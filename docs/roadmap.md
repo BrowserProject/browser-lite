@@ -95,9 +95,9 @@ kommen zuerst.
 - [x] Scrollen verschiebt Pixel statt alles neu zu malen (nur der neue Streifen wird gemalt)
 - [x] Leerlauf: der GC-Timer von JSC feuerte wegen DeferGC pausenlos (100 % CPU im Engine-Worker),
   jetzt wartet die GC-Anforderung bis zum Ende der Aufgabe (Patch 0012)
-- [ ] Aufwaermen: der erste Durchlauf ist ca. 4x langsamer als spaetere (Chrome optimiert die WASM-
-  Funktionen erst wenn sie heiss sind, dazu einmalige Initialisierung). Idee: im Leerlauf eine
-  versteckte Seite rendern
+- Gemessen: der erste Durchlauf (DOM, Parser, Layout) ist ca. 4x langsamer als spaetere. Das ist
+  vor allem einmalige Initialisierung (Schriften, CSS), nicht die WASM-Optimierung von Chrome
+  (mit `--no-wasm-dynamic-tiering` gleich langsam). Aufwaermen wuerde die Kosten nur verschieben.
 - [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
 
 GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache
