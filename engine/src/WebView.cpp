@@ -11,6 +11,7 @@
 
 #include <WebCore/BackForwardController.h>
 #include <WebCore/CookieJar.h>
+#include <WebCore/DatabaseProvider.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
@@ -38,6 +39,7 @@
 #include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Settings.h>
 #include <WebCore/SharedBuffer.h>
+#include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/StorageSessionProvider.h>
 #include <WebCore/SubstituteData.h>
 #include <pal/SessionID.h>

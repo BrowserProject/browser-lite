@@ -70,6 +70,7 @@ private:
     String userAgent(const URL&) const final;
 
     RefPtr<WebCore::LocalFrame> createFrame(const AtomString& name, WebCore::HTMLFrameOwnerElement&) final;
+    WebCore::LocalFrame* dispatchCreatePage(const WebCore::NavigationAction&, WebCore::NewFrameOpenerPolicy, const String& openedMainFrameName) final;
     void transitionToCommittedForNewPage(InitializingIframe) final;
 
     void dispatchDidStartProvisionalLoad() final;

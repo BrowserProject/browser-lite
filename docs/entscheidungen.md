@@ -34,3 +34,9 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 28 | CA-Zertifikate | Mozilla-Bundle im Datenpaket, optional `extra-ca.crt` dazu | Firmen-Netze mit eigener CA, und lokale Tests hinter einem TLS-Proxy |
 | 29 | ICU-Daten | Mit `icupkg -r` filtern statt aus Quellen neu bauen | Das Quell-Archiv hat nur das fertige `.dat`. Filter auf Konverter + Sprachen spart 14 MB |
 | 30 | Auslieferung | Engine pro Version in eigenem Ordner, immutable gecacht, `.br` vorkomprimiert | Nie eine alte .wasm aus dem Cache, Brotli q11 einmal beim Deploy statt bei jedem Request |
+| 31 | Texteingabe | Verstecktes `<textarea>` statt Fokus auf dem Canvas | Nur so kommen tote Tasten, IME und Bildschirmtastaturen als fertiger Text an |
+| 32 | Popups | Engine oeffnet den View selber (IDs ab 2^20), Oberflaeche macht einen Tab daraus | `createWindow` muss synchron eine Page liefern |
+| 33 | Downloads | Datei nochmal mit eigenem CurlRequest laden, Daten an die Oberflaeche | Einfacher als den laufenden Ladevorgang umzuhaengen; die URL ist schon das Ziel nach Redirects |
+| 34 | Speicher | IDBFS (JS-Dateisystem) statt OPFS/WasmFS | WasmFS hat keine Sockets, unser Netzwerk laeuft ueber SOCKFS |
+| 35 | localStorage/IndexedDB | Dateien aus `WebKitLegacy/Storage` mitbauen | Fertige, getestete Implementierung (InProcessIDBServer, StorageAreaSync) statt eigener |
+

@@ -115,6 +115,8 @@ const page = await context.newPage();
 const results = new Map();
 const waiters = [];
 page.on('console', (msg) => {
+  if (process.env.E2E_LOG)
+    console.log('[chromium]', msg.text());
   const match = /RESULT (\w+)=(.*?)(\s+\(|$)/.exec(msg.text());
   if (!match)
     return;
@@ -196,17 +198,20 @@ if (chooser) {
   check('Datei-Upload', false, 'kein Dateidialog');
 }
 
-// 5) Scrollen mit dem Mausrad
-await page.mouse.move(...await at(500, 400));
-await page.mouse.wheel(0, 600);
-const scroll = await result('scroll');
-check('Scrollen', Number(scroll) > 100, String(scroll));
-
-// 6) Popup (target=_blank) wird ein neuer Tab
+// 5) Popup (target=_blank) wird ein neuer Tab
 await page.mouse.click(...await at(40, 138));
 const popup = await result('popup');
 const tabCount = await page.evaluate(() => document.querySelectorAll('#tab-list .tab').length);
 check('Popup als neuer Tab', popup === 'Popup-Seite' && tabCount === 2, `Titel ${popup}, ${tabCount} Tabs`);
+
+// Zurueck zum ersten Tab
+await page.click('#tab-list .tab:first-child .title');
+
+// 6) Scrollen mit dem Mausrad
+await page.mouse.move(...await at(500, 400));
+await page.mouse.wheel(0, 600);
+const scroll = await result('scroll');
+check('Scrollen', Number(scroll) > 100, String(scroll));
 
 await page.screenshot({ path: path.join(root, 'build', 'e2e-input.png') }).catch(() => {});
 await browser.close();

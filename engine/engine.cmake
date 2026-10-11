@@ -34,6 +34,21 @@ add_executable(BrowserLiteEngine
 )
 set_target_properties(BrowserLiteEngine PROPERTIES OUTPUT_NAME engine)
 
+# Die WebKitLegacy-Dateien haben kein #include "config.h" (dort macht das ein
+# Prefix-Header), darum hier per -include
+set_source_files_properties(
+    ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaSync.cpp
+    ${BL_LEGACY_STORAGE}/StorageNamespaceImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageSyncManager.cpp
+    ${BL_LEGACY_STORAGE}/StorageThread.cpp
+    ${BL_LEGACY_STORAGE}/StorageTracker.cpp
+    ${BL_LEGACY_STORAGE}/WebDatabaseProvider.cpp
+    ${BL_LEGACY_STORAGE}/WebStorageNamespaceProvider.cpp
+    PROPERTIES COMPILE_OPTIONS "-includeconfig.h"
+)
+
 target_include_directories(BrowserLiteEngine PRIVATE
     ${BL_ENGINE_SRC}
     ${BL_LEGACY_STORAGE}

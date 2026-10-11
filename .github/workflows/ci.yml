@@ -279,6 +279,10 @@ jobs:
           (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
       - name: Netzwerk-Test
         run: cd tests/e2e && node network-test.mjs
+      - name: Eingabe-Test (Tippen, Klick, Download, Upload, Popup, Scrollen)
+        run: cd tests/e2e && node input-test.mjs
+      - name: Speicher-Test (Cookie, localStorage, IndexedDB nach Neuladen)
+        run: cd tests/e2e && node storage-test.mjs
       - name: Echte Seiten (Internet, nur zur Info)
         # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
         continue-on-error: true
@@ -292,5 +296,6 @@ jobs:
           name: e2e-screenshots
           path: |
             build/e2e-network.png
+            build/e2e-input.png
             build/sites/
           if-no-files-found: ignore

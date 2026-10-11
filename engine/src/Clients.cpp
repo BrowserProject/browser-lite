@@ -12,6 +12,7 @@
 #include "WebView.h"
 
 #include <JavaScriptCore/ConsoleTypes.h>
+#include <WebCore/Chrome.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
@@ -238,8 +239,25 @@ void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& 
     // Die URL der Antwort ist schon das Ziel nach allen Redirects.
     auto downloadRequest = request;
     downloadRequest.setURL(URL { response.url() });
-    startDownload(m_view->id(), downloadRequest, downloadAttribute);
+    BrowserLite::startDownload(m_view->id(), downloadRequest, downloadAttribute);
     function(PolicyAction::Ignore);
+}
+
+// target=_blank und Links mit neuem Fenster (window.open geht ueber denselben
+// ChromeClient::createWindow). Wie WebFrameLoaderClient in WebKitLegacy.
+LocalFrame* FrameLoaderClient::dispatchCreatePage(const NavigationAction& action, NewFrameOpenerPolicy openerPolicy, const String& openedMainFrameName)
+{
+    Ref opener = m_frameLoader->frame();
+    RefPtr page = opener->page();
+    if (!page)
+        return nullptr;
+    RefPtr newPage = page->chrome().createWindow(opener, openedMainFrameName, { }, action);
+    if (!newPage)
+        return nullptr;
+    RefPtr newFrame = dynamicDowncast<LocalFrame>(newPage->mainFrame());
+    if (newFrame && openerPolicy == NewFrameOpenerPolicy::Allow)
+        newFrame->setOpenerForWebKitLegacy(opener.ptr());
+    return newFrame.get();
 }
 
 void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)

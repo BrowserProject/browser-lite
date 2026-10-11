@@ -56,12 +56,25 @@ kommen zuerst.
 - [ ] WebSockets der Gastseiten testen
 - [ ] CI-Jobs `engine` und `e2e` gruen (Build dauert in CI lange, ccache ueber mehrere Laeufe)
 
-## Phase 6: Browser-UI und Input
-Tabs, Adressleiste, Zurueck/Vor/Reload, Maus, Scrollen, Tastatur (inkl. Schweizer Layout),
-Copy/Paste, Dialoge, Upload/Download, HiDPI.
+## Phase 6: Browser-UI und Input  (grossteils fertig)
+- [x] Tabs, Adressleiste, Zurueck/Vor/Reload, Ladebalken, Dialoge (alert/confirm/prompt)
+- [x] Maus, Mausrad, Tastatur; Texteingabe ueber verstecktes Textfeld: tote Tasten
+  (Schweizer Tastatur), IME und Bildschirmtastatur kommen als fertiger Text
+- [x] Copy/Paste mit der echten Zwischenablage
+- [x] Popups (`target=_blank`, `window.open`) werden neue Tabs, `window.close` schliesst sie
+- [x] Downloads (Content-Disposition, `<a download>`, unbekannte Typen) als Blob
+- [x] Datei-Upload (`<input type=file>`, FileReader, Formulare/fetch)
+- [x] HiDPI (devicePixelRatio)
+- [x] e2e-Test `tests/e2e/input-test.mjs`
+- [ ] Kontextmenue, Favicons, Vollbild
 
-## Phase 7: Persistenz
-WasmFS + OPFS: Cookies, localStorage, IndexedDB, Cache. "Daten loeschen"-Knopf.
+## Phase 7: Persistenz  (fertig)
+- [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
+- [x] `/data` ist ein IDBFS: wird beim Start aus der IndexedDB des Host-Browsers geladen und
+  alle 5 s sowie beim Verlassen gespeichert
+- [x] Knopf "Gespeicherte Daten loeschen"
+- [x] e2e-Test `tests/e2e/storage-test.mjs`
+- Erkenntnis: OPFS waere schneller, braucht aber WasmFS, und WasmFS kann (noch) keine Sockets.
 
 ## Phase 8: Performance + Kompatibilitaet  (angefangen)
 - [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert

@@ -59,8 +59,14 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
 })();
 </script>`;
 
+// Das Cookie kommt nur beim ersten Besuch, danach muss es aus dem
+// gespeicherten Cookie-Speicher der Engine kommen
+let visits = 0;
 const site = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'bl_store=ja; Path=/; Max-Age=86400' }).end(PAGE);
+  const headers = { 'Content-Type': 'text/html; charset=utf-8' };
+  if (visits++ === 0)
+    headers['Set-Cookie'] = 'bl_store=ja; Path=/; Max-Age=86400';
+  res.writeHead(200, headers).end(PAGE);
 });
 await new Promise((r) => site.listen(0, '127.0.0.1', r));
 const siteURL = `http://127.0.0.1:${site.address().port}/`;
@@ -101,7 +107,7 @@ const appURL = `http://localhost:${UI_PORT}/?${query}`;
 
 await page.goto(appURL);
 const first = await result('read');
-check('Erster Besuch ist leer', first === 'nein,leer,leer', String(first));
+check('Erster Besuch: nur das neue Cookie', first === 'ja,leer,leer', String(first));
 check('Daten geschrieben', (await result('written')) === '1');
 
 // Warten bis /data gespeichert ist (alle 5 s), dann alles neu laden
