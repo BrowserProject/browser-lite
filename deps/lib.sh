@@ -39,7 +39,7 @@ dep_fetch() {
     mkdir -p "$src" "$BL_DOWNLOADS"
 
     case "$type" in
-    tar)
+    tar|zip|file)
         local file
         file="$BL_DOWNLOADS/$(basename "$url")"
         if [ ! -f "$file" ] || ! echo "$hash  $file" | sha256sum -c --status; then
@@ -48,7 +48,11 @@ dep_fetch() {
             mv "$file.part" "$file"
         fi
         echo "$hash  $file" | sha256sum -c --status || bl_die "$name: SHA256 stimmt nicht ($file)"
-        tar -xf "$file" -C "$src" --strip-components=1
+        case "$type" in
+        tar) tar -xf "$file" -C "$src" --strip-components=1 ;;
+        zip) unzip -q "$file" -d "$src" ;;
+        file) cp "$file" "$src/" ;;
+        esac
         ;;
     git)
         bl_log "$name: git $version"
@@ -58,6 +62,9 @@ dep_fetch() {
         local actual
         actual="$(git -C "$src" rev-parse HEAD)"
         [ "$actual" = "$hash" ] || bl_die "$name: Commit $actual statt $hash"
+        ;;
+    none)
+        # Keine Quellen, das Rezept erzeugt alles selber
         ;;
     *)
         bl_die "$name: unbekannter Typ $type"

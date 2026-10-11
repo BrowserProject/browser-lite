@@ -21,18 +21,21 @@ if command -v ccache >/dev/null; then
     launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
 fi
 
-# Link-Flags fuer alle Programme (jsc und die LLInt-Extractors):
+# Link-Flags nur fuer die jsc-Shell (die LLInt-Extractors bekommen nur -pthread):
 # - main() laeuft in einem Worker (PROXY_TO_PTHREAD), damit blockieren erlaubt ist
 # - JSC braucht viel C-Stack (Default von Emscripten ist nur 64 KB)
 # - NODERAWFS: in node direkt aufs echte Dateisystem (fuer Tests mit .js Dateien)
-link_flags="-pthread -sPROXY_TO_PTHREAD -sEXIT_RUNTIME=1 -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB"
+link_flags="-sPROXY_TO_PTHREAD -sEXIT_RUNTIME=1 -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB"
 link_flags+=" -sINITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4GB -sPTHREAD_POOL_SIZE=8"
 link_flags+=" -sNODERAWFS=1 -sENVIRONMENT=node,worker"
 # GC-Wurzeln: JSC sucht lebende Objekte konservativ auf dem Stack. Pointer in
 # WASM-Locals sieht er nicht. --spill-pointers schreibt sie vor jedem Call auf
 # den Shadow-Stack im Linear Memory, den der GC scannt (siehe docs/architektur.md).
 if [ "${BL_SPILL_POINTERS:-1}" = 1 ]; then
-    link_flags+=" -sBINARYEN_EXTRA_PASSES=--spill-pointers"
+    # --profiling-funcs: behaelt die Namen im Binary, sonst findet der Pass nach
+    # der Optimierung den Stack-Pointer nicht ("failed to find the stack pointer").
+    # Gibt nebenbei lesbare Absturz-Stacks.
+    link_flags+=" -sBINARYEN_EXTRA_PASSES=--spill-pointers --profiling-funcs"
 fi
 
 {
@@ -45,7 +48,8 @@ fi
         -DCMAKE_FIND_ROOT_PATH="$BL_SYSROOT" \
         -DCMAKE_C_FLAGS="-pthread -msimd128" \
         -DCMAKE_CXX_FLAGS="-pthread -msimd128" \
-        -DCMAKE_EXE_LINKER_FLAGS="$link_flags" \
+        -DCMAKE_EXE_LINKER_FLAGS="-pthread" \
+        -DJSC_SHELL_LINK_OPTIONS="$link_flags" \
         -DENABLE_STATIC_JSC=ON \
         -DENABLE_JIT=OFF \
         -DENABLE_DFG_JIT=OFF \

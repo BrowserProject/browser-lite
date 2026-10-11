@@ -32,6 +32,11 @@ ORDER=(
     openssl
     nghttp2
     curl
+    notosans
+    notoserif
+    notosansmono
+    cacert
+    fontconfig-conf
 )
 
 force=0

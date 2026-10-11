@@ -1,0 +1,939 @@
+diff --git a/Source/WebCore/accessibility/AXCoreObject.h b/Source/WebCore/accessibility/AXCoreObject.h
+index 74d2b4514b..450a496b6e 100644
+--- a/Source/WebCore/accessibility/AXCoreObject.h
++++ b/Source/WebCore/accessibility/AXCoreObject.h
+@@ -81,7 +81,7 @@ class AccessibilityObjectAtspi;
+ 
+ typedef WebCore::AccessibilityObjectAtspi AccessibilityObjectWrapper;
+ 
+-#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU) || PLATFORM(WASM)
+ class AccessibilityObjectWrapper : public RefCounted<AccessibilityObjectWrapper> { };
+ #else
+ class AccessibilityObjectWrapper;
+@@ -1505,7 +1505,7 @@ private:
+     RetainPtr<WebAccessibilityObjectWrapper> m_wrapper;
+ #elif PLATFORM(WIN)
+     COMPtr<AccessibilityObjectWrapper> m_wrapper;
+-#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#elif PLATFORM(PLAYSTATION) || PLATFORM(HAIKU) || PLATFORM(WASM)
+     RefPtr<AccessibilityObjectWrapper> m_wrapper;
+ #elif USE(ATSPI)
+     RefPtr<AccessibilityObjectAtspi> m_wrapper;
+diff --git a/Source/WebCore/editing/libwpe/EditorLibWPE.cpp b/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
+index d0a3d5c048..6e70d35e2d 100644
+--- a/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
++++ b/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
+@@ -26,7 +26,7 @@
+ #include "config.h"
+ #include "Editor.h"
+ 
+-#if USE(LIBWPE)
++#if USE(LIBWPE) || PLATFORM(WASM)
+ 
+ #include "DocumentFragment.h"
+ #include "FrameDestructionObserverInlines.h"
+@@ -102,4 +102,4 @@ void Editor::platformPasteFont()
+ 
+ } // namespace WebCore
+ 
+-#endif // USE(LIBWPE)
++#endif // USE(LIBWPE) || PLATFORM(WASM)
+diff --git a/Source/WebCore/page/ChromeClient.h b/Source/WebCore/page/ChromeClient.h
+index 3faf7a53b6..78968b2178 100644
+--- a/Source/WebCore/page/ChromeClient.h
++++ b/Source/WebCore/page/ChromeClient.h
+@@ -587,7 +587,7 @@ public:
+     virtual void AXFinishFrameLoad() = 0;
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
++#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU) || PLATFORM(WASM)
+     virtual void postAccessibilityNotification(AccessibilityObject&, AXNotification) = 0;
+     virtual void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) = 0;
+     virtual void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) = 0;
+diff --git a/Source/WebCore/platform/Pasteboard.h b/Source/WebCore/platform/Pasteboard.h
+index de2f5bf37b..d6406bea2b 100644
+--- a/Source/WebCore/platform/Pasteboard.h
++++ b/Source/WebCore/platform/Pasteboard.h
+@@ -107,7 +107,7 @@ struct PasteboardWebContent {
+     bool canSmartCopyOrDelete;
+     String text;
+     String markup;
+-#elif USE(LIBWPE)
++#elif USE(LIBWPE) || PLATFORM(WASM)
+     String text;
+     String markup;
+ #endif
+diff --git a/Source/WebCore/platform/PasteboardStrategy.h b/Source/WebCore/platform/PasteboardStrategy.h
+index fd906606ba..d8eb7a517e 100644
+--- a/Source/WebCore/platform/PasteboardStrategy.h
++++ b/Source/WebCore/platform/PasteboardStrategy.h
+@@ -97,7 +97,7 @@ public:
+     virtual void writeToClipboard(const String& pasteboardName, SelectionData&&) = 0;
+     virtual void clearClipboard(const String& pasteboardName) = 0;
+     virtual int64_t changeCount(const String& pasteboardName) = 0;
+-#elif USE(LIBWPE)
++#elif USE(LIBWPE) || PLATFORM(WASM)
+     virtual void getTypes(Vector<String>& types) = 0;
+     virtual void writeToPasteboard(const PasteboardWebContent&) = 0;
+     virtual void writeToPasteboard(const String& pasteboardType, const String&) = 0;
+diff --git a/Source/WebCore/platform/PlatformKeyboardEvent.cpp b/Source/WebCore/platform/PlatformKeyboardEvent.cpp
+index 8666d1cfe5..92cbeb77df 100644
+--- a/Source/WebCore/platform/PlatformKeyboardEvent.cpp
++++ b/Source/WebCore/platform/PlatformKeyboardEvent.cpp
+@@ -60,7 +60,7 @@ void PlatformKeyboardEvent::setCurrentModifierState(OptionSet<Modifier> modifier
+     s_currentModifiers = modifiers;
+ }
+ 
+-#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+ OptionSet<PlatformEvent::Modifier> PlatformKeyboardEvent::currentStateOfModifierKeys()
+ {
+     if (s_currentModifiers)
+diff --git a/Source/WebCore/platform/PlatformKeyboardEvent.h b/Source/WebCore/platform/PlatformKeyboardEvent.h
+index 071f9fa0e6..48318dad3b 100644
+--- a/Source/WebCore/platform/PlatformKeyboardEvent.h
++++ b/Source/WebCore/platform/PlatformKeyboardEvent.h
+@@ -95,10 +95,10 @@ namespace WebCore {
+         void setWindowsVirtualKeyCode(int code) { m_windowsVirtualKeyCode = code; }
+         int windowsVirtualKeyCodeWithoutKeyPressOverride() const { return m_windowsVirtualKeyCode; }
+ 
+-#if USE(APPKIT) || PLATFORM(IOS_FAMILY) || PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#if USE(APPKIT) || PLATFORM(IOS_FAMILY) || PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+         bool handledByInputMethod() const { return m_handledByInputMethod; }
+ #endif
+-#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+         const std::optional<Vector<WebCore::CompositionUnderline>>& preeditUnderlines() const LIFETIME_BOUND { return m_preeditUnderlines; }
+         const std::optional<uint64_t>& preeditSelectionRangeStart() const LIFETIME_BOUND { return m_preeditSelectionRangeStart; }
+         const std::optional<uint64_t>& preeditSelectionRangeLength() const LIFETIME_BOUND { return m_preeditSelectionRangeLength; }
+@@ -150,10 +150,10 @@ namespace WebCore {
+         int m_windowsVirtualKeyCode { 0 };
+ 
+         bool m_isSyntheticEvent { false };
+-#if USE(APPKIT) || PLATFORM(IOS_FAMILY) || PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#if USE(APPKIT) || PLATFORM(IOS_FAMILY) || PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+         bool m_handledByInputMethod { false };
+ #endif
+-#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#if PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+         std::optional<Vector<WebCore::CompositionUnderline>> m_preeditUnderlines;
+         std::optional<uint64_t> m_preeditSelectionRangeStart;
+         std::optional<uint64_t> m_preeditSelectionRangeLength;
+diff --git a/Source/WebCore/platform/PlatformPasteboard.h b/Source/WebCore/platform/PlatformPasteboard.h
+index be45b4c096..a039e97cdc 100644
+--- a/Source/WebCore/platform/PlatformPasteboard.h
++++ b/Source/WebCore/platform/PlatformPasteboard.h
+@@ -64,7 +64,7 @@ enum class PasteboardDataLifetime : bool { Persistent, Ephemeral };
+ class PlatformPasteboard {
+ public:
+     WEBCORE_EXPORT explicit PlatformPasteboard(const String& pasteboardName);
+-#if PLATFORM(IOS_FAMILY) || USE(LIBWPE)
++#if PLATFORM(IOS_FAMILY) || USE(LIBWPE) || PLATFORM(WASM)
+     WEBCORE_EXPORT PlatformPasteboard();
+     WEBCORE_EXPORT void updateSupportedTypeIdentifiers(const Vector<String>& types);
+ #endif
+@@ -130,6 +130,10 @@ private:
+     struct wpe_pasteboard* m_pasteboard;
+     int64_t m_changeCount { 0 };
+ #endif
++#if PLATFORM(WASM)
++    // browser-lite: Clipboard im Speicher, der Embedder gleicht es mit dem Host ab
++    int64_t m_changeCount { 0 };
++#endif
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/platform/StaticPasteboard.cpp b/Source/WebCore/platform/StaticPasteboard.cpp
+index ab5540316c..1439ac7ea4 100644
+--- a/Source/WebCore/platform/StaticPasteboard.cpp
++++ b/Source/WebCore/platform/StaticPasteboard.cpp
+@@ -148,7 +148,7 @@ void StaticPasteboard::write(const PasteboardWebContent& content)
+ #if PLATFORM(COCOA)
+     markup = content.dataInHTMLFormat;
+     text = content.dataInStringFormat;
+-#elif PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM)
++#elif PLATFORM(GTK) || USE(LIBWPE) || ENABLE(WPE_PLATFORM) || PLATFORM(WASM)
+     markup = content.markup;
+     text = content.text;
+ #else
+diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+index 19c4683b7f..f4beb6ec1c 100644
+--- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
++++ b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+@@ -26,7 +26,7 @@
+ #include "config.h"
+ #include "Pasteboard.h"
+ 
+-#if USE(LIBWPE)
++#if USE(LIBWPE) || PLATFORM(WASM)
+ 
+ #include "NotImplemented.h"
+ #include "PasteboardStrategy.h"
+@@ -162,4 +162,4 @@ void Pasteboard::write(const Color&)
+ 
+ } // namespace WebCore
+ 
+-#endif // USE(LIBWPE)
++#endif // USE(LIBWPE) || PLATFORM(WASM)
+diff --git a/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
+new file mode 100644
+index 0000000000..5a7005704d
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
+@@ -0,0 +1,64 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++#include "config.h"
++#include "CurlSSLHandle.h"
++
++namespace WebCore {
++
++void CurlSSLHandle::platformInitialize()
++{
++    // Das CA-Bundle (Mozilla) liegt im virtuellen Dateisystem des Embedders.
++    setCACertPath("/etc/ssl/certs/ca-certificates.crt"_s);
++
++    // Gleiche Auswahl wie der Win-Port: moderne Cipher zuerst.
++    constexpr auto cipherList =
++        "TLS_AES_128_GCM_SHA256:"
++        "TLS_CHACHA20_POLY1305_SHA256:"
++        "TLS_AES_256_GCM_SHA384:"
++        "ECDHE-ECDSA-AES128-GCM-SHA256:"
++        "ECDHE-RSA-AES128-GCM-SHA256:"
++        "ECDHE-ECDSA-CHACHA20-POLY1305:"
++        "ECDHE-RSA-CHACHA20-POLY1305:"
++        "ECDHE-ECDSA-AES256-GCM-SHA384:"
++        "ECDHE-RSA-AES256-GCM-SHA384:"
++        "ECDHE-ECDSA-AES256-SHA:"
++        "ECDHE-ECDSA-AES128-SHA:"
++        "ECDHE-RSA-AES128-SHA:"
++        "ECDHE-RSA-AES256-SHA:"
++        "AES128-GCM-SHA256:"
++        "AES256-GCM-SHA384:"
++        "AES128-SHA:"
++        "AES256-SHA";
++
++    constexpr auto ecCurves =
++        "X25519:"
++        "P-256:"
++        "P-384:"
++        "P-521";
++
++    setCipherList(cipherList);
++    setECCurves(ecCurves);
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp b/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp
+new file mode 100644
+index 0000000000..111c7400f0
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp
+@@ -0,0 +1,99 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++#include "config.h"
++#include "MIMETypeRegistry.h"
++
++namespace WebCore {
++
++static const std::initializer_list<TypeExtensionPair>& platformMediaTypes()
++{
++    static std::initializer_list<TypeExtensionPair> platformMediaTypes = {
++        { "image/bmp"_s, "bmp"_s },
++        { "text/css"_s, "css"_s },
++        { "image/gif"_s, "gif"_s },
++        { "text/html"_s, "htm"_s },
++        { "text/html"_s, "html"_s },
++        { "image/x-icon"_s, "ico"_s },
++        { "image/jpeg"_s, "jpeg"_s },
++        { "image/jpeg"_s, "jpg"_s },
++        { "text/javascript"_s, "js"_s },
++        { "text/javascript"_s, "mjs"_s },
++        { "application/json"_s, "json"_s },
++        { "application/wasm"_s, "wasm"_s },
++        { "image/webp"_s, "webp"_s },
++        { "font/woff"_s, "woff"_s },
++        { "font/woff2"_s, "woff2"_s },
++        { "font/ttf"_s, "ttf"_s },
++        { "font/otf"_s, "otf"_s },
++        { "application/pdf"_s, "pdf"_s },
++        { "image/png"_s, "png"_s },
++        { "application/rss+xml"_s, "rss"_s },
++        { "image/svg+xml"_s, "svg"_s },
++        { "text/plain"_s, "text"_s },
++        { "text/plain"_s, "txt"_s },
++        { "text/vnd.wap.wml"_s, "wml"_s },
++        { "application/vnd.wap.wmlc"_s, "wmlc"_s },
++        { "image/x-xbitmap"_s, "xbm"_s },
++        { "application/xhtml+xml"_s, "xhtml"_s },
++        { "text/xml"_s, "xml"_s },
++        { "text/xsl"_s, "xsl"_s },
++    };
++    return platformMediaTypes;
++}
++
++String MIMETypeRegistry::mimeTypeForExtension(StringView extension)
++{
++    for (auto& entry : platformMediaTypes()) {
++        if (equalIgnoringASCIICase(extension, entry.extension))
++            return entry.type;
++    }
++    return emptyString();
++}
++
++bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
++{
++    return false;
++}
++
++String MIMETypeRegistry::preferredExtensionForMIMEType(const String& mimeType)
++{
++    for (auto& entry : platformMediaTypes()) {
++        if (equalIgnoringASCIICase(mimeType, entry.type))
++            return entry.extension;
++    }
++    return emptyString();
++}
++
++Vector<String> MIMETypeRegistry::extensionsForMIMEType(const String& mimeType)
++{
++    Vector<String> extensions;
++    for (auto& entry : platformMediaTypes()) {
++        if (equalIgnoringASCIICase(mimeType, entry.type))
++            extensions.append(entry.extension);
++    }
++    return extensions;
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
+new file mode 100644
+index 0000000000..e04dceef41
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
+@@ -0,0 +1,41 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++#include "config.h"
++#include "NetworkStateNotifier.h"
++
++namespace WebCore {
++
++// Online/Offline: der Embedder meldet spaeter navigator.onLine vom Host.
++// Bis dahin gelten wir immer als online.
++
++void NetworkStateNotifier::updateStateWithoutNotifying()
++{
++    m_isOnLine = true;
++}
++
++void NetworkStateNotifier::startObserving()
++{
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/PlatformKeyboardEventWasm.cpp b/Source/WebCore/platform/wasm/PlatformKeyboardEventWasm.cpp
+new file mode 100644
+index 0000000000..01b44c5401
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/PlatformKeyboardEventWasm.cpp
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "PlatformKeyboardEvent.h"
++
++namespace WebCore {
++
++// Der Embedder baut PlatformKeyboardEvents direkt aus den DOM KeyboardEvents
++// des Host-Browsers (key, code, keyCode). Hier braucht es nur noch die
++// Aufteilung von KeyDown in RawKeyDown/Char, wie bei GTK/WPE.
++void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type type, bool backwardsCompatibility)
++{
++    ASSERT(m_type == PlatformEvent::Type::KeyDown);
++    m_type = type;
++    if (backwardsCompatibility || m_handledByInputMethod)
++        return;
++
++    if (type == PlatformEvent::Type::RawKeyDown) {
++        m_text = String();
++        m_unmodifiedText = String();
++    } else
++        m_keyIdentifier = String();
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp b/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp
+new file mode 100644
+index 0000000000..ef98545c58
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp
+@@ -0,0 +1,124 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "PlatformPasteboard.h"
++
++#if PLATFORM(WASM)
++
++#include "Pasteboard.h"
++#include "PasteboardCustomData.h"
++#include "WasmPlatform.h"
++
++namespace WebCore {
++
++// Ein globales Clipboard im Speicher (WasmPlatform). Der Embedder spiegelt es
++// in die Zwischenablage des Host-Browsers.
++
++PlatformPasteboard::PlatformPasteboard(const String&)
++{
++}
++
++PlatformPasteboard::PlatformPasteboard()
++{
++}
++
++void PlatformPasteboard::performAsDataOwner(DataOwnerType, NOESCAPE Function<void()>&& actions)
++{
++    actions();
++}
++
++int64_t PlatformPasteboard::changeCount() const
++{
++    return m_changeCount;
++}
++
++void PlatformPasteboard::getTypes(Vector<String>& types) const
++{
++    for (auto& item : WasmPlatform::clipboardContents())
++        types.append(item.first);
++}
++
++String PlatformPasteboard::readString(size_t, const String& type) const
++{
++    for (auto& item : WasmPlatform::clipboardContents()) {
++        if (item.first == type)
++            return item.second;
++    }
++    return { };
++}
++
++void PlatformPasteboard::write(const PasteboardWebContent& content)
++{
++    WasmPlatform::ClipboardItems items;
++    if (!content.text.isNull())
++        items.append({ "text/plain;charset=utf-8"_s, content.text });
++    if (!content.markup.isNull())
++        items.append({ "text/html"_s, content.markup });
++    WasmPlatform::setClipboardContents(WTF::move(items));
++    m_changeCount++;
++}
++
++void PlatformPasteboard::write(const String& type, const String& string)
++{
++    WasmPlatform::ClipboardItems items;
++    items.append({ type, string });
++    WasmPlatform::setClipboardContents(WTF::move(items));
++    m_changeCount++;
++}
++
++Vector<String> PlatformPasteboard::typesSafeForDOMToReadAndWrite(const String&) const
++{
++    return { };
++}
++
++int64_t PlatformPasteboard::write(const PasteboardCustomData& customData, PasteboardDataLifetime)
++{
++    PasteboardWebContent contents;
++    customData.forEachPlatformStringOrBuffer([&contents] (auto& type, auto& stringOrBuffer) {
++        if (std::holds_alternative<String>(stringOrBuffer)) {
++            if (type.startsWith("text/plain"_s))
++                contents.text = std::get<String>(stringOrBuffer);
++            else if (type == "text/html"_s)
++                contents.markup = std::get<String>(stringOrBuffer);
++        }
++    });
++    if (contents.text.isNull() && contents.markup.isNull())
++        return m_changeCount;
++
++    write(contents);
++    return m_changeCount;
++}
++
++int64_t PlatformPasteboard::write(const Vector<PasteboardCustomData>& data, PasteboardDataLifetime)
++{
++    if (data.size() != 1)
++        return m_changeCount;
++    return write(data[0]);
++}
++
++} // namespace WebCore
++
++#endif // PLATFORM(WASM)
+diff --git a/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp b/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp
+new file mode 100644
+index 0000000000..3ab9099204
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp
+@@ -0,0 +1,75 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "PlatformScreen.h"
++
++#include "DestinationColorSpace.h"
++#include "FloatRect.h"
++#include "WasmPlatform.h"
++
++namespace WebCore {
++
++int screenDepth(Widget*)
++{
++    return WasmPlatform::screenInfo().depth;
++}
++
++int screenDepthPerComponent(Widget*)
++{
++    return 8;
++}
++
++bool screenIsMonochrome(Widget*)
++{
++    return false;
++}
++
++bool screenHasInvertedColors()
++{
++    return false;
++}
++
++FloatRect screenRect(Widget*)
++{
++    return WasmPlatform::screenInfo().rect;
++}
++
++FloatRect screenAvailableRect(Widget*)
++{
++    return WasmPlatform::screenInfo().availableRect;
++}
++
++bool screenSupportsExtendedColor(Widget*)
++{
++    return false;
++}
++
++DestinationColorSpace screenColorSpace(Widget*)
++{
++    return DestinationColorSpace::SRGB();
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
+new file mode 100644
+index 0000000000..ffe2501ecc
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++#include "config.h"
++#include "SystemFontDatabase.h"
++
++#include "WebKitFontFamilyNames.h"
++#include <wtf/NeverDestroyed.h>
++
++namespace WebCore {
++
++SystemFontDatabase& SystemFontDatabase::singleton()
++{
++    static NeverDestroyed<SystemFontDatabase> database = SystemFontDatabase();
++    return database.get();
++}
++
++auto SystemFontDatabase::platformSystemFontShorthandInfo(FontShorthand) -> SystemFontShorthandInfo
++{
++    // system-ui & Co: die Standard-Schrift (fontconfig waehlt die passende Noto-Schrift)
++    return { WebKitFontFamilyNames::standardFamily, 16, normalWeightValue() };
++}
++
++void SystemFontDatabase::platformInvalidate()
++{
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/UserAgentWasm.cpp b/Source/WebCore/platform/wasm/UserAgentWasm.cpp
+new file mode 100644
+index 0000000000..cee6cc8343
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/UserAgentWasm.cpp
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++#include "config.h"
++#include "UserAgent.h"
++
++#include "WasmPlatform.h"
++#include <wtf/URL.h>
++
++namespace WebCore {
++
++// Der User-Agent kommt vom Embedder (Standard: Safari-artig, siehe WasmPlatform.cpp).
++// Seiten erkennen WebKit am zuverlaessigsten, wenn "Safari" und "Version/X" drin sind.
++
++String standardUserAgent(const String& applicationName, const String& applicationVersion)
++{
++    if (applicationName.isEmpty())
++        return WasmPlatform::userAgent();
++    return makeString(WasmPlatform::userAgent(), ' ', applicationName, '/', applicationVersion.isEmpty() ? "605.1.15"_s : applicationVersion);
++}
++
++String standardUserAgentForURL(const URL&)
++{
++    return WasmPlatform::userAgent();
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+new file mode 100644
+index 0000000000..09202b12bb
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+@@ -0,0 +1,95 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "WasmPlatform.h"
++
++#include <wtf/NeverDestroyed.h>
++
++namespace WebCore::WasmPlatform {
++
++static ScreenInfo& screenStorage()
++{
++    static NeverDestroyed<ScreenInfo> info;
++    return info;
++}
++
++void setScreenInfo(const ScreenInfo& info)
++{
++    screenStorage() = info;
++}
++
++const ScreenInfo& screenInfo()
++{
++    return screenStorage();
++}
++
++static String& userAgentStorage()
++{
++    // WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
++    static NeverDestroyed<String> userAgent { "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s };
++    return userAgent;
++}
++
++void setUserAgent(const String& userAgent)
++{
++    userAgentStorage() = userAgent;
++}
++
++String userAgent()
++{
++    return userAgentStorage();
++}
++
++static ClipboardItems& clipboardStorage()
++{
++    static NeverDestroyed<ClipboardItems> items;
++    return items;
++}
++
++static Function<void(const ClipboardItems&)>& clipboardCallback()
++{
++    static NeverDestroyed<Function<void(const ClipboardItems&)>> callback;
++    return callback;
++}
++
++void setClipboardContents(ClipboardItems&& items)
++{
++    clipboardStorage() = WTF::move(items);
++    if (auto& callback = clipboardCallback())
++        callback(clipboardStorage());
++}
++
++const ClipboardItems& clipboardContents()
++{
++    return clipboardStorage();
++}
++
++void setClipboardChangedCallback(Function<void(const ClipboardItems&)>&& callback)
++{
++    clipboardCallback() = WTF::move(callback);
++}
++
++} // namespace WebCore::WasmPlatform
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+new file mode 100644
+index 0000000000..7ef20172b5
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -0,0 +1,59 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#pragma once
++
++#include <WebCore/FloatRect.h>
++#include <wtf/Function.h>
++#include <wtf/Vector.h>
++#include <wtf/text/WTFString.h>
++
++// browser-lite: Schnittstelle zwischen dem WebCore-Port (PORT=Wasm) und dem
++// Embedder (engine/ im browser-lite Repo). Der Embedder setzt hier Werte, die
++// er vom Host-Browser bekommt (Bildschirm, Clipboard, User-Agent, ...).
++
++namespace WebCore::WasmPlatform {
++
++struct ScreenInfo {
++    FloatRect rect { 0, 0, 1280, 800 };
++    FloatRect availableRect { 0, 0, 1280, 800 };
++    int depth { 24 };
++    bool prefersDarkMode { false };
++};
++
++WEBCORE_EXPORT void setScreenInfo(const ScreenInfo&);
++WEBCORE_EXPORT const ScreenInfo& screenInfo();
++
++WEBCORE_EXPORT void setUserAgent(const String&);
++WEBCORE_EXPORT String userAgent();
++
++// Clipboard: Inhalt als Paare (MIME-Typ, Text). Der Embedder wird bei jedem
++// Schreiben informiert und kann den Inhalt an den Host weitergeben.
++using ClipboardItems = Vector<std::pair<String, String>>;
++WEBCORE_EXPORT void setClipboardContents(ClipboardItems&&);
++WEBCORE_EXPORT const ClipboardItems& clipboardContents();
++WEBCORE_EXPORT void setClipboardChangedCallback(Function<void(const ClipboardItems&)>&&);
++
++} // namespace WebCore::WasmPlatform

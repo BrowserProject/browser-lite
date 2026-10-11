@@ -1,0 +1,302 @@
+diff --git a/Source/JavaScriptCore/PlatformWasm.cmake b/Source/JavaScriptCore/PlatformWasm.cmake
+new file mode 100644
+index 0000000000..df4aa275f2
+--- /dev/null
++++ b/Source/JavaScriptCore/PlatformWasm.cmake
+@@ -0,0 +1,5 @@
++# JavaScriptCore fuer PORT=Wasm (browser-lite). Remote Inspector ist aus;
++# falls er mal an geht, die Socket-Variante wie JSCOnly/PlayStation.
++if (ENABLE_REMOTE_INSPECTOR)
++    include(inspector/remote/Socket.cmake)
++endif ()
+diff --git a/Source/WTF/wtf/PlatformWasm.cmake b/Source/WTF/wtf/PlatformWasm.cmake
+new file mode 100644
+index 0000000000..26d1c04e91
+--- /dev/null
++++ b/Source/WTF/wtf/PlatformWasm.cmake
+@@ -0,0 +1,30 @@
++# WTF fuer PORT=Wasm (browser-lite): generischer RunLoop + POSIX/Unix-Teile,
++# die Emscripten (musl) anbietet.
++list(APPEND WTF_SOURCES
++    generic/MainThreadGeneric.cpp
++    generic/MemoryFootprintGeneric.cpp
++    generic/MemoryPressureHandlerGeneric.cpp
++    generic/RunLoopGeneric.cpp
++    generic/WorkQueueGeneric.cpp
++
++    posix/CPUTimePOSIX.cpp
++    posix/FileHandlePOSIX.cpp
++    posix/FileSystemPOSIX.cpp
++    posix/MappedFileDataPOSIX.cpp
++    posix/OSAllocatorPOSIX.cpp
++    posix/ThreadingPOSIX.cpp
++
++    text/unix/TextBreakIteratorInternalICUUnix.cpp
++
++    unix/LanguageUnix.cpp
++    unix/LoggingUnix.cpp
++    unix/UniStdExtrasUnix.cpp
++)
++
++list(APPEND WTF_PUBLIC_HEADERS
++    unix/UnixFileDescriptor.h
++)
++
++list(APPEND WTF_LIBRARIES
++    Threads::Threads
++)
+diff --git a/Source/WebCore/PAL/pal/PlatformWasm.cmake b/Source/WebCore/PAL/pal/PlatformWasm.cmake
+new file mode 100644
+index 0000000000..2eb4471e0d
+--- /dev/null
++++ b/Source/WebCore/PAL/pal/PlatformWasm.cmake
+@@ -0,0 +1,11 @@
++# PAL fuer PORT=Wasm (browser-lite): wie PlayStation (OpenSSL fuer Hashes).
++list(APPEND PAL_SOURCES
++    crypto/openssl/CryptoDigestOpenSSL.cpp
++
++    system/ClockGeneric.cpp
++    system/Sound.cpp
++
++    text/KillRing.cpp
++)
++
++list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
+diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
+new file mode 100644
+index 0000000000..477c65c917
+--- /dev/null
++++ b/Source/WebCore/PlatformWasm.cmake
+@@ -0,0 +1,69 @@
++# WebCore fuer PORT=Wasm (browser-lite).
++# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
++include(platform/Adwaita.cmake)
++include(platform/Curl.cmake)
++include(platform/ImageDecoders.cmake)
++include(platform/OpenSSL.cmake)
++include(platform/Skia.cmake)
++
++list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
++    "${WEBCORE_DIR}/platform"
++    "${WEBCORE_DIR}/platform/generic"
++    "${WEBCORE_DIR}/platform/graphics/egl"
++    "${WEBCORE_DIR}/platform/graphics/opengl"
++    "${WEBCORE_DIR}/platform/mediacapabilities"
++    "${WEBCORE_DIR}/platform/video-codecs"
++    "${WEBCORE_DIR}/platform/wasm"
++)
++
++list(APPEND WebCore_SOURCES
++    # Accessibility: wie PlayStation/Haiku (Benachrichtigungen ueber den ChromeClient)
++    accessibility/playstation/AXObjectCachePlayStation.cpp
++    accessibility/playstation/AccessibilityObjectPlayStation.cpp
++
++    # Diese libwpe-Dateien brauchen libwpe gar nicht, sie sind fuer uns freigeschaltet
++    editing/libwpe/EditorLibWPE.cpp
++    platform/libwpe/PasteboardLibWPE.cpp
++
++    platform/generic/KeyedDecoderGeneric.cpp
++    platform/generic/KeyedEncoderGeneric.cpp
++
++    platform/graphics/PlatformDisplay.cpp
++    platform/graphics/egl/GLContext.cpp
++    platform/graphics/egl/GLContextWrapper.cpp
++    platform/graphics/egl/GLDisplay.cpp
++    platform/graphics/egl/GLFence.cpp
++    platform/graphics/egl/GLFenceEGL.cpp
++    platform/graphics/egl/GLFenceGL.cpp
++
++    platform/text/Hyphenation.cpp
++    platform/text/LocaleICU.cpp
++
++    platform/unix/LoggingUnix.cpp
++    platform/unix/SharedMemoryUnix.cpp
++
++    platform/wasm/CurlSSLHandleWasm.cpp
++    platform/wasm/MIMETypeRegistryWasm.cpp
++    platform/wasm/NetworkStateNotifierWasm.cpp
++    platform/wasm/PlatformKeyboardEventWasm.cpp
++    platform/wasm/PlatformPasteboardWasm.cpp
++    platform/wasm/PlatformScreenWasm.cpp
++    platform/wasm/SystemFontDatabaseWasm.cpp
++    platform/wasm/UserAgentWasm.cpp
++    platform/wasm/WasmPlatform.cpp
++)
++
++list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
++    platform/wasm/WasmPlatform.h
++)
++
++list(APPEND WebCore_LIBRARIES
++    Fontconfig::Fontconfig
++    Freetype::Freetype
++)
++
++# browser-lite: den Embedder (engine/ im browser-lite Repo) mitbauen, nachdem
++# WebCore/CMakeLists.txt fertig ist (dann sind alle Include-Listen komplett).
++if (BROWSER_LITE_ENGINE_DIR)
++    cmake_language(DEFER CALL include "${BROWSER_LITE_ENGINE_DIR}/engine.cmake")
++endif ()
+diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
+new file mode 100644
+index 0000000000..c5c0b49df5
+--- /dev/null
++++ b/Source/cmake/OptionsWasm.cmake
+@@ -0,0 +1,145 @@
++# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
++#
++# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
++#   engine/) haengt WebCore::Page direkt an.
++# - Aufbau wie der PlayStation-Port (curl, generischer RunLoop, statisch),
++#   Grafik wie WPE (Skia), Theme wie Win (Adwaita).
++# - JavaScriptCore mit CLoop, kein JIT (WASM kann nicht selber Code erzeugen).
++#
++# Gebaut wird mit tools/build-webcore.sh aus dem browser-lite Repo.
++
++if (NOT EMSCRIPTEN)
++    message(FATAL_ERROR "PORT=Wasm geht nur mit Emscripten (emcmake cmake ...)")
++endif ()
++
++find_package(Threads REQUIRED)
++
++set(CMAKE_C_VISIBILITY_PRESET hidden)
++set(CMAKE_CXX_VISIBILITY_PRESET hidden)
++set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
++
++add_definitions(-DBUILDING_WASM__)
++add_definitions(-DWTF_PLATFORM_WASM=1)
++
++set(PROJECT_VERSION_MAJOR 0)
++set(PROJECT_VERSION_MINOR 1)
++set(PROJECT_VERSION_MICRO 0)
++set(PROJECT_VERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_MICRO})
++
++set(ENABLE_WEBCORE ON)
++set(ENABLE_WEBKIT OFF)
++set(ENABLE_WEBKIT_LEGACY OFF)
++set(ENABLE_WEBINSPECTORUI OFF)
++set(ENABLE_WEBGPU OFF)
++set(ENABLE_TOOLS OFF)
++
++WEBKIT_OPTION_BEGIN()
++
++WEBKIT_OPTION_DEFINE(ENABLE_STATIC_JSC "Whether to build JavaScriptCore as a static library." PUBLIC ON)
++
++# JavaScriptCore: nur der CLoop-Interpreter
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_JIT PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DFG_JIT PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FTL_JIT PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_C_LOOP PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBASSEMBLY PRIVATE OFF)
++# Thread::suspend geht in WASM nicht, darum nie den Sampling-Profiler
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SAMPLING_PROFILER PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_REMOTE_INSPECTOR PRIVATE OFF)
++# bmalloc/libpas passen nicht zum Linear Memory von WASM
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SYSTEM_MALLOC PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_ISO_MALLOC PRIVATE OFF)
++
++# Grafik
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA_ENCODERS PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_AVIF PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
++
++# Web-Features: fuers erste Bild alles Optionale aus. Wird spaeter Stueck fuer Stueck angemacht.
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_VIDEO PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_AUDIO PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBGL PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_RTC PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ENCRYPTED_MEDIA PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GAMEPAD PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SPEECH_SYNTHESIS PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_NOTIFICATIONS PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GEOLOCATION PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FULLSCREEN_API PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBXR PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_XSLT PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MATHML PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DARK_MODE_CSS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SMOOTH_SCROLLING PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_RESOURCE_USAGE PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_PERIODIC_MEMORY_MONITOR PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBDRIVER PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MINIBROWSER PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_API_TESTS PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_LAYOUT_TESTS PRIVATE OFF)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GPU_PROCESS PRIVATE OFF)
++
++WEBKIT_OPTION_END()
++
++if (NOT ENABLE_STATIC_JSC)
++    message(FATAL_ERROR "PORT=Wasm braucht ENABLE_STATIC_JSC=ON (WASM wird komplett statisch gelinkt)")
++endif ()
++
++# Event-Loop: WTF RunLoopGeneric, angetrieben vom Embedder (kein GLib)
++SET_AND_EXPOSE_TO_BUILD(USE_GENERIC_EVENT_LOOP 1)
++SET_AND_EXPOSE_TO_BUILD(WTF_DEFAULT_EVENT_LOOP 0)
++
++find_package(ICU 70.1 REQUIRED COMPONENTS data i18n uc)
++
++SET_AND_EXPOSE_TO_BUILD(USE_CURL ON)
++SET_AND_EXPOSE_TO_BUILD(USE_OPENSSL ON)
++SET_AND_EXPOSE_TO_BUILD(USE_HARFBUZZ ON)
++SET_AND_EXPOSE_TO_BUILD(USE_THEME_ADWAITA ON)
++SET_AND_EXPOSE_TO_BUILD(USE_UNIX_DOMAIN_SOCKETS ON)
++SET_AND_EXPOSE_TO_BUILD(USE_INSPECTOR_SOCKET_SERVER ${ENABLE_REMOTE_INSPECTOR})
++SET_AND_EXPOSE_TO_BUILD(ENABLE_DEVELOPER_MODE ${DEVELOPER_MODE})
++
++# Alle Libs kommen aus dem browser-lite sysroot (CMAKE_FIND_ROOT_PATH)
++find_package(Brotli REQUIRED COMPONENTS dec)
++find_package(CURL 7.85.0 REQUIRED)
++find_package(Fontconfig 2.13.0 REQUIRED)
++find_package(Freetype 2.9.0 REQUIRED)
++find_package(HarfBuzz 2.7.4 REQUIRED COMPONENTS ICU)
++find_package(JPEG 1.5.2 REQUIRED)
++find_package(LibPSL 0.20.2 REQUIRED)
++find_package(LibXml2 2.9.7 REQUIRED)
++find_package(OpenSSL REQUIRED)
++find_package(PNG REQUIRED)
++find_package(SQLite3 3.23.1 REQUIRED)
++if (NOT TARGET SQLite3::SQLite3) # CMake < 4.3
++    add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
++endif ()
++find_package(WebP REQUIRED COMPONENTS demux)
++find_package(ZLIB 1.2.11 REQUIRED)
++
++if (ENABLE_XSLT)
++    find_package(LibXslt 1.1.13 REQUIRED)
++endif ()
++
++if (USE_WOFF2)
++    find_package(WOFF2 1.0.2 COMPONENTS dec)
++    if (NOT WOFF2_FOUND)
++        message(FATAL_ERROR "libwoff2dec fehlt im sysroot")
++    endif ()
++endif ()
++
++# EGL und GLES2 kommen von Emscripten selber (Header im Emscripten-sysroot,
++# die Implementierung ist eine JS-Library auf WebGL, -lEGL -lGL beim Linken).
++# Es gibt keine .a Dateien, darum leere INTERFACE-Targets.
++set(EGL_LIBRARIES "")
++if (NOT TARGET EGL::EGL)
++    add_library(EGL::EGL INTERFACE IMPORTED)
++endif ()
++if (NOT TARGET OpenGL::GLES)
++    add_library(OpenGL::GLES INTERFACE IMPORTED)
++endif ()
+diff --git a/Source/cmake/WebKitCommon.cmake b/Source/cmake/WebKitCommon.cmake
+index d96e185036..2877a99d71 100644
+--- a/Source/cmake/WebKitCommon.cmake
++++ b/Source/cmake/WebKitCommon.cmake
+@@ -79,6 +79,7 @@ if (NOT HAS_RUN_WEBKIT_COMMON)
+         Mac
+         PlayStation
+         WPE
++        Wasm
+         Win
+     )
+     set(PORT "NOPORT" CACHE STRING "choose which WebKit port to build (one of ${ALL_PORTS})")

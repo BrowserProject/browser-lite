@@ -21,3 +21,9 @@ libpsl        tar  0.23.3    https://github.com/rockdaboot/libpsl/releases/downl
 openssl       tar  3.5.4     https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz                    967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99
 nghttp2       tar  1.68.0    https://github.com/nghttp2/nghttp2/releases/download/v1.68.0/nghttp2-1.68.0.tar.xz                         5511d3128850e01b5b26ec92bf39df15381c767a63441438b25ad6235def902c
 curl          tar  8.20.0    https://curl.se/download/curl-8.20.0.tar.xz                                                                63fe2dc148ba0ceae89922ef838f7e5c946272c2e78b7c59fab4b79d3ce2b896
+# Laufzeit-Dateien (landen in sysroot/runtime und von dort im WASM-Dateisystem)
+notosans      zip  2.015     https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSans-v2.015/NotoSans-v2.015.zip        0c34df072a3fa7efbb7cbf34950e1f971a4447cffe365d3a359e2d4089b958f5
+notoserif     zip  2.015     https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSerif-v2.015/NotoSerif-v2.015.zip      0e9a43c8a4b94ac76f55069ed1d7385bbcaf6b99527a94deb5619e032b7e76c1
+notosansmono  zip  2.014     https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSansMono-v2.014/NotoSansMono-v2.014.zip 090cf6c5e03f337a755630ca888b1fef463e64ae7b33ee134e9309c05f978732
+cacert        file 2025-09-09 https://curl.se/ca/cacert-2025-09-09.pem                                                                       f290e6acaf904a4121424ca3ebdd70652780707e28e8af999221786b86bb1975
+fontconfig-conf none -    -                                                                                                              -

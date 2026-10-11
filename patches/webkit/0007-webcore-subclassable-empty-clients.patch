@@ -1,0 +1,578 @@
+diff --git a/Source/WebCore/loader/EmptyClients.h b/Source/WebCore/loader/EmptyClients.h
+index 97c2a7e662..3a06f89258 100644
+--- a/Source/WebCore/loader/EmptyClients.h
++++ b/Source/WebCore/loader/EmptyClients.h
+@@ -59,171 +59,172 @@ struct FocusOptions;
+ 
+ class EmptyChromeClient : public ChromeClient {
+     WTF_MAKE_TZONE_ALLOCATED(EmptyChromeClient);
++protected:
+ 
+     void chromeDestroyed() override { }
+ 
+-    void setWindowRect(const FloatRect&) final { }
+-    FloatRect windowRect() const final { return FloatRect(); }
++    void setWindowRect(const FloatRect&) override { }
++    FloatRect windowRect() const override { return FloatRect(); }
+ 
+-    FloatRect pageRect() const final { return FloatRect(); }
++    FloatRect pageRect() const override { return FloatRect(); }
+ 
+-    void focus() final { }
+-    void unfocus() final { }
++    void focus() override { }
++    void unfocus() override { }
+ 
+-    bool canTakeFocus(FocusDirection) const final { return false; }
+-    void takeFocus(FocusDirection) final { }
++    bool canTakeFocus(FocusDirection) const override { return false; }
++    void takeFocus(FocusDirection) override { }
+ 
+-    void focusedElementChanged(Element*, LocalFrame*, FocusOptions, BroadcastFocusedElement) final { }
+-    void focusedFrameChanged(Frame*) final { }
++    void focusedElementChanged(Element*, LocalFrame*, FocusOptions, BroadcastFocusedElement) override { }
++    void focusedFrameChanged(Frame*) override { }
+ 
+-    RefPtr<Page> createWindow(LocalFrame&, const String&, const WindowFeatures&, const NavigationAction&) final;
+-    void show() final { }
++    RefPtr<Page> createWindow(LocalFrame&, const String&, const WindowFeatures&, const NavigationAction&) override;
++    void show() override { }
+ 
+-    bool canRunModal() const final { return false; }
+-    void runModal() final { }
++    bool canRunModal() const override { return false; }
++    void runModal() override { }
+ 
+-    bool isPopup() const final { return false; }
++    bool isPopup() const override { return false; }
+ 
+-    void setResizable(bool) final { }
++    void setResizable(bool) override { }
+ 
+-    void addMessageToConsole(JSC::MessageSource, JSC::MessageLevel, const String&, unsigned, unsigned, const String&) final { }
++    void addMessageToConsole(JSC::MessageSource, JSC::MessageLevel, const String&, unsigned, unsigned, const String&) override { }
+ 
+-    bool canRunBeforeUnloadConfirmPanel() final { return false; }
+-    bool runBeforeUnloadConfirmPanel(String&&, LocalFrame&) final { return true; }
++    bool canRunBeforeUnloadConfirmPanel() override { return false; }
++    bool runBeforeUnloadConfirmPanel(String&&, LocalFrame&) override { return true; }
+ 
+-    void closeWindow() final { }
++    void closeWindow() override { }
+ 
+-    void rootFrameAdded(const LocalFrame&) final { }
+-    void rootFrameRemoved(const LocalFrame&) final { }
++    void rootFrameAdded(const LocalFrame&) override { }
++    void rootFrameRemoved(const LocalFrame&) override { }
+ 
+-    void runJavaScriptAlert(LocalFrame&, const String&) final { }
+-    bool runJavaScriptConfirm(LocalFrame&, const String&) final { return false; }
+-    bool runJavaScriptPrompt(LocalFrame&, const String&, const String&, String&) final { return false; }
++    void runJavaScriptAlert(LocalFrame&, const String&) override { }
++    bool runJavaScriptConfirm(LocalFrame&, const String&) override { return false; }
++    bool runJavaScriptPrompt(LocalFrame&, const String&, const String&, String&) override { return false; }
+ 
+-    RefPtr<PopupMenu> createPopupMenu(PopupMenuClient&) const final;
+-    RefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient&) const final;
++    RefPtr<PopupMenu> createPopupMenu(PopupMenuClient&) const override;
++    RefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient&) const override;
+ 
+-    KeyboardUIMode keyboardUIMode() final { return KeyboardAccessDefault; }
++    KeyboardUIMode keyboardUIMode() override { return KeyboardAccessDefault; }
+ 
+-    bool hasAccessoryMousePointingDevice() const final { return false; }
+-    bool hoverSupportedByPrimaryPointingDevice() const final { return false; };
+-    bool hoverSupportedByAnyAvailablePointingDevice() const final { return false; }
+-    std::optional<PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final { return std::nullopt; };
+-    OptionSet<PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final { return { }; }
++    bool hasAccessoryMousePointingDevice() const override { return false; }
++    bool hoverSupportedByPrimaryPointingDevice() const override { return false; };
++    bool hoverSupportedByAnyAvailablePointingDevice() const override { return false; }
++    std::optional<PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const override { return std::nullopt; };
++    OptionSet<PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const override { return { }; }
+ 
+-    void invalidateRootView(const IntRect&) final { }
++    void invalidateRootView(const IntRect&) override { }
+     void invalidateContentsAndRootView(const IntRect&) override { }
+-    void invalidateContentsForSlowScroll(const IntRect&) final { }
+-    void scroll(const IntSize&, const IntRect&, const IntRect&) final { }
+-
+-    IntPoint screenToRootView(const IntPoint& p) const final { return p; }
+-    IntPoint rootViewToScreen(const IntPoint& p) const final { return p; }
+-    IntRect rootViewToScreen(const IntRect& r) const final { return r; }
+-    IntPoint accessibilityScreenToRootView(const IntPoint& p) const final { return p; };
+-    IntRect rootViewToAccessibilityScreen(const IntRect& r) const final { return r; };
++    void invalidateContentsForSlowScroll(const IntRect&) override { }
++    void scroll(const IntSize&, const IntRect&, const IntRect&) override { }
++
++    IntPoint screenToRootView(const IntPoint& p) const override { return p; }
++    IntPoint rootViewToScreen(const IntPoint& p) const override { return p; }
++    IntRect rootViewToScreen(const IntRect& r) const override { return r; }
++    IntPoint accessibilityScreenToRootView(const IntPoint& p) const override { return p; };
++    IntRect rootViewToAccessibilityScreen(const IntRect& r) const override { return r; };
+ #if PLATFORM(IOS_FAMILY)
+-    void relayAccessibilityNotification(String&&, RetainPtr<NSData>&&) const final { };
+-    void relayAriaNotifyNotification(AriaNotifyData&&) const final { };
+-    void relayLiveRegionNotification(LiveRegionAnnouncementData&&) const final { };
++    void relayAccessibilityNotification(String&&, RetainPtr<NSData>&&) const override { };
++    void relayAriaNotifyNotification(AriaNotifyData&&) const override { };
++    void relayLiveRegionNotification(LiveRegionAnnouncementData&&) const override { };
+ #endif
+ 
+-    void didFinishLoadingImageForElement(HTMLImageElement&) final { }
++    void didFinishLoadingImageForElement(HTMLImageElement&) override { }
+ 
+-    PlatformPageClient platformPageClient() const final { return 0; }
+-    void contentsSizeChanged(LocalFrame&, const IntSize&) const final { }
+-    void intrinsicContentsSizeChanged(const IntSize&) const final { }
++    PlatformPageClient platformPageClient() const override { return 0; }
++    void contentsSizeChanged(LocalFrame&, const IntSize&) const override { }
++    void intrinsicContentsSizeChanged(const IntSize&) const override { }
+ 
+-    void mouseDidMoveOverElement(const HitTestResult&, OptionSet<PlatformEventModifier>, const String&, TextDirection) final { }
++    void mouseDidMoveOverElement(const HitTestResult&, OptionSet<PlatformEventModifier>, const String&, TextDirection) override { }
+ 
+-    void print(LocalFrame&, const StringWithDirection&) final { }
++    void print(LocalFrame&, const StringWithDirection&) override { }
+ 
+-    void exceededDatabaseQuota(LocalFrame&, const String&, DatabaseDetails) final { }
++    void exceededDatabaseQuota(LocalFrame&, const String&, DatabaseDetails) override { }
+ 
+-    RefPtr<ColorChooser> createColorChooser(ColorChooserClient&, const Color&) final;
++    RefPtr<ColorChooser> createColorChooser(ColorChooserClient&, const Color&) override;
+ 
+-    RefPtr<DataListSuggestionPicker> createDataListSuggestionPicker(DataListSuggestionsClient&) final;
+-    bool canShowDataListSuggestionLabels() const final { return false; }
++    RefPtr<DataListSuggestionPicker> createDataListSuggestionPicker(DataListSuggestionsClient&) override;
++    bool canShowDataListSuggestionLabels() const override { return false; }
+ 
+-    RefPtr<DateTimeChooser> createDateTimeChooser(DateTimeChooserClient&) final;
++    RefPtr<DateTimeChooser> createDateTimeChooser(DateTimeChooserClient&) override;
+ 
+-    void NODELETE setTextIndicator(RefPtr<TextIndicator>&&) const final;
+-    void NODELETE updateTextIndicator(RefPtr<TextIndicator>&&) const final;
++    void NODELETE setTextIndicator(RefPtr<TextIndicator>&&) const override;
++    void NODELETE updateTextIndicator(RefPtr<TextIndicator>&&) const override;
+ 
+-    DisplayRefreshMonitorFactory* NODELETE displayRefreshMonitorFactory() const final;
++    DisplayRefreshMonitorFactory* NODELETE displayRefreshMonitorFactory() const override;
+ 
+-    void NODELETE runOpenPanel(LocalFrame&, FileChooser&) final;
+-    void NODELETE showShareSheet(ShareDataWithParsedURL&&, CompletionHandler<void(bool)>&&) final;
+-    void loadIconForFiles(const Vector<String>&, FileIconLoader&) final { }
++    void NODELETE runOpenPanel(LocalFrame&, FileChooser&) override;
++    void NODELETE showShareSheet(ShareDataWithParsedURL&&, CompletionHandler<void(bool)>&&) override;
++    void loadIconForFiles(const Vector<String>&, FileIconLoader&) override { }
+ 
+-    void elementDidFocus(Element&, const FocusOptions&) final { }
+-    void elementDidBlur(Element&) final { }
++    void elementDidFocus(Element&, const FocusOptions&) override { }
++    void elementDidBlur(Element&) override { }
+ 
+-    void setCursor(const Cursor&) final { }
+-    void setCursorHiddenUntilMouseMoves(bool) final { }
++    void setCursor(const Cursor&) override { }
++    void setCursorHiddenUntilMouseMoves(bool) override { }
+ 
+-    void scrollContainingScrollViewsToRevealRect(const IntRect&) const final { }
+-    void scrollMainFrameToRevealRect(const IntRect&) const final { }
++    void scrollContainingScrollViewsToRevealRect(const IntRect&) const override { }
++    void scrollMainFrameToRevealRect(const IntRect&) const override { }
+ 
+-    void attachRootGraphicsLayer(LocalFrame&, GraphicsLayer*) final { }
+-    void attachViewOverlayGraphicsLayer(GraphicsLayer*) final { }
+-    void setNeedsOneShotDrawingSynchronization() final { }
+-    void triggerRenderingUpdate() final { }
++    void attachRootGraphicsLayer(LocalFrame&, GraphicsLayer*) override { }
++    void attachViewOverlayGraphicsLayer(GraphicsLayer*) override { }
++    void setNeedsOneShotDrawingSynchronization() override { }
++    void triggerRenderingUpdate() override { }
+ 
+ #if PLATFORM(WIN)
+-    void AXStartFrameLoad() final { }
+-    void AXFinishFrameLoad() final { }
++    void AXStartFrameLoad() override { }
++    void AXFinishFrameLoad() override { }
+ #endif
+ 
+-#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU)
+-    void postAccessibilityNotification(AccessibilityObject&, AXNotification) final { }
+-    void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) final { }
+-    void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) final { }
++#if PLATFORM(PLAYSTATION) || PLATFORM(HAIKU) || PLATFORM(WASM)
++    void postAccessibilityNotification(AccessibilityObject&, AXNotification) override { }
++    void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) override { }
++    void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) override { }
+ #endif
+ 
+ #if ENABLE(IOS_TOUCH_EVENTS)
+-    void didPreventDefaultForEvent() final { }
++    void didPreventDefaultForEvent() override { }
+ #endif
+ 
+ #if PLATFORM(IOS_FAMILY)
+-    void didReceiveMobileDocType(bool) final { }
+-    void setNeedsScrollNotifications(LocalFrame&, bool) final { }
+-    void notifyRevealedSelectionByScrollingFrame(LocalFrame&) final { }
+-    void didLayout(LayoutType) final { }
+-    void didStartOverflowScroll() final { }
+-    void didEndOverflowScroll() final { }
++    void didReceiveMobileDocType(bool) override { }
++    void setNeedsScrollNotifications(LocalFrame&, bool) override { }
++    void notifyRevealedSelectionByScrollingFrame(LocalFrame&) override { }
++    void didLayout(LayoutType) override { }
++    void didStartOverflowScroll() override { }
++    void didEndOverflowScroll() override { }
+ 
+-    void suppressFormNotifications() final { }
+-    void restoreFormNotifications() final { }
++    void suppressFormNotifications() override { }
++    void restoreFormNotifications() override { }
+ 
+-    void addOrUpdateScrollingLayer(Node*, PlatformLayer*, PlatformLayer*, const IntSize&, bool, bool) final { }
+-    void removeScrollingLayer(Node*, PlatformLayer*, PlatformLayer*) final { }
++    void addOrUpdateScrollingLayer(Node*, PlatformLayer*, PlatformLayer*, const IntSize&, bool, bool) override { }
++    void removeScrollingLayer(Node*, PlatformLayer*, PlatformLayer*) override { }
+ 
+-    void webAppOrientationsUpdated() final { }
+-    void showPlaybackTargetPicker(bool, RouteSharingPolicy, const String&) final { }
++    void webAppOrientationsUpdated() override { }
++    void showPlaybackTargetPicker(bool, RouteSharingPolicy, const String&) override { }
+ 
+-    bool showDataDetectorsUIForElement(const Element&, const Event&) final { return false; }
++    bool showDataDetectorsUIForElement(const Element&, const Event&) override { return false; }
+ #endif // PLATFORM(IOS_FAMILY)
+ 
+ #if ENABLE(CONTENT_CHANGE_OBSERVER)
+-    void didFinishContentChangeObserving(LocalFrame&, ContentChange) final { }
++    void didFinishContentChangeObserving(LocalFrame&, ContentChange) override { }
+ #endif
+ 
+ #if ENABLE(ORIENTATION_EVENTS)
+-    IntDegrees deviceOrientation() const final { return 0; }
++    IntDegrees deviceOrientation() const override { return 0; }
+ #endif
+ 
+ #if PLATFORM(IOS_FAMILY)
+-    bool isStopping() final { return false; }
++    bool isStopping() override { return false; }
+ #endif
+ 
+-    void wheelEventHandlersChanged(bool) final { }
++    void wheelEventHandlersChanged(bool) override { }
+     
+-    bool isEmptyChromeClient() const final { return true; }
++    bool isEmptyChromeClient() const override { return true; }
+ 
+-    void didAssociateFormControls(const Vector<Ref<Element>>&, LocalFrame&) final { }
+-    bool shouldNotifyOnFormChanges() final { return false; }
++    void didAssociateFormControls(const Vector<Ref<Element>>&, LocalFrame&) override { }
++    bool shouldNotifyOnFormChanges() override { return false; }
+ 
+-    RefPtr<Icon> createIconForFiles(const Vector<String>& /* filenames */) final;
++    RefPtr<Icon> createIconForFiles(const Vector<String>& /* filenames */) override;
+ };
+ 
+ DiagnosticLoggingClient& NODELETE emptyDiagnosticLoggingClient();
+diff --git a/Source/WebCore/loader/EmptyFrameLoaderClient.h b/Source/WebCore/loader/EmptyFrameLoaderClient.h
+index d5c2330d24..0a9254fbbe 100644
+--- a/Source/WebCore/loader/EmptyFrameLoaderClient.h
++++ b/Source/WebCore/loader/EmptyFrameLoaderClient.h
+@@ -36,174 +36,174 @@ public:
+         : LocalFrameLoaderClient(frameLoader)
+     { }
+ 
+-private:
++protected:
+     Ref<DocumentLoader> createDocumentLoader(ResourceRequest&&, SubstituteData&&, ResourceRequest&&) override;
+     Ref<DocumentLoader> createDocumentLoader(ResourceRequest&&, SubstituteData&&) override;
+ 
+-    bool NODELETE hasWebView() const final;
++    bool NODELETE hasWebView() const override;
+ 
+-    void NODELETE makeRepresentation(DocumentLoader*) final;
++    void NODELETE makeRepresentation(DocumentLoader*) override;
+ 
+ #if PLATFORM(IOS_FAMILY)
+-    bool forceLayoutOnRestoreFromBackForwardCache() final;
++    bool forceLayoutOnRestoreFromBackForwardCache() override;
+ #endif
+ 
+-    void NODELETE forceLayoutForNonHTML() final;
++    void NODELETE forceLayoutForNonHTML() override;
+ 
+-    void NODELETE setCopiesOnScroll() final;
++    void NODELETE setCopiesOnScroll() override;
+ 
+-    void NODELETE detachedFromParent2() final;
+-    void NODELETE detachedFromParent3() final;
++    void NODELETE detachedFromParent2() override;
++    void NODELETE detachedFromParent3() override;
+ 
+-    void NODELETE convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest&, const ResourceResponse&) final;
++    void NODELETE convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest&, const ResourceResponse&) override;
+ 
+-    void NODELETE assignIdentifierToInitialRequest(ResourceLoaderIdentifier, DocumentLoader*, const ResourceRequest&) final;
++    void NODELETE assignIdentifierToInitialRequest(ResourceLoaderIdentifier, DocumentLoader*, const ResourceRequest&) override;
+     bool NODELETE shouldUseCredentialStorage(DocumentLoader*, ResourceLoaderIdentifier) override;
+-    void NODELETE dispatchWillSendRequest(DocumentLoader*, ResourceLoaderIdentifier, ResourceRequest&, const ResourceResponse&) final;
+-    void NODELETE dispatchDidReceiveAuthenticationChallenge(DocumentLoader*, ResourceLoaderIdentifier, const AuthenticationChallenge&) final;
++    void NODELETE dispatchWillSendRequest(DocumentLoader*, ResourceLoaderIdentifier, ResourceRequest&, const ResourceResponse&) override;
++    void NODELETE dispatchDidReceiveAuthenticationChallenge(DocumentLoader*, ResourceLoaderIdentifier, const AuthenticationChallenge&) override;
+ #if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+-    bool NODELETE canAuthenticateAgainstProtectionSpace(DocumentLoader*, ResourceLoaderIdentifier, const ProtectionSpace&) final;
++    bool NODELETE canAuthenticateAgainstProtectionSpace(DocumentLoader*, ResourceLoaderIdentifier, const ProtectionSpace&) override;
+ #endif
+ 
+ #if PLATFORM(IOS_FAMILY)
+-    RetainPtr<CFDictionaryRef> connectionProperties(DocumentLoader*, ResourceLoaderIdentifier) final;
++    RetainPtr<CFDictionaryRef> connectionProperties(DocumentLoader*, ResourceLoaderIdentifier) override;
+ #endif
+ 
+-    void NODELETE dispatchDidReceiveResponse(DocumentLoader*, ResourceLoaderIdentifier, const ResourceResponse&) final;
+-    void NODELETE dispatchDidReceiveContentLength(DocumentLoader*, ResourceLoaderIdentifier, int) final;
+-    void NODELETE dispatchDidFinishLoading(DocumentLoader*, ResourceLoaderIdentifier) final;
++    void NODELETE dispatchDidReceiveResponse(DocumentLoader*, ResourceLoaderIdentifier, const ResourceResponse&) override;
++    void NODELETE dispatchDidReceiveContentLength(DocumentLoader*, ResourceLoaderIdentifier, int) override;
++    void NODELETE dispatchDidFinishLoading(DocumentLoader*, ResourceLoaderIdentifier) override;
+ #if ENABLE(DATA_DETECTION)
+-    void NODELETE dispatchDidFinishDataDetection(NSArray *) final;
++    void NODELETE dispatchDidFinishDataDetection(NSArray *) override;
+ #endif
+-    void NODELETE dispatchDidFailLoading(DocumentLoader*, ResourceLoaderIdentifier, const ResourceError&) final;
+-    bool NODELETE dispatchDidLoadResourceFromMemoryCache(DocumentLoader*, const ResourceRequest&, const ResourceResponse&, int) final;
+-
+-    void NODELETE dispatchDidDispatchOnloadEvents() final;
+-    void NODELETE dispatchDidReceiveServerRedirectForProvisionalLoad() final;
+-    void NODELETE dispatchDidCancelClientRedirect() final;
+-    void dispatchWillPerformClientRedirect(const URL&, double, WallTime, LockBackForwardList) final;
+-    void NODELETE dispatchDidChangeLocationWithinPage() final;
+-    void NODELETE dispatchDidPushStateWithinPage() final;
+-    void NODELETE dispatchDidReplaceStateWithinPage() final;
+-    void NODELETE dispatchDidPopStateWithinPage() final;
+-    void NODELETE dispatchWillClose() final;
+-    void NODELETE dispatchDidStartProvisionalLoad() final;
+-    void NODELETE dispatchDidReceiveTitle(const StringWithDirection&) final;
+-    void NODELETE dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>) final;
+-    void NODELETE dispatchDidFailProvisionalLoad(const ResourceError&, WillContinueLoading, WillInternallyHandleFailure) final;
+-    void NODELETE dispatchDidFailLoad(const ResourceError&) final;
+-    void NODELETE dispatchDidFinishDocumentLoad() final;
+-    void NODELETE dispatchDidFinishLoad() final;
+-    void NODELETE dispatchDidReachLayoutMilestone(OptionSet<LayoutMilestone>) final;
+-    void NODELETE dispatchDidReachVisuallyNonEmptyState() final;
+-
+-    LocalFrame* NODELETE dispatchCreatePage(const NavigationAction&, NewFrameOpenerPolicy, const String&) final;
+-    void NODELETE dispatchShow() final;
+-
+-    void NODELETE dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, const String&, FramePolicyFunction&&) final;
+-    void NODELETE dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&&) final;
+-    void NODELETE dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse& redirectResponse, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&&) final;
+-    void NODELETE updateSandboxFlags(SandboxFlags) final;
+-    void NODELETE updateOpener(std::optional<FrameIdentifier>) final;
+-    void setPrinting(bool, FloatSize, FloatSize, float, AdjustViewSize) final;
+-    void NODELETE cancelPolicyCheck() final;
+-
+-    void NODELETE dispatchUnableToImplementPolicy(const ResourceError&) final;
+-
+-    void NODELETE dispatchWillSendSubmitEvent(Ref<FormState>&&) final;
+-    void dispatchWillSubmitForm(FormState&, URL&& requestURL, String&& method, CompletionHandler<void()>&&) final;
+-
+-    void NODELETE revertToProvisionalState(DocumentLoader*) final;
+-    void NODELETE setMainDocumentError(DocumentLoader*, const ResourceError&) final;
+-
+-    void NODELETE setMainFrameDocumentReady(bool) final;
+-
+-    void NODELETE startDownload(const ResourceRequest&, const String&, FromDownloadAttribute = FromDownloadAttribute::No) final;
+-
+-    void NODELETE willChangeTitle(DocumentLoader*) final;
+-    void NODELETE didChangeTitle(DocumentLoader*) final;
+-
+-    void NODELETE willReplaceMultipartContent() final;
+-    void NODELETE didReplaceMultipartContent() final;
+-
+-    void NODELETE committedLoad(DocumentLoader*, const SharedBuffer&) final;
+-    void NODELETE finishedLoading(DocumentLoader*) final;
+-
+-    void NODELETE loadStorageAccessQuirksIfNeeded() final;
+-
+-    bool NODELETE shouldFallBack(const ResourceError&) const final;
+-
+-    bool NODELETE canHandleRequest(const ResourceRequest&) const final;
+-    bool NODELETE canShowMIMEType(const String&) const final;
+-    bool NODELETE canShowMIMETypeAsHTML(const String&) const final;
+-    bool NODELETE representationExistsForURLScheme(StringView) const final;
+-    String NODELETE generatedMIMETypeForURLScheme(StringView) const final;
+-
+-    void NODELETE frameLoadCompleted() final;
+-    void NODELETE restoreViewState() final;
+-    void NODELETE provisionalLoadStarted() final;
+-    void NODELETE didFinishLoad() final;
+-    void NODELETE prepareForDataSourceReplacement() final;
+-
+-    void NODELETE updateCachedDocumentLoader(DocumentLoader&) final;
+-    void NODELETE setTitle(const StringWithDirection&, const URL&) final;
++    void NODELETE dispatchDidFailLoading(DocumentLoader*, ResourceLoaderIdentifier, const ResourceError&) override;
++    bool NODELETE dispatchDidLoadResourceFromMemoryCache(DocumentLoader*, const ResourceRequest&, const ResourceResponse&, int) override;
++
++    void NODELETE dispatchDidDispatchOnloadEvents() override;
++    void NODELETE dispatchDidReceiveServerRedirectForProvisionalLoad() override;
++    void NODELETE dispatchDidCancelClientRedirect() override;
++    void dispatchWillPerformClientRedirect(const URL&, double, WallTime, LockBackForwardList) override;
++    void NODELETE dispatchDidChangeLocationWithinPage() override;
++    void NODELETE dispatchDidPushStateWithinPage() override;
++    void NODELETE dispatchDidReplaceStateWithinPage() override;
++    void NODELETE dispatchDidPopStateWithinPage() override;
++    void NODELETE dispatchWillClose() override;
++    void NODELETE dispatchDidStartProvisionalLoad() override;
++    void NODELETE dispatchDidReceiveTitle(const StringWithDirection&) override;
++    void NODELETE dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>) override;
++    void NODELETE dispatchDidFailProvisionalLoad(const ResourceError&, WillContinueLoading, WillInternallyHandleFailure) override;
++    void NODELETE dispatchDidFailLoad(const ResourceError&) override;
++    void NODELETE dispatchDidFinishDocumentLoad() override;
++    void NODELETE dispatchDidFinishLoad() override;
++    void NODELETE dispatchDidReachLayoutMilestone(OptionSet<LayoutMilestone>) override;
++    void NODELETE dispatchDidReachVisuallyNonEmptyState() override;
++
++    LocalFrame* NODELETE dispatchCreatePage(const NavigationAction&, NewFrameOpenerPolicy, const String&) override;
++    void NODELETE dispatchShow() override;
++
++    void NODELETE dispatchDecidePolicyForResponse(const ResourceResponse&, const ResourceRequest&, const String&, FramePolicyFunction&&) override;
++    void NODELETE dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&&) override;
++    void NODELETE dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse& redirectResponse, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&&) override;
++    void NODELETE updateSandboxFlags(SandboxFlags) override;
++    void NODELETE updateOpener(std::optional<FrameIdentifier>) override;
++    void setPrinting(bool, FloatSize, FloatSize, float, AdjustViewSize) override;
++    void NODELETE cancelPolicyCheck() override;
++
++    void NODELETE dispatchUnableToImplementPolicy(const ResourceError&) override;
++
++    void NODELETE dispatchWillSendSubmitEvent(Ref<FormState>&&) override;
++    void dispatchWillSubmitForm(FormState&, URL&& requestURL, String&& method, CompletionHandler<void()>&&) override;
++
++    void NODELETE revertToProvisionalState(DocumentLoader*) override;
++    void NODELETE setMainDocumentError(DocumentLoader*, const ResourceError&) override;
++
++    void NODELETE setMainFrameDocumentReady(bool) override;
++
++    void NODELETE startDownload(const ResourceRequest&, const String&, FromDownloadAttribute = FromDownloadAttribute::No) override;
++
++    void NODELETE willChangeTitle(DocumentLoader*) override;
++    void NODELETE didChangeTitle(DocumentLoader*) override;
++
++    void NODELETE willReplaceMultipartContent() override;
++    void NODELETE didReplaceMultipartContent() override;
++
++    void NODELETE committedLoad(DocumentLoader*, const SharedBuffer&) override;
++    void NODELETE finishedLoading(DocumentLoader*) override;
++
++    void NODELETE loadStorageAccessQuirksIfNeeded() override;
++
++    bool NODELETE shouldFallBack(const ResourceError&) const override;
++
++    bool NODELETE canHandleRequest(const ResourceRequest&) const override;
++    bool NODELETE canShowMIMEType(const String&) const override;
++    bool NODELETE canShowMIMETypeAsHTML(const String&) const override;
++    bool NODELETE representationExistsForURLScheme(StringView) const override;
++    String NODELETE generatedMIMETypeForURLScheme(StringView) const override;
++
++    void NODELETE frameLoadCompleted() override;
++    void NODELETE restoreViewState() override;
++    void NODELETE provisionalLoadStarted() override;
++    void NODELETE didFinishLoad() override;
++    void NODELETE prepareForDataSourceReplacement() override;
++
++    void NODELETE updateCachedDocumentLoader(DocumentLoader&) override;
++    void NODELETE setTitle(const StringWithDirection&, const URL&) override;
+ 
+     String NODELETE userAgent(const URL&) const override;
+ 
+-    void NODELETE savePlatformDataToCachedFrame(CachedFrame*) final;
+-    void NODELETE transitionToCommittedFromCachedFrame(CachedFrame*) final;
++    void NODELETE savePlatformDataToCachedFrame(CachedFrame*) override;
++    void NODELETE transitionToCommittedFromCachedFrame(CachedFrame*) override;
+ #if PLATFORM(IOS_FAMILY)
+-    void didRestoreFrameHierarchyForCachedFrame() final;
++    void didRestoreFrameHierarchyForCachedFrame() override;
+ #endif
+-    void NODELETE transitionToCommittedForNewPage(InitializingIframe) final;
++    void NODELETE transitionToCommittedForNewPage(InitializingIframe) override;
+ 
+-    void NODELETE didRestoreFromBackForwardCache() final;
++    void NODELETE didRestoreFromBackForwardCache() override;
+ 
+-    void NODELETE updateGlobalHistory() final;
+-    void NODELETE updateGlobalHistoryRedirectLinks() final;
+-    ShouldGoToHistoryItem NODELETE shouldGoToHistoryItem(HistoryItem&, IsSameDocumentNavigation) const final;
+-    bool NODELETE supportsAsyncShouldGoToHistoryItem() const final;
+-    void NODELETE shouldGoToHistoryItemAsync(HistoryItem&, CompletionHandler<void(ShouldGoToHistoryItem)>&&) const final;
+-    void NODELETE dispatchGoToBackForwardItemAtIndex(int steps) final;
+-    void NODELETE dispatchEnqueueHistoryTraversalDelta(int delta) final;
++    void NODELETE updateGlobalHistory() override;
++    void NODELETE updateGlobalHistoryRedirectLinks() override;
++    ShouldGoToHistoryItem NODELETE shouldGoToHistoryItem(HistoryItem&, IsSameDocumentNavigation) const override;
++    bool NODELETE supportsAsyncShouldGoToHistoryItem() const override;
++    void NODELETE shouldGoToHistoryItemAsync(HistoryItem&, CompletionHandler<void(ShouldGoToHistoryItem)>&&) const override;
++    void NODELETE dispatchGoToBackForwardItemAtIndex(int steps) override;
++    void NODELETE dispatchEnqueueHistoryTraversalDelta(int delta) override;
+ 
+-    void NODELETE saveViewStateToItem(HistoryItem&) final;
+-    bool NODELETE canCachePage() const final;
+-    RefPtr<LocalFrame> createFrame(const AtomString&, HTMLFrameOwnerElement&) final;
+-    RefPtr<Widget> createPlugin(HTMLPlugInElement&, const URL&, const Vector<AtomString>&, const Vector<AtomString>&, const String&, bool) final;
++    void NODELETE saveViewStateToItem(HistoryItem&) override;
++    bool NODELETE canCachePage() const override;
++    RefPtr<LocalFrame> createFrame(const AtomString&, HTMLFrameOwnerElement&) override;
++    RefPtr<Widget> createPlugin(HTMLPlugInElement&, const URL&, const Vector<AtomString>&, const Vector<AtomString>&, const String&, bool) override;
+ 
+-    ObjectContentType NODELETE objectContentType(const URL&, const String&) final;
+-    AtomString NODELETE overrideMediaType() const final;
++    ObjectContentType NODELETE objectContentType(const URL&, const String&) override;
++    AtomString NODELETE overrideMediaType() const override;
+ 
+-    void NODELETE redirectDataToPlugin(Widget&) final;
+-    void NODELETE dispatchDidClearWindowObjectInWorld(DOMWrapperWorld&) final;
++    void NODELETE redirectDataToPlugin(Widget&) override;
++    void NODELETE dispatchDidClearWindowObjectInWorld(DOMWrapperWorld&) override;
+ 
+ #if PLATFORM(COCOA)
+-    RemoteAXObjectRef NODELETE accessibilityRemoteObject() final;
+-    IntPoint NODELETE accessibilityRemoteFrameOffset() final;
++    RemoteAXObjectRef NODELETE accessibilityRemoteObject() override;
++    IntPoint NODELETE accessibilityRemoteFrameOffset() override;
+ #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+-    void NODELETE setIsolatedTree(Ref<WebCore::AXIsolatedTree>&&) final;
+-    RefPtr<WebCore::AXIsolatedTree> isolatedTree() const final;
++    void NODELETE setIsolatedTree(Ref<WebCore::AXIsolatedTree>&&) override;
++    RefPtr<WebCore::AXIsolatedTree> isolatedTree() const override;
+ #endif
+-    void willCacheResponse(DocumentLoader*, ResourceLoaderIdentifier, NSCachedURLResponse *, CompletionHandler<void(NSCachedURLResponse *)>&&) const final;
++    void willCacheResponse(DocumentLoader*, ResourceLoaderIdentifier, NSCachedURLResponse *, CompletionHandler<void(NSCachedURLResponse *)>&&) const override;
+ #endif
+ 
+-    Ref<FrameNetworkingContext> createNetworkingContext() final;
++    Ref<FrameNetworkingContext> createNetworkingContext() override;
+ 
+     bool NODELETE isEmptyFrameLoaderClient() const override;
+-    void NODELETE prefetchDNS(const String&) final;
+-    void sendH2Ping(const URL&, CompletionHandler<void(Expected<Seconds, ResourceError>&&)>&&) final;
++    void NODELETE prefetchDNS(const String&) override;
++    void sendH2Ping(const URL&, CompletionHandler<void(Expected<Seconds, ResourceError>&&)>&&) override;
+ 
+ #if USE(QUICK_LOOK)
+-    RefPtr<LegacyPreviewLoaderClient> createPreviewLoaderClient(const String&, const String&) final;
++    RefPtr<LegacyPreviewLoaderClient> createPreviewLoaderClient(const String&, const String&) override;
+ #endif
+ 
+-    bool NODELETE hasFrameSpecificStorageAccess() final;
+-    void NODELETE revokeFrameSpecificStorageAccess() final;
++    bool NODELETE hasFrameSpecificStorageAccess() override;
++    void NODELETE revokeFrameSpecificStorageAccess() override;
+ 
+-    void NODELETE dispatchLoadEventToOwnerElementInAnotherProcess() final;
++    void NODELETE dispatchLoadEventToOwnerElementInAnotherProcess() override;
+ 
+-    RefPtr<HistoryItem> createHistoryItemTree(bool, BackForwardItemIdentifier) const final;
++    RefPtr<HistoryItem> createHistoryItemTree(bool, BackForwardItemIdentifier) const override;
+ };
+ 
+ } // namespace WebCore

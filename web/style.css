@@ -1,0 +1,48 @@
+:root {
+  --bg: #f3f3f5;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --border: #d2d2d7;
+  --tab: #e5e5ea;
+  --tab-active: #ffffff;
+  --accent: #0a84ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f2f2f7;
+    --muted: #98989d;
+    --border: #3a3a3c;
+    --tab: #2c2c2e;
+    --tab-active: #3a3a3c;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px system-ui, sans-serif; }
+body { display: flex; flex-direction: column; }
+#chrome { flex: none; border-bottom: 1px solid var(--border); position: relative; }
+#tabs { display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; overflow-x: auto; }
+#tab-list { display: flex; gap: 2px; min-width: 0; }
+.tab { display: flex; align-items: center; gap: 6px; max-width: 220px; min-width: 80px; padding: 6px 8px; border-radius: 8px 8px 0 0; background: var(--tab); cursor: default; user-select: none; }
+.tab.active { background: var(--tab-active); }
+.tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .close { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 14px; }
+button { font: inherit; color: inherit; }
+#new-tab { border: none; background: none; font-size: 18px; padding: 4px 10px; cursor: pointer; color: var(--muted); }
+#toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--tab-active); }
+#toolbar > button { width: 32px; height: 32px; border: none; border-radius: 6px; background: none; font-size: 16px; cursor: pointer; }
+#toolbar > button:hover:not(:disabled) { background: var(--tab); }
+#toolbar > button:disabled { opacity: 0.35; cursor: default; }
+#address-form { flex: 1; min-width: 0; }
+#address { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 16px; padding: 0 14px; background: var(--bg); color: var(--fg); font: inherit; }
+#address:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+#progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); transition: width 0.2s, opacity 0.4s; }
+#viewport { flex: 1; position: relative; overflow: hidden; background: #fff; }
+#screen { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
+#ime { position: absolute; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; }
+#boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6e6e73; background: #fff; }
+#boot[hidden] { display: none; }
+@media (max-width: 600px) {
+  #status { display: none; }
+}

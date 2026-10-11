@@ -1,0 +1,38 @@
+diff --git a/Source/WTF/wtf/RunLoop.h b/Source/WTF/wtf/RunLoop.h
+index e29c37ed27..0f24f9f0ce 100644
+--- a/Source/WTF/wtf/RunLoop.h
++++ b/Source/WTF/wtf/RunLoop.h
+@@ -144,6 +144,11 @@ public:
+ 
+ #if USE(GENERIC_EVENT_LOOP) || USE(WINDOWS_EVENT_LOOP)
+     WTF_EXPORT_PRIVATE static void setWakeUpCallback(WTF::Function<void()>&&);
++#if OS(EMSCRIPTEN)
++    // browser-lite: Der Embedder treibt den Loop selber an (RunLoop::cycle()) und
++    // muss wissen, wann der naechste Timer faellig ist, um so lange zu warten.
++    WTF_EXPORT_PRIVATE static std::optional<MonotonicTime> nextTimerFireTime();
++#endif
+ #endif
+ 
+ #if USE(WINDOWS_EVENT_LOOP)
+diff --git a/Source/WTF/wtf/generic/RunLoopGeneric.cpp b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+index 7ac74579c7..7f441950b2 100644
+--- a/Source/WTF/wtf/generic/RunLoopGeneric.cpp
++++ b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+@@ -242,6 +242,17 @@ void RunLoop::setWakeUpCallback(WTF::Function<void()>&& function)
+     RunLoop::currentSingleton().m_wakeUpCallback = WTF::move(function);
+ }
+ 
++#if OS(EMSCRIPTEN)
++std::optional<MonotonicTime> RunLoop::nextTimerFireTime()
++{
++    auto& runLoop = RunLoop::currentSingleton();
++    Locker locker { runLoop.m_loopLock };
++    if (runLoop.m_schedules.isEmpty())
++        return std::nullopt;
++    return runLoop.m_schedules.first()->scheduledTimePoint();
++}
++#endif
++
+ // RunLoop operations are thread-safe. These operations can be called from outside of the RunLoop's thread.
+ // For example, WorkQueue::{dispatch, dispatchAfter} call the operations of the WorkQueue thread's RunLoop
+ // from the caller's thread.

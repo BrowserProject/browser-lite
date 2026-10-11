@@ -22,3 +22,10 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 16 | ICU-Daten | Selber aus dem Host-Archiv als `libicudata.a` | Im Cross-Build baut ICU nur Stub-Daten |
 | 17 | GC-Wurzeln | `--spill-pointers` fuer das ganze Binary | Ohne gehen lebende Objekte verloren (mit Stresstest bewiesen) |
 | 18 | Erster JSC-Build | `PORT=JSCOnly` mit Patches, eigener `PORT=Wasm` erst fuer WebCore | JSCOnly reicht fuer JSC, so bleiben die Patches klein |
+| 19 | Spill + Namen | `--spill-pointers` braucht `--profiling-funcs` | Ohne Namen findet der Pass nach voller Optimierung den Stack-Pointer nicht |
+| 20 | Link-Flags jsc | Nur am Target `jsc`, nicht global | Die LLInt-Extractors (mit -O0 gelinkt) vertragen `--spill-pointers` nicht |
+| 21 | Theme | Adwaita (wie Win-Port) | Fertige Formular-Elemente und Scrollbars ohne Abhaengigkeiten |
+| 22 | Clients | Empty-Clients per Patch ueberschreibbar machen (`final` -> `override`) | Mechanischer Patch, eigene Clients ueberschreiben nur was noetig ist |
+| 23 | Event-Loop | RunLoop von aussen pumpen (WakeUp-Callback + Timer auf naechsten WebCore-Timer) | Ein Worker darf nicht blockieren, sonst kommen keine Nachrichten mehr an |
+| 24 | Bild zum Host | Pixel im gemeinsamen Speicher, Host kopiert per putImageData, immer nur ein Bild unterwegs | Einfach und robust, GPU-Weg folgt in Phase 8 |
+| 25 | Oberflaeche | Schlichtes HTML/CSS/JS ohne Build-Schritt statt TypeScript + Vite | Keine npm-Abhaengigkeiten, einfacher zu hosten, reicht fuer die UI |
