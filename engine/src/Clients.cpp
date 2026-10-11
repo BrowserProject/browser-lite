@@ -78,11 +78,13 @@ void ChromeClient::invalidateContentsAndRootView(const IntRect& rect)
 
 void ChromeClient::invalidateContentsForSlowScroll(const IntRect& rect)
 {
+    debugLog("Scrollen langsam (neu malen) %dx%d", rect.width(), rect.height());
     m_view->addDamage(rect);
 }
 
 void ChromeClient::scroll(const IntSize& delta, const IntRect& rectToScroll, const IntRect& clipRect)
 {
+    debugLog("Scrollen schnell (verschieben) %d,%d", delta.width(), delta.height());
     m_view->scrollDamage(delta, rectToScroll, clipRect);
 }
 

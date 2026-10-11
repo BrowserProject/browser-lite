@@ -183,6 +183,7 @@ LocalFrameView* WebView::mainFrameView() const
 
 void WebView::createSurface()
 {
+    m_pendingScrolls.clear();
     m_pixelSize = IntSize { static_cast<int>(std::ceil(m_size.width() * m_deviceScaleFactor)), static_cast<int>(std::ceil(m_size.height() * m_deviceScaleFactor)) };
     m_pixels.fill(0, static_cast<size_t>(m_pixelSize.width()) * m_pixelSize.height() * 4);
     auto info = SkImageInfo::Make(m_pixelSize.width(), m_pixelSize.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType);
@@ -282,11 +283,71 @@ void WebView::addDamage(const IntRect& rect)
     }
 }
 
-void WebView::scrollDamage(const IntSize&, const IntRect& rectToScroll, const IntRect& clipRect)
+void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, const IntRect& clipRect)
 {
-    // Einfach und korrekt: den ganzen verschobenen Bereich neu malen.
-    // (Pixel verschieben statt neu malen kommt mit dem GPU-Pfad, Phase 8)
-    addDamage(intersection(rectToScroll, clipRect));
+    IntRect area = intersection(intersection(rectToScroll, clipRect), IntRect { { }, m_size });
+    if (area.isEmpty())
+        return;
+    // Nur ganze Geraete-Pixel lassen sich verschieben, sonst neu malen
+    float deviceX = delta.width() * m_deviceScaleFactor;
+    float deviceY = delta.height() * m_deviceScaleFactor;
+    if (deviceX != std::round(deviceX) || deviceY != std::round(deviceY) || std::abs(delta.width()) >= area.width() || std::abs(delta.height()) >= area.height()) {
+        addDamage(area);
+        return;
+    }
+
+    // Was noch neu gemalt werden muss, wandert mit dem Inhalt mit
+    Region moved = intersect(m_damage, Region { area });
+    m_damage.subtract(area);
+    moved.translate(delta);
+    moved.intersect(Region { area });
+    m_damage.unite(moved);
+
+    m_pendingScrolls.append({ delta, area });
+
+    // Der frei gewordene Streifen muss neu gemalt werden
+    IntRect kept = intersection(area, IntRect { area.location() + delta, area.size() });
+    Region exposed { area };
+    exposed.subtract(kept);
+    for (auto& rect : exposed.rects())
+        addDamage(rect);
+    if (!m_frameRequested) {
+        m_frameRequested = true;
+        requestFrameFromHost(m_id);
+    }
+}
+
+// Verschiebt die Pixel im Buffer (Geraete-Pixel). presented bekommt den
+// Bereich, den die Oberflaeche neu kopieren muss.
+void WebView::applyPendingScrolls(IntRect& presented)
+{
+    const size_t stride = static_cast<size_t>(m_pixelSize.width()) * 4;
+    for (auto& [delta, area] : std::exchange(m_pendingScrolls, { })) {
+        IntRect deviceArea = area;
+        deviceArea.scale(m_deviceScaleFactor);
+        deviceArea.intersect(IntRect { { }, m_pixelSize });
+        int dx = std::lround(delta.width() * m_deviceScaleFactor);
+        int dy = std::lround(delta.height() * m_deviceScaleFactor);
+        IntRect target = intersection(deviceArea, IntRect { deviceArea.location() + IntSize { dx, dy }, deviceArea.size() });
+        if (target.isEmpty())
+            continue;
+        auto pixels = m_pixels.mutableSpan();
+        size_t rowBytes = static_cast<size_t>(target.width()) * 4;
+        auto copyRow = [&](int y) {
+            size_t to = static_cast<size_t>(y) * stride + static_cast<size_t>(target.x()) * 4;
+            size_t from = static_cast<size_t>(y - dy) * stride + static_cast<size_t>(target.x() - dx) * 4;
+            memmove(pixels.data() + to, pixels.data() + from, rowBytes);
+        };
+        // Bei Bewegung nach unten von unten her kopieren, sonst ueberschreiben wir die Quelle
+        if (dy > 0) {
+            for (int y = target.maxY() - 1; y >= target.y(); --y)
+                copyRow(y);
+        } else {
+            for (int y = target.y(); y < target.maxY(); ++y)
+                copyRow(y);
+        }
+        presented.unite(deviceArea);
+    }
 }
 
 void WebView::scheduleRenderingUpdate()
@@ -316,7 +377,10 @@ bool WebView::renderFrame(IntRect* dirtyOut)
     view->updateLayoutAndStyleIfNeededRecursive();
     auto layoutDone = MonotonicTime::now();
 
-    if (m_damage.isEmpty())
+    IntRect presented;
+    applyPendingScrolls(presented);
+
+    if (m_damage.isEmpty() && presented.isEmpty())
         return false;
 
     auto damage = std::exchange(m_damage, Region { });
@@ -340,8 +404,11 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     if (dirtyOut) {
         IntRect bounds = damage.bounds();
-        bounds.scale(m_deviceScaleFactor);
-        bounds.inflate(1);
+        if (!bounds.isEmpty()) {
+            bounds.scale(m_deviceScaleFactor);
+            bounds.inflate(1);
+        }
+        bounds.unite(presented);
         *dirtyOut = intersection(bounds, IntRect { { }, m_pixelSize });
     }
     return true;

@@ -87,6 +87,7 @@ kommen zuerst.
   (Wikipedia 40 s -> 12 s, GitHub 19 s -> 8 s)
 - [x] fontconfig-Cache im Datenpaket (`deps/tools/fc-precache.c`)
 - [x] Debug-Ausgabe der Engine mit `?debug=1` (Zeitstempel, lange Schritte, GC)
+- [x] Scrollen verschiebt Pixel statt alles neu zu malen (nur der neue Streifen wird gemalt)
 - [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
 
 GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache

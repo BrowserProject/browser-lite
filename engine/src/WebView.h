@@ -105,6 +105,14 @@ private:
     Vector<uint8_t> m_pixels;
     sk_sp<SkSurface> m_surface;
     WebCore::Region m_damage;
+    // Scrollen: Pixel verschieben statt neu malen. Wird erst beim naechsten
+    // Bild ausgefuehrt, weil die Oberflaeche vorher noch das alte Bild kopiert.
+    struct PendingScroll {
+        WebCore::IntSize delta;
+        WebCore::IntRect area;
+    };
+    Vector<PendingScroll> m_pendingScrolls;
+    void applyPendingScrolls(WebCore::IntRect& presented);
     bool m_renderingUpdateRequested { false };
     bool m_frameRequested { false };
     bool m_frameInFlight { false };
