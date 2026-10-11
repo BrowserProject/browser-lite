@@ -56,15 +56,25 @@ export class WispTransport {
         }
         this.handlePacket(packet);
       };
-      ws.onclose = () => {
-        this.ready = null;
+      let closed = false;
+      const onClosed = () => {
+        if (closed)
+          return;
+        closed = true;
+        if (this.ws === ws)
+          this.ready = null;
         for (const stream of this.streams.values())
           stream.closed(0x03); // Netzwerkfehler
         this.streams.clear();
         if (!opened)
           reject(new Error('Wisp-Verbindung fehlgeschlagen: ' + this.url));
       };
-      ws.onerror = () => {};
+      ws.onclose = onClosed;
+      // Node (undici) schickt bei abgelehntem Handshake nur error, kein close
+      ws.onerror = () => {
+        if (!opened)
+          onClosed();
+      };
     });
     return this.ready;
   }

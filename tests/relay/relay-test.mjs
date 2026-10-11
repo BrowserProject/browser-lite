@@ -10,6 +10,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const TOKEN = 'test-token-0123456789abcdef';
 const RELAY_PORT = 15001;
 
+// Nie ewig haengen (z.B. Port belegt, Relay startet nicht)
+setTimeout(() => {
+  console.log('FAIL Zeitlimit (60 s)');
+  process.exit(1);
+}, 60000).unref();
+
 const echo = net.createServer((socket) => socket.pipe(socket)).listen(0, '127.0.0.1');
 await new Promise((r) => echo.on('listening', r));
 const echoPort = echo.address().port;

@@ -23,6 +23,12 @@ const RELAY_PORT = 15101;
 const UI_PORT = 15102;
 const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
 
+// Nie ewig haengen
+setTimeout(() => {
+  console.log('FAIL Zeitlimit fuer den ganzen Test');
+  process.exit(1);
+}, TIMEOUT + 120000).unref();
+
 let failed = 0;
 const check = (name, ok, info = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
