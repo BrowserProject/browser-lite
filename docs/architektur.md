@@ -107,8 +107,42 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 ### Speicher
-WasmFS mit OPFS-Backend fuer Cookies, localStorage, IndexedDB und Cache. Bleibt also
-zwischen Besuchen erhalten.
+Cookies (SQLite), localStorage und IndexedDB liegen in der Engine unter `/data`. Das ist ein
+IDBFS von Emscripten: beim Start aus der IndexedDB des Host-Browsers geladen, danach alle
+5 s und beim Verlassen der Seite zurueckgeschrieben. Bleibt also zwischen Besuchen erhalten.
+
+### Ton (Web Audio)
+```
+Seite (JS in der Engine)            Engine                          Host-Browser
+AudioContext, Oszillator, ...  ->   Thread "WebAudio Wasm"     ->   AudioWorklet liest den
+                                    rendert in Ringpuffer im        Ring und gibt ihn an das
+                                    gemeinsamen WASM-Speicher       echte Web Audio weiter
+```
+- `platform/audio/wasm/AudioDestinationWasm.cpp`: rendert immer ca. 64 ms im Voraus. Der Ring
+  hat zwei Zaehler (geschrieben/gelesen) und einen Herzschlag, das Worklet (`web/audio-worklet.js`)
+  liest ohne Locks.
+- Chrome erlaubt Ton erst nach einem Klick. Bis dahin rendert die Engine im Takt der Uhr
+  weiter und wirft den Ton weg, `currentTime` laeuft also wie in einem normalen Browser.
+- `decodeAudioData`: die Daten gehen an den Dekoder des Host-Browsers (MP3, AAC, Opus, ...),
+  der Hintergrund-Thread der Engine wartet so lange.
+- FFT (Analyser, Convolver, Oszillator-Tabellen): eigene Radix-2-FFT (`FFTFrameWasm.cpp`).
+- HRTF-Daten fuer den PannerNode liegen in `engine.data`.
+
+### Video und Audio-Elemente
+```
+Seite: <video src=...>        Engine (media/)                 Oberflaeche (media.js, sw.js)
+HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video src=bl-media/..>
+                                                                 | Range-Anfrage
+                      MediaFetch (curl, Range)  <--------  Service Worker (2-MB-Stuecke)
+                      malt das Bild in die Seite <--------  Bild (drawImage) in WASM-Speicher
+```
+- Zustand (Zeit, Dauer, readyState, buffered) meldet die Oberflaeche bei jedem Event des
+  Host-`<video>`, dazwischen rechnet die Engine die Zeit selber weiter.
+- MSE: WebCore bekommt Spuren und Zeitstempel aus `ContainerParser` (fMP4, WebM) und macht
+  daraus `buffered`, Springen und Speicherverwaltung. Die gleichen Bytes gehen an ein
+  MediaSource im Host, das dekodiert. `readyState` ist das Minimum von beiden.
+- Der Ton kommt direkt aus dem Host-`<video>`. Chrome erlaubt Ton erst nach einem Klick, stumme
+  Videos duerfen sofort laufen (wie in einem normalen Browser).
 
 ### Hosting
 Auf dem VPS mit Docker Compose: Caddy (HTTPS, die Header oben, Brotli) und das Wisp-Relay.

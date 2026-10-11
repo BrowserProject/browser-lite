@@ -9,6 +9,7 @@
 #include <wtf/CheckedRef.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/URL.h>
 #include <wtf/Vector.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/WTFString.h>
@@ -34,6 +35,7 @@ public:
 
     static WebView* fromID(int);
     int id() const { return m_id; }
+    void exitFullscreen();
 
     WebCore::Page& page() { return *m_page; }
     WebCore::LocalFrame* mainFrame() const;
@@ -121,7 +123,10 @@ private:
     bool m_renderingUpdateRequested { false };
     bool m_frameRequested { false };
     bool m_frameInFlight { false };
+    void loadFavicon();
+
     bool m_isLoading { false };
+    URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;
 };
 

@@ -5,6 +5,8 @@
 // Callbacks onEngine... zurueck (siehe engine/src/Host.cpp).
 
 import { WispTransport, installTransportSocket, setTransport } from './transport.js';
+import { audioState, onEngineAudio } from './audio.js';
+import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -36,6 +38,8 @@ function relayURL() {
 }
 
 let engine = null;
+window.__blAudioState = audioState; // fuer die Tests (tests/e2e)
+window.__blMediaState = mediaState;
 let nextViewId = 1;
 const tabs = new Map(); // viewId -> Tab
 let activeTab = null;
@@ -69,6 +73,10 @@ async function startEngine() {
     onEngineFrame,
     onEngineNeedsFrame,
     onEngineDownloadData,
+    onEngineIcon: (viewId, url, mime, bytes) => tabs.get(viewId)?.setIcon(mime, bytes),
+    onEngineAudio: (...args) => onEngineAudio(engine, ...args),
+    onEngineMedia,
+    onEngineMediaFetch,
     engineDialog,
     preRun: [mountStorage, installExtraCA, (module) => {
       // ?debug=1: Zeitstempel und Ablauf der Engine in der Konsole
@@ -79,7 +87,9 @@ async function startEngine() {
     }],
   };
   engine = module;
+  const mediaReady = initMedia(module);
   await window.createBrowserLiteEngine(module);
+  await mediaReady;
 }
 
 // ------------------------------------------------------------ Speicher
@@ -186,7 +196,8 @@ class Tab {
 
     this.element = document.createElement('div');
     this.element.className = 'tab';
-    this.element.innerHTML = '<span class="title"></span><button class="close" title="Tab schliessen">&#215;</button>';
+    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><button class="close" title="Tab schliessen">&#215;</button>';
+    this.iconURL = null;
     this.element.addEventListener('mousedown', (e) => {
       if (!e.target.classList.contains('close'))
         activateTab(this);
@@ -203,6 +214,20 @@ class Tab {
     engine._bl_create_view(this.id, width, height, devicePixelRatio);
     if (url)
       engine._bl_load_url(this.id, toUTF8(url));
+  }
+
+  // Favicon: die Engine hat es geladen, wir bekommen die Bytes
+  setIcon(mime, bytes) {
+    if (this.iconURL)
+      URL.revokeObjectURL(this.iconURL);
+    this.iconURL = bytes.length ? URL.createObjectURL(new Blob([bytes], { type: mime || 'image/x-icon' })) : null;
+    const img = this.element.querySelector('.icon');
+    img.hidden = !this.iconURL;
+    if (this.iconURL)
+      img.src = this.iconURL;
+    else
+      img.removeAttribute('src');
+    img.onerror = () => { img.hidden = true; };
   }
 
   updateTitle() {
@@ -269,6 +294,38 @@ function updateToolbar() {
   $('address').value = tab.url === 'about:blank' ? '' : tab.url;
 }
 
+// --------------------------------------------------------- Vollbild
+// Die Seite ruft element.requestFullscreen() auf: wir machen den Seitenbereich
+// im Host-Browser gross. Die neue Groesse geht wie sonst ueber bl_resize an
+// die Engine. Beendet der Benutzer das Vollbild (Esc), sagen wir es der Engine.
+
+let fullscreenTab = null;
+
+function setFullscreen(tab, on) {
+  if (on) {
+    fullscreenTab = tab;
+    if (document.fullscreenElement !== $('viewport')) {
+      $('viewport').requestFullscreen?.().catch(() => {
+        // Ohne Benutzer-Aktion erlaubt der Browser es nicht
+        fullscreenTab = null;
+        engine._bl_exit_fullscreen(tab.id);
+      });
+    }
+  } else {
+    fullscreenTab = null;
+    if (document.fullscreenElement)
+      document.exitFullscreen().catch(() => {});
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && fullscreenTab) {
+    const tab = fullscreenTab;
+    fullscreenTab = null;
+    engine._bl_exit_fullscreen(tab.id);
+  }
+});
+
 // --------------------------------------------------------- Meldungen der Engine
 
 function onEngineEvent(viewId, type, payload) {
@@ -304,6 +361,10 @@ function onEngineEvent(viewId, type, payload) {
   }
   if (type === 'filechooser') {
     openFileChooser(tab, data);
+    return;
+  }
+  if (type === 'fullscreen') {
+    setFullscreen(tab, data.on);
     return;
   }
   switch (type) {

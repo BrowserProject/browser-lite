@@ -41,6 +41,7 @@ const PAGE = `<!doctype html>
   #popup { position: absolute; left: 20px; top: 130px; }
   #download { position: absolute; left: 20px; top: 170px; }
   #file { position: absolute; left: 20px; top: 210px; }
+  #fs { position: absolute; left: 20px; top: 250px; width: 120px; height: 30px; }
 </style></head>
 <body>
 <input id="text" autocomplete="off">
@@ -48,6 +49,7 @@ const PAGE = `<!doctype html>
 <a id="popup" href="/popup.html" target="_blank">Popup</a>
 <a id="download" href="/datei.txt">Download</a>
 <input id="file" type="file">
+<button id="fs">Vollbild</button>
 <div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">eigenes Menue</div>
 <script>
   const text = document.getElementById('text');
@@ -72,6 +74,13 @@ const PAGE = `<!doctype html>
   document.getElementById('own-menu').addEventListener('contextmenu', (e) => {
     e.preventDefault();
     console.log('RESULT ownmenu=1');
+  });
+  document.getElementById('fs').addEventListener('click', () => {
+    console.log('RESULT fsclick=' + document.fullscreenEnabled + ',' + typeof document.documentElement.requestFullscreen);
+    document.documentElement.requestFullscreen().then(() => console.log('RESULT fs=ok'), (e) => console.log('RESULT fs=' + e.name));
+  });
+  document.addEventListener('fullscreenchange', () => {
+    console.log(document.fullscreenElement ? 'RESULT fson=1' : 'RESULT fsoff=1');
   });
   console.log('RESULT ready=1');
 </script>
@@ -236,6 +245,18 @@ await page.mouse.move(...await at(500, 400));
 await page.mouse.wheel(0, 600);
 const scroll = await result('scroll');
 check('Scrollen', Number(scroll) > 100, String(scroll));
+
+// 7) Vollbild: die Seite fordert es an, die Oberflaeche macht den Bereich gross;
+// beendet der Host-Browser es (wie mit Esc), merkt es auch die Seite
+await page.mouse.wheel(0, -2000);
+await page.waitForTimeout(500);
+await page.mouse.click(...await at(60, 265));
+const fullscreenClick = await result('fsclick', 10000);
+const fullscreen = await result('fs');
+const hostFullscreen = await page.waitForFunction(() => document.fullscreenElement?.id === 'viewport', null, { timeout: 10000 }).then(() => true, () => false);
+check('Vollbild (requestFullscreen)', fullscreen === 'ok' && (await result('fson')) === '1' && hostFullscreen, `Klick: ${fullscreenClick}, Seite: ${fullscreen}, Host: ${hostFullscreen}`);
+await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+check('Vollbild beenden kommt bei der Seite an', (await result('fsoff')) === '1');
 
 await page.screenshot({ path: path.join(root, 'build', 'e2e-input.png') }).catch(() => {});
 await browser.close();

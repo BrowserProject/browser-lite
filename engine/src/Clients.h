@@ -51,6 +51,12 @@ private:
     void triggerRenderingUpdate() final;
     bool scheduleRenderingUpdate() final;
 
+#if ENABLE(FULLSCREEN_API)
+    bool supportsFullScreenForElement(const WebCore::Element&, bool) final { return true; }
+    void enterFullScreenForElement(WebCore::Element&, WebCore::HTMLMediaElementEnums::VideoFullscreenMode, CompletionHandler<void(WebCore::ExceptionOr<void>)>&&, CompletionHandler<bool(bool)>&&) final;
+    void exitFullScreenForElement(WebCore::Element*, CompletionHandler<void()>&&) final;
+#endif
+
     WeakRef<WebView> m_view;
 };
 

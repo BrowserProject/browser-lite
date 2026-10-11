@@ -42,7 +42,7 @@ using namespace WebCore;
 
 static constexpr auto errorDomain = "BrowserLite"_s;
 
-static void addCookieHeader(ResourceRequest& request)
+void addCookieHeader(ResourceRequest& request)
 {
     auto& session = networkStorageSession();
     auto includeSecureCookies = request.url().protocolIs("https"_s) ? IncludeSecureCookies::Yes : IncludeSecureCookies::No;
@@ -389,6 +389,87 @@ void startDownload(int viewId, const ResourceRequest& request, const String& sug
 {
     auto copy = request;
     Download::start(viewId, WTF::move(copy), suggestedFilename);
+}
+
+// Favicon fuer den Tab: klein, ganz im Speicher, geht als Ganzes an die Oberflaeche
+class IconLoad final : public RefCounted<IconLoad>, public CurlRequestClient {
+public:
+    static void start(int viewId, const URL& url)
+    {
+        ResourceRequest request(URL { url });
+        request.setHTTPUserAgent(standardUserAgent());
+        request.setHTTPHeaderField(HTTPHeaderName::Accept, "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"_s);
+        request.setFirstPartyForCookies(url);
+        addCookieHeader(request);
+        Ref load = adoptRef(*new IconLoad(viewId, url));
+        load->m_self = load.ptr();
+        load->m_request = CurlRequest::create(request, load.get());
+        load->m_request->resume();
+    }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+private:
+    static constexpr size_t maxSize = 512 * 1024;
+
+    IconLoad(int viewId, const URL& url)
+        : m_viewId(viewId)
+        , m_url(url)
+    {
+    }
+
+    void done(bool success)
+    {
+        // Auch ohne Icon melden, damit die Oberflaeche das alte Icon entfernt
+        if (!success)
+            m_data.clear();
+        sendIconData(m_viewId, m_url.string(), m_mimeType, m_data.span());
+        if (auto request = std::exchange(m_request, nullptr))
+            request->invalidateClient();
+        m_self = nullptr; // gibt uns frei
+    }
+
+    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
+    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
+    {
+        Ref protectedThis { *this };
+        ResourceResponse response(curlResponse);
+        m_ok = response.httpStatusCode() >= 200 && response.httpStatusCode() < 300;
+        m_mimeType = response.mimeType();
+        request.completeDidReceiveResponse();
+    }
+    void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
+    {
+        if (m_data.size() + buffer->size() > maxSize) {
+            m_ok = false;
+            return;
+        }
+        m_data.append(buffer->span());
+    }
+    void curlDidComplete(CurlRequest&, NetworkLoadMetrics&&) final
+    {
+        Ref protectedThis { *this };
+        done(m_ok);
+    }
+    void curlDidFailWithError(CurlRequest&, ResourceError&&, CertificateInfo&&) final
+    {
+        Ref protectedThis { *this };
+        done(false);
+    }
+
+    int m_viewId;
+    URL m_url;
+    String m_mimeType;
+    bool m_ok { false };
+    Vector<uint8_t> m_data;
+    RefPtr<CurlRequest> m_request;
+    RefPtr<IconLoad> m_self;
+};
+
+void loadIcon(int viewId, const URL& url)
+{
+    IconLoad::start(viewId, url);
 }
 
 class WasmLoaderStrategy final : public LoaderStrategy {

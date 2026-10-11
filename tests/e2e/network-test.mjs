@@ -43,7 +43,7 @@ const check = (name, ok, info = '') => {
 // ------------------------------------------------------------ Testserver
 
 const PAGE = `<!doctype html>
-<html><head><title>laedt</title>
+<html><head><title>laedt</title><link rel="icon" href="/icon.svg">
 <style>body{margin:0;background:#fff} #box{position:absolute;left:20px;top:20px;width:100px;height:100px;background:#e00000}</style>
 </head><body><div id="box"></div><p style="margin-top:140px">Netzwerk-Test</p>
 <script src="/script.js"></script></body></html>`;
@@ -87,6 +87,9 @@ const site = http.createServer((req, res) => {
     break;
   case '/page':
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Set-Cookie': 'bl=1; Path=/' }).end(PAGE);
+    break;
+  case '/icon.svg':
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#0a0"/></svg>');
     break;
   case '/script.js':
     res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(`const SECURE = 'https://127.0.0.1:${secureSite.address().port}';\n` + SCRIPT);
@@ -189,6 +192,13 @@ const pixel = await page.evaluate(() => {
   return { r, g, b };
 });
 check('rote Box gemalt', pixel && pixel.r > 200 && pixel.g < 40 && pixel.b < 40, JSON.stringify(pixel));
+
+// Favicon: die Engine laedt es selber und gibt es der Oberflaeche
+const icon = await page.waitForFunction(() => {
+  const img = document.querySelector('.tab.active .icon') || document.querySelector('.tab .icon');
+  return img && !img.hidden && img.complete && img.naturalWidth > 0 ? img.naturalWidth : 0;
+}, null, { timeout: 20000 }).then((handle) => handle.jsonValue(), () => 0);
+check('Favicon im Tab', icon > 0 && requests.includes('/icon.svg'), `(Breite ${icon})`);
 
 await page.screenshot({ path: path.join(root, 'build', 'e2e-network.png') }).catch(() => {});
 await browser.close();

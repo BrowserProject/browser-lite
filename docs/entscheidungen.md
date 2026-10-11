@@ -44,4 +44,13 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 38 | Fehlender Content-Type | Wie andere Browser raten (Endung, sonst HTML) | Sonst wurde die Seite als Download behandelt |
 | 39 | WebSockets | `WebSocketChannel` + `SocketStreamHandle` aus WebKitLegacy kopiert (`engine/src/websocket/`), eigener Socket auf WebCores `CurlStreamScheduler` | WebCore hat fuer single-process keinen WebSocket-Kanal mehr; WebKitLegacy hat nur eine Cocoa-Variante (CFNetwork) |
 | 40 | Video | `ENABLE_VIDEO` an, noch ohne MediaPlayer-Backend | Seiten erwarten die Media-API (`video.pause()` usw.). Abspielen kommt mit Phase 9 ueber den Host-Browser |
-
+| 41 | Web Audio | Engine rendert auf eigenem Thread in einen Ring im WASM-Speicher, AudioWorklet im Host spielt ab | Kein Kopieren ueber postMessage, kein Lock. Das Worklet kann den gemeinsamen Speicher direkt lesen |
+| 42 | Audio-Dekoder | `decodeAudioData` ueber `OfflineAudioContext` des Host-Browsers | Kann alle Formate des Browsers, ohne ffmpeg & Co. im WASM |
+| 43 | FFT | Eigene kleine Radix-2-FFT statt einer Library | WebCore hat sonst nur vDSP (Apple) oder GStreamer. Fuer die Groessen in Web Audio reicht das |
+| 44 | Favicons | Engine laedt das Icon selber und schickt die Bytes an die Oberflaeche | Die Oberflaeche hat kein eigenes Netz (alles geht ueber das Relay), so kommen auch Cookies mit |
+| 45 | Vollbild | Ganzer Seitenbereich (`#viewport`) geht in den Vollbild-Modus, nicht ein einzelnes Element | Die Engine malt alles in ein Canvas; WebCore legt das Element selber ueber die ganze Seite |
+| 46 | Video abspielen | Host-`<video>` spielt ab, Engine malt die kopierten Bilder | Alle Codecs des Browsers, Ton ohne Umweg. Bilder kopieren kostet etwas CPU, dafuer stimmen Ueberlagerung, Clipping und Scrollen genau |
+| 47 | Video-Daten | Service Worker fragt die Engine in Stuecken (Range, 2 MB) | Die Oberflaeche hat kein Netz; das naechste Stueck kommt erst, wenn der Browser liest, so bleibt der Speicher klein |
+| 48 | MSE | WebCore-MSE mit eigenen Parsern (nur Zeitstempel), Daten zusaetzlich an MediaSource im Host | So stimmen `buffered`, Springen und Events wie im Standard, dekodiert wird trotzdem vom Browser |
+| 49 | Ausgerichteter Speicher | WTF rundet die Groesse bei `aligned_alloc` auf ein Vielfaches der Ausrichtung auf (Patch 0015) | Emscripten gibt sonst nullptr zurueck (C11-Regel) und WebKit stuerzt ab, z.B. beim HRTF-Laden |
+| 50 | WebKit-Fehler in `VectorMath::multiplyComplex` | Ergebnis erst zwischenspeichern (Patch 0013) | Der Code ohne SIMD ueberschrieb den Realteil zu frueh, die FFT-Faltung (ConvolverNode, HRTF) war falsch. Faellt auf x86/ARM nicht auf, weil dort SIMD rechnet |

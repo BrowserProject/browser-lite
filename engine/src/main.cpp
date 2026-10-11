@@ -7,12 +7,14 @@
 
 #include "Engine.h"
 #include "Host.h"
+#include "MediaPlayerPrivateWasm.h"
 #include "Storage.h"
 #include "Strategies.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
 #include <WebCore/CommonAtomStrings.h>
 #include <WebCore/CommonVM.h>
+#include <WebCore/MediaPlayer.h>
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
 #include <cstdlib>
@@ -62,6 +64,8 @@ int main(int, char**)
     // VM gleich anlegen: ab jetzt laeuft jede Arbeit mit DeferGC (EngineLoop.cpp)
     WebCore::commonVM();
     installPlatformStrategies();
+    // <video>/<audio> ueber das Host-<video> (media/)
+    WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     initializeEngineLoop();
 
     // Kopieren in der Seite -> echte Zwischenablage (der Host schreibt sie)

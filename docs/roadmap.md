@@ -57,7 +57,7 @@ kommen zuerst.
 - [x] TLS-Test ohne Internet: lokaler HTTPS/WSS-Server mit eigener Test-CA in `network-test.mjs`
 - [x] CI-Jobs `engine` und `e2e` gruen
 
-## Phase 6: Browser-UI und Input  (grossteils fertig)
+## Phase 6: Browser-UI und Input  (fertig)
 - [x] Tabs, Adressleiste, Zurueck/Vor/Reload, Ladebalken, Dialoge (alert/confirm/prompt)
 - [x] Maus, Mausrad, Tastatur; Texteingabe ueber verstecktes Textfeld: tote Tasten
   (Schweizer Tastatur), IME und Bildschirmtastatur kommen als fertiger Text
@@ -69,7 +69,10 @@ kommen zuerst.
 - [x] e2e-Test `tests/e2e/input-test.mjs`
 - [x] Kontextmenue (Rechtsklick): Link/Bild in neuem Tab, Adresse kopieren, Kopieren/Einfuegen,
   Zurueck/Vor/Neu laden. Seiten mit eigenem Menue bekommen das contextmenu-Event wie gewohnt
-- [ ] Favicons, Vollbild
+- [x] Favicons: die Engine sucht das Icon (`<link rel=icon>`, sonst `/favicon.ico`) und laedt
+  es selber, die Oberflaeche zeigt es im Tab
+- [x] Vollbild (`requestFullscreen`): der Seitenbereich wird im Host-Browser gross, Esc beendet
+  es auch fuer die Seite
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
@@ -98,6 +101,17 @@ fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.
 ## Phase 9: Media (spaeter)
 - [x] `ENABLE_VIDEO` an, ohne Abspiel-Backend: `<video>`/`<audio>` sind echte Media-Elemente,
   `play()` lehnt mit NotSupportedError ab. Vorher stuerzten Seiten wie 20min.ch ab.
+- [x] Web Audio mit echtem Ton: Engine rendert in einen Ringpuffer, ein AudioWorklet im
+  Host-Browser spielt ab. `decodeAudioData` ueber den Dekoder des Host-Browsers, eigene FFT,
+  HRTF-Daten. Test: `tests/e2e/audio-test.mjs`
+- [x] `<audio>`/`<video>` abspielen (Dateien): verstecktes `<video>` im Host-Browser spielt ab,
+  die Daten holt ein Service Worker (`web/sw.js`) in Stuecken von 2 MB bei der Engine (Range ueber
+  das Relay), die Bilder kopiert die Oberflaeche in den WASM-Speicher, die Engine malt sie.
+  Test: `tests/e2e/media-test.mjs`
+- [x] MSE (YouTube & Co.): WebCore macht die MSE-Logik mit Zeitstempeln aus eigenen kleinen
+  Parsern fuer fMP4 und WebM (`engine/src/media/ContainerParser.cpp`), die Daten gehen
+  zusaetzlich an ein MediaSource im Host-Browser, das abspielt. Test in `media-test.mjs`
+- [ ] `SourceBuffer.remove()` wird noch nicht an den Host weitergegeben (der raeumt selber auf)
 `<audio>`/`<video>` ueber WebCodecs + Web Audio, danach MSE.
 
 ## Zukunft: WireGuard

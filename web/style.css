@@ -25,6 +25,7 @@ body { display: flex; flex-direction: column; }
 #tab-list { display: flex; gap: 2px; min-width: 0; }
 .tab { display: flex; align-items: center; gap: 6px; max-width: 220px; min-width: 80px; padding: 6px 8px; border-radius: 8px 8px 0 0; background: var(--tab); cursor: default; user-select: none; }
 .tab.active { background: var(--tab-active); }
+.tab .icon { width: 16px; height: 16px; flex: none; object-fit: contain; }
 .tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab .close { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 14px; }
 button { font: inherit; color: inherit; }
@@ -54,3 +55,4 @@ button { font: inherit; color: inherit; }
 #context-menu button:hover:not(:disabled) { background: var(--tab); }
 #context-menu button:disabled { opacity: 0.4; cursor: default; }
 #context-menu hr { margin: 4px 0; border: none; border-top: 1px solid var(--border); }
+#viewport:fullscreen { background: #000; }

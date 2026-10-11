@@ -6,6 +6,8 @@
 #include "config.h"
 
 #include "Engine.h"
+#include "MediaFetch.h"
+#include "MediaPlayerPrivateWasm.h"
 #include "WebView.h"
 
 #include <WebCore/WasmPlatform.h>
@@ -125,6 +127,39 @@ EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)
 EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
 {
     withView(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });
+}
+
+// Video/Audio: Zustand des Host-<video> (JSON), neues Bild, Daten fuer den Service Worker
+EMSCRIPTEN_KEEPALIVE void bl_media_event(int playerId, char* json)
+{
+    runOnEngineThread([playerId, json = takeString(json)] {
+        if (auto* player = MediaPlayerPrivateWasm::fromId(playerId))
+            player->hostEvent(json);
+    });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_media_frame(int playerId, uint8_t* pixels, int width, int height)
+{
+    runOnEngineThread([=] {
+        if (auto* player = MediaPlayerPrivateWasm::fromId(playerId))
+            player->hostFrame(pixels, width, height);
+    });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_media_fetch(int playerId, int fetchId, double start, double end)
+{
+    runOnEngineThread([=] { startMediaFetch(playerId, fetchId, start, end); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_media_fetch_cancel(int fetchId)
+{
+    runOnEngineThread([=] { cancelMediaFetch(fetchId); });
+}
+
+// Der Host-Browser hat das Vollbild beendet (Esc) oder konnte es nicht starten
+EMSCRIPTEN_KEEPALIVE void bl_exit_fullscreen(int id)
+{
+    withView(id, [](WebView& view) { view.exitFullscreen(); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)

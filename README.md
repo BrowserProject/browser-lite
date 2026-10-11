@@ -16,12 +16,15 @@ sieht also nur verschluesselte Bytes. Spaeter soll statt dem Relay auch WireGuar
 Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 
 - echte HTTPS-Seiten (z.B. Wikipedia, SRF, Google, GitHub, YouTube, OpenStreetMap)
-- Tabs, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge
+- Tabs mit Favicons, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge,
+  Kontextmenue, Vollbild
 - Tastatur inkl. Schweizer Layout und tote Tasten, Copy/Paste, Scrollen
 - Cookies, localStorage und IndexedDB bleiben nach dem Neuladen erhalten
 - WebSockets der Seiten (ws:// und wss://)
+- Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
+- `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
 
-Noch nicht: Video/Audio abspielen, WebGL, WireGuard. JavaScript ist langsamer als in einem
+Noch nicht: WebGL, DRM (EME), WireGuard. JavaScript ist langsamer als in einem
 normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md).
 
 ## Auf dem eigenen Server betreiben

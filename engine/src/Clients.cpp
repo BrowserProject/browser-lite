@@ -42,6 +42,10 @@
 #include <WebCore/WindowFeatures.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
+#if ENABLE(FULLSCREEN_API)
+#include <WebCore/DocumentFullscreen.h>
+#include <WebCore/Element.h>
+#endif
 #include <wtf/RunLoop.h>
 #include <wtf/text/MakeString.h>
 
@@ -210,6 +214,32 @@ bool ChromeClient::scheduleRenderingUpdate()
     m_view->scheduleRenderingUpdate();
     return true;
 }
+
+#if ENABLE(FULLSCREEN_API)
+// Vollbild (element.requestFullscreen()): WebCore-Zustand sofort umstellen,
+// die Oberflaeche macht den Seitenbereich im Host-Browser gross. Die neue
+// Groesse kommt dann wie sonst ueber bl_resize.
+void ChromeClient::enterFullScreenForElement(Element& element, HTMLMediaElementEnums::VideoFullscreenMode mode, CompletionHandler<void(ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
+{
+    auto result = protect(protect(element.document())->fullscreen())->willEnterFullscreen(element, mode);
+    bool failed = result.hasException();
+    willEnterFullscreen(WTF::move(result));
+    if (failed) {
+        didEnterFullscreen(false);
+        return;
+    }
+    notifyHost(m_view->id(), "fullscreen", "{\"on\":true}"_s);
+    didEnterFullscreen(true);
+}
+
+void ChromeClient::exitFullScreenForElement(Element* element, CompletionHandler<void()>&& completionHandler)
+{
+    if (element)
+        protect(protect(element->document())->fullscreen())->willExitFullscreen();
+    notifyHost(m_view->id(), "fullscreen", "{\"on\":false}"_s);
+    completionHandler();
+}
+#endif
 
 // ------------------------------------------------------------ FrameLoaderClient
 

@@ -64,10 +64,10 @@ index 0000000000..2eb4471e0d
 +list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
 diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
 new file mode 100644
-index 0000000000..98d23b8d3a
+index 0000000000..fbff39ff9c
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,76 @@
 +# WebCore fuer PORT=Wasm (browser-lite).
 +# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
@@ -96,6 +96,10 @@ index 0000000000..98d23b8d3a
 +    # Diese libwpe-Dateien brauchen libwpe gar nicht, sie sind fuer uns freigeschaltet
 +    editing/libwpe/EditorLibWPE.cpp
 +    platform/libwpe/PasteboardLibWPE.cpp
++
++    platform/audio/wasm/AudioDestinationWasm.cpp
++    platform/audio/wasm/AudioFileReaderWasm.cpp
++    platform/audio/wasm/FFTFrameWasm.cpp
 +
 +    platform/generic/KeyedDecoderGeneric.cpp
 +    platform/generic/KeyedEncoderGeneric.cpp
@@ -142,10 +146,10 @@ index 0000000000..98d23b8d3a
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..c385543993
+index 0000000000..517056aad1
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,150 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
 +#
 +# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
@@ -210,9 +214,11 @@ index 0000000000..c385543993
 +# <video>/<audio> gibt es (API und Elemente), Abspielen kommt in Phase 9.
 +# Ohne VIDEO stuerzen Seiten ab, die z.B. video.pause() aufrufen.
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_VIDEO PRIVATE ON)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_AUDIO PRIVATE OFF)
++# Web Audio: Ausgabe ueber ein AudioWorklet des Host-Browsers (platform/audio/wasm)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_AUDIO PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBGL PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE PRIVATE OFF)
++# MSE: die API gibt es, abgespielt wird spaeter ueber das MediaSource des Host-Browsers
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_RTC PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ENCRYPTED_MEDIA PRIVATE OFF)
@@ -220,7 +226,8 @@ index 0000000000..c385543993
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SPEECH_SYNTHESIS PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_NOTIFICATIONS PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GEOLOCATION PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FULLSCREEN_API PRIVATE OFF)
++# Fullscreen: die Oberflaeche macht den Seitenbereich im Host-Browser gross
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FULLSCREEN_API PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBXR PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_XSLT PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MATHML PRIVATE ON)

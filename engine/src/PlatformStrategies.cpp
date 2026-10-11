@@ -9,6 +9,9 @@
 #include "LoaderStrategy.h"
 #include "Storage.h"
 
+#if ENABLE(WEB_AUDIO)
+#include <WebCore/AudioDestination.h>
+#endif
 #include <WebCore/BlobDataFileReference.h>
 #include <WebCore/BlobPart.h>
 #include <WebCore/BlobRegistry.h>
@@ -122,7 +125,13 @@ class WasmPasteboardStrategy final : public PasteboardStrategy {
 };
 
 class WasmMediaStrategy final : public MediaStrategy {
-    // VIDEO und WEB_AUDIO sind (noch) aus, es gibt nichts zu implementieren.
+#if ENABLE(WEB_AUDIO)
+    // Ton-Ausgabe: platform/audio/wasm/AudioDestinationWasm.cpp
+    Ref<AudioDestination> createAudioDestination(const AudioDestinationCreationOptions& options) final
+    {
+        return AudioDestination::create(options);
+    }
+#endif
 };
 
 class WasmPlatformStrategies final : public PlatformStrategies {

@@ -6,6 +6,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "Host.h"
+#include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
 #include "Storage.h"
 #include "Strategies.h"
@@ -14,6 +15,7 @@
 #include <WebCore/CookieJar.h>
 #include <WebCore/DatabaseProvider.h>
 #include <WebCore/Cursor.h>
+#include <WebCore/DocumentFullscreen.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentView.h>
@@ -28,6 +30,8 @@
 #include <WebCore/FrameLoader.h>
 #include <WebCore/GraphicsContextSkia.h>
 #include <WebCore/HandleUserInputEventResult.h>
+#include <WebCore/LinkIconCollector.h>
+#include <WebCore/LinkIconType.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
@@ -137,6 +141,16 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
+    settings.setWebAudioEnabled(true);
+#if ENABLE(FULLSCREEN_API)
+    settings.setFullScreenEnabled(true);
+#endif
+#if ENABLE(MEDIA_SOURCE)
+    settings.setMediaSourceEnabled(true);
+    // ManagedMediaSource braucht Hinweise vom System (startstreaming), die wir
+    // nicht haben. hls.js & Co. nehmen sonst MMS und warten ewig.
+    settings.setManagedMediaSourceEnabled(false);
+#endif
     settings.setDefaultFontSize(16);
     settings.setDefaultFixedFontSize(13);
     settings.setStandardFontFamily("Noto Sans"_s);
@@ -620,6 +634,42 @@ void WebView::didFinishLoading()
     m_isLoading = false;
     notifyNavigationState();
     notifyHost(m_id, "load");
+    loadFavicon();
+}
+
+void WebView::exitFullscreen()
+{
+#if ENABLE(FULLSCREEN_API)
+    RefPtr frame = mainFrame();
+    if (RefPtr document = frame ? frame->document() : nullptr)
+        protect(document->fullscreen())->fullyExitFullscreen();
+#endif
+}
+
+// Bestes Icon aus <link rel=icon> (am naechsten an 32 px, SVG passt immer),
+// sonst /favicon.ico. Die Engine laedt es selber, die Oberflaeche hat kein Netz.
+void WebView::loadFavicon()
+{
+    RefPtr frame = mainFrame();
+    RefPtr document = frame ? frame->document() : nullptr;
+    if (!document || !document->url().protocolIsInHTTPFamily())
+        return;
+    URL best;
+    unsigned bestScore = std::numeric_limits<unsigned>::max();
+    for (auto& icon : LinkIconCollector(*document).iconsOfTypes({ LinkIconType::Favicon })) {
+        unsigned score = icon.mimeType == "image/svg+xml"_s || icon.url.path().endsWith(".svg"_s) ? 0
+            : icon.size ? static_cast<unsigned>(std::abs(static_cast<int>(*icon.size) - 32)) + 1 : 20;
+        if (score < bestScore) {
+            bestScore = score;
+            best = icon.url;
+        }
+    }
+    if (best.isEmpty())
+        best = URL(document->url(), "/favicon.ico"_s);
+    if (best == m_faviconURL)
+        return;
+    m_faviconURL = best;
+    loadIcon(m_id, best);
 }
 
 void WebView::didFailLoading(const String& url, const String& description)

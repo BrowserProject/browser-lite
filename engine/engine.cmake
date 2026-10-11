@@ -20,6 +20,10 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp
+    ${BL_ENGINE_SRC}/media/ContainerParser.cpp
+    ${BL_ENGINE_SRC}/media/MediaFetch.cpp
+    ${BL_ENGINE_SRC}/media/MediaSourceWasm.cpp
+    ${BL_ENGINE_SRC}/media/MediaPlayerPrivateWasm.cpp
     ${BL_ENGINE_SRC}/websocket/WasmSocketProvider.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandleCurl.cpp
@@ -55,6 +59,7 @@ set_source_files_properties(
 
 target_include_directories(BrowserLiteEngine PRIVATE
     ${BL_ENGINE_SRC}
+    ${BL_ENGINE_SRC}/media
     ${BL_ENGINE_SRC}/websocket
     ${BL_LEGACY_STORAGE}
     ${WebCore_INCLUDE_DIRECTORIES}
@@ -90,7 +95,7 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sENVIRONMENT=web,worker,node"
     "SHELL:-sMODULARIZE=1"
     "SHELL:-sEXPORT_NAME=createBrowserLiteEngine"
-    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,ENV,HEAPU8,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
+    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,ENV,HEAPU8,HEAPF32,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
     "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     "SHELL:-lEGL"
     "SHELL:-lGL"
@@ -119,5 +124,7 @@ endif ()
 if (BROWSER_LITE_RUNTIME_DIR)
     target_link_options(BrowserLiteEngine PRIVATE
         "SHELL:--preload-file ${BROWSER_LITE_RUNTIME_DIR}@/"
+        # HRTF-Daten fuer PannerNode (AudioBus::loadPlatformResource)
+        "SHELL:--preload-file ${WEBCORE_DIR}/platform/audio/resources/Composite.wav@/usr/share/webkit/audio/Composite.wav"
     )
 endif ()

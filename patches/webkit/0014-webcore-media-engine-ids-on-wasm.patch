@@ -1,0 +1,44 @@
+diff --git a/Source/WebCore/platform/graphics/MediaPlayer.h b/Source/WebCore/platform/graphics/MediaPlayer.h
+index 91724d1a42..d4cdb7ba70 100644
+--- a/Source/WebCore/platform/graphics/MediaPlayer.h
++++ b/Source/WebCore/platform/graphics/MediaPlayer.h
+@@ -162,7 +162,10 @@ enum class MediaPlatformType {
+     Mock,
+     AVFObjC,
+     GStreamer,
+-    Remote
++    Remote,
++#if PLATFORM(WASM)
++    Wasm,
++#endif
+ };
+ 
+ enum class MediaPlayerType {
+@@ -178,7 +181,11 @@ enum class MediaPlayerType {
+     GStreamerMSE,
+     HolePunch,
+     WirelessPlayback,
+-    Remote
++    Remote,
++#if PLATFORM(WASM)
++    Wasm,
++    WasmMSE,
++#endif
+ };
+ 
+ using TrackID = uint64_t;
+diff --git a/Source/WebCore/platform/graphics/MediaPlayerEnums.h b/Source/WebCore/platform/graphics/MediaPlayerEnums.h
+index 581158cda1..afe4992a2a 100644
+--- a/Source/WebCore/platform/graphics/MediaPlayerEnums.h
++++ b/Source/WebCore/platform/graphics/MediaPlayerEnums.h
+@@ -95,6 +95,10 @@ enum class MediaPlayerMediaEngineIdentifier : uint8_t {
+     MockMSE,
+     CocoaWebM,
+     WirelessPlayback,
++#if PLATFORM(WASM)
++    Wasm,
++    WasmMSE,
++#endif
+ };
+ 
+ enum class MediaPlayerWirelessPlaybackTargetType : uint8_t {

@@ -1,0 +1,71 @@
+diff --git a/Source/WTF/wtf/FastMalloc.cpp b/Source/WTF/wtf/FastMalloc.cpp
+index 7dea132dd7..f5bebcd060 100644
+--- a/Source/WTF/wtf/FastMalloc.cpp
++++ b/Source/WTF/wtf/FastMalloc.cpp
+@@ -61,6 +61,21 @@
+ 
+ namespace WTF {
+ 
++#if OS(EMSCRIPTEN)
++// Emscriptens aligned_alloc gibt nullptr zurueck, wenn die Groesse kein
++// Vielfaches der Ausrichtung ist (C11-Regel). WebKit verlangt das nicht.
++static inline size_t alignedAllocationSize(size_t alignment, size_t size)
++{
++    return alignment ? (size + alignment - 1) / alignment * alignment : size;
++}
++#else
++static inline size_t alignedAllocationSize(size_t, size_t size)
++{
++    return size;
++}
++#endif
++
++
+ #if !defined(NDEBUG)
+ namespace {
+ // We do not use std::numeric_limits<size_t>::max() here due to the edge case in VC++.
+@@ -425,7 +440,7 @@ void* fastAlignedMalloc(size_t alignment, size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::memalign(alignment, size, bmalloc::CompactAllocationMode::NonCompact);
++    void* result = bmalloc::api::memalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -438,7 +453,7 @@ void* tryFastAlignedMalloc(size_t alignment, size_t size)
+ {
+     FAIL_IF_EXCEEDS_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::NonCompact);
++    void* result = bmalloc::api::tryMemalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -537,7 +552,7 @@ void* fastCompactAlignedMalloc(size_t alignment, size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::memalign(alignment, size, bmalloc::CompactAllocationMode::Compact);
++    void* result = bmalloc::api::memalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -550,7 +565,7 @@ void* tryFastCompactAlignedMalloc(size_t alignment, size_t size)
+ {
+     FAIL_IF_EXCEEDS_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::Compact);
++    void* result = bmalloc::api::tryMemalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -667,7 +682,7 @@ namespace Gigacage {
+ 
+ void* tryAlignedMalloc(Kind kind, size_t alignment, size_t size)
+ {
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::Compact, bmalloc::heapKind(kind));
++    void* result = bmalloc::api::tryMemalign(alignment, WTF::alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact, bmalloc::heapKind(kind));
+     BPROFILE_TRY_ALLOCATION(GIGACAGE, kind, result, size);
+     WTF::compilerFence();
+     return result;
