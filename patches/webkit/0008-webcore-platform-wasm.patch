@@ -194,10 +194,10 @@ index 19c4683b7f..f4beb6ec1c 100644
 +#endif // USE(LIBWPE) || PLATFORM(WASM)
 diff --git a/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
 new file mode 100644
-index 0000000000..32f1a3cd16
+index 0000000000..abeb161c2b
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -226,12 +226,50 @@ index 0000000000..32f1a3cd16
 +#include "config.h"
 +#include "CurlSSLHandle.h"
 +
++#include <cstdio>
++
 +namespace WebCore {
++
++static constexpr auto systemBundle = "/etc/ssl/certs/ca-certificates.crt";
++static constexpr auto extraCertificates = "/etc/ssl/certs/extra-ca.crt";
++static constexpr auto combinedBundle = "/tmp/ca-certificates.crt";
++
++static bool appendFile(FILE* out, const char* path)
++{
++    FILE* in = fopen(path, "rb");
++    if (!in)
++        return false;
++    char buffer[16384];
++    size_t length;
++    while ((length = fread(buffer, 1, sizeof(buffer), in)) > 0)
++        fwrite(buffer, 1, length, out);
++    fclose(in);
++    fputc('\n', out);
++    return true;
++}
++
++// Das CA-Bundle (Mozilla) liegt im virtuellen Dateisystem des Embedders. Der
++// Embedder kann zusaetzliche CAs nach extra-ca.crt legen (z.B. Firmen-CA oder
++// Test-CA), dann wird ein gemeinsames Bundle gebaut.
++static String caBundlePath()
++{
++    FILE* probe = fopen(extraCertificates, "rb");
++    if (!probe)
++        return String::fromLatin1(systemBundle);
++    fclose(probe);
++
++    FILE* out = fopen(combinedBundle, "wb");
++    if (!out)
++        return String::fromLatin1(systemBundle);
++    appendFile(out, systemBundle);
++    appendFile(out, extraCertificates);
++    fclose(out);
++    return String::fromLatin1(combinedBundle);
++}
 +
 +void CurlSSLHandle::platformInitialize()
 +{
-+    // Das CA-Bundle (Mozilla) liegt im virtuellen Dateisystem des Embedders.
-+    setCACertPath("/etc/ssl/certs/ca-certificates.crt"_s);
++    setCACertPath(caBundlePath());
 +
 +    // Gleiche Auswahl wie der Win-Port: moderne Cipher zuerst.
 +    constexpr auto cipherList =

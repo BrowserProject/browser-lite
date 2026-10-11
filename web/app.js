@@ -66,9 +66,21 @@ async function startEngine() {
     onEngineFrame,
     onEngineNeedsFrame,
     engineDialog,
+    preRun: [installExtraCA],
   };
   engine = module;
   await window.createBrowserLiteEngine(module);
+}
+
+// Zusaetzliche CA-Zertifikate (PEM), z.B. eine Firmen-CA oder fuer Tests.
+// Die Engine haengt sie an das Mozilla-Bundle an (CurlSSLHandleWasm.cpp).
+function installExtraCA(module) {
+  const pem = window.__blExtraCA || storage('bl-extra-ca');
+  if (!pem)
+    return;
+  const fs = (module || engine).FS;
+  fs.mkdirTree('/etc/ssl/certs');
+  fs.writeFile('/etc/ssl/certs/extra-ca.crt', pem);
 }
 
 function onEngineReady() {
@@ -213,6 +225,7 @@ function onEngineEvent(viewId, type, payload) {
     break;
   case 'load':
     tab.loading = false;
+    window.__blLoaded = true; // fuer die Tests (tests/e2e)
     if (tab === activeTab)
       setStatus('');
     break;
