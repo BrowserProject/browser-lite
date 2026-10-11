@@ -53,8 +53,9 @@ kommen zuerst.
 - [x] Echte HTTPS-Seiten (`tests/e2e/site-test.mjs`): example.com, Wikipedia, SRF, Google,
   Hacker News und GitHub laden und werden richtig gemalt
 - [x] Zusaetzliche CA moeglich (`extra-ca.crt`, z.B. Firmen-CA)
-- [ ] WebSockets der Gastseiten testen
-- [ ] CI-Jobs `engine` und `e2e` gruen (Build dauert in CI lange, ccache ueber mehrere Laeufe)
+- [x] WebSockets der Gastseiten (ws:// und wss://), getestet mit Echo-Servern
+- [x] TLS-Test ohne Internet: lokaler HTTPS/WSS-Server mit eigener Test-CA in `network-test.mjs`
+- [x] CI-Jobs `engine` und `e2e` gruen
 
 ## Phase 6: Browser-UI und Input  (grossteils fertig)
 - [x] Tabs, Adressleiste, Zurueck/Vor/Reload, Ladebalken, Dialoge (alert/confirm/prompt)

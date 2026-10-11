@@ -20,6 +20,10 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp
+    ${BL_ENGINE_SRC}/websocket/WasmSocketProvider.cpp
+    ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp
+    ${BL_ENGINE_SRC}/websocket/SocketStreamHandleCurl.cpp
+    ${BL_ENGINE_SRC}/websocket/WebSocketChannel.cpp
 
     # localStorage + IndexedDB aus WebKitLegacy (ohne den Rest von WebKitLegacy)
     ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
@@ -51,6 +55,7 @@ set_source_files_properties(
 
 target_include_directories(BrowserLiteEngine PRIVATE
     ${BL_ENGINE_SRC}
+    ${BL_ENGINE_SRC}/websocket
     ${BL_LEGACY_STORAGE}
     ${WebCore_INCLUDE_DIRECTORIES}
     ${WebCore_PRIVATE_INCLUDE_DIRECTORIES}

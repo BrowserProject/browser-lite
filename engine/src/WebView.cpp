@@ -6,6 +6,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "Host.h"
+#include "WasmSocketProvider.h"
 #include "Storage.h"
 #include "Strategies.h"
 
@@ -113,6 +114,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.cookieJar = CookieJar::create(SessionProvider::create());
     configuration.storageNamespaceProvider = &storageNamespaceProvider();
     configuration.databaseProvider = &databaseProvider();
+    configuration.socketProvider = createSocketProvider();
 
     // Die Empty-Konfiguration ist fuer SVG-Bilder gedacht: alles gesandboxt,
     // kein Script. Fuer echte Seiten: ohne Sandbox und mit unserem FrameLoaderClient.

@@ -42,4 +42,5 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 36 | GC-Wurzeln (Engine) | GC nur auf leerem Stack (DeferGC um jede Aufgabe, Patch 0012) statt `--spill-pointers` | Der Pass machte alles etwa 10x langsamer und die .wasm 34 MB groesser. Mit Stresstest abgesichert (ohne Verschiebung Absturz) |
 | 37 | Schriften | fontconfig-Cache beim Build erzeugen, Schrift-Ordner bekommen mtime 0 | fontconfig haelt den Cache dann fuer gueltig und liest die Schriften nicht bei jedem Start neu ein |
 | 38 | Fehlender Content-Type | Wie andere Browser raten (Endung, sonst HTML) | Sonst wurde die Seite als Download behandelt |
+| 39 | WebSockets | `WebSocketChannel` + `SocketStreamHandle` aus WebKitLegacy kopiert (`engine/src/websocket/`), eigener Socket auf WebCores `CurlStreamScheduler` | WebCore hat fuer single-process keinen WebSocket-Kanal mehr; WebKitLegacy hat nur eine Cocoa-Variante (CFNetwork) |
 
