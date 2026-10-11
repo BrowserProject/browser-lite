@@ -1,0 +1,15 @@
+# Grosse, generierte Sachen (werden per Skript erzeugt)
+/third_party/
+/build/
+/sysroot/
+/out/
+
+# Node / Frontend
+node_modules/
+/web/dist/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
