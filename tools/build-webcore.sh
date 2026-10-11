@@ -16,6 +16,8 @@ target="${1:-BrowserLiteEngine}"
 
 [ -f "$BL_SYSROOT/lib/libcurl.a" ] || bl_die "sysroot unvollstaendig. Zuerst deps/build-all.sh ausfuehren."
 command -v emcmake >/dev/null || bl_die "emcmake fehlt (im Toolchain-Image ausfuehren)"
+# sysroot kann aus einem anderen Pfad kommen (CI-Artefakt)
+"$BL_ROOT/deps/relocate-pc.sh" "$BL_SYSROOT"
 
 launcher=()
 if command -v ccache >/dev/null; then

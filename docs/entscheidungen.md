@@ -29,3 +29,8 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 23 | Event-Loop | RunLoop von aussen pumpen (WakeUp-Callback + Timer auf naechsten WebCore-Timer) | Ein Worker darf nicht blockieren, sonst kommen keine Nachrichten mehr an |
 | 24 | Bild zum Host | Pixel im gemeinsamen Speicher, Host kopiert per putImageData, immer nur ein Bild unterwegs | Einfach und robust, GPU-Weg folgt in Phase 8 |
 | 25 | Oberflaeche | Schlichtes HTML/CSS/JS ohne Build-Schritt statt TypeScript + Vite | Keine npm-Abhaengigkeiten, einfacher zu hosten, reicht fuer die UI |
+| 26 | Compositing | Kein Accelerated Compositing, leere `GraphicsLayerWasm` | Alles wird direkt in den Pixel-Buffer gemalt. Einfach, reicht bis zum GPU-Weg |
+| 27 | Exceptions | Werfen beim Link erlauben, Fangen nicht | Deps (C++) referenzieren `__cxa_throw`. Ein throw fuehrt zu abort, wie bei WebKit erwartet |
+| 28 | CA-Zertifikate | Mozilla-Bundle im Datenpaket, optional `extra-ca.crt` dazu | Firmen-Netze mit eigener CA, und lokale Tests hinter einem TLS-Proxy |
+| 29 | ICU-Daten | Mit `icupkg -r` filtern statt aus Quellen neu bauen | Das Quell-Archiv hat nur das fertige `.dat`. Filter auf Konverter + Sprachen spart 14 MB |
+| 30 | Auslieferung | Engine pro Version in eigenem Ordner, immutable gecacht, `.br` vorkomprimiert | Nie eine alte .wasm aus dem Cache, Brotli q11 einmal beim Deploy statt bei jedem Request |

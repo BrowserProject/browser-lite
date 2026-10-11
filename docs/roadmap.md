@@ -18,11 +18,11 @@ kommen zuerst.
 - [x] CI-Job `deps` (mit Cache)
 - Erkenntnisse: ICU baut im Cross-Build nur Stub-Daten, wir machen `libicudata.a` selber aus dem
   Host-Archiv (`genccode -e icudt78`). fontconfig braucht Meson >= 1.6 (aus pip). Die woff2-Tools
-  linken ohne brotlicommon. ICU-Daten sind noch voll (33 MB), Filter kommt in Phase 8.
+  linken ohne brotlicommon. ICU-Daten werden seit Phase 8 gefiltert (siehe dort).
 - Skia ist nicht dabei: es ist in WebKit enthalten (`Source/ThirdParty/skia`) und wird mit WebKit gebaut.
 - Fonts (Noto) kommen in Phase 4, wenn wir sie zum ersten Mal brauchen.
 
-## Phase 2: JavaScriptCore im Browser  (in Arbeit)
+## Phase 2: JavaScriptCore im Browser  (fertig)
 - [x] JSC (PORT=JSCOnly, CLoop, kein JIT) baut und linkt mit Emscripten (`tools/build-jsc.sh`)
 - [x] `jsc`-Shell laeuft in node (`tests/jsc/run.sh`)
 - [x] **GC-Problem bestaetigt und geloest:** Ohne Massnahme stuerzt der GC-Stresstest
@@ -31,19 +31,30 @@ kommen zuerst.
 - [x] Patches 0001-0004 (OS(EMSCRIPTEN), wasm32-Fixes, kein Thread::suspend, LLInt-Extractors, Debug-Flags)
 - [x] CI-Job `jsc` mit ccache und Tests
 - [ ] Groesse/Speed von `--spill-pointers` messen und optimieren
-- [ ] jsc im Browser (headless Chromium) statt nur node
 
-## Phase 3: WTF + WebCore bauen (`PORT=Wasm`)
-`OptionsWasm.cmake` + `PlatformWasm.cmake`. Viele Features erstmal aus (Media, WebRTC,
-WebGL, WebXR, Accessibility, ...). Ziel: alles linkt.
+## Phase 3: WTF + WebCore bauen (`PORT=Wasm`)  (fertig)
+- [x] `OptionsWasm.cmake` + `PlatformWasm.cmake` (Patch 0006), Plattform-Code in `platform/wasm/` (0008)
+- [x] Media, WebRTC, WebGL, WebXR, Accessibility usw. aus
+- [x] Kleine Fixes fuer wasm32 (Persistenz-Coder fuer `unsigned long`, 0009) und OpenSSL 3 (0010)
+- Erkenntnisse: `GraphicsLayer::create` wird auch ohne Compositing gelinkt, darum eine leere
+  `GraphicsLayerWasm`. Einige Deps sind C++ und koennen werfen, darum `-sDISABLE_EXCEPTION_THROWING=0`
+  beim Link (WebKit selber baut mit `-fno-exceptions`).
 
-## Phase 4: Embedding + erstes Bild
-Eigene WebCore-Clients, HTML aus String laden, mit Skia malen, aufs Canvas bringen.
-Test: Screenshot-Vergleich.
+## Phase 4: Embedding + erstes Bild  (fertig)
+- [x] Eigene Clients (Chrome, FrameLoader, Editor, ProgressTracker, BackForwardList) in `engine/`
+- [x] Skia-Raster in einen Pixel-Buffer, Host malt per `putImageData`
+- [x] Render-Test in node (`tests/engine/render-test.mjs` + `check-basic.mjs`): Kasten, Kreis, Text, JS
 
-## Phase 5: Netzwerk ueber Wisp
-Socket-Schicht + Transport-Interface + Wisp-Client. HTTP/1.1, HTTP/2, TLS, Cookies,
-Redirects, Kompression, WebSockets. Relay auf dem VPS mit Auth.
+## Phase 5: Netzwerk ueber Wisp  (fertig, lokal getestet)
+- [x] curl-Backend von WebCore ueber eigene LoaderStrategy, Sockets ueber Emscripten SOCKFS
+  -> `TransportSocket` -> Wisp-Stream (`web/transport.js`)
+- [x] Relay (`relay/`) mit Token, ohne private Netze, nur Web-Ports; Caddy + docker-compose
+- [x] e2e in Chromium (`tests/e2e/network-test.mjs`): Redirect, Cookie, Skript, fetch mit gzip
+- [x] Echte HTTPS-Seiten (`tests/e2e/site-test.mjs`): example.com, Wikipedia, SRF, Google,
+  Hacker News und GitHub laden und werden richtig gemalt
+- [x] Zusaetzliche CA moeglich (`extra-ca.crt`, z.B. Firmen-CA)
+- [ ] WebSockets der Gastseiten testen
+- [ ] CI-Jobs `engine` und `e2e` gruen (Build dauert in CI lange, ccache ueber mehrere Laeufe)
 
 ## Phase 6: Browser-UI und Input
 Tabs, Adressleiste, Zurueck/Vor/Reload, Maus, Scrollen, Tastatur (inkl. Schweizer Layout),
@@ -52,7 +63,12 @@ Copy/Paste, Dialoge, Upload/Download, HiDPI.
 ## Phase 7: Persistenz
 WasmFS + OPFS: Cookies, localStorage, IndexedDB, Cache. "Daten loeschen"-Knopf.
 
-## Phase 8: Performance + Kompatibilitaet
+## Phase 8: Performance + Kompatibilitaet  (angefangen)
+- [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert
+  (`tools/optimize-site.mjs`, engine.wasm 120 MB -> 21 MB brotli)
+- [x] ICU-Datenfilter (33 MB -> 19 MB): nur noetige Konverter, Anzeigenamen nur fuer ca. 50 Sprachen
+- [ ] Startzeit messen, Service-Worker-Cache
+
 GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache
 fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.
 
