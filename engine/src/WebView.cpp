@@ -19,7 +19,9 @@
 #include <WebCore/DocumentView.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventHandler.h>
+#include <WebCore/ContextMenuController.h>
 #include <WebCore/FileChooser.h>
+#include <WebCore/HitTestResult.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -514,6 +516,44 @@ bool WebView::keyEvent(int type, const String& key, const String& code, const St
 }
 
 // Fertiger Text aus der Texteingabe des Hosts (IME, tote Tasten, Bildschirmtastatur)
+void WebView::contextMenu(double x, double y)
+{
+    RefPtr frame = mainFrame();
+    RefPtr view = mainFrameView();
+    if (!frame || !view)
+        return;
+    DoublePoint position { x, y };
+    PlatformMouseEvent event { position, position, MouseButton::Right, PlatformEvent::Type::MousePressed, 1, { }, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
+    // Wie in WebKit2: Faengt die Seite das contextmenu-Event nicht ab, baut der
+    // ContextMenuController von WebCore ein Menue. Nur dann zeigen wir unseres.
+    auto& controller = m_page->contextMenuController();
+    controller.clearContextMenu();
+    frame->eventHandler().sendContextMenuEvent(event);
+    bool show = controller.contextMenu();
+    debugLog("Kontextmenue bei %.0f,%.0f: %s", x, y, show ? "zeigen" : "die Seite hat ein eigenes");
+    if (!show)
+        return;
+    auto result = controller.hitTestResult();
+    controller.clearContextMenu();
+    String selection;
+    if (RefPtr focused = m_page->focusController().focusedOrMainFrame())
+        selection = focused->editor().selectedText();
+    auto& backForward = m_page->backForward();
+    notifyHost(m_id, "contextmenu", makeString("{\"x\":"_s, x, ",\"y\":"_s, y,
+        ",\"link\":\""_s, jsonEscape(result.absoluteLinkURL().string()),
+        "\",\"image\":\""_s, jsonEscape(result.absoluteImageURL().string()),
+        "\",\"selection\":\""_s, jsonEscape(selection.left(200)),
+        "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
+        ",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
+        ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, '}'));
+}
+
+void WebView::executeCommand(const String& name)
+{
+    if (RefPtr frame = m_page->focusController().focusedOrMainFrame())
+        frame->editor().command(name).execute();
+}
+
 void WebView::insertText(const String& text)
 {
     RefPtr frame = m_page->focusController().focusedOrMainFrame();

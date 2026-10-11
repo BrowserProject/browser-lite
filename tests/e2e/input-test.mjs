@@ -48,6 +48,7 @@ const PAGE = `<!doctype html>
 <a id="popup" href="/popup.html" target="_blank">Popup</a>
 <a id="download" href="/datei.txt">Download</a>
 <input id="file" type="file">
+<div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">eigenes Menue</div>
 <script>
   const text = document.getElementById('text');
   text.addEventListener('change', () => console.log('RESULT text=' + text.value));
@@ -67,6 +68,10 @@ const PAGE = `<!doctype html>
     form.append('upload', file);
     const response = await fetch('/upload', { method: 'POST', body: form });
     console.log('RESULT upload=' + (await response.text()));
+  });
+  document.getElementById('own-menu').addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    console.log('RESULT ownmenu=1');
   });
   console.log('RESULT ready=1');
 </script>
@@ -114,6 +119,7 @@ const page = await context.newPage();
 
 const results = new Map();
 const waiters = [];
+page.on('pageerror', (error) => console.log('[chromium fehler]', error.message));
 page.on('console', (msg) => {
   if (process.env.E2E_LOG)
     console.log('[chromium]', msg.text());
@@ -206,6 +212,24 @@ check('Popup als neuer Tab', popup === 'Popup-Seite' && tabCount === 2, `Titel $
 
 // Zurueck zum ersten Tab
 await page.click('#tab-list .tab:first-child .title');
+
+// 5b) Rechtsklick: eigenes Menue der Seite bekommt das Event, unser Menue bleibt zu
+await page.mouse.click(...await at(470, 50), { button: 'right' });
+check('Rechtsklick: Menue der Seite', (await result('ownmenu')) === '1');
+await page.waitForTimeout(500);
+check('Rechtsklick: unser Menue bleibt zu', await page.evaluate(() => document.getElementById('context-menu').hidden));
+
+// 5c) Rechtsklick auf den Link: unser Menue, "Link in neuem Tab oeffnen"
+await page.mouse.click(...await at(40, 138), { button: 'right' });
+const menuItem = page.locator('#context-menu button', { hasText: 'Link in neuem Tab öffnen' });
+const menuShown = await menuItem.waitFor({ timeout: 10000 }).then(() => true, () => false);
+check('Rechtsklick auf Link: Menue', menuShown);
+if (menuShown) {
+  await menuItem.click();
+  await page.waitForFunction(() => document.querySelectorAll('#tab-list .tab').length === 3, null, { timeout: 30000 }).catch(() => {});
+  check('Link in neuem Tab geoeffnet', (await page.evaluate(() => document.querySelectorAll('#tab-list .tab').length)) === 3);
+  await page.click('#tab-list .tab:first-child .title');
+}
 
 // 6) Scrollen mit dem Mausrad
 await page.mouse.move(...await at(500, 400));

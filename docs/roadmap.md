@@ -67,7 +67,9 @@ kommen zuerst.
 - [x] Datei-Upload (`<input type=file>`, FileReader, Formulare/fetch)
 - [x] HiDPI (devicePixelRatio)
 - [x] e2e-Test `tests/e2e/input-test.mjs`
-- [ ] Kontextmenue, Favicons, Vollbild
+- [x] Kontextmenue (Rechtsklick): Link/Bild in neuem Tab, Adresse kopieren, Kopieren/Einfuegen,
+  Zurueck/Vor/Neu laden. Seiten mit eigenem Menue bekommen das contextmenu-Event wie gewohnt
+- [ ] Favicons, Vollbild
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`

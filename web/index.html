@@ -13,14 +13,14 @@
       <button id="new-tab" title="Neuer Tab">+</button>
     </div>
     <div id="toolbar">
-      <button id="back" title="Zurueck" disabled>&#8592;</button>
-      <button id="forward" title="Vorwaerts" disabled>&#8594;</button>
+      <button id="back" title="Zurück" disabled>&#8592;</button>
+      <button id="forward" title="Vorwärts" disabled>&#8594;</button>
       <button id="reload" title="Neu laden">&#8635;</button>
       <form id="address-form">
         <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Adresse eingeben">
       </form>
       <span id="status"></span>
-      <button id="clear-data" title="Gespeicherte Daten loeschen">&#128465;</button>
+      <button id="clear-data" title="Gespeicherte Daten löschen">&#128465;</button>
     </div>
     <div id="progress"></div>
   </header>
@@ -29,6 +29,7 @@
     <textarea id="ime" aria-hidden="true" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
     <div id="boot">Engine wird geladen...</div>
   </main>
+  <div id="context-menu" role="menu" hidden></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -117,6 +117,16 @@ EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
     });
 }
 
+EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)
+{
+    withView(id, [=](WebView& view) { view.contextMenu(x, y); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
+{
+    withView(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
 {
     withView(id, [=](WebView& view) { view.setFocused(focused); });

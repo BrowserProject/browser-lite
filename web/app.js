@@ -135,7 +135,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', saveStorage);
 
 async function clearStorage() {
-  if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) loeschen?'))
+  if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?'))
     return;
   storageReady = false; // nichts mehr zurueckschreiben
   await new Promise((resolve) => {
@@ -298,6 +298,10 @@ function onEngineEvent(viewId, type, payload) {
     closeTab(tab);
     return;
   }
+  if (type === 'contextmenu') {
+    showContextMenu(tab, data);
+    return;
+  }
   if (type === 'filechooser') {
     openFileChooser(tab, data);
     return;
@@ -428,6 +432,83 @@ function onEngineDownloadData(id, bytes) {
   setStatus('Download: ' + download.filename + ' ' + formatSize(download.received) + total);
 }
 
+// ------------------------------------------------------------ Kontextmenue
+// Die Engine schickt nach einem Rechtsklick, was unter der Maus ist (Link,
+// Bild, Auswahl). Hat die Seite ein eigenes Menue, kommt nichts.
+
+const menu = $('context-menu');
+
+function hideContextMenu() {
+  menu.hidden = true;
+  menu.replaceChildren();
+}
+
+function showContextMenu(tab, data) {
+  hideContextMenu();
+  const items = [];
+  const add = (label, action, enabled = true) => items.push({ label, action, enabled });
+  const separator = () => items.length && items[items.length - 1] !== null && items.push(null);
+  if (data.link) {
+    add('Link in neuem Tab öffnen', () => newTab(data.link));
+    add('Link-Adresse kopieren', () => navigator.clipboard?.writeText(data.link));
+    separator();
+  }
+  if (data.image) {
+    add('Bild in neuem Tab öffnen', () => newTab(data.image));
+    add('Bild-Adresse kopieren', () => navigator.clipboard?.writeText(data.image));
+    separator();
+  }
+  if (data.selection)
+    add('Kopieren', () => engine._bl_command(tab.id, toUTF8('Copy')));
+  if (data.editable) {
+    add('Ausschneiden', () => engine._bl_command(tab.id, toUTF8('Cut')), !!data.selection);
+    add('Einfügen', async () => {
+      const text = await navigator.clipboard?.readText().catch(() => null);
+      if (text != null)
+        engine._bl_set_clipboard_text(toUTF8(text));
+      engine._bl_command(tab.id, toUTF8('Paste'));
+    });
+  }
+  add('Alles auswählen', () => engine._bl_command(tab.id, toUTF8('SelectAll')));
+  separator();
+  add('Zurück', () => engine._bl_go_back(tab.id), data.canGoBack);
+  add('Vorwärts', () => engine._bl_go_forward(tab.id), data.canGoForward);
+  add('Neu laden', () => engine._bl_reload(tab.id));
+
+  for (const item of items) {
+    if (!item) {
+      menu.appendChild(document.createElement('hr'));
+      continue;
+    }
+    const button = document.createElement('button');
+    button.textContent = item.label;
+    button.disabled = !item.enabled;
+    button.addEventListener('click', () => {
+      hideContextMenu();
+      item.action();
+      focusPage();
+    });
+    menu.appendChild(button);
+  }
+  menu.hidden = false;
+  // Position im Fenster, nicht ueber den Rand hinaus
+  const rect = tab.canvas.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  menu.style.left = Math.min(rect.left + data.x, window.innerWidth - width - 4) + 'px';
+  menu.style.top = Math.min(rect.top + data.y, window.innerHeight - height - 4) + 'px';
+}
+
+window.addEventListener('pointerdown', (e) => {
+  if (!menu.hidden && !menu.contains(e.target))
+    hideContextMenu();
+}, true);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !menu.hidden)
+    hideContextMenu();
+}, true);
+window.addEventListener('blur', hideContextMenu);
+
 // ------------------------------------------------------------- Datei-Upload
 // <input type=file> der Seite: echten Dateidialog zeigen, die Dateien ins
 // virtuelle Dateisystem der Engine schreiben und die Pfade zurueckgeben.
@@ -500,7 +581,10 @@ function attachInput(tab) {
   canvas.addEventListener('pointermove', (e) => {
     engine._bl_mouse(tab.id, 2, -1, ...position(e), 0, modifierBits(e));
   });
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    engine._bl_context_menu(tab.id, ...position(e));
+  });
   canvas.addEventListener('wheel', (e) => {
     let factor = 1;
     if (e.deltaMode === 1) factor = 40;       // Zeilen

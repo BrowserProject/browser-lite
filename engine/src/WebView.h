@@ -73,6 +73,11 @@ public:
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
+    // Rechtsklick: zuerst das contextmenu-Event der Seite, dann (wenn die Seite
+    // es nicht abfaengt) Infos fuer das Menue der Oberflaeche
+    void contextMenu(double x, double y);
+    // Editor-Befehl wie "Copy", "Paste", "SelectAll"
+    void executeCommand(const String&);
     void setFocused(bool);
 
     // Fuer die Clients
