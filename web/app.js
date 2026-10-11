@@ -9,6 +9,9 @@ import { WispTransport, installTransportSocket, setTransport } from './transport
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const START_URL = params.get('url') || 'https://example.com/';
+// Ordner der Engine. tools/package-site.sh ersetzt das durch engine/<version>/,
+// damit nach einem Update nie eine alte .wasm aus dem Cache kommt.
+const ENGINE_BASE = 'engine/';
 
 // Relay (Wisp-Server). Standard: auf dem gleichen Server unter /wisp/.
 // Der Zugangs-Token wird einmal mit ?token=... gesetzt und im Browser gespeichert.
@@ -56,9 +59,9 @@ async function startEngine() {
   }
   setTransport(new WispTransport(relayURL()));
   installTransportSocket();
-  await loadScript('engine/engine.js');
+  await loadScript(ENGINE_BASE + 'engine.js');
   const module = {
-    locateFile: (path) => 'engine/' + path,
+    locateFile: (path) => ENGINE_BASE + path,
     print: (text) => console.log('[engine]', text),
     printErr: (text) => console.warn('[engine]', text),
     onEngineReady,

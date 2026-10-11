@@ -65,7 +65,7 @@ for (const site of sites) {
     failed++;
   }
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(Number(process.env.SITE_WAIT || 1500));
   const title = await page.evaluate(() => document.title);
   const file = path.join(outDir, new URL(site).hostname + '.png');
   await page.screenshot({ path: file });
