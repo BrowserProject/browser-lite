@@ -48,6 +48,59 @@ Regeln:
 - In Code-Aenderungen in WebKit immer `PLATFORM(WASM)` bzw. `__EMSCRIPTEN__` verwenden,
   damit klar ist was von uns kommt.
 
+## Dependencies (Phase 1)
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/build-all.sh   # ca. 30-45 min
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/test.sh        # Smoke-Test
+```
+
+Alle Quellen stehen mit SHA256 in `deps/sources.txt`, das Ergebnis landet in `sysroot/`.
+Laufzeit-Dateien (Fonts, fontconfig, CA-Zertifikate) liegen in `sysroot/runtime/` und kommen
+beim Linken der Engine als Datenpaket (`engine.data`) ins WASM-Dateisystem.
+
+## JavaScriptCore alleine (Phase 2)
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain tools/build-jsc.sh
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain tests/jsc/run.sh
+```
+
+## Engine (WebCore + Embedder, Phase 3/4)
+
+```bash
+docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 browser-lite-toolchain tools/build-webcore.sh
+```
+
+Braucht viel RAM (ca. 1.5 GB pro Compiler-Prozess) und mehrere Stunden beim ersten Mal.
+Mit `ccache` (im Image) gehen spaetere Builds viel schneller. Ergebnis:
+`build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`.
+
+Test in node (rendert eine Seite in ein Bild):
+
+```bash
+node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm
+node tests/engine/check-basic.mjs build/basic.ppm
+```
+
+## Oberflaeche lokal starten
+
+```bash
+node web/serve.mjs 8080                 # liefert web/ und /engine/ aus build/webcore/bin
+```
+
+Dann `http://localhost:8080/?url=https://example.com` oeffnen. Fuer echte Seiten braucht es
+das Relay (siehe unten), lokal z.B.:
+
+```bash
+cd relay && npm ci && RELAY_TOKEN=lokal-test-token-123456 node server.mjs
+# und die Seite mit ?relay=ws://localhost:5001/wisp/&token=lokal-test-token-123456 oeffnen
+```
+
+## Relay und Hosting (VPS)
+
+Siehe [relay/README.md](../relay/README.md).
+
 ## CI
 
 `.github/workflows/ci.yml`:
@@ -58,6 +111,10 @@ Regeln:
 | toolchain | Toolchain-Image bauen + nach ghcr.io pushen (nur wenn noch nicht vorhanden) |
 | toolchain-check | `tools/check-toolchain.sh` im Image |
 | webkit-source | WebKit holen + Patches pruefen |
+| relay | Relay + Wisp-Client zusammen testen |
+| deps | Dependencies bauen (Cache) + Smoke-Test, sysroot als Artefakt |
+| jsc | JavaScriptCore + Tests (inkl. GC-Stresstest) |
+| engine | WebCore + Engine bauen, Render-Test, Engine als Artefakt |
 
-Spaeter kommen dazu: deps, jsc, webkit (mit ccache, aufgeteilt wegen 6h-Limit pro Job),
-web, e2e, deploy.
+Der Engine-Job bricht nach 320 Minuten selber ab und speichert ccache. Der naechste Lauf
+macht dann mit dem Cache weiter (GitHub erlaubt hoechstens 6 Stunden pro Job).

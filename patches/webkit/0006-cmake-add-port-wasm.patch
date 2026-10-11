@@ -64,10 +64,10 @@ index 0000000000..2eb4471e0d
 +list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
 diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
 new file mode 100644
-index 0000000000..477c65c917
+index 0000000000..abafe2c838
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
-@@ -0,0 +1,69 @@
+@@ -0,0 +1,70 @@
 +# WebCore fuer PORT=Wasm (browser-lite).
 +# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
@@ -81,6 +81,8 @@ index 0000000000..477c65c917
 +    "${WEBCORE_DIR}/platform/generic"
 +    "${WEBCORE_DIR}/platform/graphics/egl"
 +    "${WEBCORE_DIR}/platform/graphics/opengl"
++    # Skia-Header (SkiaGPUAtlas.h) brauchen BitmapTexture.h, ohne TextureMapper-Compositing
++    "${WEBCORE_DIR}/platform/graphics/texmap"
 +    "${WEBCORE_DIR}/platform/mediacapabilities"
 +    "${WEBCORE_DIR}/platform/video-codecs"
 +    "${WEBCORE_DIR}/platform/wasm"
@@ -100,7 +102,6 @@ index 0000000000..477c65c917
 +
 +    platform/graphics/PlatformDisplay.cpp
 +    platform/graphics/egl/GLContext.cpp
-+    platform/graphics/egl/GLContextWrapper.cpp
 +    platform/graphics/egl/GLDisplay.cpp
 +    platform/graphics/egl/GLFence.cpp
 +    platform/graphics/egl/GLFenceEGL.cpp

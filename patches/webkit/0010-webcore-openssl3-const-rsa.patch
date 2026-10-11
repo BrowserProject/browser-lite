@@ -1,0 +1,43 @@
+diff --git a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
+index cfc7adfc97..e111fb6b4c 100644
+--- a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
+@@ -37,7 +37,7 @@
+ 
+ namespace WebCore {
+ 
+-static size_t getRSAModulusLength(RSA* rsa)
++static size_t getRSAModulusLength(const RSA* rsa)
+ {
+     if (!rsa)
+         return 0;
+@@ -164,7 +164,8 @@ bool CryptoKeyRSA::isRestrictedToHash(CryptoAlgorithmIdentifier& identifier) con
+ 
+ size_t CryptoKeyRSA::keySizeInBits() const
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
+     if (!rsa)
+         return 0;
+ 
+@@ -297,7 +298,8 @@ ExceptionOr<Vector<uint8_t>> CryptoKeyRSA::exportPkcs8() const
+ 
+ auto CryptoKeyRSA::algorithm() const -> KeyAlgorithm
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
+ 
+     // FIXME: `CryptoRsaKeyAlgorithm` stores `modulusLength` as an `unsigned` requiring us to cast below. We should find a way to remove the need for a cast / ensure the cast is safe and doesn't overflow.
+ 
+@@ -330,7 +332,8 @@ auto CryptoKeyRSA::algorithm() const -> KeyAlgorithm
+ 
+ std::unique_ptr<CryptoKeyRSAComponents> CryptoKeyRSA::exportData() const
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
+     if (!rsa)
+         return nullptr;
+ 

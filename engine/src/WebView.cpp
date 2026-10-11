@@ -1,7 +1,9 @@
 #include "config.h"
 #include "WebView.h"
 
+#include "BackForwardList.h"
 #include "Clients.h"
+#include "EditorClient.h"
 #include "Engine.h"
 #include "Host.h"
 #include "Strategies.h"
@@ -71,6 +73,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
+    configuration.editorClient = makeUniqueRef<EditorClient>();
+    configuration.backForwardClient = BackForwardList::create();
     configuration.progressTrackerClient = makeUniqueRef<ProgressTrackerClient>(*this);
     configuration.cookieJar = CookieJar::create(SessionProvider::create());
 

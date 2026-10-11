@@ -179,10 +179,10 @@ index 19c4683b7f..f4beb6ec1c 100644
 +#endif // USE(LIBWPE) || PLATFORM(WASM)
 diff --git a/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
 new file mode 100644
-index 0000000000..5a7005704d
+index 0000000000..32f1a3cd16
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,66 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -206,6 +206,8 @@ index 0000000000..5a7005704d
 + * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 + * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 + * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
 +#include "config.h"
 +#include "CurlSSLHandle.h"
 +
@@ -354,10 +356,10 @@ index 0000000000..111c7400f0
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
 new file mode 100644
-index 0000000000..e04dceef41
+index 0000000000..8b5ba6fc77
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
-@@ -0,0 +1,41 @@
+@@ -0,0 +1,43 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -381,6 +383,8 @@ index 0000000000..e04dceef41
 + * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 + * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 + * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
 +#include "config.h"
 +#include "NetworkStateNotifier.h"
 +
@@ -666,10 +670,10 @@ index 0000000000..3ab9099204
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
 new file mode 100644
-index 0000000000..ffe2501ecc
+index 0000000000..ba4b11cc12
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,50 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -693,6 +697,8 @@ index 0000000000..ffe2501ecc
 + * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 + * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 + * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
 +#include "config.h"
 +#include "SystemFontDatabase.h"
 +
@@ -720,10 +726,10 @@ index 0000000000..ffe2501ecc
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/UserAgentWasm.cpp b/Source/WebCore/platform/wasm/UserAgentWasm.cpp
 new file mode 100644
-index 0000000000..cee6cc8343
+index 0000000000..d32c0e60ad
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/UserAgentWasm.cpp
-@@ -0,0 +1,47 @@
+@@ -0,0 +1,49 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -747,6 +753,8 @@ index 0000000000..cee6cc8343
 + * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 + * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
 + * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
 +#include "config.h"
 +#include "UserAgent.h"
 +

@@ -185,3 +185,103 @@ jobs:
           name: jsc-wasm
           path: build/jsc/bin/jsc.*
           retention-days: 7
+
+  engine:
+    name: WebCore + Engine (PORT=Wasm) + Render-Test
+    needs: [toolchain, deps]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      IMAGE: ${{ needs.toolchain.outputs.image }}
+    steps:
+      - name: Platz schaffen (WebCore-Build braucht viel)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          docker image prune -af >/dev/null
+          df -h / | tail -1
+      - uses: actions/checkout@v5
+      - name: Bei ghcr.io anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Toolchain-Image holen
+        run: docker pull "$IMAGE"
+      - name: sysroot holen
+        uses: actions/download-artifact@v7
+        with:
+          name: sysroot
+          path: sysroot
+      - name: WebKit holen + Patches anwenden
+        run: |
+          tools/fetch-webkit.sh
+          tools/apply-patches.sh
+      - name: ccache holen
+        uses: actions/cache/restore@v5
+        with:
+          path: build/ccache
+          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
+          restore-keys: ccache-engine-${{ needs.toolchain.outputs.image }}-
+      - name: WebCore + Engine bauen
+        # Vor dem 6h-Limit selber abbrechen, damit ccache noch gespeichert wird.
+        # Der naechste Lauf macht dann mit dem Cache weiter.
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 -e CCACHE_DIR=/src/build/ccache -e CCACHE_MAXSIZE=5G \
+            "$IMAGE" timeout 320m tools/build-webcore.sh
+      - name: ccache speichern (auch bei Abbruch)
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: build/ccache
+          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
+      - name: Render-Test (node)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" bash -c \
+            'node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600 && node tests/engine/check-basic.mjs build/basic.ppm'
+      - name: Engine als Artefakt
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: engine
+          path: |
+            build/webcore/bin/engine.js
+            build/webcore/bin/engine.wasm
+            build/webcore/bin/engine.data
+          retention-days: 14
+      - name: Render-Bild als Artefakt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: render-test
+          path: build/basic.ppm
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-End (Chromium + Relay + Engine)
+    needs: [engine]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Engine holen
+        uses: actions/download-artifact@v7
+        with:
+          name: engine
+          path: build/webcore/bin
+      - name: Relay + Playwright installieren
+        run: |
+          (cd relay && npm ci)
+          (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
+      - name: Netzwerk-Test
+        run: cd tests/e2e && node network-test.mjs
+      - name: Screenshot als Artefakt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-screenshot
+          path: build/e2e-network.png
+          if-no-files-found: ignore

@@ -8,7 +8,9 @@
 set(BL_ENGINE_SRC "${BROWSER_LITE_ENGINE_DIR}/src")
 
 add_executable(BrowserLiteEngine
+    ${BL_ENGINE_SRC}/BackForwardList.cpp
     ${BL_ENGINE_SRC}/Clients.cpp
+    ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
     ${BL_ENGINE_SRC}/Host.cpp

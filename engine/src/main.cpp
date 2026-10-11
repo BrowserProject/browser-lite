@@ -17,6 +17,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
 #include <wtf/MainThread.h>
+#include <wtf/text/MakeString.h>
 
 int main(int, char**)
 {
@@ -33,6 +34,16 @@ int main(int, char**)
     WebCore::initializeCommonAtomStrings();
     installPlatformStrategies();
     initializeEngineLoop();
+
+    // Kopieren in der Seite -> echte Zwischenablage (der Host schreibt sie)
+    WebCore::WasmPlatform::setClipboardChangedCallback([](const WebCore::WasmPlatform::ClipboardItems& items) {
+        for (auto& [type, text] : items) {
+            if (type.startsWith("text/plain"_s)) {
+                notifyHost(0, "clipboard", makeString("{\"text\":\""_s, jsonEscape(text), "\"}"_s));
+                return;
+            }
+        }
+    });
 
     // Standard von WebCore ist 8 MB, eine moderne Seite verdraengt damit alles
     WebCore::MemoryCache::singleton().setCapacities(0, 16 * 1024 * 1024, 64 * 1024 * 1024);

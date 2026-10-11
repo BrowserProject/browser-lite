@@ -177,7 +177,7 @@ function updateToolbar() {
   $('reload').innerHTML = tab.loading ? '&#215;' : '&#8635;';
   $('reload').title = tab.loading ? 'Stoppen' : 'Neu laden';
   if (document.activeElement !== $('address'))
-    $('address').value = tab.url === 'about:blank' ? '' : tab.url;
+  $('address').value = tab.url === 'about:blank' ? '' : tab.url;
 }
 
 // --------------------------------------------------------- Meldungen der Engine

@@ -2,17 +2,17 @@
 # Phase 3: WebKit mit unserem PORT=Wasm bauen (WTF, JavaScriptCore, PAL, WebCore).
 # Braucht das komplette sysroot (deps/build-all.sh) und den gepatchten WebKit-Baum.
 #
-#   tools/build-webcore.sh                 # konfigurieren + WebCore bauen
-#   tools/build-webcore.sh <ninja-target>  # anderes Target (z.B. JavaScriptCore)
+#   tools/build-webcore.sh                 # konfigurieren + Engine bauen (WebCore + engine/)
+#   tools/build-webcore.sh <ninja-target>  # anderes Target (z.B. WebCore)
 #
-# Ausgabe: statische Libs in build/webcore/lib/
+# Ausgabe: build/webcore/bin/engine.js, engine.wasm, engine.data
 set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
 
 out="$BL_BUILD_DIR/webcore"
 jobs="${BL_JOBS:-$(nproc)}"
-target="${1:-WebCore}"
+target="${1:-BrowserLiteEngine}"
 
 [ -f "$BL_SYSROOT/lib/libcurl.a" ] || bl_die "sysroot unvollstaendig. Zuerst deps/build-all.sh ausfuehren."
 command -v emcmake >/dev/null || bl_die "emcmake fehlt (im Toolchain-Image ausfuehren)"
@@ -33,8 +33,10 @@ emcmake cmake -S "$BL_WEBKIT_DIR" -B "$out" -G Ninja \
     -DCMAKE_CXX_FLAGS="-pthread -msimd128" \
     -DCMAKE_EXE_LINKER_FLAGS="-pthread" \
     -DDEVELOPER_MODE=OFF \
+    -DBROWSER_LITE_ENGINE_DIR="$BL_ROOT/engine" \
+    -DBROWSER_LITE_RUNTIME_DIR="$BL_SYSROOT/runtime" \
     "${launcher[@]}"
 
 bl_log "Baue $target mit $jobs Jobs"
 cmake --build "$out" --target "$target" -j "$jobs"
-bl_log "Fertig: $(find "$out/lib" -maxdepth 1 -name '*.a' -printf '%f ' 2>/dev/null)"
+bl_log "Fertig: $(find "$out/bin" -maxdepth 1 -name 'engine.*' -printf '%f %s Bytes  ' 2>/dev/null)"
