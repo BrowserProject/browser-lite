@@ -1,3 +1,25 @@
+diff --git a/Source/JavaScriptCore/heap/GCActivityCallback.cpp b/Source/JavaScriptCore/heap/GCActivityCallback.cpp
+index e72c3a6470..0dc5e1219b 100644
+--- a/Source/JavaScriptCore/heap/GCActivityCallback.cpp
++++ b/Source/JavaScriptCore/heap/GCActivityCallback.cpp
+@@ -58,10 +58,17 @@ void GCActivityCallback::doWork(VM& vm)
+     
+     ASSERT(vm.currentThreadIsHoldingAPILock());
+     JSC::Heap& heap = vm.heap;
++#if OS(EMSCRIPTEN)
++    // Der Embedder haelt bei jeder Arbeit ein DeferGC offen (Heap.cpp). Neu
++    // planen wuerde den Timer endlos feuern lassen. Die Anforderung wartet
++    // stattdessen bis zum Ende des aeussersten DeferGC.
++    UNUSED_VARIABLE(heap);
++#else
+     if (heap.isDeferred()) {
+         scheduleTimer(0_s);
+         return;
+     }
++#endif
+ 
+     doCollection(vm);
+ }
 diff --git a/Source/JavaScriptCore/heap/Heap.cpp b/Source/JavaScriptCore/heap/Heap.cpp
 index 67e317d5bb..e57124fe3a 100644
 --- a/Source/JavaScriptCore/heap/Heap.cpp

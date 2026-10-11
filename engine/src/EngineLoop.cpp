@@ -60,7 +60,8 @@ static void runWithGCAfterwards(Work&& work)
     }
     JSC::JSLockHolder lock(*vm);
     auto gcStart = WTF::MonotonicTime::now();
-    auto sizeBefore = vm->heap.size();
+    // heap.size() ist teuer, nur fuer die Debug-Ausgabe
+    size_t sizeBefore = debugEnabled() ? vm->heap.size() : 0;
     {
         JSC::DeferGC deferGC(*vm);
         work();
