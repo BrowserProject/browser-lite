@@ -200,7 +200,11 @@ void WebView::loadURL(const String& urlString)
         // Ohne Schema: wie in jedem Browser https:// davor
         url = URL { makeString("https://"_s, urlString) };
     }
-    frame->loader().load(FrameLoadRequest { *frame, ResourceRequest { WTF::move(url) } });
+    // Eingabe in der Adressleiste: wie in anderen Browsern darf das auch eine
+    // data:-URL sein (Seiten selber duerfen nicht dorthin navigieren)
+    FrameLoadRequest request { *frame, ResourceRequest { WTF::move(url) } };
+    request.setIsRequestFromClientOrUserInput();
+    frame->loader().load(WTF::move(request));
 }
 
 void WebView::loadHTML(const String& html, const String& baseURL)

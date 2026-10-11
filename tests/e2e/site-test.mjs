@@ -4,7 +4,7 @@
 //   node site-test.mjs [engine-ordner] https://example.com/ https://de.wikipedia.org/ ...
 //
 // Ergebnis pro Seite: Titel, Ladezeit, Fehler. Screenshots in build/sites/.
-import { mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { chromium } from 'playwright';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 let args = process.argv.slice(2);
 let engineDir = path.join(root, 'build', 'webcore', 'bin');
-if (args[0] && !args[0].includes('://'))
+if (args[0] && !/^[a-z][a-z0-9+.-]*:/i.test(args[0]))
   engineDir = path.resolve(args.shift());
 const sites = args.length ? args : ['https://example.com/'];
 const TOKEN = 'site-token-0123456789abcdef';
@@ -38,6 +38,7 @@ const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), en
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 
 let failed = 0;
+const rows = [];
 for (const site of sites) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   // Optional eigene CA (z.B. wenn ein TLS-Proxy dazwischen ist): SITE_EXTRA_CA=datei.pem
@@ -67,12 +68,18 @@ for (const site of sites) {
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   await page.waitForTimeout(Number(process.env.SITE_WAIT || 1500));
   const title = await page.evaluate(() => document.title);
-  const file = path.join(outDir, new URL(site).hostname + '.png');
+  const file = path.join(outDir, (new URL(site).hostname || 'seite') + '.png');
   await page.screenshot({ path: file });
   console.log(`${result === 'ok' ? 'ok  ' : 'FAIL'} ${site} (${seconds} s) Titel: "${title}" ${result === 'ok' ? '' : result}`);
+  rows.push(`| ${site} | ${result === 'ok' ? 'geladen' : 'Fehler'} | ${seconds} s | ${title.replace(/ - browser-lite$/, '').replace(/\|/g, '/').slice(0, 60)} |`);
   if (result !== 'ok' || process.env.SITE_LOG)
-    console.log(log.slice(-30).map((l) => '    ' + l).join('\n'));
+    console.log((process.env.SITE_LOG === 'all' ? log : log.slice(-30)).map((l) => '    ' + l).join('\n'));
   await page.close();
+}
+
+// Kompatibilitaetsliste fuer die GitHub-Zusammenfassung
+if (process.env.GITHUB_STEP_SUMMARY) {
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, ['### Kompatibilitaet (echte Seiten)', '', '| Seite | Status | Zeit | Titel |', '|---|---|---|---|', ...rows, ''].join('\n') + '\n');
 }
 
 await browser.close();

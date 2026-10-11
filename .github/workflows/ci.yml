@@ -292,7 +292,11 @@ jobs:
         continue-on-error: true
         run: |
           cd tests/e2e && SITE_WAIT=5000 node site-test.mjs \
-            https://example.com/ https://de.wikipedia.org/wiki/Schweiz https://news.ycombinator.com/
+            https://example.com/ https://de.wikipedia.org/wiki/Schweiz https://news.ycombinator.com/ \
+            https://www.srf.ch/ https://www.20min.ch/ https://github.com/ https://www.google.com/ \
+            https://html.duckduckgo.com/html/?q=webkit https://developer.mozilla.org/de/ \
+            https://stackoverflow.com/questions https://old.reddit.com/ https://www.bbc.com/news \
+            https://www.openstreetmap.org/ https://www.youtube.com/
       - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6
