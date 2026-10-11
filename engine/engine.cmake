@@ -6,6 +6,7 @@
 # (Gleiches Muster wie WebCoreTestSupport unten in WebCore/CMakeLists.txt.)
 
 set(BL_ENGINE_SRC "${BROWSER_LITE_ENGINE_DIR}/src")
+set(BL_LEGACY_STORAGE "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/Storage")
 
 add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/BackForwardList.cpp
@@ -16,13 +17,26 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
+    ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp
+
+    # localStorage + IndexedDB aus WebKitLegacy (ohne den Rest von WebKitLegacy)
+    ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaSync.cpp
+    ${BL_LEGACY_STORAGE}/StorageNamespaceImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageSyncManager.cpp
+    ${BL_LEGACY_STORAGE}/StorageThread.cpp
+    ${BL_LEGACY_STORAGE}/StorageTracker.cpp
+    ${BL_LEGACY_STORAGE}/WebDatabaseProvider.cpp
+    ${BL_LEGACY_STORAGE}/WebStorageNamespaceProvider.cpp
 )
 set_target_properties(BrowserLiteEngine PROPERTIES OUTPUT_NAME engine)
 
 target_include_directories(BrowserLiteEngine PRIVATE
     ${BL_ENGINE_SRC}
+    ${BL_LEGACY_STORAGE}
     ${WebCore_INCLUDE_DIRECTORIES}
     ${WebCore_PRIVATE_INCLUDE_DIRECTORIES}
 )
@@ -56,10 +70,12 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sENVIRONMENT=web,worker,node"
     "SHELL:-sMODULARIZE=1"
     "SHELL:-sEXPORT_NAME=createBrowserLiteEngine"
-    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,HEAPU8,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
+    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,HEAPU8,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
     "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     "SHELL:-lEGL"
     "SHELL:-lGL"
+    # Dauerhafter Speicher (/data) ueber IndexedDB des Host-Browsers, siehe web/app.js
+    "SHELL:-lidbfs.js"
     "SHELL:-Wl,--error-limit=0"
     # WebKit baut mit -fno-exceptions, einige Deps (C++) koennen aber werfen.
     # Werfen erlauben (ohne Fangen fuehrt ein throw zu abort).

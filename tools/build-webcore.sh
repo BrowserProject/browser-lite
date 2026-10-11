@@ -22,6 +22,9 @@ command -v emcmake >/dev/null || bl_die "emcmake fehlt (im Toolchain-Image ausfu
 launcher=()
 if command -v ccache >/dev/null; then
     launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+    # WebKit nutzt Precompiled Headers. Ohne diese Einstellung kann ccache
+    # 60% der Aufrufe nicht cachen ("Could not use precompiled header").
+    export CCACHE_SLOPPINESS="${CCACHE_SLOPPINESS:-pch_defines,time_macros,include_file_mtime,include_file_ctime}"
 fi
 
 bl_log "Konfiguriere WebKit PORT=Wasm ($out)"

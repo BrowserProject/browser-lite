@@ -16,6 +16,7 @@
 class SkSurface;
 
 namespace WebCore {
+class FileChooser;
 class LocalFrame;
 class LocalFrameView;
 class Page;
@@ -26,6 +27,9 @@ namespace BrowserLite {
 class WebView : public RefCounted<WebView>, public CanMakeWeakPtr<WebView> {
 public:
     static Ref<WebView> create(int id, WebCore::IntSize, float deviceScaleFactor);
+    // Offene Views gehoeren der Engine, bis close() sie wieder freigibt
+    static WebView& open(int id, WebCore::IntSize, float deviceScaleFactor);
+    static void close(int id);
     ~WebView();
 
     static WebView* fromID(int);
@@ -48,6 +52,7 @@ public:
     // Groesse in CSS-Pixeln, deviceScaleFactor fuer HiDPI
     void resize(WebCore::IntSize, float deviceScaleFactor);
     WebCore::IntSize size() const { return m_size; }
+    float deviceScaleFactor() const { return m_deviceScaleFactor; }
 
     // Rendering
     void addDamage(const WebCore::IntRect&);
@@ -67,6 +72,7 @@ public:
     void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers);
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
+    void insertText(const String&);
     void setFocused(bool);
 
     // Fuer die Clients
@@ -79,6 +85,11 @@ public:
     void didChangeCursor(const String& cssCursor);
     void didReceiveConsoleMessage(int level, const String& message, const String& source, unsigned line);
     bool isLoading() const { return m_isLoading; }
+
+    // <input type=file>: die Oberflaeche zeigt den Dateidialog, schreibt die
+    // Dateien ins virtuelle Dateisystem und ruft dann chooseFiles() auf
+    void openFileChooser(WebCore::FileChooser&);
+    void chooseFiles(const Vector<String>& paths);
 
 private:
     WebView(int id, WebCore::IntSize, float deviceScaleFactor);
@@ -98,6 +109,7 @@ private:
     bool m_frameRequested { false };
     bool m_frameInFlight { false };
     bool m_isLoading { false };
+    RefPtr<WebCore::FileChooser> m_fileChooser;
 };
 
 } // namespace BrowserLite

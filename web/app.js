@@ -68,11 +68,75 @@ async function startEngine() {
     onEngineEvent,
     onEngineFrame,
     onEngineNeedsFrame,
+    onEngineDownloadData,
     engineDialog,
-    preRun: [installExtraCA],
+    preRun: [mountStorage, installExtraCA],
   };
   engine = module;
   await window.createBrowserLiteEngine(module);
+}
+
+// ------------------------------------------------------------ Speicher
+// Cookies, localStorage und IndexedDB der Seiten liegen in der Engine unter
+// /data. Das ist ein IDBFS: beim Start aus der IndexedDB des Browsers laden,
+// danach alle paar Sekunden und beim Verlassen der Seite zurueckschreiben.
+
+let storageReady = false;
+let storageSyncing = false;
+let storageSyncAgain = false;
+
+function mountStorage(module) {
+  module = module || engine;
+  const fs = module.FS;
+  const IDBFS = fs.filesystems?.IDBFS;
+  if (!IDBFS || !window.indexedDB)
+    return;
+  fs.mkdirTree('/data');
+  fs.mount(IDBFS, {}, '/data');
+  module.addRunDependency('bl-storage');
+  fs.syncfs(true, (error) => {
+    if (error)
+      console.warn('Gespeicherte Daten konnten nicht geladen werden:', error);
+    storageReady = true;
+    module.removeRunDependency('bl-storage');
+  });
+}
+
+function saveStorage() {
+  if (!storageReady)
+    return;
+  if (storageSyncing) {
+    storageSyncAgain = true;
+    return;
+  }
+  storageSyncing = true;
+  engine.FS.syncfs(false, (error) => {
+    storageSyncing = false;
+    if (error)
+      console.warn('Daten konnten nicht gespeichert werden:', error);
+    if (storageSyncAgain) {
+      storageSyncAgain = false;
+      saveStorage();
+    }
+  });
+}
+
+setInterval(saveStorage, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden)
+    saveStorage();
+});
+window.addEventListener('pagehide', saveStorage);
+
+async function clearStorage() {
+  if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) loeschen?'))
+    return;
+  storageReady = false; // nichts mehr zurueckschreiben
+  await new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase('/data');
+    request.onsuccess = request.onerror = request.onblocked = resolve;
+  });
+  location.reload();
 }
 
 // Zusaetzliche CA-Zertifikate (PEM), z.B. eine Firmen-CA oder fuer Tests.
@@ -97,8 +161,9 @@ const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
 // --------------------------------------------------------------------- Tabs
 
 class Tab {
-  constructor(url) {
-    this.id = nextViewId++;
+  // viewId gesetzt: die Engine hat den View schon geoeffnet (Popup)
+  constructor(url, viewId = 0) {
+    this.id = viewId || nextViewId++;
     this.title = 'Neuer Tab';
     this.url = url;
     this.canGoBack = false;
@@ -108,7 +173,6 @@ class Tab {
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'page';
-    this.canvas.tabIndex = 0;
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none';
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     $('viewport').appendChild(this.canvas);
@@ -126,6 +190,10 @@ class Tab {
     this.updateTitle();
 
     const { width, height } = viewportSize();
+    if (viewId) {
+      engine._bl_resize(this.id, width, height, devicePixelRatio);
+      return;
+    }
     engine._bl_create_view(this.id, width, height, devicePixelRatio);
     if (url)
       engine._bl_load_url(this.id, toUTF8(url));
@@ -144,8 +212,8 @@ function viewportSize() {
   return { width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) };
 }
 
-function newTab(url) {
-  const tab = new Tab(url);
+function newTab(url, viewId = 0) {
+  const tab = new Tab(url, viewId);
   tabs.set(tab.id, tab);
   activateTab(tab);
   return tab;
@@ -163,7 +231,7 @@ function activateTab(tab) {
   tab.canvas.style.display = 'block';
   tab.element.classList.add('active');
   engine._bl_focus(tab.id, 1);
-  tab.canvas.focus();
+  focusPage();
   updateToolbar();
   tab.updateTitle();
 }
@@ -209,8 +277,25 @@ function onEngineEvent(viewId, type, payload) {
     navigator.clipboard?.writeText(data.text).catch(() => {});
     return;
   }
+  if (type === 'download-start' || type === 'download-done') {
+    onDownloadEvent(type, data);
+    return;
+  }
+  if (type === 'newview') {
+    // window.open / target=_blank: die Engine hat schon einen View geoeffnet
+    newTab('', viewId);
+    return;
+  }
   if (!tab)
     return;
+  if (type === 'close') {
+    closeTab(tab);
+    return;
+  }
+  if (type === 'filechooser') {
+    openFileChooser(tab, data);
+    return;
+  }
   switch (type) {
   case 'navigation':
     tab.url = data.url;
@@ -292,6 +377,85 @@ function onEngineNeedsFrame(viewId) {
   });
 }
 
+// ----------------------------------------------------------------- Downloads
+// Die Engine laedt die Datei und schickt die Daten in Stuecken. Am Ende
+// wird daraus ein Blob, den der Browser normal speichert.
+
+const downloads = new Map(); // id -> { filename, chunks, received, size }
+
+function formatSize(bytes) {
+  return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' kB';
+}
+
+function onDownloadEvent(type, data) {
+  if (type === 'download-start') {
+    downloads.set(data.id, { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size });
+    setStatus('Download: ' + data.filename);
+    return;
+  }
+  const download = downloads.get(data.id);
+  downloads.delete(data.id);
+  if (!download)
+    return;
+  if (data.error) {
+    setStatus('Download fehlgeschlagen: ' + download.filename + ' (' + data.error + ')');
+    return;
+  }
+  const blob = new Blob(download.chunks, { type: download.mime || 'application/octet-stream' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = download.filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+  setStatus('Download fertig: ' + download.filename + ' (' + formatSize(blob.size) + ')');
+}
+
+function onEngineDownloadData(id, bytes) {
+  const download = downloads.get(id);
+  if (!download)
+    return;
+  download.chunks.push(bytes);
+  download.received += bytes.length;
+  const total = download.size > 0 ? ' von ' + formatSize(download.size) : '';
+  setStatus('Download: ' + download.filename + ' ' + formatSize(download.received) + total);
+}
+
+// ------------------------------------------------------------- Datei-Upload
+// <input type=file> der Seite: echten Dateidialog zeigen, die Dateien ins
+// virtuelle Dateisystem der Engine schreiben und die Pfade zurueckgeben.
+
+let uploadCounter = 0;
+
+function openFileChooser(tab, data) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = data.multiple;
+  if (data.accept)
+    input.accept = data.accept;
+  let answered = false;
+  const answer = (paths) => {
+    if (answered)
+      return;
+    answered = true;
+    engine._bl_choose_files(tab.id, toUTF8(paths.join('\n')));
+  };
+  input.addEventListener('change', async () => {
+    const paths = [];
+    for (const file of input.files) {
+      const dir = '/tmp/uploads/' + (++uploadCounter);
+      engine.FS.mkdirTree(dir);
+      const path = dir + '/' + file.name.replace(/[\/\n]/g, '_');
+      engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+      paths.push(path);
+    }
+    answer(paths);
+  });
+  input.addEventListener('cancel', () => answer([]));
+  input.click();
+}
+
 // alert/confirm/prompt der Seite
 function engineDialog(type, message, defaultValue) {
   if (type === 0) {
@@ -319,7 +483,7 @@ function attachInput(tab) {
   };
 
   canvas.addEventListener('pointerdown', (e) => {
-    canvas.focus();
+    focusPage();
     canvas.setPointerCapture(e.pointerId);
     engine._bl_mouse(tab.id, 0, e.button, ...position(e), Math.max(1, e.detail), modifierBits(e));
     e.preventDefault();
@@ -338,32 +502,65 @@ function attachInput(tab) {
     engine._bl_wheel(tab.id, ...position(e), e.deltaX * factor, e.deltaY * factor, modifierBits(e));
     e.preventDefault();
   }, { passive: false });
-
-  const isPasteShortcut = (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
-  canvas.addEventListener('keydown', (e) => {
-    // Einfuegen: erst das paste-Event abwarten, dort kennen wir den Inhalt
-    if (isPasteShortcut(e))
-      return;
-    sendKey(tab, 0, e);
-    // Browser-Kurzbefehle wie Tab, Backspace, Leertaste nicht an die UI weitergeben
-    if (!(e.key === 'F5' || e.key === 'F12'))
-      e.preventDefault();
-  });
-  canvas.addEventListener('keyup', (e) => {
-    if (isPasteShortcut(e))
-      return;
-    sendKey(tab, 1, e);
-    e.preventDefault();
-  });
-  canvas.addEventListener('paste', (e) => {
-    const text = e.clipboardData?.getData('text/plain') ?? '';
-    engine._bl_set_clipboard_text(toUTF8(text));
-    const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
-    sendKey(tab, 0, fake);
-    sendKey(tab, 1, fake);
-    e.preventDefault();
-  });
 }
+
+// Tastatur: Ein unsichtbares Textfeld (#ime) hat den Fokus, nicht das Canvas.
+// Normale Tasten gehen direkt als keydown/keyup an die Engine. Text, der erst
+// zusammengesetzt wird (tote Tasten wie ^ und ` auf der Schweizer Tastatur,
+// IME fuer Chinesisch/Japanisch, Bildschirmtastatur), kommt ueber die
+// input/composition-Events und wird als fertiger Text eingefuegt.
+const ime = $('ime');
+let composing = false;
+
+function focusPage() {
+  ime.focus({ preventScroll: true });
+}
+
+const isPasteShortcut = (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
+const isTextInput = (e) => e.isComposing || composing || e.key === 'Dead' || e.key === 'Process'
+  || e.key === 'Unidentified' || e.keyCode === 229;
+
+ime.addEventListener('keydown', (e) => {
+  // Einfuegen: erst das paste-Event abwarten, dort kennen wir den Inhalt
+  if (!activeTab || isPasteShortcut(e) || isTextInput(e))
+    return;
+  sendKey(activeTab, 0, e);
+  // Browser-Kurzbefehle wie Tab, Backspace, Leertaste nicht an die UI weitergeben
+  if (!(e.key === 'F5' || e.key === 'F12'))
+    e.preventDefault();
+});
+ime.addEventListener('keyup', (e) => {
+  if (!activeTab || isPasteShortcut(e) || isTextInput(e))
+    return;
+  sendKey(activeTab, 1, e);
+  e.preventDefault();
+});
+ime.addEventListener('compositionstart', () => {
+  composing = true;
+});
+ime.addEventListener('compositionend', (e) => {
+  composing = false;
+  if (activeTab && e.data)
+    engine._bl_insert_text(activeTab.id, toUTF8(e.data));
+  ime.value = '';
+});
+ime.addEventListener('input', (e) => {
+  if (composing || e.isComposing)
+    return;
+  if (activeTab && e.data && (e.inputType === 'insertText' || e.inputType === 'insertReplacementText'))
+    engine._bl_insert_text(activeTab.id, toUTF8(e.data));
+  ime.value = '';
+});
+ime.addEventListener('paste', (e) => {
+  if (!activeTab)
+    return;
+  const text = e.clipboardData?.getData('text/plain') ?? '';
+  engine._bl_set_clipboard_text(toUTF8(text));
+  const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
+  sendKey(activeTab, 0, fake);
+  sendKey(activeTab, 1, fake);
+  e.preventDefault();
+});
 
 function keyText(e) {
   if (e.ctrlKey || e.metaKey)
@@ -395,7 +592,7 @@ $('address-form').addEventListener('submit', (e) => {
     url = /^[^\s]+\.[^\s]+$/.test(url) ? 'https://' + url : 'https://duckduckgo.com/html/?q=' + encodeURIComponent(url);
   }
   engine._bl_load_url(activeTab.id, toUTF8(url));
-  activeTab.canvas.focus();
+  focusPage();
 });
 $('back').addEventListener('click', () => activeTab && engine._bl_go_back(activeTab.id));
 $('forward').addEventListener('click', () => activeTab && engine._bl_go_forward(activeTab.id));
@@ -407,6 +604,7 @@ $('reload').addEventListener('click', () => {
   else
     engine._bl_reload(activeTab.id);
 });
+$('clear-data').addEventListener('click', clearStorage);
 $('new-tab').addEventListener('click', () => {
   newTab('about:blank');
   $('address').focus();

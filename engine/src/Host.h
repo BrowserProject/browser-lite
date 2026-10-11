@@ -1,6 +1,7 @@
 // Nachrichten von der Engine an die Browser-Oberflaeche (Haupt-Thread der Seite).
 #pragma once
 
+#include <span>
 #include <wtf/text/WTFString.h>
 
 namespace BrowserLite {
@@ -15,6 +16,10 @@ void presentFrameToHost(int viewId, const uint8_t* pixels, int width, int height
 
 // Host moechte bei der naechsten Gelegenheit (requestAnimationFrame) bl_frame() aufrufen
 void requestFrameFromHost(int viewId);
+
+// Daten eines Downloads: ruft im Haupt-Thread Module.onEngineDownloadData(downloadId, bytes)
+// auf (bytes ist eine Kopie als Uint8Array).
+void sendDownloadData(int downloadId, std::span<const uint8_t>);
 
 String jsonEscape(const String&);
 

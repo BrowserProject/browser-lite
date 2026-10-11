@@ -6,6 +6,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "Host.h"
+#include "Storage.h"
 #include "Strategies.h"
 
 #include <WebCore/BackForwardController.h>
@@ -14,7 +15,9 @@
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentView.h>
+#include <WebCore/Editor.h>
 #include <WebCore/EventHandler.h>
+#include <WebCore/FileChooser.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -43,6 +46,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace BrowserLite {
 
@@ -57,6 +61,27 @@ static HashMap<int, WeakPtr<WebView>>& viewsByID()
 WebView* WebView::fromID(int id)
 {
     return viewsByID().get(id);
+}
+
+// Offene Views (Tabs). Die Oberflaeche oeffnet und schliesst sie, Popups
+// (window.open, target=_blank) oeffnet die Engine selber.
+static HashMap<int, Ref<WebView>>& openViews()
+{
+    static NeverDestroyed<HashMap<int, Ref<WebView>>> views;
+    return views;
+}
+
+WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
+{
+    Ref view = create(id, size, deviceScaleFactor);
+    auto& result = view.get();
+    openViews().set(id, WTF::move(view));
+    return result;
+}
+
+void WebView::close(int id)
+{
+    openViews().remove(id);
 }
 
 class SessionProvider final : public StorageSessionProvider {
@@ -83,6 +108,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.backForwardClient = BackForwardList::create();
     configuration.progressTrackerClient = makeUniqueRef<ProgressTrackerClient>(*this);
     configuration.cookieJar = CookieJar::create(SessionProvider::create());
+    configuration.storageNamespaceProvider = &storageNamespaceProvider();
+    configuration.databaseProvider = &databaseProvider();
 
     // Die Empty-Konfiguration ist fuer SVG-Bilder gedacht: alles gesandboxt,
     // kein Script. Fuer echte Seiten: ohne Sandbox und mit unserem FrameLoaderClient.
@@ -398,6 +425,41 @@ bool WebView::keyEvent(int type, const String& key, const String& code, const St
     auto platformType = type == 0 ? PlatformEvent::Type::KeyDown : PlatformEvent::Type::KeyUp;
     PlatformKeyboardEvent event { platformType, text, text, key, code, keyIdentifierForKey(key), keyCode, repeat, isKeypad, false, modifiersFromBits(modifiers), MonotonicTime::now() };
     return frame->eventHandler().keyEvent(event);
+}
+
+// Fertiger Text aus der Texteingabe des Hosts (IME, tote Tasten, Bildschirmtastatur)
+void WebView::insertText(const String& text)
+{
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame || text.isEmpty())
+        return;
+    frame->editor().insertText(text, nullptr);
+}
+
+void WebView::openFileChooser(FileChooser& chooser)
+{
+    if (m_fileChooser)
+        m_fileChooser->cancelFileChoosing();
+    m_fileChooser = &chooser;
+    auto& settings = chooser.settings();
+    StringBuilder accept;
+    for (auto& type : settings.acceptMIMETypes)
+        accept.append(accept.isEmpty() ? ""_s : ","_s, type);
+    for (auto& extension : settings.acceptFileExtensions)
+        accept.append(accept.isEmpty() ? ""_s : ","_s, extension);
+    notifyHost(m_id, "filechooser", makeString("{\"multiple\":"_s, settings.allowsMultipleFiles ? "true"_s : "false"_s,
+        ",\"accept\":\""_s, jsonEscape(accept.toString()), "\"}"_s));
+}
+
+void WebView::chooseFiles(const Vector<String>& paths)
+{
+    RefPtr chooser = std::exchange(m_fileChooser, nullptr);
+    if (!chooser)
+        return;
+    if (paths.isEmpty())
+        chooser->cancelFileChoosing();
+    else
+        chooser->chooseFiles(paths);
 }
 
 void WebView::setFocused(bool focused)

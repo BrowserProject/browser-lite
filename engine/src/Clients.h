@@ -44,6 +44,10 @@ private:
     bool runJavaScriptConfirm(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptPrompt(WebCore::LocalFrame&, const String& message, const String& defaultValue, String& result) final;
 
+    RefPtr<WebCore::Page> createWindow(WebCore::LocalFrame&, const String&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
+    void closeWindow() final;
+    void runOpenPanel(WebCore::LocalFrame&, WebCore::FileChooser&) final;
+
     void triggerRenderingUpdate() final;
     bool scheduleRenderingUpdate() final;
 

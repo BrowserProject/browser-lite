@@ -7,6 +7,8 @@
 #include "Clients.h"
 
 #include "Engine.h"
+#include "Host.h"
+#include "LoaderStrategy.h"
 #include "WebView.h"
 
 #include <JavaScriptCore/ConsoleTypes.h>
@@ -15,6 +17,7 @@
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentPage.h>
 #include <WebCore/DocumentView.h>
+#include <WebCore/FileChooser.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -35,9 +38,11 @@
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StringWithDirection.h>
 #include <WebCore/UserAgent.h>
+#include <WebCore/WindowFeatures.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
 #include <wtf/RunLoop.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
@@ -169,6 +174,27 @@ bool ChromeClient::runJavaScriptPrompt(LocalFrame&, const String& message, const
     return true;
 }
 
+// Neuer Tab fuer window.open / target=_blank. Die Engine vergibt die ID selber
+// (ab 2^20, die Oberflaeche zaehlt ab 1) und meldet den Tab der Oberflaeche.
+RefPtr<Page> ChromeClient::createWindow(LocalFrame&, const String&, const WindowFeatures&, const NavigationAction&)
+{
+    static int nextPopupID = 1 << 20;
+    int id = nextPopupID++;
+    auto& popup = WebView::open(id, m_view->size(), m_view->deviceScaleFactor());
+    notifyHost(id, "newview", makeString("{\"opener\":"_s, m_view->id(), '}'));
+    return &popup.page();
+}
+
+void ChromeClient::runOpenPanel(LocalFrame&, FileChooser& chooser)
+{
+    m_view->openFileChooser(chooser);
+}
+
+void ChromeClient::closeWindow()
+{
+    notifyHost(m_view->id(), "close");
+}
+
 void ChromeClient::triggerRenderingUpdate()
 {
     m_view->scheduleRenderingUpdate();
@@ -201,26 +227,25 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
     function(PolicyAction::Use);
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest&, const String&, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest& request, const String& downloadAttribute, FramePolicyFunction&& function)
 {
-    // Downloads (Content-Disposition: attachment, unbekannte Typen) kommen in Phase 6
-    if (!response.isAttachment() && canShowMIMEType(response.mimeType()))
+    if (!response.isAttachment() && downloadAttribute.isNull() && canShowMIMEType(response.mimeType())) {
         function(PolicyAction::Use);
-    else
-        function(PolicyAction::Ignore);
+        return;
+    }
+    // Download (Content-Disposition: attachment, <a download>, unbekannter Typ):
+    // nochmal mit eigenem Request laden, die Daten gehen an die Oberflaeche.
+    // Die URL der Antwort ist schon das Ziel nach allen Redirects.
+    auto downloadRequest = request;
+    downloadRequest.setURL(URL { response.url() });
+    startDownload(m_view->id(), downloadRequest, downloadAttribute);
+    function(PolicyAction::Ignore);
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest& request, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
 {
-    // Neue Fenster/Tabs (target=_blank, window.open): vorerst im selben View
-    // oeffnen statt nichts zu tun. Echte Tabs kommen mit der UI (Phase 6).
-    if (request.url().protocolIsInHTTPFamily()) {
-        WTF::RunLoop::mainSingleton().dispatch([view = WeakPtr { m_view.get() }, url = request.url().isolatedCopy()] {
-            if (view)
-                view->loadURL(url.string());
-        });
-    }
-    function(PolicyAction::Ignore);
+    // Neue Fenster (target=_blank, window.open) werden neue Tabs, siehe ChromeClient::createWindow
+    function(PolicyAction::Use);
 }
 
 bool FrameLoaderClient::canShowMIMEType(const String& mimeType) const

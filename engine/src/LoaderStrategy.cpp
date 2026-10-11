@@ -10,6 +10,7 @@
 #include "LoaderStrategy.h"
 
 #include "Engine.h"
+#include "Host.h"
 #include "Strategies.h"
 
 #include <WebCore/CachedResource.h>
@@ -32,6 +33,7 @@
 #include <WebCore/UserAgent.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
@@ -299,6 +301,86 @@ private:
     RefPtr<PingLoad> m_self;
     ResourceResponse m_response;
 };
+
+// Download: eigener CurlRequest, die Daten gehen stueckweise an die Oberflaeche,
+// die daraus eine Datei (Blob) macht.
+class Download final : public RefCounted<Download>, public CurlRequestClient {
+public:
+    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename)
+    {
+        static int nextID = 1;
+        if (request.httpUserAgent().isEmpty())
+            request.setHTTPUserAgent(standardUserAgent());
+        addCookieHeader(request);
+        Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename));
+        download->m_self = download.ptr();
+        download->m_request = CurlRequest::create(request, download.get());
+        download->m_request->resume();
+    }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+private:
+    Download(int id, int viewId, const String& suggestedFilename)
+        : m_id(id)
+        , m_viewId(viewId)
+        , m_filename(suggestedFilename)
+    {
+    }
+
+    void finish(const String& error)
+    {
+        notifyHost(m_viewId, "download-done", makeString("{\"id\":"_s, m_id, ",\"error\":\""_s, jsonEscape(error), "\"}"_s));
+        if (auto request = std::exchange(m_request, nullptr))
+            request->invalidateClient();
+        m_self = nullptr; // gibt uns frei
+    }
+
+    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
+    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
+    {
+        Ref protectedThis { *this };
+        ResourceResponse response(curlResponse);
+        String filename = m_filename;
+        if (filename.isEmpty())
+            filename = response.suggestedFilename();
+        if (filename.isEmpty())
+            filename = response.url().lastPathComponent().toString();
+        if (filename.isEmpty())
+            filename = "download"_s;
+        notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, jsonEscape(response.url().string()),
+            "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
+            "\",\"size\":"_s, response.expectedContentLength(), '}'));
+        request.completeDidReceiveResponse();
+    }
+    void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
+    {
+        sendDownloadData(m_id, buffer->span());
+    }
+    void curlDidComplete(CurlRequest&, NetworkLoadMetrics&&) final
+    {
+        Ref protectedThis { *this };
+        finish({ });
+    }
+    void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
+    {
+        Ref protectedThis { *this };
+        finish(error.localizedDescription().isEmpty() ? "Fehler"_s : error.localizedDescription());
+    }
+
+    int m_id;
+    int m_viewId;
+    String m_filename;
+    RefPtr<CurlRequest> m_request;
+    RefPtr<Download> m_self;
+};
+
+void startDownload(int viewId, const ResourceRequest& request, const String& suggestedFilename)
+{
+    auto copy = request;
+    Download::start(viewId, WTF::move(copy), suggestedFilename);
+}
 
 class WasmLoaderStrategy final : public LoaderStrategy {
 private:

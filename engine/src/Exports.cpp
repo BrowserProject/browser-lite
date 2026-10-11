@@ -10,16 +10,8 @@
 
 #include <WebCore/WasmPlatform.h>
 #include <emscripten/emscripten.h>
-#include <wtf/HashMap.h>
-#include <wtf/NeverDestroyed.h>
 
 using namespace BrowserLite;
-
-static HashMap<int, Ref<WebView>>& views()
-{
-    static NeverDestroyed<HashMap<int, Ref<WebView>>> views;
-    return views;
-}
 
 static String takeString(char* utf8)
 {
@@ -44,14 +36,14 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE void bl_create_view(int id, int width, int height, float deviceScaleFactor)
 {
     runOnEngineThread([=] {
-        views().set(id, WebView::create(id, { width, height }, deviceScaleFactor));
+        WebView::open(id, { width, height }, deviceScaleFactor);
     });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_destroy_view(int id)
 {
     runOnEngineThread([=] {
-        views().remove(id);
+        WebView::close(id);
     });
 }
 
@@ -108,6 +100,19 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
 {
     withView(id, [=, key = takeString(key), code = takeString(code), text = takeString(text)](WebView& view) {
         view.keyEvent(type, key, code, text, keyCode, repeat, modifiers);
+    });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_insert_text(int id, char* text)
+{
+    withView(id, [text = takeString(text)](WebView& view) { view.insertText(text); });
+}
+
+// paths: Pfade im virtuellen Dateisystem, mit Zeilenumbruch getrennt. Leer = abgebrochen.
+EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
+{
+    withView(id, [paths = takeString(paths)](WebView& view) {
+        view.chooseFiles(paths.split('\n'));
     });
 }
 

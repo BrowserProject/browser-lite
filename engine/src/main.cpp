@@ -7,6 +7,7 @@
 
 #include "Engine.h"
 #include "Host.h"
+#include "Storage.h"
 #include "Strategies.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
@@ -32,6 +33,7 @@ int main(int, char**)
     JSC::initialize();
     WTF::initializeMainThread();
     WebCore::initializeCommonAtomStrings();
+    initializeStorage();
     installPlatformStrategies();
     initializeEngineLoop();
 

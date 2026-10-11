@@ -7,6 +7,7 @@
 #include "Strategies.h"
 
 #include "LoaderStrategy.h"
+#include "Storage.h"
 
 #include <WebCore/BlobDataFileReference.h>
 #include <WebCore/BlobPart.h>
@@ -33,10 +34,10 @@ using namespace WebCore;
 
 NetworkStorageSession& networkStorageSession()
 {
-    // Cookies in SQLite unter /data (spaeter OPFS, Phase 7). Bis dahin im Speicher.
+    // Cookies in SQLite unter /data (siehe Storage.h)
     static NeverDestroyed<std::unique_ptr<NetworkStorageSession>> session = [] {
         auto session = makeUnique<NetworkStorageSession>(PAL::SessionID::defaultSessionID(), String { });
-        session->setCookieDatabase(makeUniqueRef<CookieJarDB>(":memory:"_s));
+        session->setCookieDatabase(makeUniqueRef<CookieJarDB>(cookieDatabasePath()));
         return session;
     }();
     return *session.get();

@@ -42,6 +42,19 @@ void requestFrameFromHost(int viewId)
     }, viewId);
 }
 
+void sendDownloadData(int downloadId, std::span<const uint8_t> data)
+{
+    if (data.empty())
+        return;
+    auto* copy = static_cast<uint8_t*>(malloc(data.size()));
+    memcpy(copy, data.data(), data.size());
+    MAIN_THREAD_ASYNC_EM_ASM({
+        if (Module.onEngineDownloadData)
+            Module.onEngineDownloadData($0, HEAPU8.slice($1, $1 + $2));
+        _free($1);
+    }, downloadId, copy, data.size());
+}
+
 String jsonEscape(const String& input)
 {
     StringBuilder builder;
