@@ -6,9 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Ein laufender Lauf wird nicht abgebrochen (ein voller WebKit-Build dauert
+# Stunden). Neue Pushes warten, und nur der neueste wartende Lauf startet danach.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
