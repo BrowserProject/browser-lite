@@ -19,9 +19,9 @@ jobs:
     name: Lint (Shell-Skripte, Pins)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: shellcheck
-        run: shellcheck -x tools/*.sh
+        run: shellcheck -x tools/*.sh deps/*.sh deps/recipes/*.sh
       - name: versions.env pruefen
         run: |
           # Nur KEY=VALUE oder Kommentare, keine Leerzeichen im Wert
@@ -35,7 +35,7 @@ jobs:
     outputs:
       image: ${{ steps.tag.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Image-Tag berechnen
         id: tag
         run: |
@@ -77,15 +77,97 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: tools/check-toolchain.sh
 
   webkit-source:
     name: WebKit holen + Patches pruefen
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: WebKit (gepinnt, sparse)
         run: tools/fetch-webkit.sh
       - name: Patches anwendbar?
         run: tools/apply-patches.sh --check
+
+  deps:
+    name: Dependencies nach WASM
+    needs: toolchain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    container:
+      image: ${{ needs.toolchain.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      BL_JOBS: 4
+    steps:
+      - uses: actions/checkout@v5
+      - name: Downloads aus dem Cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/downloads
+          key: downloads-${{ hashFiles('deps/sources.txt') }}
+          restore-keys: downloads-
+      - name: sysroot aus dem Cache
+        id: sysroot-cache
+        uses: actions/cache@v4
+        with:
+          path: sysroot
+          key: sysroot-${{ needs.toolchain.outputs.image }}-${{ hashFiles('deps/**') }}
+          # Aelteren Stand nehmen, build-all.sh baut per Stamp nur was sich geaendert hat
+          restore-keys: sysroot-${{ needs.toolchain.outputs.image }}-
+      - name: Dependencies bauen
+        run: deps/build-all.sh
+      - name: Smoke-Test (alle Libs gelinkt, laeuft in node)
+        run: deps/test.sh
+      - name: sysroot fuer spaetere Jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysroot
+          path: sysroot
+          retention-days: 7
+
+  jsc:
+    name: JavaScriptCore (CLoop) + Tests
+    needs: [toolchain, deps]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    container:
+      image: ${{ needs.toolchain.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      BL_JOBS: 4
+      CCACHE_DIR: ${{ github.workspace }}/build/ccache
+      CCACHE_MAXSIZE: 3G
+    steps:
+      - uses: actions/checkout@v5
+      - name: sysroot holen
+        uses: actions/download-artifact@v4
+        with:
+          name: sysroot
+          path: sysroot
+      - name: WebKit holen + Patches anwenden
+        run: |
+          git config --global --add safe.directory '*'
+          tools/fetch-webkit.sh
+          tools/apply-patches.sh
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: build/ccache
+          key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
+          restore-keys: ccache-jsc-${{ needs.toolchain.outputs.image }}-
+      - name: jsc bauen
+        run: tools/build-jsc.sh
+      - name: Tests (inkl. GC-Stresstest)
+        run: tests/jsc/run.sh
+      - name: jsc als Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: jsc-wasm
+          path: build/jsc/bin/jsc.*
+          retention-days: 7

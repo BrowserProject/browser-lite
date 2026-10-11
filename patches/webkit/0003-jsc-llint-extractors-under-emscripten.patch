@@ -1,0 +1,60 @@
+diff --git a/Source/JavaScriptCore/CMakeLists.txt b/Source/JavaScriptCore/CMakeLists.txt
+index 0cd2c74897..547ba02da3 100644
+--- a/Source/JavaScriptCore/CMakeLists.txt
++++ b/Source/JavaScriptCore/CMakeLists.txt
+@@ -343,11 +343,21 @@ add_custom_command(
+     COMMAND ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_settings_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredSettings.h ${OFFLINE_ASM_BACKEND} ${OFFLINE_ASM_ARGS}
+     VERBATIM)
+ 
++# offlineasm sucht magische Werte direkt im Binary der Extractor-Programme.
++# Unter Emscripten ist $<TARGET_FILE> nur der .js-Loader, die Daten stehen in der .wasm.
++if (EMSCRIPTEN)
++    set(LLINT_SETTINGS_EXTRACTOR_BINARY $<TARGET_FILE_DIR:LLIntSettingsExtractor>/LLIntSettingsExtractor.wasm)
++    set(LLINT_OFFSETS_EXTRACTOR_BINARY $<TARGET_FILE_DIR:LLIntOffsetsExtractor>/LLIntOffsetsExtractor.wasm)
++else ()
++    set(LLINT_SETTINGS_EXTRACTOR_BINARY $<TARGET_FILE:LLIntSettingsExtractor>)
++    set(LLINT_OFFSETS_EXTRACTOR_BINARY $<TARGET_FILE:LLIntOffsetsExtractor>)
++endif ()
++
+ add_custom_command(
+     OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredOffsets.h
+     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/offlineasm/generate_offset_extractor.rb
+     DEPENDS LLIntSettingsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmOps.h
+-    COMMAND ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_offset_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm $<TARGET_FILE:LLIntSettingsExtractor> ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredOffsets.h ${OFFLINE_ASM_BACKEND} ${BUILD_VARIANTS} ${OFFLINE_ASM_ARGS}
++    COMMAND ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_offset_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm ${LLINT_SETTINGS_EXTRACTOR_BINARY} ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredOffsets.h ${OFFLINE_ASM_BACKEND} ${BUILD_VARIANTS} ${OFFLINE_ASM_ARGS}
+     VERBATIM)
+ 
+ # JSCBuiltins
+@@ -435,6 +445,11 @@ set(LLIntSettingsExtractor_DEPENDENCIES
+ )
+ set_property(TARGET LLIntSettingsExtractor PROPERTY SKIP_CODESIGN YES)
+ WEBKIT_EXECUTABLE(LLIntSettingsExtractor)
++if (EMSCRIPTEN)
++    # wasm-opt (ab -O1) teilt Datensegmente an Null-Bereichen auf. Dann findet
++    # offlineasm die magischen Werte nicht mehr. Darum ohne Optimierung linken.
++    target_link_options(LLIntSettingsExtractor PRIVATE "-O0")
++endif ()
+ 
+ # LLIntSettingsExtractor target needs to have a direct or indirect
+ # dependency to Bytecodes target for CMake Visual Studio generator to
+@@ -463,6 +478,11 @@ set(LLIntOffsetsExtractor_DEPENDENCIES
+ )
+ set_property(TARGET LLIntOffsetsExtractor PROPERTY SKIP_CODESIGN YES)
+ WEBKIT_EXECUTABLE(LLIntOffsetsExtractor)
++if (EMSCRIPTEN)
++    # wasm-opt (ab -O1) teilt Datensegmente an Null-Bereichen auf. Dann findet
++    # offlineasm die magischen Werte nicht mehr. Darum ohne Optimierung linken.
++    target_link_options(LLIntOffsetsExtractor PRIVATE "-O0")
++endif ()
+ 
+ # The build system will execute asm.rb every time LLIntOffsetsExtractor's mtime is newer than
+ # LLIntAssembly.h's mtime. The problem we have here is: asm.rb has some built-in optimization
+@@ -476,7 +496,7 @@ add_custom_command(
+     OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput}
+     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/offlineasm/asm.rb
+     DEPENDS LLIntOffsetsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm
+-    COMMAND ${CMAKE_COMMAND} -E env CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID} GCC_OFFLINEASM_SOURCE_MAP=${GCC_OFFLINEASM_SOURCE_MAP} ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/asm.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm $<TARGET_FILE:LLIntOffsetsExtractor> ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput} ${BUILD_VARIANTS} ${OFFLINE_ASM_ARGS} ${OFFLINE_ASM_FORMAT_ARGS}
++    COMMAND ${CMAKE_COMMAND} -E env CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID} GCC_OFFLINEASM_SOURCE_MAP=${GCC_OFFLINEASM_SOURCE_MAP} ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/asm.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm ${LLINT_OFFSETS_EXTRACTOR_BINARY} ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput} ${BUILD_VARIANTS} ${OFFLINE_ASM_ARGS} ${OFFLINE_ASM_FORMAT_ARGS}
+     COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput}
+     WORKING_DIRECTORY ${JavaScriptCore_DERIVED_SOURCES_DIR}
+     VERBATIM)

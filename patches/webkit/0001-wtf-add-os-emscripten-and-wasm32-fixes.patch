@@ -1,0 +1,64 @@
+diff --git a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
+index 26e825ace4..b7d6bff329 100644
+--- a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
++++ b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
+@@ -68,7 +68,7 @@ uint32_t computeJSCBytecodeCacheVersion()
+         }
+         cacheVersion.construct(0);
+         dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
+-#elif OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(HAIKU) && !OS(QNX)
++#elif OS(UNIX) && !PLATFORM(PLAYSTATION) && !OS(HAIKU) && !OS(QNX) && !OS(EMSCRIPTEN)
+         auto result = ([&] -> std::optional<uint32_t> {
+             Dl_info info { };
+             if (!dladdr(jsFunctionAddr, &info))
+diff --git a/Source/JavaScriptCore/runtime/Options.cpp b/Source/JavaScriptCore/runtime/Options.cpp
+index 683bc60a7a..4a2eb2ab45 100644
+--- a/Source/JavaScriptCore/runtime/Options.cpp
++++ b/Source/JavaScriptCore/runtime/Options.cpp
+@@ -233,7 +233,7 @@ std::optional<OptionsStorage::Unsigned> parse(const char* string)
+     return std::nullopt;
+ }
+ 
+-#if CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU)
++#if CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU) || OS(EMSCRIPTEN)
+ template<>
+ std::optional<OptionsStorage::Size> parse(const char* string)
+ {
+@@ -242,7 +242,7 @@ std::optional<OptionsStorage::Size> parse(const char* string)
+         return value;
+     return std::nullopt;
+ }
+-#endif // CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU)
++#endif // CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU) || OS(EMSCRIPTEN)
+ 
+ template<>
+ std::optional<OptionsStorage::Double> parse(const char* string)
+diff --git a/Source/WTF/wtf/PlatformOS.h b/Source/WTF/wtf/PlatformOS.h
+index e3184e90a1..d16a511b69 100644
+--- a/Source/WTF/wtf/PlatformOS.h
++++ b/Source/WTF/wtf/PlatformOS.h
+@@ -92,6 +92,11 @@
+ #define WTF_OS_FREEBSD 1
+ #endif
+ 
++/* OS(EMSCRIPTEN) - WebAssembly via Emscripten (browser-lite) */
++#if defined(__EMSCRIPTEN__)
++#define WTF_OS_EMSCRIPTEN 1
++#endif
++
+ /* OS(FUCHSIA) - Fuchsia */
+ #if defined(__Fuchsia__)
+ #define WTF_OS_FUCHSIA 1
+diff --git a/Source/WTF/wtf/RawHex.h b/Source/WTF/wtf/RawHex.h
+index ad348c937c..6aed65c066 100644
+--- a/Source/WTF/wtf/RawHex.h
++++ b/Source/WTF/wtf/RawHex.h
+@@ -51,7 +51,7 @@ public:
+         : RawHex(static_cast<uintptr_t>(value))
+     { }
+ 
+-#if CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU)
++#if CPU(ADDRESS64) || OS(DARWIN) || OS(HAIKU) || OS(EMSCRIPTEN)
+     // These causes build errors for CPU(ADDRESS32) on some ports because int32_t
+     // is already handled by intptr_t, and uint32_t is handled by uintptr_t.
+     explicit RawHex(int32_t value)

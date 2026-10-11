@@ -53,12 +53,14 @@ aussieht. In WASM gibt es zwei Stacks:
 
 Wenn ein Pointer auf ein JS-Objekt nur in einem WASM-Local liegt, sieht der GC ihn nicht
 und kann das Objekt freigeben, obwohl es noch gebraucht wird. Das gibt seltene, schwer
-reproduzierbare Abstuerze. Loesungsansaetze (wird in Phase 2 geklaert):
+reproduzierbare Abstuerze.
 
-- Binaryen-Pass `--spill-pointers`: alle pointer-grossen Locals werden vor Calls auf den
-  Shadow-Stack geschrieben, der GC scannt dann den Shadow-Stack.
-- Fallback: GC nur an sicheren Punkten laufen lassen (wenn der Event-Loop leer ist und
-  kein JS/C++ mehr auf dem Stack ist).
+**Geloest in Phase 2** mit dem Binaryen-Pass `--spill-pointers` (Link-Flag
+`-sBINARYEN_EXTRA_PASSES=--spill-pointers`): alle pointer-grossen Locals werden vor Calls auf
+den Shadow-Stack geschrieben, und den scannt der GC sowieso. Nachweis mit
+`tests/jsc/gc-stress.js` und `--slowPathAllocsBetweenGCs=10`: ohne Pass 0/5 Laeufe ok
+(Absturz in `Structure::materializePropertyTable`), mit Pass 5/5 ok. Der Pass gilt fuer das
+ganze Binary (JSC und spaeter WebCore). Kosten an Groesse und Speed messen wir noch.
 
 Ausserdem: `Thread::suspend` geht in WASM nicht (keine Signale). Darum pro JS-VM nur ein
 Thread, Sampling-Profiler aus.

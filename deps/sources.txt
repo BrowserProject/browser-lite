@@ -1,0 +1,23 @@
+# Quellen aller Dependencies, fix gepinnt.
+# Format:  name  tar  version  url                 sha256
+#          name  git  version  repo-url            commit
+# Reihenfolge hier ist egal, die Build-Reihenfolge steht in deps/build-all.sh.
+zlib          tar  1.3.1     https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz                                  9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+brotli        git  v1.1.0    https://github.com/google/brotli.git                                                                       ed738e842d2fbdf2d6459e39267a633c4a9b2f5d
+zstd          tar  1.5.7     https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz                                eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+libpng        tar  1.6.58    https://download.sourceforge.net/libpng/libpng-1.6.58.tar.xz                                               28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775
+libjpeg-turbo tar  3.1.4     https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.4/libjpeg-turbo-3.1.4.tar.gz          e23d3ebb2c6ee4d0e2a5823dbb55b614845df5ea3435c956fed5cf04041a87ad
+libwebp       tar  1.6.0     https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz                e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564
+expat         tar  2.8.5     https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz                          1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182
+libxml2       tar  2.15.3    https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.3.tar.xz                                      78262a6e7ac170d6528ebfe2efccdf220191a5af6a6cd61ea4a9a9a5042c7a07
+libxslt       tar  1.1.45    https://download.gnome.org/sources/libxslt/1.1/libxslt-1.1.45.tar.xz                                       9acfe68419c4d06a45c550321b3212762d92f41465062ca4ea19e632ee5d216e
+sqlite        tar  3.53.4    https://www.sqlite.org/2026/sqlite-autoconf-3530400.tar.gz                                                 0e9483900e92cd5de8fd48d16bf9200145a61f7fd5be542a5ac81d8a9516eb9c
+icu           tar  78.1      https://github.com/unicode-org/icu/releases/download/release-78.1/icu4c-78.1-sources.tgz                    6217f58ca39b23127605cfc6c7e0d3475fe4b0d63157011383d716cb41617886
+freetype      tar  2.14.1    https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz                                 32427e8c471ac095853212a37aef816c60b42052d4d9e48230bab3bdf2936ccc
+harfbuzz      tar  14.5.1    https://github.com/harfbuzz/harfbuzz/releases/download/14.5.1/harfbuzz-14.5.1.tar.xz                       7e2fa4e8c7c98e8d8140671f5772542afaaa6acccfbd746506886b6d85f7f8d6
+fontconfig    tar  2.17.1    https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.17.1/fontconfig-2.17.1.tar.xz 9f5cae93f4fffc1fbc05ae99cdfc708cd60dfd6612ffc0512827025c026fa541
+woff2         git  v1.0.2    https://github.com/google/woff2.git                                                                        1bccf208bca986e53a647dfe4811322adb06ecf8
+libpsl        tar  0.23.3    https://github.com/rockdaboot/libpsl/releases/download/0.23.3/libpsl-0.23.3.tar.gz                         93941f85a1e7bd593fa94f299233cb5dfc91cd144fd9a78a6ceb75001c5b03be
+openssl       tar  3.5.4     https://github.com/openssl/openssl/releases/download/openssl-3.5.4/openssl-3.5.4.tar.gz                    967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99
+nghttp2       tar  1.68.0    https://github.com/nghttp2/nghttp2/releases/download/v1.68.0/nghttp2-1.68.0.tar.xz                         5511d3128850e01b5b26ec92bf39df15381c767a63441438b25ad6235def902c
+curl          tar  8.20.0    https://curl.se/download/curl-8.20.0.tar.xz                                                                63fe2dc148ba0ceae89922ef838f7e5c946272c2e78b7c59fab4b79d3ce2b896

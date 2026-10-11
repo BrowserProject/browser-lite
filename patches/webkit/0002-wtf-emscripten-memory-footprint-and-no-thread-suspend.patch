@@ -1,0 +1,62 @@
+diff --git a/Source/WTF/wtf/generic/MemoryFootprintGeneric.cpp b/Source/WTF/wtf/generic/MemoryFootprintGeneric.cpp
+index 393310d007..9f0722f4c2 100644
+--- a/Source/WTF/wtf/generic/MemoryFootprintGeneric.cpp
++++ b/Source/WTF/wtf/generic/MemoryFootprintGeneric.cpp
+@@ -29,12 +29,22 @@
+ #include <wtf/MemoryFootprint.h>
+ #include <wtf/Platform.h>
+ 
++#if OS(EMSCRIPTEN)
++#include <malloc.h>
++#endif
++
+ namespace WTF {
+ 
+ size_t memoryFootprint()
+ {
++#if OS(EMSCRIPTEN)
++    // WASM: es gibt nur einen Linear Memory. Belegt ist, was malloc vergeben hat.
++    struct mallinfo info = mallinfo();
++    return static_cast<size_t>(info.uordblks) + static_cast<size_t>(info.hblkhd);
++#else
+     auto memoryUse = memoryStatus();
+     return memoryUse.memoryFootprint;
++#endif
+ }
+ 
+ } // namespace WTF
+diff --git a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
+index a64641f83b..2dc0c62081 100644
+--- a/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
++++ b/Source/WTF/wtf/posix/ThreadingPOSIX.cpp
+@@ -179,10 +179,16 @@ void Thread::signalHandlerSuspendResume(int, siginfo_t*, void* ucontext)
+ 
+     // Reaching here, sigThreadSuspendResume is blocked in this handler (this is configured by sigaction's sa_mask).
+     // So before calling sigsuspend, sigThreadSuspendResume to this thread is deferred. This ensures that the handler is not executed recursively.
++#if OS(EMSCRIPTEN)
++    // WASM hat keine echten Signale, Threads koennen nicht angehalten werden.
++    // Thread::suspend() bricht darum schon vorher ab, hier kommen wir nie hin.
++    RELEASE_ASSERT_NOT_REACHED();
++#else
+     sigset_t blockedSignalSet;
+     sigfillset(&blockedSignalSet);
+     sigdelset(&blockedSignalSet, g_wtfConfig.sigThreadSuspendResume);
+     sigsuspend(&blockedSignalSet);
++#endif
+ 
+     thread->m_platformRegisters = nullptr;
+ 
+@@ -575,7 +581,12 @@ bool Thread::signal(int signalNumber)
+ auto Thread::suspend(const ThreadSuspendLocker&) -> Expected<void, PlatformSuspendError>
+ {
+     RELEASE_ASSERT_WITH_MESSAGE(this != &Thread::currentSingleton(), "We do not support suspending the current thread itself.");
+-#if OS(DARWIN)
++#if OS(EMSCRIPTEN)
++    // Ohne Signale kann man in WASM keinen anderen Thread anhalten. Darum darf es
++    // pro JS-VM nur einen Thread geben und der Sampling-Profiler bleibt aus.
++    RELEASE_ASSERT_NOT_REACHED_WITH_MESSAGE("Thread::suspend is not supported on Emscripten");
++    return makeUnexpected(ENOTSUP);
++#elif OS(DARWIN)
+     kern_return_t result = thread_suspend(m_platformThread);
+     if (result != KERN_SUCCESS)
+         return makeUnexpected(result);

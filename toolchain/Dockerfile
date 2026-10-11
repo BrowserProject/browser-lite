@@ -31,7 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gperf \
         libtool \
         make \
-        meson \
         ninja-build \
         patch \
         perl \
@@ -72,6 +71,10 @@ RUN true \
     && rm -f /tmp/warm* \
     && chmod -R a+rwX "$EM_CACHE"
 
-RUN emcc --version && node --version && cmake --version && ninja --version
+# Meson aus pip: Ubuntu hat nur 1.3, fontconfig braucht >= 1.6.1
+ARG MESON_VERSION=1.12.0
+RUN pip install --no-cache-dir --break-system-packages "meson==${MESON_VERSION}"
+
+RUN emcc --version && node --version && meson --version && cmake --version && ninja --version
 
 WORKDIR /src

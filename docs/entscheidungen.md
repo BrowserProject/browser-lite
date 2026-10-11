@@ -18,3 +18,7 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 12 | Build | GitHub Actions mit Docker-Toolchain-Image | Repo ist public, gleiche Umgebung lokal und in CI |
 | 13 | Referenz | WebkitWasm (theogbob) nur als Referenz, kein Fork | Wir wollen eine saubere, reproduzierbare Basis. Lizenz ist BSD-2-Clause, Uebernahmen sind mit Copyright-Hinweis erlaubt |
 | 14 | Lizenz | BSD-2-Clause fuer eigenen Code | Kompatibel mit WebKit (LGPL/BSD) und mit der Referenz |
+| 15 | Meson | Aus pip (gepinnt) statt Ubuntu-Paket | fontconfig 2.17 braucht Meson >= 1.6.1, Ubuntu 24.04 hat 1.3 |
+| 16 | ICU-Daten | Selber aus dem Host-Archiv als `libicudata.a` | Im Cross-Build baut ICU nur Stub-Daten |
+| 17 | GC-Wurzeln | `--spill-pointers` fuer das ganze Binary | Ohne gehen lebende Objekte verloren (mit Stresstest bewiesen) |
+| 18 | Erster JSC-Build | `PORT=JSCOnly` mit Patches, eigener `PORT=Wasm` erst fuer WebCore | JSCOnly reicht fuer JSC, so bleiben die Patches klein |

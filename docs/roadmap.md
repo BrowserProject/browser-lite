@@ -3,7 +3,7 @@
 Jede Phase endet mit etwas das in CI getestet wird. Die grossen Risiken (Build in CI, GC)
 kommen zuerst.
 
-## Phase 0: Grundlagen  (in Arbeit)
+## Phase 0: Grundlagen  (fertig)
 - [x] Repo-Struktur, Lizenz, Doku
 - [x] Versions-Pins in `versions.env` (WebKit `wpewebkit-2.54.1`, Emscripten 6.0.10)
 - [x] WebKit holen (shallow, sparse, blobless) + Patch-Workflow
@@ -11,15 +11,27 @@ kommen zuerst.
 - [x] CI: Lint, Toolchain-Image bauen + testen, WebKit holen + Patches pruefen
 - [x] Referenzprojekt WebkitWasm analysiert ([Notizen](referenz-webkitwasm.md))
 
-## Phase 1: Dependencies nach WASM
-zlib, brotli, zstd, libpng, libjpeg-turbo, libwebp, freetype, harfbuzz, fontconfig, woff2,
-ICU (>= 70.1, Daten reduziert), libxml2, libxslt, sqlite, OpenSSL, nghttp2, libcurl, Skia.
-Alles mit `-pthread`, gepinnt mit Hash, in ein `sysroot/`. Fonts: Noto-Set.
-Test: kleines Testprogramm pro Lib.
+## Phase 1: Dependencies nach WASM  (fertig)
+- [x] 19 Libs gepinnt mit SHA256/Commit in `deps/sources.txt`, ein Rezept pro Lib in `deps/recipes/`
+- [x] `deps/build-all.sh` mit Stamps (baut nur neu was sich geaendert hat)
+- [x] Smoke-Test `deps/test.sh`: alle Libs in ein Programm gelinkt, laeuft in node
+- [x] CI-Job `deps` (mit Cache)
+- Erkenntnisse: ICU baut im Cross-Build nur Stub-Daten, wir machen `libicudata.a` selber aus dem
+  Host-Archiv (`genccode -e icudt78`). fontconfig braucht Meson >= 1.6 (aus pip). Die woff2-Tools
+  linken ohne brotlicommon. ICU-Daten sind noch voll (33 MB), Filter kommt in Phase 8.
+- Skia ist nicht dabei: es ist in WebKit enthalten (`Source/ThirdParty/skia`) und wird mit WebKit gebaut.
+- Fonts (Noto) kommen in Phase 4, wenn wir sie zum ersten Mal brauchen.
 
-## Phase 2: JavaScriptCore im Browser
-CLoop, kein JIT. GC-Stackscanning loesen (siehe [Architektur](architektur.md)).
-`jsc`-Shell als WASM. Test: test262-Teilmenge + GC-Stresstests in headless Chromium.
+## Phase 2: JavaScriptCore im Browser  (in Arbeit)
+- [x] JSC (PORT=JSCOnly, CLoop, kein JIT) baut und linkt mit Emscripten (`tools/build-jsc.sh`)
+- [x] `jsc`-Shell laeuft in node (`tests/jsc/run.sh`)
+- [x] **GC-Problem bestaetigt und geloest:** Ohne Massnahme stuerzt der GC-Stresstest
+  (`--slowPathAllocsBetweenGCs=10`) in 5 von 5 Laeufen ab (in `materializePropertyTable`, genau
+  wie der offene Discord-Absturz im Referenzprojekt). Mit `--spill-pointers` laufen 5 von 5 durch.
+- [x] Patches 0001-0004 (OS(EMSCRIPTEN), wasm32-Fixes, kein Thread::suspend, LLInt-Extractors, Debug-Flags)
+- [x] CI-Job `jsc` mit ccache und Tests
+- [ ] Groesse/Speed von `--spill-pointers` messen und optimieren
+- [ ] jsc im Browser (headless Chromium) statt nur node
 
 ## Phase 3: WTF + WebCore bauen (`PORT=Wasm`)
 `OptionsWasm.cmake` + `PlatformWasm.cmake`. Viele Features erstmal aus (Media, WebRTC,

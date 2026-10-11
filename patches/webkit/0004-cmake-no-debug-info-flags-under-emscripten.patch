@@ -1,0 +1,28 @@
+diff --git a/Source/cmake/WebKitCompilerFlags.cmake b/Source/cmake/WebKitCompilerFlags.cmake
+index 0793c78950..7942b46255 100644
+--- a/Source/cmake/WebKitCompilerFlags.cmake
++++ b/Source/cmake/WebKitCompilerFlags.cmake
+@@ -177,7 +177,9 @@ if (DEVELOPER_MODE OR ARM)
+ endif ()
+ 
+ if (COMPILER_IS_GCC_OR_CLANG)
+-    if (NOT APPLE AND (COMPILER_IS_CLANG OR (DEVELOPER_MODE AND NOT ARM)))
++    # Emscripten: emcc wertet jedes -g... Flag als "Debug-Info gewuenscht" und
++    # schaltet dann die Binaryen-Optimierungen ab. Darum diese Flags weglassen.
++    if (NOT EMSCRIPTEN AND NOT APPLE AND (COMPILER_IS_CLANG OR (DEVELOPER_MODE AND NOT ARM)))
+         # Split debug information in ".debug_types" / ".debug_info" sections - this leads
+         # to a smaller overall size of the debug information, and avoids linker relocation
+         # errors on e.g. aarch64 (relocation R_AARCH64_ABS32 out of range: 4312197985 is not in [-2147483648, 4294967295])
+@@ -186,8 +188,10 @@ if (COMPILER_IS_GCC_OR_CLANG)
+         WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-fdebug-types-section)
+     endif ()
+ 
+-    WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-gsimple-template-names)
+-    WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS("-mllvm -dwarf-linkage-names=Abstract")
++    if (NOT EMSCRIPTEN)
++        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS(-gsimple-template-names)
++        WEBKIT_PREPEND_GLOBAL_COMPILER_FLAGS("-mllvm -dwarf-linkage-names=Abstract")
++    endif ()
+ 
+     # FIXME: Remove once the strict-aliasing violations exposed by 315506@main are fixed.
+     # Enabling strict aliasing (the compiler default at -O2) miscompiles type-punning code
