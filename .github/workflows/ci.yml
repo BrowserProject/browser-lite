@@ -29,6 +29,20 @@ jobs:
             echo "versions.env hat ungueltige Zeilen (siehe oben)"; exit 1
           fi
 
+  relay:
+    name: Relay + Wisp-Client Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Relay installieren
+        working-directory: relay
+        run: npm ci --no-audit --no-fund
+      - name: Test (Token, 2 MB Echo ueber Wisp)
+        run: node tests/relay/relay-test.mjs
+
   toolchain:
     name: Toolchain-Image
     runs-on: ubuntu-24.04
@@ -105,14 +119,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Downloads aus dem Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: third_party/downloads
           key: downloads-${{ hashFiles('deps/sources.txt') }}
           restore-keys: downloads-
       - name: sysroot aus dem Cache
         id: sysroot-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: sysroot
           key: sysroot-${{ needs.toolchain.outputs.image }}-${{ hashFiles('deps/**') }}
@@ -123,7 +137,7 @@ jobs:
       - name: Smoke-Test (alle Libs gelinkt, laeuft in node)
         run: deps/test.sh
       - name: sysroot fuer spaetere Jobs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sysroot
           path: sysroot
@@ -146,7 +160,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: sysroot holen
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: sysroot
           path: sysroot
@@ -156,7 +170,7 @@ jobs:
           tools/fetch-webkit.sh
           tools/apply-patches.sh
       - name: ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: build/ccache
           key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
@@ -166,7 +180,7 @@ jobs:
       - name: Tests (inkl. GC-Stresstest)
         run: tests/jsc/run.sh
       - name: jsc als Artefakt
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: jsc-wasm
           path: build/jsc/bin/jsc.*

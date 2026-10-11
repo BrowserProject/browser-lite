@@ -4,9 +4,33 @@
 // Wir rufen ihre C-Funktionen (_bl_...) auf, sie meldet sich ueber die
 // Callbacks onEngine... zurueck (siehe engine/src/Host.cpp).
 
+import { WispTransport, installTransportSocket, setTransport } from './transport.js';
+
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const START_URL = params.get('url') || 'https://example.com/';
+
+// Relay (Wisp-Server). Standard: auf dem gleichen Server unter /wisp/.
+// Der Zugangs-Token wird einmal mit ?token=... gesetzt und im Browser gespeichert.
+function storage(key, value) {
+  try {
+    if (value !== undefined)
+      localStorage.setItem(key, value);
+    return localStorage.getItem(key);
+  } catch {
+    return value ?? null;
+  }
+}
+if (params.get('token'))
+  storage('bl-relay-token', params.get('token'));
+if (params.get('relay'))
+  storage('bl-relay-url', params.get('relay'));
+
+function relayURL() {
+  const base = storage('bl-relay-url') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
+  const token = storage('bl-relay-token');
+  return token ? base + (base.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : base;
+}
 
 let engine = null;
 let nextViewId = 1;
@@ -30,6 +54,8 @@ async function startEngine() {
     $('boot').textContent = 'Fehler: Die Seite braucht die Header COOP/COEP (SharedArrayBuffer fehlt).';
     return;
   }
+  setTransport(new WispTransport(relayURL()));
+  installTransportSocket();
   await loadScript('engine/engine.js');
   const module = {
     locateFile: (path) => 'engine/' + path,

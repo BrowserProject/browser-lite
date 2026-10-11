@@ -50,7 +50,12 @@ build() {
     local gen="$BL_DEPS_BUILD/$DEP_NAME/data"
     mkdir -p "$gen"
     # genccode macht aus dem Archiv eine .c Datei mit dem Symbol icudtNN_dat
-    LD_LIBRARY_PATH="$host/lib" "$host/bin/genccode" -d "$gen" "$dat"
+    # -e: Name des Einstiegspunkts ohne Endianness-Buchstaben (icudt78l.dat -> icudt78),
+    # so wie ICU ihn beim Laden sucht (Symbol icudt78_dat).
+    local entry
+    entry="$(basename "$dat" .dat)"
+    entry="${entry%l}"
+    LD_LIBRARY_PATH="$host/lib" "$host/bin/genccode" -e "$entry" -d "$gen" "$dat"
     local csrc
     csrc="$(find "$gen" -name '*.c' | head -n 1)"
     # shellcheck disable=SC2086

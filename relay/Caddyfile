@@ -1,0 +1,28 @@
+# browser-lite: statische Seite + Relay auf einer Domain.
+# DOMAIN kommt aus der Umgebung (docker-compose / .env)
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Noetig fuer SharedArrayBuffer (Threads in der Engine)
+	header {
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Embedder-Policy require-corp
+		Cross-Origin-Resource-Policy same-origin
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+
+	# Wisp-Relay (WebSocket)
+	handle /wisp/* {
+		reverse_proxy relay:5001
+	}
+
+	# Engine-Dateien sind gross und aendern sich nur mit neuer Version
+	@engine path /engine/*
+	header @engine Cache-Control "public, max-age=3600"
+
+	handle {
+		root * /srv/www
+		file_server
+	}
+}
