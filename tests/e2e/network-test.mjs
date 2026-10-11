@@ -71,7 +71,10 @@ function secure() {
 fetch('/data.txt').then((r) => r.text()).then(async (text) => {
   const ws = await webSocketEcho();
   const tls = await secure();
-  document.title = 'E2E|' + document.cookie + '|' + text.trim() + '|' + ws + '|' + tls;
+  // <video> muss ein echtes HTMLMediaElement sein (Abspielen geht noch nicht)
+  const video = document.createElement('video');
+  const media = video instanceof HTMLMediaElement && typeof video.pause === 'function' ? 'media-ok' : 'media-fehlt';
+  document.title = 'E2E|' + document.cookie + '|' + text.trim() + '|' + ws + '|' + tls + '|' + media;
 }, (e) => { document.title = 'E2E|fetch-fehler|' + e; });
 `;
 
@@ -171,7 +174,8 @@ check('Seite geladen (Redirect + Skript)', title.startsWith('E2E|'), title);
 check('Cookie gesetzt', title.includes('|bl=1|'));
 check('fetch() mit gzip', title.includes('|hallo-gzip|'));
 check('WebSocket (Echo, Umlaute)', title.includes('|ws:echo:ping-äöü|'));
-check('HTTPS + WSS mit eigener CA (TLS im WASM)', title.includes('|tls-ok,wss:tls'), title.split('|').pop());
+check('HTTPS + WSS mit eigener CA (TLS im WASM)', title.includes('|tls-ok,wss:tls|'), title);
+check('<video> als HTMLMediaElement', title.includes('|media-ok'), title.split('|').pop());
 check('Redirect ueber /start', requests.includes('/start') && requests.includes('/page'), requests.join(' '));
 
 // Ein Frame mit der roten Box sollte auf dem Canvas sein

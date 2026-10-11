@@ -93,6 +93,8 @@ GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-
 fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.
 
 ## Phase 9: Media (spaeter)
+- [x] `ENABLE_VIDEO` an, ohne Abspiel-Backend: `<video>`/`<audio>` sind echte Media-Elemente,
+  `play()` lehnt mit NotSupportedError ab. Vorher stuerzten Seiten wie 20min.ch ab.
 `<audio>`/`<video>` ueber WebCodecs + Web Audio, danach MSE.
 
 ## Zukunft: WireGuard

@@ -43,4 +43,5 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 37 | Schriften | fontconfig-Cache beim Build erzeugen, Schrift-Ordner bekommen mtime 0 | fontconfig haelt den Cache dann fuer gueltig und liest die Schriften nicht bei jedem Start neu ein |
 | 38 | Fehlender Content-Type | Wie andere Browser raten (Endung, sonst HTML) | Sonst wurde die Seite als Download behandelt |
 | 39 | WebSockets | `WebSocketChannel` + `SocketStreamHandle` aus WebKitLegacy kopiert (`engine/src/websocket/`), eigener Socket auf WebCores `CurlStreamScheduler` | WebCore hat fuer single-process keinen WebSocket-Kanal mehr; WebKitLegacy hat nur eine Cocoa-Variante (CFNetwork) |
+| 40 | Video | `ENABLE_VIDEO` an, noch ohne MediaPlayer-Backend | Seiten erwarten die Media-API (`video.pause()` usw.). Abspielen kommt mit Phase 9 ueber den Host-Browser |
 
