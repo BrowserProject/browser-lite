@@ -158,6 +158,21 @@ index ab5540316c..1439ac7ea4 100644
      markup = content.markup;
      text = content.text;
  #else
+diff --git a/Source/WebCore/platform/graphics/egl/GLContextWrapper.cpp b/Source/WebCore/platform/graphics/egl/GLContextWrapper.cpp
+index c33e4efbe5..5de0bc09ed 100644
+--- a/Source/WebCore/platform/graphics/egl/GLContextWrapper.cpp
++++ b/Source/WebCore/platform/graphics/egl/GLContextWrapper.cpp
+@@ -21,7 +21,10 @@
+ #include "GLContextWrapper.h"
+ 
+ #include "GLContext.h"
++
++#if !PLATFORM(WASM)
+ #include "GraphicsContextGLTextureMapperANGLE.h"
++#endif
+ 
+ namespace WebCore {
+ 
 diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
 index 19c4683b7f..f4beb6ec1c 100644
 --- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
@@ -246,6 +261,67 @@ index 0000000000..32f1a3cd16
 +
 +    setCipherList(cipherList);
 +    setECCurves(ecCurves);
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp b/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp
+new file mode 100644
+index 0000000000..44ad0ffcaa
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp
+@@ -0,0 +1,55 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "GraphicsLayer.h"
++
++#include "GraphicsLayerFactory.h"
++
++namespace WebCore {
++
++// Ohne Accelerated Compositing malt WebCore alles direkt in den Pixel-Buffer.
++// GraphicsLayer::create wird trotzdem gelinkt (Page-Overlays, Compositor),
++// darum gibt es hier eine Ebene, die nichts tut.
++class GraphicsLayerWasm final : public GraphicsLayer {
++public:
++    GraphicsLayerWasm(Type layerType, GraphicsLayerClient& client)
++        : GraphicsLayer(layerType, client)
++    {
++    }
++
++private:
++    void setNeedsDisplay() final { }
++    void setNeedsDisplayInRect(const FloatRect&, ShouldClipToLayer) final { }
++};
++
++Ref<GraphicsLayer> GraphicsLayer::create(GraphicsLayerFactory* factory, GraphicsLayerClient& client, Type layerType)
++{
++    if (factory)
++        return factory->createGraphicsLayer(layerType, client);
++    return adoptRef(*new GraphicsLayerWasm(layerType, client));
 +}
 +
 +} // namespace WebCore

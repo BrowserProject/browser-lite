@@ -4,6 +4,7 @@
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
+#include <wtf/HexNumber.h>
 #include <wtf/text/StringBuilder.h>
 
 namespace BrowserLite {

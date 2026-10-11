@@ -5,6 +5,7 @@
 
 #include <WebCore/EmptyClients.h>
 #include <WebCore/EmptyFrameLoaderClient.h>
+#include <WebCore/ProgressTrackerClient.h>
 #include <wtf/WeakPtr.h>
 
 namespace BrowserLite {
@@ -42,7 +43,6 @@ private:
     void runJavaScriptAlert(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptConfirm(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptPrompt(WebCore::LocalFrame&, const String& message, const String& defaultValue, String& result) final;
-    void setStatusbarText(const String&) final;
 
     void triggerRenderingUpdate() final;
     bool scheduleRenderingUpdate() final;
@@ -74,7 +74,7 @@ private:
     void dispatchDidChangeLocationWithinPage() final;
     void dispatchDidFinishLoad() final;
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
-    void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WillContinueLoading, WillInternallyHandleFailure) final;
+    void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading, WebCore::WillInternallyHandleFailure) final;
 
     bool isMainFrame() const;
 

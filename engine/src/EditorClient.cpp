@@ -1,12 +1,19 @@
 #include "config.h"
 #include "EditorClient.h"
 
+#include <WebCore/Document.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
+#include <WebCore/FrameInlines.h>
 #include <WebCore/KeyboardEvent.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/Node.h>
+#include <WebCore/NodeInlines.h>
 #include <WebCore/PlatformKeyboardEvent.h>
+#include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 
 namespace BrowserLite {

@@ -27,6 +27,8 @@ let loaded = false;
 // Emscripten (MODULARIZE) benutzt genau dieses Objekt als Module, darum sind
 // die Exports (_bl_...) schon in den Callbacks darauf verfuegbar.
 const engine = {
+  // engine.wasm und engine.data liegen neben engine.js
+  locateFile: (file) => path.join(path.dirname(path.resolve(enginePath)), file),
   onEngineReady() {
     console.log('Engine bereit');
     engine._bl_create_view(1, width, height, 1);

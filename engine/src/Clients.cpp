@@ -11,15 +11,22 @@
 
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <WebCore/Cursor.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
+#include <WebCore/DocumentPage.h>
+#include <WebCore/DocumentView.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
+#include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/FrameTreeSyncData.h>
 #include <WebCore/HTMLFrameOwnerElement.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/NavigationAction.h>
+#include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
 #include <WebCore/ProgressTracker.h>
 #include <WebCore/ResourceError.h>
@@ -160,10 +167,6 @@ bool ChromeClient::runJavaScriptPrompt(LocalFrame&, const String& message, const
     result = String::fromUTF8(answer);
     free(answer);
     return true;
-}
-
-void ChromeClient::setStatusbarText(const String&)
-{
 }
 
 void ChromeClient::triggerRenderingUpdate()

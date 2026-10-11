@@ -11,14 +11,20 @@
 #include <WebCore/BackForwardController.h>
 #include <WebCore/CookieJar.h>
 #include <WebCore/Cursor.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
+#include <WebCore/DocumentView.h>
 #include <WebCore/EventHandler.h>
 #include <WebCore/FocusController.h>
+#include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/GraphicsContextSkia.h>
+#include <WebCore/HandleUserInputEventResult.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
+#include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
 #include <WebCore/PageConfiguration.h>
 #include <WebCore/PlatformKeyboardEvent.h>
@@ -50,7 +56,7 @@ static HashMap<int, WeakPtr<WebView>>& viewsByID()
 
 WebView* WebView::fromID(int id)
 {
-    return viewsByID().get(id).get();
+    return viewsByID().get(id);
 }
 
 class SessionProvider final : public StorageSessionProvider {
@@ -142,10 +148,10 @@ LocalFrameView* WebView::mainFrameView() const
 void WebView::createSurface()
 {
     m_pixelSize = IntSize { static_cast<int>(std::ceil(m_size.width() * m_deviceScaleFactor)), static_cast<int>(std::ceil(m_size.height() * m_deviceScaleFactor)) };
-    m_pixels = Vector<uint8_t>(static_cast<size_t>(m_pixelSize.width()) * m_pixelSize.height() * 4, 0);
+    m_pixels.fill(0, static_cast<size_t>(m_pixelSize.width()) * m_pixelSize.height() * 4);
     auto info = SkImageInfo::Make(m_pixelSize.width(), m_pixelSize.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType);
-    m_surface = makeUnique<sk_sp<SkSurface>>(SkSurfaces::WrapPixels(info, m_pixels.mutableSpan().data(), m_pixelSize.width() * 4));
-    RELEASE_ASSERT(*m_surface);
+    m_surface = SkSurfaces::WrapPixels(info, m_pixels.mutableSpan().data(), m_pixelSize.width() * 4);
+    RELEASE_ASSERT(m_surface);
 }
 
 void WebView::loadURL(const String& urlString)
@@ -272,7 +278,7 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         return false;
 
     auto damage = std::exchange(m_damage, Region { });
-    SkCanvas* canvas = (*m_surface)->getCanvas();
+    SkCanvas* canvas = m_surface->getCanvas();
     for (auto& rect : damage.rects()) {
         canvas->save();
         canvas->scale(m_deviceScaleFactor, m_deviceScaleFactor);
@@ -342,16 +348,16 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     DoublePoint position { x, y };
     PlatformMouseEvent event { position, position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
 
-    Ref handler = frame->eventHandler();
+    auto& handler = frame->eventHandler();
     switch (eventType) {
     case PlatformEvent::Type::MousePressed:
-        handler->handleMousePressEvent(event);
+        handler.handleMousePressEvent(event);
         break;
     case PlatformEvent::Type::MouseReleased:
-        handler->handleMouseReleaseEvent(event);
+        handler.handleMouseReleaseEvent(event);
         break;
     default:
-        handler->mouseMoved(event);
+        handler.mouseMoved(event);
         break;
     }
 }

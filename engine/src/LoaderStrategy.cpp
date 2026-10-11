@@ -43,7 +43,7 @@ static void addCookieHeader(ResourceRequest& request)
 {
     auto& session = networkStorageSession();
     auto includeSecureCookies = request.url().protocolIs("https"_s) ? IncludeSecureCookies::Yes : IncludeSecureCookies::No;
-    auto [cookies, secureCookiesAccessed] = session.cookieRequestHeaderFieldValue(request.firstPartyForCookies(), SameSiteInfo::create(request), request.url(), std::nullopt, std::nullopt, includeSecureCookies, ApplyTrackingPrevention::No, ShouldRelaxThirdPartyCookieBlocking::No);
+    auto [cookies, secureCookiesAccessed] = session.cookieRequestHeaderFieldValue(request.firstPartyForCookies(), SameSiteInfo::create(request), request.url(), std::nullopt, std::nullopt, includeSecureCookies, ApplyTrackingPrevention::No, ShouldRelaxThirdPartyCookieBlocking::No, IsKnownCrossSiteTracker::No);
     UNUSED_PARAM(secureCookiesAccessed);
     if (!cookies.isEmpty())
         request.setHTTPHeaderField(HTTPHeaderName::Cookie, cookies);
@@ -384,7 +384,6 @@ private:
     ResourceError blockedByContentBlockerError(const ResourceRequest& r) const final { return makeError(r.url(), "Blocked by content blocker"_s, ResourceError::Type::AccessControl); }
     ResourceError cannotShowURLError(const ResourceRequest& r) const final { return makeError(r.url(), "Cannot show URL"_s, ResourceError::Type::AccessControl); }
     ResourceError interruptedForPolicyChangeError(const ResourceRequest& r) const final { return makeError(r.url(), "Interrupted for policy change"_s); }
-    ResourceError blockedByContentFilterError(const ResourceRequest& r) const final { return makeError(r.url(), "Blocked by content filter"_s, ResourceError::Type::AccessControl); }
     ResourceError cannotShowMIMETypeError(const ResourceResponse& r) const final { return makeError(r.url(), "Cannot show MIME type"_s); }
     ResourceError fileDoesNotExistError(const ResourceResponse& r) const final { return makeError(r.url(), "File does not exist"_s); }
     ResourceError httpsUpgradeRedirectLoopError(const ResourceRequest& r) const final { return makeError(r.url(), "HTTPS upgrade redirect loop"_s); }

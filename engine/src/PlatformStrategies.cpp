@@ -14,6 +14,7 @@
 #include <WebCore/BlobRegistryImpl.h>
 #include <WebCore/Color.h>
 #include <WebCore/CookieJarDB.h>
+#include <WebCore/LoaderStrategy.h>
 #include <WebCore/MediaStrategy.h>
 #include <WebCore/NetworkStorageSession.h>
 #include <WebCore/Pasteboard.h>
@@ -124,7 +125,7 @@ class WasmMediaStrategy final : public MediaStrategy {
 };
 
 class WasmPlatformStrategies final : public PlatformStrategies {
-    WebCore::LoaderStrategy* createLoaderStrategy() final { return &loaderStrategy(); }
+    WebCore::LoaderStrategy* createLoaderStrategy() final { return &BrowserLite::loaderStrategy(); }
     PasteboardStrategy* createPasteboardStrategy() final
     {
         static NeverDestroyed<WasmPasteboardStrategy> strategy;

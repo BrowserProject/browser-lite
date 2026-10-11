@@ -34,13 +34,18 @@ target_include_directories(BrowserLiteEngine SYSTEM PRIVATE
 # ICU, ...) kommen als LINK_ONLY mit. Skia direkt fuer die Include-Pfade.
 target_link_libraries(BrowserLiteEngine PRIVATE WebCore Skia::Skia)
 
+# Private Abhaengigkeiten der statischen Libs, die CMake nicht kennt
+# (stehen nur als Requires.private in den .pc-Dateien).
+find_library(BL_WOFF2COMMON_LIBRARY woff2common REQUIRED)
+find_library(BL_EXPAT_LIBRARY expat REQUIRED)
+target_link_libraries(BrowserLiteEngine PRIVATE ${BL_WOFF2COMMON_LIBRARY} ${BL_EXPAT_LIBRARY})
+
 target_link_options(BrowserLiteEngine PRIVATE
     # main() laeuft in einem eigenen Worker (pthread). Der Haupt-Thread der
     # Seite bleibt frei fuer die UI.
     "SHELL:-pthread"
     "SHELL:-sPROXY_TO_PTHREAD"
     "SHELL:-sPTHREAD_POOL_SIZE=8"
-    "SHELL:-sOFFSCREENCANVAS_SUPPORT=1"
     "SHELL:-sSTACK_SIZE=8MB"
     "SHELL:-sDEFAULT_PTHREAD_STACK_SIZE=4MB"
     "SHELL:-sINITIAL_MEMORY=256MB"
@@ -56,6 +61,9 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-lEGL"
     "SHELL:-lGL"
     "SHELL:-Wl,--error-limit=0"
+    # WebKit baut mit -fno-exceptions, einige Deps (C++) koennen aber werfen.
+    # Werfen erlauben (ohne Fangen fuehrt ein throw zu abort).
+    "SHELL:-sDISABLE_EXCEPTION_THROWING=0"
     # GC-Wurzeln in WASM-Locals sichtbar machen (siehe docs/architektur.md).
     # --profiling-funcs, damit der Pass den Stack-Pointer nach der Optimierung findet.
     "SHELL:-sBINARYEN_EXTRA_PASSES=--spill-pointers"

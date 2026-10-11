@@ -5,6 +5,7 @@
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
 #include <WebCore/Region.h>
+#include <skia/core/SkRefCnt.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -13,7 +14,6 @@
 #include <wtf/text/WTFString.h>
 
 class SkSurface;
-template<typename> class sk_sp;
 
 namespace WebCore {
 class LocalFrame;
@@ -92,7 +92,7 @@ private:
     RefPtr<WebCore::Page> m_page;
 
     Vector<uint8_t> m_pixels;
-    std::unique_ptr<sk_sp<SkSurface>> m_surface;
+    sk_sp<SkSurface> m_surface;
     WebCore::Region m_damage;
     bool m_renderingUpdateRequested { false };
     bool m_frameRequested { false };

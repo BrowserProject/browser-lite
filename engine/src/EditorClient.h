@@ -3,6 +3,7 @@
 // Behandlung nach WinCairo WebPage::handleEditingKeyboardEvent.
 #pragma once
 
+#include <WebCore/DOMPasteAccess.h>
 #include <WebCore/EditorClient.h>
 #include <WebCore/TextCheckerClient.h>
 #include <WebCore/UndoStep.h>
