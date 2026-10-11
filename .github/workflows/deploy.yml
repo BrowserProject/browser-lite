@@ -1,6 +1,6 @@
 name: Deploy
 
-# Wenn die CI auf main gruen ist (oder von Hand): Seite + Relay auf den VPS.
+# Wenn die CI auf dem Standard-Branch gruen ist (oder von Hand): Seite + Relay auf den VPS.
 # Noetige Secrets (Settings -> Secrets and variables -> Actions):
 #   VPS_HOST      z.B. 203.0.113.10 oder browser.example.com
 #   VPS_USER      SSH-Benutzer (braucht Docker-Rechte)
@@ -12,12 +12,11 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       run_id:
-        description: "CI-Lauf, dessen Engine deployt werden soll (leer = letzter erfolgreicher auf main)"
-        required: false
+        description: "ID des CI-Laufs, dessen Engine deployt werden soll"
+        required: true
 
 permissions:
   contents: read
@@ -29,7 +28,11 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Nur der Standard-Branch des Repos wird deployt (Einstellungen -> Default branch)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     env:
       VPS_HOST: ${{ secrets.VPS_HOST }}
