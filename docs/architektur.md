@@ -59,8 +59,25 @@ reproduzierbare Abstuerze.
 `-sBINARYEN_EXTRA_PASSES=--spill-pointers`): alle pointer-grossen Locals werden vor Calls auf
 den Shadow-Stack geschrieben, und den scannt der GC sowieso. Nachweis mit
 `tests/jsc/gc-stress.js` und `--slowPathAllocsBetweenGCs=10`: ohne Pass 0/5 Laeufe ok
-(Absturz in `Structure::materializePropertyTable`), mit Pass 5/5 ok. Der Pass gilt fuer das
-ganze Binary (JSC und spaeter WebCore). Kosten an Groesse und Speed messen wir noch.
+(Absturz in `Structure::materializePropertyTable`), mit Pass 5/5 ok.
+
+**Besser geloest in Phase 8:** Der Pass kostet sehr viel. In der Engine war das Erstellen
+der ersten Seite 14x langsamer (4.6 s statt 0.33 s) und die .wasm 34 MB groesser. Die
+Engine braucht ihn darum nicht mehr. Stattdessen laeuft der GC nur noch, wenn nichts von
+JSC/WebCore auf dem Stack liegt:
+
+- Jede Arbeit auf dem Engine-Thread (ein Schritt des Event-Loops, ein Aufruf aus der
+  Oberflaeche) laeuft unter JSLock und einem `DeferGC` (`engine/src/EngineLoop.cpp`).
+- Patch 0012: Auch explizite Anforderungen (`collectAsync`, `collectSync`) warten, solange
+  ein `DeferGC` offen ist. Am Ende des aeussersten `DeferGC` laeuft der GC dann auf leerem
+  Stack und findet alle Wurzeln im Speicher.
+- Gleich fuer die Web Worker der Seiten (`WorkerRunLoop`) und den IndexedDB-Thread.
+
+Nachweis: `tests/engine/gc-test.mjs` mit `JSC_slowPathAllocsBetweenGCs=10` (GC sehr oft).
+Ohne die Verschiebung stuerzt der Test ab ("memory access out of bounds"), mit ihr laeuft er
+durch. Nachteil: Waehrend einer einzelnen langen Aufgabe (z.B. eine JS-Schleife die viel
+Speicher anlegt) laeuft kein GC. Der `jsc`-Test (Phase 2) nutzt weiter `--spill-pointers`,
+weil dort ein ganzes Skript eine einzige Aufgabe ist.
 
 Ausserdem: `Thread::suspend` geht in WASM nicht (keine Signale). Darum pro JS-VM nur ein
 Thread, Sampling-Profiler aus.

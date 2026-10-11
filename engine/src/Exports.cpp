@@ -50,6 +50,7 @@ EMSCRIPTEN_KEEPALIVE void bl_destroy_view(int id)
 EMSCRIPTEN_KEEPALIVE void bl_load_url(int id, char* url)
 {
     withView(id, [url = takeString(url)](WebView& view) {
+        debugLog("bl_load_url %s", url.utf8().data());
         view.loadURL(url);
     });
 }

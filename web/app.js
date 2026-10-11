@@ -70,7 +70,13 @@ async function startEngine() {
     onEngineNeedsFrame,
     onEngineDownloadData,
     engineDialog,
-    preRun: [mountStorage, installExtraCA],
+    preRun: [mountStorage, installExtraCA, (module) => {
+      // ?debug=1: Zeitstempel und Ablauf der Engine in der Konsole
+      if (params.get('debug'))
+        (module || engine).ENV.BL_DEBUG = '1';
+      if (params.get('fcdebug'))
+        (module || engine).ENV.FC_DEBUG = params.get('fcdebug');
+    }],
   };
   engine = module;
   await window.createBrowserLiteEngine(module);

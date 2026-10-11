@@ -103,6 +103,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     , m_deviceScaleFactor(deviceScaleFactor)
 {
     viewsByID().set(id, *this);
+    debugLog("View %d: erstellen", id);
 
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
@@ -123,6 +124,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     }
 
     m_page = Page::create(WTF::move(configuration));
+    debugLog("View %d: Page erstellt", id);
 
     auto& settings = m_page->settings();
     settings.setScriptEnabled(true);
@@ -139,11 +141,13 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setFixedFontFamily("Noto Sans Mono"_s);
 
     m_page->setDeviceScaleFactor(m_deviceScaleFactor);
+    debugLog("View %d: Einstellungen gesetzt", id);
 
     RefPtr frame = m_page->localMainFrame();
     RELEASE_ASSERT(frame);
     frame->setView(LocalFrameView::create(*frame, m_size));
     frame->init();
+    debugLog("View %d: Frame bereit", id);
     if (RefPtr view = frame->view()) {
         view->resize(m_size);
         view->setCanHaveScrollbars(true);
@@ -152,6 +156,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     createSurface();
     setFocused(true);
     addDamage(IntRect { { }, m_size });
+    debugLog("View %d: fertig", id);
 }
 
 WebView::~WebView()
@@ -290,6 +295,7 @@ void WebView::scheduleRenderingUpdate()
 bool WebView::renderFrame(IntRect* dirtyOut)
 {
     m_frameRequested = false;
+    auto start = MonotonicTime::now();
 
     if (m_renderingUpdateRequested) {
         m_renderingUpdateRequested = false;
@@ -302,6 +308,7 @@ bool WebView::renderFrame(IntRect* dirtyOut)
     if (!view)
         return false;
     view->updateLayoutAndStyleIfNeededRecursive();
+    auto layoutDone = MonotonicTime::now();
 
     if (m_damage.isEmpty())
         return false;
@@ -320,6 +327,10 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     m_page->didCompleteRenderingUpdateDisplay();
     m_page->didCompleteRenderingFrame();
+
+    auto end = MonotonicTime::now();
+    if ((end - start).milliseconds() > 30)
+        debugLog("View %d: Bild %.0f ms (Layout %.0f ms, Malen %.0f ms)", m_id, (end - start).milliseconds(), (layoutDone - start).milliseconds(), (end - layoutDone).milliseconds());
 
     if (dirtyOut) {
         IntRect bounds = damage.bounds();
@@ -479,17 +490,20 @@ void WebView::notifyNavigationState()
 
 void WebView::didStartLoading()
 {
+    debugLog("View %d: Laden beginnt", m_id);
     m_isLoading = true;
     notifyNavigationState();
 }
 
 void WebView::didCommitLoad()
 {
+    debugLog("View %d: Commit", m_id);
     notifyNavigationState();
 }
 
 void WebView::didFinishLoading()
 {
+    debugLog("View %d: fertig geladen", m_id);
     m_isLoading = false;
     notifyNavigationState();
     notifyHost(m_id, "load");

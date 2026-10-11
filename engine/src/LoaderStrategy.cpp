@@ -21,6 +21,7 @@
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/LoaderStrategy.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/NetworkLoadMetrics.h>
 #include <WebCore/NetworkStateNotifier.h>
 #include <WebCore/NetworkStorageSession.h>
@@ -66,6 +67,7 @@ public:
 
     void start()
     {
+        debugLog("lade %s", m_loader->request().url().string().utf8().data());
         m_curlRequest = createCurlRequest(ResourceRequest { m_loader->request() });
         m_curlRequest->resume();
     }
@@ -198,6 +200,12 @@ private:
             return;
 
         m_response = ResourceResponse(curlResponse);
+        // Ohne Content-Type raten wie andere Browser: nach der Endung, sonst HTML
+        if (m_response.mimeType().isEmpty()) {
+            auto type = MIMETypeRegistry::mimeTypeForPath(m_response.url().path());
+            m_response.setMimeType(type.isEmpty() || type == "application/octet-stream"_s ? "text/html"_s : WTF::move(type));
+        }
+        debugLog("Antwort %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
         storeCookies(request.resourceRequest(), curlResponse);
 
         if (isRedirect()) {
@@ -226,6 +234,7 @@ private:
         if (!m_loader || m_curlRequest != &request)
             return;
         RefPtr loader = m_loader;
+        debugLog("fertig %s", loader->url().string().utf8().data());
         finish();
         loader->didFinishLoading(metrics);
     }

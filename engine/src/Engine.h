@@ -26,4 +26,8 @@ void scheduleRunLoopPump();
 // Log-Ausgabe, landet in der Konsole des Host-Browsers
 void log(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
 
+// Nur mit Umgebungsvariable BL_DEBUG (Oberflaeche: ?debug=1), mit Zeitstempel in ms
+bool debugEnabled();
+void debugLog(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
+
 } // namespace BrowserLite

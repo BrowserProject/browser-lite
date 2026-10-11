@@ -17,10 +17,15 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <pthread.h>
+#include <JavaScriptCore/DeferGCInlines.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/VM.h>
+#include <WebCore/CommonVM.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/RunLoop.h>
 
@@ -40,10 +45,40 @@ bool isEngineThread()
     return s_engineThreadSet.load(std::memory_order_acquire) && pthread_equal(pthread_self(), s_engineThread);
 }
 
+// Jede Arbeit auf dem Engine-Thread laeuft unter JSLock und einem DeferGC.
+// In WebAssembly sieht der konservative GC keine lokalen Variablen. Darum darf
+// er nur laufen, wenn nichts von JSC/WebCore auf dem Stack liegt: am Ende des
+// aeussersten DeferGC, also hier nach der Arbeit (Patch 0012, Heap.cpp).
+// So braucht es kein --spill-pointers, das alles etwa 10x langsamer macht.
+template<typename Work>
+static void runWithGCAfterwards(Work&& work)
+{
+    auto* vm = WebCore::commonVMOrNull();
+    if (!vm) {
+        work();
+        return;
+    }
+    JSC::JSLockHolder lock(*vm);
+    auto gcStart = WTF::MonotonicTime::now();
+    auto sizeBefore = vm->heap.size();
+    {
+        JSC::DeferGC deferGC(*vm);
+        work();
+        gcStart = WTF::MonotonicTime::now();
+    } // hier laeuft ein aufgeschobener GC
+    if (debugEnabled()) {
+        auto duration = (WTF::MonotonicTime::now() - gcStart).milliseconds();
+        if (duration > 5)
+            debugLog("GC %.0f ms, Heap %zu -> %zu kB", duration, sizeBefore / 1024, vm->heap.size() / 1024);
+    }
+}
+
 static void runFunction(void* arg)
 {
     auto* function = static_cast<Function<void()>*>(arg);
-    (*function)();
+    runWithGCAfterwards([&] {
+        (*function)();
+    });
     delete function;
 }
 
@@ -96,9 +131,15 @@ static void armTimerForNextScheduledTask()
 static void pumpRunLoop()
 {
     s_pumpScheduled.store(false, std::memory_order_release);
+    auto start = WTF::MonotonicTime::now();
     // Einmal alle faelligen Timer und wartenden Aufgaben abarbeiten
-    WTF::RunLoop::cycle();
+    runWithGCAfterwards([] {
+        WTF::RunLoop::cycle();
+    });
     armTimerForNextScheduledTask();
+    auto duration = (WTF::MonotonicTime::now() - start).milliseconds();
+    if (duration > 50)
+        debugLog("RunLoop-Schritt dauerte %.0f ms", duration);
 }
 
 void scheduleRunLoopPump()
@@ -121,6 +162,24 @@ void initializeEngineLoop()
         scheduleRunLoopPump();
     });
     scheduleRunLoopPump();
+}
+
+bool debugEnabled()
+{
+    static bool enabled = getenv("BL_DEBUG");
+    return enabled;
+}
+
+void debugLog(const char* format, ...)
+{
+    if (!debugEnabled())
+        return;
+    va_list args;
+    va_start(args, format);
+    char buffer[2048];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    std::fprintf(stderr, "[engine %.0f] %s\n", WTF::MonotonicTime::now().secondsSinceEpoch().milliseconds(), buffer);
 }
 
 void log(const char* format, ...)

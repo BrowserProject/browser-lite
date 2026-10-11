@@ -37,6 +37,7 @@ ORDER=(
     notosansmono
     cacert
     fontconfig-conf
+    fontcache
 )
 
 force=0

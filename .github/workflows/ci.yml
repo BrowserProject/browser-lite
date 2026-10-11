@@ -240,6 +240,10 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" -w /src "$IMAGE" bash -c \
             'node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600 && node tests/engine/check-basic.mjs build/basic.ppm'
+      - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \
+            node tests/engine/gc-test.mjs build/webcore/bin/engine.js
       - name: Engine als Artefakt
         if: success()
         uses: actions/upload-artifact@v6

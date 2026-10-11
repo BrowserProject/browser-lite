@@ -80,7 +80,13 @@ kommen zuerst.
 - [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert
   (`tools/optimize-site.mjs`, engine.wasm 120 MB -> 21 MB brotli)
 - [x] ICU-Datenfilter (33 MB -> 19 MB): nur noetige Konverter, Anzeigenamen nur fuer ca. 50 Sprachen
-- [ ] Startzeit messen, Service-Worker-Cache
+- [x] Startzeit gemessen: Engine bereit nach ca. 2 s (lokal)
+- [x] `--spill-pointers` ersetzt durch GC auf leerem Stack (siehe Architektur): erste Seite
+  14x schneller aufgebaut, engine.wasm 126 MB -> 92 MB. Echte Seiten jetzt 2-5x schneller
+  (Wikipedia 40 s -> 12 s, GitHub 19 s -> 8 s)
+- [x] fontconfig-Cache im Datenpaket (`deps/tools/fc-precache.c`)
+- [x] Debug-Ausgabe der Engine mit `?debug=1` (Zeitstempel, lange Schritte, GC)
+- [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
 
 GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache
 fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.

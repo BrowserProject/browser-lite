@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GC-Stresstest</title>
+<div id="root"></div>
+<script>
+// Viel Muell ueber viele Aufgaben verteilt, dazwischen laeuft der GC (in der
+// Engine nur zwischen zwei Aufgaben). Was behalten wird, muss heil bleiben:
+// JS-Objekte, Strings, Maps, Closures und DOM-Knoten mit Zusatz-Eigenschaften.
+const ROUNDS = 60;
+const kept = [];
+const root = document.getElementById('root');
+let round = 0;
+
+function makeGraph(seed) {
+  const objects = [];
+  for (let i = 0; i < 300; i++) {
+    const object = { id: seed * 1000 + i, name: 'obj-' + seed + '-' + i, list: [i, i * 2, i * 3] };
+    object.self = object;
+    object.map = new Map([[i, 'wert-' + i]]);
+    object.get = () => object.id * 2;
+    objects.push(object);
+  }
+  const element = document.createElement('span');
+  element.expando = { seed, objects };
+  element.textContent = 'runde ' + seed;
+  root.appendChild(element);
+  if (root.childNodes.length > 20)
+    root.removeChild(root.firstChild); // DOM-Knoten werden zu Muell
+  return { seed, objects, element, text: JSON.stringify(objects.slice(0, 5).map((o) => o.name)) };
+}
+
+function check(entry) {
+  const { seed, objects, element, text } = entry;
+  if (objects.length !== 300)
+    return 'Laenge ' + objects.length;
+  for (let i = 0; i < objects.length; i++) {
+    const object = objects[i];
+    if (object.id !== seed * 1000 + i || object.self !== object || object.name !== 'obj-' + seed + '-' + i)
+      return 'Objekt ' + i;
+    if (object.list[2] !== i * 3 || object.map.get(i) !== 'wert-' + i || object.get() !== object.id * 2)
+      return 'Inhalt ' + i;
+  }
+  if (element.expando.seed !== seed || element.expando.objects !== objects || element.textContent !== 'runde ' + seed)
+    return 'DOM-Knoten';
+  if (JSON.stringify(objects.slice(0, 5).map((o) => o.name)) !== text)
+    return 'String';
+  return null;
+}
+
+function step() {
+  // Muell: ca. 5 MB pro Runde
+  let garbage = [];
+  for (let i = 0; i < 20000; i++)
+    garbage.push({ a: i, b: 'muell' + i, c: [i] });
+  garbage = null;
+
+  kept.push(makeGraph(round));
+  if (kept.length > 25)
+    kept.shift();
+  for (const entry of kept) {
+    const error = check(entry);
+    if (error) {
+      console.log('GC-TEST FEHLER Runde ' + round + ' Eintrag ' + entry.seed + ': ' + error);
+      return;
+    }
+  }
+  round++;
+  if (round < ROUNDS)
+    setTimeout(step, 0);
+  else
+    console.log('GC-TEST ok ' + ROUNDS + ' Runden');
+}
+setTimeout(step, 0);
+</script>

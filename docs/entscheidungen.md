@@ -39,4 +39,7 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 33 | Downloads | Datei nochmal mit eigenem CurlRequest laden, Daten an die Oberflaeche | Einfacher als den laufenden Ladevorgang umzuhaengen; die URL ist schon das Ziel nach Redirects |
 | 34 | Speicher | IDBFS (JS-Dateisystem) statt OPFS/WasmFS | WasmFS hat keine Sockets, unser Netzwerk laeuft ueber SOCKFS |
 | 35 | localStorage/IndexedDB | Dateien aus `WebKitLegacy/Storage` mitbauen | Fertige, getestete Implementierung (InProcessIDBServer, StorageAreaSync) statt eigener |
+| 36 | GC-Wurzeln (Engine) | GC nur auf leerem Stack (DeferGC um jede Aufgabe, Patch 0012) statt `--spill-pointers` | Der Pass machte alles etwa 10x langsamer und die .wasm 34 MB groesser. Mit Stresstest abgesichert (ohne Verschiebung Absturz) |
+| 37 | Schriften | fontconfig-Cache beim Build erzeugen, Schrift-Ordner bekommen mtime 0 | fontconfig haelt den Cache dann fuer gueltig und liest die Schriften nicht bei jedem Start neu ein |
+| 38 | Fehlender Content-Type | Wie andere Browser raten (Endung, sonst HTML) | Sonst wurde die Seite als Download behandelt |
 

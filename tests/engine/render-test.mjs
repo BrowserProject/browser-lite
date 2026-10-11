@@ -29,6 +29,11 @@ let loaded = false;
 const engine = {
   // engine.wasm und engine.data liegen neben engine.js
   locateFile: (file) => path.join(path.dirname(path.resolve(enginePath)), file),
+  // BL_DEBUG=1: Ablauf der Engine mit Zeitstempeln
+  preRun: [(module) => {
+    if (process.env.BL_DEBUG)
+      module.ENV.BL_DEBUG = '1';
+  }],
   onEngineReady() {
     console.log('Engine bereit');
     engine._bl_create_view(1, width, height, 1);

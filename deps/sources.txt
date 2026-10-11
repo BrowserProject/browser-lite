@@ -27,3 +27,4 @@ notoserif     zip  2.015     https://github.com/notofonts/latin-greek-cyrillic/r
 notosansmono  zip  2.014     https://github.com/notofonts/latin-greek-cyrillic/releases/download/NotoSansMono-v2.014/NotoSansMono-v2.014.zip 090cf6c5e03f337a755630ca888b1fef463e64ae7b33ee134e9309c05f978732
 cacert        file 2025-09-09 https://curl.se/ca/cacert-2025-09-09.pem                                                                       f290e6acaf904a4121424ca3ebdd70652780707e28e8af999221786b86bb1975
 fontconfig-conf none -    -                                                                                                              -
+fontcache       none -    -                                                                                                              -

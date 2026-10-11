@@ -1,0 +1,166 @@
+diff --git a/Source/JavaScriptCore/heap/Heap.cpp b/Source/JavaScriptCore/heap/Heap.cpp
+index 67e317d5bb..e57124fe3a 100644
+--- a/Source/JavaScriptCore/heap/Heap.cpp
++++ b/Source/JavaScriptCore/heap/Heap.cpp
+@@ -1344,11 +1344,35 @@ void Heap::collectNow(Synchronousness synchronousness, GCRequest request)
+     RELEASE_ASSERT_NOT_REACHED();
+ }
+ 
++#if OS(EMSCRIPTEN)
++// In WebAssembly sind lokale Variablen fuer den konservativen GC unsichtbar
++// (sie liegen nicht im linearen Speicher). Der Embedder haelt darum waehrend
++// jeder Arbeit ein DeferGC offen. Auch explizite Anforderungen (collectAsync,
++// collectSync) warten dann, bis das aeusserste DeferGC endet. Dort liegt nichts
++// von JSC auf dem Stack und der GC findet alle Wurzeln im Speicher.
++static thread_local std::optional<GCRequest> s_requestDeferredUntilTopLevel;
++
++static void deferUntilTopLevel(GCRequest request)
++{
++    auto& deferred = s_requestDeferredUntilTopLevel;
++    if (!deferred || !request.subsumedBy(*deferred))
++        deferred = request;
++}
++#endif
++
+ void Heap::collectAsync(GCRequest request)
+ {
+     if (!Options::useGC()) [[unlikely]]
+         return;
+ 
++#if OS(EMSCRIPTEN)
++    if (isDeferred()) {
++        deferUntilTopLevel(request);
++        m_didDeferGCWork = true;
++        return;
++    }
++#endif
++
+     if constexpr (validateDFGDoesGC)
+         vm().verifyCanGC();
+ 
+@@ -1376,6 +1400,14 @@ void Heap::collectSync(GCRequest request)
+     if (!Options::useGC()) [[unlikely]]
+         return;
+ 
++#if OS(EMSCRIPTEN)
++    if (isDeferred()) {
++        deferUntilTopLevel(request);
++        m_didDeferGCWork = true;
++        return;
++    }
++#endif
++
+     if constexpr (validateDFGDoesGC)
+         vm().verifyCanGC();
+ 
+@@ -2980,6 +3012,10 @@ void Heap::decrementDeferralDepthAndGCIfNeededSlow()
+     ASSERT(!isDeferred());
+     
+     m_didDeferGCWork = false;
++#if OS(EMSCRIPTEN)
++    if (auto request = std::exchange(s_requestDeferredUntilTopLevel, std::nullopt))
++        collectAsync(*request);
++#endif
+     // FIXME: Bring back something like the DeferGCProbability mode.
+     // https://bugs.webkit.org/show_bug.cgi?id=166627
+     collectIfNecessaryOrDefer();
+diff --git a/Source/WebCore/bindings/js/IDBBindingUtilities.cpp b/Source/WebCore/bindings/js/IDBBindingUtilities.cpp
+index 9038ef805d..49f773da00 100644
+--- a/Source/WebCore/bindings/js/IDBBindingUtilities.cpp
++++ b/Source/WebCore/bindings/js/IDBBindingUtilities.cpp
+@@ -53,6 +53,7 @@
+ #include "WebCoreJSClientData.h"
+ #include <JavaScriptCore/ArrayBuffer.h>
+ #include <JavaScriptCore/DateInstance.h>
++#include <JavaScriptCore/DeferGC.h>
+ #include <JavaScriptCore/JSObjectInlines.h>
+ #include <JavaScriptCore/ObjectConstructor.h>
+ #include <JavaScriptCore/StrongInlines.h>
+@@ -594,7 +595,15 @@ void callOnIDBSerializationThreadAndWait(Function<void(JSC::JSGlobalObject&)>&&
+             IDBSerializationContext serializationContext;
+             while (auto function = queue->waitForMessage()) {
+                 AutodrainedPool pool;
++#if OS(EMSCRIPTEN)
++                // WASM: GC erst nach der Aufgabe, auf leerem Stack (siehe Heap::collectAsync)
++                auto& globalObject = serializationContext.globalObject();
++                JSC::JSLockHolder lock(globalObject.vm());
++                JSC::DeferGC deferGC(globalObject.vm());
++                (*function)(globalObject);
++#else
+                 (*function)(serializationContext.globalObject());
++#endif
+             }
+         });
+     });
+diff --git a/Source/WebCore/workers/WorkerOrWorkletThread.cpp b/Source/WebCore/workers/WorkerOrWorkletThread.cpp
+index e59b7654e9..a7f8478095 100644
+--- a/Source/WebCore/workers/WorkerOrWorkletThread.cpp
++++ b/Source/WebCore/workers/WorkerOrWorkletThread.cpp
+@@ -31,6 +31,8 @@
+ #include "WorkerLoaderProxy.h"
+ #include "WorkerOrWorkletGlobalScope.h"
+ #include "WorkerOrWorkletScriptController.h"
++#include <JavaScriptCore/DeferGC.h>
++#include <JavaScriptCore/JSLock.h>
+ 
+ #if PLATFORM(IOS_FAMILY)
+ #include "FloatingPointEnvironment.h"
+@@ -174,7 +176,17 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
+     }
+ 
+     String exceptionMessage;
++#if OS(EMSCRIPTEN)
++    {
++        // WASM: GC erst nach dem Skript, wenn nichts von JSC mehr auf dem Stack
++        // liegt (siehe Heap::collectAsync und WorkerDedicatedRunLoop::runInMode)
++        JSC::JSLockHolder lock(scriptController->vm());
++        JSC::DeferGC deferGC(scriptController->vm());
++        evaluateScriptIfNecessary(exceptionMessage);
++    }
++#else
+     evaluateScriptIfNecessary(exceptionMessage);
++#endif
+ 
+     callOnMainThread([evaluateCallback = WTF::move(m_evaluateCallback), message = exceptionMessage.isolatedCopy()] {
+         if (evaluateCallback)
+diff --git a/Source/WebCore/workers/WorkerRunLoop.cpp b/Source/WebCore/workers/WorkerRunLoop.cpp
+index 2b85941f2f..570e870d9c 100644
+--- a/Source/WebCore/workers/WorkerRunLoop.cpp
++++ b/Source/WebCore/workers/WorkerRunLoop.cpp
+@@ -51,6 +51,8 @@
+ #include <JavaScriptCore/TopExceptionScope.h>
+ #include <JavaScriptCore/VMManager.h>
+ #include <JavaScriptCore/VMTraps.h>
++#include <JavaScriptCore/DeferGC.h>
++#include <JavaScriptCore/JSLock.h>
+ #include <wtf/AutodrainedPool.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
+@@ -334,6 +336,16 @@ WorkerDedicatedRunLoop::RunInModeResult WorkerDedicatedRunLoop::runInMode(Worker
+     RunInModeResult runInModeResult;
+     runInModeResult.messageQueueResult = result;
+ 
++#if OS(EMSCRIPTEN)
++    // WASM: Lokale Variablen sieht der GC nicht. Er laeuft darum erst am Ende
++    // dieses Blocks (Ende des aeussersten DeferGC), nicht mitten in der Aufgabe.
++    std::optional<JSC::JSLockHolder> gcLock;
++    if (script)
++        gcLock.emplace(script->vm());
++    {
++    JSC::DeferGC deferGC(context->vm());
++#endif
++
+     // If the context is closing, don't execute any further JavaScript tasks (per section 4.1.1 of the Web Workers spec).
+     // However, there may be implementation cleanup tasks in the queue, so keep running through it.
+     switch (result) {
+@@ -352,6 +364,10 @@ WorkerDedicatedRunLoop::RunInModeResult WorkerDedicatedRunLoop::runInMode(Worker
+         break;
+     }
+ 
++#if OS(EMSCRIPTEN)
++    }
++#endif
++
+ #if USE(CF)
+     if (result != MessageQueueTerminated) {
+         if (nextCFRunLoopTimerFireDate <= CFAbsoluteTimeGetCurrent()) {

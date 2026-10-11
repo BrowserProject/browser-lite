@@ -85,7 +85,7 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sENVIRONMENT=web,worker,node"
     "SHELL:-sMODULARIZE=1"
     "SHELL:-sEXPORT_NAME=createBrowserLiteEngine"
-    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,HEAPU8,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
+    "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,ENV,HEAPU8,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
     "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     "SHELL:-lEGL"
     "SHELL:-lGL"
@@ -95,12 +95,20 @@ target_link_options(BrowserLiteEngine PRIVATE
     # WebKit baut mit -fno-exceptions, einige Deps (C++) koennen aber werfen.
     # Werfen erlauben (ohne Fangen fuehrt ein throw zu abort).
     "SHELL:-sDISABLE_EXCEPTION_THROWING=0"
-    # GC-Wurzeln in WASM-Locals sichtbar machen (siehe docs/architektur.md).
-    # --profiling-funcs, damit der Pass den Stack-Pointer nach der Optimierung findet.
-    "SHELL:-sBINARYEN_EXTRA_PASSES=--spill-pointers"
+    # Funktionsnamen behalten (Profile, Stacktraces; tools/optimize-site.mjs
+    # entfernt sie fuer die Auslieferung)
     "SHELL:--profiling-funcs"
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js"
 )
+
+# GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
+# laufen (engine/src/EngineLoop.cpp, Patch 0012), darum braucht es den Pass
+# nicht. Er macht alles etwa 10x langsamer, bleibt aber zum Vergleichen da
+# (braucht --profiling-funcs, siehe oben).
+option(BROWSER_LITE_SPILL_POINTERS "Binaryen --spill-pointers fuer den konservativen GC" OFF)
+if (BROWSER_LITE_SPILL_POINTERS)
+    target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sBINARYEN_EXTRA_PASSES=--spill-pointers")
+endif ()
 
 # Laufzeit-Dateien (fontconfig-Konfig, Fonts, CA-Zertifikate) als Datenpaket.
 if (BROWSER_LITE_RUNTIME_DIR)
