@@ -279,10 +279,18 @@ jobs:
           (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
       - name: Netzwerk-Test
         run: cd tests/e2e && node network-test.mjs
-      - name: Screenshot als Artefakt
+      - name: Echte Seiten (Internet, nur zur Info)
+        # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
+        continue-on-error: true
+        run: |
+          cd tests/e2e && SITE_WAIT=5000 node site-test.mjs \
+            https://example.com/ https://de.wikipedia.org/wiki/Schweiz https://news.ycombinator.com/
+      - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: e2e-screenshot
-          path: build/e2e-network.png
+          name: e2e-screenshots
+          path: |
+            build/e2e-network.png
+            build/sites/
           if-no-files-found: ignore
