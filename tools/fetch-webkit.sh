@@ -6,7 +6,8 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 # Ordner, die wir nicht brauchen (zusammen viele GB). JSTests/test262 holen wir
-# in Phase 2 separat, wenn wir es fuer Tests brauchen.
+# in Phase 2 separat, wenn wir es fuer Tests brauchen. Von ANGLE nur die Header
+# (WebGL geht direkt auf das WebGL2 des Host-Browsers, ohne ANGLE zu bauen).
 SPARSE_PATTERNS='/*
 !/LayoutTests/
 !/JSTests/
@@ -16,6 +17,7 @@ SPARSE_PATTERNS='/*
 !/WebDriverTests/
 !/Source/ThirdParty/libwebrtc/
 !/Source/ThirdParty/ANGLE/
+/Source/ThirdParty/ANGLE/include/
 !/Source/WebInspectorUI/
 '
 
@@ -33,6 +35,8 @@ printf '%s' "$SPARSE_PATTERNS" > "$BL_WEBKIT_DIR/.git/info/sparse-checkout"
 current="$(git -C "$BL_WEBKIT_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)"
 if [ "$current" = "$WEBKIT_COMMIT" ]; then
     bl_log "WebKit ist schon auf $WEBKIT_TAG (${WEBKIT_COMMIT:0:12})"
+    # Geaenderte Muster (z.B. neue Ordner) uebernehmen, lokale Aenderungen bleiben
+    git -C "$BL_WEBKIT_DIR" sparse-checkout reapply
 else
     bl_log "Lade WebKit $WEBKIT_TAG (${WEBKIT_COMMIT:0:12}), shallow"
     attempt=1

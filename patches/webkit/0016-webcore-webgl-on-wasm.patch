@@ -1,0 +1,2053 @@
+diff --git a/Source/CMakeLists.txt b/Source/CMakeLists.txt
+index f00f452204..a1d7e66d20 100644
+--- a/Source/CMakeLists.txt
++++ b/Source/CMakeLists.txt
+@@ -21,7 +21,14 @@ endif ()
+ add_subdirectory(JavaScriptCore)
+ 
+ if (ENABLE_WEBGL OR USE_ANGLE_EGL)
+-    add_subdirectory(ThirdParty/ANGLE)
++    if (PORT STREQUAL "Wasm")
++        # Kein ANGLE: WebGL geht ueber platform/wasm/angle an das WebGL des Host-Browsers
++        add_library(ANGLE::GLES INTERFACE IMPORTED GLOBAL)
++        set_target_properties(ANGLE::GLES PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
++            "${CMAKE_SOURCE_DIR}/Source/WebCore/platform/wasm/angle;${CMAKE_SOURCE_DIR}/Source/ThirdParty/ANGLE/include")
++    else ()
++        add_subdirectory(ThirdParty/ANGLE)
++    endif ()
+ endif ()
+ 
+ if (ENABLE_API_TESTS)
+diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
+new file mode 100644
+index 0000000000..2c36e12b3a
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
+@@ -0,0 +1,145 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "GraphicsContextGLWasm.h"
++
++#if ENABLE(WEBGL)
++
++#include "ANGLEHeaders.h"
++#include "ANGLEShimWasm.h"
++#include "PixelBuffer.h"
++#include <wtf/TZoneMallocInlines.h>
++
++namespace WebCore {
++
++// Diese GraphicsContextGLANGLE-Methoden definiert jede Plattform selber
++
++GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
++{
++    if (!makeContextCurrent())
++        return;
++    if (m_texture)
++        GL_DeleteTextures(1, &m_texture);
++    auto attributes = contextAttributes();
++    if (attributes.antialias) {
++        GL_DeleteRenderbuffers(1, &m_multisampleColorBuffer);
++        if (attributes.stencil || attributes.depth)
++            GL_DeleteRenderbuffers(1, &m_multisampleDepthStencilBuffer);
++        GL_DeleteFramebuffers(1, &m_multisampleFBO);
++    } else {
++        if ((attributes.stencil || attributes.depth) && m_depthStencilBuffer)
++            GL_DeleteRenderbuffers(1, &m_depthStencilBuffer);
++        if (m_preserveDrawingBufferTexture)
++            GL_DeleteTextures(1, &m_preserveDrawingBufferTexture);
++        if (m_preserveDrawingBufferFBO)
++            GL_DeleteFramebuffers(1, &m_preserveDrawingBufferFBO);
++    }
++    GL_DeleteFramebuffers(1, &m_fbo);
++    if (m_contextObj)
++        angleShimDestroyContext(static_cast<int>(reinterpret_cast<intptr_t>(m_contextObj)));
++}
++
++bool GraphicsContextGLANGLE::makeContextCurrent()
++{
++    return m_contextObj && angleShimMakeCurrent(static_cast<int>(reinterpret_cast<intptr_t>(m_contextObj)));
++}
++
++void GraphicsContextGLANGLE::checkGPUStatus()
++{
++}
++
++void GraphicsContextGLANGLE::platformReleaseThreadResources()
++{
++}
++
++RefPtr<GraphicsContextGL> createWebProcessGraphicsContextGL(const GraphicsContextGLAttributes& attributes)
++{
++    return GraphicsContextGLWasm::create(GraphicsContextGLAttributes { attributes });
++}
++
++WTF_MAKE_TZONE_ALLOCATED_IMPL(GraphicsContextGLWasm);
++
++RefPtr<GraphicsContextGLWasm> GraphicsContextGLWasm::create(GraphicsContextGLAttributes&& attributes)
++{
++    auto context = adoptRef(*new GraphicsContextGLWasm(WTF::move(attributes)));
++    if (!context->initialize())
++        return nullptr;
++    return context;
++}
++
++GraphicsContextGLWasm::GraphicsContextGLWasm(GraphicsContextGLAttributes&& attributes)
++    : GraphicsContextGLANGLE(WTF::move(attributes))
++{
++}
++
++GraphicsContextGLWasm::~GraphicsContextGLWasm() = default;
++
++bool GraphicsContextGLWasm::platformInitializeContext()
++{
++    m_isForWebGL2 = contextAttributes().isWebGL2;
++    // WebGL 1 hat keine Multisample-Renderbuffer, darum dort ohne Antialiasing
++    if (!m_isForWebGL2 && contextAttributes().antialias) {
++        auto attributes = contextAttributes();
++        attributes.antialias = false;
++        setContextAttributes(attributes);
++    }
++    m_handle = angleShimCreateContext(m_isForWebGL2);
++    if (!m_handle)
++        return false;
++    m_displayObj = reinterpret_cast<GCGLDisplay>(1);
++    m_configObj = reinterpret_cast<GCGLConfig>(1);
++    m_contextObj = reinterpret_cast<GCGLContext>(static_cast<intptr_t>(m_handle));
++    return makeContextCurrent();
++}
++
++bool GraphicsContextGLWasm::reshapeDrawingBuffer()
++{
++    auto attributes = contextAttributes();
++    auto size = getInternalFramebufferSize();
++    GLenum colorFormat = attributes.alpha ? GL_RGBA : GL_RGB;
++    ScopedRestoreTextureBinding restoreBinding(TEXTURE_BINDING_2D, TEXTURE_2D);
++    GL_BindTexture(GL_TEXTURE_2D, m_texture);
++    GL_TexImage2D(GL_TEXTURE_2D, 0, colorFormat, size.width(), size.height(), 0, colorFormat, GL_UNSIGNED_BYTE, nullptr);
++    m_displayBuffer = nullptr;
++    return true;
++}
++
++// Fertiges Bild: jetzt lesen, bevor WebGL den Zeichenpuffer wieder loescht
++void GraphicsContextGLWasm::prepareForDisplay()
++{
++    if (!makeContextCurrent())
++        return;
++    m_displayBuffer = readRenderingResultsForPainting();
++}
++
++RefPtr<PixelBuffer> GraphicsContextGLWasm::readCompositedResults()
++{
++    return m_displayBuffer;
++}
++
++} // namespace WebCore
++
++#endif // ENABLE(WEBGL)
+diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
+new file mode 100644
+index 0000000000..23eb41a1f6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#pragma once
++
++#if ENABLE(WEBGL)
++
++#include "GraphicsContextGLANGLE.h"
++
++namespace WebCore {
++
++class PixelBuffer;
++
++// WebGL fuer PORT=Wasm: die GL-Aufrufe gehen ueber den ANGLE-Ersatz
++// (platform/wasm/angle) an einen WebGL-Kontext des Host-Browsers. Ohne
++// Compositing: das Bild wird mit readPixels gelesen und in die Seite gemalt.
++class GraphicsContextGLWasm final : public GraphicsContextGLANGLE {
++    WTF_MAKE_TZONE_ALLOCATED(GraphicsContextGLWasm);
++public:
++    static RefPtr<GraphicsContextGLWasm> create(GraphicsContextGLAttributes&&);
++    ~GraphicsContextGLWasm();
++
++    int handle() const { return m_handle; }
++
++private:
++    explicit GraphicsContextGLWasm(GraphicsContextGLAttributes&&);
++
++    bool platformInitializeContext() final;
++    bool reshapeDrawingBuffer() final;
++    void prepareForDisplay() final;
++    RefPtr<PixelBuffer> readCompositedResults() final;
++    RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() final { return nullptr; }
++#if ENABLE(VIDEO)
++    bool copyTextureFromVideoFrame(VideoFrame&, PlatformGLObject, GCGLenum, GCGLint, GCGLenum, GCGLenum, GCGLenum, bool, bool) final { return false; }
++#endif
++#if ENABLE(MEDIA_STREAM) || ENABLE(WEB_CODECS)
++    RefPtr<VideoFrame> surfaceBufferToVideoFrame(SurfaceBuffer) final { return nullptr; }
++#endif
++
++    int m_handle { 0 };
++    RefPtr<PixelBuffer> m_displayBuffer;
++};
++
++} // namespace WebCore
++
++#endif // ENABLE(WEBGL)
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_autogen.h
+new file mode 100644
+index 0000000000..8cf39103e6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_autogen.h
+@@ -0,0 +1,3 @@
++// browser-lite: siehe tools/gen-angle-shim.py
++#pragma once
++#include "../ANGLEShimEntryPoints.h"
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h
+new file mode 100644
+index 0000000000..8cf39103e6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h
+@@ -0,0 +1,3 @@
++// browser-lite: siehe tools/gen-angle-shim.py
++#pragma once
++#include "../ANGLEShimEntryPoints.h"
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h
+new file mode 100644
+index 0000000000..8cf39103e6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h
+@@ -0,0 +1,3 @@
++// browser-lite: siehe tools/gen-angle-shim.py
++#pragma once
++#include "../ANGLEShimEntryPoints.h"
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h
+new file mode 100644
+index 0000000000..8cf39103e6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h
+@@ -0,0 +1,3 @@
++// browser-lite: siehe tools/gen-angle-shim.py
++#pragma once
++#include "../ANGLEShimEntryPoints.h"
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h
+new file mode 100644
+index 0000000000..8cf39103e6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h
+@@ -0,0 +1,3 @@
++// browser-lite: siehe tools/gen-angle-shim.py
++#pragma once
++#include "../ANGLEShimEntryPoints.h"
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h b/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h
+new file mode 100644
+index 0000000000..36d35e1941
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h
+@@ -0,0 +1,309 @@
++// Generiert von tools/gen-angle-shim.py, nicht von Hand aendern.
++#pragma once
++
++#include <EGL/egl.h>
++#include <EGL/eglext.h>
++#include <EGL/eglext_angle.h>
++#include <GLES2/gl2.h>
++#include <GLES2/gl2ext.h>
++#include <GLES2/gl2ext_angle.h>
++#include <GLES3/gl3.h>
++#include <GLES3/gl31.h>
++#include <GLES3/gl32.h>
++
++extern "C" {
++EGLBoolean EGLAPIENTRY EGL_BindAPI(EGLenum api);
++EGLBoolean EGLAPIENTRY EGL_ChooseConfig(EGLDisplay dpy, const EGLint *attrib_list, EGLConfig *configs, EGLint config_size, EGLint *num_config);
++EGLContext EGLAPIENTRY EGL_CreateContext(EGLDisplay dpy, EGLConfig config, EGLContext share_context, const EGLint *attrib_list);
++EGLSurface EGLAPIENTRY EGL_CreatePbufferSurface(EGLDisplay dpy, EGLConfig config, const EGLint *attrib_list);
++EGLSync EGLAPIENTRY EGL_CreateSync(EGLDisplay dpy, EGLenum type, const EGLAttrib *attrib_list);
++EGLBoolean EGLAPIENTRY EGL_DestroyContext(EGLDisplay dpy, EGLContext ctx);
++EGLBoolean EGLAPIENTRY EGL_DestroyImageKHR(EGLDisplay dpy, EGLImageKHR image);
++EGLBoolean EGLAPIENTRY EGL_DestroySurface(EGLDisplay dpy, EGLSurface surface);
++EGLBoolean EGLAPIENTRY EGL_DestroySync(EGLDisplay dpy, EGLSync sync);
++EGLint EGLAPIENTRY EGL_DupNativeFenceFDANDROID(EGLDisplay dpy, EGLSyncKHR sync);
++EGLDisplay EGLAPIENTRY EGL_GetCurrentDisplay(void);
++EGLint EGLAPIENTRY EGL_GetError(void);
++EGLDisplay EGLAPIENTRY EGL_GetPlatformDisplayEXT(EGLenum platform, void *native_display, const EGLint *attrib_list);
++EGLBoolean EGLAPIENTRY EGL_Initialize(EGLDisplay dpy, EGLint *major, EGLint *minor);
++EGLBoolean EGLAPIENTRY EGL_MakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx);
++const char * EGLAPIENTRY EGL_QueryString(EGLDisplay dpy, EGLint name);
++EGLBoolean EGLAPIENTRY EGL_ReleaseThread(void);
++EGLBoolean EGLAPIENTRY EGL_Terminate(EGLDisplay dpy);
++void GL_APIENTRY GL_ActiveTexture(GLenum texture);
++void GL_APIENTRY GL_AttachShader(GLuint program, GLuint shader);
++void GL_APIENTRY GL_BeginQuery(GLenum target, GLuint id);
++void GL_APIENTRY GL_BeginQueryEXT(GLenum target, GLuint id);
++void GL_APIENTRY GL_BeginTransformFeedback(GLenum primitiveMode);
++void GL_APIENTRY GL_BindAttribLocation(GLuint program, GLuint index, const GLchar *name);
++void GL_APIENTRY GL_BindBuffer(GLenum target, GLuint buffer);
++void GL_APIENTRY GL_BindBufferBase(GLenum target, GLuint index, GLuint buffer);
++void GL_APIENTRY GL_BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
++void GL_APIENTRY GL_BindFramebuffer(GLenum target, GLuint framebuffer);
++void GL_APIENTRY GL_BindRenderbuffer(GLenum target, GLuint renderbuffer);
++void GL_APIENTRY GL_BindSampler(GLuint unit, GLuint sampler);
++void GL_APIENTRY GL_BindTexture(GLenum target, GLuint texture);
++void GL_APIENTRY GL_BindTransformFeedback(GLenum target, GLuint id);
++void GL_APIENTRY GL_BindVertexArray(GLuint array);
++void GL_APIENTRY GL_BindVertexArrayOES(GLuint array);
++void GL_APIENTRY GL_BlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
++void GL_APIENTRY GL_BlendEquation(GLenum mode);
++void GL_APIENTRY GL_BlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha);
++void GL_APIENTRY GL_BlendEquationSeparateiOES(GLuint buf, GLenum modeRGB, GLenum modeAlpha);
++void GL_APIENTRY GL_BlendEquationiOES(GLuint buf, GLenum mode);
++void GL_APIENTRY GL_BlendFunc(GLenum sfactor, GLenum dfactor);
++void GL_APIENTRY GL_BlendFuncSeparate(GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha);
++void GL_APIENTRY GL_BlendFuncSeparateiOES(GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha);
++void GL_APIENTRY GL_BlendFunciOES(GLuint buf, GLenum src, GLenum dst);
++void GL_APIENTRY GL_BlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
++void GL_APIENTRY GL_BlitFramebufferANGLE(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
++void GL_APIENTRY GL_BlitFramebufferNV(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
++void GL_APIENTRY GL_BufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage);
++void GL_APIENTRY GL_BufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
++GLenum GL_APIENTRY GL_CheckFramebufferStatus(GLenum target);
++void GL_APIENTRY GL_Clear(GLbitfield mask);
++void GL_APIENTRY GL_ClearBufferfi(GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil);
++void GL_APIENTRY GL_ClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat *value);
++void GL_APIENTRY GL_ClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint *value);
++void GL_APIENTRY GL_ClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint *value);
++void GL_APIENTRY GL_ClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
++void GL_APIENTRY GL_ClearDepthf(GLfloat d);
++void GL_APIENTRY GL_ClearStencil(GLint s);
++GLenum GL_APIENTRY GL_ClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
++void GL_APIENTRY GL_ClipControlEXT(GLenum origin, GLenum depth);
++void GL_APIENTRY GL_ColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
++void GL_APIENTRY GL_ColorMaskiOES(GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a);
++void GL_APIENTRY GL_CompileShader(GLuint shader);
++void GL_APIENTRY GL_CompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
++void GL_APIENTRY GL_CompressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
++void GL_APIENTRY GL_CompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data);
++void GL_APIENTRY GL_CompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data);
++void GL_APIENTRY GL_CopyBufferSubData(GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size);
++void GL_APIENTRY GL_CopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
++void GL_APIENTRY GL_CopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_CopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height);
++GLuint GL_APIENTRY GL_CreateProgram(void);
++GLuint GL_APIENTRY GL_CreateShader(GLenum type);
++void GL_APIENTRY GL_CullFace(GLenum mode);
++void GL_APIENTRY GL_DebugMessageCallbackKHR(GLDEBUGPROCKHR callback, const void *userParam);
++void GL_APIENTRY GL_DebugMessageControlKHR(GLenum source, GLenum type, GLenum severity, GLsizei count, const GLuint *ids, GLboolean enabled);
++void GL_APIENTRY GL_DeleteBuffers(GLsizei n, const GLuint *buffers);
++void GL_APIENTRY GL_DeleteFramebuffers(GLsizei n, const GLuint *framebuffers);
++void GL_APIENTRY GL_DeleteProgram(GLuint program);
++void GL_APIENTRY GL_DeleteQueries(GLsizei n, const GLuint *ids);
++void GL_APIENTRY GL_DeleteQueriesEXT(GLsizei n, const GLuint *ids);
++void GL_APIENTRY GL_DeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers);
++void GL_APIENTRY GL_DeleteSamplers(GLsizei count, const GLuint *samplers);
++void GL_APIENTRY GL_DeleteShader(GLuint shader);
++void GL_APIENTRY GL_DeleteSync(GLsync sync);
++void GL_APIENTRY GL_DeleteTextures(GLsizei n, const GLuint *textures);
++void GL_APIENTRY GL_DeleteTransformFeedbacks(GLsizei n, const GLuint *ids);
++void GL_APIENTRY GL_DeleteVertexArrays(GLsizei n, const GLuint *arrays);
++void GL_APIENTRY GL_DeleteVertexArraysOES(GLsizei n, const GLuint *arrays);
++void GL_APIENTRY GL_DepthFunc(GLenum func);
++void GL_APIENTRY GL_DepthMask(GLboolean flag);
++void GL_APIENTRY GL_DepthRangef(GLfloat n, GLfloat f);
++void GL_APIENTRY GL_DetachShader(GLuint program, GLuint shader);
++void GL_APIENTRY GL_Disable(GLenum cap);
++void GL_APIENTRY GL_DisableVertexAttribArray(GLuint index);
++void GL_APIENTRY GL_DisableiOES(GLenum target, GLuint index);
++void GL_APIENTRY GL_DiscardFramebufferEXT(GLenum target, GLsizei numAttachments, const GLenum *attachments);
++void GL_APIENTRY GL_DrawArrays(GLenum mode, GLint first, GLsizei count);
++void GL_APIENTRY GL_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
++void GL_APIENTRY GL_DrawArraysInstancedANGLE(GLenum mode, GLint first, GLsizei count, GLsizei primcount);
++void GL_APIENTRY GL_DrawArraysInstancedBaseInstanceANGLE(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance);
++void GL_APIENTRY GL_DrawBuffers(GLsizei n, const GLenum *bufs);
++void GL_APIENTRY GL_DrawBuffersEXT(GLsizei n, const GLenum *bufs);
++void GL_APIENTRY GL_DrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices);
++void GL_APIENTRY GL_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount);
++void GL_APIENTRY GL_DrawElementsInstancedANGLE(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount);
++void GL_APIENTRY GL_DrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei instanceCount, GLint baseVertex, GLuint baseInstance);
++void GL_APIENTRY GL_DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices);
++void GL_APIENTRY GL_Enable(GLenum cap);
++void GL_APIENTRY GL_EnableVertexAttribArray(GLuint index);
++void GL_APIENTRY GL_EnableiOES(GLenum target, GLuint index);
++void GL_APIENTRY GL_EndQuery(GLenum target);
++void GL_APIENTRY GL_EndQueryEXT(GLenum target);
++void GL_APIENTRY GL_EndTransformFeedback(void);
++GLsync GL_APIENTRY GL_FenceSync(GLenum condition, GLbitfield flags);
++void GL_APIENTRY GL_Finish(void);
++void GL_APIENTRY GL_Flush(void);
++void GL_APIENTRY GL_FramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
++void GL_APIENTRY GL_FramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
++void GL_APIENTRY GL_FramebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer);
++void GL_APIENTRY GL_FrontFace(GLenum mode);
++void GL_APIENTRY GL_GenBuffers(GLsizei n, GLuint *buffers);
++void GL_APIENTRY GL_GenFramebuffers(GLsizei n, GLuint *framebuffers);
++void GL_APIENTRY GL_GenQueries(GLsizei n, GLuint *ids);
++void GL_APIENTRY GL_GenQueriesEXT(GLsizei n, GLuint *ids);
++void GL_APIENTRY GL_GenRenderbuffers(GLsizei n, GLuint *renderbuffers);
++void GL_APIENTRY GL_GenSamplers(GLsizei count, GLuint *samplers);
++void GL_APIENTRY GL_GenTextures(GLsizei n, GLuint *textures);
++void GL_APIENTRY GL_GenTransformFeedbacks(GLsizei n, GLuint *ids);
++void GL_APIENTRY GL_GenVertexArrays(GLsizei n, GLuint *arrays);
++void GL_APIENTRY GL_GenVertexArraysOES(GLsizei n, GLuint *arrays);
++void GL_APIENTRY GL_GenerateMipmap(GLenum target);
++void GL_APIENTRY GL_GetActiveAttrib(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
++void GL_APIENTRY GL_GetActiveUniform(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
++void GL_APIENTRY GL_GetActiveUniformBlockName(GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName);
++void GL_APIENTRY GL_GetActiveUniformBlockivRobustANGLE(GLuint program, GLuint uniformBlockIndex, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetActiveUniformsiv(GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params);
++GLint GL_APIENTRY GL_GetAttribLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY GL_GetBooleanv(GLenum pname, GLboolean *data);
++void GL_APIENTRY GL_GetBooleanvRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLboolean *data);
++void GL_APIENTRY GL_GetBufferParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++GLenum GL_APIENTRY GL_GetError(void);
++void GL_APIENTRY GL_GetFloatv(GLenum pname, GLfloat *data);
++void GL_APIENTRY GL_GetFloatvRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *data);
++GLint GL_APIENTRY GL_GetFragDataLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY GL_GetFramebufferAttachmentParameterivRobustANGLE(GLenum target, GLenum attachment, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetInteger64i_vRobustANGLE(GLenum target, GLuint index, GLsizei paramCount, GLsizei *length, GLint64 *data);
++void GL_APIENTRY GL_GetInteger64vRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLint64 *data);
++void GL_APIENTRY GL_GetIntegeri_vRobustANGLE(GLenum target, GLuint index, GLsizei paramCount, GLsizei *length, GLint *data);
++void GL_APIENTRY GL_GetIntegerv(GLenum pname, GLint *data);
++void GL_APIENTRY GL_GetIntegervRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLint *data);
++void GL_APIENTRY GL_GetInternalformativRobustANGLE(GLenum target, GLenum internalformat, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
++void GL_APIENTRY GL_GetProgramiv(GLuint program, GLenum pname, GLint *params);
++void GL_APIENTRY GL_GetProgramivRobustANGLE(GLuint program, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetQueryObjectivRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetQueryObjectui64vRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLuint64 *params);
++void GL_APIENTRY GL_GetQueryObjectuivRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLuint *params);
++void GL_APIENTRY GL_GetQueryiv(GLenum target, GLenum pname, GLint *params);
++void GL_APIENTRY GL_GetQueryivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetRenderbufferParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetSamplerParameterfvRobustANGLE(GLuint sampler, GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *params);
++void GL_APIENTRY GL_GetSamplerParameterivRobustANGLE(GLuint sampler, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
++void GL_APIENTRY GL_GetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision);
++void GL_APIENTRY GL_GetShaderiv(GLuint shader, GLenum pname, GLint *params);
++void GL_APIENTRY GL_GetShaderivRobustANGLE(GLuint shader, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++const GLubyte * GL_APIENTRY GL_GetString(GLenum name);
++void GL_APIENTRY GL_GetSynciv(GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values);
++void GL_APIENTRY GL_GetTexParameterfvRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *params);
++void GL_APIENTRY GL_GetTexParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetTransformFeedbackVarying(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name);
++void GL_APIENTRY GL_GetTranslatedShaderSourceANGLE(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *source);
++GLuint GL_APIENTRY GL_GetUniformBlockIndex(GLuint program, const GLchar *uniformBlockName);
++GLint GL_APIENTRY GL_GetUniformLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY GL_GetUniformfvRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLfloat *params);
++void GL_APIENTRY GL_GetUniformivRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLint *params);
++void GL_APIENTRY GL_GetUniformuivRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLuint *params);
++void GL_APIENTRY GL_GetVertexAttribPointervRobustANGLE(GLuint index, GLenum pname, GLsizei paramCount, GLsizei *length, void **pointer);
++void GL_APIENTRY GL_Hint(GLenum target, GLenum mode);
++void GL_APIENTRY GL_InvalidateFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments);
++void GL_APIENTRY GL_InvalidateSubFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height);
++GLboolean GL_APIENTRY GL_IsBuffer(GLuint buffer);
++GLboolean GL_APIENTRY GL_IsEnabled(GLenum cap);
++GLboolean GL_APIENTRY GL_IsFramebuffer(GLuint framebuffer);
++GLboolean GL_APIENTRY GL_IsProgram(GLuint program);
++GLboolean GL_APIENTRY GL_IsQuery(GLuint id);
++GLboolean GL_APIENTRY GL_IsQueryEXT(GLuint id);
++GLboolean GL_APIENTRY GL_IsRenderbuffer(GLuint renderbuffer);
++GLboolean GL_APIENTRY GL_IsSampler(GLuint sampler);
++GLboolean GL_APIENTRY GL_IsShader(GLuint shader);
++GLboolean GL_APIENTRY GL_IsSync(GLsync sync);
++GLboolean GL_APIENTRY GL_IsTexture(GLuint texture);
++GLboolean GL_APIENTRY GL_IsTransformFeedback(GLuint id);
++GLboolean GL_APIENTRY GL_IsVertexArray(GLuint array);
++GLboolean GL_APIENTRY GL_IsVertexArrayOES(GLuint array);
++void GL_APIENTRY GL_LineWidth(GLfloat width);
++void GL_APIENTRY GL_LinkProgram(GLuint program);
++void * GL_APIENTRY GL_MapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access);
++void GL_APIENTRY GL_MultiDrawArraysANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, GLsizei drawcount);
++void GL_APIENTRY GL_MultiDrawArraysInstancedANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, const GLsizei *instanceCounts, GLsizei drawcount);
++void GL_APIENTRY GL_MultiDrawArraysInstancedBaseInstanceANGLE(GLenum mode, const GLsizei *firsts, const GLsizei *counts, const GLsizei *instanceCounts, const GLuint *baseInstances, GLsizei drawCount);
++void GL_APIENTRY GL_MultiDrawElementsANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, GLsizei drawcount);
++void GL_APIENTRY GL_MultiDrawElementsInstancedANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, GLsizei drawcount);
++void GL_APIENTRY GL_MultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, const GLint *baseVertices, const GLuint *baseInstances, GLsizei drawCount);
++void GL_APIENTRY GL_PauseTransformFeedback(void);
++void GL_APIENTRY GL_PixelStorei(GLenum pname, GLint param);
++void GL_APIENTRY GL_PolygonModeANGLE(GLenum face, GLenum mode);
++void GL_APIENTRY GL_PolygonOffset(GLfloat factor, GLfloat units);
++void GL_APIENTRY GL_PolygonOffsetClampEXT(GLfloat factor, GLfloat units, GLfloat clamp);
++void GL_APIENTRY GL_ProvokingVertexANGLE(GLenum provokeMode);
++void GL_APIENTRY GL_QueryCounterEXT(GLuint id, GLenum target);
++void GL_APIENTRY GL_ReadBuffer(GLenum src);
++void GL_APIENTRY GL_ReadPixelsRobustANGLE(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLsizei *length, GLsizei *columns, GLsizei *rows, void *pixels);
++void GL_APIENTRY GL_RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_RenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_RenderbufferStorageMultisampleANGLE(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_RequestExtensionANGLE(const GLchar *name);
++void GL_APIENTRY GL_ResumeTransformFeedback(void);
++void GL_APIENTRY GL_SampleCoverage(GLfloat value, GLboolean invert);
++void GL_APIENTRY GL_SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param);
++void GL_APIENTRY GL_SamplerParameteri(GLuint sampler, GLenum pname, GLint param);
++void GL_APIENTRY GL_Scissor(GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_ShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length);
++void GL_APIENTRY GL_StencilFunc(GLenum func, GLint ref, GLuint mask);
++void GL_APIENTRY GL_StencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask);
++void GL_APIENTRY GL_StencilMask(GLuint mask);
++void GL_APIENTRY GL_StencilMaskSeparate(GLenum face, GLuint mask);
++void GL_APIENTRY GL_StencilOp(GLenum fail, GLenum zfail, GLenum zpass);
++void GL_APIENTRY GL_StencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
++void GL_APIENTRY GL_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
++void GL_APIENTRY GL_TexImage2DRobustANGLE(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLsizei bufSize, const void *pixels);
++void GL_APIENTRY GL_TexImage3DRobustANGLE(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, GLsizei bufSize, const void *pixels);
++void GL_APIENTRY GL_TexParameterf(GLenum target, GLenum pname, GLfloat param);
++void GL_APIENTRY GL_TexParameteri(GLenum target, GLenum pname, GLint param);
++void GL_APIENTRY GL_TexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_TexStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth);
++void GL_APIENTRY GL_TexSubImage2DRobustANGLE(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, const void *pixels);
++void GL_APIENTRY GL_TexSubImage3DRobustANGLE(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, const void *pixels);
++void GL_APIENTRY GL_TransformFeedbackVaryings(GLuint program, GLsizei count, const GLchar *const*varyings, GLenum bufferMode);
++void GL_APIENTRY GL_Uniform1f(GLint location, GLfloat v0);
++void GL_APIENTRY GL_Uniform1fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY GL_Uniform1i(GLint location, GLint v0);
++void GL_APIENTRY GL_Uniform1iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY GL_Uniform1ui(GLint location, GLuint v0);
++void GL_APIENTRY GL_Uniform1uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY GL_Uniform2f(GLint location, GLfloat v0, GLfloat v1);
++void GL_APIENTRY GL_Uniform2fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY GL_Uniform2i(GLint location, GLint v0, GLint v1);
++void GL_APIENTRY GL_Uniform2iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY GL_Uniform2ui(GLint location, GLuint v0, GLuint v1);
++void GL_APIENTRY GL_Uniform2uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY GL_Uniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
++void GL_APIENTRY GL_Uniform3fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY GL_Uniform3i(GLint location, GLint v0, GLint v1, GLint v2);
++void GL_APIENTRY GL_Uniform3iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY GL_Uniform3ui(GLint location, GLuint v0, GLuint v1, GLuint v2);
++void GL_APIENTRY GL_Uniform3uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY GL_Uniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
++void GL_APIENTRY GL_Uniform4fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY GL_Uniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3);
++void GL_APIENTRY GL_Uniform4iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY GL_Uniform4ui(GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3);
++void GL_APIENTRY GL_Uniform4uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY GL_UniformBlockBinding(GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding);
++void GL_APIENTRY GL_UniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix2x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix2x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix3x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix3x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix4x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY GL_UniformMatrix4x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++GLboolean GL_APIENTRY GL_UnmapBuffer(GLenum target);
++void GL_APIENTRY GL_UseProgram(GLuint program);
++void GL_APIENTRY GL_ValidateProgram(GLuint program);
++void GL_APIENTRY GL_VertexAttrib1f(GLuint index, GLfloat x);
++void GL_APIENTRY GL_VertexAttrib1fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY GL_VertexAttrib2f(GLuint index, GLfloat x, GLfloat y);
++void GL_APIENTRY GL_VertexAttrib2fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY GL_VertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z);
++void GL_APIENTRY GL_VertexAttrib3fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY GL_VertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
++void GL_APIENTRY GL_VertexAttrib4fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY GL_VertexAttribDivisor(GLuint index, GLuint divisor);
++void GL_APIENTRY GL_VertexAttribDivisorANGLE(GLuint index, GLuint divisor);
++void GL_APIENTRY GL_VertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w);
++void GL_APIENTRY GL_VertexAttribI4iv(GLuint index, const GLint *v);
++void GL_APIENTRY GL_VertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w);
++void GL_APIENTRY GL_VertexAttribI4uiv(GLuint index, const GLuint *v);
++void GL_APIENTRY GL_VertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, const void *pointer);
++void GL_APIENTRY GL_VertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
++void GL_APIENTRY GL_Viewport(GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY GL_WaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
++}
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
+new file mode 100644
+index 0000000000..4fdf42a51d
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
+@@ -0,0 +1,496 @@
++// Generiert von tools/gen-angle-shim.py, nicht von Hand aendern.
++// GL_Xxx -> glXxx von Emscripten (WebGL des Host-Browsers).
++#include "config.h"
++
++#if ENABLE(WEBGL)
++
++#include "ANGLEShimEntryPoints.h"
++
++extern "C" {
++
++void GL_APIENTRY glAttachShader(GLuint program, GLuint shader);
++void GL_APIENTRY glBeginQuery(GLenum target, GLuint id);
++void GL_APIENTRY glBeginQueryEXT(GLenum target, GLuint id);
++void GL_APIENTRY glBeginTransformFeedback(GLenum primitiveMode);
++void GL_APIENTRY glBindAttribLocation(GLuint program, GLuint index, const GLchar *name);
++void GL_APIENTRY glBindBuffer(GLenum target, GLuint buffer);
++void GL_APIENTRY glBindBufferBase(GLenum target, GLuint index, GLuint buffer);
++void GL_APIENTRY glBindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
++void GL_APIENTRY glBindFramebuffer(GLenum target, GLuint framebuffer);
++void GL_APIENTRY glBindRenderbuffer(GLenum target, GLuint renderbuffer);
++void GL_APIENTRY glBindSampler(GLuint unit, GLuint sampler);
++void GL_APIENTRY glBindTexture(GLenum target, GLuint texture);
++void GL_APIENTRY glBlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
++void GL_APIENTRY glBlendEquation(GLenum mode);
++void GL_APIENTRY glBlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha);
++void GL_APIENTRY glBlendFunc(GLenum sfactor, GLenum dfactor);
++void GL_APIENTRY glBlendFuncSeparate(GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha);
++void GL_APIENTRY glBlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter);
++void GL_APIENTRY glBufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage);
++void GL_APIENTRY glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
++GLenum GL_APIENTRY glCheckFramebufferStatus(GLenum target);
++void GL_APIENTRY glClear(GLbitfield mask);
++void GL_APIENTRY glClearBufferfi(GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil);
++void GL_APIENTRY glClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat *value);
++void GL_APIENTRY glClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint *value);
++void GL_APIENTRY glClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint *value);
++void GL_APIENTRY glClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha);
++void GL_APIENTRY glClearDepthf(GLfloat d);
++void GL_APIENTRY glClearStencil(GLint s);
++GLenum GL_APIENTRY glClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
++void GL_APIENTRY glClipControlEXT(GLenum origin, GLenum depth);
++void GL_APIENTRY glColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);
++void GL_APIENTRY glCompileShader(GLuint shader);
++void GL_APIENTRY glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data);
++void GL_APIENTRY glCompressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data);
++void GL_APIENTRY glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data);
++void GL_APIENTRY glCompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data);
++void GL_APIENTRY glCopyBufferSubData(GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size);
++void GL_APIENTRY glCopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border);
++void GL_APIENTRY glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY glCopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height);
++GLuint GL_APIENTRY glCreateProgram(void);
++GLuint GL_APIENTRY glCreateShader(GLenum type);
++void GL_APIENTRY glCullFace(GLenum mode);
++void GL_APIENTRY glDeleteBuffers(GLsizei n, const GLuint *buffers);
++void GL_APIENTRY glDeleteFramebuffers(GLsizei n, const GLuint *framebuffers);
++void GL_APIENTRY glDeleteProgram(GLuint program);
++void GL_APIENTRY glDeleteQueries(GLsizei n, const GLuint *ids);
++void GL_APIENTRY glDeleteQueriesEXT(GLsizei n, const GLuint *ids);
++void GL_APIENTRY glDeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers);
++void GL_APIENTRY glDeleteSamplers(GLsizei count, const GLuint *samplers);
++void GL_APIENTRY glDeleteShader(GLuint shader);
++void GL_APIENTRY glDeleteSync(GLsync sync);
++void GL_APIENTRY glDeleteTextures(GLsizei n, const GLuint *textures);
++void GL_APIENTRY glDepthFunc(GLenum func);
++void GL_APIENTRY glDepthMask(GLboolean flag);
++void GL_APIENTRY glDepthRangef(GLfloat n, GLfloat f);
++void GL_APIENTRY glDetachShader(GLuint program, GLuint shader);
++void GL_APIENTRY glDisableVertexAttribArray(GLuint index);
++void GL_APIENTRY glDrawArrays(GLenum mode, GLint first, GLsizei count);
++void GL_APIENTRY glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount);
++void GL_APIENTRY glDrawArraysInstancedANGLE(GLenum mode, GLint first, GLsizei count, GLsizei primcount);
++void GL_APIENTRY glDrawArraysInstancedBaseInstanceANGLE(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance);
++void GL_APIENTRY glDrawBuffers(GLsizei n, const GLenum *bufs);
++void GL_APIENTRY glDrawBuffersEXT(GLsizei n, const GLenum *bufs);
++void GL_APIENTRY glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices);
++void GL_APIENTRY glDrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount);
++void GL_APIENTRY glDrawElementsInstancedANGLE(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount);
++void GL_APIENTRY glDrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei instanceCount, GLint baseVertex, GLuint baseInstance);
++void GL_APIENTRY glDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices);
++void GL_APIENTRY glEnableVertexAttribArray(GLuint index);
++void GL_APIENTRY glEndQuery(GLenum target);
++void GL_APIENTRY glEndQueryEXT(GLenum target);
++void GL_APIENTRY glEndTransformFeedback(void);
++GLsync GL_APIENTRY glFenceSync(GLenum condition, GLbitfield flags);
++void GL_APIENTRY glFinish(void);
++void GL_APIENTRY glFlush(void);
++void GL_APIENTRY glFramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
++void GL_APIENTRY glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
++void GL_APIENTRY glFramebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer);
++void GL_APIENTRY glFrontFace(GLenum mode);
++void GL_APIENTRY glGenBuffers(GLsizei n, GLuint *buffers);
++void GL_APIENTRY glGenFramebuffers(GLsizei n, GLuint *framebuffers);
++void GL_APIENTRY glGenQueries(GLsizei n, GLuint *ids);
++void GL_APIENTRY glGenQueriesEXT(GLsizei n, GLuint *ids);
++void GL_APIENTRY glGenRenderbuffers(GLsizei n, GLuint *renderbuffers);
++void GL_APIENTRY glGenSamplers(GLsizei count, GLuint *samplers);
++void GL_APIENTRY glGenTextures(GLsizei n, GLuint *textures);
++void GL_APIENTRY glGenTransformFeedbacks(GLsizei n, GLuint *ids);
++void GL_APIENTRY glGenVertexArrays(GLsizei n, GLuint *arrays);
++void GL_APIENTRY glGenVertexArraysOES(GLsizei n, GLuint *arrays);
++void GL_APIENTRY glGenerateMipmap(GLenum target);
++void GL_APIENTRY glGetActiveAttrib(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
++void GL_APIENTRY glGetActiveUniform(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
++void GL_APIENTRY glGetActiveUniformBlockName(GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName);
++void GL_APIENTRY glGetActiveUniformBlockiv(GLuint program, GLuint uniformBlockIndex, GLenum pname, GLint *params);
++void GL_APIENTRY glGetActiveUniformsiv(GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params);
++GLint GL_APIENTRY glGetAttribLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY glGetBooleanv(GLenum pname, GLboolean *data);
++void GL_APIENTRY glGetBufferParameteriv(GLenum target, GLenum pname, GLint *params);
++void GL_APIENTRY glGetFloatv(GLenum pname, GLfloat *data);
++GLint GL_APIENTRY glGetFragDataLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY glGetFramebufferAttachmentParameteriv(GLenum target, GLenum attachment, GLenum pname, GLint *params);
++void GL_APIENTRY glGetInteger64i_v(GLenum target, GLuint index, GLint64 *data);
++void GL_APIENTRY glGetInteger64v(GLenum pname, GLint64 *data);
++void GL_APIENTRY glGetIntegeri_v(GLenum target, GLuint index, GLint *data);
++void GL_APIENTRY glGetIntegerv(GLenum pname, GLint *data);
++void GL_APIENTRY glGetInternalformativ(GLenum target, GLenum internalformat, GLenum pname, GLsizei count, GLint *params);
++void GL_APIENTRY glGetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
++void GL_APIENTRY glGetProgramiv(GLuint program, GLenum pname, GLint *params);
++void GL_APIENTRY glGetQueryObjectivEXT(GLuint id, GLenum pname, GLint *params);
++void GL_APIENTRY glGetQueryObjectui64vEXT(GLuint id, GLenum pname, GLuint64 *params);
++void GL_APIENTRY glGetQueryObjectuiv(GLuint id, GLenum pname, GLuint *params);
++void GL_APIENTRY glGetQueryiv(GLenum target, GLenum pname, GLint *params);
++void GL_APIENTRY glGetRenderbufferParameteriv(GLenum target, GLenum pname, GLint *params);
++void GL_APIENTRY glGetSamplerParameterfv(GLuint sampler, GLenum pname, GLfloat *params);
++void GL_APIENTRY glGetSamplerParameteriv(GLuint sampler, GLenum pname, GLint *params);
++void GL_APIENTRY glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog);
++void GL_APIENTRY glGetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision);
++void GL_APIENTRY glGetShaderiv(GLuint shader, GLenum pname, GLint *params);
++void GL_APIENTRY glGetSynciv(GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values);
++void GL_APIENTRY glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *params);
++void GL_APIENTRY glGetTexParameteriv(GLenum target, GLenum pname, GLint *params);
++void GL_APIENTRY glGetTransformFeedbackVarying(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name);
++GLuint GL_APIENTRY glGetUniformBlockIndex(GLuint program, const GLchar *uniformBlockName);
++GLint GL_APIENTRY glGetUniformLocation(GLuint program, const GLchar *name);
++void GL_APIENTRY glGetUniformfv(GLuint program, GLint location, GLfloat *params);
++void GL_APIENTRY glGetUniformiv(GLuint program, GLint location, GLint *params);
++void GL_APIENTRY glGetUniformuiv(GLuint program, GLint location, GLuint *params);
++void GL_APIENTRY glGetVertexAttribPointerv(GLuint index, GLenum pname, void **pointer);
++void GL_APIENTRY glHint(GLenum target, GLenum mode);
++void GL_APIENTRY glInvalidateFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments);
++void GL_APIENTRY glInvalidateSubFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height);
++GLboolean GL_APIENTRY glIsBuffer(GLuint buffer);
++GLboolean GL_APIENTRY glIsFramebuffer(GLuint framebuffer);
++GLboolean GL_APIENTRY glIsProgram(GLuint program);
++GLboolean GL_APIENTRY glIsQuery(GLuint id);
++GLboolean GL_APIENTRY glIsQueryEXT(GLuint id);
++GLboolean GL_APIENTRY glIsRenderbuffer(GLuint renderbuffer);
++GLboolean GL_APIENTRY glIsSampler(GLuint sampler);
++GLboolean GL_APIENTRY glIsShader(GLuint shader);
++GLboolean GL_APIENTRY glIsSync(GLsync sync);
++GLboolean GL_APIENTRY glIsTexture(GLuint texture);
++GLboolean GL_APIENTRY glIsTransformFeedback(GLuint id);
++GLboolean GL_APIENTRY glIsVertexArray(GLuint array);
++GLboolean GL_APIENTRY glIsVertexArrayOES(GLuint array);
++void GL_APIENTRY glLineWidth(GLfloat width);
++void GL_APIENTRY glLinkProgram(GLuint program);
++void GL_APIENTRY glMultiDrawArraysANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, GLsizei drawcount);
++void GL_APIENTRY glMultiDrawArraysInstancedANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, const GLsizei *instanceCounts, GLsizei drawcount);
++void GL_APIENTRY glMultiDrawArraysInstancedBaseInstanceANGLE(GLenum mode, const GLsizei *firsts, const GLsizei *counts, const GLsizei *instanceCounts, const GLuint *baseInstances, GLsizei drawCount);
++void GL_APIENTRY glMultiDrawElementsANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, GLsizei drawcount);
++void GL_APIENTRY glMultiDrawElementsInstancedANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, GLsizei drawcount);
++void GL_APIENTRY glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, const GLint *baseVertices, const GLuint *baseInstances, GLsizei drawCount);
++void GL_APIENTRY glPauseTransformFeedback(void);
++void GL_APIENTRY glPixelStorei(GLenum pname, GLint param);
++void GL_APIENTRY glPolygonOffset(GLfloat factor, GLfloat units);
++void GL_APIENTRY glPolygonOffsetClampEXT(GLfloat factor, GLfloat units, GLfloat clamp);
++void GL_APIENTRY glQueryCounterEXT(GLuint id, GLenum target);
++void GL_APIENTRY glReadBuffer(GLenum src);
++void GL_APIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, void *pixels);
++void GL_APIENTRY glRenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY glResumeTransformFeedback(void);
++void GL_APIENTRY glSampleCoverage(GLfloat value, GLboolean invert);
++void GL_APIENTRY glSamplerParameterf(GLuint sampler, GLenum pname, GLfloat param);
++void GL_APIENTRY glSamplerParameteri(GLuint sampler, GLenum pname, GLint param);
++void GL_APIENTRY glScissor(GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length);
++void GL_APIENTRY glStencilFunc(GLenum func, GLint ref, GLuint mask);
++void GL_APIENTRY glStencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask);
++void GL_APIENTRY glStencilMask(GLuint mask);
++void GL_APIENTRY glStencilMaskSeparate(GLenum face, GLuint mask);
++void GL_APIENTRY glStencilOp(GLenum fail, GLenum zfail, GLenum zpass);
++void GL_APIENTRY glStencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass);
++void GL_APIENTRY glTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels);
++void GL_APIENTRY glTexImage3D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const void *pixels);
++void GL_APIENTRY glTexParameterf(GLenum target, GLenum pname, GLfloat param);
++void GL_APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param);
++void GL_APIENTRY glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height);
++void GL_APIENTRY glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth);
++void GL_APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void *pixels);
++void GL_APIENTRY glTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const void *pixels);
++void GL_APIENTRY glTransformFeedbackVaryings(GLuint program, GLsizei count, const GLchar *const*varyings, GLenum bufferMode);
++void GL_APIENTRY glUniform1f(GLint location, GLfloat v0);
++void GL_APIENTRY glUniform1fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY glUniform1i(GLint location, GLint v0);
++void GL_APIENTRY glUniform1iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY glUniform1ui(GLint location, GLuint v0);
++void GL_APIENTRY glUniform1uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY glUniform2f(GLint location, GLfloat v0, GLfloat v1);
++void GL_APIENTRY glUniform2fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY glUniform2i(GLint location, GLint v0, GLint v1);
++void GL_APIENTRY glUniform2iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY glUniform2ui(GLint location, GLuint v0, GLuint v1);
++void GL_APIENTRY glUniform2uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY glUniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
++void GL_APIENTRY glUniform3fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY glUniform3i(GLint location, GLint v0, GLint v1, GLint v2);
++void GL_APIENTRY glUniform3iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY glUniform3ui(GLint location, GLuint v0, GLuint v1, GLuint v2);
++void GL_APIENTRY glUniform3uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY glUniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
++void GL_APIENTRY glUniform4fv(GLint location, GLsizei count, const GLfloat *value);
++void GL_APIENTRY glUniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3);
++void GL_APIENTRY glUniform4iv(GLint location, GLsizei count, const GLint *value);
++void GL_APIENTRY glUniform4ui(GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3);
++void GL_APIENTRY glUniform4uiv(GLint location, GLsizei count, const GLuint *value);
++void GL_APIENTRY glUniformBlockBinding(GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding);
++void GL_APIENTRY glUniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix2x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix2x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix3x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix3x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix4x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUniformMatrix4x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
++void GL_APIENTRY glUseProgram(GLuint program);
++void GL_APIENTRY glValidateProgram(GLuint program);
++void GL_APIENTRY glVertexAttrib1f(GLuint index, GLfloat x);
++void GL_APIENTRY glVertexAttrib1fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY glVertexAttrib2f(GLuint index, GLfloat x, GLfloat y);
++void GL_APIENTRY glVertexAttrib2fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY glVertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z);
++void GL_APIENTRY glVertexAttrib3fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
++void GL_APIENTRY glVertexAttrib4fv(GLuint index, const GLfloat *v);
++void GL_APIENTRY glVertexAttribDivisor(GLuint index, GLuint divisor);
++void GL_APIENTRY glVertexAttribDivisorANGLE(GLuint index, GLuint divisor);
++void GL_APIENTRY glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w);
++void GL_APIENTRY glVertexAttribI4iv(GLuint index, const GLint *v);
++void GL_APIENTRY glVertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w);
++void GL_APIENTRY glVertexAttribI4uiv(GLuint index, const GLuint *v);
++void GL_APIENTRY glVertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, const void *pointer);
++void GL_APIENTRY glVertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
++void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height);
++void GL_APIENTRY glWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
++
++void GL_APIENTRY GL_AttachShader(GLuint program, GLuint shader) { glAttachShader(program, shader); }
++void GL_APIENTRY GL_BeginQuery(GLenum target, GLuint id) { glBeginQuery(target, id); }
++void GL_APIENTRY GL_BeginQueryEXT(GLenum target, GLuint id) { glBeginQueryEXT(target, id); }
++void GL_APIENTRY GL_BeginTransformFeedback(GLenum primitiveMode) { glBeginTransformFeedback(primitiveMode); }
++void GL_APIENTRY GL_BindAttribLocation(GLuint program, GLuint index, const GLchar *name) { glBindAttribLocation(program, index, name); }
++void GL_APIENTRY GL_BindBuffer(GLenum target, GLuint buffer) { glBindBuffer(target, buffer); }
++void GL_APIENTRY GL_BindBufferBase(GLenum target, GLuint index, GLuint buffer) { glBindBufferBase(target, index, buffer); }
++void GL_APIENTRY GL_BindBufferRange(GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size) { glBindBufferRange(target, index, buffer, offset, size); }
++void GL_APIENTRY GL_BindFramebuffer(GLenum target, GLuint framebuffer) { glBindFramebuffer(target, framebuffer); }
++void GL_APIENTRY GL_BindRenderbuffer(GLenum target, GLuint renderbuffer) { glBindRenderbuffer(target, renderbuffer); }
++void GL_APIENTRY GL_BindSampler(GLuint unit, GLuint sampler) { glBindSampler(unit, sampler); }
++void GL_APIENTRY GL_BindTexture(GLenum target, GLuint texture) { glBindTexture(target, texture); }
++void GL_APIENTRY GL_BlendColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) { glBlendColor(red, green, blue, alpha); }
++void GL_APIENTRY GL_BlendEquation(GLenum mode) { glBlendEquation(mode); }
++void GL_APIENTRY GL_BlendEquationSeparate(GLenum modeRGB, GLenum modeAlpha) { glBlendEquationSeparate(modeRGB, modeAlpha); }
++void GL_APIENTRY GL_BlendFunc(GLenum sfactor, GLenum dfactor) { glBlendFunc(sfactor, dfactor); }
++void GL_APIENTRY GL_BlendFuncSeparate(GLenum sfactorRGB, GLenum dfactorRGB, GLenum sfactorAlpha, GLenum dfactorAlpha) { glBlendFuncSeparate(sfactorRGB, dfactorRGB, sfactorAlpha, dfactorAlpha); }
++void GL_APIENTRY GL_BlitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter) { glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter); }
++void GL_APIENTRY GL_BufferData(GLenum target, GLsizeiptr size, const void *data, GLenum usage) { glBufferData(target, size, data, usage); }
++void GL_APIENTRY GL_BufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data) { glBufferSubData(target, offset, size, data); }
++GLenum GL_APIENTRY GL_CheckFramebufferStatus(GLenum target) { return glCheckFramebufferStatus(target); }
++void GL_APIENTRY GL_Clear(GLbitfield mask) { glClear(mask); }
++void GL_APIENTRY GL_ClearBufferfi(GLenum buffer, GLint drawbuffer, GLfloat depth, GLint stencil) { glClearBufferfi(buffer, drawbuffer, depth, stencil); }
++void GL_APIENTRY GL_ClearBufferfv(GLenum buffer, GLint drawbuffer, const GLfloat *value) { glClearBufferfv(buffer, drawbuffer, value); }
++void GL_APIENTRY GL_ClearBufferiv(GLenum buffer, GLint drawbuffer, const GLint *value) { glClearBufferiv(buffer, drawbuffer, value); }
++void GL_APIENTRY GL_ClearBufferuiv(GLenum buffer, GLint drawbuffer, const GLuint *value) { glClearBufferuiv(buffer, drawbuffer, value); }
++void GL_APIENTRY GL_ClearColor(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) { glClearColor(red, green, blue, alpha); }
++void GL_APIENTRY GL_ClearDepthf(GLfloat d) { glClearDepthf(d); }
++void GL_APIENTRY GL_ClearStencil(GLint s) { glClearStencil(s); }
++GLenum GL_APIENTRY GL_ClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) { return glClientWaitSync(sync, flags, timeout); }
++void GL_APIENTRY GL_ClipControlEXT(GLenum origin, GLenum depth) { glClipControlEXT(origin, depth); }
++void GL_APIENTRY GL_ColorMask(GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha) { glColorMask(red, green, blue, alpha); }
++void GL_APIENTRY GL_CompileShader(GLuint shader) { glCompileShader(shader); }
++void GL_APIENTRY GL_CompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data) { glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data); }
++void GL_APIENTRY GL_CompressedTexImage3D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLsizei imageSize, const void *data) { glCompressedTexImage3D(target, level, internalformat, width, height, depth, border, imageSize, data); }
++void GL_APIENTRY GL_CompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const void *data) { glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, data); }
++void GL_APIENTRY GL_CompressedTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLsizei imageSize, const void *data) { glCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, imageSize, data); }
++void GL_APIENTRY GL_CopyBufferSubData(GLenum readTarget, GLenum writeTarget, GLintptr readOffset, GLintptr writeOffset, GLsizeiptr size) { glCopyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size); }
++void GL_APIENTRY GL_CopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border) { glCopyTexImage2D(target, level, internalformat, x, y, width, height, border); }
++void GL_APIENTRY GL_CopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei width, GLsizei height) { glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height); }
++void GL_APIENTRY GL_CopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height) { glCopyTexSubImage3D(target, level, xoffset, yoffset, zoffset, x, y, width, height); }
++GLuint GL_APIENTRY GL_CreateProgram(void) { return glCreateProgram(); }
++GLuint GL_APIENTRY GL_CreateShader(GLenum type) { return glCreateShader(type); }
++void GL_APIENTRY GL_CullFace(GLenum mode) { glCullFace(mode); }
++void GL_APIENTRY GL_DeleteBuffers(GLsizei n, const GLuint *buffers) { glDeleteBuffers(n, buffers); }
++void GL_APIENTRY GL_DeleteFramebuffers(GLsizei n, const GLuint *framebuffers) { glDeleteFramebuffers(n, framebuffers); }
++void GL_APIENTRY GL_DeleteProgram(GLuint program) { glDeleteProgram(program); }
++void GL_APIENTRY GL_DeleteQueries(GLsizei n, const GLuint *ids) { glDeleteQueries(n, ids); }
++void GL_APIENTRY GL_DeleteQueriesEXT(GLsizei n, const GLuint *ids) { glDeleteQueriesEXT(n, ids); }
++void GL_APIENTRY GL_DeleteRenderbuffers(GLsizei n, const GLuint *renderbuffers) { glDeleteRenderbuffers(n, renderbuffers); }
++void GL_APIENTRY GL_DeleteSamplers(GLsizei count, const GLuint *samplers) { glDeleteSamplers(count, samplers); }
++void GL_APIENTRY GL_DeleteShader(GLuint shader) { glDeleteShader(shader); }
++void GL_APIENTRY GL_DeleteSync(GLsync sync) { glDeleteSync(sync); }
++void GL_APIENTRY GL_DeleteTextures(GLsizei n, const GLuint *textures) { glDeleteTextures(n, textures); }
++void GL_APIENTRY GL_DepthFunc(GLenum func) { glDepthFunc(func); }
++void GL_APIENTRY GL_DepthMask(GLboolean flag) { glDepthMask(flag); }
++void GL_APIENTRY GL_DepthRangef(GLfloat n, GLfloat f) { glDepthRangef(n, f); }
++void GL_APIENTRY GL_DetachShader(GLuint program, GLuint shader) { glDetachShader(program, shader); }
++void GL_APIENTRY GL_DisableVertexAttribArray(GLuint index) { glDisableVertexAttribArray(index); }
++void GL_APIENTRY GL_DrawArrays(GLenum mode, GLint first, GLsizei count) { glDrawArrays(mode, first, count); }
++void GL_APIENTRY GL_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instancecount) { glDrawArraysInstanced(mode, first, count, instancecount); }
++void GL_APIENTRY GL_DrawArraysInstancedANGLE(GLenum mode, GLint first, GLsizei count, GLsizei primcount) { glDrawArraysInstancedANGLE(mode, first, count, primcount); }
++void GL_APIENTRY GL_DrawArraysInstancedBaseInstanceANGLE(GLenum mode, GLint first, GLsizei count, GLsizei instanceCount, GLuint baseInstance) { glDrawArraysInstancedBaseInstanceANGLE(mode, first, count, instanceCount, baseInstance); }
++void GL_APIENTRY GL_DrawBuffers(GLsizei n, const GLenum *bufs) { glDrawBuffers(n, bufs); }
++void GL_APIENTRY GL_DrawBuffersEXT(GLsizei n, const GLenum *bufs) { glDrawBuffersEXT(n, bufs); }
++void GL_APIENTRY GL_DrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices) { glDrawElements(mode, count, type, indices); }
++void GL_APIENTRY GL_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei instancecount) { glDrawElementsInstanced(mode, count, type, indices, instancecount); }
++void GL_APIENTRY GL_DrawElementsInstancedANGLE(GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount) { glDrawElementsInstancedANGLE(mode, count, type, indices, primcount); }
++void GL_APIENTRY GL_DrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices, GLsizei instanceCount, GLint baseVertex, GLuint baseInstance) { glDrawElementsInstancedBaseVertexBaseInstanceANGLE(mode, count, type, indices, instanceCount, baseVertex, baseInstance); }
++void GL_APIENTRY GL_DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count, GLenum type, const void *indices) { glDrawRangeElements(mode, start, end, count, type, indices); }
++void GL_APIENTRY GL_EnableVertexAttribArray(GLuint index) { glEnableVertexAttribArray(index); }
++void GL_APIENTRY GL_EndQuery(GLenum target) { glEndQuery(target); }
++void GL_APIENTRY GL_EndQueryEXT(GLenum target) { glEndQueryEXT(target); }
++void GL_APIENTRY GL_EndTransformFeedback(void) { glEndTransformFeedback(); }
++GLsync GL_APIENTRY GL_FenceSync(GLenum condition, GLbitfield flags) { return glFenceSync(condition, flags); }
++void GL_APIENTRY GL_Finish(void) { glFinish(); }
++void GL_APIENTRY GL_Flush(void) { glFlush(); }
++void GL_APIENTRY GL_FramebufferRenderbuffer(GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer) { glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer); }
++void GL_APIENTRY GL_FramebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level) { glFramebufferTexture2D(target, attachment, textarget, texture, level); }
++void GL_APIENTRY GL_FramebufferTextureLayer(GLenum target, GLenum attachment, GLuint texture, GLint level, GLint layer) { glFramebufferTextureLayer(target, attachment, texture, level, layer); }
++void GL_APIENTRY GL_FrontFace(GLenum mode) { glFrontFace(mode); }
++void GL_APIENTRY GL_GenBuffers(GLsizei n, GLuint *buffers) { glGenBuffers(n, buffers); }
++void GL_APIENTRY GL_GenFramebuffers(GLsizei n, GLuint *framebuffers) { glGenFramebuffers(n, framebuffers); }
++void GL_APIENTRY GL_GenQueries(GLsizei n, GLuint *ids) { glGenQueries(n, ids); }
++void GL_APIENTRY GL_GenQueriesEXT(GLsizei n, GLuint *ids) { glGenQueriesEXT(n, ids); }
++void GL_APIENTRY GL_GenRenderbuffers(GLsizei n, GLuint *renderbuffers) { glGenRenderbuffers(n, renderbuffers); }
++void GL_APIENTRY GL_GenSamplers(GLsizei count, GLuint *samplers) { glGenSamplers(count, samplers); }
++void GL_APIENTRY GL_GenTextures(GLsizei n, GLuint *textures) { glGenTextures(n, textures); }
++void GL_APIENTRY GL_GenTransformFeedbacks(GLsizei n, GLuint *ids) { glGenTransformFeedbacks(n, ids); }
++void GL_APIENTRY GL_GenVertexArrays(GLsizei n, GLuint *arrays) { glGenVertexArrays(n, arrays); }
++void GL_APIENTRY GL_GenVertexArraysOES(GLsizei n, GLuint *arrays) { glGenVertexArraysOES(n, arrays); }
++void GL_APIENTRY GL_GenerateMipmap(GLenum target) { glGenerateMipmap(target); }
++void GL_APIENTRY GL_GetActiveAttrib(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) { glGetActiveAttrib(program, index, bufSize, length, size, type, name); }
++void GL_APIENTRY GL_GetActiveUniform(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLint *size, GLenum *type, GLchar *name) { glGetActiveUniform(program, index, bufSize, length, size, type, name); }
++void GL_APIENTRY GL_GetActiveUniformBlockName(GLuint program, GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName) { glGetActiveUniformBlockName(program, uniformBlockIndex, bufSize, length, uniformBlockName); }
++void GL_APIENTRY GL_GetActiveUniformBlockivRobustANGLE(GLuint program, GLuint uniformBlockIndex, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetActiveUniformBlockiv(program, uniformBlockIndex, pname, params); }
++void GL_APIENTRY GL_GetActiveUniformsiv(GLuint program, GLsizei uniformCount, const GLuint *uniformIndices, GLenum pname, GLint *params) { glGetActiveUniformsiv(program, uniformCount, uniformIndices, pname, params); }
++GLint GL_APIENTRY GL_GetAttribLocation(GLuint program, const GLchar *name) { return glGetAttribLocation(program, name); }
++void GL_APIENTRY GL_GetBooleanv(GLenum pname, GLboolean *data) { glGetBooleanv(pname, data); }
++void GL_APIENTRY GL_GetBooleanvRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLboolean *data) { (void)paramCount; if (length) *length = 0; glGetBooleanv(pname, data); }
++void GL_APIENTRY GL_GetBufferParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetBufferParameteriv(target, pname, params); }
++void GL_APIENTRY GL_GetFloatv(GLenum pname, GLfloat *data) { glGetFloatv(pname, data); }
++void GL_APIENTRY GL_GetFloatvRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *data) { (void)paramCount; if (length) *length = 0; glGetFloatv(pname, data); }
++GLint GL_APIENTRY GL_GetFragDataLocation(GLuint program, const GLchar *name) { return glGetFragDataLocation(program, name); }
++void GL_APIENTRY GL_GetFramebufferAttachmentParameterivRobustANGLE(GLenum target, GLenum attachment, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetFramebufferAttachmentParameteriv(target, attachment, pname, params); }
++void GL_APIENTRY GL_GetInteger64i_vRobustANGLE(GLenum target, GLuint index, GLsizei paramCount, GLsizei *length, GLint64 *data) { (void)paramCount; if (length) *length = 0; glGetInteger64i_v(target, index, data); }
++void GL_APIENTRY GL_GetInteger64vRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLint64 *data) { (void)paramCount; if (length) *length = 0; glGetInteger64v(pname, data); }
++void GL_APIENTRY GL_GetIntegeri_vRobustANGLE(GLenum target, GLuint index, GLsizei paramCount, GLsizei *length, GLint *data) { (void)paramCount; if (length) *length = 0; glGetIntegeri_v(target, index, data); }
++void GL_APIENTRY GL_GetIntegerv(GLenum pname, GLint *data) { glGetIntegerv(pname, data); }
++void GL_APIENTRY GL_GetIntegervRobustANGLE(GLenum pname, GLsizei paramCount, GLsizei *length, GLint *data) { (void)paramCount; if (length) *length = 0; glGetIntegerv(pname, data); }
++void GL_APIENTRY GL_GetInternalformativRobustANGLE(GLenum target, GLenum internalformat, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { if (length) *length = 0; glGetInternalformativ(target, internalformat, pname, paramCount, params); }
++void GL_APIENTRY GL_GetProgramInfoLog(GLuint program, GLsizei bufSize, GLsizei *length, GLchar *infoLog) { glGetProgramInfoLog(program, bufSize, length, infoLog); }
++void GL_APIENTRY GL_GetProgramiv(GLuint program, GLenum pname, GLint *params) { glGetProgramiv(program, pname, params); }
++void GL_APIENTRY GL_GetProgramivRobustANGLE(GLuint program, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetProgramiv(program, pname, params); }
++void GL_APIENTRY GL_GetQueryObjectivRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetQueryObjectivEXT(id, pname, params); }
++void GL_APIENTRY GL_GetQueryObjectui64vRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLuint64 *params) { (void)paramCount; if (length) *length = 0; glGetQueryObjectui64vEXT(id, pname, params); }
++void GL_APIENTRY GL_GetQueryObjectuivRobustANGLE(GLuint id, GLenum pname, GLsizei paramCount, GLsizei *length, GLuint *params) { (void)paramCount; if (length) *length = 0; glGetQueryObjectuiv(id, pname, params); }
++void GL_APIENTRY GL_GetQueryiv(GLenum target, GLenum pname, GLint *params) { glGetQueryiv(target, pname, params); }
++void GL_APIENTRY GL_GetQueryivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetQueryiv(target, pname, params); }
++void GL_APIENTRY GL_GetRenderbufferParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetRenderbufferParameteriv(target, pname, params); }
++void GL_APIENTRY GL_GetSamplerParameterfvRobustANGLE(GLuint sampler, GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *params) { (void)paramCount; if (length) *length = 0; glGetSamplerParameterfv(sampler, pname, params); }
++void GL_APIENTRY GL_GetSamplerParameterivRobustANGLE(GLuint sampler, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetSamplerParameteriv(sampler, pname, params); }
++void GL_APIENTRY GL_GetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) { glGetShaderInfoLog(shader, bufSize, length, infoLog); }
++void GL_APIENTRY GL_GetShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision) { glGetShaderPrecisionFormat(shadertype, precisiontype, range, precision); }
++void GL_APIENTRY GL_GetShaderiv(GLuint shader, GLenum pname, GLint *params) { glGetShaderiv(shader, pname, params); }
++void GL_APIENTRY GL_GetShaderivRobustANGLE(GLuint shader, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetShaderiv(shader, pname, params); }
++void GL_APIENTRY GL_GetSynciv(GLsync sync, GLenum pname, GLsizei count, GLsizei *length, GLint *values) { glGetSynciv(sync, pname, count, length, values); }
++void GL_APIENTRY GL_GetTexParameterfvRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLfloat *params) { (void)paramCount; if (length) *length = 0; glGetTexParameterfv(target, pname, params); }
++void GL_APIENTRY GL_GetTexParameterivRobustANGLE(GLenum target, GLenum pname, GLsizei paramCount, GLsizei *length, GLint *params) { (void)paramCount; if (length) *length = 0; glGetTexParameteriv(target, pname, params); }
++void GL_APIENTRY GL_GetTransformFeedbackVarying(GLuint program, GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name) { glGetTransformFeedbackVarying(program, index, bufSize, length, size, type, name); }
++GLuint GL_APIENTRY GL_GetUniformBlockIndex(GLuint program, const GLchar *uniformBlockName) { return glGetUniformBlockIndex(program, uniformBlockName); }
++GLint GL_APIENTRY GL_GetUniformLocation(GLuint program, const GLchar *name) { return glGetUniformLocation(program, name); }
++void GL_APIENTRY GL_GetUniformfvRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLfloat *params) { (void)bufSize; if (length) *length = 0; glGetUniformfv(program, location, params); }
++void GL_APIENTRY GL_GetUniformivRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLint *params) { (void)bufSize; if (length) *length = 0; glGetUniformiv(program, location, params); }
++void GL_APIENTRY GL_GetUniformuivRobustANGLE(GLuint program, GLint location, GLsizei bufSize, GLsizei *length, GLuint *params) { (void)bufSize; if (length) *length = 0; glGetUniformuiv(program, location, params); }
++void GL_APIENTRY GL_GetVertexAttribPointervRobustANGLE(GLuint index, GLenum pname, GLsizei paramCount, GLsizei *length, void **pointer) { (void)paramCount; if (length) *length = 0; glGetVertexAttribPointerv(index, pname, pointer); }
++void GL_APIENTRY GL_Hint(GLenum target, GLenum mode) { glHint(target, mode); }
++void GL_APIENTRY GL_InvalidateFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments) { glInvalidateFramebuffer(target, numAttachments, attachments); }
++void GL_APIENTRY GL_InvalidateSubFramebuffer(GLenum target, GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height) { glInvalidateSubFramebuffer(target, numAttachments, attachments, x, y, width, height); }
++GLboolean GL_APIENTRY GL_IsBuffer(GLuint buffer) { return glIsBuffer(buffer); }
++GLboolean GL_APIENTRY GL_IsFramebuffer(GLuint framebuffer) { return glIsFramebuffer(framebuffer); }
++GLboolean GL_APIENTRY GL_IsProgram(GLuint program) { return glIsProgram(program); }
++GLboolean GL_APIENTRY GL_IsQuery(GLuint id) { return glIsQuery(id); }
++GLboolean GL_APIENTRY GL_IsQueryEXT(GLuint id) { return glIsQueryEXT(id); }
++GLboolean GL_APIENTRY GL_IsRenderbuffer(GLuint renderbuffer) { return glIsRenderbuffer(renderbuffer); }
++GLboolean GL_APIENTRY GL_IsSampler(GLuint sampler) { return glIsSampler(sampler); }
++GLboolean GL_APIENTRY GL_IsShader(GLuint shader) { return glIsShader(shader); }
++GLboolean GL_APIENTRY GL_IsSync(GLsync sync) { return glIsSync(sync); }
++GLboolean GL_APIENTRY GL_IsTexture(GLuint texture) { return glIsTexture(texture); }
++GLboolean GL_APIENTRY GL_IsTransformFeedback(GLuint id) { return glIsTransformFeedback(id); }
++GLboolean GL_APIENTRY GL_IsVertexArray(GLuint array) { return glIsVertexArray(array); }
++GLboolean GL_APIENTRY GL_IsVertexArrayOES(GLuint array) { return glIsVertexArrayOES(array); }
++void GL_APIENTRY GL_LineWidth(GLfloat width) { glLineWidth(width); }
++void GL_APIENTRY GL_LinkProgram(GLuint program) { glLinkProgram(program); }
++void GL_APIENTRY GL_MultiDrawArraysANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, GLsizei drawcount) { glMultiDrawArraysANGLE(mode, firsts, counts, drawcount); }
++void GL_APIENTRY GL_MultiDrawArraysInstancedANGLE(GLenum mode, const GLint *firsts, const GLsizei *counts, const GLsizei *instanceCounts, GLsizei drawcount) { glMultiDrawArraysInstancedANGLE(mode, firsts, counts, instanceCounts, drawcount); }
++void GL_APIENTRY GL_MultiDrawArraysInstancedBaseInstanceANGLE(GLenum mode, const GLsizei *firsts, const GLsizei *counts, const GLsizei *instanceCounts, const GLuint *baseInstances, GLsizei drawCount) { glMultiDrawArraysInstancedBaseInstanceANGLE(mode, firsts, counts, instanceCounts, baseInstances, drawCount); }
++void GL_APIENTRY GL_MultiDrawElementsANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, GLsizei drawcount) { glMultiDrawElementsANGLE(mode, counts, type, indices, drawcount); }
++void GL_APIENTRY GL_MultiDrawElementsInstancedANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, GLsizei drawcount) { glMultiDrawElementsInstancedANGLE(mode, counts, type, indices, instanceCounts, drawcount); }
++void GL_APIENTRY GL_MultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(GLenum mode, const GLsizei *counts, GLenum type, const GLvoid* const *indices, const GLsizei *instanceCounts, const GLint *baseVertices, const GLuint *baseInstances, GLsizei drawCount) { glMultiDrawElementsInstancedBaseVertexBaseInstanceANGLE(mode, counts, type, indices, instanceCounts, baseVertices, baseInstances, drawCount); }
++void GL_APIENTRY GL_PauseTransformFeedback(void) { glPauseTransformFeedback(); }
++void GL_APIENTRY GL_PixelStorei(GLenum pname, GLint param) { glPixelStorei(pname, param); }
++void GL_APIENTRY GL_PolygonOffset(GLfloat factor, GLfloat units) { glPolygonOffset(factor, units); }
++void GL_APIENTRY GL_PolygonOffsetClampEXT(GLfloat factor, GLfloat units, GLfloat clamp) { glPolygonOffsetClampEXT(factor, units, clamp); }
++void GL_APIENTRY GL_QueryCounterEXT(GLuint id, GLenum target) { glQueryCounterEXT(id, target); }
++void GL_APIENTRY GL_ReadBuffer(GLenum src) { glReadBuffer(src); }
++void GL_APIENTRY GL_ReadPixelsRobustANGLE(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, GLsizei *length, GLsizei *columns, GLsizei *rows, void *pixels) { (void)bufSize; if (length) *length = 0; if (columns) *columns = width; if (rows) *rows = height; glReadPixels(x, y, width, height, format, type, pixels); }
++void GL_APIENTRY GL_RenderbufferStorageMultisample(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) { glRenderbufferStorageMultisample(target, samples, internalformat, width, height); }
++void GL_APIENTRY GL_ResumeTransformFeedback(void) { glResumeTransformFeedback(); }
++void GL_APIENTRY GL_SampleCoverage(GLfloat value, GLboolean invert) { glSampleCoverage(value, invert); }
++void GL_APIENTRY GL_SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) { glSamplerParameterf(sampler, pname, param); }
++void GL_APIENTRY GL_SamplerParameteri(GLuint sampler, GLenum pname, GLint param) { glSamplerParameteri(sampler, pname, param); }
++void GL_APIENTRY GL_Scissor(GLint x, GLint y, GLsizei width, GLsizei height) { glScissor(x, y, width, height); }
++void GL_APIENTRY GL_ShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) { glShaderSource(shader, count, string, length); }
++void GL_APIENTRY GL_StencilFunc(GLenum func, GLint ref, GLuint mask) { glStencilFunc(func, ref, mask); }
++void GL_APIENTRY GL_StencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask) { glStencilFuncSeparate(face, func, ref, mask); }
++void GL_APIENTRY GL_StencilMask(GLuint mask) { glStencilMask(mask); }
++void GL_APIENTRY GL_StencilMaskSeparate(GLenum face, GLuint mask) { glStencilMaskSeparate(face, mask); }
++void GL_APIENTRY GL_StencilOp(GLenum fail, GLenum zfail, GLenum zpass) { glStencilOp(fail, zfail, zpass); }
++void GL_APIENTRY GL_StencilOpSeparate(GLenum face, GLenum sfail, GLenum dpfail, GLenum dppass) { glStencilOpSeparate(face, sfail, dpfail, dppass); }
++void GL_APIENTRY GL_TexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const void *pixels) { glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels); }
++void GL_APIENTRY GL_TexImage2DRobustANGLE(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLsizei bufSize, const void *pixels) { (void)bufSize; glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels); }
++void GL_APIENTRY GL_TexImage3DRobustANGLE(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, GLsizei bufSize, const void *pixels) { (void)bufSize; glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, pixels); }
++void GL_APIENTRY GL_TexParameterf(GLenum target, GLenum pname, GLfloat param) { glTexParameterf(target, pname, param); }
++void GL_APIENTRY GL_TexParameteri(GLenum target, GLenum pname, GLint param) { glTexParameteri(target, pname, param); }
++void GL_APIENTRY GL_TexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height) { glTexStorage2D(target, levels, internalformat, width, height); }
++void GL_APIENTRY GL_TexStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth) { glTexStorage3D(target, levels, internalformat, width, height, depth); }
++void GL_APIENTRY GL_TexSubImage2DRobustANGLE(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLsizei bufSize, const void *pixels) { (void)bufSize; glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels); }
++void GL_APIENTRY GL_TexSubImage3DRobustANGLE(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, GLsizei bufSize, const void *pixels) { (void)bufSize; glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, pixels); }
++void GL_APIENTRY GL_TransformFeedbackVaryings(GLuint program, GLsizei count, const GLchar *const*varyings, GLenum bufferMode) { glTransformFeedbackVaryings(program, count, varyings, bufferMode); }
++void GL_APIENTRY GL_Uniform1f(GLint location, GLfloat v0) { glUniform1f(location, v0); }
++void GL_APIENTRY GL_Uniform1fv(GLint location, GLsizei count, const GLfloat *value) { glUniform1fv(location, count, value); }
++void GL_APIENTRY GL_Uniform1i(GLint location, GLint v0) { glUniform1i(location, v0); }
++void GL_APIENTRY GL_Uniform1iv(GLint location, GLsizei count, const GLint *value) { glUniform1iv(location, count, value); }
++void GL_APIENTRY GL_Uniform1ui(GLint location, GLuint v0) { glUniform1ui(location, v0); }
++void GL_APIENTRY GL_Uniform1uiv(GLint location, GLsizei count, const GLuint *value) { glUniform1uiv(location, count, value); }
++void GL_APIENTRY GL_Uniform2f(GLint location, GLfloat v0, GLfloat v1) { glUniform2f(location, v0, v1); }
++void GL_APIENTRY GL_Uniform2fv(GLint location, GLsizei count, const GLfloat *value) { glUniform2fv(location, count, value); }
++void GL_APIENTRY GL_Uniform2i(GLint location, GLint v0, GLint v1) { glUniform2i(location, v0, v1); }
++void GL_APIENTRY GL_Uniform2iv(GLint location, GLsizei count, const GLint *value) { glUniform2iv(location, count, value); }
++void GL_APIENTRY GL_Uniform2ui(GLint location, GLuint v0, GLuint v1) { glUniform2ui(location, v0, v1); }
++void GL_APIENTRY GL_Uniform2uiv(GLint location, GLsizei count, const GLuint *value) { glUniform2uiv(location, count, value); }
++void GL_APIENTRY GL_Uniform3f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2) { glUniform3f(location, v0, v1, v2); }
++void GL_APIENTRY GL_Uniform3fv(GLint location, GLsizei count, const GLfloat *value) { glUniform3fv(location, count, value); }
++void GL_APIENTRY GL_Uniform3i(GLint location, GLint v0, GLint v1, GLint v2) { glUniform3i(location, v0, v1, v2); }
++void GL_APIENTRY GL_Uniform3iv(GLint location, GLsizei count, const GLint *value) { glUniform3iv(location, count, value); }
++void GL_APIENTRY GL_Uniform3ui(GLint location, GLuint v0, GLuint v1, GLuint v2) { glUniform3ui(location, v0, v1, v2); }
++void GL_APIENTRY GL_Uniform3uiv(GLint location, GLsizei count, const GLuint *value) { glUniform3uiv(location, count, value); }
++void GL_APIENTRY GL_Uniform4f(GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3) { glUniform4f(location, v0, v1, v2, v3); }
++void GL_APIENTRY GL_Uniform4fv(GLint location, GLsizei count, const GLfloat *value) { glUniform4fv(location, count, value); }
++void GL_APIENTRY GL_Uniform4i(GLint location, GLint v0, GLint v1, GLint v2, GLint v3) { glUniform4i(location, v0, v1, v2, v3); }
++void GL_APIENTRY GL_Uniform4iv(GLint location, GLsizei count, const GLint *value) { glUniform4iv(location, count, value); }
++void GL_APIENTRY GL_Uniform4ui(GLint location, GLuint v0, GLuint v1, GLuint v2, GLuint v3) { glUniform4ui(location, v0, v1, v2, v3); }
++void GL_APIENTRY GL_Uniform4uiv(GLint location, GLsizei count, const GLuint *value) { glUniform4uiv(location, count, value); }
++void GL_APIENTRY GL_UniformBlockBinding(GLuint program, GLuint uniformBlockIndex, GLuint uniformBlockBinding) { glUniformBlockBinding(program, uniformBlockIndex, uniformBlockBinding); }
++void GL_APIENTRY GL_UniformMatrix2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix2fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix2x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix2x3fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix2x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix2x4fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix3fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix3x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix3x2fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix3x4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix3x4fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix4fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix4fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix4x2fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix4x2fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UniformMatrix4x3fv(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value) { glUniformMatrix4x3fv(location, count, transpose, value); }
++void GL_APIENTRY GL_UseProgram(GLuint program) { glUseProgram(program); }
++void GL_APIENTRY GL_ValidateProgram(GLuint program) { glValidateProgram(program); }
++void GL_APIENTRY GL_VertexAttrib1f(GLuint index, GLfloat x) { glVertexAttrib1f(index, x); }
++void GL_APIENTRY GL_VertexAttrib1fv(GLuint index, const GLfloat *v) { glVertexAttrib1fv(index, v); }
++void GL_APIENTRY GL_VertexAttrib2f(GLuint index, GLfloat x, GLfloat y) { glVertexAttrib2f(index, x, y); }
++void GL_APIENTRY GL_VertexAttrib2fv(GLuint index, const GLfloat *v) { glVertexAttrib2fv(index, v); }
++void GL_APIENTRY GL_VertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z) { glVertexAttrib3f(index, x, y, z); }
++void GL_APIENTRY GL_VertexAttrib3fv(GLuint index, const GLfloat *v) { glVertexAttrib3fv(index, v); }
++void GL_APIENTRY GL_VertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w) { glVertexAttrib4f(index, x, y, z, w); }
++void GL_APIENTRY GL_VertexAttrib4fv(GLuint index, const GLfloat *v) { glVertexAttrib4fv(index, v); }
++void GL_APIENTRY GL_VertexAttribDivisor(GLuint index, GLuint divisor) { glVertexAttribDivisor(index, divisor); }
++void GL_APIENTRY GL_VertexAttribDivisorANGLE(GLuint index, GLuint divisor) { glVertexAttribDivisorANGLE(index, divisor); }
++void GL_APIENTRY GL_VertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w) { glVertexAttribI4i(index, x, y, z, w); }
++void GL_APIENTRY GL_VertexAttribI4iv(GLuint index, const GLint *v) { glVertexAttribI4iv(index, v); }
++void GL_APIENTRY GL_VertexAttribI4ui(GLuint index, GLuint x, GLuint y, GLuint z, GLuint w) { glVertexAttribI4ui(index, x, y, z, w); }
++void GL_APIENTRY GL_VertexAttribI4uiv(GLuint index, const GLuint *v) { glVertexAttribI4uiv(index, v); }
++void GL_APIENTRY GL_VertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, const void *pointer) { glVertexAttribIPointer(index, size, type, stride, pointer); }
++void GL_APIENTRY GL_VertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer) { glVertexAttribPointer(index, size, type, normalized, stride, pointer); }
++void GL_APIENTRY GL_Viewport(GLint x, GLint y, GLsizei width, GLsizei height) { glViewport(x, y, width, height); }
++void GL_APIENTRY GL_WaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) { glWaitSync(sync, flags, timeout); }
++
++} // extern "C"
++
++#endif // ENABLE(WEBGL)
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+new file mode 100644
+index 0000000000..bf71977d5f
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+@@ -0,0 +1,892 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++// ANGLE-Ersatz fuer PORT=Wasm, der Teil von Hand (der Rest ist generiert,
++// siehe ANGLEShimForwardWasm.cpp und tools/gen-angle-shim.py im browser-lite Repo).
++//
++// WebGL der Seite laeuft auf einem WebGL-Kontext des Host-Browsers, den wir
++// im Engine-Worker auf einem OffscreenCanvas anlegen. WebGL 1 bekommt ein
++// WebGL 1, WebGL 2 ein WebGL 2, so stimmen Shader und Formate genau.
++// ANGLE arbeitet mit GLES-Namen fuer Erweiterungen, der Browser mit WebGL-
++// Namen. Hier wird zwischen beiden uebersetzt.
++//
++// Chrome erlaubt in einem Worker nur 4 aktive WebGL-Kontexte, danach geht der
++// aelteste verloren. Darum teilen sich alle Kontexte eines Threads einen
++// Host-Kontext pro WebGL-Version (wie die virtualisierten Kontexte von ANGLE):
++// beim Wechsel wird der GL-Zustand gespeichert und der des anderen Kontexts
++// wiederhergestellt. Jeder Kontext hat ein eigenes "Standard"-VAO und
++// Transform-Feedback-Objekt, weil die des Host-Kontexts sonst geteilt waeren.
++
++#include "config.h"
++#include "ANGLEShimWasm.h"
++
++#if ENABLE(WEBGL)
++
++#include "ANGLEShimEntryPoints.h"
++#include <algorithm>
++#include <emscripten/emscripten.h>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++extern "C" {
++const GLubyte* GL_APIENTRY glGetString(GLenum);
++void GL_APIENTRY glRenderbufferStorage(GLenum, GLenum, GLsizei, GLsizei);
++void GL_APIENTRY glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
++void GL_APIENTRY glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
++void GL_APIENTRY glInvalidateFramebuffer(GLenum, GLsizei, const GLenum*);
++void GL_APIENTRY glGetShaderSource(GLuint, GLsizei, GLsizei*, GLchar*);
++void GL_APIENTRY glEnable(GLenum);
++void GL_APIENTRY glDisable(GLenum);
++GLboolean GL_APIENTRY glIsEnabled(GLenum);
++GLenum GL_APIENTRY glGetError();
++void GL_APIENTRY glActiveTexture(GLenum);
++void GL_APIENTRY glGenVertexArrays(GLsizei, GLuint*);
++void GL_APIENTRY glBindVertexArray(GLuint);
++void GL_APIENTRY glDeleteVertexArrays(GLsizei, const GLuint*);
++void GL_APIENTRY glGenTransformFeedbacks(GLsizei, GLuint*);
++void GL_APIENTRY glBindTransformFeedback(GLenum, GLuint);
++void GL_APIENTRY glDeleteTransformFeedbacks(GLsizei, const GLuint*);
++void GL_APIENTRY glBufferSubData(GLenum, GLintptr, GLsizeiptr, const void*);
++}
++
++namespace {
++
++// Ein Kontext von WebKit (virtuell, teilt sich den Host-Kontext)
++struct ShimContext {
++    int id { 0 };
++    bool webgl2 { false };
++    std::unordered_set<std::string> requestable;
++    std::unordered_set<std::string> enabled;
++    std::string enabledString;
++    std::string requestableString;
++    // Fehler, die beim Wechsel noch im Host-Kontext lagen
++    std::vector<GLenum> pendingErrors;
++    // Eigenes "Standard"-VAO/Transform-Feedback und was gerade gebunden ist
++    GLuint defaultVertexArray { 0 };
++    GLuint boundVertexArray { 0 };
++    GLuint defaultTransformFeedback { 0 };
++    GLuint boundTransformFeedback { 0 };
++    // Hoechste benutzte Textur-Einheit (nur so viele werden gespeichert)
++    int maxTextureUnit { 0 };
++};
++
++// Ein echter WebGL-Kontext des Browsers
++struct HostContext {
++    int handle { 0 };
++    // Kontext, dessen Zustand gerade im Host-Kontext steckt
++    int stateOwner { 0 };
++    // Hoechste Textur-Einheit, die irgendein Kontext benutzt hat
++    int maxTextureUnit { 0 };
++};
++
++thread_local std::unordered_map<int, ShimContext>* contextMap;
++thread_local HostContext hosts[2];
++thread_local ShimContext* current = nullptr;
++thread_local int nextId = 1;
++
++std::unordered_map<int, ShimContext>& contexts()
++{
++    if (!contextMap)
++        contextMap = new std::unordered_map<int, ShimContext>;
++    return *contextMap;
++}
++
++HostContext& hostFor(const ShimContext& context)
++{
++    return hosts[context.webgl2 ? 1 : 0];
++}
++
++struct Mapping {
++    const char* webgl;
++    std::vector<const char*> gles;
++    int versions; // 1 = WebGL 1, 2 = WebGL 2, 3 = beide
++};
++
++// Welche WebGL-Erweiterung des Browsers welche GLES-Erweiterung fuer WebKit ergibt
++const std::vector<Mapping>& mappings()
++{
++    static const std::vector<Mapping> list {
++        { "EXT_texture_filter_anisotropic", { "GL_EXT_texture_filter_anisotropic" }, 3 },
++        { "WEBGL_compressed_texture_s3tc", { "GL_EXT_texture_compression_dxt1", "GL_ANGLE_texture_compression_dxt3", "GL_ANGLE_texture_compression_dxt5" }, 3 },
++        { "WEBGL_compressed_texture_s3tc_srgb", { "GL_EXT_texture_compression_s3tc_srgb" }, 3 },
++        { "WEBGL_compressed_texture_etc", { "GL_ANGLE_compressed_texture_etc" }, 3 },
++        { "WEBGL_compressed_texture_etc1", { "GL_OES_compressed_ETC1_RGB8_texture" }, 3 },
++        { "WEBGL_compressed_texture_astc", { "GL_KHR_texture_compression_astc_ldr" }, 3 },
++        { "WEBGL_compressed_texture_pvrtc", { "GL_IMG_texture_compression_pvrtc" }, 3 },
++        { "EXT_texture_compression_bptc", { "GL_EXT_texture_compression_bptc" }, 3 },
++        { "EXT_texture_compression_rgtc", { "GL_EXT_texture_compression_rgtc" }, 3 },
++        { "OES_texture_float_linear", { "GL_OES_texture_float_linear" }, 3 },
++        { "EXT_float_blend", { "GL_EXT_float_blend" }, 3 },
++        { "KHR_parallel_shader_compile", { "GL_KHR_parallel_shader_compile" }, 3 },
++        { "WEBGL_multi_draw", { "GL_ANGLE_multi_draw" }, 3 },
++        { "EXT_color_buffer_half_float", { "GL_EXT_color_buffer_half_float" }, 3 },
++        { "ANGLE_instanced_arrays", { "GL_ANGLE_instanced_arrays" }, 1 },
++        { "EXT_blend_minmax", { "GL_EXT_blend_minmax" }, 1 },
++        { "EXT_disjoint_timer_query", { "GL_EXT_disjoint_timer_query" }, 1 },
++        { "EXT_frag_depth", { "GL_EXT_frag_depth" }, 1 },
++        { "EXT_shader_texture_lod", { "GL_EXT_shader_texture_lod" }, 1 },
++        { "EXT_sRGB", { "GL_EXT_sRGB" }, 1 },
++        { "OES_element_index_uint", { "GL_OES_element_index_uint" }, 1 },
++        { "OES_fbo_render_mipmap", { "GL_OES_fbo_render_mipmap" }, 1 },
++        { "OES_standard_derivatives", { "GL_OES_standard_derivatives" }, 1 },
++        { "OES_texture_float", { "GL_OES_texture_float" }, 1 },
++        { "OES_texture_half_float", { "GL_OES_texture_half_float" }, 1 },
++        { "OES_texture_half_float_linear", { "GL_OES_texture_half_float_linear" }, 1 },
++        { "OES_vertex_array_object", { "GL_OES_vertex_array_object" }, 1 },
++        { "WEBGL_color_buffer_float", { "GL_CHROMIUM_color_buffer_float_rgba" }, 1 },
++        { "WEBGL_depth_texture", { "GL_OES_depth_texture", "GL_ANGLE_depth_texture" }, 1 },
++        { "WEBGL_draw_buffers", { "GL_EXT_draw_buffers" }, 1 },
++        { "EXT_color_buffer_float", { "GL_EXT_color_buffer_float" }, 2 },
++        { "EXT_disjoint_timer_query_webgl2", { "GL_EXT_disjoint_timer_query" }, 2 },
++        { "OES_draw_buffers_indexed", { "GL_OES_draw_buffers_indexed" }, 2 },
++        { "EXT_texture_norm16", { "GL_EXT_texture_norm16" }, 2 },
++        { "EXT_render_snorm", { "GL_EXT_render_snorm" }, 2 },
++        { "WEBGL_draw_instanced_base_vertex_base_instance", { "GL_ANGLE_base_vertex_base_instance" }, 2 },
++        { "EXT_clip_control", { "GL_EXT_clip_control" }, 3 },
++        { "EXT_depth_clamp", { "GL_EXT_depth_clamp" }, 3 },
++        { "EXT_polygon_offset_clamp", { "GL_EXT_polygon_offset_clamp" }, 3 },
++        { "EXT_texture_mirror_clamp_to_edge", { "GL_EXT_texture_mirror_clamp_to_edge" }, 3 },
++        { "WEBGL_polygon_mode", { "GL_ANGLE_polygon_mode" }, 3 },
++        { "WEBGL_provoking_vertex", { "GL_ANGLE_provoking_vertex" }, 2 },
++        { "EXT_conservative_depth", { "GL_EXT_conservative_depth" }, 2 },
++        { "NV_shader_noperspective_interpolation", { "GL_NV_shader_noperspective_interpolation" }, 2 },
++        { "OES_sample_variables", { "GL_OES_sample_variables" }, 2 },
++        { "OES_shader_multisample_interpolation", { "GL_OES_shader_multisample_interpolation" }, 2 },
++        { "WEBGL_clip_cull_distance", { "GL_ANGLE_clip_cull_distance" }, 2 },
++        { "WEBGL_stencil_texturing", { "GL_ANGLE_stencil_texturing" }, 2 },
++        { "WEBGL_render_shared_exponent", { "GL_QCOM_render_shared_exponent" }, 2 },
++    };
++    return list;
++}
++
++std::string join(const std::unordered_set<std::string>& names)
++{
++    std::string result;
++    for (auto& name : names) {
++        if (!result.empty())
++            result += ' ';
++        result += name;
++    }
++    return result;
++}
++
++void updateStrings(ShimContext& context)
++{
++    context.enabledString = join(context.enabled);
++    context.requestableString = join(context.requestable);
++}
++
++} // namespace
++
++// Host-Kontext im Engine-Worker auf einem eigenen OffscreenCanvas. Gezeichnet
++// wird nur in Framebuffer von WebKit, darum ohne Tiefe/Stencil/Antialiasing.
++EM_JS(int, blCreateGLContext, (int webgl2), {
++    if (typeof OffscreenCanvas === "undefined")
++        return 0;
++    var canvas = new OffscreenCanvas(1, 1);
++    var attributes = {
++        majorVersion: webgl2 ? 2 : 1, minorVersion: 0, alpha: true, depth: false, stencil: false,
++        antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false,
++        powerPreference: "default", failIfMajorPerformanceCaveat: false, enableExtensionsByDefault: 1
++    };
++    try {
++        var handle = GL.createContext(canvas, attributes) || 0;
++        // Ohne Vertex Arrays geht das Teilen nicht (in Chrome immer da)
++        if (handle && !GL.getContext(handle).GLctx.createVertexArray) {
++            GL.deleteContext(handle);
++            return 0;
++        }
++        return handle;
++    } catch (e) {
++        return 0;
++    }
++});
++
++EM_JS(int, blIsContextLost, (int handle), {
++    var context = GL.getContext(handle);
++    return !context || context.GLctx.isContextLost() ? 1 : 0;
++});
++
++// Zustand des aktuellen Host-Kontexts unter "key" speichern. Gespeichert wird
++// alles, was in WebGL zum Kontext gehoert und nicht in einem Objekt steckt
++// (VAO, Framebuffer, Programm, Transform Feedback haben ihren Zustand selber).
++// Dazu die Werte, die sich Emscriptens GL-Schicht selber merkt.
++EM_JS(void, blSaveState, (int key, int webgl2, int units), {
++    var gl = GLctx;
++    var s = { caps: [], params: {}, units: [], attribs: [] };
++    var caps = [0x0BE2, 0x0B44, 0x0B71, 0x0BD0, 0x8037, 0x809E, 0x80A0, 0x0C11, 0x0B90];
++    if (webgl2)
++        caps.push(0x8C89);
++    // Schalter und Werte aus Erweiterungen, nur wenn der Browser sie hat
++    var extensionNames = [];
++    if (gl.getExtension("EXT_depth_clamp"))
++        caps.push(0x864F);
++    if (gl.getExtension("WEBGL_polygon_mode")) {
++        caps.push(0x2A02);
++        extensionNames.push(0x0B40);
++    }
++    if (gl.getExtension("EXT_polygon_offset_clamp"))
++        extensionNames.push(0x8E1B);
++    if (gl.getExtension("EXT_clip_control"))
++        extensionNames.push(0x935C, 0x935D);
++    if (webgl2 && gl.getExtension("WEBGL_provoking_vertex"))
++        extensionNames.push(0x8E4F);
++    if (webgl2 && gl.getExtension("WEBGL_clip_cull_distance")) {
++        for (var d = 0; d < gl.getParameter(0x0D32); d++)
++            caps.push(0x3000 + d);
++    }
++    s.capList = caps;
++    for (var i = 0; i < caps.length; i++)
++        s.caps.push(gl.isEnabled(caps[i]));
++    var names = [0x8005, 0x8009, 0x883D, 0x80C9, 0x80C8, 0x80CB, 0x80CA, 0x0C22, 0x0C23, 0x0B73, 0x0B91,
++        0x0B45, 0x0B74, 0x0B72, 0x0B70, 0x0B46, 0x0B21, 0x8038, 0x2A00, 0x80AA, 0x80AB, 0x0C10, 0x0BA2,
++        0x0B92, 0x0B97, 0x0B93, 0x0B94, 0x0B95, 0x0B96, 0x0B98, 0x8800, 0x8CA3, 0x8CA4, 0x8801, 0x8802,
++        0x8803, 0x8CA5, 0x8192, 0x0D05, 0x0CF5, 0x9240, 0x9241, 0x9243, 0x8B8D, 0x8894, 0x8CA6, 0x8CA7,
++        0x84E0, 0x85B5];
++    if (webgl2)
++        names = names.concat([0x8CAA, 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x806E, 0x0CF3, 0x0CF4, 0x806D,
++            0x8F36, 0x8F37, 0x88ED, 0x88EF, 0x8E25, 0x8A28, 0x8C8F, 0x8B8B]);
++    names = names.concat(extensionNames);
++    for (var i = 0; i < names.length; i++)
++        s.params[names[i]] = gl.getParameter(names[i]);
++    for (var u = 0; u <= units; u++) {
++        gl.activeTexture(0x84C0 + u);
++        var unit = [gl.getParameter(0x8069), gl.getParameter(0x8514)];
++        if (webgl2)
++            unit.push(gl.getParameter(0x806A), gl.getParameter(0x8C1D), gl.getParameter(0x8919));
++        s.units.push(unit);
++    }
++    gl.activeTexture(s.params[0x84E0]);
++    var attribs = gl.getParameter(0x8869);
++    for (var a = 0; a < attribs; a++)
++        s.attribs.push(gl.getVertexAttrib(a, 0x8626));
++    if (webgl2) {
++        s.uniformBuffers = [];
++        var count = gl.getParameter(0x8A2F);
++        for (var b = 0; b < count; b++)
++            s.uniformBuffers.push([gl.getIndexedParameter(0x8A28, b), gl.getIndexedParameter(0x8A29, b), gl.getIndexedParameter(0x8A2A, b)]);
++    }
++    s.cache = [gl.currentArrayBufferBinding, gl.currentElementArrayBufferBinding, gl.currentPixelPackBufferBinding,
++        gl.currentPixelUnpackBufferBinding, gl.currentProgram, GL.unpackAlignment, GL.unpackRowLength];
++    (GL.blStates || (GL.blStates = {}))[key] = s;
++});
++
++// Zustand "key" in den aktuellen Host-Kontext laden. Ein neuer Kontext bekommt
++// den Grundzustand des Host-Kontexts (defaultKey) mit seinem eigenen VAO/TF.
++// "units" Textur-Einheiten werden gesetzt, auch die, die dieser Kontext nie
++// benutzt hat, damit keine Texturen eines anderen Kontexts sichtbar bleiben.
++EM_JS(void, blRestoreState, (int key, int defaultKey, int vertexArray, int transformFeedback, int webgl2, int units), {
++    var gl = GLctx;
++    var saved = GL.blStates[key];
++    var s = saved || GL.blStates[defaultKey];
++    var p = s.params;
++    gl.bindVertexArray(saved ? p[0x85B5] : GL.vaos[vertexArray]);
++    if (webgl2)
++        gl.bindTransformFeedback(0x8E22, saved ? p[0x8E25] : GL.transformFeedbacks[transformFeedback]);
++    for (var i = 0; i < s.capList.length; i++) {
++        if (s.caps[i])
++            gl.enable(s.capList[i]);
++        else
++            gl.disable(s.capList[i]);
++    }
++    gl.blendColor(p[0x8005][0], p[0x8005][1], p[0x8005][2], p[0x8005][3]);
++    gl.blendEquationSeparate(p[0x8009], p[0x883D]);
++    gl.blendFuncSeparate(p[0x80C9], p[0x80C8], p[0x80CB], p[0x80CA]);
++    gl.clearColor(p[0x0C22][0], p[0x0C22][1], p[0x0C22][2], p[0x0C22][3]);
++    gl.colorMask(p[0x0C23][0], p[0x0C23][1], p[0x0C23][2], p[0x0C23][3]);
++    gl.clearDepth(p[0x0B73]);
++    gl.clearStencil(p[0x0B91]);
++    gl.cullFace(p[0x0B45]);
++    gl.depthFunc(p[0x0B74]);
++    gl.depthMask(p[0x0B72]);
++    gl.depthRange(p[0x0B70][0], p[0x0B70][1]);
++    gl.frontFace(p[0x0B46]);
++    gl.lineWidth(p[0x0B21]);
++    if (p[0x8E1B] !== undefined)
++        gl.getExtension("EXT_polygon_offset_clamp").polygonOffsetClampEXT(p[0x8038], p[0x2A00], p[0x8E1B]);
++    else
++        gl.polygonOffset(p[0x8038], p[0x2A00]);
++    if (p[0x0B40] !== undefined)
++        gl.getExtension("WEBGL_polygon_mode").polygonModeWEBGL(0x0408, p[0x0B40]);
++    if (p[0x935C] !== undefined)
++        gl.getExtension("EXT_clip_control").clipControlEXT(p[0x935C], p[0x935D]);
++    if (p[0x8E4F] !== undefined)
++        gl.getExtension("WEBGL_provoking_vertex").provokingVertexWEBGL(p[0x8E4F]);
++    gl.sampleCoverage(p[0x80AA], p[0x80AB]);
++    gl.scissor(p[0x0C10][0], p[0x0C10][1], p[0x0C10][2], p[0x0C10][3]);
++    gl.viewport(p[0x0BA2][0], p[0x0BA2][1], p[0x0BA2][2], p[0x0BA2][3]);
++    gl.stencilFuncSeparate(0x0404, p[0x0B92], p[0x0B97], p[0x0B93]);
++    gl.stencilFuncSeparate(0x0405, p[0x8800], p[0x8CA3], p[0x8CA4]);
++    gl.stencilOpSeparate(0x0404, p[0x0B94], p[0x0B95], p[0x0B96]);
++    gl.stencilOpSeparate(0x0405, p[0x8801], p[0x8802], p[0x8803]);
++    gl.stencilMaskSeparate(0x0404, p[0x0B98]);
++    gl.stencilMaskSeparate(0x0405, p[0x8CA5]);
++    gl.hint(0x8192, p[0x8192]);
++    var pixelStore = [0x0D05, 0x0CF5, 0x9240, 0x9241, 0x9243];
++    if (webgl2)
++        pixelStore = pixelStore.concat([0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x806E, 0x0CF3, 0x0CF4, 0x806D]);
++    for (var i = 0; i < pixelStore.length; i++)
++        gl.pixelStorei(pixelStore[i], p[pixelStore[i]]);
++    gl.useProgram(p[0x8B8D]);
++    gl.bindBuffer(0x8892, p[0x8894]);
++    gl.bindRenderbuffer(0x8D41, p[0x8CA7]);
++    if (webgl2) {
++        gl.bindFramebuffer(0x8CA9, p[0x8CA6]);
++        gl.bindFramebuffer(0x8CA8, p[0x8CAA]);
++        gl.bindBuffer(0x8F36, p[0x8F36]);
++        gl.bindBuffer(0x8F37, p[0x8F37]);
++        gl.bindBuffer(0x88EB, p[0x88ED]);
++        gl.bindBuffer(0x88EC, p[0x88EF]);
++        gl.hint(0x8B8B, p[0x8B8B]);
++        for (var b = 0; b < s.uniformBuffers.length; b++) {
++            var binding = s.uniformBuffers[b];
++            if (binding[0] && binding[2] > 0)
++                gl.bindBufferRange(0x8A11, b, binding[0], binding[1], binding[2]);
++            else
++                gl.bindBufferBase(0x8A11, b, binding[0]);
++        }
++        // bindBufferBase/Range setzen auch die allgemeine Bindung
++        gl.bindBuffer(0x8A11, p[0x8A28]);
++        gl.bindBuffer(0x8C8E, p[0x8C8F]);
++    } else
++        gl.bindFramebuffer(0x8D40, p[0x8CA6]);
++    for (var u = 0; u <= units; u++) {
++        var unit = s.units[u] || [null, null, null, null, null];
++        gl.activeTexture(0x84C0 + u);
++        gl.bindTexture(0x0DE1, unit[0]);
++        gl.bindTexture(0x8513, unit[1]);
++        if (webgl2) {
++            gl.bindTexture(0x806F, unit[2]);
++            gl.bindTexture(0x8C1A, unit[3]);
++            gl.bindSampler(u, unit[4]);
++        }
++    }
++    gl.activeTexture(p[0x84E0]);
++    for (var a = 0; a < s.attribs.length; a++) {
++        var value = s.attribs[a];
++        if (value instanceof Int32Array)
++            gl.vertexAttribI4iv(a, value);
++        else if (value instanceof Uint32Array)
++            gl.vertexAttribI4uiv(a, value);
++        else
++            gl.vertexAttrib4fv(a, value);
++    }
++    var cache = s.cache;
++    gl.currentArrayBufferBinding = cache[0];
++    gl.currentElementArrayBufferBinding = saved ? cache[1] : 0;
++    gl.currentPixelPackBufferBinding = cache[2];
++    gl.currentPixelUnpackBufferBinding = cache[3];
++    gl.currentProgram = cache[4];
++    GL.unpackAlignment = cache[5];
++    GL.unpackRowLength = cache[6];
++});
++
++EM_JS(void, blForgetState, (int key), {
++    if (GL.blStates)
++        delete GL.blStates[key];
++});
++
++namespace {
++
++// Schluessel fuer den Grundzustand eines Host-Kontexts (Kontext-IDs sind positiv)
++int defaultStateKey(bool webgl2)
++{
++    return webgl2 ? -2 : -1;
++}
++
++bool makeHostCurrent(HostContext& host)
++{
++    return EM_ASM_INT({
++        if (GL.currentContext === GL.contexts[$0])
++            return 1;
++        return GL.makeContextCurrent($0) ? 1 : 0;
++    }, host.handle);
++}
++
++// Host-Kontext fuer die Version, beim ersten Mal (oder nach Verlust) neu
++HostContext* ensureHost(bool webgl2)
++{
++    auto& host = hosts[webgl2 ? 1 : 0];
++    if (host.handle && blIsContextLost(host.handle)) {
++        // Verloren: alle Kontexte darauf sind sowieso kaputt
++        EM_ASM({ GL.deleteContext($0); }, host.handle);
++        host = { };
++    }
++    if (!host.handle) {
++        host.handle = blCreateGLContext(webgl2);
++        if (!host.handle)
++            return nullptr;
++        if (!makeHostCurrent(host))
++            return nullptr;
++        blSaveState(defaultStateKey(webgl2), webgl2, 0);
++    }
++    return &host;
++}
++
++void drainErrors(std::vector<GLenum>* into)
++{
++    // Nicht endlos, falls der Kontext verloren ist
++    for (int i = 0; i < 16; i++) {
++        GLenum error = glGetError();
++        if (error == GL_NO_ERROR)
++            break;
++        if (into && std::find(into->begin(), into->end(), error) == into->end())
++            into->push_back(error);
++    }
++}
++
++} // namespace
++
++namespace WebCore {
++
++int angleShimCreateContext(bool webgl2)
++{
++    auto* host = ensureHost(webgl2);
++    if (!host || !makeHostCurrent(*host))
++        return 0;
++    // Der aktuelle Kontext ist jetzt evtl. nicht mehr der im Host
++    current = nullptr;
++
++    ShimContext context;
++    context.id = nextId++;
++    context.webgl2 = webgl2;
++    // Eigene Objekte statt der geteilten Standard-Objekte des Host-Kontexts
++    glGenVertexArrays(1, &context.defaultVertexArray);
++    if (webgl2)
++        glGenTransformFeedbacks(1, &context.defaultTransformFeedback);
++    if (!context.defaultVertexArray)
++        return 0;
++    context.boundVertexArray = context.defaultVertexArray;
++    context.boundTransformFeedback = context.defaultTransformFeedback;
++
++    char* supported = reinterpret_cast<char*>(EM_ASM_PTR({
++        var list = GLctx.getSupportedExtensions() || [];
++        return stringToNewUTF8(' ' + list.join(' ') + ' ');
++    }));
++    std::string supportedList = supported ? supported : "";
++    free(supported);
++    int version = webgl2 ? 2 : 1;
++    for (auto& mapping : mappings()) {
++        if (!(mapping.versions & version))
++            continue;
++        if (supportedList.find(std::string(" ") + mapping.webgl + " ") == std::string::npos)
++            continue;
++        for (auto* name : mapping.gles)
++            context.requestable.insert(name);
++    }
++    // In WebGL 2 eingebaut, WebKit fragt trotzdem danach
++    if (webgl2) {
++        for (auto* name : { "GL_EXT_occlusion_query_boolean", "GL_ANGLE_framebuffer_multisample", "GL_ANGLE_framebuffer_blit",
++            "GL_OES_packed_depth_stencil", "GL_OES_depth24", "GL_OES_rgb8_rgba8", "GL_EXT_blend_minmax", "GL_OES_texture_half_float" })
++            context.requestable.insert(name);
++    } else {
++        // WebGL 1 hat DEPTH_STENCIL-Renderbuffer (GL_RenderbufferStorage passt das Format an)
++        context.requestable.insert("GL_OES_packed_depth_stencil");
++    }
++    context.requestable.insert("GL_ANGLE_translated_shader_source");
++    updateStrings(context);
++    int id = context.id;
++    contexts()[id] = std::move(context);
++    return id;
++}
++
++bool angleShimMakeCurrent(int id)
++{
++    if (!id) {
++        current = nullptr;
++        return true;
++    }
++    if (current && current->id == id)
++        return true;
++    auto it = contexts().find(id);
++    if (it == contexts().end())
++        return false;
++    auto& context = it->second;
++    auto& host = hostFor(context);
++    if (!host.handle || !makeHostCurrent(host))
++        return false;
++    if (host.stateOwner != id) {
++        auto owner = contexts().find(host.stateOwner);
++        if (owner != contexts().end()) {
++            drainErrors(&owner->second.pendingErrors);
++            blSaveState(owner->first, owner->second.webgl2, owner->second.maxTextureUnit);
++        } else
++            drainErrors(nullptr);
++        blRestoreState(id, defaultStateKey(context.webgl2), context.defaultVertexArray, context.defaultTransformFeedback, context.webgl2, host.maxTextureUnit);
++        // Fehler hier kaemen vom Wiederherstellen, nicht von der Seite
++        drainErrors(nullptr);
++        host.stateOwner = id;
++    }
++    current = &context;
++    return true;
++}
++
++void angleShimDestroyContext(int id)
++{
++    auto it = contexts().find(id);
++    if (it == contexts().end())
++        return;
++    auto& context = it->second;
++    auto& host = hostFor(context);
++    if (host.handle && makeHostCurrent(host)) {
++        glDeleteVertexArrays(1, &context.defaultVertexArray);
++        if (context.defaultTransformFeedback)
++            glDeleteTransformFeedbacks(1, &context.defaultTransformFeedback);
++    }
++    if (host.stateOwner == id)
++        host.stateOwner = 0;
++    blForgetState(id);
++    current = nullptr;
++    contexts().erase(it);
++}
++
++} // namespace WebCore
++
++extern "C" {
++
++// ------------------------------------------------------------------ GL
++
++const GLubyte* GL_APIENTRY GL_GetString(GLenum name)
++{
++    if (current && name == GL_EXTENSIONS)
++        return reinterpret_cast<const GLubyte*>(current->enabledString.c_str());
++    if (current && name == GL_REQUESTABLE_EXTENSIONS_ANGLE)
++        return reinterpret_cast<const GLubyte*>(current->requestableString.c_str());
++    return glGetString(name);
++}
++
++void GL_APIENTRY GL_RequestExtensionANGLE(const GLchar* name)
++{
++    if (!current || !name || !current->requestable.count(name))
++        return;
++    // Im Browser sind alle Erweiterungen schon an (enableExtensionsByDefault)
++    current->enabled.insert(name);
++    updateStrings(*current);
++}
++
++void GL_APIENTRY GL_GetTranslatedShaderSourceANGLE(GLuint shader, GLsizei bufSize, GLsizei* length, GLchar* source)
++{
++    // Uebersetzt wird im Browser, wir kennen nur die Quelle
++    glGetShaderSource(shader, bufSize, length, source);
++}
++
++// ------------------------------------------------------------------ geteilter Host-Kontext
++
++GLenum GL_APIENTRY GL_GetError()
++{
++    if (current && !current->pendingErrors.empty()) {
++        GLenum error = current->pendingErrors.front();
++        current->pendingErrors.erase(current->pendingErrors.begin());
++        return error;
++    }
++    return glGetError();
++}
++
++void GL_APIENTRY GL_ActiveTexture(GLenum texture)
++{
++    if (current && texture >= GL_TEXTURE0 && texture < GL_TEXTURE0 + 256) {
++        int unit = texture - GL_TEXTURE0;
++        current->maxTextureUnit = std::max(current->maxTextureUnit, unit);
++        auto& host = hostFor(*current);
++        host.maxTextureUnit = std::max(host.maxTextureUnit, unit);
++    }
++    glActiveTexture(texture);
++}
++
++// VAO 0 ist das eigene Standard-VAO des Kontexts
++void GL_APIENTRY GL_BindVertexArray(GLuint array)
++{
++    if (current) {
++        if (!array)
++            array = current->defaultVertexArray;
++        current->boundVertexArray = array;
++    }
++    glBindVertexArray(array);
++}
++
++void GL_APIENTRY GL_BindVertexArrayOES(GLuint array)
++{
++    GL_BindVertexArray(array);
++}
++
++void GL_APIENTRY GL_DeleteVertexArrays(GLsizei n, const GLuint* arrays)
++{
++    glDeleteVertexArrays(n, arrays);
++    if (!current)
++        return;
++    for (GLsizei i = 0; i < n; i++) {
++        // Gebundenes VAO geloescht: zurueck auf "0", also das eigene
++        if (arrays[i] && arrays[i] == current->boundVertexArray)
++            GL_BindVertexArray(0);
++    }
++}
++
++void GL_APIENTRY GL_DeleteVertexArraysOES(GLsizei n, const GLuint* arrays)
++{
++    GL_DeleteVertexArrays(n, arrays);
++}
++
++// Transform Feedback 0 ist das eigene Standard-Objekt des Kontexts
++void GL_APIENTRY GL_BindTransformFeedback(GLenum target, GLuint id)
++{
++    if (current && current->webgl2) {
++        if (!id)
++            id = current->defaultTransformFeedback;
++        current->boundTransformFeedback = id;
++    }
++    glBindTransformFeedback(target, id);
++}
++
++void GL_APIENTRY GL_DeleteTransformFeedbacks(GLsizei n, const GLuint* ids)
++{
++    glDeleteTransformFeedbacks(n, ids);
++    if (!current)
++        return;
++    for (GLsizei i = 0; i < n; i++) {
++        if (ids[i] && ids[i] == current->boundTransformFeedback)
++            GL_BindTransformFeedback(GL_TRANSFORM_FEEDBACK, 0);
++    }
++}
++
++// WebKit liest Puffer (getBufferSubData) ueber MapBufferRange. Emscriptens
++// Version kann nicht lesen, darum hier ueber getBufferSubData des Browsers.
++struct MappedBuffer {
++    GLintptr offset { 0 };
++    GLsizeiptr length { 0 };
++    GLbitfield access { 0 };
++    void* data { nullptr };
++};
++
++static thread_local std::unordered_map<GLenum, MappedBuffer>* mappedBuffers;
++
++void* GL_APIENTRY GL_MapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length, GLbitfield access)
++{
++    if (!current || !current->webgl2 || length < 0)
++        return nullptr;
++    if (!mappedBuffers)
++        mappedBuffers = new std::unordered_map<GLenum, MappedBuffer>;
++    if (mappedBuffers->contains(target))
++        return nullptr;
++    void* data = calloc(length ? length : 1, 1);
++    if (!data)
++        return nullptr;
++    if (access & GL_MAP_READ_BIT)
++        EM_ASM({ GLctx.getBufferSubData($0, $1, HEAPU8, $2, $3); }, target, offset, data, length);
++    (*mappedBuffers)[target] = MappedBuffer { offset, length, access, data };
++    return data;
++}
++
++GLboolean GL_APIENTRY GL_UnmapBuffer(GLenum target)
++{
++    if (!mappedBuffers)
++        return GL_FALSE;
++    auto it = mappedBuffers->find(target);
++    if (it == mappedBuffers->end())
++        return GL_FALSE;
++    auto mapped = it->second;
++    mappedBuffers->erase(it);
++    if ((mapped.access & GL_MAP_WRITE_BIT) && !(mapped.access & GL_MAP_FLUSH_EXPLICIT_BIT))
++        glBufferSubData(target, mapped.offset, mapped.length, mapped.data);
++    free(mapped.data);
++    return GL_TRUE;
++}
++
++void GL_APIENTRY GL_RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height)
++{
++    if (current && !current->webgl2) {
++        // WebGL 1 kennt nur die unsized Formate
++        switch (internalformat) {
++        case GL_DEPTH24_STENCIL8_OES:
++            internalformat = GL_DEPTH_STENCIL_OES;
++            break;
++        case GL_DEPTH_COMPONENT24_OES:
++            internalformat = GL_DEPTH_COMPONENT16;
++            break;
++        case GL_RGBA8_OES:
++            internalformat = GL_RGBA4;
++            break;
++        case GL_RGB8_OES:
++            internalformat = GL_RGB565;
++            break;
++        default:
++            break;
++        }
++    }
++    glRenderbufferStorage(target, internalformat, width, height);
++}
++
++void GL_APIENTRY GL_RenderbufferStorageMultisampleANGLE(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height)
++{
++    if (current && current->webgl2)
++        glRenderbufferStorageMultisample(target, samples, internalformat, width, height);
++}
++
++void GL_APIENTRY GL_BlitFramebufferANGLE(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter)
++{
++    if (current && current->webgl2)
++        glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
++}
++
++void GL_APIENTRY GL_BlitFramebufferNV(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, GLbitfield mask, GLenum filter)
++{
++    GL_BlitFramebufferANGLE(srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter);
++}
++
++void GL_APIENTRY GL_DiscardFramebufferEXT(GLenum target, GLsizei numAttachments, const GLenum* attachments)
++{
++    // Nur ein Hinweis fuer den Treiber
++    if (current && current->webgl2)
++        glInvalidateFramebuffer(target, numAttachments, attachments);
++}
++
++// Schalter, die es in WebGL nicht gibt: Primitive Restart ist in WebGL 2 immer an,
++// Debug-Ausgabe und Rechteck-Texturen (schaltet WebKit beim Shader-Kompilieren)
++// gibt es nicht. Weiterleiten gaebe INVALID_ENUM, das die Seite dann sieht.
++static bool isFixedCapability(GLenum cap)
++{
++    return cap == GL_PRIMITIVE_RESTART_FIXED_INDEX || cap == GL_DEBUG_OUTPUT_KHR || cap == GL_DEBUG_OUTPUT_SYNCHRONOUS_KHR
++        || cap == GL_TEXTURE_RECTANGLE_ANGLE;
++}
++
++void GL_APIENTRY GL_Enable(GLenum cap)
++{
++    if (!isFixedCapability(cap))
++        glEnable(cap);
++}
++
++void GL_APIENTRY GL_Disable(GLenum cap)
++{
++    if (!isFixedCapability(cap))
++        glDisable(cap);
++}
++
++GLboolean GL_APIENTRY GL_IsEnabled(GLenum cap)
++{
++    if (isFixedCapability(cap))
++        return cap == GL_PRIMITIVE_RESTART_FIXED_INDEX && current && current->webgl2;
++    return glIsEnabled(cap);
++}
++
++void GL_APIENTRY GL_PolygonModeANGLE(GLenum face, GLenum mode)
++{
++    EM_ASM({ var e = GLctx.getExtension('WEBGL_polygon_mode'); if (e) e.polygonModeWEBGL($0, $1); }, face, mode);
++}
++
++void GL_APIENTRY GL_ProvokingVertexANGLE(GLenum mode)
++{
++    EM_ASM({ var e = GLctx.getExtension('WEBGL_provoking_vertex'); if (e) e.provokingVertexWEBGL($0); }, mode);
++}
++
++// Debug-Ausgabe gibt es in WebGL nicht
++void GL_APIENTRY GL_DebugMessageCallbackKHR(GLDEBUGPROCKHR, const void*) { }
++void GL_APIENTRY GL_DebugMessageControlKHR(GLenum, GLenum, GLenum, GLsizei, const GLuint*, GLboolean) { }
++
++// OES_draw_buffers_indexed: in Emscripten nicht da, direkt an die Erweiterung
++void GL_APIENTRY GL_EnableiOES(GLenum target, GLuint index)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.enableiOES($0, $1); }, target, index);
++}
++
++void GL_APIENTRY GL_DisableiOES(GLenum target, GLuint index)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.disableiOES($0, $1); }, target, index);
++}
++
++void GL_APIENTRY GL_BlendEquationiOES(GLuint buf, GLenum mode)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.blendEquationiOES($0, $1); }, buf, mode);
++}
++
++void GL_APIENTRY GL_BlendEquationSeparateiOES(GLuint buf, GLenum modeRGB, GLenum modeAlpha)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.blendEquationSeparateiOES($0, $1, $2); }, buf, modeRGB, modeAlpha);
++}
++
++void GL_APIENTRY GL_BlendFunciOES(GLuint buf, GLenum src, GLenum dst)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.blendFunciOES($0, $1, $2); }, buf, src, dst);
++}
++
++void GL_APIENTRY GL_BlendFuncSeparateiOES(GLuint buf, GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.blendFuncSeparateiOES($0, $1, $2, $3, $4); }, buf, srcRGB, dstRGB, srcAlpha, dstAlpha);
++}
++
++void GL_APIENTRY GL_ColorMaskiOES(GLuint index, GLboolean r, GLboolean g, GLboolean b, GLboolean a)
++{
++    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.colorMaskiOES($0, !!$1, !!$2, !!$3, !!$4); }, index, r, g, b, a);
++}
++
++// ------------------------------------------------------------------ EGL
++// Nur so viel, wie WebKit ausserhalb von GraphicsContextGLWasm braucht.
++
++static EGLDisplay const shimDisplay = reinterpret_cast<EGLDisplay>(1);
++
++EGLBoolean EGLAPIENTRY EGL_BindAPI(EGLenum) { return EGL_TRUE; }
++
++EGLBoolean EGLAPIENTRY EGL_ChooseConfig(EGLDisplay, const EGLint*, EGLConfig* configs, EGLint configSize, EGLint* numConfig)
++{
++    if (configs && configSize > 0)
++        configs[0] = reinterpret_cast<EGLConfig>(1);
++    if (numConfig)
++        *numConfig = 1;
++    return EGL_TRUE;
++}
++
++EGLContext EGLAPIENTRY EGL_CreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLint*) { return EGL_NO_CONTEXT; }
++EGLSurface EGLAPIENTRY EGL_CreatePbufferSurface(EGLDisplay, EGLConfig, const EGLint*) { return reinterpret_cast<EGLSurface>(1); }
++EGLSync EGLAPIENTRY EGL_CreateSync(EGLDisplay, EGLenum, const EGLAttrib*) { return EGL_NO_SYNC; }
++EGLBoolean EGLAPIENTRY EGL_DestroyContext(EGLDisplay, EGLContext) { return EGL_TRUE; }
++EGLBoolean EGLAPIENTRY EGL_DestroyImageKHR(EGLDisplay, EGLImageKHR) { return EGL_TRUE; }
++EGLBoolean EGLAPIENTRY EGL_DestroySurface(EGLDisplay, EGLSurface) { return EGL_TRUE; }
++EGLBoolean EGLAPIENTRY EGL_DestroySync(EGLDisplay, EGLSync) { return EGL_TRUE; }
++EGLint EGLAPIENTRY EGL_DupNativeFenceFDANDROID(EGLDisplay, EGLSyncKHR) { return -1; }
++EGLDisplay EGLAPIENTRY EGL_GetCurrentDisplay() { return current ? shimDisplay : EGL_NO_DISPLAY; }
++EGLint EGLAPIENTRY EGL_GetError() { return EGL_SUCCESS; }
++EGLDisplay EGLAPIENTRY EGL_GetPlatformDisplayEXT(EGLenum, void*, const EGLint*) { return shimDisplay; }
++
++EGLBoolean EGLAPIENTRY EGL_Initialize(EGLDisplay, EGLint* major, EGLint* minor)
++{
++    if (major)
++        *major = 1;
++    if (minor)
++        *minor = 5;
++    return EGL_TRUE;
++}
++
++EGLBoolean EGLAPIENTRY EGL_MakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext context)
++{
++    return WebCore::angleShimMakeCurrent(static_cast<int>(reinterpret_cast<intptr_t>(context))) ? EGL_TRUE : EGL_FALSE;
++}
++
++const char* EGLAPIENTRY EGL_QueryString(EGLDisplay, EGLint) { return ""; }
++EGLBoolean EGLAPIENTRY EGL_ReleaseThread() { return WebCore::angleShimMakeCurrent(0) ? EGL_TRUE : EGL_FALSE; }
++EGLBoolean EGLAPIENTRY EGL_Terminate(EGLDisplay) { return EGL_TRUE; }
++
++} // extern "C"
++
++#endif // ENABLE(WEBGL)
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
+new file mode 100644
+index 0000000000..e4eaa19b81
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
+@@ -0,0 +1,42 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#pragma once
++
++#include <wtf/Platform.h>
++
++#if ENABLE(WEBGL)
++
++namespace WebCore {
++
++// WebGL-Kontext des Host-Browsers im Engine-Worker (siehe ANGLEShimWasm.cpp).
++// Rueckgabe 0: kein WebGL moeglich.
++int angleShimCreateContext(bool webgl2);
++bool angleShimMakeCurrent(int handle);
++void angleShimDestroyContext(int handle);
++
++} // namespace WebCore
++
++#endif // ENABLE(WEBGL)

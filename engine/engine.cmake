@@ -77,7 +77,9 @@ target_link_libraries(BrowserLiteEngine PRIVATE WebCore Skia::Skia)
 # (stehen nur als Requires.private in den .pc-Dateien).
 find_library(BL_WOFF2COMMON_LIBRARY woff2common REQUIRED)
 find_library(BL_EXPAT_LIBRARY expat REQUIRED)
-target_link_libraries(BrowserLiteEngine PRIVATE ${BL_WOFF2COMMON_LIBRARY} ${BL_EXPAT_LIBRARY})
+# libwebp (Encoder fuer toDataURL/toBlob) braucht libsharpyuv
+find_library(BL_SHARPYUV_LIBRARY sharpyuv REQUIRED)
+target_link_libraries(BrowserLiteEngine PRIVATE ${BL_WOFF2COMMON_LIBRARY} ${BL_EXPAT_LIBRARY} ${BL_SHARPYUV_LIBRARY})
 
 target_link_options(BrowserLiteEngine PRIVATE
     # main() laeuft in einem eigenen Worker (pthread). Der Haupt-Thread der
@@ -98,6 +100,9 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,ENV,HEAPU8,HEAPF32,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
     "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     "SHELL:-lEGL"
+    # WebGL der Seiten (platform/wasm/angle): WebGL 1 und 2. Ohne FULL_ES3, die
+    # Emulation von Client-Arrays braucht WebGL nicht und kostet bei jedem Draw.
+    "SHELL:-sMAX_WEBGL_VERSION=2"
     "SHELL:-lGL"
     # Dauerhafter Speicher (/data) ueber IndexedDB des Host-Browsers, siehe web/app.js
     "SHELL:-lidbfs.js"

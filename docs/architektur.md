@@ -87,6 +87,26 @@ Thread, Sampling-Profiler aus.
 - Spaeter Skia Ganesh auf WebGL2 im OffscreenCanvas mit Compositing (Scrollen ohne neu
   malen).
 
+### WebGL
+- WebKits `GraphicsContextGLANGLE` ruft ANGLE-Funktionen auf (`GL_DrawArrays`, `EGL_...`).
+  ANGLE selber wird nicht gebaut. Stattdessen gibt es einen kleinen Ersatz in
+  `platform/wasm/angle/` (Patch 0016): `tools/gen-angle-shim.py` sucht die benutzten
+  Funktionen und leitet sie an Emscriptens GLES weiter, also an ein echtes WebGL des
+  Host-Browsers auf einem OffscreenCanvas im Engine-Worker. Was es in WebGL nicht gibt oder
+  anders heisst (Erweiterungen, Robust-Varianten, Formate in WebGL 1) ist von Hand gemacht.
+- WebGL-1-Seiten bekommen einen WebGL-1-Kontext, WebGL-2-Seiten einen WebGL-2-Kontext. So
+  stimmen Shader-Versionen und Grenzen ohne Uebersetzung. Der Shader-Compiler von WebKit (ANGLE
+  Translator) laeuft nicht, die Shader gehen direkt an den Browser, der sie selber prueft.
+- Chrome erlaubt in einem Worker nur 4 aktive WebGL-Kontexte (danach geht der aelteste
+  verloren). Darum teilen sich alle WebGL-Kontexte der Engine einen echten Kontext pro
+  WebGL-Version, wie die virtualisierten Kontexte von ANGLE: beim Wechsel speichert
+  `ANGLEShimWasm.cpp` den GL-Zustand (Schalter, Bindungen, Textur-Einheiten, Pixel-Store,
+  Uniform-Puffer, ...) und laedt den des anderen Kontexts. Jeder Kontext hat ein eigenes
+  "Standard"-VAO und Transform-Feedback-Objekt, und Textur-Einheiten, die ein Kontext nie
+  benutzt hat, werden geleert. So sieht keine Seite Daten einer anderen.
+- Bild in die Seite: nach jedem Frame liest `GraphicsContextGLWasm` die Pixel mit
+  `readPixels` (kein Compositing, siehe Entscheid 26).
+
 ### Netzwerk
 - WebCore curl-Backend (`Source/WebCore/platform/network/curl/`), libcurl mit nghttp2
   (HTTP/2) und OpenSSL (das curl-Backend von WebCore nutzt direkt die OpenSSL-API).

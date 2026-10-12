@@ -142,6 +142,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
     settings.setWebAudioEnabled(true);
+#if ENABLE(WEBGL)
+    settings.setWebGLEnabled(true);
+#endif
 #if ENABLE(FULLSCREEN_API)
     settings.setFullScreenEnabled(true);
 #endif

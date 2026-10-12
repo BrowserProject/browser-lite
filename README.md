@@ -23,8 +23,9 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - WebSockets der Seiten (ws:// und wss://)
 - Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
 - `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
+- WebGL 1 und 2 (ueber das WebGL des eigenen Browsers)
 
-Noch nicht: WebGL, DRM (EME), WireGuard. JavaScript ist langsamer als in einem
+Noch nicht: DRM (EME), WebRTC, WireGuard. JavaScript ist langsamer als in einem
 normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md).
 
 ## Auf dem eigenen Server betreiben

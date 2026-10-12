@@ -35,7 +35,8 @@ function start(script, args, env) {
 // Echtes Relay wie auf dem Server (ohne RELAY_ALLOW_LOCAL)
 const relay = await start(path.join(root, 'relay', 'server.mjs'), [], { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1' });
 const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+// SwiftShader, damit WebGL der Seiten auch ohne GPU (headless, CI) geht
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 
 let failed = 0;
 const rows = [];

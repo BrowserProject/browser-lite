@@ -98,6 +98,14 @@ kommen zuerst.
 - Gemessen: der erste Durchlauf (DOM, Parser, Layout) ist ca. 4x langsamer als spaetere. Das ist
   vor allem einmalige Initialisierung (Schriften, CSS), nicht die WASM-Optimierung von Chrome
   (mit `--no-wasm-dynamic-tiering` gleich langsam). Aufwaermen wuerde die Kosten nur verschieben.
+- [x] WebGL 1 und 2: die GL-Aufrufe gehen ueber einen kleinen ANGLE-Ersatz an ein WebGL im
+  Engine-Worker (kein ANGLE im WASM). Bild per `readPixels` in die Seite. Beliebig viele
+  Kontexte (ein geteilter Host-Kontext pro Version). three.js-Beispiele laufen.
+  Test: `tests/e2e/webgl-test.mjs`
+- [x] `toDataURL`/`toBlob` (PNG, JPEG, WebP): Skia-Encoder eingeschaltet, vorher immer `data:,`
+- [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
+- [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
+- [ ] WebGL ohne `readPixels`: Bild direkt als ImageBitmap zum Host (braucht Compositing)
 - [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
 
 GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache

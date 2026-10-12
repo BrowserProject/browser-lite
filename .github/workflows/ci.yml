@@ -293,6 +293,8 @@ jobs:
         run: cd tests/e2e && node audio-test.mjs
       - name: Media-Test (<video>/<audio> ueber Service Worker und Engine)
         run: cd tests/e2e && node media-test.mjs
+      - name: WebGL-Test (WebGL 1 und 2 ueber WebGL des Host-Browsers)
+        run: cd tests/e2e && node webgl-test.mjs
       - name: Echte Seiten (Internet, nur zur Info)
         # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
         continue-on-error: true
@@ -302,7 +304,8 @@ jobs:
             https://www.srf.ch/ https://www.20min.ch/ https://github.com/ https://www.google.com/ \
             https://html.duckduckgo.com/html/?q=webkit https://developer.mozilla.org/de/ \
             https://stackoverflow.com/questions https://old.reddit.com/ https://www.bbc.com/news \
-            https://www.openstreetmap.org/ https://www.youtube.com/
+            https://www.openstreetmap.org/ https://www.youtube.com/ \
+            https://threejs.org/examples/webgl_geometry_cube.html
       - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6
@@ -313,5 +316,6 @@ jobs:
             build/e2e-input.png
             build/e2e-media.png
             build/e2e-mse.png
+            build/e2e-webgl.png
             build/sites/
           if-no-files-found: ignore
