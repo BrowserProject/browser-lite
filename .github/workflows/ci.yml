@@ -295,17 +295,6 @@ jobs:
         run: cd tests/e2e && node media-test.mjs
       - name: WebGL-Test (WebGL 1 und 2 ueber WebGL des Host-Browsers)
         run: cd tests/e2e && node webgl-test.mjs
-      - name: Echte Seiten (Internet, nur zur Info)
-        # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
-        continue-on-error: true
-        run: |
-          cd tests/e2e && SITE_WAIT=5000 node site-test.mjs \
-            https://example.com/ https://de.wikipedia.org/wiki/Schweiz https://news.ycombinator.com/ \
-            https://www.srf.ch/ https://www.20min.ch/ https://github.com/ https://www.google.com/ \
-            https://html.duckduckgo.com/html/?q=webkit https://developer.mozilla.org/de/ \
-            https://stackoverflow.com/questions https://old.reddit.com/ https://www.bbc.com/news \
-            https://www.openstreetmap.org/ https://www.youtube.com/ \
-            https://threejs.org/examples/webgl_geometry_cube.html
       - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6
@@ -317,5 +306,35 @@ jobs:
             build/e2e-media.png
             build/e2e-mse.png
             build/e2e-webgl.png
-            build/sites/
+          if-no-files-found: ignore
+
+  kompatibilitaet:
+    name: Kompatibilitaet (echte Seiten, nur zur Info)
+    needs: [engine]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Engine holen
+        uses: actions/download-artifact@v7
+        with:
+          name: engine
+          path: build/webcore/bin
+      - name: Relay + Playwright installieren
+        run: |
+          (cd relay && npm ci)
+          (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
+      - name: Seiten aus tests/e2e/sites.txt laden
+        run: cd tests/e2e && SITE_WAIT=5000 node site-test.mjs $(grep -v '^#' sites.txt)
+      - name: Screenshots als Artefakt
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: kompatibilitaet
+          path: build/sites/
           if-no-files-found: ignore

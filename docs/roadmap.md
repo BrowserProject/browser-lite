@@ -108,8 +108,12 @@ kommen zuerst.
 - [ ] WebGL ohne `readPixels`: Bild direkt als ImageBitmap zum Host (braucht Compositing)
 - [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
 
-GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD, Service-Worker-Cache
-fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.
+- [x] Kompatibilitaetsliste: 52 Seiten in `tests/e2e/sites.txt`, eigener CI-Job, Stand in
+  `docs/kompatibilitaet.md`. Alle erreichbaren Seiten laden ohne Absturz.
+- [ ] Cloudflare-Pruefung (Turnstile) bleibt lokal bei "Verifying" haengen
+
+Offen: GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD,
+Service-Worker-Cache fuer das .wasm, CLoop-Tuning, WebAssembly der Seiten.
 
 ## Phase 9: Media (spaeter)
 - [x] `ENABLE_VIDEO` an, ohne Abspiel-Backend: `<video>`/`<audio>` sind echte Media-Elemente,

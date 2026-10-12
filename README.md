@@ -26,7 +26,8 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - WebGL 1 und 2 (ueber das WebGL des eigenen Browsers)
 
 Noch nicht: DRM (EME), WebRTC, WireGuard. JavaScript ist langsamer als in einem
-normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md).
+normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md), welche
+Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 
 ## Auf dem eigenen Server betreiben
 
