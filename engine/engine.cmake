@@ -16,6 +16,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
+    ${BL_ENGINE_SRC}/FileAccessCache.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
@@ -134,6 +135,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
     "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
+    # access() auf feste Dateien gemerkt (engine/src/FileAccessCache.cpp)
+    "SHELL:-Wl,--wrap=access"
 )
 
 # GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack

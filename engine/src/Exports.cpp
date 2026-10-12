@@ -94,6 +94,18 @@ EMSCRIPTEN_KEEPALIVE void bl_frame(int id)
     withView(id, [](WebView& view) { view.presentIfNeeded(); });
 }
 
+// Das Canvas des Views ist jetzt im Engine-Worker (engine-pre.js)
+EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
+{
+    withView(id, [](WebView& view) { view.canvasAttached(); });
+}
+
+// pthread des Engine-Threads: die Oberflaeche sucht damit den Worker
+EMSCRIPTEN_KEEPALIVE int bl_engine_thread()
+{
+    return static_cast<int>(reinterpret_cast<uintptr_t>(engineThread()));
+}
+
 // Host hat das letzte Bild kopiert, der Pixel-Buffer darf wieder bemalt werden
 EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
 {

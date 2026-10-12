@@ -7,7 +7,52 @@
 #include <wtf/HexNumber.h>
 #include <wtf/text/StringBuilder.h>
 
+// Im Engine-Worker: Module.blCanvases (engine-pre.js) haelt pro View das
+// OffscreenCanvas. ImageData darf nicht auf den SharedArrayBuffer zeigen, darum
+// die Zeilen kopieren. Chrome uebernimmt das Bild am Ende der Aufgabe.
+EM_JS(int, bl_js_present_in_worker, (int viewId, const uint8_t* pixels, int width, int height, int x, int y, int w, int h), {
+    var target = Module.blCanvases && Module.blCanvases.get(viewId);
+    if (!target)
+        return 0;
+    var canvas = target.canvas;
+    if (canvas.width != width || canvas.height != height) {
+        // Neue Groesse leert das Canvas: alles kopieren
+        canvas.width = width;
+        canvas.height = height;
+        x = 0;
+        y = 0;
+        w = width;
+        h = height;
+    }
+    if (w > 0 && h > 0) {
+        var image = new ImageData(w, h);
+        var data = image.data;
+        var heap = HEAPU8;
+        for (var row = 0; row < h; row++) {
+            var start = pixels + ((y + row) * width + x) * 4;
+            data.set(heap.subarray(start, start + w * 4), row * w * 4);
+        }
+        target.ctx.putImageData(image, x, y);
+    }
+    return 1;
+});
+
+EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
+    if (Module.blCanvases)
+        Module.blCanvases.delete(viewId);
+});
+
 namespace BrowserLite {
+
+bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight)
+{
+    return bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
+}
+
+void forgetWorkerCanvas(int viewId)
+{
+    bl_js_forget_worker_canvas(viewId);
+}
 
 void notifyHost(int viewId, const char* type, const String& payload)
 {

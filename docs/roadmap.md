@@ -162,6 +162,12 @@ kommen zuerst.
   Navigation API, Compression Streams, Permissions, Lazy Loading, Visual Viewport, Beacon,
   `<datalist>`, Async Clipboard, Datum/Farbe, Formular-Pruefung mit Hinweis, Quirks u.a.
 - [x] Resizable ArrayBuffer (ES2024) stuerzte ab: bmalloc/WTF brauchten echtes mmap (Patch 0023)
+- [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
+  Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
+  kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken
+  (Schriftpruefung in Skia, `canPlayType`, `access()`) und eine gemeinsame Crypto-Queue statt
+  einem Thread pro iframe (Patch 0024). CNN: Engine wartet 0.5 statt 4.5 s, Ladezeit
+  19.8 -> 16.2 s (Mittel aus 3 Laeufen). mimalloc statt dlmalloc getestet: langsamer
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

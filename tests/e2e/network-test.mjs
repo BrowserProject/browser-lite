@@ -184,12 +184,8 @@ check('Redirect ueber /start', requests.includes('/start') && requests.includes(
 // Ein Frame mit der roten Box sollte auf dem Canvas sein
 await page.waitForTimeout(1000);
 const pixel = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  if (!canvas)
-    return null;
-  const ratio = canvas.width / canvas.getBoundingClientRect().width;
-  const [r, g, b] = canvas.getContext('2d').getImageData(Math.round(70 * ratio), Math.round(70 * ratio), 1, 1).data;
-  return { r, g, b };
+  const color = window.blPagePixel(70, 70);
+  return color && { r: color[0], g: color[1], b: color[2] };
 });
 check('rote Box gemalt', pixel && pixel.r > 200 && pixel.g < 40 && pixel.b < 40, JSON.stringify(pixel));
 

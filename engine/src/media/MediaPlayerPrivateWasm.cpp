@@ -15,6 +15,7 @@
 #include <skia/core/SkPixmap.h>
 #include <wtf/HashMap.h>
 #include <wtf/JSONValues.h>
+#include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -37,17 +38,39 @@ MediaPlayerPrivateWasm* MediaPlayerPrivateWasm::fromId(int id)
     return players().get(id);
 }
 
+// Antworten des Host merken: jede Frage geht synchron ueber den Haupt-Thread und
+// wartet, bis die Oberflaeche Zeit hat (auf CNN fragten Werbe-Skripte so oft,
+// dass die Engine fast 1 s nur wartete). Die Antworten aendern sich nie.
+template<typename Ask>
+static int cachedHostAnswer(const String& key, Ask&& ask)
+{
+    static Lock lock;
+    static NeverDestroyed<HashMap<String, int>> answers WTF_GUARDED_BY_LOCK(lock);
+    {
+        Locker locker { lock };
+        auto it = answers->find(key);
+        if (it != answers->end())
+            return it->value;
+    }
+    int answer = ask();
+    Locker locker { lock };
+    answers->set(key.isolatedCopy(), answer);
+    return answer;
+}
+
 // MSE: kann das MediaSource des Host-Browsers das? (synchron)
 static bool hostMediaSourceSupports(const String& type)
 {
-    auto utf8 = type.utf8();
-    return MAIN_THREAD_EM_ASM_INT({
-        try {
-            return self.MediaSource && MediaSource.isTypeSupported(UTF8ToString($0)) ? 1 : 0;
-        } catch (e) {
-            return 0;
-        }
-    }, utf8.data());
+    return cachedHostAnswer(makeString("mse:"_s, type), [&] {
+        auto utf8 = type.utf8();
+        return MAIN_THREAD_EM_ASM_INT({
+            try {
+                return self.MediaSource && MediaSource.isTypeSupported(UTF8ToString($0)) ? 1 : 0;
+            } catch (e) {
+                return 0;
+            }
+        }, utf8.data());
+    });
 }
 
 bool MediaPlayerPrivateWasm::supportsMediaSourceType(const ContentType& type)
@@ -58,18 +81,20 @@ bool MediaPlayerPrivateWasm::supportsMediaSourceType(const ContentType& type)
     return hostMediaSourceSupports(type.raw());
 }
 
-// Kann der Host-Browser das abspielen? (synchron, der Haupt-Thread antwortet sofort)
+// Kann der Host-Browser das abspielen? (synchron ueber den Haupt-Thread)
 static MediaPlayer::SupportsType hostCanPlayType(const String& type)
 {
-    auto utf8 = type.utf8();
-    int result = MAIN_THREAD_EM_ASM_INT({
-        try {
-            var answer = document.createElement('video').canPlayType(UTF8ToString($0));
-            return answer === 'probably' ? 2 : answer === 'maybe' ? 1 : 0;
-        } catch (e) {
-            return 0;
-        }
-    }, utf8.data());
+    int result = cachedHostAnswer(makeString("play:"_s, type), [&] {
+        auto utf8 = type.utf8();
+        return MAIN_THREAD_EM_ASM_INT({
+            try {
+                var answer = document.createElement('video').canPlayType(UTF8ToString($0));
+                return answer === 'probably' ? 2 : answer === 'maybe' ? 1 : 0;
+            } catch (e) {
+                return 0;
+            }
+        }, utf8.data());
+    });
     return result == 2 ? MediaPlayer::SupportsType::IsSupported : result == 1 ? MediaPlayer::SupportsType::MayBeSupported : MediaPlayer::SupportsType::IsNotSupported;
 }
 

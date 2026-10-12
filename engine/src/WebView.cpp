@@ -243,6 +243,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 WebView::~WebView()
 {
     viewsByID().remove(m_id);
+    forgetWorkerCanvas(m_id);
     if (m_page) {
         if (RefPtr frame = m_page->localMainFrame())
             frame->loader().detachFromParent();
@@ -458,6 +459,8 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     IntRect presented;
     applyPendingScrolls(presented);
+    if (std::exchange(m_needsFullPresent, false))
+        presented = IntRect { { }, m_pixelSize };
 
     if (m_damage.isEmpty() && presented.isEmpty())
         return false;
@@ -504,8 +507,19 @@ void WebView::presentIfNeeded()
     IntRect dirty;
     if (!renderFrame(&dirty))
         return;
+    if (presentFrameInWorker(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height()))
+        return;
     m_frameInFlight = true;
     presentFrameToHost(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height());
+}
+
+void WebView::canvasAttached()
+{
+    m_needsFullPresent = true;
+    if (!m_frameRequested) {
+        m_frameRequested = true;
+        requestFrameFromHost(m_id);
+    }
 }
 
 static OptionSet<PlatformEvent::Modifier> modifiersFromBits(int bits)

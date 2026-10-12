@@ -224,9 +224,7 @@ let pixel = null;
 const end = Date.now() + 20000;
 while (Date.now() < end) {
   pixel = await page.evaluate(() => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-    const ratio = canvas.width / canvas.getBoundingClientRect().width;
-    const [r, g, b] = canvas.getContext('2d').getImageData(Math.round(180 * ratio), Math.round(140 * ratio), 1, 1).data;
+    const [r, g, b] = window.blPagePixel(180, 140);
     return { r, g, b };
   });
   if (pixel.r > 180 && pixel.g < 60 && pixel.b < 60)
@@ -262,9 +260,7 @@ let msePixel = null;
 const mseEnd = Date.now() + 20000;
 while (Date.now() < mseEnd) {
   msePixel = await page.evaluate(() => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-    const ratio = canvas.width / canvas.getBoundingClientRect().width;
-    const [r, g, b] = canvas.getContext('2d').getImageData(Math.round(180 * ratio), Math.round(140 * ratio), 1, 1).data;
+    const [r, g, b] = window.blPagePixel(180, 140);
     return { r, g, b };
   });
   if (msePixel.r > 180 && msePixel.g < 60 && msePixel.b < 60)

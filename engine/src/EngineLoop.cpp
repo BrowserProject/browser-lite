@@ -42,6 +42,11 @@ void setEngineThread()
     s_engineThreadSet.store(true, std::memory_order_release);
 }
 
+pthread_t engineThread()
+{
+    return s_engineThreadSet.load(std::memory_order_acquire) ? s_engineThread : 0;
+}
+
 bool isEngineThread()
 {
     return s_engineThreadSet.load(std::memory_order_acquire) && pthread_equal(pthread_self(), s_engineThread);

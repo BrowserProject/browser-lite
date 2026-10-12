@@ -14,6 +14,13 @@ void notifyHost(int viewId, const char* type, const String& payload = { });
 // Der Host muss mit bl_frame_presented(viewId) bestaetigen, bevor wir weitermalen.
 void presentFrameToHost(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight);
 
+// Neues Bild direkt in das Canvas des Tabs, wenn die Oberflaeche es dem
+// Engine-Worker gegeben hat (transferControlToOffscreen, engine-pre.js). Laeuft im
+// Engine-Thread, der Haupt-Thread kopiert nichts. false: kein Canvas hier, dann
+// presentFrameToHost.
+bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight);
+void forgetWorkerCanvas(int viewId);
+
 // Host moechte bei der naechsten Gelegenheit (requestAnimationFrame) bl_frame() aufrufen
 void requestFrameFromHost(int viewId);
 

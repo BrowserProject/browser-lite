@@ -6,6 +6,8 @@
 // runOnEngineThread() hierher.
 #pragma once
 
+#include <pthread.h>
+
 #include <wtf/Function.h>
 #include <wtf/text/WTFString.h>
 
@@ -14,6 +16,8 @@ namespace BrowserLite {
 // Engine-Thread (wird in main() gesetzt)
 void setEngineThread();
 bool isEngineThread();
+// pthread des Engine-Threads, 0 solange er nicht laeuft
+pthread_t engineThread();
 
 // Funktion auf dem Engine-Thread ausfuehren (von jedem Thread aus aufrufbar).
 // Laeuft asynchron, sobald der Engine-Thread wieder im Event-Loop ist.

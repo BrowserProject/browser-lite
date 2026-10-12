@@ -70,6 +70,8 @@ public:
     void framePresented() { m_frameInFlight = false; }
     bool frameInFlight() const { return m_frameInFlight; }
     void presentIfNeeded();
+    // Die Oberflaeche hat das Canvas an den Engine-Worker gegeben: alles neu zeigen
+    void canvasAttached();
 
     const uint8_t* pixels() const { return m_pixels.span().data(); }
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
@@ -138,6 +140,7 @@ private:
     bool m_renderingUpdateRequested { false };
     bool m_frameRequested { false };
     bool m_frameInFlight { false };
+    bool m_needsFullPresent { false };
     void loadFavicon();
 
     bool m_isLoading { false };

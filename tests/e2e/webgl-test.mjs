@@ -343,12 +343,7 @@ check('WebGL 1: Erweiterungen', extensions > 5, String(extensions));
 
 // Das Bild muss auch in der Seite ankommen
 async function pixelAt(x, y) {
-  return page.evaluate(([x, y]) => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-    const ratio = canvas.width / canvas.getBoundingClientRect().width;
-    const [r, g, b] = canvas.getContext('2d').getImageData(Math.round(x * ratio), Math.round(y * ratio), 1, 1).data;
-    return [r, g, b];
-  }, [x, y]);
+  return page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
 }
 let center1 = null, center2 = null, corner1 = null;
 const end = Date.now() + 20000;

@@ -254,8 +254,17 @@ class Tab {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'page';
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none;touch-action:none';
-    this.ctx = this.canvas.getContext('2d', { alpha: false });
     $('viewport').appendChild(this.canvas);
+    // Das Canvas geht an den Engine-Worker, der malt selber hinein. Nur wo das
+    // nicht geht, kopieren wir die Pixel hier (onEngineFrame).
+    const worker = typeof this.canvas.transferControlToOffscreen === 'function' && engine.blEngineWorker?.();
+    if (worker) {
+      const offscreen = this.canvas.transferControlToOffscreen();
+      worker.postMessage({ blCanvas: offscreen, viewId: this.id }, [offscreen]);
+      this.ctx = null;
+    } else {
+      this.ctx = this.canvas.getContext('2d', { alpha: false });
+    }
     attachInput(this);
 
     this.element = document.createElement('div');
@@ -573,7 +582,7 @@ function setProgress(value) {
 // Ein Bild ist fertig: Pixel aus dem gemeinsamen Speicher ins Canvas kopieren
 function onEngineFrame(viewId, ptr, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight) {
   const tab = tabs.get(viewId);
-  if (tab) {
+  if (tab && tab.ctx) {
     const canvas = tab.canvas;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
@@ -593,6 +602,22 @@ function onEngineFrame(viewId, ptr, width, height, dirtyX, dirtyY, dirtyWidth, d
   }
   engine._bl_frame_presented(viewId);
 }
+
+// Fuer Tests: Farbe [r, g, b] an einer Stelle der sichtbaren Seite (CSS-Pixel).
+// Das Canvas gehoert meist dem Engine-Worker, darum ueber drawImage statt
+// getImageData.
+window.blPagePixel = (x, y) => {
+  if (!activeTab)
+    return null;
+  const rect = activeTab.canvas.getBoundingClientRect();
+  const probe = document.createElement('canvas');
+  probe.width = Math.ceil(rect.width);
+  probe.height = Math.ceil(rect.height);
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(activeTab.canvas, 0, 0, probe.width, probe.height);
+  return [...ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data.slice(0, 3)];
+};
 
 // Engine moechte ein neues Bild: beim naechsten Bildschirm-Refresh
 function onEngineNeedsFrame(viewId) {
