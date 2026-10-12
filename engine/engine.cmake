@@ -18,6 +18,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
+    ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp
@@ -119,6 +120,12 @@ target_link_options(BrowserLiteEngine PRIVATE
     # WebAssembly der Seiten (engine/src/wasm/WasmBridge.cpp)
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js"
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js"
+    # Sockets im WASM statt SOCKFS (engine/src/Sockets.cpp): die Funktionen
+    # beim Linken abfangen, Verbindungen ueber den Transport der Oberflaeche
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js"
+    "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
+    "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
+    "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
 )
 
 # GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
@@ -146,5 +153,6 @@ set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
     ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
 )

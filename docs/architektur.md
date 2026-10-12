@@ -166,8 +166,21 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
 ### Netzwerk
 - WebCore curl-Backend (`Source/WebCore/platform/network/curl/`), libcurl mit nghttp2
   (HTTP/2) und OpenSSL (das curl-Backend von WebCore nutzt direkt die OpenSSL-API).
-- libcurl denkt es hat normale Sockets. Unsere Socket-Schicht leitet `connect/send/recv/poll`
-  an ein **Transport-Interface** weiter (`engine/net/transport.h`).
+- libcurl denkt es hat normale Sockets. Die Socket-Funktionen (`socket/connect/send/recv/
+  poll/close/...`, die Weck-Pipe von curl und `getaddrinfo`) werden beim Linken abgefangen
+  (`-Wl,--wrap=...`, `engine/src/Sockets.cpp`). Puffer und Warten (Condition-Variable) liegen
+  im WASM. Nur Verbindung oeffnen, Daten senden und schliessen gehen asynchron an den
+  Haupt-Thread (`engine/js/sockets.js`), der sie ueber den **Transport** der Oberflaeche
+  schickt (`Module.blTransport`, heute Wisp aus `web/transport.js`). Ankommende Daten
+  schreibt der Haupt-Thread direkt in den Puffer. Vorher lief alles ueber Emscriptens SOCKFS
+  im JavaScript des Haupt-Threads: jedes `send/recv/poll` von curl war ein synchroner Umweg.
+  `getaddrinfo` gibt fuer Hostnamen Platzhalter (172.29.x.y), `connect` macht daraus wieder
+  den Namen, aufloesen tut das Relay.
+- Wichtig fuer allen Code, der auf dem Haupt-Thread laeuft: waehrend er auf ein Lock wartet
+  (auch das von malloc), arbeitet Emscripten die Warteschlange des Haupt-Threads ab. Haelt er
+  dabei schon ein Lock, das eine dieser Aufgaben auch nimmt, wartet er auf sich selber. Das
+  liess Seiten wie nzz.ch ab und zu haengen. Darum: auf dem Haupt-Thread unter einem Lock
+  nichts, was warten kann (kein malloc/free).
 - TLS: ChaCha20-Poly1305 zuerst (TLS 1.3 ueber `CURLOPT_TLS13_CIPHERS`, Patch 0021, und
   TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
   auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn

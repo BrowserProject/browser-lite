@@ -1,10 +1,9 @@
 // Netzwerk-Transport der Engine.
 //
-// Die Engine (libcurl + OpenSSL im WASM) benutzt Emscriptens SOCKFS. SOCKFS baut
-// fuer jede TCP-Verbindung ein "new WebSocket('ws://host:port/')". Wir ersetzen
-// WebSocket durch TransportSocket: der oeffnet stattdessen einen TCP-Stream
-// ueber den aktiven Transport. TLS passiert im WASM, der Transport sieht nur
-// verschluesselte Bytes.
+// Die Engine (libcurl + OpenSSL im WASM) hat eigene Sockets
+// (engine/src/Sockets.cpp). Jede TCP-Verbindung wird ein Stream ueber den
+// Transport (Module.blTransport, engine/js/sockets.js). TLS passiert im WASM,
+// der Transport sieht nur verschluesselte Bytes.
 //
 // Transport-Schnittstelle (damit spaeter WireGuard die gleiche Stelle nutzt):
 //   transport.openTCP(host, port) -> stream
@@ -185,88 +184,4 @@ class WispStream {
     this.isOpen = false;
     this.onclose?.(reason);
   }
-}
-
-// ---------------------------------------------- WebSocket-Ersatz fuer SOCKFS
-
-let activeTransport = null;
-
-export function setTransport(transport) {
-  activeTransport = transport;
-}
-
-export class TransportSocket extends EventTarget {
-  static CONNECTING = 0;
-  static OPEN = 1;
-  static CLOSING = 2;
-  static CLOSED = 3;
-
-  constructor(url) {
-    super();
-    // Konstanten auch auf der Instanz (SOCKFS prueft socket.CLOSED usw.)
-    this.CONNECTING = 0;
-    this.OPEN = 1;
-    this.CLOSING = 2;
-    this.CLOSED = 3;
-    this.url = url;
-    this.binaryType = 'arraybuffer';
-    this.readyState = 0;
-    this.bufferedAmount = 0;
-    this.protocol = '';
-    this.onopen = null;
-    this.onmessage = null;
-    this.onclose = null;
-    this.onerror = null;
-
-    const match = /^wss?:\/\/\[?([^\]/]+?)\]?:(\d+)/.exec(url);
-    if (!match || !activeTransport) {
-      queueMicrotask(() => this.fail());
-      return;
-    }
-    this.stream = activeTransport.openTCP(match[1], Number(match[2]));
-    this.stream.onopen = () => {
-      this.readyState = 1;
-      this.emit('open', new Event('open'));
-    };
-    this.stream.ondata = (data) => {
-      this.emit('message', new MessageEvent('message', { data: data.buffer }));
-    };
-    this.stream.onclose = (reason) => {
-      const wasOpen = this.readyState === 1;
-      this.readyState = 3;
-      if (!wasOpen)
-        this.emit('error', new Event('error'));
-      this.emit('close', new CloseEvent('close', { code: reason === CLOSE_VOLUNTARY ? 1000 : 1006 }));
-    };
-  }
-
-  emit(type, event) {
-    this['on' + type]?.(event);
-    this.dispatchEvent(event);
-  }
-
-  fail() {
-    this.readyState = 3;
-    this.emit('error', new Event('error'));
-    this.emit('close', new CloseEvent('close', { code: 1006 }));
-  }
-
-  send(data) {
-    if (this.readyState !== 1)
-      return;
-    this.stream.send(ArrayBuffer.isView(data) ? data : new Uint8Array(data));
-  }
-
-  close() {
-    if (this.readyState >= 2)
-      return;
-    this.readyState = 2;
-    this.stream?.close();
-  }
-}
-
-// SOCKFS benutzt das globale WebSocket. Unsere eigene UI braucht kein WebSocket,
-// der Transport hat sich das Original oben schon gemerkt.
-export function installTransportSocket() {
-  globalThis.WebSocket = TransportSocket;
 }

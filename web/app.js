@@ -4,7 +4,7 @@
 // Wir rufen ihre C-Funktionen (_bl_...) auf, sie meldet sich ueber die
 // Callbacks onEngine... zurueck (siehe engine/src/Host.cpp).
 
-import { WispTransport, installTransportSocket, setTransport } from './transport.js';
+import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
 
@@ -68,10 +68,10 @@ async function startEngine() {
     $('boot').textContent = 'Fehler: Die Seite braucht die Header COOP/COEP (SharedArrayBuffer fehlt).';
     return;
   }
-  setTransport(new WispTransport(relayURL()));
-  installTransportSocket();
   await loadScript(ENGINE_BASE + 'engine.js');
   const module = {
+    // Netzwerk der Engine (engine/js/sockets.js): TCP-Verbindungen ueber Wisp
+    blTransport: new WispTransport(relayURL()),
     locateFile: (path) => ENGINE_BASE + path,
     print: (text) => console.log('[engine]', text),
     printErr: (text) => console.warn('[engine]', text),

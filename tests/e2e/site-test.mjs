@@ -84,8 +84,22 @@ async function checkSite(site, page, log) {
 
 const printLog = (log, all) => console.log((all ? log : [...log.slice(0, 40), '...', ...log.slice(-20)]).map((l) => '    ' + l).join('\n'));
 
+// Bei einem Haenger: wo steht der UI-Thread? (Stack ueber das Debugger-Protokoll)
+async function mainThreadStack(cdp) {
+  try {
+    const paused = new Promise((resolve) => cdp.once('Debugger.paused', resolve));
+    await within(cdp.send('Debugger.pause'), 10000, 'pause');
+    const event = await within(paused, 10000, 'paused');
+    return event.callFrames.slice(0, 30).map((frame) => `${frame.functionName || '(anon)'} ${frame.url.split('/').pop()}:${frame.location.lineNumber}`);
+  } catch (e) {
+    return ['(kein Stack: ' + e.message + ')'];
+  }
+}
+
 for (const site of sites) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Debugger.enable').catch(() => {});
   const log = [];
   let outcome;
   try {
@@ -93,6 +107,7 @@ for (const site of sites) {
     outcome = await within(checkSite(site, page, log), TIMEOUT + 90000, 'Seite haengt');
   } catch (e) {
     outcome = { result: 'haengt (' + e.message + ')', seconds: '-', title: '' };
+    log.push('Stack des UI-Threads:', ...await mainThreadStack(cdp));
   }
   const { result, seconds, title } = outcome;
   if (result !== 'ok')

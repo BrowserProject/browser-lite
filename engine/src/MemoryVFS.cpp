@@ -16,9 +16,10 @@
 // Geschrieben wird nur, wenn gerade keine Schreib-Transaktion laeuft, damit
 // Datenbank und WAL zusammenpassen.
 //
-// Regel gegen Deadlocks: waehrend ein Lock hier gehalten wird, gibt es keinen
-// Dateizugriff (der koennte auf den Haupt-Thread warten, der vielleicht
-// gerade selber auf dieses Lock wartet).
+// Regeln gegen Deadlocks: in Worker-Threads kein Dateizugriff, waehrend ein
+// Lock hier gehalten wird (der wartet auf den Haupt-Thread, der vielleicht
+// gerade selber auf dieses Lock wartet). Auf dem Haupt-Thread unter dem Lock
+// nichts, was warten kann (auch kein malloc), siehe flushFamily.
 
 #include "config.h"
 #include "MemoryVFS.h"
@@ -191,6 +192,27 @@ bool flushFamily(Family& family, bool fromHostThread)
             return false;
     } else
         ioLock.lock();
+
+    if (fromHostThread) {
+        // Auf dem Haupt-Thread gehen Dateizugriffe direkt (kein Warten), darum
+        // ohne Kopie unter dem Lock schreiben. Kopieren hiesse malloc, und
+        // waehrend der Haupt-Thread auf malloc wartet, arbeitet Emscripten die
+        // Warteschlange ab (siehe Sockets.cpp)
+        std::lock_guard lock(family.mutex);
+        if (family.writeLocked())
+            return false;
+        bool ok = true;
+        for (auto& node : family.nodes) {
+            if (!node->dirty)
+                continue;
+            bool written = node->exists ? writeFile(node->path, node->data) : (!unlink(node->path.c_str()) || errno == ENOENT);
+            if (written)
+                node->dirty = false;
+            else
+                ok = false;
+        }
+        return ok;
+    }
 
     std::vector<Pending> pending;
     {
@@ -706,11 +728,21 @@ void flushMemoryVFS(bool fromHostThread)
 {
     if (!families)
         return;
+    // Liste ohne malloc unter dem Lock (Haupt-Thread, siehe flushFamily)
     std::vector<std::shared_ptr<Family>> all;
+    size_t count;
     {
         std::lock_guard registryLock(registryMutex);
-        for (auto& [name, family] : *families)
+        count = families->size();
+    }
+    all.reserve(count + 8);
+    {
+        std::lock_guard registryLock(registryMutex);
+        for (auto& [name, family] : *families) {
+            if (all.size() == all.capacity())
+                break; // der Rest beim naechsten Mal
             all.push_back(family);
+        }
     }
     for (auto& family : all)
         flushFamily(*family, fromHostThread);

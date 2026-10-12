@@ -123,9 +123,11 @@ kommen zuerst.
 - [ ] WebCrypto: Ed25519 und X25519 (WebKit hat dafuer keinen OpenSSL-Code)
 - [x] SQLite-Datenbanken (Cookies, localStorage, IndexedDB) im WASM-Speicher statt ueber das
   JS-Dateisystem auf dem UI-Thread (eigenes VFS): Dateizugriffe auf CNN 12 600 -> 3 200
-- [ ] Sockets laufen weiter ueber Emscriptens SOCKFS auf dem UI-Thread (jedes send/recv/poll
-  ein synchroner Umweg, auf dem curl-Thread ca. 0.5 s bei CNN). Ziel: eigene Socket-Schicht
-  im WASM (auch Grundlage fuer WireGuard)
+- [x] Eigene Socket-Schicht im WASM statt SOCKFS (`engine/src/Sockets.cpp`): kein synchroner
+  Umweg ueber den UI-Thread mehr fuer send/recv/poll, Grundlage fuer WireGuard. Dateizugriffe
+  ueber den UI-Thread beim Laden von CNN jetzt ca. 2 000 (vorher 12 600)
+- [x] Haenger (nzz.ch, 20min.ch, ab und zu): Selbst-Deadlock auf dem Haupt-Thread gefunden
+  (Stack ueber das Debugger-Protokoll, jetzt im Kompatibilitaets-Test) und behoben
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
