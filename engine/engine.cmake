@@ -17,6 +17,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
+    ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
@@ -123,6 +124,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     # Sockets im WASM statt SOCKFS (engine/src/Sockets.cpp): die Funktionen
     # beim Linken abfangen, Verbindungen ueber den Transport der Oberflaeche
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js"
+    # HTTP-Cache in der Cache API des Host (engine/src/HttpCache.cpp)
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js"
     "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
     "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
@@ -154,5 +157,6 @@ set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js
     ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
 )

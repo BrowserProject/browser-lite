@@ -120,6 +120,8 @@ kommen zuerst.
 - [x] WebCrypto: AES-GCM, RSA-OAEP und RSA-PSS gingen mit OpenSSL 3 nicht (Patch 0010).
   Damit kommen SBB, IMDb und Booking durch die Bot-Pruefung von AWS WAF.
   Test `tests/engine/crypto.html` in CI
+- [x] Dauerhafter HTTP-Cache (Cache API des Host): beim zweiten Besuch kommt fast alles aus dem
+  Cache oder wird nur mit 304 nachgeprueft. Test `tests/e2e/cache-test.mjs`
 - [ ] WebCrypto: Ed25519 und X25519 (WebKit hat dafuer keinen OpenSSL-Code)
 - [x] SQLite-Datenbanken (Cookies, localStorage, IndexedDB) im WASM-Speicher statt ueber das
   JS-Dateisystem auf dem UI-Thread (eigenes VFS): Dateizugriffe auf CNN 12 600 -> 3 200

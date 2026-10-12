@@ -185,6 +185,16 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
   auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn
   der ChaCha bevorzugt (wie Handys ohne AES-Befehle).
+- HTTP-Cache: ohne Network-Prozess hat WebKit nur den Speicher-Cache, der mit der Engine
+  verschwindet. `engine/src/HttpCache.cpp` legt cachebare Antworten (bis 10 MB) in die Cache
+  API des Host-Browsers (auf der Platte, wird nur bei Bedarf gelesen, Zugriff ueber
+  `engine/js/http-cache.js` auf dem Haupt-Thread; die URL-Liste haelt der Haupt-Thread im
+  Speicher, Anfragen ohne Eintrag kosten so keinen Plattenzugriff). Vor dem Netz: frisch ->
+  direkt aus dem Cache, alt mit ETag/Last-Modified -> bedingte Anfrage, bei 304 aus dem Cache.
+  Frische, Alter und Vary rechnet WebCore (`CacheValidation.h`). Ueber 400 MB werden die
+  aeltesten Eintraege geloescht. "Gespeicherte Daten loeschen" leert ihn mit. Gemessen beim
+  zweiten Besuch: GitHub 135 von 136 Anfragen aus dem Cache, CNN 123 (davon 103 mit 304).
+  Test: `tests/e2e/cache-test.mjs`.
 - WebCrypto (`crypto.subtle`) ueber den OpenSSL-Code von WebCore. Zwei Stellen gingen mit
   OpenSSL 3 nicht und sind in Patch 0010 repariert: AES-GCM (Padding wurde vor dem Init
   gesetzt) und RSA-OAEP/RSA-PSS (WebKit prueft mit `#if defined(...)` auf Makros, die in

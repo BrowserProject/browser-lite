@@ -37,7 +37,7 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 31 | Texteingabe | Verstecktes `<textarea>` statt Fokus auf dem Canvas | Nur so kommen tote Tasten, IME und Bildschirmtastaturen als fertiger Text an |
 | 32 | Popups | Engine oeffnet den View selber (IDs ab 2^20), Oberflaeche macht einen Tab daraus | `createWindow` muss synchron eine Page liefern |
 | 33 | Downloads | Datei nochmal mit eigenem CurlRequest laden, Daten an die Oberflaeche | Einfacher als den laufenden Ladevorgang umzuhaengen; die URL ist schon das Ziel nach Redirects |
-| 34 | Speicher | IDBFS (JS-Dateisystem) statt OPFS/WasmFS | WasmFS hat keine Sockets, unser Netzwerk laeuft ueber SOCKFS |
+| 34 | Speicher | IDBFS (JS-Dateisystem) statt OPFS/WasmFS | WasmFS hat keine Sockets, unser Netzwerk lief ueber SOCKFS (seit Entscheid 68 nicht mehr, WasmFS waere jetzt moeglich) |
 | 35 | localStorage/IndexedDB | Dateien aus `WebKitLegacy/Storage` mitbauen | Fertige, getestete Implementierung (InProcessIDBServer, StorageAreaSync) statt eigener |
 | 36 | GC-Wurzeln (Engine) | GC nur auf leerem Stack (DeferGC um jede Aufgabe, Patch 0012) statt `--spill-pointers` | Der Pass machte alles etwa 10x langsamer und die .wasm 34 MB groesser. Mit Stresstest abgesichert (ohne Verschiebung Absturz) |
 | 37 | Schriften | fontconfig-Cache beim Build erzeugen, Schrift-Ordner bekommen mtime 0 | fontconfig haelt den Cache dann fuer gueltig und liest die Schriften nicht bei jedem Start neu ein |
@@ -73,3 +73,4 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 67 | SQLite-Dateien | Eigenes VFS im WASM-Speicher, ganze Dateien ins IDBFS schreiben | Jeder Dateizugriff ging synchron ueber den Haupt-Thread (Emscriptens JS-Dateisystem). WasmFS waere die allgemeine Loesung, geht aber nicht zusammen mit den Sockets von SOCKFS |
 | 68 | Sockets | Eigene Schicht im WASM (`--wrap` beim Linken) statt Emscriptens SOCKFS | Kein synchroner Umweg ueber den Haupt-Thread fuer jedes send/recv/poll mehr. Der Transport bleibt austauschbar (spaeter WireGuard). Kein Patch an curl noetig |
 | 69 | Haupt-Thread und Locks | Auf dem Haupt-Thread unter einem Lock nichts, was warten kann | Emscripten arbeitet beim Warten auf dem Haupt-Thread die Warteschlange ab, das fuehrte zu Selbst-Deadlocks (nzz.ch, 20min.ch haengten ab und zu) |
+| 70 | HTTP-Cache | Cache API des Host-Browsers statt Dateien im IDBFS | IDBFS laedt beim Start alles in den Speicher und schreibt den ganzen Baum alle 5 s. Die Cache API liegt auf der Platte und wird nur bei Bedarf gelesen |

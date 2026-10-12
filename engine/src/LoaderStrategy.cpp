@@ -11,8 +11,10 @@
 
 #include "Engine.h"
 #include "Host.h"
+#include "HttpCache.h"
 #include "Strategies.h"
 
+#include <WebCore/CacheValidation.h>
 #include <WebCore/CachedResource.h>
 #include <WebCore/CurlRequest.h>
 #include <WebCore/CurlRequestClient.h>
@@ -68,8 +70,33 @@ public:
     void start()
     {
         debugLog("lade %s", m_loader->request().url().string().utf8().data());
-        m_curlRequest = createCurlRequest(ResourceRequest { m_loader->request() });
-        m_curlRequest->resume();
+        auto& request = m_loader->request();
+        // Zuerst im HTTP-Cache nachsehen (HttpCache.cpp), ausser beim Neuladen
+        if (HttpCache::canUse(request) && request.cachePolicy() != ResourceRequestCachePolicy::ReloadIgnoringCacheData) {
+            HttpCache::lookup(request, [this, protectedThis = Ref { *this }](std::unique_ptr<HttpCache::Entry>&& entry) {
+                if (!m_loader)
+                    return;
+                ResourceRequest request { m_loader->request() };
+                if (entry) {
+                    auto use = HttpCache::decide(*entry, request);
+                    debugLog("Cache %s: %s", use == HttpCache::Use::Fresh ? "frisch" : use == HttpCache::Use::Revalidate ? "nachpruefen" : "nicht nutzbar", request.url().string().utf8().data());
+                    switch (use) {
+                    case HttpCache::Use::Fresh:
+                        serveFromCache(WTF::move(entry), ResourceResponse::Source::DiskCache);
+                        return;
+                    case HttpCache::Use::Revalidate:
+                        HttpCache::addValidationHeaders(request, *entry);
+                        m_cachedEntry = WTF::move(entry);
+                        break;
+                    case HttpCache::Use::None:
+                        break;
+                    }
+                }
+                startNetwork(WTF::move(request));
+            });
+            return;
+        }
+        startNetwork(ResourceRequest { request });
     }
 
     void cancel()
@@ -86,6 +113,32 @@ private:
         : m_loader(&loader)
         , m_done(WTF::move(done))
     {
+    }
+
+    void startNetwork(ResourceRequest&& request)
+    {
+        m_curlRequest = createCurlRequest(WTF::move(request));
+        m_curlRequest->resume();
+    }
+
+    void serveFromCache(std::unique_ptr<HttpCache::Entry>&& entry, ResourceResponse::Source source)
+    {
+        debugLog("aus dem Cache %s", m_loader->request().url().string().utf8().data());
+        m_response = entry->response;
+        m_response.setSource(source);
+        m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }, body = WTF::move(entry->body)] {
+            if (!m_loader)
+                return;
+            RefPtr loader = m_loader;
+            if (body->size())
+                loader->didReceiveBuffer(body.get(), body->size(), DataPayloadBytes);
+            if (!m_loader)
+                return;
+            finish();
+            NetworkLoadMetrics metrics;
+            metrics.markComplete();
+            loader->didFinishLoading(metrics);
+        });
     }
 
     Ref<CurlRequest> createCurlRequest(ResourceRequest&& request)
@@ -208,10 +261,28 @@ private:
         debugLog("Antwort %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
         storeCookies(request.resourceRequest(), curlResponse);
 
+        // Bedingte Anfrage aus dem Cache: 304 heisst, der gespeicherte Inhalt stimmt noch
+        if (auto entry = std::exchange(m_cachedEntry, nullptr); entry && m_response.httpStatusCode() == 304) {
+            if (auto old = std::exchange(m_curlRequest, nullptr)) {
+                old->cancel();
+                old->invalidateClient();
+            }
+            updateResponseHeadersAfterRevalidation(entry->response, m_response);
+            entry->responseTime = WallTime::now();
+            HttpCache::store(m_loader->request(), entry->response, entry->responseTime, entry->body.get());
+            serveFromCache(WTF::move(entry), ResourceResponse::Source::DiskCacheAfterValidation);
+            return;
+        }
+
         if (isRedirect()) {
             redirect();
             return;
         }
+
+        // Cachebar? Dann den Inhalt mitschreiben (HttpCache.cpp)
+        m_storing = HttpCache::isStorable(m_loader->request(), m_response);
+        m_responseTime = WallTime::now();
+        m_cacheBody.reset();
 
         m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }] {
             if (m_curlRequest && m_loader)
@@ -225,6 +296,13 @@ private:
         if (!m_loader || m_curlRequest != &request)
             return;
         auto size = buffer->size();
+        if (m_storing) {
+            if (m_cacheBody.size() + size > HttpCache::maximumEntrySize) {
+                m_storing = false;
+                m_cacheBody.reset();
+            } else
+                m_cacheBody.append(buffer.get());
+        }
         m_loader->didReceiveBuffer(buffer.get(), size, DataPayloadBytes);
     }
 
@@ -235,6 +313,8 @@ private:
             return;
         RefPtr loader = m_loader;
         debugLog("fertig %s", loader->url().string().utf8().data());
+        if (std::exchange(m_storing, false))
+            HttpCache::store(loader->request(), m_response, m_responseTime, m_cacheBody.takeBuffer().get());
         finish();
         loader->didFinishLoading(metrics);
     }
@@ -253,6 +333,11 @@ private:
     Function<void(ResourceLoad&)> m_done;
     ResourceResponse m_response;
     int m_redirectCount { 0 };
+    // HTTP-Cache: Eintrag, der gerade nachgeprueft wird, und was gespeichert wird
+    std::unique_ptr<HttpCache::Entry> m_cachedEntry;
+    bool m_storing { false };
+    WallTime m_responseTime;
+    SharedBufferBuilder m_cacheBody;
 };
 
 // Fire-and-forget fuer sendBeacon, <a ping>, CSP-Reports

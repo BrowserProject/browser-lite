@@ -162,6 +162,8 @@ async function clearStorage() {
   if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?'))
     return;
   storageReady = false; // nichts mehr zurueckschreiben
+  // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
+  await engine?.blClearHttpCache?.().catch(() => {});
   await new Promise((resolve) => {
     const request = indexedDB.deleteDatabase('/data');
     request.onsuccess = request.onerror = request.onblocked = resolve;
