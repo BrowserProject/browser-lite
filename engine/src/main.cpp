@@ -6,8 +6,10 @@
 #include "config.h"
 
 #include "Engine.h"
+#include "Gamepad.h"
 #include "Host.h"
 #include "MediaPlayerPrivateWasm.h"
+#include "Speech.h"
 #include "Storage.h"
 #include "Strategies.h"
 #include "wasm/WasmBridge.h"
@@ -66,6 +68,8 @@ int main(int, char**)
     WebCore::commonVM();
     installPlatformStrategies();
     installPermissionController();
+    installGamepadProvider();
+    installSpeech();
     // <video>/<audio> ueber das Host-<video> (media/)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     BrowserLite::initializeWebAssembly();

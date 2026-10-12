@@ -1,0 +1,186 @@
+// End-to-End Test fuer Geraete und Berechtigungen (web/devices.js,
+// engine/src/DeviceClients.cpp): Markieren mit der Maus, Touch (Antippen,
+// Wischen scrollt), Farbschema des Systems, Standort und Benachrichtigungen mit
+// der Abfrage wie in Chrome.
+//
+//   cd tests/e2e && node devices-test.mjs [engine-ordner]
+import http from 'node:http';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chromium } from 'playwright';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
+const TOKEN = 'devices-token-0123456789abcdef';
+const RELAY_PORT = 15821;
+const UI_PORT = 15822;
+const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
+
+setTimeout(() => {
+  console.log('FAIL Zeitlimit fuer den ganzen Test');
+  process.exit(1);
+}, TIMEOUT + 120000).unref();
+
+let failed = 0;
+const check = (name, ok, info = '') => {
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
+  if (!ok)
+    failed++;
+};
+
+const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
+<style>
+  body { margin: 0; font: 20px sans-serif; height: 4000px; }
+  #text { position: absolute; left: 20px; top: 20px; width: 600px; }
+  #tap { position: absolute; left: 20px; top: 100px; width: 200px; height: 60px; background: #9cf; }
+  #geo { position: absolute; left: 20px; top: 200px; width: 200px; height: 40px; }
+  #notify { position: absolute; left: 260px; top: 200px; width: 200px; height: 40px; }
+</style></head><body>
+<p id="text">Dieser Satz soll mit der Maus markiert werden koennen.</p>
+<div id="tap">Antippen</div>
+<button id="geo">Standort</button>
+<button id="notify">Benachrichtigung</button>
+<script>
+  const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+  document.addEventListener('mouseup', () => {
+    const text = String(getSelection());
+    if (text)
+      result('selection', text.trim());
+  });
+  const tap = document.getElementById('tap');
+  tap.addEventListener('touchstart', (e) => result('touchstart', e.touches.length));
+  tap.addEventListener('click', () => result('tapclick', 1));
+  let reported = false;
+  window.addEventListener('scroll', () => {
+    if (!reported && scrollY > 50) {
+      reported = true;
+      result('touchscroll', Math.round(scrollY));
+    }
+  });
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  result('dark', dark.matches);
+  dark.addEventListener('change', () => result('darkchange', dark.matches));
+  result('ontouchstart', 'ontouchstart' in window);
+  document.getElementById('geo').addEventListener('click', () => {
+    navigator.geolocation.getCurrentPosition(
+      (p) => result('geo', p.coords.latitude.toFixed(2) + ',' + p.coords.longitude.toFixed(2)),
+      (e) => result('geo', 'fehler' + e.code));
+  });
+  document.getElementById('notify').addEventListener('click', async () => {
+    const permission = await Notification.requestPermission();
+    result('notifypermission', permission);
+    result('notifystate', Notification.permission);
+  });
+  result('ready', 1);
+</script></body></html>`;
+
+const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
+await new Promise((r) => site.listen(0, '127.0.0.1', r));
+const siteURL = `http://127.0.0.1:${site.address().port}/`;
+
+function start(script, args, env) {
+  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
+  return new Promise((resolve) => child.stdout.on('data', (d) => {
+    if (/laeuft|browser-lite auf/.test(d.toString()))
+      resolve(child);
+  }));
+}
+const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
+  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
+const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
+
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+// Touchscreen wie ein Chromebook, Standort Bern
+const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, hasTouch: true, geolocation: { latitude: 46.948, longitude: 7.447 }, permissions: ['geolocation', 'notifications'] });
+const page = await context.newPage();
+const results = new Map();
+page.on('console', (msg) => {
+  if (process.env.E2E_LOG)
+    console.log('[chromium]', msg.text());
+  const match = /RESULT (\w+)=(.*?)(\s+\(|$)/.exec(msg.text());
+  if (match)
+    results.set(match[1], match[2]);
+});
+async function result(key, timeout = 30000) {
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    if (results.has(key))
+      return results.get(key);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return null;
+}
+async function at(x, y) {
+  const box = await page.evaluate(() => {
+    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+    const rect = canvas.getBoundingClientRect();
+    return { x: rect.left, y: rect.top };
+  });
+  return [box.x + x, box.y + y];
+}
+
+const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
+await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+check('Seite bereit', (await result('ready', TIMEOUT)) === '1');
+check('Touchscreen erkannt (ontouchstart)', (await result('ontouchstart')) === 'true');
+
+// 1) Markieren mit der Maus (braucht ENABLE_DRAG_SUPPORT)
+await page.mouse.move(...await at(25, 45));
+await page.mouse.down();
+await page.mouse.move(...await at(200, 45), { steps: 8 });
+await page.mouse.move(...await at(380, 45), { steps: 8 });
+await page.mouse.up();
+const selection = await result('selection', 10000);
+check('Markieren mit der Maus', selection && selection.length > 10, JSON.stringify(selection));
+
+// 2) Antippen: Touch-Events gehen an die Seite, daraus wird ein Klick
+await page.touchscreen.tap(...await at(100, 130));
+check('Touch-Event (touchstart)', (await result('touchstart', 10000)) === '1');
+check('Antippen wird Klick', (await result('tapclick', 10000)) === '1');
+
+// 3) Wischen scrollt die Seite (CDP: Finger nach oben ziehen)
+const cdp = await context.newCDPSession(page);
+const [sx, sy] = await at(600, 500);
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy }] });
+for (let i = 1; i <= 10; i++) {
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: sx, y: sy - i * 30 }] });
+  await page.waitForTimeout(16);
+}
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+const touchScroll = await result('touchscroll', 10000);
+check('Wischen scrollt', Number(touchScroll) > 50, String(touchScroll));
+// Schwung auslaufen lassen, dann wieder nach oben
+await page.waitForTimeout(2000);
+await page.mouse.move(...await at(600, 400));
+await page.mouse.wheel(0, -5000);
+await page.waitForTimeout(1000);
+
+// 4) Farbschema: der Host wechselt auf dunkel, die Seite merkt es
+check('Farbschema hell am Anfang', (await result('dark')) === 'false');
+await page.emulateMedia({ colorScheme: 'dark' });
+check('Farbschema dunkel kommt an', (await result('darkchange', 10000)) === 'true');
+
+// 5) Standort: Abfrage wie Chrome, nach "Zulassen" kommt die Position
+await page.mouse.click(...await at(120, 220));
+const prompt = page.locator('#permission-prompt:not([hidden])');
+const promptShown = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
+check('Standort: Abfrage erscheint', promptShown && /Standort/.test(await prompt.textContent()));
+if (promptShown)
+  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+check('Standort kommt an', (await result('geo', 15000)) === '46.95,7.45', results.get('geo'));
+
+// 6) Benachrichtigungen: Abfrage, danach "granted"
+await page.mouse.click(...await at(360, 220));
+const notifyPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
+if (notifyPrompt)
+  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+check('Benachrichtigungen erlaubt', notifyPrompt && (await result('notifypermission', 15000)) === 'granted' && (await result('notifystate')) === 'granted',
+  `${results.get('notifypermission')} / ${results.get('notifystate')}`);
+
+await browser.close();
+relay.kill();
+ui.kill();
+site.close();
+console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
+process.exit(failed ? 1 : 0);

@@ -7,6 +7,7 @@
 #include <WebCore/Region.h>
 #include <skia/core/SkRefCnt.h>
 #include <wtf/CheckedRef.h>
+#include <wtf/CompletionHandler.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/URL.h>
@@ -17,6 +18,7 @@
 class SkSurface;
 
 namespace WebCore {
+enum class PointerLockRequestResult : uint8_t;
 class FileChooser;
 class LocalFrame;
 class LocalFrameView;
@@ -34,6 +36,8 @@ public:
     ~WebView();
 
     static WebView* fromID(int);
+    static void forEach(const Function<void(WebView&)>&);
+    void setDarkAppearance(bool);
     int id() const { return m_id; }
     void exitFullscreen();
 
@@ -71,8 +75,15 @@ public:
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
 
     // Eingabe (Koordinaten in CSS-Pixeln relativ zur View)
-    void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers);
+    void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0);
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+#if ENABLE(POINTER_LOCK)
+    void requestPointerLock(CompletionHandler<void(WebCore::PointerLockRequestResult)>&&);
+    void requestPointerUnlock();
+    // Antwort/Ende vom Host: false = nicht bekommen oder verloren (Esc)
+    void pointerLockResult(bool locked);
+#endif
+    void touchEvent(int type, const String& pointsJSON, int modifiers);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
     // Rechtsklick: zuerst das contextmenu-Event der Seite, dann (wenn die Seite
@@ -132,6 +143,9 @@ private:
     bool m_isLoading { false };
     URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;
+#if ENABLE(POINTER_LOCK)
+    CompletionHandler<void(WebCore::PointerLockRequestResult)> m_pointerLockHandler;
+#endif
 };
 
 } // namespace BrowserLite

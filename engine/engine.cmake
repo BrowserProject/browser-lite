@@ -12,9 +12,11 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/BackForwardList.cpp
     ${BL_ENGINE_SRC}/Choosers.cpp
     ${BL_ENGINE_SRC}/Clients.cpp
+    ${BL_ENGINE_SRC}/DeviceClients.cpp
     ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
+    ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/Permissions.cpp
@@ -22,6 +24,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
+    ${BL_ENGINE_SRC}/Speech.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp

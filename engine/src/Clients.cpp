@@ -38,6 +38,7 @@
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
+#include <WebCore/PointerLockController.h>
 #include <WebCore/ProgressTracker.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceRequest.h>
@@ -228,6 +229,19 @@ RefPtr<DateTimeChooser> ChromeClient::createDateTimeChooser(DateTimeChooserClien
 {
     return BrowserLite::createDateTimeChooser(m_view.get(), client);
 }
+
+#if ENABLE(POINTER_LOCK)
+void ChromeClient::requestPointerLock(CompletionHandler<void(PointerLockRequestResult)>&& completionHandler)
+{
+    m_view->requestPointerLock(WTF::move(completionHandler));
+}
+
+void ChromeClient::requestPointerUnlock(CompletionHandler<void(bool)>&& completionHandler)
+{
+    m_view->requestPointerUnlock();
+    completionHandler(true);
+}
+#endif
 
 // Link-Adresse unten links und Tooltips (title-Attribut) wie in Chrome
 void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& toolTip, TextDirection)

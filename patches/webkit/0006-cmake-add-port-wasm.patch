@@ -64,10 +64,10 @@ index 0000000000..2eb4471e0d
 +list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
 diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
 new file mode 100644
-index 0000000000..6604213858
+index 0000000000..7a9fdf8b15
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,82 @@
 +# WebCore fuer PORT=Wasm (browser-lite).
 +# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
@@ -118,7 +118,9 @@ index 0000000000..6604213858
 +    platform/unix/LoggingUnix.cpp
 +    platform/unix/SharedMemoryUnix.cpp
 +
++    page/glib/DragControllerGLib.cpp
 +    platform/wasm/CurlSSLHandleWasm.cpp
++    platform/wasm/DragWasm.cpp
 +    platform/wasm/GraphicsContextGLWasm.cpp
 +    platform/wasm/angle/ANGLEShimForwardWasm.cpp
 +    platform/wasm/angle/ANGLEShimWasm.cpp
@@ -128,6 +130,7 @@ index 0000000000..6604213858
 +    platform/wasm/PlatformKeyboardEventWasm.cpp
 +    platform/wasm/PlatformPasteboardWasm.cpp
 +    platform/wasm/PlatformScreenWasm.cpp
++    platform/wasm/PlatformSpeechSynthesizerWasm.cpp
 +    platform/wasm/SystemFontDatabaseWasm.cpp
 +    platform/wasm/UserAgentWasm.cpp
 +    platform/wasm/WasmPlatform.cpp
@@ -149,10 +152,10 @@ index 0000000000..6604213858
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..fdcbc8504c
+index 0000000000..352ba916a4
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,160 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
 +#
 +# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
@@ -226,10 +229,19 @@ index 0000000000..fdcbc8504c
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_RTC PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ENCRYPTED_MEDIA PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GAMEPAD PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SPEECH_SYNTHESIS PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_NOTIFICATIONS PRIVATE OFF)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GEOLOCATION PRIVATE OFF)
++# Geraete und Dienste des Host-Browsers (engine/src, Daten kommen von der Oberflaeche)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GAMEPAD PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SPEECH_SYNTHESIS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_NOTIFICATIONS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GEOLOCATION PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_TOUCH_EVENTS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_POINTER_LOCK PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SESSION PRIVATE ON)
++# Markieren mit der Maus haengt in WebCore am Drag-Support
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DRAG_SUPPORT PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_OFFSCREEN_CANVAS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_OFFSCREEN_CANVAS_IN_WORKERS PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_VARIATION_FONTS PRIVATE ON)
 +# Fullscreen: die Oberflaeche macht den Seitenbereich im Host-Browser gross
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FULLSCREEN_API PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBXR PRIVATE OFF)

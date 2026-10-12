@@ -7,6 +7,8 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
+import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
+import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
 const $ = (id) => document.getElementById(id);
@@ -171,6 +173,7 @@ async function clearStorage() {
   if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?'))
     return;
   storageReady = false; // nichts mehr zurueckschreiben
+  clearPermissions();
   // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
   await engine?.blClearHttpCache?.().catch(() => {});
   await new Promise((resolve) => {
@@ -191,10 +194,43 @@ function installExtraCA(module) {
   fs.writeFile('/etc/ssl/certs/extra-ca.crt', pem);
 }
 
+// Bildschirm, Farbschema (prefers-color-scheme) und Touchscreen wie im Host
+const darkScheme = matchMedia('(prefers-color-scheme: dark)');
+function sendScreen() {
+  const flags = (darkScheme.matches ? 1 : 0) | (navigator.maxTouchPoints > 0 ? 2 : 0);
+  engine._bl_set_screen(screen.width, screen.height, screen.availWidth, screen.availHeight, flags);
+}
+
 function onEngineReady() {
   $('boot').hidden = true;
-  engine._bl_set_screen(screen.width, screen.height, screen.availWidth, screen.availHeight);
-  newTab(START_URL);
+  sendScreen();
+  darkScheme.addEventListener('change', sendScreen);
+  initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
+  initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind() });
+  // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
+  const session = params.get('url') ? null : sessionToRestore();
+  if (session) {
+    const restored = session.map((entry) => restoredTab(entry));
+    activateTab(restored[Math.max(0, session.findIndex((entry) => entry.active))]);
+  } else {
+    newTab(START_URL);
+  }
+}
+
+// Link/Lesezeichen oeffnen: im aktiven Tab oder in einem neuen
+function openURL(url, inNewTab) {
+  if (inNewTab || !activeTab) {
+    newTab(url || settings().homePage || 'about:blank');
+    if (!url)
+      $('address').focus();
+    return;
+  }
+  engine._bl_load_url(activeTab.id, toUTF8(url));
+  focusPage();
+}
+
+function persistSession() {
+  saveSession([...tabs.values()], activeTab);
 }
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
@@ -203,10 +239,11 @@ initPickers({ engine: () => engine, toUTF8, focusPage: () => focusPage() });
 // --------------------------------------------------------------------- Tabs
 
 class Tab {
-  // viewId gesetzt: die Engine hat den View schon geoeffnet (Popup)
-  constructor(url, viewId = 0) {
+  // viewId gesetzt: die Engine hat den View schon geoeffnet (Popup).
+  // lazy: erst laden, wenn der Tab angeklickt wird (wiederhergestellte Tabs)
+  constructor(url, viewId = 0, lazy = null) {
     this.id = viewId || nextViewId++;
-    this.title = 'Neuer Tab';
+    this.title = lazy?.title || 'Neuer Tab';
     this.url = url;
     this.canGoBack = false;
     this.canGoForward = false;
@@ -216,7 +253,7 @@ class Tab {
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'page';
-    this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none';
+    this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none;touch-action:none';
     this.ctx = this.canvas.getContext('2d', { alpha: false });
     $('viewport').appendChild(this.canvas);
     attachInput(this);
@@ -239,7 +276,9 @@ class Tab {
       return;
     }
     engine._bl_create_view(this.id, width, height, devicePixelRatio);
-    if (url)
+    if (lazy)
+      this.pendingURL = url;
+    else if (url)
       engine._bl_load_url(this.id, toUTF8(url));
   }
 
@@ -277,6 +316,13 @@ function newTab(url, viewId = 0) {
   return tab;
 }
 
+// Wiederhergestellter Tab im Hintergrund: laedt erst beim ersten Anklicken
+function restoredTab(entry) {
+  const tab = new Tab(entry.url, 0, { title: entry.title });
+  tabs.set(tab.id, tab);
+  return tab;
+}
+
 function activateTab(tab) {
   if (activeTab === tab)
     return;
@@ -287,6 +333,12 @@ function activateTab(tab) {
   }
   activeTab = tab;
   clearHover();
+  updateStar(tab.url);
+  if (tab.pendingURL) {
+    engine._bl_load_url(tab.id, toUTF8(tab.pendingURL));
+    tab.pendingURL = null;
+  }
+  persistSession();
   tab.canvas.style.display = 'block';
   tab.element.classList.add('active');
   engine._bl_focus(tab.id, 1);
@@ -296,6 +348,8 @@ function activateTab(tab) {
 }
 
 function closeTab(tab) {
+  onGeolocationStop(tab);
+  setTimeout(persistSession);
   engine._bl_destroy_view(tab.id);
   tab.canvas.remove();
   tab.element.remove();
@@ -370,6 +424,24 @@ function onEngineEvent(viewId, type, payload) {
     navigator.clipboard?.writeText(data.text).catch(() => {});
     return;
   }
+  // Fuer alle Tabs: Gamepads und Sprachausgabe (web/devices.js)
+  switch (type) {
+  case 'gamepad-monitor':
+    onGamepadMonitor(data);
+    return;
+  case 'gamepad-effect':
+    onGamepadEffect(data);
+    return;
+  case 'speak':
+    onSpeak(data);
+    return;
+  case 'speech-command':
+    onSpeechCommand(data);
+    return;
+  case 'notification-close':
+    onNotificationClose(data);
+    return;
+  }
   if (type === 'download-start' || type === 'download-done') {
     onDownloadEvent(type, data);
     return;
@@ -424,6 +496,24 @@ function onEngineEvent(viewId, type, payload) {
     if (tab === activeTab)
       showFindCount(data);
     return;
+  case 'permission':
+    onPermissionRequest(tab, data);
+    return;
+  case 'geolocation-start':
+    onGeolocationStart(tab, data);
+    return;
+  case 'geolocation-stop':
+    onGeolocationStop(tab);
+    return;
+  case 'notification':
+    onNotification(tab, data);
+    return;
+  case 'touch-result':
+    tab.onTouchResult?.(data);
+    return;
+  case 'pointerlock':
+    setPointerLock(tab, data.on);
+    return;
   }
   if (type === 'fullscreen') {
     setFullscreen(tab, data.on);
@@ -431,14 +521,21 @@ function onEngineEvent(viewId, type, payload) {
   }
   switch (type) {
   case 'navigation':
+    if (data.url !== tab.url)
+      recordVisit(data.url, '');
     tab.url = data.url;
     tab.canGoBack = data.canGoBack;
     tab.canGoForward = data.canGoForward;
     tab.loading = data.loading;
+    if (tab === activeTab)
+      updateStar(tab.url);
+    persistSession();
     break;
   case 'title':
     tab.title = data.title;
     tab.updateTitle();
+    recordVisit(tab.url, data.title);
+    persistSession();
     break;
   case 'progress':
     if (tab === activeTab)
@@ -520,9 +617,15 @@ function formatSize(bytes) {
   return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' kB';
 }
 
+// Liste fuer das Download-Panel (Strg+J), nur fuer diese Sitzung
+const downloadHistory = [];
+
 function onDownloadEvent(type, data) {
   if (type === 'download-start') {
-    downloads.set(data.id, { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size });
+    const download = { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size };
+    downloads.set(data.id, download);
+    downloadHistory.push(download);
+    refreshDownloadsPanel();
     setStatus('Download: ' + data.filename);
     return;
   }
@@ -531,6 +634,9 @@ function onDownloadEvent(type, data) {
   if (!download)
     return;
   if (data.error) {
+    download.error = data.error;
+    download.chunks = [];
+    refreshDownloadsPanel();
     setStatus('Download fehlgeschlagen: ' + download.filename + ' (' + data.error + ')');
     return;
   }
@@ -541,7 +647,17 @@ function onDownloadEvent(type, data) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+  download.url = link.href;
+  download.done = true;
+  download.size = blob.size;
+  download.chunks = [];
+  // Alte Downloads aus dem Speicher werfen (die Liste behaelt nur den Namen)
+  const kept = downloadHistory.filter((d) => d.url);
+  if (kept.length > 10) {
+    URL.revokeObjectURL(kept[0].url);
+    kept[0].url = null;
+  }
+  refreshDownloadsPanel();
   setStatus('Download fertig: ' + download.filename + ' (' + formatSize(blob.size) + ')');
 }
 
@@ -692,6 +808,8 @@ function attachInput(tab) {
     return [e.clientX - rect.left, e.clientY - rect.top];
   };
 
+  // Finger zuerst: Touch-Events, Scrollen mit Schwung, Antippen (web/devices.js)
+  attachTouch(tab, canvas, position, modifierBits);
   canvas.addEventListener('pointerdown', (e) => {
     focusPage();
     canvas.setPointerCapture(e.pointerId);
@@ -702,7 +820,9 @@ function attachInput(tab) {
     engine._bl_mouse(tab.id, 1, e.button, ...position(e), Math.max(1, e.detail), modifierBits(e));
   });
   canvas.addEventListener('pointermove', (e) => {
-    engine._bl_mouse(tab.id, 2, -1, ...position(e), 0, modifierBits(e));
+    // Gedrueckte Taste mitgeben (e.buttons: 1 links, 2 rechts, 4 Mitte), sonst kein Ziehen
+    const button = e.buttons & 1 ? 0 : e.buttons & 4 ? 1 : e.buttons & 2 ? 2 : -1;
+    engine._bl_mouse_move(tab.id, ...position(e), e.movementX || 0, e.movementY || 0, button, modifierBits(e));
   });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -803,13 +923,10 @@ $('address-form').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!activeTab)
     return;
-  let url = $('address').value.trim();
+  hideSuggestions();
+  const url = addressToURL($('address').value);
   if (!url)
     return;
-  if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
-    // Ohne Punkt und ohne Schema ist es wohl eine Suche
-    url = /^[^\s]+\.[^\s]+$/.test(url) ? 'https://' + url : 'https://duckduckgo.com/html/?q=' + encodeURIComponent(url);
-  }
   engine._bl_load_url(activeTab.id, toUTF8(url));
   focusPage();
 });
@@ -824,9 +941,67 @@ $('reload').addEventListener('click', () => {
     engine._bl_reload(activeTab.id);
 });
 $('clear-data').addEventListener('click', clearStorage);
-$('new-tab').addEventListener('click', () => {
-  newTab('about:blank');
-  $('address').focus();
+$('new-tab').addEventListener('click', () => openURL('', true));
+
+// --------------------------------------------------- Vorschlaege der Adressleiste
+
+const suggestionBox = document.createElement('div');
+suggestionBox.id = 'suggestions';
+suggestionBox.hidden = true;
+document.body.appendChild(suggestionBox);
+let suggestionIndex = -1;
+
+function hideSuggestions() {
+  suggestionBox.hidden = true;
+  suggestionIndex = -1;
+}
+
+function showSuggestions() {
+  const list = suggestions($('address').value);
+  suggestionBox.textContent = '';
+  suggestionIndex = -1;
+  if (!list.length) {
+    hideSuggestions();
+    return;
+  }
+  for (const entry of list) {
+    const row = document.createElement('div');
+    row.className = 'suggestion';
+    const title = document.createElement('span');
+    title.className = 'suggestion-title';
+    title.textContent = entry.title || entry.url;
+    const url = document.createElement('span');
+    url.className = 'suggestion-url';
+    url.textContent = entry.url;
+    row.append(title, url);
+    row.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      $('address').value = entry.url;
+      hideSuggestions();
+      $('address-form').requestSubmit();
+    });
+    suggestionBox.appendChild(row);
+  }
+  const rect = $('address').getBoundingClientRect();
+  Object.assign(suggestionBox.style, { left: rect.left + 'px', top: rect.bottom + 2 + 'px', width: rect.width + 'px' });
+  suggestionBox.hidden = false;
+}
+
+$('address').addEventListener('input', showSuggestions);
+$('address').addEventListener('blur', () => setTimeout(hideSuggestions, 100));
+$('address').addEventListener('keydown', (e) => {
+  if (suggestionBox.hidden || !['ArrowDown', 'ArrowUp', 'Escape'].includes(e.key))
+    return;
+  e.preventDefault();
+  if (e.key === 'Escape') {
+    hideSuggestions();
+    return;
+  }
+  const rows = [...suggestionBox.children];
+  rows[suggestionIndex]?.classList.remove('selected');
+  suggestionIndex = (suggestionIndex + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+  rows[suggestionIndex].classList.add('selected');
+  $('address').value = rows[suggestionIndex].querySelector('.suggestion-url').textContent;
 });
 
 new ResizeObserver(() => {
@@ -836,6 +1011,29 @@ new ResizeObserver(() => {
   for (const tab of tabs.values())
     engine._bl_resize(tab.id, width, height, devicePixelRatio);
 }).observe($('viewport'));
+
+// ------------------------------------------------------------ Pointer Lock
+// Spiele/3D: die Maus bleibt im Canvas, die Seite bekommt nur movementX/Y.
+// Esc beendet es (Host-Browser), das merkt dann auch die Seite.
+
+function setPointerLock(tab, on) {
+  if (!on) {
+    if (document.pointerLockElement === tab.canvas)
+      document.exitPointerLock();
+    return;
+  }
+  Promise.resolve(tab.canvas.requestPointerLock?.({ unadjustedMovement: true })).catch(() => tab.canvas.requestPointerLock?.())
+    .then(() => engine._bl_pointer_lock(tab.id, document.pointerLockElement === tab.canvas ? 1 : 0),
+      () => engine._bl_pointer_lock(tab.id, 0));
+}
+
+let pointerLockTab = null;
+document.addEventListener('pointerlockchange', () => {
+  const tab = [...tabs.values()].find((t) => t.canvas === document.pointerLockElement);
+  if (pointerLockTab && pointerLockTab !== tab)
+    engine._bl_pointer_lock(pointerLockTab.id, 0);
+  pointerLockTab = tab || null;
+});
 
 // ------------------------------------------------------------------ Zoom
 
@@ -928,9 +1126,20 @@ function shortcut(e) {
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const tab = activeTab;
+  if (ctrl && e.shiftKey && key === 'o') {
+    togglePanel('bookmarks');
+    return true;
+  }
+  if (key === 'Escape' && panelIsOpen()) {
+    togglePanel(null);
+    return true;
+  }
   if (ctrl && !e.altKey) {
     switch (key) {
-    case 't': newTab('about:blank'); $('address').focus(); return true;
+    case 't': openURL('', true); return true;
+    case 'h': togglePanel('history'); return true;
+    case 'j': togglePanel('downloads'); return true;
+    case 'd': if (tab) toggleBookmark(tab.url, tab.title); return true;
     case 'w': if (tab) closeTab(tab); return true;
     case 'l': $('address').focus(); $('address').select(); return true;
     case 'f':

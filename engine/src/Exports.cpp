@@ -6,10 +6,13 @@
 #include "config.h"
 
 #include "Choosers.h"
+#include "DeviceClients.h"
 #include "Engine.h"
+#include "Gamepad.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
+#include "Speech.h"
 #include "WebView.h"
 
 #include <JavaScriptCore/DeferGCInlines.h>
@@ -103,6 +106,23 @@ EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
 EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, double x, double y, int clickCount, int modifiers)
 {
     withView(id, [=](WebView& view) { view.mouseEvent(type, button, x, y, clickCount, modifiers); });
+}
+
+// Mausbewegung mit movementX/Y (auch bei Pointer Lock). button: gedrueckte
+// Taste wie bei bl_mouse (-1 = keine), sonst gibt es kein Ziehen/Markieren
+EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int button, int modifiers)
+{
+    withView(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
+{
+#if ENABLE(POINTER_LOCK)
+    withView(id, [=](WebView& view) { view.pointerLockResult(locked); });
+#else
+    UNUSED_PARAM(id);
+    UNUSED_PARAM(locked);
+#endif
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers)
@@ -216,14 +236,69 @@ EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
     withView(id, [=](WebView& view) { view.setFocused(focused); });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight)
+// flags: 1 = dunkles Farbschema (prefers-color-scheme), 2 = Touchscreen
+EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
 {
     runOnEngineThread([=] {
         WebCore::WasmPlatform::ScreenInfo info;
         info.rect = WebCore::FloatRect(0, 0, width, height);
         info.availableRect = WebCore::FloatRect(0, 0, availableWidth, availableHeight);
+        info.prefersDarkMode = flags & 1;
+        info.hasTouch = flags & 2;
+        bool darkChanged = info.prefersDarkMode != WebCore::WasmPlatform::screenInfo().prefersDarkMode;
         WebCore::WasmPlatform::setScreenInfo(info);
+        if (darkChanged)
+            WebView::forEach([&](WebView& view) { view.setDarkAppearance(info.prefersDarkMode); });
     });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers)
+{
+    withView(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
+}
+
+// Berechtigungen, Standort, Benachrichtigungen (DeviceClients.cpp)
+EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int granted)
+{
+    runOnEngineThread([=] { answerPermission(requestId, granted); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_set_permission(char* kind, char* origin, int decision)
+{
+    runOnEngineThread([kind = takeString(kind), origin = takeString(origin), decision] {
+        setStoredPermission(kind, origin, static_cast<PermissionDecision>(std::clamp(decision, 0, 2)));
+    });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_geolocation_position(int id, double latitude, double longitude, double accuracy, double altitude, double altitudeAccuracy, double heading, double speed, double timestamp)
+{
+    runOnEngineThread([=] { geolocationPosition(id, latitude, longitude, accuracy, altitude, altitudeAccuracy, heading, speed, timestamp); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_geolocation_error(int id, int code, char* message)
+{
+    runOnEngineThread([id, code, message = takeString(message)] { geolocationError(id, code, message); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_notification_event(char* notificationID, int type)
+{
+    runOnEngineThread([notificationID = takeString(notificationID), type] { notificationEvent(notificationID, type); });
+}
+
+// Gamepads (Gamepad.cpp) und Sprachausgabe (Speech.cpp)
+EMSCRIPTEN_KEEPALIVE void bl_gamepad(int index, char* json)
+{
+    runOnEngineThread([index, json = takeString(json)] { updateGamepad(index, json); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_speech_voices(char* json)
+{
+    runOnEngineThread([json = takeString(json)] { setSpeechVoices(json); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_speech_event(double id, int type, int charIndex, int charLength)
+{
+    runOnEngineThread([=] { speechEvent(static_cast<uint64_t>(id), type, charIndex, charLength); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent)

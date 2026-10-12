@@ -3,6 +3,7 @@
 // fuer das, was Chrome ohne Abfrage erlaubt.
 #include "config.h"
 #include "Engine.h"
+#include "DeviceClients.h"
 
 #include <WebCore/ClientOrigin.h>
 #include <WebCore/PermissionController.h>
@@ -19,8 +20,24 @@ public:
     static Ref<EnginePermissionController> create() { return adoptRef(*new EnginePermissionController); }
 
 private:
-    void query(ClientOrigin&&, PermissionDescriptor descriptor, const WeakPtr<Page>&, PermissionQuerySource, CompletionHandler<void(std::optional<PermissionState>)>&& completionHandler) final
+    void query(ClientOrigin&& clientOrigin, PermissionDescriptor descriptor, const WeakPtr<Page>&, PermissionQuerySource, CompletionHandler<void(std::optional<PermissionState>)>&& completionHandler) final
     {
+        // Schon entschieden (Abfrage in der Oberflaeche, DeviceClients.cpp)?
+        String origin = clientOrigin.topOrigin.toString();
+        String kind = descriptor.name == PermissionName::Geolocation ? "geolocation"_s
+            : descriptor.name == PermissionName::Notifications ? "notifications"_s : String { };
+        if (!kind.isNull()) {
+            switch (storedPermission(kind, origin)) {
+            case PermissionDecision::Granted:
+                completionHandler(PermissionState::Granted);
+                return;
+            case PermissionDecision::Denied:
+                completionHandler(PermissionState::Denied);
+                return;
+            case PermissionDecision::Ask:
+                break;
+            }
+        }
         switch (descriptor.name) {
         case PermissionName::Accelerometer:
         case PermissionName::Gyroscope:

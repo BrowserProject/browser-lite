@@ -323,6 +323,10 @@ jobs:
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)
         run: cd tests/e2e && node cache-test.mjs
+      - name: Geraete-Test (Markieren, Touch, Farbschema, Standort, Benachrichtigungen)
+        run: cd tests/e2e && node devices-test.mjs
+      - name: Oberflaeche-Test (Verlauf, Lesezeichen, Vorschlaege, Sitzung)
+        run: cd tests/e2e && node ui-test.mjs
       - name: Messlatte gegen Chromium (Web-APIs, JS, CSS; rot nur bei Rueckschritt)
         run: cd tests/e2e && PARITY_REPORT="$GITHUB_STEP_SUMMARY" node parity-test.mjs
       - name: Screenshots als Artefakt

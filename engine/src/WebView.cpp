@@ -1,6 +1,7 @@
 #include "config.h"
 #include "WebView.h"
 #include "Choosers.h"
+#include "DeviceClients.h"
 
 #include "BackForwardList.h"
 #include "Clients.h"
@@ -42,6 +43,11 @@
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/PlatformWheelEvent.h>
+#include <WebCore/PointerLockController.h>
+#include <WebCore/PlatformTouchEvent.h>
+#include <WebCore/PlatformTouchPoint.h>
+#include <WebCore/WasmPlatform.h>
+#include <WebCore/RemoteFrameGeometryTransformer.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
@@ -54,6 +60,7 @@
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkSurface.h>
 #include <wtf/HashMap.h>
+#include <wtf/JSONValues.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
@@ -93,6 +100,7 @@ void WebView::close(int id)
 {
     closeChoosers(id);
     openViews().remove(id);
+    detachDeviceClients(id);
 }
 
 class SessionProvider final : public StorageSessionProvider {
@@ -135,6 +143,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     m_page = Page::create(WTF::move(configuration));
     debugLog("View %d: Page erstellt", id);
+    attachDeviceClients(*this, *m_page);
+    m_page->setUseColorAppearance(WasmPlatform::screenInfo().prefersDarkMode, false);
 
     auto& settings = m_page->settings();
     settings.setScriptEnabled(true);
@@ -189,6 +199,20 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setMediaCapabilitiesEnabled(true);
     settings.setHiddenPageDOMTimerThrottlingEnabled(true);
     settings.setHiddenPageCSSAnimationSuspensionEnabled(true);
+    // Brauchen die Funktions-Schalter in OptionsWasm.cmake
+#if ENABLE(OFFSCREEN_CANVAS)
+    settings.setOffscreenCanvasEnabled(true);
+#endif
+#if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
+    settings.setOffscreenCanvasInWorkersEnabled(true);
+#endif
+#if ENABLE(POINTER_LOCK)
+    settings.setPointerLockEnabled(true);
+#endif
+#if ENABLE(GAMEPAD)
+    settings.setGamepadsEnabled(true);
+    settings.setGamepadVibrationActuatorEnabled(true);
+#endif
 
     settings.setDefaultFontSize(16);
     settings.setDefaultFixedFontSize(13);
@@ -500,7 +524,19 @@ static OptionSet<PlatformEvent::Modifier> modifiersFromBits(int bits)
     return modifiers;
 }
 
-void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers)
+namespace {
+// movementX/Y kommen vom Host (bei Pointer Lock die einzige Bewegung)
+class MouseEventWasm final : public PlatformMouseEvent {
+public:
+    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement)
+        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven)
+    {
+        m_movementDelta = movement;
+    }
+};
+}
+
+void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY)
 {
     RefPtr frame = mainFrame();
     if (!frame)
@@ -514,7 +550,7 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
     PlatformEvent::Type eventType = type == 0 ? PlatformEvent::Type::MousePressed : type == 1 ? PlatformEvent::Type::MouseReleased : PlatformEvent::Type::MouseMoved;
     DoublePoint position { x, y };
-    PlatformMouseEvent event { position, position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
+    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY } };
 
     auto& handler = frame->eventHandler();
     switch (eventType) {
@@ -540,6 +576,106 @@ void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, int m
     PlatformWheelEvent event { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), static_cast<float>(-deltaX / 40), static_cast<float>(-deltaY / 40),
         PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
     frame->eventHandler().handleWheelEvent(event, { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
+}
+
+#if ENABLE(TOUCH_EVENTS)
+namespace {
+// PlatformTouchEvent/-Point haben nur geschuetzte Felder, die Ports fuellen sie selber
+class TouchPointWasm final : public PlatformTouchPoint {
+public:
+    TouchPointWasm(unsigned id, State state, DoublePoint position, DoubleSize radius, float force)
+    {
+        m_id = id;
+        m_state = state;
+        m_pos = position;
+        m_screenPos = position;
+        m_radius = radius;
+        m_rotationAngle = 0;
+        m_twist = 0;
+        m_force = force;
+    }
+};
+
+class TouchEventWasm final : public PlatformTouchEvent {
+public:
+    TouchEventWasm(PlatformEvent::Type type, Vector<PlatformTouchPoint>&& points, OptionSet<PlatformEvent::Modifier> modifiers)
+    {
+        m_type = type;
+        m_touchPoints = WTF::move(points);
+        m_modifiers = modifiers;
+        m_timestamp = MonotonicTime::now();
+    }
+};
+}
+#endif
+
+// Touch (Chromebooks): type 0 Start, 1 Bewegung, 2 Ende, 3 Abbruch. Punkte als
+// JSON [{id, x, y, state, rx, ry, force}], state wie PlatformTouchPoint::State.
+// Die Oberflaeche erfaehrt, ob die Seite das Event abgefangen hat (dann kein
+// Scrollen und kein Klick daraus).
+void WebView::touchEvent(int type, const String& json, int modifiers)
+{
+#if ENABLE(TOUCH_EVENTS)
+    RefPtr frame = mainFrame();
+    auto value = JSON::Value::parseJSON(json);
+    auto array = value ? value->asArray() : nullptr;
+    if (!frame || !array)
+        return;
+    Vector<PlatformTouchPoint> points;
+    for (auto& item : *array) {
+        auto point = item->asObject();
+        if (!point)
+            continue;
+        auto state = static_cast<PlatformTouchPoint::State>(std::clamp(point->getInteger("state"_s).value_or(0), 0, 4));
+        points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state,
+            { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) },
+            { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
+            static_cast<float>(point->getDouble("force"_s).value_or(0))));
+    }
+    static constexpr PlatformEvent::Type types[] = { PlatformEvent::Type::TouchStart, PlatformEvent::Type::TouchMove, PlatformEvent::Type::TouchEnd, PlatformEvent::Type::TouchCancel };
+    TouchEventWasm event { types[std::clamp(type, 0, 3)], WTF::move(points), modifiersFromBits(modifiers) };
+    auto result = frame->eventHandler().handleTouchEvent(event);
+    bool consumed = result && *result;
+    notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, consumed ? "true"_s : "false"_s, '}'));
+#else
+    UNUSED_PARAM(type);
+    UNUSED_PARAM(json);
+    UNUSED_PARAM(modifiers);
+#endif
+}
+
+#if ENABLE(POINTER_LOCK)
+// Pointer Lock (Spiele, 3D): die Oberflaeche ruft requestPointerLock() am Canvas auf
+void WebView::requestPointerLock(CompletionHandler<void(PointerLockRequestResult)>&& completionHandler)
+{
+    if (auto previous = std::exchange(m_pointerLockHandler, WTF::move(completionHandler)))
+        previous(PointerLockRequestResult::Failure);
+    notifyHost(m_id, "pointerlock", "{\"on\":true}"_s);
+}
+
+void WebView::pointerLockResult(bool locked)
+{
+    if (auto completionHandler = std::exchange(m_pointerLockHandler, nullptr))
+        completionHandler(locked ? PointerLockRequestResult::Success : PointerLockRequestResult::Failure);
+    else if (!locked)
+        m_page->pointerLockController().didLosePointerLock();
+}
+
+void WebView::requestPointerUnlock()
+{
+    notifyHost(m_id, "pointerlock", "{\"on\":false}"_s);
+}
+#endif
+
+void WebView::forEach(const Function<void(WebView&)>& function)
+{
+    for (auto& view : copyToVector(openViews().values()))
+        function(view.get());
+}
+
+void WebView::setDarkAppearance(bool dark)
+{
+    m_page->setUseColorAppearance(dark, false);
 }
 
 static String keyIdentifierForKey(const String& key)

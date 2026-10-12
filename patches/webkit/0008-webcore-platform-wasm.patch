@@ -145,6 +145,19 @@ index be45b4c096..a039e97cdc 100644
  };
  
  } // namespace WebCore
+diff --git a/Source/WebCore/platform/PlatformScreen.h b/Source/WebCore/platform/PlatformScreen.h
+index 68f7a5502c..555b2e3e16 100644
+--- a/Source/WebCore/platform/PlatformScreen.h
++++ b/Source/WebCore/platform/PlatformScreen.h
+@@ -170,7 +170,7 @@ WEBCORE_EXPORT float screenScaleFactor(UIScreen * = nullptr);
+ #endif
+ 
+ #if ENABLE(TOUCH_EVENTS)
+-#if PLATFORM(GTK)
++#if PLATFORM(GTK) || PLATFORM(WASM)
+ WEBCORE_EXPORT bool screenHasTouchDevice();
+ #else
+ constexpr bool screenHasTouchDevice() { return true; }
 diff --git a/Source/WebCore/platform/StaticPasteboard.cpp b/Source/WebCore/platform/StaticPasteboard.cpp
 index ab5540316c..1439ac7ea4 100644
 --- a/Source/WebCore/platform/StaticPasteboard.cpp
@@ -301,6 +314,66 @@ index 0000000000..b26fac25b3
 +}
 +
 +} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/DragWasm.cpp b/Source/WebCore/platform/wasm/DragWasm.cpp
+new file mode 100644
+index 0000000000..73c2f1f624
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/DragWasm.cpp
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++
++#if ENABLE(DRAG_SUPPORT)
++
++#include "DragData.h"
++#include "Pasteboard.h"
++
++// browser-lite: Drag & Drop innerhalb der Seite (und Markieren mit der Maus)
++// laeuft ganz in WebCore. Dateien oder Text aus dem Host ziehen geht noch nicht,
++// darum ist das Drag-Pasteboard ein normales Pasteboard ohne System-Drag.
++
++namespace WebCore {
++
++std::unique_ptr<Pasteboard> Pasteboard::createForDragAndDrop(std::unique_ptr<PasteboardContext>&& context)
++{
++    return makeUnique<Pasteboard>(WTF::move(context));
++}
++
++void Pasteboard::setDragImage(DragImage, const IntPoint&)
++{
++}
++
++Vector<String> DragData::asFilenames() const
++{
++    return { };
++}
++
++} // namespace WebCore
++
++#endif // ENABLE(DRAG_SUPPORT)
 diff --git a/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp b/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp
 new file mode 100644
 index 0000000000..44ad0ffcaa
@@ -702,10 +775,10 @@ index 0000000000..ef98545c58
 +#endif // PLATFORM(WASM)
 diff --git a/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp b/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp
 new file mode 100644
-index 0000000000..3ab9099204
+index 0000000000..a201215d91
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/PlatformScreenWasm.cpp
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,83 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -780,7 +853,253 @@ index 0000000000..3ab9099204
 +    return DestinationColorSpace::SRGB();
 +}
 +
++#if ENABLE(TOUCH_EVENTS)
++// ontouchstart & Co. nur wie im Host-Browser: viele Seiten schalten sonst auf die Mobil-Ansicht
++bool screenHasTouchDevice()
++{
++    return WasmPlatform::screenInfo().hasTouch;
++}
++#endif
++
 +} // namespace WebCore
+diff --git a/Source/WebCore/platform/wasm/PlatformSpeechSynthesizerWasm.cpp b/Source/WebCore/platform/wasm/PlatformSpeechSynthesizerWasm.cpp
+new file mode 100644
+index 0000000000..f7a9d3a3c6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/PlatformSpeechSynthesizerWasm.cpp
+@@ -0,0 +1,232 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "PlatformSpeechSynthesizer.h"
++
++#if ENABLE(SPEECH_SYNTHESIS)
++
++#include "PlatformSpeechSynthesisUtterance.h"
++#include "PlatformSpeechSynthesisVoice.h"
++#include "WasmPlatform.h"
++#include <wtf/HashMap.h>
++#include <wtf/NeverDestroyed.h>
++
++// browser-lite: speechSynthesis ueber den Host-Browser (WasmPlatform.h). Pro
++// Synthesizer spricht hoechstens eine Aeusserung, die Ereignisse des Hosts
++// kommen mit deren ID zurueck.
++
++namespace WebCore {
++
++namespace {
++struct Speaking {
++    WeakPtr<PlatformSpeechSynthesizer> synthesizer;
++    RefPtr<PlatformSpeechSynthesisUtterance> utterance;
++};
++}
++
++static HashMap<uint64_t, Speaking>& speakingByID()
++{
++    static NeverDestroyed<HashMap<uint64_t, Speaking>> map;
++    return map;
++}
++
++static Vector<WeakPtr<PlatformSpeechSynthesizer>>& allSynthesizers()
++{
++    static NeverDestroyed<Vector<WeakPtr<PlatformSpeechSynthesizer>>> list;
++    return list;
++}
++
++Ref<PlatformSpeechSynthesizer> PlatformSpeechSynthesizer::create(PlatformSpeechSynthesizerClient& client)
++{
++    Ref synthesizer = adoptRef(*new PlatformSpeechSynthesizer(client));
++    allSynthesizers().append(synthesizer.get());
++    return synthesizer;
++}
++
++PlatformSpeechSynthesizer::PlatformSpeechSynthesizer(PlatformSpeechSynthesizerClient& client)
++    : m_speechSynthesizerClient(client)
++{
++}
++
++PlatformSpeechSynthesizer::~PlatformSpeechSynthesizer()
++{
++    speakingByID().removeIf([&](auto& entry) {
++        return !entry.value.synthesizer || entry.value.synthesizer.get() == this;
++    });
++    allSynthesizers().removeAllMatching([&](auto& weak) {
++        return !weak || weak.get() == this;
++    });
++}
++
++void PlatformSpeechSynthesizer::initializeVoiceList()
++{
++    for (auto& voice : WasmPlatform::speechVoices())
++        m_voiceList.append(PlatformSpeechSynthesisVoice::create(voice.uri, voice.name, voice.lang, voice.localService, voice.isDefault));
++}
++
++static std::optional<uint64_t> currentID(PlatformSpeechSynthesizer& synthesizer)
++{
++    for (auto& [id, speaking] : speakingByID()) {
++        if (speaking.synthesizer.get() == &synthesizer)
++            return id;
++    }
++    return std::nullopt;
++}
++
++static Function<void(const WasmPlatform::SpeechRequest&)>& speakCallback()
++{
++    static NeverDestroyed<Function<void(const WasmPlatform::SpeechRequest&)>> callback;
++    return callback;
++}
++
++static Function<void(WasmPlatform::SpeechCommand)>& commandCallback()
++{
++    static NeverDestroyed<Function<void(WasmPlatform::SpeechCommand)>> callback;
++    return callback;
++}
++
++void PlatformSpeechSynthesizer::speak(RefPtr<PlatformSpeechSynthesisUtterance>&& utterance)
++{
++    if (!utterance)
++        return;
++    RefPtr client = this->client();
++    if (!speakCallback()) {
++        if (client)
++            client->speakingErrorOccurred(*utterance);
++        return;
++    }
++    static uint64_t nextID = 1;
++    uint64_t id = nextID++;
++    WasmPlatform::SpeechRequest request;
++    request.id = id;
++    request.text = utterance->text();
++    request.lang = utterance->lang();
++    if (auto* voice = utterance->voice())
++        request.voiceURI = voice->voiceURI();
++    request.volume = utterance->volume();
++    request.rate = utterance->rate();
++    request.pitch = utterance->pitch();
++    speakingByID().set(id, Speaking { *this, WTF::move(utterance) });
++    speakCallback()(request);
++}
++
++void PlatformSpeechSynthesizer::pause()
++{
++    if (commandCallback() && currentID(*this))
++        commandCallback()(WasmPlatform::SpeechCommand::Pause);
++}
++
++void PlatformSpeechSynthesizer::resume()
++{
++    if (commandCallback() && currentID(*this))
++        commandCallback()(WasmPlatform::SpeechCommand::Resume);
++}
++
++void PlatformSpeechSynthesizer::cancel()
++{
++    auto id = currentID(*this);
++    if (!id)
++        return;
++    // WebCore erwartet danach kein Ereignis mehr fuer diese Aeusserung
++    speakingByID().remove(*id);
++    if (commandCallback())
++        commandCallback()(WasmPlatform::SpeechCommand::Cancel);
++}
++
++void PlatformSpeechSynthesizer::resetState()
++{
++    cancel();
++}
++
++namespace WasmPlatform {
++
++static Vector<SpeechVoice>& voices()
++{
++    static NeverDestroyed<Vector<SpeechVoice>> list;
++    return list;
++}
++
++void setSpeechVoices(Vector<SpeechVoice>&& list)
++{
++    voices() = WTF::move(list);
++    for (auto& weak : allSynthesizers()) {
++        if (RefPtr synthesizer = weak.get())
++            synthesizer->voicesDidChange();
++    }
++}
++
++const Vector<SpeechVoice>& speechVoices()
++{
++    return voices();
++}
++
++void setSpeechCallbacks(Function<void(const SpeechRequest&)>&& speak, Function<void(SpeechCommand)>&& command)
++{
++    speakCallback() = WTF::move(speak);
++    commandCallback() = WTF::move(command);
++}
++
++void speechEvent(uint64_t id, SpeechEvent event, unsigned charIndex, unsigned charLength)
++{
++    auto it = speakingByID().find(id);
++    if (it == speakingByID().end())
++        return;
++    RefPtr synthesizer = it->value.synthesizer.get();
++    RefPtr utterance = it->value.utterance;
++    if (event == SpeechEvent::End || event == SpeechEvent::Error)
++        speakingByID().remove(it);
++    RefPtr client = synthesizer ? synthesizer->client() : nullptr;
++    if (!client || !utterance)
++        return;
++    switch (event) {
++    case SpeechEvent::Start:
++        client->didStartSpeaking(*utterance);
++        break;
++    case SpeechEvent::End:
++        client->didFinishSpeaking(*utterance);
++        break;
++    case SpeechEvent::Pause:
++        client->didPauseSpeaking(*utterance);
++        break;
++    case SpeechEvent::Resume:
++        client->didResumeSpeaking(*utterance);
++        break;
++    case SpeechEvent::Error:
++        client->speakingErrorOccurred(*utterance);
++        break;
++    case SpeechEvent::WordBoundary:
++        client->boundaryEventOccurred(*utterance, SpeechBoundary::SpeechWordBoundary, charIndex, charLength);
++        break;
++    case SpeechEvent::SentenceBoundary:
++        client->boundaryEventOccurred(*utterance, SpeechBoundary::SpeechSentenceBoundary, charIndex, charLength);
++        break;
++    }
++}
++
++} // namespace WasmPlatform
++
++} // namespace WebCore
++
++#endif // ENABLE(SPEECH_SYNTHESIS)
 diff --git a/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp b/Source/WebCore/platform/wasm/SystemFontDatabaseWasm.cpp
 new file mode 100644
 index 0000000000..ba4b11cc12
@@ -995,10 +1314,10 @@ index 0000000000..09202b12bb
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..7ef20172b5
+index 0000000000..f081bf6c64
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1042,6 +1361,8 @@ index 0000000000..7ef20172b5
 +    FloatRect availableRect { 0, 0, 1280, 800 };
 +    int depth { 24 };
 +    bool prefersDarkMode { false };
++    // Hat das Geraet einen Touchscreen (navigator.maxTouchPoints im Host)?
++    bool hasTouch { false };
 +};
 +
 +WEBCORE_EXPORT void setScreenInfo(const ScreenInfo&);
@@ -1056,5 +1377,30 @@ index 0000000000..7ef20172b5
 +WEBCORE_EXPORT void setClipboardContents(ClipboardItems&&);
 +WEBCORE_EXPORT const ClipboardItems& clipboardContents();
 +WEBCORE_EXPORT void setClipboardChangedCallback(Function<void(const ClipboardItems&)>&&);
++
++// Sprachausgabe (speechSynthesis): gesprochen wird vom Host-Browser. Der
++// Embedder setzt die Stimmen und leitet die Ereignisse des Hosts weiter.
++struct SpeechVoice {
++    String uri;
++    String name;
++    String lang;
++    bool localService { true };
++    bool isDefault { false };
++};
++struct SpeechRequest {
++    uint64_t id { 0 };
++    String text;
++    String lang;
++    String voiceURI;
++    float volume { 1 };
++    float rate { 1 };
++    float pitch { 1 };
++};
++enum class SpeechCommand : uint8_t { Pause, Resume, Cancel };
++enum class SpeechEvent : uint8_t { Start, End, Pause, Resume, Error, WordBoundary, SentenceBoundary };
++WEBCORE_EXPORT void setSpeechVoices(Vector<SpeechVoice>&&);
++WEBCORE_EXPORT const Vector<SpeechVoice>& speechVoices();
++WEBCORE_EXPORT void setSpeechCallbacks(Function<void(const SpeechRequest&)>&& speak, Function<void(SpeechCommand)>&& command);
++WEBCORE_EXPORT void speechEvent(uint64_t id, SpeechEvent, unsigned charIndex = 0, unsigned charLength = 0);
 +
 +} // namespace WebCore::WasmPlatform

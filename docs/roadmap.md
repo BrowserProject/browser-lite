@@ -81,6 +81,16 @@ kommen zuerst.
 - [x] Suchen auf der Seite (Strg+F, F3, Enter/Umschalt+Enter, "x von y"), Zoom (Strg +/-/0,
   Strg+Mausrad, Anzeige in der Leiste), Tastenkuerzel wie Chrome (Strg+L/T/W/R/Tab/1-9,
   Alt+Links/Rechts, F5, F6), Tab aus der Adressleiste in die Seite und zurueck
+- [x] Markieren mit der Maus (ging nicht: steckt in WebCore hinter `ENABLE_DRAG_SUPPORT`)
+- [x] Touch (Chromebooks): echte Touch-Events an die Seite, Wischen scrollt mit Schwung,
+  Antippen = Klick, langes Druecken = Kontextmenue. `ontouchstart` nur mit Touchscreen
+- [x] Abfragen wie Chrome ("... moechte deinen Standort verwenden"), Entscheidung pro Seite:
+  Standort und Benachrichtigungen ueber den Host-Browser, `navigator.permissions` passt dazu
+- [x] Gamepads (mit Vibration), Pointer Lock (`movementX/Y`), Sprachausgabe (`speechSynthesis`
+  des Hosts), Dunkelmodus des Systems (`prefers-color-scheme`)
+- [x] Sitzung wiederherstellen (Hintergrund-Tabs laden erst beim Anklicken), Verlauf (Strg+H),
+  Lesezeichen (Stern, Strg+D, Strg+Umschalt+O), Download-Liste (Strg+J), Einstellungen
+  (Suchmaschine, Startseite), Vorschlaege in der Adressleiste. Test `tests/e2e/ui-test.mjs`
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
