@@ -107,6 +107,9 @@ kommen zuerst.
   Bereich im Engine-Speicher (Modul wird umgeschrieben), API in JSC nachgebaut. Auch in
   Workern. Tests: `tests/wasm/` (node) und `tests/e2e/wasm-test.mjs` (u.a. ein
   Emscripten-Programm). sql.js laeuft, die Cloudflare-Pruefung kommt jetzt bis zum Klick.
+- [x] Speicher-Spitzen: GC auch mitten in langen Skripten (an sicheren Punkten im Interpreter)
+  und automatisches Freigeben der WebKit-Caches ab 192 MB (siehe Architektur). Bericht in der
+  Konsole mit `__blMemory(true)`
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

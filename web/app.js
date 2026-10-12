@@ -40,6 +40,12 @@ function relayURL() {
 let engine = null;
 window.__blAudioState = audioState; // fuer die Tests (tests/e2e)
 window.__blMediaState = mediaState;
+// Speicher der Engine (Tests): Groesse, mit report=true auch Bericht in der Konsole
+window.__blMemory = (report) => {
+  if (report && engine && engine._bl_memory_report)
+    engine._bl_memory_report(report === 2 ? 2 : report === 3 ? 0 : report === 4 ? 3 : 1);
+  return engine && engine.HEAPU8 ? engine.HEAPU8.length : 0;
+};
 let nextViewId = 1;
 const tabs = new Map(); // viewId -> Tab
 let activeTab = null;
@@ -84,6 +90,9 @@ async function startEngine() {
         (module || engine).ENV.BL_DEBUG = '1';
       if (params.get('fcdebug'))
         (module || engine).ENV.FC_DEBUG = params.get('fcdebug');
+      // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
+      if (params.get('safepointgc'))
+        (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');
     }],
   };
   engine = module;

@@ -109,6 +109,15 @@ var blWasmRewrite = (function () {
       } while (value);
     }
     s64(value) {
+      // Schneller Weg fuer kleine nicht-negative Zahlen (Grenzpruefungen)
+      if (typeof value === 'number' && value >= 0 && value < 2 ** 52) {
+        while (value >= 64) {
+          this.byte((value % 128) | 0x80);
+          value = Math.floor(value / 128);
+        }
+        this.byte(value);
+        return;
+      }
       value = BigInt(value);
       for (;;) {
         const b = Number(value & 0x7fn);
@@ -257,13 +266,36 @@ var blWasmRewrite = (function () {
   class NeedsGlobals extends Error {}
   const VALTYPE_CODE = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c, v128: 0x7b };
 
-  function rewriteExpr(r, w, ctx, temps, cache = false) {
+  function rewriteExpr(r, target, ctx, temps, cache = false) {
+    // Unveraenderte Befehle werden nicht einzeln kopiert, sondern als Lauf
+    // gesammelt und erst vor dem naechsten geaenderten Befehl am Stueck
+    let runStart = -1, runEnd = -1;
+    const flush = () => {
+      if (runEnd > runStart)
+        target.raw(r.bytes.subarray(runStart, runEnd));
+      runStart = runEnd = -1;
+    };
+    const w = {
+      byte(b) { flush(); target.byte(b); },
+      u32(v) { flush(); target.u32(v); },
+      s32(v) { flush(); target.s32(v); },
+      s64(v) { flush(); target.s64(v); },
+      raw(b) { flush(); target.raw(b); },
+    };
     // temps: Index des ersten Hilfs-Locals oder null (konstante Ausdruecke)
     const tA = temps, tB = temps + 1, tC = temps + 2, tL = temps + 3, tL2 = temps + 4, tF = temps + 5, tD = temps + 6, tV = temps + 7;
     const cBase = temps + 8, cBytes = temps + 9;
     const valueTemp = (type) => ({ i32: tB, i64: tL, f32: tF, f64: tD, v128: tV })[type];
     let depth = 1;
-    const copyFrom = (start) => w.raw(r.bytes.subarray(start, r.pos));
+    const copyFrom = (start) => {
+      if (start === runEnd)
+        runEnd = r.pos;
+      else {
+        flush();
+        runStart = start;
+        runEnd = r.pos;
+      }
+    };
     const getBase = () => {
       if (cache)
         w.byte(0x20), w.u32(cBase);
@@ -316,12 +348,15 @@ var blWasmRewrite = (function () {
       w.byte(0x6a);
     };
     const memarg = () => {
-      const start = r.pos;
       const align = r.u32();
       if (align & 0x40)
         throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
       const offset = r.u32();
-      return { bytes: r.bytes.subarray(start, r.pos), offset };
+      return { align, offset };
+    };
+    const writeMemarg = (arg) => {
+      w.u32(arg.align);
+      w.u32(arg.offset);
     };
     const needMemory = () => {
       if (temps === null || !ctx.hasMemory)
@@ -475,7 +510,7 @@ var blWasmRewrite = (function () {
           const arg = memarg();
           address(arg.offset + LOAD[op]);
           w.byte(op);
-          w.raw(arg.bytes);
+          writeMemarg(arg);
         } else if (STORE[op] !== undefined) {
           needMemory();
           const arg = memarg();
@@ -484,7 +519,7 @@ var blWasmRewrite = (function () {
           address(arg.offset + width);
           w.byte(0x20); w.u32(valueTemp(type));
           w.byte(op);
-          w.raw(arg.bytes);
+          writeMemarg(arg);
         } else if ((op >= 0x45 && op <= 0xc4) || op <= 0x01 || op === 0x05 || op === 0x0a || op === 0x0f
           || op === 0x1a || op === 0x1b || op === 0xd1 || op === 0xd3 || op === 0xd4)
           copyFrom(start);
@@ -492,6 +527,7 @@ var blWasmRewrite = (function () {
           throw new CompileError('unbekannter Befehl 0x' + op.toString(16));
       }
     }
+    flush();
 
     function miscOp(start) {
       const sub = r.u32();
@@ -566,7 +602,7 @@ var blWasmRewrite = (function () {
         if (mem[1])
           w.byte(0x20), w.u32(tV);
         w.byte(0xfd); w.u32(sub);
-        w.raw(arg.bytes);
+        writeMemarg(arg);
         if (lane !== null)
           w.byte(lane);
         return;
@@ -589,7 +625,7 @@ var blWasmRewrite = (function () {
       const arg = memarg();
       const emit = () => {
         w.byte(0xfe); w.u32(sub);
-        w.raw(arg.bytes);
+        writeMemarg(arg);
       };
       if (sub === 0) { // notify [addr count]
         w.byte(0x21); w.u32(tB);

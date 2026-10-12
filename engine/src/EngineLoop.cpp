@@ -26,6 +26,8 @@
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/VM.h>
 #include <WebCore/CommonVM.h>
+#include <WebCore/MemoryRelease.h>
+#include <malloc.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/RunLoop.h>
 
@@ -45,6 +47,40 @@ bool isEngineThread()
     return s_engineThreadSet.load(std::memory_order_acquire) && pthread_equal(pthread_self(), s_engineThread);
 }
 
+// Der WASM-Speicher schrumpft nie. Darum geben wir bei hohem Verbrauch frueh
+// frei, was WebKit sonst erst bei Speicherdruck freigibt (Caches, dekodierte
+// Bilder, Back/Forward-Cache, kompilierter Code). Pruefung hoechstens alle
+// paar Sekunden, mallinfo() laeuft ueber den ganzen Heap.
+// BL_MEMORY_RELEASE_MB: Schwelle in MB, 0 schaltet es ab.
+static size_t memoryReleaseThreshold()
+{
+    static size_t threshold = [] {
+        const char* value = getenv("BL_MEMORY_RELEASE_MB");
+        return static_cast<size_t>(value ? atoi(value) : 192) << 20;
+    }();
+    return threshold;
+}
+
+static void releaseMemoryIfNeeded()
+{
+    static WTF::MonotonicTime lastCheck;
+    static size_t usedAfterRelease;
+    if (!memoryReleaseThreshold())
+        return;
+    auto now = WTF::MonotonicTime::now();
+    if (now - lastCheck < WTF::Seconds(5))
+        return;
+    lastCheck = now;
+    size_t used = mallinfo().uordblks;
+    // Erst wieder, wenn seit der letzten Freigabe deutlich mehr dazukam
+    if (used < memoryReleaseThreshold() || used < usedAfterRelease + (64 << 20))
+        return;
+    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
+    usedAfterRelease = mallinfo().uordblks;
+    lastCheck = WTF::MonotonicTime::now();
+    debugLog("Speicher freigegeben: %zu -> %zu MB in %.0f ms", used >> 20, usedAfterRelease >> 20, (lastCheck - now).milliseconds());
+}
+
 // Jede Arbeit auf dem Engine-Thread laeuft unter JSLock und einem DeferGC.
 // In WebAssembly sieht der konservative GC keine lokalen Variablen. Darum darf
 // er nur laufen, wenn nichts von JSC/WebCore auf dem Stack liegt: am Ende des
@@ -59,6 +95,13 @@ static void runWithGCAfterwards(Work&& work)
         return;
     }
     JSC::JSLockHolder lock(*vm);
+    // Schon in einer Arbeit (z.B. der Runloop-Pump aus runOnEngineThread):
+    // kein zweites DeferGC, der GC an sicheren Punkten (Patch 0012) braucht
+    // genau eine Ebene
+    if (vm->heap.isDeferred()) {
+        work();
+        return;
+    }
     auto gcStart = WTF::MonotonicTime::now();
     // heap.size() ist teuer, nur fuer die Debug-Ausgabe
     size_t sizeBefore = debugEnabled() ? vm->heap.size() : 0;
@@ -72,6 +115,7 @@ static void runWithGCAfterwards(Work&& work)
         if (duration > 5)
             debugLog("GC %.0f ms, Heap %zu -> %zu kB", duration, sizeBefore / 1024, vm->heap.size() / 1024);
     }
+    releaseMemoryIfNeeded();
 }
 
 static void runFunction(void* arg)

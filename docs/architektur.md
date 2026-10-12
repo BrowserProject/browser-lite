@@ -75,9 +75,24 @@ JSC/WebCore auf dem Stack liegt:
 
 Nachweis: `tests/engine/gc-test.mjs` mit `JSC_slowPathAllocsBetweenGCs=10` (GC sehr oft).
 Ohne die Verschiebung stuerzt der Test ab ("memory access out of bounds"), mit ihr laeuft er
-durch. Nachteil: Waehrend einer einzelnen langen Aufgabe (z.B. eine JS-Schleife die viel
-Speicher anlegt) laeuft kein GC. Der `jsc`-Test (Phase 2) nutzt weiter `--spill-pointers`,
-weil dort ein ganzes Skript eine einzige Aufgabe ist.
+durch. Der `jsc`-Test (Phase 2) nutzt weiter `--spill-pointers`, weil dort ein ganzes
+Skript eine einzige Aufgabe ist.
+
+**GC an sicheren Punkten:** Ohne mehr laeuft waehrend einer einzelnen langen Aufgabe (ein
+grosses Skript beim Laden) kein GC. Der Muell sammelte sich bis zum Ende, und weil der
+WASM-Speicher nie schrumpft, blieb die Spitze fuer immer. Darum (auch Patch 0012): will der
+Heap sammeln, waehrend aufgeschoben ist, setzt er einen eigenen VM-Trap. Den bedient nur der
+Interpreter bei `op_check_traps`, also an einer Befehlsgrenze, wo alle Werte im JS-Stack von
+JSC im Speicher liegen. Gesammelt wird nur, wenn JS direkt aus der Engine kam (genau ein
+VM-Einstieg, kein C++ dazwischen) und nichts ausser dem `DeferGC` der Engine aufschiebt.
+Abschalten mit `?safepointgc=0`, Ausgabe mit `?safepointgc=debug`.
+
+**Freigeben bei hohem Verbrauch:** Nach einer Aufgabe prueft die Engine hoechstens alle 5 s
+den belegten malloc-Speicher. Ab 192 MB (und wenn seit der letzten Freigabe 64 MB dazukamen)
+ruft sie `WebCore::releaseMemory` auf, das sonst nur bei Speicherdruck laeuft: Caches,
+dekodierte Bilder, Back/Forward-Cache, kompilierter Code, danach ein voller GC. Gemessen
+(CNN, Microsoft, YouTube, Wikipedia nacheinander): 220 -> 170 MB und 248 -> 146 MB, je ca.
+0.3 s. Schwelle mit `BL_MEMORY_RELEASE_MB` (0 = aus).
 
 Ausserdem: `Thread::suspend` geht in WASM nicht (keine Signale). Darum pro JS-VM nur ein
 Thread, Sampling-Profiler aus.

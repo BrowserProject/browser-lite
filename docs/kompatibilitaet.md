@@ -27,9 +27,15 @@ kein Absturz, Seite sieht im Screenshot aus wie in Chrome (bis auf noch ladende 
 | npm, Medium | teilweise | Cloudflare-Pruefung: seit WebAssembly geht, kommt das Kaestchen "Verify you are human" (bei Rechenzentrums-IPs normal), vorher blieb sie bei "Verifying" haengen |
 | sql.js-Demo (SQLite als WebAssembly im Worker) | ok | Abfrage liefert das richtige Ergebnis |
 | Squoosh | ok | Startseite |
-| Reddit, NYTimes, Spiegel, SBB, IMDb, Booking | nicht getestet | Im lokalen Test-Netz gesperrt |
+| NYTimes, Spiegel | ok | in CI getestet |
+| Reddit, eBay | gesperrt | Sperren Rechenzentrums-IPs ("blocked by network security" bzw. Fehlerseite). Liegt an der IP des Relays, nicht an der Engine |
+| Booking, IMDb, SBB | offen | In CI (noch ohne WebAssembly) leere Seite ohne Titel, vermutlich eine Bot-Pruefung. Lokal im Test-Netz gesperrt |
 
 ## Bekannte Grenzen
+
+- Manche Seiten sperren Rechenzentrums-IPs (Reddit, eBay, Cloudflare zeigt dann ein
+  Kaestchen zum Anklicken). Das Relay auf einem VPS hat so eine IP. Abhilfe spaeter mit
+  WireGuard ueber einen anderen Anschluss.
 
 - JavaScript ist ohne JIT langsamer (CLoop), grosse Seiten brauchen 10 bis 60 s.
 - WebAssembly mit geteiltem Speicher (Threads) geht noch nicht. Seiten nehmen dann meist

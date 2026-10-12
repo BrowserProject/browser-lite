@@ -10,7 +10,16 @@
 #include "MediaPlayerPrivateWasm.h"
 #include "WebView.h"
 
+#include <JavaScriptCore/DeferGCInlines.h>
+#include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/JSLock.h>
+#include <WebCore/CommonVM.h>
+#include <WebCore/Document.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
+#include <WebCore/MemoryCache.h>
+#include <WebCore/MemoryRelease.h>
 #include <WebCore/WasmPlatform.h>
+#include <malloc.h>
 #include <emscripten/emscripten.h>
 
 using namespace BrowserLite;
@@ -193,4 +202,35 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
     });
 }
 
+
+// Speicher der Engine in der Konsole (fuer Tests und Fehlersuche).
+// full: vorher einen vollen GC machen.
+EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
+{
+    runOnEngineThread([full] {
+        auto& vm = WebCore::commonVM();
+        JSC::JSLockHolder lock(vm);
+        // 3: vorher wie bei Speicherdruck alles Freigebbare freigeben
+        if (full == 3)
+            WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
+        if (full)
+            vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
+        struct mallinfo info = mallinfo();
+        auto& cache = WebCore::MemoryCache::singleton();
+        printf("[speicher] malloc belegt %zu MB, frei %zu MB, JS-Heap %zu MB (Kapazitaet %zu MB), Dokumente %u, Cache %u KB\n",
+            static_cast<size_t>(info.uordblks) >> 20, static_cast<size_t>(info.fordblks) >> 20,
+            vm.heap.size() >> 20, vm.heap.capacity() >> 20, WebCore::Document::allDocumentsMap().size(), cache.size() >> 10);
+        auto statistics = cache.getStatistics();
+        printf("[speicher]   Cache Bilder %d (%d KB, dekodiert %d KB), Skripte %d KB, CSS %d KB, Schriften %d KB\n",
+            statistics.images.count, statistics.images.size >> 10, statistics.images.decodedSize >> 10,
+            statistics.scripts.size >> 10, statistics.cssStyleSheets.size >> 10, statistics.fonts.size >> 10);
+        if (full > 1) {
+            // Lebende Dokumente: Referenzen, Frame, URL
+            for (auto& document : WebCore::Document::allDocuments()) {
+                printf("[speicher]   doc refs=%u frame=%d %s\n", document->refCount(), document->frame() ? 1 : 0,
+                    document->url().string().left(100).utf8().data());
+            }
+        }
+    });
+}
 } // extern "C"

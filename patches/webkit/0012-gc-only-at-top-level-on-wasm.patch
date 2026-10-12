@@ -21,10 +21,24 @@ index e72c3a6470..0dc5e1219b 100644
      doCollection(vm);
  }
 diff --git a/Source/JavaScriptCore/heap/Heap.cpp b/Source/JavaScriptCore/heap/Heap.cpp
-index 67e317d5bb..e57124fe3a 100644
+index 67e317d5bb..a41b96761e 100644
 --- a/Source/JavaScriptCore/heap/Heap.cpp
 +++ b/Source/JavaScriptCore/heap/Heap.cpp
-@@ -1344,11 +1344,35 @@ void Heap::collectNow(Synchronousness synchronousness, GCRequest request)
+@@ -123,6 +123,13 @@
+ #include "JSCGLibWrapperObject.h"
+ #endif
+ 
++#if OS(EMSCRIPTEN)
++#include "VMEntryRecord.h"
++#include "VMTrapsInlines.h"
++#include <cstdlib>
++#include <cstring>
++#endif
++
+ namespace JSC {
+ 
+ namespace HeapInternal {
+@@ -1344,11 +1351,90 @@ void Heap::collectNow(Synchronousness synchronousness, GCRequest request)
      RELEASE_ASSERT_NOT_REACHED();
  }
  
@@ -42,6 +56,60 @@ index 67e317d5bb..e57124fe3a 100644
 +    if (!deferred || !request.subsumedBy(*deferred))
 +        deferred = request;
 +}
++
++// Lange JS-Aufgaben sammelten sonst bis zum Ende Muell an (hunderte MB, der
++// WASM-Speicher schrumpft danach nicht mehr). Darum: GC auch mitten in JS,
++// aber nur an op_check_traps (Befehlsgrenze im Interpreter) und nur wenn
++// - JS nicht ueber C++ verschachtelt aufgerufen wurde (genau ein VM-Einstieg),
++// - ausser dem DeferGC des Embedders nichts den GC aufschiebt.
++// Abschalten mit BL_SAFEPOINT_GC=0.
++static bool safepointGCEnabled()
++{
++    static bool enabled = [] {
++        const char* value = getenv("BL_SAFEPOINT_GC");
++        return !value || strcmp(value, "0");
++    }();
++    return enabled;
++}
++
++// BL_SAFEPOINT_GC=debug: jeden Versuch ausgeben
++static bool safepointGCDebug()
++{
++    static bool debug = [] {
++        const char* value = getenv("BL_SAFEPOINT_GC");
++        return value && !strcmp(value, "debug");
++    }();
++    return debug;
++}
++
++void Heap::requestSafepointGC()
++{
++    if (safepointGCEnabled() && !vm().traps().hasTrapBit(VMTraps::NeedSafepointGC))
++        vm().traps().fireTrap(VMTraps::NeedSafepointGC);
++}
++
++void Heap::collectAtSafepoint()
++{
++    VM& vm = this->vm();
++    EntryFrame* entryFrame = vm.topEntryFrame;
++    if (safepointGCDebug()) {
++        dataLogLn("[safepoint-gc] depth=", m_deferralDepth, " safe=", m_isSafeToCollect, " state=", static_cast<int>(mutatorState()),
++            " deferredWork=", m_didDeferGCWork, " request=", !!s_requestDeferredUntilTopLevel,
++            " nested=", entryFrame ? !!vmEntryRecord(entryFrame)->prevTopEntryFrame() : -1, " heap=", size() >> 20, "MB");
++    }
++    if (m_deferralDepth != 1 || !m_isSafeToCollect)
++        return;
++    if (mutatorState() != MutatorState::Running)
++        return;
++    if (!m_didDeferGCWork && !s_requestDeferredUntilTopLevel)
++        return;
++    if (!entryFrame || vmEntryRecord(entryFrame)->prevTopEntryFrame())
++        return;
++    // Wie am Ende des aeussersten DeferGC, danach wieder aufschieben
++    m_deferralDepth = 0;
++    decrementDeferralDepthAndGCIfNeededSlow();
++    m_deferralDepth = 1;
++}
 +#endif
 +
  void Heap::collectAsync(GCRequest request)
@@ -53,6 +121,7 @@ index 67e317d5bb..e57124fe3a 100644
 +    if (isDeferred()) {
 +        deferUntilTopLevel(request);
 +        m_didDeferGCWork = true;
++        requestSafepointGC();
 +        return;
 +    }
 +#endif
@@ -60,7 +129,7 @@ index 67e317d5bb..e57124fe3a 100644
      if constexpr (validateDFGDoesGC)
          vm().verifyCanGC();
  
-@@ -1376,6 +1400,14 @@ void Heap::collectSync(GCRequest request)
+@@ -1376,6 +1462,15 @@ void Heap::collectSync(GCRequest request)
      if (!Options::useGC()) [[unlikely]]
          return;
  
@@ -68,6 +137,7 @@ index 67e317d5bb..e57124fe3a 100644
 +    if (isDeferred()) {
 +        deferUntilTopLevel(request);
 +        m_didDeferGCWork = true;
++        requestSafepointGC();
 +        return;
 +    }
 +#endif
@@ -75,7 +145,22 @@ index 67e317d5bb..e57124fe3a 100644
      if constexpr (validateDFGDoesGC)
          vm().verifyCanGC();
  
-@@ -2980,6 +3012,10 @@ void Heap::decrementDeferralDepthAndGCIfNeededSlow()
+@@ -2963,9 +3058,12 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
+ 
+     if (deferralContext)
+         deferralContext->m_shouldGC = true;
+-    else if (isDeferred())
++    else if (isDeferred()) {
+         m_didDeferGCWork = true;
+-    else {
++#if OS(EMSCRIPTEN)
++        requestSafepointGC();
++#endif
++    } else {
+         collectAsync();
+         stopIfNecessary(); // This will immediately start the collection if we have the conn.
+     }
+@@ -2980,6 +3078,10 @@ void Heap::decrementDeferralDepthAndGCIfNeededSlow()
      ASSERT(!isDeferred());
      
      m_didDeferGCWork = false;
@@ -86,6 +171,94 @@ index 67e317d5bb..e57124fe3a 100644
      // FIXME: Bring back something like the DeferGCProbability mode.
      // https://bugs.webkit.org/show_bug.cgi?id=166627
      collectIfNecessaryOrDefer();
+diff --git a/Source/JavaScriptCore/heap/Heap.h b/Source/JavaScriptCore/heap/Heap.h
+index eaa7a00f76..cf2552ebbe 100644
+--- a/Source/JavaScriptCore/heap/Heap.h
++++ b/Source/JavaScriptCore/heap/Heap.h
+@@ -406,6 +406,11 @@ public:
+     // choose Eden or Full. This implies that if you request a GC while that GC is ongoing, nothing
+     // will happen.
+     JS_EXPORT_PRIVATE void collectAsync(GCRequest = GCRequest());
++#if OS(EMSCRIPTEN)
++    // Sammeln an einem sicheren Punkt im Interpreter (siehe Heap.cpp)
++    void requestSafepointGC();
++    void collectAtSafepoint();
++#endif
+     
+     // Queue up a collection and wait for it to complete. This won't return until you get your own
+     // complete collection. For example, if there was an ongoing asynchronous collection at the time
+diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+index 43da80a76e..b43542cb36 100644
+--- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
++++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+@@ -2317,6 +2317,17 @@ LLINT_SLOW_PATH_DECL(slow_path_handle_traps)
+ {
+     LLINT_BEGIN_NO_SET_PC();
+     ASSERT(vm.traps().needHandling(VMTraps::AsyncEvents));
++#if OS(EMSCRIPTEN)
++    // Befehlsgrenze im Interpreter: alle Werte liegen im JS-Stack von JSC
++    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
++        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
++        vm.heap.collectAtSafepoint();
++        if (!vm.traps().needHandling(VMTraps::AsyncEvents)) {
++            UNUSED_PARAM(pc);
++            LLINT_RETURN_TWO(throwScope.exception(), globalObject);
++        }
++    }
++#endif
+     vm.traps().handleTraps(VMTraps::AsyncEvents);
+     UNUSED_PARAM(pc);
+     LLINT_RETURN_TWO(throwScope.exception(), globalObject);
+diff --git a/Source/JavaScriptCore/runtime/VMTraps.cpp b/Source/JavaScriptCore/runtime/VMTraps.cpp
+index 54e789b7c7..7404af379b 100644
+--- a/Source/JavaScriptCore/runtime/VMTraps.cpp
++++ b/Source/JavaScriptCore/runtime/VMTraps.cpp
+@@ -512,6 +512,14 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
+             didHandleTrap = true;
+             break;
+ 
++#if OS(EMSCRIPTEN)
++        case NeedSafepointGC:
++            // Nur an op_check_traps sicher (LLIntSlowPaths.cpp), hier verwerfen.
++            // Die naechste Allokation meldet sich wieder.
++            didHandleTrap = true;
++            break;
++#endif
++
+         // cancelStop() cleared the bit between needHandling() and takeTopPriorityTrap().
+         case NoEvent:
+             break;
+diff --git a/Source/JavaScriptCore/runtime/VMTraps.h b/Source/JavaScriptCore/runtime/VMTraps.h
+index 1d7720b04c..e9b1d9f61e 100644
+--- a/Source/JavaScriptCore/runtime/VMTraps.h
++++ b/Source/JavaScriptCore/runtime/VMTraps.h
+@@ -146,13 +146,26 @@ public:
+     //    as well as if there are asynchronous VMTraps events to handle.
+ 
+ // WARNING: Do NOT sort this list. Read comment above for the reason.
++#if OS(EMSCRIPTEN)
++    // NeedSafepointGC: der Heap will sammeln, waehrend der Embedder den GC
++    // aufschiebt. Wird nur im Interpreter an op_check_traps bedient (Heap.cpp).
+ #define FOR_EACH_VMTRAPS_EVENTS(v) \
+     v(NeedShellTimeoutCheck) \
+     v(NeedTermination) \
+     v(NeedWatchdogCheck) \
+     v(NeedDebuggerBreak) \
+     v(NeedStopTheWorld) \
++    v(NeedSafepointGC) \
+     v(NeedExceptionHandling)
++#else
++#define FOR_EACH_VMTRAPS_EVENTS(v) \
++    v(NeedShellTimeoutCheck) \
++    v(NeedTermination) \
++    v(NeedWatchdogCheck) \
++    v(NeedDebuggerBreak) \
++    v(NeedStopTheWorld) \
++    v(NeedExceptionHandling)
++#endif
+ 
+ #define DECLARE_VMTRAPS_EVENT_BIT_SHIFT(event__)  event__##BitShift,
+     enum EventBitShift {
 diff --git a/Source/WebCore/bindings/js/IDBBindingUtilities.cpp b/Source/WebCore/bindings/js/IDBBindingUtilities.cpp
 index 9038ef805d..49f773da00 100644
 --- a/Source/WebCore/bindings/js/IDBBindingUtilities.cpp

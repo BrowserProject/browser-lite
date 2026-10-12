@@ -48,6 +48,9 @@ for (const site of sites) {
   const log = [];
   page.on('console', (msg) => log.push(msg.text()));
   const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: site });
+  // SITE_DEBUG=1: Ablauf der Engine mitschreiben (wird nur bei Problemen ausgegeben)
+  if (process.env.SITE_DEBUG)
+    query.set('debug', '1');
   const started = Date.now();
   await page.goto(`http://localhost:${UI_PORT}/?${query}`);
   let result = 'ok';
@@ -73,8 +76,10 @@ for (const site of sites) {
   await page.screenshot({ path: file });
   console.log(`${result === 'ok' ? 'ok  ' : 'FAIL'} ${site} (${seconds} s) Titel: "${title}" ${result === 'ok' ? '' : result}`);
   rows.push(`| ${site} | ${result === 'ok' ? 'geladen' : 'Fehler'} | ${seconds} s | ${title.replace(/ - browser-lite$/, '').replace(/\|/g, '/').slice(0, 60)} |`);
-  if (result !== 'ok' || process.env.SITE_LOG)
-    console.log((process.env.SITE_LOG === 'all' ? log : log.slice(-30)).map((l) => '    ' + l).join('\n'));
+  // Leere Seite (kein Titel): Log zeigen, damit man sieht, was passiert ist
+  const blank = !title || /^Neuer Tab/.test(title);
+  if (result !== 'ok' || blank || process.env.SITE_LOG)
+    console.log((process.env.SITE_LOG === 'all' ? log : blank ? [...log.slice(0, 40), '...', ...log.slice(-20)] : log.slice(-30)).map((l) => '    ' + l).join('\n'));
   await page.close();
 }
 
