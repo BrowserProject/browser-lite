@@ -168,6 +168,10 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   (HTTP/2) und OpenSSL (das curl-Backend von WebCore nutzt direkt die OpenSSL-API).
 - libcurl denkt es hat normale Sockets. Unsere Socket-Schicht leitet `connect/send/recv/poll`
   an ein **Transport-Interface** weiter (`engine/net/transport.h`).
+- TLS: ChaCha20-Poly1305 zuerst (TLS 1.3 ueber `CURLOPT_TLS13_CIPHERS`, Patch 0021, und
+  TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
+  auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn
+  der ChaCha bevorzugt (wie Handys ohne AES-Befehle).
 - `WispTransport`: jede TCP-Verbindung ist ein Stream in einer Wisp-WebSocket-Verbindung.
   Hostnamen werden vom Relay aufgeloest.
 - Spaeter `WireGuardTransport`: userspace TCP/IP + WireGuard im WASM, UDP-Pakete ueber

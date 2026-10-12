@@ -115,6 +115,8 @@ kommen zuerst.
   Aufruf ging durch C++. Eingeschaltet (Patch 0019): Aufrufe, Klassen und Callbacks 30-40 %
   schneller
 - [x] Skia malt mit SIMD (SSE4.1-Pfad ueber WASM-SIMD, Patch 0020): Malen ca. 2x schneller
+- [x] TLS: ChaCha20 statt AES-GCM (keine AES-Hardware in WASM), Krypto auf dem curl-Thread
+  4x schneller (Patch 0021)
 - [ ] Datei- und Socket-Zugriffe laufen ueber Emscriptens JS-Dateisystem auf dem UI-Thread
   (jeder Zugriff ein synchroner Umweg, auf CNN ca. 12 600 Stueck, vor allem die Cookie-DB).
   Ziel: eigene Socket-Schicht im WASM und WasmFS, damit nichts mehr ueber den UI-Thread geht

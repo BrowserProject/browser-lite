@@ -194,10 +194,10 @@ index 19c4683b7f..f4beb6ec1c 100644
 +#endif // USE(LIBWPE) || PLATFORM(WASM)
 diff --git a/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
 new file mode 100644
-index 0000000000..abeb161c2b
+index 0000000000..b26fac25b3
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/CurlSSLHandleWasm.cpp
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,103 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -271,15 +271,14 @@ index 0000000000..abeb161c2b
 +{
 +    setCACertPath(caBundlePath());
 +
-+    // Gleiche Auswahl wie der Win-Port: moderne Cipher zuerst.
++    // Wie der Win-Port, aber ChaCha20 zuerst: ohne AES-Hardware (WebAssembly)
++    // ist es in Software ein Mehrfaches schneller als AES-GCM. TLS 1.3 siehe
++    // CurlContext.cpp.
 +    constexpr auto cipherList =
-+        "TLS_AES_128_GCM_SHA256:"
-+        "TLS_CHACHA20_POLY1305_SHA256:"
-+        "TLS_AES_256_GCM_SHA384:"
-+        "ECDHE-ECDSA-AES128-GCM-SHA256:"
-+        "ECDHE-RSA-AES128-GCM-SHA256:"
 +        "ECDHE-ECDSA-CHACHA20-POLY1305:"
 +        "ECDHE-RSA-CHACHA20-POLY1305:"
++        "ECDHE-ECDSA-AES128-GCM-SHA256:"
++        "ECDHE-RSA-AES128-GCM-SHA256:"
 +        "ECDHE-ECDSA-AES256-GCM-SHA384:"
 +        "ECDHE-RSA-AES256-GCM-SHA384:"
 +        "ECDHE-ECDSA-AES256-SHA:"
