@@ -95,18 +95,27 @@ JSC im Speicher liegen. Gesammelt wird nur, wenn JS direkt aus der Engine kam (g
 VM-Einstieg, kein C++ dazwischen) und nichts ausser dem `DeferGC` der Engine aufschiebt.
 Abschalten mit `?safepointgc=0`, Ausgabe mit `?safepointgc=debug`.
 
-**Freigeben bei hohem Verbrauch:** Nach einer Aufgabe prueft die Engine hoechstens alle 5 s
-den belegten malloc-Speicher. Ab 192 MB (und wenn seit der letzten Freigabe 64 MB dazukamen)
-ruft sie `WebCore::releaseMemory` auf, das sonst nur bei Speicherdruck laeuft: Caches,
-dekodierte Bilder, Back/Forward-Cache, kompilierter Code, danach ein voller GC. Gemessen
-(CNN, Microsoft, YouTube, Wikipedia nacheinander): 220 -> 170 MB und 248 -> 146 MB, je ca.
-0.3 s. Schwelle mit `BL_MEMORY_RELEASE_MB` (0 = aus).
+**Freigeben bei Wachstum:** Nach jeder Aufgabe schaut die Engine, wie gross der Bereich ist,
+den malloc vom System geholt hat (`malloc_footprint()`, kostet nichts). Ab 192 MB ruft sie bei
+jedem Wachstum um 32 MB `WebCore::releaseMemory` auf, das sonst nur bei Speicherdruck laeuft:
+Caches, dekodierte Bilder, Back/Forward-Cache, kompilierter Code, danach ein voller GC. So
+wird zuerst der frei gewordene Platz wiederverwendet, bevor der WASM-Speicher waechst.
+Gemessen (CNN, Microsoft, YouTube, Wikipedia nacheinander): WASM-Speicher am Ende 369 MB statt
+443 MB, jede Freigabe 0.1-0.3 s. (Die erste Version nahm `mallinfo()`, das ueber den ganzen
+Heap laeuft und auf CNN ca. 25 ms pro Aufruf kostete.) Schwelle mit `BL_MEMORY_RELEASE_MB`
+(0 = aus).
 
 Ausserdem: `Thread::suspend` geht in WASM nicht (keine Signale). Darum pro JS-VM nur ein
 Thread, Sampling-Profiler aus.
 
 ### Rendering
 - Zuerst Skia CPU-Raster in einen Buffer, dann als ImageBitmap auf das Canvas.
+- Skia erkennt auf WASM keine CPU-Erweiterungen und nimmt sonst die skalare
+  Raster-Pipeline (ein Pixel pro Schritt, ohne die schnellen 16-Bit-Stufen). Patch 0020
+  baut Skia mit `-msse4.1`: Emscripten bildet SSE bis 4.1 auf WASM-SIMD ab, so laeuft der
+  SSE4.1-Pfad. Malen von `tests/engine/paintbench.html` (1280x2000): 907 -> ca. 430 ms,
+  Bild bis auf Rundung gleich (max. 4/255 bei 0.03 % der Werte). Nur skcms (Farbprofile)
+  bleibt bei seinem eigenen Vektor-Code, sonst wuerde es AVX-Header einbinden.
 - Spaeter Skia Ganesh auf WebGL2 im OffscreenCanvas mit Compositing (Scrollen ohne neu
   malen).
 

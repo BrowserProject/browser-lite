@@ -108,11 +108,16 @@ kommen zuerst.
   Workern. Tests: `tests/wasm/` (node) und `tests/e2e/wasm-test.mjs` (u.a. ein
   Emscripten-Programm). sql.js laeuft, die Cloudflare-Pruefung kommt jetzt bis zum Klick.
 - [x] Speicher-Spitzen: GC auch mitten in langen Skripten (an sicheren Punkten im Interpreter)
-  und automatisches Freigeben der WebKit-Caches ab 192 MB (siehe Architektur). Bericht in der
+  und automatisches Freigeben der WebKit-Caches, wenn malloc ueber 192 MB waechst (siehe
+  Architektur). Bericht in der
   Konsole mit `__blMemory(true)`
 - [x] JS-Aufrufe: die Aufruf-Caches des Interpreters waren auf 32 Bit abgeschaltet, jeder
   Aufruf ging durch C++. Eingeschaltet (Patch 0019): Aufrufe, Klassen und Callbacks 30-40 %
   schneller
+- [x] Skia malt mit SIMD (SSE4.1-Pfad ueber WASM-SIMD, Patch 0020): Malen ca. 2x schneller
+- [ ] Datei- und Socket-Zugriffe laufen ueber Emscriptens JS-Dateisystem auf dem UI-Thread
+  (jeder Zugriff ein synchroner Umweg, auf CNN ca. 12 600 Stueck, vor allem die Cookie-DB).
+  Ziel: eigene Socket-Schicht im WASM und WasmFS, damit nichts mehr ueber den UI-Thread geht
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

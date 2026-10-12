@@ -1,0 +1,26 @@
+diff --git a/Source/ThirdParty/skia/CMakeLists.txt b/Source/ThirdParty/skia/CMakeLists.txt
+index 49b926228c..187e578290 100644
+--- a/Source/ThirdParty/skia/CMakeLists.txt
++++ b/Source/ThirdParty/skia/CMakeLists.txt
+@@ -1103,6 +1103,21 @@ else ()
+     )
+ endif ()
+ 
++# WebAssembly: ohne x86-Makros nimmt Skia die skalare Raster-Pipeline (ein
++# Pixel pro Schritt, keine lowp-Stufen). Emscripten bildet SSE bis 4.1 auf
++# WASM-SIMD ab, so laeuft der SSE4.1-Pfad mit 4 bzw. 8 Pixeln pro Schritt.
++if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
++    target_compile_options(Skia PRIVATE -msimd128 -msse4.1)
++    # skcms wuerde mit __SSE__ auch die AVX-Header einbinden; dort reicht der
++    # eigene Vektor-Code von skcms
++    set_source_files_properties(
++        modules/skcms/skcms.cc
++        modules/skcms/src/skcms_TransformBaseline.cc
++        modules/skcms/src/skcms_TransformHsw.cc
++        modules/skcms/src/skcms_TransformSkx.cc
++        PROPERTIES COMPILE_OPTIONS "-U__SSE__;-U__SSE2__;-U__SSE3__;-U__SSSE3__;-U__SSE4_1__")
++endif ()
++
+ #
+ # The SkCMS module includes AVX/SSE optimizations, which may need additional
+ # compiler flags.
