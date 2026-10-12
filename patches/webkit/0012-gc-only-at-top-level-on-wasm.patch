@@ -21,10 +21,10 @@ index e72c3a6470..0dc5e1219b 100644
      doCollection(vm);
  }
 diff --git a/Source/JavaScriptCore/heap/Heap.cpp b/Source/JavaScriptCore/heap/Heap.cpp
-index 67e317d5bb..a41b96761e 100644
+index 67e317d5bb..e3ecf77d4b 100644
 --- a/Source/JavaScriptCore/heap/Heap.cpp
 +++ b/Source/JavaScriptCore/heap/Heap.cpp
-@@ -123,6 +123,13 @@
+@@ -123,6 +123,14 @@
  #include "JSCGLibWrapperObject.h"
  #endif
  
@@ -33,12 +33,13 @@ index 67e317d5bb..a41b96761e 100644
 +#include "VMTrapsInlines.h"
 +#include <cstdlib>
 +#include <cstring>
++#include <emscripten/emscripten.h>
 +#endif
 +
  namespace JSC {
  
  namespace HeapInternal {
-@@ -1344,11 +1351,90 @@ void Heap::collectNow(Synchronousness synchronousness, GCRequest request)
+@@ -1344,11 +1352,93 @@ void Heap::collectNow(Synchronousness synchronousness, GCRequest request)
      RELEASE_ASSERT_NOT_REACHED();
  }
  
@@ -59,7 +60,8 @@ index 67e317d5bb..a41b96761e 100644
 +
 +// Lange JS-Aufgaben sammelten sonst bis zum Ende Muell an (hunderte MB, der
 +// WASM-Speicher schrumpft danach nicht mehr). Darum: GC auch mitten in JS,
-+// aber nur an op_check_traps (Befehlsgrenze im Interpreter) und nur wenn
++// aber nur an Befehlsgrenzen im Interpreter (op_check_traps und beim
++// Funktionseintritt, LLIntSlowPaths.cpp) und nur wenn
 +// - JS nicht ueber C++ verschachtelt aufgerufen wurde (genau ein VM-Einstieg),
 +// - ausser dem DeferGC des Embedders nichts den GC aufschiebt.
 +// Abschalten mit BL_SAFEPOINT_GC=0.
@@ -72,7 +74,7 @@ index 67e317d5bb..a41b96761e 100644
 +    return enabled;
 +}
 +
-+// BL_SAFEPOINT_GC=debug: jeden Versuch ausgeben
++// BL_SAFEPOINT_GC=debug: jeden Versuch ausgeben, beim Sammeln mit C-Stack
 +static bool safepointGCDebug()
 +{
 +    static bool debug = [] {
@@ -93,9 +95,9 @@ index 67e317d5bb..a41b96761e 100644
 +    VM& vm = this->vm();
 +    EntryFrame* entryFrame = vm.topEntryFrame;
 +    if (safepointGCDebug()) {
-+        dataLogLn("[safepoint-gc] depth=", m_deferralDepth, " safe=", m_isSafeToCollect, " state=", static_cast<int>(mutatorState()),
-+            " deferredWork=", m_didDeferGCWork, " request=", !!s_requestDeferredUntilTopLevel,
-+            " nested=", entryFrame ? !!vmEntryRecord(entryFrame)->prevTopEntryFrame() : -1, " heap=", size() >> 20, "MB");
++        emscripten_log(EM_LOG_CONSOLE, "[safepoint-gc] depth=%u safe=%d state=%d deferredWork=%d request=%d nested=%d heap=%zuMB",
++            m_deferralDepth, m_isSafeToCollect, static_cast<int>(mutatorState()), m_didDeferGCWork, !!s_requestDeferredUntilTopLevel,
++            entryFrame ? !!vmEntryRecord(entryFrame)->prevTopEntryFrame() : -1, size() >> 20);
 +    }
 +    if (m_deferralDepth != 1 || !m_isSafeToCollect)
 +        return;
@@ -105,6 +107,8 @@ index 67e317d5bb..a41b96761e 100644
 +        return;
 +    if (!entryFrame || vmEntryRecord(entryFrame)->prevTopEntryFrame())
 +        return;
++    if (safepointGCDebug())
++        emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "[safepoint-gc] sammelt");
 +    // Wie am Ende des aeussersten DeferGC, danach wieder aufschieben
 +    m_deferralDepth = 0;
 +    decrementDeferralDepthAndGCIfNeededSlow();
@@ -129,7 +133,7 @@ index 67e317d5bb..a41b96761e 100644
      if constexpr (validateDFGDoesGC)
          vm().verifyCanGC();
  
-@@ -1376,6 +1462,15 @@ void Heap::collectSync(GCRequest request)
+@@ -1376,6 +1466,15 @@ void Heap::collectSync(GCRequest request)
      if (!Options::useGC()) [[unlikely]]
          return;
  
@@ -145,7 +149,7 @@ index 67e317d5bb..a41b96761e 100644
      if constexpr (validateDFGDoesGC)
          vm().verifyCanGC();
  
-@@ -2963,9 +3058,12 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
+@@ -2963,9 +3062,12 @@ void Heap::collectIfNecessaryOrDefer(GCDeferralContext* deferralContext)
  
      if (deferralContext)
          deferralContext->m_shouldGC = true;
@@ -160,7 +164,7 @@ index 67e317d5bb..a41b96761e 100644
          collectAsync();
          stopIfNecessary(); // This will immediately start the collection if we have the conn.
      }
-@@ -2980,6 +3078,10 @@ void Heap::decrementDeferralDepthAndGCIfNeededSlow()
+@@ -2980,6 +3082,10 @@ void Heap::decrementDeferralDepthAndGCIfNeededSlow()
      ASSERT(!isDeferred());
      
      m_didDeferGCWork = false;
@@ -188,10 +192,27 @@ index eaa7a00f76..cf2552ebbe 100644
      // Queue up a collection and wait for it to complete. This won't return until you get your own
      // complete collection. For example, if there was an ongoing asynchronous collection at the time
 diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-index 43da80a76e..b43542cb36 100644
+index 43da80a76e..efc00a94ba 100644
 --- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 +++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-@@ -2317,6 +2317,17 @@ LLINT_SLOW_PATH_DECL(slow_path_handle_traps)
+@@ -560,6 +560,16 @@ UGPRPair SYSV_ABI llint_check_stack_and_vm_traps(CallFrame* callFrame, const JSI
+ #endif
+     }
+ 
++#if OS(EMSCRIPTEN)
++    // Ein Trap setzt die Stack-Grenze so, dass der naechste Funktionseintritt
++    // hier landet (meist vor dem naechsten op_check_traps). Auch hier liegen
++    // alle Werte im JS-Stack: der Rahmen des Aufrufers ist fertig, der neue hat
++    // Kopf und Argumente, seine Locals sind noch nicht benutzt.
++    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
++        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
++        vm.heap.collectAtSafepoint();
++    }
++#endif
+     if (vm.traps().handleTrapsIfNeeded()) {
+         if (vm.hasPendingTerminationException()) {
+             throwScope.release();
+@@ -2317,6 +2327,17 @@ LLINT_SLOW_PATH_DECL(slow_path_handle_traps)
  {
      LLINT_BEGIN_NO_SET_PC();
      ASSERT(vm.traps().needHandling(VMTraps::AsyncEvents));
@@ -210,7 +231,7 @@ index 43da80a76e..b43542cb36 100644
      UNUSED_PARAM(pc);
      LLINT_RETURN_TWO(throwScope.exception(), globalObject);
 diff --git a/Source/JavaScriptCore/runtime/VMTraps.cpp b/Source/JavaScriptCore/runtime/VMTraps.cpp
-index 54e789b7c7..7404af379b 100644
+index 54e789b7c7..8d95a99def 100644
 --- a/Source/JavaScriptCore/runtime/VMTraps.cpp
 +++ b/Source/JavaScriptCore/runtime/VMTraps.cpp
 @@ -512,6 +512,14 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
@@ -219,7 +240,7 @@ index 54e789b7c7..7404af379b 100644
  
 +#if OS(EMSCRIPTEN)
 +        case NeedSafepointGC:
-+            // Nur an op_check_traps sicher (LLIntSlowPaths.cpp), hier verwerfen.
++            // Nur im Interpreter sicher (LLIntSlowPaths.cpp), hier verwerfen.
 +            // Die naechste Allokation meldet sich wieder.
 +            didHandleTrap = true;
 +            break;
@@ -229,16 +250,17 @@ index 54e789b7c7..7404af379b 100644
          case NoEvent:
              break;
 diff --git a/Source/JavaScriptCore/runtime/VMTraps.h b/Source/JavaScriptCore/runtime/VMTraps.h
-index 1d7720b04c..e9b1d9f61e 100644
+index 1d7720b04c..f9795dfb63 100644
 --- a/Source/JavaScriptCore/runtime/VMTraps.h
 +++ b/Source/JavaScriptCore/runtime/VMTraps.h
-@@ -146,13 +146,26 @@ public:
+@@ -146,13 +146,27 @@ public:
      //    as well as if there are asynchronous VMTraps events to handle.
  
  // WARNING: Do NOT sort this list. Read comment above for the reason.
 +#if OS(EMSCRIPTEN)
 +    // NeedSafepointGC: der Heap will sammeln, waehrend der Embedder den GC
-+    // aufschiebt. Wird nur im Interpreter an op_check_traps bedient (Heap.cpp).
++    // aufschiebt. Wird nur im Interpreter bedient (op_check_traps und beim
++    // Funktionseintritt, siehe Heap.cpp).
  #define FOR_EACH_VMTRAPS_EVENTS(v) \
      v(NeedShellTimeoutCheck) \
      v(NeedTermination) \

@@ -1,0 +1,40 @@
+<!doctype html><title>stack</title><body><script>
+// Stack-Grenze des Interpreters nach einem VM-Trap (Patch 0022): Der GC an
+// sicheren Punkten setzt ein Trap-Bit, danach muss die Grenze wieder die des
+// JS-Stacks sein. Vorher lief tiefe Rekursion danach ueber das Ende des
+// JS-Stacks hinaus und hat fremden Speicher ueberschrieben (Absturz auf x.com).
+//   RENDER_WAIT_FOR="STACK fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/stack.html /tmp/s.ppm 200 200
+// Am Ende "STACK fertig=ok".
+function depth() {
+  let n = 0;
+  function f() { n++; f(); }
+  try {
+    f();
+  } catch (e) {
+    return [n, e instanceof RangeError];
+  }
+  return [n, false];
+}
+
+let ok = true;
+const [first, firstIsRange] = depth();
+console.log(`STACK start tiefe=${first} range=${firstIsRange}`);
+if (!firstIsRange)
+  ok = false;
+for (let round = 0; round < 5; round++) {
+  // Viel Muell: der Heap will sammeln, waehrend die Engine den GC aufschiebt
+  let keep = [];
+  for (let i = 0; i < 300000; i++)
+    keep.push({ i, s: 'x' + i });
+  keep = null;
+  const [n, isRange] = depth();
+  console.log(`STACK runde=${round} tiefe=${n} range=${isRange}`);
+  if (!isRange || n > first * 1.5 || n < first / 2)
+    ok = false;
+}
+// Noch etwas, das viel Speicher anfasst: kaputter Speicher faellt hier auf
+const big = Array.from({ length: 100000 }, (_, i) => ({ i, t: [i, i + 1] }));
+if (big.reduce((sum, o) => sum + o.t[1] - o.i, 0) !== 100000)
+  ok = false;
+console.log('STACK fertig=' + (ok ? 'ok' : 'FEHLER'));
+</script>

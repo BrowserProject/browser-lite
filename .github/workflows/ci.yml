@@ -261,6 +261,11 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="CRYPTO fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200 | tee build/crypto.log
           grep -q "CRYPTO fertig=ok" build/crypto.log
+      - name: Stack-Grenze nach VM-Trap (Rekursion nach GC-Anforderung)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="STACK fertig" "$IMAGE" \
+            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/stack.html build/stack.ppm 200 200 | tee build/stack.log
+          grep -q "STACK fertig=ok" build/stack.log
       - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \

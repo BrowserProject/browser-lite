@@ -130,6 +130,11 @@ kommen zuerst.
   ueber den UI-Thread beim Laden von CNN jetzt ca. 2 000 (vorher 12 600)
 - [x] Haenger (nzz.ch, 20min.ch, ab und zu): Selbst-Deadlock auf dem Haupt-Thread gefunden
   (Stack ueber das Debugger-Protokoll, jetzt im Kompatibilitaets-Test) und behoben
+- [x] Absturz auf x.com: WebKit-Fehler im C-Loop, nach einem VM-Trap stimmte die Stack-Grenze
+  nicht mehr und tiefe Rekursion ueberschrieb fremden Speicher (Patch 0022, Test
+  `tests/engine/stack.html`). Gefunden ueber das Kernel-Log (Segfault im Worker), `gdb` und die
+  perf-Map von V8 (`--perf-basic-prof`). Dabei auch: der GC waehrend langer Skripte kam auf
+  echten Seiten fast nie dran, jetzt auch beim Funktionseintritt
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

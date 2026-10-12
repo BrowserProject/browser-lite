@@ -72,6 +72,8 @@ async function startEngine() {
   const module = {
     // Netzwerk der Engine (engine/js/sockets.js): TCP-Verbindungen ueber Wisp
     blTransport: new WispTransport(relayURL()),
+    // ?httpcache=0 schaltet den dauerhaften HTTP-Cache aus (zum Testen)
+    blHttpCacheDisabled: params.get('httpcache') === '0',
     locateFile: (path) => ENGINE_BASE + path,
     print: (text) => console.log('[engine]', text),
     printErr: (text) => console.warn('[engine]', text),
@@ -94,6 +96,12 @@ async function startEngine() {
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
       if (params.get('safepointgc'))
         (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');
+      // Zum Testen: ?env=JSC_verifyGC=1,BL_DEBUG=1 setzt Umgebungsvariablen
+      for (const pair of (params.get('env') || '').split(',')) {
+        const at = pair.indexOf('=');
+        if (at > 0)
+          (module || engine).ENV[pair.slice(0, at)] = pair.slice(at + 1);
+      }
     }],
   };
   engine = module;

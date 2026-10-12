@@ -1,0 +1,25 @@
+diff --git a/Source/JavaScriptCore/runtime/StackManager.cpp b/Source/JavaScriptCore/runtime/StackManager.cpp
+index 0ed68aee81..c8a9f73b50 100644
+--- a/Source/JavaScriptCore/runtime/StackManager.cpp
++++ b/Source/JavaScriptCore/runtime/StackManager.cpp
+@@ -44,9 +44,18 @@ CONCURRENT_SAFE void StackManager::cancelStop()
+         return;
+ 
+     Locker lock { m_mirrorLock };
+-    m_trapAwareSoftStackLimit.storeRelaxed(m_softStackLimit);
++#if ENABLE(C_LOOP)
++    // Im C-Loop prueft der Interpreter die Grenze seines eigenen JS-Stacks
++    // (setCLoopStackLimit), nicht die des nativen Stacks. Sonst stimmt die
++    // Grenze nach dem ersten Trap nicht mehr und tiefe Rekursion schreibt
++    // ueber das Ende des JS-Stacks hinaus.
++    void* limit = m_cloopStackLimit;
++#else
++    void* limit = m_softStackLimit;
++#endif
++    m_trapAwareSoftStackLimit.storeRelaxed(limit);
+     for (auto& mirror : m_mirrors)
+-        mirror.m_trapAwareSoftStackLimit.storeRelaxed(m_softStackLimit);
++        mirror.m_trapAwareSoftStackLimit.storeRelaxed(limit);
+ }
+ 
+ void StackManager::setStackSoftLimit(void* newStackLimit)
