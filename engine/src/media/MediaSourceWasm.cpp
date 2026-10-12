@@ -290,6 +290,14 @@ void SourceBufferPrivateWasm::resetParserStateInternal()
         source->send("sb-abort"_s, makeString("{\"sb\":"_s, m_id, '}'));
 }
 
+// remove() der Seite und das Aufraeumen vor einem Append: der Host muss die
+// gleichen Frames wegwerfen, sonst spielt er Daten, die es in WebCore nicht mehr gibt
+void SourceBufferPrivateWasm::didRemoveCodedFrames(const MediaTime& start, const MediaTime& end)
+{
+    if (RefPtr source = this->source())
+        source->send("sb-remove"_s, makeString("{\"sb\":"_s, m_id, ",\"start\":"_s, jsonTime(start), ",\"end\":"_s, jsonTime(end), '}'));
+}
+
 void SourceBufferPrivateWasm::removedFromMediaSource()
 {
     SourceBufferPrivate::removedFromMediaSource();

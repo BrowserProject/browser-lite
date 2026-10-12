@@ -124,7 +124,8 @@ fuer das .wasm, CLoop-Tuning. Kompatibilitaetsliste Top-50 Seiten in CI.
 - [x] MSE (YouTube & Co.): WebCore macht die MSE-Logik mit Zeitstempeln aus eigenen kleinen
   Parsern fuer fMP4 und WebM (`engine/src/media/ContainerParser.cpp`), die Daten gehen
   zusaetzlich an ein MediaSource im Host-Browser, das abspielt. Test in `media-test.mjs`
-- [ ] `SourceBuffer.remove()` wird noch nicht an den Host weitergegeben (der raeumt selber auf)
+- [x] `SourceBuffer.remove()` und das Aufraeumen von WebCore gehen auch an das MediaSource im Host
+  (Hook `didRemoveCodedFrames`, Patch 0017)
 `<audio>`/`<video>` ueber WebCodecs + Web Audio, danach MSE.
 
 ## Zukunft: WireGuard

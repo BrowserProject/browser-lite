@@ -221,6 +221,20 @@ class Player {
           buffer.abort();
       });
       return true;
+    case 'sb-remove':
+      this.enqueue(() => {
+        const buffer = this.sourceBuffers.get(data.sb);
+        const source = this.mediaSource;
+        // Bei "ended" setzt remove() das MediaSource selber wieder auf "open"
+        if (!buffer || source.readyState === 'closed' || Number.isNaN(source.duration))
+          return;
+        // Wie in WebCore: nicht ueber die Dauer hinaus
+        const start = Math.min(data.start, source.duration);
+        const end = fromTime(data.end);
+        if (end > start)
+          buffer.remove(start, end);
+      });
+      return true;
     case 'sb-type':
       this.enqueue(() => this.sourceBuffers.get(data.sb)?.changeType(data.type));
       return true;
@@ -370,5 +384,10 @@ export function onEngineMedia(id, type, data, bytes) {
 
 // Fuer Tests
 export function mediaState() {
-  return [...players.values()].map((p) => ({ id: p.id, time: p.video.currentTime, paused: p.video.paused, width: p.video.videoWidth, frame: !!p.frame }));
+  return [...players.values()].map((p) => {
+    const ranges = [];
+    for (let i = 0; i < p.video.buffered.length; i++)
+      ranges.push([p.video.buffered.start(i), p.video.buffered.end(i)]);
+    return { id: p.id, time: p.video.currentTime, paused: p.video.paused, width: p.video.videoWidth, frame: !!p.frame, buffered: ranges };
+  });
 }

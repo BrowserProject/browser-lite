@@ -1,0 +1,26 @@
+diff --git a/Source/WebCore/platform/graphics/SourceBufferPrivate.cpp b/Source/WebCore/platform/graphics/SourceBufferPrivate.cpp
+index 58ebd96bb6..cd89d597d4 100644
+--- a/Source/WebCore/platform/graphics/SourceBufferPrivate.cpp
++++ b/Source/WebCore/platform/graphics/SourceBufferPrivate.cpp
+@@ -587,6 +587,8 @@ void SourceBufferPrivate::removeCodedFramesInternal(const MediaTime& start, cons
+     // No-op
+ 
+     updateHighestPresentationTimestamp();
++
++    didRemoveCodedFrames(start, end);
+ }
+ 
+ size_t SourceBufferPrivate::platformEvictionThreshold() const
+diff --git a/Source/WebCore/platform/graphics/SourceBufferPrivate.h b/Source/WebCore/platform/graphics/SourceBufferPrivate.h
+index 03bddbbc92..556dbf09ab 100644
+--- a/Source/WebCore/platform/graphics/SourceBufferPrivate.h
++++ b/Source/WebCore/platform/graphics/SourceBufferPrivate.h
+@@ -199,6 +199,8 @@ protected:
+     virtual void flush(TrackID) { }
+     virtual void enqueueSample(Ref<MediaSample>&&, TrackID) { }
+     virtual void allSamplesInTrackEnqueued(TrackID) { }
++    // Nach remove() oder dem Aufraeumen vor einem Append (Coded Frame Removal)
++    virtual void didRemoveCodedFrames(const MediaTime&, const MediaTime&) { }
+     virtual bool isReadyForMoreSamples(TrackID) { return false; }
+     virtual void notifyClientWhenReadyForMoreSamples(TrackID) { }
+ 

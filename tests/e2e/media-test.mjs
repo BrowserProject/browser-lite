@@ -138,7 +138,18 @@ source.addEventListener('sourceopen', async () => {
   source.endOfStream();
   result('mseduration', video.duration.toFixed(1));
   video.addEventListener('playing', () => result('mseplaying', '1'));
-  video.addEventListener('timeupdate', () => { if (video.currentTime > 1.2) result('msetime', video.currentTime.toFixed(1)); });
+  let removed = false;
+  video.addEventListener('timeupdate', () => {
+    if (video.currentTime <= 1.2)
+      return;
+    result('msetime', video.currentTime.toFixed(1));
+    // Danach das Ende wegwerfen, der Host muss es auch tun
+    if (removed)
+      return;
+    removed = true;
+    buffer.addEventListener('updateend', () => result('mseremoved', buffer.buffered.length ? buffer.buffered.end(0).toFixed(1) : 'leer'), { once: true });
+    buffer.remove(2.5, Infinity);
+  });
   video.play().then(() => result('mseplay', 'ok'), (e) => result('mseplay', e.name));
 });
 </script>`;
@@ -262,6 +273,18 @@ while (Date.now() < mseEnd) {
 }
 check('MSE: Bild in der Seite gemalt', msePixel && msePixel.r > 180 && msePixel.g < 60 && msePixel.b < 60, JSON.stringify(msePixel));
 await page.screenshot({ path: path.join(root, 'build', 'e2e-mse.png') }).catch(() => {});
+const mseRemoved = await result('mseremoved');
+check('MSE: remove() in der Engine', Number(mseRemoved) > 2 && Number(mseRemoved) <= 2.5, mseRemoved);
+let hostBuffered = null;
+const removeEnd = Date.now() + 10000;
+while (Date.now() < removeEnd) {
+  const players = await page.evaluate(() => window.__blMediaState());
+  hostBuffered = players.length ? players[players.length - 1].buffered : null;
+  if (hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6)
+    break;
+  await page.waitForTimeout(250);
+}
+check('MSE: remove() auch im Host', hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6, JSON.stringify(hostBuffered));
 await browser.close();
 relay.kill();
 ui.kill();
