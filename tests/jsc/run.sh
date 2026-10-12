@@ -21,6 +21,8 @@ run() {
 }
 
 run basics "$here/basics.js"
+run calls "$here/calls.js"
+run calls-gc --slowPathAllocsBetweenGCs=10 "$here/calls.js"
 run gc-stress "$here/gc-stress.js"
 # GC sehr oft ausloesen (alle paar Allokationen)
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"

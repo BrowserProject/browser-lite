@@ -110,6 +110,9 @@ kommen zuerst.
 - [x] Speicher-Spitzen: GC auch mitten in langen Skripten (an sicheren Punkten im Interpreter)
   und automatisches Freigeben der WebKit-Caches ab 192 MB (siehe Architektur). Bericht in der
   Konsole mit `__blMemory(true)`
+- [x] JS-Aufrufe: die Aufruf-Caches des Interpreters waren auf 32 Bit abgeschaltet, jeder
+  Aufruf ging durch C++. Eingeschaltet (Patch 0019): Aufrufe, Klassen und Callbacks 30-40 %
+  schneller
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

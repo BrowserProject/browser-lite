@@ -44,6 +44,14 @@ JavaScriptCore mit dem **CLoop**-Interpreter (`ENABLE_JIT=OFF`, `ENABLE_C_LOOP=O
 In WASM kann man nicht einfach Maschinencode erzeugen, darum kein JIT. JS ist dadurch
 langsamer als normal, einfache und mittlere Seiten gehen aber gut.
 
+**Aufruf-Caches:** JSC schaltet auf 32-Bit-Systemen alle ICs ab (`forceICFailure`), und
+WASM ist 32 Bit. Darum ging jeder JS-Funktionsaufruf durch `llint_default_call` in C++
+(gemessen: 300 000 Aufrufe = 300 000 Mal der langsame Weg). Der Interpreter hat aber eigene
+Aufruf-Caches (ein Ziel, mehrere Ziele, Closures), die auch auf 32 Bit gehen. Patch 0019
+schaltet sie ein. Gewinn im Benchmark (`tests/engine/jsbench.html`, bester von 5 Laeufen):
+Aufrufe -37 %, Klassen -40 %, Arrays mit Callbacks -30 %, Closures -30 %. Test:
+`tests/jsc/calls.js`.
+
 ### Garbage Collector (wichtigstes Risiko)
 JSC hat einen konservativen GC: er sucht auf dem Stack nach allem was wie ein Pointer
 aussieht. In WASM gibt es zwei Stacks:

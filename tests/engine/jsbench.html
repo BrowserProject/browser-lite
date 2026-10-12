@@ -1,0 +1,14 @@
+<!doctype html><title>jsbench</title><body><script>
+// Kleiner JS-Benchmark fuer den Interpreter. Laufen lassen mit
+//   node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/jsbench.html /tmp/x.ppm 800 600
+// Pro Test der beste von 5 Laeufen in ms (Zeile "BENCH name=ms").
+function t(name, f) { let best = 1e9; for (let r = 0; r < 5; r++) { const s = performance.now(); f(); best = Math.min(best, performance.now() - s); } console.log('BENCH ' + name + '=' + best.toFixed(0)); }
+t('props', () => { let o = { a: 1, b: 2, c: 3 }, s = 0; for (let i = 0; i < 300000; i++) { s += o.a + o.b + o.c; o.a = i & 7; } return s; });
+t('calls', () => { function add(x, y) { return x + y; } let s = 0; for (let i = 0; i < 300000; i++) s = add(s, i) | 0; return s; });
+t('closures', () => { const fs = []; for (let i = 0; i < 20000; i++) fs.push(() => i * 2); let s = 0; for (let k = 0; k < 10; k++) for (const f of fs) s += f(); return s; });
+t('arrays', () => { const a = []; for (let i = 0; i < 100000; i++) a.push(i); return a.map((x) => x * 2).filter((x) => x % 3).reduce((p, c) => p + c, 0); });
+t('strings', () => { let s = ''; for (let i = 0; i < 50000; i++) s += String.fromCharCode(65 + i % 26); return s.split('A').join('-').length; });
+t('json', () => { const o = { list: Array.from({ length: 2000 }, (_, i) => ({ id: i, name: 'n' + i, tags: ['x', 'y'] })) }; let n = 0; for (let k = 0; k < 5; k++) n += JSON.parse(JSON.stringify(o)).list.length; return n; });
+t('classes', () => { class P { constructor(x, y) { this.x = x; this.y = y; } len() { return Math.sqrt(this.x * this.x + this.y * this.y); } } let s = 0; for (let i = 0; i < 100000; i++) s += new P(i, i + 1).len(); return s; });
+t('regexp', () => { const r = /(\d+)-(\w+)/; let n = 0; for (let i = 0; i < 20000; i++) if (r.exec('abc ' + i + '-foo')) n++; return n; });
+</script>

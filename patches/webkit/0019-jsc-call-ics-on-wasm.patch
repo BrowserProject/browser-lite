@@ -1,0 +1,19 @@
+diff --git a/Source/JavaScriptCore/runtime/Options.cpp b/Source/JavaScriptCore/runtime/Options.cpp
+index 4a2eb2ab45..86281a8b2d 100644
+--- a/Source/JavaScriptCore/runtime/Options.cpp
++++ b/Source/JavaScriptCore/runtime/Options.cpp
+@@ -565,6 +565,14 @@ static void disableAllSignalHandlerBasedOptions();
+ 
+ static void overrideDefaults()
+ {
++#if OS(EMSCRIPTEN)
++    // Auf 32 Bit sind die ICs standardmaessig aus (forceICFailure). In
++    // WebAssembly gibt es nur den C-Loop-Interpreter, und dessen Aufruf-Caches
++    // funktionieren auch auf 32 Bit. Ohne sie geht jeder JS-Aufruf durch
++    // llint_default_call (C++), das kostet bis zu 40 %.
++    Options::forceICFailure() = false;
++#endif
++
+ #if OS(DARWIN)
+     if (Options::machExceptionHandlerSandboxPolicy == Options::SandboxPolicy::Block)
+         disableAllSignalHandlerBasedOptions();
