@@ -2,6 +2,9 @@
 // Benutzt genau die gleiche Schnittstelle wie die Browser-Oberflaeche (web/).
 //
 //   node tests/engine/render-test.mjs <engine.js> <seite.html> <ausgabe.ppm> [breite] [hoehe]
+//
+// RENDER_WAIT_FOR=text: erst fertig, wenn die Seite eine Konsolen-Zeile mit
+// diesem Text ausgegeben hat (z.B. am Ende eines Tests)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -18,10 +21,13 @@ const html = readFileSync(htmlPath, 'utf8');
 const require = createRequire(import.meta.url);
 const createEngine = require(path.resolve(enginePath));
 
+const waitFor = process.env.RENDER_WAIT_FOR;
+let waited = !waitFor;
+let pendingFrame = null;
 const timeout = setTimeout(() => {
-  console.error('FEHLER: Timeout (60s), kein Bild bekommen');
+  console.error(waited ? 'FEHLER: Timeout (120s), kein Bild bekommen' : `FEHLER: Timeout (120s), "${waitFor}" kam nicht`);
   process.exit(1);
-}, 60000);
+}, 120000);
 
 let loaded = false;
 // Emscripten (MODULARIZE) benutzt genau dieses Objekt als Module, darum sind
@@ -45,8 +51,19 @@ const engine = {
     engine._bl_load_html(1, engine.stringToNewUTF8(html), engine.stringToNewUTF8('file:///test/'));
   },
   onEngineEvent(viewId, type, payload) {
-    if (type === 'console')
+    if (type === 'console') {
       console.log('[seite]', payload);
+      if (!waited && payload.includes(waitFor)) {
+        waited = true;
+        if (pendingFrame)
+          pendingFrame();
+        // Hat sich nichts geaendert, kommt kein neues Bild: dann ohne Bild fertig
+        setTimeout(() => {
+          console.log('Fertig (kein neues Bild)');
+          process.exit(0);
+        }, 3000);
+      }
+    }
     if (type === 'load') {
       loaded = true;
       engine._bl_frame(viewId);
@@ -59,7 +76,10 @@ const engine = {
     setTimeout(() => engine._bl_frame(viewId), 16);
   },
   onEngineFrame(viewId, ptr, w, h) {
-    if (!loaded) {
+    if (!loaded || !waited) {
+      // Noch nicht fertig: Bild verwerfen, beim naechsten weitermachen
+      if (loaded)
+        pendingFrame = () => engine._bl_frame(viewId);
       engine._bl_frame_presented(viewId);
       return;
     }

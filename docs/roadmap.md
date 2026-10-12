@@ -117,6 +117,10 @@ kommen zuerst.
 - [x] Skia malt mit SIMD (SSE4.1-Pfad ueber WASM-SIMD, Patch 0020): Malen ca. 2x schneller
 - [x] TLS: ChaCha20 statt AES-GCM (keine AES-Hardware in WASM), Krypto auf dem curl-Thread
   4x schneller (Patch 0021)
+- [x] WebCrypto: AES-GCM, RSA-OAEP und RSA-PSS gingen mit OpenSSL 3 nicht (Patch 0010).
+  Damit kommen SBB, IMDb und Booking durch die Bot-Pruefung von AWS WAF.
+  Test `tests/engine/crypto.html` in CI
+- [ ] WebCrypto: Ed25519 und X25519 (WebKit hat dafuer keinen OpenSSL-Code)
 - [ ] Datei- und Socket-Zugriffe laufen ueber Emscriptens JS-Dateisystem auf dem UI-Thread
   (jeder Zugriff ein synchroner Umweg, auf CNN ca. 12 600 Stueck, vor allem die Cookie-DB).
   Ziel: eigene Socket-Schicht im WASM und WasmFS, damit nichts mehr ueber den UI-Thread geht

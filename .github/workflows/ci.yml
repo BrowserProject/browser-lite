@@ -256,6 +256,11 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" -w /src "$IMAGE" bash -c \
             'node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600 && node tests/engine/check-basic.mjs build/basic.ppm'
+      - name: WebCrypto-Test (OpenSSL im WASM)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="CRYPTO fertig" "$IMAGE" \
+            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200 | tee build/crypto.log
+          grep -q "CRYPTO fertig=ok" build/crypto.log
       - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \

@@ -36,16 +36,18 @@ function start(script, args, env) {
 const relay = await start(path.join(root, 'relay', 'server.mjs'), [], { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1' });
 const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
 // SwiftShader, damit WebGL der Seiten auch ohne GPU (headless, CI) geht
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const launch = () => chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+let browser = await launch();
+// Promise mit Zeitlimit (page.evaluate hat keins und haengt, wenn die Seite blockiert)
+const within = (promise, ms, what) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(what)), ms))]);
 
 let failed = 0;
 const rows = [];
-for (const site of sites) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+
+async function checkSite(site, page, log) {
   // Optional eigene CA (z.B. wenn ein TLS-Proxy dazwischen ist): SITE_EXTRA_CA=datei.pem
   if (extraCA)
     await page.addInitScript((pem) => { window.__blExtraCA = pem; }, extraCA);
-  const log = [];
   page.on('console', (msg) => log.push(msg.text()));
   const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: site });
   // SITE_DEBUG=1: Ablauf der Engine mitschreiben (wird nur bei Problemen ausgegeben)
@@ -60,27 +62,54 @@ for (const site of sites) {
       const status = document.getElementById('status')?.textContent || '';
       return status.startsWith('Fehler') || window.__blLoaded === true;
     }, null, { timeout: TIMEOUT, polling: 250 });
-    const status = await page.evaluate(() => document.getElementById('status')?.textContent || '');
-    if (status.startsWith('Fehler')) {
+    const status = await within(page.evaluate(() => document.getElementById('status')?.textContent || ''), 10000, 'Status');
+    if (status.startsWith('Fehler'))
       result = status;
-      failed++;
-    }
   } catch {
     result = 'Zeitlimit';
-    failed++;
   }
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   await page.waitForTimeout(Number(process.env.SITE_WAIT || 1500));
-  const title = await page.evaluate(() => document.title);
+  let title = await within(page.evaluate(() => document.title), 10000, 'Titel');
+  // Noch kein Titel: oft eine Bot-Pruefung (z.B. AWS WAF), die rechnet und dann
+  // die echte Seite neu laedt. Darauf noch etwas warten.
+  if (!title || /^Neuer Tab/.test(title)) {
+    await page.waitForFunction(() => document.title && !/^Neuer Tab/.test(document.title), null, { timeout: 30000, polling: 500 }).catch(() => {});
+    title = await within(page.evaluate(() => document.title), 10000, 'Titel');
+  }
   const file = path.join(outDir, (new URL(site).hostname || 'seite') + '.png');
-  await page.screenshot({ path: file });
+  await page.screenshot({ path: file, timeout: 20000 });
+  return { result, seconds, title };
+}
+
+const printLog = (log, all) => console.log((all ? log : [...log.slice(0, 40), '...', ...log.slice(-20)]).map((l) => '    ' + l).join('\n'));
+
+for (const site of sites) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const log = [];
+  let outcome;
+  try {
+    // Harte Grenze pro Seite: eine blockierte Seite darf nicht den ganzen Lauf aufhalten
+    outcome = await within(checkSite(site, page, log), TIMEOUT + 90000, 'Seite haengt');
+  } catch (e) {
+    outcome = { result: 'haengt (' + e.message + ')', seconds: '-', title: '' };
+  }
+  const { result, seconds, title } = outcome;
+  if (result !== 'ok')
+    failed++;
   console.log(`${result === 'ok' ? 'ok  ' : 'FAIL'} ${site} (${seconds} s) Titel: "${title}" ${result === 'ok' ? '' : result}`);
   rows.push(`| ${site} | ${result === 'ok' ? 'geladen' : 'Fehler'} | ${seconds} s | ${title.replace(/ - browser-lite$/, '').replace(/\|/g, '/').slice(0, 60)} |`);
-  // Leere Seite (kein Titel): Log zeigen, damit man sieht, was passiert ist
+  // Leere Seite (kein Titel) oder Fehler: Log zeigen, damit man sieht, was passiert ist
   const blank = !title || /^Neuer Tab/.test(title);
   if (result !== 'ok' || blank || process.env.SITE_LOG)
-    console.log((process.env.SITE_LOG === 'all' ? log : blank ? [...log.slice(0, 40), '...', ...log.slice(-20)] : log.slice(-30)).map((l) => '    ' + l).join('\n'));
-  await page.close();
+    printLog(process.env.SITE_LOG === 'all' || result !== 'ok' ? log.slice(-80) : log, process.env.SITE_LOG === 'all' || result !== 'ok');
+  try {
+    await within(page.close(), 10000, 'close');
+  } catch {
+    // Seite reagiert nicht mehr: neuer Browser fuer den Rest
+    await within(browser.close(), 10000, 'browser.close').catch(() => {});
+    browser = await launch();
+  }
 }
 
 // Kompatibilitaetsliste fuer die GitHub-Zusammenfassung

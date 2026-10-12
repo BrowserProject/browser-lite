@@ -1,3 +1,89 @@
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
+index 70fce2e67a..4b7ade0c3b 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
+@@ -64,14 +64,14 @@ static std::optional<Vector<uint8_t>> cryptEncrypt(const Vector<uint8_t>& key, c
+     if (!(ctx = EvpCipherCtxPtr(EVP_CIPHER_CTX_new())))
+         return std::nullopt;
+ 
+-    // Disable padding
+-    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+-        return std::nullopt;
+-
+     // Initialize the encryption operation
+     if (1 != EVP_EncryptInit_ex(ctx.get(), algorithm, nullptr, nullptr, nullptr))
+         return std::nullopt;
+ 
++    // Disable padding (OpenSSL 3 needs the cipher to be set first)
++    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
++        return std::nullopt;
++
+     // Set IV length
+     if (1 != EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr))
+         return std::nullopt;
+@@ -120,14 +120,14 @@ static std::optional<Vector<uint8_t>> cryptDecrypt(const Vector<uint8_t>& key, c
+     if (!(ctx = EvpCipherCtxPtr(EVP_CIPHER_CTX_new())))
+         return std::nullopt;
+ 
+-    // Disable padding
+-    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+-        return std::nullopt;
+-
+     // Initialize the encryption operation
+     if (1 != EVP_DecryptInit_ex(ctx.get(), algorithm, nullptr, nullptr, nullptr))
+         return std::nullopt;
+ 
++    // Disable padding (OpenSSL 3 needs the cipher to be set first)
++    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
++        return std::nullopt;
++
+     // Set IV length
+     if (1 != EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr))
+         return std::nullopt;
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
+index 4e8ca0234f..7d69eff0a1 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
+@@ -36,7 +36,7 @@ namespace WebCore {
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& plainText)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+@@ -85,7 +85,7 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const Cryp
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformDecrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& cipherText)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
+index 0d16994f3d..a51fa1bdcc 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
+@@ -37,7 +37,7 @@ namespace WebCore {
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_PSS::platformSign(const CryptoAlgorithmRsaPssParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& data)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+@@ -82,7 +82,7 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_PSS::platformSign(const CryptoAl
+ 
+ ExceptionOr<bool> CryptoAlgorithmRSA_PSS::platformVerify(const CryptoAlgorithmRsaPssParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
 diff --git a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
 index cfc7adfc97..e111fb6b4c 100644
 --- a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp

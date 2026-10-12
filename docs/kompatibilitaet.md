@@ -29,7 +29,7 @@ kein Absturz, Seite sieht im Screenshot aus wie in Chrome (bis auf noch ladende 
 | Squoosh | ok | Startseite |
 | NYTimes, Spiegel | ok | in CI getestet |
 | Reddit, eBay | gesperrt | Sperren Rechenzentrums-IPs ("blocked by network security" bzw. Fehlerseite). Liegt an der IP des Relays, nicht an der Engine |
-| Booking, IMDb, SBB | offen | In CI (noch ohne WebAssembly) leere Seite ohne Titel, vermutlich eine Bot-Pruefung. Lokal im Test-Netz gesperrt |
+| Booking, IMDb, SBB | ok | Bot-Pruefung von AWS WAF: scheiterte an WebCrypto (AES-GCM ging mit OpenSSL 3 nicht, Patch 0010), jetzt rechnet sie durch und laedt die echte Seite neu |
 
 ## Bekannte Grenzen
 

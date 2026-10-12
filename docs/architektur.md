@@ -172,6 +172,11 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
   auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn
   der ChaCha bevorzugt (wie Handys ohne AES-Befehle).
+- WebCrypto (`crypto.subtle`) ueber den OpenSSL-Code von WebCore. Zwei Stellen gingen mit
+  OpenSSL 3 nicht und sind in Patch 0010 repariert: AES-GCM (Padding wurde vor dem Init
+  gesetzt) und RSA-OAEP/RSA-PSS (WebKit prueft mit `#if defined(...)` auf Makros, die in
+  OpenSSL 3 Funktionen sind). Bot-Pruefungen wie AWS WAF brauchen AES-GCM. Ed25519/X25519
+  fehlen noch (WebKit hat dafuer keinen OpenSSL-Code). Test: `tests/engine/crypto.html`.
 - `WispTransport`: jede TCP-Verbindung ist ein Stream in einer Wisp-WebSocket-Verbindung.
   Hostnamen werden vom Relay aufgeloest.
 - Spaeter `WireGuardTransport`: userspace TCP/IP + WireGuard im WASM, UDP-Pakete ueber

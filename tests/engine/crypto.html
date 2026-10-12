@@ -1,0 +1,136 @@
+<!doctype html><title>crypto</title><body><script>
+// WebCrypto in der Engine (OpenSSL im WASM): jede Operation einzeln, Ausgabe
+// "CRYPTO name=ok" oder "CRYPTO name=FEHLER ...". Laufen lassen mit
+//   RENDER_WAIT_FOR="CRYPTO fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html /tmp/c.ppm 200 200
+// Am Ende "CRYPTO fertig=ok", wenn alles ausser den bekannten Luecken geht.
+const s = crypto.subtle;
+const enc = new TextEncoder();
+const data = enc.encode('Hallo WebCrypto');
+const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+const tests = {
+  'random': async () => { crypto.getRandomValues(new Uint8Array(16)); return crypto.randomUUID().length === 36; },
+  'digest SHA-1': async () => hex(await s.digest('SHA-1', data)).length === 40,
+  'digest SHA-256': async () => hex(await s.digest('SHA-256', enc.encode('abc'))) === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  'digest SHA-384': async () => hex(await s.digest('SHA-384', data)).length === 96,
+  'digest SHA-512': async () => hex(await s.digest('SHA-512', data)).length === 128,
+  'HMAC': async () => {
+    const k = await s.generateKey({ name: 'HMAC', hash: 'SHA-256' }, true, ['sign', 'verify']);
+    const sig = await s.sign('HMAC', k, data);
+    return s.verify('HMAC', k, sig, data);
+  },
+  'HMAC importKey raw': async () => {
+    const k = await s.importKey('raw', enc.encode('geheim'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    return hex(await s.sign('HMAC', k, enc.encode('abc'))).length === 64;
+  },
+  'AES-GCM': async () => {
+    const k = await s.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const c = await s.encrypt({ name: 'AES-GCM', iv }, k, data);
+    return new TextDecoder().decode(await s.decrypt({ name: 'AES-GCM', iv }, k, c)) === 'Hallo WebCrypto';
+  },
+  'AES-GCM 128 raw': async () => {
+    const k = await s.importKey('raw', new Uint8Array(16), 'AES-GCM', true, ['encrypt']);
+    return (await s.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12), additionalData: data, tagLength: 128 }, k, data)).byteLength === data.length + 16;
+  },
+  'AES-CBC': async () => {
+    const k = await s.generateKey({ name: 'AES-CBC', length: 128 }, true, ['encrypt', 'decrypt']);
+    const iv = new Uint8Array(16);
+    const c = await s.encrypt({ name: 'AES-CBC', iv }, k, data);
+    return (await s.decrypt({ name: 'AES-CBC', iv }, k, c)).byteLength === data.length;
+  },
+  'AES-CTR': async () => {
+    const k = await s.generateKey({ name: 'AES-CTR', length: 128 }, true, ['encrypt', 'decrypt']);
+    const counter = new Uint8Array(16);
+    const c = await s.encrypt({ name: 'AES-CTR', counter, length: 64 }, k, data);
+    return (await s.decrypt({ name: 'AES-CTR', counter, length: 64 }, k, c)).byteLength === data.length;
+  },
+  'AES-KW': async () => {
+    const kek = await s.generateKey({ name: 'AES-KW', length: 128 }, true, ['wrapKey', 'unwrapKey']);
+    const k = await s.generateKey({ name: 'AES-GCM', length: 128 }, true, ['encrypt']);
+    const w = await s.wrapKey('raw', k, kek, 'AES-KW');
+    return !!(await s.unwrapKey('raw', w, kek, 'AES-KW', 'AES-GCM', true, ['encrypt']));
+  },
+  'exportKey jwk': async () => {
+    const k = await s.generateKey({ name: 'AES-GCM', length: 128 }, true, ['encrypt']);
+    return (await s.exportKey('jwk', k)).kty === 'oct';
+  },
+  'ECDSA P-256': async () => {
+    const k = await s.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+    const sig = await s.sign({ name: 'ECDSA', hash: 'SHA-256' }, k.privateKey, data);
+    return s.verify({ name: 'ECDSA', hash: 'SHA-256' }, k.publicKey, sig, data);
+  },
+  'ECDSA P-384 export': async () => {
+    const k = await s.generateKey({ name: 'ECDSA', namedCurve: 'P-384' }, true, ['sign', 'verify']);
+    return (await s.exportKey('spki', k.publicKey)).byteLength > 0 && (await s.exportKey('pkcs8', k.privateKey)).byteLength > 0;
+  },
+  'ECDH': async () => {
+    const a = await s.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const b = await s.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const x = await s.deriveBits({ name: 'ECDH', public: b.publicKey }, a.privateKey, 256);
+    const y = await s.deriveBits({ name: 'ECDH', public: a.publicKey }, b.privateKey, 256);
+    return hex(x) === hex(y);
+  },
+  'ECDH raw import': async () => {
+    const a = await s.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
+    const raw = await s.exportKey('raw', a.publicKey);
+    return !!(await s.importKey('raw', raw, { name: 'ECDH', namedCurve: 'P-256' }, true, []));
+  },
+  'RSA-OAEP': async () => {
+    const k = await s.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['encrypt', 'decrypt']);
+    const c = await s.encrypt({ name: 'RSA-OAEP' }, k.publicKey, data);
+    return (await s.decrypt({ name: 'RSA-OAEP' }, k.privateKey, c)).byteLength === data.length;
+  },
+  'RSA-PSS': async () => {
+    const k = await s.generateKey({ name: 'RSA-PSS', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+    const sig = await s.sign({ name: 'RSA-PSS', saltLength: 32 }, k.privateKey, data);
+    return s.verify({ name: 'RSA-PSS', saltLength: 32 }, k.publicKey, sig, data);
+  },
+  'RSASSA-PKCS1-v1_5': async () => {
+    const k = await s.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']);
+    const sig = await s.sign('RSASSA-PKCS1-v1_5', k.privateKey, data);
+    return s.verify('RSASSA-PKCS1-v1_5', k.publicKey, sig, data);
+  },
+  'RSA spki import': async () => {
+    const k = await s.generateKey({ name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['encrypt', 'decrypt']);
+    const spki = await s.exportKey('spki', k.publicKey);
+    const jwk = await s.exportKey('jwk', k.privateKey);
+    return !!(await s.importKey('spki', spki, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['encrypt'])) && !!(await s.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, true, ['decrypt']));
+  },
+  'PBKDF2': async () => {
+    const k = await s.importKey('raw', enc.encode('passwort'), 'PBKDF2', false, ['deriveBits', 'deriveKey']);
+    const bits = await s.deriveBits({ name: 'PBKDF2', salt: enc.encode('salz'), iterations: 1000, hash: 'SHA-256' }, k, 256);
+    return bits.byteLength === 32;
+  },
+  'HKDF': async () => {
+    const k = await s.importKey('raw', enc.encode('eingabe'), 'HKDF', false, ['deriveBits']);
+    return (await s.deriveBits({ name: 'HKDF', salt: new Uint8Array(16), info: new Uint8Array(0), hash: 'SHA-256' }, k, 256)).byteLength === 32;
+  },
+  'Ed25519': async () => {
+    const k = await s.generateKey('Ed25519', true, ['sign', 'verify']);
+    const sig = await s.sign('Ed25519', k.privateKey, data);
+    return s.verify('Ed25519', k.publicKey, sig, data);
+  },
+  'X25519': async () => {
+    const a = await s.generateKey('X25519', true, ['deriveBits']);
+    const b = await s.generateKey('X25519', true, ['deriveBits']);
+    return (await s.deriveBits({ name: 'X25519', public: b.publicKey }, a.privateKey, 256)).byteLength === 32;
+  },
+};
+// Noch nicht umgesetzt (WebKit hat dafuer keinen OpenSSL-Code)
+const KNOWN_MISSING = ['Ed25519', 'X25519'];
+(async () => {
+  let bad = 0;
+  for (const [name, test] of Object.entries(tests)) {
+    let ok = false;
+    try {
+      ok = await test();
+      console.log('CRYPTO ' + name + '=' + (ok ? 'ok' : 'FALSCH'));
+    } catch (e) {
+      console.log('CRYPTO ' + name + '=FEHLER ' + e.name + ': ' + e.message);
+    }
+    if (!ok && !KNOWN_MISSING.includes(name))
+      bad++;
+  }
+  console.log('CRYPTO fertig=' + (bad ? bad + ' Fehler' : 'ok'));
+})();
+</script>
