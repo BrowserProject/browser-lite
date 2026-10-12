@@ -196,6 +196,18 @@ Cookies (SQLite), localStorage und IndexedDB liegen in der Engine unter `/data`.
 IDBFS von Emscripten: beim Start aus der IndexedDB des Host-Browsers geladen, danach alle
 5 s und beim Verlassen der Seite zurueckgeschrieben. Bleibt also zwischen Besuchen erhalten.
 
+Das Dateisystem von Emscripten lebt im JavaScript des Haupt-Threads, jeder Zugriff aus einem
+anderen Thread ist ein synchroner Umweg. SQLite schreibt jede WAL-Seite einzeln (mit seek
+davor): beim Laden von CNN waren das ca. 7000 Umwege nur fuer die Cookie-Datenbank. Darum
+gibt es ein eigenes SQLite-VFS (`engine/src/MemoryVFS.cpp`): Datenbank, `-journal`, `-wal`
+und der gemeinsame Speicher fuer den WAL-Index liegen im WASM-Speicher (Locks nur im
+Prozess). Ins Dateisystem kommen die Dateien als Ganzes, wenn gerade keine
+Schreib-Transaktion laeuft: vor jedem Speichern des IDBFS (`bl_storage_flush` vom
+Haupt-Thread) und wenn die letzte Verbindung zu einer Datenbank schliesst. Danach liest das
+VFS wieder von der Platte, damit es stimmt, wenn WebKit Dateien selber loescht
+(`indexedDB.deleteDatabase`). Dateizugriffe beim Laden von CNN: 12 600 -> 3 200. Regel gegen
+Deadlocks: waehrend ein Lock im VFS gehalten wird, gibt es keinen Dateizugriff.
+
 ### Ton (Web Audio)
 ```
 Seite (JS in der Engine)            Engine                          Host-Browser

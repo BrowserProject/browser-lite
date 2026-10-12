@@ -17,6 +17,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
+    ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp

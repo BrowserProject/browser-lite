@@ -8,6 +8,7 @@
 #include "Engine.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
+#include "MemoryVFS.h"
 #include "WebView.h"
 
 #include <JavaScriptCore/DeferGCInlines.h>
@@ -202,6 +203,13 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
     });
 }
 
+
+// Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp).
+// Laeuft auf dem Haupt-Thread des Host, direkt vor dem Speichern des IDBFS.
+EMSCRIPTEN_KEEPALIVE void bl_storage_flush()
+{
+    flushMemoryVFS(true);
+}
 
 // Speicher der Engine in der Konsole (fuer Tests und Fehlersuche).
 // full: vorher einen vollen GC machen.

@@ -19,7 +19,7 @@ const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
 setTimeout(() => {
   console.log('FAIL Zeitlimit fuer den ganzen Test');
   process.exit(1);
-}, 2 * TIMEOUT + 120000).unref();
+}, 3 * TIMEOUT + 120000).unref();
 
 let failed = 0;
 const check = (name, ok, info = '') => {
@@ -56,6 +56,25 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
     open.onerror = resolve;
   });
   console.log('RESULT written=1');
+  // Zweiter Besuch: eine Datenbank anlegen und wieder loeschen (WebKit loescht
+  // die Dateien dabei selber, die Engine darf sie nicht zurueckschreiben)
+  const exists = async (name) => (await indexedDB.databases()).some((db) => db.name === name) ? 'da' : 'weg';
+  if (local === 'gespeichert') {
+    await new Promise((resolve) => {
+      const open = indexedDB.open('bl-weg', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('w').put('x', 'y');
+      open.onsuccess = () => { open.result.close(); resolve(); };
+      open.onerror = resolve;
+    });
+    await new Promise((resolve) => {
+      const del = indexedDB.deleteDatabase('bl-weg');
+      del.onsuccess = del.onerror = resolve;
+    });
+    localStorage.setItem('bl', 'zwei');
+    console.log('RESULT deleted=' + await exists('bl-weg'));
+  }
+  if (local === 'zwei')
+    console.log('RESULT third=' + local + ',' + await exists('bl-weg'));
 })();
 </script>`;
 
@@ -116,6 +135,13 @@ results = new Map();
 await page.reload();
 const second = await result('read');
 check('Nach Neuladen noch da (Cookie, localStorage, IndexedDB)', second === 'ja,gespeichert,idb-wert', String(second));
+check('IndexedDB-Datenbank geloescht', (await result('deleted')) === 'weg', String(results.get('deleted')));
+
+// Nochmal neu laden: die geloeschte Datenbank darf nicht zurueckkommen
+await page.waitForTimeout(7000);
+results = new Map();
+await page.reload();
+check('Nach zweitem Neuladen: neuer Wert da, geloeschte Datenbank weg', (await result('third')) === 'zwei,weg', String(results.get('third')));
 
 await browser.close();
 relay.kill();

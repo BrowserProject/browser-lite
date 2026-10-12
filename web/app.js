@@ -136,6 +136,10 @@ function saveStorage() {
     return;
   }
   storageSyncing = true;
+  // Datenbanken liegen in der Engine im Speicher (engine/src/MemoryVFS.cpp),
+  // zuerst ins Dateisystem schreiben
+  if (engine._bl_storage_flush)
+    engine._bl_storage_flush();
   engine.FS.syncfs(false, (error) => {
     storageSyncing = false;
     if (error)

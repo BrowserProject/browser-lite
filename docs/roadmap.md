@@ -121,9 +121,11 @@ kommen zuerst.
   Damit kommen SBB, IMDb und Booking durch die Bot-Pruefung von AWS WAF.
   Test `tests/engine/crypto.html` in CI
 - [ ] WebCrypto: Ed25519 und X25519 (WebKit hat dafuer keinen OpenSSL-Code)
-- [ ] Datei- und Socket-Zugriffe laufen ueber Emscriptens JS-Dateisystem auf dem UI-Thread
-  (jeder Zugriff ein synchroner Umweg, auf CNN ca. 12 600 Stueck, vor allem die Cookie-DB).
-  Ziel: eigene Socket-Schicht im WASM und WasmFS, damit nichts mehr ueber den UI-Thread geht
+- [x] SQLite-Datenbanken (Cookies, localStorage, IndexedDB) im WASM-Speicher statt ueber das
+  JS-Dateisystem auf dem UI-Thread (eigenes VFS): Dateizugriffe auf CNN 12 600 -> 3 200
+- [ ] Sockets laufen weiter ueber Emscriptens SOCKFS auf dem UI-Thread (jedes send/recv/poll
+  ein synchroner Umweg, auf dem curl-Thread ca. 0.5 s bei CNN). Ziel: eigene Socket-Schicht
+  im WASM (auch Grundlage fuer WireGuard)
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

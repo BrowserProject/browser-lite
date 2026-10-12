@@ -6,6 +6,7 @@
 #include "config.h"
 #include "Storage.h"
 
+#include "MemoryVFS.h"
 #include "StorageTracker.h"
 #include "WebDatabaseProvider.h"
 #include "WebStorageNamespaceProvider.h"
@@ -27,6 +28,8 @@ namespace BrowserLite {
 
 void initializeStorage()
 {
+    // SQLite-Datenbanken unter /data im WASM-Speicher (MemoryVFS.cpp)
+    registerMemoryVFS();
     FileSystem::makeAllDirectories(localStorageDirectory);
     FileSystem::makeAllDirectories(indexedDBDirectory);
     WebKit::StorageTracker::initializeTracker(localStorageDirectory, nullptr);
