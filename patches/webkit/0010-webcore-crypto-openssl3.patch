@@ -1,0 +1,599 @@
+diff --git a/Source/WebCore/crypto/algorithms/CryptoAlgorithmEd25519.cpp b/Source/WebCore/crypto/algorithms/CryptoAlgorithmEd25519.cpp
+index a053b3297c..2005cce9cc 100644
+--- a/Source/WebCore/crypto/algorithms/CryptoAlgorithmEd25519.cpp
++++ b/Source/WebCore/crypto/algorithms/CryptoAlgorithmEd25519.cpp
+@@ -35,7 +35,7 @@
+ 
+ namespace WebCore {
+ 
+-#if !PLATFORM(COCOA) && !USE(GCRYPT)
++#if !PLATFORM(COCOA) && !USE(GCRYPT) && !USE(OPENSSL)
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmEd25519::platformSign(const CryptoKeyOKP&, const Vector<uint8_t>&)
+ {
+     ASSERT_NOT_REACHED();
+diff --git a/Source/WebCore/crypto/algorithms/CryptoAlgorithmX25519.cpp b/Source/WebCore/crypto/algorithms/CryptoAlgorithmX25519.cpp
+index 84091c1b39..777c6a94c3 100644
+--- a/Source/WebCore/crypto/algorithms/CryptoAlgorithmX25519.cpp
++++ b/Source/WebCore/crypto/algorithms/CryptoAlgorithmX25519.cpp
+@@ -58,7 +58,7 @@ void CryptoAlgorithmX25519::generateKey(const CryptoAlgorithmParameters&, bool e
+     callback(WTF::move(pair));
+ }
+ 
+-#if !PLATFORM(COCOA) && !USE(GCRYPT)
++#if !PLATFORM(COCOA) && !USE(GCRYPT) && !USE(OPENSSL)
+ std::optional<Vector<uint8_t>> CryptoAlgorithmX25519::platformDeriveBits(const CryptoKeyOKP&, const CryptoKeyOKP&)
+ {
+     return std::nullopt;
+diff --git a/Source/WebCore/crypto/keys/CryptoKeyOKP.cpp b/Source/WebCore/crypto/keys/CryptoKeyOKP.cpp
+index 3bc098d85c..1aadc3624d 100644
+--- a/Source/WebCore/crypto/keys/CryptoKeyOKP.cpp
++++ b/Source/WebCore/crypto/keys/CryptoKeyOKP.cpp
+@@ -232,7 +232,7 @@ CryptoKey::Data CryptoKeyOKP::data() const
+     };
+ }
+ 
+-#if !PLATFORM(COCOA) && !USE(GCRYPT)
++#if !PLATFORM(COCOA) && !USE(GCRYPT) && !USE(OPENSSL)
+ 
+ bool CryptoKeyOKP::supportsNamedCurve()
+ {
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
+index 70fce2e67a..4b7ade0c3b 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmAESGCMOpenSSL.cpp
+@@ -64,14 +64,14 @@ static std::optional<Vector<uint8_t>> cryptEncrypt(const Vector<uint8_t>& key, c
+     if (!(ctx = EvpCipherCtxPtr(EVP_CIPHER_CTX_new())))
+         return std::nullopt;
+ 
+-    // Disable padding
+-    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+-        return std::nullopt;
+-
+     // Initialize the encryption operation
+     if (1 != EVP_EncryptInit_ex(ctx.get(), algorithm, nullptr, nullptr, nullptr))
+         return std::nullopt;
+ 
++    // Disable padding (OpenSSL 3 needs the cipher to be set first)
++    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
++        return std::nullopt;
++
+     // Set IV length
+     if (1 != EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr))
+         return std::nullopt;
+@@ -120,14 +120,14 @@ static std::optional<Vector<uint8_t>> cryptDecrypt(const Vector<uint8_t>& key, c
+     if (!(ctx = EvpCipherCtxPtr(EVP_CIPHER_CTX_new())))
+         return std::nullopt;
+ 
+-    // Disable padding
+-    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
+-        return std::nullopt;
+-
+     // Initialize the encryption operation
+     if (1 != EVP_DecryptInit_ex(ctx.get(), algorithm, nullptr, nullptr, nullptr))
+         return std::nullopt;
+ 
++    // Disable padding (OpenSSL 3 needs the cipher to be set first)
++    if (1 != EVP_CIPHER_CTX_set_padding(ctx.get(), 0))
++        return std::nullopt;
++
+     // Set IV length
+     if (1 != EVP_CIPHER_CTX_ctrl(ctx.get(), EVP_CTRL_GCM_SET_IVLEN, iv.size(), nullptr))
+         return std::nullopt;
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmEd25519OpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmEd25519OpenSSL.cpp
+new file mode 100644
+index 0000000000..3437a9ea3a
+--- /dev/null
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmEd25519OpenSSL.cpp
+@@ -0,0 +1,78 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "CryptoAlgorithmEd25519.h"
++
++#include "CryptoKeyOKP.h"
++#include "ExceptionOr.h"
++#include "OpenSSLCryptoUniquePtr.h"
++#include <openssl/evp.h>
++
++namespace WebCore {
++
++// Ed25519 (RFC 8032) ohne Vorab-Hash: EVP_DigestSign mit leerem Digest
++
++ExceptionOr<Vector<uint8_t>> CryptoAlgorithmEd25519::platformSign(const CryptoKeyOKP& key, const Vector<uint8_t>& data)
++{
++    auto keyData = key.platformKey().span();
++    EvpPKeyPtr pkey(EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, keyData.data(), keyData.size()));
++    if (!pkey)
++        return Exception { ExceptionCode::OperationError };
++
++    EvpDigestCtxPtr context(EVP_MD_CTX_new());
++    if (!context || EVP_DigestSignInit(context.get(), nullptr, nullptr, nullptr, pkey.get()) <= 0)
++        return Exception { ExceptionCode::OperationError };
++
++    size_t signatureSize = 0;
++    auto dataSpan = data.span();
++    if (EVP_DigestSign(context.get(), nullptr, &signatureSize, dataSpan.data(), dataSpan.size()) <= 0)
++        return Exception { ExceptionCode::OperationError };
++    Vector<uint8_t> signature(signatureSize);
++    if (EVP_DigestSign(context.get(), signature.mutableSpan().data(), &signatureSize, dataSpan.data(), dataSpan.size()) <= 0)
++        return Exception { ExceptionCode::OperationError };
++    signature.shrink(signatureSize);
++    return signature;
++}
++
++ExceptionOr<bool> CryptoAlgorithmEd25519::platformVerify(const CryptoKeyOKP& key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
++{
++    if (signature.size() != 64)
++        return false;
++
++    auto keyData = key.platformKey().span();
++    EvpPKeyPtr pkey(EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr, keyData.data(), keyData.size()));
++    if (!pkey)
++        return false;
++
++    EvpDigestCtxPtr context(EVP_MD_CTX_new());
++    if (!context || EVP_DigestVerifyInit(context.get(), nullptr, nullptr, nullptr, pkey.get()) <= 0)
++        return false;
++
++    auto signatureSpan = signature.span();
++    auto dataSpan = data.span();
++    return EVP_DigestVerify(context.get(), signatureSpan.data(), signatureSpan.size(), dataSpan.data(), dataSpan.size()) == 1;
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
+index 4e8ca0234f..7d69eff0a1 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
+@@ -36,7 +36,7 @@ namespace WebCore {
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& plainText)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+@@ -85,7 +85,7 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformEncrypt(const Cryp
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_OAEP::platformDecrypt(const CryptoAlgorithmRsaOaepParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& cipherText)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_oaep_md) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md) && defined(EVP_PKEY_CTX_set0_rsa_oaep_label))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
+index 0d16994f3d..a51fa1bdcc 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
+@@ -37,7 +37,7 @@ namespace WebCore {
+ 
+ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_PSS::platformSign(const CryptoAlgorithmRsaPssParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& data)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+@@ -82,7 +82,7 @@ ExceptionOr<Vector<uint8_t>> CryptoAlgorithmRSA_PSS::platformSign(const CryptoAl
+ 
+ ExceptionOr<bool> CryptoAlgorithmRSA_PSS::platformVerify(const CryptoAlgorithmRsaPssParams& parameters, const CryptoKeyRSA& key, const Vector<uint8_t>& signature, const Vector<uint8_t>& data)
+ {
+-#if defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md)
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L || (defined(EVP_PKEY_CTX_set_rsa_pss_saltlen) && defined(EVP_PKEY_CTX_set_rsa_mgf1_md))
+     const EVP_MD* md = digestAlgorithm(key.hashAlgorithmIdentifier());
+     if (!md)
+         return Exception { ExceptionCode::NotSupportedError };
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmRegistryOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmRegistryOpenSSL.cpp
+index 7d44959c76..4a4e527533 100644
+--- a/Source/WebCore/crypto/openssl/CryptoAlgorithmRegistryOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmRegistryOpenSSL.cpp
+@@ -33,6 +33,7 @@
+ #include "CryptoAlgorithmAESKW.h"
+ #include "CryptoAlgorithmECDH.h"
+ #include "CryptoAlgorithmECDSA.h"
++#include "CryptoAlgorithmEd25519.h"
+ #include "CryptoAlgorithmHKDF.h"
+ #include "CryptoAlgorithmHMAC.h"
+ #include "CryptoAlgorithmPBKDF2.h"
+@@ -43,6 +44,7 @@
+ #include "CryptoAlgorithmSHA256.h"
+ #include "CryptoAlgorithmSHA384.h"
+ #include "CryptoAlgorithmSHA512.h"
++#include "CryptoAlgorithmX25519.h"
+ 
+ namespace WebCore {
+ 
+@@ -55,6 +57,7 @@ void CryptoAlgorithmRegistry::platformRegisterAlgorithms()
+     registerAlgorithm<CryptoAlgorithmAESKW>();
+     registerAlgorithm<CryptoAlgorithmECDH>();
+     registerAlgorithm<CryptoAlgorithmECDSA>();
++    registerAlgorithm<CryptoAlgorithmEd25519>();
+     registerAlgorithm<CryptoAlgorithmHKDF>();
+     registerAlgorithm<CryptoAlgorithmHMAC>();
+     registerAlgorithm<CryptoAlgorithmPBKDF2>();
+@@ -65,6 +68,7 @@ void CryptoAlgorithmRegistry::platformRegisterAlgorithms()
+     registerAlgorithm<CryptoAlgorithmSHA256>();
+     registerAlgorithm<CryptoAlgorithmSHA384>();
+     registerAlgorithm<CryptoAlgorithmSHA512>();
++    registerAlgorithm<CryptoAlgorithmX25519>();
+ }
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/crypto/openssl/CryptoAlgorithmX25519OpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoAlgorithmX25519OpenSSL.cpp
+new file mode 100644
+index 0000000000..a3f092021e
+--- /dev/null
++++ b/Source/WebCore/crypto/openssl/CryptoAlgorithmX25519OpenSSL.cpp
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "CryptoAlgorithmX25519.h"
++
++#include "CryptoKeyOKP.h"
++#include "OpenSSLCryptoUniquePtr.h"
++#include <openssl/evp.h>
++
++namespace WebCore {
++
++// X25519 (RFC 7748). OpenSSL lehnt ein Ergebnis aus lauter Nullen selber ab.
++std::optional<Vector<uint8_t>> CryptoAlgorithmX25519::platformDeriveBits(const CryptoKeyOKP& baseKey, const CryptoKeyOKP& publicKey)
++{
++    auto baseKeyData = baseKey.platformKey().span();
++    auto publicKeyData = publicKey.platformKey().span();
++    EvpPKeyPtr privateKey(EVP_PKEY_new_raw_private_key(EVP_PKEY_X25519, nullptr, baseKeyData.data(), baseKeyData.size()));
++    EvpPKeyPtr peerKey(EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, nullptr, publicKeyData.data(), publicKeyData.size()));
++    if (!privateKey || !peerKey)
++        return std::nullopt;
++
++    EvpPKeyCtxPtr context(EVP_PKEY_CTX_new(privateKey.get(), nullptr));
++    if (!context || EVP_PKEY_derive_init(context.get()) <= 0 || EVP_PKEY_derive_set_peer(context.get(), peerKey.get()) <= 0)
++        return std::nullopt;
++
++    size_t length = 0;
++    if (EVP_PKEY_derive(context.get(), nullptr, &length) <= 0)
++        return std::nullopt;
++    Vector<uint8_t> result(length);
++    if (EVP_PKEY_derive(context.get(), result.mutableSpan().data(), &length) <= 0)
++        return std::nullopt;
++    result.shrink(length);
++    return result;
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/crypto/openssl/CryptoKeyOKPOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoKeyOKPOpenSSL.cpp
+new file mode 100644
+index 0000000000..3ca2fe7f00
+--- /dev/null
++++ b/Source/WebCore/crypto/openssl/CryptoKeyOKPOpenSSL.cpp
+@@ -0,0 +1,219 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
++ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
++ * IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
++ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
++ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "CryptoKeyOKP.h"
++
++#include "CryptoKeyPair.h"
++#include "ExceptionOr.h"
++#include "OpenSSLCryptoUniquePtr.h"
++#include <openssl/evp.h>
++#include <openssl/x509.h>
++#include <wtf/text/Base64.h>
++
++namespace WebCore {
++
++// Ed25519 und X25519 ueber die EVP_PKEY-Schnittstelle von OpenSSL. Die Schluessel
++// liegen wie bei den anderen Ports roh in m_data: 32 Bytes privat bzw. oeffentlich.
++
++static constexpr size_t okpKeySize = 32;
++
++static int evpTypeForCurve(CryptoKeyOKP::NamedCurve curve)
++{
++    return curve == CryptoKeyOKP::NamedCurve::Ed25519 ? EVP_PKEY_ED25519 : EVP_PKEY_X25519;
++}
++
++static EvpPKeyPtr evpKeyFromRaw(CryptoKeyOKP::NamedCurve curve, CryptoKeyType type, const Vector<uint8_t>& data)
++{
++    auto span = data.span();
++    if (type == CryptoKeyType::Private)
++        return EvpPKeyPtr(EVP_PKEY_new_raw_private_key(evpTypeForCurve(curve), nullptr, span.data(), span.size()));
++    return EvpPKeyPtr(EVP_PKEY_new_raw_public_key(evpTypeForCurve(curve), nullptr, span.data(), span.size()));
++}
++
++static std::optional<Vector<uint8_t>> rawPublicKey(EVP_PKEY* key)
++{
++    size_t size = 0;
++    if (EVP_PKEY_get_raw_public_key(key, nullptr, &size) <= 0 || size != okpKeySize)
++        return std::nullopt;
++    Vector<uint8_t> result(size);
++    if (EVP_PKEY_get_raw_public_key(key, result.mutableSpan().data(), &size) <= 0)
++        return std::nullopt;
++    return result;
++}
++
++static std::optional<Vector<uint8_t>> rawPrivateKey(EVP_PKEY* key)
++{
++    size_t size = 0;
++    if (EVP_PKEY_get_raw_private_key(key, nullptr, &size) <= 0 || size != okpKeySize)
++        return std::nullopt;
++    Vector<uint8_t> result(size);
++    if (EVP_PKEY_get_raw_private_key(key, result.mutableSpan().data(), &size) <= 0)
++        return std::nullopt;
++    return result;
++}
++
++bool CryptoKeyOKP::supportsNamedCurve()
++{
++    return true;
++}
++
++std::optional<CryptoKeyPair> CryptoKeyOKP::platformGeneratePair(CryptoAlgorithmIdentifier identifier, NamedCurve namedCurve, bool extractable, CryptoKeyUsageBitmap usages)
++{
++    EvpPKeyCtxPtr context(EVP_PKEY_CTX_new_id(evpTypeForCurve(namedCurve), nullptr));
++    if (!context || EVP_PKEY_keygen_init(context.get()) <= 0)
++        return std::nullopt;
++
++    EVP_PKEY* generated = nullptr;
++    if (EVP_PKEY_keygen(context.get(), &generated) <= 0)
++        return std::nullopt;
++    EvpPKeyPtr key(generated);
++
++    auto publicKeyData = rawPublicKey(key.get());
++    auto privateKeyData = rawPrivateKey(key.get());
++    if (!publicKeyData || !privateKeyData)
++        return std::nullopt;
++
++    bool isPublicKeyExtractable = true;
++    auto publicKey = CryptoKeyOKP::create(identifier, namedCurve, CryptoKeyType::Public, WTF::move(*publicKeyData), isPublicKeyExtractable, usages);
++    ASSERT(publicKey);
++    auto privateKey = CryptoKeyOKP::create(identifier, namedCurve, CryptoKeyType::Private, WTF::move(*privateKeyData), extractable, usages);
++    ASSERT(privateKey);
++    return CryptoKeyPair { WTF::move(publicKey), WTF::move(privateKey) };
++}
++
++bool CryptoKeyOKP::platformCheckPairedKeys(CryptoAlgorithmIdentifier, NamedCurve namedCurve, const Vector<uint8_t>& privateKey, const Vector<uint8_t>& publicKey)
++{
++    auto key = evpKeyFromRaw(namedCurve, CryptoKeyType::Private, privateKey);
++    if (!key)
++        return false;
++    auto derivedPublicKey = rawPublicKey(key.get());
++    return derivedPublicKey && *derivedPublicKey == publicKey;
++}
++
++RefPtr<CryptoKeyOKP> CryptoKeyOKP::importSpki(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
++{
++    // SubjectPublicKeyInfo nach RFC 8410: OID id-Ed25519 bzw. id-X25519, ohne Parameter
++    auto span = keyData.span();
++    const uint8_t* pointer = span.data();
++    EvpPKeyPtr key(d2i_PUBKEY(nullptr, &pointer, span.size()));
++    if (!key || pointer != span.data() + span.size())
++        return nullptr;
++    if (EVP_PKEY_get_base_id(key.get()) != evpTypeForCurve(curve))
++        return nullptr;
++
++    auto publicKeyData = rawPublicKey(key.get());
++    if (!publicKeyData)
++        return nullptr;
++    return create(identifier, curve, CryptoKeyType::Public, WTF::move(*publicKeyData), extractable, usages);
++}
++
++ExceptionOr<Vector<uint8_t>> CryptoKeyOKP::exportSpki() const
++{
++    if (type() != CryptoKeyType::Public)
++        return Exception { ExceptionCode::InvalidAccessError };
++
++    auto key = evpKeyFromRaw(m_curve, CryptoKeyType::Public, m_data);
++    if (!key)
++        return Exception { ExceptionCode::OperationError };
++
++    int length = i2d_PUBKEY(key.get(), nullptr);
++    if (length <= 0)
++        return Exception { ExceptionCode::OperationError };
++    Vector<uint8_t> result(length);
++    uint8_t* pointer = result.mutableSpan().data();
++    if (i2d_PUBKEY(key.get(), &pointer) != length)
++        return Exception { ExceptionCode::OperationError };
++    return result;
++}
++
++RefPtr<CryptoKeyOKP> CryptoKeyOKP::importPkcs8(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
++{
++    // PrivateKeyInfo nach RFC 8410: der private Schluessel steckt als OCTET STRING drin
++    auto span = keyData.span();
++    const uint8_t* pointer = span.data();
++    PKCS8PrivKeyInfoPtr info(d2i_PKCS8_PRIV_KEY_INFO(nullptr, &pointer, span.size()));
++    if (!info || pointer != span.data() + span.size())
++        return nullptr;
++
++    EvpPKeyPtr key(EVP_PKCS82PKEY(info.get()));
++    if (!key || EVP_PKEY_get_base_id(key.get()) != evpTypeForCurve(curve))
++        return nullptr;
++
++    auto privateKeyData = rawPrivateKey(key.get());
++    if (!privateKeyData)
++        return nullptr;
++    return create(identifier, curve, CryptoKeyType::Private, WTF::move(*privateKeyData), extractable, usages);
++}
++
++ExceptionOr<Vector<uint8_t>> CryptoKeyOKP::exportPkcs8() const
++{
++    if (type() != CryptoKeyType::Private)
++        return Exception { ExceptionCode::InvalidAccessError };
++
++    auto key = evpKeyFromRaw(m_curve, CryptoKeyType::Private, m_data);
++    if (!key)
++        return Exception { ExceptionCode::OperationError };
++
++    PKCS8PrivKeyInfoPtr info(EVP_PKEY2PKCS8(key.get()));
++    if (!info)
++        return Exception { ExceptionCode::OperationError };
++
++    int length = i2d_PKCS8_PRIV_KEY_INFO(info.get(), nullptr);
++    if (length <= 0)
++        return Exception { ExceptionCode::OperationError };
++    Vector<uint8_t> result(length);
++    uint8_t* pointer = result.mutableSpan().data();
++    if (i2d_PKCS8_PRIV_KEY_INFO(info.get(), &pointer) != length)
++        return Exception { ExceptionCode::OperationError };
++    return result;
++}
++
++String CryptoKeyOKP::generateJwkD() const
++{
++    ASSERT(type() == CryptoKeyType::Private);
++    return base64URLEncodeToString(m_data);
++}
++
++String CryptoKeyOKP::generateJwkX() const
++{
++    if (type() == CryptoKeyType::Public)
++        return base64URLEncodeToString(m_data);
++
++    ASSERT(type() == CryptoKeyType::Private);
++    auto key = evpKeyFromRaw(m_curve, CryptoKeyType::Private, m_data);
++    if (!key)
++        return { };
++    auto publicKeyData = rawPublicKey(key.get());
++    if (!publicKeyData)
++        return { };
++    return base64URLEncodeToString(*publicKeyData);
++}
++
++Vector<uint8_t> CryptoKeyOKP::platformExportRaw() const
++{
++    return m_data;
++}
++
++} // namespace WebCore
+diff --git a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp b/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
+index cfc7adfc97..e111fb6b4c 100644
+--- a/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
++++ b/Source/WebCore/crypto/openssl/CryptoKeyRSAOpenSSL.cpp
+@@ -37,7 +37,7 @@
+ 
+ namespace WebCore {
+ 
+-static size_t getRSAModulusLength(RSA* rsa)
++static size_t getRSAModulusLength(const RSA* rsa)
+ {
+     if (!rsa)
+         return 0;
+@@ -164,7 +164,8 @@ bool CryptoKeyRSA::isRestrictedToHash(CryptoAlgorithmIdentifier& identifier) con
+ 
+ size_t CryptoKeyRSA::keySizeInBits() const
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
+     if (!rsa)
+         return 0;
+ 
+@@ -297,7 +298,8 @@ ExceptionOr<Vector<uint8_t>> CryptoKeyRSA::exportPkcs8() const
+ 
+ auto CryptoKeyRSA::algorithm() const -> KeyAlgorithm
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
+ 
+     // FIXME: `CryptoRsaKeyAlgorithm` stores `modulusLength` as an `unsigned` requiring us to cast below. We should find a way to remove the need for a cast / ensure the cast is safe and doesn't overflow.
+ 
+@@ -330,7 +332,8 @@ auto CryptoKeyRSA::algorithm() const -> KeyAlgorithm
+ 
+ std::unique_ptr<CryptoKeyRSAComponents> CryptoKeyRSA::exportData() const
+ {
+-    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
++    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
+     if (!rsa)
+         return nullptr;
+ 
+diff --git a/Source/WebCore/platform/OpenSSL.cmake b/Source/WebCore/platform/OpenSSL.cmake
+index d65ff90dc3..1a4a65584f 100644
+--- a/Source/WebCore/platform/OpenSSL.cmake
++++ b/Source/WebCore/platform/OpenSSL.cmake
+@@ -6,6 +6,7 @@ list(APPEND WebCore_SOURCES
+     crypto/openssl/CryptoAlgorithmAESKWOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmECDHOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmECDSAOpenSSL.cpp
++    crypto/openssl/CryptoAlgorithmEd25519OpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmHKDFOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmHMACOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmPBKDF2OpenSSL.cpp
+@@ -13,7 +14,9 @@ list(APPEND WebCore_SOURCES
+     crypto/openssl/CryptoAlgorithmRSA_OAEPOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmRSA_PSSOpenSSL.cpp
+     crypto/openssl/CryptoAlgorithmRegistryOpenSSL.cpp
++    crypto/openssl/CryptoAlgorithmX25519OpenSSL.cpp
+     crypto/openssl/CryptoKeyECOpenSSL.cpp
++    crypto/openssl/CryptoKeyOKPOpenSSL.cpp
+     crypto/openssl/CryptoKeyRSAOpenSSL.cpp
+     crypto/openssl/OpenSSLUtilities.cpp
+     crypto/openssl/SerializedCryptoKeyWrapOpenSSL.cpp

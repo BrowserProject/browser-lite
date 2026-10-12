@@ -2,11 +2,13 @@
 // WebCrypto in der Engine (OpenSSL im WASM): jede Operation einzeln, Ausgabe
 // "CRYPTO name=ok" oder "CRYPTO name=FEHLER ...". Laufen lassen mit
 //   RENDER_WAIT_FOR="CRYPTO fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html /tmp/c.ppm 200 200
-// Am Ende "CRYPTO fertig=ok", wenn alles ausser den bekannten Luecken geht.
+// Am Ende "CRYPTO fertig=ok", wenn alles geht.
 const s = crypto.subtle;
 const enc = new TextEncoder();
 const data = enc.encode('Hallo WebCrypto');
 const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+const unhex = (h) => new Uint8Array(h.match(/../g).map((x) => parseInt(x, 16)));
+const b64url = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const tests = {
   'random': async () => { crypto.getRandomValues(new Uint8Array(16)); return crypto.randomUUID().length === 36; },
   'digest SHA-1': async () => hex(await s.digest('SHA-1', data)).length === 40,
@@ -110,14 +112,58 @@ const tests = {
     const sig = await s.sign('Ed25519', k.privateKey, data);
     return s.verify('Ed25519', k.publicKey, sig, data);
   },
+  'Ed25519 RFC 8032': async () => {
+    // Testvektor 1 aus RFC 8032, Abschnitt 7.1 (leere Nachricht)
+    const d = '9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60';
+    const x = 'd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a';
+    const expected = 'e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b';
+    const priv = await s.importKey('jwk', { kty: 'OKP', crv: 'Ed25519', d: b64url(unhex(d)), x: b64url(unhex(x)) }, 'Ed25519', true, ['sign']);
+    const pub = await s.importKey('raw', unhex(x), 'Ed25519', true, ['verify']);
+    const sig = await s.sign('Ed25519', priv, new Uint8Array(0));
+    const bad = new Uint8Array(sig.slice(0)); bad[0] ^= 1;
+    return hex(sig) === expected && await s.verify('Ed25519', pub, sig, new Uint8Array(0)) && !await s.verify('Ed25519', pub, bad, new Uint8Array(0));
+  },
+  'Ed25519 Export/Import': async () => {
+    const k = await s.generateKey('Ed25519', true, ['sign', 'verify']);
+    const spki = await s.exportKey('spki', k.publicKey);
+    const pkcs8 = await s.exportKey('pkcs8', k.privateKey);
+    const jwk = await s.exportKey('jwk', k.privateKey);
+    const raw = await s.exportKey('raw', k.publicKey);
+    const priv = await s.importKey('pkcs8', pkcs8, 'Ed25519', true, ['sign']);
+    const pub = await s.importKey('spki', spki, 'Ed25519', true, ['verify']);
+    const sig = await s.sign('Ed25519', priv, data);
+    return spki.byteLength === 44 && pkcs8.byteLength === 48 && jwk.x === b64url(raw) && jwk.d.length === 43
+      && await s.verify('Ed25519', pub, sig, data) && await s.verify('Ed25519', k.publicKey, sig, data);
+  },
   'X25519': async () => {
     const a = await s.generateKey('X25519', true, ['deriveBits']);
     const b = await s.generateKey('X25519', true, ['deriveBits']);
-    return (await s.deriveBits({ name: 'X25519', public: b.publicKey }, a.privateKey, 256)).byteLength === 32;
+    const ab = await s.deriveBits({ name: 'X25519', public: b.publicKey }, a.privateKey, 256);
+    const ba = await s.deriveBits({ name: 'X25519', public: a.publicKey }, b.privateKey, 256);
+    return ab.byteLength === 32 && hex(ab) === hex(ba);
+  },
+  'X25519 RFC 7748': async () => {
+    // Beispiel aus RFC 7748, Abschnitt 6.1
+    const alice = await s.importKey('jwk', { kty: 'OKP', crv: 'X25519',
+      d: b64url(unhex('77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a')),
+      x: b64url(unhex('8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a')) }, 'X25519', true, ['deriveBits']);
+    const bob = await s.importKey('raw', unhex('de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f'), 'X25519', true, []);
+    const shared = await s.deriveBits({ name: 'X25519', public: bob }, alice, 256);
+    return hex(shared) === '4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742';
+  },
+  'X25519 Export/Import': async () => {
+    const a = await s.generateKey('X25519', true, ['deriveBits']);
+    const b = await s.generateKey('X25519', true, ['deriveBits']);
+    const priv = await s.importKey('pkcs8', await s.exportKey('pkcs8', a.privateKey), 'X25519', false, ['deriveBits']);
+    const pub = await s.importKey('spki', await s.exportKey('spki', b.publicKey), 'X25519', true, []);
+    const jwk = await s.exportKey('jwk', a.privateKey);
+    const one = await s.deriveBits({ name: 'X25519', public: pub }, priv, 256);
+    const two = await s.deriveBits({ name: 'X25519', public: b.publicKey }, a.privateKey, 256);
+    return hex(one) === hex(two) && jwk.x === b64url(await s.exportKey('raw', a.publicKey));
   },
 };
-// Noch nicht umgesetzt (WebKit hat dafuer keinen OpenSSL-Code)
-const KNOWN_MISSING = ['Ed25519', 'X25519'];
+// Noch nicht umgesetzt
+const KNOWN_MISSING = [];
 (async () => {
   let bad = 0;
   for (const [name, test] of Object.entries(tests)) {
