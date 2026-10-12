@@ -25,7 +25,7 @@ private:
     void focus() final { }
     void unfocus() final { }
     bool canTakeFocus(WebCore::FocusDirection) const final { return true; }
-    void takeFocus(WebCore::FocusDirection) final { }
+    void takeFocus(WebCore::FocusDirection) final;
 
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;
@@ -48,6 +48,12 @@ private:
     void closeWindow() final;
     void runOpenPanel(WebCore::LocalFrame&, WebCore::FileChooser&) final;
 
+    RefPtr<WebCore::PopupMenu> createPopupMenu(WebCore::PopupMenuClient&) const final;
+    RefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebCore::PopupMenuClient&) const final;
+    RefPtr<WebCore::ColorChooser> createColorChooser(WebCore::ColorChooserClient&, const WebCore::Color&) final;
+    RefPtr<WebCore::DateTimeChooser> createDateTimeChooser(WebCore::DateTimeChooserClient&) final;
+    void mouseDidMoveOverElement(const WebCore::HitTestResult&, OptionSet<WebCore::PlatformEventModifier>, const String& toolTip, WebCore::TextDirection) final;
+
     void triggerRenderingUpdate() final;
     bool scheduleRenderingUpdate() final;
 
@@ -58,6 +64,8 @@ private:
 #endif
 
     WeakRef<WebView> m_view;
+    String m_hoveredLink;
+    String m_toolTip;
 };
 
 class FrameLoaderClient final : public WebCore::EmptyFrameLoaderClient {

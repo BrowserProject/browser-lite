@@ -7,6 +7,7 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
+import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -197,6 +198,7 @@ function onEngineReady() {
 }
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
+initPickers({ engine: () => engine, toUTF8, focusPage: () => focusPage() });
 
 // --------------------------------------------------------------------- Tabs
 
@@ -210,6 +212,7 @@ class Tab {
     this.canGoForward = false;
     this.loading = false;
     this.frameRequested = false;
+    this.zoom = 1;
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'page';
@@ -283,6 +286,7 @@ function activateTab(tab) {
     engine._bl_focus(activeTab.id, 0);
   }
   activeTab = tab;
+  clearHover();
   tab.canvas.style.display = 'block';
   tab.element.classList.add('active');
   engine._bl_focus(tab.id, 1);
@@ -314,6 +318,8 @@ function updateToolbar() {
   $('forward').disabled = !tab.canGoForward;
   $('reload').innerHTML = tab.loading ? '&#215;' : '&#8635;';
   $('reload').title = tab.loading ? 'Stoppen' : 'Neu laden';
+  $('zoom').hidden = tab.zoom === 1;
+  $('zoom').textContent = Math.round(tab.zoom * 100) + ' %';
   if (document.activeElement !== $('address'))
   $('address').value = tab.url === 'about:blank' ? '' : tab.url;
 }
@@ -385,6 +391,38 @@ function onEngineEvent(viewId, type, payload) {
   }
   if (type === 'filechooser') {
     openFileChooser(tab, data);
+    return;
+  }
+  // <select>, <input type=color/date>, Link unter der Maus (web/pickers.js)
+  switch (type) {
+  case 'popup':
+    showSelectPopup(tab, data);
+    return;
+  case 'popup-hide':
+    hideSelectPopup();
+    return;
+  case 'colorpicker':
+    showColorPicker(tab, data);
+    return;
+  case 'datetimepicker':
+    showDateTimePicker(tab, data);
+    return;
+  case 'picker-hide':
+    hidePicker();
+    return;
+  case 'hover':
+    showHover(tab, data, tab === activeTab);
+    return;
+  case 'takefocus':
+    // Tab ueber das letzte Element der Seite hinaus: zur Adressleiste
+    if (tab === activeTab) {
+      $('address').focus();
+      $('address').select();
+    }
+    return;
+  case 'find':
+    if (tab === activeTab)
+      showFindCount(data);
     return;
   }
   if (type === 'fullscreen') {
@@ -671,6 +709,12 @@ function attachInput(tab) {
     engine._bl_context_menu(tab.id, ...position(e));
   });
   canvas.addEventListener('wheel', (e) => {
+    // Strg + Mausrad (und Zwei-Finger-Zoom auf dem Touchpad): Zoom wie in Chrome
+    if (e.ctrlKey && !e.altKey && e.deltaY) {
+      changeZoom(tab, e.deltaY < 0 ? 1 : -1);
+      e.preventDefault();
+      return;
+    }
     let factor = 1;
     if (e.deltaMode === 1) factor = 40;       // Zeilen
     else if (e.deltaMode === 2) factor = 800; // Seiten
@@ -792,6 +836,163 @@ new ResizeObserver(() => {
   for (const tab of tabs.values())
     engine._bl_resize(tab.id, width, height, devicePixelRatio);
 }).observe($('viewport'));
+
+// ------------------------------------------------------------------ Zoom
+
+const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
+
+function setZoom(tab, zoom) {
+  tab.zoom = zoom;
+  engine._bl_set_zoom(tab.id, zoom);
+  if (tab === activeTab)
+    updateToolbar();
+}
+
+// direction: +1 groesser, -1 kleiner, 0 zuruecksetzen
+function changeZoom(tab, direction) {
+  if (!direction)
+    return setZoom(tab, 1);
+  const index = ZOOM_LEVELS.findIndex((level) => level >= tab.zoom - 0.001);
+  const next = direction > 0
+    ? ZOOM_LEVELS[Math.min(index + (ZOOM_LEVELS[index] > tab.zoom + 0.001 ? 0 : 1), ZOOM_LEVELS.length - 1)]
+    : ZOOM_LEVELS[Math.max(index - 1, 0)];
+  setZoom(tab, next);
+}
+$('zoom').addEventListener('click', () => activeTab && changeZoom(activeTab, 0));
+
+// ------------------------------------------------------- Suchen auf der Seite
+
+const findBar = $('find-bar');
+const findInput = $('find-input');
+let findTimer = 0;
+
+function openFind() {
+  if (!activeTab)
+    return;
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  if (findInput.value)
+    runFind(false, false);
+}
+
+function runFind(backwards, again) {
+  if (activeTab)
+    engine._bl_find(activeTab.id, toUTF8(findInput.value), backwards ? 1 : 0, again ? 1 : 0);
+}
+
+function closeFind() {
+  if (findBar.hidden)
+    return;
+  findBar.hidden = true;
+  $('find-count').textContent = '';
+  if (activeTab)
+    engine._bl_find_done(activeTab.id);
+  focusPage();
+}
+
+function showFindCount(data) {
+  $('find-count').textContent = findInput.value ? (data.matches ? `${data.index || 1} von ${data.matches}` : 'Keine Treffer') : '';
+}
+
+findInput.addEventListener('input', () => {
+  clearTimeout(findTimer);
+  findTimer = setTimeout(() => runFind(false, false), 150);
+});
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    runFind(e.shiftKey, true);
+    e.preventDefault();
+  } else if (e.key === 'Escape') {
+    closeFind();
+    e.preventDefault();
+  }
+});
+$('find-next').addEventListener('click', () => runFind(false, true));
+$('find-prev').addEventListener('click', () => runFind(true, true));
+$('find-close').addEventListener('click', closeFind);
+
+// ------------------------------------------------------------ Tastenkuerzel
+// Wie in Chrome. Manche (Strg+T/W/N/Tab) gibt Chrome nur in einem eigenen
+// App-Fenster (installierte Web-App) an Seiten weiter, dann gehen sie auch hier.
+
+function switchTab(offset) {
+  const list = [...tabs.values()];
+  if (list.length < 2 || !activeTab)
+    return;
+  const index = list.indexOf(activeTab);
+  activateTab(list[(index + offset + list.length) % list.length]);
+}
+
+function shortcut(e) {
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const tab = activeTab;
+  if (ctrl && !e.altKey) {
+    switch (key) {
+    case 't': newTab('about:blank'); $('address').focus(); return true;
+    case 'w': if (tab) closeTab(tab); return true;
+    case 'l': $('address').focus(); $('address').select(); return true;
+    case 'f':
+    case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;
+    case 'r': if (tab) engine._bl_reload(tab.id); return true;
+    case '+':
+    case '=': if (tab) changeZoom(tab, 1); return true;
+    case '-': if (tab) changeZoom(tab, -1); return true;
+    case '0': if (tab) changeZoom(tab, 0); return true;
+    case 'Tab': switchTab(e.shiftKey ? -1 : 1); return true;
+    case 'PageDown': switchTab(1); return true;
+    case 'PageUp': switchTab(-1); return true;
+    }
+    if (/^[1-9]$/.test(key)) {
+      const list = [...tabs.values()];
+      const target = key === '9' ? list[list.length - 1] : list[Number(key) - 1];
+      if (target)
+        activateTab(target);
+      return true;
+    }
+    return false;
+  }
+  if (e.altKey && !ctrl && tab) {
+    if (key === 'ArrowLeft') { engine._bl_go_back(tab.id); return true; }
+    if (key === 'ArrowRight') { engine._bl_go_forward(tab.id); return true; }
+    if (key === 'd') { $('address').focus(); $('address').select(); return true; }
+  }
+  if (!ctrl && !e.altKey) {
+    switch (key) {
+    case 'F5': if (tab) engine._bl_reload(tab.id); return true;
+    case 'F6': $('address').focus(); $('address').select(); return true;
+    case 'F3': if (findBar.hidden) openFind(); else runFind(e.shiftKey, true); return true;
+    }
+  }
+  return false;
+}
+
+let swallowKeyUp = null;
+window.addEventListener('keydown', (e) => {
+  if (!engine || e.isComposing)
+    return;
+  if (shortcut(e)) {
+    swallowKeyUp = e.code;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}, true);
+window.addEventListener('keyup', (e) => {
+  if (swallowKeyUp && e.code === swallowKeyUp) {
+    swallowKeyUp = null;
+    e.stopImmediatePropagation();
+  }
+}, true);
+
+// Tab in der Adressleiste: Fokus in die Seite (erstes Element)
+$('address').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab' || !activeTab)
+    return;
+  e.preventDefault();
+  focusPage();
+  engine._bl_focus_initial(activeTab.id, e.shiftKey ? 0 : 1);
+});
 
 $('screen').remove(); // Platzhalter, jeder Tab hat sein eigenes Canvas
 startEngine().catch((error) => {

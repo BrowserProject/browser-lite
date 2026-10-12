@@ -20,6 +20,7 @@
         <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Adresse eingeben">
       </form>
       <span id="status"></span>
+      <button id="zoom" title="Zoom zurücksetzen" hidden></button>
       <button id="clear-data" title="Gespeicherte Daten löschen">&#128465;</button>
     </div>
     <div id="progress"></div>
@@ -28,6 +29,13 @@
     <canvas id="screen" tabindex="0"></canvas>
     <textarea id="ime" aria-hidden="true" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
     <div id="boot">Engine wird geladen...</div>
+    <div id="find-bar" hidden>
+      <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Auf Seite suchen">
+      <span id="find-count"></span>
+      <button id="find-prev" title="Vorheriger Treffer (Umschalt+Enter)">&#8963;</button>
+      <button id="find-next" title="Nächster Treffer (Enter)">&#8964;</button>
+      <button id="find-close" title="Schliessen (Esc)">&#215;</button>
+    </div>
   </main>
   <div id="context-menu" role="menu" hidden></div>
   <script type="module" src="app.js"></script>

@@ -73,6 +73,14 @@ kommen zuerst.
   es selber, die Oberflaeche zeigt es im Tab
 - [x] Vollbild (`requestFullscreen`): der Seitenbereich wird im Host-Browser gross, Esc beendet
   es auch fuer die Seite
+- [x] `<select>`-Listen (vorher gingen sie gar nicht auf): eigene Liste in der Oberflaeche mit
+  Maus, Pfeiltasten, Tippen zum Springen, Esc (`engine/src/Choosers.cpp`, `web/pickers.js`)
+- [x] Farb- und Datumsauswahl (`<input type=color/date/time/datetime-local/month/week>`) ueber
+  den echten Dialog des Host-Browsers (verstecktes Feld + `showPicker`)
+- [x] Link-Adresse unten links beim Darueberfahren, Tooltips (`title`)
+- [x] Suchen auf der Seite (Strg+F, F3, Enter/Umschalt+Enter, "x von y"), Zoom (Strg +/-/0,
+  Strg+Mausrad, Anzeige in der Leiste), Tastenkuerzel wie Chrome (Strg+L/T/W/R/Tab/1-9,
+  Alt+Links/Rechts, F5, F6), Tab aus der Adressleiste in die Seite und zurueck
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
@@ -137,6 +145,13 @@ kommen zuerst.
   `tests/engine/stack.html`). Gefunden ueber das Kernel-Log (Segfault im Worker), `gdb` und die
   perf-Map von V8 (`--perf-basic-prof`). Dabei auch: der GC waehrend langer Skripte kam auf
   echten Seiten fast nie dran, jetzt auch beim Funktionseintritt
+- [x] Messlatte gegen Chromium (`tests/engine/features.html`, `tests/e2e/parity-test.mjs`):
+  277 Pruefungen (JS, WebAssembly, DOM, Grafik, CSS, Netz, Medien, Geraete). Stand:
+  206 von 277 wie Chromium (74 %). In CI als Bericht, rot nur bei Rueckschritt
+- [x] Viele fertige WebKit-Funktionen waren nur per Einstellung aus (Standard fuer WebCore allein):
+  Navigation API, Compression Streams, Permissions, Lazy Loading, Visual Viewport, Beacon,
+  `<datalist>`, Async Clipboard, Datum/Farbe, Formular-Pruefung mit Hinweis, Quirks u.a.
+- [x] Resizable ArrayBuffer (ES2024) stuerzte ab: bmalloc/WTF brauchten echtes mmap (Patch 0023)
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

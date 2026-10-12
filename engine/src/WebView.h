@@ -81,6 +81,10 @@ public:
     // Editor-Befehl wie "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);
+    void focusInitial(bool forward);
+    void setZoom(float);
+    void find(const String&, bool backwards, bool again);
+    void stopFind();
 
     // Fuer die Clients
     void didStartLoading();

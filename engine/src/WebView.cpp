@@ -1,5 +1,6 @@
 #include "config.h"
 #include "WebView.h"
+#include "Choosers.h"
 
 #include "BackForwardList.h"
 #include "Clients.h"
@@ -90,6 +91,7 @@ WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
 
 void WebView::close(int id)
 {
+    closeChoosers(id);
     openViews().remove(id);
 }
 
@@ -154,6 +156,40 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // nicht haben. hls.js & Co. nehmen sonst MMS und warten ewig.
     settings.setManagedMediaSourceEnabled(false);
 #endif
+    // Funktionen, die WebKit-Browser (WPE/GTK/Safari) einschalten, die fuer
+    // WebCore allein aber aus sind (UnifiedWebPreferences.yaml, Standard "WebCore")
+    settings.setCompressionStreamEnabled(true);
+    settings.setNavigationAPIEnabled(true);
+    settings.setPermissionsAPIEnabled(true);
+    settings.setUserActivationAPIEnabled(true);
+    settings.setLazyImageLoadingEnabled(true);
+    settings.setLazyIframeLoadingEnabled(true);
+    settings.setVisualViewportAPIEnabled(true);
+    settings.setBeaconAPIEnabled(true);
+    settings.setDataListElementEnabled(true);
+    settings.setAsyncClipboardAPIEnabled(true);
+    settings.setGenericCueAPIEnabled(true);
+    settings.setInputTypeColorEnabled(true);
+    settings.setInputTypeDateEnabled(true);
+    settings.setInputTypeDateTimeLocalEnabled(true);
+    settings.setInputTypeTimeEnabled(true);
+    settings.setInputTypeMonthEnabled(true);
+    settings.setInputTypeWeekEnabled(true);
+    settings.setDateTimeInputsEditableComponentsEnabled(true);
+    settings.setInteractiveFormValidationEnabled(true);
+    settings.setTextAreasAreResizable(true);
+    settings.setShouldRespectImageOrientation(true);
+    settings.setNeedsSiteSpecificQuirks(true);
+    settings.setDataTransferItemsEnabled(true);
+    settings.setDirectoryUploadEnabled(true);
+    settings.setDownloadAttributeEnabled(true);
+    settings.setClearSiteDataHTTPHeaderEnabled(true);
+    settings.setCrossOriginEmbedderPolicyEnabled(true);
+    settings.setCrossOriginOpenerPolicyEnabled(true);
+    settings.setMediaCapabilitiesEnabled(true);
+    settings.setHiddenPageDOMTimerThrottlingEnabled(true);
+    settings.setHiddenPageCSSAnimationSuspensionEnabled(true);
+
     settings.setDefaultFontSize(16);
     settings.setDefaultFixedFontSize(13);
     settings.setStandardFontFamily("Noto Sans"_s);
@@ -609,6 +645,55 @@ void WebView::setFocused(bool focused)
 {
     m_page->focusController().setActive(focused);
     m_page->focusController().setFocused(focused);
+}
+
+// Tab aus der Adressleiste in die Seite: erstes bzw. letztes Element fokussieren
+void WebView::focusInitial(bool forward)
+{
+    setFocused(true);
+    m_page->focusController().setInitialFocus(forward ? FocusDirection::Forward : FocusDirection::Backward, nullptr);
+}
+
+// Zoom wie Strg +/- in Chrome (Seite inkl. Bilder, Layout neu)
+void WebView::setZoom(float factor)
+{
+    if (RefPtr frame = mainFrame())
+        frame->setPageZoomFactor(factor);
+}
+
+// Suchen auf der Seite (Strg+F): alle Treffer markieren, zum naechsten springen,
+// der Oberflaeche "Treffer x von y" melden
+void WebView::find(const String& text, bool backwards, bool again)
+{
+    m_page->unmarkAllTextMatches();
+    if (text.isEmpty()) {
+        notifyHost(m_id, "find", "{\"matches\":0,\"index\":0}"_s);
+        return;
+    }
+    constexpr unsigned maxMatches = 1000;
+    FindOptions options { FindOption::CaseInsensitive, FindOption::WrapAround };
+    if (backwards)
+        options.add(FindOption::Backwards);
+    if (!again)
+        options.add(FindOption::StartInSelection);
+    auto matches = m_page->findTextMatches(text, { FindOption::CaseInsensitive }, maxMatches, false);
+    m_page->markAllMatchesForText(text, { FindOption::CaseInsensitive }, true, maxMatches);
+    auto found = m_page->findString(text, options);
+    unsigned index = 0;
+    if (found.range) {
+        for (size_t i = 0; i < matches.ranges.size(); i++) {
+            if (matches.ranges[i] == *found.range) {
+                index = i + 1;
+                break;
+            }
+        }
+    }
+    notifyHost(m_id, "find", makeString("{\"matches\":"_s, matches.ranges.size(), ",\"index\":"_s, index, '}'));
+}
+
+void WebView::stopFind()
+{
+    m_page->unmarkAllTextMatches();
 }
 
 void WebView::notifyNavigationState()

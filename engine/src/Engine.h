@@ -21,6 +21,9 @@ void runOnEngineThread(Function<void()>&&);
 
 // Event-Loop (EngineLoop.cpp)
 void initializeEngineLoop();
+
+// navigator.permissions.query() (Permissions.cpp)
+void installPermissionController();
 void scheduleRunLoopPump();
 
 // Log-Ausgabe, landet in der Konsole des Host-Browsers

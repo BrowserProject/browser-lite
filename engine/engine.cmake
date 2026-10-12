@@ -10,12 +10,14 @@ set(BL_LEGACY_STORAGE "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/Storage")
 
 add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/BackForwardList.cpp
+    ${BL_ENGINE_SRC}/Choosers.cpp
     ${BL_ENGINE_SRC}/Clients.cpp
     ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
+    ${BL_ENGINE_SRC}/Permissions.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp

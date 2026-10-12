@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "Clients.h"
+#include "Choosers.h"
 
 #include "Engine.h"
 #include "Host.h"
@@ -20,6 +21,7 @@
 #include <WebCore/DocumentPage.h>
 #include <WebCore/DocumentView.h>
 #include <WebCore/FileChooser.h>
+#include <WebCore/HitTestResult.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -199,6 +201,43 @@ RefPtr<Page> ChromeClient::createWindow(LocalFrame&, const String&, const Window
 void ChromeClient::runOpenPanel(LocalFrame&, FileChooser& chooser)
 {
     m_view->openFileChooser(chooser);
+}
+
+// Tab ueber das letzte Element hinaus: Fokus zurueck an die Oberflaeche
+void ChromeClient::takeFocus(FocusDirection direction)
+{
+    notifyHost(m_view->id(), "takefocus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
+}
+
+RefPtr<PopupMenu> ChromeClient::createPopupMenu(PopupMenuClient& client) const
+{
+    return BrowserLite::createPopupMenu(m_view.get(), client);
+}
+
+RefPtr<SearchPopupMenu> ChromeClient::createSearchPopupMenu(PopupMenuClient& client) const
+{
+    return BrowserLite::createSearchPopupMenu(m_view.get(), client);
+}
+
+RefPtr<ColorChooser> ChromeClient::createColorChooser(ColorChooserClient& client, const Color& color)
+{
+    return BrowserLite::createColorChooser(m_view.get(), client, color);
+}
+
+RefPtr<DateTimeChooser> ChromeClient::createDateTimeChooser(DateTimeChooserClient& client)
+{
+    return BrowserLite::createDateTimeChooser(m_view.get(), client);
+}
+
+// Link-Adresse unten links und Tooltips (title-Attribut) wie in Chrome
+void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& toolTip, TextDirection)
+{
+    String link = result.absoluteLinkURL().string();
+    if (link == m_hoveredLink && toolTip == m_toolTip)
+        return;
+    m_hoveredLink = link;
+    m_toolTip = toolTip;
+    notifyHost(m_view->id(), "hover", makeString("{\"link\":\""_s, jsonEscape(link), "\",\"tooltip\":\""_s, jsonEscape(toolTip), "\"}"_s));
 }
 
 void ChromeClient::closeWindow()

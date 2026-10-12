@@ -31,6 +31,14 @@ kein Absturz, Seite sieht im Screenshot aus wie in Chrome (bis auf noch ladende 
 | Reddit, eBay | gesperrt | Sperren Rechenzentrums-IPs ("blocked by network security" bzw. Fehlerseite). Liegt an der IP des Relays, nicht an der Engine |
 | Booking, IMDb, SBB | ok | Bot-Pruefung von AWS WAF: scheiterte an WebCrypto (AES-GCM ging mit OpenSSL 3 nicht, Patch 0010), jetzt rechnet sie durch und laedt die echte Seite neu |
 
+## Messlatte gegen Chromium
+
+`tests/e2e/parity-test.mjs` laedt `tests/engine/features.html` (277 Pruefungen) im Host-Chromium
+und im browser-lite. Stand 2026-10-12: **206 von 277 wie Chromium (74 %)**. Es fehlen vor allem
+Service Worker, SharedWorker, Cache API und Speicher-APIs, WebRTC/WebCodecs/Kamera,
+Geraete-APIs (Touch, Gamepad, Geolocation, Benachrichtigungen), OffscreenCanvas und variable
+Schriften. Die Liste der Unterschiede steht im CI-Lauf (Schritt "Messlatte").
+
 ## Bekannte Grenzen
 
 - Manche Seiten sperren Rechenzentrums-IPs (Reddit, eBay, Cloudflare zeigt dann ein

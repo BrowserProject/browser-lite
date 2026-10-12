@@ -5,6 +5,7 @@
 
 #include "config.h"
 
+#include "Choosers.h"
 #include "Engine.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
@@ -127,6 +128,44 @@ EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
     withView(id, [paths = takeString(paths)](WebView& view) {
         view.chooseFiles(paths.split('\n'));
     });
+}
+
+// Antworten der Auswahlen (Choosers.h): Listeneintrag (-1 = abgebrochen),
+// Farbe "#rrggbb", Datum/Zeit als Wert des Eingabefelds. done = Auswahl zu
+EMSCRIPTEN_KEEPALIVE void bl_popup_choose(int id, int index)
+{
+    runOnEngineThread([=] { choosePopupItem(id, index); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_color_chosen(int id, char* color, int done)
+{
+    runOnEngineThread([id, color = takeString(color), done] { chooseColor(id, color, done); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_datetime_chosen(int id, char* value, int done)
+{
+    runOnEngineThread([id, value = takeString(value), done] { chooseDateTime(id, value, done); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_focus_initial(int id, int forward)
+{
+    withView(id, [=](WebView& view) { view.focusInitial(forward); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
+{
+    withView(id, [=](WebView& view) { view.setZoom(factor); });
+}
+
+// Suchen: again = Weitersuchen mit derselben Eingabe (Enter / Shift+Enter)
+EMSCRIPTEN_KEEPALIVE void bl_find(int id, char* text, int backwards, int again)
+{
+    withView(id, [text = takeString(text), backwards, again](WebView& view) { view.find(text, backwards, again); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)
+{
+    withView(id, [](WebView& view) { view.stopFind(); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)

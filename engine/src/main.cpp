@@ -65,6 +65,7 @@ int main(int, char**)
     // VM gleich anlegen: ab jetzt laeuft jede Arbeit mit DeferGC (EngineLoop.cpp)
     WebCore::commonVM();
     installPlatformStrategies();
+    installPermissionController();
     // <video>/<audio> ueber das Host-<video> (media/)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     BrowserLite::initializeWebAssembly();
