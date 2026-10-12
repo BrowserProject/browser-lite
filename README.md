@@ -24,6 +24,7 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
 - `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
 - WebGL 1 und 2 (ueber das WebGL des eigenen Browsers)
+- WebAssembly der Seiten (laeuft in der WASM-Engine des eigenen Browsers), auch in Workern
 
 Noch nicht: DRM (EME), WebRTC, WireGuard. JavaScript ist langsamer als in einem
 normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md), welche

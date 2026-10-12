@@ -24,6 +24,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/media/MediaFetch.cpp
     ${BL_ENGINE_SRC}/media/MediaSourceWasm.cpp
     ${BL_ENGINE_SRC}/media/MediaPlayerPrivateWasm.cpp
+    ${BL_ENGINE_SRC}/wasm/WasmBridge.cpp
     ${BL_ENGINE_SRC}/websocket/WasmSocketProvider.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandleCurl.cpp
@@ -114,6 +115,9 @@ target_link_options(BrowserLiteEngine PRIVATE
     # entfernt sie fuer die Auslieferung)
     "SHELL:--profiling-funcs"
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js"
+    # WebAssembly der Seiten (engine/src/wasm/WasmBridge.cpp)
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js"
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js"
 )
 
 # GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
@@ -131,5 +135,15 @@ if (BROWSER_LITE_RUNTIME_DIR)
         "SHELL:--preload-file ${BROWSER_LITE_RUNTIME_DIR}@/"
         # HRTF-Daten fuer PannerNode (AudioBus::loadPlatformResource)
         "SHELL:--preload-file ${WEBCORE_DIR}/platform/audio/resources/Composite.wav@/usr/share/webkit/audio/Composite.wav"
+        # WebAssembly-API fuer die Seiten, wird in JSC ausgewertet
+        "SHELL:--preload-file ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js@/usr/share/browser-lite/wasm-guest.js"
     )
 endif ()
+
+# JS-Teile und Datenpaket: bei Aenderung neu linken
+set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
+    ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
+)

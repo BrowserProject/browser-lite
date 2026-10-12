@@ -24,12 +24,14 @@ kein Absturz, Seite sieht im Screenshot aus wie in Chrome (bis auf noch ladende 
 | CNN, weather.com | ok | weather.com ca. 60 s bis geladen (viel JavaScript) |
 | Blick, NZZ, Galaxus, Zalando, Ricardo | ok | |
 | three.js-Beispiel (WebGL) | ok | |
-| npm, Medium | offen | Cloudflare-Pruefung ("Just a moment...") bleibt bei "Verifying" haengen. Lokal kein klarer Fehler der Engine (ein Name der Pruefung loest auch bei Google-DNS nicht auf), in CI beobachten |
+| npm, Medium | teilweise | Cloudflare-Pruefung: seit WebAssembly geht, kommt das Kaestchen "Verify you are human" (bei Rechenzentrums-IPs normal), vorher blieb sie bei "Verifying" haengen |
+| sql.js-Demo (SQLite als WebAssembly im Worker) | ok | Abfrage liefert das richtige Ergebnis |
+| Squoosh | ok | Startseite |
 | Reddit, NYTimes, Spiegel, SBB, IMDb, Booking | nicht getestet | Im lokalen Test-Netz gesperrt |
 
 ## Bekannte Grenzen
 
 - JavaScript ist ohne JIT langsamer (CLoop), grosse Seiten brauchen 10 bis 60 s.
-- WebAssembly der Seiten gibt es noch nicht (`ENABLE_WEBASSEMBLY` aus). Seiten, die es
-  zwingend brauchen (z.B. manche Spiele, Figma), gehen darum nicht.
+- WebAssembly mit geteiltem Speicher (Threads) geht noch nicht. Seiten nehmen dann meist
+  eine Variante ohne Threads.
 - DRM (EME) gibt es nicht, Netflix & Co. spielen keine geschuetzten Videos ab.

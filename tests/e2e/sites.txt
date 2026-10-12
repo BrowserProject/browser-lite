@@ -53,3 +53,5 @@ https://www.zalando.ch/
 https://www.ricardo.ch/
 https://www.openstreetmap.org/
 https://threejs.org/examples/webgl_geometry_cube.html
+https://sql.js.org/examples/GUI/
+https://squoosh.app/

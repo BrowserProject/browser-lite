@@ -107,6 +107,30 @@ Thread, Sampling-Profiler aus.
 - Bild in die Seite: nach jedem Frame liest `GraphicsContextGLWasm` die Pixel mit
   `readPixels` (kein Compositing, siehe Entscheid 26).
 
+### WebAssembly der Seiten
+JSC kann mit dem C-Loop-Interpreter kein WebAssembly (der Wasm-Interpreter von JSC hat
+keinen C-Loop-Modus). Die Module der Seiten laufen darum in der echten WASM-Engine des
+Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
+
+- `engine/js/wasm-guest.js` baut die API `WebAssembly` in JSC nach (Module, Instance,
+  Memory, Table, Global, Tag, Exception, compile/instantiate(Streaming), Fehlerklassen).
+  Sie wird erst beim ersten Zugriff auf `WebAssembly` ausgewertet, in Fenstern und in
+  Workern/Worklets (Hook in WebCore, Patch 0018).
+- `engine/src/wasm/WasmBridge.cpp` ist die Bruecke: Werte gehen als Paare [Typ, Wert]
+  bzw. als 16-Byte-Slots im Speicher der Engine hin und her. Werte aus JSC (z.B. Funktionen
+  fuer Imports, externref) bekommen eine id, Objekte des Browsers (Funktionen, Tabellen,
+  Globals) auch.
+- `engine/js/wasm-host.js` fuehrt die Module im Engine-Worker aus. Imports aus JS rufen
+  ueber `bl_wasm_call_guest` zurueck in JSC, Ausnahmen gehen in beide Richtungen durch.
+- Speicher: JavaScript der Seite muss `memory.buffer` direkt sehen, der ArrayBuffer muss
+  also im Speicher der Engine liegen. Darum schreibt `engine/js/wasm-rewrite.js` jedes Modul
+  vor dem Kompilieren um: Speicher 0 wird der Speicher der Engine, jeder Zugriff bekommt
+  eine Grenzpruefung und die Basis des eigenen Bereichs dazu. memory.grow ruft die Bruecke,
+  die den Bereich bei Bedarf umzieht (der alte ArrayBuffer wird abgehaengt, wie im Standard).
+  Basis und Groesse liegen pro Funktion in Locals und werden nur nach Aufrufen neu geladen.
+  Kostet ca. 10-15 % Geschwindigkeit, dafuer kann ein Modul nur seinen eigenen Bereich
+  lesen und schreiben.
+
 ### Netzwerk
 - WebCore curl-Backend (`Source/WebCore/platform/network/curl/`), libcurl mit nghttp2
   (HTTP/2) und OpenSSL (das curl-Backend von WebCore nutzt direkt die OpenSSL-API).

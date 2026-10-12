@@ -10,6 +10,7 @@
 #include "MediaPlayerPrivateWasm.h"
 #include "Storage.h"
 #include "Strategies.h"
+#include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
 #include <WebCore/CommonAtomStrings.h>
@@ -66,6 +67,7 @@ int main(int, char**)
     installPlatformStrategies();
     // <video>/<audio> ueber das Host-<video> (media/)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
+    BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
 
     // Kopieren in der Seite -> echte Zwischenablage (der Host schreibt sie)

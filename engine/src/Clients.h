@@ -86,6 +86,7 @@ private:
     void dispatchDidFinishLoad() final;
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
     void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading, WebCore::WillInternallyHandleFailure) final;
+    void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld&) final;
 
     bool isMainFrame() const;
 

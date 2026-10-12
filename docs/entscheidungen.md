@@ -59,3 +59,7 @@ Hier steht was wir entschieden haben und kurz warum. Neue Entscheidungen unten a
 | 53 | ANGLE-Funktionen | Mit `tools/gen-angle-shim.py` aus den Khronos-Headern erzeugt, Rest von Hand | Rund 300 Funktionen, fast alle 1:1. Bei einem WebKit-Update einfach neu erzeugen |
 | 54 | Viele WebGL-Kontexte | Ein Host-Kontext pro WebGL-Version, Zustand beim Wechsel speichern/laden | Chrome erlaubt im Worker nur 4 Kontexte. Fingerprinting- und Feature-Tests legen oft kurz eigene Kontexte an, sonst ginge der Kontext der Seite verloren |
 | 55 | Bild-Encoder | Skia-Encoder an (PNG, JPEG, WebP) | Ohne sie lieferte `toDataURL`/`toBlob` immer `data:,`. Die Libs waren im sysroot schon da |
+| 56 | WebAssembly der Seiten | Module in der WASM-Engine des Browsers, API in JSC nachgebaut | JSC kann ohne JIT kein WebAssembly. Ein Interpreter im WASM waere 20-50x langsamer, so laeuft es fast mit voller Geschwindigkeit |
+| 57 | Speicher der Module | Modul umschreiben: Speicher ist ein Bereich im Engine-Speicher, jeder Zugriff mit Grenzpruefung | JSC muss `memory.buffer` als normalen ArrayBuffer zeigen, der muss im Engine-Speicher liegen. Die Pruefung haelt jedes Modul in seinem Bereich |
+| 58 | Basis/Groesse im Code | Pro Funktion in Locals, neu laden nach Aufrufen | Importierte Globals bei jedem Zugriff zu lesen machte den Code ca. 3x langsamer, so sind es ca. 12 % |
+| 59 | WebAssembly-API | Erst beim ersten Zugriff auswerten (Getter auf dem globalen Objekt) | Die meisten Seiten brauchen kein WebAssembly, so kostet es dort nichts |

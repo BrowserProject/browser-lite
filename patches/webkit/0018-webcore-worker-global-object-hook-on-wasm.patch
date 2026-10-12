@@ -1,0 +1,39 @@
+diff --git a/Source/WebCore/workers/WorkerOrWorkletScriptController.cpp b/Source/WebCore/workers/WorkerOrWorkletScriptController.cpp
+index d5ec6ffb1c..8b1b3ccd2d 100644
+--- a/Source/WebCore/workers/WorkerOrWorkletScriptController.cpp
++++ b/Source/WebCore/workers/WorkerOrWorkletScriptController.cpp
+@@ -680,8 +680,17 @@ void WorkerOrWorkletScriptController::initScriptWithSubclass()
+     // queue, not the event loop's queue.
+     if (!is<WorkletGlobalScope>(m_globalScope))
+         globalScope->addMicrotaskGlobalObject(m_globalScopeWrapper.get());
++
++#if PLATFORM(WASM)
++    if (workerGlobalObjectCreatedHook)
++        workerGlobalObjectCreatedHook(*m_globalScopeWrapper.get());
++#endif
+ }
+ 
++#if PLATFORM(WASM)
++void (*WorkerOrWorkletScriptController::workerGlobalObjectCreatedHook)(JSC::JSGlobalObject&) = nullptr;
++#endif
++
+ void WorkerOrWorkletScriptController::initScript()
+ {
+     ASSERT(m_vm.get());
+diff --git a/Source/WebCore/workers/WorkerOrWorkletScriptController.h b/Source/WebCore/workers/WorkerOrWorkletScriptController.h
+index c76bbee98b..983d05d3f4 100644
+--- a/Source/WebCore/workers/WorkerOrWorkletScriptController.h
++++ b/Source/WebCore/workers/WorkerOrWorkletScriptController.h
+@@ -63,6 +63,12 @@ class WorkerOrWorkletScriptController final : public CanMakeCheckedPtr<WorkerOrW
+     WTF_MAKE_NONCOPYABLE(WorkerOrWorkletScriptController);
+     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(WorkerOrWorkletScriptController);
+ public:
++#if PLATFORM(WASM)
++    // Fuer die Einbettung: wird nach dem Anlegen des globalen Objekts eines
++    // Workers/Worklets aufgerufen (browser-lite legt dort WebAssembly an)
++    WEBCORE_EXPORT static void (*workerGlobalObjectCreatedHook)(JSC::JSGlobalObject&);
++#endif
++
+     WorkerOrWorkletScriptController(WorkerThreadType, Ref<JSC::VM>&&, WorkerOrWorkletGlobalScope*);
+     ~WorkerOrWorkletScriptController();
+ 

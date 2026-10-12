@@ -10,6 +10,7 @@
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "WebView.h"
+#include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <WebCore/Chrome.h>
@@ -28,7 +29,10 @@
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
+#include <WebCore/DOMWrapperWorld.h>
+#include <WebCore/JSDOMGlobalObject.h>
 #include <WebCore/MIMETypeRegistry.h>
+#include <WebCore/ScriptController.h>
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
@@ -248,6 +252,16 @@ FrameLoaderClient::FrameLoaderClient(FrameLoader& frameLoader, WebView& view)
     , m_frameLoader(frameLoader)
     , m_view(view)
 {
+}
+
+// Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h)
+void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& world)
+{
+    if (!world.isNormal())
+        return;
+    Ref frame = m_frameLoader->frame();
+    if (auto* globalObject = frame->script().globalObject(world))
+        installWebAssembly(*globalObject);
 }
 
 bool FrameLoaderClient::isMainFrame() const

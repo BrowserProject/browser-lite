@@ -103,6 +103,11 @@ kommen zuerst.
   Kontexte (ein geteilter Host-Kontext pro Version). three.js-Beispiele laufen.
   Test: `tests/e2e/webgl-test.mjs`
 - [x] `toDataURL`/`toBlob` (PNG, JPEG, WebP): Skia-Encoder eingeschaltet, vorher immer `data:,`
+- [x] WebAssembly der Seiten: Module laufen in der WASM-Engine des Browsers, Speicher als
+  Bereich im Engine-Speicher (Modul wird umgeschrieben), API in JSC nachgebaut. Auch in
+  Workern. Tests: `tests/wasm/` (node) und `tests/e2e/wasm-test.mjs` (u.a. ein
+  Emscripten-Programm). sql.js laeuft, die Cloudflare-Pruefung kommt jetzt bis zum Klick.
+- [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
 - [ ] WebGL ohne `readPixels`: Bild direkt als ImageBitmap zum Host (braucht Compositing)
@@ -110,10 +115,11 @@ kommen zuerst.
 
 - [x] Kompatibilitaetsliste: 52 Seiten in `tests/e2e/sites.txt`, eigener CI-Job, Stand in
   `docs/kompatibilitaet.md`. Alle erreichbaren Seiten laden ohne Absturz.
-- [ ] Cloudflare-Pruefung (Turnstile) bleibt lokal bei "Verifying" haengen
+- [x] Cloudflare-Pruefung (Turnstile): mit WebAssembly kommt sie bis zum Kaestchen "Verify you
+  are human" (vorher blieb sie bei "Verifying" haengen)
 
 Offen: GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD,
-Service-Worker-Cache fuer das .wasm, CLoop-Tuning, WebAssembly der Seiten.
+Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 
 ## Phase 9: Media (spaeter)
 - [x] `ENABLE_VIDEO` an, ohne Abspiel-Backend: `<video>`/`<audio>` sind echte Media-Elemente,
