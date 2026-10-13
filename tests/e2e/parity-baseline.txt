@@ -197,6 +197,8 @@ js:uint8array-base64
 js:weakref
 media:audio-worklet
 media:av1
+media:get-display-media
+media:get-user-media
 media:media-session
 media:mse
 media:speech-recognition

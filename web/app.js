@@ -7,6 +7,7 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
+import { initCapture, onCaptureStart, onCaptureStop } from './capture.js';
 import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
@@ -215,6 +216,7 @@ function onEngineReady() {
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
+  initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker?.() });
   initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab) });
   // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
   const session = params.get('url') ? null : sessionToRestore();
@@ -279,7 +281,7 @@ class Tab {
 
     this.element = document.createElement('div');
     this.element.className = 'tab';
-    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><button class="audio" hidden></button><button class="close" title="Tab schliessen">&#215;</button>';
+    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><span class="recording" title="Kamera, Mikrofon oder Bildschirm in Gebrauch" hidden>&#9679;</span><button class="audio" hidden></button><button class="close" title="Tab schliessen">&#215;</button>';
     this.audible = false;
     this.muted = false;
     // Lautsprecher wie in Chrome: zeigt Ton an, Klick schaltet den Tab stumm
@@ -522,6 +524,12 @@ function onEngineEvent(viewId, type, payload) {
   case 'speak':
     onSpeak(data);
     return;
+  case 'capture-start':
+    onCaptureStart(data);
+    return;
+  case 'capture-stop':
+    onCaptureStop(data);
+    return;
   case 'speech-command':
     onSpeechCommand(data);
     return;
@@ -658,6 +666,9 @@ function onEngineEvent(viewId, type, payload) {
     break;
   case 'media-state':
     tab.setAudible(!!data.audio);
+    return;
+  case 'capture-state':
+    tab.element.querySelector('.recording').hidden = !data.active;
     return;
   case 'cursor':
     tab.canvas.style.cursor = data.cursor;

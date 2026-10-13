@@ -22,6 +22,7 @@ class ContentType;
 namespace BrowserLite {
 
 class MediaSourcePrivateWasm;
+class MediaStreamPlayback;
 
 class MediaPlayerPrivateWasm final
     : public WebCore::MediaPlayerPrivateInterface
@@ -51,6 +52,10 @@ public:
     void activeSourceBuffersChanged();
     void mediaSourceDurationChanged();
 
+    // Von MediaStreamPlayback (srcObject = MediaStream)
+    void streamChanged();
+    void streamFrameAvailable();
+
 private:
     constexpr WebCore::MediaPlayerType mediaPlayerType() const final { return m_isMediaSource ? WebCore::MediaPlayerType::WasmMSE : WebCore::MediaPlayerType::Wasm; }
 
@@ -60,6 +65,9 @@ private:
     void readyStateFromMediaSourceChanged() final;
     void characteristicsFromMediaSourceChanged() final;
     void mediaSourceHasRetrievedAllData() final;
+#endif
+#if ENABLE(MEDIA_STREAM)
+    void load(WebCore::MediaStreamPrivate&) final;
 #endif
     void cancelLoad() final;
 
@@ -96,7 +104,7 @@ private:
     // new VideoFrame(video) (WebCodecs)
     RefPtr<WebCore::VideoFrame> videoFrameForCurrentTime() final;
     WebCore::DestinationColorSpace colorSpace() final;
-    bool hasAvailableVideoFrame() const final { return m_frame.pixels; }
+    bool hasAvailableVideoFrame() const final;
     // requestVideoFrameCallback: Angaben zum neusten Bild, nur einmal pro Bild
     std::optional<WebCore::VideoFrameMetadata> videoFrameMetadata() final;
 
@@ -112,6 +120,11 @@ private:
     bool m_isMediaSource { false };
 #if ENABLE(MEDIA_SOURCE)
     RefPtr<MediaSourcePrivateWasm> m_mediaSource;
+#endif
+#if ENABLE(MEDIA_STREAM)
+    RefPtr<MediaStreamPlayback> m_stream;
+    WebCore::IntSize m_streamSize;
+    MonotonicTime m_streamStart;
 #endif
 
     WebCore::MediaPlayer::NetworkState m_networkState { WebCore::MediaPlayer::NetworkState::Empty };

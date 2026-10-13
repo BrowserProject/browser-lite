@@ -1,0 +1,65 @@
+diff --git a/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp b/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp
+index 3203d18f80..8c32e4dee9 100644
+--- a/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp
++++ b/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp
+@@ -546,6 +546,11 @@ void MediaStreamTrackPrivate::applyConstraints(const MediaConstraints& constrain
+ }
+ 
+ #if ENABLE(WEB_AUDIO)
++#if PLATFORM(WASM)
++// browser-lite: engine/src/media/MediaStreamWasm.cpp
++RefPtr<WebAudioSourceProvider> createMediaStreamTrackAudioSourceProviderWasm(MediaStreamTrackPrivate&);
++#endif
++
+ RefPtr<WebAudioSourceProvider> MediaStreamTrackPrivate::createAudioSourceProvider()
+ {
+     ASSERT(isMainThread());
+@@ -555,6 +560,8 @@ RefPtr<WebAudioSourceProvider> MediaStreamTrackPrivate::createAudioSourceProvide
+     return MediaStreamTrackAudioSourceProviderCocoa::create(*this);
+ #elif USE(GSTREAMER)
+     return AudioSourceProviderGStreamer::create(*this);
++#elif PLATFORM(WASM)
++    return createMediaStreamTrackAudioSourceProviderWasm(*this);
+ #else
+     return nullptr;
+ #endif
+diff --git a/Source/WebCore/platform/mediastream/RealtimeMediaSource.cpp b/Source/WebCore/platform/mediastream/RealtimeMediaSource.cpp
+index adc3420111..62f5e75c98 100644
+--- a/Source/WebCore/platform/mediastream/RealtimeMediaSource.cpp
++++ b/Source/WebCore/platform/mediastream/RealtimeMediaSource.cpp
+@@ -42,6 +42,7 @@
+ #include "NotImplemented.h"
+ #include "RealtimeMediaSourceCapabilities.h"
+ #include "RealtimeMediaSourceCenter.h"
++#include "VideoFrame.h"
+ #include <wtf/CompletionHandler.h>
+ #include <wtf/MainThread.h>
+ #include <wtf/MediaTime.h>
+diff --git a/Source/WebCore/platform/mock/MockRealtimeAudioSource.cpp b/Source/WebCore/platform/mock/MockRealtimeAudioSource.cpp
+index cca0135247..680c4c6af4 100644
+--- a/Source/WebCore/platform/mock/MockRealtimeAudioSource.cpp
++++ b/Source/WebCore/platform/mock/MockRealtimeAudioSource.cpp
+@@ -52,7 +52,8 @@
+ 
+ namespace WebCore {
+ 
+-#if !PLATFORM(MAC) && !PLATFORM(IOS_FAMILY) && !USE(GSTREAMER)
++// browser-lite: keine Mock-Geraete (engine/src/media/MediaStreamWasm.cpp)
++#if !PLATFORM(MAC) && !PLATFORM(IOS_FAMILY) && !USE(GSTREAMER) && !PLATFORM(WASM)
+ CaptureSourceOrError MockRealtimeAudioSource::create(String&& deviceID, String&& name, MediaDeviceHashSalts&& hashSalts, const MediaConstraints* constraints, std::optional<PageIdentifier>)
+ {
+ #ifndef NDEBUG
+diff --git a/Source/WebCore/platform/mock/MockRealtimeVideoSource.cpp b/Source/WebCore/platform/mock/MockRealtimeVideoSource.cpp
+index e302df5200..3b2107a1dd 100644
+--- a/Source/WebCore/platform/mock/MockRealtimeVideoSource.cpp
++++ b/Source/WebCore/platform/mock/MockRealtimeVideoSource.cpp
+@@ -60,7 +60,8 @@
+ 
+ namespace WebCore {
+ 
+-#if !PLATFORM(MAC) && !PLATFORM(IOS_FAMILY) && !USE(GSTREAMER)
++// browser-lite: keine Mock-Geraete (engine/src/media/MediaStreamWasm.cpp)
++#if !PLATFORM(MAC) && !PLATFORM(IOS_FAMILY) && !USE(GSTREAMER) && !PLATFORM(WASM)
+ CaptureSourceOrError MockRealtimeVideoSource::create(String&& deviceID, AtomString&& name, MediaDeviceHashSalts&& hashSalts, const MediaConstraints* constraints, std::optional<PageIdentifier> pageIdentifier)
+ {
+ #ifndef NDEBUG

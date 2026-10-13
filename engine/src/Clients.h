@@ -76,6 +76,7 @@ private:
 
     WeakRef<WebView> m_view;
     bool m_audible { false };
+    bool m_capturing { false };
     String m_hoveredLink;
     String m_toolTip;
 };

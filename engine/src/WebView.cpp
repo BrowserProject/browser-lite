@@ -15,6 +15,9 @@
 #include "ServiceWorkerWasm.h"
 #include "WebPlatformExtras.h"
 #include "WebCodecsWasm.h"
+#if ENABLE(MEDIA_STREAM)
+#include "MediaStreamWasm.h"
+#endif
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
@@ -170,6 +173,10 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     m_page = Page::create(WTF::move(configuration));
     debugLog("View %d: Page erstellt", id);
     attachDeviceClients(*this, *m_page);
+#if ENABLE(MEDIA_STREAM)
+    // getUserMedia/getDisplayMedia ueber Kamera und Bildschirm des Host
+    MediaStreams::attachTo(m_id, *m_page);
+#endif
     m_page->setUseColorAppearance(WasmPlatform::screenInfo().prefersDarkMode, false);
 
     auto& settings = m_page->settings();
@@ -224,6 +231,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCacheAPIEnabled(true);
     ServiceWorkers::enableIn(settings);
     WebCodecs::enableIn(settings);
+#if ENABLE(MEDIA_STREAM)
+    MediaStreams::enableIn(settings);
+#endif
     settings.setSpeechRecognitionEnabled(true);
     // Origin Private File System (FileSystemStorageWasm.cpp)
     settings.setFileSystemEnabled(true);

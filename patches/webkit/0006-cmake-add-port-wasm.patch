@@ -159,10 +159,10 @@ index 0000000000..0211c67287
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..e6f5f3bfda
+index 0000000000..5fd8150d5a
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,173 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
 +#
 +# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
@@ -233,7 +233,9 @@ index 0000000000..e6f5f3bfda
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBGL PRIVATE ON)
 +# MSE: die API gibt es, abgespielt wird spaeter ueber das MediaSource des Host-Browsers
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE PRIVATE ON)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE OFF)
++# Kamera, Mikrofon und Bildschirm des Host-Browsers (engine/src/media/MediaStreamWasm.cpp)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE ON)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_RECORDER PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_RTC PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ENCRYPTED_MEDIA PRIVATE OFF)
 +# Geraete und Dienste des Host-Browsers (engine/src, Daten kommen von der Oberflaeche)

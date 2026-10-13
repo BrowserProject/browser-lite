@@ -182,10 +182,17 @@ void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
 void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
 {
     bool audible = state.contains(MediaProducerMediaState::IsPlayingAudio);
-    if (audible == m_audible)
-        return;
-    m_audible = audible;
-    notifyHost(m_view->id(), "media-state", audible ? "{\"audio\":true}"_s : "{\"audio\":false}"_s);
+    if (audible != m_audible) {
+        m_audible = audible;
+        notifyHost(m_view->id(), "media-state", audible ? "{\"audio\":true}"_s : "{\"audio\":false}"_s);
+    }
+    // Kamera, Mikrofon oder Bildschirm in Gebrauch: roter Punkt im Tab
+    bool capturing = state.containsAny({ MediaProducerMediaState::HasActiveAudioCaptureDevice, MediaProducerMediaState::HasActiveVideoCaptureDevice,
+        MediaProducerMediaState::HasActiveScreenCaptureDevice, MediaProducerMediaState::HasActiveWindowCaptureDevice });
+    if (capturing != m_capturing) {
+        m_capturing = capturing;
+        notifyHost(m_view->id(), "capture-state", capturing ? "{\"active\":true}"_s : "{\"active\":false}"_s);
+    }
 }
 
 void ChromeClient::runJavaScriptAlert(LocalFrame&, const String& message)

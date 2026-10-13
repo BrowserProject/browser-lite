@@ -4,6 +4,7 @@
 // verwenden"); die Entscheidung gilt pro Ursprung und Art.
 #pragma once
 
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/UniqueRef.h>
 
@@ -23,6 +24,8 @@ void detachDeviceClients(int viewId);
 // Gespeicherte Entscheidung: 0 = noch nicht gefragt, 1 = erlaubt, 2 = blockiert
 enum class PermissionDecision : int { Ask = 0, Granted = 1, Denied = 2 };
 PermissionDecision storedPermission(const String& kind, const String& origin);
+// Gespeicherte Entscheidung oder Abfrage in der Oberflaeche (Engine-Thread)
+void requestDevicePermission(int viewId, const String& kind, const String& origin, CompletionHandler<void(bool)>&&);
 
 // Antworten der Oberflaeche (Engine-Thread)
 void answerPermission(int requestId, bool granted);

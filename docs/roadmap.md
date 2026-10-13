@@ -240,6 +240,9 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 - [x] File System Access (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`) ueber die
   Dialoge und Handles des Host-Browsers (Test in `devices-test.mjs`)
 - [x] Lautsprecher im Tab und Tab stummschalten (Test in `audio-test.mjs`)
+- [x] Kamera, Mikrofon und Bildschirm (`getUserMedia`, `getDisplayMedia`, `enumerateDevices`) ueber die
+  Geraete des Host, `<video>.srcObject`, Mikrofon in Web Audio (Test `mediastream-test.mjs`).
+  Offen: MediaRecorder, WebRTC
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).

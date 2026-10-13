@@ -44,6 +44,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/media/MediaPlayerPrivateWasm.cpp
     ${BL_ENGINE_SRC}/media/VideoFrameWasm.cpp
     ${BL_ENGINE_SRC}/media/WebCodecsWasm.cpp
+    ${BL_ENGINE_SRC}/media/MediaStreamWasm.cpp
     ${BL_ENGINE_SRC}/wasm/WasmBridge.cpp
     ${BL_ENGINE_SRC}/websocket/WasmSocketProvider.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp

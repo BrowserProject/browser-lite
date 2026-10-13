@@ -5,6 +5,9 @@
 #include "Host.h"
 #include "MediaSourceWasm.h"
 #include "VideoFrameWasm.h"
+#if ENABLE(MEDIA_STREAM)
+#include "MediaStreamWasm.h"
+#endif
 
 #include <WebCore/ContentType.h>
 #include <WebCore/GraphicsContext.h>
@@ -99,6 +102,13 @@ static MediaPlayer::SupportsType hostCanPlayType(const String& type)
     return result == 2 ? MediaPlayer::SupportsType::IsSupported : result == 1 ? MediaPlayer::SupportsType::MayBeSupported : MediaPlayer::SupportsType::IsNotSupported;
 }
 
+// srcObject = MediaStream: dann gibt es kein Host-<video>
+#if ENABLE(MEDIA_STREAM)
+#define BL_IF_STREAM(...) if (m_stream) { __VA_ARGS__; }
+#else
+#define BL_IF_STREAM(...)
+#endif
+
 class MediaPlayerFactoryWasm final : public MediaPlayerFactory {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(MediaPlayerFactoryWasm);
     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(MediaPlayerFactoryWasm);
@@ -126,6 +136,10 @@ private:
             return MediaPlayer::SupportsType::IsNotSupported;
 #endif
         }
+#if ENABLE(MEDIA_STREAM)
+        if (parameters.platformType == PlatformMediaDecodingType::MediaStream)
+            return MediaPlayer::SupportsType::IsSupported;
+#endif
         if (parameters.platformType != PlatformMediaDecodingType::FileOrHLS)
             return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.type.isEmpty())
@@ -149,6 +163,12 @@ MediaPlayerPrivateWasm::MediaPlayerPrivateWasm(MediaPlayer& player)
 MediaPlayerPrivateWasm::~MediaPlayerPrivateWasm()
 {
     players().remove(m_id);
+#if ENABLE(MEDIA_STREAM)
+    if (m_stream) {
+        m_stream->stop();
+        return;
+    }
+#endif
     send("destroy"_s);
 }
 
@@ -229,6 +249,66 @@ void MediaPlayerPrivateWasm::mediaSourceHasRetrievedAllData()
 }
 #endif
 
+#if ENABLE(MEDIA_STREAM)
+// srcObject = MediaStream: Bilder kommen von WebCore (Kamera, Bildschirm,
+// Canvas), es gibt kein Host-<video>
+void MediaPlayerPrivateWasm::load(MediaStreamPrivate& stream)
+{
+    m_stream = MediaStreamPlayback::create(*this, stream);
+    m_streamStart = MonotonicTime::now();
+    m_duration = MediaTime::positiveInfiniteTime();
+    setNetworkState(MediaPlayer::NetworkState::Idle);
+    streamChanged();
+}
+#endif
+
+void MediaPlayerPrivateWasm::streamChanged()
+{
+#if ENABLE(MEDIA_STREAM)
+    if (!m_stream)
+        return;
+    auto& stream = m_stream->stream();
+    m_hasVideo = stream.hasVideo();
+    m_hasAudio = stream.hasAudio();
+    // Nur Ton: sofort bereit, mit Video erst mit dem ersten Bild
+    auto state = !m_hasVideo || m_stream->currentFrame() ? MediaPlayer::ReadyState::HaveEnoughData : MediaPlayer::ReadyState::HaveMetadata;
+    RefPtr player = m_player.get();
+    if (state != m_readyState) {
+        m_readyState = state;
+        if (player)
+            player->readyStateChanged();
+    }
+    if (player)
+        player->characteristicChanged();
+#endif
+}
+
+void MediaPlayerPrivateWasm::streamFrameAvailable()
+{
+#if ENABLE(MEDIA_STREAM)
+    if (!m_stream)
+        return;
+    RefPtr frame = m_stream->currentFrame();
+    if (!frame)
+        return;
+    RefPtr player = m_player.get();
+    auto size = frame->presentationSize();
+    if (size != m_streamSize) {
+        m_streamSize = size;
+        m_naturalSize = size;
+        if (player)
+            player->sizeChanged();
+    }
+    ++m_presentedFrames;
+    m_frameArrival = MonotonicTime::now();
+    m_frameMediaTime = currentTime().toDouble();
+    if (m_readyState < MediaPlayer::ReadyState::HaveEnoughData)
+        streamChanged();
+    if (player)
+        player->repaint();
+#endif
+}
+
 void MediaPlayerPrivateWasm::activeSourceBuffersChanged()
 {
     if (RefPtr player = m_player.get())
@@ -280,11 +360,19 @@ MediaPlayer::ReadyState MediaPlayerPrivateWasm::readyState() const
 
 void MediaPlayerPrivateWasm::cancelLoad()
 {
+    BL_IF_STREAM(return)
     send("destroy"_s);
+}
+
+bool MediaPlayerPrivateWasm::hasAvailableVideoFrame() const
+{
+    BL_IF_STREAM(return !!m_stream->currentFrame())
+    return m_frame.pixels;
 }
 
 void MediaPlayerPrivateWasm::play()
 {
+    BL_IF_STREAM(m_paused = false; return)
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = false;
@@ -294,6 +382,7 @@ void MediaPlayerPrivateWasm::play()
 
 void MediaPlayerPrivateWasm::pause()
 {
+    BL_IF_STREAM(m_paused = true; return)
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = true;
@@ -302,6 +391,7 @@ void MediaPlayerPrivateWasm::pause()
 
 MediaTime MediaPlayerPrivateWasm::currentTime() const
 {
+    BL_IF_STREAM(return MediaTime::createWithDouble((MonotonicTime::now() - m_streamStart).seconds()))
     double time = m_hostTime;
     // Zwischen zwei Meldungen vom Host selber weiterzaehlen
     if (!m_paused && !m_seeking && !m_ended && m_readyState >= MediaPlayer::ReadyState::HaveFutureData)
@@ -351,6 +441,7 @@ void MediaPlayerPrivateWasm::seekHost(const MediaTime& time)
 
 void MediaPlayerPrivateWasm::setRate(float rate)
 {
+    BL_IF_STREAM(return)
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_rate = rate;
@@ -359,16 +450,19 @@ void MediaPlayerPrivateWasm::setRate(float rate)
 
 void MediaPlayerPrivateWasm::setVolume(float volume)
 {
+    BL_IF_STREAM(return)
     send("volume"_s, makeString("{\"volume\":"_s, volume, '}'));
 }
 
 void MediaPlayerPrivateWasm::setMuted(bool muted)
 {
+    BL_IF_STREAM(return)
     send("muted"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, '}'));
 }
 
 void MediaPlayerPrivateWasm::setPreservesPitch(bool preservesPitch)
 {
+    BL_IF_STREAM(return)
     send("pitch"_s, makeString("{\"preservesPitch\":"_s, preservesPitch ? "true"_s : "false"_s, '}'));
 }
 
@@ -382,6 +476,7 @@ bool MediaPlayerPrivateWasm::didLoadingProgress() const
 
 void MediaPlayerPrivateWasm::setPresentationSize(const IntSize& size)
 {
+    BL_IF_STREAM(return)
     if (size == m_presentationSize)
         return;
     m_presentationSize = size;
@@ -400,6 +495,13 @@ static RefPtr<NativeImage> imageForFrame(uint8_t* pixels, int width, int height,
 
 void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& rect)
 {
+#if ENABLE(MEDIA_STREAM)
+    if (m_stream) {
+        if (RefPtr frame = m_stream->currentFrame(); frame && !context.paintingDisabled())
+            context.drawVideoFrame(*frame, rect, ImageOrientation::Orientation::None, true);
+        return;
+    }
+#endif
     if (context.paintingDisabled() || !m_frame.pixels)
         return;
     // Ohne Kopie: der Puffer gehoert dem Host und bleibt gueltig, gemalt wird sofort
@@ -409,6 +511,12 @@ void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& re
 
 RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
 {
+#if ENABLE(MEDIA_STREAM)
+    if (m_stream) {
+        RefPtr frame = m_stream->currentFrame();
+        return frame ? frame->copyNativeImage() : nullptr;
+    }
+#endif
     // Fuer canvas.drawImage(video): eine echte Kopie, die darf laenger leben
     if (!m_frame.pixels)
         return nullptr;
@@ -417,6 +525,7 @@ RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
 
 RefPtr<VideoFrame> MediaPlayerPrivateWasm::videoFrameForCurrentTime()
 {
+    BL_IF_STREAM(return m_stream->currentFrame())
     if (!m_frame.pixels)
         return nullptr;
     return VideoFrameWasm::createRGBA(m_frame.pixels, static_cast<size_t>(m_frame.width) * 4, m_frame.width, m_frame.height, true, MediaTime::createWithDouble(m_frameMediaTime));

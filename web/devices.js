@@ -10,6 +10,8 @@ const KIND_TEXT = {
   geolocation: 'möchte deinen Standort verwenden',
   notifications: 'möchte Benachrichtigungen anzeigen',
   microphone: 'möchte dein Mikrofon verwenden',
+  camera: 'möchte deine Kamera verwenden',
+  'camera-microphone': 'möchte deine Kamera und dein Mikrofon verwenden',
 };
 
 function loadDecisions() {

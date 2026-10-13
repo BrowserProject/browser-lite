@@ -82,16 +82,14 @@ var blCodecs = (function () {
     HEAPU8.set(pixels, ptr);
   }
 
-  async function deliverVideoFrame(id, state, generation, frame) {
-    let ptr = 0;
+  // Pixel eines VideoFrame in den Speicher der Engine (Ebenen wie VideoFrameWasm)
+  async function copyVideoFrame(frame) {
+    const visible = frame.visibleRect;
+    const rect = { x: visible.x, y: visible.y, width: visible.width, height: visible.height };
+    const format = VIDEO_FORMATS.indexOf(frame.format) >= 0 ? frame.format : 'RGBA';
+    const { layout, size } = videoLayout(format, rect.width, rect.height);
+    const ptr = Module._malloc(size);
     try {
-      if (state.closed || generation !== state.generation)
-        return;
-      const visible = frame.visibleRect;
-      const rect = { x: visible.x, y: visible.y, width: visible.width, height: visible.height };
-      let format = VIDEO_FORMATS.indexOf(frame.format) >= 0 ? frame.format : 'RGBA';
-      const { layout, size } = videoLayout(format, rect.width, rect.height);
-      ptr = Module._malloc(size);
       if (frame.format === format) {
         try {
           await frame.copyTo(heapView(ptr, size), { rect, layout });
@@ -103,11 +101,24 @@ var blCodecs = (function () {
         }
       } else
         readViaCanvas(frame, rect, ptr);
+    } catch (e) {
+      Module._free(ptr);
+      throw e;
+    }
+    return { ptr, size, format: VIDEO_FORMATS.indexOf(format), width: rect.width, height: rect.height };
+  }
+
+  async function deliverVideoFrame(id, state, generation, frame) {
+    let ptr = 0;
+    try {
       if (state.closed || generation !== state.generation)
         return;
-      const result = ptr;
+      const copy = await copyVideoFrame(frame);
+      ptr = copy.ptr;
+      if (state.closed || generation !== state.generation)
+        return;
       ptr = 0;
-      Module._bl_codec_video_frame(id, result, size, VIDEO_FORMATS.indexOf(format), rect.width, rect.height,
+      Module._bl_codec_video_frame(id, copy.ptr, copy.size, copy.format, copy.width, copy.height,
         frame.timestamp, frame.duration == null ? -1 : frame.duration, packColorSpace(frame.colorSpace));
     } catch (e) {
       if (!state.closed)
@@ -117,6 +128,69 @@ var blCodecs = (function () {
         Module._free(ptr);
       frame.close();
     }
+  }
+
+  // Kamera, Mikrofon, Bildschirm (engine/src/media/MediaStreamWasm.cpp): die
+  // Oberflaeche schickt den ReadableStream eines MediaStreamTrackProcessor
+  const captures = new Map(); // id -> reader
+  function attachCapture(id, kind, readable) {
+    detachCapture(id);
+    const reader = readable.getReader();
+    captures.set(id, reader);
+    (async () => {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done)
+          break;
+        try {
+          if (kind === 'video') {
+            const copy = await copyVideoFrame(value);
+            if (captures.get(id) === reader)
+              Module._bl_capture_video(id, copy.ptr, copy.size, copy.format, copy.width, copy.height, value.timestamp);
+            else
+              Module._free(copy.ptr);
+          } else
+            deliverCaptureAudio(id, value);
+        } finally {
+          value.close();
+        }
+      }
+    })().catch(() => {}).finally(() => {
+      if (captures.get(id) === reader)
+        captures.delete(id);
+    });
+  }
+  function deliverCaptureAudio(id, data) {
+    const frames = data.numberOfFrames, channels = data.numberOfChannels;
+    const ptr = Module._malloc(Math.max(frames * channels * 4, 4));
+    try {
+      const plane = new Float32Array(frames);
+      for (let channel = 0; channel < channels; channel++) {
+        data.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
+        HEAPU8.set(new Uint8Array(plane.buffer), ptr + channel * frames * 4);
+      }
+      Module._bl_capture_audio(id, ptr, frames, channels, data.sampleRate, data.timestamp);
+    } finally {
+      Module._free(ptr);
+    }
+  }
+  function detachCapture(id) {
+    const reader = captures.get(id);
+    if (!reader)
+      return;
+    captures.delete(id);
+    reader.cancel().catch(() => {});
+  }
+  if (typeof ENVIRONMENT_IS_PTHREAD !== 'undefined' && ENVIRONMENT_IS_PTHREAD && typeof self !== 'undefined') {
+    self.addEventListener('message', (event) => {
+      const data = event.data && event.data.blCapture;
+      if (!data)
+        return;
+      if (data.readable)
+        attachCapture(data.id, data.kind, data.readable);
+      else
+        detachCapture(data.id);
+    });
   }
 
   async function deliverAudioData(id, state, generation, data) {

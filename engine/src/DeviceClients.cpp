@@ -101,6 +101,11 @@ static void requestPermission(int viewId, const String& kind, const String& orig
     notifyHost(viewId, "permission", makeString("{\"id\":"_s, id, ",\"kind\":\""_s, jsonEscape(kind), "\",\"origin\":\""_s, jsonEscape(origin), "\"}"_s));
 }
 
+void requestDevicePermission(int viewId, const String& kind, const String& origin, CompletionHandler<void(bool)>&& completionHandler)
+{
+    requestPermission(viewId, kind, origin, WTF::move(completionHandler));
+}
+
 void answerPermission(int requestId, bool granted)
 {
     if (auto completionHandler = pendingRequests().take(requestId))
