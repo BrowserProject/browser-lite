@@ -25,6 +25,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/ScrollingWasm.cpp
     ${BL_ENGINE_SRC}/ServiceWorkerWasm.cpp
     ${BL_ENGINE_SRC}/WebPlatformExtras.cpp
+    ${BL_ENGINE_SRC}/WebRTCPolyfill.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp

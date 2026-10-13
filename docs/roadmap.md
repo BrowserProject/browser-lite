@@ -242,7 +242,9 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 - [x] Lautsprecher im Tab und Tab stummschalten (Test in `audio-test.mjs`)
 - [x] Kamera, Mikrofon und Bildschirm (`getUserMedia`, `getDisplayMedia`, `enumerateDevices`) ueber die
   Geraete des Host, `<video>.srcObject` (Bild und Ton), Mikrofon in Web Audio (Test `mediastream-test.mjs`).
-  Offen: WebRTC
+  Offen: WebRTC-Medien
+- [x] WebRTC Stufe 1: `RTCPeerConnection` + `RTCDataChannel` ueber das WebRTC des Host (Test `webrtc-test.mjs`,
+  auch gegen eine normale Chromium-Seite). Offen: Medien-Spuren (Stufe 2), Verkehr ueber das Relay (TURN)
 - [x] MediaRecorder: WebM (VP8/VP9/AV1 + Opus) mit den Encodern des Host, Web Audio als Stream-Quelle
   (`createMediaStreamDestination`), Test in `mediastream-test.mjs` (Chromium spielt die Aufnahme ab)
 

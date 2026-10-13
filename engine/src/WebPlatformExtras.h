@@ -26,6 +26,8 @@ namespace BrowserLite {
 WTF::UniqueRef<WebCore::StorageProvider> createStorageProvider();
 WebCore::ScreenOrientationManager& screenOrientationManager();
 WTF::Ref<WebCore::UserContentProvider> userContentProvider();
+// WebRTC ueber den Host (WebRTCPolyfill.cpp), laeuft vor dem allgemeinen Polyfill
+extern const char* const webrtcPolyfillSource;
 
 // Bildschirm hat gedreht (bl_set_screen): Beobachter benachrichtigen
 void screenOrientationMayHaveChanged();

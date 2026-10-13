@@ -210,6 +210,7 @@ media:web-audio
 media:webcodecs-audio
 media:webcodecs-video
 media:webm-vp9
+media:webrtc
 net:beacon
 net:broadcast-channel
 net:cache-api

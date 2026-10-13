@@ -219,6 +219,8 @@ function base64ToBytes(text) {
   return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 }
 
+import { rtcHostCalls } from './webrtc.js';
+
 const hostCalls = {
   async 'fs-open'(payload, origin) {
     fsNeed('showOpenFilePicker');
@@ -330,6 +332,8 @@ const hostCalls = {
     return [...(await navigator.keyboard.getLayoutMap()).entries()];
   },
 };
+
+Object.assign(hostCalls, rtcHostCalls);
 
 export async function onHostCall(tab, data) {
   const send = (ok, value) => api.engine()._bl_host_call_result(data.id, ok ? 1 : 0, api.toUTF8(JSON.stringify(value ?? null)));

@@ -327,6 +327,8 @@ jobs:
         run: cd tests/e2e && node webcodecs-test.mjs
       - name: MediaStream-Test (Kamera, Mikrofon, Bildschirm ueber den Host)
         run: cd tests/e2e && node mediastream-test.mjs
+      - name: WebRTC-Test (RTCPeerConnection, DataChannel, Verbindung zu Chromium)
+        run: cd tests/e2e && node webrtc-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)

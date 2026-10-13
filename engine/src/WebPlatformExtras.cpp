@@ -377,6 +377,7 @@ bool isAllowedHostCall(const String& name)
         "eyedropper"_s, "battery"_s, "keyboard-lock"_s, "keyboard-unlock"_s, "keyboard-layout"_s,
         "fs-open"_s, "fs-save"_s, "fs-directory"_s, "fs-file"_s, "fs-writable"_s, "fs-write"_s, "fs-child"_s,
         "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
+        "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s,
     };
     for (auto entry : allowed) {
         if (name == entry)
@@ -435,6 +436,7 @@ Ref<UserContentProvider> userContentProvider()
 {
     static NeverDestroyed<Ref<UserContentController>> controller = [] {
         auto controller = UserContentController::create();
+        controller->addUserScript(mainThreadNormalWorldSingleton(), makeUnique<UserScript>(String::fromUTF8(webrtcPolyfillSource)));
         controller->addUserScript(mainThreadNormalWorldSingleton(), makeUnique<UserScript>(String::fromUTF8(polyfillSource)));
         return controller;
     }();
