@@ -149,13 +149,18 @@ check('Fixierte Leiste oben', near(bar, [255, 128, 0]), JSON.stringify(bar));
 check('Compositing ist an', logs.some((line) => /Compositor: eigener Thread/.test(line)) && !logs.some((line) => /Compositing aus/.test(line)));
 
 // Die Animation laeuft: der schwarze Kasten ist mal links, mal weiter rechts
+// Linker Rand des schwarzen Kastens in der Zeile y=180 (auf 50 px gerundet),
+// alle Punkte aus demselben Bild
+const moverX = async () => {
+  const row = await page.evaluate(() => window.blPageRow(180));
+  const x = row ? row.findIndex((pixel) => near(pixel, [0, 0, 0], 60)) : -1;
+  return x < 0 ? null : Math.round(x / 50) * 50;
+};
 const positions = new Set();
 for (let i = 0; i < 20; i++) {
-  for (const x of [40, 140, 240, 340]) {
-    const pixel = await pixelAt(x, 180);
-    if (near(pixel, [0, 0, 0], 60))
-      positions.add(x);
-  }
+  const x = await moverX();
+  if (x !== null)
+    positions.add(x);
   await page.waitForTimeout(100);
 }
 check('CSS-Animation (transform) bewegt sich', positions.size >= 2, JSON.stringify([...positions]));
@@ -181,12 +186,12 @@ check('requestAnimationFrame laeuft weiter', framesAfter - framesBefore > 10, `$
 await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 3000; while (Date.now() < end); return 1; })()'));
 await page.waitForTimeout(400);
 const busyPositions = new Set();
-for (let i = 0; i < 12; i++) {
-  for (const x of [40, 140, 240, 340]) {
-    if (near(await pixelAt(x, 180), [0, 0, 0], 60))
-      busyPositions.add(x);
-  }
-  await page.waitForTimeout(120);
+const busyStartAnim = Date.now();
+while (Date.now() - busyStartAnim < 2000) {
+  const x = await moverX();
+  if (x !== null)
+    busyPositions.add(x);
+  await page.waitForTimeout(80);
 }
 check('Animation laeuft weiter, waehrend das JS blockiert', busyPositions.size >= 2, JSON.stringify([...busyPositions]));
 if (busyPositions.size < 2)

@@ -727,6 +727,23 @@ window.blPagePixel = (x, y) => {
   ctx.drawImage(activeTab.canvas, 0, 0, probe.width, probe.height);
   return [...ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data.slice(0, 3)];
 };
+// Fuer Tests: eine ganze Zeile auf einmal (gleiches Bild fuer alle Punkte)
+window.blPageRow = (y) => {
+  if (!activeTab)
+    return null;
+  const rect = activeTab.canvas.getBoundingClientRect();
+  const probe = document.createElement('canvas');
+  probe.width = Math.ceil(rect.width);
+  probe.height = Math.ceil(rect.height);
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(activeTab.canvas, 0, 0, probe.width, probe.height);
+  const data = ctx.getImageData(0, Math.round(y), probe.width, 1).data;
+  const row = [];
+  for (let i = 0; i < data.length; i += 4)
+    row.push([data[i], data[i + 1], data[i + 2]]);
+  return row;
+};
 
 // Engine moechte ein neues Bild: beim naechsten Bildschirm-Refresh
 function onEngineNeedsFrame(viewId) {
