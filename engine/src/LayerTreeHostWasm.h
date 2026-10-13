@@ -22,6 +22,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/OptionSet.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -58,7 +59,10 @@ public:
     float deviceScaleFactor WTF_GUARDED_BY_LOCK(lock) { 1 };
     OptionSet<WebCore::CompositionReason> reasons WTF_GUARDED_BY_LOCK(lock);
     bool frameScheduled WTF_GUARDED_BY_LOCK(lock) { false };
+    // Ein Rendering-Update wartet auf Kacheln (seit wann): die letzte fertige
+    // Kachel plant das naechste Bild ein
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
+    MonotonicTime tilesWaitStart WTF_GUARDED_BY_LOCK(lock);
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
     // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)

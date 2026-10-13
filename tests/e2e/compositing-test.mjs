@@ -189,6 +189,8 @@ for (let i = 0; i < 12; i++) {
   await page.waitForTimeout(120);
 }
 check('Animation laeuft weiter, waehrend das JS blockiert', busyPositions.size >= 2, JSON.stringify([...busyPositions]));
+if (busyPositions.size < 2)
+  console.log(logs.filter((line) => /Compositor|Kachel|GPU/.test(line)).slice(-20).join('\n'));
 await page.waitForTimeout(1500);
 
 // Scrollen: Inhalt wandert, die Leiste bleibt

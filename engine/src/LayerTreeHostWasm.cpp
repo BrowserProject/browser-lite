@@ -63,11 +63,23 @@ static void compositeScene(CompositorScene& scene)
             return;
         }
         // Das Rendering-Update erst zeigen, wenn alle Kacheln gemalt sind
-        // (die letzte fertige Kachel plant das naechste Bild ein)
+        // (die letzte fertige Kachel plant das naechste Bild ein). Aber nur
+        // kurz: Animationen und Scrollen sollen nicht stehen bleiben, wenn das
+        // Malen dauert (langsame Maschine), dann lieber mit den alten Kacheln.
         if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
-            scene.waitingForTiles = true;
-            return;
+            auto now = MonotonicTime::now();
+            if (!scene.tilesWaitStart)
+                scene.tilesWaitStart = now;
+            if (now - scene.tilesWaitStart < 100_ms) {
+                scene.waitingForTiles = true;
+                // Im naechsten Bild nochmal schauen
+                scene.scheduleFrameLocked();
+                return;
+            }
+            debugLog("Compositor: Kacheln brauchen ueber 100 ms, Bild ohne sie");
         }
+        scene.waitingForTiles = false;
+        scene.tilesWaitStart = { };
         reasons = std::exchange(scene.reasons, { });
         notify = std::exchange(scene.notifyEngine, false);
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
@@ -171,7 +183,7 @@ void CompositorScene::requestScrollingTick()
 
 void CompositorScene::scheduleFrameLocked()
 {
-    if (frameScheduled || invalidated || waitingForTiles)
+    if (frameScheduled || invalidated)
         return;
     frameScheduled = true;
     Compositor::dispatch([scene = Ref { *this }]() mutable {
