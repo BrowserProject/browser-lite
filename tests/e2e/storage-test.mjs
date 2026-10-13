@@ -55,6 +55,11 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
     };
     open.onerror = resolve;
   });
+  // Cache API (engine/src/CacheStorageWasm.cpp): bleibt nach Neuladen
+  const cache = await caches.open('bl-cache');
+  const cachedResponse = await cache.match('/gespeichert');
+  console.log('RESULT cacheapi=' + (cachedResponse ? (await cachedResponse.text()) + ':' + cachedResponse.headers.get('X-Test') : 'leer'));
+  await cache.put('/gespeichert', new Response('cache-wert', { headers: { 'X-Test': 'ja' } }));
   console.log('RESULT written=1');
   // Origin Private File System: Datei lesen, schreiben, Ordner, resolve()
   try {
@@ -171,6 +176,7 @@ await page.goto(appURL);
 const first = await result('read');
 check('Erster Besuch: nur das neue Cookie', first === 'ja,leer,leer', String(first));
 check('Daten geschrieben', (await result('written')) === '1');
+check('Cache API am Anfang leer', results.get('cacheapi') === 'leer', results.get('cacheapi'));
 check('OPFS: Dateien, Ordner, resolve()', (await result('opfs')) === 'leer,notiz.txt+ordner,ordner/notiz.txt,innen', results.get('opfs'));
 check('OPFS: synchroner Zugriff im Worker', (await result('opfsworker')) === 'sync-ok', results.get('opfsworker'));
 
@@ -180,6 +186,7 @@ results = new Map();
 await page.reload();
 const second = await result('read');
 check('Nach Neuladen noch da (Cookie, localStorage, IndexedDB)', second === 'ja,gespeichert,idb-wert', String(second));
+check('Cache API: nach Neuladen noch da (mit Headern)', (await result('cacheapi')) === 'cache-wert:ja', results.get('cacheapi'));
 check('OPFS: nach Neuladen noch da', (await result('opfs')) === 'gespeichert,notiz.txt+ordner+sync.bin,ordner/notiz.txt,innen', results.get('opfs'));
 check('IndexedDB-Datenbank geloescht', (await result('deleted')) === 'weg', String(results.get('deleted')));
 

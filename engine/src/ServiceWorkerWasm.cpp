@@ -37,6 +37,8 @@
 #include <WebCore/SWClientConnection.h>
 #include <WebCore/SWContextManager.h>
 #include <WebCore/SWOriginStore.h>
+#include <WebCore/SWRegistrationDatabase.h>
+#include <WebCore/SWRegistrationStore.h>
 #include <WebCore/SWServer.h>
 #include <WebCore/SWServerDelegate.h>
 #include <WebCore/SWServerRegistration.h>
@@ -47,6 +49,7 @@
 #include <WebCore/ServiceWorkerJobData.h>
 #include <WebCore/ServiceWorkerProvider.h>
 #include <WebCore/ServiceWorkerRegistrationData.h>
+#include <WebCore/ServiceWorkerTypes.h>
 #include <WebCore/ServiceWorkerRoute.h>
 #include <WebCore/ServiceWorkerThreadProxy.h>
 #include <WebCore/SharedWorkerContextManager.h>
@@ -430,6 +433,93 @@ private:
     }
 };
 
+
+// Registrierungen und Skripte dauerhaft unter /data/serviceworkers (SQLite und
+// Dateien, WebCores SWRegistrationDatabase). In WebKit2 macht das der
+// Netzwerk-Prozess in einer eigenen Queue; hier direkt im Engine-Thread, die
+// Datenbank ist klein.
+class RegistrationStore final : public SWRegistrationStore {
+public:
+    static Ref<RegistrationStore> create(SWServer& server) { return adoptRef(*new RegistrationStore(server)); }
+
+private:
+    explicit RegistrationStore(SWServer& server)
+        : m_server(server)
+        , m_database(makeUnique<SWRegistrationDatabase>("/data/serviceworkers"_s))
+    {
+    }
+
+    void clearAll(CompletionHandler<void()>&& callback) final
+    {
+        m_updates.clear();
+        m_database->deleteAllFiles();
+        callback();
+    }
+    void flushChanges(CompletionHandler<void()>&& callback) final { write(); callback(); }
+    void closeFiles(CompletionHandler<void()>&& callback) final { callback(); }
+    void importRegistrationsForOrigin(const SecurityOriginData& topOrigin, CompletionHandler<void(std::optional<Vector<ServiceWorkerContextData>>&&)>&& callback) final
+    {
+        post([this, protectedThis = Ref { *this }, topOrigin, callback = WTF::move(callback)]() mutable {
+            callback(m_database->importRegistrations(topOrigin));
+        });
+    }
+    void importOriginList(CompletionHandler<void(std::optional<HashSet<ClientOrigin>>&&)>&& callback) final
+    {
+        post([this, protectedThis = Ref { *this }, callback = WTF::move(callback)]() mutable {
+            callback(m_database->importOrigins());
+        });
+    }
+    void updateRegistration(const ServiceWorkerContextData& data) final
+    {
+        m_updates.set(data.registration.key, data.copy());
+        scheduleWrite();
+    }
+    void removeRegistration(const ServiceWorkerRegistrationKey& key) final
+    {
+        m_updates.set(key, std::nullopt);
+        scheduleWrite();
+    }
+    void retrieveWorkerScripts(ServiceWorkerIdentifier identifier, const ServiceWorkerRegistrationKey& key, const URL& scriptURL, const Vector<URL>& importedScriptURLs, CompletionHandler<void(std::optional<ServiceWorkerScripts>&&)>&& callback) final
+    {
+        callback(m_database->retrieveWorkerScripts(identifier, key, scriptURL, importedScriptURLs));
+    }
+
+    void scheduleWrite()
+    {
+        if (std::exchange(m_writeScheduled, true))
+            return;
+        post([this, protectedThis = Ref { *this }] {
+            m_writeScheduled = false;
+            write();
+        });
+    }
+
+    void write()
+    {
+        Vector<ServiceWorkerRegistrationKey> toDelete;
+        Vector<ServiceWorkerContextData> toUpdate;
+        for (auto& [key, data] : std::exchange(m_updates, { })) {
+            if (data)
+                toUpdate.append(WTF::move(*data));
+            else
+                toDelete.append(key);
+        }
+        if (toUpdate.isEmpty() && toDelete.isEmpty())
+            return;
+        auto scripts = m_database->updateRegistrations(toUpdate, toDelete);
+        RefPtr server = m_server.get();
+        if (!scripts || !server)
+            return;
+        for (auto& script : *scripts)
+            server->didSaveWorkerScriptsToDisk(script.identifier, WTF::move(script.mainScript), WTF::move(script.importedScripts));
+    }
+
+    WeakPtr<SWServer> m_server;
+    std::unique_ptr<SWRegistrationDatabase> m_database;
+    HashMap<ServiceWorkerRegistrationKey, std::optional<ServiceWorkerContextData>> m_updates;
+    bool m_writeScheduled { false };
+};
+
 class ServerDelegate final : public SWServerDelegate, public CanMakeCheckedPtr<ServerDelegate> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(ServerDelegate);
     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ServerDelegate);
@@ -463,8 +553,7 @@ private:
     void requestBackgroundFetchPermission(const ClientOrigin&, CompletionHandler<void(bool)>&& callback) final { callback(false); }
     RefPtr<BackgroundFetchRecordLoader> createBackgroundFetchRecordLoader(BackgroundFetchRecordLoaderClient&, const BackgroundFetchRequest&, size_t, const ClientOrigin&) final { return nullptr; }
     Ref<BackgroundFetchStore> createBackgroundFetchStore() final { return NoBackgroundFetchStore::create(); }
-    // Ohne Speicher auf der Platte: Registrierungen nur im Speicher
-    RefPtr<SWRegistrationStore> createRegistrationStore(SWServer&) final { return nullptr; }
+    RefPtr<SWRegistrationStore> createRegistrationStore(SWServer& server) final { return RegistrationStore::create(server); }
 
 public:
     void forget(SWServerToContextConnection& connection)
@@ -1261,6 +1350,13 @@ static void controlClient(ResourceLoader& loader, SWServerRegistration& registra
     serverConnection()->registerClient(ClientOrigin { registration.key().topOrigin(), SecurityOriginData::fromURLWithoutStrictOpaqueness(request.url()) }, WTF::move(data), registration.identifier(), request.httpUserAgent(), SWServer::IsBeingCreatedClient::Yes);
 }
 
+// Navigationen, die auf den Import ihrer Registrierungen warten
+static HashSet<const ResourceLoader*>& pendingImports()
+{
+    static NeverDestroyed<HashSet<const ResourceLoader*>> set;
+    return set;
+}
+
 bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 {
     RefPtr server = ServiceWorkers::server();
@@ -1280,6 +1376,18 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
         auto topOrigin = document ? document->topOrigin().data() : SecurityOriginData::fromURL(url);
         if (!clientConnection()->origins.contains(topOrigin))
             return false;
+        // Registrierungen des Ursprungs erst von der Platte holen (wie
+        // NetworkConnectionToWebProcess::scheduleResourceLoad)
+        if (!server->isImportCompletedForOrigin(topOrigin)) {
+            pendingImports().add(&loader);
+            server->importRegistrationsForOrigin(topOrigin, [loader = Ref { loader }, networkLoad = WTF::move(networkLoad)]() mutable {
+                if (!pendingImports().remove(loader.ptr()))
+                    return;
+                if (!startFetch(loader, [networkLoad = WTF::move(networkLoad)]() mutable { networkLoad(); }))
+                    networkLoad();
+            });
+            return true;
+        }
         RefPtr registration = server->doRegistrationMatchingSync(topOrigin, url);
         if (!registration)
             return false;
@@ -1324,6 +1432,8 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 
 bool cancelFetch(ResourceLoader& loader)
 {
+    if (pendingImports().remove(&loader))
+        return true;
     auto task = fetchTasks().take(&loader);
     if (!task)
         return false;
@@ -1333,7 +1443,7 @@ bool cancelFetch(ResourceLoader& loader)
 
 bool isFetching(const ResourceLoader& loader)
 {
-    return fetchTasks().contains(&loader);
+    return fetchTasks().contains(&loader) || pendingImports().contains(&loader);
 }
 
 

@@ -198,8 +198,8 @@ kommen zuerst.
 - [x] Lage-/Bewegungssensoren (`deviceorientation`, `devicemotion`) vom Host (`devices-test.mjs`).
   Messlatte 234 von 277 (84.5 %)
 - [x] Service Worker (SWServer im selben Prozess, Fetch abfangen) und SharedWorker
-  (`serviceworker-test.mjs`). Offen: Registrierungen dauerhaft speichern, Skript im Hintergrund
-  aktualisieren, Navigation Preload, Push
+  (`serviceworker-test.mjs`). Registrierungen und Cache API bleiben nach einem Neustart.
+  Offen: Skript im Hintergrund aktualisieren, Navigation Preload, Push
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

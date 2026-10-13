@@ -47,6 +47,7 @@ else {
 }
 (async () => {
   if (!('serviceWorker' in navigator)) { log('sw=none'); return; }
+  log('initialcontroller=' + !!navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('message', (e) => log('message=' + e.data));
   await navigator.serviceWorker.register('/sw.js');
   await navigator.serviceWorker.ready;
@@ -144,6 +145,7 @@ const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`,
 await page.goto(`http://localhost:${UI_PORT}/?${query}`);
 check('navigator.serviceWorker vorhanden', await result('registered') === '1' || results.get('sw') !== 'none', results.get('error') || '');
 check('Registriert (ready)', await result('registered') === '1', results.get('error') || '');
+check('Am Anfang ohne Worker', results.get('initialcontroller') === 'false', results.get('initialcontroller'));
 check('Seite wird kontrolliert (clients.claim)', await result('controlled', 30000) === '1');
 check('Fetch vom Worker beantwortet', await result('fetch', 30000) === 'from-sw', results.get('fetch'));
 check('Antwort aus der Cache API des Workers', await result('cached', 30000) === 'cache-ok', results.get('cached'));
@@ -157,6 +159,15 @@ check('Zweites SharedWorker-Objekt nutzt denselben Worker', await result('shared
 // Navigation, die der Worker beantwortet (die Seite gibt es auf dem Server nicht)
 await page.evaluate(() => window.__blEval('location.href = "/sw-page"'));
 check('Navigation vom Worker beantwortet und kontrolliert', await result('swpage', 30000) === 'true', results.get('swpage'));
+
+// Neustart des Browsers: die Registrierung kommt von der Platte (/data), die
+// Seite ist von Anfang an kontrolliert
+await page.waitForTimeout(7000);
+results.clear();
+await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+check('Nach Neustart: Seite gleich kontrolliert', await result('initialcontroller', 60000) === 'true', results.get('initialcontroller'));
+check('Nach Neustart: Fetch vom Worker beantwortet', await result('fetch', 30000) === 'from-sw', results.get('fetch'));
+check('Nach Neustart: Cache API des Workers noch da', await result('cached', 30000) === 'cache-ok', results.get('cached'));
 
 await browser.close();
 relay.kill();

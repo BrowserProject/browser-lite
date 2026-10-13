@@ -7,7 +7,7 @@
 // reden direkt miteinander, aber immer ueber den RunLoop (wie bei IPC), damit
 // WebCore die gleiche Reihenfolge sieht wie in WebKit2.
 //
-// Registrierungen bleiben bis zum Neustart der Engine (wie die Cache API, #93).
+// Registrierungen und Skripte bleiben unter /data/serviceworkers (SQLite).
 //
 // SharedWorker: ein Worker pro Ursprung/URL/Name fuer alle Tabs (wie
 // WebSharedWorkerServer), mit eigener Page wie die Service Worker.
