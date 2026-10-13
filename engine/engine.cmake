@@ -45,6 +45,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/media/VideoFrameWasm.cpp
     ${BL_ENGINE_SRC}/media/WebCodecsWasm.cpp
     ${BL_ENGINE_SRC}/media/MediaStreamWasm.cpp
+    ${BL_ENGINE_SRC}/media/MediaRecorderWasm.cpp
     ${BL_ENGINE_SRC}/wasm/WasmBridge.cpp
     ${BL_ENGINE_SRC}/websocket/WasmSocketProvider.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp
@@ -146,6 +147,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js"
     # WebCodecs der Seiten ueber die WebCodecs des Host (engine/src/media/WebCodecsWasm.cpp)
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/webcodecs-host.js"
+    # MediaRecorder: Encoder des Host + WebM (engine/src/media/MediaRecorderWasm.cpp)
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/mediarecorder-host.js"
     "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
     "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"

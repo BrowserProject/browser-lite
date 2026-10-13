@@ -199,6 +199,7 @@ media:audio-worklet
 media:av1
 media:get-display-media
 media:get-user-media
+media:media-recorder
 media:media-session
 media:mse
 media:speech-recognition

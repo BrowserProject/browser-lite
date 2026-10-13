@@ -1,3 +1,77 @@
+diff --git a/Source/WebCore/Modules/mediarecorder/MediaRecorder.cpp b/Source/WebCore/Modules/mediarecorder/MediaRecorder.cpp
+index 485cce61c4..4c00a9fcd9 100644
+--- a/Source/WebCore/Modules/mediarecorder/MediaRecorder.cpp
++++ b/Source/WebCore/Modules/mediarecorder/MediaRecorder.cpp
+@@ -56,9 +56,20 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(MediaRecorder);
+ 
+ MediaRecorder::CreatorFunction MediaRecorder::m_customCreator = nullptr;
+ 
++#if PLATFORM(WASM)
++// engine/src/media/MediaRecorderWasm.cpp
++bool isMediaRecorderTypeSupportedWasm(const ContentType&);
++std::unique_ptr<MediaRecorderPrivate> createMediaRecorderPrivateWasm(MediaStreamPrivate&, const MediaRecorderPrivateOptions&);
++#endif
++
+ bool MediaRecorder::isTypeSupported(Document& document, const String& value)
+ {
+-#if PLATFORM(COCOA) || USE(GSTREAMER)
++#if PLATFORM(WASM)
++    UNUSED_PARAM(document);
++    if (value.isEmpty())
++        return true;
++    return isMediaRecorderTypeSupportedWasm(ContentType(value));
++#elif PLATFORM(COCOA) || USE(GSTREAMER)
+     if (value.isEmpty())
+         return true;
+ 
+@@ -103,6 +114,8 @@ ExceptionOr<std::unique_ptr<MediaRecorderPrivate>> MediaRecorder::createMediaRec
+     std::unique_ptr<MediaRecorderPrivate> result = MediaRecorderPrivateAVFImpl::create(stream, options);
+ #elif USE(GSTREAMER)
+     std::unique_ptr<MediaRecorderPrivate> result = MediaRecorderPrivateGStreamer::create(stream, options);
++#elif PLATFORM(WASM)
++    std::unique_ptr<MediaRecorderPrivate> result = createMediaRecorderPrivateWasm(stream, options);
+ #else
+     std::unique_ptr<MediaRecorderPrivate> result;
+ #endif
+diff --git a/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.cpp b/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.cpp
+index 75c1c3a44c..f1c6f3a5ce 100644
+--- a/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.cpp
++++ b/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.cpp
+@@ -70,7 +70,19 @@ void MediaStreamAudioSource::setNumberOfChannels(unsigned)
+ }
+ #endif
+ 
+-#if !PLATFORM(COCOA) && !USE(GSTREAMER)
++#if PLATFORM(WASM)
++// engine/src/media/MediaStreamWasm.cpp: macht aus dem AudioBus Float32-Ebenen
++// und ruft deliver damit auf
++using MediaStreamAudioDeliver = void (*)(void*, const MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t);
++void consumeMediaStreamAudioWasm(AudioBus&, size_t numberOfFrames, double sampleRate, uint64_t& framesSoFar, MediaStreamAudioDeliver, void* context);
++
++void MediaStreamAudioSource::consumeAudio(AudioBus& bus, size_t numberOfFrames)
++{
++    consumeMediaStreamAudioWasm(bus, numberOfFrames, m_currentSettings.sampleRate(), m_wasmFramesSoFar, [](void* context, const MediaTime& time, const PlatformAudioData& data, const AudioStreamDescription& description, size_t frames) {
++        static_cast<MediaStreamAudioSource*>(context)->audioSamplesAvailable(time, data, description, frames);
++    }, this);
++}
++#elif !PLATFORM(COCOA) && !USE(GSTREAMER)
+ void MediaStreamAudioSource::consumeAudio(AudioBus&, size_t)
+ {
+ }
+diff --git a/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.h b/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.h
+index 93ee9f9f73..defc883964 100644
+--- a/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.h
++++ b/Source/WebCore/Modules/webaudio/MediaStreamAudioSource.h
+@@ -70,6 +70,9 @@ private:
+ #if USE(AVFOUNDATION) || USE(GSTREAMER)
+     size_t m_numberOfFrames { 0 };
+ #endif
++#if PLATFORM(WASM)
++    uint64_t m_wasmFramesSoFar { 0 };
++#endif
+ #if USE(GSTREAMER)
+     GstAudioInfo m_info;
+     GRefPtr<GstCaps> m_caps;
 diff --git a/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp b/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp
 index 3203d18f80..8c32e4dee9 100644
 --- a/Source/WebCore/platform/mediastream/MediaStreamTrackPrivate.cpp

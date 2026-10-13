@@ -7,6 +7,7 @@
 #include "MediaPlayerPrivateWasm.h"
 #include "VideoFrameWasm.h"
 #include <WebCore/AudioBus.h>
+#include <WebCore/AudioChannel.h>
 #include <WebCore/AudioSourceProviderClient.h>
 #include <WebCore/AudioStreamDescription.h>
 #include <WebCore/CaptureDevice.h>
@@ -86,50 +87,6 @@ public:
 };
 
 // ------------------------------------------------------------ Quellen
-
-// Ton im Speicher der Engine: Float32, ein Block pro Kanal
-class WasmAudioData final : public PlatformAudioData {
-public:
-    WasmAudioData(const float* samples, size_t frames, unsigned channels)
-        : m_samples(samples)
-        , m_frames(frames)
-        , m_channels(channels)
-    {
-    }
-    std::span<const float> channel(unsigned index) const { return { m_samples + index * m_frames, m_frames }; }
-    unsigned channels() const { return m_channels; }
-
-private:
-    const float* m_samples;
-    size_t m_frames;
-    unsigned m_channels;
-};
-
-class WasmAudioStreamDescription final : public AudioStreamDescription {
-public:
-    WasmAudioStreamDescription(double sampleRate, unsigned channels)
-        : m_sampleRate(sampleRate)
-        , m_channels(channels)
-    {
-    }
-
-private:
-    const PlatformDescription& platformDescription() const final { return m_description; }
-    PCMFormat format() const final { return Float32; }
-    double sampleRate() const final { return m_sampleRate; }
-    bool isInterleaved() const final { return false; }
-    bool isSignedInteger() const final { return false; }
-    bool isFloat() const final { return true; }
-    bool isNativeEndian() const final { return true; }
-    uint32_t numberOfInterleavedChannels() const final { return 1; }
-    uint32_t numberOfChannelStreams() const final { return m_channels; }
-    uint32_t numberOfChannels() const final { return m_channels; }
-    uint32_t sampleWordSize() const final { return sizeof(float); }
-
-    PlatformDescription m_description { PlatformDescription::None, nullptr };
-    double m_sampleRate;
-    unsigned m_channels;
-};
 
 int nextSourceId()
 {
@@ -763,6 +720,7 @@ void enableIn(Settings& settings)
     settings.setMediaDevicesEnabled(true);
     settings.setScreenCaptureEnabled(true);
     settings.setGetUserMediaRequiresFocus(false);
+    settings.setMediaRecorderEnabled(true);
 }
 
 void attachTo(int viewId, Page& page)
@@ -808,6 +766,26 @@ CaptureSourceOrError MockRealtimeVideoSource::create(String&&, AtomString&&, Med
 RefPtr<WebAudioSourceProvider> createMediaStreamTrackAudioSourceProviderWasm(MediaStreamTrackPrivate& track)
 {
     return BrowserLite::AudioSourceProviderWasm::create(track);
+}
+
+// Web Audio -> MediaStream (MediaStreamAudioDestinationNode), Audio-Thread
+using MediaStreamAudioDeliver = void (*)(void*, const MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t);
+void consumeMediaStreamAudioWasm(AudioBus& bus, size_t frames, double sampleRate, uint64_t& framesSoFar, MediaStreamAudioDeliver deliver, void* context)
+{
+    unsigned channels = bus.numberOfChannels();
+    if (!channels || !frames || sampleRate <= 0)
+        return;
+    Vector<float, 1024> samples;
+    samples.grow(channels * frames);
+    for (unsigned index = 0; index < channels; ++index) {
+        auto channel = bus.channel(index)->span();
+        for (size_t frame = 0; frame < frames; ++frame)
+            samples[index * frames + frame] = frame < channel.size() ? channel[frame] : 0;
+    }
+    BrowserLite::WasmAudioData data(samples.span().data(), frames, channels);
+    BrowserLite::WasmAudioStreamDescription description(sampleRate, channels);
+    deliver(context, MediaTime(static_cast<int64_t>(framesSoFar), static_cast<uint32_t>(sampleRate)), data, description, frames);
+    framesSoFar += frames;
 }
 
 } // namespace WebCore

@@ -1,7 +1,9 @@
 // End-to-End Test fuer Kamera und Mikrofon (engine/src/media/MediaStreamWasm.cpp,
 // web/capture.js): getUserMedia mit der Fake-Kamera/dem Fake-Mikrofon von
 // Chromium, Abfrage wie Chrome, <video>.srcObject, canvas.drawImage(video),
-// Mikrofon in Web Audio, enumerateDevices, Aufnahme-Anzeige im Tab.
+// Mikrofon in Web Audio, enumerateDevices, Aufnahme-Anzeige im Tab. MediaRecorder
+// (engine/src/media/MediaRecorderWasm.cpp) nimmt Canvas + Web Audio als WebM auf,
+// das echte Chromium spielt die Datei ab.
 //
 //   cd tests/e2e && node mediastream-test.mjs [engine-ordner]
 import http from 'node:http';
@@ -31,9 +33,10 @@ const check = (name, ok, info = '') => {
 
 
 const PAGE = `<!doctype html><title>MediaStream-Test</title>
-<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; }</style>
+<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; }</style>
 <button id="start">Kamera an</button>
 <button id="screen">Bildschirm teilen</button>
+<button id="rec">Aufnehmen</button>
 <script>
 const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
 log('api', typeof navigator.mediaDevices?.getUserMedia + ',' + typeof navigator.mediaDevices?.getDisplayMedia);
@@ -49,6 +52,60 @@ document.getElementById('screen').addEventListener('click', async () => {
     stream.getTracks().forEach((track) => track.stop());
   } catch (e) {
     log('screen', e.name + ':' + e.message);
+  }
+});
+document.getElementById('rec').addEventListener('click', async () => {
+  try {
+    const types = ['video/webm', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9', 'audio/webm;codecs=opus', 'video/mp4', 'audio/webm;codecs=vp8'];
+    log('rectypes', types.map((type) => MediaRecorder.isTypeSupported(type) ? 1 : 0).join(','));
+    // Bild: Canvas mit wechselnder Farbe, Ton: 440 Hz aus Web Audio
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 120;
+    const context = canvas.getContext('2d');
+    let frame = 0;
+    const draw = () => {
+      context.fillStyle = frame++ % 2 ? 'rgb(255,0,0)' : 'rgb(0,0,255)';
+      context.fillRect(0, 0, 160, 120);
+    };
+    draw();
+    const timer = setInterval(draw, 50);
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    oscillator.frequency.value = 440;
+    const destination = audioContext.createMediaStreamDestination();
+    oscillator.connect(destination);
+    oscillator.start();
+    await audioContext.resume();
+    const stream = new MediaStream([...canvas.captureStream(20).getVideoTracks(), ...destination.stream.getAudioTracks()]);
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
+    const events = [];
+    recorder.ondataavailable = (event) => {
+      events.push('data');
+      if (event.data.size)
+        chunks.push(event.data);
+    };
+    recorder.onstart = () => events.push('start');
+    const stopped = new Promise((resolve) => recorder.onstop = resolve);
+    recorder.start(500);
+    log('recstate', recorder.state);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    recorder.stop();
+    await stopped;
+    clearInterval(timer);
+    oscillator.stop();
+    log('recmime', recorder.mimeType);
+    log('recevents', events[0] + ':' + events.filter((e) => e === 'data').length);
+    const blob = new Blob(chunks, { type: recorder.mimeType });
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    log('recsize', bytes.length);
+    let binary = '';
+    for (const byte of bytes)
+      binary += String.fromCharCode(byte);
+    log('recdata', btoa(binary));
+  } catch (e) {
+    log('recerror', e.name + ':' + e.message);
   }
 });
 document.getElementById('start').addEventListener('click', async () => {
@@ -165,6 +222,50 @@ check('enumerateDevices mit Namen nach Erlaubnis', await result('devices', 30000
 check('track.stop() beendet die Spur', await result('stopped', 30000) === 'ended', results.get('stopped') || err());
 await page.mouse.click(box.x + 360, box.y + 50);
 check('getDisplayMedia zeigt den Bildschirm', await result('screen', 30000) === 'bild:monitor', results.get('screen'));
+
+// MediaRecorder: Canvas + Web Audio als WebM
+await page.mouse.click(box.x + 600, box.y + 50);
+const recErr = () => results.get('recerror') || '';
+check('MediaRecorder.isTypeSupported wie Chrome', await result('rectypes', 30000) === '1,1,1,1,0,0', results.get('rectypes') || recErr());
+check('MediaRecorder nimmt auf', await result('recstate', 30000) === 'recording', results.get('recstate') || recErr());
+check('MediaRecorder.mimeType wie Chrome', await result('recmime', 30000) === 'video/webm;codecs=vp8,opus', results.get('recmime') || recErr());
+const recEvents = await result('recevents', 30000);
+check('start und mehrere dataavailable (timeslice)', /^start:([3-9]|\d\d)$/.test(recEvents || ''), recEvents || recErr());
+const recData = await result('recdata', 30000);
+const webm = recData ? Buffer.from(recData, 'base64') : Buffer.alloc(0);
+check('WebM-Datei (EBML-Kopf)', webm.length > 2000 && webm.readUInt32BE(0) === 0x1A45DFA3, `${webm.length} Bytes`);
+// Das echte Chromium spielt die Aufnahme ab: Bildgroesse, Farbe, Ton
+const playback = await page.evaluate(async (base64) => {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+  const video = document.createElement('video');
+  video.muted = true;
+  video.src = url;
+  await new Promise((resolve, reject) => {
+    video.onloadeddata = resolve;
+    video.onerror = () => reject(new Error('video error ' + (video.error && video.error.message)));
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = 16;
+  canvas.height = 12;
+  const context = canvas.getContext('2d');
+  const colors = [];
+  for (const time of [0, 0.5, 1, 1.5]) {
+    video.currentTime = time;
+    await new Promise((resolve) => video.onseeked = resolve);
+    context.drawImage(video, 0, 0, 16, 12);
+    colors.push([...context.getImageData(8, 6, 1, 1).data.slice(0, 3)]);
+  }
+  const [r, g, b] = colors[2];
+  const audio = await new AudioContext().decodeAudioData(bytes.buffer.slice(0));
+  const samples = audio.getChannelData(0);
+  let peak = 0;
+  for (const value of samples)
+    peak = Math.max(peak, Math.abs(value));
+  return { size: video.videoWidth + 'x' + video.videoHeight, color: [r, g, b], colors, audioSeconds: Math.round(audio.duration * 10) / 10, peak: Math.round(peak * 100) / 100 };
+}, recData || '').catch((e) => ({ error: String(e) }));
+check('Chromium spielt die Aufnahme ab (Bild)', playback.size === '160x120' && (playback.color[0] > 200 || playback.color[2] > 200), JSON.stringify(playback));
+check('Chromium spielt die Aufnahme ab (Ton)', playback.audioSeconds >= 1.5 && playback.peak > 0.3, JSON.stringify(playback));
 
 await browser.close();
 relay.kill();

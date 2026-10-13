@@ -9,7 +9,9 @@
 // Wie in Chrome fragt die Oberflaeche pro Ursprung nach Kamera/Mikrofon.
 #pragma once
 
+#include <WebCore/AudioStreamDescription.h>
 #include <WebCore/MediaStreamPrivate.h>
+#include <WebCore/PlatformAudioData.h>
 #include <WebCore/RealtimeMediaSource.h>
 #include <wtf/Lock.h>
 #include <wtf/RefCounted.h>
@@ -29,6 +31,50 @@ namespace MediaStreams {
 void enableIn(WebCore::Settings&);
 void attachTo(int viewId, WebCore::Page&);
 }
+
+// Ton im Speicher der Engine: Float32, ein Block pro Kanal
+class WasmAudioData final : public WebCore::PlatformAudioData {
+public:
+    WasmAudioData(const float* samples, size_t frames, unsigned channels)
+        : m_samples(samples)
+        , m_frames(frames)
+        , m_channels(channels)
+    {
+    }
+    std::span<const float> channel(unsigned index) const { return { m_samples + index * m_frames, m_frames }; }
+    unsigned channels() const { return m_channels; }
+
+private:
+    const float* m_samples;
+    size_t m_frames;
+    unsigned m_channels;
+};
+
+class WasmAudioStreamDescription final : public WebCore::AudioStreamDescription {
+public:
+    WasmAudioStreamDescription(double sampleRate, unsigned channels)
+        : m_sampleRate(sampleRate)
+        , m_channels(channels)
+    {
+    }
+
+private:
+    const WebCore::PlatformDescription& platformDescription() const final { return m_description; }
+    PCMFormat format() const final { return Float32; }
+    double sampleRate() const final { return m_sampleRate; }
+    bool isInterleaved() const final { return false; }
+    bool isSignedInteger() const final { return false; }
+    bool isFloat() const final { return true; }
+    bool isNativeEndian() const final { return true; }
+    uint32_t numberOfInterleavedChannels() const final { return 1; }
+    uint32_t numberOfChannelStreams() const final { return m_channels; }
+    uint32_t numberOfChannels() const final { return m_channels; }
+    uint32_t sampleWordSize() const final { return sizeof(float); }
+
+    WebCore::PlatformDescription m_description { WebCore::PlatformDescription::None, nullptr };
+    double m_sampleRate;
+    unsigned m_channels;
+};
 
 // <video>.srcObject = stream: haelt das neuste Bild der Video-Spur
 class MediaStreamPlayback final
