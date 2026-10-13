@@ -372,7 +372,7 @@ bool MediaPlayerPrivateWasm::hasAvailableVideoFrame() const
 
 void MediaPlayerPrivateWasm::play()
 {
-    BL_IF_STREAM(m_paused = false; return)
+    BL_IF_STREAM(m_paused = false; m_stream->setAudioState(true, m_streamVolume, m_streamMuted); return)
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = false;
@@ -382,7 +382,7 @@ void MediaPlayerPrivateWasm::play()
 
 void MediaPlayerPrivateWasm::pause()
 {
-    BL_IF_STREAM(m_paused = true; return)
+    BL_IF_STREAM(m_paused = true; m_stream->setAudioState(false, m_streamVolume, m_streamMuted); return)
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = true;
@@ -450,13 +450,16 @@ void MediaPlayerPrivateWasm::setRate(float rate)
 
 void MediaPlayerPrivateWasm::setVolume(float volume)
 {
-    BL_IF_STREAM(return)
+    // Auch vor dem Laden merken (WebCore setzt es beim Erzeugen des Players)
+    m_streamVolume = volume;
+    BL_IF_STREAM(m_stream->setAudioState(!m_paused, volume, m_streamMuted); return)
     send("volume"_s, makeString("{\"volume\":"_s, volume, '}'));
 }
 
 void MediaPlayerPrivateWasm::setMuted(bool muted)
 {
-    BL_IF_STREAM(return)
+    m_streamMuted = muted;
+    BL_IF_STREAM(m_stream->setAudioState(!m_paused, m_streamVolume, muted); return)
     send("muted"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, '}'));
 }
 

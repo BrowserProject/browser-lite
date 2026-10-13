@@ -8,6 +8,8 @@
 #include "VideoFrameWasm.h"
 #include <WebCore/AudioBus.h>
 #include <WebCore/AudioChannel.h>
+#include <WebCore/AudioDestination.h>
+#include <WebCore/AudioIOCallback.h>
 #include <WebCore/AudioSourceProviderClient.h>
 #include <WebCore/AudioStreamDescription.h>
 #include <WebCore/CaptureDevice.h>
@@ -640,9 +642,98 @@ Ref<MediaStreamPlayback> MediaStreamPlayback::create(MediaPlayerPrivateWasm& pla
 {
     Ref playback = adoptRef(*new MediaStreamPlayback(player, stream));
     stream.addObserver(playback.get());
-    playback->updateVideoTrack();
+    playback->updateTracks();
     return playback;
 }
+
+// Ton einer Stream-Spur ueber einen eigenen Ausgang wie Web Audio (der
+// Resampler passt die Rate an den Host an)
+class StreamAudioOutput final
+    : public ThreadSafeRefCounted<StreamAudioOutput>
+    , public AudioSourceProviderClient
+    , public AudioIOCallback {
+public:
+    static Ref<StreamAudioOutput> create(MediaStreamTrackPrivate& track) { return adoptRef(*new StreamAudioOutput(track)); }
+
+    ~StreamAudioOutput()
+    {
+        stopDestination();
+        m_provider->setClient(nullptr);
+    }
+
+    void ref() const final { ThreadSafeRefCounted::ref(); }
+    void deref() const final { ThreadSafeRefCounted::deref(); }
+
+    MediaStreamTrackPrivate* track() const { return m_track.get(); }
+
+    void setState(bool playing, float volume)
+    {
+        m_volume = volume;
+        if (playing == m_playing)
+            return;
+        m_playing = playing;
+        if (playing)
+            startDestination();
+        else
+            stopDestination();
+    }
+
+private:
+    explicit StreamAudioOutput(MediaStreamTrackPrivate& track)
+        : m_track(track)
+        , m_provider(AudioSourceProviderWasm::create(track))
+    {
+        m_provider->setClient(WeakPtr<AudioSourceProviderClient> { *this });
+    }
+
+    void setFormat(size_t, float sampleRate) final
+    {
+        if (sampleRate == m_sampleRate)
+            return;
+        m_sampleRate = sampleRate;
+        if (m_playing) {
+            stopDestination();
+            startDestination();
+        }
+    }
+
+    void startDestination()
+    {
+        if (m_destination || m_sampleRate <= 0)
+            return;
+        m_destination = AudioDestination::create({ *this, emptyString(), 0, 2, m_sampleRate });
+        m_destination->start(nullptr);
+    }
+
+    void stopDestination()
+    {
+        if (RefPtr destination = std::exchange(m_destination, nullptr)) {
+            destination->clearCallback();
+            destination->stop();
+        }
+    }
+
+    // Audio-Thread
+    void render(AudioBus& bus, size_t frames, const AudioIOPosition&) final
+    {
+        m_provider->provideInput(bus, frames);
+        float volume = m_volume;
+        if (volume == 1)
+            return;
+        for (unsigned index = 0; index < bus.numberOfChannels(); ++index) {
+            for (auto& sample : bus.channel(index)->mutableSpan())
+                sample *= volume;
+        }
+    }
+    void isPlayingDidChange() final { }
+
+    WeakPtr<MediaStreamTrackPrivate> m_track;
+    const Ref<WebAudioSourceProvider> m_provider;
+    RefPtr<AudioDestination> m_destination;
+    std::atomic<float> m_volume { 1 };
+    bool m_playing { false };
+    float m_sampleRate { 0 };
+};
 
 MediaStreamPlayback::MediaStreamPlayback(MediaPlayerPrivateWasm& player, MediaStreamPrivate& stream)
     : m_player(player)
@@ -663,6 +754,45 @@ void MediaStreamPlayback::stop()
     m_stream->removeObserver(*this);
     if (RefPtr source = std::exchange(m_videoSource, nullptr))
         source->removeVideoFrameObserver(*this);
+    if (RefPtr audio = std::exchange(m_audio, nullptr))
+        audio->setState(false, 0);
+}
+
+void MediaStreamPlayback::updateTracks()
+{
+    updateVideoTrack();
+    updateAudioTrack();
+}
+
+void MediaStreamPlayback::updateAudioTrack()
+{
+    if (m_stopped)
+        return;
+    RefPtr<MediaStreamTrackPrivate> track;
+    for (auto& candidate : m_stream->tracks()) {
+        if (candidate->isAudio() && candidate->enabled() && !candidate->ended()) {
+            track = candidate.ptr();
+            break;
+        }
+    }
+    if (m_audio && m_audio->track() == track.get()) {
+        m_audio->setState(m_audioPlaying && !m_audioMuted && m_audioVolume > 0, m_audioVolume);
+        return;
+    }
+    if (RefPtr audio = std::exchange(m_audio, nullptr))
+        audio->setState(false, 0);
+    if (!track)
+        return;
+    m_audio = StreamAudioOutput::create(*track);
+    m_audio->setState(m_audioPlaying && !m_audioMuted && m_audioVolume > 0, m_audioVolume);
+}
+
+void MediaStreamPlayback::setAudioState(bool playing, float volume, bool muted)
+{
+    m_audioPlaying = playing;
+    m_audioVolume = volume;
+    m_audioMuted = muted;
+    updateAudioTrack();
 }
 
 void MediaStreamPlayback::updateVideoTrack()
@@ -684,7 +814,7 @@ void MediaStreamPlayback::updateVideoTrack()
 
 void MediaStreamPlayback::characteristicsChanged()
 {
-    updateVideoTrack();
+    updateTracks();
     if (RefPtr player = m_player.get())
         player->streamChanged();
 }

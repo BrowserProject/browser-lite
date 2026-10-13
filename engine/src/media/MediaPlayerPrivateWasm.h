@@ -130,6 +130,8 @@ private:
     WebCore::MediaPlayer::NetworkState m_networkState { WebCore::MediaPlayer::NetworkState::Empty };
     WebCore::MediaPlayer::ReadyState m_readyState { WebCore::MediaPlayer::ReadyState::HaveNothing };
     bool m_paused { true };
+    float m_streamVolume { 1 };
+    bool m_streamMuted { false };
     bool m_ended { false };
     bool m_hasVideo { false };
     bool m_hasAudio { false };

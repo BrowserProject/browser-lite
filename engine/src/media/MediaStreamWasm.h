@@ -26,6 +26,7 @@ class VideoFrame;
 namespace BrowserLite {
 
 class MediaPlayerPrivateWasm;
+class StreamAudioOutput;
 
 namespace MediaStreams {
 void enableIn(WebCore::Settings&);
@@ -90,18 +91,22 @@ public:
 
     void stop();
     RefPtr<WebCore::VideoFrame> currentFrame() const;
+    // Ton der Spur abspielen (nur wenn das Element spielt und nicht stumm ist)
+    void setAudioState(bool playing, float volume, bool muted);
     WebCore::MediaStreamPrivate& stream() const { return m_stream; }
 
 private:
     MediaStreamPlayback(MediaPlayerPrivateWasm&, WebCore::MediaStreamPrivate&);
 
     void updateVideoTrack();
+    void updateAudioTrack();
+    void updateTracks();
 
     // MediaStreamPrivateObserver
     void characteristicsChanged() final;
     void activeStatusChanged() final;
-    void didAddTrack(WebCore::MediaStreamTrackPrivate&) final { updateVideoTrack(); }
-    void didRemoveTrack(WebCore::MediaStreamTrackPrivate&) final { updateVideoTrack(); }
+    void didAddTrack(WebCore::MediaStreamTrackPrivate&) final { updateTracks(); }
+    void didRemoveTrack(WebCore::MediaStreamTrackPrivate&) final { updateTracks(); }
 
     // VideoFrameObserver (kann von jedem Thread kommen)
     void videoFrameAvailable(WebCore::VideoFrame&, WebCore::VideoFrameTimeMetadata) final;
@@ -112,6 +117,10 @@ private:
     mutable Lock m_frameLock;
     RefPtr<WebCore::VideoFrame> m_frame WTF_GUARDED_BY_LOCK(m_frameLock);
     bool m_stopped { false };
+    RefPtr<StreamAudioOutput> m_audio;
+    bool m_audioPlaying { false };
+    float m_audioVolume { 1 };
+    bool m_audioMuted { false };
 };
 
 } // namespace BrowserLite

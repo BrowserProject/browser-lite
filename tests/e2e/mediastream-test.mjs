@@ -33,11 +33,37 @@ const check = (name, ok, info = '') => {
 
 
 const PAGE = `<!doctype html><title>MediaStream-Test</title>
-<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; }</style>
+<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; } #listen { position: absolute; left: 740px; top: 20px; width: 200px; height: 60px; }</style>
 <button id="start">Kamera an</button>
 <button id="screen">Bildschirm teilen</button>
 <button id="rec">Aufnehmen</button>
+<button id="listen">Anhoeren</button>
 <script>
+// Ton eines Streams in <audio>: 440 Hz aus Web Audio ueber srcObject
+let listenAudio = null;
+document.getElementById('listen').addEventListener('click', async () => {
+  try {
+    if (listenAudio) {
+      listenAudio.muted = true;
+      log('listenmuted', 1);
+      return;
+    }
+    const audioContext = new AudioContext();
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    gain.gain.value = 0.5;
+    const destination = audioContext.createMediaStreamDestination();
+    oscillator.connect(gain).connect(destination);
+    oscillator.start();
+    await audioContext.resume();
+    listenAudio = new Audio();
+    listenAudio.srcObject = destination.stream;
+    await listenAudio.play();
+    log('listen', listenAudio.paused ? 'pausiert' : 'spielt');
+  } catch (e) {
+    log('listen', e.name + ':' + e.message);
+  }
+});
 const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
 log('api', typeof navigator.mediaDevices?.getUserMedia + ',' + typeof navigator.mediaDevices?.getDisplayMedia);
 document.getElementById('screen').addEventListener('click', async () => {
@@ -266,6 +292,27 @@ const playback = await page.evaluate(async (base64) => {
 }, recData || '').catch((e) => ({ error: String(e) }));
 check('Chromium spielt die Aufnahme ab (Bild)', playback.size === '160x120' && (playback.color[0] > 200 || playback.color[2] > 200), JSON.stringify(playback));
 check('Chromium spielt die Aufnahme ab (Ton)', playback.audioSeconds >= 1.5 && playback.peak > 0.3, JSON.stringify(playback));
+
+// Ton eines Streams in <audio> (srcObject) kommt beim Host an, stumm = still
+const hostPeak = async (done) => {
+  let peak = null;
+  const until = Date.now() + 15000;
+  while (Date.now() < until) {
+    peak = (await page.evaluate(() => window.__blAudioState())).peak;
+    if (done(peak))
+      break;
+    await page.waitForTimeout(250);
+  }
+  return peak;
+};
+await page.mouse.click(box.x + 840, box.y + 50);
+check('<audio>.srcObject spielt', await result('listen', 30000) === 'spielt', results.get('listen'));
+const streamPeak = await hostPeak((peak) => peak > 0.3);
+check('Ton des Streams kommt beim Host an', streamPeak > 0.3 && streamPeak < 0.6, String(streamPeak));
+await page.mouse.click(box.x + 840, box.y + 50);
+await result('listenmuted', 10000);
+const mutedStreamPeak = await hostPeak((peak) => peak <= 0.01);
+check('<audio>.muted macht den Stream still', mutedStreamPeak <= 0.01, String(mutedStreamPeak));
 
 await browser.close();
 relay.kill();
