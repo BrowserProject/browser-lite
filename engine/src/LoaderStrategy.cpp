@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "LoaderStrategy.h"
+#include "ServiceWorkerWasm.h"
 
 #include "Engine.h"
 #include "Host.h"
@@ -576,6 +577,14 @@ private:
             loader.start();
             return;
         }
+        // Zuerst ein zustaendiger Service Worker; der kann es ans Netz zurueckgeben
+        if (ServiceWorkers::startFetch(loader, [this, loader = Ref { loader }] { startNetworkLoad(loader); }))
+            return;
+        startNetworkLoad(loader);
+    }
+
+    void startNetworkLoad(ResourceLoader& loader)
+    {
         auto load = ResourceLoad::create(loader, [this](ResourceLoad& load) {
             if (auto* loader = load.loader())
                 m_loads.remove(loader);
@@ -605,6 +614,8 @@ private:
 
     void remove(ResourceLoader* loader) final
     {
+        if (loader)
+            ServiceWorkers::cancelFetch(*loader);
         if (auto load = m_loads.take(loader))
             load->cancel();
     }
@@ -637,7 +648,8 @@ private:
 
     void isResourceLoadFinished(CachedResource& resource, CompletionHandler<void(bool)>&& callback) final
     {
-        callback(!resource.loader() || !m_loads.contains(resource.loader()));
+        RefPtr loader = resource.loader();
+        callback(!loader || (!m_loads.contains(loader.get()) && !ServiceWorkers::isFetching(*loader)));
     }
 
     ResourceError makeError(const URL& url, ASCIILiteral message, ResourceError::Type type = ResourceError::Type::General) const

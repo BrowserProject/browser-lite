@@ -321,6 +321,8 @@ jobs:
         run: cd tests/e2e && node webgl-test.mjs
       - name: Compositing-Test (Ebenen auf der GPU, Animation, Filter, Scrollen)
         run: cd tests/e2e && node compositing-test.mjs
+      - name: Service-Worker-Test (Registrieren, Fetch abfangen, SharedWorker)
+        run: cd tests/e2e && node serviceworker-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)

@@ -12,6 +12,7 @@
 #include "GpuRaster.h"
 #include "LayerTreeHostWasm.h"
 #include "ScrollingWasm.h"
+#include "ServiceWorkerWasm.h"
 #include "WebPlatformExtras.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
@@ -218,6 +219,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCSSScrollbarColorEnabled(true);
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
+    ServiceWorkers::enableIn(settings);
     // Origin Private File System (FileSystemStorageWasm.cpp)
     settings.setFileSystemEnabled(true);
     settings.setFileSystemWritableStreamEnabled(true);

@@ -214,6 +214,8 @@ net:local-storage
 net:message-channel
 net:online
 net:opfs
+net:service-worker
+net:shared-worker
 net:storage-manager
 net:web-locks
 net:websocket

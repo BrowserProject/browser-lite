@@ -10,6 +10,7 @@
 #include "Gamepad.h"
 #include "Host.h"
 #include "MediaPlayerPrivateWasm.h"
+#include "ServiceWorkerWasm.h"
 #include "Speech.h"
 #include "Storage.h"
 #include "Strategies.h"
@@ -71,6 +72,8 @@ int main(int, char**)
     installPermissionController();
     installGamepadProvider();
     installSpeech();
+    // Service Worker der Seiten (ServiceWorkerWasm.cpp)
+    ServiceWorkers::initialize();
     // <video>/<audio> ueber das Host-<video> (media/)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     BrowserLite::initializeWebAssembly();
