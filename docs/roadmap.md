@@ -235,6 +235,8 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   (hat WebKit nicht), Bilder direkt als Textur statt ueber den Speicher
 - [x] Spracherkennung (`webkitSpeechRecognition`) ueber den Host-Browser, mit Mikrofon-Abfrage
   (Test in `devices-test.mjs`)
+- [x] Drucken: PDF aus der Engine (Skia PDF, `@media print`, Seitenumbrueche), Druckvorschau mit
+  Druckdialog des Host und "Als PDF speichern" (Test in `ui-test.mjs`)
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).

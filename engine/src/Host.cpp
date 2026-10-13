@@ -165,6 +165,19 @@ void sendDownloadData(int downloadId, std::span<const uint8_t> data)
     }, downloadId, copy, data.size());
 }
 
+void sendPrintDocument(int viewId, std::span<const uint8_t> data, const String& title)
+{
+    auto* copy = static_cast<uint8_t*>(malloc(data.size()));
+    memcpy(copy, data.data(), data.size());
+    char* titleCopy = strdup(title.utf8().data());
+    MAIN_THREAD_ASYNC_EM_ASM({
+        if (Module.onEnginePrint)
+            Module.onEnginePrint($0, HEAPU8.slice($1, $1 + $2), UTF8ToString($3));
+        _free($1);
+        _free($3);
+    }, viewId, copy, data.size(), titleCopy);
+}
+
 void notifyMedia(int playerId, ASCIILiteral type, const String& json, std::span<const uint8_t> data)
 {
     char* jsonCopy = strdup(json.utf8().data());

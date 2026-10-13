@@ -29,7 +29,11 @@ const check = (name, ok, info = '') => {
 };
 
 const loads = new Map();
-const page = (title) => title === 'Seite links'
+// Lange Seite zum Drucken: drei Abschnitte mit Seitenumbruch, ein Teil nur auf dem Bildschirm
+const PRINT_PAGE = `<!doctype html><title>Seite drucken</title><style>@media print { .screen { display: none } } section { break-after: page }</style>
+<div class="screen">Nur Bildschirm</div><section>Erste Druckseite</section><section>Zweite Druckseite</section><section>Dritte Druckseite</section>
+<script>addEventListener('beforeprint', () => console.log('RESULT print=before')); addEventListener('afterprint', () => console.log('RESULT print=after')); console.log('RESULT loaded=' + document.title)</script>`;
+const page = (title) => title === 'Seite drucken' ? PRINT_PAGE : title === 'Seite links'
   ? `<!doctype html><title>${title}</title><body style="margin:0"><a id="l" href="/ziel" style="display:block;width:300px;height:60px;background:#9cf">Link</a><script>console.log('RESULT loaded=' + document.title)</script>`
   : `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title)</script>`;
 const site = http.createServer((req, res) => {
@@ -55,7 +59,11 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
 const tab = await context.newPage();
 let loaded = [];
+const printEvents = [];
 tab.on('console', (msg) => {
+  const printMatch = /RESULT print=(\w+)/.exec(msg.text());
+  if (printMatch)
+    printEvents.push(printMatch[1]);
   if (process.env.E2E_LOG)
     console.log('[chromium]', msg.text());
   const match = /RESULT loaded=(.*?)(\s+\(|$)/.exec(msg.text());
@@ -157,6 +165,28 @@ await tab.locator('#tab-list .tab.active .title').click();
 await tab.keyboard.press('Control+u');
 const sourceTab = await tab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent?.startsWith('view-source:'), null, { timeout: 15000 }).then(() => true, () => false);
 check('Quelltext anzeigen (Strg+U)', sourceTab, await tab.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent));
+
+// Drucken: window.print() der Seite und Strg+P zeigen die Vorschau mit dem PDF der Engine
+await tab.locator('#tab-list .tab.active .title').click();
+await go(siteURL + 'drucken');
+check('Seite zum Drucken', await waitLoaded('Seite drucken'));
+await tab.evaluate(() => window.__blEval('window.print()'));
+const preview = tab.locator('#print-preview:not([hidden]) iframe');
+const previewShown = await preview.waitFor({ state: 'attached', timeout: 20000 }).then(() => true, () => false);
+const pdf = previewShown ? await tab.evaluate(async () => {
+  const src = document.querySelector('#print-preview iframe').src;
+  const text = new TextDecoder('latin1').decode(await (await fetch(src)).arrayBuffer());
+  return { header: text.slice(0, 5), pages: (text.match(/\/Type\s*\/Page\b/g) || []).length };
+}) : null;
+check('window.print(): Druckvorschau mit PDF', pdf && pdf.header === '%PDF-', JSON.stringify(pdf));
+check('PDF hat drei Seiten (break-after, @media print)', pdf && pdf.pages === 3, JSON.stringify(pdf));
+check('beforeprint und afterprint', printEvents.join(',') === 'before,after', printEvents.join(','));
+await tab.keyboard.press('Escape');
+check('Vorschau mit Esc zu', await tab.evaluate(() => document.getElementById('print-preview').hidden));
+await tab.locator('#tab-list .tab.active .title').click();
+await tab.keyboard.press('Control+p');
+check('Strg+P zeigt die Vorschau', await preview.waitFor({ state: 'attached', timeout: 20000 }).then(() => true, () => false));
+await tab.evaluate(() => document.querySelector('#print-preview .print-close').click());
 
 await browser.close();
 relay.kill();

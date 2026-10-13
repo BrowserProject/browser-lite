@@ -41,6 +41,7 @@ private:
 
     void addMessageToConsole(JSC::MessageSource, JSC::MessageLevel, const String& message, unsigned lineNumber, unsigned columnNumber, const String& sourceID) final;
     void runJavaScriptAlert(WebCore::LocalFrame&, const String&) final;
+    void print(WebCore::LocalFrame&, const WebCore::StringWithDirection&) final;
     bool runJavaScriptConfirm(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptPrompt(WebCore::LocalFrame&, const String& message, const String& defaultValue, String& result) final;
 

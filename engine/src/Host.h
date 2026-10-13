@@ -33,6 +33,8 @@ void requestFrameFromHost(int viewId);
 // Daten eines Downloads: ruft im Haupt-Thread Module.onEngineDownloadData(downloadId, bytes)
 // auf (bytes ist eine Kopie als Uint8Array).
 void sendDownloadData(int downloadId, std::span<const uint8_t>);
+// Fertiges PDF zum Drucken: ruft im Haupt-Thread Module.onEnginePrint(viewId, bytes, title)
+void sendPrintDocument(int viewId, std::span<const uint8_t>, const String& title);
 // Video/Audio (media/): Befehle an das Host-<video> und Daten fuer den Service Worker
 void notifyMedia(int playerId, ASCIILiteral type, const String& json, std::span<const uint8_t> = { });
 void sendMediaFetch(int fetchId, ASCIILiteral type, const String& json, std::span<const uint8_t> = { });

@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "Clients.h"
+#include "Printing.h"
 #include "Choosers.h"
 
 #include "Engine.h"
@@ -169,6 +170,12 @@ static intptr_t runDialog(int type, const String& message, const String& default
             return 0;
         return Module.engineDialog($0, UTF8ToString($1), UTF8ToString($2)) | 0;
     }, type, messageUTF8.data(), defaultUTF8.data());
+}
+
+void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
+{
+    // window.print(): PDF bauen, die Oberflaeche zeigt den Druckdialog
+    BrowserLite::printFrame(m_view->id(), frame);
 }
 
 void ChromeClient::runJavaScriptAlert(LocalFrame&, const String& message)

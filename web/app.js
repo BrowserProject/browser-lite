@@ -87,6 +87,7 @@ async function startEngine() {
     onEngineFrame,
     onEngineNeedsFrame,
     onEngineDownloadData,
+    onEnginePrint,
     onEngineIcon: (viewId, url, mime, bytes) => tabs.get(viewId)?.setIcon(mime, bytes),
     onEngineAudio: (...args) => onEngineAudio(engine, ...args),
     onEngineMedia,
@@ -214,7 +215,7 @@ function onEngineReady() {
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
-  initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind() });
+  initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab) });
   // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
   const session = params.get('url') ? null : sessionToRestore();
   if (session) {
@@ -776,6 +777,67 @@ function onEngineDownloadData(id, bytes) {
   setStatus('Download: ' + download.filename + ' ' + formatSize(download.received) + total);
 }
 
+// ------------------------------------------------------------ Drucken
+// Die Engine baut ein PDF (engine/src/Printing.cpp). Wir zeigen es wie die
+// Druckvorschau von Chrome an und oeffnen gleich den Druckdialog des Host.
+
+const printPreview = $('print-preview');
+let printURL = null;
+
+function printTab(tab) {
+  if (!tab || !engine)
+    return;
+  setStatus('Druckvorschau wird erstellt …');
+  engine._bl_print(tab.id);
+}
+
+function closePrintPreview() {
+  printPreview.hidden = true;
+  printPreview.querySelector('iframe')?.remove();
+  if (printURL)
+    URL.revokeObjectURL(printURL);
+  printURL = null;
+  focusPage();
+}
+
+function onEnginePrint(viewId, bytes, title) {
+  if (tabs.get(viewId) !== activeTab)
+    return;
+  setStatus('');
+  closePrintPreview();
+  printURL = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const name = (title || 'Seite').replace(/[\\/:*?"<>|]+/g, ' ').trim() + '.pdf';
+  printPreview.querySelector('.print-title').textContent = title || 'Drucken';
+  const save = printPreview.querySelector('.print-save');
+  save.href = printURL;
+  save.download = name;
+  const frame = document.createElement('iframe');
+  frame.title = 'Druckvorschau';
+  frame.src = printURL;
+  // Wie window.print() in Chrome: der Druckdialog kommt gleich
+  frame.addEventListener('load', () => {
+    try {
+      frame.contentWindow.print();
+    } catch (e) {}
+  }, { once: true });
+  printPreview.append(frame);
+  printPreview.hidden = false;
+}
+
+printPreview.querySelector('.print-close').addEventListener('click', closePrintPreview);
+printPreview.querySelector('.print-now').addEventListener('click', () => {
+  try {
+    printPreview.querySelector('iframe')?.contentWindow.print();
+  } catch (e) {}
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !printPreview.hidden) {
+    closePrintPreview();
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}, true);
+
 // ------------------------------------------------------------ Kontextmenue
 // Die Engine schickt nach einem Rechtsklick, was unter der Maus ist (Link,
 // Bild, Auswahl). Hat die Seite ein eigenes Menue, kommt nichts.
@@ -818,6 +880,7 @@ function showContextMenu(tab, data) {
   add('Zurück', () => engine._bl_go_back(tab.id), data.canGoBack);
   add('Vorwärts', () => engine._bl_go_forward(tab.id), data.canGoForward);
   add('Neu laden', () => engine._bl_reload(tab.id));
+  add('Drucken …', () => printTab(tab));
   add('Seitenquelltext anzeigen', () => engine._bl_view_source(tab.id), /^https?:/.test(tab.url || ''));
 
   for (const item of items) {
@@ -1252,6 +1315,7 @@ function shortcut(e) {
     case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;
     case 'r': if (tab) engine._bl_reload(tab.id); return true;
     case 'u': if (tab) engine._bl_view_source(tab.id); return true;
+    case 'p': printTab(tab); return true;
     case '+':
     case '=': if (tab) changeZoom(tab, 1); return true;
     case '-': if (tab) changeZoom(tab, -1); return true;

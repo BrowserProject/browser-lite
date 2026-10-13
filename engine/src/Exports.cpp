@@ -8,6 +8,7 @@
 #include "Choosers.h"
 #include "Compositor.h"
 #include "DeviceClients.h"
+#include "Printing.h"
 #include "Engine.h"
 #include "Gamepad.h"
 #include "Host.h"
@@ -248,6 +249,15 @@ EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
 EMSCRIPTEN_KEEPALIVE void bl_find(int id, char* text, int backwards, int again)
 {
     withView(id, [text = takeString(text), backwards, again](WebView& view) { view.find(text, backwards, again); });
+}
+
+// Drucken (Strg+P, Menue): Hauptframe als PDF
+EMSCRIPTEN_KEEPALIVE void bl_print(int id)
+{
+    withView(id, [id](WebView& view) {
+        if (RefPtr frame = view.mainFrame())
+            printFrame(id, *frame);
+    });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)

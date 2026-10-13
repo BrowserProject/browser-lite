@@ -248,7 +248,8 @@ function renderPanel() {
   if (panelName === 'menu') {
     const items = [['Neuer Tab', 'Strg+T', () => api.openURL('', true)], ['Verlauf', 'Strg+H', () => togglePanel('history')],
       ['Lesezeichen', 'Strg+Umschalt+O', () => togglePanel('bookmarks')], ['Downloads', 'Strg+J', () => togglePanel('downloads')],
-      ['Suchen auf der Seite', 'Strg+F', () => { togglePanel(null); api.find(); }], ['Einstellungen', '', () => togglePanel('settings')]];
+      ['Suchen auf der Seite', 'Strg+F', () => { togglePanel(null); api.find(); }], ['Drucken …', 'Strg+P', () => { togglePanel(null); api.print(); }],
+      ['Einstellungen', '', () => togglePanel('settings')]];
     for (const [label, key, action] of items) {
       const button = element('button', { className: 'panel-menu-item' }, element('span', { textContent: label }), element('kbd', { textContent: key }));
       button.addEventListener('click', action);
