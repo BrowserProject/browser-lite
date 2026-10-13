@@ -167,9 +167,10 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     auto& settings = m_page->settings();
     settings.setScriptEnabled(true);
     settings.setLoadsImagesAutomatically(true);
-    // Compositing mit Ebenen: vorerst nur auf Wunsch (BL_COMPOSITING=1,
-    // Oberflaeche ?compositing=1) und nur mit GPU
-    if (const char* compositing = getenv("BL_COMPOSITING"); compositing && !strcmp(compositing, "1") && LayerTreeHostWasm::isAvailable()) {
+    // Compositing mit Ebenen, wenn die GPU geht (BL_COMPOSITING=0 bzw.
+    // ?compositing=0 in der Oberflaeche schaltet ab)
+    const char* compositing = getenv("BL_COMPOSITING");
+    if ((!compositing || strcmp(compositing, "0")) && LayerTreeHostWasm::isAvailable()) {
         m_layerTreeHost = makeUnique<LayerTreeHostWasm>(*this);
         m_compositing = true;
     }

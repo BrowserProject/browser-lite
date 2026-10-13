@@ -101,7 +101,7 @@ async function startEngine() {
       // Skia malt ueber WebGL 2 (GPU); ?gpu=0 malt auf der CPU
       if (params.get('gpu'))
         (module || engine).ENV.BL_GPU = params.get('gpu');
-      // Compositing mit Ebenen (braucht die GPU): ?compositing=1
+      // Compositing mit Ebenen (Standard mit GPU): ?compositing=0 schaltet ab
       if (params.get('compositing'))
         (module || engine).ENV.BL_COMPOSITING = params.get('compositing');
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe

@@ -54,9 +54,9 @@ static bool ensureSharedDisplay()
 
 bool LayerTreeHostWasm::isAvailable()
 {
-    if (!ensureSharedDisplay())
-        return false;
     auto* context = Gpu::context();
+    if (!context || !ensureSharedDisplay())
+        return false;
     // SkiaCompositingLayer holt den Kontext ueber PlatformDisplay
     setSkiaGrContextForWasm(context);
     return context;

@@ -77,7 +77,7 @@ public:
     // Die Oberflaeche hat das Canvas an den Engine-Worker gegeben: alles neu zeigen
     void canvasAttached();
 
-    // Compositing mit Ebenen (LayerTreeHostWasm.h), nur mit GPU und BL_COMPOSITING=1
+    // Compositing mit Ebenen (LayerTreeHostWasm.h), mit GPU, ausser BL_COMPOSITING=0
     bool isCompositing() const { return m_compositing; }
     LayerTreeHostWasm* layerTreeHost() const { return m_compositing ? m_layerTreeHost.get() : nullptr; }
     WebCore::GraphicsLayerFactory* graphicsLayerFactory() const;
