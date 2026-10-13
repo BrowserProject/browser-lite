@@ -229,7 +229,10 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   zusaetzlich an ein MediaSource im Host-Browser, das abspielt. Test in `media-test.mjs`
 - [x] `SourceBuffer.remove()` und das Aufraeumen von WebCore gehen auch an das MediaSource im Host
   (Hook `didRemoveCodedFrames`, Patch 0017)
-`<audio>`/`<video>` ueber WebCodecs + Web Audio, danach MSE.
+- [x] WebCodecs fuer Seiten und Worker: Video/Audio dekodieren und kodieren ueber die Codecs des
+  Host-Browsers, `VideoFrame` aus Canvas, Bild, Video und Rohdaten (I420, NV12, RGBA, ...),
+  `AudioData` in allen Formaten. Test: `tests/e2e/webcodecs-test.mjs`. Offen: `ImageDecoder`
+  (hat WebKit nicht), Bilder direkt als Textur statt ueber den Speicher
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).

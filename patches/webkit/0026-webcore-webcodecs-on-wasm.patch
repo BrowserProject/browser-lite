@@ -1,0 +1,119 @@
+diff --git a/Source/WebCore/html/HTMLCanvasElement.cpp b/Source/WebCore/html/HTMLCanvasElement.cpp
+index 61a2ae4d1f..b414fd0941 100644
+--- a/Source/WebCore/html/HTMLCanvasElement.cpp
++++ b/Source/WebCore/html/HTMLCanvasElement.cpp
+@@ -105,6 +105,10 @@
+ #include <pal/cf/CoreMediaSoftLink.h>
+ #endif
+ 
++#if PLATFORM(WASM) && (ENABLE(MEDIA_STREAM) || ENABLE(WEB_CODECS))
++#include "VideoFrame.h"
++#endif
++
+ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(HTMLCanvasElement);
+@@ -771,9 +775,10 @@ RefPtr<ImageData> HTMLCanvasElement::getImageData()
+ 
+ RefPtr<VideoFrame> HTMLCanvasElement::toVideoFrame()
+ {
+-#if PLATFORM(COCOA) || USE(GSTREAMER)
++#if PLATFORM(COCOA) || USE(GSTREAMER) || PLATFORM(WASM)
+     Ref document = this->document();
+-#if ENABLE(WEBGL)
++    // browser-lite: WebGL-Bilder kommen wie 2D ueber makeRenderingResultsAvailable
++#if ENABLE(WEBGL) && !PLATFORM(WASM)
+     if (RefPtr context = dynamicDowncast<WebGLRenderingContextBase>(m_context.get())) {
+         if (document->settings().webAPIStatisticsEnabled())
+             ResourceLoadObserver::singleton().logCanvasRead(document.get());
+diff --git a/Source/WebCore/platform/AudioDecoder.cpp b/Source/WebCore/platform/AudioDecoder.cpp
+index 681e921599..154f27b1ae 100644
+--- a/Source/WebCore/platform/AudioDecoder.cpp
++++ b/Source/WebCore/platform/AudioDecoder.cpp
+@@ -43,6 +43,8 @@
+ 
+ namespace WebCore {
+ 
++// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++#if !PLATFORM(WASM)
+ bool AudioDecoder::isCodecSupported(const StringView& codec)
+ {
+     bool isMPEG4AAC = codec == "mp4a.40.2"_s || codec == "mp4a.40.02"_s || codec == "mp4a.40.5"_s
+@@ -85,6 +87,7 @@ Ref<AudioDecoder::CreatePromise> AudioDecoder::create(const String& codecName, c
+     return CreatePromise::createAndReject("Not supported"_s));
+ #endif
+ }
++#endif
+ 
+ AudioDecoder::AudioDecoder() = default;
+ AudioDecoder::~AudioDecoder() = default;
+diff --git a/Source/WebCore/platform/AudioEncoder.cpp b/Source/WebCore/platform/AudioEncoder.cpp
+index d53a42e0d8..bfbae13ca4 100644
+--- a/Source/WebCore/platform/AudioEncoder.cpp
++++ b/Source/WebCore/platform/AudioEncoder.cpp
+@@ -39,6 +39,8 @@
+ 
+ namespace WebCore {
+ 
++// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++#if !PLATFORM(WASM)
+ Ref<AudioEncoder::CreatePromise> AudioEncoder::create(const String& codecName, const Config& config, DescriptionCallback&& descriptionCallback, OutputCallback&& outputCallback)
+ {
+ #if USE(GSTREAMER)
+@@ -54,6 +56,7 @@ Ref<AudioEncoder::CreatePromise> AudioEncoder::create(const String& codecName, c
+     return CreatePromise::createAndReject("Not supported"_s));
+ #endif
+ }
++#endif
+ 
+ } // namespace WebCore
+ 
+diff --git a/Source/WebCore/platform/VideoFrame.cpp b/Source/WebCore/platform/VideoFrame.cpp
+index 423db07dd4..6999b8451c 100644
+--- a/Source/WebCore/platform/VideoFrame.cpp
++++ b/Source/WebCore/platform/VideoFrame.cpp
+@@ -78,7 +78,8 @@ bool VideoFrame::is10bits() const
+ #endif
+ }
+ 
+-#if !PLATFORM(COCOA) && !USE(GSTREAMER)
++// browser-lite: eigene Umsetzung in engine/src/media/VideoFrameWasm.cpp
++#if !PLATFORM(COCOA) && !USE(GSTREAMER) && !PLATFORM(WASM)
+ RefPtr<VideoFrame> VideoFrame::fromNativeImage(NativeImage&)
+ {
+     // FIXME: Add support.
+diff --git a/Source/WebCore/platform/VideoPixelFormat.cpp b/Source/WebCore/platform/VideoPixelFormat.cpp
+index db5cd94470..3c9ce86346 100644
+--- a/Source/WebCore/platform/VideoPixelFormat.cpp
++++ b/Source/WebCore/platform/VideoPixelFormat.cpp
+@@ -74,6 +74,16 @@ std::optional<VideoPixelFormat> convertVideoFramePixelFormat(uint32_t format, bo
+     default:
+         break;
+     }
++#elif PLATFORM(WASM)
++    // browser-lite: VideoFrameWasm meldet VideoPixelFormat + 1 (0 = unbekannt)
++    if (format && format <= static_cast<uint32_t>(VideoPixelFormat::BGRX) + 1) {
++        auto pixelFormat = static_cast<VideoPixelFormat>(format - 1);
++        if (shouldDiscardAlpha && pixelFormat == VideoPixelFormat::RGBA)
++            return VideoPixelFormat::RGBX;
++        if (shouldDiscardAlpha && pixelFormat == VideoPixelFormat::BGRA)
++            return VideoPixelFormat::BGRX;
++        return pixelFormat;
++    }
+ #else
+     UNUSED_PARAM(format);
+     UNUSED_PARAM(shouldDiscardAlpha);
+diff --git a/Source/WebCore/platform/audio/PlatformRawAudioData.cpp b/Source/WebCore/platform/audio/PlatformRawAudioData.cpp
+index 9e1a471626..ea8fdd4f74 100644
+--- a/Source/WebCore/platform/audio/PlatformRawAudioData.cpp
++++ b/Source/WebCore/platform/audio/PlatformRawAudioData.cpp
+@@ -29,7 +29,8 @@
+ 
+ namespace WebCore {
+ 
+-#if !USE(GSTREAMER) && !USE(AVFOUNDATION)
++// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++#if !USE(GSTREAMER) && !USE(AVFOUNDATION) && !PLATFORM(WASM)
+ RefPtr<PlatformRawAudioData> PlatformRawAudioData::create(std::span<const uint8_t>, AudioSampleFormat, float, int64_t, size_t, size_t)
+ {
+     notImplemented();

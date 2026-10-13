@@ -14,6 +14,7 @@
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "WebPlatformExtras.h"
+#include "WebCodecsWasm.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
@@ -220,6 +221,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
     ServiceWorkers::enableIn(settings);
+    WebCodecs::enableIn(settings);
     // Origin Private File System (FileSystemStorageWasm.cpp)
     settings.setFileSystemEnabled(true);
     settings.setFileSystemWritableStreamEnabled(true);

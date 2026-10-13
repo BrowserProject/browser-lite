@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "Host.h"
 #include "MediaSourceWasm.h"
+#include "VideoFrameWasm.h"
 
 #include <WebCore/ContentType.h>
 #include <WebCore/GraphicsContext.h>
@@ -412,6 +413,13 @@ RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
     if (!m_frame.pixels)
         return nullptr;
     return imageForFrame(m_frame.pixels, m_frame.width, m_frame.height, true);
+}
+
+RefPtr<VideoFrame> MediaPlayerPrivateWasm::videoFrameForCurrentTime()
+{
+    if (!m_frame.pixels)
+        return nullptr;
+    return VideoFrameWasm::createRGBA(m_frame.pixels, static_cast<size_t>(m_frame.width) * 4, m_frame.width, m_frame.height, true, MediaTime::createWithDouble(m_frameMediaTime));
 }
 
 DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()

@@ -93,6 +93,8 @@ private:
     void setPresentationSize(const WebCore::IntSize&) final;
     void paint(WebCore::GraphicsContext&, const WebCore::FloatRect&) final;
     RefPtr<WebCore::NativeImage> nativeImageForCurrentTime() final;
+    // new VideoFrame(video) (WebCodecs)
+    RefPtr<WebCore::VideoFrame> videoFrameForCurrentTime() final;
     WebCore::DestinationColorSpace colorSpace() final;
     bool hasAvailableVideoFrame() const final { return m_frame.pixels; }
     // requestVideoFrameCallback: Angaben zum neusten Bild, nur einmal pro Bild

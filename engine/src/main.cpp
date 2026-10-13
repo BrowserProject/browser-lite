@@ -14,6 +14,7 @@
 #include "Speech.h"
 #include "Storage.h"
 #include "Strategies.h"
+#include "WebCodecsWasm.h"
 #include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
@@ -76,6 +77,8 @@ int main(int, char**)
     ServiceWorkers::initialize();
     // <video>/<audio> ueber das Host-<video> (media/)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
+    // WebCodecs der Seiten ueber die WebCodecs des Host (media/WebCodecsWasm.cpp)
+    WebCodecs::initialize();
     BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
     // Eigener Thread fuer Compositing und Anzeige (braucht WebGL 2)

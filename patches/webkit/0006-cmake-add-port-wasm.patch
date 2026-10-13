@@ -159,10 +159,10 @@ index 0000000000..0211c67287
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..64a0f9fc37
+index 0000000000..e6f5f3bfda
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,171 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
 +#
 +# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
@@ -260,6 +260,8 @@ index 0000000000..64a0f9fc37
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ASYNC_SCROLLING PRIVATE ON)
 +# Lage- und Bewegungssensoren des Host (engine/src/DeviceClients.cpp)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DEVICE_ORIENTATION PRIVATE ON)
++# WebCodecs ueber die WebCodecs des Host-Browsers (engine/src/media/WebCodecsWasm.cpp)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_CODECS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_RESOURCE_USAGE PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_PERIODIC_MEMORY_MONITOR PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBDRIVER PRIVATE OFF)

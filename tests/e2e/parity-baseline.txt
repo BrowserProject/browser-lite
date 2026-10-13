@@ -203,6 +203,8 @@ media:speech-synthesis
 media:video
 media:video-frame-callback
 media:web-audio
+media:webcodecs-audio
+media:webcodecs-video
 media:webm-vp9
 net:beacon
 net:broadcast-channel
