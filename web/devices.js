@@ -157,6 +157,53 @@ export function onSensorStop(tab, data) {
   sensors.delete(key);
 }
 
+// ------------------------------------------------------- Host-Bruecke
+
+// Polyfills der Seite (engine/src/WebPlatformExtras.cpp) fragen APIs des
+// Host-Browsers. Die Engine laesst nur diese Namen durch.
+const hostCalls = {
+  async eyedropper() {
+    if (typeof EyeDropper !== 'function')
+      throw Object.assign(new Error('EyeDropper not supported'), { name: 'NotSupportedError' });
+    const result = await new EyeDropper().open();
+    return { sRGBHex: result.sRGBHex };
+  },
+  async battery() {
+    if (typeof navigator.getBattery !== 'function')
+      return { charging: true, chargingTime: 0, dischargingTime: null, level: 1 };
+    const battery = await navigator.getBattery();
+    const finite = (value) => (Number.isFinite(value) ? value : null);
+    return { charging: battery.charging, chargingTime: finite(battery.chargingTime), dischargingTime: finite(battery.dischargingTime), level: battery.level };
+  },
+  async 'keyboard-lock'(payload) {
+    if (!navigator.keyboard?.lock)
+      throw Object.assign(new Error('Keyboard lock not supported'), { name: 'NotSupportedError' });
+    await navigator.keyboard.lock(payload?.keyCodes || undefined);
+    return null;
+  },
+  async 'keyboard-unlock'() {
+    navigator.keyboard?.unlock?.();
+    return null;
+  },
+  async 'keyboard-layout'() {
+    if (!navigator.keyboard?.getLayoutMap)
+      return [];
+    return [...(await navigator.keyboard.getLayoutMap()).entries()];
+  },
+};
+
+export async function onHostCall(tab, data) {
+  const send = (ok, value) => api.engine()._bl_host_call_result(data.id, ok ? 1 : 0, api.toUTF8(JSON.stringify(value ?? null)));
+  const handler = hostCalls[data.name];
+  if (!handler)
+    return send(false, { name: 'NotSupportedError', message: 'Not supported' });
+  try {
+    send(true, await handler(JSON.parse(data.payload || 'null')));
+  } catch (error) {
+    send(false, { name: error?.name || 'NotSupportedError', message: error?.message || String(error) });
+  }
+}
+
 // ------------------------------------------------------- Benachrichtigungen
 
 const notifications = new Map(); // id -> Notification des Hosts

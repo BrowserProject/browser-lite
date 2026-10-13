@@ -69,9 +69,11 @@ css:trig-functions
 css:typed-om
 css:view-timeline
 css:zoom
+dev:battery
 dev:clipboard-item
 dev:clipboard-text
 dev:device-orientation
+dev:eyedropper
 dev:fullscreen
 dev:gamepad
 dev:geolocation
@@ -100,6 +102,7 @@ dom:highlight-api
 dom:inert
 dom:input-showPicker
 dom:intersection-observer
+dom:keyboard-lock
 dom:moveBefore
 dom:mutation-observer
 dom:navigation-api

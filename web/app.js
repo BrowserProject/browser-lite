@@ -7,7 +7,7 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
-import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
+import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
@@ -575,6 +575,9 @@ function onEngineEvent(viewId, type, payload) {
     return;
   case 'sensor-start':
     onSensorStart(tab, data);
+    return;
+  case 'host-call':
+    onHostCall(tab, data);
     return;
   case 'sensor-stop':
     onSensorStop(tab, data);

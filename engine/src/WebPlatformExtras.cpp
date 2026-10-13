@@ -1,8 +1,15 @@
 #include "config.h"
 #include "WebPlatformExtras.h"
 
+#include "Engine.h"
 #include "FileSystemStorageWasm.h"
+#include "Host.h"
 
+#include <JavaScriptCore/CallData.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/JSNativeStdFunction.h>
+#include <JavaScriptCore/StrongInlines.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/Exception.h>
 #include <WebCore/ExceptionOr.h>
@@ -19,6 +26,7 @@
 #include <wtf/RefCounted.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/WeakHashSet.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
@@ -190,7 +198,120 @@ static constexpr auto polyfillSource = R"JS((() => {
   // navigator.vibrate: Chrome auf dem Desktop hat es, ohne Motor passiert nichts
   if (typeof Navigator === 'function')
     define(Navigator.prototype, 'vibrate', function vibrate() { return true; });
+
+  // APIs des Host-Browsers ueber die Oberflaeche (installHostBridge, web/devices.js).
+  // Die Bruecke ist nur hier sichtbar, die Seite sieht sie nicht.
+  const host = globalThis.__blHost;
+  delete globalThis.__blHost;
+  if (typeof host !== 'function' || typeof Navigator !== 'function')
+    return;
+  const call = (name, payload) => new Promise((resolve, reject) => {
+    host(name, JSON.stringify(payload ?? null), (ok, result) => {
+      const value = JSON.parse(result);
+      if (ok)
+        resolve(value);
+      else
+        reject(new DOMException(value?.message || 'Failed', value?.name || 'NotSupportedError'));
+    });
+  });
+
+  // EyeDropper: Farbe vom Bildschirm (die Seite ist im Host ja ein Canvas)
+  if (!('EyeDropper' in globalThis)) {
+    class EyeDropper {
+      open(options = {}) {
+        if (options.signal?.aborted)
+          return Promise.reject(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        return call('eyedropper');
+      }
+    }
+    define(globalThis, 'EyeDropper', EyeDropper);
+  }
+
+  // Battery Status API (Chromebooks haben einen Akku)
+  let battery;
+  define(Navigator.prototype, 'getBattery', function getBattery() {
+    battery ??= call('battery').then((info) => {
+      const manager = new EventTarget();
+      for (const name of ['charging', 'chargingTime', 'dischargingTime', 'level'])
+        Object.defineProperty(manager, name, { get: () => info[name] ?? Infinity, enumerable: true });
+      for (const name of ['onchargingchange', 'onchargingtimechange', 'ondischargingtimechange', 'onlevelchange'])
+        manager[name] = null;
+      return manager;
+    });
+    return battery;
+  });
+
+  // Keyboard API: Tasten im Vollbild selber behandeln, Tastatur-Belegung
+  if (!('keyboard' in Navigator.prototype)) {
+    const keyboard = {
+      lock(keyCodes) { return call('keyboard-lock', { keyCodes: keyCodes ? [...keyCodes] : null }).then(() => undefined); },
+      unlock() { call('keyboard-unlock').catch(() => {}); },
+      getLayoutMap() { return call('keyboard-layout').then((entries) => new Map(entries)); },
+    };
+    Object.defineProperty(Navigator.prototype, 'keyboard', { get: () => keyboard, configurable: true, enumerable: true });
+  }
 })();)JS";
+
+// ---------------------------------------------------------------- Host-Bruecke
+
+namespace {
+
+struct PendingHostCall {
+    JSC::Strong<JSC::JSGlobalObject> globalObject;
+    JSC::Strong<JSC::JSObject> callback;
+};
+
+HashMap<uint64_t, PendingHostCall>& pendingHostCalls()
+{
+    static NeverDestroyed<HashMap<uint64_t, PendingHostCall>> calls;
+    return calls;
+}
+
+// Nur diese APIs des Host darf eine Seite ueber die Polyfills erreichen
+bool isAllowedHostCall(const String& name)
+{
+    return name == "eyedropper"_s || name == "battery"_s || name == "keyboard-lock"_s || name == "keyboard-unlock"_s || name == "keyboard-layout"_s;
+}
+
+}
+
+void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
+{
+    auto& vm = globalObject.vm();
+    auto* function = JSC::JSNativeStdFunction::create(vm, &globalObject, 3, "__blHost"_s, [viewId](JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
+        auto& vm = globalObject->vm();
+        auto scope = DECLARE_THROW_SCOPE(vm);
+        auto name = callFrame->argument(0).toWTFString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        auto payload = callFrame->argument(1).toWTFString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        auto* callback = callFrame->argument(2).getObject();
+        if (!callback || !callback->isCallable() || !isAllowedHostCall(name))
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        static uint64_t nextIdentifier;
+        auto identifier = ++nextIdentifier;
+        pendingHostCalls().add(identifier, PendingHostCall { { vm, globalObject }, { vm, callback } });
+        notifyHost(viewId, "host-call", makeString("{\"id\":"_s, identifier, ",\"name\":\""_s, jsonEscape(name), "\",\"payload\":\""_s, jsonEscape(payload), "\"}"_s));
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    });
+    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blHost"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+}
+
+void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)
+{
+    auto call = pendingHostCalls().take(identifier);
+    if (!call.callback)
+        return;
+    auto* globalObject = call.globalObject.get();
+    auto& vm = globalObject->vm();
+    JSC::JSLockHolder lock(vm);
+    auto callData = JSC::getCallData(call.callback.get());
+    JSC::MarkedArgumentBuffer arguments;
+    arguments.append(JSC::jsBoolean(ok));
+    arguments.append(JSC::jsString(vm, resultJSON));
+    NakedPtr<JSC::Exception> exception;
+    JSC::call(globalObject, call.callback.get(), callData, JSC::jsUndefined(), arguments, exception);
+}
 
 Ref<UserContentProvider> userContentProvider()
 {

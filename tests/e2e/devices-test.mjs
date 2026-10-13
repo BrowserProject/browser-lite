@@ -99,6 +99,12 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     result('movebefore', child.parentNode === to);
     result('estimate', typeof (await navigator.storage.estimate()).quota);
     result('orientation', screen.orientation.type);
+    // APIs des Host ueber die Bruecke der Polyfills (die Bruecke selber ist unsichtbar)
+    result('hostbridge', typeof __blHost + ',' + typeof EyeDropper + ',' + typeof navigator.keyboard?.lock);
+    const battery = await navigator.getBattery();
+    result('battery', typeof battery.level + ',' + typeof battery.charging + ',' + (battery instanceof EventTarget));
+    const layout = await navigator.keyboard.getLayoutMap().then((map) => 'map:' + (map instanceof Map), (e) => 'fehler:' + e.name);
+    result('keyboardlayout', layout);
     const cache = await caches.open('test');
     await cache.put('/a?x=1', new Response('hallo'));
     await cache.put('/a?x=1', new Response('neu'));
@@ -160,6 +166,9 @@ check('scheduler.postTask/yield mit Abbruch', (await result('scheduler')) === 'a
 check('Canvas-Filter (blur)', (await result('canvasfilter')) === 'blur', results.get('canvasfilter'));
 check('moveBefore', (await result('movebefore')) === 'true');
 check('navigator.storage.estimate', (await result('estimate')) === 'number');
+check('Host-Bruecke unsichtbar, EyeDropper und keyboard.lock da', (await result('hostbridge')) === 'undefined,function,function', results.get('hostbridge'));
+check('navigator.getBattery() vom Host', (await result('battery')) === 'number,boolean,true', results.get('battery'));
+check('navigator.keyboard.getLayoutMap() vom Host', (await result('keyboardlayout')) === 'map:true', results.get('keyboardlayout'));
 check('screen.orientation', (await result('orientation')) === 'landscape-primary', results.get('orientation'));
 check('Cache API (put, match, keys)', (await result('cacheapi')) === 'neu:1:true', results.get('cacheapi'));
 

@@ -362,6 +362,14 @@ EMSCRIPTEN_KEEPALIVE void bl_device_motion(int id, double x, double y, double z,
     });
 }
 
+// Antwort der Oberflaeche auf einen Aufruf der Host-Bruecke (WebPlatformExtras.h)
+EMSCRIPTEN_KEEPALIVE void bl_host_call_result(double identifier, int ok, char* result)
+{
+    runOnEngineThread([identifier = static_cast<uint64_t>(identifier), ok, result = takeString(result)] {
+        hostCallFinished(identifier, ok, result);
+    });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_notification_event(char* notificationID, int type)
 {
     runOnEngineThread([notificationID = takeString(notificationID), type] { notificationEvent(notificationID, type); });

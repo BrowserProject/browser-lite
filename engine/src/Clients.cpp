@@ -10,6 +10,7 @@
 #include "Engine.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
+#include "WebPlatformExtras.h"
 #include "WebView.h"
 #include "wasm/WasmBridge.h"
 
@@ -335,8 +336,10 @@ void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& wor
     if (!world.isNormal())
         return;
     Ref frame = m_frameLoader->frame();
-    if (auto* globalObject = frame->script().globalObject(world))
+    if (auto* globalObject = frame->script().globalObject(world)) {
         installWebAssembly(*globalObject);
+        installHostBridge(*globalObject, m_view->id());
+    }
 }
 
 bool FrameLoaderClient::isMainFrame() const
