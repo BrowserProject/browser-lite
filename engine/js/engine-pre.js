@@ -18,7 +18,8 @@ if (ENVIRONMENT_IS_PTHREAD) {
       const data = event.data;
       if (!data || !data.blCanvas)
         return;
-      Module.blCanvases.set(data.viewId, { canvas: data.blCanvas, ctx: data.blCanvas.getContext('2d', { alpha: false }) });
+      // Den Kontext legt erst das erste Bild an: 2d (CPU) oder bitmaprenderer (GPU)
+      Module.blCanvases.set(data.viewId, { canvas: data.blCanvas });
       Module._bl_canvas_attached(data.viewId);
     });
 } else {

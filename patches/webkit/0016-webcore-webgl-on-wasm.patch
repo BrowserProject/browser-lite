@@ -1107,10 +1107,10 @@ index 0000000000..4fdf42a51d
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
 new file mode 100644
-index 0000000000..bf71977d5f
+index 0000000000..548c389a1e
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
-@@ -0,0 +1,892 @@
+@@ -0,0 +1,895 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1633,8 +1633,11 @@ index 0000000000..bf71977d5f
 +        current = nullptr;
 +        return true;
 +    }
++    // Der GPU-Rasterer der Engine (engine/src/GpuRaster.cpp) wechselt auch den
++    // GL-Kontext von Emscripten. Darum auch hier pruefen, ob der Host-Kontext
++    // noch aktuell ist (kostet nur einen Vergleich in JS).
 +    if (current && current->id == id)
-+        return true;
++        return makeHostCurrent(hostFor(*current));
 +    auto it = contexts().find(id);
 +    if (it == contexts().end())
 +        return false;

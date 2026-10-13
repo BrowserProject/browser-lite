@@ -1,0 +1,104 @@
+diff --git a/Source/ThirdParty/skia/CMakeLists.txt b/Source/ThirdParty/skia/CMakeLists.txt
+index 49b926228c..14d9422798 100644
+--- a/Source/ThirdParty/skia/CMakeLists.txt
++++ b/Source/ThirdParty/skia/CMakeLists.txt
+@@ -852,7 +852,13 @@ else ()
+     endif ()
+ endif ()
+ 
+-if (USE_LIBEPOXY)
++if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
++    # WebAssembly: GL ist WebGL 2 des Browsers (ueber Emscripten), wie bei CanvasKit
++    target_sources(Skia PRIVATE
++        src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp
++        src/gpu/ganesh/gl/webgl/GrGLMakeNativeInterface_webgl.cpp
++    )
++elseif (USE_LIBEPOXY)
+     target_sources(Skia PRIVATE src/gpu/ganesh/gl/epoxy/GrGLMakeEpoxyEGLInterface.cpp)
+     target_link_libraries(Skia PRIVATE Epoxy::Epoxy)
+ else ()
+@@ -1044,7 +1050,7 @@ target_compile_definitions(Skia PUBLIC
+     SK_DISABLE_LEGACY_INIT_DECODERS
+     SK_DISABLE_LEGACY_PNG_WRITEBUFFER
+     SK_DISABLE_TRACING
+-    SK_DISABLE_WEBGL_INTERFACE
++    $<$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},Emscripten>>:SK_DISABLE_WEBGL_INTERFACE>
+ 
+     SK_ENABLE_PRECOMPILE
+ 
+@@ -1076,11 +1082,19 @@ target_compile_definitions(Skia PRIVATE
+ #       used. Note that SK_DISABLE_WEBGL_INTERFACE is set anyway so WebGL
+ #       support is not built regardless of the value for SK_ASSUME_WEBGL.
+ #
+-target_compile_definitions(Skia PUBLIC
+-    SK_ASSUME_GL=0
+-    SK_ASSUME_GL_ES=1
+-    SK_ASSUME_WEBGL=0
+-)
++if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
++    target_compile_definitions(Skia PUBLIC
++        SK_ASSUME_GL=0
++        SK_ASSUME_GL_ES=0
++        SK_ASSUME_WEBGL=1
++    )
++else ()
++    target_compile_definitions(Skia PUBLIC
++        SK_ASSUME_GL=0
++        SK_ASSUME_GL_ES=1
++        SK_ASSUME_WEBGL=0
++    )
++endif ()
+ 
+ if (WIN32)
+     target_compile_definitions(Skia PRIVATE SK_TYPEFACE_FACTORY_DIRECTWRITE)
+@@ -1103,6 +1117,21 @@ else ()
+     )
+ endif ()
+ 
++# WebAssembly: ohne x86-Makros nimmt Skia die skalare Raster-Pipeline (ein
++# Pixel pro Schritt, keine lowp-Stufen). Emscripten bildet SSE bis 4.1 auf
++# WASM-SIMD ab, so laeuft der SSE4.1-Pfad mit 4 bzw. 8 Pixeln pro Schritt.
++if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
++    target_compile_options(Skia PRIVATE -msimd128 -msse4.1)
++    # skcms wuerde mit __SSE__ auch die AVX-Header einbinden; dort reicht der
++    # eigene Vektor-Code von skcms
++    set_source_files_properties(
++        modules/skcms/skcms.cc
++        modules/skcms/src/skcms_TransformBaseline.cc
++        modules/skcms/src/skcms_TransformHsw.cc
++        modules/skcms/src/skcms_TransformSkx.cc
++        PROPERTIES COMPILE_OPTIONS "-U__SSE__;-U__SSE2__;-U__SSE3__;-U__SSSE3__;-U__SSE4_1__")
++endif ()
++
+ #
+ # The SkCMS module includes AVX/SSE optimizations, which may need additional
+ # compiler flags.
+diff --git a/Source/ThirdParty/skia/src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp b/Source/ThirdParty/skia/src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp
+index a46b65f545..85ce802d37 100644
+--- a/Source/ThirdParty/skia/src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp
++++ b/Source/ThirdParty/skia/src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp
+@@ -27,8 +27,22 @@ sk_sp<const GrGLInterface> GrGLMakeAssembledWebGLInterface(void *ctx, GrGLGetPro
+ #include <webgl/webgl2.h>
+ #include <webgl/webgl2_ext.h>
+ 
+-#define GET_PROC(F) functions->f##F = emscripten_gl##F
+-#define GET_PROC_SUFFIX(F, S) functions->f##F = emscripten_gl##F##S
++// browser-lite: In der Engine wechseln auch andere den WebGL-Kontext (WebGL der
++// Seiten). Vor jedem GL-Aufruf von Skia darum den eigenen Kontext aktuell
++// machen; die Engine stellt die Funktion bereit (engine/src/GpuRaster.cpp).
++extern "C" void bl_skia_ensure_gl_context() __attribute__((weak));
++
++template<auto F> struct SkiaGLCall;
++template<typename R, typename... A, R (*F)(A...)> struct SkiaGLCall<F> {
++    static R call(A... args) {
++        if (bl_skia_ensure_gl_context)
++            bl_skia_ensure_gl_context();
++        return F(args...);
++    }
++};
++
++#define GET_PROC(F) functions->f##F = SkiaGLCall<emscripten_gl##F>::call
++#define GET_PROC_SUFFIX(F, S) functions->f##F = SkiaGLCall<emscripten_gl##F##S>::call
+ 
+ sk_sp<const GrGLInterface> GrGLMakeAssembledWebGLInterface(void *ctx, GrGLGetProc get) {
+     const char* verStr = reinterpret_cast<const char*>(glGetString(GR_GL_VERSION));

@@ -128,6 +128,11 @@ private:
 
     Vector<uint8_t> m_pixels;
     sk_sp<SkSurface> m_surface;
+    // GPU-Rastern (GpuRaster.h): Zielflaeche als Textur, sonst m_surface auf der CPU
+    sk_sp<SkSurface> m_gpuSurface;
+    bool m_canvasAttached { false };
+    void createGpuSurfaceIfPossible();
+    void dropGpuSurface();
     WebCore::Region m_damage;
     // Scrollen: Pixel verschieben statt neu malen. Wird erst beim naechsten
     // Bild ausgefuehrt, weil die Oberflaeche vorher noch das alte Bild kopiert.

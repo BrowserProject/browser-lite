@@ -189,6 +189,15 @@ const pixel = await page.evaluate(() => {
 });
 check('rote Box gemalt', pixel && pixel.r > 200 && pixel.g < 40 && pixel.b < 40, JSON.stringify(pixel));
 
+// GPU-Kontext verloren (GPU-Reset): die Engine malt auf der CPU weiter
+await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
+await page.waitForTimeout(1500);
+const pixelAfterLoss = await page.evaluate(() => {
+  const color = window.blPagePixel(70, 70);
+  return color && { r: color[0], g: color[1], b: color[2] };
+});
+check('nach GPU-Verlust weiter gemalt', pixelAfterLoss && pixelAfterLoss.r > 200 && pixelAfterLoss.g < 40 && pixelAfterLoss.b < 40, JSON.stringify(pixelAfterLoss));
+
 // Favicon: die Engine laedt es selber und gibt es der Oberflaeche
 const icon = await page.waitForFunction(() => {
   const img = document.querySelector('.tab.active .icon') || document.querySelector('.tab .icon');

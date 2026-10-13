@@ -96,6 +96,9 @@ async function startEngine() {
         (module || engine).ENV.BL_DEBUG = '1';
       if (params.get('fcdebug'))
         (module || engine).ENV.FC_DEBUG = params.get('fcdebug');
+      // Skia malt ueber WebGL 2 (GPU); ?gpu=0 malt auf der CPU
+      if (params.get('gpu'))
+        (module || engine).ENV.BL_GPU = params.get('gpu');
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
       if (params.get('safepointgc'))
         (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');

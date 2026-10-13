@@ -20,6 +20,7 @@ void presentFrameToHost(int viewId, const uint8_t* pixels, int width, int height
 // presentFrameToHost.
 bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight);
 void forgetWorkerCanvas(int viewId);
+bool hasWorkerCanvas(int viewId);
 
 // Host moechte bei der naechsten Gelegenheit (requestAnimationFrame) bl_frame() aufrufen
 void requestFrameFromHost(int viewId);

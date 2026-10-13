@@ -53,6 +53,9 @@ async function checkSite(site, page, log) {
   // SITE_DEBUG=1: Ablauf der Engine mitschreiben (wird nur bei Problemen ausgegeben)
   if (process.env.SITE_DEBUG)
     query.set('debug', '1');
+  // SITE_ENV=NAME=wert,...: Umgebungsvariablen der Engine (zum Vergleichen von Schaltern)
+  if (process.env.SITE_ENV)
+    query.set('env', process.env.SITE_ENV);
   const started = Date.now();
   await page.goto(`http://localhost:${UI_PORT}/?${query}`);
   let result = 'ok';

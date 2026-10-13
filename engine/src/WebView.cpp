@@ -7,6 +7,7 @@
 #include "Clients.h"
 #include "EditorClient.h"
 #include "Engine.h"
+#include "GpuRaster.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
@@ -57,7 +58,10 @@
 #include <WebCore/StorageSessionProvider.h>
 #include <WebCore/SubstituteData.h>
 #include <pal/SessionID.h>
+#include <optional>
 #include <skia/core/SkCanvas.h>
+#include <skia/core/SkImage.h>
+#include <skia/core/SkPaint.h>
 #include <skia/core/SkSurface.h>
 #include <wtf/HashMap.h>
 #include <wtf/JSONValues.h>
@@ -93,6 +97,9 @@ WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
     Ref view = create(id, size, deviceScaleFactor);
     auto& result = view.get();
     openViews().set(id, WTF::move(view));
+    // Die Oberflaeche schickt das Canvas oft, bevor der View hier existiert
+    if (hasWorkerCanvas(id))
+        result.canvasAttached();
     return result;
 }
 
@@ -269,6 +276,32 @@ void WebView::createSurface()
     auto info = SkImageInfo::Make(m_pixelSize.width(), m_pixelSize.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType);
     m_surface = SkSurfaces::WrapPixels(info, m_pixels.mutableSpan().data(), m_pixelSize.width() * 4);
     RELEASE_ASSERT(m_surface);
+    m_gpuSurface = nullptr;
+    createGpuSurfaceIfPossible();
+}
+
+// Mit Canvas im Engine-Worker und WebGL 2 malt Skia auf der GPU (GpuRaster.h).
+// Die Flaeche ist neu und leer, darum alles neu malen.
+void WebView::createGpuSurfaceIfPossible()
+{
+    if (m_gpuSurface || !m_canvasAttached || m_pixelSize.isEmpty())
+        return;
+    Gpu::Scope scope;
+    if (!scope)
+        return;
+    m_gpuSurface = Gpu::createSurface(m_pixelSize.width(), m_pixelSize.height());
+    if (m_gpuSurface)
+        addDamage(IntRect { { }, m_size });
+}
+
+// Zurueck auf die CPU (GPU verloren): der Pixel-Buffer ist alt, alles neu malen
+void WebView::dropGpuSurface()
+{
+    if (!m_gpuSurface)
+        return;
+    m_gpuSurface = nullptr;
+    m_pendingScrolls.clear();
+    addDamage(IntRect { { }, m_size });
 }
 
 void WebView::loadURL(const String& urlString)
@@ -411,6 +444,19 @@ void WebView::applyPendingScrolls(IntRect& presented)
         IntRect target = intersection(deviceArea, IntRect { deviceArea.location() + IntSize { dx, dy }, deviceArea.size() });
         if (target.isEmpty())
             continue;
+        if (m_gpuSurface) {
+            // Auf der GPU: den Bereich als Bild nehmen und verschoben wieder hinein
+            IntRect source = target;
+            source.move(-dx, -dy);
+            auto image = m_gpuSurface->makeImageSnapshot(SkIRect::MakeXYWH(source.x(), source.y(), source.width(), source.height()));
+            if (image) {
+                SkPaint paint;
+                paint.setBlendMode(SkBlendMode::kSrc);
+                m_gpuSurface->getCanvas()->drawImage(image, target.x(), target.y(), SkSamplingOptions { }, &paint);
+            }
+            presented.unite(deviceArea);
+            continue;
+        }
         auto pixels = m_pixels.mutableSpan();
         size_t rowBytes = static_cast<size_t>(target.width()) * 4;
         auto copyRow = [&](int y) {
@@ -457,6 +503,12 @@ bool WebView::renderFrame(IntRect* dirtyOut)
     view->updateLayoutAndStyleIfNeededRecursive();
     auto layoutDone = MonotonicTime::now();
 
+    // Skia legt auf der GPU schon beim Malen Texturen an (Bilder): der eigene
+    // GL-Kontext muss die ganze Zeit aktuell sein
+    std::optional<Gpu::Scope> gpuScope;
+    if (m_gpuSurface)
+        gpuScope.emplace();
+
     IntRect presented;
     applyPendingScrolls(presented);
     if (std::exchange(m_needsFullPresent, false))
@@ -466,7 +518,7 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         return false;
 
     auto damage = std::exchange(m_damage, Region { });
-    SkCanvas* canvas = m_surface->getCanvas();
+    SkCanvas* canvas = m_gpuSurface ? m_gpuSurface->getCanvas() : m_surface->getCanvas();
     for (auto& rect : damage.rects()) {
         canvas->save();
         canvas->scale(m_deviceScaleFactor, m_deviceScaleFactor);
@@ -504,9 +556,24 @@ void WebView::presentIfNeeded()
         m_frameRequested = true;
         return;
     }
+    if (m_gpuSurface && !Gpu::context())
+        dropGpuSurface();
     IntRect dirty;
     if (!renderFrame(&dirty))
         return;
+    if (m_gpuSurface) {
+        auto start = MonotonicTime::now();
+        Gpu::Scope scope;
+        if (scope && Gpu::present(m_id, *m_gpuSurface)) {
+            auto milliseconds = (MonotonicTime::now() - start).milliseconds();
+            if (milliseconds > 30)
+                debugLog("View %d: GPU-Abschicken %.0f ms", m_id, milliseconds);
+            return;
+        }
+        // Ging nicht (Kontext weg): ab jetzt auf der CPU, im naechsten Bild alles
+        dropGpuSurface();
+        return;
+    }
     if (presentFrameInWorker(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height()))
         return;
     m_frameInFlight = true;
@@ -515,6 +582,8 @@ void WebView::presentIfNeeded()
 
 void WebView::canvasAttached()
 {
+    m_canvasAttached = true;
+    createGpuSurfaceIfPossible();
     m_needsFullPresent = true;
     if (!m_frameRequested) {
         m_frameRequested = true;

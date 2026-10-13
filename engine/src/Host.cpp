@@ -14,8 +14,14 @@ EM_JS(int, bl_js_present_in_worker, (int viewId, const uint8_t* pixels, int widt
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
     if (!target)
         return 0;
-    var canvas = target.canvas;
-    if (canvas.width != width || canvas.height != height) {
+    // Nach dem GPU-Weg (GpuRaster.cpp) hat das Canvas schon einen
+    // bitmaprenderer: dann ueber ein Zwischen-Canvas, immer das ganze Bild
+    if (!target.ctx && !target.bitmapContext)
+        target.ctx = target.canvas.getContext("2d", { alpha: false });
+    var canvas = target.ctx ? target.canvas : (target.scratch || (target.scratch = new OffscreenCanvas(width, height)));
+    if (!target.ctx && !target.scratchCtx)
+        target.scratchCtx = canvas.getContext("2d", { alpha: false });
+    if (canvas.width != width || canvas.height != height || !target.ctx) {
         // Neue Groesse leert das Canvas: alles kopieren
         canvas.width = width;
         canvas.height = height;
@@ -32,9 +38,18 @@ EM_JS(int, bl_js_present_in_worker, (int viewId, const uint8_t* pixels, int widt
             var start = pixels + ((y + row) * width + x) * 4;
             data.set(heap.subarray(start, start + w * 4), row * w * 4);
         }
-        target.ctx.putImageData(image, x, y);
+        (target.ctx || target.scratchCtx).putImageData(image, x, y);
+    }
+    if (!target.ctx) {
+        target.canvas.width = width;
+        target.canvas.height = height;
+        target.bitmapContext.transferFromImageBitmap(canvas.transferToImageBitmap());
     }
     return 1;
+});
+
+EM_JS(int, bl_js_has_worker_canvas, (int viewId), {
+    return Module.blCanvases && Module.blCanvases.has(viewId) ? 1 : 0;
 });
 
 EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
@@ -47,6 +62,11 @@ namespace BrowserLite {
 bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight)
 {
     return bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
+}
+
+bool hasWorkerCanvas(int viewId)
+{
+    return bl_js_has_worker_canvas(viewId);
 }
 
 void forgetWorkerCanvas(int viewId)

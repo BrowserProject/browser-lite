@@ -168,6 +168,11 @@ kommen zuerst.
   (Schriftpruefung in Skia, `canPlayType`, `access()`) und eine gemeinsame Crypto-Queue statt
   einem Thread pro iframe (Patch 0024). CNN: Engine wartet 0.5 statt 4.5 s, Ladezeit
   19.8 -> 16.2 s (Mittel aus 3 Laeufen). mimalloc statt dlmalloc getestet: langsamer
+- [x] GPU-Rastern: Skia malt ueber WebGL 2 (Ganesh, wie CanvasKit) im Engine-Worker, Scrollen
+  kopiert auf der GPU, Bild ohne Kopie per `transferToImageBitmap` ins Tab-Canvas. Faellt bei
+  Kontextverlust auf die CPU zurueck (Test in `network-test.mjs`). Offen: CSS-Filter (`filter:
+  blur()`) laufen noch ueber WebCores Software-Filter, dafuer braucht WebCore den GPU-Kontext
+  ueber `PlatformDisplay`; danach Ebenen (Compositing)
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
