@@ -225,6 +225,26 @@ while (Date.now() < end) {
 }
 check('Ton kommt beim Host an (AudioWorklet)', state?.state === 'running' && state.peak > 0.3 && state.peak < 0.6, JSON.stringify(state));
 
+// Lautsprecher im Tab wie Chrome: erscheint bei Ton, Klick schaltet den Tab stumm
+const audioButton = page.locator('#tab-list .tab.active .audio:not([hidden])');
+check('Lautsprecher im Tab', await audioButton.waitFor({ timeout: 10000 }).then(() => true, () => false));
+const peakUntil = async (done) => {
+  let peak = null;
+  for (let i = 0; i < 40; i++) {
+    await page.waitForTimeout(250);
+    peak = (await page.evaluate(() => window.__blAudioState())).peak;
+    if (done(peak))
+      break;
+  }
+  return peak;
+};
+await audioButton.click();
+const mutedPeak = await peakUntil((peak) => peak <= 0.01);
+check('Tab stummgeschaltet: kein Ton mehr', mutedPeak <= 0.01, String(mutedPeak));
+await audioButton.click();
+const unmutedPeak = await peakUntil((peak) => peak > 0.3);
+check('Ton wieder an', unmutedPeak > 0.3, String(unmutedPeak));
+
 const hrtf = (await result('hrtf')) || '';
 const [left, right] = hrtf.split(',').map(Number);
 check('HRTF-Panner (Quelle rechts)', right > 0.05 && right > left, hrtf);

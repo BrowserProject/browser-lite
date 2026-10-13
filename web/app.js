@@ -279,10 +279,14 @@ class Tab {
 
     this.element = document.createElement('div');
     this.element.className = 'tab';
-    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><button class="close" title="Tab schliessen">&#215;</button>';
+    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><button class="audio" hidden></button><button class="close" title="Tab schliessen">&#215;</button>';
+    this.audible = false;
+    this.muted = false;
+    // Lautsprecher wie in Chrome: zeigt Ton an, Klick schaltet den Tab stumm
+    this.element.querySelector('.audio').addEventListener('click', () => this.setMuted(!this.muted));
     this.iconURL = null;
     this.element.addEventListener('mousedown', (e) => {
-      if (!e.target.classList.contains('close'))
+      if (!e.target.classList.contains('close') && !e.target.classList.contains('audio'))
         activateTab(this);
     });
     this.element.querySelector('.close').addEventListener('click', () => closeTab(this));
@@ -313,6 +317,25 @@ class Tab {
     else
       img.removeAttribute('src');
     img.onerror = () => { img.hidden = true; };
+  }
+
+  setAudible(audible) {
+    this.audible = audible;
+    this.updateAudio();
+  }
+
+  setMuted(muted) {
+    this.muted = muted;
+    engine._bl_set_muted(this.id, muted ? 1 : 0);
+    this.updateAudio();
+  }
+
+  updateAudio() {
+    const button = this.element.querySelector('.audio');
+    button.hidden = !this.audible && !this.muted;
+    button.textContent = this.muted ? '\u{1F507}' : '\u{1F50A}';
+    button.title = this.muted ? 'Ton für diesen Tab einschalten' : 'Diesen Tab stummschalten';
+    button.classList.toggle('muted', this.muted);
   }
 
   updateTitle() {
@@ -633,6 +656,9 @@ function onEngineEvent(viewId, type, payload) {
     if (tab === activeTab)
       setStatus('Fehler: ' + data.description);
     break;
+  case 'media-state':
+    tab.setAudible(!!data.audio);
+    return;
   case 'cursor':
     tab.canvas.style.cursor = data.cursor;
     break;

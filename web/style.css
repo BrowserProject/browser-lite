@@ -27,6 +27,9 @@ body { display: flex; flex-direction: column; }
 .tab.active { background: var(--tab-active); }
 .tab .icon { width: 16px; height: 16px; flex: none; object-fit: contain; }
 .tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .audio { border: none; background: none; color: var(--fg); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; }
+.tab .audio[hidden] { display: none; }
+.tab .audio.muted { opacity: 0.7; }
 .tab .close { border: none; background: none; color: var(--muted); cursor: pointer; padding: 0 2px; font-size: 14px; }
 button { font: inherit; color: inherit; }
 #new-tab { border: none; background: none; font-size: 18px; padding: 4px 10px; cursor: pointer; color: var(--muted); }

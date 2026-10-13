@@ -25,6 +25,8 @@
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSLock.h>
+#include <WebCore/MediaProducer.h>
+#include <WebCore/Page.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/Document.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
@@ -249,6 +251,14 @@ EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
 EMSCRIPTEN_KEEPALIVE void bl_find(int id, char* text, int backwards, int again)
 {
     withView(id, [text = takeString(text), backwards, again](WebView& view) { view.find(text, backwards, again); });
+}
+
+// Tab stummschalten (Lautsprecher im Tab)
+EMSCRIPTEN_KEEPALIVE void bl_set_muted(int id, int muted)
+{
+    withView(id, [muted](WebView& view) {
+        view.page().setMuted(muted ? WebCore::MediaProducerMutedStateFlags { WebCore::MediaProducerMutedState::AudioIsMuted } : WebCore::MediaProducerMutedStateFlags { });
+    });
 }
 
 // Drucken (Strg+P, Menue): Hauptframe als PDF

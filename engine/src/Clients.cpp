@@ -41,6 +41,7 @@
 #include <WebCore/ScriptController.h>
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NodeInlines.h>
+#include <WebCore/MediaProducer.h>
 #include <WebCore/Page.h>
 #include <WebCore/PointerLockController.h>
 #include <WebCore/ProgressTracker.h>
@@ -176,6 +177,15 @@ void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
 {
     // window.print(): PDF bauen, die Oberflaeche zeigt den Druckdialog
     BrowserLite::printFrame(m_view->id(), frame);
+}
+
+void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
+{
+    bool audible = state.contains(MediaProducerMediaState::IsPlayingAudio);
+    if (audible == m_audible)
+        return;
+    m_audible = audible;
+    notifyHost(m_view->id(), "media-state", audible ? "{\"audio\":true}"_s : "{\"audio\":false}"_s);
 }
 
 void ChromeClient::runJavaScriptAlert(LocalFrame&, const String& message)
