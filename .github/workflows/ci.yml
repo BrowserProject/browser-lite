@@ -311,7 +311,7 @@ jobs:
         run: cd tests/e2e && node network-test.mjs
       - name: Eingabe-Test (Tippen, Klick, Download, Upload, Popup, select, Farbe, Datum, Scrollen)
         run: cd tests/e2e && node input-test.mjs
-      - name: Speicher-Test (Cookie, localStorage, IndexedDB nach Neuladen)
+      - name: Speicher-Test (Cookie, localStorage, IndexedDB, OPFS nach Neuladen)
         run: cd tests/e2e && node storage-test.mjs
       - name: Audio-Test (Web Audio, decodeAudioData, Ton im AudioWorklet)
         run: cd tests/e2e && node audio-test.mjs
@@ -319,6 +319,8 @@ jobs:
         run: cd tests/e2e && node media-test.mjs
       - name: WebGL-Test (WebGL 1 und 2 ueber WebGL des Host-Browsers)
         run: cd tests/e2e && node webgl-test.mjs
+      - name: Compositing-Test (Ebenen auf der GPU, Animation, Filter, Scrollen)
+        run: cd tests/e2e && node compositing-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)

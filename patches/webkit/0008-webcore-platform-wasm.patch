@@ -376,10 +376,10 @@ index 0000000000..73c2f1f624
 +#endif // ENABLE(DRAG_SUPPORT)
 diff --git a/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp b/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp
 new file mode 100644
-index 0000000000..44ad0ffcaa
+index 0000000000..21f20a994d
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/GraphicsLayerWasm.cpp
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,59 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -410,6 +410,8 @@ index 0000000000..44ad0ffcaa
 +
 +#include "GraphicsLayerFactory.h"
 +
++#if !USE(COORDINATED_GRAPHICS)
++
 +namespace WebCore {
 +
 +// Ohne Accelerated Compositing malt WebCore alles direkt in den Pixel-Buffer.
@@ -435,6 +437,8 @@ index 0000000000..44ad0ffcaa
 +}
 +
 +} // namespace WebCore
++
++#endif // !USE(COORDINATED_GRAPHICS)
 diff --git a/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp b/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp
 new file mode 100644
 index 0000000000..111c7400f0

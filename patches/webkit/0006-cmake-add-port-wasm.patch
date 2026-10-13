@@ -64,10 +64,10 @@ index 0000000000..2eb4471e0d
 +list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
 diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
 new file mode 100644
-index 0000000000..7a9fdf8b15
+index 0000000000..0211c67287
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,89 @@
 +# WebCore fuer PORT=Wasm (browser-lite).
 +# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
@@ -75,14 +75,21 @@ index 0000000000..7a9fdf8b15
 +include(platform/ImageDecoders.cmake)
 +include(platform/OpenSSL.cmake)
 +include(platform/Skia.cmake)
++include(platform/TextureMapper.cmake)
++
++# WebGL hat eine eigene Bruecke (platform/wasm/GraphicsContextGLWasm.cpp)
++list(REMOVE_ITEM WebCore_SOURCES
++    platform/graphics/texmap/GraphicsContextGLTextureMapperANGLE.cpp
++    platform/graphics/texmap/coordinated/GraphicsContextGLTextureMapperANGLECoordinated.cpp
++)
 +
 +list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
 +    "${WEBCORE_DIR}/platform"
 +    "${WEBCORE_DIR}/platform/generic"
 +    "${WEBCORE_DIR}/platform/graphics/egl"
 +    "${WEBCORE_DIR}/platform/graphics/opengl"
-+    # Skia-Header (SkiaGPUAtlas.h) brauchen BitmapTexture.h, ohne TextureMapper-Compositing
 +    "${WEBCORE_DIR}/platform/graphics/texmap"
++    "${WEBCORE_DIR}/platform/graphics/texmap/coordinated"
 +    "${WEBCORE_DIR}/platform/mediacapabilities"
 +    "${WEBCORE_DIR}/platform/video-codecs"
 +    "${WEBCORE_DIR}/platform/wasm"
@@ -152,10 +159,10 @@ index 0000000000..7a9fdf8b15
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..352ba916a4
+index 0000000000..a09c13c03b
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,165 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
 +#
 +# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
@@ -275,6 +282,11 @@ index 0000000000..352ba916a4
 +SET_AND_EXPOSE_TO_BUILD(USE_THEME_ADWAITA ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_UNIX_DOMAIN_SOCKETS ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_INSPECTOR_SOCKET_SERVER ${ENABLE_REMOTE_INSPECTOR})
++# Ebenen (Compositing) wie WPE: GraphicsLayerCoordinated, gemalt von Skia,
++# zusammengesetzt im Engine-Worker (engine/src/LayerTreeHostWasm.cpp). Ob eine Seite
++# Ebenen benutzt, entscheidet die Engine zur Laufzeit.
++SET_AND_EXPOSE_TO_BUILD(USE_TEXTURE_MAPPER ON)
++SET_AND_EXPOSE_TO_BUILD(USE_COORDINATED_GRAPHICS ON)
 +SET_AND_EXPOSE_TO_BUILD(ENABLE_DEVELOPER_MODE ${DEVELOPER_MODE})
 +
 +# Alle Libs kommen aus dem browser-lite sysroot (CMAKE_FIND_ROOT_PATH)

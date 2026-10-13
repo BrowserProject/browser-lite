@@ -27,6 +27,9 @@ void answerPermission(int requestId, bool granted);
 void setStoredPermission(const String& kind, const String& origin, PermissionDecision);
 void geolocationPosition(int viewId, double latitude, double longitude, double accuracy, double altitude, double altitudeAccuracy, double heading, double speed, double timestamp);
 void geolocationError(int viewId, int code, const String& message);
+// Lage/Bewegung vom Host (NaN = Wert fehlt); values hat 9 Eintraege (siehe DeviceClients.cpp)
+void deviceOrientation(int viewId, double alpha, double beta, double gamma, bool absolute);
+void deviceMotion(int viewId, const double* values, double interval);
 // type: 0 = gezeigt, 1 = angeklickt, 2 = geschlossen, 3 = Fehler
 void notificationEvent(const String& notificationID, int type);
 

@@ -7,7 +7,7 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
-import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
+import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
@@ -101,6 +101,9 @@ async function startEngine() {
       // Skia malt ueber WebGL 2 (GPU); ?gpu=0 malt auf der CPU
       if (params.get('gpu'))
         (module || engine).ENV.BL_GPU = params.get('gpu');
+      // Compositing mit Ebenen (braucht die GPU): ?compositing=1
+      if (params.get('compositing'))
+        (module || engine).ENV.BL_COMPOSITING = params.get('compositing');
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
       if (params.get('safepointgc'))
         (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');
@@ -389,6 +392,8 @@ function activateTab(tab) {
 
 function closeTab(tab) {
   onGeolocationStop(tab);
+  onSensorStop(tab, { kind: 'orientation' });
+  onSensorStop(tab, { kind: 'motion' });
   setTimeout(persistSession);
   engine._bl_destroy_view(tab.id);
   tab.canvas.remove();
@@ -566,6 +571,12 @@ function onEngineEvent(viewId, type, payload) {
     return;
   case 'geolocation-stop':
     onGeolocationStop(tab);
+    return;
+  case 'sensor-start':
+    onSensorStart(tab, data);
+    return;
+  case 'sensor-stop':
+    onSensorStop(tab, data);
     return;
   case 'notification':
     onNotification(tab, data);

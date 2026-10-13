@@ -59,6 +59,9 @@ private:
     void mouseDidMoveOverElement(const WebCore::HitTestResult&, OptionSet<WebCore::PlatformEventModifier>, const String& toolTip, WebCore::TextDirection) final;
 
     void triggerRenderingUpdate() final;
+    WebCore::GraphicsLayerFactory* graphicsLayerFactory() const final;
+    void attachRootGraphicsLayer(WebCore::LocalFrame&, WebCore::GraphicsLayer*) final;
+    void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) final;
     bool scheduleRenderingUpdate() final;
 
 #if ENABLE(FULLSCREEN_API)

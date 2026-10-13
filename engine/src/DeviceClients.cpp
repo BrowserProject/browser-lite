@@ -3,6 +3,15 @@
 
 #include "Host.h"
 #include "WebView.h"
+#if ENABLE(DEVICE_ORIENTATION)
+// Nicht in den exportierten Headern von WebCore, aber im Include-Pfad (engine.cmake)
+#include "DeviceMotionClient.h"
+#include "DeviceMotionController.h"
+#include "DeviceMotionData.h"
+#include "DeviceOrientationClient.h"
+#include "DeviceOrientationController.h"
+#include "DeviceOrientationData.h"
+#endif
 #include <WebCore/Document.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/Geolocation.h>
@@ -189,6 +198,110 @@ void geolocationError(int viewId, int code, const String& message)
         controller->errorOccurred(error.get());
 }
 
+// ------------------------------------------------------------ Lage und Bewegung
+
+#if ENABLE(DEVICE_ORIENTATION)
+// Die Oberflaeche hoert auf deviceorientation/devicemotion des Host-Browsers,
+// solange die Seite Zuhoerer hat (Chromebooks mit Touchscreen haben Sensoren,
+// auf dem Desktop kommt wie bei Chrome nie ein Event).
+class DeviceOrientationClientWasm final : public DeviceOrientationClient {
+public:
+    explicit DeviceOrientationClientWasm(int viewId)
+        : m_viewId(viewId)
+    {
+    }
+
+    void update(Ref<DeviceOrientationData>&& data)
+    {
+        m_last = WTF::move(data);
+        if (m_controller)
+            m_controller->didChangeDeviceOrientation(m_last.get());
+    }
+
+private:
+    void setController(DeviceOrientationController* controller) final { m_controller = controller; }
+    void startUpdating() final { notifyHost(m_viewId, "sensor-start", "{\"kind\":\"orientation\"}"_s); }
+    void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"orientation\"}"_s); }
+    DeviceOrientationData* lastOrientation() const final { return m_last.get(); }
+    void deviceOrientationControllerDestroyed() final { m_controller = nullptr; }
+
+    int m_viewId;
+    DeviceOrientationController* m_controller { nullptr };
+    RefPtr<DeviceOrientationData> m_last;
+};
+
+class DeviceMotionClientWasm final : public DeviceMotionClient {
+public:
+    explicit DeviceMotionClientWasm(int viewId)
+        : m_viewId(viewId)
+    {
+    }
+
+    void update(Ref<DeviceMotionData>&& data)
+    {
+        m_last = WTF::move(data);
+        if (m_controller)
+            m_controller->didChangeDeviceMotion(m_last.get());
+    }
+
+private:
+    void setController(DeviceMotionController* controller) final { m_controller = controller; }
+    void startUpdating() final { notifyHost(m_viewId, "sensor-start", "{\"kind\":\"motion\"}"_s); }
+    void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"motion\"}"_s); }
+    DeviceMotionData* lastMotion() const final { return m_last.get(); }
+    void deviceMotionControllerDestroyed() final { m_controller = nullptr; }
+
+    int m_viewId;
+    DeviceMotionController* m_controller { nullptr };
+    RefPtr<DeviceMotionData> m_last;
+};
+
+// Die Controller der Page zeigen auf die Clients und werden nicht vor ihnen
+// abgebaut, darum bleiben die (kleinen) Clients bis zum Ende der Engine.
+struct SensorClients {
+    std::unique_ptr<DeviceOrientationClientWasm> orientation;
+    std::unique_ptr<DeviceMotionClientWasm> motion;
+};
+
+static HashMap<int, SensorClients>& sensorClients()
+{
+    static NeverDestroyed<HashMap<int, SensorClients>> map;
+    return map;
+}
+#endif
+
+void deviceOrientation(int viewId, double alpha, double beta, double gamma, bool absolute)
+{
+#if ENABLE(DEVICE_ORIENTATION)
+    auto it = sensorClients().find(viewId);
+    if (it != sensorClients().end())
+        it->value.orientation->update(DeviceOrientationData::create(optionalNumber(alpha), optionalNumber(beta), optionalNumber(gamma), absolute));
+#else
+    UNUSED_PARAM(viewId); UNUSED_PARAM(alpha); UNUSED_PARAM(beta); UNUSED_PARAM(gamma); UNUSED_PARAM(absolute);
+#endif
+}
+
+void deviceMotion(int viewId, const double* values, double interval)
+{
+#if ENABLE(DEVICE_ORIENTATION)
+    auto it = sensorClients().find(viewId);
+    if (it == sensorClients().end())
+        return;
+    // values: Beschleunigung x/y/z, mit Schwerkraft x/y/z, Drehung alpha/beta/gamma (NaN = fehlt)
+    auto acceleration = [&](int start) -> RefPtr<DeviceMotionData::Acceleration> {
+        if (std::isnan(values[start]) && std::isnan(values[start + 1]) && std::isnan(values[start + 2]))
+            return nullptr;
+        return DeviceMotionData::Acceleration::create(optionalNumber(values[start]), optionalNumber(values[start + 1]), optionalNumber(values[start + 2]));
+    };
+    RefPtr<DeviceMotionData::RotationRate> rotation;
+    if (!std::isnan(values[6]) || !std::isnan(values[7]) || !std::isnan(values[8]))
+        rotation = DeviceMotionData::RotationRate::create(optionalNumber(values[6]), optionalNumber(values[7]), optionalNumber(values[8]));
+    it->value.motion->update(DeviceMotionData::create(acceleration(0), acceleration(3), WTF::move(rotation), optionalNumber(interval)));
+#else
+    UNUSED_PARAM(viewId); UNUSED_PARAM(values); UNUSED_PARAM(interval);
+#endif
+}
+
 // ------------------------------------------------------------ Benachrichtigungen
 
 static HashMap<String, std::unique_ptr<NotificationData>>& shownNotifications()
@@ -305,6 +418,15 @@ void attachDeviceClients(WebView& view, Page& page)
     geolocationClients().set(view.id(), WTF::move(geolocationClient));
     // Gehoert danach dem NotificationController (notificationControllerDestroyed)
     provideNotification(&page, new NotificationClientWasm(view.id()));
+#if ENABLE(DEVICE_ORIENTATION)
+    auto& sensors = sensorClients().add(view.id(), SensorClients { }).iterator->value;
+    if (!sensors.orientation) {
+        sensors.orientation = makeUnique<DeviceOrientationClientWasm>(view.id());
+        sensors.motion = makeUnique<DeviceMotionClientWasm>(view.id());
+    }
+    Supplement<Page>::provideTo(&page, DeviceOrientationController::supplementName(), makeUnique<DeviceOrientationController>(*sensors.orientation));
+    Supplement<Page>::provideTo(&page, DeviceMotionController::supplementName(), makeUnique<DeviceMotionController>(*sensors.motion));
+#endif
 }
 
 void detachDeviceClients(int viewId)

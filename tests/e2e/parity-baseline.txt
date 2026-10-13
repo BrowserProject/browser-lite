@@ -4,6 +4,7 @@ async:compression-roundtrip
 async:font-loading
 async:image-bitmap-from-canvas
 async:indexeddb-open
+async:opfs-directory
 async:permissions-query
 async:raf
 async:storage-estimate
@@ -196,6 +197,7 @@ media:media-session
 media:mse
 media:speech-synthesis
 media:video
+media:video-frame-callback
 media:web-audio
 media:webm-vp9
 net:beacon
@@ -210,6 +212,7 @@ net:indexeddb
 net:local-storage
 net:message-channel
 net:online
+net:opfs
 net:storage-manager
 net:web-locks
 net:websocket

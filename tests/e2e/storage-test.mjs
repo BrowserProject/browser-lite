@@ -56,6 +56,49 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
     open.onerror = resolve;
   });
   console.log('RESULT written=1');
+  // Origin Private File System: Datei lesen, schreiben, Ordner, resolve()
+  try {
+    const root = await navigator.storage.getDirectory();
+    let text = 'leer';
+    try {
+      text = await (await (await root.getFileHandle('notiz.txt')).getFile()).text();
+    } catch (e) {}
+    const folder = await root.getDirectoryHandle('ordner', { create: true });
+    const inner = await folder.getFileHandle('notiz.txt', { create: true });
+    const innerWriter = await inner.createWritable();
+    await innerWriter.write('innen');
+    await innerWriter.close();
+    const top = await root.getFileHandle('notiz.txt', { create: true });
+    const writer = await top.createWritable();
+    await writer.write('gespeichert');
+    await writer.close();
+    const names = [];
+    for await (const [name] of root.entries())
+      names.push(name);
+    console.log('RESULT opfs=' + [text, names.sort().join('+'), (await root.resolve(inner)).join('/'), await (await inner.getFile()).text()].join(','));
+  } catch (e) {
+    console.log('RESULT opfs=fehler:' + e.name);
+  }
+  // Synchroner Zugriff gibt es nur in Workern
+  const workerSource = \`onmessage = async () => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const file = await root.getFileHandle('sync.bin', { create: true });
+      const handle = await file.createSyncAccessHandle();
+      handle.truncate(0);
+      handle.write(new TextEncoder().encode('sync-ok'));
+      handle.flush();
+      const bytes = new Uint8Array(handle.getSize());
+      handle.read(bytes, { at: 0 });
+      handle.close();
+      postMessage(new TextDecoder().decode(bytes));
+    } catch (e) {
+      postMessage('fehler:' + e.name);
+    }
+  };\`;
+  const worker = new Worker(URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' })));
+  worker.onmessage = (e) => console.log('RESULT opfsworker=' + e.data);
+  worker.postMessage(1);
   // Zweiter Besuch: eine Datenbank anlegen und wieder loeschen (WebKit loescht
   // die Dateien dabei selber, die Engine darf sie nicht zurueckschreiben)
   const exists = async (name) => (await indexedDB.databases()).some((db) => db.name === name) ? 'da' : 'weg';
@@ -128,6 +171,8 @@ await page.goto(appURL);
 const first = await result('read');
 check('Erster Besuch: nur das neue Cookie', first === 'ja,leer,leer', String(first));
 check('Daten geschrieben', (await result('written')) === '1');
+check('OPFS: Dateien, Ordner, resolve()', (await result('opfs')) === 'leer,notiz.txt+ordner,ordner/notiz.txt,innen', results.get('opfs'));
+check('OPFS: synchroner Zugriff im Worker', (await result('opfsworker')) === 'sync-ok', results.get('opfsworker'));
 
 // Warten bis /data gespeichert ist (alle 5 s), dann alles neu laden
 await page.waitForTimeout(7000);
@@ -135,6 +180,7 @@ results = new Map();
 await page.reload();
 const second = await result('read');
 check('Nach Neuladen noch da (Cookie, localStorage, IndexedDB)', second === 'ja,gespeichert,idb-wert', String(second));
+check('OPFS: nach Neuladen noch da', (await result('opfs')) === 'gespeichert,notiz.txt+ordner+sync.bin,ordner/notiz.txt,innen', results.get('opfs'));
 check('IndexedDB-Datenbank geloescht', (await result('deleted')) === 'weg', String(results.get('deleted')));
 
 // Nochmal neu laden: die geloeschte Datenbank darf nicht zurueckkommen

@@ -20,10 +20,10 @@ index f00f452204..a1d7e66d20 100644
  if (ENABLE_API_TESTS)
 diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
 new file mode 100644
-index 0000000000..2c36e12b3a
+index 0000000000..9c02dfe7c7
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,189 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -58,6 +58,16 @@ index 0000000000..2c36e12b3a
 +#include "ANGLEShimWasm.h"
 +#include "PixelBuffer.h"
 +#include <wtf/TZoneMallocInlines.h>
++
++#if USE(COORDINATED_GRAPHICS)
++#include "CoordinatedPlatformLayerBufferNativeImage.h"
++#include "GraphicsLayerContentsDisplayDelegateCoordinated.h"
++#include "NativeImage.h"
++WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
++#include <skia/core/SkCanvas.h>
++#include <skia/core/SkSurface.h>
++WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
++#endif
 +
 +namespace WebCore {
 +
@@ -159,6 +169,40 @@ index 0000000000..2c36e12b3a
 +    if (!makeContextCurrent())
 +        return;
 +    m_displayBuffer = readRenderingResultsForPainting();
++#if USE(COORDINATED_GRAPHICS)
++    if (m_layerContentsDisplayDelegate && m_displayBuffer) {
++        // Das GL-Bild steht auf dem Kopf (unten links beginnt es), die Ebene will es aufrecht
++        auto image = createNativeImageFromPixelBuffer(contextAttributes(), Ref { *m_displayBuffer });
++        if (!image)
++            return;
++        auto& source = image->platformImage();
++        auto info = SkImageInfo::Make(source->width(), source->height(), kRGBA_8888_SkColorType, contextAttributes().alpha ? kPremul_SkAlphaType : kOpaque_SkAlphaType);
++        auto surface = SkSurfaces::Raster(info);
++        if (!surface)
++            return;
++        auto* canvas = surface->getCanvas();
++        canvas->translate(0, source->height());
++        canvas->scale(1, -1);
++        SkPaint paint;
++        paint.setBlendMode(SkBlendMode::kSrc);
++        canvas->drawImage(source, 0, 0, SkSamplingOptions { }, &paint);
++        auto upright = NativeImage::create(surface->makeImageSnapshot());
++        if (!upright)
++            return;
++        static_cast<GraphicsLayerContentsDisplayDelegate&>(*m_layerContentsDisplayDelegate).setDisplayBuffer(CoordinatedPlatformLayerBufferNativeImage::create(upright.releaseNonNull(), nullptr));
++    }
++#endif
++}
++
++RefPtr<GraphicsLayerContentsDisplayDelegate> GraphicsContextGLWasm::layerContentsDisplayDelegate()
++{
++#if USE(COORDINATED_GRAPHICS)
++    if (!m_layerContentsDisplayDelegate)
++        m_layerContentsDisplayDelegate = GraphicsLayerContentsDisplayDelegateCoordinated::create();
++    return m_layerContentsDisplayDelegate;
++#else
++    return nullptr;
++#endif
 +}
 +
 +RefPtr<PixelBuffer> GraphicsContextGLWasm::readCompositedResults()
@@ -171,10 +215,10 @@ index 0000000000..2c36e12b3a
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
 new file mode 100644
-index 0000000000..23eb41a1f6
+index 0000000000..60eeec01f4
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,73 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -208,6 +252,7 @@ index 0000000000..23eb41a1f6
 +
 +namespace WebCore {
 +
++class GraphicsLayerContentsDisplayDelegateCoordinated;
 +class PixelBuffer;
 +
 +// WebGL fuer PORT=Wasm: die GL-Aufrufe gehen ueber den ANGLE-Ersatz
@@ -228,7 +273,8 @@ index 0000000000..23eb41a1f6
 +    bool reshapeDrawingBuffer() final;
 +    void prepareForDisplay() final;
 +    RefPtr<PixelBuffer> readCompositedResults() final;
-+    RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() final { return nullptr; }
++    // Mit Compositing (Coordinated Graphics) wird das Bild Inhalt einer Ebene
++    RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() final;
 +#if ENABLE(VIDEO)
 +    bool copyTextureFromVideoFrame(VideoFrame&, PlatformGLObject, GCGLenum, GCGLint, GCGLenum, GCGLenum, GCGLenum, bool, bool) final { return false; }
 +#endif
@@ -238,6 +284,9 @@ index 0000000000..23eb41a1f6
 +
 +    int m_handle { 0 };
 +    RefPtr<PixelBuffer> m_displayBuffer;
++#if USE(COORDINATED_GRAPHICS)
++    RefPtr<GraphicsLayerContentsDisplayDelegateCoordinated> m_layerContentsDisplayDelegate;
++#endif
 +};
 +
 +} // namespace WebCore

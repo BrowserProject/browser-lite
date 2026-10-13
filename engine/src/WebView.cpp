@@ -9,6 +9,7 @@
 #include "Engine.h"
 #include "CacheStorageWasm.h"
 #include "GpuRaster.h"
+#include "LayerTreeHostWasm.h"
 #include "WebPlatformExtras.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
@@ -166,7 +167,15 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     auto& settings = m_page->settings();
     settings.setScriptEnabled(true);
     settings.setLoadsImagesAutomatically(true);
-    settings.setAcceleratedCompositingEnabled(false);
+    // Compositing mit Ebenen: vorerst nur auf Wunsch (BL_COMPOSITING=1,
+    // Oberflaeche ?compositing=1) und nur mit GPU
+    if (const char* compositing = getenv("BL_COMPOSITING"); compositing && !strcmp(compositing, "1") && LayerTreeHostWasm::isAvailable()) {
+        m_layerTreeHost = makeUnique<LayerTreeHostWasm>(*this);
+        m_compositing = true;
+    }
+    settings.setAcceleratedCompositingEnabled(m_compositing);
+    settings.setForceCompositingMode(m_compositing);
+    settings.setAcceleratedCompositingForFixedPositionEnabled(m_compositing);
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
@@ -195,6 +204,10 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCSSScrollbarColorEnabled(true);
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
+    // Origin Private File System (FileSystemStorageWasm.cpp)
+    settings.setFileSystemEnabled(true);
+    settings.setFileSystemWritableStreamEnabled(true);
+    settings.setAccessHandleEnabled(true);
     settings.setStorageAPIEstimateEnabled(true);
     settings.setScreenOrientationAPIEnabled(true);
     settings.setScreenOrientationLockingAPIEnabled(true);
@@ -226,6 +239,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCrossOriginEmbedderPolicyEnabled(true);
     settings.setCrossOriginOpenerPolicyEnabled(true);
     settings.setMediaCapabilitiesEnabled(true);
+    settings.setRequestVideoFrameCallbackEnabled(true);
     settings.setHiddenPageDOMTimerThrottlingEnabled(true);
     settings.setHiddenPageCSSAnimationSuspensionEnabled(true);
     // Brauchen die Funktions-Schalter in OptionsWasm.cmake
@@ -277,6 +291,9 @@ WebView::~WebView()
         if (RefPtr frame = m_page->localMainFrame())
             frame->loader().detachFromParent();
     }
+    // Die Ebenen gehoeren der Page, darum den Compositor erst danach abbauen
+    m_page = nullptr;
+    m_layerTreeHost = nullptr;
 }
 
 LocalFrame* WebView::mainFrame() const
@@ -322,6 +339,7 @@ void WebView::dropGpuSurface()
     if (!m_gpuSurface)
         return;
     m_gpuSurface = nullptr;
+    stopCompositing();
     m_pendingScrolls.clear();
     addDamage(IntRect { { }, m_size });
 }
@@ -403,11 +421,19 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
     if (RefPtr view = mainFrameView())
         view->resize(size);
     createSurface();
+    if (m_compositing) {
+        m_layerTreeHost->sizeDidChange();
+        scheduleRenderingUpdate();
+        return;
+    }
     addDamage(IntRect { { }, m_size });
 }
 
 void WebView::addDamage(const IntRect& rect)
 {
+    // Mit Compositing malen die Ebenen selber (setNeedsDisplay)
+    if (m_compositing)
+        return;
     IntRect clipped = intersection(rect, IntRect { { }, m_size });
     if (clipped.isEmpty())
         return;
@@ -420,6 +446,8 @@ void WebView::addDamage(const IntRect& rect)
 
 void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, const IntRect& clipRect)
 {
+    if (m_compositing)
+        return;
     IntRect area = intersection(intersection(rectToScroll, clipRect), IntRect { { }, m_size });
     if (area.isEmpty())
         return;
@@ -507,9 +535,95 @@ void WebView::scheduleRenderingUpdate()
     }
 }
 
+void WebView::requestComposite()
+{
+    if (!m_frameRequested) {
+        m_frameRequested = true;
+        requestFrameFromHost(m_id);
+    }
+}
+
+GraphicsLayerFactory* WebView::graphicsLayerFactory() const
+{
+    return m_compositing ? m_layerTreeHost.get() : nullptr;
+}
+
+void WebView::attachRootGraphicsLayer(GraphicsLayer* layer)
+{
+    if (m_layerTreeHost)
+        m_layerTreeHost->setRootCompositingLayer(layer);
+}
+
+void WebView::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)
+{
+    if (m_layerTreeHost)
+        m_layerTreeHost->setViewOverlayRootLayer(layer);
+}
+
+// Zurueck zum Malen ohne Ebenen (GPU verloren). WebCore baut die Ebenen ab,
+// der Compositor bleibt bis zum Ende des Views (die Ebenen zeigen auf ihn).
+void WebView::stopCompositing()
+{
+    if (!m_compositing)
+        return;
+    debugLog("View %d: Compositing aus", m_id);
+    m_compositing = false;
+    auto& settings = m_page->settings();
+    settings.setForceCompositingMode(false);
+    settings.setAcceleratedCompositingEnabled(false);
+    settings.setAcceleratedCompositingForFixedPositionEnabled(false);
+    m_page->setNeedsRecalcStyleInAllFrames();
+    addDamage(IntRect { { }, m_size });
+    scheduleRenderingUpdate();
+}
+
+// Wie WebKit2 (LayerTreeHost::updateRendering + ThreadedCompositor): erst das
+// Rendering-Update, dann zusammensetzen, sobald alle Kacheln gemalt sind. Das
+// naechste Rendering-Update kommt erst nach dem Zusammensetzen.
+bool WebView::renderCompositedFrame(IntRect* dirtyOut)
+{
+    auto start = MonotonicTime::now();
+    auto& host = *m_layerTreeHost;
+    if (m_renderingUpdateRequested && !host.hasPendingRenderingUpdate() && !host.isWaitingForTiles()) {
+        m_renderingUpdateRequested = false;
+        m_page->updateRendering();
+        m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
+        host.flush();
+    }
+    // Die letzte fertige Kachel fordert ein neues Bild an
+    if (host.isWaitingForTiles())
+        return false;
+
+    bool fullPresent = std::exchange(m_needsFullPresent, false);
+    if (!m_gpuSurface || (!host.needsComposition() && !fullPresent)) {
+        if (m_renderingUpdateRequested)
+            requestComposite();
+        return false;
+    }
+
+    auto updateDone = MonotonicTime::now();
+    {
+        Gpu::Scope scope;
+        host.composite(*m_gpuSurface, m_deviceScaleFactor);
+    }
+    m_page->didCompleteRenderingUpdateDisplay();
+    m_page->didCompleteRenderingFrame();
+    if (m_renderingUpdateRequested)
+        requestComposite();
+
+    auto end = MonotonicTime::now();
+    if ((end - start).milliseconds() > 30)
+        debugLog("View %d: Bild %.0f ms (Update %.0f ms, Zusammensetzen %.0f ms)", m_id, (end - start).milliseconds(), (updateDone - start).milliseconds(), (end - updateDone).milliseconds());
+    if (dirtyOut)
+        *dirtyOut = IntRect { { }, m_pixelSize };
+    return true;
+}
+
 bool WebView::renderFrame(IntRect* dirtyOut)
 {
     m_frameRequested = false;
+    if (m_compositing)
+        return renderCompositedFrame(dirtyOut);
     auto start = MonotonicTime::now();
 
     if (m_renderingUpdateRequested) {

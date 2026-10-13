@@ -118,6 +118,45 @@ export function onGeolocationStop(tab) {
   }
 }
 
+// ------------------------------------------------------- Lage und Bewegung
+
+// Pro Tab und Art (orientation/motion) ein Zuhoerer auf das Event des Hosts,
+// solange die Seite selber zuhoert. Nur der sichtbare Tab bekommt Werte.
+const sensors = new Map(); // `${viewId}:${kind}` -> Funktion
+
+export function onSensorStart(tab, data) {
+  onSensorStop(tab, data);
+  const nan = (value) => (value == null ? NaN : value);
+  let listener;
+  if (data.kind === 'orientation') {
+    listener = (event) => {
+      if (api.activeTab() === tab)
+        api.engine()._bl_device_orientation(tab.id, nan(event.alpha), nan(event.beta), nan(event.gamma), event.absolute ? 1 : 0);
+    };
+    window.addEventListener('deviceorientation', listener);
+  } else if (data.kind === 'motion') {
+    listener = (event) => {
+      if (!api.activeTab() === tab)
+        return;
+      const a = event.acceleration || {}, g = event.accelerationIncludingGravity || {}, r = event.rotationRate || {};
+      api.engine()._bl_device_motion(tab.id, nan(a.x), nan(a.y), nan(a.z), nan(g.x), nan(g.y), nan(g.z),
+        nan(r.alpha), nan(r.beta), nan(r.gamma), nan(event.interval));
+    };
+    window.addEventListener('devicemotion', listener);
+  } else
+    return;
+  sensors.set(`${tab.id}:${data.kind}`, listener);
+}
+
+export function onSensorStop(tab, data) {
+  const key = `${tab.id}:${data.kind}`;
+  const listener = sensors.get(key);
+  if (!listener)
+    return;
+  window.removeEventListener(data.kind === 'orientation' ? 'deviceorientation' : 'devicemotion', listener);
+  sensors.delete(key);
+}
+
 // ------------------------------------------------------- Benachrichtigungen
 
 const notifications = new Map(); // id -> Notification des Hosts

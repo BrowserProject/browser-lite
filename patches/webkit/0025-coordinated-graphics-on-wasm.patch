@@ -1,0 +1,231 @@
+diff --git a/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp b/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp
+index 776466ea87..b463c05d25 100644
+--- a/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp
+@@ -393,8 +393,25 @@ void PlatformDisplay::setSkiaGLContextForCurrentThread(std::unique_ptr<GLContext
+     m_skiaGLContexts.add(*s_skiaGLContext);
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: Die Engine legt den GPU-Kontext selber an (WebGL 2 im Engine-Worker,
++// engine/src/GpuRaster.cpp) und gibt ihn hier fuer den Skia-Compositor weiter. Einen
++// EGL-Kontext (skiaGLContext) gibt es nicht, Kacheln malt Skia darum auf der CPU.
++static GrDirectContext* s_wasmGrContext;
++
++WEBCORE_EXPORT void setSkiaGrContextForWasm(GrDirectContext*);
++void setSkiaGrContextForWasm(GrDirectContext* context)
++{
++    s_wasmGrContext = context;
++}
++#endif
++
+ GrDirectContext* PlatformDisplay::skiaGrContext() const
+ {
++#if PLATFORM(WASM)
++    if (!s_skiaGLContext)
++        return s_wasmGrContext;
++#endif
+     RELEASE_ASSERT(s_skiaGLContext);
+     return s_skiaGLContext->skiaGrContext();
+ }
+diff --git a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp b/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
+index 9fee5e03f2..e83ca38b76 100644
+--- a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
++++ b/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
+@@ -70,6 +70,39 @@ static const GLenum s_pixelDataType = GL_UNSIGNED_BYTE;
+ #define GL_DEPTH24_STENCIL8 0x88F0
+ #endif
+ 
++#if PLATFORM(WASM)
++// browser-lite: Texturen leben im WebGL-Kontext von Skia (engine/src/GpuRaster.cpp).
++// Sie werden auch ausserhalb des Compositors angelegt oder freigegeben (Timer im
++// BitmapTexturePool), darum stellt jeder GL-Aufruf hier zuerst diesen Kontext ein.
++extern "C" void bl_skia_ensure_gl_context() __attribute__((weak));
++#define BL_GL_ENSURE(F) [](auto... args) { if (bl_skia_ensure_gl_context) bl_skia_ensure_gl_context(); return F(args...); }
++#define glActiveTexture(...) BL_GL_ENSURE(glActiveTexture)(__VA_ARGS__)
++#define glBindFramebuffer(...) BL_GL_ENSURE(glBindFramebuffer)(__VA_ARGS__)
++#define glBindRenderbuffer(...) BL_GL_ENSURE(glBindRenderbuffer)(__VA_ARGS__)
++#define glBindTexture(...) BL_GL_ENSURE(glBindTexture)(__VA_ARGS__)
++#define glClear(...) BL_GL_ENSURE(glClear)(__VA_ARGS__)
++#define glClearColor(...) BL_GL_ENSURE(glClearColor)(__VA_ARGS__)
++#define glClearStencil(...) BL_GL_ENSURE(glClearStencil)(__VA_ARGS__)
++#define glCopyTexSubImage2D(...) BL_GL_ENSURE(glCopyTexSubImage2D)(__VA_ARGS__)
++#define glDeleteFramebuffers(...) BL_GL_ENSURE(glDeleteFramebuffers)(__VA_ARGS__)
++#define glDeleteRenderbuffers(...) BL_GL_ENSURE(glDeleteRenderbuffers)(__VA_ARGS__)
++#define glDeleteTextures(...) BL_GL_ENSURE(glDeleteTextures)(__VA_ARGS__)
++#define glDisable(...) BL_GL_ENSURE(glDisable)(__VA_ARGS__)
++#define glEnable(...) BL_GL_ENSURE(glEnable)(__VA_ARGS__)
++#define glFramebufferRenderbuffer(...) BL_GL_ENSURE(glFramebufferRenderbuffer)(__VA_ARGS__)
++#define glFramebufferTexture2D(...) BL_GL_ENSURE(glFramebufferTexture2D)(__VA_ARGS__)
++#define glGenFramebuffers(...) BL_GL_ENSURE(glGenFramebuffers)(__VA_ARGS__)
++#define glGenRenderbuffers(...) BL_GL_ENSURE(glGenRenderbuffers)(__VA_ARGS__)
++#define glGenTextures(...) BL_GL_ENSURE(glGenTextures)(__VA_ARGS__)
++#define glGetIntegerv(...) BL_GL_ENSURE(glGetIntegerv)(__VA_ARGS__)
++#define glPixelStorei(...) BL_GL_ENSURE(glPixelStorei)(__VA_ARGS__)
++#define glRenderbufferStorage(...) BL_GL_ENSURE(glRenderbufferStorage)(__VA_ARGS__)
++#define glTexImage2D(...) BL_GL_ENSURE(glTexImage2D)(__VA_ARGS__)
++#define glTexParameteri(...) BL_GL_ENSURE(glTexParameteri)(__VA_ARGS__)
++#define glTexSubImage2D(...) BL_GL_ENSURE(glTexSubImage2D)(__VA_ARGS__)
++#define glViewport(...) BL_GL_ENSURE(glViewport)(__VA_ARGS__)
++#endif
++
+ namespace WebCore {
+ 
+ void BitmapTexture::determineRenderTargetAndBinding()
+@@ -91,11 +124,16 @@ GLenum BitmapTexture::textureFormat() const
+ 
+ GLenum depthBufferFormat()
+ {
++#if PLATFORM(WASM)
++    // WebGL 2 (GLES 3), ohne eigenen GLContext
++    return GL_DEPTH24_STENCIL8;
++#else
+     auto* glContext = GLContext::current();
+     if (glContext->version() >= 300 || glContext->glExtensions().OES_packed_depth_stencil)
+         return GL_DEPTH24_STENCIL8;
+ 
+     return GL_DEPTH_COMPONENT16;
++#endif
+ }
+ 
+ BitmapTexture::BitmapTexture(const IntSize& size, OptionSet<Flags> flags)
+@@ -332,7 +370,12 @@ void BitmapTexture::updateContents(const void* srcData, const IntRect& targetRec
+     IntPoint adjustedSourceOffset = sourceOffset;
+ 
+     // Texture upload requires subimage buffer if driver doesn't support subimage and we don't have full image upload.
++#if PLATFORM(WASM)
++    // WebGL 2 kann UNPACK_ROW_LENGTH/SKIP_ROWS/SKIP_PIXELS
++    bool supportsUnpackSubimage = true;
++#else
+     bool supportsUnpackSubimage = GLContext::current()->glExtensions().EXT_unpack_subimage;
++#endif
+     bool requireSubImageBuffer = !supportsUnpackSubimage
+         && !(bytesPerLine == static_cast<int>(targetRect.width() * bytesPerPixel) && adjustedSourceOffset == IntPoint::zero());
+ 
+diff --git a/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.cpp b/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.cpp
+index 8b791bca49..f85230251b 100644
+--- a/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.cpp
++++ b/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.cpp
+@@ -169,6 +169,9 @@ void BitmapTexturePool::releaseUnusedTexturesTimerFired()
+ #endif
+     };
+ 
++#if PLATFORM(WASM)
++    releaseTexturesIfNeeded();
++#else
+     if (GLContextWrapper::currentContext())
+         releaseTexturesIfNeeded();
+ #if !PLATFORM(WIN)
+@@ -177,6 +180,7 @@ void BitmapTexturePool::releaseUnusedTexturesTimerFired()
+         releaseTexturesIfNeeded();
+     }
+ #endif
++#endif // PLATFORM(WASM)
+ 
+     if (hasTextures())
+         scheduleReleaseUnusedTextures();
+diff --git a/Source/WebCore/platform/graphics/texmap/TextureMapperGLHeaders.h b/Source/WebCore/platform/graphics/texmap/TextureMapperGLHeaders.h
+index f25e1a3a05..cdc797d9dd 100644
+--- a/Source/WebCore/platform/graphics/texmap/TextureMapperGLHeaders.h
++++ b/Source/WebCore/platform/graphics/texmap/TextureMapperGLHeaders.h
+@@ -36,6 +36,25 @@
+ #define GL_BGRA 0x80E1
+ #endif
+ 
++#if PLATFORM(WASM)
++// WebGL 2 (GLES 3) kann diese Formate, die GLES-2-Header kennen sie aber nicht
++#ifndef GL_RGBA8
++#define GL_RGBA8 0x8058
++#endif
++#ifndef GL_R8
++#define GL_R8 0x8229
++#endif
++#ifndef GL_R16
++#define GL_R16 0x822A
++#endif
++#ifndef GL_RG8
++#define GL_RG8 0x822B
++#endif
++#ifndef GL_RG16
++#define GL_RG16 0x822C
++#endif
++#endif
++
+ #ifndef GL_TEXTURE_RECTANGLE_ARB
+ #define GL_TEXTURE_RECTANGLE_ARB 0x84F5
+ #endif
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferNativeImage.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferNativeImage.cpp
+index 752b082f88..fc81ef20dc 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferNativeImage.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferNativeImage.cpp
+@@ -114,7 +114,7 @@ bool CoordinatedPlatformLayerBufferNativeImage::tryEnsureBuffer(UseSkiaForCompos
+     if (m_image->hasAlpha())
+         textureFlags.add(BitmapTexture::Flags::SupportsAlpha);
+ 
+-#if USE(SKIA)
++#if USE(SKIA) && !PLATFORM(WASM)
+     if (m_image->platformImage()->imageInfo().colorType() == kBGRA_8888_SkColorType)
+         textureFlags.add(BitmapTexture::Flags::UseBGRALayout);
+ #endif
+@@ -132,6 +132,20 @@ bool CoordinatedPlatformLayerBufferNativeImage::tryEnsureBuffer(UseSkiaForCompos
+     if (!image->peekPixels(&pixmap))
+         return false;
+ 
++#if PLATFORM(WASM)
++    // WebGL kennt kein BGRA und es gibt keinen GLContext: als RGBA hochladen,
++    // BitmapTexture stellt den GL-Kontext von Skia selber ein
++    UNUSED_PARAM(useSkiaForCompositing);
++    Vector<uint8_t> rgbaPixels;
++    if (pixmap.colorType() != kRGBA_8888_SkColorType) {
++        auto info = pixmap.info().makeColorType(kRGBA_8888_SkColorType);
++        rgbaPixels.resize(info.computeMinByteSize());
++        if (!pixmap.readPixels(info, rgbaPixels.mutableSpan().data(), info.minRowBytes()))
++            return false;
++        pixmap = SkPixmap(info, rgbaPixels.span().data(), info.minRowBytes());
++    }
++    texture->updateContents(pixmap.addr(), IntRect(IntPoint(), m_size), IntPoint(), pixmap.rowBytes(), PixelFormat::RGBA8);
++#else
+     if (useSkiaForCompositing == UseSkiaForCompositing::Yes) {
+         auto& display = PlatformDisplay::sharedDisplay();
+         GLContext::ScopedGLContextCurrent scopedCurrent(*display.skiaGLContext());
+@@ -147,6 +161,7 @@ bool CoordinatedPlatformLayerBufferNativeImage::tryEnsureBuffer(UseSkiaForCompos
+         surface->writePixels(pixmap, 0, 0);
+     } else
+         texture->updateContents(pixmap.addr(), IntRect(IntPoint(), m_size), IntPoint(), image->imageInfo().minRowBytes(), PixelFormat::BGRA8);
++#endif // PLATFORM(WASM)
+ #endif
+ 
+     m_buffer = CoordinatedPlatformLayerBufferRGB::create(WTF::move(texture), m_flags, nullptr);
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
+index e1dbc8996b..0c8dbfddae 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
+@@ -135,7 +135,11 @@ SkCanvas* CoordinatedUnacceleratedTileBuffer::canvas()
+ {
+     if (!m_surface) {
+         auto alphaType = supportsAlpha() ? kPremul_SkAlphaType : kOpaque_SkAlphaType;
++#if PLATFORM(WASM)
++        auto imageInfo = SkImageInfo::Make(m_size.width(), m_size.height(), kRGBA_8888_SkColorType, alphaType, SkColorSpace::MakeSRGB());
++#else
+         auto imageInfo = SkImageInfo::Make(m_size.width(), m_size.height(), kBGRA_8888_SkColorType, alphaType, SkColorSpace::MakeSRGB());
++#endif
+         // FIXME: ref buffer and unref on release proc?
+         auto properties = FontRenderOptions::singleton().createSurfaceProps();
+         m_surface = SkSurfaces::WrapPixels(imageInfo, data(), imageInfo.minRowBytes64(), &properties);
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
+index 7fd1ee8fe4..bb3ab53dd0 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
+@@ -121,7 +121,12 @@ private:
+ 
+     bool isBackedByOpenGL() const final { return false; }
+     IntSize size() const final { return m_size; }
++#if PLATFORM(WASM)
++    // WebGL kennt kein BGRA, die Kacheln landen direkt als RGBA in der Textur
++    PixelFormat pixelFormat() const final { return PixelFormat::RGBA8; }
++#else
+     PixelFormat pixelFormat() const final { return PixelFormat::BGRA8; }
++#endif
+ 
+ #if USE(SKIA)
+     SkCanvas* canvas() final;

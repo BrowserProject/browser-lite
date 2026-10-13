@@ -1,6 +1,8 @@
 #include "config.h"
 #include "WebPlatformExtras.h"
 
+#include "FileSystemStorageWasm.h"
+
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/Exception.h>
 #include <WebCore/ExceptionOr.h>
@@ -46,10 +48,10 @@ public:
 
     void getPersisted(ClientOrigin&&, PersistCallback&& completionHandler) final { completionHandler(false); }
     void persist(const ClientOrigin&, PersistCallback&& completionHandler) final { completionHandler(false); }
-    void fileSystemGetDirectory(ClientOrigin&&, GetDirectoryCallback&& completionHandler) final
+    void fileSystemGetDirectory(ClientOrigin&& origin, GetDirectoryCallback&& completionHandler) final
     {
-        // Origin Private File System fehlt noch (braucht einen FileSystemStorageConnection)
-        completionHandler(ExceptionOr<DirectoryInfo> { Exception { ExceptionCode::NotSupportedError } });
+        // Origin Private File System (FileSystemStorageWasm.cpp)
+        BrowserLite::fileSystemGetDirectory(origin, WTF::move(completionHandler));
     }
     void getEstimate(ClientOrigin&&, GetEstimateCallback&& completionHandler) final
     {

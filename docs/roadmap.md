@@ -184,6 +184,15 @@ kommen zuerst.
   anzeigen (Strg+U, Kontextmenue), Sicherheitsanzeige (Schloss bei HTTPS, "Nicht sicher" bei
   HTTP). Tests in `ui-test.mjs`
 - [x] Cache API (`caches.*`) im Speicher der Engine (pro Sitzung). Messlatte 230 von 277 (83 %)
+- [x] Compositing mit Ebenen (Coordinated Graphics, Skia-Compositor im Engine-Thread), vorerst mit
+  `?compositing=1`. Test `compositing-test.mjs`: Farben, Animation ohne Neumalen, Opacity, Blur auf
+  der GPU, WebGL als Ebene, fixierte Leiste beim Scrollen. Naechste Schritte: messen, als Standard
+  an, dann asynchrones Scrollen (eigener Compositor-Takt)
+- [x] Origin Private File System (`navigator.storage.getDirectory`, Writable Streams, synchroner
+  Zugriff im Worker) und `requestVideoFrameCallback`. Messlatte 233 von 277 (84 %)
+- [ ] Lage-/Bewegungssensoren: Engine-Teil fertig, WebKit-Schalter `ENABLE_DEVICE_ORIENTATION` mit
+  dem naechsten vollen Neubau
+- [ ] Service Worker (SWServer im selben Prozess, Fetch abfangen) und SharedWorker
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

@@ -97,6 +97,19 @@ video.addEventListener('loadedmetadata', () => result('videometa', video.videoWi
 video.addEventListener('playing', () => result('videoplaying', '1'));
 video.addEventListener('error', () => result('videoerror', video.error && video.error.code));
 video.play().then(() => result('videoplay', 'ok'), (e) => result('videoplay', e.name));
+// requestVideoFrameCallback: drei Bilder mit wachsender Nummer und Groesse
+if (video.requestVideoFrameCallback) {
+  const seen = [];
+  const onFrame = (now, metadata) => {
+    seen.push(metadata.presentedFrames);
+    if (seen.length < 3)
+      return video.requestVideoFrameCallback(onFrame);
+    const increasing = seen[0] < seen[1] && seen[1] < seen[2];
+    result('rvfc', (increasing ? 'ok' : seen.join('/')) + ',' + metadata.width + 'x' + metadata.height + ',' + (metadata.mediaTime > 0));
+  };
+  video.requestVideoFrameCallback(onFrame);
+} else
+  result('rvfc', 'fehlt');
 
 audio.addEventListener('loadedmetadata', () => result('audioduration', audio.duration.toFixed(1)));
 audio.addEventListener('error', () => result('audioerror', audio.error && audio.error.code));
@@ -232,6 +245,8 @@ while (Date.now() < end) {
   await page.waitForTimeout(250);
 }
 check('Video: Bild in der Seite gemalt', pixel && pixel.r > 180 && pixel.g < 60 && pixel.b < 60, JSON.stringify(pixel));
+
+check('Video: requestVideoFrameCallback', (await result('rvfc')) === 'ok,320x240,true', results.get('rvfc'));
 
 check('Audio: Dauer bekannt', (await result('audioduration')) === '30.0', results.get('audioerror') ? `Fehler ${results.get('audioerror')}` : results.get('audioduration'));
 check('Audio: play()', (await result('audioplay')) === 'ok', results.get('audioplay'));

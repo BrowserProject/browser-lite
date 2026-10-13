@@ -422,8 +422,27 @@ DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
 void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 {
     m_frame = { pixels, width, height };
+    ++m_presentedFrames;
+    m_frameArrival = MonotonicTime::now();
+    m_frameMediaTime = currentTime().toDouble();
     if (RefPtr player = m_player.get())
         player->repaint();
+}
+
+std::optional<VideoFrameMetadata> MediaPlayerPrivateWasm::videoFrameMetadata()
+{
+    if (!m_frame.pixels || m_presentedFrames == m_lastMetadataFrame)
+        return std::nullopt;
+    m_lastMetadataFrame = m_presentedFrames;
+    VideoFrameMetadata metadata;
+    // Rohe MonotonicTime-Sekunden, HTMLVideoElement rechnet sie in die Zeit der Seite um
+    metadata.presentationTime = m_frameArrival.secondsSinceEpoch().seconds();
+    metadata.expectedDisplayTime = (m_frameArrival + 16_ms).secondsSinceEpoch().seconds();
+    metadata.width = m_frame.width;
+    metadata.height = m_frame.height;
+    metadata.mediaTime = m_frameMediaTime;
+    metadata.presentedFrames = m_presentedFrames;
+    return metadata;
 }
 
 static MediaPlayer::ReadyState readyStateFromHost(int value)

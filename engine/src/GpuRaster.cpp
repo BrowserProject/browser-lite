@@ -93,6 +93,11 @@ EM_JS(int, bl_gpu_transfer, (int viewId), {
     return 1;
 });
 
+namespace WebCore {
+// Patch in PlatformDisplaySkia.cpp: GrDirectContext fuer den Compositor
+void setSkiaGrContextForWasm(GrDirectContext*);
+}
+
 namespace BrowserLite::Gpu {
 
 static int s_handle;
@@ -115,6 +120,8 @@ GrDirectContext* context()
         debugLog("GPU: WebGL-Kontext verloren, male wieder auf der CPU");
         s_context->abandonContext();
         s_context = nullptr;
+        // Der Compositor (LayerTreeHostWasm) darf ihn nicht mehr benutzen
+        WebCore::setSkiaGrContextForWasm(nullptr);
         return nullptr;
     }
     if (s_context || tried || !enabled())

@@ -265,6 +265,21 @@ void ChromeClient::triggerRenderingUpdate()
     m_view->scheduleRenderingUpdate();
 }
 
+GraphicsLayerFactory* ChromeClient::graphicsLayerFactory() const
+{
+    return m_view->graphicsLayerFactory();
+}
+
+void ChromeClient::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* layer)
+{
+    m_view->attachRootGraphicsLayer(layer);
+}
+
+void ChromeClient::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)
+{
+    m_view->attachViewOverlayGraphicsLayer(layer);
+}
+
 bool ChromeClient::scheduleRenderingUpdate()
 {
     // Wir haben keinen DisplayRefreshMonitor. Das naechste Bild vom Host

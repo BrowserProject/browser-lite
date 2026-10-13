@@ -10,6 +10,7 @@
 
 #include <WebCore/MediaPlayerPrivate.h>
 #include <WebCore/PlatformTimeRanges.h>
+#include <WebCore/VideoFrameMetadata.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/WeakPtr.h>
@@ -94,6 +95,8 @@ private:
     RefPtr<WebCore::NativeImage> nativeImageForCurrentTime() final;
     WebCore::DestinationColorSpace colorSpace() final;
     bool hasAvailableVideoFrame() const final { return m_frame.pixels; }
+    // requestVideoFrameCallback: Angaben zum neusten Bild, nur einmal pro Bild
+    std::optional<WebCore::VideoFrameMetadata> videoFrameMetadata() final;
 
     bool didPassCORSAccessCheck() const final { return true; }
 
@@ -134,6 +137,10 @@ private:
         int height { 0 };
     };
     Frame m_frame;
+    unsigned m_presentedFrames { 0 };
+    unsigned m_lastMetadataFrame { 0 };
+    MonotonicTime m_frameArrival;
+    double m_frameMediaTime { 0 };
     WebCore::IntSize m_presentationSize;
 };
 

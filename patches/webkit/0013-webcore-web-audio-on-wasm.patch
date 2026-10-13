@@ -1,8 +1,18 @@
 diff --git a/Source/WTF/wtf/PlatformUse.h b/Source/WTF/wtf/PlatformUse.h
-index 0c16afbd6f..c377c07736 100644
+index 0c16afbd6f..75ad10747d 100644
 --- a/Source/WTF/wtf/PlatformUse.h
 +++ b/Source/WTF/wtf/PlatformUse.h
-@@ -359,7 +359,7 @@
+@@ -83,7 +83,8 @@
+ #define USE_SOUP 1
+ #endif
+ 
+-#if USE(COORDINATED_GRAPHICS) && USE(THEME_ADWAITA) && USE(SKIA)
++// browser-lite (PORT=Wasm): ohne asynchrones Scrollen malt WebCore die Scrollbars selber
++#if USE(COORDINATED_GRAPHICS) && USE(THEME_ADWAITA) && USE(SKIA) && !PLATFORM(WASM)
+ #define USE_COORDINATED_GRAPHICS_ASYNC_SCROLLBAR 1
+ #endif
+ 
+@@ -359,7 +360,7 @@
  #define USE_GRAPHICS_CONTEXT_FILTERS 1
  #endif
  

@@ -328,6 +328,20 @@ EMSCRIPTEN_KEEPALIVE void bl_geolocation_error(int id, int code, char* message)
     runOnEngineThread([id, code, message = takeString(message)] { geolocationError(id, code, message); });
 }
 
+// Lage/Bewegung vom Host-Browser (NaN = Wert fehlt)
+EMSCRIPTEN_KEEPALIVE void bl_device_orientation(int id, double alpha, double beta, double gamma, int absolute)
+{
+    runOnEngineThread([=] { deviceOrientation(id, alpha, beta, gamma, absolute); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_device_motion(int id, double x, double y, double z, double gravityX, double gravityY, double gravityZ, double rotationAlpha, double rotationBeta, double rotationGamma, double interval)
+{
+    runOnEngineThread([=] {
+        double values[9] = { x, y, z, gravityX, gravityY, gravityZ, rotationAlpha, rotationBeta, rotationGamma };
+        deviceMotion(id, values, interval);
+    });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_notification_event(char* notificationID, int type)
 {
     runOnEngineThread([notificationID = takeString(notificationID), type] { notificationEvent(notificationID, type); });

@@ -20,12 +20,16 @@ class SkSurface;
 namespace WebCore {
 enum class PointerLockRequestResult : uint8_t;
 class FileChooser;
+class GraphicsLayer;
+class GraphicsLayerFactory;
 class LocalFrame;
 class LocalFrameView;
 class Page;
 }
 
 namespace BrowserLite {
+
+class LayerTreeHostWasm;
 
 class WebView : public RefCounted<WebView>, public CanMakeWeakPtr<WebView> {
 public:
@@ -72,6 +76,15 @@ public:
     void presentIfNeeded();
     // Die Oberflaeche hat das Canvas an den Engine-Worker gegeben: alles neu zeigen
     void canvasAttached();
+
+    // Compositing mit Ebenen (LayerTreeHostWasm.h), nur mit GPU und BL_COMPOSITING=1
+    bool isCompositing() const { return m_compositing; }
+    LayerTreeHostWasm* layerTreeHost() const { return m_compositing ? m_layerTreeHost.get() : nullptr; }
+    WebCore::GraphicsLayerFactory* graphicsLayerFactory() const;
+    void attachRootGraphicsLayer(WebCore::GraphicsLayer*);
+    void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*);
+    // Ebenen neu zusammensetzen (ohne Rendering-Update)
+    void requestComposite();
 
     const uint8_t* pixels() const { return m_pixels.span().data(); }
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
@@ -133,6 +146,10 @@ private:
     bool m_canvasAttached { false };
     void createGpuSurfaceIfPossible();
     void dropGpuSurface();
+    std::unique_ptr<LayerTreeHostWasm> m_layerTreeHost;
+    bool m_compositing { false };
+    bool renderCompositedFrame(WebCore::IntRect* dirtyOut);
+    void stopCompositing();
     WebCore::Region m_damage;
     // Scrollen: Pixel verschieben statt neu malen. Wird erst beim naechsten
     // Bild ausgefuehrt, weil die Oberflaeche vorher noch das alte Bild kopiert.
