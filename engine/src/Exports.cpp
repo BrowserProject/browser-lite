@@ -6,9 +6,11 @@
 #include "config.h"
 
 #include "Choosers.h"
+#include "Compositor.h"
 #include "DeviceClients.h"
 #include "Engine.h"
 #include "Gamepad.h"
+#include "Host.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
@@ -102,8 +104,10 @@ EMSCRIPTEN_KEEPALIVE void bl_frame(int id)
 }
 
 // Das Canvas des Views ist jetzt im Engine-Worker (engine-pre.js)
+// Kommt aus dem Worker, der die Canvas bekommt (bl_presenter_thread)
 EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
 {
+    workerCanvasArrived(id);
     withView(id, [](WebView& view) { view.canvasAttached(); });
 }
 
@@ -111,6 +115,13 @@ EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
 EMSCRIPTEN_KEEPALIVE int bl_engine_thread()
 {
     return static_cast<int>(reinterpret_cast<uintptr_t>(engineThread()));
+}
+
+// pthread, dessen Worker die Canvas der Tabs bekommt: der Compositor-Thread,
+// sonst der Engine-Thread
+EMSCRIPTEN_KEEPALIVE int bl_presenter_thread()
+{
+    return static_cast<int>(reinterpret_cast<uintptr_t>(Compositor::presenterThread()));
 }
 
 // Quelltext der aktuellen Seite (Strg+U): kommt wie ein Download mit viewSource-Merker

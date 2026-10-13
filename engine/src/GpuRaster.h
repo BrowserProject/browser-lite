@@ -40,4 +40,10 @@ sk_sp<SkSurface> createSurface(int width, int height);
 // false, wenn der View (noch) kein Canvas im Engine-Worker hat.
 bool present(int viewId, SkSurface&);
 
+// Direkt in den Framebuffer des Kontexts malen (Compositor): Flaeche in der
+// Groesse des Views, nullptr wenn der View hier kein Canvas hat. Danach
+// showFramebuffer() schickt das Bild ohne Kopie ins Canvas des Tabs.
+sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height);
+bool showFramebuffer(int viewId);
+
 } // namespace BrowserLite::Gpu

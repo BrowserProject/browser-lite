@@ -1,6 +1,7 @@
 #include "config.h"
 #include "GpuRaster.h"
 
+#include "Compositor.h"
 #include "Engine.h"
 #include "WebView.h"
 
@@ -100,8 +101,11 @@ void setSkiaGrContextForWasm(GrDirectContext*);
 
 namespace BrowserLite::Gpu {
 
-static int s_handle;
-static sk_sp<GrDirectContext> s_context;
+// Pro Thread: der Engine-Thread (Malen ohne Ebenen) und der Compositor-Thread
+// (Compositor.cpp) haben je einen eigenen Kontext in ihrem Worker
+static thread_local int s_handle;
+static thread_local sk_sp<GrDirectContext> s_context;
+static thread_local bool s_tried;
 
 static bool enabled()
 {
@@ -114,19 +118,21 @@ static bool enabled()
 
 GrDirectContext* context()
 {
-    static bool tried;
     if (s_context && bl_gpu_context_lost(s_handle)) {
         // GPU zurueckgesetzt: ab jetzt wieder auf der CPU
         debugLog("GPU: WebGL-Kontext verloren, male wieder auf der CPU");
         s_context->abandonContext();
         s_context = nullptr;
         // Der Compositor (LayerTreeHostWasm) darf ihn nicht mehr benutzen
-        WebCore::setSkiaGrContextForWasm(nullptr);
+        if (Compositor::isCompositorThread()) {
+            WebCore::setSkiaGrContextForWasm(nullptr);
+            Compositor::markLost();
+        }
         return nullptr;
     }
-    if (s_context || tried || !enabled())
+    if (s_context || s_tried || !enabled())
         return s_context.get();
-    tried = true;
+    s_tried = true;
 
     s_handle = bl_gpu_create_context();
     if (!s_handle) {
@@ -187,21 +193,48 @@ bool present(int viewId, SkSurface& surface)
     return bl_gpu_transfer(viewId);
 }
 
+sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height)
+{
+    auto* gr = context();
+    if (!gr || width <= 0 || height <= 0 || !bl_gpu_prepare(viewId, width, height))
+        return nullptr;
+    GrGLFramebufferInfo framebuffer { 0, 0x8058 /* GL_RGBA8 */ };
+    auto target = GrBackendRenderTargets::MakeGL(width, height, 0, 8, framebuffer);
+    return SkSurfaces::WrapBackendRenderTarget(gr, target, kBottomLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType, nullptr, nullptr);
+}
+
+bool showFramebuffer(int viewId)
+{
+    return bl_gpu_transfer(viewId);
+}
+
 } // namespace BrowserLite::Gpu
 
 // Kontext verloren: jeder View faellt beim naechsten Bild auf die CPU zurueck
-// (WebView::presentIfNeeded) und malt alles neu
+// (WebView::presentIfNeeded) und malt alles neu. Kommt vom Worker, dem der
+// Kontext gehoert (Engine- oder Compositor-Thread).
 extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_context_lost_event()
 {
-    BrowserLite::WebView::forEach([](BrowserLite::WebView& view) {
+    using namespace BrowserLite;
+    if (Compositor::isCompositorThread()) {
+        Gpu::context(); // merkt den Verlust (Compositor::isLost)
+        runOnEngineThread([] {
+            WebView::forEach([](WebView& view) {
+                view.compositorLost();
+            });
+        });
+        return;
+    }
+    WebView::forEach([](WebView& view) {
         view.addDamage({ { }, view.size() });
     });
 }
 
-// Fuer Tests: den Kontext absichtlich verlieren (WEBGL_lose_context)
+// Fuer Tests: den Kontext absichtlich verlieren (WEBGL_lose_context), mit
+// Compositor-Thread dessen Kontext
 extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_lose_context_for_testing()
 {
-    BrowserLite::runOnEngineThread([] {
+    auto run = [] {
         using namespace BrowserLite::Gpu;
         if (!s_handle)
             return;
@@ -211,7 +244,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_lose_context_for_testing()
             if (extension)
                 extension.loseContext();
         }, s_handle);
-    });
+    };
+    if (BrowserLite::Compositor::isRunning())
+        BrowserLite::Compositor::dispatch(WTF::move(run));
+    else
+        BrowserLite::runOnEngineThread(WTF::move(run));
 }
 
 // Ruft Skia vor jedem GL-Aufruf auf (Patch 0020, GrGLAssembleWebGLInterfaceAutogen.cpp):

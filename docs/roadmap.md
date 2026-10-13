@@ -184,11 +184,14 @@ kommen zuerst.
   anzeigen (Strg+U, Kontextmenue), Sicherheitsanzeige (Schloss bei HTTPS, "Nicht sicher" bei
   HTTP). Tests in `ui-test.mjs`
 - [x] Cache API (`caches.*`) im Speicher der Engine (pro Sitzung). Messlatte 230 von 277 (83 %)
-- [x] Compositing mit Ebenen (Coordinated Graphics, Skia-Compositor im Engine-Thread), Standard
+- [x] Compositing mit Ebenen (Coordinated Graphics, Skia-Compositor), Standard
   an mit WebGL 2 (`?compositing=0` schaltet ab). Test `compositing-test.mjs`: Farben, Animation
   ohne Neumalen, Opacity, Blur auf der GPU, WebGL als Ebene, fixierte Leiste beim Scrollen.
   Scrollen: NZZ/Wikipedia ohne langsame Bilder, GitHub 1946 -> 701 ms; Laden 5-15 % schneller.
-  Naechster Schritt: asynchrones Scrollen (Compositor-Takt unabhaengig vom JS der Seite)
+- [x] Compositor-Thread mit eigenem WebGL-Kontext: Animationen laufen weiter, auch wenn das JS der
+  Seite den Engine-Thread blockiert (`compositing-test.mjs`)
+- [ ] Asynchrones Scrollen: WebKits ScrollingTree (ENABLE_ASYNC_SCROLLING) auf einem eigenen Thread,
+  Rad- und Touch-Events direkt dorthin, Positionen an den Compositor
 - [x] Origin Private File System (`navigator.storage.getDirectory`, Writable Streams, synchroner
   Zugriff im Worker) und `requestVideoFrameCallback`. Messlatte 233 von 277 (84 %)
 - [ ] Lage-/Bewegungssensoren: Engine-Teil fertig, WebKit-Schalter `ENABLE_DEVICE_ORIENTATION` mit

@@ -8,6 +8,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "CacheStorageWasm.h"
+#include "Compositor.h"
 #include "GpuRaster.h"
 #include "LayerTreeHostWasm.h"
 #include "WebPlatformExtras.h"
@@ -56,6 +57,8 @@
 #include <WebCore/PlatformTouchPoint.h>
 #include <WebCore/WasmPlatform.h>
 #include <WebCore/RemoteFrameGeometryTransformer.h>
+#include <WebCore/RenderLayerCompositor.h>
+#include <WebCore/RenderView.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
@@ -318,13 +321,16 @@ void WebView::createSurface()
     RELEASE_ASSERT(m_surface);
     m_gpuSurface = nullptr;
     createGpuSurfaceIfPossible();
+    if (m_layerTreeHost)
+        m_layerTreeHost->sizeDidChange(m_pixelSize, m_deviceScaleFactor);
 }
 
 // Mit Canvas im Engine-Worker und WebGL 2 malt Skia auf der GPU (GpuRaster.h).
 // Die Flaeche ist neu und leer, darum alles neu malen.
 void WebView::createGpuSurfaceIfPossible()
 {
-    if (m_gpuSurface || !m_canvasAttached || m_pixelSize.isEmpty())
+    // Mit Compositor-Thread hat der Engine-Worker kein Canvas und keine GPU
+    if (m_gpuSurface || !m_canvasAttached || m_pixelSize.isEmpty() || Compositor::isRunning())
         return;
     Gpu::Scope scope;
     if (!scope)
@@ -423,7 +429,6 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
         view->resize(size);
     createSurface();
     if (m_compositing) {
-        m_layerTreeHost->sizeDidChange();
         scheduleRenderingUpdate();
         return;
     }
@@ -573,51 +578,64 @@ void WebView::stopCompositing()
     settings.setForceCompositingMode(false);
     settings.setAcceleratedCompositingEnabled(false);
     settings.setAcceleratedCompositingForFixedPositionEnabled(false);
+    // Die Einstellung wirkt sonst erst bei der naechsten echten Aenderung an
+    // Style oder Layout: Compositing in allen Frames gleich beenden
+    for (RefPtr<Frame> frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
+        if (CheckedPtr renderView = localFrame ? localFrame->contentRenderer() : nullptr) {
+            auto& compositor = renderView->compositor();
+            compositor.willRecalcStyle(); // liest die Einstellungen neu
+            // Backings der Ebenen abbauen, sonst malt WebCore ihren Inhalt nicht selber
+            compositor.clearBackingForAllLayers();
+            compositor.enableCompositingMode(false);
+        }
+    }
     m_page->setNeedsRecalcStyleInAllFrames();
+    m_repaintAfterCompositingStopped = true;
     addDamage(IntRect { { }, m_size });
     scheduleRenderingUpdate();
 }
 
-// Wie WebKit2 (LayerTreeHost::updateRendering + ThreadedCompositor): erst das
-// Rendering-Update, dann zusammensetzen, sobald alle Kacheln gemalt sind. Das
-// naechste Rendering-Update kommt erst nach dem Zusammensetzen.
-bool WebView::renderCompositedFrame(IntRect* dirtyOut)
+// Wie WebKit2 (LayerTreeHost::updateRendering): Rendering-Update und den Stand
+// der Ebenen an den Compositor-Thread. Der zeigt das Bild selber und meldet
+// sich mit didComposite(); erst dann kommt das naechste Rendering-Update.
+bool WebView::renderCompositedFrame(IntRect*)
 {
-    auto start = MonotonicTime::now();
     auto& host = *m_layerTreeHost;
-    if (m_renderingUpdateRequested && !host.hasPendingRenderingUpdate() && !host.isWaitingForTiles()) {
-        m_renderingUpdateRequested = false;
-        m_page->updateRendering();
-        m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
-        host.flush();
-    }
-    // Die letzte fertige Kachel fordert ein neues Bild an
-    if (host.isWaitingForTiles())
+    if (std::exchange(m_needsFullPresent, false))
+        host.forceRepaint();
+    if (!m_renderingUpdateRequested || host.isWaitingForCompositor())
         return false;
+    auto start = MonotonicTime::now();
+    m_renderingUpdateRequested = false;
+    m_page->updateRendering();
+    m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
+    host.flush();
+    // Nichts zu zeigen: das Bild ist trotzdem "fertig"
+    if (!host.isWaitingForCompositor())
+        didComposite();
+    auto milliseconds = (MonotonicTime::now() - start).milliseconds();
+    if (milliseconds > 30)
+        debugLog("View %d: Rendering-Update %.0f ms", m_id, milliseconds);
+    return false;
+}
 
-    bool fullPresent = std::exchange(m_needsFullPresent, false);
-    if (!m_gpuSurface || (!host.needsComposition() && !fullPresent)) {
-        if (m_renderingUpdateRequested)
-            requestComposite();
-        return false;
-    }
-
-    auto updateDone = MonotonicTime::now();
-    {
-        Gpu::Scope scope;
-        host.composite(*m_gpuSurface, m_deviceScaleFactor);
-    }
+void WebView::didComposite()
+{
+    if (m_layerTreeHost)
+        m_layerTreeHost->didComposite();
     m_page->didCompleteRenderingUpdateDisplay();
     m_page->didCompleteRenderingFrame();
     if (m_renderingUpdateRequested)
         requestComposite();
+}
 
-    auto end = MonotonicTime::now();
-    if ((end - start).milliseconds() > 30)
-        debugLog("View %d: Bild %.0f ms (Update %.0f ms, Zusammensetzen %.0f ms)", m_id, (end - start).milliseconds(), (updateDone - start).milliseconds(), (end - updateDone).milliseconds());
-    if (dirtyOut)
-        *dirtyOut = IntRect { { }, m_pixelSize };
-    return true;
+// Der Compositor-Thread hat seine GPU verloren: ohne Ebenen weitermalen
+void WebView::compositorLost()
+{
+    if (m_layerTreeHost)
+        m_layerTreeHost->didComposite();
+    stopCompositing();
 }
 
 bool WebView::renderFrame(IntRect* dirtyOut)
@@ -632,6 +650,17 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         // requestAnimationFrame-Callbacks, Animationen, Style, Layout, ...
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ });
+        // Nach stopCompositing: solange WebCore noch Ebenen hat, malt es den
+        // Inhalt nicht selber. Sobald sie weg sind, alles neu malen.
+        if (m_repaintAfterCompositingStopped) {
+            RefPtr frameView = mainFrameView();
+            CheckedPtr renderView = frameView ? frameView->renderView() : nullptr;
+            if (renderView && !renderView->usesCompositing()) {
+                m_repaintAfterCompositingStopped = false;
+                addDamage(IntRect { { }, m_size });
+            } else
+                scheduleRenderingUpdate();
+        }
     }
 
     RefPtr view = mainFrameView();
@@ -709,6 +738,13 @@ void WebView::presentIfNeeded()
         }
         // Ging nicht (Kontext weg): ab jetzt auf der CPU, im naechsten Bild alles
         dropGpuSurface();
+        return;
+    }
+    // Mit Compositor-Thread zeigt dessen Worker auch die Bilder ohne Ebenen;
+    // bis er fertig ist, darf der Pixel-Buffer nicht geaendert werden
+    if (Compositor::isRunning()) {
+        m_frameInFlight = true;
+        presentFrameOnCompositor(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height());
         return;
     }
     if (presentFrameInWorker(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height()))

@@ -21,6 +21,11 @@ void presentFrameToHost(int viewId, const uint8_t* pixels, int width, int height
 bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight);
 void forgetWorkerCanvas(int viewId);
 bool hasWorkerCanvas(int viewId);
+// Das Canvas eines Views ist im Worker angekommen (engine-pre.js, bl_canvas_attached)
+void workerCanvasArrived(int viewId);
+// Mit Compositor-Thread: Bild ohne Ebenen in dessen Worker zeigen. Danach ruft
+// er auf dem Engine-Thread WebView::framePresented() und presentIfNeeded() auf.
+void presentFrameOnCompositor(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight);
 
 // Host moechte bei der naechsten Gelegenheit (requestAnimationFrame) bl_frame() aufrufen
 void requestFrameFromHost(int viewId);

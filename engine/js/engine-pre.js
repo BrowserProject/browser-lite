@@ -28,4 +28,10 @@ if (ENVIRONMENT_IS_PTHREAD) {
     const thread = Module._bl_engine_thread();
     return thread ? PThread.pthreads[thread] || null : null;
   };
+  // Worker, der die Canvas der Tabs bekommt: der Compositor-Thread
+  // (engine/src/Compositor.h), ohne ihn der Engine-Thread
+  Module.blPresenterWorker = () => {
+    const thread = Module._bl_presenter_thread();
+    return thread ? PThread.pthreads[thread] || null : null;
+  };
 }

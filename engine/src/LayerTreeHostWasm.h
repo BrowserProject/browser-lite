@@ -1,28 +1,31 @@
-// Compositing mit Ebenen (Coordinated Graphics), vereinfacht nach WebKit2
-// (LayerTreeHost, CoordinatedSceneState, ThreadedCompositor).
+// Compositing mit Ebenen (Coordinated Graphics), nach WebKit2 (LayerTreeHost,
+// CoordinatedSceneState, ThreadedCompositor).
 //
 // WebCore teilt die Seite in Ebenen (GraphicsLayerCoordinated). Jede Ebene
-// malt ihre Kacheln selber (SkiaPaintingEngine, CPU in Hintergrund-Threads),
-// der Compositor setzt die Kacheln mit Skia auf der GPU zusammen
-// (SkiaCompositingLayer). Animationen von transform/opacity und Scrollen
-// brauchen so kein neues Malen, nur ein neues Zusammensetzen.
+// malt ihre Kacheln selber (SkiaPaintingEngine, CPU in Hintergrund-Threads).
+// Der Compositor-Thread (Compositor.h) setzt die Kacheln mit Skia auf der GPU
+// zusammen (SkiaCompositingLayer) und zeigt das Bild. Animationen von
+// transform/opacity laufen dort weiter, auch wenn der Engine-Thread mit dem JS
+// der Seite beschaeftigt ist.
 //
-// Anders als in WebKit2 laeuft hier alles im Engine-Thread: erst das
-// Rendering-Update (flush), dann sofort das Zusammensetzen ins GPU-Ziel des
-// Views. Nur das Malen der Kacheln laeuft parallel.
+// Ablauf pro Bild: Engine-Thread macht das Rendering-Update und flush(), der
+// Compositor uebernimmt den neuen Stand beim naechsten Bild (rAF in seinem
+// Worker), sobald alle Kacheln gemalt sind, und meldet "fertig" zurueck. Erst
+// dann kommt das naechste Rendering-Update.
 #pragma once
 
 #include <WebCore/CoordinatedCompositionReason.h>
 #include <WebCore/CoordinatedPlatformLayer.h>
 #include <WebCore/GraphicsLayerFactory.h>
+#include <WebCore/IntSize.h>
 #include <atomic>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/Lock.h>
 #include <wtf/OptionSet.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WeakPtr.h>
-
-class SkSurface;
 
 namespace WebCore {
 class CoordinatedImageBackingStore;
@@ -35,31 +38,59 @@ namespace BrowserLite {
 
 class WebView;
 
+// Gemeinsamer Stand von Engine- und Compositor-Thread (wie CoordinatedSceneState)
+class CompositorScene final : public ThreadSafeRefCounted<CompositorScene> {
+public:
+    static Ref<CompositorScene> create(int viewId) { return adoptRef(*new CompositorScene(viewId)); }
+
+    const int viewId;
+    const Ref<WebCore::CoordinatedPlatformLayer> rootLayer;
+
+    Lock lock;
+    HashSet<Ref<WebCore::CoordinatedPlatformLayer>> pendingLayers WTF_GUARDED_BY_LOCK(lock);
+    bool hasPendingLayers WTF_GUARDED_BY_LOCK(lock) { false };
+    HashSet<Ref<WebCore::CoordinatedPlatformLayer>> pendingLayersToRemove WTF_GUARDED_BY_LOCK(lock);
+    WebCore::IntSize pixelSize WTF_GUARDED_BY_LOCK(lock);
+    float deviceScaleFactor WTF_GUARDED_BY_LOCK(lock) { 1 };
+    OptionSet<WebCore::CompositionReason> reasons WTF_GUARDED_BY_LOCK(lock);
+    bool frameScheduled WTF_GUARDED_BY_LOCK(lock) { false };
+    bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
+    bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
+    bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
+    std::atomic<unsigned> pendingTiles { 0 };
+
+    // Nur auf dem Compositor-Thread
+    HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
+
+    // Von jedem Thread: beim naechsten Bild des Compositors zusammensetzen
+    void requestComposition(WebCore::CompositionReason);
+    void scheduleFrameLocked() WTF_REQUIRES_LOCK(lock);
+
+private:
+    explicit CompositorScene(int viewId);
+};
+
 class LayerTreeHostWasm final : public WebCore::GraphicsLayerFactory, public WebCore::CoordinatedPlatformLayer::Client {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(LayerTreeHostWasm);
 public:
     explicit LayerTreeHostWasm(WebView&);
     ~LayerTreeHostWasm();
 
-    // Nur mit GPU (Gpu::context()) moeglich
+    // Nur mit Compositor-Thread (Compositor.h)
     static bool isAvailable();
 
     void setRootCompositingLayer(WebCore::GraphicsLayer*);
     void setViewOverlayRootLayer(WebCore::GraphicsLayer*);
-    bool hasRootLayer() const { return m_rootCompositingLayer; }
-    void sizeDidChange();
+    void sizeDidChange(WebCore::IntSize pixelSize, float deviceScaleFactor);
 
-    // Nach page->finalizeRenderingUpdate(): Zustand der Ebenen uebernehmen.
-    // true, wenn ein neues Zusammensetzen noetig ist.
-    bool flush();
-    bool needsComposition() const { return !m_reasons.isEmpty(); }
-    bool hasPendingRenderingUpdate() const { return m_reasons.contains(WebCore::CompositionReason::RenderingUpdate); }
-    // Kacheln werden noch gemalt: mit dem Zusammensetzen warten
-    bool isWaitingForTiles() const { return m_pendingTiles.load(); }
-
-    // Setzt die Ebenen ins GPU-Ziel (braucht einen Gpu::Scope). Gibt true
-    // zurueck, wenn noch Animationen laufen.
-    bool composite(SkSurface&, float deviceScaleFactor);
+    // Nach page->finalizeRenderingUpdate(): Stand der Ebenen an den Compositor
+    void flush();
+    // Das letzte Rendering-Update ist noch nicht gezeigt
+    bool isWaitingForCompositor() const { return m_waitingForCompositor; }
+    // Vom Compositor (Engine-Thread)
+    void didComposite() { m_waitingForCompositor = false; }
+    // Alles neu zeigen (z.B. neues Canvas)
+    void forceRepaint();
 
 private:
     void updateRootLayer();
@@ -70,30 +101,27 @@ private:
     void attachLayer(WebCore::CoordinatedPlatformLayer&) override;
     void detachLayer(WebCore::CoordinatedPlatformLayer&) override;
     void notifyCompositionRequired() override { m_compositionRequired = true; }
-    bool isCompositionRequiredOrOngoing() const override { return m_compositionRequired || !m_reasons.isEmpty(); }
+    bool isCompositionRequiredOrOngoing() const override { return m_compositionRequired || m_waitingForCompositor; }
     void requestComposition(WebCore::CompositionReason) override;
     RunLoop* compositingRunLoop() const override;
-    int maxTextureSize() const override;
-    void willPaintTile() override { ++m_pendingTiles; }
+    int maxTextureSize() const override { return 4096; }
+    void willPaintTile() override { ++m_scene->pendingTiles; }
     void didPaintTile() override;
 
     // GraphicsLayerFactory
     Ref<WebCore::GraphicsLayer> createGraphicsLayer(WebCore::GraphicsLayer::Type, WebCore::GraphicsLayerClient&) override;
 
     WeakPtr<WebView> m_view;
-    int m_viewId;
-    Ref<WebCore::CoordinatedPlatformLayer> m_rootLayer;
+    Ref<CompositorScene> m_scene;
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layers;
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layersToRemove;
     WebCore::GraphicsLayer* m_rootCompositingLayer { nullptr };
     WebCore::GraphicsLayer* m_overlayCompositingLayer { nullptr };
     std::unique_ptr<WebCore::SkiaPaintingEngine> m_paintingEngine;
     HashMap<uint64_t, Ref<WebCore::CoordinatedImageBackingStore>> m_imageBackingStores;
-    OptionSet<WebCore::CompositionReason> m_reasons;
     bool m_compositionRequired { false };
     bool m_layersChanged { false };
-    bool m_pendingResize { false };
-    std::atomic<unsigned> m_pendingTiles { 0 };
+    bool m_waitingForCompositor { false };
 };
 
 } // namespace BrowserLite

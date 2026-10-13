@@ -50,7 +50,7 @@ const PAGE = `<!doctype html><title>Compositing-Test</title>
 <div id="blur"></div>
 <div class="box" id="fade"></div>
 <canvas id="gl" width="80" height="80"></canvas>
-<div style="position:absolute;top:1000px;left:20px;width:60px;height:60px;background:rgb(0,128,0)"></div>
+<div id="late" style="position:absolute;top:1000px;left:20px;width:60px;height:60px;background:rgb(0,128,0)"></div>
 <script>
 const gl = document.getElementById('gl').getContext('webgl');
 if (gl) {
@@ -133,7 +133,7 @@ const red = await pixelAt(50, 90), green = await pixelAt(130, 90), blue = await 
 check('Farben stimmen (rot, gruen, blau)', near(red, [255, 0, 0]) && near(green, [0, 255, 0]) && near(blue, [0, 0, 255]), JSON.stringify({ red, green, blue }));
 const bar = await pixelAt(500, 20);
 check('Fixierte Leiste oben', near(bar, [255, 128, 0]), JSON.stringify(bar));
-check('Compositing ist an', !logs.some((line) => /Compositing aus/.test(line)));
+check('Compositing ist an', logs.some((line) => /Compositor: eigener Thread/.test(line)) && !logs.some((line) => /Compositing aus/.test(line)));
 
 // Die Animation laeuft: der schwarze Kasten ist mal links, mal weiter rechts
 const positions = new Set();
@@ -161,6 +161,21 @@ results.delete('frames');
 const framesAfter = Number(await result('frames'));
 check('requestAnimationFrame laeuft weiter', framesAfter - framesBefore > 10, `${framesBefore} -> ${framesAfter}`);
 
+// Die Animation laeuft im Compositor-Thread weiter, auch wenn das JS der Seite
+// den Engine-Thread 3 s blockiert
+await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 3000; while (Date.now() < end); return 1; })()'));
+await page.waitForTimeout(400);
+const busyPositions = new Set();
+for (let i = 0; i < 12; i++) {
+  for (const x of [40, 140, 240, 340]) {
+    if (near(await pixelAt(x, 180), [0, 0, 0], 60))
+      busyPositions.add(x);
+  }
+  await page.waitForTimeout(120);
+}
+check('Animation laeuft weiter, waehrend das JS blockiert', busyPositions.size >= 2, JSON.stringify([...busyPositions]));
+await page.waitForTimeout(1500);
+
 // Scrollen: Inhalt wandert, die Leiste bleibt
 await page.mouse.move(500, 400);
 await page.mouse.wheel(0, 900);
@@ -168,6 +183,17 @@ let scrolled = null;
 await waitFor(async () => near(scrolled = await pixelAt(50, 130), [0, 128, 0]), 10000);
 check('Scrollen verschiebt den Inhalt', near(scrolled, [0, 128, 0]), JSON.stringify(scrolled));
 check('Leiste bleibt beim Scrollen', near(await pixelAt(500, 20), [255, 128, 0]));
+
+// GPU verloren: die Engine malt ohne Ebenen auf der CPU weiter
+await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
+await waitFor(async () => logs.some((line) => /Compositing aus/.test(line)), 15000);
+await page.waitForTimeout(1000);
+// Eine Aenderung nach dem Verlust muss ankommen (nicht nur das alte Bild)
+await page.evaluate(() => window.__blEval('document.getElementById("late").style.background = "rgb(0, 0, 255)"'));
+let afterLoss = null;
+await waitFor(async () => near(afterLoss = await pixelAt(50, 130), [0, 0, 255]), 10000);
+const barAfterLoss = await pixelAt(500, 20);
+check('Nach GPU-Verlust weiter gemalt (ohne Ebenen)', near(afterLoss, [0, 0, 255]) && near(barAfterLoss, [255, 128, 0]), JSON.stringify({ afterLoss, barAfterLoss }));
 
 await page.screenshot({ path: path.join(root, 'build', 'e2e-compositing.png') }).catch(() => {});
 await browser.close();

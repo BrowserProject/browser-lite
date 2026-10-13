@@ -29,10 +29,10 @@ index 776466ea87..b463c05d25 100644
      return s_skiaGLContext->skiaGrContext();
  }
 diff --git a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp b/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
-index 9fee5e03f2..e83ca38b76 100644
+index 9fee5e03f2..f060106844 100644
 --- a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
 +++ b/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
-@@ -70,6 +70,39 @@ static const GLenum s_pixelDataType = GL_UNSIGNED_BYTE;
+@@ -70,6 +70,58 @@ static const GLenum s_pixelDataType = GL_UNSIGNED_BYTE;
  #define GL_DEPTH24_STENCIL8 0x88F0
  #endif
  
@@ -41,6 +41,25 @@ index 9fee5e03f2..e83ca38b76 100644
 +// Sie werden auch ausserhalb des Compositors angelegt oder freigegeben (Timer im
 +// BitmapTexturePool), darum stellt jeder GL-Aufruf hier zuerst diesen Kontext ein.
 +extern "C" void bl_skia_ensure_gl_context() __attribute__((weak));
++// WebGL-Kennungen gelten nur im Worker, der sie angelegt hat. Freigeben darum
++// immer ueber die Engine, die es an den richtigen Thread weitergibt
++// (kind: 0 = Textur, 1 = Framebuffer, 2 = Renderbuffer).
++extern "C" void bl_texmap_gl_delete(int kind, int count, const unsigned* ids) __attribute__((weak));
++static void deleteGLObjects(int kind, GLsizei count, const GLuint* ids)
++{
++    if (bl_texmap_gl_delete) {
++        bl_texmap_gl_delete(kind, count, ids);
++        return;
++    }
++    if (bl_skia_ensure_gl_context)
++        bl_skia_ensure_gl_context();
++    if (!kind)
++        glDeleteTextures(count, ids);
++    else if (kind == 1)
++        glDeleteFramebuffers(count, ids);
++    else
++        glDeleteRenderbuffers(count, ids);
++}
 +#define BL_GL_ENSURE(F) [](auto... args) { if (bl_skia_ensure_gl_context) bl_skia_ensure_gl_context(); return F(args...); }
 +#define glActiveTexture(...) BL_GL_ENSURE(glActiveTexture)(__VA_ARGS__)
 +#define glBindFramebuffer(...) BL_GL_ENSURE(glBindFramebuffer)(__VA_ARGS__)
@@ -50,9 +69,9 @@ index 9fee5e03f2..e83ca38b76 100644
 +#define glClearColor(...) BL_GL_ENSURE(glClearColor)(__VA_ARGS__)
 +#define glClearStencil(...) BL_GL_ENSURE(glClearStencil)(__VA_ARGS__)
 +#define glCopyTexSubImage2D(...) BL_GL_ENSURE(glCopyTexSubImage2D)(__VA_ARGS__)
-+#define glDeleteFramebuffers(...) BL_GL_ENSURE(glDeleteFramebuffers)(__VA_ARGS__)
-+#define glDeleteRenderbuffers(...) BL_GL_ENSURE(glDeleteRenderbuffers)(__VA_ARGS__)
-+#define glDeleteTextures(...) BL_GL_ENSURE(glDeleteTextures)(__VA_ARGS__)
++#define glDeleteFramebuffers(n, ids) deleteGLObjects(1, n, ids)
++#define glDeleteRenderbuffers(n, ids) deleteGLObjects(2, n, ids)
++#define glDeleteTextures(n, ids) deleteGLObjects(0, n, ids)
 +#define glDisable(...) BL_GL_ENSURE(glDisable)(__VA_ARGS__)
 +#define glEnable(...) BL_GL_ENSURE(glEnable)(__VA_ARGS__)
 +#define glFramebufferRenderbuffer(...) BL_GL_ENSURE(glFramebufferRenderbuffer)(__VA_ARGS__)
@@ -72,7 +91,7 @@ index 9fee5e03f2..e83ca38b76 100644
  namespace WebCore {
  
  void BitmapTexture::determineRenderTargetAndBinding()
-@@ -91,11 +124,16 @@ GLenum BitmapTexture::textureFormat() const
+@@ -91,11 +143,16 @@ GLenum BitmapTexture::textureFormat() const
  
  GLenum depthBufferFormat()
  {
@@ -89,7 +108,7 @@ index 9fee5e03f2..e83ca38b76 100644
  }
  
  BitmapTexture::BitmapTexture(const IntSize& size, OptionSet<Flags> flags)
-@@ -332,7 +370,12 @@ void BitmapTexture::updateContents(const void* srcData, const IntRect& targetRec
+@@ -332,7 +389,12 @@ void BitmapTexture::updateContents(const void* srcData, const IntRect& targetRec
      IntPoint adjustedSourceOffset = sourceOffset;
  
      // Texture upload requires subimage buffer if driver doesn't support subimage and we don't have full image upload.

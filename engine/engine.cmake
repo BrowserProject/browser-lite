@@ -12,6 +12,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/BackForwardList.cpp
     ${BL_ENGINE_SRC}/Choosers.cpp
     ${BL_ENGINE_SRC}/Clients.cpp
+    ${BL_ENGINE_SRC}/Compositor.cpp
     ${BL_ENGINE_SRC}/DeviceClients.cpp
     ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp

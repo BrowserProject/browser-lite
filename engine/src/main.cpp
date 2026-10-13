@@ -5,6 +5,7 @@
 
 #include "config.h"
 
+#include "Compositor.h"
 #include "Engine.h"
 #include "Gamepad.h"
 #include "Host.h"
@@ -74,6 +75,8 @@ int main(int, char**)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
+    // Eigener Thread fuer Compositing und Anzeige (braucht WebGL 2)
+    Compositor::start();
 
     // Kopieren in der Seite -> echte Zwischenablage (der Host schreibt sie)
     WebCore::WasmPlatform::setClipboardChangedCallback([](const WebCore::WasmPlatform::ClipboardItems& items) {

@@ -85,6 +85,9 @@ public:
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*);
     // Ebenen neu zusammensetzen (ohne Rendering-Update)
     void requestComposite();
+    // Vom Compositor-Thread: das letzte Rendering-Update ist gezeigt
+    void didComposite();
+    void compositorLost();
 
     const uint8_t* pixels() const { return m_pixels.span().data(); }
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
@@ -148,6 +151,7 @@ private:
     void dropGpuSurface();
     std::unique_ptr<LayerTreeHostWasm> m_layerTreeHost;
     bool m_compositing { false };
+    bool m_repaintAfterCompositingStopped { false };
     bool renderCompositedFrame(WebCore::IntRect* dirtyOut);
     void stopCompositing();
     WebCore::Region m_damage;

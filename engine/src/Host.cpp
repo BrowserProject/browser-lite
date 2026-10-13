@@ -4,7 +4,13 @@
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
+#include "Compositor.h"
+#include "Engine.h"
+#include "WebView.h"
+#include <wtf/HashSet.h>
 #include <wtf/HexNumber.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/text/StringBuilder.h>
 
 // Im Engine-Worker: Module.blCanvases (engine-pre.js) haelt pro View das
@@ -64,14 +70,53 @@ bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int heig
     return bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
 }
 
+// Welche Views ein Canvas im Worker haben. Der Worker ist der des Compositors
+// oder der des Engine-Threads (Compositor::presenterThread), darum hier in C++.
+static Lock s_canvasLock;
+static HashSet<int>& attachedCanvases() WTF_REQUIRES_LOCK(s_canvasLock)
+{
+    static NeverDestroyed<HashSet<int>> canvases;
+    return canvases;
+}
+
+void workerCanvasArrived(int viewId)
+{
+    Locker locker { s_canvasLock };
+    attachedCanvases().add(viewId);
+}
+
 bool hasWorkerCanvas(int viewId)
 {
-    return bl_js_has_worker_canvas(viewId);
+    Locker locker { s_canvasLock };
+    return attachedCanvases().contains(viewId);
 }
 
 void forgetWorkerCanvas(int viewId)
 {
+    {
+        Locker locker { s_canvasLock };
+        attachedCanvases().remove(viewId);
+    }
+    if (Compositor::isRunning()) {
+        Compositor::dispatch([viewId] {
+            bl_js_forget_worker_canvas(viewId);
+        });
+        return;
+    }
     bl_js_forget_worker_canvas(viewId);
+}
+
+void presentFrameOnCompositor(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight)
+{
+    Compositor::dispatch([=] {
+        bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
+        runOnEngineThread([viewId] {
+            if (auto* view = WebView::fromID(viewId)) {
+                view->framePresented();
+                view->presentIfNeeded();
+            }
+        });
+    });
 }
 
 void notifyHost(int viewId, const char* type, const String& payload)

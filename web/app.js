@@ -263,9 +263,10 @@ class Tab {
     this.canvas.className = 'page';
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none;touch-action:none';
     $('viewport').appendChild(this.canvas);
-    // Das Canvas geht an den Engine-Worker, der malt selber hinein. Nur wo das
-    // nicht geht, kopieren wir die Pixel hier (onEngineFrame).
-    const worker = typeof this.canvas.transferControlToOffscreen === 'function' && engine.blEngineWorker?.();
+    // Das Canvas geht an den Worker des Compositors (sonst des Engine-Threads),
+    // der malt selber hinein. Nur wo das nicht geht, kopieren wir die Pixel
+    // hier (onEngineFrame).
+    const worker = typeof this.canvas.transferControlToOffscreen === 'function' && (engine.blPresenterWorker || engine.blEngineWorker)?.();
     if (worker) {
       const offscreen = this.canvas.transferControlToOffscreen();
       worker.postMessage({ blCanvas: offscreen, viewId: this.id }, [offscreen]);

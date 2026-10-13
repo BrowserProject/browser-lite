@@ -1,31 +1,161 @@
 #include "config.h"
 #include "LayerTreeHostWasm.h"
 
+#include "Compositor.h"
+#include "Engine.h"
 #include "GpuRaster.h"
 #include "WebView.h"
+#include <EGL/egl.h>
+#include "GLDisplay.h"
 #include <WebCore/CoordinatedImageBackingStore.h>
 #include <WebCore/Damage.h>
 #include <WebCore/GraphicsLayerCoordinated.h>
 #include <WebCore/NativeImage.h>
 #include <WebCore/PlatformDisplay.h>
-#include <EGL/egl.h>
-#include "GLDisplay.h"
 #include <WebCore/SkiaCompositingLayer.h>
 #include <WebCore/SkiaPaintingEngine.h>
+#include <emscripten/emscripten.h>
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkSurface.h>
 #include <skia/gpu/ganesh/GrDirectContext.h>
-#include <wtf/MainThread.h>
 #include <wtf/RunLoop.h>
-
-namespace WebCore {
-// Patch in PlatformDisplaySkia.cpp: unser GrDirectContext fuer den Compositor
-void setSkiaGrContextForWasm(GrDirectContext*);
-}
 
 namespace BrowserLite {
 
 using namespace WebCore;
+
+// ------------------------------------------------------------ Compositor-Thread
+
+// Naechstes Bild im Worker des Compositors (rAF, sonst 16 ms)
+EM_JS(void, bl_compositor_request_frame, (void* scene), {
+    var run = function () { Module._bl_compositor_frame(scene); };
+    if (typeof requestAnimationFrame === "function")
+        requestAnimationFrame(run);
+    else
+        setTimeout(run, 16);
+});
+
+static void compositeScene(CompositorScene& scene)
+{
+    ASSERT(Compositor::isCompositorThread());
+    OptionSet<CompositionReason> reasons;
+    bool notify = false;
+    IntSize pixelSize;
+    float deviceScaleFactor = 1;
+    HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
+    {
+        Locker locker { scene.lock };
+        scene.frameScheduled = false;
+        if (scene.invalidated)
+            return;
+        // Das Rendering-Update erst zeigen, wenn alle Kacheln gemalt sind
+        // (die letzte fertige Kachel plant das naechste Bild ein)
+        if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
+            scene.waitingForTiles = true;
+            return;
+        }
+        reasons = std::exchange(scene.reasons, { });
+        notify = std::exchange(scene.notifyEngine, false);
+        layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
+        if (std::exchange(scene.hasPendingLayers, false))
+            scene.committedLayers = std::exchange(scene.pendingLayers, { });
+        pixelSize = scene.pixelSize;
+        deviceScaleFactor = scene.deviceScaleFactor;
+    }
+
+    auto notifyEngine = [&] {
+        if (!notify)
+            return;
+        runOnEngineThread([viewId = scene.viewId] {
+            if (auto* view = WebView::fromID(viewId))
+                view->didComposite();
+        });
+    };
+
+    Gpu::Scope scope;
+    for (auto& layer : layersToRemove)
+        layer->invalidateTarget();
+    layersToRemove.clear();
+
+    auto* grContext = Gpu::context();
+    if (!scope || !grContext || Compositor::isLost() || reasons.isEmpty()) {
+        notifyEngine();
+        return;
+    }
+
+    scene.rootLayer->flushPositionChanges(reasons, true);
+    for (auto& layer : scene.committedLayers)
+        layer->flushPositionChanges(reasons, true);
+
+    Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
+    scene.rootLayer->flushCompositingState(reasons, true);
+    for (auto& layer : scene.committedLayers) {
+        layer->flushCompositingState(reasons, true);
+        if (layer->hasPendingBackingStoreTileUpdates())
+            layersWithTileUpdates.append(layer);
+    }
+    for (auto& layer : layersWithTileUpdates)
+        layer->processPendingBackingStoreTileUpdates();
+
+    // Ohne Canvas (noch nicht da) nur den Stand uebernehmen
+    auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
+    if (!surface) {
+        notifyEngine();
+        return;
+    }
+
+    auto& rootLayer = scene.rootLayer->ensureSkiaTarget();
+    TransformationMatrix matrix;
+    matrix.scale(deviceScaleFactor);
+    rootLayer.setTransform(matrix);
+
+    // Ohne Schadens-Verfolgung: jedes Mal das ganze Bild (auf der GPU billig)
+    auto* canvas = surface->getCanvas();
+    std::optional<Damage> frameDamage;
+    canvas->save();
+    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE);
+    canvas->restore();
+    grContext->flushAndSubmit(surface.get());
+    Gpu::showFramebuffer(scene.viewId);
+
+    if (hasRunningAnimations)
+        scene.requestComposition(CompositionReason::Animation);
+    notifyEngine();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_compositor_frame(CompositorScene* scenePointer)
+{
+    // Die Referenz aus scheduleFrameLocked()
+    Ref scene = adoptRef(*scenePointer);
+    compositeScene(scene);
+}
+
+// ------------------------------------------------------------ CompositorScene
+
+CompositorScene::CompositorScene(int viewId)
+    : viewId(viewId)
+    , rootLayer(CoordinatedPlatformLayer::create())
+{
+}
+
+void CompositorScene::requestComposition(CompositionReason reason)
+{
+    Locker locker { lock };
+    reasons.add(reason);
+    scheduleFrameLocked();
+}
+
+void CompositorScene::scheduleFrameLocked()
+{
+    if (frameScheduled || invalidated || waitingForTiles)
+        return;
+    frameScheduled = true;
+    Compositor::dispatch([scene = Ref { *this }]() mutable {
+        bl_compositor_request_frame(&scene.leakRef());
+    });
+}
+
+// ------------------------------------------------------------ Engine-Thread
 
 // WebCore fragt den Compositor-Kontext ueber PlatformDisplay::sharedDisplay()
 // ab. Einen echten EGL-Kontext gibt es nicht (skiaGLContext() ist auf PORT=Wasm
@@ -54,27 +184,26 @@ static bool ensureSharedDisplay()
 
 bool LayerTreeHostWasm::isAvailable()
 {
-    auto* context = Gpu::context();
-    if (!context || !ensureSharedDisplay())
-        return false;
-    // SkiaCompositingLayer holt den Kontext ueber PlatformDisplay
-    setSkiaGrContextForWasm(context);
-    return context;
+    return Compositor::isRunning() && !Compositor::isLost() && ensureSharedDisplay();
 }
 
 LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
     : m_view(view)
-    , m_viewId(view.id())
-    , m_rootLayer(CoordinatedPlatformLayer::create())
+    , m_scene(CompositorScene::create(view.id()))
 {
     {
-        Locker locker { m_rootLayer->lock() };
-        m_rootLayer->setAnchorPoint(FloatPoint3D(0, 0, 0));
-        m_rootLayer->setSize(FloatSize(view.size()));
+        Locker locker { m_scene->rootLayer->lock() };
+        m_scene->rootLayer->setAnchorPoint(FloatPoint3D(0, 0, 0));
+        m_scene->rootLayer->setSize(FloatSize(view.size()));
+    }
+    {
+        Locker locker { m_scene->lock };
+        m_scene->pixelSize = view.pixelSize();
+        m_scene->deviceScaleFactor = view.deviceScaleFactor();
     }
     // Kacheln malt die CPU (PlatformDisplay hat keinen GL-Kontext fuer
-    // Hintergrund-Threads), der Proxy wird nur fuer DDL gebraucht
-    m_paintingEngine = SkiaPaintingEngine::create(Gpu::context()->threadSafeProxy());
+    // Hintergrund-Threads), den Proxy braucht nur DDL
+    m_paintingEngine = SkiaPaintingEngine::create(nullptr);
 }
 
 LayerTreeHostWasm::~LayerTreeHostWasm()
@@ -84,12 +213,23 @@ LayerTreeHostWasm::~LayerTreeHostWasm()
         layer->waitUntilPaintingComplete();
         layer->invalidateClient();
     }
-    Gpu::Scope scope;
-    m_rootLayer->invalidateTarget();
-    for (auto& layer : m_layers)
-        layer->invalidateTarget();
-    for (auto& layer : m_layersToRemove)
-        layer->invalidateTarget();
+    HashSet<Ref<CoordinatedPlatformLayer>> layers = WTF::move(m_layers);
+    layers.addAll(std::exchange(m_layersToRemove, { }));
+    {
+        Locker locker { m_scene->lock };
+        m_scene->invalidated = true;
+        layers.addAll(std::exchange(m_scene->pendingLayers, { }));
+        layers.addAll(std::exchange(m_scene->pendingLayersToRemove, { }));
+    }
+    // Die Ziele (Texturen) gehoeren dem Compositor-Thread
+    Compositor::dispatch([scene = m_scene.copyRef(), layers = WTF::move(layers)]() mutable {
+        Gpu::Scope scope;
+        for (auto& layer : layers)
+            layer->invalidateTarget();
+        for (auto& layer : std::exchange(scene->committedLayers, { }))
+            layer->invalidateTarget();
+        scene->rootLayer->invalidateTarget();
+    });
 }
 
 void LayerTreeHostWasm::updateRootLayer()
@@ -101,8 +241,8 @@ void LayerTreeHostWasm::updateRootLayer()
             children.append(downcast<GraphicsLayerCoordinated>(m_overlayCompositingLayer)->coordinatedPlatformLayer());
     }
     {
-        Locker locker { m_rootLayer->lock() };
-        m_rootLayer->setChildren(WTF::move(children));
+        Locker locker { m_scene->rootLayer->lock() };
+        m_scene->rootLayer->setChildren(WTF::move(children));
     }
     m_layersChanged = true;
 }
@@ -123,71 +263,50 @@ void LayerTreeHostWasm::setViewOverlayRootLayer(GraphicsLayer* layer)
     updateRootLayer();
 }
 
-void LayerTreeHostWasm::sizeDidChange()
+void LayerTreeHostWasm::sizeDidChange(IntSize pixelSize, float deviceScaleFactor)
 {
-    m_pendingResize = true;
+    if (m_view) {
+        Locker locker { m_scene->rootLayer->lock() };
+        m_scene->rootLayer->setSize(FloatSize(m_view->size()));
+    }
+    {
+        Locker locker { m_scene->lock };
+        m_scene->pixelSize = pixelSize;
+        m_scene->deviceScaleFactor = deviceScaleFactor;
+    }
+    m_compositionRequired = true;
 }
 
-bool LayerTreeHostWasm::flush()
+void LayerTreeHostWasm::forceRepaint()
 {
-    if (std::exchange(m_pendingResize, false) && m_view) {
-        Locker locker { m_rootLayer->lock() };
-        m_rootLayer->setSize(FloatSize(m_view->size()));
-        m_compositionRequired = true;
-    }
+    m_scene->requestComposition(CompositionReason::Animation);
+}
 
+void LayerTreeHostWasm::flush()
+{
     for (auto& layer : m_layers)
         layer->flushPendingState();
 
-    if (std::exchange(m_layersChanged, false) || std::exchange(m_compositionRequired, false))
-        m_reasons.add(CompositionReason::RenderingUpdate);
+    if (std::exchange(m_layersChanged, false)) {
+        Locker locker { m_scene->lock };
+        m_scene->pendingLayers = m_layers;
+        m_scene->hasPendingLayers = true;
+        m_scene->pendingLayersToRemove.addAll(std::exchange(m_layersToRemove, { }));
+        m_compositionRequired = true;
+    }
 
     // Bilder, die nur noch hier gehalten werden, freigeben
     m_imageBackingStores.removeIf([](auto& entry) {
         return entry.value->hasOneRef();
     });
 
-    return !m_reasons.isEmpty();
-}
-
-bool LayerTreeHostWasm::composite(SkSurface& surface, float deviceScaleFactor)
-{
-    auto reasons = std::exchange(m_reasons, { });
-    if (reasons.isEmpty())
-        reasons.add(CompositionReason::RenderingUpdate);
-
-    for (auto& layer : std::exchange(m_layersToRemove, { }))
-        layer->invalidateTarget();
-
-    m_rootLayer->flushPositionChanges(reasons, true);
-    for (auto& layer : m_layers)
-        layer->flushPositionChanges(reasons, true);
-
-    Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
-    m_rootLayer->flushCompositingState(reasons, true);
-    for (auto& layer : m_layers) {
-        layer->flushCompositingState(reasons, true);
-        if (layer->hasPendingBackingStoreTileUpdates())
-            layersWithTileUpdates.append(layer);
-    }
-    for (auto& layer : layersWithTileUpdates)
-        layer->processPendingBackingStoreTileUpdates();
-
-    auto& rootLayer = m_rootLayer->ensureSkiaTarget();
-    TransformationMatrix matrix;
-    matrix.scale(deviceScaleFactor);
-    rootLayer.setTransform(matrix);
-
-    // Ohne Schadens-Verfolgung: jedes Mal das ganze Bild (auf der GPU billig)
-    auto* canvas = surface.getCanvas();
-    std::optional<Damage> frameDamage;
-    canvas->save();
-    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE);
-    canvas->restore();
-
-    if (hasRunningAnimations)
-        requestComposition(CompositionReason::Animation);
-    return hasRunningAnimations;
+    if (!std::exchange(m_compositionRequired, false))
+        return;
+    m_waitingForCompositor = true;
+    Locker locker { m_scene->lock };
+    m_scene->reasons.add(CompositionReason::RenderingUpdate);
+    m_scene->notifyEngine = true;
+    m_scene->scheduleFrameLocked();
 }
 
 Ref<CoordinatedImageBackingStore> LayerTreeHostWasm::imageBackingStore(Ref<NativeImage>&& nativeImage)
@@ -214,18 +333,7 @@ void LayerTreeHostWasm::detachLayer(CoordinatedPlatformLayer& layer)
 
 void LayerTreeHostWasm::requestComposition(CompositionReason reason)
 {
-    if (!isMainThread()) {
-        callOnMainThread([viewId = m_viewId, reason] {
-            if (auto* view = WebView::fromID(viewId)) {
-                if (auto* host = view->layerTreeHost())
-                    host->requestComposition(reason);
-            }
-        });
-        return;
-    }
-    m_reasons.add(reason);
-    if (m_view)
-        m_view->requestComposite();
+    m_scene->requestComposition(reason);
 }
 
 RunLoop* LayerTreeHostWasm::compositingRunLoop() const
@@ -233,21 +341,15 @@ RunLoop* LayerTreeHostWasm::compositingRunLoop() const
     return &RunLoop::mainSingleton();
 }
 
-int LayerTreeHostWasm::maxTextureSize() const
-{
-    auto* context = Gpu::context();
-    return context ? context->maxTextureSize() : 4096;
-}
-
 void LayerTreeHostWasm::didPaintTile()
 {
     // Kommt aus den Mal-Threads. Die letzte fertige Kachel weckt den Compositor.
-    if (--m_pendingTiles)
+    if (--m_scene->pendingTiles)
         return;
-    callOnMainThread([viewId = m_viewId] {
-        if (auto* view = WebView::fromID(viewId))
-            view->requestComposite();
-    });
+    Locker locker { m_scene->lock };
+    if (!std::exchange(m_scene->waitingForTiles, false))
+        return;
+    m_scene->scheduleFrameLocked();
 }
 
 Ref<GraphicsLayer> LayerTreeHostWasm::createGraphicsLayer(GraphicsLayer::Type layerType, GraphicsLayerClient& client)
