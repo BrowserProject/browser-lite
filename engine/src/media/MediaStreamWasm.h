@@ -17,6 +17,10 @@
 #include <wtf/RefCounted.h>
 #include <wtf/WeakPtr.h>
 
+namespace JSC {
+class JSGlobalObject;
+}
+
 namespace WebCore {
 class Page;
 class Settings;
@@ -31,6 +35,8 @@ class StreamAudioOutput;
 namespace MediaStreams {
 void enableIn(WebCore::Settings&);
 void attachTo(int viewId, WebCore::Page&);
+// __blMedia fuer das WebRTC-Polyfill (Spuren der Seite <-> Host)
+void installBridge(JSC::JSGlobalObject&);
 }
 
 // Ton im Speicher der Engine: Float32, ein Block pro Kanal

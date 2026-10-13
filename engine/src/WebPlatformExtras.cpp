@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "FileSystemStorageWasm.h"
 #include "Host.h"
+#include "MediaStreamWasm.h"
 
 #include <JavaScriptCore/CallData.h>
 #include <JavaScriptCore/JSCInlines.h>
@@ -377,7 +378,7 @@ bool isAllowedHostCall(const String& name)
         "eyedropper"_s, "battery"_s, "keyboard-lock"_s, "keyboard-unlock"_s, "keyboard-layout"_s,
         "fs-open"_s, "fs-save"_s, "fs-directory"_s, "fs-file"_s, "fs-writable"_s, "fs-write"_s, "fs-child"_s,
         "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
-        "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s,
+        "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s, "rtc-receive"_s, "rtc-track"_s,
     };
     for (auto entry : allowed) {
         if (name == entry)
@@ -414,6 +415,7 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
         return JSC::JSValue::encode(JSC::jsUndefined());
     });
     globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blHost"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+    MediaStreams::installBridge(globalObject);
 }
 
 void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)

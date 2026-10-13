@@ -6,6 +6,8 @@
 // Achtung: die Verbindungen laufen ueber das Netz des Host-Browsers, nicht
 // ueber das Relay (wie Chrome zeigt die Gegenseite die IP des Geraets).
 
+import { captureTrack, captureApi } from './capture.js';
+
 const POLL_WAIT = 20000;
 const CLIENT_TIMEOUT = 60000;
 
@@ -39,7 +41,11 @@ function clientFor(id, origin, create) {
   if (!client) {
     if (!create)
       throw rtcError('InvalidStateError', 'Unknown connection');
-    client = { origin, pcs: new Map(), channels: new Map(), channelPc: new Map(), queue: [], waiter: null, lastSeen: Date.now(), remoteChannels: 0 };
+    client = {
+      origin, pcs: new Map(), channels: new Map(), channelPc: new Map(), queue: [], waiter: null, lastSeen: Date.now(), remoteChannels: 0,
+      // Medien: Transceiver per Schluessel, Host-Spuren der Seite per Spur-Id
+      transceivers: new Map(), transceiverKeys: new WeakMap(), transceiverPc: new Map(), remoteTransceivers: 0, tracks: new Map(),
+    };
     clients.set(id, client);
   }
   // Verbindungen gehoeren dem Ursprung, der sie gemacht hat
@@ -62,10 +68,35 @@ const describe = (value) => value ? { type: value.type, sdp: value.sdp } : null;
 
 // Schnappschuesse kommen ueber verschiedene Antworten an (Operation, Ereignis);
 // die Nummer sagt der Seite, welcher neuer ist
-function snapshot(pc) {
+function transceiverKey(client, pcId, transceiver) {
+  let key = client.transceiverKeys.get(transceiver);
+  if (!key) {
+    key = `r${++client.remoteTransceivers}`;
+    client.transceiverKeys.set(transceiver, key);
+    client.transceivers.set(key, transceiver);
+    client.transceiverPc.set(key, pcId);
+  }
+  return key;
+}
+
+const json = (value) => {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (e) {
+    return undefined;
+  }
+};
+
+function snapshot(pc, client, pcId) {
   pc.blSequence = (pc.blSequence || 0) + 1;
+  const transceivers = client ? pc.getTransceivers().map((transceiver) => ({
+    key: transceiverKey(client, pcId, transceiver), kind: transceiver.receiver.track.kind, mid: transceiver.mid,
+    direction: transceiver.direction, currentDirection: transceiver.currentDirection,
+    sender: json(transceiver.sender.getParameters()), receiver: json(transceiver.receiver.getParameters()),
+  })) : undefined;
   return {
     sequence: pc.blSequence,
+    transceivers,
     signalingState: pc.signalingState, iceGatheringState: pc.iceGatheringState, iceConnectionState: pc.iceConnectionState,
     connectionState: pc.connectionState, canTrickleIceCandidates: pc.canTrickleIceCandidates ?? null,
     localDescription: describe(pc.localDescription), currentLocalDescription: describe(pc.currentLocalDescription),
@@ -102,6 +133,55 @@ function wireChannel(client, pcId, key, channel) {
   };
 }
 
+// Spur der Seite -> Spur im Host. Kamera/Mikrofon: Kopie der echten Spur; sonst
+// ein MediaStreamTrackGenerator, in den der Engine-Worker schreibt
+async function hostTrack(client, info) {
+  if (!info)
+    return null;
+  let track = client.tracks.get(info.id);
+  if (track && track.readyState !== 'ended')
+    return track;
+  if (info.capture) {
+    const original = await captureTrack(info.capture);
+    if (!original)
+      throw rtcError('InvalidStateError', 'The track has ended.');
+    track = original.clone();
+  } else if (info.sink && typeof MediaStreamTrackGenerator === 'function') {
+    track = new MediaStreamTrackGenerator({ kind: info.kind });
+    const worker = captureApi()?.engineWorker();
+    if (!worker)
+      throw rtcError('InvalidStateError', 'No engine');
+    worker.postMessage({ blSink: { id: info.sink, writable: track.writable } }, [track.writable]);
+  } else
+    throw rtcError('NotSupportedError', 'This track cannot be sent');
+  track.enabled = info.enabled !== false;
+  client.tracks.set(info.id, track);
+  return track;
+}
+
+const streamsFor = (client, ids) => (ids || []).map((id) => {
+  client.streams ??= new Map();
+  let stream = client.streams.get(id);
+  if (!stream) {
+    stream = new MediaStream();
+    client.streams.set(id, stream);
+  }
+  return stream;
+});
+
+function transceiverFor(client, key) {
+  const transceiver = client.transceivers.get(key);
+  if (!transceiver)
+    throw rtcError('InvalidStateError', 'Unknown transceiver');
+  return transceiver;
+}
+
+function remember(client, pcId, key, transceiver) {
+  client.transceivers.set(key, transceiver);
+  client.transceiverKeys.set(transceiver, key);
+  client.transceiverPc.set(key, pcId);
+}
+
 function connection(client, id) {
   const pc = client.pcs.get(id);
   if (!pc)
@@ -120,6 +200,12 @@ function closeConnection(client, id) {
       client.channelPc.delete(key);
     }
   }
+  for (const [key, pcId] of client.transceiverPc) {
+    if (pcId === id) {
+      client.transceivers.delete(key);
+      client.transceiverPc.delete(key);
+    }
+  }
   try {
     pc.close();
   } catch (e) {
@@ -133,6 +219,9 @@ function closeClient(id) {
   clients.delete(id);
   for (const pcId of [...client.pcs.keys()])
     closeConnection(client, pcId);
+  for (const track of client.tracks.values())
+    track.stop();
+  client.tracks.clear();
   client.waiter?.();
 }
 
@@ -202,8 +291,64 @@ const operations = {
     wireChannel(client, payload.pc, payload.channel, channel);
     return { id: channel.id };
   },
-  async getStats(pc) {
-    const report = await pc.getStats();
+  async addTrack(pc, payload, client) {
+    const track = await hostTrack(client, payload.track);
+    const streams = streamsFor(client, payload.streams);
+    if (payload.reuse) {
+      // Wie addTrack mit einem ungenutzten Transceiver aus einem Angebot
+      const transceiver = transceiverFor(client, payload.transceiver);
+      await transceiver.sender.replaceTrack(track);
+      transceiver.sender.setStreams?.(...streams);
+      transceiver.direction = transceiver.direction === 'recvonly' ? 'sendrecv' : transceiver.direction === 'inactive' ? 'sendonly' : transceiver.direction;
+    } else {
+      const transceiver = pc.addTransceiver(track, { direction: 'sendrecv', streams });
+      remember(client, payload.pc, payload.transceiver, transceiver);
+    }
+    return {};
+  },
+  async addTransceiver(pc, payload, client) {
+    const init = { direction: payload.init?.direction ?? 'sendrecv', streams: streamsFor(client, payload.init?.streams) };
+    if (payload.init?.sendEncodings)
+      init.sendEncodings = payload.init.sendEncodings;
+    const transceiver = pc.addTransceiver(payload.track ? await hostTrack(client, payload.track) : payload.kind, init);
+    remember(client, payload.pc, payload.transceiver, transceiver);
+    return {};
+  },
+  async removeTrack(pc, payload, client) {
+    pc.removeTrack(transceiverFor(client, payload.transceiver).sender);
+    return {};
+  },
+  async replaceTrack(pc, payload, client) {
+    await transceiverFor(client, payload.transceiver).sender.replaceTrack(await hostTrack(client, payload.track));
+    return {};
+  },
+  async setStreams(pc, payload, client) {
+    transceiverFor(client, payload.transceiver).sender.setStreams?.(...streamsFor(client, payload.streams));
+    return {};
+  },
+  async setParameters(pc, payload, client) {
+    await transceiverFor(client, payload.transceiver).sender.setParameters(payload.parameters);
+    return {};
+  },
+  async setDirection(pc, payload, client) {
+    transceiverFor(client, payload.transceiver).direction = payload.direction;
+    return {};
+  },
+  async stopTransceiver(pc, payload, client) {
+    transceiverFor(client, payload.transceiver).stop();
+    return {};
+  },
+  async setCodecPreferences(pc, payload, client) {
+    transceiverFor(client, payload.transceiver).setCodecPreferences(payload.codecs || []);
+    return {};
+  },
+  async getStats(pc, payload, client) {
+    let source = pc;
+    if (payload.selector?.sender)
+      source = transceiverFor(client, payload.selector.sender).sender;
+    else if (payload.selector?.receiver)
+      source = transceiverFor(client, payload.selector.receiver).receiver;
+    const report = await source.getStats();
     return { stats: [...report.values()].map((entry) => JSON.parse(JSON.stringify(entry))) };
   },
 };
@@ -218,17 +363,26 @@ export const rtcHostCalls = {
       throw rtcError('InvalidStateError', 'Duplicate connection');
     const pc = new RTCPeerConnection(sanitizeConfig(payload.config));
     client.pcs.set(id, pc);
-    const forward = (type) => () => push(client, { pc: id, type, state: snapshot(pc) });
-    pc.onicecandidate = (event) => push(client, { pc: id, type: 'icecandidate', candidate: event.candidate ? event.candidate.toJSON() : null, url: event.url ?? null, state: snapshot(pc) });
-    pc.onicecandidateerror = (event) => push(client, { pc: id, type: 'icecandidateerror', address: event.address, port: event.port, url: event.url, errorCode: event.errorCode, errorText: event.errorText, state: snapshot(pc) });
+    const forward = (type) => () => push(client, { pc: id, type, state: snapshot(pc, client, id) });
+    pc.onicecandidate = (event) => push(client, { pc: id, type: 'icecandidate', candidate: event.candidate ? event.candidate.toJSON() : null, url: event.url ?? null, state: snapshot(pc, client, id) });
+    pc.onicecandidateerror = (event) => push(client, { pc: id, type: 'icecandidateerror', address: event.address, port: event.port, url: event.url, errorCode: event.errorCode, errorText: event.errorText, state: snapshot(pc, client, id) });
     for (const type of ['negotiationneeded', 'signalingstatechange', 'iceconnectionstatechange', 'icegatheringstatechange', 'connectionstatechange'])
       pc.addEventListener(type, forward(type));
+    pc.ontrack = (event) => {
+      const key = transceiverKey(client, id, event.transceiver);
+      push(client, { pc: id, type: 'track', transceiver: key, streams: event.streams.map((stream) => stream.id), state: snapshot(pc, client, id) });
+    };
     pc.ondatachannel = (event) => {
       const key = `${payload.client}:r${++client.remoteChannels}`;
       wireChannel(client, id, key, event.channel);
-      push(client, { pc: id, type: 'datachannel', info: channelInfo(key, event.channel), state: snapshot(pc) });
+      push(client, { pc: id, type: 'datachannel', info: channelInfo(key, event.channel), state: snapshot(pc, client, id) });
     };
-    return { state: snapshot(pc) };
+    const capabilities = { sender: {}, receiver: {} };
+    for (const kind of ['audio', 'video']) {
+      capabilities.sender[kind] = json(RTCRtpSender.getCapabilities?.(kind));
+      capabilities.receiver[kind] = json(RTCRtpReceiver.getCapabilities?.(kind));
+    }
+    return { state: snapshot(pc, client, id), capabilities };
   },
   async 'rtc-op'(payload, origin) {
     const client = clientFor(payload?.client, origin, false);
@@ -237,7 +391,7 @@ export const rtcHostCalls = {
     if (!operation)
       throw rtcError('NotSupportedError', 'Unknown operation');
     const result = await operation(pc, payload, client);
-    return { ...result, state: snapshot(pc) };
+    return { ...result, state: snapshot(pc, client, payload.pc) };
   },
   async 'rtc-poll'(payload, origin) {
     const client = clientFor(payload?.client, origin, true);
@@ -253,6 +407,45 @@ export const rtcHostCalls = {
     }
     client.lastSeen = Date.now();
     return client.queue.splice(0);
+  },
+  // Die Seite schaut die Spur eines Empfaengers an: Bilder/Ton an die Engine
+  async 'rtc-receive'(payload, origin) {
+    const client = clientFor(payload?.client, origin, false);
+    const track = transceiverFor(client, payload.transceiver).receiver.track;
+    const api = captureApi();
+    const worker = api?.engineWorker();
+    if (!worker || typeof MediaStreamTrackProcessor !== 'function')
+      throw rtcError('NotSupportedError', 'MediaStreamTrackProcessor is missing');
+    const source = Number(payload.source);
+    const processor = new MediaStreamTrackProcessor({ track });
+    worker.postMessage({ blCapture: { id: source, kind: track.kind, readable: processor.readable } }, [processor.readable]);
+    // Chrome zieht Ton von WebRTC nur, wenn er irgendwo abgespielt wird: ein
+    // stummes <audio> im Host haelt ihn am Laufen (hoerbar macht ihn die Engine)
+    let player = null;
+    if (track.kind === 'audio') {
+      player = new Audio();
+      player.muted = true;
+      player.srcObject = new MediaStream([track]);
+      player.play().catch(() => {});
+    }
+    track.addEventListener('ended', () => {
+      if (player)
+        player.srcObject = null;
+      api.engine()._bl_capture_ended(source);
+    }, { once: true });
+    return {};
+  },
+  async 'rtc-track'(payload, origin) {
+    const client = clientFor(payload?.client, origin, false);
+    const track = client.tracks.get(payload.track);
+    if (!track)
+      return {};
+    if (payload.stop) {
+      track.stop();
+      client.tracks.delete(payload.track);
+    } else if (typeof payload.enabled === 'boolean')
+      track.enabled = payload.enabled;
+    return {};
   },
   async 'rtc-send'(payload, origin) {
     const client = clientFor(payload?.client, origin, false);

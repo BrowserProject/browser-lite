@@ -6,6 +6,13 @@
 #include "Host.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "VideoFrameWasm.h"
+#include "JSMediaStreamTrack.h"
+#include <JavaScriptCore/ArrayConstructor.h>
+#include <JavaScriptCore/JSCInlines.h>
+#include <JavaScriptCore/JSFunction.h>
+#include <WebCore/JSDOMGlobalObject.h>
+#include <WebCore/MediaStreamTrack.h>
+#include <wtf/MonotonicTime.h>
 #include <WebCore/AudioBus.h>
 #include <WebCore/AudioChannel.h>
 #include <WebCore/AudioDestination.h>
@@ -131,7 +138,7 @@ public:
     ~VideoCaptureSourceWasm()
     {
         videoSources().remove(m_id);
-        if (m_producing)
+        if (m_producing && !m_remote)
             notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
@@ -145,14 +152,25 @@ public:
         dispatchVideoFrameToObservers(frame, { });
     }
 
+    // Spur einer Gegenstelle (WebRTC): Bilder kommen vom Host wie bei der
+    // Kamera, aber ohne Geraet und ohne Aufnahme-Anzeige
+    static Ref<VideoCaptureSourceWasm> createRemote(const String& label)
+    {
+        CaptureDevice device { makeString("remote-video-"_s, nextSourceId()), CaptureDevice::DeviceType::Camera, label };
+        return adoptRef(*new VideoCaptureSourceWasm(device, { }, std::nullopt, true));
+    }
+
     void hostFailed() { captureFailed(); }
     void hostEnded() { end(); }
+    int id() const { return m_id; }
+    bool isRemote() const { return m_remote; }
 
 private:
-    VideoCaptureSourceWasm(const CaptureDevice& device, MediaDeviceHashSalts&& hashSalts, std::optional<PageIdentifier> pageIdentifier)
+    VideoCaptureSourceWasm(const CaptureDevice& device, MediaDeviceHashSalts&& hashSalts, std::optional<PageIdentifier> pageIdentifier, bool remote = false)
         : RealtimeVideoCaptureSource(device, WTF::move(hashSalts), pageIdentifier)
         , m_id(nextSourceId())
         , m_type(device.type())
+        , m_remote(remote)
     {
         videoSources().add(m_id, this);
     }
@@ -218,6 +236,8 @@ private:
     void startProducingData() final
     {
         m_producing = true;
+        if (m_remote)
+            return;
         auto requested = size();
         notifyCapture("capture-start"_s, makeString("{\"id\":"_s, m_id, ",\"kind\":\""_s, m_type == CaptureDevice::DeviceType::Camera ? "camera"_s : "screen"_s,
             "\",\"width\":"_s, requested.width(), ",\"height\":"_s, requested.height(), ",\"frameRate\":"_s, frameRate(), '}'));
@@ -226,14 +246,16 @@ private:
     void stopProducingData() final
     {
         m_producing = false;
-        notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
+        if (!m_remote)
+            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
     CaptureDevice::DeviceType deviceType() const final { return m_type; }
-    bool isCaptureSource() const final { return true; }
+    bool isCaptureSource() const final { return !m_remote; }
 
     const int m_id;
     const CaptureDevice::DeviceType m_type;
+    const bool m_remote;
     bool m_producing { false };
     std::optional<RealtimeMediaSourceCapabilities> m_capabilities;
     std::optional<RealtimeMediaSourceSettings> m_settings;
@@ -254,7 +276,7 @@ public:
     ~AudioCaptureSourceWasm()
     {
         audioSources().remove(m_id);
-        if (m_producing)
+        if (m_producing && !m_remote)
             notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
@@ -271,17 +293,27 @@ public:
         audioSamplesAvailable(MediaTime(static_cast<int64_t>(timestamp), 1000000), data, description, frames);
     }
 
+    static Ref<AudioCaptureSourceWasm> createRemote(const String& label)
+    {
+        CaptureDevice device { makeString("remote-audio-"_s, nextSourceId()), CaptureDevice::DeviceType::Microphone, label };
+        return adoptRef(*new AudioCaptureSourceWasm(device, { }, std::nullopt, true));
+    }
+
     void hostFailed() { captureFailed(); }
     void hostEnded() { end(); }
+    int id() const { return m_id; }
+    bool isRemote() const { return m_remote; }
 
 private:
-    AudioCaptureSourceWasm(const CaptureDevice& device, MediaDeviceHashSalts&& hashSalts, std::optional<PageIdentifier> pageIdentifier)
+    AudioCaptureSourceWasm(const CaptureDevice& device, MediaDeviceHashSalts&& hashSalts, std::optional<PageIdentifier> pageIdentifier, bool remote = false)
         : RealtimeMediaSource(device, WTF::move(hashSalts), pageIdentifier)
         , m_id(nextSourceId())
+        , m_remote(remote)
     {
         audioSources().add(m_id, this);
         setSampleRate(48000);
-        initializeEchoCancellation(true);
+        if (!remote)
+            initializeEchoCancellation(true);
     }
 
     const RealtimeMediaSourceCapabilities& capabilities() final
@@ -325,19 +357,23 @@ private:
     void startProducingData() final
     {
         m_producing = true;
+        if (m_remote)
+            return;
         notifyCapture("capture-start"_s, makeString("{\"id\":"_s, m_id, ",\"kind\":\"microphone\",\"echoCancellation\":"_s, echoCancellation() ? "true"_s : "false"_s, '}'));
     }
 
     void stopProducingData() final
     {
         m_producing = false;
-        notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
+        if (!m_remote)
+            notifyCapture("capture-stop"_s, makeString("{\"id\":"_s, m_id, '}'));
     }
 
     CaptureDevice::DeviceType deviceType() const final { return CaptureDevice::DeviceType::Microphone; }
-    bool isCaptureSource() const final { return true; }
+    bool isCaptureSource() const final { return !m_remote; }
 
     const int m_id;
+    const bool m_remote;
     bool m_producing { false };
     std::optional<RealtimeMediaSourceCapabilities> m_capabilities;
     std::optional<RealtimeMediaSourceSettings> m_settings;
@@ -843,7 +879,196 @@ RefPtr<VideoFrame> MediaStreamPlayback::currentFrame() const
     return m_frame;
 }
 
+// ------------------------------------------------------------ WebRTC-Bruecke
+
+EM_JS(void, blJsSinkVideo, (int id, const uint8_t* data, int size, int format, int width, int height, double timestamp), {
+    blSinks.video(id, data, size, format, width, height, timestamp);
+});
+EM_JS(void, blJsSinkAudio, (int id, const float* samples, int frames, int channels, double sampleRate, double timestamp), {
+    blSinks.audio(id, samples, frames, channels, sampleRate, timestamp);
+});
+EM_JS(void, blJsSinkClose, (int id), {
+    blSinks.close(id);
+});
+
+// Bilder/Ton einer Spur der Seite (Canvas, Web Audio, ...) an den Host: dort
+// schreibt engine/js/webcodecs-host.js sie in einen MediaStreamTrackGenerator,
+// den web/webrtc.js an RTCPeerConnection gibt
+class TrackSink final
+    : public ThreadSafeRefCounted<TrackSink>
+    , public RealtimeMediaSource::VideoFrameObserver
+    , public RealtimeMediaSource::AudioSampleObserver
+    , public CanMakeCheckedPtr<TrackSink> {
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(TrackSink);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(TrackSink);
+public:
+    static Ref<TrackSink> create(RealtimeMediaSource& source) { return adoptRef(*new TrackSink(source)); }
+
+    int id() const { return m_id; }
+
+    void stop()
+    {
+        if (m_stopped)
+            return;
+        m_stopped = true;
+        if (m_source->type() == RealtimeMediaSource::Type::Video)
+            m_source->removeVideoFrameObserver(*this);
+        else
+            m_source->removeAudioSampleObserver(*this);
+        blJsSinkClose(m_id);
+    }
+
+private:
+    explicit TrackSink(RealtimeMediaSource& source)
+        : m_id(nextSourceId())
+        , m_source(source)
+        , m_start(MonotonicTime::now())
+    {
+        if (source.type() == RealtimeMediaSource::Type::Video)
+            source.addVideoFrameObserver(*this);
+        else
+            source.addAudioSampleObserver(*this);
+    }
+
+    uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
+    uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
+    void incrementCheckedPtrCount() const final { CanMakeCheckedPtr::incrementCheckedPtrCount(); }
+    void decrementCheckedPtrCount() const final { CanMakeCheckedPtr::decrementCheckedPtrCount(); }
+    void setDidBeginCheckedPtrDeletion() final { CanMakeCheckedPtr::setDidBeginCheckedPtrDeletion(); }
+
+    double now() const { return (MonotonicTime::now() - m_start).microseconds(); }
+
+    void videoFrameAvailable(VideoFrame& frame, VideoFrameTimeMetadata) final
+    {
+        if (!frame.pixelFormat() || frame.pixelFormat() > static_cast<uint32_t>(VideoPixelFormat::BGRX) + 1)
+            return;
+        ensureOnMainThread([protectedThis = Ref { *this }, frame = Ref { frame }, timestamp = now()] {
+            if (protectedThis->m_stopped)
+                return;
+            auto& wasmFrame = static_cast<VideoFrameWasm&>(frame.get());
+            auto data = wasmFrame.data();
+            auto size = wasmFrame.presentationSize();
+            blJsSinkVideo(protectedThis->m_id, data.data(), data.size(), static_cast<int>(wasmFrame.format()), size.width(), size.height(), timestamp);
+        });
+    }
+
+    void audioSamplesAvailable(const MediaTime&, const PlatformAudioData& data, const AudioStreamDescription& description, size_t frames) final
+    {
+        if (description.platformDescription().type != PlatformDescription::None || data.kind() != PlatformAudioData::Kind::None || !frames)
+            return;
+        auto& audio = static_cast<const WasmAudioData&>(data);
+        unsigned channels = audio.channels();
+        Vector<float> samples;
+        samples.fill(0.0f, channels * frames);
+        for (unsigned index = 0; index < channels; ++index) {
+            auto channel = audio.channel(index);
+            for (size_t frame = 0; frame < frames && frame < channel.size(); ++frame)
+                samples[index * frames + frame] = channel[frame];
+        }
+        ensureOnMainThread([protectedThis = Ref { *this }, samples = WTF::move(samples), frames, channels, sampleRate = description.sampleRate(), timestamp = now()] {
+            if (!protectedThis->m_stopped)
+                blJsSinkAudio(protectedThis->m_id, samples.span().data(), frames, channels, sampleRate, timestamp);
+        });
+    }
+
+    const int m_id;
+    const Ref<RealtimeMediaSource> m_source;
+    const MonotonicTime m_start;
+    bool m_stopped { false };
+};
+
+HashMap<int, Ref<TrackSink>>& sinks()
+{
+    static NeverDestroyed<HashMap<int, Ref<TrackSink>>> map;
+    return map;
+}
+
+int hostCaptureId(RealtimeMediaSource& source)
+{
+    for (auto& [id, video] : videoSources()) {
+        if (video == &source)
+            return video->isRemote() ? 0 : id;
+    }
+    for (auto& [id, audio] : audioSources()) {
+        if (audio == &source)
+            return audio->isRemote() ? 0 : id;
+    }
+    return 0;
+}
+
+// __blMedia(op, ...) nur fuer das WebRTC-Polyfill:
+//   "capture", track  -> Id der Host-Kamera/-Mikrofon-Spur oder 0
+//   "sink", track     -> Id einer neuen Senke (Bilder/Ton an den Host)
+//   "sink-stop", id
+//   "remote", kind, label -> [MediaStreamTrack, Id] einer neuen entfernten Spur
+static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame)
+{
+    auto& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    auto op = callFrame->argument(0).toWTFString(globalObject);
+    RETURN_IF_EXCEPTION(scope, { });
+    auto* domGlobalObject = dynamicDowncast<JSDOMGlobalObject>(globalObject);
+    if (!domGlobalObject)
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    auto trackArgument = [&]() -> RefPtr<MediaStreamTrack> {
+        return JSMediaStreamTrack::toWrapped(vm, callFrame->argument(1));
+    };
+    if (op == "capture"_s) {
+        RefPtr track = trackArgument();
+        return JSC::JSValue::encode(JSC::jsNumber(track ? hostCaptureId(track->privateTrack().source()) : 0));
+    }
+    if (op == "sink"_s) {
+        RefPtr track = trackArgument();
+        if (!track)
+            return JSC::JSValue::encode(JSC::jsNumber(0));
+        auto sink = TrackSink::create(track->privateTrack().source());
+        int id = sink->id();
+        sinks().add(id, WTF::move(sink));
+        return JSC::JSValue::encode(JSC::jsNumber(id));
+    }
+    if (op == "sink-stop"_s) {
+        int id = callFrame->argument(1).toInt32(globalObject);
+        if (auto sink = sinks().take(id))
+            sink->stop();
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+    if (op == "remote"_s) {
+        auto kind = callFrame->argument(1).toWTFString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        auto label = callFrame->argument(2).toWTFString(globalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        RefPtr document = dynamicDowncast<Document>(domGlobalObject->scriptExecutionContext());
+        if (!document)
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        RefPtr<RealtimeMediaSource> source;
+        int id = 0;
+        if (kind == "audio"_s) {
+            auto audio = AudioCaptureSourceWasm::createRemote(label);
+            id = audio->id();
+            source = WTF::move(audio);
+        } else {
+            auto video = VideoCaptureSourceWasm::createRemote(label);
+            id = video->id();
+            source = WTF::move(video);
+        }
+        source->start();
+        auto track = MediaStreamTrack::create(*document, MediaStreamTrackPrivate::create(document->logger(), source.releaseNonNull()), MediaStreamTrack::RegisterCaptureTrackToOwner::No);
+        JSC::MarkedArgumentBuffer values;
+        values.append(toJS(globalObject, domGlobalObject, track.get()));
+        values.append(JSC::jsNumber(id));
+        return JSC::JSValue::encode(JSC::constructArray(globalObject, static_cast<JSC::ArrayAllocationProfile*>(nullptr), values));
+    }
+    return JSC::JSValue::encode(JSC::jsUndefined());
+}
+
 namespace MediaStreams {
+
+void installBridge(JSC::JSGlobalObject& globalObject)
+{
+    auto& vm = globalObject.vm();
+    auto* function = JSC::JSFunction::create(vm, &globalObject, 3, "__blMedia"_s, mediaBridge, JSC::ImplementationVisibility::Public);
+    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blMedia"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+}
 
 void enableIn(Settings& settings)
 {
@@ -940,6 +1165,13 @@ EMSCRIPTEN_KEEPALIVE void bl_capture_audio(int id, float* samples, int frames, i
 {
     if (auto* source = BrowserLite::audioSources().get(id))
         Ref { *source }->deliver(samples, frames, channels, sampleRate, timestamp);
+}
+
+// Aus engine/js/webcodecs-host.js (Engine-Thread): der Generator im Host ist weg
+EMSCRIPTEN_KEEPALIVE void bl_sink_closed(int id)
+{
+    if (auto sink = BrowserLite::sinks().take(id))
+        sink->stop();
 }
 
 // Von der Oberflaeche (Haupt-Thread): Host-Kamera verweigert oder beendet

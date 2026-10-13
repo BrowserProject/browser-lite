@@ -12,6 +12,9 @@ namespace BrowserLite {
 // holt eine Schleife mit "rtc-poll" (der Host antwortet, sobald etwas da ist).
 const char* const webrtcPolyfillSource = R"JS((() => {
   const host = globalThis.__blHost;
+  // Spuren der Seite <-> Host (engine/src/media/MediaStreamWasm.cpp)
+  const media = globalThis.__blMedia;
+  delete globalThis.__blMedia;
   if (typeof host !== 'function' || 'RTCPeerConnection' in globalThis)
     return;
   const define = (target, name, value) => Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
@@ -286,6 +289,208 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     return channel;
   }
 
+
+  // ---------------------------------------------------------------- Medien
+  // Spur der Seite fuer den Host: Kamera/Mikrofon als echte Host-Spur, alles
+  // andere (Canvas, Web Audio, entfernte Spuren) ueber eine Senke der Engine
+  const trackSinks = new WeakMap();
+  const sentTracks = new Map(); // id -> MediaStreamTrack
+  function describeTrack(track) {
+    if (track === null || track === undefined)
+      return null;
+    if (typeof MediaStreamTrack !== 'function' || !(track instanceof MediaStreamTrack))
+      throw new TypeError("The provided value is not of type 'MediaStreamTrack'.");
+    const info = { id: track.id, kind: track.kind, enabled: track.enabled };
+    const capture = media ? media('capture', track) : 0;
+    if (capture)
+      info.capture = capture;
+    else if (media) {
+      let sink = trackSinks.get(track);
+      if (!sink) {
+        sink = media('sink', track);
+        trackSinks.set(track, sink);
+      }
+      info.sink = sink;
+    }
+    sentTracks.set(track.id, track);
+    return info;
+  }
+  if (typeof MediaStreamTrack === 'function') {
+    // enabled = false sendet wie in Chrome schwarze Bilder/Stille, stop() beendet
+    const enabled = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'enabled');
+    if (enabled?.set) {
+      Object.defineProperty(MediaStreamTrack.prototype, 'enabled', {
+        ...enabled,
+        set(value) {
+          enabled.set.call(this, value);
+          if (sentTracks.get(this.id) === this)
+            call('rtc-track', { client, track: this.id, enabled: !!value }).catch(() => {});
+        },
+      });
+    }
+    const originalStop = MediaStreamTrack.prototype.stop;
+    define(MediaStreamTrack.prototype, 'stop', function stop() {
+      originalStop.call(this);
+      if (sentTracks.get(this.id) === this) {
+        sentTracks.delete(this.id);
+        const sink = trackSinks.get(this);
+        if (sink && media)
+          media('sink-stop', sink);
+        call('rtc-track', { client, track: this.id, stop: true }).catch(() => {});
+      }
+    });
+  }
+
+  // Fallback, bis der Host seine Liste geschickt hat
+  let capabilities = {
+    sender: {
+      audio: { codecs: [{ mimeType: 'audio/opus', clockRate: 48000, channels: 2, sdpFmtpLine: 'minptime=10;useinbandfec=1' }], headerExtensions: [] },
+      video: { codecs: [{ mimeType: 'video/VP8', clockRate: 90000 }, { mimeType: 'video/VP9', clockRate: 90000 }, { mimeType: 'video/AV1', clockRate: 90000 }, { mimeType: 'video/H264', clockRate: 90000 }], headerExtensions: [] },
+    },
+  };
+  capabilities.receiver = capabilities.sender;
+  const copy = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+
+  class RTCRtpSender {
+    constructor() {
+      throw new TypeError('Illegal constructor');
+    }
+    get track() { return state(this).track; }
+    get transport() { return null; }
+    get rtcpTransport() { return null; }
+    get dtmf() { return null; }
+    getParameters() { return copy(state(this).parameters) ?? { transactionId: '', encodings: [], codecs: [], headerExtensions: [], rtcp: {} }; }
+    setParameters(parameters) {
+      const data = state(this);
+      return data.pc._operation('setParameters', { transceiver: data.key, parameters: copy(parameters) }).then(() => undefined);
+    }
+    replaceTrack(track) {
+      const data = state(this);
+      let info;
+      try {
+        info = describeTrack(track ?? null);
+      } catch (e) {
+        return Promise.reject(e);
+      }
+      if (track && track.kind !== data.kind)
+        return Promise.reject(new TypeError('The track kind does not match the sender kind.'));
+      return data.pc._operation('replaceTrack', { transceiver: data.key, track: info }).then(() => {
+        data.track = track ?? null;
+      });
+    }
+    setStreams(...streams) {
+      const data = state(this);
+      data.pc._operation('setStreams', { transceiver: data.key, streams: streams.map((stream) => stream.id) }).catch(() => {});
+    }
+    getStats() { return state(this).pc._stats({ sender: state(this).key }); }
+    static getCapabilities(kind) { return copy(capabilities.sender[kind]) ?? null; }
+  }
+
+  class RTCRtpReceiver {
+    constructor() {
+      throw new TypeError('Illegal constructor');
+    }
+    get track() { return receiverTrack(this); }
+    get transport() { return null; }
+    get rtcpTransport() { return null; }
+    get jitterBufferTarget() { return null; }
+    set jitterBufferTarget(value) {}
+    getParameters() { return copy(state(this).parameters) ?? { codecs: [], headerExtensions: [], rtcp: {} }; }
+    getStats() { return state(this).pc._stats({ receiver: state(this).key }); }
+    getContributingSources() { return []; }
+    getSynchronizationSources() { return []; }
+    static getCapabilities(kind) { return copy(capabilities.receiver[kind]) ?? null; }
+  }
+
+  // Die Spur eines Empfaengers gibt es sofort (stumm, bis Daten kommen); die
+  // Bilder/den Ton holt die Engine erst, wenn die Seite die Spur anschaut
+  function receiverTrack(receiver) {
+    const data = state(receiver);
+    if (!data.track && media) {
+      const result = media('remote', data.kind, data.kind === 'audio' ? 'remote audio' : 'remote video');
+      if (result) {
+        data.track = result[0];
+        const pc = state(data.pc);
+        if (!pc.closed)
+          call('rtc-receive', { client, pc: pc.id, transceiver: data.key, source: result[1] }).catch(() => {});
+      }
+    }
+    return data.track ?? null;
+  }
+
+  const DIRECTIONS = ['sendrecv', 'sendonly', 'recvonly', 'inactive'];
+  class RTCRtpTransceiver {
+    constructor() {
+      throw new TypeError('Illegal constructor');
+    }
+    get mid() { return state(this).mid; }
+    get sender() { return state(this).sender; }
+    get receiver() { return state(this).receiver; }
+    get direction() { return state(this).direction; }
+    set direction(value) {
+      const data = state(this);
+      if (!DIRECTIONS.includes(value))
+        throw new TypeError(`The provided value '${value}' is not a valid enum value of type RTCRtpTransceiverDirection.`);
+      if (data.direction === 'stopped')
+        throw new DOMException('The transceiver is stopped.', 'InvalidStateError');
+      data.direction = value;
+      data.pc._operation('setDirection', { transceiver: data.key, direction: value }).catch(() => {});
+    }
+    get currentDirection() { return state(this).currentDirection; }
+    stop() {
+      const data = state(this);
+      if (data.direction === 'stopped')
+        return;
+      data.direction = 'stopped';
+      data.pc._operation('stopTransceiver', { transceiver: data.key }).catch(() => {});
+    }
+    setCodecPreferences(codecs) {
+      const data = state(this);
+      data.pc._operation('setCodecPreferences', { transceiver: data.key, codecs: copy([...(codecs || [])]) }).catch(() => {});
+    }
+  }
+
+  function makeTransceiver(pc, info) {
+    const pcData = state(pc);
+    const transceiver = Object.create(RTCRtpTransceiver.prototype);
+    const sender = Object.create(RTCRtpSender.prototype);
+    const receiver = Object.create(RTCRtpReceiver.prototype);
+    const data = {
+      key: info.key, kind: info.kind, mid: info.mid ?? null, direction: info.direction ?? 'sendrecv', currentDirection: info.currentDirection ?? null,
+      sender, receiver, fresh: !info.remoteCreated, remoteCreated: !!info.remoteCreated, everSending: false, pc,
+    };
+    internal.set(transceiver, data);
+    internal.set(sender, { key: info.key, kind: info.kind, track: null, parameters: info.sender, pc, transceiver });
+    internal.set(receiver, { key: info.key, kind: info.kind, track: null, parameters: info.receiver, pc, transceiver });
+    pcData.transceivers.set(info.key, transceiver);
+    pcData.order.push(transceiver);
+    return transceiver;
+  }
+
+  class RTCTrackEvent extends Event {
+    constructor(type, init = {}) {
+      super(type, init);
+      this.receiver = init.receiver;
+      this.track = init.track;
+      this.streams = Object.freeze([...(init.streams || [])]);
+      this.transceiver = init.transceiver;
+    }
+  }
+
+  // Entfernte Streams mit der Id aus dem SDP (msid), wie in Chrome
+  const remoteStreams = new Map();
+  function remoteStream(id, track) {
+    let stream = remoteStreams.get(id);
+    if (!stream) {
+      stream = new MediaStream();
+      Object.defineProperty(stream, 'id', { value: id, configurable: true });
+      remoteStreams.set(id, stream);
+    }
+    if (track && !stream.getTracks().includes(track))
+      stream.addTrack(track);
+    return stream;
+  }
+
   // ---------------------------------------------------------------- RTCPeerConnection
   const STATE_NAMES = ['signalingState', 'iceGatheringState', 'iceConnectionState', 'connectionState', 'canTrickleIceCandidates'];
   const DESCRIPTION_NAMES = ['localDescription', 'currentLocalDescription', 'pendingLocalDescription', 'remoteDescription', 'currentRemoteDescription', 'pendingRemoteDescription'];
@@ -304,7 +509,27 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         localDescription: null, currentLocalDescription: null, pendingLocalDescription: null,
         remoteDescription: null, currentRemoteDescription: null, pendingRemoteDescription: null,
         chain: null,
+        transceivers: new Map(),
+        order: [],
         sequence: 0,
+        applyTransceivers(list) {
+          const seen = new Set();
+          for (const info of list) {
+            let transceiver = data.transceivers.get(info.key);
+            if (!transceiver)
+              transceiver = makeTransceiver(self, { ...info, remoteCreated: true });
+            const entry = state(transceiver);
+            entry.fresh = false;
+            entry.mid = info.mid ?? null;
+            entry.currentDirection = info.currentDirection ?? null;
+            if (entry.direction !== 'stopped' || info.direction === 'stopped')
+              entry.direction = info.direction;
+            state(entry.sender).parameters = info.sender;
+            state(entry.receiver).parameters = info.receiver;
+            seen.add(info.key);
+          }
+          data.order = data.order.filter((transceiver) => seen.has(state(transceiver).key) || state(transceiver).fresh);
+        },
         apply(snapshot) {
           if (!snapshot || snapshot.sequence <= data.sequence)
             return;
@@ -317,6 +542,8 @@ const char* const webrtcPolyfillSource = R"JS((() => {
             if (snapshot[name] !== undefined)
               data[name] = description(snapshot[name]);
           }
+          if (snapshot.transceivers)
+            data.applyTransceivers(snapshot.transceivers);
         },
         hostEvent(event) {
           if (data.closed)
@@ -332,6 +559,16 @@ const char* const webrtcPolyfillSource = R"JS((() => {
           case 'datachannel':
             self.dispatchEvent(new RTCDataChannelEvent('datachannel', { channel: makeChannel(self, event.info) }));
             break;
+          case 'track': {
+            const transceiver = data.transceivers.get(event.transceiver);
+            if (!transceiver)
+              break;
+            const receiver = state(transceiver).receiver;
+            const track = receiver.track;
+            const streams = (event.streams || []).map((id) => remoteStream(id, track));
+            self.dispatchEvent(new RTCTrackEvent('track', { receiver, track, streams, transceiver }));
+            break;
+          }
           case 'negotiationneeded':
           case 'signalingstatechange':
           case 'iceconnectionstatechange':
@@ -344,7 +581,11 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       };
       internal.set(this, data);
       connections.set(id, this);
-      data.chain = call('rtc-create', { client, pc: id, config });
+      data.chain = call('rtc-create', { client, pc: id, config }).then((value) => {
+        if (value?.capabilities)
+          capabilities = value.capabilities;
+        data.apply(value?.state);
+      });
       data.chain.catch(() => {});
       poll();
     }
@@ -427,19 +668,87 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       });
       return channel;
     }
-    getStats() {
-      return this._operation('getStats', {}).then((value) => {
+    getStats(selector) {
+      if (selector && typeof MediaStreamTrack === 'function' && selector instanceof MediaStreamTrack) {
+        const transceiver = state(this).order.find((t) => state(state(t).sender).track === selector || state(state(t).receiver).track === selector);
+        if (!transceiver)
+          return Promise.reject(new DOMException('There is no sender or receiver for the track.', 'InvalidAccessError'));
+        const sends = state(state(transceiver).sender).track === selector;
+        return this._stats(sends ? { sender: state(transceiver).key } : { receiver: state(transceiver).key });
+      }
+      return this._stats({});
+    }
+    _stats(selector) {
+      return this._operation('getStats', { selector }).then((value) => {
         const report = new Map((value.stats || []).map((entry) => [entry.id, entry]));
         Object.setPrototypeOf(report, RTCStatsReport.prototype);
         return report;
       });
     }
-    getSenders() { return []; }
-    getReceivers() { return []; }
-    getTransceivers() { return []; }
-    addTrack() { throw new DOMException('Media tracks are not supported yet', 'NotSupportedError'); }
-    addTransceiver() { throw new DOMException('Media tracks are not supported yet', 'NotSupportedError'); }
-    removeTrack() { }
+    getSenders() { return state(this).order.map((t) => state(t).sender); }
+    getReceivers() { return state(this).order.map((t) => state(t).receiver); }
+    getTransceivers() { return [...state(this).order]; }
+    addTrack(track, ...streams) {
+      const data = state(this);
+      if (data.closed)
+        throw new DOMException("Failed to execute 'addTrack' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'.", 'InvalidStateError');
+      if (typeof MediaStreamTrack !== 'function' || !(track instanceof MediaStreamTrack))
+        throw new TypeError("Failed to execute 'addTrack' on 'RTCPeerConnection': parameter 1 is not of type 'MediaStreamTrack'.");
+      if (data.order.some((t) => state(state(t).sender).track === track))
+        throw new DOMException("Failed to execute 'addTrack' on 'RTCPeerConnection': A sender already exists for the track.", 'InvalidAccessError');
+      const info = describeTrack(track);
+      // Wie Chrome: einen ungenutzten Transceiver aus einem Angebot wiederverwenden
+      let transceiver = data.order.find((t) => {
+        const entry = state(t);
+        return entry.remoteCreated && !entry.everSending && entry.kind === track.kind && entry.direction !== 'stopped' && !state(entry.sender).track;
+      });
+      const reuse = !!transceiver;
+      if (transceiver) {
+        const entry = state(transceiver);
+        entry.direction = entry.direction === 'recvonly' ? 'sendrecv' : entry.direction === 'inactive' ? 'sendonly' : entry.direction;
+      } else
+        transceiver = makeTransceiver(this, { key: client + ':t' + (++nextId), kind: track.kind, direction: 'sendrecv' });
+      const entry = state(transceiver);
+      entry.everSending = true;
+      state(entry.sender).track = track;
+      this._operation('addTrack', { transceiver: entry.key, reuse, track: info, streams: streams.map((stream) => stream.id) }).catch((e) => reportError(e));
+      return entry.sender;
+    }
+    addTransceiver(trackOrKind, init = {}) {
+      const data = state(this);
+      if (data.closed)
+        throw new DOMException("Failed to execute 'addTransceiver' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'.", 'InvalidStateError');
+      const track = typeof trackOrKind === 'string' ? null : trackOrKind;
+      const kind = typeof trackOrKind === 'string' ? trackOrKind : track?.kind;
+      if (kind !== 'audio' && kind !== 'video')
+        throw new TypeError(`Failed to execute 'addTransceiver' on 'RTCPeerConnection': The provided value '${kind}' is not a valid enum value of type MediaStreamTrackKind.`);
+      const direction = init.direction ?? 'sendrecv';
+      if (!DIRECTIONS.includes(direction))
+        throw new TypeError(`The provided value '${direction}' is not a valid enum value of type RTCRtpTransceiverDirection.`);
+      const info = describeTrack(track);
+      const transceiver = makeTransceiver(this, { key: client + ':t' + (++nextId), kind, direction });
+      const entry = state(transceiver);
+      entry.everSending = !!track;
+      state(entry.sender).track = track;
+      this._operation('addTransceiver', { transceiver: entry.key, kind, track: info, init: { direction, streams: (init.streams || []).map((stream) => stream.id), sendEncodings: copy(init.sendEncodings) } }).catch((e) => reportError(e));
+      return transceiver;
+    }
+    removeTrack(sender) {
+      const data = state(this);
+      if (data.closed)
+        throw new DOMException("Failed to execute 'removeTrack' on 'RTCPeerConnection': The RTCPeerConnection's signalingState is 'closed'.", 'InvalidStateError');
+      if (!(sender instanceof RTCRtpSender))
+        throw new TypeError("Failed to execute 'removeTrack' on 'RTCPeerConnection': parameter 1 is not of type 'RTCRtpSender'.");
+      const entry = state(sender);
+      if (entry.pc !== this)
+        throw new DOMException("Failed to execute 'removeTrack' on 'RTCPeerConnection': The sender was not created by this peer connection.", 'InvalidAccessError');
+      if (!entry.track)
+        return;
+      entry.track = null;
+      const transceiver = state(entry.transceiver);
+      transceiver.direction = transceiver.direction === 'sendrecv' ? 'recvonly' : transceiver.direction === 'sendonly' ? 'inactive' : transceiver.direction;
+      this._operation('removeTrack', { transceiver: entry.key }).catch(() => {});
+    }
     close() {
       const data = state(this);
       if (data.closed)
@@ -479,6 +788,10 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   define(globalThis, 'RTCError', RTCError);
   define(globalThis, 'RTCErrorEvent', RTCErrorEvent);
   define(globalThis, 'RTCStatsReport', RTCStatsReport);
+  define(globalThis, 'RTCRtpSender', RTCRtpSender);
+  define(globalThis, 'RTCRtpReceiver', RTCRtpReceiver);
+  define(globalThis, 'RTCRtpTransceiver', RTCRtpTransceiver);
+  define(globalThis, 'RTCTrackEvent', RTCTrackEvent);
 })();
 )JS";
 

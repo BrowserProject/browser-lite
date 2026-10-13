@@ -427,3 +427,69 @@ var blCodecs = (function () {
 
   return { create, decode, encodeVideo, encodeAudio, flush, reset, close, setRates };
 })();
+
+// Spuren der Seite fuer WebRTC (engine/src/media/MediaStreamWasm.cpp, TrackSink):
+// web/webrtc.js schickt den WritableStream eines MediaStreamTrackGenerator, wir
+// schreiben Bilder und Ton der Engine hinein.
+var blSinks = (function () {
+  'use strict';
+  const VIDEO_FORMATS = ['I420', 'I420A', 'I422', 'I444', 'NV12', 'RGBA', 'RGBX', 'BGRA', 'BGRX'];
+  const writers = new Map(); // id -> writer
+
+  function close(id) {
+    const writer = writers.get(id);
+    if (!writer)
+      return;
+    writers.delete(id);
+    writer.close().catch(() => {});
+  }
+
+  if (typeof ENVIRONMENT_IS_PTHREAD !== 'undefined' && ENVIRONMENT_IS_PTHREAD && typeof self !== 'undefined') {
+    self.addEventListener('message', (event) => {
+      const data = event.data && event.data.blSink;
+      if (!data)
+        return;
+      if (!data.writable) {
+        close(data.id);
+        return;
+      }
+      const writer = data.writable.getWriter();
+      writers.set(data.id, writer);
+      writer.closed.catch(() => {}).finally(() => {
+        if (writers.get(data.id) !== writer)
+          return;
+        writers.delete(data.id);
+        Module._bl_sink_closed(data.id);
+      });
+    });
+  }
+
+  function video(id, ptr, size, format, width, height, timestamp) {
+    const writer = writers.get(id);
+    // Generator kommt noch oder ist voll: Bild auslassen
+    if (!writer || writer.desiredSize === null || writer.desiredSize <= 0)
+      return;
+    let frame;
+    try {
+      frame = new VideoFrame(HEAPU8.slice(ptr, ptr + size), { format: VIDEO_FORMATS[format], codedWidth: width, codedHeight: height, timestamp });
+    } catch (e) {
+      return;
+    }
+    writer.write(frame).catch(() => frame.close());
+  }
+
+  function audio(id, ptr, frames, channels, sampleRate, timestamp) {
+    const writer = writers.get(id);
+    if (!writer || writer.desiredSize === null || writer.desiredSize <= -8)
+      return;
+    let data;
+    try {
+      data = new AudioData({ format: 'f32-planar', sampleRate, numberOfFrames: frames, numberOfChannels: channels, timestamp, data: HEAPU8.slice(ptr, ptr + frames * channels * 4) });
+    } catch (e) {
+      return;
+    }
+    writer.write(data).catch(() => data.close());
+  }
+
+  return { video, audio, close };
+})();

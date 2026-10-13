@@ -27,6 +27,8 @@ async function openHostDevice(data) {
 export async function onCaptureStart(data) {
   onCaptureStop(data);
   const entry = { stream: null, track: null };
+  // Fuer WebRTC: wartet, bis die Host-Spur offen ist (null = fehlgeschlagen)
+  entry.ready = new Promise((resolve) => entry.resolve = resolve);
   captures.set(data.id, entry);
   const engine = api.engine();
   try {
@@ -43,6 +45,7 @@ export async function onCaptureStart(data) {
       throw new Error('MediaStreamTrackProcessor fehlt');
     entry.stream = stream;
     entry.track = track;
+    entry.resolve(track);
     // z.B. "Freigabe beenden" in Chrome
     track.addEventListener('ended', () => {
       if (captures.get(data.id) !== entry)
@@ -56,6 +59,7 @@ export async function onCaptureStart(data) {
     if (captures.get(data.id) === entry)
       captures.delete(data.id);
     console.warn('[capture]', data.kind, error?.message || error);
+    entry.resolve(null);
     engine._bl_capture_failed(data.id);
   }
 }
@@ -67,4 +71,14 @@ export function onCaptureStop(data) {
   captures.delete(data.id);
   entry.stream?.getTracks().forEach((track) => track.stop());
   api.engineWorker()?.postMessage({ blCapture: { id: data.id } });
+}
+
+// Fuer WebRTC (web/webrtc.js): die echte Host-Spur einer Aufnahme der Engine
+export async function captureTrack(id) {
+  const entry = captures.get(id);
+  return entry ? (entry.track ?? await entry.ready) : null;
+}
+
+export function captureApi() {
+  return api;
 }
