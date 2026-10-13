@@ -45,6 +45,8 @@ window.__blAudioState = audioState; // fuer die Tests (tests/e2e)
 window.__blMediaState = mediaState;
 // Speicher der Engine (Tests): Groesse, mit report=true auch Bericht in der Konsole
 window.__blEngine = () => engine; // Fehlersuche: Emscripten-Modul (FS, Exporte)
+// Fehlersuche: JS in der Seite des aktiven Tabs, Ergebnis in der Konsole ([eval])
+window.__blEval = (source) => engine._bl_eval_script(activeTab.id, toUTF8(source));
 window.__blMemory = (report) => {
   if (report && engine && engine._bl_memory_report)
     engine._bl_memory_report(report === 2 ? 2 : report === 3 ? 0 : report === 4 ? 3 : 1);

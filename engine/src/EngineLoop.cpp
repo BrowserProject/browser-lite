@@ -28,7 +28,9 @@
 #include <WebCore/CommonVM.h>
 #include <WebCore/MemoryRelease.h>
 #include <malloc.h>
+#include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 
 namespace BrowserLite {
@@ -126,13 +128,56 @@ static void runWithGCAfterwards(Work&& work)
     releaseMemoryIfNeeded();
 }
 
+// Emscripten arbeitet die Warteschlange eines Threads ab, bis sie leer ist,
+// auch was waehrenddessen dazukommt. Bei viel Arbeit (Animationen, dazu jedes
+// Bild vom UI-Thread) kam der Engine-Worker so sekundenlang nicht in den
+// JS-Event-Loop zurueck. Ein OffscreenCanvas zeigt ein neues Bild aber erst,
+// wenn die laufende JS-Aufgabe endet (GitHub blieb ca. 10 s weiss).
+// Darum landet alles zuerst in einer eigenen Liste. Ein Durchgang arbeitet nur
+// ab, was beim Start drin war, und gibt dann per MessageChannel (ohne die
+// Verzoegerung von setTimeout) an den Event-Loop ab.
+static Deque<Function<void()>*>& localTasks()
+{
+    static NeverDestroyed<Deque<Function<void()>*>> tasks;
+    return tasks;
+}
+
+static bool s_localDrainScheduled;
+
+EM_JS(void, bl_schedule_local_drain, (), {
+    if (!Module.blTaskChannel) {
+        Module.blTaskChannel = new MessageChannel();
+        Module.blTaskChannel.port2.onmessage = function () { Module._bl_run_local_tasks(); };
+    }
+    Module.blTaskChannel.port1.postMessage(0);
+});
+
+static void scheduleLocalDrain()
+{
+    if (std::exchange(s_localDrainScheduled, true))
+        return;
+    bl_schedule_local_drain();
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_run_local_tasks()
+{
+    s_localDrainScheduled = false;
+    auto& tasks = localTasks();
+    for (size_t count = tasks.size(); count && !tasks.isEmpty(); --count) {
+        auto* function = tasks.takeFirst();
+        runWithGCAfterwards([&] {
+            (*function)();
+        });
+        delete function;
+    }
+    if (!tasks.isEmpty())
+        scheduleLocalDrain();
+}
+
 static void runFunction(void* arg)
 {
-    auto* function = static_cast<Function<void()>*>(arg);
-    runWithGCAfterwards([&] {
-        (*function)();
-    });
-    delete function;
+    localTasks().append(static_cast<Function<void()>*>(arg));
+    scheduleLocalDrain();
 }
 
 void runOnEngineThread(Function<void()>&& function)

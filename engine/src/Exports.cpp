@@ -16,6 +16,7 @@
 #include "WebView.h"
 
 #include <JavaScriptCore/DeferGCInlines.h>
+#include <JavaScriptCore/JSCJSValueInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSLock.h>
 #include <WebCore/CommonVM.h>
@@ -25,6 +26,10 @@
 #include <WebCore/MemoryRelease.h>
 #include <WebCore/WasmPlatform.h>
 #include <malloc.h>
+#include <WebCore/DOMWrapperWorld.h>
+#include <WebCore/JSDOMWindowBase.h>
+#include <WebCore/LocalFrameInlines.h>
+#include <WebCore/ScriptController.h>
 #include <emscripten/emscripten.h>
 
 using namespace BrowserLite;
@@ -104,6 +109,24 @@ EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
 EMSCRIPTEN_KEEPALIVE int bl_engine_thread()
 {
     return static_cast<int>(reinterpret_cast<uintptr_t>(engineThread()));
+}
+
+// Fehlersuche: JS in der Seite ausfuehren (auch wenn die CSP der Seite
+// javascript:-URLs verbietet), Ergebnis als Text in der Konsole.
+// In der Oberflaeche: __blEval("document.title")
+EMSCRIPTEN_KEEPALIVE void bl_eval_script(int id, char* source)
+{
+    withView(id, [source = takeString(source), id](WebView& view) {
+        RefPtr frame = view.mainFrame();
+        if (!frame)
+            return;
+        auto result = frame->script().executeScriptIgnoringException(source, JSC::SourceTaintedOrigin::Untainted);
+        String text = result ? result.toWTFString(frame->script().globalObject(WebCore::mainThreadNormalWorldSingleton())) : "(Ausnahme)"_s;
+        RefPtr document = frame->document();
+        printf("[eval %d] %s (Malen erlaubt %d, Render-Blocking %d, View-Transition %d)\n", id, text.utf8().data(),
+            document && document->visualUpdatesAllowed(), document && document->isRenderBlocked(),
+            document && document->renderingIsSuppressedForViewTransition());
+    });
 }
 
 // Host hat das letzte Bild kopiert, der Pixel-Buffer darf wieder bemalt werden

@@ -173,6 +173,10 @@ kommen zuerst.
   Kontextverlust auf die CPU zurueck (Test in `network-test.mjs`). Offen: CSS-Filter (`filter:
   blur()`) laufen noch ueber WebCores Software-Filter, dafuer braucht WebCore den GPU-Kontext
   ueber `PlatformDisplay`; danach Ebenen (Compositing)
+- [x] GitHub-Startseite blieb ca. 10 s weiss: der Engine-Worker kam bei Dauer-Animationen nicht in
+  den JS-Event-Loop zurueck, das OffscreenCanvas zeigte darum kein neues Bild. Eigene Liste fuer
+  die Aufgaben der Engine (`EngineLoop.cpp`). Zur Fehlersuche: `__blEval("js")` in der Konsole
+  fuehrt JS in der Seite aus (auch bei strenger CSP) und zeigt, ob WebKit das Malen sperrt
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
