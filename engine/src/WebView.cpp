@@ -8,6 +8,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "GpuRaster.h"
+#include "WebPlatformExtras.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
@@ -41,6 +42,9 @@
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
 #include <WebCore/PageConfiguration.h>
+#include <WebCore/ScreenOrientationManager.h>
+#include <WebCore/StorageProvider.h>
+#include <WebCore/UserContentProvider.h>
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/PlatformWheelEvent.h>
@@ -138,6 +142,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.storageNamespaceProvider = &storageNamespaceProvider();
     configuration.databaseProvider = &databaseProvider();
     configuration.socketProvider = createSocketProvider();
+    configuration.storageProvider = createStorageProvider();
+    configuration.screenOrientationManager = screenOrientationManager();
+    configuration.userContentProvider = userContentProvider();
 
     // Die Empty-Konfiguration ist fuer SVG-Bilder gedacht: alles gesandboxt,
     // kein Script. Fuer echte Seiten: ohne Sandbox und mit unserem FrameLoaderClient.
@@ -177,6 +184,17 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // WebCore allein aber aus sind (UnifiedWebPreferences.yaml, Standard "WebCore")
     settings.setCompressionStreamEnabled(true);
     settings.setNavigationAPIEnabled(true);
+    // Fertig in WebKit, nur die Standardwerte fuer WebCore allein sind aus
+    // (Messlatte tests/engine/features.html)
+    settings.setCanvasFiltersEnabled(true);
+    settings.setMoveBeforeEnabled(true);
+    settings.setSelectShowPickerEnabled(true);
+    settings.setCSSScrollbarColorEnabled(true);
+    settings.setStorageAPIEnabled(true);
+    settings.setStorageAPIEstimateEnabled(true);
+    settings.setScreenOrientationAPIEnabled(true);
+    settings.setScreenOrientationLockingAPIEnabled(true);
+    settings.setScreenWakeLockAPIEnabled(true);
     settings.setPermissionsAPIEnabled(true);
     settings.setUserActivationAPIEnabled(true);
     settings.setLazyImageLoadingEnabled(true);

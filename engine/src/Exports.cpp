@@ -13,6 +13,7 @@
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
 #include "Speech.h"
+#include "WebPlatformExtras.h"
 #include "WebView.h"
 
 #include <JavaScriptCore/DeferGCInlines.h>
@@ -284,6 +285,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
         WebCore::WasmPlatform::setScreenInfo(info);
         if (darkChanged)
             WebView::forEach([&](WebView& view) { view.setDarkAppearance(info.prefersDarkMode); });
+        screenOrientationMayHaveChanged();
     });
 }
 

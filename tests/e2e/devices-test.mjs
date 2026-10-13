@@ -72,6 +72,30 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     result('notifypermission', permission);
     result('notifystate', Notification.permission);
   });
+  // Plattform-Funktionen, die per Einstellung/Polyfill dazukamen (engine/src/WebPlatformExtras.cpp)
+  (async () => {
+    const order = [];
+    await Promise.all([scheduler.postTask(() => order.push('a')), scheduler.postTask(() => order.push('b'), { delay: 5 })]);
+    const controller = new TaskController();
+    const task = scheduler.postTask(() => 1, { signal: controller.signal, delay: 50 });
+    controller.abort();
+    const aborted = await task.then(() => false, (e) => e.name === 'AbortError');
+    result('scheduler', order.join('') + (aborted ? '+abort' : ''));
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 20;
+    document.body.append(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.filter = 'blur(3px)';
+    ctx.fillRect(5, 5, 10, 10);
+    result('canvasfilter', ctx.getImageData(3, 10, 1, 1).data[3] > 0 ? 'blur' : 'none');
+    const from = document.createElement('div'), to = document.createElement('div'), child = document.createElement('span');
+    from.append(child);
+    document.body.append(from, to);
+    to.moveBefore(child, null);
+    result('movebefore', child.parentNode === to);
+    result('estimate', typeof (await navigator.storage.estimate()).quota);
+    result('orientation', screen.orientation.type);
+  })();
   result('ready', 1);
 </script></body></html>`;
 
@@ -124,6 +148,11 @@ const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`,
 await page.goto(`http://localhost:${UI_PORT}/?${query}`);
 check('Seite bereit', (await result('ready', TIMEOUT)) === '1');
 check('Touchscreen erkannt (ontouchstart)', (await result('ontouchstart')) === 'true');
+check('scheduler.postTask/yield mit Abbruch', (await result('scheduler')) === 'ab+abort', results.get('scheduler'));
+check('Canvas-Filter (blur)', (await result('canvasfilter')) === 'blur', results.get('canvasfilter'));
+check('moveBefore', (await result('movebefore')) === 'true');
+check('navigator.storage.estimate', (await result('estimate')) === 'number');
+check('screen.orientation', (await result('orientation')) === 'landscape-primary', results.get('orientation'));
 
 // 1) Markieren mit der Maus (braucht ENABLE_DRAG_SUPPORT)
 await page.mouse.move(...await at(25, 45));

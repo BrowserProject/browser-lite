@@ -5,6 +5,7 @@ async:image-bitmap-from-canvas
 async:indexeddb-open
 async:permissions-query
 async:raf
+async:storage-estimate
 async:subtle-digest
 async:wasm-instantiate
 async:worker-roundtrip
@@ -53,6 +54,7 @@ css:round-mod-rem
 css:scope-rule
 css:scroll-snap
 css:scroll-timeline
+css:scrollbar-color
 css:scrollbar-gutter
 css:scrollbar-width
 css:starting-style
@@ -75,7 +77,10 @@ dev:notifications
 dev:permissions
 dev:pointer-events
 dev:pointer-lock
+dev:screen-orientation
 dev:touch-events
+dev:vibrate
+dev:wake-lock
 dom:abortsignal-any
 dom:abortsignal-timeout
 dom:beforeinput
@@ -92,6 +97,7 @@ dom:highlight-api
 dom:inert
 dom:input-showPicker
 dom:intersection-observer
+dom:moveBefore
 dom:mutation-observer
 dom:navigation-api
 dom:page-visibility
@@ -103,8 +109,11 @@ dom:readable-stream-from
 dom:reporting-observer
 dom:requestIdleCallback
 dom:resize-observer
+dom:scheduler-postTask
+dom:scheduler-yield
 dom:scrollIntoView-options
 dom:scrollend-event
+dom:select-showPicker
 dom:selection-getComposedRanges
 dom:setHTMLUnsafe
 dom:shadow-dom
@@ -117,6 +126,7 @@ dom:url-parse
 dom:url-pattern
 dom:user-activation
 dom:view-transitions
+gfx:canvas-filter
 gfx:canvas-letterSpacing
 gfx:canvas-reset
 gfx:canvas-roundRect
@@ -198,6 +208,7 @@ net:indexeddb
 net:local-storage
 net:message-channel
 net:online
+net:storage-manager
 net:web-locks
 net:websocket
 net:worker

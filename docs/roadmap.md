@@ -177,6 +177,9 @@ kommen zuerst.
   den JS-Event-Loop zurueck, das OffscreenCanvas zeigte darum kein neues Bild. Eigene Liste fuer
   die Aufgaben der Engine (`EngineLoop.cpp`). Zur Fehlersuche: `__blEval("js")` in der Konsole
   fuehrt JS in der Seite aus (auch bei strenger CSP) und zeigt, ob WebKit das Malen sperrt
+- [x] Messlatte 228 von 277 (82 %): Canvas-Filter, `moveBefore`, `select.showPicker`,
+  `scrollbar-color`, `navigator.storage`, `screen.orientation`, Wake Lock, `scheduler.postTask`,
+  `navigator.vibrate`. Funktions-Pruefungen in `devices-test.mjs`
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
