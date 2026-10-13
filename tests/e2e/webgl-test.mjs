@@ -248,6 +248,23 @@ function sharing() {
   if (back.join() !== '2,3,4')
     failed.push('getBufferSubData:' + back.join('.'));
 
+  // Konstante Vertex-Attribute und Uniform-Buffer gehoeren zum Kontext: nach
+  // Wechseln in andere Kontexte noch da, die anderen sehen sie nicht
+  const [c, d] = [contexts[3], contexts[5]];
+  c.vertexAttrib4f(3, 0.25, 0.5, 0.75, 1);
+  const ubo = c.createBuffer();
+  c.bindBuffer(c.UNIFORM_BUFFER, ubo);
+  c.bufferData(c.UNIFORM_BUFFER, 256, c.STATIC_DRAW);
+  c.bindBufferRange(c.UNIFORM_BUFFER, 2, ubo, 0, 64);
+  d.clear(d.COLOR_BUFFER_BIT);
+  a.clear(a.COLOR_BUFFER_BIT);
+  const attribC = Array.from(c.getVertexAttrib(3, c.CURRENT_VERTEX_ATTRIB)).join();
+  const attribD = Array.from(d.getVertexAttrib(3, d.CURRENT_VERTEX_ATTRIB)).join();
+  const uboC = c.getIndexedParameter(c.UNIFORM_BUFFER_BINDING, 2) === ubo && c.getIndexedParameter(c.UNIFORM_BUFFER_SIZE, 2) === 64;
+  const uboD = d.getIndexedParameter(d.UNIFORM_BUFFER_BINDING, 2) === null;
+  if (attribC !== '0.25,0.5,0.75,1' || attribD !== '0,0,0,1' || !uboC || !uboD)
+    failed.push('attrib-ubo:' + attribC + '/' + attribD + '/' + uboC + '/' + uboD);
+
   contexts.forEach((gl, i) => {
     const error = gl.getError();
     if (error)

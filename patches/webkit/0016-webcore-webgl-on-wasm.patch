@@ -1156,10 +1156,10 @@ index 0000000000..4fdf42a51d
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
 new file mode 100644
-index 0000000000..548c389a1e
+index 0000000000..31a929fb22
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
-@@ -0,0 +1,895 @@
+@@ -0,0 +1,944 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1382,6 +1382,41 @@ index 0000000000..548c389a1e
 +            GL.deleteContext(handle);
 +            return 0;
 +        }
++        // Beim Wechsel muss der Zustand gesichert werden, und jede Abfrage ist
++        // ein synchroner Aufruf an den GPU-Prozess. Darum merken wir uns, ob
++        // seit dem letzten Wiederherstellen Uniform-Buffer oder Vertex-Attribute
++        // ueberhaupt gesetzt wurden; sonst gilt der wiederhergestellte Stand.
++        if (handle) {
++            var gl = GL.getContext(handle).GLctx;
++            gl.blTouched = {};
++            var track = function (names, flag) {
++                names.forEach(function (name) {
++                    var original = gl[name];
++                    if (typeof original !== "function")
++                        return;
++                    gl[name] = function () {
++                        gl.blTouched[flag] = true;
++                        return original.apply(gl, arguments);
++                    };
++                });
++            };
++            track(["bindBufferBase", "bindBufferRange"], "ubo");
++            track(["vertexAttrib1f", "vertexAttrib1fv", "vertexAttrib2f", "vertexAttrib2fv", "vertexAttrib3f", "vertexAttrib3fv",
++                "vertexAttrib4f", "vertexAttrib4fv", "vertexAttribI4i", "vertexAttribI4iv", "vertexAttribI4ui", "vertexAttribI4uiv"], "attrib");
++            // Erweiterungen und Grenzen aendern sich nicht: nur einmal fragen
++            gl.blExtensions = {};
++            gl.blExtension = function (name) {
++                if (!(name in gl.blExtensions))
++                    gl.blExtensions[name] = gl.getExtension(name);
++                return gl.blExtensions[name];
++            };
++            gl.blLimits = {};
++            gl.blLimit = function (name) {
++                if (!(name in gl.blLimits))
++                    gl.blLimits[name] = gl.getParameter(name);
++                return gl.blLimits[name];
++            };
++        }
 +        return handle;
 +    } catch (e) {
 +        return 0;
@@ -1405,22 +1440,25 @@ index 0000000000..548c389a1e
 +        caps.push(0x8C89);
 +    // Schalter und Werte aus Erweiterungen, nur wenn der Browser sie hat
 +    var extensionNames = [];
-+    if (gl.getExtension("EXT_depth_clamp"))
++    if (gl.blExtension("EXT_depth_clamp"))
 +        caps.push(0x864F);
-+    if (gl.getExtension("WEBGL_polygon_mode")) {
++    if (gl.blExtension("WEBGL_polygon_mode")) {
 +        caps.push(0x2A02);
 +        extensionNames.push(0x0B40);
 +    }
-+    if (gl.getExtension("EXT_polygon_offset_clamp"))
++    if (gl.blExtension("EXT_polygon_offset_clamp"))
 +        extensionNames.push(0x8E1B);
-+    if (gl.getExtension("EXT_clip_control"))
++    if (gl.blExtension("EXT_clip_control"))
 +        extensionNames.push(0x935C, 0x935D);
-+    if (webgl2 && gl.getExtension("WEBGL_provoking_vertex"))
++    if (webgl2 && gl.blExtension("WEBGL_provoking_vertex"))
 +        extensionNames.push(0x8E4F);
-+    if (webgl2 && gl.getExtension("WEBGL_clip_cull_distance")) {
-+        for (var d = 0; d < gl.getParameter(0x0D32); d++)
++    if (webgl2 && gl.blExtension("WEBGL_clip_cull_distance")) {
++        for (var d = 0; d < gl.blLimit(0x0D32); d++)
 +            caps.push(0x3000 + d);
 +    }
++    // Was seit dem Wiederherstellen niemand gesetzt hat, gilt wie wiederhergestellt
++    var restored = gl.blRestored;
++    var touched = gl.blTouched;
 +    s.capList = caps;
 +    for (var i = 0; i < caps.length; i++)
 +        s.caps.push(gl.isEnabled(caps[i]));
@@ -1443,14 +1481,22 @@ index 0000000000..548c389a1e
 +        s.units.push(unit);
 +    }
 +    gl.activeTexture(s.params[0x84E0]);
-+    var attribs = gl.getParameter(0x8869);
-+    for (var a = 0; a < attribs; a++)
-+        s.attribs.push(gl.getVertexAttrib(a, 0x8626));
++    if (restored && !touched.attrib)
++        s.attribs = restored.attribs;
++    else {
++        var attribs = gl.blLimit(0x8869);
++        for (var a = 0; a < attribs; a++)
++            s.attribs.push(gl.getVertexAttrib(a, 0x8626));
++    }
 +    if (webgl2) {
-+        s.uniformBuffers = [];
-+        var count = gl.getParameter(0x8A2F);
-+        for (var b = 0; b < count; b++)
-+            s.uniformBuffers.push([gl.getIndexedParameter(0x8A28, b), gl.getIndexedParameter(0x8A29, b), gl.getIndexedParameter(0x8A2A, b)]);
++        if (restored && !touched.ubo)
++            s.uniformBuffers = restored.uniformBuffers;
++        else {
++            s.uniformBuffers = [];
++            var count = gl.blLimit(0x8A2F);
++            for (var b = 0; b < count; b++)
++                s.uniformBuffers.push([gl.getIndexedParameter(0x8A28, b), gl.getIndexedParameter(0x8A29, b), gl.getIndexedParameter(0x8A2A, b)]);
++        }
 +    }
 +    s.cache = [gl.currentArrayBufferBinding, gl.currentElementArrayBufferBinding, gl.currentPixelPackBufferBinding,
 +        gl.currentPixelUnpackBufferBinding, gl.currentProgram, GL.unpackAlignment, GL.unpackRowLength];
@@ -1489,15 +1535,15 @@ index 0000000000..548c389a1e
 +    gl.frontFace(p[0x0B46]);
 +    gl.lineWidth(p[0x0B21]);
 +    if (p[0x8E1B] !== undefined)
-+        gl.getExtension("EXT_polygon_offset_clamp").polygonOffsetClampEXT(p[0x8038], p[0x2A00], p[0x8E1B]);
++        gl.blExtension("EXT_polygon_offset_clamp").polygonOffsetClampEXT(p[0x8038], p[0x2A00], p[0x8E1B]);
 +    else
 +        gl.polygonOffset(p[0x8038], p[0x2A00]);
 +    if (p[0x0B40] !== undefined)
-+        gl.getExtension("WEBGL_polygon_mode").polygonModeWEBGL(0x0408, p[0x0B40]);
++        gl.blExtension("WEBGL_polygon_mode").polygonModeWEBGL(0x0408, p[0x0B40]);
 +    if (p[0x935C] !== undefined)
-+        gl.getExtension("EXT_clip_control").clipControlEXT(p[0x935C], p[0x935D]);
++        gl.blExtension("EXT_clip_control").clipControlEXT(p[0x935C], p[0x935D]);
 +    if (p[0x8E4F] !== undefined)
-+        gl.getExtension("WEBGL_provoking_vertex").provokingVertexWEBGL(p[0x8E4F]);
++        gl.blExtension("WEBGL_provoking_vertex").provokingVertexWEBGL(p[0x8E4F]);
 +    gl.sampleCoverage(p[0x80AA], p[0x80AB]);
 +    gl.scissor(p[0x0C10][0], p[0x0C10][1], p[0x0C10][2], p[0x0C10][3]);
 +    gl.viewport(p[0x0BA2][0], p[0x0BA2][1], p[0x0BA2][2], p[0x0BA2][3]);
@@ -1565,6 +1611,9 @@ index 0000000000..548c389a1e
 +    gl.currentProgram = cache[4];
 +    GL.unpackAlignment = cache[5];
 +    GL.unpackRowLength = cache[6];
++    // Ab hier zaehlt, was der Kontext selber setzt
++    gl.blRestored = s;
++    gl.blTouched = {};
 +});
 +
 +EM_JS(void, blForgetState, (int key), {
