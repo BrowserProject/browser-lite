@@ -85,3 +85,56 @@ index 738678daef..540bdcd9dd 100644
  {
  }
  
+diff --git a/Source/WebCore/platform/graphics/ImageFrameWorkQueue.cpp b/Source/WebCore/platform/graphics/ImageFrameWorkQueue.cpp
+index a000bb9b22..d6ca44c8a3 100644
+--- a/Source/WebCore/platform/graphics/ImageFrameWorkQueue.cpp
++++ b/Source/WebCore/platform/graphics/ImageFrameWorkQueue.cpp
+@@ -29,6 +29,7 @@
+ #include "BitmapImageSource.h"
+ #include "ImageDecoder.h"
+ #include "Logging.h"
++#include <wtf/NeverDestroyed.h>
+ #include <wtf/SystemTracing.h>
+ #include <wtf/text/TextStream.h>
+ 
+@@ -121,6 +122,40 @@ void ImageFrameWorkQueue::dispatch(const Request& request)
+ {
+     ASSERT(isMainThread());
+ 
++#if PLATFORM(WASM)
++    // browser-lite: ein gemeinsamer Thread fuer alle Bilder. Sonst haelt jedes
++    // Bild mit asynchronem Dekodieren einen eigenen Thread offen (die Schleife
++    // in start() wartet blockierend auf Auftraege), und jeder neue Thread
++    // braucht im Browser einen neuen Web Worker vom Haupt-Thread.
++    RefPtr decoder = m_source.get()->decoder();
++    decodeQueue().append(request);
++    if (!decoder)
++        return;
++    static NeverDestroyed<Ref<WorkQueue>> sharedQueue(WorkQueue::create("org.webkit.ImageDecoder"_s, WorkQueue::QOS::Default));
++    m_workQueue = sharedQueue.get().ptr();
++    sharedQueue.get()->dispatch([protectedThis = Ref { *this }, protectedWorkQueue = sharedQueue.get(), protectedSource = m_source.get(), protectedDecoder = decoder.releaseNonNull(), request]() mutable {
++        auto decodeRequest = request;
++        RefPtr<NativeImage> nativeImage;
++        DecodingDestination decodingDestination = decodeRequest.options.decodingDestination();
++        if (auto result = protectedDecoder->createNativeImageAtIndex(decodeRequest.index, decodeRequest.subsamplingLevel, decodeRequest.options)) {
++            nativeImage = WTF::move(std::get<Ref<NativeImage>>(*result));
++            decodingDestination = std::get<DecodingDestination>(*result);
++        }
++        decodeRequest.options = { decodeRequest.options.decodingMode(), decodingDestination, decodeRequest.options.sizeForDrawing() };
++
++        // Alle Referenzen gehen in den Haupt-Thread und werden dort abgebaut
++        callOnMainThread([protectedThis = WTF::move(protectedThis), protectedWorkQueue = WTF::move(protectedWorkQueue), protectedSource = WTF::move(protectedSource), decodeRequest, nativeImage = WTF::move(nativeImage)] () mutable {
++            if (protectedWorkQueue.ptr() != protectedThis->m_workQueue || protectedSource.ptr() != protectedThis->m_source.get().ptr())
++                return;
++            if (protectedThis->decodeQueue().isEmpty() || !decodeRequest.isCompatibleWith(protectedThis->decodeQueue().first()))
++                return;
++            protectedThis->decodeQueue().removeFirst();
++            protectedSource->imageFrameDecodeAtIndexHasFinished(decodeRequest.index, decodeRequest.subsamplingLevel, decodeRequest.animatingState, decodeRequest.options, WTF::move(nativeImage));
++        });
++    });
++    return;
++#endif
++
+     protect(requestQueue())->enqueue(request);
+     decodeQueue().append(request);
+ 

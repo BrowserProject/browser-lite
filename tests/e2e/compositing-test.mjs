@@ -64,6 +64,14 @@ let frames = 0;
 const count = () => { frames++; requestAnimationFrame(count); };
 requestAnimationFrame(count);
 setInterval(() => console.log('RESULT frames=' + frames), 500);
+// Bild asynchron dekodieren (img.decode, gemeinsamer Dekodier-Thread)
+const source = document.createElement('canvas');
+source.width = source.height = 300;
+source.getContext('2d').fillStyle = 'rgb(255, 0, 255)';
+source.getContext('2d').fillRect(0, 0, 300, 300);
+const decoded = new Image();
+decoded.src = source.toDataURL('image/png');
+decoded.decode().then(() => console.log('RESULT decode=' + decoded.naturalWidth), (e) => console.log('RESULT decode=fehler'));
 // Ein wheel-Listener, der das Scrollen verhindert: der Scroll-Thread muss auf die Seite warten
 document.getElementById('trap').addEventListener('wheel', (e) => { e.preventDefault(); console.log('RESULT trapwheel=1'); }, { passive: false });
 console.log('RESULT ready=1');
@@ -159,6 +167,8 @@ check('Blur-Filter', near(blurCenter, [0, 0, 255], 60) && blurEdge[2] > 60 && bl
 let yellow = null;
 await waitFor(async () => near(yellow = await pixelAt(540, 280), [255, 255, 0]), 10000);
 check('WebGL-Canvas in einer Ebene', near(yellow, [255, 255, 0]), JSON.stringify(yellow));
+
+check('img.decode() (Bild im Hintergrund dekodiert)', await result('decode') === '300', results.get('decode'));
 
 const framesBefore = Number(await result('frames'));
 await page.waitForTimeout(2000);
