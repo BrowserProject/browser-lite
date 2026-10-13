@@ -14,6 +14,7 @@
 #include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/ConsoleTypes.h>
+#include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/Chrome.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/DocumentInlines.h>
@@ -322,8 +323,18 @@ bool FrameLoaderClient::isMainFrame() const
     return m_frameLoader->frame().isMainFrame();
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction&, const ResourceRequest&, const ResourceResponse&, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse&, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
 {
+    // Strg/Cmd+Klick oder Mittelklick auf einen Link: wie Chrome in einem neuen
+    // Tab im Hintergrund, die Seite bleibt
+    if (action.type() == NavigationType::LinkClicked && request.url().protocolIsInHTTPFamily()) {
+        auto& mouse = action.mouseEventData();
+        if (mouse && (mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle)) {
+            notifyHost(m_view->id(), "open-tab", makeString("{\"url\":\""_s, jsonEscape(request.url().string()), "\"}"_s));
+            function(PolicyAction::Ignore);
+            return;
+        }
+    }
     function(PolicyAction::Use);
 }
 

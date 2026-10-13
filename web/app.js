@@ -330,6 +330,32 @@ function newTab(url, viewId = 0) {
   return tab;
 }
 
+function openBackgroundTab(url) {
+  const tab = new Tab(url);
+  tabs.set(tab.id, tab);
+  persistSession();
+  return tab;
+}
+
+// Quelltext einer Seite (Strg+U): die Engine laedt die Adresse wie einen
+// Download, wir zeigen den Text mit Zeilennummern in einem neuen Tab
+function showSource(url, bytes, mime) {
+  const charset = /charset=([\w-]+)/i.exec(mime || '')?.[1] || 'utf-8';
+  let text;
+  try {
+    text = new TextDecoder(charset).decode(bytes);
+  } catch {
+    text = new TextDecoder().decode(bytes);
+  }
+  const escape = (line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const lines = text.split(/\r?\n/).map((line) => '<li>' + escape(line) + '</li>').join('');
+  const html = '<!doctype html><meta charset="utf-8"><title>view-source:' + escape(url) + '</title>'
+    + '<style>body{margin:8px 0;font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}'
+    + 'ol{margin:0;padding-left:5em}li{padding-left:1em}li::marker{color:#999}</style><ol>' + lines + '</ol>';
+  const tab = newTab('');
+  engine._bl_load_html(tab.id, toUTF8(html), toUTF8('view-source:' + url));
+}
+
 // Wiederhergestellter Tab im Hintergrund: laedt erst beim ersten Anklicken
 function restoredTab(entry) {
   const tab = new Tab(entry.url, 0, { title: entry.title });
@@ -390,6 +416,23 @@ function updateToolbar() {
   $('zoom').textContent = Math.round(tab.zoom * 100) + ' %';
   if (document.activeElement !== $('address'))
   $('address').value = tab.url === 'about:blank' ? '' : tab.url;
+  updateSecurity(tab.url);
+}
+
+// Sicherheitsanzeige wie Chrome: Schloss bei HTTPS (die Engine prueft das
+// Zertifikat selber, ohne gueltiges Zertifikat laedt die Seite gar nicht),
+// "Nicht sicher" bei HTTP
+function updateSecurity(url) {
+  const security = $('security');
+  const form = $('address-form');
+  const https = /^https:/.test(url || '');
+  const http = /^http:/.test(url || '');
+  security.hidden = !https && !http;
+  security.textContent = https ? '\u{1F512}' : http ? 'Nicht sicher' : '';
+  security.title = https ? 'Verbindung ist sicher (TLS)' : http ? 'Die Verbindung zu dieser Seite ist nicht verschlüsselt' : '';
+  security.classList.toggle('insecure', http);
+  form.classList.toggle('with-security', https || http);
+  form.classList.toggle('insecure', http);
 }
 
 // --------------------------------------------------------- Vollbild
@@ -458,6 +501,11 @@ function onEngineEvent(viewId, type, payload) {
   }
   if (type === 'download-start' || type === 'download-done') {
     onDownloadEvent(type, data);
+    return;
+  }
+  if (type === 'open-tab') {
+    // Strg/Cmd+Klick oder Mittelklick auf einen Link: neuer Tab im Hintergrund
+    openBackgroundTab(data.url);
     return;
   }
   if (type === 'newview') {
@@ -652,8 +700,10 @@ const downloadHistory = [];
 
 function onDownloadEvent(type, data) {
   if (type === 'download-start') {
-    const download = { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size };
+    const download = { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size, viewSource: data.viewSource, sourceURL: data.url };
     downloads.set(data.id, download);
+    if (download.viewSource)
+      return;
     downloadHistory.push(download);
     refreshDownloadsPanel();
     setStatus('Download: ' + data.filename);
@@ -663,6 +713,11 @@ function onDownloadEvent(type, data) {
   downloads.delete(data.id);
   if (!download)
     return;
+  if (download.viewSource) {
+    if (!data.error)
+      new Blob(download.chunks).arrayBuffer().then((buffer) => showSource(download.sourceURL, new Uint8Array(buffer), download.mime));
+    return;
+  }
   if (data.error) {
     download.error = data.error;
     download.chunks = [];
@@ -697,6 +752,8 @@ function onEngineDownloadData(id, bytes) {
     return;
   download.chunks.push(bytes);
   download.received += bytes.length;
+  if (download.viewSource)
+    return;
   const total = download.size > 0 ? ' von ' + formatSize(download.size) : '';
   setStatus('Download: ' + download.filename + ' ' + formatSize(download.received) + total);
 }
@@ -743,6 +800,7 @@ function showContextMenu(tab, data) {
   add('Zurück', () => engine._bl_go_back(tab.id), data.canGoBack);
   add('Vorwärts', () => engine._bl_go_forward(tab.id), data.canGoForward);
   add('Neu laden', () => engine._bl_reload(tab.id));
+  add('Seitenquelltext anzeigen', () => engine._bl_view_source(tab.id), /^https?:/.test(tab.url || ''));
 
   for (const item of items) {
     if (!item) {
@@ -1175,6 +1233,7 @@ function shortcut(e) {
     case 'f':
     case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;
     case 'r': if (tab) engine._bl_reload(tab.id); return true;
+    case 'u': if (tab) engine._bl_view_source(tab.id); return true;
     case '+':
     case '=': if (tab) changeZoom(tab, 1); return true;
     case '-': if (tab) changeZoom(tab, -1); return true;

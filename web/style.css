@@ -34,7 +34,11 @@ button { font: inherit; color: inherit; }
 #toolbar > button { width: 32px; height: 32px; border: none; border-radius: 6px; background: none; font-size: 16px; cursor: pointer; }
 #toolbar > button:hover:not(:disabled) { background: var(--tab); }
 #toolbar > button:disabled { opacity: 0.35; cursor: default; }
-#address-form { flex: 1; min-width: 0; }
+#address-form { flex: 1; min-width: 0; position: relative; }
+#security { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--muted, #666); pointer-events: none; white-space: nowrap; }
+#security.insecure { color: #c5221f; }
+#address-form.with-security #address { padding-left: 34px; }
+#address-form.with-security.insecure #address { padding-left: 92px; }
 #address { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 16px; padding: 0 14px; background: var(--bg); color: var(--fg); font: inherit; }
 #address:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 #status { color: var(--muted); font-size: 12px; white-space: nowrap; }

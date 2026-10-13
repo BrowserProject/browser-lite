@@ -180,6 +180,9 @@ kommen zuerst.
 - [x] Messlatte 228 von 277 (82 %): Canvas-Filter, `moveBefore`, `select.showPicker`,
   `scrollbar-color`, `navigator.storage`, `screen.orientation`, Wake Lock, `scheduler.postTask`,
   `navigator.vibrate`. Funktions-Pruefungen in `devices-test.mjs`
+- [x] Oberflaeche: Strg/Cmd+Klick und Mittelklick oeffnen Links im Hintergrund-Tab, Quelltext
+  anzeigen (Strg+U, Kontextmenue), Sicherheitsanzeige (Schloss bei HTTPS, "Nicht sicher" bei
+  HTTP). Tests in `ui-test.mjs`
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)

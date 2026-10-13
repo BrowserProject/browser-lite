@@ -14,6 +14,7 @@
 #include "MemoryVFS.h"
 #include "Speech.h"
 #include "WebPlatformExtras.h"
+#include "LoaderStrategy.h"
 #include "WebView.h"
 
 #include <JavaScriptCore/DeferGCInlines.h>
@@ -110,6 +111,16 @@ EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
 EMSCRIPTEN_KEEPALIVE int bl_engine_thread()
 {
     return static_cast<int>(reinterpret_cast<uintptr_t>(engineThread()));
+}
+
+// Quelltext der aktuellen Seite (Strg+U): kommt wie ein Download mit viewSource-Merker
+EMSCRIPTEN_KEEPALIVE void bl_view_source(int id)
+{
+    withView(id, [id](WebView& view) {
+        URL url { view.currentURL() };
+        if (url.protocolIsInHTTPFamily())
+            startViewSource(id, url);
+    });
 }
 
 // Fehlersuche: JS in der Seite ausfuehren (auch wenn die CSP der Seite

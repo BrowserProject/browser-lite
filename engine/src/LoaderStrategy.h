@@ -14,6 +14,8 @@ WebCore::LoaderStrategy& loaderStrategy();
 // Laedt die Datei herunter und gibt sie an die Oberflaeche (Events
 // download-start / download-done, Daten ueber Module.onEngineDownloadData).
 void startDownload(int viewId, const WebCore::ResourceRequest&, const String& suggestedFilename);
+// Quelltext einer Adresse laden (wie ein Download, mit viewSource-Merker)
+void startViewSource(int viewId, const URL&);
 
 // Cookies aus dem Cookie-Speicher der Engine an die Anfrage haengen
 void addCookieHeader(WebCore::ResourceRequest&);

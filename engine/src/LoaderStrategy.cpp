@@ -400,13 +400,14 @@ private:
 // die daraus eine Datei (Blob) macht.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
-    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename)
+    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
     {
         static int nextID = 1;
         if (request.httpUserAgent().isEmpty())
             request.setHTTPUserAgent(standardUserAgent());
         addCookieHeader(request);
         Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename));
+        download->m_viewSource = viewSource;
         download->m_self = download.ptr();
         download->m_request = CurlRequest::create(request, download.get());
         download->m_request->resume();
@@ -445,7 +446,7 @@ private:
             filename = "download"_s;
         notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, jsonEscape(response.url().string()),
             "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
-            "\",\"size\":"_s, response.expectedContentLength(), '}'));
+            "\",\"size\":"_s, response.expectedContentLength(), m_viewSource ? ",\"viewSource\":true}"_s : "}"_s));
         request.completeDidReceiveResponse();
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
@@ -466,6 +467,8 @@ private:
     int m_id;
     int m_viewId;
     String m_filename;
+    // Quelltext anzeigen: die Oberflaeche zeigt die Daten als Text statt zu speichern
+    bool m_viewSource { false };
     RefPtr<CurlRequest> m_request;
     RefPtr<Download> m_self;
 };
@@ -474,6 +477,13 @@ void startDownload(int viewId, const ResourceRequest& request, const String& sug
 {
     auto copy = request;
     Download::start(viewId, WTF::move(copy), suggestedFilename);
+}
+
+void startViewSource(int viewId, const URL& url)
+{
+    ResourceRequest request { URL { url } };
+    request.setFirstPartyForCookies(url);
+    Download::start(viewId, WTF::move(request), { }, true);
 }
 
 // Favicon fuer den Tab: klein, ganz im Speicher, geht als Ganzes an die Oberflaeche

@@ -29,7 +29,9 @@ const check = (name, ok, info = '') => {
 };
 
 const loads = new Map();
-const page = (title) => `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title)</script>`;
+const page = (title) => title === 'Seite links'
+  ? `<!doctype html><title>${title}</title><body style="margin:0"><a id="l" href="/ziel" style="display:block;width:300px;height:60px;background:#9cf">Link</a><script>console.log('RESULT loaded=' + document.title)</script>`
+  : `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title)</script>`;
 const site = http.createServer((req, res) => {
   const name = req.url.slice(1) || 'start';
   loads.set(name, (loads.get(name) || 0) + 1);
@@ -130,6 +132,31 @@ await tab.waitForTimeout(1500);
 check('Sitzung: Hintergrund-Tab laedt noch nicht', (loads.get('eins') || 0) === loadsBefore, `${loads.get('eins')} Aufrufe`);
 await tab.click('#tab-list .tab:first-child .title');
 check('Sitzung: Hintergrund-Tab laedt beim Anklicken', await waitLoaded('Seite eins'));
+
+// Links: Strg+Klick und Mittelklick oeffnen je einen Tab im Hintergrund
+await go(siteURL + 'links');
+check('Seite mit Link', await waitLoaded('Seite links'));
+const tabCount = () => tab.locator('#tab-list .tab').count();
+const before = await tabCount();
+const box = await tab.evaluate(() => {
+  const rect = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').getBoundingClientRect();
+  return { x: rect.left + 100, y: rect.top + 30 };
+});
+await tab.keyboard.down('Control');
+await tab.mouse.click(box.x, box.y);
+await tab.keyboard.up('Control');
+await tab.waitForTimeout(1500);
+check('Strg+Klick: neuer Tab im Hintergrund', (await tabCount()) === before + 1 && (await tab.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent)) === 'Seite links', `${await tabCount()} Tabs`);
+await tab.mouse.click(box.x, box.y, { button: 'middle' });
+await tab.waitForTimeout(1500);
+check('Mittelklick: genau ein neuer Tab', (await tabCount()) === before + 2, `${await tabCount()} Tabs`);
+check('Sicherheitsanzeige bei HTTP', await tab.evaluate(() => !document.getElementById('security').hidden && document.getElementById('security').textContent === 'Nicht sicher'));
+
+// Quelltext (Strg+U): neuer Tab mit dem HTML der Seite
+await tab.locator('#tab-list .tab.active .title').click();
+await tab.keyboard.press('Control+u');
+const sourceTab = await tab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent?.startsWith('view-source:'), null, { timeout: 15000 }).then(() => true, () => false);
+check('Quelltext anzeigen (Strg+U)', sourceTab, await tab.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent));
 
 await browser.close();
 relay.kill();
