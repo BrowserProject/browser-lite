@@ -1,4 +1,5 @@
 # Funktionen, die browser-lite schon kann (tests/e2e/parity-test.mjs, PARITY_UPDATE=1)
+async:cache-open
 async:compression-roundtrip
 async:font-loading
 async:image-bitmap-from-canvas
@@ -199,6 +200,7 @@ media:web-audio
 media:webm-vp9
 net:beacon
 net:broadcast-channel
+net:cache-api
 net:cookie-store
 net:eventsource
 net:fetch

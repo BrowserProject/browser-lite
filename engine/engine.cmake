@@ -17,6 +17,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
     ${BL_ENGINE_SRC}/FileAccessCache.cpp
+    ${BL_ENGINE_SRC}/CacheStorageWasm.cpp
     ${BL_ENGINE_SRC}/GpuRaster.cpp
     ${BL_ENGINE_SRC}/WebPlatformExtras.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp

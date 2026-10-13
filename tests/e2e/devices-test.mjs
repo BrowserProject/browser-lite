@@ -95,6 +95,10 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     result('movebefore', child.parentNode === to);
     result('estimate', typeof (await navigator.storage.estimate()).quota);
     result('orientation', screen.orientation.type);
+    const cache = await caches.open('test');
+    await cache.put('/a?x=1', new Response('hallo'));
+    await cache.put('/a?x=1', new Response('neu'));
+    result('cacheapi', (await (await cache.match('/a', { ignoreSearch: true })).text()) + ':' + (await cache.keys()).length + ':' + (await caches.has('test')));
   })();
   result('ready', 1);
 </script></body></html>`;
@@ -153,6 +157,7 @@ check('Canvas-Filter (blur)', (await result('canvasfilter')) === 'blur', results
 check('moveBefore', (await result('movebefore')) === 'true');
 check('navigator.storage.estimate', (await result('estimate')) === 'number');
 check('screen.orientation', (await result('orientation')) === 'landscape-primary', results.get('orientation'));
+check('Cache API (put, match, keys)', (await result('cacheapi')) === 'neu:1:true', results.get('cacheapi'));
 
 // 1) Markieren mit der Maus (braucht ENABLE_DRAG_SUPPORT)
 await page.mouse.move(...await at(25, 45));

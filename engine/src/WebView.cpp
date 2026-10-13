@@ -7,6 +7,7 @@
 #include "Clients.h"
 #include "EditorClient.h"
 #include "Engine.h"
+#include "CacheStorageWasm.h"
 #include "GpuRaster.h"
 #include "WebPlatformExtras.h"
 #include "Host.h"
@@ -41,6 +42,7 @@
 #include <WebCore/LocalFrameView.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
+#include <WebCore/CacheStorageProvider.h>
 #include <WebCore/PageConfiguration.h>
 #include <WebCore/ScreenOrientationManager.h>
 #include <WebCore/StorageProvider.h>
@@ -143,6 +145,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.databaseProvider = &databaseProvider();
     configuration.socketProvider = createSocketProvider();
     configuration.storageProvider = createStorageProvider();
+    configuration.cacheStorageProvider = createCacheStorageProvider();
     configuration.screenOrientationManager = screenOrientationManager();
     configuration.userContentProvider = userContentProvider();
 
@@ -191,6 +194,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setSelectShowPickerEnabled(true);
     settings.setCSSScrollbarColorEnabled(true);
     settings.setStorageAPIEnabled(true);
+    settings.setCacheAPIEnabled(true);
     settings.setStorageAPIEstimateEnabled(true);
     settings.setScreenOrientationAPIEnabled(true);
     settings.setScreenOrientationLockingAPIEnabled(true);

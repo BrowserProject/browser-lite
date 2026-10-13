@@ -183,6 +183,7 @@ kommen zuerst.
 - [x] Oberflaeche: Strg/Cmd+Klick und Mittelklick oeffnen Links im Hintergrund-Tab, Quelltext
   anzeigen (Strg+U, Kontextmenue), Sicherheitsanzeige (Schloss bei HTTPS, "Nicht sicher" bei
   HTTP). Tests in `ui-test.mjs`
+- [x] Cache API (`caches.*`) im Speicher der Engine (pro Sitzung). Messlatte 230 von 277 (83 %)
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
