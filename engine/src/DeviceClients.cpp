@@ -204,7 +204,9 @@ void geolocationError(int viewId, int code, const String& message)
 // Die Oberflaeche hoert auf deviceorientation/devicemotion des Host-Browsers,
 // solange die Seite Zuhoerer hat (Chromebooks mit Touchscreen haben Sensoren,
 // auf dem Desktop kommt wie bei Chrome nie ein Event).
-class DeviceOrientationClientWasm final : public DeviceOrientationClient {
+class DeviceOrientationClientWasm final : public DeviceOrientationClient, public CanMakeCheckedPtr<DeviceOrientationClientWasm> {
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(DeviceOrientationClientWasm);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(DeviceOrientationClientWasm);
 public:
     explicit DeviceOrientationClientWasm(int viewId)
         : m_viewId(viewId)
@@ -224,13 +226,20 @@ private:
     void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"orientation\"}"_s); }
     DeviceOrientationData* lastOrientation() const final { return m_last.get(); }
     void deviceOrientationControllerDestroyed() final { m_controller = nullptr; }
+    uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
+    uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
+    void incrementCheckedPtrCount() const final { CanMakeCheckedPtr::incrementCheckedPtrCount(); }
+    void decrementCheckedPtrCount() const final { CanMakeCheckedPtr::decrementCheckedPtrCount(); }
+    void setDidBeginCheckedPtrDeletion() final { CanMakeCheckedPtr::setDidBeginCheckedPtrDeletion(); }
 
     int m_viewId;
     DeviceOrientationController* m_controller { nullptr };
     RefPtr<DeviceOrientationData> m_last;
 };
 
-class DeviceMotionClientWasm final : public DeviceMotionClient {
+class DeviceMotionClientWasm final : public DeviceMotionClient, public CanMakeCheckedPtr<DeviceMotionClientWasm> {
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(DeviceMotionClientWasm);
+    WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(DeviceMotionClientWasm);
 public:
     explicit DeviceMotionClientWasm(int viewId)
         : m_viewId(viewId)
@@ -250,6 +259,11 @@ private:
     void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"motion\"}"_s); }
     DeviceMotionData* lastMotion() const final { return m_last.get(); }
     void deviceMotionControllerDestroyed() final { m_controller = nullptr; }
+    uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
+    uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
+    void incrementCheckedPtrCount() const final { CanMakeCheckedPtr::incrementCheckedPtrCount(); }
+    void decrementCheckedPtrCount() const final { CanMakeCheckedPtr::decrementCheckedPtrCount(); }
+    void setDidBeginCheckedPtrDeletion() final { CanMakeCheckedPtr::setDidBeginCheckedPtrDeletion(); }
 
     int m_viewId;
     DeviceMotionController* m_controller { nullptr };
@@ -424,8 +438,10 @@ void attachDeviceClients(WebView& view, Page& page)
         sensors.orientation = makeUnique<DeviceOrientationClientWasm>(view.id());
         sensors.motion = makeUnique<DeviceMotionClientWasm>(view.id());
     }
-    Supplement<Page>::provideTo(&page, DeviceOrientationController::supplementName(), makeUnique<DeviceOrientationController>(*sensors.orientation));
-    Supplement<Page>::provideTo(&page, DeviceMotionController::supplementName(), makeUnique<DeviceMotionController>(*sensors.motion));
+    // Namen wie DeviceOrientationController::supplementName() (privat). In
+    // WebKit stellt kein Port die Controller mehr bereit.
+    Supplement<Page>::provideTo(&page, "DeviceOrientationController"_s, makeUnique<DeviceOrientationController>(*sensors.orientation));
+    Supplement<Page>::provideTo(&page, "DeviceMotionController"_s, makeUnique<DeviceMotionController>(*sensors.motion));
 #endif
 }
 

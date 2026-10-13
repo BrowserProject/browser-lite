@@ -61,6 +61,7 @@ private:
     void triggerRenderingUpdate() final;
     WebCore::GraphicsLayerFactory* graphicsLayerFactory() const final;
     void attachRootGraphicsLayer(WebCore::LocalFrame&, WebCore::GraphicsLayer*) final;
+    RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const final;
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) final;
     bool scheduleRenderingUpdate() final;
 

@@ -213,7 +213,7 @@ function onEngineReady() {
   $('boot').hidden = true;
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
-  initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
+  initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
   initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind() });
   // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
   const session = params.get('url') ? null : sessionToRestore();

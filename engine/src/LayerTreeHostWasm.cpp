@@ -4,6 +4,7 @@
 #include "Compositor.h"
 #include "Engine.h"
 #include "GpuRaster.h"
+#include "ScrollingWasm.h"
 #include "WebView.h"
 #include <EGL/egl.h>
 #include "GLDisplay.h"
@@ -12,6 +13,7 @@
 #include <WebCore/GraphicsLayerCoordinated.h>
 #include <WebCore/NativeImage.h>
 #include <WebCore/PlatformDisplay.h>
+#include <WebCore/ScrollingThread.h>
 #include <WebCore/SkiaCompositingLayer.h>
 #include <WebCore/SkiaPaintingEngine.h>
 #include <emscripten/emscripten.h>
@@ -19,6 +21,7 @@
 #include <skia/core/SkSurface.h>
 #include <skia/gpu/ganesh/GrDirectContext.h>
 #include <wtf/RunLoop.h>
+#include <wtf/Scope.h>
 
 namespace BrowserLite {
 
@@ -38,6 +41,14 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
 static void compositeScene(CompositorScene& scene)
 {
     ASSERT(Compositor::isCompositorThread());
+    // Takt fuer den Scroll-Thread: er wendet neue Scroll-Positionen an, wenn
+    // der Engine-Thread nicht rechtzeitig ein Rendering-Update macht, und fuehrt
+    // Scroll-Animationen weiter. Laeuft eine, braucht es auch das naechste Bild.
+    bool keepTicking = Scrolling::displayDidRefresh(scene.viewId);
+    auto tickAgain = makeScopeExit([&] {
+        if (keepTicking)
+            scene.requestScrollingTick();
+    });
     OptionSet<CompositionReason> reasons;
     bool notify = false;
     IntSize pixelSize;
@@ -46,8 +57,11 @@ static void compositeScene(CompositorScene& scene)
     {
         Locker locker { scene.lock };
         scene.frameScheduled = false;
-        if (scene.invalidated)
+        scene.scrollingTick = false;
+        if (scene.invalidated) {
+            keepTicking = false;
             return;
+        }
         // Das Rendering-Update erst zeigen, wenn alle Kacheln gemalt sind
         // (die letzte fertige Kachel plant das naechste Bild ein)
         if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
@@ -83,9 +97,12 @@ static void compositeScene(CompositorScene& scene)
         return;
     }
 
-    scene.rootLayer->flushPositionChanges(reasons, true);
-    for (auto& layer : scene.committedLayers)
-        layer->flushPositionChanges(reasons, true);
+    {
+        Locker stateLocker { scene.stateLock };
+        scene.rootLayer->flushPositionChanges(reasons, true);
+        for (auto& layer : scene.committedLayers)
+            layer->flushPositionChanges(reasons, true);
+    }
 
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     scene.rootLayer->flushCompositingState(reasons, true);
@@ -145,6 +162,13 @@ void CompositorScene::requestComposition(CompositionReason reason)
     scheduleFrameLocked();
 }
 
+void CompositorScene::requestScrollingTick()
+{
+    Locker locker { lock };
+    scrollingTick = true;
+    scheduleFrameLocked();
+}
+
 void CompositorScene::scheduleFrameLocked()
 {
     if (frameScheduled || invalidated || waitingForTiles)
@@ -201,6 +225,7 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
         m_scene->pixelSize = view.pixelSize();
         m_scene->deviceScaleFactor = view.deviceScaleFactor();
     }
+    Scrolling::setScene(view.id(), m_scene.ptr());
     // Kacheln malt die CPU (PlatformDisplay hat keinen GL-Kontext fuer
     // Hintergrund-Threads), den Proxy braucht nur DDL
     m_paintingEngine = SkiaPaintingEngine::create(nullptr);
@@ -208,12 +233,17 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
 
 LayerTreeHostWasm::~LayerTreeHostWasm()
 {
+    Scrolling::setScene(m_scene->viewId, nullptr);
     // Malende Threads duerfen uns danach nicht mehr erreichen
-    for (auto& layer : m_layers) {
+    HashSet<Ref<CoordinatedPlatformLayer>> layers;
+    {
+        Locker locker { m_layersLock };
+        layers = WTF::move(m_layers);
+    }
+    for (auto& layer : layers) {
         layer->waitUntilPaintingComplete();
         layer->invalidateClient();
     }
-    HashSet<Ref<CoordinatedPlatformLayer>> layers = WTF::move(m_layers);
     layers.addAll(std::exchange(m_layersToRemove, { }));
     {
         Locker locker { m_scene->lock };
@@ -282,14 +312,24 @@ void LayerTreeHostWasm::forceRepaint()
     m_scene->requestComposition(CompositionReason::Animation);
 }
 
-void LayerTreeHostWasm::flush()
+void LayerTreeHostWasm::flushLayerStates()
 {
+    Locker stateLocker { m_scene->stateLock };
+    Locker layersLocker { m_layersLock };
     for (auto& layer : m_layers)
         layer->flushPendingState();
+}
+
+void LayerTreeHostWasm::flush()
+{
+    flushLayerStates();
 
     if (std::exchange(m_layersChanged, false)) {
         Locker locker { m_scene->lock };
-        m_scene->pendingLayers = m_layers;
+        {
+            Locker layersLocker { m_layersLock };
+            m_scene->pendingLayers = m_layers;
+        }
         m_scene->hasPendingLayers = true;
         m_scene->pendingLayersToRemove.addAll(std::exchange(m_layersToRemove, { }));
         m_compositionRequired = true;
@@ -319,20 +359,46 @@ Ref<CoordinatedImageBackingStore> LayerTreeHostWasm::imageBackingStore(Ref<Nativ
 
 void LayerTreeHostWasm::attachLayer(CoordinatedPlatformLayer& layer)
 {
-    m_layers.add(layer);
+    {
+        Locker locker { m_layersLock };
+        m_layers.add(layer);
+    }
     m_layersToRemove.remove(layer);
     m_layersChanged = true;
 }
 
 void LayerTreeHostWasm::detachLayer(CoordinatedPlatformLayer& layer)
 {
-    m_layers.remove(layer);
+    {
+        Locker locker { m_layersLock };
+        m_layers.remove(layer);
+    }
     m_layersToRemove.add(layer);
     m_layersChanged = true;
 }
 
+void LayerTreeHostWasm::notifyCompositionRequired()
+{
+#if ENABLE(SCROLLING_THREAD)
+    if (ScrollingThread::isCurrentThread()) {
+        m_compositionRequiredInScrollingThread = true;
+        return;
+    }
+#endif
+    m_compositionRequired = true;
+}
+
 void LayerTreeHostWasm::requestComposition(CompositionReason reason)
 {
+#if ENABLE(SCROLLING_THREAD)
+    // Wie WebKit2: der Scroll-Thread hat Ebenen verschoben, den neuen Stand
+    // gleich hier uebernehmen (der Engine-Thread ist vielleicht blockiert)
+    if (ScrollingThread::isCurrentThread()) {
+        flushLayerStates();
+        if (!m_compositionRequiredInScrollingThread.exchange(false))
+            return;
+    }
+#endif
     m_scene->requestComposition(reason);
 }
 

@@ -136,7 +136,7 @@ export function onSensorStart(tab, data) {
     window.addEventListener('deviceorientation', listener);
   } else if (data.kind === 'motion') {
     listener = (event) => {
-      if (!api.activeTab() === tab)
+      if (api.activeTab() !== tab)
         return;
       const a = event.acceleration || {}, g = event.accelerationIncludingGravity || {}, r = event.rotationRate || {};
       api.engine()._bl_device_motion(tab.id, nan(a.x), nan(a.y), nan(a.z), nan(g.x), nan(g.y), nan(g.z),

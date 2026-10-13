@@ -190,12 +190,13 @@ kommen zuerst.
   Scrollen: NZZ/Wikipedia ohne langsame Bilder, GitHub 1946 -> 701 ms; Laden 5-15 % schneller.
 - [x] Compositor-Thread mit eigenem WebGL-Kontext: Animationen laufen weiter, auch wenn das JS der
   Seite den Engine-Thread blockiert (`compositing-test.mjs`)
-- [ ] Asynchrones Scrollen: WebKits ScrollingTree (ENABLE_ASYNC_SCROLLING) auf einem eigenen Thread,
-  Rad- und Touch-Events direkt dorthin, Positionen an den Compositor
+- [x] Asynchrones Scrollen: WebKits ScrollingTree (ENABLE_ASYNC_SCROLLING) auf einem eigenen Thread,
+  Rad- und Wisch-Events ueber den Compositor-Thread direkt dorthin. Scrollen geht auch, waehrend das
+  JS der Seite blockiert (`compositing-test.mjs`)
 - [x] Origin Private File System (`navigator.storage.getDirectory`, Writable Streams, synchroner
   Zugriff im Worker) und `requestVideoFrameCallback`. Messlatte 233 von 277 (84 %)
-- [ ] Lage-/Bewegungssensoren: Engine-Teil fertig, WebKit-Schalter `ENABLE_DEVICE_ORIENTATION` mit
-  dem naechsten vollen Neubau
+- [x] Lage-/Bewegungssensoren (`deviceorientation`, `devicemotion`) vom Host (`devices-test.mjs`).
+  Messlatte 234 von 277 (84.5 %)
 - [ ] Service Worker (SWServer im selben Prozess, Fetch abfangen) und SharedWorker
 - [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus

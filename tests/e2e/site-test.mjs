@@ -80,6 +80,18 @@ async function checkSite(site, page, log) {
     await page.waitForFunction(() => document.title && !/^Neuer Tab/.test(document.title), null, { timeout: 30000, polling: 500 }).catch(() => {});
     title = await within(page.evaluate(() => document.title), 10000, 'Titel');
   }
+  // Ohne Titel und mit (fast) keinem Text ist nichts Richtiges geladen (z.B.
+  // kurze 403-Antwort einer IP-Sperre), auch wenn der Tab fertig meldet
+  if (result === 'ok' && (!title || /^Neuer Tab/.test(title))) {
+    const marker = `SITECHECK${Date.now()}`;
+    await within(page.evaluate((m) => window.__blEval(`console.log("${m} " + JSON.stringify((document.body ? document.body.innerText : '').trim().slice(0, 200)))`), marker), 10000, 'Text').catch(() => {});
+    await page.waitForTimeout(1000);
+    // Log der Seite: '[seite N] SITECHECK... "<Text>"'
+    const line = log.find((l) => l.includes(marker));
+    const text = line ? line.slice(line.indexOf(marker) + marker.length + 1).replace(/ \(.*\)$/, '') : null;
+    if (text !== null && text.length < 200)
+      result = `fast leere Seite: ${text}`;
+  }
   const file = path.join(outDir, (new URL(site).hostname || 'seite') + '.png');
   await page.screenshot({ path: file, timeout: 20000 });
   return { result, seconds, title };

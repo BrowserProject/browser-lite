@@ -11,6 +11,7 @@
 #include "Compositor.h"
 #include "GpuRaster.h"
 #include "LayerTreeHostWasm.h"
+#include "ScrollingWasm.h"
 #include "WebPlatformExtras.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
@@ -180,6 +181,15 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setAcceleratedCompositingEnabled(m_compositing);
     settings.setForceCompositingMode(m_compositing);
     settings.setAcceleratedCompositingForFixedPositionEnabled(m_compositing);
+#if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
+    // Scrollen im eigenen Thread (ScrollingWasm.h), braucht die Ebenen.
+    // BL_ASYNC_SCROLLING=0 schaltet ab.
+    const char* asyncScrolling = getenv("BL_ASYNC_SCROLLING");
+    bool useAsyncScrolling = m_compositing && (!asyncScrolling || strcmp(asyncScrolling, "0"));
+    settings.setScrollingCoordinatorEnabled(useAsyncScrolling);
+    settings.setAsyncFrameScrollingEnabled(useAsyncScrolling);
+    settings.setAsyncOverflowScrollingEnabled(useAsyncScrolling);
+#endif
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
@@ -578,6 +588,12 @@ void WebView::stopCompositing()
     settings.setForceCompositingMode(false);
     settings.setAcceleratedCompositingEnabled(false);
     settings.setAcceleratedCompositingForFixedPositionEnabled(false);
+#if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
+    // Ohne Ebenen scrollt wieder der Engine-Thread
+    settings.setAsyncFrameScrollingEnabled(false);
+    settings.setAsyncOverflowScrollingEnabled(false);
+    Scrolling::stopForView(m_id);
+#endif
     // Die Einstellung wirkt sonst erst bei der naechsten echten Aenderung an
     // Style oder Layout: Compositing in allen Frames gleich beenden
     for (RefPtr<Frame> frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
@@ -822,16 +838,36 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
 }
 
+PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)
+{
+    IntPoint position { static_cast<int>(x), static_cast<int>(y) };
+    // DOM: deltaY > 0 heisst nach unten scrollen. WebCore: umgekehrtes Vorzeichen.
+    return { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), static_cast<float>(-deltaX / 40), static_cast<float>(-deltaY / 40),
+        PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
+}
+
 void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)
+{
+    dispatchWheelEvent(makeWheelEvent(x, y, deltaX, deltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
+}
+
+void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
 {
     RefPtr frame = mainFrame();
     if (!frame)
         return;
-    IntPoint position { static_cast<int>(x), static_cast<int>(y) };
-    // DOM: deltaY > 0 heisst nach unten scrollen. WebCore: umgekehrtes Vorzeichen.
-    PlatformWheelEvent event { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), static_cast<float>(-deltaX / 40), static_cast<float>(-deltaY / 40),
-        PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
-    frame->eventHandler().handleWheelEvent(event, { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
+    frame->eventHandler().handleWheelEvent(event, steps);
+}
+
+RefPtr<ScrollingCoordinator> WebView::createScrollingCoordinator(Page& page) const
+{
+#if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
+    if (m_compositing)
+        return ScrollingCoordinatorWasm::create(page, m_id);
+#else
+    UNUSED_PARAM(page);
+#endif
+    return nullptr;
 }
 
 #if ENABLE(TOUCH_EVENTS)

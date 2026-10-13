@@ -14,6 +14,7 @@
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
+#include "ScrollingWasm.h"
 #include "Speech.h"
 #include "WebPlatformExtras.h"
 #include "LoaderStrategy.h"
@@ -185,6 +186,14 @@ EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
 
 EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers)
 {
+    // Mit Compositor-Thread: ueber ihn zum Scroll-Thread (ScrollingWasm.h), so
+    // scrollt die Seite auch, wenn ihr JS den Engine-Thread blockiert
+    if (Compositor::isRunning()) {
+        Compositor::dispatch([=] {
+            Scrolling::wheelEvent(id, WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers));
+        });
+        return;
+    }
     withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, modifiers); });
 }
 

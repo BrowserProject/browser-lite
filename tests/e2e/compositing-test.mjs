@@ -1,6 +1,7 @@
 // End-to-End Test fuer Compositing mit Ebenen (?compositing=1): Farben der
 // Kacheln, CSS-Animation (transform) ohne neues Malen, fixierte Leiste beim
-// Scrollen, Blur-Filter und WebGL-Canvas in einer Ebene.
+// Scrollen, Blur-Filter und WebGL-Canvas in einer Ebene. Animation und Scrollen
+// laufen weiter, waehrend das JS der Seite blockiert (Compositor-/Scroll-Thread).
 //
 //   cd tests/e2e && node compositing-test.mjs [engine-ordner]
 import http from 'node:http';
@@ -51,6 +52,8 @@ const PAGE = `<!doctype html><title>Compositing-Test</title>
 <div class="box" id="fade"></div>
 <canvas id="gl" width="80" height="80"></canvas>
 <div id="late" style="position:absolute;top:1000px;left:20px;width:60px;height:60px;background:rgb(0,128,0)"></div>
+<div id="trap" style="position:absolute;top:1200px;left:20px;width:300px;height:200px;background:rgb(200,200,200)"></div>
+<div id="box" style="position:absolute;top:1200px;left:400px;width:200px;height:200px;overflow:auto"><div style="height:300px;background:rgb(255,0,255)"></div><div style="height:700px;background:rgb(0,255,255)"></div></div>
 <script>
 const gl = document.getElementById('gl').getContext('webgl');
 if (gl) {
@@ -61,6 +64,8 @@ let frames = 0;
 const count = () => { frames++; requestAnimationFrame(count); };
 requestAnimationFrame(count);
 setInterval(() => console.log('RESULT frames=' + frames), 500);
+// Ein wheel-Listener, der das Scrollen verhindert: der Scroll-Thread muss auf die Seite warten
+document.getElementById('trap').addEventListener('wheel', (e) => { e.preventDefault(); console.log('RESULT trapwheel=1'); }, { passive: false });
 console.log('RESULT ready=1');
 </script>`;
 
@@ -183,6 +188,41 @@ let scrolled = null;
 await waitFor(async () => near(scrolled = await pixelAt(50, 130), [0, 128, 0]), 10000);
 check('Scrollen verschiebt den Inhalt', near(scrolled, [0, 128, 0]), JSON.stringify(scrolled));
 check('Leiste bleibt beim Scrollen', near(await pixelAt(500, 20), [255, 128, 0]));
+
+// Scrollen im Scroll-Thread: geht auch, waehrend das JS der Seite den
+// Engine-Thread 5 s blockiert
+await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 5000; while (Date.now() < end); return 1; })()'));
+await page.waitForTimeout(500);
+const busyStart = Date.now();
+await page.mouse.wheel(0, -900);
+let busyScrolled = null;
+const scrolledWhileBusy = await waitFor(async () => near(busyScrolled = await pixelAt(50, 90), [255, 0, 0]), 3000);
+check('Scrollen, waehrend das JS blockiert', scrolledWhileBusy && Date.now() - busyStart < 4000, JSON.stringify(busyScrolled));
+// Danach kennt auch die Seite die neue Position
+await page.waitForTimeout(4000);
+results.delete('scrollY');
+await page.evaluate(() => window.__blEval('console.log("RESULT scrollY=" + scrollY)'));
+check('Seite kennt die Scroll-Position', await result('scrollY') === '0');
+await page.mouse.wheel(0, 900);
+await waitFor(async () => near(await pixelAt(50, 130), [0, 128, 0]), 10000);
+
+// wheel-Listener mit preventDefault: die Seite scrollt nicht
+await page.mouse.move(100, 400);
+await page.mouse.wheel(0, 300);
+const trapped = await result('trapwheel');
+await page.waitForTimeout(1000);
+check('preventDefault im wheel-Listener verhindert Scrollen', trapped === '1' && near(await pixelAt(50, 130), [0, 128, 0]), JSON.stringify(await pixelAt(50, 130)));
+
+// Kasten mit overflow: auto scrollt im Scroll-Thread, auch waehrend das JS blockiert
+check('Scroll-Kasten oben violett', near(await pixelAt(500, 320), [255, 0, 255]), JSON.stringify(await pixelAt(500, 320)));
+await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 4000; while (Date.now() < end); return 1; })()'));
+await page.waitForTimeout(500);
+await page.mouse.move(500, 400);
+await page.mouse.wheel(0, 400);
+let boxScrolled = null;
+const boxOk = await waitFor(async () => near(boxScrolled = await pixelAt(500, 320), [0, 255, 255]), 2500);
+check('Kasten scrollt, waehrend das JS blockiert', boxOk && near(await pixelAt(50, 130), [0, 128, 0]), JSON.stringify(boxScrolled));
+await page.waitForTimeout(3500);
 
 // GPU verloren: die Engine malt ohne Ebenen auf der CPU weiter
 await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());

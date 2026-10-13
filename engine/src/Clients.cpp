@@ -15,6 +15,7 @@
 
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <WebCore/PlatformMouseEvent.h>
+#include <WebCore/ScrollingCoordinator.h>
 #include <WebCore/Chrome.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/DocumentInlines.h>
@@ -268,6 +269,11 @@ void ChromeClient::triggerRenderingUpdate()
 GraphicsLayerFactory* ChromeClient::graphicsLayerFactory() const
 {
     return m_view->graphicsLayerFactory();
+}
+
+RefPtr<ScrollingCoordinator> ChromeClient::createScrollingCoordinator(Page& page) const
+{
+    return m_view->createScrollingCoordinator(page);
 }
 
 void ChromeClient::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* layer)

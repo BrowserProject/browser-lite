@@ -4,6 +4,8 @@
 
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
+#include <WebCore/PlatformWheelEvent.h>
+#include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Region.h>
 #include <skia/core/SkRefCnt.h>
 #include <wtf/CheckedRef.h>
@@ -25,6 +27,7 @@ class GraphicsLayerFactory;
 class LocalFrame;
 class LocalFrameView;
 class Page;
+class ScrollingCoordinator;
 }
 
 namespace BrowserLite {
@@ -95,6 +98,11 @@ public:
     // Eingabe (Koordinaten in CSS-Pixeln relativ zur View)
     void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0);
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+    static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+    // Auch vom Scroll-Thread (ScrollingWasm.cpp), mit den Schritten, die noch fehlen
+    void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
+    // ChromeClient: Scrollen im eigenen Thread, wenn mit Ebenen
+    RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const;
 #if ENABLE(POINTER_LOCK)
     void requestPointerLock(CompletionHandler<void(WebCore::PointerLockRequestResult)>&&);
     void requestPointerUnlock();

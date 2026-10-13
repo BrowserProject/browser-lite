@@ -1,3 +1,28 @@
+diff --git a/Source/WTF/wtf/PlatformEnable.h b/Source/WTF/wtf/PlatformEnable.h
+index 08d8ea5a09..ef46145d6c 100644
+--- a/Source/WTF/wtf/PlatformEnable.h
++++ b/Source/WTF/wtf/PlatformEnable.h
+@@ -317,6 +317,20 @@
+ #define ENABLE_INSPECTOR_TELEMETRY 0
+ #endif
+ 
++// browser-lite: wie WPE (PlatformEnableGlib.h), Scrollen im eigenen Thread
++#if PLATFORM(WASM) && USE(COORDINATED_GRAPHICS)
++#if !defined(ENABLE_SCROLLING_THREAD)
++#define ENABLE_SCROLLING_THREAD 1
++#endif
++#if !defined(ENABLE_WHEEL_EVENT_REGIONS)
++#define ENABLE_WHEEL_EVENT_REGIONS 1
++#endif
++// Der Scrolling-Baum braucht die Gesten-Phasen der Rad-Events
++#if !defined(ENABLE_KINETIC_SCROLLING)
++#define ENABLE_KINETIC_SCROLLING 1
++#endif
++#endif
++
+ #if !defined(ENABLE_KINETIC_SCROLLING)
+ #define ENABLE_KINETIC_SCROLLING 0
+ #endif
 diff --git a/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp b/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp
 index 776466ea87..b463c05d25 100644
 --- a/Source/WebCore/platform/graphics/skia/PlatformDisplaySkia.cpp

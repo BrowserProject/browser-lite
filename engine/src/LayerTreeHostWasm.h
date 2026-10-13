@@ -46,6 +46,10 @@ public:
     const int viewId;
     const Ref<WebCore::CoordinatedPlatformLayer> rootLayer;
 
+    // Stand der Ebenen uebernehmen (flushPendingState) und lesen
+    // (flushPositionChanges) nie gleichzeitig: Engine-, Scroll- und Compositor-Thread
+    Lock stateLock;
+
     Lock lock;
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> pendingLayers WTF_GUARDED_BY_LOCK(lock);
     bool hasPendingLayers WTF_GUARDED_BY_LOCK(lock) { false };
@@ -57,6 +61,8 @@ public:
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
+    // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)
+    bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
 
     // Nur auf dem Compositor-Thread
@@ -65,6 +71,9 @@ public:
     // Von jedem Thread: beim naechsten Bild des Compositors zusammensetzen
     void requestComposition(WebCore::CompositionReason);
     void scheduleFrameLocked() WTF_REQUIRES_LOCK(lock);
+    // Von jedem Thread: beim naechsten Bild den Scroll-Thread takten
+    // (ScrollingWasm.h), auch wenn nichts neu zusammenzusetzen ist
+    void requestScrollingTick();
 
 private:
     explicit CompositorScene(int viewId);
@@ -100,7 +109,7 @@ private:
     Ref<WebCore::CoordinatedImageBackingStore> imageBackingStore(Ref<WebCore::NativeImage>&&) override;
     void attachLayer(WebCore::CoordinatedPlatformLayer&) override;
     void detachLayer(WebCore::CoordinatedPlatformLayer&) override;
-    void notifyCompositionRequired() override { m_compositionRequired = true; }
+    void notifyCompositionRequired() override;
     bool isCompositionRequiredOrOngoing() const override { return m_compositionRequired || m_waitingForCompositor; }
     void requestComposition(WebCore::CompositionReason) override;
     RunLoop* compositingRunLoop() const override;
@@ -111,9 +120,13 @@ private:
     // GraphicsLayerFactory
     Ref<WebCore::GraphicsLayer> createGraphicsLayer(WebCore::GraphicsLayer::Type, WebCore::GraphicsLayerClient&) override;
 
+    void flushLayerStates();
+
     WeakPtr<WebView> m_view;
     Ref<CompositorScene> m_scene;
-    HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layers;
+    // Auch vom Scroll-Thread gelesen (requestComposition)
+    Lock m_layersLock;
+    HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layers WTF_GUARDED_BY_LOCK(m_layersLock);
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layersToRemove;
     WebCore::GraphicsLayer* m_rootCompositingLayer { nullptr };
     WebCore::GraphicsLayer* m_overlayCompositingLayer { nullptr };
@@ -122,6 +135,8 @@ private:
     bool m_compositionRequired { false };
     bool m_layersChanged { false };
     bool m_waitingForCompositor { false };
+    // Der Scroll-Thread hat Ebenen verschoben
+    std::atomic<bool> m_compositionRequiredInScrollingThread { false };
 };
 
 } // namespace BrowserLite

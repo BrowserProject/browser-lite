@@ -71,6 +71,7 @@ css:view-timeline
 css:zoom
 dev:clipboard-item
 dev:clipboard-text
+dev:device-orientation
 dev:fullscreen
 dev:gamepad
 dev:geolocation

@@ -62,6 +62,10 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
   result('dark', dark.matches);
   dark.addEventListener('change', () => result('darkchange', dark.matches));
   result('ontouchstart', 'ontouchstart' in window);
+  // Lage- und Bewegungssensoren des Hosts (ENABLE_DEVICE_ORIENTATION)
+  // Chrome schickt beim Anmelden ein Event ohne Werte, wenn es keine Sensoren hat
+  addEventListener('deviceorientation', (e) => { if (e.alpha != null) result('orient', [e.alpha, e.beta, e.gamma].map(Math.round).join(',')); });
+  addEventListener('devicemotion', (e) => { if (e.accelerationIncludingGravity?.z != null) result('motion', Math.round(e.accelerationIncludingGravity.z)); });
   document.getElementById('geo').addEventListener('click', () => {
     navigator.geolocation.getCurrentPosition(
       (p) => result('geo', p.coords.latitude.toFixed(2) + ',' + p.coords.longitude.toFixed(2)),
@@ -211,6 +215,18 @@ if (notifyPrompt)
   await prompt.locator('button', { hasText: 'Zulassen' }).click();
 check('Benachrichtigungen erlaubt', notifyPrompt && (await result('notifypermission', 15000)) === 'granted' && (await result('notifystate')) === 'granted',
   `${results.get('notifypermission')} / ${results.get('notifystate')}`);
+
+// 7) Lage und Bewegung: die Oberflaeche reicht die Events des Hosts weiter,
+// solange die Seite zuhoert (der Zuhoerer im Host kommt mit etwas Verzoegerung)
+for (let i = 0; i < 30 && !(results.has('orient') && results.has('motion')); i++) {
+  await page.evaluate(() => {
+    window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 10, beta: 20, gamma: 30 }));
+    window.dispatchEvent(new DeviceMotionEvent('devicemotion', { accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 }, interval: 16 }));
+  });
+  await page.waitForTimeout(300);
+}
+check('deviceorientation kommt an', (await result('orient', 5000)) === '10,20,30', results.get('orient'));
+check('devicemotion kommt an', (await result('motion', 5000)) === '10', results.get('motion'));
 
 await browser.close();
 relay.kill();
