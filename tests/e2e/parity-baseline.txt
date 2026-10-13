@@ -215,6 +215,7 @@ net:eventsource
 net:fetch
 net:fetch-keepalive
 net:fetch-priority
+net:file-system-access
 net:indexeddb
 net:local-storage
 net:message-channel

@@ -237,6 +237,9 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   (Test in `devices-test.mjs`)
 - [x] Drucken: PDF aus der Engine (Skia PDF, `@media print`, Seitenumbrueche), Druckvorschau mit
   Druckdialog des Host und "Als PDF speichern" (Test in `ui-test.mjs`)
+- [x] File System Access (`showOpenFilePicker`, `showSaveFilePicker`, `showDirectoryPicker`) ueber die
+  Dialoge und Handles des Host-Browsers (Test in `devices-test.mjs`)
+- [x] Lautsprecher im Tab und Tab stummschalten (Test in `audio-test.mjs`)
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).

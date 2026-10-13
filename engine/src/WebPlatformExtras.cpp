@@ -12,6 +12,9 @@
 #include <JavaScriptCore/StrongInlines.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/Exception.h>
+#include <WebCore/JSDOMGlobalObject.h>
+#include <WebCore/ScriptExecutionContext.h>
+#include <WebCore/SecurityOrigin.h>
 #include <WebCore/ExceptionOr.h>
 #include <WebCore/ScreenOrientationManager.h>
 #include <WebCore/ScreenOrientationType.h>
@@ -250,6 +253,106 @@ static constexpr auto polyfillSource = R"JS((() => {
     };
     Object.defineProperty(Navigator.prototype, 'keyboard', { get: () => keyboard, configurable: true, enumerable: true });
   }
+
+  // File System Access API: Dateien und Ordner des Host oeffnen und speichern.
+  // Die Handles des Host bleiben in der Oberflaeche, hier nur ihre id.
+  if (typeof globalThis.showOpenFilePicker !== 'function' && typeof FileSystemFileHandle === 'function' && typeof FileSystemDirectoryHandle === 'function') {
+    const ids = new WeakMap();
+    const fromBase64 = typeof Uint8Array.fromBase64 === 'function'
+      ? (text) => Uint8Array.fromBase64(text)
+      : (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+    const toBase64 = (bytes) => {
+      if (typeof bytes.toBase64 === 'function')
+        return bytes.toBase64();
+      let text = '';
+      for (let i = 0; i < bytes.length; i += 0x8000)
+        text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(text);
+    };
+    const toBytes = async (data) => {
+      if (typeof data === 'string')
+        return new TextEncoder().encode(data);
+      if (data instanceof Blob)
+        return new Uint8Array(await data.arrayBuffer());
+      if (ArrayBuffer.isView(data))
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      if (data instanceof ArrayBuffer)
+        return new Uint8Array(data);
+      throw new TypeError('Unsupported data for FileSystemWritableFileStream.write()');
+    };
+    const makeWritable = (id) => {
+      const send = (operation) => call('fs-write', Object.assign({ id }, operation)).then(() => undefined);
+      const stream = new WritableStream({
+        async write(chunk) {
+          if (chunk && typeof chunk === 'object' && typeof chunk.type === 'string' && !(chunk instanceof Blob) && !ArrayBuffer.isView(chunk) && !(chunk instanceof ArrayBuffer)) {
+            if (chunk.type === 'seek')
+              return send({ op: 'seek', position: chunk.position });
+            if (chunk.type === 'truncate')
+              return send({ op: 'truncate', size: chunk.size });
+            return send({ op: 'write', position: chunk.position, data: toBase64(await toBytes(chunk.data)) });
+          }
+          return send({ op: 'write', data: toBase64(await toBytes(chunk)) });
+        },
+        close: () => send({ op: 'close' }),
+        abort: () => send({ op: 'abort' }),
+      });
+      if (typeof FileSystemWritableFileStream === 'function')
+        Object.setPrototypeOf(stream, FileSystemWritableFileStream.prototype);
+      const write = (value) => {
+        const writer = WritableStream.prototype.getWriter.call(stream);
+        return writer.write(value).finally(() => writer.releaseLock());
+      };
+      Object.defineProperties(stream, {
+        write: { value: write, configurable: true },
+        seek: { value: (position) => write({ type: 'seek', position }), configurable: true },
+        truncate: { value: (size) => write({ type: 'truncate', size }), configurable: true },
+      });
+      return stream;
+    };
+    const makeHandle = (info) => {
+      const directory = info.kind === 'directory';
+      const handle = Object.create(directory ? FileSystemDirectoryHandle.prototype : FileSystemFileHandle.prototype);
+      ids.set(handle, info.id);
+      const own = (name, value) => Object.defineProperty(handle, name, { value, configurable: true });
+      own('kind', info.kind);
+      own('name', info.name);
+      own('isSameEntry', (other) => call('fs-same', { id: info.id, other: ids.get(other) ?? null }));
+      own('queryPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: false }));
+      own('requestPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: true }));
+      if (!directory) {
+        own('getFile', async () => {
+          const file = await call('fs-file', { id: info.id });
+          return new File([fromBase64(file.data)], file.name, { type: file.type, lastModified: file.lastModified });
+        });
+        own('createWritable', async (options) => makeWritable((await call('fs-writable', { id: info.id, keepExistingData: !!options?.keepExistingData })).id));
+        return handle;
+      }
+      const child = (kind) => async (name, options) => makeHandle(await call('fs-child', { id: info.id, name: String(name), kind, create: !!options?.create }));
+      own('getFileHandle', child('file'));
+      own('getDirectoryHandle', child('directory'));
+      own('removeEntry', (name, options) => call('fs-remove', { id: info.id, name: String(name), recursive: !!options?.recursive }).then(() => undefined));
+      own('resolve', (possibleDescendant) => call('fs-resolve', { id: info.id, other: ids.get(possibleDescendant) ?? null }));
+      const list = () => call('fs-list', { id: info.id });
+      own('entries', async function* entries() { for (const entry of await list()) yield [entry.name, makeHandle(entry)]; });
+      own('keys', async function* keys() { for (const entry of await list()) yield entry.name; });
+      own('values', async function* values() { for (const entry of await list()) yield makeHandle(entry); });
+      own(Symbol.asyncIterator, handle.entries);
+      return handle;
+    };
+    // Nur was der Host verstehen kann: Typen, Mehrfachauswahl, Name, Startordner als Text
+    const pickerOptions = (options = {}) => ({
+      types: Array.isArray(options.types) ? options.types.map((type) => ({ description: type?.description ? String(type.description) : undefined, accept: type?.accept })) : undefined,
+      excludeAcceptAllOption: !!options.excludeAcceptAllOption,
+      multiple: !!options.multiple,
+      suggestedName: options.suggestedName ? String(options.suggestedName) : undefined,
+      id: options.id ? String(options.id) : undefined,
+      startIn: typeof options.startIn === 'string' ? options.startIn : undefined,
+      mode: options.mode === 'readwrite' ? 'readwrite' : undefined,
+    });
+    define(globalThis, 'showOpenFilePicker', async (options) => (await call('fs-open', pickerOptions(options))).map(makeHandle));
+    define(globalThis, 'showSaveFilePicker', async (options) => makeHandle(await call('fs-save', pickerOptions(options))));
+    define(globalThis, 'showDirectoryPicker', async (options) => makeHandle(await call('fs-directory', pickerOptions(options))));
+  }
 })();)JS";
 
 // ---------------------------------------------------------------- Host-Bruecke
@@ -270,7 +373,16 @@ HashMap<uint64_t, PendingHostCall>& pendingHostCalls()
 // Nur diese APIs des Host darf eine Seite ueber die Polyfills erreichen
 bool isAllowedHostCall(const String& name)
 {
-    return name == "eyedropper"_s || name == "battery"_s || name == "keyboard-lock"_s || name == "keyboard-unlock"_s || name == "keyboard-layout"_s;
+    static constexpr ASCIILiteral allowed[] = {
+        "eyedropper"_s, "battery"_s, "keyboard-lock"_s, "keyboard-unlock"_s, "keyboard-layout"_s,
+        "fs-open"_s, "fs-save"_s, "fs-directory"_s, "fs-file"_s, "fs-writable"_s, "fs-write"_s, "fs-child"_s,
+        "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
+    };
+    for (auto entry : allowed) {
+        if (name == entry)
+            return true;
+    }
+    return false;
 }
 
 }
@@ -291,7 +403,13 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
         static uint64_t nextIdentifier;
         auto identifier = ++nextIdentifier;
         pendingHostCalls().add(identifier, PendingHostCall { { vm, globalObject }, { vm, callback } });
-        notifyHost(viewId, "host-call", makeString("{\"id\":"_s, identifier, ",\"name\":\""_s, jsonEscape(name), "\",\"payload\":\""_s, jsonEscape(payload), "\"}"_s));
+        // Der Ursprung der Seite: die Oberflaeche gibt Handles (Dateien) nur ihm wieder heraus
+        String origin;
+        if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
+            if (RefPtr context = domGlobalObject->scriptExecutionContext())
+                origin = context->securityOrigin() ? context->securityOrigin()->toString() : String { };
+        }
+        notifyHost(viewId, "host-call", makeString("{\"id\":"_s, identifier, ",\"name\":\""_s, jsonEscape(name), "\",\"origin\":\""_s, jsonEscape(origin), "\",\"payload\":\""_s, jsonEscape(payload), "\"}"_s));
         return JSC::JSValue::encode(JSC::jsUndefined());
     });
     globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blHost"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));

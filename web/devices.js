@@ -162,7 +162,143 @@ export function onSensorStop(tab, data) {
 
 // Polyfills der Seite (engine/src/WebPlatformExtras.cpp) fragen APIs des
 // Host-Browsers. Die Engine laesst nur diese Namen durch.
+// File System Access: die Handles des Host bleiben hier, die Seite bekommt nur
+// eine zufaellige id. Jede id gilt nur fuer den Ursprung, der sie bekommen hat.
+const fsHandles = new Map(); // id -> { handle, origin }
+const fsWritables = new Map(); // id -> { writable, origin }
+const FS_MAX_FILE = 256 * 1024 * 1024;
+
+function fsError(name, message) {
+  return Object.assign(new Error(message), { name });
+}
+
+function fsInfo(handle, origin) {
+  const id = crypto.randomUUID();
+  fsHandles.set(id, { handle, origin });
+  return { id, name: handle.name, kind: handle.kind };
+}
+
+function fsHandle(id, origin, kind) {
+  const entry = fsHandles.get(id);
+  if (!entry || entry.origin !== origin || (kind && entry.handle.kind !== kind))
+    throw fsError('NotFoundError', 'Handle not found');
+  return entry.handle;
+}
+
+function fsPickerOptions(payload) {
+  const options = {};
+  for (const key of ['types', 'excludeAcceptAllOption', 'multiple', 'suggestedName', 'id', 'startIn', 'mode']) {
+    if (payload?.[key] !== undefined && payload[key] !== null)
+      options[key] = payload[key];
+  }
+  return options;
+}
+
+function fsNeed(name) {
+  if (typeof window[name] !== 'function')
+    throw fsError('NotSupportedError', name + ' not supported');
+}
+
+async function bytesToBase64(bytes) {
+  if (typeof bytes.toBase64 === 'function')
+    return bytes.toBase64();
+  const url = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(new Blob([bytes]));
+  });
+  return url.slice(url.indexOf(',') + 1);
+}
+
+function base64ToBytes(text) {
+  if (typeof Uint8Array.fromBase64 === 'function')
+    return Uint8Array.fromBase64(text);
+  return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+}
+
 const hostCalls = {
+  async 'fs-open'(payload, origin) {
+    fsNeed('showOpenFilePicker');
+    return (await window.showOpenFilePicker(fsPickerOptions(payload))).map((handle) => fsInfo(handle, origin));
+  },
+  async 'fs-save'(payload, origin) {
+    fsNeed('showSaveFilePicker');
+    return fsInfo(await window.showSaveFilePicker(fsPickerOptions(payload)), origin);
+  },
+  async 'fs-directory'(payload, origin) {
+    fsNeed('showDirectoryPicker');
+    return fsInfo(await window.showDirectoryPicker(fsPickerOptions(payload)), origin);
+  },
+  async 'fs-file'(payload, origin) {
+    const file = await fsHandle(payload?.id, origin, 'file').getFile();
+    if (file.size > FS_MAX_FILE)
+      throw fsError('NotReadableError', 'File too large');
+    return { name: file.name, type: file.type, lastModified: file.lastModified, data: await bytesToBase64(new Uint8Array(await file.arrayBuffer())) };
+  },
+  async 'fs-writable'(payload, origin) {
+    const writable = await fsHandle(payload?.id, origin, 'file').createWritable({ keepExistingData: !!payload?.keepExistingData });
+    const id = crypto.randomUUID();
+    fsWritables.set(id, { writable, origin });
+    return { id };
+  },
+  async 'fs-write'(payload, origin) {
+    const entry = fsWritables.get(payload?.id);
+    if (!entry || entry.origin !== origin)
+      throw fsError('InvalidStateError', 'Stream is closed');
+    const { writable } = entry;
+    switch (payload.op) {
+    case 'write': {
+      const data = base64ToBytes(payload.data || '');
+      await writable.write(payload.position == null ? data : { type: 'write', position: payload.position, data });
+      return null;
+    }
+    case 'seek':
+      await writable.seek(payload.position);
+      return null;
+    case 'truncate':
+      await writable.truncate(payload.size);
+      return null;
+    case 'close':
+      fsWritables.delete(payload.id);
+      await writable.close();
+      return null;
+    default:
+      fsWritables.delete(payload.id);
+      await writable.abort();
+      return null;
+    }
+  },
+  async 'fs-child'(payload, origin) {
+    const directory = fsHandle(payload?.id, origin, 'directory');
+    const options = { create: !!payload.create };
+    const handle = payload.kind === 'directory' ? await directory.getDirectoryHandle(payload.name, options) : await directory.getFileHandle(payload.name, options);
+    return fsInfo(handle, origin);
+  },
+  async 'fs-list'(payload, origin) {
+    const list = [];
+    for await (const handle of fsHandle(payload?.id, origin, 'directory').values())
+      list.push(fsInfo(handle, origin));
+    return list;
+  },
+  async 'fs-remove'(payload, origin) {
+    await fsHandle(payload?.id, origin, 'directory').removeEntry(payload.name, { recursive: !!payload.recursive });
+    return null;
+  },
+  async 'fs-resolve'(payload, origin) {
+    const other = payload?.other ? fsHandle(payload.other, origin) : null;
+    return other ? fsHandle(payload.id, origin, 'directory').resolve(other) : null;
+  },
+  async 'fs-same'(payload, origin) {
+    const other = payload?.other ? fsHandle(payload.other, origin) : null;
+    return other ? fsHandle(payload.id, origin).isSameEntry(other) : false;
+  },
+  async 'fs-permission'(payload, origin) {
+    const handle = fsHandle(payload?.id, origin);
+    const descriptor = { mode: payload.mode === 'readwrite' ? 'readwrite' : 'read' };
+    const method = payload.request ? handle.requestPermission : handle.queryPermission;
+    return typeof method === 'function' ? method.call(handle, descriptor) : 'granted';
+  },
   async eyedropper() {
     if (typeof EyeDropper !== 'function')
       throw Object.assign(new Error('EyeDropper not supported'), { name: 'NotSupportedError' });
@@ -199,7 +335,7 @@ export async function onHostCall(tab, data) {
   if (!handler)
     return send(false, { name: 'NotSupportedError', message: 'Not supported' });
   try {
-    send(true, await handler(JSON.parse(data.payload || 'null')));
+    send(true, await handler(JSON.parse(data.payload || 'null'), data.origin || ''));
   } catch (error) {
     send(false, { name: error?.name || 'NotSupportedError', message: error?.message || String(error) });
   }

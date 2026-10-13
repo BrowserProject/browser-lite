@@ -37,12 +37,14 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
   #geo { position: absolute; left: 20px; top: 200px; width: 200px; height: 40px; }
   #notify { position: absolute; left: 260px; top: 200px; width: 200px; height: 40px; }
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
+  #files { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
 </style></head><body>
 <p id="text">Dieser Satz soll mit der Maus markiert werden koennen.</p>
 <div id="tap">Antippen</div>
 <button id="geo">Standort</button>
 <button id="notify">Benachrichtigung</button>
 <button id="speech">Sprechen</button>
+<button id="files">Dateien</button>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -86,6 +88,27 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     recognition.onerror = (e) => result('speecherror', e.error);
     recognition.onend = () => result('speechend', events.join('+'));
     recognition.start();
+  });
+  // File System Access ueber den Host (im Test Attrappen im Host)
+  document.getElementById('files').addEventListener('click', async () => {
+    try {
+      const [handle] = await showOpenFilePicker({ types: [{ description: 'Text', accept: { 'text/plain': ['.txt'] } }] });
+      const file = await handle.getFile();
+      result('fsopen', handle.kind + ':' + handle.name + ':' + (await file.text()).replace(/ /g, '_') + ':' + (handle instanceof FileSystemFileHandle));
+      const save = await showSaveFilePicker({ suggestedName: 'ergebnis.txt' });
+      const writable = await save.createWritable();
+      await writable.write('Gespeichert ');
+      await writable.write(new TextEncoder().encode('aus der Seite'));
+      await writable.close();
+      const directory = await showDirectoryPicker();
+      const names = [];
+      for await (const [name, entry] of directory.entries())
+        names.push(name + '/' + entry.kind);
+      const created = await directory.getFileHandle('neu.txt', { create: true });
+      result('fsdir', names.sort().join(',') + ':' + created.name + ':' + (directory instanceof FileSystemDirectoryHandle));
+    } catch (e) {
+      result('fserror', e.name + ':' + e.message);
+    }
   });
   document.getElementById('notify').addEventListener('click', async () => {
     const permission = await Notification.requestPermission();
@@ -167,6 +190,44 @@ await context.addInitScript(() => {
     abort() {}
   }
   window.SpeechRecognition = window.webkitSpeechRecognition = FakeRecognition;
+
+  // File System Access des Host als Attrappe (Dateien im Speicher)
+  const files = new Map([['notiz.txt', 'Hallo Datei'], ['bild.png', 'png']]);
+  window.__fakeFiles = files;
+  class FakeFile {
+    constructor(name) { this.kind = 'file'; this.name = name; }
+    async getFile() { return new File([files.get(this.name) ?? ''], this.name, { type: 'text/plain', lastModified: 1000 }); }
+    async createWritable() {
+      const name = this.name;
+      const parts = [];
+      return {
+        async write(data) { parts.push(typeof data === 'string' ? data : new TextDecoder().decode(data.data ?? data)); },
+        async seek() {},
+        async truncate() {},
+        async close() { files.set(name, parts.join('')); },
+        async abort() {},
+      };
+    }
+    async isSameEntry(other) { return other.name === this.name; }
+    async queryPermission() { return 'granted'; }
+    async requestPermission() { return 'granted'; }
+  }
+  class FakeDirectory {
+    constructor() { this.kind = 'directory'; this.name = 'ordner'; }
+    async getFileHandle(name, options = {}) {
+      if (!files.has(name) && !options.create)
+        throw new DOMException('Not found', 'NotFoundError');
+      if (!files.has(name))
+        files.set(name, '');
+      return new FakeFile(name);
+    }
+    async *values() { for (const name of [...files.keys()]) yield new FakeFile(name); }
+    async removeEntry(name) { files.delete(name); }
+    async queryPermission() { return 'granted'; }
+  }
+  window.showOpenFilePicker = async () => [new FakeFile('notiz.txt')];
+  window.showSaveFilePicker = async (options) => new FakeFile(options?.suggestedName || 'neu.txt');
+  window.showDirectoryPicker = async () => new FakeDirectory();
 });
 const page = await context.newPage();
 const results = new Map();
@@ -272,7 +333,13 @@ check('Spracherkennung: Ergebnis kommt an', (await result('speechresult', 15000)
 check('Spracherkennung: start/audio/end', (await result('speechend', 15000)) === 'start+audio', results.get('speechend'));
 check('Spracherkennung: Sprache an den Host', (await page.evaluate(() => window.__speechLang)) === 'de-CH');
 
-// 8) Lage und Bewegung: die Oberflaeche reicht die Events des Hosts weiter,
+// 8) File System Access: Datei oeffnen, speichern, Ordner lesen (ueber den Host)
+await page.mouse.click(...await at(840, 220));
+check('showOpenFilePicker + getFile', (await result('fsopen', 15000)) === 'file:notiz.txt:Hallo_Datei:true', results.get('fsopen') || results.get('fserror'));
+check('showDirectoryPicker + entries + getFileHandle(create)', (await result('fsdir', 15000)) === 'bild.png/file,ergebnis.txt/file,notiz.txt/file:neu.txt:true', results.get('fsdir') || results.get('fserror'));
+check('showSaveFilePicker + createWritable schreibt beim Host', (await page.evaluate(() => window.__fakeFiles.get('ergebnis.txt'))) === 'Gespeichert aus der Seite');
+
+// 9) Lage und Bewegung: die Oberflaeche reicht die Events des Hosts weiter,
 // solange die Seite zuhoert (der Zuhoerer im Host kommt mit etwas Verzoegerung)
 for (let i = 0; i < 30 && !(results.has('orient') && results.has('motion')); i++) {
   await page.evaluate(() => {
