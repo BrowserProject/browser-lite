@@ -29,6 +29,14 @@
 #include <WebCore/Page.h>
 #include <WebCore/ScriptExecutionContext.h>
 #include <WebCore/SecurityOrigin.h>
+#include <WebCore/SpeechRecognitionConnection.h>
+#include <WebCore/SpeechRecognitionConnectionClient.h>
+#include <WebCore/SpeechRecognitionError.h>
+#include <WebCore/SpeechRecognitionProvider.h>
+#include <WebCore/SpeechRecognitionResultData.h>
+#include <WebCore/ClientOrigin.h>
+#include <wtf/JSONValues.h>
+#include <wtf/WeakPtr.h>
 #include <cmath>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
@@ -421,6 +429,164 @@ void notificationEvent(const String& notificationID, int type)
             notification->dispatchErrorEvent();
         }
     });
+}
+
+// ------------------------------------------------------------ Spracherkennung
+// webkitSpeechRecognition: die Oberflaeche erkennt mit SpeechRecognition des
+// Host-Browsers und meldet die Ereignisse zurueck (bl_speech_recognition_event).
+// Wie Chrome fragen wir pro Ursprung nach dem Mikrofon.
+
+static HashMap<uint64_t, WeakPtr<SpeechRecognitionConnectionClient>>& recognitionClients()
+{
+    static NeverDestroyed<HashMap<uint64_t, WeakPtr<SpeechRecognitionConnectionClient>>> map;
+    return map;
+}
+
+class SpeechRecognitionConnectionWasm final : public SpeechRecognitionConnection {
+public:
+    static Ref<SpeechRecognitionConnectionWasm> create(int viewId) { return adoptRef(*new SpeechRecognitionConnectionWasm(viewId)); }
+
+private:
+    explicit SpeechRecognitionConnectionWasm(int viewId)
+        : m_viewId(viewId)
+    {
+    }
+
+    void registerClient(SpeechRecognitionConnectionClient& client) final
+    {
+        recognitionClients().set(client.identifier().toUInt64(), client);
+    }
+
+    void unregisterClient(SpeechRecognitionConnectionClient& client) final
+    {
+        auto id = client.identifier().toUInt64();
+        if (recognitionClients().remove(id))
+            notifyHost(m_viewId, "speech-recognition", makeString("{\"id\":"_s, id, ",\"action\":\"abort\"}"_s));
+    }
+
+    void start(SpeechRecognitionConnectionClientIdentifier identifier, const String& lang, bool continuous, bool interimResults, uint64_t maxAlternatives, ClientOrigin&& clientOrigin, FrameIdentifier) final
+    {
+        auto id = identifier.toUInt64();
+        auto origin = clientOrigin.clientOrigin.toString();
+        requestPermission(m_viewId, "microphone"_s, origin, [viewId = m_viewId, id, lang = lang.isolatedCopy(), continuous, interimResults, maxAlternatives](bool granted) {
+            RefPtr client = recognitionClients().get(id);
+            if (!client)
+                return;
+            if (!granted) {
+                client->didError({ SpeechRecognitionErrorType::NotAllowed, "Permission is denied"_s });
+                return;
+            }
+            notifyHost(viewId, "speech-recognition", makeString("{\"id\":"_s, id, ",\"action\":\"start\",\"lang\":\""_s, jsonEscape(lang),
+                "\",\"continuous\":"_s, continuous ? "true"_s : "false"_s, ",\"interimResults\":"_s, interimResults ? "true"_s : "false"_s,
+                ",\"maxAlternatives\":"_s, maxAlternatives, '}'));
+        });
+    }
+
+    void stop(SpeechRecognitionConnectionClientIdentifier identifier) final
+    {
+        notifyHost(m_viewId, "speech-recognition", makeString("{\"id\":"_s, identifier.toUInt64(), ",\"action\":\"stop\"}"_s));
+    }
+
+    void abort(SpeechRecognitionConnectionClientIdentifier identifier) final
+    {
+        notifyHost(m_viewId, "speech-recognition", makeString("{\"id\":"_s, identifier.toUInt64(), ",\"action\":\"abort\"}"_s));
+    }
+
+    void didReceiveUpdate(SpeechRecognitionUpdate&&) final { }
+
+    const int m_viewId;
+};
+
+class SpeechRecognitionProviderWasm final : public SpeechRecognitionProvider {
+public:
+    explicit SpeechRecognitionProviderWasm(int viewId)
+        : m_connection(SpeechRecognitionConnectionWasm::create(viewId))
+    {
+    }
+
+private:
+    SpeechRecognitionConnection& speechRecognitionConnection() final { return m_connection; }
+
+    const Ref<SpeechRecognitionConnectionWasm> m_connection;
+};
+
+UniqueRef<SpeechRecognitionProvider> createSpeechRecognitionProvider(int viewId)
+{
+    return makeUniqueRef<SpeechRecognitionProviderWasm>(viewId);
+}
+
+void speechRecognitionEvent(uint64_t id, int type, const String& json)
+{
+    RefPtr client = recognitionClients().get(id);
+    if (!client)
+        return;
+    switch (type) {
+    case 0:
+        client->didStart();
+        break;
+    case 1:
+        client->didStartCapturingAudio();
+        break;
+    case 2:
+        client->didStartCapturingSound();
+        break;
+    case 3:
+        client->didStartCapturingSpeech();
+        break;
+    case 4:
+        client->didStopCapturingSpeech();
+        break;
+    case 5:
+        client->didStopCapturingSound();
+        break;
+    case 6:
+        client->didStopCapturingAudio();
+        break;
+    case 7: {
+        // [{"final":true,"alternatives":[["Text",0.9],...]},...]
+        auto value = JSON::Value::parseJSON(json);
+        auto array = value ? value->asArray() : nullptr;
+        if (!array)
+            break;
+        Vector<SpeechRecognitionResultData> results;
+        for (auto& item : *array) {
+            auto object = item->asObject();
+            if (!object)
+                continue;
+            SpeechRecognitionResultData result;
+            result.isFinal = object->getBoolean("final"_s).value_or(false);
+            if (auto alternatives = object->getArray("alternatives"_s)) {
+                for (auto& alternative : *alternatives) {
+                    auto pair = alternative->asArray();
+                    if (!pair || pair->length() < 2)
+                        continue;
+                    result.alternatives.append({ pair->get(0)->asString(), pair->get(1)->asDouble().value_or(0) });
+                }
+            }
+            results.append(WTF::move(result));
+        }
+        client->didReceiveResult(WTF::move(results));
+        break;
+    }
+    case 8:
+        client->didFindNoMatch();
+        break;
+    case 9: {
+        // {"error":2,"message":"..."} mit error als Index in SpeechRecognitionErrorType
+        auto value = JSON::Value::parseJSON(json);
+        auto object = value ? value->asObject() : nullptr;
+        int error = object ? object->getInteger("error"_s).value_or(0) : 0;
+        if (error < 0 || error > static_cast<int>(SpeechRecognitionErrorType::LanguageNotSupported))
+            error = static_cast<int>(SpeechRecognitionErrorType::Network);
+        client->didError({ static_cast<SpeechRecognitionErrorType>(error), object ? object->getString("message"_s) : String { } });
+        break;
+    }
+    case 10:
+        client->didEnd();
+        break;
+    default:
+        break;
+    }
 }
 
 // ------------------------------------------------------------

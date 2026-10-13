@@ -391,6 +391,11 @@ EMSCRIPTEN_KEEPALIVE void bl_speech_event(double id, int type, int charIndex, in
     runOnEngineThread([=] { speechEvent(static_cast<uint64_t>(id), type, charIndex, charLength); });
 }
 
+EMSCRIPTEN_KEEPALIVE void bl_speech_recognition_event(double id, int type, char* json)
+{
+    runOnEngineThread([id, type, json = takeString(json)] { speechRecognitionEvent(static_cast<uint64_t>(id), type, json); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent)
 {
     runOnEngineThread([userAgent = takeString(userAgent)] {

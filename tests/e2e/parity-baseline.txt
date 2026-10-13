@@ -199,6 +199,7 @@ media:audio-worklet
 media:av1
 media:media-session
 media:mse
+media:speech-recognition
 media:speech-synthesis
 media:video
 media:video-frame-callback

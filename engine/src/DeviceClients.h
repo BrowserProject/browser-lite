@@ -5,9 +5,11 @@
 #pragma once
 
 #include <wtf/Forward.h>
+#include <wtf/UniqueRef.h>
 
 namespace WebCore {
 class Page;
+class SpeechRecognitionProvider;
 }
 
 namespace BrowserLite {
@@ -32,5 +34,10 @@ void deviceOrientation(int viewId, double alpha, double beta, double gamma, bool
 void deviceMotion(int viewId, const double* values, double interval);
 // type: 0 = gezeigt, 1 = angeklickt, 2 = geschlossen, 3 = Fehler
 void notificationEvent(const String& notificationID, int type);
+// Spracherkennung: Provider fuer die PageConfiguration, Ereignisse vom Host
+// (type: 0 start, 1-6 Audio/Ton/Sprache an und aus, 7 Ergebnis, 8 nichts
+// erkannt, 9 Fehler, 10 Ende)
+UniqueRef<WebCore::SpeechRecognitionProvider> createSpeechRecognitionProvider(int viewId);
+void speechRecognitionEvent(uint64_t id, int type, const String& json);
 
 } // namespace BrowserLite

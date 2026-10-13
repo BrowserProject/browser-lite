@@ -9,6 +9,7 @@ const PERMISSIONS_KEY = 'bl-permissions';
 const KIND_TEXT = {
   geolocation: 'möchte deinen Standort verwenden',
   notifications: 'möchte Benachrichtigungen anzeigen',
+  microphone: 'möchte dein Mikrofon verwenden',
 };
 
 function loadDecisions() {
@@ -325,6 +326,72 @@ export function onSpeechCommand(data) {
     speechSynthesis.resume();
   else
     speechSynthesis.cancel();
+}
+
+// ------------------------------------------------------- Spracherkennung
+// Die Engine (DeviceClients.cpp) hat schon nach dem Mikrofon gefragt. Wir
+// erkennen mit SpeechRecognition des Host und melden alles zurueck.
+
+const RECOGNITION_ERRORS = ['no-speech', 'aborted', 'audio-capture', 'network', 'not-allowed', 'service-not-allowed', 'bad-grammar', 'language-not-supported'];
+const recognitions = new Map(); // id -> SpeechRecognition des Host
+
+export function onSpeechRecognition(tab, data) {
+  const send = (type, payload = '') => api.engine()._bl_speech_recognition_event(data.id, type, api.toUTF8(payload));
+  const running = recognitions.get(data.id);
+  if (data.action !== 'start') {
+    if (running) {
+      if (data.action === 'stop')
+        running.stop();
+      else
+        running.abort();
+    }
+    return;
+  }
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    send(9, JSON.stringify({ error: RECOGNITION_ERRORS.indexOf('service-not-allowed'), message: 'Spracherkennung gibt es hier nicht' }));
+    send(10);
+    return;
+  }
+  running?.abort();
+  const recognition = new Recognition();
+  if (data.lang)
+    recognition.lang = data.lang;
+  recognition.continuous = !!data.continuous;
+  recognition.interimResults = !!data.interimResults;
+  recognition.maxAlternatives = Math.max(1, data.maxAlternatives || 1);
+  const events = ['start', 'audiostart', 'soundstart', 'speechstart', 'speechend', 'soundend', 'audioend'];
+  events.forEach((name, type) => recognition.addEventListener(name, () => send(type)));
+  recognition.addEventListener('result', (e) => {
+    // Nur die geaenderten Ergebnisse, WebCore haengt sie an die fertigen an
+    const results = [];
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const result = e.results[i];
+      const alternatives = [];
+      for (let j = 0; j < result.length; j++)
+        alternatives.push([result[j].transcript, result[j].confidence]);
+      results.push({ final: result.isFinal, alternatives });
+    }
+    send(7, JSON.stringify(results));
+  });
+  recognition.addEventListener('nomatch', () => send(8));
+  recognition.addEventListener('error', (e) => {
+    const index = RECOGNITION_ERRORS.indexOf(e.error);
+    send(9, JSON.stringify({ error: index < 0 ? 3 : index, message: e.message || '' }));
+  });
+  recognition.addEventListener('end', () => {
+    if (recognitions.get(data.id) === recognition)
+      recognitions.delete(data.id);
+    send(10);
+  });
+  recognitions.set(data.id, recognition);
+  try {
+    recognition.start();
+  } catch (e) {
+    recognitions.delete(data.id);
+    send(9, JSON.stringify({ error: 2, message: String(e.message || e) }));
+    send(10);
+  }
 }
 
 // ------------------------------------------------------- Touch

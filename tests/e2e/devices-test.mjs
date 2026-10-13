@@ -36,11 +36,13 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
   #tap { position: absolute; left: 20px; top: 100px; width: 200px; height: 60px; background: #9cf; }
   #geo { position: absolute; left: 20px; top: 200px; width: 200px; height: 40px; }
   #notify { position: absolute; left: 260px; top: 200px; width: 200px; height: 40px; }
+  #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
 </style></head><body>
 <p id="text">Dieser Satz soll mit der Maus markiert werden koennen.</p>
 <div id="tap">Antippen</div>
 <button id="geo">Standort</button>
 <button id="notify">Benachrichtigung</button>
+<button id="speech">Sprechen</button>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -70,6 +72,20 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     navigator.geolocation.getCurrentPosition(
       (p) => result('geo', p.coords.latitude.toFixed(2) + ',' + p.coords.longitude.toFixed(2)),
       (e) => result('geo', 'fehler' + e.code));
+  });
+  // Spracherkennung ueber den Host (im Test eine Attrappe im Host)
+  document.getElementById('speech').addEventListener('click', () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new Recognition();
+    recognition.lang = 'de-CH';
+    recognition.interimResults = true;
+    const events = [];
+    recognition.onstart = () => events.push('start');
+    recognition.onaudiostart = () => events.push('audio');
+    recognition.onresult = (e) => result('speechresult', e.results[e.resultIndex][0].transcript.replace(/ /g, '_') + ':' + e.results[e.resultIndex].isFinal + ':' + e.results[e.resultIndex][0].confidence.toFixed(1));
+    recognition.onerror = (e) => result('speecherror', e.error);
+    recognition.onend = () => result('speechend', events.join('+'));
+    recognition.start();
   });
   document.getElementById('notify').addEventListener('click', async () => {
     const permission = await Notification.requestPermission();
@@ -131,6 +147,27 @@ const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), en
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 // Touchscreen wie ein Chromebook, Standort Bern
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, hasTouch: true, geolocation: { latitude: 46.948, longitude: 7.447 }, permissions: ['geolocation', 'notifications'] });
+// Spracherkennung des Host als Attrappe (headless hat kein Mikrofon)
+await context.addInitScript(() => {
+  class FakeRecognition extends EventTarget {
+    start() {
+      window.__speechLang = this.lang;
+      setTimeout(() => {
+        this.dispatchEvent(new Event('start'));
+        this.dispatchEvent(new Event('audiostart'));
+        const event = new Event('result');
+        event.resultIndex = 0;
+        event.results = [Object.assign([{ transcript: 'hallo welt', confidence: 0.9 }], { isFinal: true })];
+        this.dispatchEvent(event);
+        this.dispatchEvent(new Event('audioend'));
+        this.dispatchEvent(new Event('end'));
+      }, 50);
+    }
+    stop() {}
+    abort() {}
+  }
+  window.SpeechRecognition = window.webkitSpeechRecognition = FakeRecognition;
+});
 const page = await context.newPage();
 const results = new Map();
 page.on('console', (msg) => {
@@ -225,7 +262,17 @@ if (notifyPrompt)
 check('Benachrichtigungen erlaubt', notifyPrompt && (await result('notifypermission', 15000)) === 'granted' && (await result('notifystate')) === 'granted',
   `${results.get('notifypermission')} / ${results.get('notifystate')}`);
 
-// 7) Lage und Bewegung: die Oberflaeche reicht die Events des Hosts weiter,
+// 7) Spracherkennung: Abfrage fuer das Mikrofon, dann Ergebnis vom Host
+await page.mouse.click(...await at(600, 220));
+const speechPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
+check('Spracherkennung: Abfrage fuer das Mikrofon', speechPrompt && /Mikrofon/.test(await prompt.textContent()));
+if (speechPrompt)
+  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+check('Spracherkennung: Ergebnis kommt an', (await result('speechresult', 15000)) === 'hallo_welt:true:0.9', results.get('speechresult') || results.get('speecherror'));
+check('Spracherkennung: start/audio/end', (await result('speechend', 15000)) === 'start+audio', results.get('speechend'));
+check('Spracherkennung: Sprache an den Host', (await page.evaluate(() => window.__speechLang)) === 'de-CH');
+
+// 8) Lage und Bewegung: die Oberflaeche reicht die Events des Hosts weiter,
 // solange die Seite zuhoert (der Zuhoerer im Host kommt mit etwas Verzoegerung)
 for (let i = 0; i < 30 && !(results.has('orient') && results.has('motion')); i++) {
   await page.evaluate(() => {

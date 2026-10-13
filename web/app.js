@@ -7,7 +7,7 @@
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
-import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, attachTouch } from './devices.js';
+import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
@@ -500,6 +500,9 @@ function onEngineEvent(viewId, type, payload) {
     return;
   case 'speech-command':
     onSpeechCommand(data);
+    return;
+  case 'speech-recognition':
+    onSpeechRecognition(tab, data);
     return;
   case 'notification-close':
     onNotificationClose(data);

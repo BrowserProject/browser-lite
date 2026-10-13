@@ -49,6 +49,7 @@
 #include <WebCore/Page.h>
 #include <WebCore/CacheStorageProvider.h>
 #include <WebCore/PageConfiguration.h>
+#include <WebCore/SpeechRecognitionProvider.h>
 #include <WebCore/ScreenOrientationManager.h>
 #include <WebCore/StorageProvider.h>
 #include <WebCore/UserContentProvider.h>
@@ -145,6 +146,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
     configuration.editorClient = makeUniqueRef<EditorClient>();
+    configuration.speechRecognitionProvider = createSpeechRecognitionProvider(m_id);
     configuration.backForwardClient = BackForwardList::create();
     configuration.progressTrackerClient = makeUniqueRef<ProgressTrackerClient>(*this);
     configuration.cookieJar = CookieJar::create(SessionProvider::create());
@@ -222,6 +224,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCacheAPIEnabled(true);
     ServiceWorkers::enableIn(settings);
     WebCodecs::enableIn(settings);
+    settings.setSpeechRecognitionEnabled(true);
     // Origin Private File System (FileSystemStorageWasm.cpp)
     settings.setFileSystemEnabled(true);
     settings.setFileSystemWritableStreamEnabled(true);

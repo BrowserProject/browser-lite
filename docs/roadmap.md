@@ -233,6 +233,8 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   Host-Browsers, `VideoFrame` aus Canvas, Bild, Video und Rohdaten (I420, NV12, RGBA, ...),
   `AudioData` in allen Formaten. Test: `tests/e2e/webcodecs-test.mjs`. Offen: `ImageDecoder`
   (hat WebKit nicht), Bilder direkt als Textur statt ueber den Speicher
+- [x] Spracherkennung (`webkitSpeechRecognition`) ueber den Host-Browser, mit Mikrofon-Abfrage
+  (Test in `devices-test.mjs`)
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).
