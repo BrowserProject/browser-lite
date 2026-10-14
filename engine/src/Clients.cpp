@@ -20,6 +20,10 @@
 #include <WebCore/ScrollingCoordinator.h>
 #include <WebCore/Chrome.h>
 #include <WebCore/Cursor.h>
+#include <WebCore/DataTransfer.h>
+#include <WebCore/DragItem.h>
+#include <WebCore/Pasteboard.h>
+#include <WebCore/WasmPlatform.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentPage.h>
@@ -545,6 +549,18 @@ void ProgressTrackerClient::progressEstimateChanged(LocalFrame& frame)
 void ProgressTrackerClient::progressFinished(LocalFrame&)
 {
     m_view->didChangeProgress(1.0);
+}
+
+DragClient::DragClient(WebView& view)
+    : m_view(view)
+{
+}
+
+void DragClient::startDrag(DragItem, DataTransfer& dataTransfer, Frame&, const std::optional<NodeIdentifier>&)
+{
+    // Das Pasteboard des Ziehens schreibt in einen DragContent (DragWasm.cpp)
+    RefPtr content = WasmPlatform::dragContent(dataTransfer.pasteboard());
+    m_view->startPageDrag(content ? content.releaseNonNull() : WasmPlatform::DragContent::create(), dataTransfer.sourceOperationMask());
 }
 
 } // namespace BrowserLite

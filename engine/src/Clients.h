@@ -3,6 +3,7 @@
 // echter Browser braucht.
 #pragma once
 
+#include <WebCore/DragClient.h>
 #include <WebCore/EmptyClients.h>
 #include <WebCore/EmptyFrameLoaderClient.h>
 #include <WebCore/ProgressTrackerClient.h>
@@ -123,6 +124,22 @@ private:
     void progressStarted(WebCore::LocalFrame&) final;
     void progressEstimateChanged(WebCore::LocalFrame&) final;
     void progressFinished(WebCore::LocalFrame&) final;
+
+    WeakRef<WebView> m_view;
+};
+
+// Drag & Drop aus der Seite (draggable, markierter Text, Links, Bilder). Ein
+// echtes System-Ziehen gibt es im Canvas nicht: die WebView spielt es selber
+// mit den folgenden Mausbewegungen durch (WebView::startPageDrag).
+class DragClient final : public WebCore::DragClient {
+public:
+    explicit DragClient(WebView&);
+
+private:
+    void willPerformDragDestinationAction(WebCore::DragDestinationAction, const WebCore::DragData&) final { }
+    void willPerformDragSourceAction(WebCore::DragSourceAction, const WebCore::IntPoint&, WebCore::DataTransfer&) final { }
+    OptionSet<WebCore::DragSourceAction> dragSourceActionMaskForPoint(const WebCore::IntPoint&) final { return WebCore::anyDragSourceAction(); }
+    void startDrag(WebCore::DragItem, WebCore::DataTransfer&, WebCore::Frame&, const std::optional<WebCore::NodeIdentifier>&) final;
 
     WeakRef<WebView> m_view;
 };

@@ -20,8 +20,22 @@ index 74d2b4514b..450a496b6e 100644
      RefPtr<AccessibilityObjectWrapper> m_wrapper;
  #elif USE(ATSPI)
      RefPtr<AccessibilityObjectAtspi> m_wrapper;
+diff --git a/Source/WebCore/dom/DataTransfer.cpp b/Source/WebCore/dom/DataTransfer.cpp
+index 2cc4626d71..150bfabf59 100644
+--- a/Source/WebCore/dom/DataTransfer.cpp
++++ b/Source/WebCore/dom/DataTransfer.cpp
+@@ -264,7 +264,8 @@ bool DataTransfer::shouldSuppressGetAndSetDataToAvoidExposingFilePaths() const
+ 
+ bool DataTransfer::allowsFileAccess() const
+ {
+-#if PLATFORM(COCOA)
++#if PLATFORM(COCOA) || PLATFORM(WASM)
++    // browser-lite: abgelegte Dateien sind Kopien im Dateisystem der Engine
+     return !forDrag() || forFileDrag();
+ #elif PLATFORM(GTK) || PLATFORM(WPE)
+     // File drag access is disabled until https://webkit.org/b/271957 is resolved for GTK/WPE ports.
 diff --git a/Source/WebCore/editing/libwpe/EditorLibWPE.cpp b/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
-index d0a3d5c048..6e70d35e2d 100644
+index d0a3d5c048..ba474625a1 100644
 --- a/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
 +++ b/Source/WebCore/editing/libwpe/EditorLibWPE.cpp
 @@ -26,7 +26,7 @@
@@ -33,7 +47,45 @@ index d0a3d5c048..6e70d35e2d 100644
  
  #include "DocumentFragment.h"
  #include "FrameDestructionObserverInlines.h"
-@@ -102,4 +102,4 @@ void Editor::platformPasteFont()
+@@ -55,7 +55,8 @@ static RefPtr<DocumentFragment> createFragmentFromPasteboardData(Pasteboard& pas
+     if (!allowPlainText)
+         return nullptr;
+ 
+-    if (types.contains("text/plain;charset=utf-8"_s)) {
++    // Drag & Drop (Pasteboard mit DragContent) meldet "text/plain"
++    if (types.contains("text/plain;charset=utf-8"_s) || types.contains("text/plain"_s)) {
+         chosePlainText = true;
+         return createFragmentFromText(range, pasteboard.readString("text/plain;charset=utf-8"_s));
+     }
+@@ -71,11 +72,25 @@ void Editor::writeSelectionToPasteboard(Pasteboard& pasteboard)
+     pasteboard.write(pasteboardContent);
+ }
+ 
+-void Editor::writeImageToPasteboard(Pasteboard&, Element&, const URL&, const String&)
++void Editor::writeImageToPasteboard(Pasteboard& pasteboard, Element&, const URL& url, const String& title)
+ {
+-    notImplemented();
++    // Nur die URL (Bild ziehen); die Zwischenablage nimmt keine Bilder
++    PasteboardImage image;
++    image.url.url = url;
++    image.url.title = title;
++    pasteboard.write(image);
+ }
+ 
++#if ENABLE(DRAG_SUPPORT)
++RefPtr<DocumentFragment> Editor::webContentFromPasteboard(Pasteboard& pasteboard, const SimpleRange& context, bool allowPlainText, bool& chosePlainText)
++{
++    RefPtr frame = document().frame();
++    if (!frame)
++        return nullptr;
++    return createFragmentFromPasteboardData(pasteboard, *frame, context, allowPlainText, chosePlainText);
++}
++#endif
++
+ void Editor::pasteWithPasteboard(Pasteboard* pasteboard, OptionSet<PasteOption> options)
+ {
+     auto range = selectedRange();
+@@ -102,4 +117,4 @@ void Editor::platformPasteFont()
  
  } // namespace WebCore
  
@@ -52,6 +104,19 @@ index 3faf7a53b6..78968b2178 100644
      virtual void postAccessibilityNotification(AccessibilityObject&, AXNotification) = 0;
      virtual void postAccessibilityNodeTextChangeNotification(AccessibilityObject*, AXTextChange, unsigned, const String&) = 0;
      virtual void postAccessibilityFrameLoadingEventNotification(AccessibilityObject*, AXLoadingEvent) = 0;
+diff --git a/Source/WebCore/platform/DragImage.cpp b/Source/WebCore/platform/DragImage.cpp
+index 6d9f05afed..bca26cf4d8 100644
+--- a/Source/WebCore/platform/DragImage.cpp
++++ b/Source/WebCore/platform/DragImage.cpp
+@@ -272,7 +272,7 @@ DragImage::~DragImage()
+         deleteDragImage(m_dragImageRef);
+ }
+ 
+-#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN) && !(PLATFORM(WPE) && ENABLE(DRAG_SUPPORT))
++#if !PLATFORM(COCOA) && !PLATFORM(GTK) && !PLATFORM(WIN) && !(PLATFORM(WPE) && ENABLE(DRAG_SUPPORT)) && !(PLATFORM(WASM) && ENABLE(DRAG_SUPPORT))
+ 
+ IntSize dragImageSize(DragImageRef)
+ {
 diff --git a/Source/WebCore/platform/Pasteboard.h b/Source/WebCore/platform/Pasteboard.h
 index de2f5bf37b..d6406bea2b 100644
 --- a/Source/WebCore/platform/Pasteboard.h
@@ -187,19 +252,194 @@ index c33e4efbe5..5de0bc09ed 100644
  namespace WebCore {
  
 diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
-index 19c4683b7f..f4beb6ec1c 100644
+index 19c4683b7f..0e47f99ee4 100644
 --- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
 +++ b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
-@@ -26,7 +26,7 @@
+@@ -26,14 +26,26 @@
  #include "config.h"
  #include "Pasteboard.h"
  
 -#if USE(LIBWPE)
++#if PLATFORM(WASM)
++#include "WasmPlatform.h"
++#endif
++
 +#if USE(LIBWPE) || PLATFORM(WASM)
  
  #include "NotImplemented.h"
  #include "PasteboardStrategy.h"
-@@ -162,4 +162,4 @@ void Pasteboard::write(const Color&)
+ #include "PlatformStrategies.h"
++#include <wtf/text/MakeString.h>
+ 
+ namespace WebCore {
+ 
++#if PLATFORM(WASM)
++// Drag & Drop: eigener Inhalt statt Zwischenablage (platform/wasm/DragWasm.cpp)
++#define DRAG_CONTENT(name) auto* name = WasmPlatform::dragContent(*this)
++#else
++#define DRAG_CONTENT(name) WasmPlatform::DragContent* name = nullptr
++#endif
++
+ std::unique_ptr<Pasteboard> Pasteboard::createForCopyAndPaste(std::unique_ptr<PasteboardContext>&& context)
+ {
+     return makeUnique<Pasteboard>(WTF::move(context));
+@@ -46,6 +58,8 @@ Pasteboard::Pasteboard(std::unique_ptr<PasteboardContext>&& context)
+ 
+ bool Pasteboard::hasData()
+ {
++    if (DRAG_CONTENT(drag))
++        return !drag->isEmpty();
+     // FIXME: Getting the list of types for this is wasteful. Do this in the UI process.
+     Vector<String> types;
+     platformStrategies()->pasteboardStrategy()->getTypes(types);
+@@ -60,6 +74,12 @@ Vector<String> Pasteboard::typesSafeForBindings(const String&)
+ 
+ Vector<String> Pasteboard::typesForLegacyUnsafeBindings()
+ {
++    if (DRAG_CONTENT(drag)) {
++        Vector<String> types;
++        for (auto& item : drag->strings)
++            types.append(item.first);
++        return types;
++    }
+     Vector<String> types;
+     platformStrategies()->pasteboardStrategy()->getTypes(types);
+     return types;
+@@ -73,6 +93,16 @@ String Pasteboard::readOrigin()
+ 
+ String Pasteboard::readString(const String& type)
+ {
++    if (DRAG_CONTENT(drag)) {
++        // getData("text") und getData("url") wie in Chrome
++        if (equalLettersIgnoringASCIICase(type, "text"_s))
++            return drag->string("text/plain"_s);
++        if (equalLettersIgnoringASCIICase(type, "url"_s))
++            return drag->string("text/uri-list"_s).left(drag->string("text/uri-list"_s).find('\n'));
++        // EditorLibWPE fragt nach "text/plain;charset=utf-8"
++        auto separator = type.find(';');
++        return drag->string(separator == notFound ? type : type.left(separator));
++    }
+     return platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, type, name(), context());
+ }
+ 
+@@ -84,19 +114,37 @@ String Pasteboard::readStringInCustomData(const String&)
+ 
+ void Pasteboard::writeString(const String& type, const String& text)
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->setString(type, text);
++        return;
++    }
+     platformStrategies()->pasteboardStrategy()->writeToPasteboard(type, text);
+ }
+ 
+ void Pasteboard::clear()
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->strings.clear();
++        return;
++    }
+ }
+ 
+-void Pasteboard::clear(const String&)
++void Pasteboard::clear(const String& type)
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->strings.removeFirstMatching([&](auto& item) {
++            return equalIgnoringASCIICase(item.first, type);
++        });
++        return;
++    }
+ }
+ 
+ void Pasteboard::read(PasteboardPlainText& text, PlainTextURLReadingPolicy, std::optional<size_t>)
+ {
++    if (DRAG_CONTENT(drag)) {
++        text.text = drag->string("text/plain"_s);
++        return;
++    }
+     text.text = platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain;charset=utf-8"_s, name(), context());
+ }
+ 
+@@ -105,12 +153,24 @@ void Pasteboard::read(PasteboardWebContentReader&, WebContentReadingPolicy, std:
+     notImplemented();
+ }
+ 
+-void Pasteboard::read(PasteboardFileReader&, std::optional<size_t>)
++void Pasteboard::read(PasteboardFileReader& reader, std::optional<size_t>)
+ {
++    if (DRAG_CONTENT(drag)) {
++        for (auto& path : drag->files)
++            reader.readFilename(path);
++        return;
++    }
+ }
+ 
+ void Pasteboard::write(const PasteboardURL& url)
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->setString("text/uri-list"_s, url.url.string());
++        drag->setString("text/plain"_s, url.url.string());
++        if (!url.title.isEmpty())
++            drag->setString("text/x-moz-url-desc"_s, url.title);
++        return;
++    }
+     platformStrategies()->pasteboardStrategy()->writeToPasteboard("text/plain;charset=utf-8"_s, url.url.string());
+ }
+ 
+@@ -119,8 +179,16 @@ void Pasteboard::writeTrustworthyWebURLsPboardType(const PasteboardURL&)
+     notImplemented();
+ }
+ 
+-void Pasteboard::write(const PasteboardImage&)
++void Pasteboard::write(const PasteboardImage& image)
+ {
++    if (DRAG_CONTENT(drag)) {
++        // Bild ziehen: URL wie in Chrome (die Pixel bleiben in der Seite)
++        if (!image.url.url.isEmpty()) {
++            drag->setString("text/uri-list"_s, image.url.url.string());
++            drag->setString("text/html"_s, makeString("<img src=\""_s, image.url.url.string(), "\">"_s));
++        }
++        return;
++    }
+ }
+ 
+ void Pasteboard::write(const PasteboardBuffer&)
+@@ -129,11 +197,19 @@ void Pasteboard::write(const PasteboardBuffer&)
+ 
+ void Pasteboard::write(const PasteboardWebContent& content)
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->setString("text/plain"_s, content.text);
++        if (!content.markup.isEmpty())
++            drag->setString("text/html"_s, content.markup);
++        return;
++    }
+     platformStrategies()->pasteboardStrategy()->writeToPasteboard(content);
+ }
+ 
+ Pasteboard::FileContentState Pasteboard::fileContentState()
+ {
++    if (DRAG_CONTENT(drag))
++        return drag->hasFiles() ? FileContentState::MayContainFilePaths : FileContentState::NoFileOrImageData;
+     notImplemented();
+     return FileContentState::NoFileOrImageData;
+ }
+@@ -143,8 +219,12 @@ bool Pasteboard::canSmartReplace()
+     return false;
+ }
+ 
+-void Pasteboard::writeMarkup(const String&)
++void Pasteboard::writeMarkup(const String& markup)
+ {
++    if (DRAG_CONTENT(drag)) {
++        drag->setString("text/html"_s, markup);
++        return;
++    }
+ }
+ 
+ void Pasteboard::writePlainText(const String& text, SmartReplaceOption)
+@@ -162,4 +242,4 @@ void Pasteboard::write(const Color&)
  
  } // namespace WebCore
  
@@ -316,10 +556,10 @@ index 0000000000..b26fac25b3
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/DragWasm.cpp b/Source/WebCore/platform/wasm/DragWasm.cpp
 new file mode 100644
-index 0000000000..73c2f1f624
+index 0000000000..2382b6551d
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/DragWasm.cpp
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,214 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -349,26 +589,186 @@ index 0000000000..73c2f1f624
 +#if ENABLE(DRAG_SUPPORT)
 +
 +#include "DragData.h"
++#include "PagePasteboardContext.h"
 +#include "Pasteboard.h"
++#include "WasmPlatform.h"
++#include <wtf/HashMap.h>
++#include <wtf/NeverDestroyed.h>
++#include <wtf/URL.h>
 +
-+// browser-lite: Drag & Drop innerhalb der Seite (und Markieren mit der Maus)
-+// laeuft ganz in WebCore. Dateien oder Text aus dem Host ziehen geht noch nicht,
-+// darum ist das Drag-Pasteboard ein normales Pasteboard ohne System-Drag.
++// browser-lite: Drag & Drop. Ein Pasteboard fuer Drag & Drop schreibt und
++// liest einen WasmPlatform::DragContent statt der Zwischenablage
++// (PasteboardLibWPE.cpp). Der Inhalt haengt an einem eigenen
++// PasteboardContext: der gehoert dem Pasteboard und meldet sich beim Abbau ab.
++// Den Ziehvorgang selber steuert die Engine (DragClient, Host-Ereignisse).
 +
 +namespace WebCore {
 +
-+std::unique_ptr<Pasteboard> Pasteboard::createForDragAndDrop(std::unique_ptr<PasteboardContext>&& context)
++namespace {
++
++class DragPasteboardContext final : public PasteboardContext {
++    WTF_MAKE_TZONE_ALLOCATED_INLINE(DragPasteboardContext);
++public:
++    explicit DragPasteboardContext(Ref<WasmPlatform::DragContent>&& content)
++        : m_content(WTF::move(content))
++    {
++        contents().set(this, m_content.ptr());
++    }
++
++    ~DragPasteboardContext()
++    {
++        contents().remove(this);
++    }
++
++    static HashMap<const PasteboardContext*, WasmPlatform::DragContent*>& contents()
++    {
++        static NeverDestroyed<HashMap<const PasteboardContext*, WasmPlatform::DragContent*>> map;
++        return map;
++    }
++
++private:
++    Ref<WasmPlatform::DragContent> m_content;
++};
++
++WasmPlatform::DragContent* contentOf(const DragData& dragData)
 +{
-+    return makeUnique<Pasteboard>(WTF::move(context));
++    return static_cast<WasmPlatform::DragContent*>(dragData.platformData());
++}
++
++} // namespace
++
++namespace WasmPlatform {
++
++String DragContent::string(const String& type) const
++{
++    for (auto& [itemType, value] : strings) {
++        if (equalIgnoringASCIICase(itemType, type))
++            return value;
++    }
++    return { };
++}
++
++void DragContent::setString(const String& type, const String& value)
++{
++    for (auto& item : strings) {
++        if (equalIgnoringASCIICase(item.first, type)) {
++            item.second = value;
++            return;
++        }
++    }
++    strings.append({ type, value });
++}
++
++DragContent* dragContent(const Pasteboard& pasteboard)
++{
++    auto* context = pasteboard.context();
++    return context ? DragPasteboardContext::contents().get(context) : nullptr;
++}
++
++} // namespace WasmPlatform
++
++// Pasteboard der Quelle (dragstart): neuer, leerer Inhalt
++std::unique_ptr<Pasteboard> Pasteboard::createForDragAndDrop(std::unique_ptr<PasteboardContext>&&)
++{
++    return makeUnique<Pasteboard>(makeUnique<DragPasteboardContext>(WasmPlatform::DragContent::create()));
++}
++
++// Pasteboard des Ziels (dragenter/dragover/drop): Inhalt aus den DragData
++std::unique_ptr<Pasteboard> Pasteboard::create(const DragData& dragData)
++{
++    RefPtr content = contentOf(dragData);
++    if (!content)
++        content = WasmPlatform::DragContent::create();
++    return makeUnique<Pasteboard>(makeUnique<DragPasteboardContext>(content.releaseNonNull()));
 +}
 +
 +void Pasteboard::setDragImage(DragImage, const IntPoint&)
 +{
 +}
 +
-+Vector<String> DragData::asFilenames() const
++bool DragData::canSmartReplace() const
++{
++    return false;
++}
++
++bool DragData::containsColor() const
++{
++    return false;
++}
++
++Color DragData::asColor() const
 +{
 +    return { };
++}
++
++bool DragData::containsFiles() const
++{
++    auto* content = contentOf(*this);
++    return !m_disallowFileAccess && content && content->hasFiles();
++}
++
++unsigned DragData::numberOfFiles() const
++{
++    auto* content = contentOf(*this);
++    if (m_disallowFileAccess || !content)
++        return 0;
++    return content->files.isEmpty() ? content->fileCount : content->files.size();
++}
++
++Vector<String> DragData::asFilenames() const
++{
++    auto* content = contentOf(*this);
++    if (m_disallowFileAccess || !content)
++        return { };
++    return content->files;
++}
++
++bool DragData::containsPlainText() const
++{
++    auto* content = contentOf(*this);
++    return content && !content->string("text/plain"_s).isEmpty();
++}
++
++String DragData::asPlainText() const
++{
++    auto* content = contentOf(*this);
++    return content ? content->string("text/plain"_s) : String();
++}
++
++bool DragData::containsCompatibleContent(DraggingPurpose) const
++{
++    auto* content = contentOf(*this);
++    return content && (containsPlainText() || containsURL() || !content->string("text/html"_s).isEmpty() || containsFiles());
++}
++
++bool DragData::containsURL(FilenameConversionPolicy filenamePolicy) const
++{
++    return !asURL(filenamePolicy).isEmpty();
++}
++
++String DragData::asURL(FilenameConversionPolicy, String* title) const
++{
++    auto* content = contentOf(*this);
++    if (!content)
++        return { };
++    // Erste Zeile der URI-Liste ohne Kommentare
++    for (auto line : content->string("text/uri-list"_s).split('\n')) {
++        line = line.trim(deprecatedIsSpaceOrNewline);
++        if (line.isEmpty() || line[0] == '#')
++            continue;
++        URL url { line };
++        if (!url.isValid() || url.protocolIsFile())
++            continue;
++        if (title)
++            *title = content->string("text/x-moz-url-desc"_s);
++        return url.string();
++    }
++    return { };
++}
++
++bool DragData::shouldMatchStyleOnDrop() const
++{
++    return false;
 +}
 +
 +} // namespace WebCore
@@ -1318,10 +1718,10 @@ index 0000000000..09202b12bb
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..f081bf6c64
+index 0000000000..0658622eff
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,110 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1351,6 +1751,7 @@ index 0000000000..f081bf6c64
 +
 +#include <WebCore/FloatRect.h>
 +#include <wtf/Function.h>
++#include <wtf/RefCounted.h>
 +#include <wtf/Vector.h>
 +#include <wtf/text/WTFString.h>
 +
@@ -1358,7 +1759,30 @@ index 0000000000..f081bf6c64
 +// Embedder (engine/ im browser-lite Repo). Der Embedder setzt hier Werte, die
 +// er vom Host-Browser bekommt (Bildschirm, Clipboard, User-Agent, ...).
 +
++namespace WebCore {
++class Pasteboard;
++}
++
 +namespace WebCore::WasmPlatform {
++
++// Drag & Drop (DragWasm.cpp): Inhalt eines Ziehvorgangs, aus der Seite
++// (dragstart, setData, markierter Text, Links) oder aus dem Host (Dateien,
++// Text). DragData::platformData() zeigt beim Ablegen darauf.
++struct DragContent : RefCounted<DragContent> {
++    static Ref<DragContent> create() { return adoptRef(*new DragContent); }
++    // Typ -> Text in der Reihenfolge von setData (text/plain, text/html, text/uri-list, eigene Typen)
++    Vector<std::pair<String, String>> strings;
++    // Dateien: Pfade im Dateisystem der Engine (erst beim Ablegen, vorher nur die Anzahl)
++    Vector<String> files;
++    unsigned fileCount { 0 };
++
++    WEBCORE_EXPORT String string(const String& type) const;
++    WEBCORE_EXPORT void setString(const String& type, const String&);
++    bool hasFiles() const { return fileCount || !files.isEmpty(); }
++    bool isEmpty() const { return strings.isEmpty() && !hasFiles(); }
++};
++// Inhalt eines Pasteboards fuer Drag & Drop, nullptr bei der Zwischenablage
++WEBCORE_EXPORT DragContent* dragContent(const Pasteboard&);
 +
 +struct ScreenInfo {
 +    FloatRect rect { 0, 0, 1280, 800 };

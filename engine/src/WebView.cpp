@@ -51,6 +51,8 @@
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
 #include <WebCore/CacheStorageProvider.h>
+#include <WebCore/DragController.h>
+#include <WebCore/DragData.h>
 #include <WebCore/PageConfiguration.h>
 #include <WebCore/SpeechRecognitionProvider.h>
 #include <WebCore/ScreenOrientationManager.h>
@@ -149,6 +151,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
     configuration.editorClient = makeUniqueRef<EditorClient>();
+    configuration.dragClient = makeUnique<DragClient>(*this);
     configuration.speechRecognitionProvider = createSpeechRecognitionProvider(m_id);
     configuration.backForwardClient = BackForwardList::create();
     configuration.progressTrackerClient = makeUniqueRef<ProgressTrackerClient>(*this);
@@ -838,6 +841,20 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     default: break;
     }
     PlatformEvent::Type eventType = type == 0 ? PlatformEvent::Type::MousePressed : type == 1 ? PlatformEvent::Type::MouseReleased : PlatformEvent::Type::MouseMoved;
+
+    // Waehrend die Seite etwas zieht, gehoert die Maus dem Ziehen (wie beim
+    // System-Ziehen in Chrome: keine mousemove/mouseup an die Seite)
+    if (m_drag && m_drag->fromPage) {
+        IntPoint point { static_cast<int>(x), static_cast<int>(y) };
+        if (eventType == PlatformEvent::Type::MouseReleased)
+            endDrag(point, true, modifiers);
+        else if (eventType == PlatformEvent::Type::MouseMoved && mouseButton == MouseButton::None)
+            endDrag(point, false, modifiers); // Taste ausserhalb des Canvas losgelassen
+        else if (eventType == PlatformEvent::Type::MouseMoved)
+            updateDrag(point, modifiers);
+        return;
+    }
+
     DoublePoint position { x, y };
     MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY } };
 
@@ -853,6 +870,103 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
         handler.mouseMoved(event);
         break;
     }
+}
+
+// ------------------------------------------------------------ Drag & Drop
+
+void WebView::startPageDrag(Ref<WasmPlatform::DragContent>&& content, OptionSet<DragOperation> sourceOperations)
+{
+    cancelDrag();
+    m_drag = DragSession { WTF::move(content), true, sourceOperations, std::nullopt };
+}
+
+void WebView::updateDrag(IntPoint point, int modifiers)
+{
+    RefPtr frame = mainFrame();
+    if (!frame || !m_drag)
+        return;
+    OptionSet<DragApplicationFlags> flags;
+    if (m_drag->fromPage)
+        flags.add(DragApplicationFlags::IsSource);
+    if (modifiers & 2)
+        flags.add(DragApplicationFlags::IsCopyKeyDown);
+    // Ohne "Load": Dateien oder Links aus dem Host oeffnen nicht die Datei
+    // anstelle der Seite
+    DragData dragData { m_drag->content.ptr(), point, point, m_drag->sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    auto result = m_page->dragController().dragEnteredOrUpdated(*frame, WTF::move(dragData));
+    if (m_drag) {
+        auto* operation = std::get_if<std::optional<DragOperation>>(&result);
+        m_drag->operation = operation ? *operation : std::nullopt;
+    }
+}
+
+void WebView::endDrag(IntPoint point, bool drop, int modifiers)
+{
+    RefPtr frame = mainFrame();
+    if (!frame || !m_drag)
+        return;
+    auto session = WTF::move(*m_drag);
+    m_drag.reset();
+    OptionSet<DragApplicationFlags> flags;
+    if (session.fromPage)
+        flags.add(DragApplicationFlags::IsSource);
+    if (modifiers & 2)
+        flags.add(DragApplicationFlags::IsCopyKeyDown);
+    DragData dragData { session.content.ptr(), point, point, session.sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    bool dropped = drop && session.operation;
+    if (dropped)
+        m_page->dragController().performDragOperation(WTF::move(dragData), *frame);
+    else
+        m_page->dragController().dragExited(*frame, WTF::move(dragData));
+    m_page->dragController().dragEnded();
+    if (session.fromPage) {
+        // dragend an die Quelle, mit dem Ergebnis (dropEffect)
+        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
+        frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
+    }
+}
+
+void WebView::cancelDrag()
+{
+    if (m_drag)
+        endDrag({ }, false, 0);
+}
+
+// Ziehen aus dem Host: data = {"text":..,"html":..,"uriList":..,"files":[Pfade],"fileCount":n}.
+// Beim Ziehen ueber die Seite kennt der Host nur die Typen und die Anzahl
+// Dateien (wie Chrome sie der Seite auch nur zeigt), beim Ablegen alles.
+void WebView::hostDrag(int phase, double x, double y, int modifiers, const String& data)
+{
+    IntPoint point { static_cast<int>(x), static_cast<int>(y) };
+    if (m_drag && m_drag->fromPage)
+        return;
+    if (phase == 1) {
+        if (m_drag)
+            endDrag(point, false, modifiers);
+        return;
+    }
+    auto content = WasmPlatform::DragContent::create();
+    auto value = JSON::Value::parseJSON(data);
+    if (auto object = value ? value->asObject() : nullptr) {
+        for (auto type : { "text/plain"_s, "text/html"_s, "text/uri-list"_s }) {
+            auto key = type == "text/plain"_s ? "text"_s : type == "text/html"_s ? "html"_s : "uriList"_s;
+            auto string = object->getString(key);
+            if (!string.isNull())
+                content->setString(type, string);
+        }
+        if (auto files = object->getArray("files"_s)) {
+            for (auto& file : *files)
+                content->files.append(file->asString());
+        }
+        content->fileCount = std::max<unsigned>(object->getInteger("fileCount"_s).value_or(0), content->files.size());
+    }
+    if (!m_drag)
+        m_drag = DragSession { WTF::move(content), false, { DragOperation::Copy, DragOperation::Link, DragOperation::Generic }, std::nullopt };
+    else
+        m_drag->content = WTF::move(content);
+    updateDrag(point, modifiers);
+    if (phase == 2)
+        endDrag(point, true, modifiers);
 }
 
 PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)

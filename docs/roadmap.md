@@ -167,6 +167,8 @@ kommen zuerst.
   GC 6 s, Seite laedt (#122)
 - [x] WebGL-Host-Kontexte schon beim Start anlegen: das erste Anlegen wartete mitten im Laden auf die
   ausgelastete GPU (weather.com 15 s, #123). Dauerhafter Bytecode-Cache gemessen und verworfen (#124)
+- [x] Drag & Drop: HTML5-Ziehen in der Seite (war ohne DragClient tot), Dateien und Text aus dem System
+  ablegen, auch auf `<input type=file>` (#125, `dragdrop-test.mjs`)
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken

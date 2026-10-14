@@ -2,11 +2,13 @@
 // Pixel-Buffer und Eingabe-Events.
 #pragma once
 
+#include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
 #include <WebCore/PlatformWheelEvent.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Region.h>
+#include <WebCore/WasmPlatform.h>
 #include <skia/core/SkRefCnt.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/CompletionHandler.h>
@@ -98,6 +100,11 @@ public:
     // Eingabe (Koordinaten in CSS-Pixeln relativ zur View)
     void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0);
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+    // Drag & Drop: aus der Seite (DragClient) und aus dem Host (bl_drag,
+    // phase 0 = ueber der Seite, 1 = verlassen, 2 = ablegen; data als JSON)
+    void startPageDrag(Ref<WebCore::WasmPlatform::DragContent>&&, OptionSet<WebCore::DragOperation> sourceOperations);
+    void hostDrag(int phase, double x, double y, int modifiers, const String& data);
+    void cancelDrag();
     static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
     // Auch vom Scroll-Thread (ScrollingWasm.cpp), mit den Schritten, die noch fehlen
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
@@ -140,6 +147,16 @@ public:
     void chooseFiles(const Vector<String>& paths);
 
 private:
+    struct DragSession {
+        Ref<WebCore::WasmPlatform::DragContent> content;
+        bool fromPage { false };
+        OptionSet<WebCore::DragOperation> sourceOperations;
+        std::optional<WebCore::DragOperation> operation;
+    };
+    void updateDrag(WebCore::IntPoint, int modifiers);
+    void endDrag(WebCore::IntPoint, bool drop, int modifiers);
+    std::optional<DragSession> m_drag;
+
     WebView(int id, WebCore::IntSize, float deviceScaleFactor);
     void createSurface();
     void notifyNavigationState();

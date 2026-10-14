@@ -177,6 +177,13 @@ EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movem
     withView(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
 }
 
+// Ziehen aus dem Host ueber die Seite: phase 0 = darueber, 1 = verlassen,
+// 2 = abgelegt. data: JSON mit Text/HTML/URI-Liste und Dateipfaden (WebView::hostDrag)
+EMSCRIPTEN_KEEPALIVE void bl_drag(int id, int phase, double x, double y, int modifiers, char* data)
+{
+    withView(id, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
 {
 #if ENABLE(POINTER_LOCK)

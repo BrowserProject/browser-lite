@@ -1064,6 +1064,57 @@ function attachInput(tab) {
     engine._bl_wheel(tab.id, ...position(e), e.deltaX * factor, e.deltaY * factor, modifierBits(e));
     e.preventDefault();
   }, { passive: false });
+
+  // Drag & Drop aus dem System oder einem anderen Fenster (Dateien, Text,
+  // Links). Beim Ziehen sieht die Seite wie in Chrome nur die Typen und die
+  // Anzahl Dateien, beim Ablegen kommen die Daten (Dateien ins Dateisystem
+  // der Engine wie beim Upload, engine/src/WebView.cpp hostDrag).
+  const dragSummary = (dataTransfer) => {
+    const summary = { fileCount: 0 };
+    for (const item of dataTransfer.items || []) {
+      if (item.kind === 'file')
+        summary.fileCount++;
+    }
+    const types = [...(dataTransfer.types || [])];
+    if (types.includes('text/plain'))
+      summary.text = '';
+    if (types.includes('text/html'))
+      summary.html = '';
+    if (types.includes('text/uri-list'))
+      summary.uriList = '';
+    return summary;
+  };
+  const sendDrag = (phase, e, data) => engine._bl_drag(tab.id, phase, ...position(e), modifierBits(e), toUTF8(JSON.stringify(data)));
+  canvas.addEventListener('dragenter', (e) => e.preventDefault());
+  canvas.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    sendDrag(0, e, dragSummary(e.dataTransfer));
+  });
+  canvas.addEventListener('dragleave', (e) => sendDrag(1, e, {}));
+  canvas.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const dataTransfer = e.dataTransfer;
+    const data = { files: [] };
+    for (const [key, type] of [['text', 'text/plain'], ['html', 'text/html'], ['uriList', 'text/uri-list']]) {
+      const value = dataTransfer.getData(type);
+      if (value)
+        data[key] = value;
+    }
+    // Nach einem await sind die Daten des Ereignisses weg
+    const files = [...dataTransfer.files];
+    const point = position(e);
+    const modifiers = modifierBits(e);
+    for (const file of files) {
+      const dir = '/tmp/uploads/' + (++uploadCounter);
+      engine.FS.mkdirTree(dir);
+      const path = dir + '/' + file.name.replace(/[\/\n]/g, '_');
+      engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+      data.files.push(path);
+    }
+    data.fileCount = data.files.length;
+    engine._bl_drag(tab.id, 2, ...point, modifiers, toUTF8(JSON.stringify(data)));
+  });
 }
 
 // Tastatur: Ein unsichtbares Textfeld (#ime) hat den Fokus, nicht das Canvas.
