@@ -391,3 +391,70 @@ export function mediaState() {
     return { id: p.id, time: p.video.currentTime, paused: p.video.paused, width: p.video.videoWidth, frame: !!p.frame, buffered: ranges };
   });
 }
+
+// ------------------------------------------------------- Picture-in-Picture
+// Das versteckte <video> des Players geht ins PiP-Fenster von Chrome
+// (engine/src/WebRTCPolyfill.cpp). Ereignisse holt die Seite mit "pip-wait".
+
+const pipQueues = new Map(); // Player-Id -> { events, wake }
+
+function pipQueue(id) {
+  let queue = pipQueues.get(id);
+  if (!queue) {
+    queue = { events: [], wake: null };
+    pipQueues.set(id, queue);
+  }
+  return queue;
+}
+
+function pipPush(id, event) {
+  const queue = pipQueue(id);
+  queue.events.push(event);
+  queue.wake?.();
+}
+
+function pipError(name, message) {
+  const error = new Error(message);
+  error.name = name;
+  return error;
+}
+
+export const pipHostCalls = {
+  async 'pip-enter'(payload) {
+    const id = Number(payload?.player);
+    const player = players.get(id);
+    if (!player)
+      throw pipError('InvalidStateError', 'The video is gone.');
+    if (!document.pictureInPictureEnabled)
+      throw pipError('NotSupportedError', 'Picture-in-Picture is disabled.');
+    const video = player.video;
+    if (!player.pipHooked) {
+      player.pipHooked = true;
+      video.addEventListener('leavepictureinpicture', () => pipPush(id, { type: 'leave' }));
+    }
+    pipQueue(id).events.length = 0;
+    const pipWindow = await video.requestPictureInPicture();
+    pipWindow.addEventListener('resize', () => pipPush(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }));
+    return { width: pipWindow.width, height: pipWindow.height };
+  },
+  async 'pip-exit'() {
+    if (document.pictureInPictureElement)
+      await document.exitPictureInPicture();
+    return {};
+  },
+  async 'pip-wait'(payload) {
+    const id = Number(payload?.player);
+    const queue = pipQueue(id);
+    if (!queue.events.length) {
+      await new Promise((resolve) => {
+        queue.wake = resolve;
+        setTimeout(resolve, 20000);
+      });
+      queue.wake = null;
+    }
+    // Player weg: das PiP-Fenster ist zu
+    if (!players.has(id))
+      return { type: 'leave' };
+    return queue.events.shift() ?? { type: 'none' };
+  },
+};

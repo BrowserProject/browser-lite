@@ -777,6 +777,100 @@ const char* const webrtcPolyfillSource = R"JS((() => {
 
   class RTCStatsReport extends Map {}
 
+  // ---------------------------------------------------------------- Picture-in-Picture
+  // Das <video> der Seite hat im Host ein verstecktes <video> (web/media.js), das
+  // geht ins PiP-Fenster von Chrome (mit Ton und Bedienelementen).
+  if (typeof HTMLVideoElement === 'function' && !('requestPictureInPicture' in HTMLVideoElement.prototype)) {
+    let pipElement = null;
+    let pipWindow = null;
+    class PictureInPictureWindow extends EventTarget {
+      constructor() {
+        throw new TypeError('Illegal constructor');
+      }
+      get width() { return state(this).width; }
+      get height() { return state(this).height; }
+    }
+    eventHandlers(PictureInPictureWindow.prototype, ['resize']);
+    class PictureInPictureEvent extends Event {
+      constructor(type, init = {}) {
+        super(type, init);
+        this.pictureInPictureWindow = init.pictureInPictureWindow;
+      }
+    }
+    Object.defineProperty(Document.prototype, 'pictureInPictureEnabled', { get() { return true; }, configurable: true, enumerable: true });
+    Object.defineProperty(Document.prototype, 'pictureInPictureElement', {
+      get() { return pipElement && pipElement.isConnected && pipElement.ownerDocument === this ? pipElement : null; },
+      configurable: true,
+      enumerable: true,
+    });
+    if (typeof ShadowRoot === 'function')
+      Object.defineProperty(ShadowRoot.prototype, 'pictureInPictureElement', { get() { return null; }, configurable: true, enumerable: true });
+    Object.defineProperty(HTMLVideoElement.prototype, 'disablePictureInPicture', {
+      get() { return this.hasAttribute('disablepictureinpicture'); },
+      set(value) { this.toggleAttribute('disablepictureinpicture', !!value); },
+      configurable: true,
+      enumerable: true,
+    });
+    eventHandlers(HTMLVideoElement.prototype, ['enterpictureinpicture', 'leavepictureinpicture']);
+    const leave = () => {
+      if (!pipElement)
+        return;
+      const element = pipElement;
+      const window = pipWindow;
+      pipElement = null;
+      pipWindow = null;
+      state(window).width = 0;
+      state(window).height = 0;
+      element.dispatchEvent(new PictureInPictureEvent('leavepictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
+    };
+    const watch = async (player, element, window) => {
+      while (pipElement === element) {
+        let event;
+        try {
+          event = await call('pip-wait', { player });
+        } catch (e) {
+          break;
+        }
+        if (pipElement !== element)
+          break;
+        if (event?.type === 'resize') {
+          state(window).width = event.width;
+          state(window).height = event.height;
+          window.dispatchEvent(new Event('resize'));
+        } else if (event?.type === 'leave') {
+          leave();
+          break;
+        }
+      }
+    };
+    define(HTMLVideoElement.prototype, 'requestPictureInPicture', async function requestPictureInPicture() {
+      if (this.disablePictureInPicture)
+        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': \"disablePictureInPicture\" attribute is present.", 'InvalidStateError');
+      if (this.readyState === 0)
+        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Metadata for the video element are not loaded yet.", 'InvalidStateError');
+      const player = media ? media('player', this) : 0;
+      if (!player)
+        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Picture-in-Picture is not available for this video.", 'NotSupportedError');
+      const size = await call('pip-enter', { player });
+      leave();
+      const window = Reflect.construct(EventTarget, [], PictureInPictureWindow);
+      internal.set(window, { width: size.width, height: size.height });
+      pipElement = this;
+      pipWindow = window;
+      this.dispatchEvent(new PictureInPictureEvent('enterpictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
+      watch(player, this, window);
+      return window;
+    });
+    define(Document.prototype, 'exitPictureInPicture', async function exitPictureInPicture() {
+      if (!pipElement)
+        throw new DOMException("Failed to execute 'exitPictureInPicture' on 'Document': There is no Picture-in-Picture element in this document.", 'InvalidStateError');
+      await call('pip-exit', {});
+      leave();
+    });
+    define(globalThis, 'PictureInPictureWindow', PictureInPictureWindow);
+    define(globalThis, 'PictureInPictureEvent', PictureInPictureEvent);
+  }
+
   define(globalThis, 'RTCPeerConnection', RTCPeerConnection);
   define(globalThis, 'webkitRTCPeerConnection', RTCPeerConnection);
   define(globalThis, 'RTCSessionDescription', RTCSessionDescription);

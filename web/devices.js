@@ -220,6 +220,7 @@ function base64ToBytes(text) {
 }
 
 import { rtcHostCalls } from './webrtc.js';
+import { pipHostCalls } from './media.js';
 
 const hostCalls = {
   async 'fs-open'(payload, origin) {
@@ -333,7 +334,7 @@ const hostCalls = {
   },
 };
 
-Object.assign(hostCalls, rtcHostCalls);
+Object.assign(hostCalls, rtcHostCalls, pipHostCalls);
 
 export async function onHostCall(tab, data) {
   const send = (ok, value) => api.engine()._bl_host_call_result(data.id, ok ? 1 : 0, api.toUTF8(JSON.stringify(value ?? null)));

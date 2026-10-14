@@ -6,7 +6,10 @@
 #include "Host.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "VideoFrameWasm.h"
+#include "JSHTMLMediaElement.h"
 #include "JSMediaStreamTrack.h"
+#include <WebCore/HTMLMediaElement.h>
+#include <WebCore/MediaPlayer.h>
 #include <JavaScriptCore/ArrayConstructor.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/JSFunction.h>
@@ -1031,6 +1034,13 @@ static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObj
         if (auto sink = sinks().take(id))
             sink->stop();
         return JSC::JSValue::encode(JSC::jsUndefined());
+    }
+    // Host-Player eines <video> (Picture-in-Picture ueber das <video> des Host)
+    if (op == "player"_s) {
+        RefPtr element = JSHTMLMediaElement::toWrapped(vm, callFrame->argument(1));
+        RefPtr player = element ? element->player() : nullptr;
+        auto* wasmPlayer = player ? static_cast<MediaPlayerPrivateWasm*>(player->playerPrivate()) : nullptr;
+        return JSC::JSValue::encode(JSC::jsNumber(wasmPlayer && wasmPlayer->hasHostElement() ? wasmPlayer->id() : 0));
     }
     if (op == "remote"_s) {
         auto kind = callFrame->argument(1).toWTFString(globalObject);

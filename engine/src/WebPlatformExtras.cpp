@@ -379,6 +379,7 @@ bool isAllowedHostCall(const String& name)
         "fs-open"_s, "fs-save"_s, "fs-directory"_s, "fs-file"_s, "fs-writable"_s, "fs-write"_s, "fs-child"_s,
         "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
         "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s, "rtc-receive"_s, "rtc-track"_s,
+        "pip-enter"_s, "pip-exit"_s, "pip-wait"_s,
     };
     for (auto entry : allowed) {
         if (name == entry)

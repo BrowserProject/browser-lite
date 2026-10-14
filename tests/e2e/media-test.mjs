@@ -111,6 +111,20 @@ if (video.requestVideoFrameCallback) {
 } else
   result('rvfc', 'fehlt');
 
+// Picture-in-Picture beim Klick (ueber das <video> des Host)
+const pipEvents = [];
+video.addEventListener('enterpictureinpicture', (e) => pipEvents.push('enter:' + (e.pictureInPictureWindow.width > 0)));
+video.addEventListener('leavepictureinpicture', () => pipEvents.push('leave'));
+video.addEventListener('click', async () => {
+  try {
+    const pipWindow = await video.requestPictureInPicture();
+    result('pip', [document.pictureInPictureEnabled, document.pictureInPictureElement === video, pipWindow.width > 0 && pipWindow.height > 0].join(','));
+    await document.exitPictureInPicture();
+    setTimeout(() => result('pipevents', pipEvents.join('|') + ',' + (document.pictureInPictureElement === null)), 500);
+  } catch (e) {
+    result('pip', e.name + ':' + e.message.replace(/\s/g, '_'));
+  }
+});
 audio.addEventListener('loadedmetadata', () => result('audioduration', audio.duration.toFixed(1)));
 audio.addEventListener('error', () => result('audioerror', audio.error && audio.error.code));
 let seekedOnce = false;
@@ -247,6 +261,16 @@ while (Date.now() < end) {
 check('Video: Bild in der Seite gemalt', pixel && pixel.r > 180 && pixel.g < 60 && pixel.b < 60, JSON.stringify(pixel));
 
 check('Video: requestVideoFrameCallback', (await result('rvfc')) === 'ok,320x240,true', results.get('rvfc'));
+
+// Picture-in-Picture: Klick aufs Video
+const box = await page.evaluate(() => {
+  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const rect = canvas.getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+});
+await page.mouse.click(box.x + 180, box.y + 140);
+check('Picture-in-Picture: requestPictureInPicture', (await result('pip', 20000)) === 'true,true,true', results.get('pip'));
+check('Picture-in-Picture: Ereignisse und exit', (await result('pipevents', 20000)) === 'enter:true|leave,true', results.get('pipevents'));
 
 check('Audio: Dauer bekannt', (await result('audioduration')) === '30.0', results.get('audioerror') ? `Fehler ${results.get('audioerror')}` : results.get('audioduration'));
 check('Audio: play()', (await result('audioplay')) === 'ok', results.get('audioplay'));

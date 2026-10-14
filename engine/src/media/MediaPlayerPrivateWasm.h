@@ -45,6 +45,15 @@ public:
     void hostFrame(uint8_t* pixels, int width, int height);
 
     int id() const { return m_id; }
+    // false bei srcObject = MediaStream (dann gibt es kein <video> im Host)
+    bool hasHostElement() const
+    {
+#if ENABLE(MEDIA_STREAM)
+        return !m_stream;
+#else
+        return true;
+#endif
+    }
     const URL& url() const { return m_url; }
     String referrer() const;
 

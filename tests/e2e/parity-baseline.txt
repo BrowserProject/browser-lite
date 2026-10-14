@@ -202,6 +202,7 @@ media:get-user-media
 media:media-recorder
 media:media-session
 media:mse
+media:picture-in-picture
 media:speech-recognition
 media:speech-synthesis
 media:video
