@@ -175,6 +175,9 @@ kommen zuerst.
 - [x] Hintergrund-Tabs bei wenig Speicher verwerfen, Neuladen beim Anklicken (#128, Test im `ui-test.mjs`)
 - [x] Zurueck/Vor ging nie (keine Verlaufseintraege, leerer Client), jetzt mit Back/Forward-Cache und Verlauf
   pro Tab in der Sitzung und nach dem Verwerfen (#129)
+- [x] Leistung erste Seite: fontconfig beim Start im Hintergrund (0.8 s weniger im Engine-Thread, #133).
+  Gemessen und verworfen: Style-Timer verzoegern, eigener Layout-Cache fuer Prozent-Hoehen (#131),
+  Aufwaerm-Seite beim Start (#132), 16 Thread-Worker
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die

@@ -25,12 +25,15 @@
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
 #include <cstdlib>
+#include <cstring>
 #include <dirent.h>
+#include <fontconfig/fontconfig.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
 #include <sys/stat.h>
 #include <utime.h>
 #include <wtf/MainThread.h>
+#include <wtf/Threading.h>
 #include <wtf/text/MakeString.h>
 
 // Der fontconfig-Cache im Datenpaket (deps/tools/fc-precache.c) gilt nur, wenn
@@ -73,6 +76,13 @@ int main(int, char**)
 
     JSC::initialize();
     WTF::initializeMainThread();
+
+    // fontconfig gleich im Hintergrund einrichten: es liest seine Konfiguration
+    // mit vielen Dateizugriffen, die alle synchron ueber den UI-Thread laufen.
+    // Sonst passiert das mitten im Laden der ersten Seite (CNN: 0.5 s im
+    // Engine-Thread, bei der ersten Style-Berechnung).
+    if (const char* value = getenv("BL_FONTCONFIG_EARLY"); !value || strcmp(value, "0"))
+        Thread::create("fontconfig"_s, [] { FcInit(); })->detach();
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
     // VM gleich anlegen: ab jetzt laeuft jede Arbeit mit DeferGC (EngineLoop.cpp)
