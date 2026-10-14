@@ -509,6 +509,15 @@ function onEngineEvent(viewId, type, payload) {
     console[method](`[seite ${viewId}] ${data.message}`, data.source ? `(${data.source}:${data.line})` : '');
     return;
   }
+  if (type === 'caret') {
+    // Eingabefeld an den Cursor: dort zeigt die Eingabemethode ihre Vorschlaege
+    if (tab) {
+      tab.caret = data;
+      if (tab === activeTab)
+        placeIme(tab);
+    }
+    return;
+  }
   if (type === 'clipboard') {
     // Mit HTML (formatierter Text) wie in Chrome, sonst nur Text
     if (data.html && typeof ClipboardItem === 'function') {
@@ -1144,6 +1153,16 @@ function focusPage() {
   ime.focus({ preventScroll: true });
 }
 
+function placeIme(tab) {
+  const caret = tab.caret;
+  if (!caret || !tab.canvas)
+    return;
+  const rect = tab.canvas.getBoundingClientRect();
+  ime.style.left = `${rect.left + caret.x}px`;
+  ime.style.top = `${rect.top + caret.y}px`;
+  ime.style.height = `${Math.max(caret.height, 10)}px`;
+}
+
 const isPasteShortcut = (e) => (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
 const isTextInput = (e) => e.isComposing || composing || e.key === 'Dead' || e.key === 'Process'
   || e.key === 'Unidentified' || e.keyCode === 229;
@@ -1166,10 +1185,16 @@ ime.addEventListener('keyup', (e) => {
 ime.addEventListener('compositionstart', () => {
   composing = true;
 });
+// Vorschau wie in Chrome: der Text der Eingabemethode steht unterstrichen in
+// der Seite (compositionstart/-update/-end auch fuer die Seite)
+ime.addEventListener('compositionupdate', (e) => {
+  if (activeTab)
+    engine._bl_set_composition(activeTab.id, toUTF8(e.data || ''), (e.data || '').length, (e.data || '').length);
+});
 ime.addEventListener('compositionend', (e) => {
   composing = false;
-  if (activeTab && e.data)
-    engine._bl_insert_text(activeTab.id, toUTF8(e.data));
+  if (activeTab)
+    engine._bl_confirm_composition(activeTab.id, toUTF8(e.data || ''));
   ime.value = '';
 });
 ime.addEventListener('input', (e) => {

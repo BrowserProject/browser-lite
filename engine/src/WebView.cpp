@@ -51,6 +51,7 @@
 #include <WebCore/NodeInlines.h>
 #include <WebCore/Page.h>
 #include <WebCore/CacheStorageProvider.h>
+#include <WebCore/CompositionUnderline.h>
 #include <WebCore/DragController.h>
 #include <WebCore/DragData.h>
 #include <WebCore/PageConfiguration.h>
@@ -150,7 +151,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
-    configuration.editorClient = makeUniqueRef<EditorClient>();
+    configuration.editorClient = makeUniqueRef<EditorClient>(m_id);
     configuration.dragClient = makeUnique<DragClient>(*this);
     configuration.speechRecognitionProvider = createSpeechRecognitionProvider(m_id);
     configuration.backForwardClient = BackForwardList::create();
@@ -1179,6 +1180,36 @@ void WebView::insertText(const String& text)
     if (!frame || text.isEmpty())
         return;
     frame->editor().insertText(text, nullptr);
+}
+
+void WebView::setComposition(const String& text, unsigned selectionStart, unsigned selectionEnd)
+{
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
+    Ref editor = frame->editor();
+    if (text.isEmpty()) {
+        if (editor->hasComposition())
+            editor->cancelComposition();
+        return;
+    }
+    Vector<CompositionUnderline> underlines { CompositionUnderline(0, text.length(), CompositionUnderlineColor::TextColor, Color::black, false) };
+    editor->setComposition(text, underlines, { }, { }, std::min<unsigned>(selectionStart, text.length()), std::min<unsigned>(selectionEnd, text.length()));
+}
+
+void WebView::confirmComposition(const String& text)
+{
+    RefPtr frame = m_page->focusController().focusedOrMainFrame();
+    if (!frame)
+        return;
+    Ref editor = frame->editor();
+    if (editor->hasComposition()) {
+        if (text.isEmpty())
+            editor->cancelComposition();
+        else
+            editor->confirmComposition(text);
+    } else if (!text.isEmpty())
+        editor->insertText(text, nullptr);
 }
 
 void WebView::openFileChooser(FileChooser& chooser)

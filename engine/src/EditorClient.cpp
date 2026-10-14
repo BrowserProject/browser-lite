@@ -1,6 +1,8 @@
 #include "config.h"
 #include "EditorClient.h"
 
+#include "Host.h"
+
 #include <WebCore/Document.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/Editor.h>
@@ -10,17 +12,33 @@
 #include <WebCore/KeyboardEvent.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
+#include <WebCore/DocumentView.h>
+#include <WebCore/LocalFrameView.h>
+#include <WebCore/FrameSelection.h>
 #include <WebCore/Node.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
 using namespace WebCore;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(EditorClient);
+
+void EditorClient::respondToChangedSelection(LocalFrame* frame)
+{
+    if (!frame || !frame->view() || !frame->selection().selection().isContentEditable())
+        return;
+    // Ende der Markierung bzw. Cursor, in Koordinaten der Ansicht (CSS-Pixel)
+    auto caret = frame->view()->contentsToRootView(frame->selection().absoluteCaretBounds());
+    if (caret.isEmpty() || caret == m_caret)
+        return;
+    m_caret = caret;
+    notifyHost(m_viewId, "caret", makeString("{\"x\":"_s, caret.x(), ",\"y\":"_s, caret.y(), ",\"height\":"_s, caret.height(), '}'));
+}
 
 void EditorClient::registerUndoStep(UndoStep& step)
 {

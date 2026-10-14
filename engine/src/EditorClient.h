@@ -5,6 +5,7 @@
 
 #include <WebCore/DOMPasteAccess.h>
 #include <WebCore/EditorClient.h>
+#include <WebCore/IntRect.h>
 #include <WebCore/TextCheckerClient.h>
 #include <WebCore/UndoStep.h>
 #include <wtf/Vector.h>
@@ -14,7 +15,10 @@ namespace BrowserLite {
 class EditorClient final : public WebCore::EditorClient {
     WTF_MAKE_TZONE_ALLOCATED(EditorClient);
 public:
-    EditorClient() = default;
+    explicit EditorClient(int viewId)
+        : m_viewId(viewId)
+    {
+    }
 
 private:
     bool shouldDeleteRange(const std::optional<WebCore::SimpleRange>&) final { return true; }
@@ -38,7 +42,8 @@ private:
 
     void didBeginEditing() final { }
     void respondToChangedContents() final { }
-    void respondToChangedSelection(WebCore::LocalFrame*) final { }
+    // Cursor-Position an den Host: dort steht das Eingabefeld fuer IME
+    void respondToChangedSelection(WebCore::LocalFrame*) final;
     void updateEditorStateAfterLayoutIfEditabilityChanged() final { }
     void discardedComposition(const WebCore::Document&) final { }
     void canceledComposition() final { }
@@ -105,6 +110,9 @@ private:
     Vector<Ref<WebCore::UndoStep>> m_undoStack;
     Vector<Ref<WebCore::UndoStep>> m_redoStack;
     bool m_inUndoRedo { false };
+
+    int m_viewId;
+    WebCore::IntRect m_caret;
 };
 
 } // namespace BrowserLite

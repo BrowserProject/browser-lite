@@ -171,6 +171,7 @@ kommen zuerst.
   ablegen, auch auf `<input type=file>` (#125, `dragdrop-test.mjs`)
 - [x] Zwischenablage mit HTML und Bildern (Einfuegen und Kopieren), `getData('text/plain')` im paste-Ereignis,
   Doppel-/Dreifachklick (Klickzahl war immer 1) (#126, `clipboard-test.mjs`)
+- [x] IME-Vorschau (composition-Ereignisse, unterstrichener Text) und Kandidatenfenster beim Cursor (#127)
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken

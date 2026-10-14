@@ -2,7 +2,8 @@
 // engine/src/Exports.cpp bl_set_clipboard, WebCore PasteboardLibWPE.cpp):
 // Einfuegen von Text, HTML und Bildern aus dem Host (paste-Ereignis der Seite,
 // formatiert in contenteditable) und Kopieren mit HTML in die echte
-// Zwischenablage. Dazu Doppel-/Dreifachklick (Klickzahl zaehlt der Host).
+// Zwischenablage. Dazu Doppel-/Dreifachklick (Klickzahl zaehlt der Host) und
+// Texteingabe mit Vorschau (IME, ueber das DevTools-Protokoll).
 //
 //   cd tests/e2e && node clipboard-test.mjs [engine-ordner]
 import http from 'node:http';
@@ -35,9 +36,11 @@ const PAGE = `<!doctype html><title>Zwischenablage-Test</title>
 body { margin: 0; font: 16px sans-serif }
 #editor { position: absolute; left: 20px; top: 20px; width: 400px; height: 100px; border: 1px solid #888 }
 #source { position: absolute; left: 20px; top: 200px; width: 400px; height: 40px }
+#jp { position: absolute; left: 20px; top: 300px; width: 300px; height: 40px }
 </style>
 <div id="editor" contenteditable="true"></div>
 <div id="source">Kopier <i>mich</i></div>
+<textarea id="jp"></textarea>
 <script>
 const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
 const editor = document.getElementById('editor');
@@ -55,6 +58,14 @@ document.addEventListener('paste', async (e) => {
   setTimeout(() => log('editor', editor.innerHTML.includes('<b>fett</b>') ? 'formatiert' : editor.innerHTML), 300);
 });
 document.getElementById('source').addEventListener('dblclick', (e) => log('dblclick', e.detail + ':' + getSelection().toString()));
+const jp = document.getElementById('jp');
+const composition = [];
+jp.addEventListener('compositionstart', () => composition.push('start'));
+jp.addEventListener('compositionupdate', (e) => composition.push('update:' + e.data + ':' + jp.value));
+jp.addEventListener('compositionend', (e) => {
+  composition.push('end:' + e.data);
+  setTimeout(() => log('composition', composition.join('|') + '|' + jp.value), 100);
+});
 document.addEventListener('copy', () => { log('selection', getSelection().toString()); log('copied', 1); });
 log('ready', 1);
 </script>`;
@@ -154,6 +165,26 @@ for (let i = 0; i < 25 && !copied?.html; i++) {
 }
 check('Zwischenablage: Text', copied?.text?.trim() === 'Kopier mich', JSON.stringify(copied));
 check('Zwischenablage: HTML mit Formatierung', /<i[^>]*>mich<\/i>/.test(copied?.html || ''), (copied?.html || '').slice(0, 120));
+
+// 4. Eingabemethode (IME): Vorschau in der Seite, Kandidatenfenster beim Cursor
+await page.mouse.click(box.x + 100, box.y + 320);
+await page.waitForTimeout(300);
+const cdp = await context.newCDPSession(page);
+await cdp.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
+await page.waitForTimeout(300);
+await cdp.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
+await page.waitForTimeout(300);
+await cdp.send('Input.insertText', { text: '日本' });
+// compositionupdate kommt vor der Aenderung im Feld (wie Chrome): beim zweiten
+// steht die Vorschau "に" schon im Feld, vor dem Ende kommt der fertige Text
+check('IME: compositionstart/update (Vorschau im Feld) und end', await result('composition') === 'start|update:に:|update:にほ:に|update:日本:にほ|end:日本|日本', results.get('composition'));
+const imePlace = await page.evaluate(() => {
+  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const rect = canvas.getBoundingClientRect();
+  const ime = document.getElementById('ime');
+  return { x: parseFloat(ime.style.left) - rect.left, y: parseFloat(ime.style.top) - rect.top };
+});
+check('IME-Feld steht beim Cursor (fuer das Kandidatenfenster)', imePlace.x > 15 && imePlace.x < 80 && imePlace.y > 290 && imePlace.y < 340, JSON.stringify(imePlace));
 
 await browser.close();
 relay.kill();

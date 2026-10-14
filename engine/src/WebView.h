@@ -119,6 +119,9 @@ public:
     void touchEvent(int type, const String& pointsJSON, int modifiers);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
+    // Texteingabe mit Vorschau (IME, tote Tasten): unterstrichener Text in der Seite
+    void setComposition(const String&, unsigned selectionStart, unsigned selectionEnd);
+    void confirmComposition(const String&);
     // Rechtsklick: zuerst das contextmenu-Event der Seite, dann (wenn die Seite
     // es nicht abfaengt) Infos fuer das Menue der Oberflaeche
     void contextMenu(double x, double y);

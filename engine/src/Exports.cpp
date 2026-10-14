@@ -215,6 +215,17 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
     });
 }
 
+// Vorschau waehrend der Texteingabe (compositionupdate) und Abschluss (compositionend)
+EMSCRIPTEN_KEEPALIVE void bl_set_composition(int id, char* text, int selectionStart, int selectionEnd)
+{
+    withView(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_confirm_composition(int id, char* text)
+{
+    withView(id, [text = takeString(text)](WebView& view) { view.confirmComposition(text); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_insert_text(int id, char* text)
 {
     withView(id, [text = takeString(text)](WebView& view) { view.insertText(text); });

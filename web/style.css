@@ -50,7 +50,7 @@ button { font: inherit; color: inherit; }
 #progress { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; background: var(--accent); transition: width 0.2s, opacity 0.4s; }
 #viewport { flex: 1; position: relative; overflow: hidden; background: #fff; }
 #screen { position: absolute; inset: 0; width: 100%; height: 100%; outline: none; }
-#ime { position: absolute; left: -1000px; top: 0; width: 10px; height: 10px; opacity: 0; }
+#ime { position: fixed; left: -1000px; top: 0; width: 1px; height: 10px; opacity: 0; pointer-events: none; resize: none; border: 0; padding: 0; }
 #boot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6e6e73; background: #fff; }
 #boot[hidden] { display: none; }
 @media (max-width: 600px) {
