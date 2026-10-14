@@ -5,6 +5,7 @@
 
 #include "config.h"
 
+#include "BytecodeCache.h"
 #include "Compositor.h"
 #include "Engine.h"
 #include "Gamepad.h"
@@ -97,6 +98,7 @@ int main(int, char**)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     // WebCodecs der Seiten ueber die WebCodecs des Host (media/WebCodecsWasm.cpp)
     WebCodecs::initialize();
+    BytecodeCache::initialize();
     BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
     // Eigener Thread fuer Compositing und Anzeige (braucht WebGL 2)

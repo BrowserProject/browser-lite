@@ -4,6 +4,7 @@
 #include "DeviceClients.h"
 
 #include "BackForwardList.h"
+#include "BytecodeCache.h"
 #include "Clients.h"
 #include "EditorClient.h"
 #include "Engine.h"
@@ -1359,6 +1360,7 @@ void WebView::didFinishLoading()
     notifyNavigationState();
     notifyHost(m_id, "load");
     loadFavicon();
+    BytecodeCache::scheduleCommit();
 }
 
 void WebView::exitFullscreen()

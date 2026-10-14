@@ -1,0 +1,259 @@
+diff --git a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
+index b7d6bff329..17104bba06 100644
+--- a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
++++ b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
+@@ -31,6 +31,10 @@
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/text/SuperFastHash.h>
+ 
++#if OS(EMSCRIPTEN)
++#include <cstdlib>
++#endif
++
+ #if OS(UNIX)
+ #include <dlfcn.h>
+ #if OS(DARWIN)
+@@ -152,6 +156,13 @@ uint32_t computeJSCBytecodeCacheVersion()
+         }
+         cacheVersion.construct(0);
+         dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
++#elif OS(EMSCRIPTEN)
++        // browser-lite: der Zeitstempel dieser Datei aendert sich nicht, wenn sich
++        // der Rest der Engine aendert. Der Einbetter setzt BL_BUILD_ID (Hash von
++        // engine.wasm); ohne ID 0, dann nimmt der Einbetter keinen Bytecode-Cache.
++        UNUSED_VARIABLE(jsFunctionAddr);
++        const char* buildID = getenv("BL_BUILD_ID");
++        cacheVersion.construct(buildID && *buildID ? SuperFastHash::computeHash(buildID) : 0);
+ #else
+         UNUSED_VARIABLE(jsFunctionAddr);
+         static constexpr uint32_t precomputedCacheVersion = SuperFastHash::computeHash(__TIMESTAMP__);
+diff --git a/Source/WebCore/bindings/js/CachedScriptSourceProvider.h b/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
+index df84a17d3d..e6ff8df2e7 100644
+--- a/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
++++ b/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
+@@ -40,9 +40,20 @@ public:
+ 
+     virtual ~CachedScriptSourceProvider()
+     {
++#if PLATFORM(WASM)
++        finishBytecodeCache();
++#endif
+         protect(m_cachedScript)->removeClient(*this);
+     }
+ 
++#if PLATFORM(WASM)
++    // browser-lite: dauerhafter Bytecode-Cache der Skripte (platform/wasm/BytecodeCacheWasm.cpp)
++    RefPtr<JSC::CachedBytecode> cachedBytecode() const final;
++    void cacheBytecode(const JSC::BytecodeCacheGenerator&) const final;
++    void updateCache(const JSC::UnlinkedFunctionExecutable*, const JSC::SourceCode&, JSC::CodeSpecializationKind, const JSC::UnlinkedFunctionCodeBlock*) const final;
++    void commitCachedBytecode() const final;
++#endif
++
+     // CachedResourceClient.
+     void ref() const final { JSC::SourceProvider::ref(); }
+     void deref() const final { JSC::SourceProvider::deref(); }
+@@ -62,8 +73,21 @@ private:
+         , m_cachedScript(cachedScript)
+     {
+         cachedScript->addClient(*this);
++#if PLATFORM(WASM)
++        startBytecodeCache();
++#endif
+     }
+ 
++#if PLATFORM(WASM)
++    void startBytecodeCache();
++    void finishBytecodeCache();
++    bool shouldCacheBytecode() const;
++
++    mutable RefPtr<JSC::CachedBytecode> m_cachedBytecode;
++    mutable bool m_bytecodeLoaded { false };
++    mutable bool m_bytecodeCommitted { false };
++#endif
++
+     const CachedResourceHandle<CachedScript> m_cachedScript;
+ };
+ 
+diff --git a/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
+new file mode 100644
+index 0000000000..5f7fde63c6
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
+@@ -0,0 +1,177 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++// browser-lite: dauerhafter Bytecode-Cache fuer Skripte aus dem Netz.
++//
++// JavaScriptCore kann kompilierten Bytecode speichern und wieder laden (wie
++// die jsc-Shell mit --diskCachePath): beim ersten Ausfuehren fragt der
++// CodeCache den SourceProvider nach gespeichertem Bytecode, neu erzeugter
++// Code (das ganze Skript und spaeter jede Funktion beim ersten Aufruf) kommt
++// als Update dazu. Hier haengt das an CachedScriptSourceProvider; wo der
++// Bytecode liegt, entscheidet der Einbetter (setBytecodeCacheHandlers).
++// JSC prueft beim Laden selbst Version (JSCBytecodeCacheVersion, Build-ID)
++// und Schluessel (Hash, Laenge, Modus und den ganzen Quelltext).
++
++#include "config.h"
++#include "CachedScriptSourceProvider.h"
++
++#include "CommonVM.h"
++#include "WasmPlatform.h"
++#include <JavaScriptCore/BytecodeCacheError.h>
++#include <JavaScriptCore/CachedBytecode.h>
++#include <JavaScriptCore/CachedTypes.h>
++#include <JavaScriptCore/UnlinkedFunctionExecutable.h>
++#include <wtf/HashSet.h>
++#include <wtf/NeverDestroyed.h>
++
++namespace WebCore {
++
++namespace WasmPlatform {
++
++static TakeBytecodeHandler& takeBytecodeHandler()
++{
++    static NeverDestroyed<TakeBytecodeHandler> handler;
++    return handler;
++}
++
++static StoreBytecodeHandler& storeBytecodeHandler()
++{
++    static NeverDestroyed<StoreBytecodeHandler> handler;
++    return handler;
++}
++
++// Skripte, deren neuer Bytecode noch nicht gespeichert ist (nur Haupt-Thread)
++static HashSet<const CachedScriptSourceProvider*>& providersWithBytecode()
++{
++    static NeverDestroyed<HashSet<const CachedScriptSourceProvider*>> providers;
++    return providers;
++}
++
++void setBytecodeCacheHandlers(TakeBytecodeHandler&& take, StoreBytecodeHandler&& store)
++{
++    takeBytecodeHandler() = WTF::move(take);
++    storeBytecodeHandler() = WTF::move(store);
++}
++
++void commitPendingBytecode()
++{
++    for (auto* provider : copyToVector(providersWithBytecode()))
++        provider->commitCachedBytecode();
++}
++
++} // namespace WasmPlatform
++
++// Kleine Skripte kompilieren schneller, als der Weg ueber den Cache kostet
++static constexpr unsigned minimumScriptSizeForBytecodeCache = 4096;
++
++bool CachedScriptSourceProvider::shouldCacheBytecode() const
++{
++    return WasmPlatform::takeBytecodeHandler() && WasmPlatform::storeBytecodeHandler()
++        && !sourceURL().isEmpty() && m_cachedScript->encodedSize() >= minimumScriptSizeForBytecodeCache;
++}
++
++void CachedScriptSourceProvider::startBytecodeCache()
++{
++    if (shouldCacheBytecode())
++        WasmPlatform::providersWithBytecode().add(this);
++}
++
++void CachedScriptSourceProvider::finishBytecodeCache()
++{
++    commitCachedBytecode();
++    WasmPlatform::providersWithBytecode().remove(this);
++}
++
++RefPtr<JSC::CachedBytecode> CachedScriptSourceProvider::cachedBytecode() const
++{
++    if (!m_bytecodeLoaded) {
++        m_bytecodeLoaded = true;
++        if (shouldCacheBytecode()) {
++            if (auto bytes = WasmPlatform::takeBytecodeHandler()(sourceURL()); bytes && !bytes->isEmpty()) {
++                auto buffer = MallocSpan<uint8_t, JSC::VMMalloc>::malloc(bytes->size());
++                memcpySpan(buffer.mutableSpan(), bytes->span());
++                m_cachedBytecode = JSC::CachedBytecode::create(WTF::move(buffer), { });
++            }
++        }
++    }
++    return m_cachedBytecode;
++}
++
++void CachedScriptSourceProvider::cacheBytecode(const JSC::BytecodeCacheGenerator& generator) const
++{
++    if (!shouldCacheBytecode())
++        return;
++    m_bytecodeLoaded = true;
++    if (m_bytecodeCommitted || (m_cachedBytecode && m_cachedBytecode->hasUpdates()))
++        return;
++    // Gespeicherter Bytecode passte nicht (Skript geaendert): ganz neu anfangen,
++    // ein Update haengt sonst nur hinten an den alten Inhalt an
++    auto update = generator();
++    if (!update)
++        return;
++    m_cachedBytecode = JSC::CachedBytecode::create();
++    m_cachedBytecode->addGlobalUpdate(*update);
++}
++
++void CachedScriptSourceProvider::updateCache(const JSC::UnlinkedFunctionExecutable* executable, const JSC::SourceCode&, JSC::CodeSpecializationKind kind, const JSC::UnlinkedFunctionCodeBlock* codeBlock) const
++{
++    if (!m_cachedBytecode || m_bytecodeCommitted)
++        return;
++    // Nur Funktionen aus genau diesem Bytecode (bei einem Treffer im
++    // Speicher-Cache koennen sie aus einem anderen Skript gleichen Inhalts sein)
++    if (!m_cachedBytecode->leafExecutables().contains(executable))
++        return;
++    JSC::BytecodeCacheError error;
++    auto update = JSC::encodeFunctionCodeBlock(commonVM(), codeBlock, error);
++    if (update && !error.isValid())
++        m_cachedBytecode->addFunctionUpdate(executable, kind, *update);
++}
++
++void CachedScriptSourceProvider::commitCachedBytecode() const
++{
++    if (m_bytecodeCommitted || !m_cachedBytecode || !m_cachedBytecode->hasUpdates())
++        return;
++    m_bytecodeCommitted = true;
++    WasmPlatform::providersWithBytecode().remove(this);
++    if (!WasmPlatform::storeBytecodeHandler())
++        return;
++    // Wie die jsc-Shell eine Datei schreibt, nur im Speicher: bisheriger
++    // Bytecode, auf die neue Groesse gebracht, darueber die Updates
++    auto original = m_cachedBytecode->span();
++    Vector<uint8_t> blob(m_cachedBytecode->sizeForUpdate(), [](size_t) -> uint8_t { return 0; });
++    memcpySpan(blob.mutableSpan().first(std::min(original.size(), blob.size())), original.first(std::min(original.size(), blob.size())));
++    bool valid = true;
++    m_cachedBytecode->commitUpdates([&](off_t offset, std::span<const uint8_t> data) {
++        if (offset < 0 || static_cast<size_t>(offset) + data.size() > blob.size()) {
++            valid = false;
++            return;
++        }
++        memcpySpan(blob.mutableSpan().subspan(offset, data.size()), data);
++    });
++    if (valid)
++        WasmPlatform::storeBytecodeHandler()(sourceURL(), WTF::move(blob));
++}
++
++} // namespace WebCore

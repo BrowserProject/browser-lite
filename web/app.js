@@ -186,6 +186,8 @@ async function clearStorage() {
   clearPermissions();
   // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
   await engine?.blClearHttpCache?.().catch(() => {});
+  // Bytecode der Skripte (engine/js/bytecode-cache.js)
+  await engine?.blClearBytecodeCache?.().catch(() => {});
   await new Promise((resolve) => {
     const request = indexedDB.deleteDatabase('/data');
     request.onsuccess = request.onerror = request.onblocked = resolve;

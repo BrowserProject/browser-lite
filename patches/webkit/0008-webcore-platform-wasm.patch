@@ -1766,10 +1766,10 @@ index 0000000000..7660c42e7f
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..7a49d95e74
+index 0000000000..0e9c546f77
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,114 @@
+@@ -0,0 +1,124 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1798,6 +1798,7 @@ index 0000000000..7a49d95e74
 +#pragma once
 +
 +#include <WebCore/FloatRect.h>
++#include <optional>
 +#include <wtf/Function.h>
 +#include <wtf/RefCounted.h>
 +#include <wtf/Vector.h>
@@ -1878,6 +1879,15 @@ index 0000000000..7a49d95e74
 +};
 +enum class SpeechCommand : uint8_t { Pause, Resume, Cancel };
 +enum class SpeechEvent : uint8_t { Start, End, Pause, Resume, Error, WordBoundary, SentenceBoundary };
++// Dauerhafter Bytecode-Cache der Seiten-Skripte (BytecodeCacheWasm.cpp). Der
++// Einbetter liefert gespeicherten Bytecode zu einer Skript-URL (falls schon
++// da) und speichert neuen. commitPendingBytecode schreibt, was die lebenden
++// Skripte seit dem Laden kompiliert haben.
++using TakeBytecodeHandler = Function<std::optional<Vector<uint8_t>>(const String& url)>;
++using StoreBytecodeHandler = Function<void(const String& url, Vector<uint8_t>&&)>;
++WEBCORE_EXPORT void setBytecodeCacheHandlers(TakeBytecodeHandler&&, StoreBytecodeHandler&&);
++WEBCORE_EXPORT void commitPendingBytecode();
++
 +WEBCORE_EXPORT void setSpeechVoices(Vector<SpeechVoice>&&);
 +WEBCORE_EXPORT const Vector<SpeechVoice>& speechVoices();
 +WEBCORE_EXPORT void setSpeechCallbacks(Function<void(const SpeechRequest&)>&& speak, Function<void(SpeechCommand)>&& command);

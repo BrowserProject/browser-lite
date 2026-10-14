@@ -33,6 +33,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
+    ${BL_ENGINE_SRC}/BytecodeCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/Speech.cpp
@@ -146,6 +147,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js"
     # HTTP-Cache in der Cache API des Host (engine/src/HttpCache.cpp)
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js"
+    # Bytecode-Cache der Skripte, auch in der Cache API (engine/src/BytecodeCache.cpp)
+    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/bytecode-cache.js"
     # WebCodecs der Seiten ueber die WebCodecs des Host (engine/src/media/WebCodecsWasm.cpp)
     "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/webcodecs-host.js"
     # MediaRecorder: Encoder des Host + WebM (engine/src/media/MediaRecorderWasm.cpp)
@@ -184,5 +187,13 @@ set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js
     ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js
     ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js
+    ${BROWSER_LITE_ENGINE_DIR}/js/bytecode-cache.js
     ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
 )
+
+# Build-ID (Anfang des SHA-256 von engine.wasm) als Custom Section im Modul:
+# gespeicherter Bytecode gilt nur fuer genau diesen Build (BytecodeCache.cpp)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_custom_command(TARGET BrowserLiteEngine POST_BUILD
+    COMMAND ${Python3_EXECUTABLE} ${BROWSER_LITE_ENGINE_DIR}/../tools/wasm-build-id.py $<TARGET_FILE_DIR:BrowserLiteEngine>/engine.wasm
+    VERBATIM)

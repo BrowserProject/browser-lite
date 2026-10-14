@@ -166,7 +166,7 @@ kommen zuerst.
   in der GC und lief ins Zeitlimit. Mini-Modus aus (Patch 0028), Bytecode wird weiter verworfen:
   GC 6 s, Seite laedt (#122)
 - [x] WebGL-Host-Kontexte schon beim Start anlegen: das erste Anlegen wartete mitten im Laden auf die
-  ausgelastete GPU (weather.com 15 s, #123). Dauerhafter Bytecode-Cache gemessen und verworfen (#124)
+  ausgelastete GPU (weather.com 15 s, #123). Dauerhafter Bytecode-Cache zuerst verworfen (#124), spaeter doch eingebaut (#135)
 - [x] Drag & Drop: HTML5-Ziehen in der Seite (war ohne DragClient tot), Dateien und Text aus dem System
   ablegen, auch auf `<input type=file>` (#125, `dragdrop-test.mjs`)
 - [x] Zwischenablage mit HTML und Bildern (Einfuegen und Kopieren), `getData('text/plain')` im paste-Ereignis,
@@ -179,6 +179,8 @@ kommen zuerst.
   Cache pro Thread vor malloc (#134).
   Gemessen und verworfen: Style-Timer verzoegern, eigener Layout-Cache fuer Prozent-Hoehen (#131),
   Aufwaerm-Seite beim Start (#132), 16 Thread-Worker
+- [x] Dauerhafter Bytecode-Cache fuer Skripte (Cache API des Host, pro Engine-Build): zweiter Besuch
+  von CNN 2.5 s weniger im Engine-Thread, Parser 2.7 -> 1.0 s (#135, Test im `cache-test.mjs`)
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
