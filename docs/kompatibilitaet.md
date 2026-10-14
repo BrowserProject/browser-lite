@@ -5,6 +5,12 @@ Die Liste der Seiten steht in `tests/e2e/sites.txt`. CI laedt sie im Job
 eine Tabelle in die Zusammenfassung des Laufs. Die Screenshots sind im Artefakt
 `kompatibilitaet`.
 
+## Stand 2026-10-14 (lokal, nach WebRTC/PiP/MediaRecorder)
+
+46 von 54 Seiten laden. Nicht geladen: Reddit, old.reddit, Stack Overflow, BBC, NYTimes und Spiegel
+(Netz-Sperre der Test-Umgebung, in CI ok), OpenStreetMap ("This website is under heavy load", Schutz
+gegen Rechenzentrums-IPs) und weather.com (Titel da, `load` erst nach dem Zeitlimit von 120 s).
+
 ## Stand 2026-10-12 (lokal, Engine mit WebGL)
 
 Getestet ueber das lokale Relay, 6 s nach dem Laden ein Screenshot. "ok" heisst: laedt,
