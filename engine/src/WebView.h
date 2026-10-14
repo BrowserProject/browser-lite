@@ -58,6 +58,9 @@ public:
     void loadURL(const String&);
     void loadHTML(const String& html, const String& baseURL);
     void goBack();
+    // Verlauf des Tabs wieder einsetzen und den aktuellen Eintrag laden:
+    // {"entries":[{"url":..,"title":..}],"index":n}
+    void restoreHistory(const String&);
     void goForward();
     void reload();
     void stop();

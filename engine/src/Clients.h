@@ -109,6 +109,12 @@ private:
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
     void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading, WebCore::WillInternallyHandleFailure) final;
     void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld&) final;
+    // Verlauf (Zurueck/Vor): die leeren Clients legen keine Eintraege an und
+    // lehnen jedes Zurueck ab
+    RefPtr<WebCore::HistoryItem> createHistoryItemTree(bool clipAtTarget, WebCore::BackForwardItemIdentifier) const final;
+    WebCore::ShouldGoToHistoryItem shouldGoToHistoryItem(WebCore::HistoryItem&, WebCore::IsSameDocumentNavigation) const final { return WebCore::ShouldGoToHistoryItem::Yes; }
+    // Back/Forward-Cache (main.cpp): Seiten duerfen angehalten im Speicher bleiben
+    bool canCachePage() const final { return true; }
 
     bool isMainFrame() const;
 

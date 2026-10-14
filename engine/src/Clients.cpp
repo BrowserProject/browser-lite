@@ -29,6 +29,8 @@
 #include <WebCore/DocumentPage.h>
 #include <WebCore/DocumentView.h>
 #include <WebCore/FileChooser.h>
+#include <WebCore/HistoryController.h>
+#include <WebCore/HistoryItem.h>
 #include <WebCore/HitTestResult.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
@@ -356,6 +358,12 @@ FrameLoaderClient::FrameLoaderClient(FrameLoader& frameLoader, WebView& view)
     , m_frameLoader(frameLoader)
     , m_view(view)
 {
+}
+
+RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, BackForwardItemIdentifier itemID) const
+{
+    Ref frame = m_frameLoader->frame();
+    return frame->loader().history().createItemTree(frame, clipAtTarget, itemID);
 }
 
 // Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h)

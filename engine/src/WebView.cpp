@@ -1296,8 +1296,47 @@ void WebView::stopFind()
 void WebView::notifyNavigationState()
 {
     auto& backForward = m_page->backForward();
+    // Verlauf fuer die Sitzung (Zurueck/Vor nach Neustart oder Verwerfen)
+    auto& list = static_cast<BackForwardList&>(backForward.client());
+    StringBuilder history;
+    history.append("{\"index\":"_s, list.currentIndex().value_or(0), ",\"entries\":["_s);
+    bool first = true;
+    for (auto& item : list.entries()) {
+        history.append(first ? ""_s : ","_s, "{\"url\":\""_s, jsonEscape(item->urlString()), "\",\"title\":\""_s, jsonEscape(item->title()), "\"}"_s);
+        first = false;
+    }
+    history.append("]}"_s);
     notifyHost(m_id, "navigation", makeString("{\"url\":\""_s, jsonEscape(currentURL()), "\",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
-        ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, ",\"loading\":"_s, m_isLoading ? "true"_s : "false"_s, '}'));
+        ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, ",\"loading\":"_s, m_isLoading ? "true"_s : "false"_s,
+        ",\"history\":"_s, history.toString(), '}'));
+}
+
+void WebView::restoreHistory(const String& data)
+{
+    RefPtr frame = mainFrame();
+    auto value = JSON::Value::parseJSON(data);
+    auto object = value ? value->asObject() : nullptr;
+    auto array = object ? object->getArray("entries"_s) : nullptr;
+    if (!frame || !array || !array->length())
+        return;
+    Vector<Ref<HistoryItem>> items;
+    for (auto& entry : *array) {
+        auto item = entry->asObject();
+        if (!item)
+            continue;
+        URL url { item->getString("url"_s) };
+        // Nur Adressen, die man auch eintippen koennte
+        if (!url.isValid() || !(url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsAbout()))
+            continue;
+        items.append(HistoryItem::create(m_page->historyItemClient(), url.string(), item->getString("title"_s)));
+    }
+    if (items.isEmpty())
+        return;
+    size_t index = std::min<size_t>(std::max(object->getInteger("index"_s).value_or(0), 0), items.size() - 1);
+    Ref current = items[index];
+    static_cast<BackForwardList&>(m_page->backForward().client()).restore(WTF::move(items), index);
+    // Wie Zurueck/Vor: laedt den Eintrag, ohne einen neuen anzulegen
+    m_page->goToItem(*frame, current, FrameLoadType::IndexedBackForward, ShouldTreatAsContinuingLoad::No);
 }
 
 void WebView::didStartLoading()
@@ -1366,7 +1405,8 @@ void WebView::didFailLoading(const String& url, const String& description)
 
 void WebView::didChangeTitle(const String& title)
 {
-    notifyHost(m_id, "title", makeString("{\"title\":\""_s, jsonEscape(title), "\"}"_s));
+    // Mit Adresse: beim Zurueck/Vor kann der Titel vor der Navigationsmeldung kommen
+    notifyHost(m_id, "title", makeString("{\"title\":\""_s, jsonEscape(title), "\",\"url\":\""_s, jsonEscape(currentURL()), "\"}"_s));
 }
 
 void WebView::didChangeProgress(double progress)

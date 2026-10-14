@@ -255,6 +255,8 @@ class Tab {
   constructor(url, viewId = 0, lazy = null) {
     this.id = viewId || nextViewId++;
     this.title = lazy?.title || 'Neuer Tab';
+    // Zurueck/Vor des Tabs ({ entries: [{ url, title }], index }), fuer die Sitzung
+    this.history = lazy?.history || null;
     this.url = url;
     this.canGoBack = false;
     this.canGoForward = false;
@@ -301,8 +303,10 @@ class Tab {
       return;
     }
     engine._bl_create_view(this.id, width, height, devicePixelRatio);
-    if (lazy)
+    if (lazy) {
       this.pendingURL = url;
+      this.pendingHistory = lazy.history?.entries?.length ? lazy.history : null;
+    }
     else if (url)
       engine._bl_load_url(this.id, toUTF8(url));
   }
@@ -388,7 +392,7 @@ function showSource(url, bytes, mime) {
 
 // Wiederhergestellter Tab im Hintergrund: laedt erst beim ersten Anklicken
 function restoredTab(entry) {
-  const tab = new Tab(entry.url, 0, { title: entry.title });
+  const tab = new Tab(entry.url, 0, { title: entry.title, history: entry.history });
   tabs.set(tab.id, tab);
   return tab;
 }
@@ -407,8 +411,13 @@ function activateTab(tab) {
   clearHover();
   updateStar(tab.url);
   if (tab.pendingURL) {
-    engine._bl_load_url(tab.id, toUTF8(tab.pendingURL));
+    // Mit Verlauf (Zurueck/Vor) wie vor dem Neustart bzw. Verwerfen
+    if (tab.pendingHistory)
+      engine._bl_restore_history(tab.id, toUTF8(JSON.stringify(tab.pendingHistory)));
+    else
+      engine._bl_load_url(tab.id, toUTF8(tab.pendingURL));
     tab.pendingURL = null;
+    tab.pendingHistory = null;
   }
   persistSession();
   tab.canvas.style.display = 'block';
@@ -441,7 +450,7 @@ window.__blCheckMemory = (limit) => {
 };
 
 function discardTab(tab) {
-  const fresh = new Tab(tab.url, 0, { title: tab.title });
+  const fresh = new Tab(tab.url, 0, { title: tab.title, history: tab.history });
   fresh.lastActive = tab.lastActive;
   tab.element.before(fresh.element);
   // Favicon uebernehmen (die Blob-URL gehoert jetzt dem neuen Tab)
@@ -690,12 +699,22 @@ function onEngineEvent(viewId, type, payload) {
   }
   switch (type) {
   case 'navigation':
-    if (data.url !== tab.url)
-      recordVisit(data.url, '');
+    // Titel aus dem Verlaufseintrag: aus dem Back/Forward-Cache kommt er vor
+    // dieser Meldung
+    if (data.url !== tab.url) {
+      const entry = data.history?.entries?.[data.history.index];
+      recordVisit(data.url, entry && entry.url === data.url ? entry.title : '');
+      if (entry?.title && entry.url === data.url) {
+        tab.title = entry.title;
+        tab.updateTitle();
+      }
+    }
     tab.url = data.url;
     tab.canGoBack = data.canGoBack;
     tab.canGoForward = data.canGoForward;
     tab.loading = data.loading;
+    if (data.history)
+      tab.history = data.history;
     if (tab === activeTab)
       updateStar(tab.url);
     persistSession();
@@ -703,7 +722,9 @@ function onEngineEvent(viewId, type, payload) {
   case 'title':
     tab.title = data.title;
     tab.updateTitle();
-    recordVisit(tab.url, data.title);
+    // Nur zum Eintrag der Adresse, zu der der Titel gehoert
+    if (!data.url || data.url === tab.url)
+      recordVisit(tab.url, data.title);
     persistSession();
     break;
   case 'progress':

@@ -18,6 +18,7 @@
 #include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
+#include <WebCore/BackForwardCache.h>
 #include <WebCore/CommonAtomStrings.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/MediaPlayer.h>
@@ -109,6 +110,10 @@ int main(int, char**)
 
     // Standard von WebCore ist 8 MB, eine moderne Seite verdraengt damit alles
     WebCore::MemoryCache::singleton().setCapacities(0, 16 * 1024 * 1024, 64 * 1024 * 1024);
+    // Zurueck/Vor ohne Neuladen wie in Chrome (Back/Forward-Cache): die letzten
+    // Seiten bleiben angehalten im Speicher. Bei Speicherdruck gibt
+    // releaseMemory (EngineLoop.cpp) sie frei. Standard von WebCore ist 0.
+    WebCore::BackForwardCache::singleton().setMaxSize(3);
 
 #if ENABLE(WEBGL)
     // WebGL-Kontexte des Host gleich als erste Aufgabe anlegen, solange die

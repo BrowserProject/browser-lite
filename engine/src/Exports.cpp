@@ -92,6 +92,11 @@ EMSCRIPTEN_KEEPALIVE void bl_load_html(int id, char* html, char* baseURL)
     });
 }
 
+EMSCRIPTEN_KEEPALIVE void bl_restore_history(int id, char* data)
+{
+    withView(id, [data = takeString(data)](WebView& view) { view.restoreHistory(data); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_go_back(int id) { withView(id, [](WebView& view) { view.goBack(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withView(id, [](WebView& view) { view.goForward(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withView(id, [](WebView& view) { view.reload(); }); }

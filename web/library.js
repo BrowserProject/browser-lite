@@ -70,8 +70,22 @@ export function addressToURL(text) {
 
 // ------------------------------------------------------------ Sitzung
 
+// Pro Tab auch Zurueck/Vor (hoechstens 25 Eintraege um den aktuellen herum)
+function sessionHistory(tab) {
+  const history = tab.pendingHistory || tab.history;
+  if (!history?.entries?.length)
+    return undefined;
+  const start = Math.max(0, history.index - 20);
+  const entries = history.entries.slice(start, start + 25).map((entry) => ({ url: entry.url, title: entry.title }));
+  const index = Math.min(history.index - start, entries.length - 1);
+  // Der Titel kommt oft erst nach der Navigation
+  if (entries[index] && entries[index].url === tab.url && tab.title)
+    entries[index].title = tab.title;
+  return { entries, index };
+}
+
 export function saveSession(tabs, active) {
-  const list = tabs.filter((t) => !isInternal(t.url)).map((t) => ({ url: t.url, title: t.title, active: t === active }));
+  const list = tabs.filter((t) => !isInternal(t.url)).map((t) => ({ url: t.url, title: t.title, active: t === active, history: sessionHistory(t) }));
   write(KEYS.session, { tabs: list, time: Date.now() });
 }
 

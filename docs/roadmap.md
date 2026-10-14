@@ -173,6 +173,8 @@ kommen zuerst.
   Doppel-/Dreifachklick (Klickzahl war immer 1) (#126, `clipboard-test.mjs`)
 - [x] IME-Vorschau (composition-Ereignisse, unterstrichener Text) und Kandidatenfenster beim Cursor (#127)
 - [x] Hintergrund-Tabs bei wenig Speicher verwerfen, Neuladen beim Anklicken (#128, Test im `ui-test.mjs`)
+- [x] Zurueck/Vor ging nie (keine Verlaufseintraege, leerer Client), jetzt mit Back/Forward-Cache und Verlauf
+  pro Tab in der Sitzung und nach dem Verwerfen (#129)
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die

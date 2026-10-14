@@ -11,6 +11,16 @@ class BackForwardList final : public WebCore::BackForwardClient {
 public:
     static Ref<BackForwardList> create() { return adoptRef(*new BackForwardList); }
 
+    // Fuer die Sitzung der Oberflaeche: Eintraege und aktueller Index, und
+    // wieder einsetzen (beim Wiederherstellen und nach dem Verwerfen eines Tabs)
+    const Vector<Ref<WebCore::HistoryItem>>& entries() const { return m_entries; }
+    std::optional<size_t> currentIndex() const { return m_current; }
+    void restore(Vector<Ref<WebCore::HistoryItem>>&& entries, size_t current)
+    {
+        m_entries = WTF::move(entries);
+        m_current = current;
+    }
+
 private:
     void addItem(Ref<WebCore::HistoryItem>&&) final;
     void setChildItem(WebCore::BackForwardFrameItemIdentifier, Ref<WebCore::HistoryItem>&&) final;

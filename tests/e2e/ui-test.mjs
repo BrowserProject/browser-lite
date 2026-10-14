@@ -35,7 +35,7 @@ const PRINT_PAGE = `<!doctype html><title>Seite drucken</title><style>@media pri
 <script>addEventListener('beforeprint', () => console.log('RESULT print=before')); addEventListener('afterprint', () => console.log('RESULT print=after')); console.log('RESULT loaded=' + document.title)</script>`;
 const page = (title) => title === 'Seite drucken' ? PRINT_PAGE : title === 'Seite links'
   ? `<!doctype html><title>${title}</title><body style="margin:0"><a id="l" href="/ziel" style="display:block;width:300px;height:60px;background:#9cf">Link</a><script>console.log('RESULT loaded=' + document.title)</script>`
-  : `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title)</script>`;
+  : `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title); addEventListener('pageshow', (e) => { if (e.persisted) console.log('RESULT loaded=' + document.title + ' [cache]'); })</script>`;
 const site = http.createServer((req, res) => {
   const name = req.url.slice(1) || 'start';
   loads.set(name, (loads.get(name) || 0) + 1);
@@ -70,10 +70,11 @@ tab.on('console', (msg) => {
   if (match)
     loaded.push(match[1]);
 });
+// Geladen oder aus dem Back/Forward-Cache gezeigt ("Titel [cache]")
 async function waitLoaded(title, timeout = 30000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
-    if (loaded.includes(title))
+    if (loaded.includes(title) || loaded.includes(title + ' [cache]'))
       return true;
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -90,11 +91,23 @@ await tab.goto(`http://localhost:${UI_PORT}/?${new URLSearchParams({ ...base, ur
 check('Erste Seite', await waitLoaded('Seite eins', TIMEOUT));
 await go(siteURL + 'zwei');
 check('Zweite Seite ueber die Adressleiste', await waitLoaded('Seite zwei'));
+// Zurueck und Vor (Knoepfe der Oberflaeche)
+await tab.waitForFunction(() => !document.getElementById('back').disabled, null, { timeout: 10000 }).catch(() => {});
+check('Zurueck-Knopf aktiv', await tab.evaluate(() => !document.getElementById('back').disabled));
+loaded = [];
+const einsLoads = loads.get('eins') || 0;
+await tab.click('#back');
+check('Zurueck: erste Seite sofort aus dem Back/Forward-Cache (pageshow persisted, kein Neuladen)', await waitLoaded('Seite eins [cache]') && (loads.get('eins') || 0) === einsLoads, `${loaded.join('|')}, ${loads.get('eins')} Aufrufe`);
+await tab.waitForFunction(() => !document.getElementById('forward').disabled, null, { timeout: 10000 }).catch(() => {});
+loaded = [];
+await tab.click('#forward');
+check('Vor: zweite Seite aus dem Cache', await waitLoaded('Seite zwei [cache]'), loaded.join('|'));
 
 // Verlauf (Strg+H): beide Seiten, neueste zuerst
 await tab.keyboard.press('Control+h');
 const history = await tab.locator('#side-panel .panel-title').allTextContents();
-check('Verlauf', history[0] === 'Seite zwei' && history.includes('Seite eins'), JSON.stringify(history.slice(0, 3)));
+// eins, zwei, zurueck zu eins, vor zu zwei (neueste zuerst)
+check('Verlauf', JSON.stringify(history.slice(0, 4)) === JSON.stringify(['Seite zwei', 'Seite eins', 'Seite zwei', 'Seite eins']), JSON.stringify(history.slice(0, 4)));
 await tab.keyboard.press('Escape');
 check('Panel mit Esc zu', await tab.evaluate(() => document.getElementById('side-panel').hidden));
 
@@ -140,6 +153,15 @@ await tab.waitForTimeout(1500);
 check('Sitzung: Hintergrund-Tab laedt noch nicht', (loads.get('eins') || 0) === loadsBefore, `${loads.get('eins')} Aufrufe`);
 await tab.click('#tab-list .tab:first-child .title');
 check('Sitzung: Hintergrund-Tab laedt beim Anklicken', await waitLoaded('Seite eins'));
+// Zurueck/Vor des Tabs wie vor dem Neustart (eins -> zwei -> eins)
+await tab.waitForFunction(() => !document.getElementById('back').disabled, null, { timeout: 10000 }).catch(() => {});
+check('Sitzung: Zurueck geht nach dem Neustart', await tab.evaluate(() => !document.getElementById('back').disabled));
+loaded = [];
+await tab.click('#back');
+check('Sitzung: Zurueck laedt die vorige Seite', await waitLoaded('Seite zwei'));
+loaded = [];
+await tab.click('#forward');
+check('Sitzung: Vor laedt wieder die letzte Seite', await waitLoaded('Seite eins'));
 
 // Wenig Speicher: der Hintergrund-Tab wird verworfen und laedt beim Anklicken neu
 const dreiBefore = loads.get('drei') || 0;
