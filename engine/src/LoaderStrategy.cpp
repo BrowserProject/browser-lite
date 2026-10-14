@@ -398,19 +398,17 @@ private:
 };
 
 // Download: eigener CurlRequest, die Daten gehen stueckweise an die Oberflaeche,
-// die daraus eine Datei (Blob) macht. Quelltext und PDF zeigt sie statt zu speichern.
-enum class DownloadKind : uint8_t { Save, ViewSource, ViewPDF };
-
+// die daraus eine Datei (Blob) macht.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
-    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, DownloadKind kind = DownloadKind::Save)
+    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
     {
         static int nextID = 1;
         if (request.httpUserAgent().isEmpty())
             request.setHTTPUserAgent(standardUserAgent());
         addCookieHeader(request);
         Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename));
-        download->m_kind = kind;
+        download->m_viewSource = viewSource;
         download->m_self = download.ptr();
         download->m_request = CurlRequest::create(request, download.get());
         download->m_request->resume();
@@ -449,7 +447,7 @@ private:
             filename = "download"_s;
         notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, jsonEscape(response.url().string()),
             "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
-            "\",\"size\":"_s, response.expectedContentLength(), kindJSON(), "}"_s));
+            "\",\"size\":"_s, response.expectedContentLength(), m_viewSource ? ",\"viewSource\":true}"_s : "}"_s));
         request.completeDidReceiveResponse();
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
@@ -467,23 +465,11 @@ private:
         finish(error.localizedDescription().isEmpty() ? "Fehler"_s : error.localizedDescription());
     }
 
-    ASCIILiteral kindJSON() const
-    {
-        switch (m_kind) {
-        case DownloadKind::ViewSource:
-            return ",\"viewSource\":true"_s;
-        case DownloadKind::ViewPDF:
-            return ",\"viewPDF\":true"_s;
-        case DownloadKind::Save:
-            break;
-        }
-        return ""_s;
-    }
-
     int m_id;
     int m_viewId;
     String m_filename;
-    DownloadKind m_kind { DownloadKind::Save };
+    // Quelltext anzeigen: die Oberflaeche zeigt die Daten als Text statt zu speichern
+    bool m_viewSource { false };
     RefPtr<CurlRequest> m_request;
     RefPtr<Download> m_self;
 };
@@ -498,13 +484,7 @@ void startViewSource(int viewId, const URL& url)
 {
     ResourceRequest request { URL { url } };
     request.setFirstPartyForCookies(url);
-    Download::start(viewId, WTF::move(request), { }, DownloadKind::ViewSource);
-}
-
-void startPDFView(int viewId, const ResourceRequest& request)
-{
-    auto copy = request;
-    Download::start(viewId, WTF::move(copy), { }, DownloadKind::ViewPDF);
+    Download::start(viewId, WTF::move(request), { }, true);
 }
 
 // Favicon fuer den Tab: klein, ganz im Speicher, geht als Ganzes an die Oberflaeche

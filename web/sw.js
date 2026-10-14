@@ -5,11 +5,6 @@
 // ueber das Relay laedt (Range-Requests). Das naechste Stueck wird erst geholt,
 // wenn der Browser die Daten auch liest. So kommt ein langes Video nie ganz in
 // den Speicher. Alles andere geht normal ans Netz.
-//
-// Dazu PDFs im Tab (app.js showPDF): bl-pdf/<id>/<name>.pdf, damit der
-// PDF-Viewer des Browsers den richtigen Dateinamen zeigt und speichert. Die
-// Daten holen wir jedes Mal bei der Oberflaeche (der Worker kann jederzeit
-// beendet werden).
 
 const PREFIX = '/bl-media/';
 const CHUNK = 2 * 1024 * 1024;
@@ -39,11 +34,6 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  const pdfPrefix = new URL('bl-pdf/', self.registration.scope).pathname;
-  if (url.origin === location.origin && url.pathname.startsWith(pdfPrefix)) {
-    event.respondWith(pdfResponse(url.pathname.slice(pdfPrefix.length).split('/')[0]));
-    return;
-  }
   if (url.origin !== location.origin || !url.pathname.startsWith(PREFIX))
     return;
   event.respondWith(mediaResponse(event, Number(url.pathname.slice(PREFIX.length).split('/')[0])));
@@ -58,25 +48,6 @@ async function pageClient(event) {
   // Media-Anfragen haben manchmal keine clientId: dann das sichtbare Fenster
   const all = await self.clients.matchAll({ type: 'window' });
   return all.find((c) => c.visibilityState === 'visible') || all[0];
-}
-
-async function pdfResponse(id) {
-  const windows = (await self.clients.matchAll({ type: 'window' })).filter((c) => c.frameType === 'top-level');
-  windows.sort((a, b) => (b.visibilityState === 'visible') - (a.visibilityState === 'visible'));
-  for (const client of windows) {
-    const blob = await new Promise((resolve) => {
-      const channel = new MessageChannel();
-      channel.port1.onmessage = (event) => resolve(event.data?.blob || null);
-      client.postMessage({ bl: 'pdf-get', id }, [channel.port2]);
-      setTimeout(() => resolve(null), 5000);
-    });
-    if (blob) {
-      // Die Oberflaeche laeuft mit COOP/COEP: das iframe-Dokument braucht die Header auch
-      return new Response(blob, { headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(blob.size),
-        'Cross-Origin-Embedder-Policy': 'require-corp', 'Cross-Origin-Resource-Policy': 'same-origin', 'Cross-Origin-Opener-Policy': 'same-origin' } });
-    }
-  }
-  return new Response('PDF nicht mehr da', { status: 404 });
 }
 
 // Ein Stueck [start, end] bei der Engine holen. Ruft onHead einmal, dann onData.
