@@ -1,8 +1,8 @@
 diff --git a/Source/JavaScriptCore/runtime/Options.cpp b/Source/JavaScriptCore/runtime/Options.cpp
-index 4a2eb2ab45..86281a8b2d 100644
+index 4a2eb2ab45..98665e4fcf 100644
 --- a/Source/JavaScriptCore/runtime/Options.cpp
 +++ b/Source/JavaScriptCore/runtime/Options.cpp
-@@ -565,6 +565,14 @@ static void disableAllSignalHandlerBasedOptions();
+@@ -565,6 +565,18 @@ static void disableAllSignalHandlerBasedOptions();
  
  static void overrideDefaults()
  {
@@ -12,6 +12,10 @@ index 4a2eb2ab45..86281a8b2d 100644
 +    // funktionieren auch auf 32 Bit. Ohne sie geht jeder JS-Aufruf durch
 +    // llint_default_call (C++), das kostet bis zu 40 %.
 +    Options::forceICFailure() = false;
++    // Ohne JIT waere die VM im Mini-Modus (VM::isInMiniMode, bei uns aus). Von
++    // dort behalten wir nur das Verwerfen von ungenutztem Bytecode beim GC:
++    // spart auf grossen Seiten 10 MB und mehr JS-Heap, kostet kaum Zeit.
++    Options::useUnlinkedCodeBlockJettisoning() = true;
 +#endif
 +
  #if OS(DARWIN)

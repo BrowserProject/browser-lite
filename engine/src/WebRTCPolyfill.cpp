@@ -783,6 +783,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   if (typeof HTMLVideoElement === 'function' && !('requestPictureInPicture' in HTMLVideoElement.prototype)) {
     let pipElement = null;
     let pipWindow = null;
+    let pipSink = 0; // Engine-Senke eines Streams im PiP-Fenster
     class PictureInPictureWindow extends EventTarget {
       constructor() {
         throw new TypeError('Illegal constructor');
@@ -819,6 +820,9 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       const window = pipWindow;
       pipElement = null;
       pipWindow = null;
+      if (pipSink && media)
+        media('sink-stop', pipSink);
+      pipSink = 0;
       state(window).width = 0;
       state(window).height = 0;
       element.dispatchEvent(new PictureInPictureEvent('leavepictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
@@ -848,11 +852,38 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': \"disablePictureInPicture\" attribute is present.", 'InvalidStateError');
       if (this.readyState === 0)
         throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Metadata for the video element are not loaded yet.", 'InvalidStateError');
-      const player = media ? media('player', this) : 0;
-      if (!player)
-        throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Picture-in-Picture is not available for this video.", 'NotSupportedError');
-      const size = await call('pip-enter', { player });
+      const unavailable = () => new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Picture-in-Picture is not available for this video.", 'NotSupportedError');
+      let player = 0;
+      let size;
+      let sink = 0;
+      const stream = this.srcObject;
+      if (typeof MediaStream === 'function' && stream instanceof MediaStream) {
+        // Stream: der Host zeigt die Spur in einem eigenen <video>
+        const track = stream.getVideoTracks().find((t) => t.readyState === 'live');
+        if (!track || !media)
+          throw unavailable();
+        const info = { kind: 'video' };
+        const capture = media('capture', track);
+        if (capture)
+          info.capture = capture;
+        else
+          sink = info.sink = media('sink', track);
+        try {
+          size = await call('pip-enter', { track: info });
+        } catch (e) {
+          if (info.sink)
+            media('sink-stop', info.sink);
+          throw e;
+        }
+        player = size.stream;
+      } else {
+        player = media ? media('player', this) : 0;
+        if (!player)
+          throw unavailable();
+        size = await call('pip-enter', { player });
+      }
       leave();
+      pipSink = sink;
       const window = Reflect.construct(EventTarget, [], PictureInPictureWindow);
       internal.set(window, { width: size.width, height: size.height });
       pipElement = this;

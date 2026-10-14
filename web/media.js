@@ -5,6 +5,8 @@
 // von der Engine. Die Bilder kopieren wir in den WASM-Speicher, die Engine
 // malt sie in die Seite. Der Ton kommt direkt aus diesem <video>.
 
+import { captureTrack, captureApi } from './capture.js';
+
 const players = new Map(); // id -> Player
 const fetchSources = new Map(); // fetchId (Engine) -> { source, id (SW) }
 let nextEngineFetchId = 1;
@@ -419,8 +421,81 @@ function pipError(name, message) {
   return error;
 }
 
+// srcObject-Streams haben keinen Player: eigenes verstecktes <video> mit der
+// Spur (Kamera: Kopie der echten Spur, sonst schreibt die Engine-Senke in
+// einen MediaStreamTrackGenerator). Ids negativ, damit sie nicht mit Playern
+// zusammenfallen
+const streamPips = new Map(); // id -> { video, track, origin }
+let nextStreamPip = -1;
+
+function closeStreamPip(id) {
+  const pip = streamPips.get(id);
+  if (!pip)
+    return;
+  streamPips.delete(id);
+  pip.track.stop();
+  pip.video.srcObject = null;
+  pip.video.remove();
+}
+
+async function enterStreamPip(info, origin) {
+  if (!info || info.kind !== 'video')
+    throw pipError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
+  let track;
+  if (info.capture) {
+    const original = await captureTrack(info.capture);
+    if (!original || original.readyState === 'ended')
+      throw pipError('InvalidStateError', 'The track has ended.');
+    track = original.clone();
+  } else if (info.sink && typeof MediaStreamTrackGenerator === 'function') {
+    const worker = captureApi()?.engineWorker();
+    if (!worker)
+      throw pipError('InvalidStateError', 'No engine');
+    track = new MediaStreamTrackGenerator({ kind: 'video' });
+    worker.postMessage({ blSink: { id: info.sink, writable: track.writable } }, [track.writable]);
+  } else
+    throw pipError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
+  const id = nextStreamPip--;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.srcObject = new MediaStream([track]);
+  if (!container) {
+    container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
+    document.body.appendChild(container);
+  }
+  container.appendChild(video);
+  streamPips.set(id, { video, track, origin });
+  try {
+    if (video.readyState < 1)
+      await new Promise((resolve, reject) => {
+        video.addEventListener('loadedmetadata', resolve, { once: true });
+        setTimeout(() => reject(pipError('InvalidStateError', 'The video has no frames.')), 5000);
+      });
+    await video.play().catch(() => {});
+    video.addEventListener('leavepictureinpicture', () => {
+      pipPush(id, { type: 'leave' });
+      closeStreamPip(id);
+    }, { once: true });
+    track.addEventListener('ended', () => {
+      if (document.pictureInPictureElement === video)
+        document.exitPictureInPicture().catch(() => {});
+    });
+    pipQueue(id).events.length = 0;
+    const pipWindow = await video.requestPictureInPicture();
+    pipWindow.addEventListener('resize', () => pipPush(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }));
+    return { stream: id, width: pipWindow.width, height: pipWindow.height };
+  } catch (e) {
+    closeStreamPip(id);
+    throw e;
+  }
+}
+
 export const pipHostCalls = {
-  async 'pip-enter'(payload) {
+  async 'pip-enter'(payload, origin) {
+    if (payload?.track)
+      return enterStreamPip(payload.track, origin);
     const id = Number(payload?.player);
     const player = players.get(id);
     if (!player)
@@ -453,7 +528,7 @@ export const pipHostCalls = {
       queue.wake = null;
     }
     // Player weg: das PiP-Fenster ist zu
-    if (!players.has(id))
+    if (id < 0 ? !streamPips.has(id) && !queue.events.length : !players.has(id))
       return { type: 'leave' };
     return queue.events.shift() ?? { type: 'none' };
   },

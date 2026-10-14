@@ -162,6 +162,9 @@ kommen zuerst.
   Navigation API, Compression Streams, Permissions, Lazy Loading, Visual Viewport, Beacon,
   `<datalist>`, Async Clipboard, Datum/Farbe, Formular-Pruefung mit Hinweis, Quirks u.a.
 - [x] Resizable ArrayBuffer (ES2024) stuerzte ab: bmalloc/WTF brauchten echtes mmap (Patch 0023)
+- [x] JSC lief ohne JIT im Mini-Modus (nur volle GCs, kaum Heap-Wachstum): weather.com verbrachte 35 s
+  in der GC und lief ins Zeitlimit. Mini-Modus aus (Patch 0028), Bytecode wird weiter verworfen:
+  GC 6 s, Seite laedt (#122)
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken
@@ -247,7 +250,7 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   auch gegen eine normale Chromium-Seite)
 - [x] WebRTC Stufe 2: Medien senden und empfangen (Kamera, Mikrofon, Canvas, Web Audio), Transceiver-API.
   Offen: Verkehr ueber das Relay (TURN), Insertable Streams
-- [x] Picture-in-Picture ueber das versteckte Host-`<video>` (Test im `media-test.mjs`)
+- [x] Picture-in-Picture ueber das versteckte Host-`<video>` (Test im `media-test.mjs`), auch fuer `srcObject`-Streams (Kamera, WebRTC, Canvas; Test im `mediastream-test.mjs`)
 - [x] MediaRecorder: WebM (VP8/VP9/AV1 + Opus) mit den Encodern des Host, Web Audio als Stream-Quelle
   (`createMediaStreamDestination`), Test in `mediastream-test.mjs` (Chromium spielt die Aufnahme ab)
 

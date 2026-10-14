@@ -1,0 +1,17 @@
+diff --git a/Source/JavaScriptCore/runtime/VM.h b/Source/JavaScriptCore/runtime/VM.h
+index 27cb0c2ff5..72e5aa9303 100644
+--- a/Source/JavaScriptCore/runtime/VM.h
++++ b/Source/JavaScriptCore/runtime/VM.h
+@@ -725,7 +725,12 @@ public:
+     static JS_EXPORT_PRIVATE bool canUseAssembler();
+     static bool isInMiniMode()
+     {
++#if OS(EMSCRIPTEN)
++        // CLoop has no JIT at all; the mini mode (full GCs only, tiny heap growth, jettisoned bytecode) makes big pages spend a quarter of their time in GC.
++        return Options::forceMiniVMMode();
++#else
+         return !Options::useJIT() || Options::forceMiniVMMode();
++#endif
+     }
+ 
+     static bool useUnlinkedCodeBlockJettisoning()

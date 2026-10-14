@@ -33,12 +33,61 @@ const check = (name, ok, info = '') => {
 
 
 const PAGE = `<!doctype html><title>MediaStream-Test</title>
-<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; } #listen { position: absolute; left: 740px; top: 20px; width: 200px; height: 60px; }</style>
+<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; } #listen { position: absolute; left: 740px; top: 20px; width: 200px; height: 60px; } #pipcam { position: absolute; left: 20px; top: 400px; width: 200px; height: 60px; } #pipcanvas { position: absolute; left: 260px; top: 400px; width: 200px; height: 60px; }</style>
 <button id="start">Kamera an</button>
 <button id="screen">Bildschirm teilen</button>
 <button id="rec">Aufnehmen</button>
 <button id="listen">Anhoeren</button>
+<button id="pipcam">PiP Kamera</button>
+<button id="pipcanvas">PiP Canvas</button>
 <script>
+// Picture-in-Picture fuer srcObject-Streams: Kamera (Kopie der Host-Spur) und
+// Canvas (Senke der Engine)
+async function streamPip(key, stream, hold) {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.srcObject = stream;
+  video.style.cssText = 'position:absolute;left:500px;top:400px;width:80px;height:60px';
+  document.body.append(video);
+  await video.play();
+  if (video.readyState < 1)
+    await new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true }));
+  const events = [];
+  video.onenterpictureinpicture = () => events.push('enter');
+  video.onleavepictureinpicture = () => events.push('leave');
+  const pipWindow = await video.requestPictureInPicture();
+  log(key, [document.pictureInPictureElement === video, pipWindow.width > 0].join(','));
+  await new Promise((resolve) => setTimeout(resolve, hold));
+  await document.exitPictureInPicture();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  log(key + 'events', events.join('|') + ',' + (document.pictureInPictureElement === null));
+  video.remove();
+}
+document.getElementById('pipcam').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+    await streamPip('pipcam', stream, 2500);
+    stream.getTracks().forEach((track) => track.stop());
+  } catch (e) {
+    log('piperror', e.name + ':' + e.message);
+  }
+});
+document.getElementById('pipcanvas').addEventListener('click', async () => {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 120;
+    const context = canvas.getContext('2d');
+    const timer = setInterval(() => {
+      context.fillStyle = 'rgb(0,200,0)';
+      context.fillRect(0, 0, 160, 120);
+    }, 50);
+    await streamPip('pipcanvas', canvas.captureStream(20), 2500);
+    clearInterval(timer);
+  } catch (e) {
+    log('piperror', e.name + ':' + e.message);
+  }
+});
 // Ton eines Streams in <audio>: 440 Hz aus Web Audio ueber srcObject
 let listenAudio = null;
 document.getElementById('listen').addEventListener('click', async () => {
@@ -313,6 +362,28 @@ await page.mouse.click(box.x + 840, box.y + 50);
 await result('listenmuted', 10000);
 const mutedStreamPeak = await hostPeak((peak) => peak <= 0.01);
 check('<audio>.muted macht den Stream still', mutedStreamPeak <= 0.01, String(mutedStreamPeak));
+
+// Picture-in-Picture fuer Streams: das PiP-Video des Host zeigt die Spur
+const hostPip = () => page.evaluate(async () => {
+  for (let i = 0; i < 20; i++) {
+    const video = document.pictureInPictureElement;
+    if (video && video.srcObject && video.videoWidth > 0)
+      return video.videoWidth + 'x' + video.videoHeight;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return document.pictureInPictureElement ? 'ohne-bild' : 'kein-pip';
+});
+const pipErr = () => results.get('piperror') || '';
+await page.mouse.click(box.x + 120, box.y + 430);
+check('PiP fuer Kamera-Stream (srcObject)', await result('pipcam', 30000) === 'true,true', results.get('pipcam') || pipErr());
+check('PiP-Fenster des Host zeigt die Kamera', (await hostPip()) === '320x240', results.has('pipcam') ? '' : pipErr());
+check('PiP Kamera: Ereignisse und exit', await result('pipcamevents', 30000) === 'enter|leave,true', results.get('pipcamevents') || pipErr());
+await page.mouse.click(box.x + 360, box.y + 430);
+check('PiP fuer Canvas-Stream (Senke der Engine)', await result('pipcanvas', 30000) === 'true,true', results.get('pipcanvas') || pipErr());
+check('PiP-Fenster des Host zeigt das Canvas', (await hostPip()) === '160x120', pipErr());
+check('PiP Canvas: Ereignisse und exit', await result('pipcanvasevents', 30000) === 'enter|leave,true', results.get('pipcanvasevents') || pipErr());
+check('PiP-Video im Host aufgeraeumt', await page.evaluate(() => [...document.querySelectorAll('video')].every((v) => !(v.srcObject instanceof MediaStream) || v.srcObject.getVideoTracks().every((t) => t.readyState === 'live'))
+  && !document.pictureInPictureElement));
 
 await browser.close();
 relay.kill();
