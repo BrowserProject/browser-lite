@@ -93,12 +93,18 @@ int main(int, char**)
 
     // Kopieren in der Seite -> echte Zwischenablage (der Host schreibt sie)
     WebCore::WasmPlatform::setClipboardChangedCallback([](const WebCore::WasmPlatform::ClipboardItems& items) {
-        for (auto& [type, text] : items) {
-            if (type.startsWith("text/plain"_s)) {
-                notifyHost(0, "clipboard", makeString("{\"text\":\""_s, jsonEscape(text), "\"}"_s));
-                return;
-            }
+        // Mit HTML, damit formatierter Text formatiert ankommt (wie in Chrome)
+        String text;
+        String html;
+        for (auto& [type, value] : items) {
+            if (type.startsWith("text/plain"_s))
+                text = value;
+            else if (type == "text/html"_s)
+                html = value;
         }
+        if (text.isNull() && html.isNull())
+            return;
+        notifyHost(0, "clipboard", makeString("{\"text\":\""_s, jsonEscape(text), "\",\"html\":\""_s, jsonEscape(html), "\"}"_s));
     });
 
     // Standard von WebCore ist 8 MB, eine moderne Seite verdraengt damit alles

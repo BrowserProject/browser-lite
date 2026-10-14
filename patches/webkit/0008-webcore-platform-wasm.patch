@@ -252,7 +252,7 @@ index c33e4efbe5..5de0bc09ed 100644
  namespace WebCore {
  
 diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
-index 19c4683b7f..0e47f99ee4 100644
+index 19c4683b7f..9682f212f2 100644
 --- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
 +++ b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
 @@ -26,14 +26,26 @@
@@ -292,7 +292,7 @@ index 19c4683b7f..0e47f99ee4 100644
      // FIXME: Getting the list of types for this is wasteful. Do this in the UI process.
      Vector<String> types;
      platformStrategies()->pasteboardStrategy()->getTypes(types);
-@@ -60,6 +74,12 @@ Vector<String> Pasteboard::typesSafeForBindings(const String&)
+@@ -60,9 +74,26 @@ Vector<String> Pasteboard::typesSafeForBindings(const String&)
  
  Vector<String> Pasteboard::typesForLegacyUnsafeBindings()
  {
@@ -304,8 +304,22 @@ index 19c4683b7f..0e47f99ee4 100644
 +    }
      Vector<String> types;
      platformStrategies()->pasteboardStrategy()->getTypes(types);
++#if PLATFORM(WASM)
++    // Wie in Chrome: "text/plain" (gespeichert wird mit charset), Dateien als "Files" (DataTransfer)
++    Vector<String> normalized;
++    for (auto& type : types) {
++        auto name = type.startsWith("text/plain"_s) ? "text/plain"_s : type;
++        if (!normalized.contains(name))
++            normalized.append(WTF::move(name));
++    }
++    return normalized;
++#else
      return types;
-@@ -73,6 +93,16 @@ String Pasteboard::readOrigin()
++#endif
+ }
+ 
+ String Pasteboard::readOrigin()
+@@ -73,6 +104,23 @@ String Pasteboard::readOrigin()
  
  String Pasteboard::readString(const String& type)
  {
@@ -319,10 +333,17 @@ index 19c4683b7f..0e47f99ee4 100644
 +        auto separator = type.find(';');
 +        return drag->string(separator == notFound ? type : type.left(separator));
 +    }
++#if PLATFORM(WASM)
++    // getData("text/plain") der Seite: gespeichert ist "text/plain;charset=utf-8"
++    if (type.startsWith("text/plain"_s) || equalLettersIgnoringASCIICase(type, "text"_s)) {
++        auto text = platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain;charset=utf-8"_s, name(), context());
++        return text.isNull() ? platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain"_s, name(), context()) : text;
++    }
++#endif
      return platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, type, name(), context());
  }
  
-@@ -84,19 +114,37 @@ String Pasteboard::readStringInCustomData(const String&)
+@@ -84,19 +132,37 @@ String Pasteboard::readStringInCustomData(const String&)
  
  void Pasteboard::writeString(const String& type, const String& text)
  {
@@ -361,7 +382,7 @@ index 19c4683b7f..0e47f99ee4 100644
      text.text = platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain;charset=utf-8"_s, name(), context());
  }
  
-@@ -105,12 +153,24 @@ void Pasteboard::read(PasteboardWebContentReader&, WebContentReadingPolicy, std:
+@@ -105,12 +171,29 @@ void Pasteboard::read(PasteboardWebContentReader&, WebContentReadingPolicy, std:
      notImplemented();
  }
  
@@ -373,6 +394,11 @@ index 19c4683b7f..0e47f99ee4 100644
 +            reader.readFilename(path);
 +        return;
 +    }
++#if PLATFORM(WASM)
++    // Eingefuegte Dateien und Bilder (z.B. ein Screenshot) aus dem Host
++    for (auto& path : WasmPlatform::clipboardFiles())
++        reader.readFilename(path);
++#endif
  }
  
  void Pasteboard::write(const PasteboardURL& url)
@@ -387,7 +413,7 @@ index 19c4683b7f..0e47f99ee4 100644
      platformStrategies()->pasteboardStrategy()->writeToPasteboard("text/plain;charset=utf-8"_s, url.url.string());
  }
  
-@@ -119,8 +179,16 @@ void Pasteboard::writeTrustworthyWebURLsPboardType(const PasteboardURL&)
+@@ -119,8 +202,16 @@ void Pasteboard::writeTrustworthyWebURLsPboardType(const PasteboardURL&)
      notImplemented();
  }
  
@@ -405,7 +431,7 @@ index 19c4683b7f..0e47f99ee4 100644
  }
  
  void Pasteboard::write(const PasteboardBuffer&)
-@@ -129,11 +197,19 @@ void Pasteboard::write(const PasteboardBuffer&)
+@@ -129,11 +220,23 @@ void Pasteboard::write(const PasteboardBuffer&)
  
  void Pasteboard::write(const PasteboardWebContent& content)
  {
@@ -422,10 +448,14 @@ index 19c4683b7f..0e47f99ee4 100644
  {
 +    if (DRAG_CONTENT(drag))
 +        return drag->hasFiles() ? FileContentState::MayContainFilePaths : FileContentState::NoFileOrImageData;
++#if PLATFORM(WASM)
++    if (!WasmPlatform::clipboardFiles().isEmpty())
++        return FileContentState::MayContainFilePaths;
++#endif
      notImplemented();
      return FileContentState::NoFileOrImageData;
  }
-@@ -143,8 +219,12 @@ bool Pasteboard::canSmartReplace()
+@@ -143,8 +246,12 @@ bool Pasteboard::canSmartReplace()
      return false;
  }
  
@@ -439,7 +469,7 @@ index 19c4683b7f..0e47f99ee4 100644
  }
  
  void Pasteboard::writePlainText(const String& text, SmartReplaceOption)
-@@ -162,4 +242,4 @@ void Pasteboard::write(const Color&)
+@@ -162,4 +269,4 @@ void Pasteboard::write(const Color&)
  
  } // namespace WebCore
  
@@ -1617,10 +1647,10 @@ index 0000000000..d32c0e60ad
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
 new file mode 100644
-index 0000000000..09202b12bb
+index 0000000000..7660c42e7f
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1698,9 +1728,16 @@ index 0000000000..09202b12bb
 +    return callback;
 +}
 +
++static Vector<String>& clipboardFileStorage()
++{
++    static NeverDestroyed<Vector<String>> files;
++    return files;
++}
++
 +void setClipboardContents(ClipboardItems&& items)
 +{
 +    clipboardStorage() = WTF::move(items);
++    clipboardFileStorage().clear();
 +    if (auto& callback = clipboardCallback())
 +        callback(clipboardStorage());
 +}
@@ -1715,13 +1752,24 @@ index 0000000000..09202b12bb
 +    clipboardCallback() = WTF::move(callback);
 +}
 +
++void setClipboardFromHost(ClipboardItems&& items, Vector<String>&& files)
++{
++    clipboardStorage() = WTF::move(items);
++    clipboardFileStorage() = WTF::move(files);
++}
++
++const Vector<String>& clipboardFiles()
++{
++    return clipboardFileStorage();
++}
++
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..0658622eff
+index 0000000000..7a49d95e74
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,114 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1805,6 +1853,10 @@ index 0000000000..0658622eff
 +WEBCORE_EXPORT void setClipboardContents(ClipboardItems&&);
 +WEBCORE_EXPORT const ClipboardItems& clipboardContents();
 +WEBCORE_EXPORT void setClipboardChangedCallback(Function<void(const ClipboardItems&)>&&);
++// Einfuegen aus dem Host: ohne Rueckmeldung an den Host (sonst ueberschriebe
++// die Engine dort z.B. ein kopiertes Bild). files: Pfade im Dateisystem der Engine
++WEBCORE_EXPORT void setClipboardFromHost(ClipboardItems&&, Vector<String>&& files);
++WEBCORE_EXPORT const Vector<String>& clipboardFiles();
 +
 +// Sprachausgabe (speechSynthesis): gesprochen wird vom Host-Browser. Der
 +// Embedder setzt die Stimmen und leitet die Ereignisse des Hosts weiter.

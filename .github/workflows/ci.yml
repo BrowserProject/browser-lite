@@ -331,6 +331,8 @@ jobs:
         run: cd tests/e2e && node webrtc-test.mjs
       - name: Drag-&-Drop-Test (in der Seite, Dateien und Text aus dem Host)
         run: cd tests/e2e && node dragdrop-test.mjs
+      - name: Zwischenablage-Test (Einfuegen mit HTML und Bild, Kopieren mit HTML, Doppelklick)
+        run: cd tests/e2e && node clipboard-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)

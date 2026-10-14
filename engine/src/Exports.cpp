@@ -39,6 +39,7 @@
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/ScriptController.h>
 #include <emscripten/emscripten.h>
+#include <wtf/JSONValues.h>
 
 using namespace BrowserLite;
 
@@ -435,7 +436,30 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
     runOnEngineThread([text = takeString(text)] {
         WebCore::WasmPlatform::ClipboardItems items;
         items.append({ "text/plain;charset=utf-8"_s, text });
-        WebCore::WasmPlatform::setClipboardContents(WTF::move(items));
+        WebCore::WasmPlatform::setClipboardFromHost(WTF::move(items), { });
+    });
+}
+
+// Einfuegen aus dem Host: {"text":..,"html":..,"files":[Pfade im Dateisystem der Engine]}
+EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
+{
+    runOnEngineThread([json = takeString(data)] {
+        WebCore::WasmPlatform::ClipboardItems items;
+        Vector<String> files;
+        auto value = JSON::Value::parseJSON(json);
+        if (auto object = value ? value->asObject() : nullptr) {
+            auto text = object->getString("text"_s);
+            if (!text.isNull())
+                items.append({ "text/plain;charset=utf-8"_s, text });
+            auto html = object->getString("html"_s);
+            if (!html.isEmpty())
+                items.append({ "text/html"_s, html });
+            if (auto array = object->getArray("files"_s)) {
+                for (auto& file : *array)
+                    files.append(file->asString());
+            }
+        }
+        WebCore::WasmPlatform::setClipboardFromHost(WTF::move(items), WTF::move(files));
     });
 }
 

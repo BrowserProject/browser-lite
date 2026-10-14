@@ -510,7 +510,15 @@ function onEngineEvent(viewId, type, payload) {
     return;
   }
   if (type === 'clipboard') {
-    navigator.clipboard?.writeText(data.text).catch(() => {});
+    // Mit HTML (formatierter Text) wie in Chrome, sonst nur Text
+    if (data.html && typeof ClipboardItem === 'function') {
+      const item = new ClipboardItem({
+        'text/plain': new Blob([data.text || ''], { type: 'text/plain' }),
+        'text/html': new Blob([data.html], { type: 'text/html' }),
+      });
+      navigator.clipboard?.write([item]).catch(() => navigator.clipboard?.writeText(data.text || '').catch(() => {}));
+    } else
+      navigator.clipboard?.writeText(data.text || '').catch(() => {});
     return;
   }
   // Fuer alle Tabs: Gamepads und Sprachausgabe (web/devices.js)
@@ -1033,14 +1041,21 @@ function attachInput(tab) {
 
   // Finger zuerst: Touch-Events, Scrollen mit Schwung, Antippen (web/devices.js)
   attachTouch(tab, canvas, position, modifierBits);
+  // Klickzahl (Doppel-/Dreifachklick: Wort/Absatz markieren, dblclick)
+  // selber zaehlen: PointerEvent.detail ist in Chrome immer 0
+  let lastDown = { time: 0, x: 0, y: 0, button: -1, count: 0 };
   canvas.addEventListener('pointerdown', (e) => {
     focusPage();
     canvas.setPointerCapture(e.pointerId);
-    engine._bl_mouse(tab.id, 0, e.button, ...position(e), Math.max(1, e.detail), modifierBits(e));
+    const [x, y] = position(e);
+    const repeated = e.button === lastDown.button && e.timeStamp - lastDown.time < 500
+      && Math.abs(x - lastDown.x) <= 4 && Math.abs(y - lastDown.y) <= 4;
+    lastDown = { time: e.timeStamp, x, y, button: e.button, count: repeated ? lastDown.count + 1 : 1 };
+    engine._bl_mouse(tab.id, 0, e.button, x, y, lastDown.count, modifierBits(e));
     e.preventDefault();
   });
   canvas.addEventListener('pointerup', (e) => {
-    engine._bl_mouse(tab.id, 1, e.button, ...position(e), Math.max(1, e.detail), modifierBits(e));
+    engine._bl_mouse(tab.id, 1, e.button, ...position(e), e.button === lastDown.button ? lastDown.count : 1, modifierBits(e));
   });
   canvas.addEventListener('pointermove', (e) => {
     // Gedrueckte Taste mitgeben (e.buttons: 1 links, 2 rechts, 4 Mitte), sonst kein Ziehen
@@ -1164,15 +1179,33 @@ ime.addEventListener('input', (e) => {
     engine._bl_insert_text(activeTab.id, toUTF8(e.data));
   ime.value = '';
 });
-ime.addEventListener('paste', (e) => {
+// Einfuegen: Text, HTML (formatierter Text) und Dateien/Bilder (z.B. ein
+// Screenshot) wie in Chrome. Dateien kommen wie beim Upload ins Dateisystem
+// der Engine, die Seite bekommt sie in clipboardData.files.
+ime.addEventListener('paste', async (e) => {
   if (!activeTab)
     return;
-  const text = e.clipboardData?.getData('text/plain') ?? '';
-  engine._bl_set_clipboard_text(toUTF8(text));
-  const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
-  sendKey(activeTab, 0, fake);
-  sendKey(activeTab, 1, fake);
   e.preventDefault();
+  const tab = activeTab;
+  const clipboardData = e.clipboardData;
+  const data = { text: clipboardData?.getData('text/plain') ?? '', files: [] };
+  const html = clipboardData?.getData('text/html');
+  if (html)
+    data.html = html;
+  // Nach einem await sind die Daten des Ereignisses weg
+  const files = [...(clipboardData?.files || [])];
+  for (const file of files) {
+    const dir = '/tmp/uploads/' + (++uploadCounter);
+    engine.FS.mkdirTree(dir);
+    // Ein kopiertes Bild hat in Chrome den Namen "image.png"
+    const path = dir + '/' + (file.name || 'image.png').replace(/[\/\n]/g, '_');
+    engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+    data.files.push(path);
+  }
+  engine._bl_set_clipboard(toUTF8(JSON.stringify(data)));
+  const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
+  sendKey(tab, 0, fake);
+  sendKey(tab, 1, fake);
 });
 
 function keyText(e) {
