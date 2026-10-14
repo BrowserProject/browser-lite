@@ -1,0 +1,293 @@
+diff --git a/Source/WTF/wtf/FastMalloc.cpp b/Source/WTF/wtf/FastMalloc.cpp
+index 7dea132dd7..e227231f94 100644
+--- a/Source/WTF/wtf/FastMalloc.cpp
++++ b/Source/WTF/wtf/FastMalloc.cpp
+@@ -32,6 +32,12 @@
+ #include <wtf/CheckedArithmetic.h>
+ #include <wtf/PageBlock.h>
+ 
++#if OS(EMSCRIPTEN)
++#include <malloc.h>
++#include <pthread.h>
++#include <stdlib.h>
++#endif
++
+ #if OS(WINDOWS)
+ #include <windows.h>
+ #include <psapi.h>
+@@ -61,6 +67,21 @@
+ 
+ namespace WTF {
+ 
++#if OS(EMSCRIPTEN)
++// Emscriptens aligned_alloc gibt nullptr zurueck, wenn die Groesse kein
++// Vielfaches der Ausrichtung ist (C11-Regel). WebKit verlangt das nicht.
++static inline size_t alignedAllocationSize(size_t alignment, size_t size)
++{
++    return alignment ? (size + alignment - 1) / alignment * alignment : size;
++}
++#else
++static inline size_t alignedAllocationSize(size_t, size_t size)
++{
++    return size;
++}
++#endif
++
++
+ #if !defined(NDEBUG)
+ namespace {
+ // We do not use std::numeric_limits<size_t>::max() here due to the edge case in VC++.
+@@ -325,6 +346,124 @@ void fastMallocDumpMallocStats()
+ }
+ #endif
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: kleiner Cache pro Thread vor dlmalloc. Emscriptens malloc nimmt
++// in einem Build mit Threads bei jedem Aufruf einen Lock und sucht in den Bins;
++// WebCore/JSC rufen fastMalloc/fastFree fuer kleine Bloecke sehr oft auf (CNN:
++// ca. 7 % der Zeit im Engine-Thread). Freigegebene kleine Bloecke kommen in
++// eine Liste pro Groessenklasse dieses Threads und werden ohne Lock wieder
++// ausgegeben. Jeder Block bleibt ein normaler dlmalloc-Block (free(), realloc()
++// und malloc_usable_size() gehen weiter). BL_MALLOC_CACHE=0 schaltet ab.
++namespace {
++
++constexpr size_t smallBlockStep = 16;
++constexpr unsigned smallBlockClasses = 33; // Klasse k: nutzbar mindestens k * 16 Byte, bis 512
++constexpr size_t smallBlockMax = smallBlockStep * (smallBlockClasses - 1);
++constexpr uint16_t maxCachedBlocksPerClass = 64;
++
++struct CachedBlock {
++    CachedBlock* next;
++};
++
++struct SmallBlockCache {
++    CachedBlock* heads[smallBlockClasses];
++    uint16_t counts[smallBlockClasses];
++    uint8_t state; // 0 noch nicht eingerichtet, 1 aktiv, 2 aus (Thread endet oder abgeschaltet)
++};
++
++thread_local SmallBlockCache smallBlockCache;
++pthread_key_t smallBlockCacheKey;
++
++void flushSmallBlockCache(SmallBlockCache& cache)
++{
++    for (unsigned k = 0; k < smallBlockClasses; ++k) {
++        for (auto* block = cache.heads[k]; block;) {
++            auto* next = block->next;
++            ::free(block);
++            block = next;
++        }
++        cache.heads[k] = nullptr;
++        cache.counts[k] = 0;
++    }
++}
++
++void destroySmallBlockCache(void* pointer)
++{
++    auto& cache = *static_cast<SmallBlockCache*>(pointer);
++    cache.state = 2;
++    flushSmallBlockCache(cache);
++}
++
++bool smallBlockCacheEnabled()
++{
++    static bool enabled = [] {
++        const char* value = getenv("BL_MALLOC_CACHE");
++        if (value && !strcmp(value, "0"))
++            return false;
++        pthread_key_create(&smallBlockCacheKey, destroySmallBlockCache);
++        return true;
++    }();
++    return enabled;
++}
++
++ALWAYS_INLINE SmallBlockCache* activeSmallBlockCache()
++{
++    auto& cache = smallBlockCache;
++    if (cache.state == 1) [[likely]]
++        return &cache;
++    if (cache.state || !smallBlockCacheEnabled()) {
++        cache.state = 2;
++        return nullptr;
++    }
++    cache.state = 1;
++    // Beim Ende des Threads zurueck an dlmalloc
++    pthread_setspecific(smallBlockCacheKey, &cache);
++    return &cache;
++}
++
++// Kleine Anfrage: zuerst aus dem Cache, sonst die ganze Klassengroesse bei dlmalloc
++ALWAYS_INLINE void* allocateSmallBlock(size_t size, bool zeroed)
++{
++    unsigned k = (size + smallBlockStep - 1) / smallBlockStep;
++    void* result = nullptr;
++    if (auto* cache = activeSmallBlockCache()) {
++        if (auto* block = cache->heads[k]) {
++            cache->heads[k] = block->next;
++            --cache->counts[k];
++            result = block;
++        }
++    }
++    if (!result)
++        result = ::malloc(k * smallBlockStep);
++    if (result && zeroed)
++        memset(result, 0, size);
++    return result;
++}
++
++ALWAYS_INLINE bool isSmallAllocation(size_t size)
++{
++    return size - 1 < smallBlockMax;
++}
++
++ALWAYS_INLINE bool cacheSmallBlock(void* object)
++{
++    size_t usable = malloc_usable_size(object);
++    unsigned k = usable / smallBlockStep;
++    if (!k || k >= smallBlockClasses)
++        return false;
++    auto* cache = activeSmallBlockCache();
++    if (!cache || cache->counts[k] >= maxCachedBlocksPerClass)
++        return false;
++    auto* block = static_cast<CachedBlock*>(object);
++    block->next = cache->heads[k];
++    cache->heads[k] = block;
++    ++cache->counts[k];
++    return true;
++}
++
++} // namespace
++#endif
++
+ bool isFastMallocEnabled()
+ {
+     return bmalloc::api::isEnabled();
+@@ -334,6 +473,13 @@ void* fastMalloc(size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
++#if OS(EMSCRIPTEN)
++    if (isSmallAllocation(size)) {
++        void* small = allocateSmallBlock(size, false);
++        RELEASE_ASSERT(small);
++        return small;
++    }
++#endif
+     void* result = bmalloc::api::malloc(size, bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+@@ -347,6 +493,13 @@ void* fastZeroedMalloc(size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
++#if OS(EMSCRIPTEN)
++    if (isSmallAllocation(size)) {
++        void* small = allocateSmallBlock(size, true);
++        RELEASE_ASSERT(small);
++        return small;
++    }
++#endif
+     void* result = bmalloc::api::zeroedMalloc(size, bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+@@ -392,6 +545,10 @@ void* fastRealloc(void* object, size_t size)
+ 
+ void fastFree(void* object)
+ {
++#if OS(EMSCRIPTEN)
++    if (object && cacheSmallBlock(object))
++        return;
++#endif
+     bmalloc::api::free(object);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+@@ -425,7 +582,7 @@ void* fastAlignedMalloc(size_t alignment, size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::memalign(alignment, size, bmalloc::CompactAllocationMode::NonCompact);
++    void* result = bmalloc::api::memalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -438,7 +595,7 @@ void* tryFastAlignedMalloc(size_t alignment, size_t size)
+ {
+     FAIL_IF_EXCEEDS_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::NonCompact);
++    void* result = bmalloc::api::tryMemalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::NonCompact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -451,6 +608,10 @@ TryMallocReturnValue tryFastMalloc(size_t size)
+ {
+     FAIL_IF_EXCEEDS_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
++#if OS(EMSCRIPTEN)
++    if (isSmallAllocation(size))
++        return allocateSmallBlock(size, false);
++#endif
+     void* result = bmalloc::api::tryMalloc(size, bmalloc::CompactAllocationMode::NonCompact);
+     BPROFILE_TRY_ALLOCATION(NON_JS_CELL, result, size);
+     return result;
+@@ -479,6 +640,13 @@ void* fastCompactMalloc(size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
++#if OS(EMSCRIPTEN)
++    if (isSmallAllocation(size)) {
++        void* small = allocateSmallBlock(size, false);
++        RELEASE_ASSERT(small);
++        return small;
++    }
++#endif
+     void* result = bmalloc::api::malloc(size, bmalloc::CompactAllocationMode::Compact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+@@ -537,7 +705,7 @@ void* fastCompactAlignedMalloc(size_t alignment, size_t size)
+ {
+     ASSERT_IS_WITHIN_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::memalign(alignment, size, bmalloc::CompactAllocationMode::Compact);
++    void* result = bmalloc::api::memalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -550,7 +718,7 @@ void* tryFastCompactAlignedMalloc(size_t alignment, size_t size)
+ {
+     FAIL_IF_EXCEEDS_LIMIT(size);
+     assertMallocRestrictionForCurrentThreadScope();
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::Compact);
++    void* result = bmalloc::api::tryMemalign(alignment, alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact);
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN) && TRACK_MALLOC_CALLSTACK
+     if (!AvoidRecordingScope::avoidRecordingCount())
+         MallocCallTracker::singleton().recordMalloc(result, size);
+@@ -589,11 +757,19 @@ TryMallocReturnValue tryFastCompactRealloc(void* object, size_t newSize)
+ 
+ void releaseFastMallocFreeMemoryForThisThread()
+ {
++#if OS(EMSCRIPTEN)
++    if (smallBlockCache.state == 1)
++        flushSmallBlockCache(smallBlockCache);
++#endif
+     bmalloc::api::scavengeThisThread();
+ }
+ 
+ void releaseFastMallocFreeMemory()
+ {
++#if OS(EMSCRIPTEN)
++    if (smallBlockCache.state == 1)
++        flushSmallBlockCache(smallBlockCache);
++#endif
+     bmalloc::api::scavenge();
+ }
+ 
+@@ -667,7 +843,7 @@ namespace Gigacage {
+ 
+ void* tryAlignedMalloc(Kind kind, size_t alignment, size_t size)
+ {
+-    void* result = bmalloc::api::tryMemalign(alignment, size, bmalloc::CompactAllocationMode::Compact, bmalloc::heapKind(kind));
++    void* result = bmalloc::api::tryMemalign(alignment, WTF::alignedAllocationSize(alignment, size), bmalloc::CompactAllocationMode::Compact, bmalloc::heapKind(kind));
+     BPROFILE_TRY_ALLOCATION(GIGACAGE, kind, result, size);
+     WTF::compilerFence();
+     return result;
