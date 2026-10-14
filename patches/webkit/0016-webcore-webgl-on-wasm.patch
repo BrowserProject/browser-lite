@@ -1156,10 +1156,10 @@ index 0000000000..4fdf42a51d
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
 new file mode 100644
-index 0000000000..31a929fb22
+index 0000000000..72c1080ce7
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
-@@ -0,0 +1,944 @@
+@@ -0,0 +1,955 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1674,6 +1674,17 @@ index 0000000000..31a929fb22
 +
 +namespace WebCore {
 +
++void angleShimPrewarm()
++{
++    // Das erste Anlegen fragt Erweiterungen und Zustand synchron beim
++    // GPU-Prozess ab. Mitten im Laden einer Seite (Fingerprint-Skripte legen
++    // fast immer einen WebGL-Kontext an) wartete das auf weather.com
++    // Sekunden, weil die GPU mit Malen beschaeftigt war.
++    ensureHost(false);
++    ensureHost(true);
++    current = nullptr;
++}
++
 +int angleShimCreateContext(bool webgl2)
 +{
 +    auto* host = ensureHost(webgl2);
@@ -2106,10 +2117,10 @@ index 0000000000..31a929fb22
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
 new file mode 100644
-index 0000000000..e4eaa19b81
+index 0000000000..3cb9d58960
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,44 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -2148,6 +2159,8 @@ index 0000000000..e4eaa19b81
 +int angleShimCreateContext(bool webgl2);
 +bool angleShimMakeCurrent(int handle);
 +void angleShimDestroyContext(int handle);
++// Host-Kontexte vorab anlegen (beim Start der Engine, solange die GPU frei ist)
++void angleShimPrewarm();
 +
 +} // namespace WebCore
 +

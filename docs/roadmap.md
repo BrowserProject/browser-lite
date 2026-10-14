@@ -165,6 +165,8 @@ kommen zuerst.
 - [x] JSC lief ohne JIT im Mini-Modus (nur volle GCs, kaum Heap-Wachstum): weather.com verbrachte 35 s
   in der GC und lief ins Zeitlimit. Mini-Modus aus (Patch 0028), Bytecode wird weiter verworfen:
   GC 6 s, Seite laedt (#122)
+- [x] WebGL-Host-Kontexte schon beim Start anlegen: das erste Anlegen wartete mitten im Laden auf die
+  ausgelastete GPU (weather.com 15 s, #123). Dauerhafter Bytecode-Cache gemessen und verworfen (#124)
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken

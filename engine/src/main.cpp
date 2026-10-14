@@ -52,6 +52,13 @@ static void prepareFontCache(const char* path)
     utime(path, &times);
 }
 
+#if ENABLE(WEBGL)
+namespace WebCore {
+// platform/wasm/angle/ANGLEShimWasm.h (kein exportierter Header)
+void angleShimPrewarm();
+}
+#endif
+
 int main(int, char**)
 {
     using namespace BrowserLite;
@@ -96,6 +103,14 @@ int main(int, char**)
 
     // Standard von WebCore ist 8 MB, eine moderne Seite verdraengt damit alles
     WebCore::MemoryCache::singleton().setCapacities(0, 16 * 1024 * 1024, 64 * 1024 * 1024);
+
+#if ENABLE(WEBGL)
+    // WebGL-Kontexte des Host gleich als erste Aufgabe anlegen, solange die
+    // GPU noch nichts zu tun hat (ANGLEShimWasm.cpp)
+    callOnMainThread([] {
+        WebCore::angleShimPrewarm();
+    });
+#endif
 
     log("Engine bereit");
     MAIN_THREAD_ASYNC_EM_ASM({
