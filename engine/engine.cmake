@@ -30,7 +30,6 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/Permissions.cpp
-    ${BL_ENGINE_SRC}/Passwords.cpp
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp

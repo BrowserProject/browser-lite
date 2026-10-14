@@ -60,7 +60,6 @@ private:
     void requestPointerLock(CompletionHandler<void(WebCore::PointerLockRequestResult)>&&) final;
     void requestPointerUnlock(CompletionHandler<void(bool)>&&) final;
 #endif
-    void focusedElementChanged(WebCore::Element*, WebCore::LocalFrame*, WebCore::FocusOptions, WebCore::BroadcastFocusedElement) final;
     void mouseDidMoveOverElement(const WebCore::HitTestResult&, OptionSet<WebCore::PlatformEventModifier>, const String& toolTip, WebCore::TextDirection) final;
 
     void triggerRenderingUpdate() final;
@@ -116,8 +115,6 @@ private:
     WebCore::ShouldGoToHistoryItem shouldGoToHistoryItem(WebCore::HistoryItem&, WebCore::IsSameDocumentNavigation) const final { return WebCore::ShouldGoToHistoryItem::Yes; }
     // Back/Forward-Cache (main.cpp): Seiten duerfen angehalten im Speicher bleiben
     bool canCachePage() const final { return true; }
-    // Passwort-Speicher (Passwords.cpp)
-    void dispatchWillSendSubmitEvent(Ref<WebCore::FormState>&&) final;
 
     bool isMainFrame() const;
 

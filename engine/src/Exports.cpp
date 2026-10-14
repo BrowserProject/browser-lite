@@ -15,7 +15,6 @@
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
-#include "Passwords.h"
 #include "ScrollingWasm.h"
 #include "Speech.h"
 #include "WebPlatformExtras.h"
@@ -225,14 +224,6 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
 EMSCRIPTEN_KEEPALIVE void bl_set_composition(int id, char* text, int selectionStart, int selectionEnd)
 {
     withView(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
-}
-
-// Gespeicherte Anmeldung einfuellen (Passwort-Speicher der Oberflaeche)
-EMSCRIPTEN_KEEPALIVE void bl_fill_login(int id, char* origin, char* username, char* password)
-{
-    withView(id, [origin = takeString(origin), username = takeString(username), password = takeString(password)](WebView& view) {
-        Passwords::fill(view.page(), origin, username, password);
-    });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_confirm_composition(int id, char* text)

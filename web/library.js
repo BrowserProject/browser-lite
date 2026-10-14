@@ -1,9 +1,7 @@
 // Was ein Browser sich merkt: Sitzung (offene Tabs), Verlauf, Lesezeichen,
 // Downloads und Einstellungen. Alles im localStorage des Host-Browsers, nur
 // auf diesem Geraet. Dazu ein Seitenpanel (Strg+H, Strg+J, Strg+Umschalt+O,
-// Einstellungen, Passwoerter) und Vorschlaege in der Adressleiste wie in Chrome.
-
-import { listLogins, revealPassword, removeLogin } from './passwords.js';
+// Einstellungen) und Vorschlaege in der Adressleiste wie in Chrome.
 
 const KEYS = { session: 'bl-session', history: 'bl-history', bookmarks: 'bl-bookmarks', settings: 'bl-settings' };
 const MAX_HISTORY = 3000;
@@ -258,14 +256,14 @@ function renderPanel() {
   panel.textContent = '';
   const close = element('button', { className: 'panel-close', title: 'Schliessen', textContent: '×' });
   close.addEventListener('click', () => togglePanel(null));
-  const titles = { menu: 'Menü', history: 'Verlauf', bookmarks: 'Lesezeichen', downloads: 'Downloads', settings: 'Einstellungen', passwords: 'Passwörter' };
+  const titles = { menu: 'Menü', history: 'Verlauf', bookmarks: 'Lesezeichen', downloads: 'Downloads', settings: 'Einstellungen' };
   panel.append(element('header', {}, element('h2', { textContent: titles[panelName] }), close));
 
   if (panelName === 'menu') {
     const items = [['Neuer Tab', 'Strg+T', () => api.openURL('', true)], ['Verlauf', 'Strg+H', () => togglePanel('history')],
       ['Lesezeichen', 'Strg+Umschalt+O', () => togglePanel('bookmarks')], ['Downloads', 'Strg+J', () => togglePanel('downloads')],
       ['Suchen auf der Seite', 'Strg+F', () => { togglePanel(null); api.find(); }], ['Drucken …', 'Strg+P', () => { togglePanel(null); api.print(); }],
-      ['Passwörter', '', () => togglePanel('passwords')], ['Einstellungen', '', () => togglePanel('settings')]];
+      ['Einstellungen', '', () => togglePanel('settings')]];
     for (const [label, key, action] of items) {
       const button = element('button', { className: 'panel-menu-item' }, element('span', { textContent: label }), element('kbd', { textContent: key }));
       button.addEventListener('click', action);
@@ -343,44 +341,6 @@ function renderPanel() {
     if (!downloads.length)
       list.append(element('p', { className: 'panel-empty', textContent: 'Noch keine Downloads.' }));
     panel.append(list);
-    return;
-  }
-
-  if (panelName === 'passwords') {
-    const list = element('div', { className: 'panel-list' });
-    panel.append(list);
-    listLogins().then((logins) => {
-      if (panelName !== 'passwords')
-        return;
-      for (const login of logins) {
-        let host = login.origin;
-        try {
-          host = new URL(login.origin).host;
-        } catch (e) {}
-        const secret = element('span', { className: 'panel-url', textContent: '••••••••' });
-        const show = element('button', { className: 'panel-action', textContent: 'Anzeigen' });
-        show.addEventListener('click', async () => {
-          if (show.textContent === 'Anzeigen') {
-            secret.textContent = await revealPassword(login.id).catch(() => '?');
-            show.textContent = 'Verbergen';
-          } else {
-            secret.textContent = '••••••••';
-            show.textContent = 'Anzeigen';
-          }
-        });
-        const remove = element('button', { className: 'panel-remove', title: 'Entfernen', textContent: '×' });
-        remove.addEventListener('click', async () => {
-          await removeLogin(login.id).catch(() => {});
-          row.remove();
-        });
-        const info = element('div', { className: 'panel-link' }, element('span', { className: 'panel-title', textContent: host }),
-          element('span', { className: 'panel-url', textContent: login.username || '(ohne Benutzername)' }), secret);
-        const row = element('div', { className: 'panel-row', title: login.origin }, info, show, remove);
-        list.append(row);
-      }
-      if (!logins.length)
-        list.append(element('p', { className: 'panel-empty', textContent: 'Noch keine gespeicherten Passwörter.' }));
-    });
     return;
   }
 

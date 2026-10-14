@@ -175,10 +175,8 @@ kommen zuerst.
 - [x] Hintergrund-Tabs bei wenig Speicher verwerfen, Neuladen beim Anklicken (#128, Test im `ui-test.mjs`)
 - [x] Zurueck/Vor ging nie (keine Verlaufseintraege, leerer Client), jetzt mit Back/Forward-Cache und Verlauf
   pro Tab in der Sitzung und nach dem Verwerfen (#129)
-- [x] Passwort-Speicher wie Chrome: "Passwort speichern?" nach dem Anmelden, Ausfuellen beim Fokus,
-  "aktualisieren?" bei neuem Passwort, Liste im Menue, verschluesselt im Host (#130, `passwords-test.mjs`)
 - [x] PDFs im Tab wie Chrome (Viewer des Host-Browsers, richtiger Dateiname, Zurueck, Drucken); ohne
-  Viewer Download. Offen: PDFs in iframes (bleiben leer) (#131, `pdf-test.mjs`)
+  Viewer Download. Offen: PDFs in iframes (bleiben leer) (#130, `pdf-test.mjs`)
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die

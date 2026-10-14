@@ -10,7 +10,6 @@ import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './medi
 import { initCapture, onCaptureStart, onCaptureStop } from './capture.js';
 import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
-import { initPasswords, onPasswordSubmit, onLoginField, clearPasswords } from './passwords.js';
 import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 
 const $ = (id) => document.getElementById(id);
@@ -185,7 +184,6 @@ async function clearStorage() {
     return;
   storageReady = false; // nichts mehr zurueckschreiben
   clearPermissions();
-  await clearPasswords().catch(() => {});
   // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
   await engine?.blClearHttpCache?.().catch(() => {});
   await new Promise((resolve) => {
@@ -248,7 +246,6 @@ function persistSession() {
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
 initPickers({ engine: () => engine, toUTF8, focusPage: () => focusPage() });
-initPasswords({ engine: () => engine, toUTF8 });
 
 // --------------------------------------------------------------------- Tabs
 
@@ -672,12 +669,6 @@ function onEngineEvent(viewId, type, payload) {
   case 'find':
     if (tab === activeTab)
       showFindCount(data);
-    return;
-  case 'password-submit':
-    onPasswordSubmit(tab, data);
-    return;
-  case 'login-field':
-    onLoginField(tab, data);
     return;
   case 'permission':
     onPermissionRequest(tab, data);

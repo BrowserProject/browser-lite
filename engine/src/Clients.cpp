@@ -11,7 +11,6 @@
 #include "Engine.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
-#include "Passwords.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
 #include "wasm/WasmBridge.h"
@@ -30,8 +29,6 @@
 #include <WebCore/DocumentPage.h>
 #include <WebCore/DocumentView.h>
 #include <WebCore/FileChooser.h>
-#include <WebCore/FormState.h>
-#include <WebCore/HTMLFormElement.h>
 #include <WebCore/HistoryController.h>
 #include <WebCore/HistoryItem.h>
 #include <WebCore/HitTestResult.h>
@@ -280,12 +277,6 @@ void ChromeClient::requestPointerUnlock(CompletionHandler<void(bool)>&& completi
 #endif
 
 // Link-Adresse unten links und Tooltips (title-Attribut) wie in Chrome
-// Fokus auf einem Anmeldefeld: der Passwort-Speicher kann ausfuellen
-void ChromeClient::focusedElementChanged(Element* element, LocalFrame*, FocusOptions, BroadcastFocusedElement)
-{
-    Passwords::focusChanged(m_view->id(), element);
-}
-
 void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& toolTip, TextDirection)
 {
     String link = result.absoluteLinkURL().string();
@@ -373,12 +364,6 @@ RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, 
 {
     Ref frame = m_frameLoader->frame();
     return frame->loader().history().createItemTree(frame, clipAtTarget, itemID);
-}
-
-// Formular wird abgeschickt: Anmeldedaten fuer den Passwort-Speicher melden
-void FrameLoaderClient::dispatchWillSendSubmitEvent(Ref<FormState>&& state)
-{
-    Passwords::formWillSubmit(m_view->id(), state->form());
 }
 
 // Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h)

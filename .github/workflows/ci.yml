@@ -333,8 +333,6 @@ jobs:
         run: cd tests/e2e && node dragdrop-test.mjs
       - name: Zwischenablage-Test (Einfuegen mit HTML und Bild, Kopieren mit HTML, Doppelklick)
         run: cd tests/e2e && node clipboard-test.mjs
-      - name: Passwort-Test (speichern, ausfuellen, aktualisieren, anderer Ursprung)
-        run: cd tests/e2e && node passwords-test.mjs
       - name: PDF-Test (PDF im Tab mit dem Viewer des Host, Zurueck, Anhang, iframe)
         run: cd tests/e2e && node pdf-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
