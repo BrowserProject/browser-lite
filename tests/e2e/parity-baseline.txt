@@ -72,6 +72,7 @@ css:zoom
 dev:battery
 dev:clipboard-item
 dev:clipboard-text
+dev:device-memory
 dev:device-orientation
 dev:eyedropper
 dev:fullscreen
@@ -225,6 +226,7 @@ net:file-system-access
 net:indexeddb
 net:local-storage
 net:message-channel
+net:network-information
 net:online
 net:opfs
 net:service-worker

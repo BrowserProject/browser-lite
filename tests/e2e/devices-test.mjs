@@ -142,6 +142,9 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
     result('hostbridge', typeof __blHost + ',' + typeof EyeDropper + ',' + typeof navigator.keyboard?.lock);
     const battery = await navigator.getBattery();
     result('battery', typeof battery.level + ',' + typeof battery.charging + ',' + (battery instanceof EventTarget));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const connection = navigator.connection;
+    result('netinfo', [typeof connection.effectiveType, typeof connection.downlink, connection instanceof EventTarget, typeof navigator.deviceMemory].join(','));
     const layout = await navigator.keyboard.getLayoutMap().then((map) => 'map:' + (map instanceof Map), (e) => 'fehler:' + e.name);
     result('keyboardlayout', layout);
     const cache = await caches.open('test');
@@ -265,6 +268,7 @@ check('Canvas-Filter (blur)', (await result('canvasfilter')) === 'blur', results
 check('moveBefore', (await result('movebefore')) === 'true');
 check('navigator.storage.estimate', (await result('estimate')) === 'number');
 check('Host-Bruecke unsichtbar, EyeDropper und keyboard.lock da', (await result('hostbridge')) === 'undefined,function,function', results.get('hostbridge'));
+check('navigator.connection und deviceMemory', (await result('netinfo')) === 'string,number,true,number', results.get('netinfo'));
 check('navigator.getBattery() vom Host', (await result('battery')) === 'number,boolean,true', results.get('battery'));
 check('navigator.keyboard.getLayoutMap() vom Host', (await result('keyboardlayout')) === 'map:true', results.get('keyboardlayout'));
 check('screen.orientation', (await result('orientation')) === 'landscape-primary', results.get('orientation'));

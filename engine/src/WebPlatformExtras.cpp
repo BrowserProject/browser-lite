@@ -293,6 +293,52 @@ static constexpr auto polyfillSource = R"JS((() => {
     });
   });
 
+  // Network Information API und navigator.deviceMemory mit den Werten des Host
+  // (Seiten laden damit z.B. kleinere Bilder bei langsamer Verbindung)
+  if (!('connection' in Navigator.prototype)) {
+    const info = { effectiveType: '4g', downlink: 10, rtt: 50, saveData: false, type: undefined, downlinkMax: undefined };
+    class NetworkInformation extends EventTarget {
+      constructor() {
+        throw new TypeError('Illegal constructor');
+      }
+    }
+    for (const name of ['effectiveType', 'downlink', 'rtt', 'saveData', 'type', 'downlinkMax']) {
+      Object.defineProperty(NetworkInformation.prototype, name, {
+        get() { return info[name]; },
+        configurable: true,
+        enumerable: true,
+      });
+    }
+    let onchange = null;
+    Object.defineProperty(NetworkInformation.prototype, 'onchange', {
+      get() { return onchange; },
+      set(handler) {
+        if (onchange)
+          this.removeEventListener('change', onchange);
+        onchange = typeof handler === 'function' ? handler : null;
+        if (onchange)
+          this.addEventListener('change', onchange);
+      },
+      configurable: true,
+      enumerable: true,
+    });
+    const connection = Reflect.construct(EventTarget, [], NetworkInformation);
+    Object.defineProperty(Navigator.prototype, 'connection', { get() { return connection; }, configurable: true, enumerable: true });
+    define(globalThis, 'NetworkInformation', NetworkInformation);
+    let memory = 8;
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get() { return memory; }, configurable: true, enumerable: true });
+    call('network-info').then((value) => {
+      if (typeof value?.deviceMemory === 'number')
+        memory = value.deviceMemory;
+      if (!value?.connection)
+        return;
+      const changed = ['effectiveType', 'downlink', 'rtt', 'saveData'].some((name) => value.connection[name] !== undefined && value.connection[name] !== info[name]);
+      Object.assign(info, value.connection);
+      if (changed)
+        connection.dispatchEvent(new Event('change'));
+    }, () => {});
+  }
+
   // EyeDropper: Farbe vom Bildschirm (die Seite ist im Host ja ein Canvas)
   if (!('EyeDropper' in globalThis)) {
     class EyeDropper {
@@ -546,7 +592,7 @@ bool isAllowedHostCall(const String& name)
         "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
         "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s, "rtc-receive"_s, "rtc-track"_s,
         "pip-enter"_s, "pip-exit"_s, "pip-wait"_s,
-        "image-open"_s, "image-decode"_s, "image-close"_s, "image-supported"_s,
+        "image-open"_s, "image-decode"_s, "image-close"_s, "image-supported"_s, "network-info"_s,
     };
     for (auto entry : allowed) {
         if (name == entry)

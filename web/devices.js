@@ -346,6 +346,13 @@ function imageDecoderFor(payload, origin) {
 }
 
 Object.assign(hostCalls, {
+  async 'network-info'() {
+    const connection = navigator.connection;
+    return {
+      deviceMemory: navigator.deviceMemory,
+      connection: connection ? { effectiveType: connection.effectiveType, downlink: connection.downlink, rtt: connection.rtt, saveData: connection.saveData, type: connection.type } : null,
+    };
+  },
   async 'image-supported'(payload) {
     return typeof ImageDecoder === 'function' && await ImageDecoder.isTypeSupported(String(payload?.type));
   },
