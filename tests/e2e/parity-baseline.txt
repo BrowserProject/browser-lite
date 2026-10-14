@@ -145,6 +145,7 @@ gfx:font-face
 gfx:font-variations
 gfx:image-bitmap
 gfx:image-decode
+gfx:image-decoder
 gfx:offscreen-canvas
 gfx:offscreen-canvas-2d
 gfx:path2d
@@ -231,6 +232,7 @@ net:shared-worker
 net:storage-manager
 net:web-locks
 net:websocket
+net:websocket-stream
 net:worker
 perf:event-timing
 perf:lcp

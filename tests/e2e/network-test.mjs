@@ -58,6 +58,22 @@ function webSocketEcho() {
     socket.onerror = () => { clearTimeout(timer); resolve('ws-fehler'); };
   });
 }
+async function webSocketStreamEcho() {
+  if (typeof WebSocketStream !== 'function')
+    return 'wss-fehlt';
+  try {
+    const stream = new WebSocketStream('ws://' + location.host + '/echo');
+    const { readable, writable } = await stream.opened;
+    const writer = writable.getWriter();
+    await writer.write('strom');
+    const { value } = await readable.getReader().read();
+    stream.close();
+    const closed = await stream.closed;
+    return 'wsstream:' + value + ':' + closed.closeCode;
+  } catch (e) {
+    return 'wsstream-fehler:' + e.name;
+  }
+}
 function secure() {
   // HTTPS und WSS gegen den lokalen TLS-Server (Test-CA ueber window.__blExtraCA)
   return fetch(SECURE + '/secure.txt').then((r) => r.text()).then((text) => new Promise((resolve) => {
@@ -70,11 +86,12 @@ function secure() {
 }
 fetch('/data.txt').then((r) => r.text()).then(async (text) => {
   const ws = await webSocketEcho();
+  const wsStream = await webSocketStreamEcho();
   const tls = await secure();
   // <video> muss ein echtes HTMLMediaElement sein (Abspielen geht noch nicht)
   const video = document.createElement('video');
   const media = video instanceof HTMLMediaElement && typeof video.pause === 'function' ? 'media-ok' : 'media-fehlt';
-  document.title = 'E2E|' + document.cookie + '|' + text.trim() + '|' + ws + '|' + tls + '|' + media;
+  document.title = 'E2E|' + document.cookie + '|' + text.trim() + '|' + ws + '|' + tls + '|' + wsStream + '|' + media;
 }, (e) => { document.title = 'E2E|fetch-fehler|' + e; });
 `;
 
@@ -177,6 +194,7 @@ check('Seite geladen (Redirect + Skript)', title.startsWith('E2E|'), title);
 check('Cookie gesetzt', title.includes('|bl=1|'));
 check('fetch() mit gzip', title.includes('|hallo-gzip|'));
 check('WebSocket (Echo, Umlaute)', title.includes('|ws:echo:ping-äöü|'));
+check('WebSocketStream (Echo)', /\|wsstream:echo:strom:(1000|1005)\|/.test(title), title);
 check('HTTPS + WSS mit eigener CA (TLS im WASM)', title.includes('|tls-ok,wss:tls|'), title);
 check('<video> als HTMLMediaElement', title.includes('|media-ok'), title.split('|').pop());
 check('Redirect ueber /start', requests.includes('/start') && requests.includes('/page'), requests.join(' '));

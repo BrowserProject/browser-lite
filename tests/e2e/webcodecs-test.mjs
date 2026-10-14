@@ -150,6 +150,26 @@ const part = async (name, run) => {
   log('bogus', (await VideoDecoder.isConfigSupported({ codec: 'vp8x' })).supported);
   });
 
+  // ImageDecoder: blaues PNG aus einem Canvas
+  await part('imagedecoder', async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 20;
+    canvas.height = 10;
+    const context = canvas.getContext('2d');
+    context.fillStyle = 'rgb(0, 0, 255)';
+    context.fillRect(0, 0, 20, 10);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    const decoder = new ImageDecoder({ data: await blob.arrayBuffer(), type: 'image/png' });
+    await decoder.tracks.ready;
+    const { image } = await decoder.decode();
+    const pixels = new Uint8Array(image.allocationSize());
+    await image.copyTo(pixels);
+    log('imagedecoder', [await ImageDecoder.isTypeSupported('image/png'), decoder.tracks.length, decoder.tracks.selectedTrack.frameCount,
+      image.codedWidth + 'x' + image.codedHeight, pixels[0] < 30 && pixels[2] > 220].join(','));
+    image.close();
+    decoder.close();
+  });
+
   // Opus kodieren und dekodieren (440 Hz)
   await part('opus', async () => {
   const audioChunks = [];
@@ -264,6 +284,7 @@ check('VP8 dekodiert', /^5:64x48:0$/.test(await result('decoded', 60000) || ''),
 check('Dekodiertes Bild hat die Farben', await result('decodedcolor', 30000) === 'ok', results.get('decodedcolor') || err('vp8'));
 check('VP9 wird unterstuetzt', await result('vp9', 30000) === 'true', results.get('vp9') || err('support'));
 check('Unbekannter Codec abgelehnt', await result('bogus', 30000) === 'false', results.get('bogus') || err('support'));
+check('ImageDecoder (PNG -> VideoFrame)', await result('imagedecoder', 60000) === 'true,1,1,20x10,true', results.get('imagedecoder') || err('imagedecoder'));
 check('Opus kodiert', /^\d+:opus\/48000$/.test(await result('aencoded', 60000) || ''), results.get('aencoded') || results.get('aencerror') || err('opus'));
 check('Opus dekodiert mit Ton', /^\d+:48000:1:ton$/.test(await result('adecoded', 60000) || ''), results.get('adecoded') || results.get('adecerror') || err('opus'));
 check('AudioData s16 -> f32-planar', await result('audiodata', 30000) === '250:-0.50,-0.25', results.get('audiodata') || err('audiodata'));

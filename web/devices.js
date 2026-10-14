@@ -334,6 +334,60 @@ const hostCalls = {
   },
 };
 
+// WebCodecs ImageDecoder der Seiten (Polyfill in engine/src/WebPlatformExtras.cpp)
+const imageDecoders = new Map(); // id -> { decoder, origin }
+let nextImageDecoder = 1;
+
+function imageDecoderFor(payload, origin) {
+  const entry = imageDecoders.get(payload?.id);
+  if (!entry || entry.origin !== origin)
+    throw Object.assign(new Error('The decoder has been closed.'), { name: 'InvalidStateError' });
+  return entry.decoder;
+}
+
+Object.assign(hostCalls, {
+  async 'image-supported'(payload) {
+    return typeof ImageDecoder === 'function' && await ImageDecoder.isTypeSupported(String(payload?.type));
+  },
+  async 'image-open'(payload, origin) {
+    if (typeof ImageDecoder !== 'function')
+      throw Object.assign(new Error('ImageDecoder is not available'), { name: 'NotSupportedError' });
+    const init = { data: base64ToBytes(payload?.data || ''), type: String(payload?.type) };
+    if (typeof payload?.preferAnimation === 'boolean')
+      init.preferAnimation = payload.preferAnimation;
+    const decoder = new ImageDecoder(init);
+    await decoder.tracks.ready;
+    await decoder.completed;
+    const id = nextImageDecoder++;
+    imageDecoders.set(id, { decoder, origin });
+    const tracks = [];
+    for (let i = 0; i < decoder.tracks.length; i++) {
+      const track = decoder.tracks[i];
+      tracks.push({ animated: track.animated, frameCount: track.frameCount, repetitionCount: track.repetitionCount, selected: track.selected });
+    }
+    return { id, tracks };
+  },
+  async 'image-decode'(payload, origin) {
+    const decoder = imageDecoderFor(payload, origin);
+    const { image } = await decoder.decode({ frameIndex: Number(payload.frameIndex) || 0 });
+    try {
+      const width = image.displayWidth, height = image.displayHeight;
+      const canvas = new OffscreenCanvas(width, height);
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(image, 0, 0, width, height);
+      const pixels = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
+      return { width, height, timestamp: image.timestamp, duration: image.duration, data: await bytesToBase64(pixels) };
+    } finally {
+      image.close();
+    }
+  },
+  async 'image-close'(payload, origin) {
+    imageDecoderFor(payload, origin).close();
+    imageDecoders.delete(payload.id);
+    return {};
+  },
+});
+
 Object.assign(hostCalls, rtcHostCalls, pipHostCalls);
 
 export async function onHostCall(tab, data) {

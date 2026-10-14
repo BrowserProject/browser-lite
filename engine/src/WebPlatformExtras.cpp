@@ -203,6 +203,80 @@ static constexpr auto polyfillSource = R"JS((() => {
   if (typeof Navigator === 'function')
     define(Navigator.prototype, 'vibrate', function vibrate() { return true; });
 
+  // WebSocketStream (Chrome): Streams ueber einem normalen WebSocket. Ein
+  // WebSocket kann nicht pausieren, darum ohne Gegendruck beim Lesen.
+  if (typeof WebSocket === 'function' && typeof ReadableStream === 'function' && !('WebSocketStream' in globalThis)) {
+    class WebSocketError extends DOMException {
+      constructor(message = '', init = {}) {
+        super(message, 'WebSocketError');
+        this.closeCode = init.closeCode ?? null;
+        this.reason = init.reason ?? '';
+      }
+    }
+    const sockets = new WeakMap();
+    class WebSocketStream {
+      constructor(url, options = {}) {
+        const socket = new WebSocket(url, options.protocols ?? []);
+        socket.binaryType = 'arraybuffer';
+        sockets.set(this, socket);
+        this.url = socket.url;
+        let controller;
+        const readable = new ReadableStream({
+          start(c) { controller = c; },
+          cancel() { socket.close(); },
+        });
+        const writable = new WritableStream({
+          write(chunk) {
+            if (typeof chunk !== 'string' && !(chunk instanceof ArrayBuffer) && !ArrayBuffer.isView(chunk))
+              throw new TypeError('WebSocketStream can only send strings and BufferSources.');
+            socket.send(chunk);
+          },
+          close() { socket.close(); },
+          abort() { socket.close(); },
+        });
+        this.opened = new Promise((resolve, reject) => {
+          socket.addEventListener('open', () => resolve({ readable, writable, extensions: socket.extensions, protocol: socket.protocol }), { once: true });
+          socket.addEventListener('close', (event) => reject(new WebSocketError('WebSocket connection could not be established.', { closeCode: event.code, reason: event.reason })), { once: true });
+        });
+        this.closed = new Promise((resolve, reject) => {
+          socket.addEventListener('close', (event) => {
+            try {
+              controller.close();
+            } catch (e) {
+            }
+            if (event.wasClean)
+              resolve({ closeCode: event.code, reason: event.reason });
+            else
+              reject(new WebSocketError('WebSocket closed without a closing handshake.', { closeCode: event.code, reason: event.reason }));
+          }, { once: true });
+        });
+        this.opened.catch(() => {});
+        this.closed.catch(() => {});
+        socket.addEventListener('message', (event) => {
+          try {
+            controller.enqueue(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
+          } catch (e) {
+          }
+        });
+        if (options.signal) {
+          if (options.signal.aborted)
+            socket.close();
+          else
+            options.signal.addEventListener('abort', () => socket.close(), { once: true });
+        }
+      }
+      close(info = {}) {
+        const socket = sockets.get(this);
+        if (info.closeCode === undefined)
+          socket.close(info.reason === undefined ? undefined : 1000, info.reason);
+        else
+          socket.close(info.closeCode, info.reason ?? '');
+      }
+    }
+    define(globalThis, 'WebSocketStream', WebSocketStream);
+    define(globalThis, 'WebSocketError', WebSocketError);
+  }
+
   // APIs des Host-Browsers ueber die Oberflaeche (installHostBridge, web/devices.js).
   // Die Bruecke ist nur hier sichtbar, die Seite sieht sie nicht.
   const host = globalThis.__blHost;
@@ -253,6 +327,98 @@ static constexpr auto polyfillSource = R"JS((() => {
       getLayoutMap() { return call('keyboard-layout').then((entries) => new Map(entries)); },
     };
     Object.defineProperty(Navigator.prototype, 'keyboard', { get: () => keyboard, configurable: true, enumerable: true });
+  }
+
+  // WebCodecs ImageDecoder: dekodiert wird mit dem ImageDecoder des Host, die
+  // Bilder kommen als RGBA zurueck und werden hier VideoFrames
+  if (!('ImageDecoder' in globalThis) && typeof VideoFrame === 'function') {
+    const toBase64 = (bytes) => {
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000)
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(binary);
+    };
+    const fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+    const readAll = async (data) => {
+      if (data instanceof ArrayBuffer)
+        return new Uint8Array(data.slice(0));
+      if (ArrayBuffer.isView(data))
+        return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+      if (data && typeof data.getReader === 'function')
+        return new Uint8Array(await new Response(data).arrayBuffer());
+      throw new TypeError("Failed to construct 'ImageDecoder': The provided data is not a BufferSource or ReadableStream.");
+    };
+    const imageState = new WeakMap();
+    class ImageTrack {
+      constructor() {
+        throw new TypeError('Illegal constructor');
+      }
+      get animated() { return imageState.get(this).animated; }
+      get frameCount() { return imageState.get(this).frameCount; }
+      get repetitionCount() { return imageState.get(this).repetitionCount; }
+      get selected() { return imageState.get(this).selected; }
+    }
+    class ImageTrackList {
+      constructor() {
+        throw new TypeError('Illegal constructor');
+      }
+      get length() { return imageState.get(this).tracks.length; }
+      get selectedIndex() { return imageState.get(this).tracks.findIndex((track) => track.selected); }
+      get selectedTrack() { return imageState.get(this).tracks.find((track) => track.selected) ?? null; }
+      get ready() { return imageState.get(this).ready; }
+    }
+    class ImageDecoder {
+      constructor(init = {}) {
+        if (typeof init.type !== 'string' || !init.type)
+          throw new TypeError("Failed to construct 'ImageDecoder': Required member type is undefined.");
+        this.type = init.type;
+        const list = Object.create(ImageTrackList.prototype);
+        const listState = { tracks: [] };
+        imageState.set(list, listState);
+        this.tracks = list;
+        const decoder = { id: null, closed: false, complete: false };
+        imageState.set(this, decoder);
+        decoder.open = readAll(init.data).then((bytes) => call('image-open', { data: toBase64(bytes), type: init.type, preferAnimation: init.preferAnimation ?? null }));
+        listState.ready = decoder.open.then((info) => {
+          decoder.id = info.id;
+          info.tracks.forEach((entry, index) => {
+            const track = Object.create(ImageTrack.prototype);
+            imageState.set(track, entry);
+            listState.tracks.push(track);
+            Object.defineProperty(list, index, { get: () => listState.tracks[index], configurable: true, enumerable: true });
+          });
+        });
+        this.completed = listState.ready.then(() => {
+          decoder.complete = true;
+        });
+        listState.ready.catch(() => {});
+        this.completed.catch(() => {});
+      }
+      get complete() { return imageState.get(this).complete; }
+      async decode(options = {}) {
+        const decoder = imageState.get(this);
+        if (decoder.closed)
+          throw new DOMException('The decoder has been closed.', 'InvalidStateError');
+        await this.tracks.ready;
+        const frame = await call('image-decode', { id: decoder.id, frameIndex: options.frameIndex ?? 0 });
+        const image = new VideoFrame(fromBase64(frame.data), { format: 'RGBA', codedWidth: frame.width, codedHeight: frame.height, timestamp: frame.timestamp ?? 0, duration: frame.duration ?? undefined });
+        return { image, complete: true };
+      }
+      reset() {}
+      close() {
+        const decoder = imageState.get(this);
+        if (decoder.closed)
+          return;
+        decoder.closed = true;
+        decoder.open.then(() => call('image-close', { id: decoder.id })).catch(() => {});
+      }
+      static isTypeSupported(type) {
+        return call('image-supported', { type: String(type) }).then((value) => !!value, () => false);
+      }
+    }
+    define(globalThis, 'ImageDecoder', ImageDecoder);
+    define(globalThis, 'ImageTrack', ImageTrack);
+    define(globalThis, 'ImageTrackList', ImageTrackList);
   }
 
   // File System Access API: Dateien und Ordner des Host oeffnen und speichern.
@@ -380,6 +546,7 @@ bool isAllowedHostCall(const String& name)
         "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
         "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s, "rtc-receive"_s, "rtc-track"_s,
         "pip-enter"_s, "pip-exit"_s, "pip-wait"_s,
+        "image-open"_s, "image-decode"_s, "image-close"_s, "image-supported"_s,
     };
     for (auto entry : allowed) {
         if (name == entry)
