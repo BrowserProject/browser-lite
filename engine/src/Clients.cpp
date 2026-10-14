@@ -419,6 +419,18 @@ void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& 
         function(PolicyAction::Use);
         return;
     }
+    // PDF wie in Chrome anzeigen statt speichern: im Tab mit dem Viewer des
+    // Host-Browsers. In iframes geht das (noch) nicht, dort bleibt es leer
+    // statt eines ungefragten Downloads.
+    if (!response.isAttachment() && downloadAttribute.isNull() && MIMETypeRegistry::isPDFMIMEType(response.mimeType())) {
+        if (isMainFrame()) {
+            auto pdfRequest = request;
+            pdfRequest.setURL(URL { response.url() });
+            BrowserLite::startPDFView(m_view->id(), pdfRequest);
+        }
+        function(PolicyAction::Ignore);
+        return;
+    }
     // Download (Content-Disposition: attachment, <a download>, unbekannter Typ):
     // nochmal mit eigenem Request laden, die Daten gehen an die Oberflaeche.
     // Die URL der Antwort ist schon das Ziel nach allen Redirects.

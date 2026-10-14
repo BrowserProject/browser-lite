@@ -407,6 +407,8 @@ function activateTab(tab) {
   if (activeTab) {
     activeTab.lastActive = Date.now();
     activeTab.canvas.style.display = 'none';
+    if (activeTab.pdf)
+      activeTab.pdf.frame.style.display = 'none';
     activeTab.element.classList.remove('active');
     engine._bl_focus(activeTab.id, 0);
   }
@@ -423,7 +425,9 @@ function activateTab(tab) {
     tab.pendingHistory = null;
   }
   persistSession();
-  tab.canvas.style.display = 'block';
+  tab.canvas.style.display = tab.pdf ? 'none' : 'block';
+  if (tab.pdf)
+    tab.pdf.frame.style.display = 'block';
   tab.element.classList.add('active');
   engine._bl_focus(tab.id, 1);
   focusPage();
@@ -475,6 +479,7 @@ function closeTab(tab) {
   onSensorStop(tab, { kind: 'motion' });
   setTimeout(persistSession);
   engine._bl_destroy_view(tab.id);
+  closePDF(tab, false);
   tab.canvas.remove();
   tab.element.remove();
   tabs.delete(tab.id);
@@ -610,7 +615,7 @@ function onEngineEvent(viewId, type, payload) {
     return;
   }
   if (type === 'download-start' || type === 'download-done') {
-    onDownloadEvent(type, data);
+    onDownloadEvent(type, data, viewId);
     return;
   }
   if (type === 'open-tab') {
@@ -708,6 +713,9 @@ function onEngineEvent(viewId, type, payload) {
   }
   switch (type) {
   case 'navigation':
+    // Neue Navigation der Engine: das PDF ist weg
+    if (tab.pdf && (data.loading || data.url !== tab.pdf.previous.url))
+      closePDF(tab);
     // Titel aus dem Verlaufseintrag: aus dem Back/Forward-Cache kommt er vor
     // dieser Meldung
     if (data.url !== tab.url) {
@@ -859,12 +867,21 @@ function formatSize(bytes) {
 // Liste fuer das Download-Panel (Strg+J), nur fuer diese Sitzung
 const downloadHistory = [];
 
-function onDownloadEvent(type, data) {
+function onDownloadEvent(type, data, viewId) {
   if (type === 'download-start') {
-    const download = { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size, viewSource: data.viewSource, sourceURL: data.url };
+    const download = { filename: data.filename, mime: data.mime, chunks: [], received: 0, size: data.size, viewSource: data.viewSource, viewPDF: data.viewPDF, sourceURL: data.url, viewId };
     downloads.set(data.id, download);
     if (download.viewSource)
       return;
+    // Ohne PDF-Viewer im Host (z.B. abgeschaltet per Richtlinie): normal herunterladen wie Chrome
+    if (download.viewPDF && navigator.pdfViewerEnabled === false)
+      download.viewPDF = false;
+    if (download.viewPDF) {
+      const tab = tabs.get(download.viewId);
+      if (tab === activeTab)
+        setStatus('PDF wird geladen …');
+      return;
+    }
     downloadHistory.push(download);
     refreshDownloadsPanel();
     setStatus('Download: ' + data.filename);
@@ -877,6 +894,14 @@ function onDownloadEvent(type, data) {
   if (download.viewSource) {
     if (!data.error)
       new Blob(download.chunks).arrayBuffer().then((buffer) => showSource(download.sourceURL, new Uint8Array(buffer), download.mime));
+    return;
+  }
+  if (download.viewPDF) {
+    const tab = tabs.get(download.viewId);
+    if (tab === activeTab)
+      setStatus(data.error ? 'PDF konnte nicht geladen werden (' + data.error + ')' : '');
+    if (tab && !data.error)
+      showPDF(tab, download.sourceURL, download.filename, new Blob(download.chunks, { type: 'application/pdf' }));
     return;
   }
   if (data.error) {
@@ -913,10 +938,91 @@ function onEngineDownloadData(id, bytes) {
     return;
   download.chunks.push(bytes);
   download.received += bytes.length;
-  if (download.viewSource)
+  if (download.viewSource || download.viewPDF)
     return;
   const total = download.size > 0 ? ' von ' + formatSize(download.size) : '';
   setStatus('Download: ' + download.filename + ' ' + formatSize(download.received) + total);
+}
+
+// ------------------------------------------------------------ PDF im Tab
+// Wie Chrome zeigt ein Tab PDFs selber an statt sie herunterzuladen: die
+// Engine laedt sie (engine/src/Clients.cpp, startPDFView), wir zeigen sie mit
+// dem PDF-Viewer des Host-Browsers in einem iframe ueber dem Canvas. Die Seite
+// davor bleibt in der Engine, Zurueck schliesst das PDF wieder.
+
+let nextPDFId = 1;
+navigator.serviceWorker?.addEventListener('message', (event) => {
+  if (event.data?.bl !== 'pdf-get')
+    return;
+  const tab = [...tabs.values()].find((t) => t.pdf?.id === event.data.id);
+  event.ports[0]?.postMessage({ blob: tab?.pdf.blob || null });
+});
+
+function showPDF(tab, url, filename, blob) {
+  const previous = tab.pdf ? tab.pdf.previous : { url: tab.url, title: tab.title, canGoBack: tab.canGoBack, canGoForward: tab.canGoForward };
+  closePDF(tab, false);
+  const frame = document.createElement('iframe');
+  frame.className = 'pdf-view';
+  frame.title = filename;
+  frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:none;background:#525659;display:' + (tab === activeTab ? 'block' : 'none');
+  // Ueber den Service Worker (web/sw.js) mit dem richtigen Dateinamen, sonst als blob:
+  const id = String(nextPDFId++);
+  const blobURL = navigator.serviceWorker?.controller ? null : URL.createObjectURL(blob);
+  tab.pdf = { id, url, blob, blobURL, frame, filename, previous };
+  frame.src = blobURL || `bl-pdf/${id}/${encodeURIComponent(filename.replace(/[\\/]/g, '_'))}`;
+  $('viewport').appendChild(frame);
+  tab.canvas.style.display = 'none';
+  tab.url = url;
+  tab.title = filename;
+  tab.canGoBack = true;
+  tab.canGoForward = false;
+  tab.loading = false;
+  tab.updateTitle();
+  recordVisit(url, filename);
+  persistSession();
+  if (tab === activeTab) {
+    clearHover();
+    updateStar(url);
+    updateToolbar();
+  }
+}
+
+// restore: Zustand der Seite davor wieder zeigen (nicht beim Schliessen des Tabs)
+function closePDF(tab, restore = true) {
+  const pdf = tab.pdf;
+  if (!pdf)
+    return;
+  tab.pdf = null;
+  pdf.frame.remove();
+  if (pdf.blobURL)
+    URL.revokeObjectURL(pdf.blobURL);
+  if (tab === activeTab)
+    tab.canvas.style.display = 'block';
+  if (!restore)
+    return;
+  Object.assign(tab, { url: pdf.previous.url, title: pdf.previous.title, canGoBack: pdf.previous.canGoBack, canGoForward: pdf.previous.canGoForward });
+  tab.updateTitle();
+  persistSession();
+  if (tab === activeTab) {
+    updateStar(tab.url);
+    updateToolbar();
+  }
+}
+
+function goBack(tab) {
+  if (tab.pdf) {
+    closePDF(tab);
+    if (tab === activeTab)
+      focusPage();
+  } else
+    engine._bl_go_back(tab.id);
+}
+
+function reloadTab(tab) {
+  if (tab.pdf)
+    engine._bl_load_url(tab.id, toUTF8(tab.pdf.url));
+  else
+    engine._bl_reload(tab.id);
 }
 
 // ------------------------------------------------------------ Drucken
@@ -929,6 +1035,13 @@ let printURL = null;
 function printTab(tab) {
   if (!tab || !engine)
     return;
+  // PDF im Tab: der Viewer des Host druckt selber
+  if (tab.pdf) {
+    try {
+      tab.pdf.frame.contentWindow.print();
+    } catch (e) {}
+    return;
+  }
   setStatus('Druckvorschau wird erstellt …');
   engine._bl_print(tab.id);
 }
@@ -1348,7 +1461,7 @@ $('address-form').addEventListener('submit', (e) => {
   engine._bl_load_url(activeTab.id, toUTF8(url));
   focusPage();
 });
-$('back').addEventListener('click', () => activeTab && engine._bl_go_back(activeTab.id));
+$('back').addEventListener('click', () => activeTab && goBack(activeTab));
 $('forward').addEventListener('click', () => activeTab && engine._bl_go_forward(activeTab.id));
 $('reload').addEventListener('click', () => {
   if (!activeTab)
@@ -1356,7 +1469,7 @@ $('reload').addEventListener('click', () => {
   if (activeTab.loading)
     engine._bl_stop(activeTab.id);
   else
-    engine._bl_reload(activeTab.id);
+    reloadTab(activeTab);
 });
 $('clear-data').addEventListener('click', clearStorage);
 $('new-tab').addEventListener('click', () => openURL('', true));
@@ -1562,7 +1675,7 @@ function shortcut(e) {
     case 'l': $('address').focus(); $('address').select(); return true;
     case 'f':
     case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;
-    case 'r': if (tab) engine._bl_reload(tab.id); return true;
+    case 'r': if (tab) reloadTab(tab); return true;
     case 'u': if (tab) engine._bl_view_source(tab.id); return true;
     case 'p': printTab(tab); return true;
     case '+':
@@ -1583,13 +1696,13 @@ function shortcut(e) {
     return false;
   }
   if (e.altKey && !ctrl && tab) {
-    if (key === 'ArrowLeft') { engine._bl_go_back(tab.id); return true; }
+    if (key === 'ArrowLeft') { goBack(tab); return true; }
     if (key === 'ArrowRight') { engine._bl_go_forward(tab.id); return true; }
     if (key === 'd') { $('address').focus(); $('address').select(); return true; }
   }
   if (!ctrl && !e.altKey) {
     switch (key) {
-    case 'F5': if (tab) engine._bl_reload(tab.id); return true;
+    case 'F5': if (tab) reloadTab(tab); return true;
     case 'F6': $('address').focus(); $('address').select(); return true;
     case 'F3': if (findBar.hidden) openFind(); else runFind(e.shiftKey, true); return true;
     }
