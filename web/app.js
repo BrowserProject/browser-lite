@@ -396,7 +396,9 @@ function restoredTab(entry) {
 function activateTab(tab) {
   if (activeTab === tab)
     return;
+  tab.lastActive = Date.now();
   if (activeTab) {
+    activeTab.lastActive = Date.now();
     activeTab.canvas.style.display = 'none';
     activeTab.element.classList.remove('active');
     engine._bl_focus(activeTab.id, 0);
@@ -415,6 +417,44 @@ function activateTab(tab) {
   focusPage();
   updateToolbar();
   tab.updateTitle();
+}
+
+// Wie Chrome bei wenig Speicher: alle Tabs teilen sich den WASM-Speicher der
+// Engine (hoechstens 4 GB, er schrumpft nie). Wird er knapp, ersetzen wir den
+// am laengsten nicht benutzten Hintergrund-Tab durch einen, der erst beim
+// Anklicken neu laedt. Tabs mit Ton oder Kamera/Mikrofon bleiben.
+let discardLimit = 2.5 * 1024 ** 3;
+function checkMemory() {
+  if (!engine?._bl_memory_used || engine._bl_memory_used() < discardLimit)
+    return null;
+  const candidates = [...tabs.values()].filter((tab) => tab !== activeTab && !tab.pendingURL && !tab.audible
+    && !tab.capturing && /^(https?|file):/.test(tab.url || ''));
+  candidates.sort((a, b) => (a.lastActive || 0) - (b.lastActive || 0));
+  return candidates.length ? discardTab(candidates[0]) : null;
+}
+setInterval(checkMemory, 15000);
+// Fuer Tests: Grenze setzen und sofort pruefen
+window.__blCheckMemory = (limit) => {
+  if (limit !== undefined)
+    discardLimit = limit;
+  return checkMemory()?.id ?? 0;
+};
+
+function discardTab(tab) {
+  const fresh = new Tab(tab.url, 0, { title: tab.title });
+  fresh.lastActive = tab.lastActive;
+  tab.element.before(fresh.element);
+  // Favicon uebernehmen (die Blob-URL gehoert jetzt dem neuen Tab)
+  if (tab.iconURL) {
+    fresh.iconURL = tab.iconURL;
+    tab.iconURL = null;
+    const img = fresh.element.querySelector('.icon');
+    img.src = fresh.iconURL;
+    img.hidden = false;
+  }
+  tabs.set(fresh.id, fresh);
+  closeTab(tab);
+  return fresh;
 }
 
 function closeTab(tab) {
@@ -685,6 +725,7 @@ function onEngineEvent(viewId, type, payload) {
     tab.setAudible(!!data.audio);
     return;
   case 'capture-state':
+    tab.capturing = !!data.active;
     tab.element.querySelector('.recording').hidden = !data.active;
     return;
   case 'cursor':

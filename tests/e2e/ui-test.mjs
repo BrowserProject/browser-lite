@@ -141,6 +141,19 @@ check('Sitzung: Hintergrund-Tab laedt noch nicht', (loads.get('eins') || 0) === 
 await tab.click('#tab-list .tab:first-child .title');
 check('Sitzung: Hintergrund-Tab laedt beim Anklicken', await waitLoaded('Seite eins'));
 
+// Wenig Speicher: der Hintergrund-Tab wird verworfen und laedt beim Anklicken neu
+const dreiBefore = loads.get('drei') || 0;
+const discarded = await tab.evaluate(() => window.__blCheckMemory(1));
+const titlesAfter = await tab.locator('#tab-list .tab .title').allTextContents();
+check('Speicher knapp: Hintergrund-Tab verworfen, Titel bleibt', discarded > 0 && JSON.stringify(titlesAfter) === JSON.stringify(['Seite eins', 'Seite drei']), `${discarded} ${JSON.stringify(titlesAfter)}`);
+check('Aktiver Tab wird nie verworfen', await tab.evaluate(() => window.__blCheckMemory()) === 0);
+await tab.evaluate(() => window.__blCheckMemory(2.5 * 1024 ** 3));
+loaded = [];
+await tab.click('#tab-list .tab:nth-child(2) .title');
+check('Verworfener Tab laedt beim Anklicken neu', await waitLoaded('Seite drei') && (loads.get('drei') || 0) === dreiBefore + 1, `${loads.get('drei')} Aufrufe`);
+await tab.click('#tab-list .tab:first-child .title');
+check('Zurueck zum ersten Tab', await tab.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent) === 'Seite eins');
+
 // Links: Strg+Klick und Mittelklick oeffnen je einen Tab im Hintergrund
 await go(siteURL + 'links');
 check('Seite mit Link', await waitLoaded('Seite links'));

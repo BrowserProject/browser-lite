@@ -482,6 +482,13 @@ EMSCRIPTEN_KEEPALIVE void bl_storage_flush()
     flushMemoryVFS(true);
 }
 
+// Belegter Speicher (malloc) fuer das Verwerfen von Tabs in der Oberflaeche.
+// mallinfo laeuft ueber den ganzen Heap (auf CNN ca. 25 ms), darum nur selten.
+EMSCRIPTEN_KEEPALIVE double bl_memory_used()
+{
+    return static_cast<double>(mallinfo().uordblks);
+}
+
 // Speicher der Engine in der Konsole (fuer Tests und Fehlersuche).
 // full: vorher einen vollen GC machen.
 EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
