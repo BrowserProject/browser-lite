@@ -1174,6 +1174,18 @@ EMSCRIPTEN_KEEPALIVE void bl_sink_closed(int id)
         sink->stop();
 }
 
+// Von der Oberflaeche (Haupt-Thread): entfernte WebRTC-Spur stumm/wieder da
+// (wie Chrome: stumm, solange keine Pakete kommen)
+EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
+{
+    BrowserLite::runOnEngineThread([id, muted] {
+        if (auto* source = BrowserLite::videoSources().get(id); source && source->isRemote())
+            Ref { *source }->setMuted(muted);
+        else if (auto* source = BrowserLite::audioSources().get(id); source && source->isRemote())
+            Ref { *source }->setMuted(muted);
+    });
+}
+
 // Von der Oberflaeche (Haupt-Thread): Host-Kamera verweigert oder beendet
 EMSCRIPTEN_KEEPALIVE void bl_capture_failed(int id)
 {

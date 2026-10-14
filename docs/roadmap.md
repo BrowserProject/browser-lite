@@ -246,7 +246,7 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 - [x] WebRTC Stufe 1: `RTCPeerConnection` + `RTCDataChannel` ueber das WebRTC des Host (Test `webrtc-test.mjs`,
   auch gegen eine normale Chromium-Seite)
 - [x] WebRTC Stufe 2: Medien senden und empfangen (Kamera, Mikrofon, Canvas, Web Audio), Transceiver-API.
-  Offen: Verkehr ueber das Relay (TURN), Ids im SDP wie die der Seite, Insertable Streams
+  Offen: Verkehr ueber das Relay (TURN), Insertable Streams
 - [x] MediaRecorder: WebM (VP8/VP9/AV1 + Opus) mit den Encodern des Host, Web Audio als Stream-Quelle
   (`createMediaStreamDestination`), Test in `mediastream-test.mjs` (Chromium spielt die Aufnahme ab)
 

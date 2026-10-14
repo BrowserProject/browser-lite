@@ -145,7 +145,7 @@ window.mediaLoopback = async () => {
     await b.setLocalDescription(await b.createAnswer());
     await a.setRemoteDescription(b.localDescription);
     await until(() => kinds.length === 2);
-    log('tracks', kinds.sort().join(',') + ',' + (remote instanceof MediaStream) + ',' + b.getReceivers().length + ',' + a.getTransceivers().map((t) => t.mid).join('/'));
+    log('tracks', kinds.sort().join(',') + ',' + (remote instanceof MediaStream && remote.id === local.id) + ',' + b.getReceivers().length + ',' + a.getTransceivers().map((t) => t.mid).join('/'));
     const video = document.createElement('video');
     video.muted = true;
     video.srcObject = remote;
@@ -173,6 +173,24 @@ window.mediaLoopback = async () => {
     log('senderstats', [...stats.values()].some((s) => s.type === 'outbound-rtp'));
     a.close();
     b.close();
+    // Dieselbe Spur in einer neuen Verbindung (Senke wird neu angeschlossen)
+    const c = new RTCPeerConnection(), d = new RTCPeerConnection();
+    c.onicecandidate = (e) => e.candidate && d.addIceCandidate(e.candidate);
+    d.onicecandidate = (e) => e.candidate && c.addIceCandidate(e.candidate);
+    const again = new Promise((resolve) => d.ontrack = (e) => resolve(e.track));
+    c.addTrack(local.getVideoTracks()[0], local);
+    await c.setLocalDescription(await c.createOffer());
+    await d.setRemoteDescription(c.localDescription);
+    await d.setLocalDescription(await d.createAnswer());
+    await c.setRemoteDescription(d.localDescription);
+    const second = document.createElement('video');
+    second.muted = true;
+    second.srcObject = new MediaStream([await again]);
+    await second.play();
+    await until(() => second.videoWidth > 0, 30000).catch(() => {});
+    log('reuse', second.videoWidth + 'x' + second.videoHeight);
+    c.close();
+    d.close();
     clearInterval(timer);
     log('medialoop', 'fertig');
   } catch (e) {
@@ -288,10 +306,11 @@ check('close()', await result('closed', 30000) === 'closed,closed', results.get(
 // Medien im Loopback
 const mediaErr = () => results.get('mediaerror') || '';
 check('addTrack: Sender und Transceiver', await result('senders', 30000) === '2,sendrecv/sendrecv,true', results.get('senders') || mediaErr());
-check('ontrack mit Spuren und Stream', await result('tracks', 30000) === 'audio:true:true,video:true:true,true,2,0/1', results.get('tracks') || mediaErr());
+check('ontrack mit Spuren und Stream (Id wie gesendet)', await result('tracks', 30000) === 'audio:true:true,video:true:true,true,2,0/1', results.get('tracks') || mediaErr());
 check('Bild kommt an (rotes Canvas)', /^160x120,(2[0-9][0-9]|1[6-9][0-9])\.[0-9]{1,2}\./.test(await result('remotevideo', 60000) || ''), results.get('remotevideo') || mediaErr());
 check('Ton kommt an (Web Audio)', await result('remoteaudio', 30000) === 'ton', results.get('remoteaudio') || mediaErr());
 check('sender.getStats', await result('senderstats', 30000) === 'true', results.get('senderstats') || mediaErr());
+check('Spur nach close() in neuer Verbindung', await result('reuse', 60000) === '160x120', results.get('reuse') || mediaErr());
 await result('medialoop', 30000);
 
 // Verbindung zu einer normalen Chromium-Seite

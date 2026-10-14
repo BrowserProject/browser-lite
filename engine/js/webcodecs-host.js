@@ -455,11 +455,11 @@ var blSinks = (function () {
       }
       const writer = data.writable.getWriter();
       writers.set(data.id, writer);
+      // Die Senke der Engine bleibt, solange die Spur der Seite lebt: ein
+      // spaeteres addTrack schliesst einen neuen Generator an
       writer.closed.catch(() => {}).finally(() => {
-        if (writers.get(data.id) !== writer)
-          return;
-        writers.delete(data.id);
-        Module._bl_sink_closed(data.id);
+        if (writers.get(data.id) === writer)
+          writers.delete(data.id);
       });
     });
   }

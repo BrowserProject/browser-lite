@@ -45,6 +45,7 @@ function clientFor(id, origin, create) {
       origin, pcs: new Map(), channels: new Map(), channelPc: new Map(), queue: [], waiter: null, lastSeen: Date.now(), remoteChannels: 0,
       // Medien: Transceiver per Schluessel, Host-Spuren der Seite per Spur-Id
       transceivers: new Map(), transceiverKeys: new WeakMap(), transceiverPc: new Map(), remoteTransceivers: 0, tracks: new Map(),
+      toPage: new Map(), toHost: new Map(),
     };
     clients.set(id, client);
   }
@@ -64,7 +65,25 @@ function push(client, event) {
   }
 }
 
-const describe = (value) => value ? { type: value.type, sdp: value.sdp } : null;
+// Ids im SDP (a=msid:<stream> <spur>): die Seite und die Gegenstelle sollen die
+// Ids der Seite sehen, nicht die der Host-Objekte. Beim Zuruecksetzen
+// (setLocalDescription) wird wieder auf die Host-Ids getauscht.
+function mapId(client, hostId, pageId) {
+  if (!hostId || !pageId || hostId === pageId)
+    return;
+  client.toPage.set(hostId, pageId);
+  client.toHost.set(pageId, hostId);
+}
+
+function swapIds(sdp, map) {
+  if (!sdp || !map.size)
+    return sdp;
+  for (const [from, to] of map)
+    sdp = sdp.split(from).join(to);
+  return sdp;
+}
+
+const describe = (value, client) => value ? { type: value.type, sdp: client ? swapIds(value.sdp, client.toPage) : value.sdp } : null;
 
 // Schnappschuesse kommen ueber verschiedene Antworten an (Operation, Ereignis);
 // die Nummer sagt der Seite, welcher neuer ist
@@ -99,9 +118,9 @@ function snapshot(pc, client, pcId) {
     transceivers,
     signalingState: pc.signalingState, iceGatheringState: pc.iceGatheringState, iceConnectionState: pc.iceConnectionState,
     connectionState: pc.connectionState, canTrickleIceCandidates: pc.canTrickleIceCandidates ?? null,
-    localDescription: describe(pc.localDescription), currentLocalDescription: describe(pc.currentLocalDescription),
-    pendingLocalDescription: describe(pc.pendingLocalDescription), remoteDescription: describe(pc.remoteDescription),
-    currentRemoteDescription: describe(pc.currentRemoteDescription), pendingRemoteDescription: describe(pc.pendingRemoteDescription),
+    localDescription: describe(pc.localDescription, client), currentLocalDescription: describe(pc.currentLocalDescription, client),
+    pendingLocalDescription: describe(pc.pendingLocalDescription, client), remoteDescription: describe(pc.remoteDescription, client),
+    currentRemoteDescription: describe(pc.currentRemoteDescription, client), pendingRemoteDescription: describe(pc.pendingRemoteDescription, client),
   };
 }
 
@@ -156,6 +175,7 @@ async function hostTrack(client, info) {
     throw rtcError('NotSupportedError', 'This track cannot be sent');
   track.enabled = info.enabled !== false;
   client.tracks.set(info.id, track);
+  mapId(client, track.id, info.id);
   return track;
 }
 
@@ -165,6 +185,7 @@ const streamsFor = (client, ids) => (ids || []).map((id) => {
   if (!stream) {
     stream = new MediaStream();
     client.streams.set(id, stream);
+    mapId(client, stream.id, id);
   }
   return stream;
 });
@@ -204,6 +225,21 @@ function closeConnection(client, id) {
     if (pcId === id) {
       client.transceivers.delete(key);
       client.transceiverPc.delete(key);
+    }
+  }
+  // Host-Spuren, die keine offene Verbindung mehr sendet, anhalten (Kamera-Kopie
+  // freigeben, Generator schliessen); beim naechsten addTrack gibt es neue
+  const used = new Set();
+  for (const other of client.pcs.values()) {
+    for (const sender of other.getSenders()) {
+      if (sender.track)
+        used.add(sender.track);
+    }
+  }
+  for (const [pageId, track] of client.tracks) {
+    if (!used.has(track)) {
+      track.stop();
+      client.tracks.delete(pageId);
     }
   }
   try {
@@ -258,14 +294,15 @@ function sanitizeConfig(config) {
 }
 
 const operations = {
-  async createOffer(pc, payload) {
-    return { description: describe(await pc.createOffer(payload.options || {})) };
+  async createOffer(pc, payload, client) {
+    return { description: describe(await pc.createOffer(payload.options || {}), client) };
   },
-  async createAnswer(pc, payload) {
-    return { description: describe(await pc.createAnswer(payload.options || {})) };
+  async createAnswer(pc, payload, client) {
+    return { description: describe(await pc.createAnswer(payload.options || {}), client) };
   },
-  async setLocalDescription(pc, payload) {
-    await (payload.description ? pc.setLocalDescription(payload.description) : pc.setLocalDescription());
+  async setLocalDescription(pc, payload, client) {
+    const description = payload.description && { type: payload.description.type, sdp: swapIds(payload.description.sdp, client.toHost) };
+    await (description ? pc.setLocalDescription(description) : pc.setLocalDescription());
     return {};
   },
   async setRemoteDescription(pc, payload) {
@@ -428,6 +465,12 @@ export const rtcHostCalls = {
       player.srcObject = new MediaStream([track]);
       player.play().catch(() => {});
     }
+    const engine = api.engine();
+    const muted = (value) => engine._bl_remote_muted(source, value ? 1 : 0);
+    if (track.muted)
+      muted(true);
+    track.addEventListener('mute', () => muted(true));
+    track.addEventListener('unmute', () => muted(false));
     track.addEventListener('ended', () => {
       if (player)
         player.srcObject = null;
