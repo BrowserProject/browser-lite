@@ -342,6 +342,19 @@ await page.keyboard.press('Control+0');
 const resetWidth = await result('width', 10000);
 check('Zoom zuruecksetzen', Number(resetWidth) >= 950 && await page.evaluate(() => document.getElementById('zoom').hidden), String(resetWidth));
 
+// 5j) Zwei-Finger-Zoom auf dem Touchpad: viele kleine wheel-Ereignisse mit
+// ctrlKey ergeben zusammen eine Stufe (nicht eine pro Ereignis)
+await page.evaluate(() => {
+  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const rect = canvas.getBoundingClientRect();
+  for (let i = 0; i < 20; i++)
+    canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -2.5, ctrlKey: true, clientX: rect.left + 300, clientY: rect.top + 300, bubbles: true, cancelable: true }));
+});
+check('Touchpad-Pinch: eine Zoom-Stufe', await page.evaluate(() => document.getElementById('zoom').textContent) === '110 %', await page.evaluate(() => document.getElementById('zoom').textContent));
+results.delete('width');
+await page.keyboard.press('Control+0');
+await result('width', 10000);
+
 // 6) Scrollen mit dem Mausrad
 await page.mouse.move(...await at(500, 400));
 await page.mouse.wheel(0, 600);

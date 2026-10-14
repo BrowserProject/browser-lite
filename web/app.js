@@ -1116,11 +1116,26 @@ function attachInput(tab) {
     e.preventDefault();
     engine._bl_context_menu(tab.id, ...position(e));
   });
+  // Zwei-Finger-Zoom auf dem Touchpad kommt als viele kleine wheel-Ereignisse
+  // mit ctrlKey (bruchzahlige Deltas): aufsummieren, eine Zoom-Stufe pro 40 px,
+  // sonst springt der Zoom bei jedem Ereignis eine Stufe weiter
+  let pinchSum = 0;
+  let pinchTimer = 0;
   canvas.addEventListener('wheel', (e) => {
-    // Strg + Mausrad (und Zwei-Finger-Zoom auf dem Touchpad): Zoom wie in Chrome
+    // Strg + Mausrad: eine Zoom-Stufe pro Raste wie in Chrome
     if (e.ctrlKey && !e.altKey && e.deltaY) {
-      changeZoom(tab, e.deltaY < 0 ? 1 : -1);
       e.preventDefault();
+      if (e.deltaMode !== 0 || (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50)) {
+        changeZoom(tab, e.deltaY < 0 ? 1 : -1);
+        return;
+      }
+      pinchSum += e.deltaY;
+      clearTimeout(pinchTimer);
+      pinchTimer = setTimeout(() => { pinchSum = 0; }, 300);
+      if (Math.abs(pinchSum) >= 40) {
+        changeZoom(tab, pinchSum < 0 ? 1 : -1);
+        pinchSum = 0;
+      }
       return;
     }
     let factor = 1;
