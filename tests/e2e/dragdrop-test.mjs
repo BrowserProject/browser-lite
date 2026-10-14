@@ -49,7 +49,10 @@ const src = document.getElementById('src');
 const zone = document.getElementById('zone');
 const files = document.getElementById('files');
 const events = [];
+let drags = 0;
 src.addEventListener('dragstart', (e) => {
+  events.length = 0;
+  drags++;
   events.push('dragstart');
   e.dataTransfer.setData('text/plain', 'hallo');
   e.dataTransfer.setData('application/x-test', 'geheim');
@@ -57,7 +60,7 @@ src.addEventListener('dragstart', (e) => {
 });
 src.addEventListener('dragend', (e) => {
   events.push('dragend:' + e.dataTransfer.dropEffect);
-  log('events', events.join('|'));
+  log('events' + drags, events.join('|'));
 });
 let overSeen = false;
 zone.addEventListener('dragenter', (e) => { e.preventDefault(); events.push('dragenter'); });
@@ -154,9 +157,25 @@ for (let i = 1; i <= 12; i++) {
 }
 await page.mouse.up();
 check('drop mit setData-Daten und eigenen Typen', await result('drop') === 'hallo;geheim;text/plain,application/x-test', results.get('drop'));
-const events = await result('events');
+const events = await result('events1');
 check('dragstart, dragenter, dragover (Typen, Daten geschuetzt), drop, dragend mit dropEffect',
   events === 'dragstart|dragenter|dragover:text/plain,application/x-test:leer|drop|dragend:move', events);
+
+// Escape bricht das Ziehen ab: dragend mit "none", kein drop
+const dropsBefore = results.get('drop');
+results.delete('drop');
+await page.mouse.move(box.x + 80, box.y + 50);
+await page.mouse.down();
+for (let i = 1; i <= 12; i++) {
+  await page.mouse.move(box.x + 80 + i * 26, box.y + 50 + i * 2);
+  await page.waitForTimeout(60);
+}
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+await page.mouse.up();
+check('Escape bricht ab (dragend none, kein drop)', await result('events2') === 'dragstart|dragenter|dragend:none' && !results.has('drop'), results.get('events2'));
+if (dropsBefore)
+  results.set('drop', dropsBefore);
 
 // 2. Datei aus dem Host ablegen (Ereignisse auf dem Canvas wie beim Ziehen aus dem Dateimanager)
 const dropOnCanvas = (x, y, fill) => page.evaluate(([x, y, fill]) => {

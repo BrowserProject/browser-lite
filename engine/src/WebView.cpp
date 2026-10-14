@@ -893,6 +893,7 @@ void WebView::updateDrag(IntPoint point, int modifiers)
     // Ohne "Load": Dateien oder Links aus dem Host oeffnen nicht die Datei
     // anstelle der Seite
     DragData dragData { m_drag->content.ptr(), point, point, m_drag->sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    m_drag->lastPoint = point;
     auto result = m_page->dragController().dragEnteredOrUpdated(*frame, WTF::move(dragData));
     if (m_drag) {
         auto* operation = std::get_if<std::optional<DragOperation>>(&result);
@@ -1118,6 +1119,12 @@ static String keyIdentifierForKey(const String& key)
 
 bool WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
 {
+    // Escape bricht ein Ziehen aus der Seite ab (wie in Chrome, dragend mit dropEffect "none")
+    if (m_drag && m_drag->fromPage && key == "Escape"_s) {
+        if (!type)
+            endDrag(m_drag->lastPoint, false, modifiers);
+        return true;
+    }
     RefPtr frame = m_page->focusController().focusedOrMainFrame();
     if (!frame)
         return false;

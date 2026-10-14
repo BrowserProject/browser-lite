@@ -152,6 +152,7 @@ private:
         bool fromPage { false };
         OptionSet<WebCore::DragOperation> sourceOperations;
         std::optional<WebCore::DragOperation> operation;
+        WebCore::IntPoint lastPoint;
     };
     void updateDrag(WebCore::IntPoint, int modifiers);
     void endDrag(WebCore::IntPoint, bool drop, int modifiers);
