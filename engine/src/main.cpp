@@ -26,6 +26,7 @@
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
 #include <cstdlib>
+#include <unistd.h>
 #include <cstring>
 #include <dirent.h>
 #include <fontconfig/fontconfig.h>
@@ -99,7 +100,27 @@ int main(int, char**)
     // Sonst passiert das mitten im Laden der ersten Seite (CNN: 0.5 s im
     // Engine-Thread, bei der ersten Style-Berechnung).
     if (const char* value = getenv("BL_FONTCONFIG_EARLY"); !value || strcmp(value, "0"))
-        Thread::create("fontconfig"_s, [] { FcInit(); })->detach();
+        Thread::create("fontconfig"_s, [] {
+            FcInit();
+            // Programmname fuer die Regeln der Konfiguration: fontconfig holt ihn per
+            // readlink("/proc/self/exe") ueber den UI-Thread, sonst bei der ersten
+            // Schriftsuche der Seite (CNN: 0.5 s Warten im Engine-Thread)
+            // (FcConfigSubstitute holt ihn intern und merkt ihn sich)
+            if (FcPattern* pattern = FcPatternCreate()) {
+                FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+                FcPatternDestroy(pattern);
+            }
+            // Skia prueft vor jeder Schrift mit access(), ob die Datei lesbar ist; die
+            // Antworten merkt FileAccessCache.cpp, die erste kostete sonst mitten im
+            // Laden ein Warten auf den UI-Thread (CNN: 0.45 s)
+            if (FcFontSet* fonts = FcConfigGetFonts(nullptr, FcSetSystem)) {
+                for (int i = 0; i < fonts->nfont; ++i) {
+                    FcChar8* file = nullptr;
+                    if (FcPatternGetString(fonts->fonts[i], FC_FILE, 0, &file) == FcResultMatch)
+                        access(reinterpret_cast<const char*>(file), R_OK);
+                }
+            }
+        })->detach();
     // Web Worker auf Vorrat (siehe addSpareWorkers)
     addSpareWorkers(getenv("BL_SPARE_WORKERS") ? atoi(getenv("BL_SPARE_WORKERS")) : 4);
     WebCore::initializeCommonAtomStrings();

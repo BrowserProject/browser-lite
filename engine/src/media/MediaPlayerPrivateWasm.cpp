@@ -15,6 +15,8 @@
 #include <WebCore/MediaPlayer.h>
 #include <WebCore/NativeImage.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/proxying.h>
+#include <emscripten/threading.h>
 #include <skia/core/SkImage.h>
 #include <skia/core/SkPixmap.h>
 #include <wtf/HashMap.h>
@@ -22,8 +24,46 @@
 #include <wtf/Lock.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
+#include <wtf/text/StringToIntegerConversion.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
+
+// Laeuft auf dem Haupt-Thread (prefetchHostAnswers)
+EM_JS(void, blJsPrefetchHostAnswers, (), {
+    if (typeof document === 'undefined')
+        return;
+    var play = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska',
+        'video/ogg; codecs="theora"', 'video/ogg; codecs="theora, vorbis"',
+        'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
+        'video/mp4; codecs="avc1.4D401E"', 'video/mp4; codecs="avc1.64001E"', 'video/mp4; codecs="hev1"',
+        'video/mp4; codecs="hvc1"', 'video/mp4; codecs="av01.0.05M.08"', 'video/mp4; codecs="mp4v.20.8"',
+        'video/webm; codecs="vp8, vorbis"', 'video/webm; codecs="vp8"', 'video/webm; codecs="vp9"',
+        'video/webm; codecs="vp9, opus"', 'video/webm; codecs="vp09.00.10.08"', 'video/webm; codecs="av01.0.05M.08"',
+        'application/vnd.apple.mpegurl', 'application/vnd.apple.mpegURL', 'application/x-mpegURL', 'application/x-mpegurl',
+        'audio/mpegurl', 'application/dash+xml', 'audio/mpeg', 'audio/mpeg;', 'audio/mp3', 'audio/mp4', 'audio/mp4; codecs="mp4a.40.2"',
+        'audio/aac', 'audio/aac;', 'audio/x-aac', 'audio/x-m4a', 'audio/x-m4a;', 'audio/m4a', 'audio/ogg', 'audio/ogg; codecs="vorbis"',
+        'audio/ogg; codecs="opus"', 'audio/ogg; codecs="flac"', 'audio/webm', 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
+        'audio/wav', 'audio/wav; codecs="1"', 'audio/x-wav', 'audio/flac', 'audio/x-flac', 'audio/opus', 'audio/3gpp', 'video/3gpp'];
+    var mse = ['video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.4D401E"', 'video/mp4; codecs="avc1.4d401f"',
+        'video/mp4; codecs="avc1.640028"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"', 'video/mp4; codecs="av01.0.05M.08"',
+        'video/mp4; codecs="hev1.1.6.L93.B0"', 'audio/mp4; codecs="mp4a.40.2"', 'audio/mp4; codecs="mp4a.40.5"',
+        'video/webm; codecs="vp8"', 'video/webm; codecs="vp9"', 'video/webm; codecs="vp09.00.10.08"',
+        'video/webm; codecs="vp8, vorbis"', 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
+        'video/mp4', 'video/webm', 'audio/mp4', 'audio/webm'];
+    var video = document.createElement('video');
+    var lines = [];
+    play.forEach(function(type) {
+        var answer = video.canPlayType(type);
+        lines.push('play:' + type + '\t' + (answer === 'probably' ? 2 : answer === 'maybe' ? 1 : 0));
+    });
+    mse.forEach(function(type) {
+        var supported = self.MediaSource && MediaSource.isTypeSupported(type);
+        lines.push('mse:' + type + '\t' + (supported ? 1 : 0));
+    });
+    var text = stringToNewUTF8(lines.join('\n'));
+    Module['_bl_media_host_answers'](text);
+    Module['_free'](text);
+});
 
 namespace BrowserLite {
 
@@ -45,21 +85,38 @@ MediaPlayerPrivateWasm* MediaPlayerPrivateWasm::fromId(int id)
 // Antworten des Host merken: jede Frage geht synchron ueber den Haupt-Thread und
 // wartet, bis die Oberflaeche Zeit hat (auf CNN fragten Werbe-Skripte so oft,
 // dass die Engine fast 1 s nur wartete). Die Antworten aendern sich nie.
+static Lock hostAnswersLock;
+
+static HashMap<String, int>& hostAnswers() WTF_REQUIRES_LOCK(hostAnswersLock)
+{
+    static NeverDestroyed<HashMap<String, int>> answers;
+    return answers;
+}
+
 template<typename Ask>
 static int cachedHostAnswer(const String& key, Ask&& ask)
 {
-    static Lock lock;
-    static NeverDestroyed<HashMap<String, int>> answers WTF_GUARDED_BY_LOCK(lock);
     {
-        Locker locker { lock };
-        auto it = answers->find(key);
-        if (it != answers->end())
+        Locker locker { hostAnswersLock };
+        auto it = hostAnswers().find(key);
+        if (it != hostAnswers().end())
             return it->value;
     }
+    debugLog("Medien: frage Host synchron (%s)", key.utf8().data());
     int answer = ask();
-    Locker locker { lock };
-    answers->set(key.isolatedCopy(), answer);
+    Locker locker { hostAnswersLock };
+    hostAnswers().set(key.isolatedCopy(), answer);
     return answer;
+}
+
+// Haeufige Fragen schon beim Start beantworten lassen, asynchron: die erste
+// synchrone Frage wartete sonst mitten im Laden, bis der Haupt-Thread frei
+// ist (CNN: 0.5 s bei canPlayType). Typen wie in Modernizr und gaengigen Playern.
+static void prefetchHostAnswers()
+{
+    emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void*) {
+        blJsPrefetchHostAnswers();
+    }, nullptr);
 }
 
 // MSE: kann das MediaSource des Host-Browsers das? (synchron)
@@ -151,6 +208,7 @@ private:
 void MediaPlayerPrivateWasm::registerMediaEngine(MediaEngineRegistrar registrar)
 {
     registrar(makeUnique<MediaPlayerFactoryWasm>());
+    prefetchHostAnswers();
 }
 
 MediaPlayerPrivateWasm::MediaPlayerPrivateWasm(MediaPlayer& player)
@@ -668,3 +726,19 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
 }
 
 } // namespace BrowserLite
+
+using namespace BrowserLite;
+
+// Vom Haupt-Thread (prefetchHostAnswers): Zeilen "frage<TAB>antwort"
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_media_host_answers(const char* text)
+{
+    auto lines = String::fromUTF8(text);
+    Locker locker { hostAnswersLock };
+    for (auto line : StringView(lines).split('\n')) {
+        auto tab = line.find('\t');
+        if (tab == notFound)
+            continue;
+        if (auto answer = parseInteger<int>(line.substring(tab + 1)))
+            hostAnswers().add(line.left(tab).toString(), *answer);
+    }
+}
