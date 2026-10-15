@@ -1,15 +1,16 @@
 // SQLite-Datenbanken unter /data im WASM-Speicher.
 //
-// Das Dateisystem von Emscripten (IDBFS ueber MEMFS) lebt im JavaScript des
-// Haupt-Threads. Jeder Dateizugriff aus einem anderen Thread (Engine,
-// IndexedDB, localStorage) ist ein synchroner Umweg ueber diesen Thread. Beim
-// Laden von CNN waren das ca. 7000 Zugriffe nur fuer die Cookie-Datenbank
-// (SQLite schreibt jede WAL-Seite einzeln, mit seek davor).
+// SQLite schreibt jede WAL-Seite einzeln, mit seek davor: beim Laden von CNN
+// waren das ca. 7000 Dateizugriffe nur fuer die Cookie-Datenbank. Mit dem
+// JS-Dateisystem von Emscripten (IDBFS ueber MEMFS, ohne WasmFS) war jeder ein
+// synchroner Umweg ueber den Haupt-Thread, mit WasmFS ist /data im OPFS, jeder
+// Zugriff ein Umweg ueber dessen Worker.
 //
 // Darum liegen Datenbank, -journal und -wal hier im Speicher, ebenso der
 // gemeinsame Speicher (shm) fuer den WAL-Modus. Ins Dateisystem kommen die
 // Dateien nur als Ganzes:
-// - von der Oberflaeche aus vor jedem Speichern des IDBFS (bl_storage_flush),
+// - alle paar Sekunden auf Anstoss der Oberflaeche (bl_storage_flush; mit
+//   WasmFS im Engine-Thread, sonst im Haupt-Thread vor dem Speichern des IDBFS),
 // - wenn die letzte Verbindung zu einer Datenbank schliesst. Danach wird alles
 //   wieder von der Platte gelesen, so stimmt es auch, wenn WebKit die Dateien
 //   selber loescht (z.B. indexedDB.deleteDatabase).

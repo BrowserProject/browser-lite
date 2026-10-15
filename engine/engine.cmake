@@ -129,8 +129,6 @@ target_link_options(BrowserLiteEngine PRIVATE
     # Emulation von Client-Arrays braucht WebGL nicht und kostet bei jedem Draw.
     "SHELL:-sMAX_WEBGL_VERSION=2"
     "SHELL:-lGL"
-    # Dauerhafter Speicher (/data) ueber IndexedDB des Host-Browsers, siehe web/app.js
-    "SHELL:-lidbfs.js"
     "SHELL:-Wl,--error-limit=0"
     # WebKit baut mit -fno-exceptions, einige Deps (C++) koennen aber werfen.
     # Werfen erlauben (ohne Fangen fuehrt ein throw zu abort).
@@ -159,6 +157,17 @@ target_link_options(BrowserLiteEngine PRIVATE
     # access() auf feste Dateien gemerkt (engine/src/FileAccessCache.cpp)
     "SHELL:-Wl,--wrap=access"
 )
+
+# Dateisystem: WasmFS (im WASM, Datei-Syscalls ohne Umweg ueber den UI-Thread)
+# oder das alte JS-Dateisystem mit IDBFS fuer /data (siehe web/app.js).
+option(BROWSER_LITE_WASMFS "WasmFS statt JS-Dateisystem" ON)
+if (BROWSER_LITE_WASMFS)
+    target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sWASMFS")
+    target_compile_definitions(BrowserLiteEngine PRIVATE BL_WASMFS=1)
+else ()
+    # Dauerhafter Speicher (/data) ueber IndexedDB des Host-Browsers
+    target_link_options(BrowserLiteEngine PRIVATE "SHELL:-lidbfs.js")
+endif ()
 
 # GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
 # laufen (engine/src/EngineLoop.cpp, Patch 0012), darum braucht es den Pass

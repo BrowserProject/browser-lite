@@ -98,7 +98,8 @@ kommen zuerst.
   alle 5 s sowie beim Verlassen gespeichert
 - [x] Knopf "Gespeicherte Daten loeschen"
 - [x] e2e-Test `tests/e2e/storage-test.mjs`
-- Erkenntnis: OPFS waere schneller, braucht aber WasmFS, und WasmFS kann (noch) keine Sockets.
+- [x] WasmFS statt JS-Dateisystem, `/data` im OPFS (#142): keine Datei-Syscalls mehr ueber
+  den UI-Thread, alte IDBFS-Daten werden einmal uebernommen
 
 ## Phase 8: Performance + Kompatibilitaet  (angefangen)
 - [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert
@@ -182,6 +183,7 @@ kommen zuerst.
 - [x] Dauerhafter Bytecode-Cache fuer Skripte (Cache API des Host, pro Engine-Build): zweiter Besuch
   von CNN 2.5 s weniger im Engine-Thread, Parser 2.7 -> 1.0 s (#135, Test im `cache-test.mjs`)
 - [x] Web Worker auf Vorrat nach dem Start: kein Warten auf neue Threads mitten im Laden (CNN 1 s, #136)
+- [x] WasmFS mit `/data` im OPFS: Engine wartet nicht mehr auf den UI-Thread fuer Dateien (CNN 0.6 -> 0.08 s, #142)
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die

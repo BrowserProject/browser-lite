@@ -1,6 +1,6 @@
 // End-to-End Test fuer dauerhaften Speicher: Cookie, localStorage und
 // IndexedDB muessen ein Neuladen der ganzen Oberflaeche ueberleben
-// (/data in der Engine liegt im IndexedDB des Host-Browsers).
+// (/data in der Engine liegt im OPFS des Host-Browsers).
 //
 //   cd tests/e2e && node storage-test.mjs [engine-ordner]
 import http from 'node:http';
@@ -195,6 +195,46 @@ await page.waitForTimeout(7000);
 results = new Map();
 await page.reload();
 check('Nach zweitem Neuladen: neuer Wert da, geloeschte Datenbank weg', (await result('third')) === 'zwei,weg', String(results.get('third')));
+
+// Daten aus dem IDBFS frueherer Versionen (IndexedDB "/data", ein Eintrag pro
+// Datei) uebernimmt die Engine beim ersten Start mit WasmFS nach /data (OPFS)
+// und loescht die alte Datenbank danach (web/app.js, engine/src/Storage.cpp)
+const fresh = await (await browser.newContext()).newPage();
+results = new Map();
+fresh.on('console', (msg) => {
+  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
+  if (match)
+    results.set(match[1], match[2]);
+});
+await fresh.goto(`http://localhost:${UI_PORT}/nicht-da`);
+const origin = encodeURIComponent(siteURL.slice(0, -1));
+await fresh.evaluate((file) => new Promise((resolve, reject) => {
+  const open = indexedDB.open('/data', 21);
+  open.onupgradeneeded = () => open.result.createObjectStore('FILE_DATA').createIndex('timestamp', 'timestamp', { unique: false });
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const tx = open.result.transaction('FILE_DATA', 'readwrite');
+    tx.objectStore('FILE_DATA').put({ timestamp: new Date(), mode: 16877 }, '/data/opfs');
+    tx.objectStore('FILE_DATA').put({ timestamp: new Date(), mode: 33188, contents: new TextEncoder().encode('alt-daten') }, file);
+    tx.oncomplete = () => { open.result.close(); resolve(); };
+    tx.onerror = () => reject(tx.error);
+  };
+}), `/data/opfs/${origin}/${origin}/notiz.txt`);
+await fresh.goto(appURL);
+const migrated = await result('opfs');
+check('Alte IDBFS-Daten uebernommen', migrated?.startsWith('alt-daten,'), String(migrated));
+await fresh.waitForTimeout(1000);
+const legacyGone = await fresh.evaluate(async () => !(await indexedDB.databases()).some((db) => db.name === '/data'));
+check('Alte IDBFS-Datenbank geloescht', legacyGone);
+
+// "Daten loeschen": die Oberflaeche laedt neu und leert /data vor dem Start
+// der Engine, danach ist die Datei weg
+await fresh.waitForTimeout(6000);
+results = new Map();
+fresh.once('dialog', (dialog) => dialog.accept());
+await fresh.evaluate(() => document.getElementById('clear-data').click());
+const cleared = await result('opfs');
+check('Daten loeschen leert /data', cleared?.startsWith('leer,'), String(cleared));
 
 await browser.close();
 relay.kill();

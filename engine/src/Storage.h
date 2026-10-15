@@ -1,7 +1,8 @@
 // Speicher der Seiten: Cookies, localStorage und IndexedDB liegen unter /data.
-// Die Oberflaeche haengt dort ein IndexedDB-Dateisystem (IDBFS) des Host-
-// Browsers ein und speichert es regelmaessig, so bleibt alles nach einem
-// Neuladen erhalten. Ohne Host (node-Tests) ist /data nur im Speicher.
+// Mit WasmFS ist /data ein Verzeichnis im OPFS des Host-Browsers (Storage.cpp),
+// sonst haengt die Oberflaeche dort ein IDBFS ein und speichert es regelmaessig.
+// So bleibt alles nach einem Neuladen erhalten. Ohne Host (node-Tests) ist /data
+// nur im Speicher.
 #pragma once
 
 #include <wtf/Forward.h>

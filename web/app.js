@@ -125,18 +125,83 @@ async function startEngine() {
 
 // ------------------------------------------------------------ Speicher
 // Cookies, localStorage und IndexedDB der Seiten liegen in der Engine unter
-// /data. Das ist ein IDBFS: beim Start aus der IndexedDB des Browsers laden,
-// danach alle paar Sekunden und beim Verlassen der Seite zurueckschreiben.
+// /data. Mit WasmFS (Standard) ist das ein Verzeichnis im OPFS des Browsers,
+// die Engine liest und schreibt es selber (engine/src/Storage.cpp); hier wird
+// nur alle paar Sekunden und beim Verlassen der Seite das Schreiben der
+// Datenbanken angestossen. Aeltere Engine-Builds ohne WasmFS haben ein IDBFS:
+// beim Start aus der IndexedDB laden, danach regelmaessig zurueckschreiben.
 
 let storageReady = false;
 let storageSyncing = false;
 let storageSyncAgain = false;
+const clearDataFlag = 'bl-clear-data';
+
+// Alles im OPFS loeschen, solange die Engine noch nicht laeuft (sie haelt
+// sonst Dateien offen)
+async function clearOPFS() {
+  const root = await navigator.storage.getDirectory();
+  for await (const name of root.keys())
+    await root.removeEntry(name, { recursive: true }).catch((error) => console.warn('OPFS:', name, error));
+}
+
+function deleteLegacyStorage() {
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase('/data');
+    request.onsuccess = request.onerror = request.onblocked = resolve;
+  });
+}
+
+// Daten aus dem IDBFS frueherer Versionen lesen; die Engine uebernimmt sie
+// beim Start einmal nach /data und meldet sich dann (onLegacyStorageMigrated)
+async function readLegacyStorage() {
+  if (!indexedDB.databases || !(await indexedDB.databases()).some((db) => db.name === '/data'))
+    return [];
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('/data');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    if (!db.objectStoreNames.contains('FILE_DATA'))
+      return [];
+    const store = db.transaction('FILE_DATA', 'readonly').objectStore('FILE_DATA');
+    const [keys, values] = await Promise.all(['getAllKeys', 'getAll'].map((method) => new Promise((resolve, reject) => {
+      const request = store[method]();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    })));
+    return keys.map((path, i) => [path, values[i]?.contents]).filter(([path, contents]) => typeof path === 'string' && contents instanceof Uint8Array);
+  } finally {
+    db.close();
+  }
+}
 
 function mountStorage(module) {
   module = module || engine;
   const fs = module.FS;
   const IDBFS = fs.filesystems?.IDBFS;
-  if (!IDBFS || !window.indexedDB)
+  if (!IDBFS) {
+    // WasmFS: vor dem Start der Engine aufraeumen bzw. alte Daten lesen
+    storageReady = true;
+    module.addRunDependency('bl-storage');
+    (async () => {
+      if (storage(clearDataFlag)) {
+        await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
+        await deleteLegacyStorage();
+        try {
+          localStorage.removeItem(clearDataFlag);
+        } catch {}
+      } else if (window.indexedDB) {
+        module.blLegacyStorage = await readLegacyStorage().catch((error) => {
+          console.warn('Alte Daten konnten nicht gelesen werden:', error);
+          return [];
+        });
+        module.onLegacyStorageMigrated = deleteLegacyStorage;
+      }
+    })().finally(() => module.removeRunDependency('bl-storage'));
+    return;
+  }
+  if (!window.indexedDB)
     return;
   fs.mkdirTree('/data');
   fs.mount(IDBFS, {}, '/data');
@@ -152,6 +217,11 @@ function mountStorage(module) {
 function saveStorage() {
   if (!storageReady)
     return;
+  // WasmFS: die Engine schreibt die Datenbanken im eigenen Thread nach /data
+  if (!engine.FS.syncfs) {
+    engine._bl_storage_flush();
+    return;
+  }
   if (storageSyncing) {
     storageSyncAgain = true;
     return;
@@ -188,10 +258,13 @@ async function clearStorage() {
   await engine?.blClearHttpCache?.().catch(() => {});
   // Bytecode der Skripte (engine/js/bytecode-cache.js)
   await engine?.blClearBytecodeCache?.().catch(() => {});
-  await new Promise((resolve) => {
-    const request = indexedDB.deleteDatabase('/data');
-    request.onsuccess = request.onerror = request.onblocked = resolve;
-  });
+  if (engine && !engine.FS.syncfs) {
+    // WasmFS: das OPFS beim naechsten Start leeren, bevor die Engine laeuft
+    try {
+      localStorage.setItem(clearDataFlag, '1');
+    } catch {}
+  } else
+    await deleteLegacyStorage();
   location.reload();
 }
 
@@ -201,9 +274,8 @@ function installExtraCA(module) {
   const pem = window.__blExtraCA || storage('bl-extra-ca');
   if (!pem)
     return;
-  const fs = (module || engine).FS;
-  fs.mkdirTree('/etc/ssl/certs');
-  fs.writeFile('/etc/ssl/certs/extra-ca.crt', pem);
+  // Die Engine schreibt sie beim Start nach /etc/ssl/certs/extra-ca.crt (main.cpp)
+  (module || engine).ENV.BL_EXTRA_CA = pem;
 }
 
 // Bildschirm, Farbschema (prefers-color-scheme) und Touchscreen wie im Host
@@ -247,6 +319,15 @@ function persistSession() {
 }
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
+
+// Datei ins Dateisystem der Engine schreiben. Das passiert im Engine-Thread
+// (bl_write_file), nicht hier: so wartet die Oberflaeche nie auf Locks des
+// Dateisystems, und die Datei ist vor dem naechsten Aufruf an die Engine da.
+function writeEngineFile(path, bytes) {
+  const data = engine._malloc(Math.max(bytes.length, 1));
+  engine.HEAPU8.set(bytes, data);
+  engine._bl_write_file(toUTF8(path), data, bytes.length);
+}
 initPickers({ engine: () => engine, toUTF8, focusPage: () => focusPage() });
 
 // --------------------------------------------------------------------- Tabs
@@ -1074,10 +1155,8 @@ function openFileChooser(tab, data) {
   input.addEventListener('change', async () => {
     const paths = [];
     for (const file of input.files) {
-      const dir = '/tmp/uploads/' + (++uploadCounter);
-      engine.FS.mkdirTree(dir);
-      const path = dir + '/' + file.name.replace(/[\/\n]/g, '_');
-      engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + file.name.replace(/[\/\n]/g, '_');
+      writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
       paths.push(path);
     }
     answer(paths);
@@ -1209,10 +1288,8 @@ function attachInput(tab) {
     const point = position(e);
     const modifiers = modifierBits(e);
     for (const file of files) {
-      const dir = '/tmp/uploads/' + (++uploadCounter);
-      engine.FS.mkdirTree(dir);
-      const path = dir + '/' + file.name.replace(/[\/\n]/g, '_');
-      engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + file.name.replace(/[\/\n]/g, '_');
+      writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
       data.files.push(path);
     }
     data.fileCount = data.files.length;
@@ -1299,11 +1376,9 @@ ime.addEventListener('paste', async (e) => {
   // Nach einem await sind die Daten des Ereignisses weg
   const files = [...(clipboardData?.files || [])];
   for (const file of files) {
-    const dir = '/tmp/uploads/' + (++uploadCounter);
-    engine.FS.mkdirTree(dir);
     // Ein kopiertes Bild hat in Chrome den Namen "image.png"
-    const path = dir + '/' + (file.name || 'image.png').replace(/[\/\n]/g, '_');
-    engine.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
+    const path = '/tmp/uploads/' + (++uploadCounter) + '/' + (file.name || 'image.png').replace(/[\/\n]/g, '_');
+    writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
     data.files.push(path);
   }
   engine._bl_set_clipboard(toUTF8(JSON.stringify(data)));

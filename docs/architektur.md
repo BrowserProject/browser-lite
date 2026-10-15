@@ -215,21 +215,27 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 ### Speicher
-Cookies (SQLite), localStorage und IndexedDB liegen in der Engine unter `/data`. Das ist ein
-IDBFS von Emscripten: beim Start aus der IndexedDB des Host-Browsers geladen, danach alle
-5 s und beim Verlassen der Seite zurueckgeschrieben. Bleibt also zwischen Besuchen erhalten.
+Cookies (SQLite), localStorage und IndexedDB liegen in der Engine unter `/data`. Die Engine
+benutzt WasmFS (`-sWASMFS`): das Dateisystem lebt im WASM, Datei-Syscalls aus jedem Thread
+gehen direkt, ohne Umweg ueber den UI-Thread. `/data` ist ein Verzeichnis im Origin Private
+File System (OPFS) des Host-Browsers (`engine/src/Storage.cpp`, WasmFS-Backend fuer OPFS,
+das ueber einen eigenen Worker mit synchronen Zugriffs-Handles arbeitet). Bleibt also
+zwischen Besuchen erhalten. Ohne OPFS (node-Tests) ist `/data` nur im Speicher.
 
-Das Dateisystem von Emscripten lebt im JavaScript des Haupt-Threads, jeder Zugriff aus einem
-anderen Thread ist ein synchroner Umweg. SQLite schreibt jede WAL-Seite einzeln (mit seek
-davor): beim Laden von CNN waren das ca. 7000 Umwege nur fuer die Cookie-Datenbank. Darum
-gibt es ein eigenes SQLite-VFS (`engine/src/MemoryVFS.cpp`): Datenbank, `-journal`, `-wal`
-und der gemeinsame Speicher fuer den WAL-Index liegen im WASM-Speicher (Locks nur im
-Prozess). Ins Dateisystem kommen die Dateien als Ganzes, wenn gerade keine
-Schreib-Transaktion laeuft: vor jedem Speichern des IDBFS (`bl_storage_flush` vom
-Haupt-Thread) und wenn die letzte Verbindung zu einer Datenbank schliesst. Danach liest das
+SQLite schreibt jede WAL-Seite einzeln (mit seek davor): beim Laden von CNN waren das ca.
+7000 Zugriffe nur fuer die Cookie-Datenbank. Darum gibt es ein eigenes SQLite-VFS
+(`engine/src/MemoryVFS.cpp`): Datenbank, `-journal`, `-wal` und der gemeinsame Speicher fuer
+den WAL-Index liegen im WASM-Speicher (Locks nur im Prozess). Ins Dateisystem kommen die
+Dateien als Ganzes, wenn gerade keine Schreib-Transaktion laeuft: alle 5 s und beim
+Verlassen der Seite (die Oberflaeche ruft `bl_storage_flush`, geschrieben wird im
+Engine-Thread) und wenn die letzte Verbindung zu einer Datenbank schliesst. Danach liest das
 VFS wieder von der Platte, damit es stimmt, wenn WebKit Dateien selber loescht
-(`indexedDB.deleteDatabase`). Dateizugriffe beim Laden von CNN: 12 600 -> 3 200. Regel gegen
-Deadlocks: waehrend ein Lock im VFS gehalten wird, gibt es keinen Dateizugriff.
+(`indexedDB.deleteDatabase`).
+
+Frueher war `/data` ein IDBFS von Emscripten (ganzer Baum beim Start geladen, alle 5 s
+abgeglichen, alles im UI-Thread). Diese Daten liest die Oberflaeche beim ersten Start mit
+WasmFS einmal aus der IndexedDB, die Engine uebernimmt sie, danach wird die alte Datenbank
+geloescht (#142). Der alte Weg laesst sich mit `-DBROWSER_LITE_WASMFS=OFF` noch bauen.
 
 ### Ton (Web Audio)
 ```

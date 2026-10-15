@@ -34,6 +34,7 @@
 #include <WebCore/MemoryRelease.h>
 #include <WebCore/WasmPlatform.h>
 #include <malloc.h>
+#include <wtf/FileSystem.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/JSDOMWindowBase.h>
 #include <WebCore/LocalFrameInlines.h>
@@ -480,11 +481,40 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
 }
 
 
+// Datei der Oberflaeche (Upload, Drag & Drop, Einfuegen) ins Dateisystem der
+// Engine schreiben. Laeuft im Engine-Thread, vor den Aufrufen, die danach
+// kommen (bl_choose_files, bl_drag, ...), damit die Datei dann da ist.
+// Uebernimmt path und data (malloc).
+EMSCRIPTEN_KEEPALIVE void bl_write_file(char* path, uint8_t* data, int length)
+{
+    runOnEngineThread([path, data, length] {
+        String directory = String::fromUTF8(path);
+        size_t slash = directory.reverseFind('/');
+        if (slash != notFound && slash > 0)
+            FileSystem::makeAllDirectories(directory.left(slash));
+        if (FILE* file = fopen(path, "wb")) {
+            if (length > 0)
+                fwrite(data, 1, length, file);
+            fclose(file);
+        } else
+            debugLog("bl_write_file: %s nicht schreibbar", path);
+        free(path);
+        free(data);
+    });
+}
+
 // Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp).
-// Laeuft auf dem Haupt-Thread des Host, direkt vor dem Speichern des IDBFS.
+// Mit WasmFS im Engine-Thread (Schreiben nach OPFS, die Oberflaeche wartet
+// nicht), sonst auf dem Haupt-Thread des Host direkt vor dem Speichern des IDBFS.
 EMSCRIPTEN_KEEPALIVE void bl_storage_flush()
 {
+#if defined(BL_WASMFS)
+    runOnEngineThread([] {
+        flushMemoryVFS(false);
+    });
+#else
     flushMemoryVFS(true);
+#endif
 }
 
 // Belegter Speicher (malloc) fuer das Verwerfen von Tabs in der Oberflaeche.

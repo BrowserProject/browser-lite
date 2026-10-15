@@ -26,6 +26,8 @@
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
 #include <cstdlib>
+#include <cstdio>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <cstring>
 #include <dirent.h>
@@ -81,11 +83,29 @@ void angleShimPrewarm();
 }
 #endif
 
+// Zusaetzliche CA-Zertifikate der Oberflaeche (web/app.js, installExtraCA)
+// kommen als Umgebungsvariable und werden hier, im Engine-Thread, zur Datei
+// fuer CurlSSLHandleWasm.cpp. Mit WasmFS geht das Dateisystem erst ab main().
+static void installExtraCertificates()
+{
+    const char* pem = getenv("BL_EXTRA_CA");
+    if (!pem || !*pem)
+        return;
+    mkdir("/etc/ssl", 0755);
+    mkdir("/etc/ssl/certs", 0755);
+    if (FILE* file = fopen("/etc/ssl/certs/extra-ca.crt", "w")) {
+        fputs(pem, file);
+        fclose(file);
+    }
+    unsetenv("BL_EXTRA_CA");
+}
+
 int main(int, char**)
 {
     using namespace BrowserLite;
 
     setEngineThread();
+    installExtraCertificates();
 
     // fontconfig liest seine Konfiguration aus dem virtuellen Dateisystem
     // (Datenpaket aus sysroot/runtime, siehe engine.cmake)
