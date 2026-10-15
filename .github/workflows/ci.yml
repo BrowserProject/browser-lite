@@ -378,7 +378,7 @@ jobs:
           (cd relay && npm ci)
           (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
       - name: Seiten aus tests/e2e/sites.txt laden
-        run: cd tests/e2e && SITE_WAIT=5000 SITE_DEBUG=1 node site-test.mjs $(grep -v "^#" sites.txt)
+        run: cd tests/e2e && SITE_WAIT=5000 SITE_DEBUG=1 SITE_TIMEOUT=180000 node site-test.mjs $(grep -v "^#" sites.txt)
       - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6

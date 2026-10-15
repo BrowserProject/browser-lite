@@ -98,9 +98,13 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const page = await browser.newPage();
 let results = new Map();
 let bytecodeHits = 0;
+let bytecodeCommits = 0;
 page.on('console', (msg) => {
   if (msg.text().includes('Bytecode-Cache: Treffer') && msg.text().includes('/big.js'))
     bytecodeHits++;
+  // Statistik-Zeile nach jedem Speicher-Durchgang (engine/src/BytecodeCache.cpp)
+  if (/Bytecode-Cache: \d+ Treffer/.test(msg.text()))
+    bytecodeCommits++;
   const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
   if (match)
     results.set(match[1], match[2]);
@@ -147,9 +151,14 @@ async function visitBytecode(hash) {
   results = new Map();
   const bcQuery = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL + 'bc' + hash, debug: '1' });
   await page.goto(`http://localhost:${UI_PORT}/?${bcQuery}`);
+  const commits = bytecodeCommits;
   const value = await result('bc');
-  // Speichern laeuft 5 s nach dem Laden, dann asynchron in die Cache API
-  await page.waitForTimeout(7000);
+  // Gespeichert wird 5 s nach dem Laden (dabei wird erst kodiert), dann
+  // asynchron in die Cache API: auf die Statistik-Zeile warten, nicht fest
+  const end = Date.now() + 40000;
+  while (bytecodeCommits === commits && Date.now() < end)
+    await page.waitForTimeout(250);
+  await page.waitForTimeout(1500);
   return value;
 }
 const bc1 = await visitBytecode('#half');
