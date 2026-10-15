@@ -1,0 +1,61 @@
+diff --git a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+index e5885cc55b..f6c2ce5689 100644
+--- a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+@@ -31,6 +31,8 @@
+ #include "FontDescription.h"
+ #include "StyleFontSizeFunctions.h"
+ #include <wtf/Assertions.h>
++#include <wtf/HashMap.h>
++#include <wtf/NeverDestroyed.h>
+ #include <wtf/text/CString.h>
+ #include <wtf/text/CharacterProperties.h>
+ #include <wtf/unicode/CharacterNames.h>
+@@ -408,13 +410,47 @@ static bool isUnsupportedFamilyFont(const AtomString& family)
+         || family == "-apple-system-font";
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: Schluessel fuer den Typeface-Cache in createFontPlatformData
++struct TypefaceKey {
++    String family;
++    int weight;
++    int width;
++    int slant;
++    bool operator==(const TypefaceKey&) const = default;
++};
++struct TypefaceKeyHash {
++    static unsigned hash(const TypefaceKey& key) { return computeHash(key.family, key.weight, key.width, key.slant); }
++    static bool equal(const TypefaceKey& a, const TypefaceKey& b) { return a == b; }
++    static constexpr bool safeToCompareToEmptyOrDeleted = false;
++};
++struct TypefaceKeyTraits : SimpleClassHashTraits<TypefaceKey> {
++    static constexpr bool emptyValueIsZero = false;
++    static void constructDeletedValue(TypefaceKey& slot) { new (NotNull, &slot.family) String(WTF::HashTableDeletedValue); }
++    static bool isDeletedValue(const TypefaceKey& value) { return value.family.isHashTableDeletedValue(); }
++};
++#endif
++
+ std::unique_ptr<FontPlatformData> FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomString& family, const FontCreationContext& fontCreationContext, OptionSet<FontLookupOptions> options)
+ {
+     if (isUnsupportedFamilyFont(family))
+         return nullptr;
+     auto familyName = getFamilyNameStringFromFamily(family);
+     auto skFontStyle = skiaFontStyle(fontDescription);
++#if PLATFORM(WASM)
++    // browser-lite: WebCores eigener Cache (cachedFontPlatformData) unterscheidet
++    // auch Groesse und Sprache (lang); die Suche bei fontconfig haengt aber nur
++    // von Familie und Stil ab und kostet ohne JIT spuerbar (Wikipedia mit vielen
++    // lang-Attributen: 1.4 s). Die Schriften des Systems aendern sich nie, darum
++    // die Ergebnisse (auch "nicht gefunden") hier merken, pro Thread wie der FontCache.
++    static thread_local NeverDestroyed<HashMap<TypefaceKey, sk_sp<SkTypeface>, TypefaceKeyHash, TypefaceKeyTraits>> typefaces;
++    TypefaceKey typefaceKey { familyName, skFontStyle.weight(), skFontStyle.width(), static_cast<int>(skFontStyle.slant()) };
++    auto typeface = typefaces->ensure(typefaceKey, [&] {
++        return fontManager().matchFamilyStyle(familyName.utf8().data(), skFontStyle);
++    }).iterator->value;
++#else
+     auto typeface = fontManager().matchFamilyStyle(familyName.utf8().data(), skFontStyle);
++#endif
+     if (!typeface)
+         return nullptr;
+ 
