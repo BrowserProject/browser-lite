@@ -40,10 +40,12 @@ kein Absturz, Seite sieht im Screenshot aus wie in Chrome (bis auf noch ladende 
 ## Messlatte gegen Chromium
 
 `tests/e2e/parity-test.mjs` laedt `tests/engine/features.html` (277 Pruefungen) im Host-Chromium
-und im browser-lite. Stand 2026-10-12: **206 von 277 wie Chromium (74 %)**. Es fehlen vor allem
-Service Worker, SharedWorker, Cache API und Speicher-APIs, WebRTC/WebCodecs/Kamera,
-Geraete-APIs (Touch, Gamepad, Geolocation, Benachrichtigungen), OffscreenCanvas und variable
-Schriften. Die Liste der Unterschiede steht im CI-Lauf (Schritt "Messlatte").
+und im browser-lite. Stand 2026-10-15: **252 von 277 wie Chromium (91 %)**. Es fehlen vor allem
+Geraete-APIs, die ein Browser im Browser nicht sinnvoll durchreichen kann (WebAuthn, Payment
+Request, Web MIDI/USB/HID/Serial, WebXR), WebGPU, WebTransport, Push und Background Sync, EME,
+MSE in Workern, CSS Paint Worklet und `interpolate-size`, Layout-Shift- und
+Long-Animation-Frame-Messung. Dafuer kann browser-lite schon `Math.sumPrecise`, Temporal und
+`ReadableStream.from`, die das Host-Chromium noch nicht hat. Die Liste der Unterschiede steht im CI-Lauf (Schritt "Messlatte").
 
 ## Bekannte Grenzen
 
