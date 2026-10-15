@@ -57,6 +57,22 @@ static void prepareFontCache(const char* path)
     utime(path, &times);
 }
 
+// Die 8 vorbereiteten Web Worker (PTHREAD_POOL_SIZE) sind beim ersten Laden
+// schnell belegt. Jeder weitere Thread (data:-URLs, IndexedDB, Bilder, Blobs)
+// startet dann einen neuen Worker, und der Engine-Thread wartet, bis er laeuft
+// (CNN: ca. 1 s). Darum gleich nach dem Start ein paar Worker mehr laden,
+// asynchron im Haupt-Thread, ohne auf sie zu warten. Ein groesserer Pool
+// (#133) verzoegert dagegen den Start der Engine.
+static void addSpareWorkers(int count)
+{
+    if (count <= 0)
+        return;
+    MAIN_THREAD_ASYNC_EM_ASM({
+        for (var i = 0; i < $0; i++)
+            PThread.loadWasmModuleToWorker(PThread.allocateUnusedWorker());
+    }, count);
+}
+
 #if ENABLE(WEBGL)
 namespace WebCore {
 // platform/wasm/angle/ANGLEShimWasm.h (kein exportierter Header)
@@ -84,6 +100,8 @@ int main(int, char**)
     // Engine-Thread, bei der ersten Style-Berechnung).
     if (const char* value = getenv("BL_FONTCONFIG_EARLY"); !value || strcmp(value, "0"))
         Thread::create("fontconfig"_s, [] { FcInit(); })->detach();
+    // Web Worker auf Vorrat (siehe addSpareWorkers)
+    addSpareWorkers(getenv("BL_SPARE_WORKERS") ? atoi(getenv("BL_SPARE_WORKERS")) : 4);
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
     // VM gleich anlegen: ab jetzt laeuft jede Arbeit mit DeferGC (EngineLoop.cpp)
