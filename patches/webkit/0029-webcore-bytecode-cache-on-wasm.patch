@@ -76,10 +76,10 @@ index df84a17d3d..e6ff8df2e7 100644
  
 diff --git a/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
 new file mode 100644
-index 0000000000..5f7fde63c6
+index 0000000000..62cb58ec8a
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,214 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -124,7 +124,10 @@ index 0000000000..5f7fde63c6
 +#include <JavaScriptCore/BytecodeCacheError.h>
 +#include <JavaScriptCore/CachedBytecode.h>
 +#include <JavaScriptCore/CachedTypes.h>
++#include <JavaScriptCore/StrongInlines.h>
++#include <JavaScriptCore/UnlinkedFunctionCodeBlock.h>
 +#include <JavaScriptCore/UnlinkedFunctionExecutable.h>
++#include <wtf/HashMap.h>
 +#include <wtf/HashSet.h>
 +#include <wtf/NeverDestroyed.h>
 +
@@ -163,6 +166,21 @@ index 0000000000..5f7fde63c6
 +        provider->commitCachedBytecode();
 +}
 +
++// Neu kompilierte Funktionen, noch nicht kodiert (nur Haupt-Thread). Das
++// Kodieren kostete beim ersten Besuch mitten im Laden Zeit (weather.com 1.35 s),
++// darum erst beim Speichern im Leerlauf.
++struct PendingFunction {
++    JSC::Strong<JSC::UnlinkedFunctionExecutable> executable;
++    JSC::CodeSpecializationKind kind;
++    JSC::Strong<JSC::UnlinkedFunctionCodeBlock> codeBlock;
++};
++
++static HashMap<const CachedScriptSourceProvider*, Vector<PendingFunction>>& pendingFunctions()
++{
++    static NeverDestroyed<HashMap<const CachedScriptSourceProvider*, Vector<PendingFunction>>> functions;
++    return functions;
++}
++
 +} // namespace WasmPlatform
 +
 +// Kleine Skripte kompilieren schneller, als der Weg ueber den Cache kostet
@@ -184,6 +202,7 @@ index 0000000000..5f7fde63c6
 +{
 +    commitCachedBytecode();
 +    WasmPlatform::providersWithBytecode().remove(this);
++    WasmPlatform::pendingFunctions().remove(this);
 +}
 +
 +RefPtr<JSC::CachedBytecode> CachedScriptSourceProvider::cachedBytecode() const
@@ -225,15 +244,33 @@ index 0000000000..5f7fde63c6
 +    // Speicher-Cache koennen sie aus einem anderen Skript gleichen Inhalts sein)
 +    if (!m_cachedBytecode->leafExecutables().contains(executable))
 +        return;
-+    JSC::BytecodeCacheError error;
-+    auto update = JSC::encodeFunctionCodeBlock(commonVM(), codeBlock, error);
-+    if (update && !error.isValid())
-+        m_cachedBytecode->addFunctionUpdate(executable, kind, *update);
++    auto& vm = commonVM();
++    WasmPlatform::pendingFunctions().ensure(this, [] { return Vector<WasmPlatform::PendingFunction> { }; }).iterator->value.append({
++        { vm, const_cast<JSC::UnlinkedFunctionExecutable*>(executable) },
++        kind,
++        { vm, const_cast<JSC::UnlinkedFunctionCodeBlock*>(codeBlock) },
++    });
 +}
 +
 +void CachedScriptSourceProvider::commitCachedBytecode() const
 +{
-+    if (m_bytecodeCommitted || !m_cachedBytecode || !m_cachedBytecode->hasUpdates())
++    if (m_bytecodeCommitted || !m_cachedBytecode)
++        return;
++    // Gemerkte Funktionen jetzt kodieren (nicht waehrend einer GC, falls der
++    // Provider beim Aufraeumen stirbt: dann fallen sie weg)
++    auto pending = WasmPlatform::pendingFunctions().take(this);
++    auto& vm = commonVM();
++    if (vm.heap.mutatorState() == JSC::MutatorState::Running) {
++        for (auto& function : pending) {
++            if (!m_cachedBytecode->leafExecutables().contains(function.executable.get()))
++                continue;
++            JSC::BytecodeCacheError error;
++            auto update = JSC::encodeFunctionCodeBlock(vm, function.codeBlock.get(), error);
++            if (update && !error.isValid())
++                m_cachedBytecode->addFunctionUpdate(function.executable.get(), function.kind, *update);
++        }
++    }
++    if (!m_cachedBytecode->hasUpdates())
 +        return;
 +    m_bytecodeCommitted = true;
 +    WasmPlatform::providersWithBytecode().remove(this);
