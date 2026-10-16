@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import zlib from 'node:zlib';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
-import { SWIFTSHADER, TIMEOUT, check, finish, freePort, launch, root, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, TIMEOUT, check, finish, freePort, launch, root, screenshot, serve, startStack, timeLimit, watchErrors } from './harness.mjs';
 
 timeLimit(TIMEOUT + 240000);
 
@@ -208,7 +208,7 @@ page.on('console', (msg) => {
   consoleLines.push(msg.text());
   console.log('[chromium]', msg.text());
 });
-page.on('pageerror', (error) => console.log('[chromium fehler]', error.message));
+watchErrors(page, '[chromium fehler]');
 
 async function waitTitle(prefix, timeout = TIMEOUT) {
   try {

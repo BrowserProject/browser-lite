@@ -37,12 +37,28 @@ export function timeLimit(ms = TIMEOUT + 120000) {
 }
 
 let failed = 0;
+// Ein Absturz der Engine (Trap, abort) in einer beobachteten Seite ist immer
+// ein Fehler, auch wenn die Pruefungen danach noch gruen sind. Gibt eine
+// Funktion zurueck, die das Beobachten beendet (vor einem gewollten Absturz).
+const engineCrashes = [];
+export function watchErrors(page, prefix = '   Seitenfehler:') {
+  const onError = (error) => {
+    console.log(prefix, error.message);
+    if (/^Aborted\(/.test(error.message) || /engine\.wasm/.test(error.stack || ''))
+      engineCrashes.push(`${error.message} (${(error.stack || '').split('\n')[1]?.trim() || ''})`);
+  };
+  page.on('pageerror', onError);
+  return () => page.off('pageerror', onError);
+}
+
 export function check(name, ok, info = '') {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
   if (!ok)
     failed++;
 }
 export function finish() {
+  if (engineCrashes.length)
+    check('Engine ohne Absturz', false, engineCrashes.join(' | '));
   console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
   process.exit(failed ? 1 : 0);
 }
@@ -171,7 +187,7 @@ export class Results extends Map {
       if (match)
         this.set(match[1], match[2]);
     });
-    page.on('pageerror', (error) => console.log('   Seitenfehler:', error.message));
+    watchErrors(page);
     return this;
   }
 

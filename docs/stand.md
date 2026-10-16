@@ -98,7 +98,8 @@ der Oberflaeche:
   naechsten Zeichnen.
 - Medien: EME (DRM), MSE in Workern (#121), WebCodecs-Bilder direkt als Textur.
   WebRTC: Verkehr ueber das Relay (TURN), Insertable Streams. Die Engine-Senke
-  eines gesendeten Tracks, der weder endet noch eingesammelt wird, bleibt. Fehler
+  eines gesendeten Tracks bleibt bis `stop()` oder bis die Quelle endet (schwach
+  gehalten wurde die Spur im GC zerstoert und beendete die Quelle, Absturz). Fehler
   des MediaRecorder beim Abholen der Daten erreichen die Seite nicht als Ereignis.
 - Service Worker: Push, Background Sync, Background Fetch. `WindowClient.focus()`
   holt den Tab nicht nach vorne, Navigation Preload fragt den HTTP-Cache nicht.
@@ -119,7 +120,7 @@ der Oberflaeche:
   parallel bis 446 MB gemessen) und in `compositing-test.mjs` "Animation laeuft,
   waehrend das JS blockiert" (einmal rot, parallel zu drei anderen Tests).
 - Ohne Test: die Grenze fuer die Zahl der Samples in fMP4 (`trun`), das Aufraeumen
-  von Senken und Host-Objekten durch die GC, Set-Cookie beim Update eines Service
+  von Host-Objekten durch die GC, Set-Cookie beim Update eines Service
   Workers.
 - Zu pruefen: in Seiten-Workern kehrt der Engine-Thread nie in den Event-Loop des
   Host zurueck, die FinalizationRegistry der WASM-Bruecke im Host feuert dort

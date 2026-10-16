@@ -6,7 +6,7 @@
 // Neustart (web/watchdog.js), Zurueck/Vor, das scheitert, und Stopp.
 //
 //   cd tests/e2e && node ui-test.mjs [engine-ordner]
-import { TIMEOUT, VERBOSE, check, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
+import { TIMEOUT, VERBOSE, check, finish, launch, serve, startStack, timeLimit, watchErrors } from './harness.mjs';
 
 timeLimit();
 
@@ -45,6 +45,7 @@ const stack = await startStack({ token: 'ui-token-0123456789abcdef' });
 const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
 const tab = await context.newPage();
+const stopWatchingTab = watchErrors(tab);
 let loaded = [];
 const printEvents = [];
 const loadedPattern = /RESULT loaded=(.*?)(\s+\(|$)/;
@@ -245,7 +246,8 @@ const envState = await tab.evaluate(() => {
 check('?env=BL_EXTRA_CA und fremde Variablen werden ignoriert', envState.ca === null && envState.keys === null && envState.proxy === null && envState.flag === '1', JSON.stringify(envState));
 check('Leeres ?relay=: eigenes Relay ohne Token', envState.session === null && envState.url === `ws://localhost:${stack.uiPort}/wisp/`, envState.url);
 
-// Zwei Tabs fuer Haengen und Absturz
+// Zwei Tabs fuer Haengen und Absturz (gewollt, ab hier nicht mehr beobachtet)
+stopWatchingTab();
 loaded = [];
 // BL_TEST_HOOKS: bl_crash_for_testing geht nur damit
 await tab.goto(stack.app({ url: siteURL + 'vorher', env: 'BL_TEST_HOOKS=1,BL_SCRIPT_TIMEOUT=15' }));
@@ -307,6 +309,7 @@ check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'Nach dem Ne
 // bricht ab (curl versucht es auf neuer Verbindung nochmals): Fehler in der
 // Statuszeile, der Tab laedt nicht mehr.
 const navTab = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
+watchErrors(navTab);
 const navLoaded = [];
 navTab.on('console', (msg) => {
   const match = loadedPattern.exec(msg.text());
@@ -351,6 +354,7 @@ check('Zurueck/Vor scheitert: Fehler, Tab laedt nicht mehr', backFailed && (load
 // Endlosschleife danach bricht er trotzdem ab. Eigener Kontext, damit die
 // Sitzung oben unberuehrt bleibt.
 const dialogTab = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
+watchErrors(dialogTab);
 const dialogLines = [];
 dialogTab.on('console', (msg) => dialogLines.push(msg.text()));
 dialogTab.on('dialog', (dialog) => setTimeout(() => dialog.accept(), 3500));

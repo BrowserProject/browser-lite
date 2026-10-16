@@ -450,18 +450,9 @@ const char* const webrtcPolyfillSource = R"JS((() => {
 
     // ---------------------------------------------------------------- Medien
     // Spur der Seite fuer den Host: Kamera/Mikrofon als echte Host-Spur, alles
-    // andere (Canvas, Web Audio, entfernte Spuren) ueber eine Senke der Engine.
-    // Gesendete Spuren nur schwach halten: vergisst die Seite eine Spur ohne
-    // stop(), gibt die Engine ihre Senke frei, sobald sie eingesammelt ist.
+    // andere (Canvas, Web Audio, entfernte Spuren) ueber eine Senke der Engine
     const trackSinks = new WeakMap();
-    const sentTracks = new Map(); // id -> WeakRef(MediaStreamTrack)
-    const sentTrack = (id) => sentTracks.get(id)?.deref();
-    const forgotten = new FinalizationRegistry(({ id, sink }) => {
-      if (!sentTrack(id))
-        sentTracks.delete(id);
-      if (sink)
-        media('sink-stop', sink);
-    });
+    const sentTracks = new Map(); // id -> MediaStreamTrack
     function describeTrack(track) {
       if (track === null || track === undefined)
         return null;
@@ -479,10 +470,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         }
         info.sink = sink;
       }
-      if (sentTrack(track.id) !== track) {
-        sentTracks.set(track.id, new WeakRef(track));
-        forgotten.register(track, { id: track.id, sink: info.sink });
-      }
+      sentTracks.set(track.id, track);
       return info;
     }
     if (typeof MediaStreamTrack === 'function') {
@@ -493,7 +481,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
           ...enabled,
           set(value) {
             enabled.set.call(this, value);
-            if (sentTrack(this.id) === this)
+            if (sentTracks.get(this.id) === this)
               call('rtc-track', { client, track: this.id, enabled: !!value }).catch(() => {});
           },
         });
@@ -501,7 +489,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       const originalStop = MediaStreamTrack.prototype.stop;
       define(MediaStreamTrack.prototype, 'stop', function stop() {
         originalStop.call(this);
-        if (sentTrack(this.id) === this) {
+        if (sentTracks.get(this.id) === this) {
           sentTracks.delete(this.id);
           const sink = trackSinks.get(this);
           if (sink && media)
