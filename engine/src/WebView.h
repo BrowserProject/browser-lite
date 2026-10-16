@@ -5,6 +5,7 @@
 #include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
+#include <WebCore/LayoutMilestone.h>
 #include <WebCore/PlatformWheelEvent.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Region.h>
@@ -140,6 +141,7 @@ public:
     void didStartLoading();
     void didCommitLoad();
     void didFinishLoading();
+    void didReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>);
     void didFailLoading(const String& url, const String& description);
     void didChangeTitle(const String&);
     void didChangeProgress(double);

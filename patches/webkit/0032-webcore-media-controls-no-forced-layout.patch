@@ -1,0 +1,33 @@
+diff --git a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+index be0c3f9fca..1aaadea7e1 100644
+--- a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
++++ b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+@@ -85,7 +85,18 @@ class MediaController
+ 
+         this.container = shadowRoot.appendChild(document.createElement("div"));
+ 
++        // browser-lite: die Groesse beim Erstellen nicht sofort lesen. offsetWidth
++        // erzwingt sonst mitten im Parsen ein Layout der ganzen Seite (Wikipedia:
++        // 1.1 s pro Seite mit <audio controls>). Nach dem ersten Layout des
++        // Elements kommt ohnehin ein "resize" (HTMLMediaElement::layoutSizeChanged),
++        // fuer schon ausgelegte Elemente holt der naechste Frame die Groesse.
++        this._deferControlsSize = true;
+         this._updateControlsIfNeeded();
++        this._deferControlsSize = false;
++        window.requestAnimationFrame(() => {
++            if (this.controls)
++                this._updateControlsSize();
++        });
+         this._usesLTRUserInterfaceLayoutDirection = false;
+ 
+         if (host) {
+@@ -462,6 +473,9 @@ class MediaController
+ 
+     _updateControlsSize()
+     {
++        if (this._deferControlsSize)
++            return;
++
+         // Use offsetWidth/offsetHeight to get the untransformed layout dimensions of the
+         // container element in the shadow root, which is naturally sized to match the
+         // content box of its host (excluding borders). These properties are not affected

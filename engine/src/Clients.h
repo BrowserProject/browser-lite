@@ -106,6 +106,7 @@ private:
     void dispatchDidReceiveTitle(const WebCore::StringWithDirection&) final;
     void dispatchDidChangeLocationWithinPage() final;
     void dispatchDidFinishLoad() final;
+    void dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) final;
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
     void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading, WebCore::WillInternallyHandleFailure) final;
     void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld&) final;

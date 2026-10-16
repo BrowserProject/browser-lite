@@ -524,6 +524,12 @@ void FrameLoaderClient::dispatchDidFinishLoad()
         m_view->didFinishLoading();
 }
 
+void FrameLoaderClient::dispatchDidReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
+{
+    if (isMainFrame())
+        m_view->didReachLayoutMilestone(milestones);
+}
+
 void FrameLoaderClient::dispatchDidFailLoad(const ResourceError& error)
 {
     if (isMainFrame())

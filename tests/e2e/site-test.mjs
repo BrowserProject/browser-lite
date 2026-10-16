@@ -58,6 +58,10 @@ async function checkSite(site, page, log) {
     query.set('env', process.env.SITE_ENV);
   const started = Date.now();
   await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+  // Erstes sichtbares Layout der Seite (die Engine meldet "first-layout")
+  let firstLayout = '-';
+  page.waitForFunction(() => window.__blFirstLayout === true, null, { timeout: TIMEOUT, polling: 100 })
+    .then(() => { firstLayout = ((Date.now() - started) / 1000).toFixed(1); }).catch(() => {});
   let result = 'ok';
   try {
     // Fertig, wenn der Tab nicht mehr laedt (Reload-Knopf statt Stop) oder ein Fehler kommt
@@ -94,7 +98,7 @@ async function checkSite(site, page, log) {
   }
   const file = path.join(outDir, (new URL(site).hostname || 'seite') + '.png');
   await page.screenshot({ path: file, timeout: 20000 });
-  return { result, seconds, title };
+  return { result, seconds, title, firstLayout };
 }
 
 const printLog = (log, all) => console.log((all ? log : [...log.slice(0, 40), '...', ...log.slice(-20)]).map((l) => '    ' + l).join('\n'));
@@ -121,14 +125,14 @@ for (const site of sites) {
     // Harte Grenze pro Seite: eine blockierte Seite darf nicht den ganzen Lauf aufhalten
     outcome = await within(checkSite(site, page, log), TIMEOUT + 90000, 'Seite haengt');
   } catch (e) {
-    outcome = { result: 'haengt (' + e.message + ')', seconds: '-', title: '' };
+    outcome = { result: 'haengt (' + e.message + ')', seconds: '-', title: '', firstLayout: '-' };
     log.push('Stack des UI-Threads:', ...await mainThreadStack(cdp));
   }
-  const { result, seconds, title } = outcome;
+  const { result, seconds, title, firstLayout } = outcome;
   if (result !== 'ok')
     failed++;
-  console.log(`${result === 'ok' ? 'ok  ' : 'FAIL'} ${site} (${seconds} s) Titel: "${title}" ${result === 'ok' ? '' : result}`);
-  rows.push(`| ${site} | ${result === 'ok' ? 'geladen' : 'Fehler'} | ${seconds} s | ${title.replace(/ - browser-lite$/, '').replace(/\|/g, '/').slice(0, 60)} |`);
+  console.log(`${result === 'ok' ? 'ok  ' : 'FAIL'} ${site} (${seconds} s, erstes Layout ${firstLayout} s) Titel: "${title}" ${result === 'ok' ? '' : result}`);
+  rows.push(`| ${site} | ${result === 'ok' ? 'geladen' : 'Fehler'} | ${firstLayout} s | ${seconds} s | ${title.replace(/ - browser-lite$/, '').replace(/\|/g, '/').slice(0, 60)} |`);
   // Leere Seite (kein Titel) oder Fehler: Log zeigen, damit man sieht, was passiert ist
   const blank = !title || /^Neuer Tab/.test(title);
   if (result !== 'ok' || blank || process.env.SITE_LOG)
@@ -144,7 +148,7 @@ for (const site of sites) {
 
 // Kompatibilitaetsliste fuer die GitHub-Zusammenfassung
 if (process.env.GITHUB_STEP_SUMMARY) {
-  appendFileSync(process.env.GITHUB_STEP_SUMMARY, ['### Kompatibilitaet (echte Seiten)', '', '| Seite | Status | Zeit | Titel |', '|---|---|---|---|', ...rows, ''].join('\n') + '\n');
+  appendFileSync(process.env.GITHUB_STEP_SUMMARY, ['### Kompatibilitaet (echte Seiten)', '', '| Seite | Status | Erstes Layout | Geladen | Titel |', '|---|---|---|---|---|', ...rows, ''].join('\n') + '\n');
 }
 
 await browser.close();

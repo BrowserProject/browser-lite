@@ -177,6 +177,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     m_page = Page::create(WTF::move(configuration));
     debugLog("View %d: Page erstellt", id);
+    // Erstes sichtbares Layout melden (Oberflaeche, Messungen in tests/e2e)
+    m_page->addLayoutMilestones({ LayoutMilestone::DidFirstVisuallyNonEmptyLayout });
     attachDeviceClients(*this, *m_page);
 #if ENABLE(MEDIA_STREAM)
     // getUserMedia/getDisplayMedia ueber Kamera und Bildschirm des Host
@@ -1361,6 +1363,14 @@ void WebView::didFinishLoading()
     notifyHost(m_id, "load");
     loadFavicon();
     BytecodeCache::scheduleCommit();
+}
+
+void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
+{
+    if (!milestones.contains(LayoutMilestone::DidFirstVisuallyNonEmptyLayout))
+        return;
+    debugLog("View %d: erstes sichtbares Layout", m_id);
+    notifyHost(m_id, "first-layout");
 }
 
 void WebView::exitFullscreen()
