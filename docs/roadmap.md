@@ -184,6 +184,7 @@ kommen zuerst.
   von CNN 2.5 s weniger im Engine-Thread, Parser 2.7 -> 1.0 s (#135, Test im `cache-test.mjs`)
 - [x] Web Worker auf Vorrat nach dem Start: kein Warten auf neue Threads mitten im Laden (CNN 1 s, #136)
 - [x] WasmFS mit `/data` im OPFS: Engine wartet nicht mehr auf den UI-Thread fuer Dateien (CNN 0.6 -> 0.08 s, #142)
+- [x] Interpreter-Caches fuer `instanceof` und fehlende Properties auf 32 Bit (weniger Slow-Path-Aufrufe, #143)
 - [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
   Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die

@@ -24,6 +24,8 @@ run basics "$here/basics.js"
 run calls "$here/calls.js"
 run resizable "$here/resizable.js"
 run calls-gc --slowPathAllocsBetweenGCs=10 "$here/calls.js"
+run llint-caches "$here/llint-caches.js"
+run llint-caches-no-ics --useLLIntICs=false "$here/llint-caches.js"
 run gc-stress "$here/gc-stress.js"
 # GC sehr oft ausloesen (alle paar Allokationen)
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"

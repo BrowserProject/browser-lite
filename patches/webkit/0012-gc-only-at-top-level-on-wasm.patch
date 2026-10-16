@@ -191,45 +191,6 @@ index eaa7a00f76..cf2552ebbe 100644
      
      // Queue up a collection and wait for it to complete. This won't return until you get your own
      // complete collection. For example, if there was an ongoing asynchronous collection at the time
-diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-index 43da80a76e..efc00a94ba 100644
---- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-+++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-@@ -560,6 +560,16 @@ UGPRPair SYSV_ABI llint_check_stack_and_vm_traps(CallFrame* callFrame, const JSI
- #endif
-     }
- 
-+#if OS(EMSCRIPTEN)
-+    // Ein Trap setzt die Stack-Grenze so, dass der naechste Funktionseintritt
-+    // hier landet (meist vor dem naechsten op_check_traps). Auch hier liegen
-+    // alle Werte im JS-Stack: der Rahmen des Aufrufers ist fertig, der neue hat
-+    // Kopf und Argumente, seine Locals sind noch nicht benutzt.
-+    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
-+        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
-+        vm.heap.collectAtSafepoint();
-+    }
-+#endif
-     if (vm.traps().handleTrapsIfNeeded()) {
-         if (vm.hasPendingTerminationException()) {
-             throwScope.release();
-@@ -2317,6 +2327,17 @@ LLINT_SLOW_PATH_DECL(slow_path_handle_traps)
- {
-     LLINT_BEGIN_NO_SET_PC();
-     ASSERT(vm.traps().needHandling(VMTraps::AsyncEvents));
-+#if OS(EMSCRIPTEN)
-+    // Befehlsgrenze im Interpreter: alle Werte liegen im JS-Stack von JSC
-+    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
-+        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
-+        vm.heap.collectAtSafepoint();
-+        if (!vm.traps().needHandling(VMTraps::AsyncEvents)) {
-+            UNUSED_PARAM(pc);
-+            LLINT_RETURN_TWO(throwScope.exception(), globalObject);
-+        }
-+    }
-+#endif
-     vm.traps().handleTraps(VMTraps::AsyncEvents);
-     UNUSED_PARAM(pc);
-     LLINT_RETURN_TWO(throwScope.exception(), globalObject);
 diff --git a/Source/JavaScriptCore/runtime/VMTraps.cpp b/Source/JavaScriptCore/runtime/VMTraps.cpp
 index 54e789b7c7..8d95a99def 100644
 --- a/Source/JavaScriptCore/runtime/VMTraps.cpp

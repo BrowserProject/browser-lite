@@ -1,0 +1,149 @@
+diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+index 43da80a76e..98712d8550 100644
+--- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
++++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+@@ -560,6 +560,16 @@ UGPRPair SYSV_ABI llint_check_stack_and_vm_traps(CallFrame* callFrame, const JSI
+ #endif
+     }
+ 
++#if OS(EMSCRIPTEN)
++    // Ein Trap setzt die Stack-Grenze so, dass der naechste Funktionseintritt
++    // hier landet (meist vor dem naechsten op_check_traps). Auch hier liegen
++    // alle Werte im JS-Stack: der Rahmen des Aufrufers ist fertig, der neue hat
++    // Kopf und Argumente, seine Locals sind noch nicht benutzt.
++    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
++        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
++        vm.heap.collectAtSafepoint();
++    }
++#endif
+     if (vm.traps().handleTrapsIfNeeded()) {
+         if (vm.hasPendingTerminationException()) {
+             throwScope.release();
+@@ -850,6 +860,46 @@ static void setupGetByIdPrototypeCache(JSGlobalObject* globalObject, VM& vm, Cod
+     vm.writeBarrier(codeBlock);
+ }
+ 
++#if OS(EMSCRIPTEN)
++// Nur der Interpreter (CLoop), kein JIT: die Caches des LLInt sind der einzige
++// schnelle Weg. BL_LLINT_TUNING=0 schaltet die Ergaenzungen hier ab (zum Vergleichen).
++static bool llintTuningEnabled()
++{
++    static const bool enabled = [] {
++        const char* value = getenv("BL_LLINT_TUNING");
++        return !value || strcmp(value, "0");
++    }();
++    return enabled;
++}
++
++// Gleiche Pruefung wie performGetByIDHelper im .asm, fuer Stellen, die auf 32 Bit
++// keinen schnellen Weg im Interpreter haben (op_instanceof)
++static ALWAYS_INLINE bool tryCachedGetByID(const GetByIdModeMetadata& metadata, JSCell* cell, JSValue& result)
++{
++    StructureID structureID = cell->structureID();
++    switch (metadata.mode) {
++    case GetByIdMode::Default:
++        if (!metadata.defaultMode.structureID || metadata.defaultMode.structureID != structureID)
++            return false;
++        result = asObject(cell)->getDirect(metadata.defaultMode.cachedOffset);
++        return true;
++    case GetByIdMode::ProtoLoad:
++        if (metadata.protoLoadMode.structureID != structureID)
++            return false;
++        result = metadata.protoLoadMode.cachedSlot->getDirect(metadata.protoLoadMode.cachedOffset);
++        return true;
++    case GetByIdMode::Unset:
++        if (metadata.unsetMode.structureID != structureID)
++            return false;
++        result = jsUndefined();
++        return true;
++    case GetByIdMode::ArrayLength:
++        return false;
++    }
++    return false;
++}
++#endif
++
+ static JSValue performLLIntGetByID(BytecodeIndex bytecodeIndex, CodeBlock* codeBlock, JSGlobalObject* globalObject, JSValue baseValue, const Identifier& ident, GetByIdModeMetadata& metadata)
+ {
+     VM& vm = globalObject->vm();
+@@ -859,10 +909,17 @@ static JSValue performLLIntGetByID(BytecodeIndex bytecodeIndex, CodeBlock* codeB
+     JSValue result = baseValue.get(globalObject, ident, slot);
+     RETURN_IF_EXCEPTION(throwScope, { });
+ 
++#if OS(EMSCRIPTEN)
++    // Fehlende Properties (Unset) cachen wie Prototyp-Treffer: der Code dafuer
++    // ist da (setupGetByIdPrototypeCache), war aber hier ausgeschlossen
++    bool cacheUnset = llintTuningEnabled();
++#else
++    bool cacheUnset = false;
++#endif
+     if (Options::useLLIntICs()
+         && baseValue.isCell()
+         && slot.isCacheable()
+-        && !slot.isUnset()) {
++        && (!slot.isUnset() || cacheUnset)) {
+         {
+             StructureID oldStructureID;
+             switch (metadata.mode) {
+@@ -904,7 +961,7 @@ static JSValue performLLIntGetByID(BytecodeIndex bytecodeIndex, CodeBlock* codeB
+                 metadata.defaultMode.cachedOffset = slot.cachedOffset();
+                 vm.writeBarrier(codeBlock);
+             }
+-        } else if (metadata.hitCountForLLIntCaching && slot.isValue()) [[unlikely]] {
++        } else if (metadata.hitCountForLLIntCaching && (slot.isValue() || slot.isUnset())) [[unlikely]] {
+             ASSERT(slot.slotBase() != baseValue);
+ 
+             if (!(--metadata.hitCountForLLIntCaching))
+@@ -1050,15 +1107,30 @@ LLINT_SLOW_PATH_DECL(slow_path_instanceof)
+         LLINT_THROW(createTypeError(globalObject, "Right hand side of instanceof is not an object"_s));
+ 
+     bool result = false;
+-    JSValue hasInstance = performLLIntGetByID(codeBlock->bytecodeIndex(pc).withCheckpoint(OpInstanceof::getHasInstance), codeBlock, globalObject, constructor, vm.propertyNames->hasInstanceSymbol, metadata.m_hasInstanceModeMetadata);
+-    LLINT_CHECK_EXCEPTION();
++    JSValue hasInstance;
++#if OS(EMSCRIPTEN)
++    // Auf 32 Bit gibt es fuer op_instanceof keinen schnellen Weg im .asm (auf
++    // 64 Bit schon): die Caches der beiden Zugriffe hier zuerst pruefen
++    bool tuning = llintTuningEnabled();
++    if (!tuning || !tryCachedGetByID(metadata.m_hasInstanceModeMetadata, constructor.asCell(), hasInstance))
++#endif
++    {
++        hasInstance = performLLIntGetByID(codeBlock->bytecodeIndex(pc).withCheckpoint(OpInstanceof::getHasInstance), codeBlock, globalObject, constructor, vm.propertyNames->hasInstanceSymbol, metadata.m_hasInstanceModeMetadata);
++        LLINT_CHECK_EXCEPTION();
++    }
+     if (hasInstance != globalObject->functionProtoHasInstanceSymbolFunction() || !constructor.getObject()->structure()->typeInfo().implementsDefaultHasInstance()) {
+         result = constructor.getObject()->hasInstance(globalObject, value, hasInstance);
+     } else if (!value.isObject())
+         result = false;
+     else {
+-        JSValue prototype = performLLIntGetByID(codeBlock->bytecodeIndex(pc).withCheckpoint(OpInstanceof::getPrototype), codeBlock, globalObject, constructor, vm.propertyNames->prototype, metadata.m_prototypeModeMetadata);
+-        LLINT_CHECK_EXCEPTION();
++        JSValue prototype;
++#if OS(EMSCRIPTEN)
++        if (!tuning || !tryCachedGetByID(metadata.m_prototypeModeMetadata, constructor.asCell(), prototype))
++#endif
++        {
++            prototype = performLLIntGetByID(codeBlock->bytecodeIndex(pc).withCheckpoint(OpInstanceof::getPrototype), codeBlock, globalObject, constructor, vm.propertyNames->prototype, metadata.m_prototypeModeMetadata);
++            LLINT_CHECK_EXCEPTION();
++        }
+         bool hasInstanceResult = JSObject::defaultHasInstance(globalObject, value, prototype);
+         LLINT_CHECK_EXCEPTION();
+         result = hasInstanceResult;
+@@ -2317,6 +2389,17 @@ LLINT_SLOW_PATH_DECL(slow_path_handle_traps)
+ {
+     LLINT_BEGIN_NO_SET_PC();
+     ASSERT(vm.traps().needHandling(VMTraps::AsyncEvents));
++#if OS(EMSCRIPTEN)
++    // Befehlsgrenze im Interpreter: alle Werte liegen im JS-Stack von JSC
++    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
++        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
++        vm.heap.collectAtSafepoint();
++        if (!vm.traps().needHandling(VMTraps::AsyncEvents)) {
++            UNUSED_PARAM(pc);
++            LLINT_RETURN_TWO(throwScope.exception(), globalObject);
++        }
++    }
++#endif
+     vm.traps().handleTraps(VMTraps::AsyncEvents);
+     UNUSED_PARAM(pc);
+     LLINT_RETURN_TWO(throwScope.exception(), globalObject);

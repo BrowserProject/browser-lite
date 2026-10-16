@@ -39,9 +39,9 @@ const engine = {
   preRun: [(module) => {
     if (process.env.BL_DEBUG)
       module.ENV.BL_DEBUG = '1';
-    // JSC-Optionen (z.B. JSC_useLLIntICs=false) und BL_SAFEPOINT_GC durchreichen
+    // JSC-Optionen (z.B. JSC_useLLIntICs=false) und Schalter der Engine (BL_*) durchreichen
     for (const [key, value] of Object.entries(process.env)) {
-      if (key.startsWith('JSC_') || key === 'BL_SAFEPOINT_GC')
+      if (key.startsWith('JSC_') || key.startsWith('BL_'))
         module.ENV[key] = value;
     }
   }],
