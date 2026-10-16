@@ -1,11 +1,12 @@
-// browser-lite Server: Wisp-Relay (TCP ueber WebSocket) mit Token-Schutz und, mit
+// browser-lite Server: Wisp-Relay (TCP ueber WebSocket), optional mit Token, und mit
 // SITE_DIR, die fertige Seite (tools/package-site.sh). Laeuft so im Container (Dockerfile).
 //
 // Der Browser im Browser schickt hier nur verschluesselte TLS-Bytes durch,
 // das Relay sieht keine Inhalte. DNS loest das Relay auf.
 //
 // Umgebungsvariablen:
-//   RELAY_TOKEN    Pflicht. Ohne passenden ?token=... wird die Verbindung abgelehnt.
+//   RELAY_TOKEN    Optional. Gesetzt wird ohne passenden ?token=... jede Verbindung abgelehnt,
+//                  ohne ist das Relay offen (nur fuer interne Server).
 //   PORT           Standard 5001
 //   HOST           Standard 0.0.0.0
 //   SITE_DIR       Ordner der fertigen Seite. Ohne nur Relay.
@@ -17,10 +18,12 @@ import { server as wisp, logging } from '@mercuryworkshop/wisp-js/server';
 import { serveStatic } from './static.mjs';
 
 const token = process.env.RELAY_TOKEN;
-if (!token || token.length < 16) {
-  console.error('RELAY_TOKEN fehlt oder ist zu kurz (mindestens 16 Zeichen).');
+if (token && token.length < 16) {
+  console.error('RELAY_TOKEN ist zu kurz (mindestens 16 Zeichen).');
   process.exit(1);
 }
+if (!token)
+  console.warn('Ohne RELAY_TOKEN: das Relay ist fuer alle offen, nur intern betreiben.');
 const port = Number(process.env.PORT || 5001);
 const host = process.env.HOST || '0.0.0.0';
 const siteDir = process.env.SITE_DIR ? path.resolve(process.env.SITE_DIR) : null;
@@ -51,6 +54,8 @@ process.on('uncaughtException', (error) => console.error('Fehler (Relay laeuft w
 process.on('unhandledRejection', (error) => console.error('Fehler (Relay laeuft weiter):', error));
 
 function tokenOK(given) {
+  if (!token)
+    return true;
   const a = Buffer.from(String(given || ''));
   const b = Buffer.from(token);
   return a.length === b.length && crypto.timingSafeEqual(a, b);

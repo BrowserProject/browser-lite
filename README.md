@@ -43,9 +43,9 @@ Fertige Engine aus der CI (Artefakt `engine` eines CI-Laufs) nach `build/webcore
 oder selber bauen (siehe [docs/build.md](docs/build.md)), dann:
 
 ```bash
-(cd relay && npm ci && RELAY_TOKEN=lokal-0123456789abcdef PORT=5001 node server.mjs) &
+(cd relay && npm ci && PORT=5001 node server.mjs) &
 node web/serve.mjs 8080
-# im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/&token=lokal-0123456789abcdef
+# im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/
 ```
 
 Mit `?debug=1` zeigt die Engine in der Konsole, was sie macht (Zeiten, GC, Netzwerk).

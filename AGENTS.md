@@ -34,7 +34,8 @@ als Patch ([docs/build.md](docs/build.md)).
 ## Secrets und Sicherheit
 
 Das Repo ist oeffentlich: keine Secrets, Tokens, Server-IPs oder Namen aus dem Heimnetz
-committen. `RELAY_TOKEN` liegt nur auf dem Server (`/opt/browser-lite/.env`). Nie Tokens loggen.
+committen. Nie Tokens loggen. Der Server laeuft intern ohne Relay-Token, nie oeffentlich machen
+(z.B. Tailscale Funnel), ohne vorher `RELAY_TOKEN` zu setzen.
 
 Der Self-hosted Runner (Label `browser-lite-deploy`) steht im LAN. Nur der Job `deploy` in
 `deploy.yml` darf ihn nutzen, nie ein Job, der fuer Pull Requests oder Forks laeuft.

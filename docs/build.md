@@ -93,16 +93,16 @@ Dann `http://localhost:8080/?url=https://example.com` oeffnen. Fuer echte Seiten
 das Relay (siehe unten), lokal z.B.:
 
 ```bash
-cd relay && npm ci && RELAY_TOKEN=lokal-test-token-123456 node server.mjs
-# und die Seite mit ?relay=ws://localhost:5001/wisp/&token=lokal-test-token-123456 oeffnen
+cd relay && npm ci && node server.mjs
+# und die Seite mit ?relay=ws://localhost:5001/wisp/ oeffnen
 ```
 
 Wie im Container (fertige Seite und Relay auf einem Port):
 
 ```bash
 tools/package-site.sh build/webcore/bin build/site
-RELAY_TOKEN=lokal-test-token-123456 PORT=8080 SITE_DIR=build/site node relay/server.mjs
-# http://localhost:8080/?token=lokal-test-token-123456
+PORT=8080 SITE_DIR=build/site node relay/server.mjs
+# http://localhost:8080/
 ```
 
 ## Container und Deploy

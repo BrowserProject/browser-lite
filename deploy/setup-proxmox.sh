@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Richtet browser-lite auf einem Proxmox-Host ein (wiederholbar): LXC mit Docker,
-# RELAY_TOKEN, GitHub-Runner fuer den Deploy-Workflow, HTTPS ueber Tailscale auf dem Host.
+# GitHub-Runner fuer den Deploy-Workflow, HTTPS ueber Tailscale auf dem Host.
 #
 #   CT_IP=10.0.0.5/24 CT_GW=10.0.0.1 deploy/setup-proxmox.sh root@<proxmox-host>
 #
@@ -43,10 +43,6 @@ apt-get update -q
 apt-get install -y -q docker.io docker-compose curl ca-certificates unattended-upgrades
 id runner >/dev/null 2>&1 || useradd -m -s /bin/bash -G docker runner
 install -d -o runner -g runner -m 750 /opt/browser-lite
-if [ ! -f /opt/browser-lite/.env ]; then
-    (umask 077; printf 'RELAY_TOKEN=%s\n' "\$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')" > /opt/browser-lite/.env)
-    chown runner:runner /opt/browser-lite/.env
-fi
 
 dir=/home/runner/actions-runner
 if [ ! -f "\$dir/.runner" ]; then

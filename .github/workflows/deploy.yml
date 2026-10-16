@@ -2,8 +2,7 @@ name: Deploy
 
 # Nach gruener CI auf main (oder von Hand): Image mit Relay + Seite bauen, testen, nach
 # ghcr.io pushen und auf dem Server neu starten. Der Server ist der Self-hosted Runner mit
-# Label browser-lite-deploy (deploy/setup-proxmox.sh), RELAY_TOKEN liegt dort in
-# /opt/browser-lite/.env.
+# Label browser-lite-deploy (deploy/setup-proxmox.sh).
 
 on:
   workflow_run:
@@ -76,20 +75,20 @@ jobs:
             --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
             --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Image testen (Seite, Header, Kompression, Relay-Token)
+      - name: Image testen (Seite, Header, Kompression, Relay)
         env:
           TAG: ${{ steps.build.outputs.tag }}
         run: |
-          docker run -d --name smoke --read-only --cap-drop ALL -p 8080:8080 -e RELAY_TOKEN=smoke-token-0123456789 "$TAG"
+          docker run -d --name smoke --read-only --cap-drop ALL -p 8080:8080 "$TAG"
           trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
           timeout 30 sh -c 'until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done'
           curl -fsI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi '^cross-origin-embedder-policy: require-corp'
           wasm="$(cd build/site && ls engine/*/engine.wasm)"
           curl -fsI -H 'Accept-Encoding: br' "http://127.0.0.1:8080/$wasm" | tee /dev/stderr | grep -qi '^content-encoding: br'
-          code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+          code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
             -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-            'http://127.0.0.1:8080/wisp/?token=falsch')"
-          [ "$code" = 403 ] || { echo "Relay ohne gueltigen Token: $code statt 403"; exit 1; }
+            'http://127.0.0.1:8080/wisp/' || true)"
+          [ "$code" = 101 ] || { echo "Relay nimmt keine WebSocket-Verbindung an: $code statt 101"; exit 1; }
       - name: Bei ghcr.io anmelden
         uses: docker/login-action@v3
         with:
@@ -128,8 +127,8 @@ jobs:
           install -m 644 deploy/compose.yml "$DIR/compose.yml"
           printf 'IMAGE=%s\n' "$IMAGE" > "$DIR/image.env"
           cd "$DIR"
-          docker compose -p browser-lite --env-file .env --env-file image.env pull -q
-          docker compose -p browser-lite --env-file .env --env-file image.env up -d --wait --wait-timeout 60
+          docker compose -p browser-lite --env-file image.env pull -q
+          docker compose -p browser-lite --env-file image.env up -d --wait --wait-timeout 60
           curl -fsS http://127.0.0.1:8080/healthz
           running="$(docker inspect --format '{{.Image}}' browser-lite-browser-lite-1)"
           [ "$running" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")" ] || { echo "Falsches Image laeuft"; exit 1; }

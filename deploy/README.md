@@ -1,14 +1,16 @@
 # deploy/
 
 Ein Container (`Dockerfile` im Hauptordner): `relay/server.mjs` mit der fertigen Seite.
-Port 8080, ohne HTTPS. Browser geben SharedArrayBuffer nur in einem sicheren Kontext, darum
+Port 8080, ohne HTTPS und ohne Relay-Token: der Server ist nur intern zum Testen. Fuer einen
+oeffentlichen Server `RELAY_TOKEN` setzen (mindestens 16 Zeichen) und die Seite einmal mit
+`?token=...` oeffnen. Browser geben SharedArrayBuffer nur in einem sicheren Kontext, darum
 gehoert ein HTTPS-Proxy davor (hier `tailscale serve`, sonst z.B. Caddy).
 
 ## Ablauf bei jedem Push auf main
 
 1. *CI* baut und testet die Engine.
 2. *Deploy* (`.github/workflows/deploy.yml`, nur nach gruener CI):
-   - Seite packen (`tools/package-site.sh`), Image bauen und testen (Header, Brotli, Token)
+   - Seite packen (`tools/package-site.sh`), Image bauen und testen (Header, Brotli, Relay)
    - nach `ghcr.io/browserproject/browser-lite` pushen (Tags `<commit>` und `main`)
    - auf dem Server (Self-hosted Runner, Label `browser-lite-deploy`) mit `compose.yml`
      per Digest neu starten und `/healthz` pruefen
@@ -22,12 +24,10 @@ workflow* (ohne ID = letzter gruener CI-Lauf auf main).
 CT_IP=<ip>/<netz> CT_GW=<gateway> CT_STORAGE=<storage> deploy/setup-proxmox.sh root@<proxmox-host>
 ```
 
-Legt einen unprivilegierten LXC mit Docker an, erzeugt `RELAY_TOKEN` in
-`/opt/browser-lite/.env`, registriert den Runner und macht die Seite ueber `tailscale serve`
+Legt einen unprivilegierten LXC mit Docker an, registriert den Runner und macht die Seite ueber `tailscale serve`
 des Hosts per HTTPS im Tailnet erreichbar. Wiederholbar, bestehendes bleibt.
 
-Danach einmal `https://<host>/?token=<RELAY_TOKEN>` oeffnen, der Token bleibt im Browser.
-Token anzeigen: `pct exec <ct> -- cat /opt/browser-lite/.env` auf dem Proxmox-Host.
+Danach ist die Seite unter `https://<host>/` im Tailnet erreichbar.
 
 ## Sicherheit
 

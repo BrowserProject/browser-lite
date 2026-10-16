@@ -19,7 +19,7 @@ Haupt-Thread (Seite browser-lite)            Engine-Worker (WASM, pthreads)
                                              WispTransport (jetzt) / WireGuardTransport (spaeter)
                                                                 | WebSocket (wss)
                                                                 v
-                                             Server: ein Container (Seite + COOP/COEP + Wisp-Relay mit Auth)
+                                             Server: ein Container (Seite + COOP/COEP + Wisp-Relay)
 ```
 
 ## Die Teile
@@ -273,6 +273,7 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
 ### Hosting
 Ein Container (`Dockerfile`, `relay/server.mjs`): liefert die Seite mit den Headern oben
 und vorkomprimiert (Brotli) aus und ist das Wisp-Relay. HTTPS kommt von einem Proxy davor
-(Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay braucht Auth (sonst
-nutzen fremde Leute den Server als Proxy) und blockiert private IP-Bereiche. Ablauf in
+(Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay blockiert private IP-Bereiche.
+Auf einem oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als
+Proxy), intern geht es ohne. Ablauf in
 [deploy/README.md](../deploy/README.md).
