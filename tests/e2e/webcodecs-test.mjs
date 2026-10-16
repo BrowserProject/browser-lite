@@ -4,30 +4,9 @@
 // Opus kodieren und dekodieren, AudioData umwandeln.
 //
 //   cd tests/e2e && node webcodecs-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, TIMEOUT, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'webcodecs-token-0123456789abcdef';
-const RELAY_PORT = 15821;
-const UI_PORT = 15822;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 // VP8 hin und zurueck, laeuft im Fenster und im Worker
 const ROUNDTRIP = `
@@ -225,55 +204,20 @@ const part = async (name, run) => {
 })().catch((e) => log('error', e));
 </script>`;
 
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/worker.js')
     return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(WORKER);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const stack = await startStack({ token: 'webcodecs-token-0123456789abcdef' });
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-page.on('console', (msg) => {
-  const text = msg.text();
-  const match = /RESULT (\w+)=(\S*)/.exec(text);
-  if (match)
-    results.set(match[1], match[2]);
-  if (process.env.E2E_VERBOSE)
-    console.log('   ', text);
-});
-async function result(key, ms = TIMEOUT) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    if (results.has('error'))
-      return null;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL, debug: '1' });
 // E2E_DIRECT=1: dieselbe Seite direkt in Chromium (zum Vergleich)
-await page.goto(process.env.E2E_DIRECT ? siteURL : `http://localhost:${UI_PORT}/?${query}`);
+await page.goto(process.env.E2E_DIRECT ? siteURL : stack.app({ url: siteURL, debug: '1' }));
 const err = (part) => results.get(part + 'error') || results.get('error') || '';
 check('WebCodecs-API vorhanden', await result('api') === Array(7).fill('function').join(','), results.get('api'));
 check('VideoFrame aus Canvas', await result('canvasframe', 30000) === 'RGBA:64x48', results.get('canvasframe') || err('canvas'));
@@ -291,8 +235,4 @@ check('AudioData s16 -> f32-planar', await result('audiodata', 30000) === '250:-
 check('VP8 im Worker', /^5:5:64x48$/.test(await result('worker', 60000) || ''), results.get('worker') || err('worker'));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

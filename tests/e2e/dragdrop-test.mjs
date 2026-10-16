@@ -4,30 +4,9 @@
 // und Text aus dem Host (Ereignisse auf dem Canvas der Oberflaeche).
 //
 //   cd tests/e2e && node dragdrop-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, TIMEOUT, canvasOrigin, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'dragdrop-token-0123456789abcdef';
-const RELAY_PORT = 15831;
-const UI_PORT = 15832;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 120000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 60000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><title>Drag-Test</title>
 <style>
@@ -100,53 +79,17 @@ document.getElementById('upload').addEventListener('change', async (e) => {
 log('ready', 1);
 </script>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const stack = await startStack({ token: 'dragdrop-token-0123456789abcdef' });
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
-});
-async function result(key, ms = 20000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, ms = 20000) => results.wait(key, ms);
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 check('Seite geladen', await result('ready', TIMEOUT) === '1');
-const box = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  const rect = canvas.getBoundingClientRect();
-  return { x: rect.left, y: rect.top };
-});
+const box = await canvasOrigin(page);
 
 // 1. Ziehen in der Seite mit der Maus
 await page.mouse.move(box.x + 80, box.y + 50);
@@ -203,10 +146,6 @@ check('Text aus dem Host ins Textfeld', await result('textdrop') === 'Text_vom_H
 await dropOnCanvas(box.x + 100, box.y + 420, { file: { name: 'formular.csv', type: 'text/csv', content: 'a;b' } });
 check('Datei auf <input type=file>', await result('upload') === '1:formular.csv:a;b', results.get('upload'));
 
-await page.screenshot({ path: path.join(root, 'build', 'e2e-dragdrop.png') });
+await screenshot(page, 'dragdrop');
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

@@ -6,30 +6,9 @@
 // mit einer Chromium-Seite.
 //
 //   cd tests/e2e && node webrtc-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'webrtc-token-0123456789abcdef';
-const RELAY_PORT = 15831;
-const UI_PORT = 15832;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><title>WebRTC-Test</title>
 <style>body { margin: 0 } #cam { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; }</style>
@@ -243,52 +222,16 @@ window.crossAnswer = async (answer) => {
 };
 </script>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/blank' ? '<!doctype html><title>Gegenstelle</title>' : PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/blank' ? '<!doctype html><title>Gegenstelle</title>' : PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
+const stack = await startStack({ token: 'webrtc-token-0123456789abcdef' });
+const browser = await launch({ args: [...SWIFTSHADER, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, permissions: ['camera', 'microphone'] });
 const page = await context.newPage();
-const results = new Map();
-page.on('console', (msg) => {
-  const text = msg.text();
-  const match = /RESULT (\w+)=(\S*)/.exec(text);
-  if (match)
-    results.set(match[1], match[2]);
-  if (process.env.E2E_VERBOSE)
-    console.log('   ', text);
-});
-async function result(key, ms = TIMEOUT) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    if (results.has('error'))
-      return null;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 const err = () => results.get('error') || '';
 check('RTCPeerConnection & Co. vorhanden', await result('api') === 'function,function,function,function', results.get('api'));
 check('RTCIceCandidate zerlegt den Kandidaten', await result('candidate') === '192.0.2.1,54321,udp,host,rtp', results.get('candidate'));
@@ -345,11 +288,7 @@ check('Nachricht bei Chromium angekommen', received === 'hallo von browser-lite'
 
 
 // Kamera von browser-lite an Chromium und zurueck
-const box = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  const rect = canvas.getBoundingClientRect();
-  return { x: rect.left, y: rect.top };
-});
+const box = await canvasOrigin(page);
 await page.bringToFront();
 await page.mouse.click(box.x + 120, box.y + 50);
 const prompt = page.locator('#permission-prompt:not([hidden])');
@@ -393,8 +332,4 @@ for (let i = 0; i < 60 && !camSize; i++) {
 check('Chromium empfaengt die Kamera von browser-lite', /^[1-9]\d*x[1-9]\d*$/.test(camSize), camSize);
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

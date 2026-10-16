@@ -1,33 +1,12 @@
 // End-to-End Test fuer Geraete und Berechtigungen (web/devices.js,
 // engine/src/DeviceClients.cpp): Markieren mit der Maus, Touch (Antippen,
 // Wischen scrollt), Farbschema des Systems, Standort und Benachrichtigungen mit
-// der Abfrage wie in Chrome.
+// der Abfrage wie in Chrome, offene Abfragen beim Schliessen des Tabs.
 //
 //   cd tests/e2e && node devices-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'devices-token-0123456789abcdef';
-const RELAY_PORT = 15821;
-const UI_PORT = 15822;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
 <style>
@@ -155,22 +134,10 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
   result('ready', 1);
 </script></body></html>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'devices-token-0123456789abcdef' });
+const browser = await launch();
 // Touchscreen wie ein Chromebook, Standort Bern
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, hasTouch: true, geolocation: { latitude: 46.948, longitude: 7.447 }, permissions: ['geolocation', 'notifications'] });
 // Spracherkennung des Host als Attrappe (headless hat kein Mikrofon)
@@ -233,34 +200,14 @@ await context.addInitScript(() => {
   window.showDirectoryPicker = async () => new FakeDirectory();
 });
 const page = await context.newPage();
-const results = new Map();
-page.on('console', (msg) => {
-  if (process.env.E2E_LOG)
-    console.log('[chromium]', msg.text());
-  const match = /RESULT (\w+)=(.*?)(\s+\(|$)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-});
-async function result(key, timeout = 30000) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return null;
-}
+const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
+const result = (key, timeout = 30000) => results.wait(key, timeout);
 async function at(x, y) {
-  const box = await page.evaluate(() => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-    const rect = canvas.getBoundingClientRect();
-    return { x: rect.left, y: rect.top };
-  });
+  const box = await canvasOrigin(page);
   return [box.x + x, box.y + y];
 }
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 check('Seite bereit', (await result('ready', TIMEOUT)) === '1');
 check('Touchscreen erkannt (ontouchstart)', (await result('ontouchstart')) === 'true');
 check('scheduler.postTask/yield mit Abbruch', (await result('scheduler')) === 'ab+abort', results.get('scheduler'));
@@ -355,9 +302,19 @@ for (let i = 0; i < 30 && !(results.has('orient') && results.has('motion')); i++
 check('deviceorientation kommt an', (await result('orient', 5000)) === '10,20,30', results.get('orient'));
 check('devicemotion kommt an', (await result('motion', 5000)) === '10', results.get('motion'));
 
+// 10) Tab mit offener Abfrage schliessen: die Abfrage verschwindet und wird
+// nicht gemerkt (web/devices.js forgetTab)
+await page.click('#new-tab');
+await page.fill('#address', siteURL + '?zweiter-tab');
+await page.press('#address', 'Enter');
+await page.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Geraete-Test', null, { timeout: 30000 }).catch(() => {});
+await page.evaluate(() => window.__blEval('navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {})'));
+const cameraPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
+check('Geschlossener Tab: Abfrage fuer die Kamera erscheint', cameraPrompt && /Kamera/.test(await prompt.textContent()));
+await page.click('#tab-list .tab.active .close');
+const promptGone = await page.locator('#permission-prompt').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false);
+const stored = await page.evaluate(() => localStorage.getItem('bl-permissions') || '');
+check('Geschlossener Tab: Abfrage weg und nicht gemerkt', promptGone && !stored.includes('camera'), stored);
+
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

@@ -7,40 +7,20 @@
 // ueber das Relay (wie Chrome zeigt die Gegenseite die IP des Geraets).
 
 import { captureTrack, captureApi } from './capture.js';
+import { bytesToBase64, base64ToBytes, domError } from './util.js';
 
 const POLL_WAIT = 20000;
 const CLIENT_TIMEOUT = 60000;
 
 const clients = new Map(); // client -> Zustand
 
-function rtcError(name, message) {
-  const error = new Error(message);
-  error.name = name;
-  return error;
-}
-
-function bytesToBase64(bytes) {
-  if (typeof bytes.toBase64 === 'function')
-    return bytes.toBase64();
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000)
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(binary);
-}
-
-function base64ToBytes(text) {
-  if (typeof Uint8Array.fromBase64 === 'function')
-    return Uint8Array.fromBase64(text);
-  return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-}
-
 function clientFor(id, origin, create) {
   if (typeof id !== 'string' || !id)
-    throw rtcError('InvalidAccessError', 'Missing client');
+    throw domError('InvalidAccessError', 'Missing client');
   let client = clients.get(id);
   if (!client) {
     if (!create)
-      throw rtcError('InvalidStateError', 'Unknown connection');
+      throw domError('InvalidStateError', 'Unknown connection');
     client = {
       origin, pcs: new Map(), channels: new Map(), channelPc: new Map(), queue: [], waiter: null, lastSeen: Date.now(), remoteChannels: 0,
       // Medien: Transceiver per Schluessel, Host-Spuren der Seite per Spur-Id
@@ -51,7 +31,7 @@ function clientFor(id, origin, create) {
   }
   // Verbindungen gehoeren dem Ursprung, der sie gemacht hat
   if (client.origin !== origin)
-    throw rtcError('SecurityError', 'Wrong origin');
+    throw domError('SecurityError', 'Wrong origin');
   client.lastSeen = Date.now();
   return client;
 }
@@ -163,16 +143,16 @@ async function hostTrack(client, info) {
   if (info.capture) {
     const original = await captureTrack(info.capture);
     if (!original)
-      throw rtcError('InvalidStateError', 'The track has ended.');
+      throw domError('InvalidStateError', 'The track has ended.');
     track = original.clone();
   } else if (info.sink && typeof MediaStreamTrackGenerator === 'function') {
     track = new MediaStreamTrackGenerator({ kind: info.kind });
     const worker = captureApi()?.engineWorker();
     if (!worker)
-      throw rtcError('InvalidStateError', 'No engine');
+      throw domError('InvalidStateError', 'No engine');
     worker.postMessage({ blSink: { id: info.sink, writable: track.writable } }, [track.writable]);
   } else
-    throw rtcError('NotSupportedError', 'This track cannot be sent');
+    throw domError('NotSupportedError', 'This track cannot be sent');
   track.enabled = info.enabled !== false;
   client.tracks.set(info.id, track);
   mapId(client, track.id, info.id);
@@ -193,7 +173,7 @@ const streamsFor = (client, ids) => (ids || []).map((id) => {
 function transceiverFor(client, key) {
   const transceiver = client.transceivers.get(key);
   if (!transceiver)
-    throw rtcError('InvalidStateError', 'Unknown transceiver');
+    throw domError('InvalidStateError', 'Unknown transceiver');
   return transceiver;
 }
 
@@ -206,7 +186,7 @@ function remember(client, pcId, key, transceiver) {
 function connection(client, id) {
   const pc = client.pcs.get(id);
   if (!pc)
-    throw rtcError('InvalidStateError', 'The RTCPeerConnection is closed.');
+    throw domError('InvalidStateError', 'The RTCPeerConnection is closed.');
   return pc;
 }
 
@@ -323,7 +303,7 @@ const operations = {
   },
   async createDataChannel(pc, payload, client) {
     if (typeof payload.channel !== 'string' || client.channels.has(payload.channel))
-      throw rtcError('OperationError', 'Bad channel');
+      throw domError('OperationError', 'Bad channel');
     const channel = pc.createDataChannel(String(payload.label ?? ''), payload.init || {});
     wireChannel(client, payload.pc, payload.channel, channel);
     return { id: channel.id };
@@ -393,11 +373,11 @@ const operations = {
 export const rtcHostCalls = {
   async 'rtc-create'(payload, origin) {
     if (typeof RTCPeerConnection !== 'function')
-      throw rtcError('NotSupportedError', 'WebRTC is not available');
+      throw domError('NotSupportedError', 'WebRTC is not available');
     const client = clientFor(payload?.client, origin, true);
     const id = payload.pc;
     if (client.pcs.has(id))
-      throw rtcError('InvalidStateError', 'Duplicate connection');
+      throw domError('InvalidStateError', 'Duplicate connection');
     const pc = new RTCPeerConnection(sanitizeConfig(payload.config));
     client.pcs.set(id, pc);
     const forward = (type) => () => push(client, { pc: id, type, state: snapshot(pc, client, id) });
@@ -426,7 +406,7 @@ export const rtcHostCalls = {
     const pc = connection(client, payload.pc);
     const operation = operations[payload.op];
     if (!operation)
-      throw rtcError('NotSupportedError', 'Unknown operation');
+      throw domError('NotSupportedError', 'Unknown operation');
     const result = await operation(pc, payload, client);
     return { ...result, state: snapshot(pc, client, payload.pc) };
   },
@@ -452,7 +432,7 @@ export const rtcHostCalls = {
     const api = captureApi();
     const worker = api?.engineWorker();
     if (!worker || typeof MediaStreamTrackProcessor !== 'function')
-      throw rtcError('NotSupportedError', 'MediaStreamTrackProcessor is missing');
+      throw domError('NotSupportedError', 'MediaStreamTrackProcessor is missing');
     const source = Number(payload.source);
     const processor = new MediaStreamTrackProcessor({ track });
     worker.postMessage({ blCapture: { id: source, kind: track.kind, readable: processor.readable } }, [processor.readable]);
@@ -494,7 +474,7 @@ export const rtcHostCalls = {
     const client = clientFor(payload?.client, origin, false);
     const channel = client.channels.get(payload.channel);
     if (!channel || channel.readyState !== 'open')
-      throw rtcError('InvalidStateError', "RTCDataChannel.readyState is not 'open'");
+      throw domError('InvalidStateError', "RTCDataChannel.readyState is not 'open'");
     channel.send(payload.binary !== undefined ? base64ToBytes(payload.binary) : String(payload.text ?? ''));
     return { bufferedAmount: channel.bufferedAmount };
   },

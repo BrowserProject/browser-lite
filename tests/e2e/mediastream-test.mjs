@@ -6,30 +6,9 @@
 // das echte Chromium spielt die Datei ab.
 //
 //   cd tests/e2e && node mediastream-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'mediastream-token-0123456789abcdef';
-const RELAY_PORT = 15821;
-const UI_PORT = 15822;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 
 const PAGE = `<!doctype html><title>MediaStream-Test</title>
@@ -165,7 +144,13 @@ document.getElementById('rec').addEventListener('click', async () => {
     const stopped = new Promise((resolve) => recorder.onstop = resolve);
     recorder.start(500);
     log('recstate', recorder.state);
-    await new Promise((resolve) => setTimeout(resolve, 2500));
+    // 2.5 s nach der Uhr des AudioContext: auf einem ausgelasteten Rechner faellt
+    // der Ton der Engine hinter die Wanduhr zurueck, die Datei hat dann weniger Ton
+    const audioStart = audioContext.currentTime;
+    const wallStart = performance.now();
+    while (audioContext.currentTime - audioStart < 2.5 && performance.now() - wallStart < 15000)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    log('rectime', ((performance.now() - wallStart) / 1000).toFixed(2) + ':' + (audioContext.currentTime - audioStart).toFixed(2));
     recorder.stop();
     await stopped;
     clearInterval(timer);
@@ -228,59 +213,20 @@ document.getElementById('start').addEventListener('click', async () => {
 });
 </script>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
+const stack = await startStack({ token: 'mediastream-token-0123456789abcdef' });
 // Fake-Kamera (Testbild) und Fake-Mikrofon (Piepton) von Chromium
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--auto-select-desktop-capture-source=Entire screen', '--autoplay-policy=no-user-gesture-required'] });
+const browser = await launch({ args: [...SWIFTSHADER, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
+  '--auto-select-desktop-capture-source=Entire screen', '--autoplay-policy=no-user-gesture-required'] });
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, permissions: ['camera', 'microphone'] });
 const page = await context.newPage();
-const results = new Map();
-page.on('console', (msg) => {
-  const text = msg.text();
-  const match = /RESULT (\w+)=(\S*)/.exec(text);
-  if (match)
-    results.set(match[1], match[2]);
-  if (process.env.E2E_VERBOSE)
-    console.log('   ', text);
-});
-async function result(key, ms = TIMEOUT) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    if (results.has('error'))
-      return null;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL, debug: '1' });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL, debug: '1' }));
 check('mediaDevices.getUserMedia/getDisplayMedia vorhanden', await result('api') === 'function,function', results.get('api'));
-const box = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  const rect = canvas.getBoundingClientRect();
-  return { x: rect.left, y: rect.top };
-});
+const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 120, box.y + 50);
 const prompt = page.locator('#permission-prompt:not([hidden])');
 const promptShown = await prompt.waitFor({ timeout: 15000 }).then(() => true, () => false);
@@ -304,6 +250,9 @@ const recErr = () => results.get('recerror') || '';
 check('MediaRecorder.isTypeSupported wie Chrome', await result('rectypes', 30000) === '1,1,1,1,0,0', results.get('rectypes') || recErr());
 check('MediaRecorder nimmt auf', await result('recstate', 30000) === 'recording', results.get('recstate') || recErr());
 check('MediaRecorder.mimeType wie Chrome', await result('recmime', 30000) === 'video/webm;codecs=vp8,opus', results.get('recmime') || recErr());
+// Aufnahmedauer: Wanduhr und Uhr des AudioContext der Seite (in Sekunden)
+const [recWall, recAudio] = (results.get('rectime') || '0:0').split(':').map(Number);
+check('AudioContext-Uhr laeuft waehrend der Aufnahme', recAudio >= 2.5, `Wanduhr ${recWall} s, AudioContext ${recAudio} s`);
 const recEvents = await result('recevents', 30000);
 check('start und mehrere dataavailable (timeslice)', /^start:([3-9]|\d\d)$/.test(recEvents || ''), recEvents || recErr());
 const recData = await result('recdata', 30000);
@@ -340,7 +289,9 @@ const playback = await page.evaluate(async (base64) => {
   return { size: video.videoWidth + 'x' + video.videoHeight, color: [r, g, b], colors, audioSeconds: Math.round(audio.duration * 10) / 10, peak: Math.round(peak * 100) / 100 };
 }, recData || '').catch((e) => ({ error: String(e) }));
 check('Chromium spielt die Aufnahme ab (Bild)', playback.size === '160x120' && (playback.color[0] > 200 || playback.color[2] > 200), JSON.stringify(playback));
-check('Chromium spielt die Aufnahme ab (Ton)', playback.audioSeconds >= 1.5 && playback.peak > 0.3, JSON.stringify(playback));
+// Gemessen an der Uhr des AudioContext, nicht an der Wanduhr: so zeigt ein Fehler
+// verlorenen Ton im Recorder, nicht einen ausgelasteten Rechner
+check('Chromium spielt die Aufnahme ab (Ton)', playback.audioSeconds >= 0.8 * recAudio && playback.peak > 0.3, `${JSON.stringify(playback)}, AudioContext ${recAudio} s`);
 
 // Ton eines Streams in <audio> (srcObject) kommt beim Host an, stumm = still
 const hostPeak = async (done) => {
@@ -386,8 +337,4 @@ check('PiP-Video im Host aufgeraeumt', await page.evaluate(() => [...document.qu
   && !document.pictureInPictureElement));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

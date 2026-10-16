@@ -3,30 +3,9 @@
 // (/data in der Engine liegt im OPFS des Host-Browsers).
 //
 //   cd tests/e2e && node storage-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'store-token-0123456789abcdef';
-const RELAY_PORT = 15401;
-const UI_PORT = 15402;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, 3 * TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit(3 * TIMEOUT + 120000);
 
 // Erster Besuch speichert, zweiter Besuch (nach Neuladen) liest
 const PAGE = `<!doctype html><title>Speicher-Test</title><script>
@@ -129,48 +108,21 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
 // Das Cookie kommt nur beim ersten Besuch, danach muss es aus dem
 // gespeicherten Cookie-Speicher der Engine kommen
 let visits = 0;
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   const headers = { 'Content-Type': 'text/html; charset=utf-8' };
   if (visits++ === 0)
     headers['Set-Cookie'] = 'bl_store=ja; Path=/; Max-Age=86400';
   res.writeHead(200, headers).end(PAGE);
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'store-token-0123456789abcdef' });
+const browser = await launch();
 const context = await browser.newContext();
 const page = await context.newPage();
+const results = collect(page);
+const result = (key) => results.wait(key);
 
-let results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-});
-async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
-
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-const appURL = `http://localhost:${UI_PORT}/?${query}`;
+const appURL = stack.app({ url: siteURL });
 
 await page.goto(appURL);
 const first = await result('read');
@@ -182,7 +134,7 @@ check('OPFS: synchroner Zugriff im Worker', (await result('opfsworker')) === 'sy
 
 // Warten bis /data gespeichert ist (alle 5 s), dann alles neu laden
 await page.waitForTimeout(7000);
-results = new Map();
+results.clear();
 await page.reload();
 const second = await result('read');
 check('Nach Neuladen noch da (Cookie, localStorage, IndexedDB)', second === 'ja,gespeichert,idb-wert', String(second));
@@ -192,7 +144,7 @@ check('IndexedDB-Datenbank geloescht', (await result('deleted')) === 'weg', Stri
 
 // Nochmal neu laden: die geloeschte Datenbank darf nicht zurueckkommen
 await page.waitForTimeout(7000);
-results = new Map();
+results.clear();
 await page.reload();
 check('Nach zweitem Neuladen: neuer Wert da, geloeschte Datenbank weg', (await result('third')) === 'zwei,weg', String(results.get('third')));
 
@@ -200,13 +152,9 @@ check('Nach zweitem Neuladen: neuer Wert da, geloeschte Datenbank weg', (await r
 // Datei) uebernimmt die Engine beim ersten Start mit WasmFS nach /data (OPFS)
 // und loescht die alte Datenbank danach (web/app.js, engine/src/Storage.cpp)
 const fresh = await (await browser.newContext()).newPage();
-results = new Map();
-fresh.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-});
-await fresh.goto(`http://localhost:${UI_PORT}/nicht-da`);
+results.clear();
+results.watch(fresh);
+await fresh.goto(stack.uiURL + 'nicht-da');
 const origin = encodeURIComponent(siteURL.slice(0, -1));
 await fresh.evaluate((file) => new Promise((resolve, reject) => {
   const open = indexedDB.open('/data', 21);
@@ -230,15 +178,11 @@ check('Alte IDBFS-Datenbank geloescht', legacyGone);
 // "Daten loeschen": die Oberflaeche laedt neu und leert /data vor dem Start
 // der Engine, danach ist die Datei weg
 await fresh.waitForTimeout(6000);
-results = new Map();
+results.clear();
 fresh.once('dialog', (dialog) => dialog.accept());
 await fresh.evaluate(() => document.getElementById('clear-data').click());
 const cleared = await result('opfs');
 check('Daten loeschen leert /data', cleared?.startsWith('leer,'), String(cleared));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

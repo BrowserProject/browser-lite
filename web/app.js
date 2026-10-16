@@ -8,9 +8,11 @@ import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
 import { initCapture, onCaptureStart, onCaptureStop } from './capture.js';
-import { initDevices, clearPermissions, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
-import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen } from './library.js';
-import { initPickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
+import { initDevices, clearPermissions, forgetTab, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
+import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen, formatSize } from './library.js';
+import { initPickers, closePickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
+import { engineAnswered, engineFailed, expectAnswer, showEngineMessage, takeSafeStart, watchEngine } from './watchdog.js';
+import { storage } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -20,28 +22,25 @@ const START_URL = params.get('url') || 'https://example.com/';
 const ENGINE_BASE = 'engine/';
 
 // Relay (Wisp-Server). Standard: auf dem gleichen Server unter /wisp/.
-// Der Zugangs-Token wird einmal mit ?token=... gesetzt und im Browser gespeichert.
-function storage(key, value) {
-  try {
-    if (value !== undefined)
-      localStorage.setItem(key, value);
-    return localStorage.getItem(key);
-  } catch {
-    return value ?? null;
-  }
-}
+// ?relay=... gilt nur fuer diese Sitzung des Browser-Tabs, ein leeres ?relay=
+// nimmt wieder den Standard. Ein Link kann so den Verkehr nie dauerhaft umleiten.
+if (params.has('relay'))
+  storage('bl-relay-url', params.get('relay') || null, true);
+const RELAY_BASE = storage('bl-relay-url', undefined, true) || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
+// Der Zugangs-Token (einmal ?token=...) gilt nur fuer das Relay, mit dem er
+// gesetzt wurde. Ein anderes Relay bekommt ihn nie zu sehen.
+const RELAY_TOKEN_KEY = 'bl-relay-token ' + URL.parse(RELAY_BASE)?.host;
 if (params.get('token'))
-  storage('bl-relay-token', params.get('token'));
-if (params.get('relay'))
-  storage('bl-relay-url', params.get('relay'));
+  storage(RELAY_TOKEN_KEY, params.get('token'));
 
 function relayURL() {
-  const base = storage('bl-relay-url') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
-  const token = storage('bl-relay-token');
-  return token ? base + (base.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : base;
+  const token = storage(RELAY_TOKEN_KEY);
+  return token ? RELAY_BASE + (RELAY_BASE.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : RELAY_BASE;
 }
 
 let engine = null;
+// Erst nach onEngineReady und nur bis zu einem Absturz (watchdog.js)
+let engineReady = false;
 window.__blAudioState = audioState; // fuer die Tests (tests/e2e)
 window.__blMediaState = mediaState;
 // Speicher der Engine (Tests): Groesse, mit report=true auch Bericht in der Konsole
@@ -71,7 +70,7 @@ function loadScript(src) {
 
 async function startEngine() {
   if (!crossOriginIsolated) {
-    $('boot').textContent = 'Fehler: Die Seite braucht die Header COOP/COEP (SharedArrayBuffer fehlt).';
+    showEngineMessage('Fehler: Die Seite braucht die Header COOP/COEP (SharedArrayBuffer fehlt).');
     return;
   }
   await loadScript(ENGINE_BASE + 'engine.js');
@@ -109,14 +108,20 @@ async function startEngine() {
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
       if (params.get('safepointgc'))
         (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');
-      // Zum Testen: ?env=JSC_verifyGC=1,BL_DEBUG=1 setzt Umgebungsvariablen
+      // Zum Testen: ?env=JSC_verifyGC=1,BL_DEBUG=1 setzt Umgebungsvariablen.
+      // Nur Schalter der Engine: BL_EXTRA_CA (installExtraCA) oder Variablen
+      // von curl/OpenSSL (Proxy, Zertifikate, Schluessel-Log) darf ein Link nie setzen.
       for (const pair of (params.get('env') || '').split(',')) {
         const at = pair.indexOf('=');
-        if (at > 0)
-          (module || engine).ENV[pair.slice(0, at)] = pair.slice(at + 1);
+        const key = pair.slice(0, at);
+        if (at > 0 && /^(BL|JSC|FC)_/.test(key) && key !== 'BL_EXTRA_CA')
+          (module || engine).ENV[key] = pair.slice(at + 1);
       }
     }],
   };
+  watchEngine(module, () => {
+    engineReady = false;
+  });
   engine = module;
   const mediaReady = initMedia(module);
   await window.createBrowserLiteEngine(module);
@@ -188,9 +193,7 @@ function mountStorage(module) {
       if (storage(clearDataFlag)) {
         await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
         await deleteLegacyStorage();
-        try {
-          localStorage.removeItem(clearDataFlag);
-        } catch {}
+        storage(clearDataFlag, null);
       } else if (window.indexedDB) {
         module.blLegacyStorage = await readLegacyStorage().catch((error) => {
           console.warn('Alte Daten konnten nicht gelesen werden:', error);
@@ -215,7 +218,7 @@ function mountStorage(module) {
 }
 
 function saveStorage() {
-  if (!storageReady)
+  if (!storageReady || !engineReady)
     return;
   // WasmFS: die Engine schreibt die Datenbanken im eigenen Thread nach /data
   if (!engine.FS.syncfs) {
@@ -260,9 +263,7 @@ async function clearStorage() {
   await engine?.blClearBytecodeCache?.().catch(() => {});
   if (engine && !engine.FS.syncfs) {
     // WasmFS: das OPFS beim naechsten Start leeren, bevor die Engine laeuft
-    try {
-      localStorage.setItem(clearDataFlag, '1');
-    } catch {}
+    storage(clearDataFlag, '1');
   } else
     await deleteLegacyStorage();
   location.reload();
@@ -286,9 +287,11 @@ function sendScreen() {
 }
 
 function onEngineReady() {
+  engineReady = true;
   $('boot').hidden = true;
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
+  watchPixelRatio();
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
   initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker?.() });
   initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab) });
@@ -296,7 +299,10 @@ function onEngineReady() {
   const session = params.get('url') ? null : sessionToRestore();
   if (session) {
     const restored = session.map((entry) => restoredTab(entry));
-    activateTab(restored[Math.max(0, session.findIndex((entry) => entry.active))]);
+    if (takeSafeStart())
+      newTab('about:blank').notice = 'Nach dem Neustart laden die Tabs erst beim Anklicken';
+    else
+      activateTab(restored[Math.max(0, session.findIndex((entry) => entry.active))]);
   } else {
     newTab(START_URL);
   }
@@ -310,12 +316,25 @@ function openURL(url, inNewTab) {
       $('address').focus();
     return;
   }
-  engine._bl_load_url(activeTab.id, toUTF8(url));
+  loadURL(activeTab, url);
   focusPage();
 }
 
+// Auf Laden und Neu laden meldet sich die Engine immer (watchdog.js)
+function loadURL(tab, url) {
+  expectAnswer();
+  engine._bl_load_url(tab.id, toUTF8(url));
+}
+
+function reloadTab(tab) {
+  expectAnswer();
+  engine._bl_reload(tab.id);
+}
+
+// Nach einem Absturz nicht mehr: der letzte gute Stand bleibt fuer den Neustart
 function persistSession() {
-  saveSession([...tabs.values()], activeTab);
+  if (engineReady)
+    saveSession([...tabs.values()], activeTab);
 }
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
@@ -344,6 +363,8 @@ class Tab {
     this.canGoBack = false;
     this.canGoForward = false;
     this.loading = false;
+    // Steht nach dem naechsten Laden in der Statuszeile
+    this.notice = null;
     this.frameRequested = false;
     this.zoom = 1;
 
@@ -391,7 +412,7 @@ class Tab {
       this.pendingHistory = lazy.history?.entries?.length ? lazy.history : null;
     }
     else if (url)
-      engine._bl_load_url(this.id, toUTF8(url));
+      loadURL(this, url);
   }
 
   // Favicon: die Engine hat es geladen, wir bekommen die Bytes
@@ -441,6 +462,8 @@ function viewportSize() {
 }
 
 function newTab(url, viewId = 0) {
+  if (!engineReady)
+    return null;
   const tab = new Tab(url, viewId);
   tabs.set(tab.id, tab);
   activateTab(tab);
@@ -448,6 +471,8 @@ function newTab(url, viewId = 0) {
 }
 
 function openBackgroundTab(url) {
+  if (!engineReady)
+    return null;
   const tab = new Tab(url);
   tabs.set(tab.id, tab);
   persistSession();
@@ -470,6 +495,7 @@ function showSource(url, bytes, mime) {
     + '<style>body{margin:8px 0;font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}'
     + 'ol{margin:0;padding-left:5em}li{padding-left:1em}li::marker{color:#999}</style><ol>' + lines + '</ol>';
   const tab = newTab('');
+  expectAnswer();
   engine._bl_load_html(tab.id, toUTF8(html), toUTF8('view-source:' + url));
 }
 
@@ -495,10 +521,11 @@ function activateTab(tab) {
   updateStar(tab.url);
   if (tab.pendingURL) {
     // Mit Verlauf (Zurueck/Vor) wie vor dem Neustart bzw. Verwerfen
-    if (tab.pendingHistory)
+    if (tab.pendingHistory) {
+      expectAnswer();
       engine._bl_restore_history(tab.id, toUTF8(JSON.stringify(tab.pendingHistory)));
-    else
-      engine._bl_load_url(tab.id, toUTF8(tab.pendingURL));
+    } else
+      loadURL(tab, tab.pendingURL);
     tab.pendingURL = null;
     tab.pendingHistory = null;
   }
@@ -517,7 +544,7 @@ function activateTab(tab) {
 // Anklicken neu laedt. Tabs mit Ton oder Kamera/Mikrofon bleiben.
 let discardLimit = 2.5 * 1024 ** 3;
 function checkMemory() {
-  if (!engine?._bl_memory_used || engine._bl_memory_used() < discardLimit)
+  if (!engineReady || engine._bl_memory_used() < discardLimit)
     return null;
   const candidates = [...tabs.values()].filter((tab) => tab !== activeTab && !tab.pendingURL && !tab.audible
     && !tab.capturing && /^(https?|file):/.test(tab.url || ''));
@@ -550,9 +577,12 @@ function discardTab(tab) {
 }
 
 function closeTab(tab) {
-  onGeolocationStop(tab);
-  onSensorStop(tab, { kind: 'orientation' });
-  onSensorStop(tab, { kind: 'motion' });
+  forgetTab(tab);
+  closePickers(tab);
+  if (fullscreenTab === tab)
+    setFullscreen(tab, false);
+  if (tab.iconURL)
+    URL.revokeObjectURL(tab.iconURL);
   setTimeout(persistSession);
   engine._bl_destroy_view(tab.id);
   tab.canvas.remove();
@@ -579,7 +609,7 @@ function updateToolbar() {
   $('zoom').hidden = tab.zoom === 1;
   $('zoom').textContent = Math.round(tab.zoom * 100) + ' %';
   if (document.activeElement !== $('address'))
-  $('address').value = tab.url === 'about:blank' ? '' : tab.url;
+    $('address').value = tab.url === 'about:blank' ? '' : tab.url;
   updateSecurity(tab.url);
 }
 
@@ -634,10 +664,12 @@ document.addEventListener('fullscreenchange', () => {
 // --------------------------------------------------------- Meldungen der Engine
 
 function onEngineEvent(viewId, type, payload) {
+  engineAnswered();
   const tab = tabs.get(viewId);
   const data = payload ? JSON.parse(payload) : {};
   if (type === 'console') {
-    const method = data.level >= 3 ? 'error' : data.level === 2 ? 'warn' : 'log';
+    // Reihenfolge von JSC::MessageLevel
+    const method = ['log', 'warn', 'error', 'debug', 'info'][data.level] || 'log';
     console[method](`[seite ${viewId}] ${data.message}`, data.source ? `(${data.source}:${data.line})` : '');
     return;
   }
@@ -821,7 +853,8 @@ function onEngineEvent(viewId, type, payload) {
     tab.loading = false;
     window.__blLoaded = true; // fuer die Tests (tests/e2e)
     if (tab === activeTab)
-      setStatus('');
+      setStatus(tab.notice || '');
+    tab.notice = null;
     break;
   case 'error':
     tab.loading = false;
@@ -855,6 +888,7 @@ function setProgress(value) {
 
 // Ein Bild ist fertig: Pixel aus dem gemeinsamen Speicher ins Canvas kopieren
 function onEngineFrame(viewId, ptr, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight) {
+  engineAnswered();
   const tab = tabs.get(viewId);
   if (tab && tab.ctx) {
     const canvas = tab.canvas;
@@ -912,6 +946,7 @@ window.blPageRow = (y) => {
 
 // Engine moechte ein neues Bild: beim naechsten Bildschirm-Refresh
 function onEngineNeedsFrame(viewId) {
+  engineAnswered();
   const tab = tabs.get(viewId);
   if (!tab || tab.frameRequested)
     return;
@@ -928,10 +963,6 @@ function onEngineNeedsFrame(viewId) {
 // wird daraus ein Blob, den der Browser normal speichert.
 
 const downloads = new Map(); // id -> { filename, chunks, received, size }
-
-function formatSize(bytes) {
-  return bytes >= 1024 * 1024 ? (bytes / 1024 / 1024).toFixed(1) + ' MB' : Math.ceil(bytes / 1024) + ' kB';
-}
 
 // Liste fuer das Download-Panel (Strg+J), nur fuer diese Sitzung
 const downloadHistory = [];
@@ -1098,7 +1129,7 @@ function showContextMenu(tab, data) {
   separator();
   add('Zurück', () => engine._bl_go_back(tab.id), data.canGoBack);
   add('Vorwärts', () => engine._bl_go_forward(tab.id), data.canGoForward);
-  add('Neu laden', () => engine._bl_reload(tab.id));
+  add('Neu laden', () => reloadTab(tab));
   add('Drucken …', () => printTab(tab));
   add('Seitenquelltext anzeigen', () => engine._bl_view_source(tab.id), /^https?:/.test(tab.url || ''));
 
@@ -1140,7 +1171,35 @@ window.addEventListener('blur', hideContextMenu);
 // <input type=file> der Seite: echten Dateidialog zeigen, die Dateien ins
 // virtuelle Dateisystem der Engine schreiben und die Pfade zurueckgeben.
 
+const MAX_UPLOAD = 512 * 1024 * 1024;
 let uploadCounter = 0;
+
+// Dateien (Upload, Ablegen, Einfuegen) ins Dateisystem der Engine, gibt die
+// Pfade zurueck. Was sich nicht lesen laesst (weg, zu gross), faellt weg.
+async function writeUploads(files) {
+  const paths = [];
+  const skipped = [];
+  for (const file of files) {
+    // Ein eingefuegtes Bild hat in Chrome den Namen "image.png"
+    const name = (file.name || 'image.png').replace(/[\/\n]/g, '_');
+    if (file.size > MAX_UPLOAD) {
+      skipped.push(name + ' (zu gross, höchstens ' + formatSize(MAX_UPLOAD) + ')');
+      continue;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + name;
+      writeEngineFile(path, bytes);
+      paths.push(path);
+    } catch (error) {
+      console.warn('Datei nicht lesbar:', name, error);
+      skipped.push(name);
+    }
+  }
+  if (skipped.length)
+    setStatus('Nicht übernommen: ' + skipped.join(', '));
+  return paths;
+}
 
 function openFileChooser(tab, data) {
   const input = document.createElement('input');
@@ -1155,21 +1214,14 @@ function openFileChooser(tab, data) {
     answered = true;
     engine._bl_choose_files(tab.id, toUTF8(paths.join('\n')));
   };
-  input.addEventListener('change', async () => {
-    const paths = [];
-    for (const file of input.files) {
-      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + file.name.replace(/[\/\n]/g, '_');
-      writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
-      paths.push(path);
-    }
-    answer(paths);
-  });
+  input.addEventListener('change', () => writeUploads(input.files).then(answer, () => answer([])));
   input.addEventListener('cancel', () => answer([]));
   input.click();
 }
 
 // alert/confirm/prompt der Seite
 function engineDialog(type, message, defaultValue) {
+  engineAnswered();
   if (type === 0) {
     alert(message);
     return 0;
@@ -1290,11 +1342,7 @@ function attachInput(tab) {
     const files = [...dataTransfer.files];
     const point = position(e);
     const modifiers = modifierBits(e);
-    for (const file of files) {
-      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + file.name.replace(/[\/\n]/g, '_');
-      writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
-      data.files.push(path);
-    }
+    data.files = await writeUploads(files);
     data.fileCount = data.files.length;
     engine._bl_drag(tab.id, 2, ...point, modifiers, toUTF8(JSON.stringify(data)));
   });
@@ -1378,12 +1426,7 @@ ime.addEventListener('paste', async (e) => {
     data.html = html;
   // Nach einem await sind die Daten des Ereignisses weg
   const files = [...(clipboardData?.files || [])];
-  for (const file of files) {
-    // Ein kopiertes Bild hat in Chrome den Namen "image.png"
-    const path = '/tmp/uploads/' + (++uploadCounter) + '/' + (file.name || 'image.png').replace(/[\/\n]/g, '_');
-    writeEngineFile(path, new Uint8Array(await file.arrayBuffer()));
-    data.files.push(path);
-  }
+  data.files = await writeUploads(files);
   engine._bl_set_clipboard(toUTF8(JSON.stringify(data)));
   const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
   sendKey(tab, 0, fake);
@@ -1416,7 +1459,7 @@ $('address-form').addEventListener('submit', (e) => {
   const url = addressToURL($('address').value);
   if (!url)
     return;
-  engine._bl_load_url(activeTab.id, toUTF8(url));
+  loadURL(activeTab, url);
   focusPage();
 });
 $('back').addEventListener('click', () => activeTab && engine._bl_go_back(activeTab.id));
@@ -1427,7 +1470,7 @@ $('reload').addEventListener('click', () => {
   if (activeTab.loading)
     engine._bl_stop(activeTab.id);
   else
-    engine._bl_reload(activeTab.id);
+    reloadTab(activeTab);
 });
 $('clear-data').addEventListener('click', clearStorage);
 $('new-tab').addEventListener('click', () => openURL('', true));
@@ -1493,13 +1536,24 @@ $('address').addEventListener('keydown', (e) => {
   $('address').value = rows[suggestionIndex].querySelector('.suggestion-url').textContent;
 });
 
-new ResizeObserver(() => {
-  if (!engine || !engine._bl_resize)
+function resizeAllTabs() {
+  if (!engineReady)
     return;
   const { width, height } = viewportSize();
   for (const tab of tabs.values())
     engine._bl_resize(tab.id, width, height, devicePixelRatio);
-}).observe($('viewport'));
+}
+new ResizeObserver(resizeAllTabs).observe($('viewport'));
+
+// Fenster auf einem Monitor mit anderer Pixeldichte: die Groesse in CSS-Pixeln
+// bleibt gleich, der ResizeObserver merkt davon nichts
+function watchPixelRatio() {
+  matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener('change', () => {
+    resizeAllTabs();
+    sendScreen();
+    watchPixelRatio();
+  }, { once: true });
+}
 
 // ------------------------------------------------------------ Pointer Lock
 // Spiele/3D: die Maus bleibt im Canvas, die Seite bekommt nur movementX/Y.
@@ -1564,8 +1618,10 @@ function openFind() {
 }
 
 function runFind(backwards, again) {
-  if (activeTab)
+  if (activeTab) {
+    expectAnswer();
     engine._bl_find(activeTab.id, toUTF8(findInput.value), backwards ? 1 : 0, again ? 1 : 0);
+  }
 }
 
 function closeFind() {
@@ -1633,7 +1689,7 @@ function shortcut(e) {
     case 'l': $('address').focus(); $('address').select(); return true;
     case 'f':
     case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;
-    case 'r': if (tab) engine._bl_reload(tab.id); return true;
+    case 'r': if (tab) reloadTab(tab); return true;
     case 'u': if (tab) engine._bl_view_source(tab.id); return true;
     case 'p': printTab(tab); return true;
     case '+':
@@ -1660,7 +1716,7 @@ function shortcut(e) {
   }
   if (!ctrl && !e.altKey) {
     switch (key) {
-    case 'F5': if (tab) engine._bl_reload(tab.id); return true;
+    case 'F5': if (tab) reloadTab(tab); return true;
     case 'F6': $('address').focus(); $('address').select(); return true;
     case 'F3': if (findBar.hidden) openFind(); else runFind(e.shiftKey, true); return true;
     }
@@ -1670,7 +1726,7 @@ function shortcut(e) {
 
 let swallowKeyUp = null;
 window.addEventListener('keydown', (e) => {
-  if (!engine || e.isComposing)
+  if (!engineReady || e.isComposing)
     return;
   if (shortcut(e)) {
     swallowKeyUp = e.code;
@@ -1696,6 +1752,7 @@ $('address').addEventListener('keydown', (e) => {
 
 $('screen').remove(); // Platzhalter, jeder Tab hat sein eigenes Canvas
 startEngine().catch((error) => {
-  $('boot').textContent = 'Fehler beim Starten: ' + error.message;
   console.error(error);
+  if (!engineFailed())
+    showEngineMessage('Fehler beim Starten: ' + error.message);
 });

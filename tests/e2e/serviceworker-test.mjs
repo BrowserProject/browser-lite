@@ -4,30 +4,9 @@
 // eine Navigation, die der Worker beantwortet.
 //
 //   cd tests/e2e && node serviceworker-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, TIMEOUT, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'serviceworker-token-0123456789abcdef';
-const RELAY_PORT = 15821;
-const UI_PORT = 15822;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><title>SW-Test</title><body>Service Worker
 <script>
@@ -91,7 +70,7 @@ onconnect = (e) => {
 };
 `;
 
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/shared.js')
     return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SHARED);
   if (req.url === '/sw.js')
@@ -100,49 +79,15 @@ const site = http.createServer((req, res) => {
     return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('net');
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const stack = await startStack({ token: 'serviceworker-token-0123456789abcdef' });
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-page.on('console', (msg) => {
-  const text = msg.text();
-  const match = /RESULT (\w+)=(\S*)/.exec(text);
-  if (match)
-    results.set(match[1], match[2]);
-  if (process.env.E2E_VERBOSE)
-    console.log('   ', text);
-});
-async function result(key, ms = TIMEOUT) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    if (results.has('error'))
-      return null;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL, debug: '1' });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+const appURL = stack.app({ url: siteURL, debug: '1' });
+await page.goto(appURL);
 check('navigator.serviceWorker vorhanden', await result('registered') === '1' || results.get('sw') !== 'none', results.get('error') || '');
 check('Registriert (ready)', await result('registered') === '1', results.get('error') || '');
 check('Am Anfang ohne Worker', results.get('initialcontroller') === 'false', results.get('initialcontroller'));
@@ -164,14 +109,10 @@ check('Navigation vom Worker beantwortet und kontrolliert', await result('swpage
 // Seite ist von Anfang an kontrolliert
 await page.waitForTimeout(7000);
 results.clear();
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(appURL);
 check('Nach Neustart: Seite gleich kontrolliert', await result('initialcontroller', 60000) === 'true', results.get('initialcontroller'));
 check('Nach Neustart: Fetch vom Worker beantwortet', await result('fetch', 30000) === 'from-sw', results.get('fetch'));
 check('Nach Neustart: Cache API des Workers noch da', await result('cached', 30000) === 'cache-ok', results.get('cached'));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

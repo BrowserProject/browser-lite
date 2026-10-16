@@ -1,0 +1,84 @@
+<!doctype html><title>limits</title><body><script>
+// Grenzen der Engine: sehr tief verschachteltes DOM, sehr lange Strings und
+// Speicher bis zum Ende (WASM-Speicher hat hoechstens 4 GB). Danach muss die
+// Engine weiterlaufen. Jede Phase ist eine eigene Aufgabe, weil der GC in der
+// Engine nur zwischen zwei Aufgaben laeuft. Der Speicher kommt zuletzt.
+//   RENDER_WAIT_FOR="LIMITS fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html /tmp/l.ppm 200 200
+// Am Ende "LIMITS fertig=ok", sonst "LIMITS fertig=<phase>:<grund>".
+const MB = 1024 * 1024;
+const nextTask = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+const phases = {
+  // Der Parser begrenzt die Tiefe (WebKit: 512), genaue Zahl nicht pruefen
+  dom() {
+    const host = document.createElement('div');
+    host.innerHTML = '<div>'.repeat(100000) + 'tief' + '</div>'.repeat(100000);
+    document.body.append(host);
+    let depth = 0;
+    for (let node = host; node.firstElementChild; node = node.firstElementChild)
+      depth++;
+    const text = host.textContent;
+    host.remove();
+    console.log('LIMITS dom tiefe=' + depth);
+    return depth > 0 && depth < 100000 && text === 'tief';
+  },
+  // 64 MB als flacher String, dann verdoppeln bis zur Laengengrenze von JSC
+  string() {
+    const flat = 'x'.repeat(64 * MB);
+    const ok = flat.length === 64 * MB && flat.charCodeAt(flat.length - 1) === 120;
+    let rope = flat;
+    try {
+      for (let i = 0; i < 40; i++)
+        rope += rope;
+    } catch (e) {
+      console.log('LIMITS string laenge=' + rope.length + ' ' + e.name);
+      return ok && e instanceof RangeError;
+    }
+    return false;
+  },
+  // 64 MB Puffer bis zum RangeError, dann wieder freigeben
+  memory() {
+    let buffers = [];
+    try {
+      for (let i = 0; i < 200; i++) {
+        const buffer = new ArrayBuffer(64 * MB);
+        new Uint8Array(buffer)[64 * MB - 1] = i;
+        buffers.push(buffer);
+      }
+    } catch (e) {
+      console.log('LIMITS speicher puffer=' + buffers.length + ' ' + e.name);
+      const ok = buffers.length > 0 && e instanceof RangeError;
+      buffers = null;
+      return ok;
+    }
+    return false;
+  },
+  // Nach dem Speicherende: neue Allokation, DOM und Timer gehen wieder
+  async after() {
+    const buffer = new Uint8Array(16 * MB);
+    buffer[buffer.length - 1] = 7;
+    const node = document.body.appendChild(document.createElement('p'));
+    node.textContent = 'danach';
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    console.log('LIMITS danach=' + buffer[buffer.length - 1] + ',' + node.textContent);
+    return buffer[buffer.length - 1] === 7 && document.body.lastChild.textContent === 'danach';
+  },
+};
+
+(async () => {
+  for (const [name, phase] of Object.entries(phases)) {
+    await nextTask();
+    let result;
+    try {
+      result = await phase() ? 'ok' : 'falsch';
+    } catch (e) {
+      result = e.name + ' ' + e.message;
+    }
+    if (result !== 'ok') {
+      console.log('LIMITS fertig=' + name + ':' + result);
+      return;
+    }
+  }
+  console.log('LIMITS fertig=ok');
+})();
+</script>

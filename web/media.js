@@ -6,12 +6,23 @@
 // malt sie in die Seite. Der Ton kommt direkt aus diesem <video>.
 
 import { captureTrack, captureApi } from './capture.js';
+import { domError } from './util.js';
 
 const players = new Map(); // id -> Player
 const fetchSources = new Map(); // fetchId (Engine) -> { source, id (SW) }
 let nextEngineFetchId = 1;
 let engine = null;
 let container = null;
+
+// Muss im Dokument sein, sonst bremst Chrome versteckte Videos
+function hiddenContainer() {
+  if (!container) {
+    container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
+    document.body.appendChild(container);
+  }
+  return container;
+}
 
 const STATE_EVENTS = ['loadedmetadata', 'durationchange', 'loadeddata', 'canplay', 'canplaythrough', 'playing', 'play',
   'pause', 'waiting', 'seeking', 'ended', 'progress', 'resize', 'stalled', 'emptied', 'ratechange', 'suspend'];
@@ -97,13 +108,7 @@ class Player {
     video.addEventListener('error', () => {
       this.send({ type: 'error', code: video.error?.code || 4 });
     });
-    if (!container) {
-      // Muss im Dokument sein, sonst bremst Chrome versteckte Videos
-      container = document.createElement('div');
-      container.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
-      document.body.appendChild(container);
-    }
-    container.appendChild(video);
+    hiddenContainer().appendChild(video);
     if (options.mse) {
       // MSE: eigenes MediaSource, die Daten schickt die Engine (SourceBufferPrivateWasm)
       this.mediaSource = new MediaSource();
@@ -415,12 +420,6 @@ function pipPush(id, event) {
   queue.wake?.();
 }
 
-function pipError(name, message) {
-  const error = new Error(message);
-  error.name = name;
-  return error;
-}
-
 // srcObject-Streams haben keinen Player: eigenes verstecktes <video> mit der
 // Spur (Kamera: Kopie der echten Spur, sonst schreibt die Engine-Senke in
 // einen MediaStreamTrackGenerator). Ids negativ, damit sie nicht mit Playern
@@ -440,38 +439,33 @@ function closeStreamPip(id) {
 
 async function enterStreamPip(info, origin) {
   if (!info || info.kind !== 'video')
-    throw pipError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
+    throw domError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
   let track;
   if (info.capture) {
     const original = await captureTrack(info.capture);
     if (!original || original.readyState === 'ended')
-      throw pipError('InvalidStateError', 'The track has ended.');
+      throw domError('InvalidStateError', 'The track has ended.');
     track = original.clone();
   } else if (info.sink && typeof MediaStreamTrackGenerator === 'function') {
     const worker = captureApi()?.engineWorker();
     if (!worker)
-      throw pipError('InvalidStateError', 'No engine');
+      throw domError('InvalidStateError', 'No engine');
     track = new MediaStreamTrackGenerator({ kind: 'video' });
     worker.postMessage({ blSink: { id: info.sink, writable: track.writable } }, [track.writable]);
   } else
-    throw pipError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
+    throw domError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
   const id = nextStreamPip--;
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
   video.srcObject = new MediaStream([track]);
-  if (!container) {
-    container = document.createElement('div');
-    container.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
-    document.body.appendChild(container);
-  }
-  container.appendChild(video);
+  hiddenContainer().appendChild(video);
   streamPips.set(id, { video, track, origin });
   try {
     if (video.readyState < 1)
       await new Promise((resolve, reject) => {
         video.addEventListener('loadedmetadata', resolve, { once: true });
-        setTimeout(() => reject(pipError('InvalidStateError', 'The video has no frames.')), 5000);
+        setTimeout(() => reject(domError('InvalidStateError', 'The video has no frames.')), 5000);
       });
     await video.play().catch(() => {});
     video.addEventListener('leavepictureinpicture', () => {
@@ -499,9 +493,9 @@ export const pipHostCalls = {
     const id = Number(payload?.player);
     const player = players.get(id);
     if (!player)
-      throw pipError('InvalidStateError', 'The video is gone.');
+      throw domError('InvalidStateError', 'The video is gone.');
     if (!document.pictureInPictureEnabled)
-      throw pipError('NotSupportedError', 'Picture-in-Picture is disabled.');
+      throw domError('NotSupportedError', 'Picture-in-Picture is disabled.');
     const video = player.video;
     if (!player.pipHooked) {
       player.pipHooked = true;

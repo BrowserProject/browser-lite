@@ -3,30 +3,9 @@
 // (platform/wasm/angle) und malt das Ergebnis in die Seite.
 //
 //   cd tests/e2e && node webgl-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'webgl-token-0123456789abcdef';
-const RELAY_PORT = 15801;
-const UI_PORT = 15802;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 // Zwei Canvas: links WebGL 1 (blau mit rotem Dreieck), rechts WebGL 2 (gruen mit gelbem Dreieck)
 const PAGE = `<!doctype html><title>WebGL-Test</title><body style="margin:0;background:#fff">
@@ -304,44 +283,15 @@ const gl = document.createElement('canvas').getContext('webgl');
 result('extensions', gl ? gl.getSupportedExtensions().length : -1);
 </script>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-// Headless Chromium hat sonst kein WebGL
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const stack = await startStack({ token: 'webgl-token-0123456789abcdef' });
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  else if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
-});
-async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key) => results.wait(key);
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 
 const webgl1 = await result('webgl1');
 check('WebGL 1: Dreieck gezeichnet (readPixels)', webgl1?.startsWith('255,0,0,255/0,0,255,255/0'), webgl1);
@@ -375,10 +325,6 @@ while (Date.now() < end) {
 check('WebGL 1: Bild in der Seite (rot auf blau)', center1[0] > 200 && center1[1] < 60 && corner1[2] > 200, JSON.stringify({ center1, corner1 }));
 check('WebGL 2: Bild in der Seite (gelb)', center2[0] > 200 && center2[1] > 200 && center2[2] < 60, JSON.stringify(center2));
 
-await page.screenshot({ path: path.join(root, 'build', 'e2e-webgl.png') }).catch(() => {});
+await screenshot(page, 'webgl');
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

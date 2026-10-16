@@ -3,40 +3,26 @@
 //
 //   node site-test.mjs [engine-ordner] https://example.com/ https://de.wikipedia.org/ ...
 //
-// Ergebnis pro Seite: Titel, Ladezeit, Fehler. Screenshots in build/sites/.
+// Ergebnis pro Seite: Titel, Ladezeit, Fehler. Screenshots in build/sites/
+// (Name aus Host, Pfad und Query, z.B. www.google.com_maps.png).
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, launch as launchChromium, root, startStack } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-let args = process.argv.slice(2);
+const args = process.argv.slice(2);
 let engineDir = path.join(root, 'build', 'webcore', 'bin');
 if (args[0] && !/^[a-z][a-z0-9+.-]*:/i.test(args[0]))
   engineDir = path.resolve(args.shift());
 const sites = args.length ? args : ['https://example.com/'];
-const TOKEN = 'site-token-0123456789abcdef';
-const RELAY_PORT = 15201;
-const UI_PORT = 15202;
 const TIMEOUT = Number(process.env.SITE_TIMEOUT || 120000);
 const extraCA = process.env.SITE_EXTRA_CA ? readFileSync(process.env.SITE_EXTRA_CA, 'utf8') : null;
 const outDir = path.join(root, 'build', 'sites');
 mkdirSync(outDir, { recursive: true });
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-
 // Echtes Relay wie auf dem Server (ohne RELAY_ALLOW_LOCAL)
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [], { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
+const stack = await startStack({ token: 'site-token-0123456789abcdef', allowLocal: false, engine: engineDir });
 // SwiftShader, damit WebGL der Seiten auch ohne GPU (headless, CI) geht
-const launch = () => chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', ...(process.env.SITE_CHROME_ARGS ? process.env.SITE_CHROME_ARGS.split(' ') : [])] });
+const launch = () => launchChromium({ args: [...SWIFTSHADER, ...(process.env.SITE_CHROME_ARGS ? process.env.SITE_CHROME_ARGS.split(' ') : [])] });
 let browser = await launch();
 // Promise mit Zeitlimit (page.evaluate hat keins und haengt, wenn die Seite blockiert)
 const within = (promise, ms, what) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(what)), ms))]);
@@ -49,15 +35,11 @@ async function checkSite(site, page, log) {
   if (extraCA)
     await page.addInitScript((pem) => { window.__blExtraCA = pem; }, extraCA);
   page.on('console', (msg) => log.push(msg.text()));
-  const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: site });
   // SITE_DEBUG=1: Ablauf der Engine mitschreiben (wird nur bei Problemen ausgegeben)
-  if (process.env.SITE_DEBUG)
-    query.set('debug', '1');
   // SITE_ENV=NAME=wert,...: Umgebungsvariablen der Engine (zum Vergleichen von Schaltern)
-  if (process.env.SITE_ENV)
-    query.set('env', process.env.SITE_ENV);
+  const params = { url: site, ...(process.env.SITE_DEBUG ? { debug: '1' } : {}), ...(process.env.SITE_ENV ? { env: process.env.SITE_ENV } : {}) };
   const started = Date.now();
-  await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+  await page.goto(stack.app(params));
   // Erstes sichtbares Layout der Seite (die Engine meldet "first-layout")
   let firstLayout = '-';
   page.waitForFunction(() => window.__blFirstLayout === true, null, { timeout: TIMEOUT, polling: 100 })
@@ -96,7 +78,9 @@ async function checkSite(site, page, log) {
     if (text !== null && text.length < 200)
       result = `fast leere Seite: ${text}`;
   }
-  const file = path.join(outDir, (new URL(site).hostname || 'seite') + '.png');
+  const { hostname, pathname, search } = new URL(site);
+  const name = (hostname + pathname + search).replace(/[^a-zA-Z0-9.-]+/g, '_').replace(/_+$/, '').slice(0, 100) || 'seite';
+  const file = path.join(outDir, `${name}.png`);
   await page.screenshot({ path: file, timeout: 20000 });
   return { result, seconds, title, firstLayout };
 }
@@ -152,6 +136,4 @@ if (process.env.GITHUB_STEP_SUMMARY) {
 }
 
 await browser.close();
-relay.kill();
-ui.kill();
 process.exit(failed ? 1 : 0);

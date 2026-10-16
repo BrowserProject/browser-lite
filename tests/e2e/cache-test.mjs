@@ -7,30 +7,9 @@
 // unter gleicher URL darf den alten Bytecode nicht nehmen.
 //
 //   cd tests/e2e && node cache-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'cache-token-0123456789abcdef';
-const RELAY_PORT = 15801;
-const UI_PORT = 15802;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, 2 * TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit(2 * TIMEOUT + 120000);
 
 const PAGE = `<!doctype html><title>Cache-Test</title><link rel=stylesheet href="/etag.css"><script src="/fresh.js"></script>
 <body>Cache<script>
@@ -55,7 +34,7 @@ console.log('RESULT bc=' + bigVersion + ':' + bigResult(location.hash !== '#half
 </script>`;
 
 const requests = { fresh: 0, etag: 0, etag304: 0, nostore: 0 };
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   switch (req.url) {
   case '/':
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).end(PAGE);
@@ -80,23 +59,12 @@ const site = http.createServer((req, res) => {
     return res.writeHead(404).end();
   }
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'cache-token-0123456789abcdef' });
+const browser = await launch();
 const page = await browser.newPage();
-let results = new Map();
+const results = collect(page);
+const result = (key) => results.wait(key);
 let bytecodeHits = 0;
 let bytecodeCommits = 0;
 page.on('console', (msg) => {
@@ -105,31 +73,16 @@ page.on('console', (msg) => {
   // Statistik-Zeile nach jedem Speicher-Durchgang (engine/src/BytecodeCache.cpp)
   if (/Bytecode-Cache: \d+ Treffer/.test(msg.text()))
     bytecodeCommits++;
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  else if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
 });
-async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 const first = await result('visit');
 check('Erster Besuch vom Netz', first === 'frisch,rgb(1,2,3),netz1', String(first));
 check('Je eine Anfrage', requests.fresh === 1 && requests.etag === 1 && requests.nostore === 1, JSON.stringify(requests));
 
 // Speichern geht asynchron, kurz warten, dann die ganze Oberflaeche neu laden
 await page.waitForTimeout(2000);
-results = new Map();
+results.clear();
 await page.reload();
 const second = await result('visit');
 check('Zweiter Besuch: Inhalte stimmen', second === 'frisch,rgb(1,2,3),netz2', String(second));
@@ -148,9 +101,8 @@ const expected = (version, all) => {
   return `${version}:${t}`;
 };
 async function visitBytecode(hash) {
-  results = new Map();
-  const bcQuery = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL + 'bc' + hash, debug: '1' });
-  await page.goto(`http://localhost:${UI_PORT}/?${bcQuery}`);
+  results.clear();
+  await page.goto(stack.app({ url: siteURL + 'bc' + hash, debug: '1' }));
   const commits = bytecodeCommits;
   const value = await result('bc');
   // Gespeichert wird 5 s nach dem Laden (dabei wird erst kodiert), dann
@@ -176,8 +128,4 @@ const bc5 = await visitBytecode('');
 check('Bytecode: danach neuer Bytecode', bc5 === expected(2, true), String(bc5));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

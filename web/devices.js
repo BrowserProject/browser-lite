@@ -3,7 +3,11 @@
 // Sprachausgabe und Touch. Gegenstueck: engine/src/DeviceClients.cpp,
 // Gamepad.cpp, Speech.cpp und WebView::touchEvent.
 
-let api; // { engine(), toUTF8(text), tabs(), activeTab(), activateTab(tab), position(tab, e) }
+import { rtcHostCalls } from './webrtc.js';
+import { pipHostCalls } from './media.js';
+import { bytesToBase64, base64ToBytes, domError } from './util.js';
+
+let api; // { engine(), toUTF8(text), tabs(), activeTab(), activateTab(tab), focusPage() }
 
 const PERMISSIONS_KEY = 'bl-permissions';
 const KIND_TEXT = {
@@ -89,8 +93,28 @@ function showNextPrompt() {
 }
 
 export function onPermissionRequest(tab, data) {
-  queue.push(data);
+  queue.push({ ...data, view: tab.id });
   showNextPrompt();
+}
+
+// Tab geschlossen: offene Fragen ablehnen (ohne sie zu merken), Standort,
+// Sensoren und Objekte der Host-Bruecke freigeben
+export function forgetTab(tab) {
+  const shown = prompt.hidden ? null : queue[0];
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (queue[i].view === tab.id) {
+      api.engine()._bl_permission_answer(queue[i].id, 0);
+      queue.splice(i, 1);
+    }
+  }
+  if (shown?.view === tab.id) {
+    prompt.hidden = true;
+    showNextPrompt();
+  }
+  onGeolocationStop(tab);
+  onSensorStop(tab, { kind: 'orientation' });
+  onSensorStop(tab, { kind: 'motion' });
+  releaseHostObjects(tab.id);
 }
 
 // ------------------------------------------------------- Standort
@@ -166,24 +190,20 @@ export function onSensorStop(tab, data) {
 // Host-Browsers. Die Engine laesst nur diese Namen durch.
 // File System Access: die Handles des Host bleiben hier, die Seite bekommt nur
 // eine zufaellige id. Jede id gilt nur fuer den Ursprung, der sie bekommen hat.
-const fsHandles = new Map(); // id -> { handle, origin }
-const fsWritables = new Map(); // id -> { writable, origin }
+const fsHandles = new Map(); // id -> { handle, origin, view }
+const fsWritables = new Map(); // id -> { writable, origin, view }
 const FS_MAX_FILE = 256 * 1024 * 1024;
 
-function fsError(name, message) {
-  return Object.assign(new Error(message), { name });
-}
-
-function fsInfo(handle, origin) {
+function fsInfo(handle, origin, view) {
   const id = crypto.randomUUID();
-  fsHandles.set(id, { handle, origin });
+  fsHandles.set(id, { handle, origin, view });
   return { id, name: handle.name, kind: handle.kind };
 }
 
 function fsHandle(id, origin, kind) {
   const entry = fsHandles.get(id);
   if (!entry || entry.origin !== origin || (kind && entry.handle.kind !== kind))
-    throw fsError('NotFoundError', 'Handle not found');
+    throw domError('NotFoundError', 'Handle not found');
   return entry.handle;
 }
 
@@ -198,59 +218,38 @@ function fsPickerOptions(payload) {
 
 function fsNeed(name) {
   if (typeof window[name] !== 'function')
-    throw fsError('NotSupportedError', name + ' not supported');
+    throw domError('NotSupportedError', name + ' not supported');
 }
-
-async function bytesToBase64(bytes) {
-  if (typeof bytes.toBase64 === 'function')
-    return bytes.toBase64();
-  const url = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(new Blob([bytes]));
-  });
-  return url.slice(url.indexOf(',') + 1);
-}
-
-function base64ToBytes(text) {
-  if (typeof Uint8Array.fromBase64 === 'function')
-    return Uint8Array.fromBase64(text);
-  return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-}
-
-import { rtcHostCalls } from './webrtc.js';
-import { pipHostCalls } from './media.js';
 
 const hostCalls = {
-  async 'fs-open'(payload, origin) {
+  async 'fs-open'(payload, origin, view) {
     fsNeed('showOpenFilePicker');
-    return (await window.showOpenFilePicker(fsPickerOptions(payload))).map((handle) => fsInfo(handle, origin));
+    return (await window.showOpenFilePicker(fsPickerOptions(payload))).map((handle) => fsInfo(handle, origin, view));
   },
-  async 'fs-save'(payload, origin) {
+  async 'fs-save'(payload, origin, view) {
     fsNeed('showSaveFilePicker');
-    return fsInfo(await window.showSaveFilePicker(fsPickerOptions(payload)), origin);
+    return fsInfo(await window.showSaveFilePicker(fsPickerOptions(payload)), origin, view);
   },
-  async 'fs-directory'(payload, origin) {
+  async 'fs-directory'(payload, origin, view) {
     fsNeed('showDirectoryPicker');
-    return fsInfo(await window.showDirectoryPicker(fsPickerOptions(payload)), origin);
+    return fsInfo(await window.showDirectoryPicker(fsPickerOptions(payload)), origin, view);
   },
   async 'fs-file'(payload, origin) {
     const file = await fsHandle(payload?.id, origin, 'file').getFile();
     if (file.size > FS_MAX_FILE)
-      throw fsError('NotReadableError', 'File too large');
-    return { name: file.name, type: file.type, lastModified: file.lastModified, data: await bytesToBase64(new Uint8Array(await file.arrayBuffer())) };
+      throw domError('NotReadableError', 'File too large');
+    return { name: file.name, type: file.type, lastModified: file.lastModified, data: bytesToBase64(new Uint8Array(await file.arrayBuffer())) };
   },
-  async 'fs-writable'(payload, origin) {
+  async 'fs-writable'(payload, origin, view) {
     const writable = await fsHandle(payload?.id, origin, 'file').createWritable({ keepExistingData: !!payload?.keepExistingData });
     const id = crypto.randomUUID();
-    fsWritables.set(id, { writable, origin });
+    fsWritables.set(id, { writable, origin, view });
     return { id };
   },
   async 'fs-write'(payload, origin) {
     const entry = fsWritables.get(payload?.id);
     if (!entry || entry.origin !== origin)
-      throw fsError('InvalidStateError', 'Stream is closed');
+      throw domError('InvalidStateError', 'Stream is closed');
     const { writable } = entry;
     switch (payload.op) {
     case 'write': {
@@ -274,16 +273,16 @@ const hostCalls = {
       return null;
     }
   },
-  async 'fs-child'(payload, origin) {
+  async 'fs-child'(payload, origin, view) {
     const directory = fsHandle(payload?.id, origin, 'directory');
     const options = { create: !!payload.create };
     const handle = payload.kind === 'directory' ? await directory.getDirectoryHandle(payload.name, options) : await directory.getFileHandle(payload.name, options);
-    return fsInfo(handle, origin);
+    return fsInfo(handle, origin, view);
   },
-  async 'fs-list'(payload, origin) {
+  async 'fs-list'(payload, origin, view) {
     const list = [];
     for await (const handle of fsHandle(payload?.id, origin, 'directory').values())
-      list.push(fsInfo(handle, origin));
+      list.push(fsInfo(handle, origin, view));
     return list;
   },
   async 'fs-remove'(payload, origin) {
@@ -306,7 +305,7 @@ const hostCalls = {
   },
   async eyedropper() {
     if (typeof EyeDropper !== 'function')
-      throw Object.assign(new Error('EyeDropper not supported'), { name: 'NotSupportedError' });
+      throw domError('NotSupportedError', 'EyeDropper not supported');
     const result = await new EyeDropper().open();
     return { sRGBHex: result.sRGBHex };
   },
@@ -319,7 +318,7 @@ const hostCalls = {
   },
   async 'keyboard-lock'(payload) {
     if (!navigator.keyboard?.lock)
-      throw Object.assign(new Error('Keyboard lock not supported'), { name: 'NotSupportedError' });
+      throw domError('NotSupportedError', 'Keyboard lock not supported');
     await navigator.keyboard.lock(payload?.keyCodes || undefined);
     return null;
   },
@@ -335,13 +334,13 @@ const hostCalls = {
 };
 
 // WebCodecs ImageDecoder der Seiten (Polyfill in engine/src/WebPlatformExtras.cpp)
-const imageDecoders = new Map(); // id -> { decoder, origin }
+const imageDecoders = new Map(); // id -> { decoder, origin, view }
 let nextImageDecoder = 1;
 
 function imageDecoderFor(payload, origin) {
   const entry = imageDecoders.get(payload?.id);
   if (!entry || entry.origin !== origin)
-    throw Object.assign(new Error('The decoder has been closed.'), { name: 'InvalidStateError' });
+    throw domError('InvalidStateError', 'The decoder has been closed.');
   return entry.decoder;
 }
 
@@ -356,9 +355,9 @@ Object.assign(hostCalls, {
   async 'image-supported'(payload) {
     return typeof ImageDecoder === 'function' && await ImageDecoder.isTypeSupported(String(payload?.type));
   },
-  async 'image-open'(payload, origin) {
+  async 'image-open'(payload, origin, view) {
     if (typeof ImageDecoder !== 'function')
-      throw Object.assign(new Error('ImageDecoder is not available'), { name: 'NotSupportedError' });
+      throw domError('NotSupportedError', 'ImageDecoder is not available');
     const init = { data: base64ToBytes(payload?.data || ''), type: String(payload?.type) };
     if (typeof payload?.preferAnimation === 'boolean')
       init.preferAnimation = payload.preferAnimation;
@@ -366,7 +365,7 @@ Object.assign(hostCalls, {
     await decoder.tracks.ready;
     await decoder.completed;
     const id = nextImageDecoder++;
-    imageDecoders.set(id, { decoder, origin });
+    imageDecoders.set(id, { decoder, origin, view });
     const tracks = [];
     for (let i = 0; i < decoder.tracks.length; i++) {
       const track = decoder.tracks[i];
@@ -383,7 +382,7 @@ Object.assign(hostCalls, {
       const context = canvas.getContext('2d', { willReadFrequently: true });
       context.drawImage(image, 0, 0, width, height);
       const pixels = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
-      return { width, height, timestamp: image.timestamp, duration: image.duration, data: await bytesToBase64(pixels) };
+      return { width, height, timestamp: image.timestamp, duration: image.duration, data: bytesToBase64(pixels) };
     } finally {
       image.close();
     }
@@ -397,13 +396,34 @@ Object.assign(hostCalls, {
 
 Object.assign(hostCalls, rtcHostCalls, pipHostCalls);
 
+// Decoder, Writables und Handles eines geschlossenen Tabs. Beim Navigieren
+// bleiben sie: das Dokument kann im Back/Forward-Cache weiterleben.
+function releaseHostObjects(view) {
+  for (const [id, entry] of imageDecoders) {
+    if (entry.view === view) {
+      imageDecoders.delete(id);
+      entry.decoder.close();
+    }
+  }
+  for (const [id, entry] of fsWritables) {
+    if (entry.view === view) {
+      fsWritables.delete(id);
+      entry.writable.abort().catch(() => {});
+    }
+  }
+  for (const [id, entry] of fsHandles) {
+    if (entry.view === view)
+      fsHandles.delete(id);
+  }
+}
+
 export async function onHostCall(tab, data) {
   const send = (ok, value) => api.engine()._bl_host_call_result(data.id, ok ? 1 : 0, api.toUTF8(JSON.stringify(value ?? null)));
   const handler = hostCalls[data.name];
   if (!handler)
     return send(false, { name: 'NotSupportedError', message: 'Not supported' });
   try {
-    send(true, await handler(JSON.parse(data.payload || 'null'), data.origin || ''));
+    send(true, await handler(JSON.parse(data.payload || 'null'), data.origin || '', tab.id));
   } catch (error) {
     send(false, { name: error?.name || 'NotSupportedError', message: error?.message || String(error) });
   }

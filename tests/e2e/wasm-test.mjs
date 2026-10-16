@@ -7,33 +7,12 @@
 // fixtures/ enthaelt ein kleines Modul (small.c) und ein Emscripten-Programm
 // mit JS-Glue (program.cpp), neu bauen mit fixtures/build.sh.
 import fs from 'node:fs';
-import http from 'node:http';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, check, collect, finish, here, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'wasm-token-0123456789abcdef';
-const RELAY_PORT = 15701;
-const UI_PORT = 15702;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
 // Ausgabe von program.cpp (in node mit dem Original gemessen)
 const PROGRAM_RESULT = '3029871313';
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><title>WebAssembly-Test</title><body>WebAssembly<script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + value);
@@ -114,7 +93,7 @@ const importsModule = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
 const PROGRAM_PAGE = '<!doctype html><title>Emscripten</title><body>Emscripten<script src="/program.js"></script>';
 
 const fixtures = path.join(here, 'fixtures');
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/')
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
   if (req.url === '/program.html')
@@ -124,44 +103,17 @@ const site = http.createServer((req, res) => {
     return res.writeHead(200, { 'Content-Type': req.url.endsWith('.wasm') ? 'application/wasm' : 'text/javascript' }).end(fs.readFileSync(file));
   res.writeHead(404).end();
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'wasm-token-0123456789abcdef' });
+const browser = await launch();
 const page = await browser.newPage();
-const results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(.*?)(?: \((?:https?|file):[^)]*\))?$/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  else if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
-});
+const results = collect(page, /RESULT (\w+)=(.*?)(?: \((?:https?|file):[^)]*\))?$/);
 async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    if (results.has('fehler'))
-      return 'fehler: ' + results.get('fehler');
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
+  const value = await results.wait(key, TIMEOUT, () => results.has('fehler'));
+  return value ?? (results.has('fehler') ? 'fehler: ' + results.get('fehler') : null);
 }
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 
 check('WebAssembly da, nicht aufzaehlbar', (await result('typeof')) === 'object,false,[object WebAssembly]', results.get('typeof'));
 check('validate', (await result('validate')) === 'true,false', results.get('validate'));
@@ -184,8 +136,4 @@ await page.press('#address', 'Enter');
 check('Emscripten-Programm', (await result('emscripten')) === PROGRAM_RESULT, results.get('emscripten'));
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

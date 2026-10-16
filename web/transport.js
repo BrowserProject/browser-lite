@@ -23,6 +23,7 @@ const CLOSE = 0x04;
 const STREAM_TCP = 0x01;
 
 const CLOSE_VOLUNTARY = 0x02;
+const HANDSHAKE_TIMEOUT = 15000;
 
 export class WispTransport {
   constructor(url) {
@@ -34,6 +35,8 @@ export class WispTransport {
     this.ws = null;
   }
 
+  // Jeder WebSocket hat seinen eigenen Handshake. Geht er zu, baut das
+  // naechste openTCP einen neuen auf (z.B. nach einem Neustart des Relays).
   connect() {
     if (this.ready)
       return this.ready;
@@ -41,39 +44,46 @@ export class WispTransport {
       const ws = new NativeWebSocket(this.url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
-      let opened = false;
-      ws.onopen = () => {
-        opened = true;
-      };
-      ws.onmessage = (event) => {
-        const packet = new Uint8Array(event.data);
-        // Das erste CONTINUE auf Stream 0 sagt uns die Puffergroesse
-        if (!this.bufferSize && packet[0] === CONTINUE) {
-          this.bufferSize = new DataView(packet.buffer).getUint32(5, true);
-          resolve();
-          return;
-        }
-        this.handlePacket(packet);
-      };
+      let handshake = false;
       let closed = false;
       const onClosed = () => {
         if (closed)
           return;
         closed = true;
+        clearTimeout(timeout);
         if (this.ws === ws)
           this.ready = null;
         for (const stream of this.streams.values())
           stream.closed(0x03); // Netzwerkfehler
         this.streams.clear();
-        if (!opened)
+        if (!handshake)
           reject(new Error('Wisp-Verbindung fehlgeschlagen: ' + this.url));
+      };
+      // Antwortet etwas ohne Wisp (z.B. ein Proxy), nicht ewig warten
+      const timeout = setTimeout(() => {
+        onClosed();
+        ws.close();
+      }, HANDSHAKE_TIMEOUT);
+      ws.onmessage = (event) => {
+        if (closed)
+          return;
+        const packet = new Uint8Array(event.data);
+        if (handshake) {
+          this.handlePacket(packet);
+          return;
+        }
+        // Das erste CONTINUE auf Stream 0 sagt uns die Puffergroesse
+        const view = new DataView(packet.buffer);
+        if (packet.length >= 9 && packet[0] === CONTINUE && view.getUint32(1, true) === 0) {
+          handshake = true;
+          clearTimeout(timeout);
+          this.bufferSize = view.getUint32(5, true);
+          resolve();
+        }
       };
       ws.onclose = onClosed;
       // Node (undici) schickt bei abgelehntem Handshake nur error, kein close
-      ws.onerror = () => {
-        if (!opened)
-          onClosed();
-      };
+      ws.onerror = onClosed;
     });
     return this.ready;
   }

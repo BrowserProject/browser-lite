@@ -6,30 +6,9 @@
 // und ein WebM-Clip, aufgenommen mit MediaRecorder im Test-Chromium.
 //
 //   cd tests/e2e && node media-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, canvasOrigin, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'media-token-0123456789abcdef';
-const RELAY_PORT = 15601;
-const UI_PORT = 15602;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 180000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit(TIMEOUT + 180000);
 
 // --------------------------------------------------------- Testdateien
 
@@ -54,7 +33,7 @@ function wav(seconds, rate = 44100) {
 }
 const TONE = wav(30);
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const browser = await launch();
 
 // WebM: 3 s, Canvas immer rot (Farbe pruefen wir spaeter in der Engine)
 async function recordClip() {
@@ -181,11 +160,46 @@ source.addEventListener('sourceopen', async () => {
 });
 </script>`;
 
+// Server mit Eigenheiten bei Range: /star.wav ohne bekannte Laenge (bytes a-b/*),
+// /short.wav mit leerem 206 ab 2 MB (Datei kuerzer als angegeben)
+const RANGE_PAGE = (file) => `<!doctype html><title>Range-Test</title><audio src="/${file}" muted preload="auto"></audio>`;
+const SHORT_AT = 2 * 1024 * 1024;
+
+function oddRange(req, res) {
+  const match = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
+  if (!match) {
+    res.writeHead(200, { 'Content-Type': 'audio/wav' }).end(TONE);
+    return;
+  }
+  const start = Number(match[1]);
+  const end = match[2] ? Math.min(Number(match[2]), TONE.length - 1) : TONE.length - 1;
+  if (req.url === '/short.wav' && start >= SHORT_AT) {
+    res.writeHead(206, { 'Content-Type': 'audio/wav', 'Content-Length': 0, 'Content-Range': `bytes ${start}-${end}/${TONE.length}` }).end();
+    return;
+  }
+  if (start >= TONE.length) {
+    res.writeHead(416, { 'Content-Range': 'bytes */*' }).end();
+    return;
+  }
+  const total = req.url === '/star.wav' ? '*' : TONE.length;
+  res.writeHead(206, { 'Content-Type': 'audio/wav', 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${total}` });
+  res.end(TONE.subarray(start, end + 1));
+}
+
 const ranges = [];
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   const files = { '/clip.webm': [CLIP, 'video/webm'], '/tone.wav': [TONE, 'audio/wav'] };
   if (req.url === '/' || req.url === '/mse.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/' ? PAGE : MSE_PAGE);
+    return;
+  }
+  const rangePage = /^\/range-(\w+)\.html$/.exec(req.url);
+  if (rangePage) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(RANGE_PAGE(rangePage[1] + '.wav'));
+    return;
+  }
+  if (req.url === '/star.wav' || req.url === '/short.wav') {
+    oddRange(req, res);
     return;
   }
   const file = files[req.url];
@@ -205,42 +219,13 @@ const site = http.createServer((req, res) => {
   res.writeHead(206, { 'Content-Type': type, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${data.length}`, 'Accept-Ranges': 'bytes' });
   res.end(data.subarray(start, end + 1));
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
+const stack = await startStack({ token: 'media-token-0123456789abcdef' });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  else if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
-});
-page.on('pageerror', (error) => console.log('   Seitenfehler:', error.message));
-async function result(key, timeout = TIMEOUT) {
-  const end = Date.now() + timeout;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key, timeout = TIMEOUT) => results.wait(key, timeout);
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 
 check('Video: Metadaten', (await result('videometa')) === '320x240', results.get('videoerror') ? `Fehler ${results.get('videoerror')}` : results.get('videometa'));
 check('Video: play() (stumm, ohne Klick)', (await result('videoplay')) === 'ok', results.get('videoplay'));
@@ -263,11 +248,7 @@ check('Video: Bild in der Seite gemalt', pixel && pixel.r > 180 && pixel.g < 60 
 check('Video: requestVideoFrameCallback', (await result('rvfc')) === 'ok,320x240,true', results.get('rvfc'));
 
 // Picture-in-Picture: Klick aufs Video
-const box = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  const rect = canvas.getBoundingClientRect();
-  return { x: rect.left, y: rect.top };
-});
+const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 180, box.y + 140);
 check('Picture-in-Picture: requestPictureInPicture', (await result('pip', 20000)) === 'true,true,true', results.get('pip'));
 check('Picture-in-Picture: Ereignisse und exit', (await result('pipevents', 20000)) === 'enter:true|leave,true', results.get('pipevents'));
@@ -283,7 +264,7 @@ check('Audio: spielt nach dem Springen weiter', after > seeked + 0.5, String(aft
 const toneRanges = ranges.filter((r) => r.startsWith('/tone.wav'));
 check('Daten in Stuecken (Range ueber das Relay)', toneRanges.length >= 2, toneRanges.join(' '));
 
-await page.screenshot({ path: path.join(root, 'build', 'e2e-media.png') }).catch(() => {});
+await screenshot(page, 'media');
 
 // ------------------------------------------------------------------ MSE
 await page.fill('#address', siteURL + 'mse.html');
@@ -307,7 +288,7 @@ while (Date.now() < mseEnd) {
   await page.waitForTimeout(250);
 }
 check('MSE: Bild in der Seite gemalt', msePixel && msePixel.r > 180 && msePixel.g < 60 && msePixel.b < 60, JSON.stringify(msePixel));
-await page.screenshot({ path: path.join(root, 'build', 'e2e-mse.png') }).catch(() => {});
+await screenshot(page, 'mse');
 const mseRemoved = await result('mseremoved');
 check('MSE: remove() in der Engine', Number(mseRemoved) > 2 && Number(mseRemoved) <= 2.5, mseRemoved);
 let hostBuffered = null;
@@ -320,9 +301,50 @@ while (Date.now() < removeEnd) {
   await page.waitForTimeout(250);
 }
 check('MSE: remove() auch im Host', hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6, JSON.stringify(hostBuffered));
+
+// ------------------------------------------- Range-Sonderfaelle (web/sw.js)
+// Die Antwort des Service Workers muss enden, statt endlos weiterzuladen.
+// Wir lesen bl-media/<player> direkt, wie es das <video> der Oberflaeche tut.
+async function openPlayer(url) {
+  const before = new Set((await page.evaluate(() => window.__blMediaState())).map((p) => p.id));
+  await page.fill('#address', url);
+  await page.press('#address', 'Enter');
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    const fresh = (await page.evaluate(() => window.__blMediaState())).find((p) => !before.has(p.id));
+    if (fresh)
+      return fresh.id;
+    await page.waitForTimeout(250);
+  }
+  return null;
+}
+const mediaFetch = (id, range) => page.evaluate(async ({ id, range }) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(`bl-media/${id}/range-test`, { headers: range ? { Range: range } : {}, signal: controller.signal });
+    const length = (await response.arrayBuffer()).byteLength;
+    return `${response.status} ${response.headers.get('Content-Range') || '-'} ${length}`;
+  } catch (e) {
+    return e.name;
+  } finally {
+    clearTimeout(timer);
+  }
+}, { id, range });
+
+const starPlayer = await openPlayer(siteURL + 'range-star.html');
+check('Range ohne Laenge (/*): Player da', starPlayer !== null);
+if (starPlayer !== null) {
+  const open = await mediaFetch(starPlayer, 'bytes=0-');
+  check('Range ohne Laenge (/*): offener Range liefert das erste Stueck', open === `206 bytes 0-${2 * 1024 * 1024 - 1}/* ${2 * 1024 * 1024}`, open);
+  const whole = await mediaFetch(starPlayer, null);
+  check('Range ohne Laenge (/*): ganze Datei endet am Dateiende', whole === `200 - ${TONE.length}`, whole);
+}
+const shortPlayer = await openPlayer(siteURL + 'range-short.html');
+check('Leeres 206: Player da', shortPlayer !== null);
+if (shortPlayer !== null) {
+  const short = await mediaFetch(shortPlayer, 'bytes=0-');
+  check('Leeres 206: Antwort endet ohne Fortschritt', /^206 .* 2097152$/.test(short), short);
+}
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

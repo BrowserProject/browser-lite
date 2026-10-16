@@ -4,31 +4,11 @@
 // ("RESULT name=wert"), die Oberflaeche gibt die Konsole der Seite weiter.
 //
 //   cd tests/e2e && node input-test.mjs [engine-ordner]
-import http from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, canvasOrigin, check, collect, finish, launch, root, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'input-token-0123456789abcdef';
-const RELAY_PORT = 15301;
-const UI_PORT = 15302;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 240000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit(TIMEOUT + 240000);
 
 // ------------------------------------------------------------ Testseiten
 
@@ -104,7 +84,7 @@ const PAGE = `<!doctype html>
 
 const POPUP = '<!doctype html><title>Popup-Seite</title><p>Ich bin ein Popup</p><script>console.log("RESULT popup=" + document.title)</script>';
 
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
   } else if (req.url === '/popup.html') {
@@ -122,69 +102,22 @@ const site = http.createServer((req, res) => {
     res.writeHead(404).end();
   }
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
 // ------------------------------------------------------- Relay + Oberflaeche
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'input-token-0123456789abcdef' });
+const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, acceptDownloads: true });
 const page = await context.newPage();
+const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
+const result = (key, timeout = 30000) => results.wait(key, timeout);
 
-const results = new Map();
-const waiters = [];
-page.on('pageerror', (error) => console.log('[chromium fehler]', error.message));
-page.on('console', (msg) => {
-  if (process.env.E2E_LOG)
-    console.log('[chromium]', msg.text());
-  const match = /RESULT (\w+)=(.*?)(\s+\(|$)/.exec(msg.text());
-  if (!match)
-    return;
-  results.set(match[1], match[2]);
-  for (const waiter of [...waiters]) {
-    if (results.has(waiter.key)) {
-      waiters.splice(waiters.indexOf(waiter), 1);
-      waiter.resolve(results.get(waiter.key));
-    }
-  }
-});
-function result(key, timeout = 30000) {
-  if (results.has(key))
-    return Promise.resolve(results.get(key));
-  return new Promise((resolve) => {
-    const waiter = { key, resolve };
-    waiters.push(waiter);
-    setTimeout(() => {
-      if (waiters.includes(waiter)) {
-        waiters.splice(waiters.indexOf(waiter), 1);
-        resolve(null);
-      }
-    }, timeout);
-  });
-}
-
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL }));
 check('Seite bereit', (await result('ready', TIMEOUT)) === '1');
 
 // Position im Canvas des aktiven Tabs -> Position im Fenster
 async function at(x, y) {
-  const box = await page.evaluate(() => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-    const rect = canvas.getBoundingClientRect();
-    return { x: rect.left, y: rect.top };
-  });
+  const box = await canvasOrigin(page);
   return [box.x + x, box.y + y];
 }
 
@@ -373,10 +306,6 @@ check('Vollbild (requestFullscreen)', fullscreen === 'ok' && (await result('fson
 await page.evaluate(() => document.exitFullscreen().catch(() => {}));
 check('Vollbild beenden kommt bei der Seite an', (await result('fsoff')) === '1');
 
-await page.screenshot({ path: path.join(root, 'build', 'e2e-input.png') }).catch(() => {});
+await screenshot(page, 'input');
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

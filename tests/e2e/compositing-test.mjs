@@ -4,30 +4,9 @@
 // laufen weiter, waehrend das JS der Seite blockiert (Compositor-/Scroll-Thread).
 //
 //   cd tests/e2e && node compositing-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'compositing-token-0123456789abcdef';
-const RELAY_PORT = 15811;
-const UI_PORT = 15812;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 // Oben links drei Farbfelder, darunter ein Kasten, der per CSS-Animation hin und
 // her faehrt, rechts ein unscharfer Kasten und ein WebGL-Canvas. Die Leiste oben
@@ -77,54 +56,16 @@ document.getElementById('trap').addEventListener('wheel', (e) => { e.preventDefa
 console.log('RESULT ready=1');
 </script>`;
 
-const site = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-// Auch bei Abbruch (Zeitlimit) die Hilfsprozesse beenden
-process.on('exit', () => {
-  relay.kill();
-  ui.kill();
-});
-
-// Headless Chromium hat sonst kein WebGL
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const stack = await startStack({ token: 'compositing-token-0123456789abcdef' });
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = new Map();
-const logs = [];
-page.on('console', (msg) => {
-  const text = msg.text();
-  const match = /RESULT (\w+)=(\S*)/.exec(text);
-  if (match)
-    results.set(match[1], match[2]);
-  else {
-    logs.push(text);
-    if (process.env.E2E_VERBOSE)
-      console.log('   ', text);
-  }
-});
-async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
+const results = collect(page);
+const result = (key) => results.wait(key);
+const logs = results.logs;
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL, compositing: '1', debug: '1', env: process.env.COMP_ENV || '' });
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+await page.goto(stack.app({ url: siteURL, compositing: '1', debug: '1', env: process.env.COMP_ENV || '' }));
 check('Seite geladen', await result('ready') === '1');
 
 const pixelAt = (x, y) => page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
@@ -141,7 +82,7 @@ async function waitFor(condition, ms = 20000) {
 }
 
 await waitFor(async () => near(await pixelAt(50, 90), [255, 0, 0]));
-await page.screenshot({ path: path.join(root, 'build', 'e2e-compositing-top.png') }).catch(() => {});
+await screenshot(page, 'compositing-top');
 const red = await pixelAt(50, 90), green = await pixelAt(130, 90), blue = await pixelAt(210, 90);
 check('Farben stimmen (rot, gruen, blau)', near(red, [255, 0, 0]) && near(green, [0, 255, 0]) && near(blue, [0, 0, 255]), JSON.stringify({ red, green, blue }));
 const bar = await pixelAt(500, 20);
@@ -252,10 +193,6 @@ await waitFor(async () => near(afterLoss = await pixelAt(50, 130), [0, 0, 255]),
 const barAfterLoss = await pixelAt(500, 20);
 check('Nach GPU-Verlust weiter gemalt (ohne Ebenen)', near(afterLoss, [0, 0, 255]) && near(barAfterLoss, [255, 128, 0]), JSON.stringify({ afterLoss, barAfterLoss }));
 
-await page.screenshot({ path: path.join(root, 'build', 'e2e-compositing.png') }).catch(() => {});
+await screenshot(page, 'compositing');
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

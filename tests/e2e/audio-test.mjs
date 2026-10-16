@@ -7,30 +7,9 @@
 // engine.data) und dass nach einem Klick wirklich Ton beim Host ankommt.
 //
 //   cd tests/e2e && node audio-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'audio-token-0123456789abcdef';
-const RELAY_PORT = 15501;
-const UI_PORT = 15502;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const PAGE = `<!doctype html><title>Audio-Test</title><body style="margin:0;height:100vh;background:#eef">Audio-Test<script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + value);
@@ -150,48 +129,14 @@ async function hrtfTest() {
 })();
 </script>`;
 
-const site = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
-});
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'audio-token-0123456789abcdef' });
+const browser = await launch();
 const page = await browser.newPage();
-const results = new Map();
-page.on('console', (msg) => {
-  const match = /RESULT (\w+)=(\S*)/.exec(msg.text());
-  if (match)
-    results.set(match[1], match[2]);
-  else if (process.env.E2E_VERBOSE)
-    console.log('   ', msg.text());
-});
-page.on('pageerror', (error) => console.log('   Seitenfehler:', error.message));
-async function result(key) {
-  const end = Date.now() + TIMEOUT;
-  while (Date.now() < end) {
-    if (results.has(key))
-      return results.get(key);
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return null;
-}
-
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN, url: siteURL });
-if (process.env.E2E_DEBUG)
-  query.set('debug', '1');
-await page.goto(`http://localhost:${UI_PORT}/?${query}`);
+const results = collect(page);
+const result = (key) => results.wait(key);
+await page.goto(stack.app({ url: siteURL }));
 
 const sine = await result('sine');
 check('Oszillator ist ein sauberer Sinus', Number(sine) < 0.01, `(Abweichung ${sine})`);
@@ -203,12 +148,8 @@ const [decodedRate, decodedLength, decodedPeak] = decode.split(',').map(Number);
 check('decodeAudioData (WAV 22.05 kHz -> 48 kHz)', decodedRate === 48000 && Math.abs(decodedLength - 48000) < 100 && Math.abs(decodedPeak - 0.49) < 0.03, decode);
 
 // Klick als Benutzer-Aktion, damit der Host-AudioContext starten darf
-const box = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
-  const rect = canvas.getBoundingClientRect();
-  return [rect.left + 50, rect.top + 50];
-});
-await page.mouse.click(...box);
+const box = await canvasOrigin(page);
+await page.mouse.click(box.x + 50, box.y + 50);
 
 const analyser = Number(await result('analyser'));
 check('AnalyserNode findet 440 Hz', Math.abs(analyser - 440) < 30, `(${analyser} Hz)`);
@@ -250,8 +191,4 @@ const [left, right] = hrtf.split(',').map(Number);
 check('HRTF-Panner (Quelle rechts)', right > 0.05 && right > left, hrtf);
 
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();

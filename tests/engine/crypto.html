@@ -162,8 +162,6 @@ const tests = {
     return hex(one) === hex(two) && jwk.x === b64url(await s.exportKey('raw', a.publicKey));
   },
 };
-// Noch nicht umgesetzt
-const KNOWN_MISSING = [];
 (async () => {
   let bad = 0;
   for (const [name, test] of Object.entries(tests)) {
@@ -174,7 +172,7 @@ const KNOWN_MISSING = [];
     } catch (e) {
       console.log('CRYPTO ' + name + '=FEHLER ' + e.name + ': ' + e.message);
     }
-    if (!ok && !KNOWN_MISSING.includes(name))
+    if (!ok)
       bad++;
   }
   console.log('CRYPTO fertig=' + (bad ? bad + ' Fehler' : 'ok'));

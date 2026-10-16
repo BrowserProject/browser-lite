@@ -96,7 +96,7 @@ async function mediaResponse(event, player) {
         position += bytes.length;
         streamController?.enqueue(bytes);
       },
-      onEnd: () => chunkDone(),
+      onEnd: () => chunkDone(range.start, firstEnd),
       onError: (message) => {
         resolve({ status: 502, error: message });
         fail(message);
@@ -111,14 +111,21 @@ async function mediaResponse(event, player) {
   const chunked = head.status === 206 && rangeMatch;
   if (chunked && rangeMatch[3] !== '*')
     total = Number(rangeMatch[3]);
-  const lastByte = range.end >= 0 ? range.end : total - 1;
+  // Letztes Byte der Antwort. Ohne bekannte Laenge (bytes a-b/*) und mit
+  // offenem Range nur das erste Stueck, den Rest fragt der Browser neu an.
+  let lastByte = range.end >= 0 ? range.end : Infinity;
+  if (total >= 0)
+    lastByte = Math.min(lastByte, total - 1);
+  else if (chunked && wantsRange && range.end < 0)
+    lastByte = Number(rangeMatch[2]);
 
-  function chunkDone() {
+  function chunkDone(start, end) {
     current?.done();
     current = null;
-    if (!chunked || (total >= 0 && position > lastByte)) {
-      finished = true;
-      streamController?.close();
+    // Fertig: alles da, kein Fortschritt mehr, oder ohne bekannte Laenge ein
+    // kuerzeres Stueck als angefragt (Dateiende)
+    if (!chunked || position > lastByte || position === start || (total < 0 && position <= end)) {
+      finish();
       return;
     }
     // Naechstes Stueck sofort, wenn noch Platz ist, sonst wenn der Browser liest (pull)
@@ -126,6 +133,13 @@ async function mediaResponse(event, player) {
       fetchNext();
     else
       waitingForPull = true;
+  }
+
+  function finish() {
+    finished = true;
+    try {
+      streamController?.close();
+    } catch {}
   }
 
   function fail(message) {
@@ -137,17 +151,26 @@ async function mediaResponse(event, player) {
 
   function fetchNext() {
     waitingForPull = null;
-    const end = total >= 0 ? Math.min(lastByte, position + CHUNK - 1) : position + CHUNK - 1;
-    current = engineFetch(client, player, position, end, {
+    const start = position;
+    const end = Math.min(lastByte, position + CHUNK - 1);
+    const request = current = engineFetch(client, player, start, end, {
       onHead: (next) => {
-        if (next.status !== 206)
+        if (next.status === 206)
+          return;
+        request.cancel();
+        current = null;
+        // 416 heisst: hinter dem Ende, also fertig. Ohne bekannte Laenge auch
+        // jeder andere Status, sonst hat sich die Datei geaendert.
+        if (next.status === 416 || total < 0)
+          finish();
+        else
           fail('Range nicht mehr unterstuetzt');
       },
       onData: (bytes) => {
         position += bytes.length;
         streamController?.enqueue(bytes);
       },
-      onEnd: () => chunkDone(),
+      onEnd: () => chunkDone(start, end),
       onError: fail,
     });
   }

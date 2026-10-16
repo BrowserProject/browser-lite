@@ -269,6 +269,15 @@ window.addEventListener('pointerdown', (e) => {
     finishPicker(true);
 }, true);
 
+// Tab geschlossen: seine Liste oder Auswahl nicht ueber dem naechsten Tab
+// stehen lassen. Die Engine schliesst ihre Seite selber (Choosers.cpp).
+export function closePickers(tab) {
+  if (popupTab === tab)
+    closeSelectPopup();
+  if (picker?.tab === tab)
+    finishPicker(false);
+}
+
 // ------------------------------------------------------- Link und Tooltip
 
 const linkStatus = document.createElement('div');

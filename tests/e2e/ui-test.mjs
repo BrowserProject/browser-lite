@@ -1,32 +1,12 @@
 // End-to-End Test fuer die Oberflaeche (web/library.js): Verlauf, Lesezeichen,
 // Vorschlaege in der Adressleiste, Suchmaschine, Sitzung wiederherstellen
-// (Hintergrund-Tabs laden erst beim Anklicken).
+// (Hintergrund-Tabs laden erst beim Anklicken), ?relay=/?token=/?env= aus der URL,
+// Haengen und Absturz der Engine mit Neustart (web/watchdog.js).
 //
 //   cd tests/e2e && node ui-test.mjs [engine-ordner]
-import http from 'node:http';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { TIMEOUT, VERBOSE, check, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
-const TOKEN = 'ui-token-0123456789abcdef';
-const RELAY_PORT = 15831;
-const UI_PORT = 15832;
-const TIMEOUT = Number(process.env.E2E_TIMEOUT || 180000);
-
-setTimeout(() => {
-  console.log('FAIL Zeitlimit fuer den ganzen Test');
-  process.exit(1);
-}, TIMEOUT + 120000).unref();
-
-let failed = 0;
-const check = (name, ok, info = '') => {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok)
-    failed++;
-};
+timeLimit();
 
 const loads = new Map();
 // Lange Seite zum Drucken: drei Abschnitte mit Seitenumbruch, ein Teil nur auf dem Bildschirm
@@ -36,26 +16,14 @@ const PRINT_PAGE = `<!doctype html><title>Seite drucken</title><style>@media pri
 const page = (title) => title === 'Seite drucken' ? PRINT_PAGE : title === 'Seite links'
   ? `<!doctype html><title>${title}</title><body style="margin:0"><a id="l" href="/ziel" style="display:block;width:300px;height:60px;background:#9cf">Link</a><script>console.log('RESULT loaded=' + document.title)</script>`
   : `<!doctype html><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title); addEventListener('pageshow', (e) => { if (e.persisted) console.log('RESULT loaded=' + document.title + ' [cache]'); })</script>`;
-const site = http.createServer((req, res) => {
+const { url: siteURL } = await serve((req, res) => {
   const name = req.url.slice(1) || 'start';
   loads.set(name, (loads.get(name) || 0) + 1);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page('Seite ' + name));
 });
-await new Promise((r) => site.listen(0, '127.0.0.1', r));
-const siteURL = `http://127.0.0.1:${site.address().port}/`;
 
-function start(script, args, env) {
-  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
-  return new Promise((resolve) => child.stdout.on('data', (d) => {
-    if (/laeuft|browser-lite auf/.test(d.toString()))
-      resolve(child);
-  }));
-}
-const relay = await start(path.join(root, 'relay', 'server.mjs'), [],
-  { RELAY_TOKEN: TOKEN, PORT: String(RELAY_PORT), HOST: '127.0.0.1', RELAY_ALLOW_LOCAL: '1' });
-const ui = await start(path.join(root, 'web', 'serve.mjs'), [String(UI_PORT), engineDir], {});
-
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const stack = await startStack({ token: 'ui-token-0123456789abcdef' });
+const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
 const tab = await context.newPage();
 let loaded = [];
@@ -64,8 +32,8 @@ tab.on('console', (msg) => {
   const printMatch = /RESULT print=(\w+)/.exec(msg.text());
   if (printMatch)
     printEvents.push(printMatch[1]);
-  if (process.env.E2E_LOG)
-    console.log('[chromium]', msg.text());
+  if (VERBOSE)
+    console.log('   ', msg.text());
   const match = /RESULT loaded=(.*?)(\s+\(|$)/.exec(msg.text());
   if (match)
     loaded.push(match[1]);
@@ -86,8 +54,7 @@ async function go(address) {
   await tab.press('#address', 'Enter');
 }
 
-const base = { relay: `ws://127.0.0.1:${RELAY_PORT}/wisp/`, token: TOKEN };
-await tab.goto(`http://localhost:${UI_PORT}/?${new URLSearchParams({ ...base, url: siteURL + 'eins' })}`);
+await tab.goto(stack.app({ url: siteURL + 'eins' }));
 check('Erste Seite', await waitLoaded('Seite eins', TIMEOUT));
 await go(siteURL + 'zwei');
 check('Zweite Seite ueber die Adressleiste', await waitLoaded('Seite zwei'));
@@ -145,7 +112,7 @@ check('Dritte Seite im neuen Tab', await waitLoaded('Seite drei'));
 await tab.waitForTimeout(500);
 const loadsBefore = loads.get('eins') || 0;
 loaded = [];
-await tab.goto(`http://localhost:${UI_PORT}/?${new URLSearchParams(base)}`);
+await tab.goto(stack.app());
 check('Sitzung: aktiver Tab laedt wieder', await waitLoaded('Seite drei', TIMEOUT));
 const titles = await tab.locator('#tab-list .tab .title').allTextContents();
 check('Sitzung: beide Tabs da', titles.length === 2 && titles[0] === 'Seite eins' && titles[1] === 'Seite drei', JSON.stringify(titles));
@@ -223,9 +190,69 @@ await tab.keyboard.press('Control+p');
 check('Strg+P zeigt die Vorschau', await preview.waitFor({ state: 'attached', timeout: 20000 }).then(() => true, () => false));
 await tab.evaluate(() => document.querySelector('#print-preview .print-close').click());
 
+// ?relay= gilt nur fuer diesen Browser-Tab, der Token nur fuer genau dieses Relay
+const relayState = await tab.evaluate((host) => ({ local: localStorage.getItem('bl-relay-url'), session: sessionStorage.getItem('bl-relay-url'),
+  token: localStorage.getItem('bl-relay-token ' + host), url: window.__blEngine().blTransport.url }), `127.0.0.1:${stack.relayPort}`);
+check('?relay= nur fuer die Sitzung, nicht im localStorage', relayState.local === null && relayState.session === stack.relayURL, JSON.stringify(relayState));
+check('Token gehoert zu diesem Relay', relayState.token === stack.token && relayState.url === `${stack.relayURL}?token=${stack.token}`, relayState.url);
+// Leeres ?relay= nimmt wieder das eigene Relay, ohne fremden Token. ?env= setzt nur Schalter der Engine.
+await tab.goto(`${stack.uiURL}?relay=&env=BL_EXTRA_CA=x,SSLKEYLOGFILE=/tmp/keys,https_proxy=http://boese,BL_TEST_FLAG=1&url=about:blank`);
+await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: TIMEOUT });
+const envState = await tab.evaluate(() => {
+  const engine = window.__blEngine();
+  return { ca: engine.ENV.BL_EXTRA_CA ?? null, keys: engine.ENV.SSLKEYLOGFILE ?? null, proxy: engine.ENV.https_proxy ?? null, flag: engine.ENV.BL_TEST_FLAG ?? null,
+    url: engine.blTransport.url, session: sessionStorage.getItem('bl-relay-url') };
+});
+check('?env=BL_EXTRA_CA und fremde Variablen werden ignoriert', envState.ca === null && envState.keys === null && envState.proxy === null && envState.flag === '1', JSON.stringify(envState));
+check('Leeres ?relay=: eigenes Relay ohne Token', envState.session === null && envState.url === `ws://localhost:${stack.uiPort}/wisp/`, envState.url);
+
+// Zwei Tabs fuer Haengen und Absturz
+loaded = [];
+await tab.goto(stack.app({ url: siteURL + 'vorher' }));
+check('Absturz: erster Tab', await waitLoaded('Seite vorher', TIMEOUT));
+await tab.click('#new-tab');
+await go(siteURL + 'nachher');
+check('Absturz: zweiter Tab', await waitLoaded('Seite nachher'));
+await tab.waitForTimeout(500);
+const bootText = () => tab.evaluate(() => (document.getElementById('boot').hidden ? '' : document.getElementById('boot').textContent));
+const waitBoot = (text, timeout) => tab.waitForFunction((t) => !document.getElementById('boot').hidden && document.getElementById('boot').textContent.includes(t), text, { timeout }).then(() => true, () => false);
+
+// Haengen: ein Skript blockiert den Engine-Thread, Neu laden bekommt keine Antwort
+await tab.evaluate(() => window.__blEval('(() => { const end = Date.now() + 16000; while (Date.now() < end); return 1; })()'));
+await tab.waitForTimeout(300);
+await tab.click('#reload');
+check('Haengen: Meldung nach 10 s ohne Antwort', await waitBoot('reagiert nicht', 14000), await bootText());
+check('Haengen: Meldung geht weg, sobald die Engine wieder antwortet', await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: 15000 }).then(() => true, () => false));
+
+// Absturz: Fehler aus dem Engine-Thread (Emscripten wirft ihn im Haupt-Thread weiter)
+await tab.evaluate(() => window.__blEngine().blEngineWorker().postMessage({ blSink: { id: 1, writable: {} } }));
+check('Absturz: Meldung mit Neu starten', await waitBoot('abgestürzt', 10000) && await tab.locator('#boot button.primary').textContent() === 'Neu starten', await bootText());
+loaded = [];
+const vorherLoads = loads.get('vorher') || 0;
+await tab.click('#boot button.primary');
+check('Absturz: Neustart laedt den aktiven Tab wieder', await waitLoaded('Seite nachher', TIMEOUT));
+const restartURL = new URL(tab.url());
+const restoredTitles = await tab.waitForFunction(() => {
+  const titles = [...document.querySelectorAll('#tab-list .tab .title')].map((t) => t.textContent);
+  return titles.join('|') === 'Seite vorher|Seite nachher' && titles;
+}, null, { timeout: 10000 }).then((h) => h.jsonValue(), () => tab.locator('#tab-list .tab .title').allTextContents());
+check('Absturz: Neustart ohne ?url=, mit der Sitzung', !restartURL.searchParams.has('url') && restoredTitles.join('|') === 'Seite vorher|Seite nachher',
+  `${restartURL.search} ${JSON.stringify(restoredTitles)}`);
+check('Absturz: Hintergrund-Tab laedt noch nicht', (loads.get('vorher') || 0) === vorherLoads);
+
+// Gleich wieder ein Absturz (abort der Engine): danach laden die Tabs erst beim Anklicken
+const nachherLoads = loads.get('nachher') || 0;
+await tab.waitForFunction(() => window.__blEngine?.()?.onAbort && document.getElementById('boot').hidden, null, { timeout: 10000 }).catch(() => {});
+await tab.evaluate(() => window.__blEngine().onAbort('Test'));
+check('Zweiter Absturz: Meldung', await waitBoot('Schon wieder', 5000), await bootText());
+await tab.click('#boot button.primary');
+await tab.waitForFunction(() => document.getElementById('boot').hidden && document.querySelectorAll('#tab-list .tab').length === 3, null, { timeout: TIMEOUT }).catch(() => {});
+await tab.waitForTimeout(1500);
+const safeTitles = await tab.locator('#tab-list .tab .title').allTextContents();
+check('Zweiter Absturz: Tabs da, aber nicht geladen', safeTitles.length === 3 && safeTitles[0] === 'Seite vorher' && safeTitles[1] === 'Seite nachher'
+  && (loads.get('nachher') || 0) === nachherLoads && (loads.get('vorher') || 0) === vorherLoads, `${JSON.stringify(safeTitles)} ${loads.get('nachher')}`);
+const safeStatus = await tab.locator('#status').textContent();
+check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'Nach dem Neustart laden die Tabs erst beim Anklicken', safeStatus);
+
 await browser.close();
-relay.kill();
-ui.kill();
-site.close();
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
-process.exit(failed ? 1 : 0);
+finish();
