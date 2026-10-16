@@ -49,8 +49,8 @@ Offen: ob auch die Daten der Oberflaeche (Sitzung, Verlauf, Lesezeichen, Einstel
 - **Nur ein Geraet gleichzeitig.** Viele Seiten tauschen Refresh-Tokens bei jeder Nutzung aus
   (Google, Microsoft, OAuth). Legt ein zweites Geraet ein schon verbrauchtes Token vor, gilt das
   als Diebstahl und alle Sitzungen werden abgemeldet. Darum eine Sperre pro Profil auf dem
-  Server mit Uebernahme (altes Geraet flusht und schliesst zuerst), dazu eine Sperre ueber Web
-  Locks fuer mehrere Tabs im selben Host-Browser.
+  Server mit Uebernahme (altes Geraet flusht und schliesst zuerst). Im selben Host-Browser
+  besitzt schon heute nur ein Tab `/data` (Web Lock `bl-data` in `web/app.js`).
 
 ## Was nach einem Geraetewechsel fehlt
 
