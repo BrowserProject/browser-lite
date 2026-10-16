@@ -155,9 +155,44 @@ static constexpr auto polyfillSource = R"JS((() => {
     if (!(name in target))
       Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
   };
+  const defineValue = (target, name, value) => Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
+  // Erst beim ersten Zugriff bauen (Getter auf globalThis): die Klassen kosten
+  // sonst in jedem Frame Zeit, auch wenn die Seite sie nie braucht. Wer nichts
+  // definiert, hinterlaesst keinen Getter.
+  const lazy = (names, build) => {
+    if (names.some((name) => name in globalThis))
+      return;
+    let built = false;
+    const getters = new Map();
+    const run = () => {
+      if (built)
+        return;
+      built = true;
+      try {
+        build();
+      } catch (e) {
+        reportError(e);
+      }
+      for (const [name, getter] of getters) {
+        if (Object.getOwnPropertyDescriptor(globalThis, name)?.get === getter)
+          delete globalThis[name];
+      }
+    };
+    for (const name of names) {
+      const get = () => {
+        run();
+        const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+        return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+      };
+      getters.set(name, get);
+      Object.defineProperty(globalThis, name, { get, set(value) { defineValue(globalThis, name, value); }, configurable: true, enumerable: false });
+    }
+  };
 
   // Prioritized Task Scheduling (scheduler.postTask, scheduler.yield)
-  if (typeof globalThis.AbortController === 'function') {
+  lazy(['scheduler', 'TaskController', 'TaskSignal'], () => {
+    if (typeof AbortController !== 'function')
+      return;
     class TaskSignal extends AbortSignal {}
     class TaskController extends AbortController {
       constructor(init = {}) {
@@ -194,10 +229,10 @@ static constexpr auto polyfillSource = R"JS((() => {
         return new Promise((resolve) => setTimeout(resolve, 0));
       },
     };
-    define(globalThis, 'scheduler', scheduler);
-    define(globalThis, 'TaskController', TaskController);
-    define(globalThis, 'TaskSignal', TaskSignal);
-  }
+    defineValue(globalThis, 'scheduler', scheduler);
+    defineValue(globalThis, 'TaskController', TaskController);
+    defineValue(globalThis, 'TaskSignal', TaskSignal);
+  });
 
   // navigator.vibrate: Chrome auf dem Desktop hat es, ohne Motor passiert nichts
   if (typeof Navigator === 'function')
@@ -205,7 +240,9 @@ static constexpr auto polyfillSource = R"JS((() => {
 
   // WebSocketStream (Chrome): Streams ueber einem normalen WebSocket. Ein
   // WebSocket kann nicht pausieren, darum ohne Gegendruck beim Lesen.
-  if (typeof WebSocket === 'function' && typeof ReadableStream === 'function' && !('WebSocketStream' in globalThis)) {
+  lazy(['WebSocketStream', 'WebSocketError'], () => {
+    if (typeof WebSocket !== 'function' || typeof ReadableStream !== 'function')
+      return;
     class WebSocketError extends DOMException {
       constructor(message = '', init = {}) {
         super(message, 'WebSocketError');
@@ -273,9 +310,9 @@ static constexpr auto polyfillSource = R"JS((() => {
           socket.close(info.closeCode, info.reason ?? '');
       }
     }
-    define(globalThis, 'WebSocketStream', WebSocketStream);
-    define(globalThis, 'WebSocketError', WebSocketError);
-  }
+    defineValue(globalThis, 'WebSocketStream', WebSocketStream);
+    defineValue(globalThis, 'WebSocketError', WebSocketError);
+  });
 
   // APIs des Host-Browsers ueber die Oberflaeche (installHostBridge, web/devices.js).
   // Die Bruecke ist nur hier sichtbar, die Seite sieht sie nicht.
@@ -323,24 +360,31 @@ static constexpr auto polyfillSource = R"JS((() => {
       enumerable: true,
     });
     const connection = Reflect.construct(EventTarget, [], NetworkInformation);
-    Object.defineProperty(Navigator.prototype, 'connection', { get() { return connection; }, configurable: true, enumerable: true });
+    // Werte des Host erst beim ersten Lesen holen (nicht in jedem Frame beim Start)
+    let asked = false;
+    const ask = () => {
+      if (asked)
+        return;
+      asked = true;
+      call('network-info').then((value) => {
+        if (typeof value?.deviceMemory === 'number')
+          memory = value.deviceMemory;
+        if (!value?.connection)
+          return;
+        const changed = ['effectiveType', 'downlink', 'rtt', 'saveData'].some((name) => value.connection[name] !== undefined && value.connection[name] !== info[name]);
+        Object.assign(info, value.connection);
+        if (changed)
+          connection.dispatchEvent(new Event('change'));
+      }, () => {});
+    };
+    Object.defineProperty(Navigator.prototype, 'connection', { get() { ask(); return connection; }, configurable: true, enumerable: true });
     define(globalThis, 'NetworkInformation', NetworkInformation);
     let memory = 8;
-    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get() { return memory; }, configurable: true, enumerable: true });
-    call('network-info').then((value) => {
-      if (typeof value?.deviceMemory === 'number')
-        memory = value.deviceMemory;
-      if (!value?.connection)
-        return;
-      const changed = ['effectiveType', 'downlink', 'rtt', 'saveData'].some((name) => value.connection[name] !== undefined && value.connection[name] !== info[name]);
-      Object.assign(info, value.connection);
-      if (changed)
-        connection.dispatchEvent(new Event('change'));
-    }, () => {});
+    Object.defineProperty(Navigator.prototype, 'deviceMemory', { get() { ask(); return memory; }, configurable: true, enumerable: true });
   }
 
   // EyeDropper: Farbe vom Bildschirm (die Seite ist im Host ja ein Canvas)
-  if (!('EyeDropper' in globalThis)) {
+  lazy(['EyeDropper'], () => {
     class EyeDropper {
       open(options = {}) {
         if (options.signal?.aborted)
@@ -348,8 +392,8 @@ static constexpr auto polyfillSource = R"JS((() => {
         return call('eyedropper');
       }
     }
-    define(globalThis, 'EyeDropper', EyeDropper);
-  }
+    defineValue(globalThis, 'EyeDropper', EyeDropper);
+  });
 
   // Battery Status API (Chromebooks haben einen Akku)
   let battery;
@@ -377,7 +421,9 @@ static constexpr auto polyfillSource = R"JS((() => {
 
   // WebCodecs ImageDecoder: dekodiert wird mit dem ImageDecoder des Host, die
   // Bilder kommen als RGBA zurueck und werden hier VideoFrames
-  if (!('ImageDecoder' in globalThis) && typeof VideoFrame === 'function') {
+  lazy(['ImageDecoder', 'ImageTrack', 'ImageTrackList'], () => {
+    if (typeof VideoFrame !== 'function')
+      return;
     const toBase64 = (bytes) => {
       let binary = '';
       for (let i = 0; i < bytes.length; i += 0x8000)
@@ -462,14 +508,16 @@ static constexpr auto polyfillSource = R"JS((() => {
         return call('image-supported', { type: String(type) }).then((value) => !!value, () => false);
       }
     }
-    define(globalThis, 'ImageDecoder', ImageDecoder);
-    define(globalThis, 'ImageTrack', ImageTrack);
-    define(globalThis, 'ImageTrackList', ImageTrackList);
-  }
+    defineValue(globalThis, 'ImageDecoder', ImageDecoder);
+    defineValue(globalThis, 'ImageTrack', ImageTrack);
+    defineValue(globalThis, 'ImageTrackList', ImageTrackList);
+  });
 
   // File System Access API: Dateien und Ordner des Host oeffnen und speichern.
   // Die Handles des Host bleiben in der Oberflaeche, hier nur ihre id.
-  if (typeof globalThis.showOpenFilePicker !== 'function' && typeof FileSystemFileHandle === 'function' && typeof FileSystemDirectoryHandle === 'function') {
+  lazy(['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker'], () => {
+    if (typeof FileSystemFileHandle !== 'function' || typeof FileSystemDirectoryHandle !== 'function')
+      return;
     const ids = new WeakMap();
     const fromBase64 = typeof Uint8Array.fromBase64 === 'function'
       ? (text) => Uint8Array.fromBase64(text)
@@ -562,10 +610,10 @@ static constexpr auto polyfillSource = R"JS((() => {
       startIn: typeof options.startIn === 'string' ? options.startIn : undefined,
       mode: options.mode === 'readwrite' ? 'readwrite' : undefined,
     });
-    define(globalThis, 'showOpenFilePicker', async (options) => (await call('fs-open', pickerOptions(options))).map(makeHandle));
-    define(globalThis, 'showSaveFilePicker', async (options) => makeHandle(await call('fs-save', pickerOptions(options))));
-    define(globalThis, 'showDirectoryPicker', async (options) => makeHandle(await call('fs-directory', pickerOptions(options))));
-  }
+    defineValue(globalThis, 'showOpenFilePicker', async (options) => (await call('fs-open', pickerOptions(options))).map(makeHandle));
+    defineValue(globalThis, 'showSaveFilePicker', async (options) => makeHandle(await call('fs-save', pickerOptions(options))));
+    defineValue(globalThis, 'showDirectoryPicker', async (options) => makeHandle(await call('fs-directory', pickerOptions(options))));
+  });
 })();)JS";
 
 // ---------------------------------------------------------------- Host-Bruecke
