@@ -83,7 +83,7 @@ jobs:
         id: tag
         run: |
           source versions.env
-          hash="$(find toolchain -type f | sort | xargs sha256sum | sha256sum | cut -c1-12)"
+          hash="$(find toolchain -type f ! -name README.md | sort | xargs sha256sum | sha256sum | cut -c1-12)"
           echo "image=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}-${hash}" >> "$GITHUB_OUTPUT"
           echo "image_emsdk=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
           echo "emsdk=${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"

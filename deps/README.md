@@ -4,10 +4,15 @@ Die Bibliotheken der Engine (zlib, ICU, freetype, harfbuzz, fontconfig, libxml2,
 OpenSSL, nghttp2, libcurl, ...), nach WASM gebaut. Skia kommt mit WebKit.
 
 - `sources.txt`: Quelle jeder Lib mit Version und SHA256 (bzw. Git-Commit). Nur hier stehen
-  Versionen.
+  ihre Versionen.
 - `recipes/<name>.sh`: wie eine Lib gebaut wird (Funktion `build`). Liest ein Rezept weitere
-  Dateien (z.B. `tools/fc-precache.c`), stehen sie in `DEP_FILES`.
-- `build-all.sh`: Reihenfolge und Stamps. Baut nur, was sich geaendert hat, und alles danach.
+  Dateien (z.B. `deps/tools/fc-precache.c`), stehen sie in `DEP_FILES` und zaehlen zum
+  Stamp.
+- `build-all.sh`: Reihenfolge und Stamps. Baut ab der ersten Lib, die sich geaendert hat, neu
+  (`--force` alles, `--only <name>` nur eine).
+- `lib.sh`: gemeinsame Helfer der Rezepte (Flags, Download mit Pruefsumme, cmake, meson,
+  autotools).
+- `relocate-pc.sh`: passt die pkg-config-Dateien an den Pfad des sysroot an.
 - `test.sh`: Smoke-Test gegen das fertige sysroot (`tests/smoke.cpp`).
 
 Ausgabe: `sysroot/` (Header, statische Libs, pkg-config) und `sysroot/runtime/` (Fonts,

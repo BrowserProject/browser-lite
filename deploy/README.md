@@ -10,7 +10,8 @@ gehoert ein HTTPS-Proxy davor (hier `tailscale serve`, sonst z.B. Caddy).
 
 1. *CI* baut und testet die Engine.
 2. *Deploy* (`.github/workflows/deploy.yml`, nur nach gruener CI):
-   - Seite packen (`tools/package-site.sh`), Image bauen und testen (Header, Brotli, Relay)
+   - Seite packen (`tools/package-site.sh`), Image bauen und read-only testen (Header, Brotli,
+     Relay, sauberes Ende auf SIGTERM)
    - nach `ghcr.io/browserproject/browser-lite` pushen (Tags `<commit>` und `main`)
    - auf dem Server (Self-hosted Runner, Label `browser-lite-deploy`) mit `compose.yml`
      per Digest neu starten und `/healthz` pruefen

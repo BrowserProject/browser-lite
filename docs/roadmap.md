@@ -30,7 +30,7 @@ kommen zuerst.
   wie der offene Discord-Absturz im Referenzprojekt). Mit `--spill-pointers` laufen 5 von 5 durch.
 - [x] Patches 0001-0004 (OS(EMSCRIPTEN), wasm32-Fixes, kein Thread::suspend, LLInt-Extractors, Debug-Flags)
 - [x] CI-Job `jsc` mit ccache und Tests
-- [ ] Groesse/Speed von `--spill-pointers` messen und optimieren
+- [x] Groesse/Speed von `--spill-pointers` gemessen, ersetzt durch GC auf leerem Stack (#36, Phase 8)
 
 ## Phase 3: WTF + WebCore bauen (`PORT=Wasm`)  (fertig)
 - [x] `OptionsWasm.cmake` + `PlatformWasm.cmake` (Patch 0006), Plattform-Code in `platform/wasm/` (0008)
@@ -94,14 +94,14 @@ kommen zuerst.
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
-- [x] `/data` ist ein IDBFS: wird beim Start aus der IndexedDB des Host-Browsers geladen und
-  alle 5 s sowie beim Verlassen gespeichert
+- [x] `/data` als IDBFS: beim Start aus der IndexedDB des Host-Browsers geladen und alle 5 s
+  sowie beim Verlassen gespeichert (abgeloest durch WasmFS mit OPFS, siehe unten)
 - [x] Knopf "Gespeicherte Daten loeschen"
 - [x] e2e-Test `tests/e2e/storage-test.mjs`
 - [x] WasmFS statt JS-Dateisystem, `/data` im OPFS (#142): keine Datei-Syscalls mehr ueber
   den UI-Thread, alte IDBFS-Daten werden einmal uebernommen
 
-## Phase 8: Performance + Kompatibilitaet  (angefangen)
+## Phase 8: Performance + Kompatibilitaet  (laeuft)
 Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
 
 - [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert
@@ -189,8 +189,10 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
 - [x] Interpreter-Caches fuer `instanceof` und fehlende Properties auf 32 Bit (weniger Slow-Path-Aufrufe, #143)
 - [x] Erstes sichtbares Layout wird gemeldet und in `site-test.mjs` gemessen; Media-Controls erzwingen kein Layout mehr (Wikipedia 1.3 s schneller, #144)
 - [x] Polyfills bauen ihre Klassen erst beim ersten Zugriff (weather.com ca. 0.2 s weniger, #145)
-- [x] Touchpad-Pinch: Ereignisse summieren, eine Zoom-Stufe pro 40 px (vorher eine Stufe pro Ereignis).
-  Offen: echtes Pinch-Zoom wie Chrome (nur die Ansicht skalieren, im Compositor-Thread, "delegated scaling")
+- [x] Pinch-Zoom wie Chrome: Touchpad und zwei Finger skalieren nur die Ansicht (visual viewport),
+  sofort im Compositor-Thread, auch wenn das JS blockiert. Der Engine-Thread uebernimmt am Ende
+  (`Page::setPageScaleFactor`, Layout-Breite bleibt), die Seite bekommt `visualViewport`-Events.
+  Rad und Klick gleich danach gehen nicht verloren (`pinch-test.mjs`). Offen: siehe stand.md
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken
@@ -199,9 +201,9 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
   19.8 -> 16.2 s (Mittel aus 3 Laeufen). mimalloc statt dlmalloc getestet: langsamer
 - [x] GPU-Rastern: Skia malt ueber WebGL 2 (Ganesh, wie CanvasKit) im Engine-Worker, Scrollen
   kopiert auf der GPU, Bild ohne Kopie per `transferToImageBitmap` ins Tab-Canvas. Faellt bei
-  Kontextverlust auf die CPU zurueck (Test in `network-test.mjs`). Offen: CSS-Filter (`filter:
-  blur()`) laufen noch ueber WebCores Software-Filter, dafuer braucht WebCore den GPU-Kontext
-  ueber `PlatformDisplay`; danach Ebenen (Compositing)
+  Kontextverlust auf die CPU zurueck (Test in `network-test.mjs`). Ohne Ebenen (`?compositing=0`,
+  nach GPU-Verlust) laufen CSS-Filter ueber WebCores Filter auf der CPU, mit Ebenen im Compositor
+  auf der GPU
 - [x] GitHub-Startseite blieb ca. 10 s weiss: der Engine-Worker kam bei Dauer-Animationen nicht in
   den JS-Event-Loop zurueck, das OffscreenCanvas zeigte darum kein neues Bild. Eigene Liste fuer
   die Aufgaben der Engine (`EngineLoop.cpp`). Zur Fehlersuche: `__blEval("js")` in der Konsole
@@ -228,22 +230,39 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
   Messlatte 234 von 277 (84.5 %)
 - [x] Service Worker (SWServer im selben Prozess, Fetch abfangen) und SharedWorker
   (`serviceworker-test.mjs`). Registrierungen und Cache API bleiben nach einem Neustart.
-  Offen: Skript im Hintergrund aktualisieren, Navigation Preload, Push
-- [ ] WebAssembly: geteilter Speicher (Threads), memory64, mehrere Speicher, JSPI
+  Dazu Update im Hintergrund (Patch 0033), Navigation Preload, `clients.openWindow()` nach
+  `notificationclick`, Benachrichtigungen aus dem Worker (Patch 0035), Inhalte der Cache API als
+  eigene Dateien. Offen: Push, Background Fetch
+- [x] Robustheit: Absturz und Haengen der Engine erkennt die Oberflaeche, Neustart mit Sitzung;
+  Watchdog bricht Skripte nach 30 s ab; GPU zurueck nach Kontextverlust, WebGL-Seiten bekommen
+  `webglcontextlost`/`restored`; `navigator.onLine` folgt dem Relay; Relay nur zu oeffentlichen
+  Adressen. Navigation: `pushState` in Adressleiste und Verlauf, Downloads ueber WebCores
+  `PolicyAction::Download`, externe Schemata an den Host, Dialoge mit Herkunft (`ui-test.mjs`,
+  `input-test.mjs`, `network-test.mjs`, `tests/engine/hang.html`)
+- [x] WebAssembly: memory64 (auch table64) und mehrere Speicher (`tests/wasm/`, `wasm-test.mjs` mit
+  Emscripten `-sMEMORY64`). Speicher hoechstens 2 GB, 64 verschachtelte Aufrufe
+- [ ] WebAssembly: geteilter Speicher (Threads), JSPI (Gruende in entscheidungen.md)
+- [x] CSS Paint Worklet (Patch 0034, Skript klassisch ausgewertet, ohne `import`/`export`,
+  `paintworklet-test.mjs`)
+- [x] CSS-Filter auf der GPU: eine Ebene ohne Kinder behaelt ihr gefiltertes Bild, solange Inhalt,
+  Filter und Lage gleich bleiben (Patch 0036). SwiftShader, 24 Karten mit Blur/Schatten: eine
+  bewegt 12 -> 54 Bilder/s, alle bewegt 11 -> 51 (ohne Filter 57), Scrollen 17 -> 37 (ohne Filter
+  41). Pixelgleich, Abweichung zur CPU hoechstens 6/255 (`compositing-test.mjs`)
+- [x] Messlatte 257 von 280 (91.8 %)
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
-- [ ] WebGL ohne `readPixels`: Bild direkt als ImageBitmap zum Host (braucht Compositing)
-- [ ] Service-Worker-Cache (vorerst reicht der HTTP-Cache: Engine-Dateien sind versioniert und immutable)
+- [ ] WebGL-Bild ohne `readPixels` direkt als Textur in die Ebene
+- [ ] Service-Worker-Cache fuer die Engine-Dateien (vorerst reicht der HTTP-Cache: sie sind
+  versioniert und immutable)
 
-- [x] Kompatibilitaetsliste: 52 Seiten in `tests/e2e/sites.txt`, eigener CI-Job, Stand in
+- [x] Kompatibilitaetsliste: 54 Seiten in `tests/e2e/sites.txt`, eigener CI-Job, Stand in
   `docs/kompatibilitaet.md`. Alle erreichbaren Seiten laden ohne Absturz.
 - [x] Cloudflare-Pruefung (Turnstile): mit WebAssembly kommt sie bis zum Kaestchen "Verify you
   are human" (vorher blieb sie bei "Verifying" haengen)
 
-Offen: GPU-Rendering (Skia auf WebGL2), Threads fuer Bilder/Parsing, LTO/SIMD,
-Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
+Offen: siehe [stand.md](stand.md).
 
-## Phase 9: Media (spaeter)
+## Phase 9: Media  (fertig bis auf Reste in stand.md)
 - [x] `ENABLE_VIDEO` an, ohne Abspiel-Backend: `<video>`/`<audio>` sind echte Media-Elemente,
   `play()` lehnt mit NotSupportedError ab. Vorher stuerzten Seiten wie 20min.ch ab.
 - [x] Web Audio mit echtem Ton: Engine rendert in einen Ringpuffer, ein AudioWorklet im
@@ -260,8 +279,8 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   (Hook `didRemoveCodedFrames`, Patch 0017)
 - [x] WebCodecs fuer Seiten und Worker: Video/Audio dekodieren und kodieren ueber die Codecs des
   Host-Browsers, `VideoFrame` aus Canvas, Bild, Video und Rohdaten (I420, NV12, RGBA, ...),
-  `AudioData` in allen Formaten. Test: `tests/e2e/webcodecs-test.mjs`. Offen: `ImageDecoder`
-  (hat WebKit nicht), Bilder direkt als Textur statt ueber den Speicher
+  `AudioData` in allen Formaten. Test: `tests/e2e/webcodecs-test.mjs`. `ImageDecoder` als
+  Polyfill (#120). Offen: Bilder direkt als Textur statt ueber den Speicher
 - [x] Spracherkennung (`webkitSpeechRecognition`) ueber den Host-Browser, mit Mikrofon-Abfrage
   (Test in `devices-test.mjs`)
 - [x] Drucken: PDF aus der Engine (Skia PDF, `@media print`, Seitenumbrueche), Druckvorschau mit
@@ -270,8 +289,7 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
   Dialoge und Handles des Host-Browsers (Test in `devices-test.mjs`)
 - [x] Lautsprecher im Tab und Tab stummschalten (Test in `audio-test.mjs`)
 - [x] Kamera, Mikrofon und Bildschirm (`getUserMedia`, `getDisplayMedia`, `enumerateDevices`) ueber die
-  Geraete des Host, `<video>.srcObject` (Bild und Ton), Mikrofon in Web Audio (Test `mediastream-test.mjs`).
-  Offen: WebRTC-Medien
+  Geraete des Host, `<video>.srcObject` (Bild und Ton), Mikrofon in Web Audio (Test `mediastream-test.mjs`)
 - [x] WebRTC Stufe 1: `RTCPeerConnection` + `RTCDataChannel` ueber das WebRTC des Host (Test `webrtc-test.mjs`,
   auch gegen eine normale Chromium-Seite)
 - [x] WebRTC Stufe 2: Medien senden und empfangen (Kamera, Mikrofon, Canvas, Web Audio), Transceiver-API.
@@ -279,6 +297,8 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 - [x] Picture-in-Picture ueber das versteckte Host-`<video>` (Test im `media-test.mjs`), auch fuer `srcObject`-Streams (Kamera, WebRTC, Canvas; Test im `mediastream-test.mjs`)
 - [x] MediaRecorder: WebM (VP8/VP9/AV1 + Opus) mit den Encodern des Host, Web Audio als Stream-Quelle
   (`createMediaStreamDestination`), Test in `mediastream-test.mjs` (Chromium spielt die Aufnahme ab)
+- [x] `<video>`/`<audio>` mit `blob:` (auch nach `revokeObjectURL`) und `data:`, `preload` (none,
+  metadata, auto) bis zum Host-`<video>` (Test in `media-test.mjs`)
 
 ## Zukunft: Profil auf dem Server
 Login mit einem kleinen, verschluesselten Profil (Cookies, localStorage, kleine IndexedDB),

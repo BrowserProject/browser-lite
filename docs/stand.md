@@ -76,20 +76,60 @@ der Oberflaeche:
 
 ## Offen: Funktionen
 
-- Echtes Pinch-Zoom wie Chrome (nur Ansicht skalieren, im Compositor-Thread).
-- CSS-Filter auf der GPU, Paint Worklet, `interpolate-size`.
-- Push, Background Sync, Storage Buckets, WebTransport, WebGPU.
-- WebRTC: Verkehr ueber das Relay (TURN), Insertable Streams.
-- Service Worker: Skript im Hintergrund aktualisieren, Navigation Preload.
 - Login mit Profil auf dem Server (Cookies, localStorage, kleine IndexedDB), Plan in
   [profil.md](profil.md).
+- Pinch-Zoom: `visualViewport`-Events kommen erst am Ende der Geste (jeder
+  Zwischenstand wuerde alle Kacheln neu malen). Strg + Rad geht nicht zuerst an die
+  Seite (eigener Zoom von Karten und Editoren). Zwei Finger warten auf die
+  touchstart-Antwort der Seite, auch ohne blockierende Touch-Listener. Die
+  Uebernahme am Ende kostet einen Style- und Layout-Durchlauf.
+- WebAssembly: geteilter Speicher (Threads) und JSPI, `validate()` sagt dafuer
+  false und Seiten nehmen ihre Variante ohne. Zyklen zwischen Seite und Modul werden
+  erst mit der Seite frei.
+- CSS: `url(#...)`- und SVG-Filter malt die CPU. Gefilterte Ebenen mit Kindern,
+  Maske oder Video/Canvas/WebGL, Filter-Animationen und teilweise sichtbare Ebenen
+  beim Scrollen rechnen den Filter jedes Bild neu, ohne Ebenen laeuft alles auf der
+  CPU. `interpolate-size`. Paint Worklet: Skript klassisch ausgewertet (kein
+  `import`/`export`), Laufzeitfehler lehnen anders als in Chromium ab.
+- Grafik: WebGL-Bild ueber `readPixels` statt direkt als Textur, Timer-Queries,
+  Queries und Transform Feedback ueber einen Kontext-Wechsel, WebGPU. Tabs, die mit
+  Compositor die GPU verloren haben, bleiben ohne Ebenen (neue Tabs bekommen sie
+  wieder). Eine WebGL-Seite, die nicht zeichnet, merkt einen Verlust erst beim
+  naechsten Zeichnen.
+- Medien: EME (DRM), MSE in Workern (#121), WebCodecs-Bilder direkt als Textur.
+  WebRTC: Verkehr ueber das Relay (TURN), Insertable Streams. Die Engine-Senke
+  eines gesendeten Tracks, der weder endet noch eingesammelt wird, bleibt. Fehler
+  des MediaRecorder beim Abholen der Daten erreichen die Seite nicht als Ereignis.
+- Service Worker: Push, Background Sync, Background Fetch. `WindowClient.focus()`
+  holt den Tab nicht nach vorne, Navigation Preload fragt den HTTP-Cache nicht.
+- Netz: WebTransport, Streams als Request-Body, Storage Buckets, WebSocketStream
+  ohne Gegendruck beim Lesen (#120).
+- Messung und Geraete: Layout-Shift- und Long-Animation-Frame-Eintraege,
+  IdleDetector, `document.featurePolicy`.
+- Oberflaeche: Ziehen und Loslassen ausserhalb einer Ablage oeffnet nichts (#125,
+  Chrome oeffnet einen Tab). Eingefuegte Dateien bleiben bis zum Schliessen des Tabs
+  im WASM-Speicher. Unterdrueckte Dialoge sind am Tab nicht zu sehen.
 
 ## Offen: Tests und Betrieb
 
-- `tests/e2e/mediastream-test.mjs` ist manchmal rot (Aufnahme nur 1.2 statt
-  2.5 s lang, Timing). Zweimal wiederholt gruen.
+- `tests/e2e/mediastream-test.mjs`: Aufnahme manchmal zu kurz. Der Test misst mit der
+  Uhr des AudioContext und schreibt `rectime=<Wand>:<Audio>` ins Log, um Timing von einem
+  Fehler im Recorder zu unterscheiden.
+- Unter Last knapp: die Speicher-Pruefung in `wasm-test.mjs` (Grenze 512 MB,
+  parallel bis 446 MB gemessen) und in `compositing-test.mjs` "Animation laeuft,
+  waehrend das JS blockiert" (einmal rot, parallel zu drei anderen Tests).
+- Ohne Test: die Grenze fuer die Zahl der Samples in fMP4 (`trun`), das Aufraeumen
+  von Senken und Host-Objekten durch die GC, Set-Cookie beim Update eines Service
+  Workers.
+- Zu pruefen: in Seiten-Workern kehrt der Engine-Thread nie in den Event-Loop des
+  Host zurueck, die FinalizationRegistry der WASM-Bruecke im Host feuert dort
+  vermutlich nie (Werte erst mit dem Worker frei).
+- Relay: ist der Port belegt, endet es mit Code 0 statt 1.
+- Gemeinsames `bl_retry` in `tools/env.sh` statt dem eigenen `retry()` in
+  `fetch-webkit.sh`, damit auch `deps/lib.sh` Git-Quellen wiederholt holt. `MESON_VERSION` und das
+  Ubuntu-Image stehen in `toolchain/Dockerfile` statt in `versions.env` (Umzug
+  baut die Toolchain und alles danach neu).
 - Echte Seiten schwanken stark (Werbung, wechselnder Inhalt): Leistung immer mit
   mehreren Laeufen und mit Inklusivzeiten aus dem Profil vergleichen, nicht nur mit
   der Ladezeit.
-- Relay und Seite auf dem eigenen VPS (Deploy-Job braucht die Secrets).
 - Spaeter: WireGuard statt Wisp (Transport ist austauschbar gebaut).

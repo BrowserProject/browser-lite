@@ -25,9 +25,12 @@ wird, das nicht klar verlangt wurde: fragen.
 
 Doku kurz, nur was noetig ist, und aktuell halten (README des Ordners, passendes Kapitel in
 `docs/`, `docs/stand.md`). Kommentare sparsam, nur fuer Nicht-Offensichtliches, nie fuer
-Zwischenstaende oder Umstellungen. Deutsch, Umlaute als ae/oe/ue, kein Eszett, keine Gedankenstriche.
+Zwischenstaende oder Umstellungen. Deutsch. Code, Kommentare und Doku schreiben Umlaute als
+ae/oe/ue, kein Eszett, keine Gedankenstriche. Texte, die Benutzer in der Oberflaeche sehen,
+behalten echte Umlaute.
 
-Versionen stehen nur in `versions.env`. Dockerfiles und Downloads sind gepinnt, Downloads mit
+Versionen stehen nur in `versions.env`, die der Dependencies mit SHA256 in `deps/sources.txt`,
+npm-Pakete in `package-lock.json`. Dockerfiles und Downloads sind gepinnt, Downloads mit
 Checksumme. Shell-Skripte: `set -euo pipefail`, shellcheck-sauber. Aenderungen an WebKit nur
 als Patch ([docs/build.md](docs/build.md)).
 
@@ -48,6 +51,7 @@ Vor dem Push, je nach Aenderung:
 git ls-files -z '*.sh' | xargs -0 shellcheck -x
 node tests/relay/relay-test.mjs
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
+node tests/engine/recorder-test.mjs && node tests/engine/http-cache-test.mjs
 ```
 
 Engine, JSC und End-to-End-Tests brauchen den WebKit-Build und laufen in der CI

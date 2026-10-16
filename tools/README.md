@@ -1,0 +1,18 @@
+# tools/
+
+Skripte fuer Build und Auslieferung. Die Shell-Skripte laden `env.sh` (Pfade, `versions.env`,
+`bl_log`/`bl_die`). Bauen laeuft im Toolchain-Image ([docs/build.md](../docs/build.md)).
+
+| Datei | Was |
+| --- | --- |
+| `env.sh` | gemeinsame Pfade und Versionen, wird mit `source` geladen |
+| `check-toolchain.sh` | prueft das Toolchain-Image (emcc mit pthreads) |
+| `fetch-webkit.sh` | holt den gepinnten WebKit-Commit nach `third_party/WebKit` (shallow, sparse) |
+| `apply-patches.sh` | setzt WebKit zurueck und wendet `patches/webkit/` an, `--check` prueft nur |
+| `export-patch.sh` | speichert neue Aenderungen in `third_party/WebKit` als Patch |
+| `gen-angle-shim.py` | erzeugt den ANGLE-Ersatz fuer WebGL (Ausgabe kommt in Patch 0016) |
+| `build-jsc.sh` | JavaScriptCore und die `jsc`-Shell nach `build/jsc/bin/` |
+| `build-webcore.sh` | WebCore und Engine nach `build/webcore/bin/` |
+| `wasm-build-id.py` | haengt die Build-ID an `engine.wasm` (ruft der Engine-Build auf) |
+| `package-site.sh` | packt Oberflaeche und Engine fuer den Server (z.B. nach `build/site`) |
+| `optimize-site.mjs` | macht den gepackten Ordner kleiner (ohne "name"-Section, .br/.gz) |

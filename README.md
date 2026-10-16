@@ -24,9 +24,14 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
 - `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
 - WebGL 1 und 2 (ueber das WebGL des eigenen Browsers)
-- WebAssembly der Seiten (laeuft in der WASM-Engine des eigenen Browsers), auch in Workern
+- WebAssembly der Seiten (laeuft in der WASM-Engine des eigenen Browsers), auch in Workern,
+  ohne Threads
+- WebRTC, WebCodecs, Kamera, Mikrofon und Bildschirm (ueber den eigenen Browser)
+- Service Worker, Cache API, OPFS, Benachrichtigungen
+- Pinch-Zoom, Drucken, Drag & Drop
+- Absturz oder Haengen der Engine: Meldung mit "Neu starten", die Sitzung kommt zurueck
 
-Noch nicht: DRM (EME), WebRTC, WireGuard. JavaScript ist langsamer als in einem
+Noch nicht: DRM (EME), WireGuard. JavaScript ist langsamer als in einem
 normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md), welche
 Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 
@@ -48,7 +53,8 @@ node web/serve.mjs 8080
 # im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/
 ```
 
-Mit `?debug=1` zeigt die Engine in der Konsole, was sie macht (Zeiten, GC, Netzwerk).
+`?relay=` gilt nur fuer diesen Browser-Tab. Mit `?debug=1` zeigt die Engine in der Konsole,
+was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/README.md).
 
 ## Doku
 
@@ -60,12 +66,13 @@ Mit `?debug=1` zeigt die Engine in der Konsole, was sie macht (Zeiten, GC, Netzw
 | [docs/roadmap.md](docs/roadmap.md) | Phasen und aktueller Stand |
 | [docs/stand.md](docs/stand.md) | Kurzer Stand, Messwerte und was noch offen ist |
 | [docs/build.md](docs/build.md) | Selber bauen (lokal und CI) |
+| [docs/kompatibilitaet.md](docs/kompatibilitaet.md) | Welche echten Seiten gehen |
 | [docs/referenz-webkitwasm.md](docs/referenz-webkitwasm.md) | Was wir vom Projekt WebkitWasm gelernt haben |
 
 ## Ordner
 
 ```
-versions.env   alle Versions-Pins (WebKit, Emscripten, ...)
+versions.env   Versions-Pins (WebKit, Emscripten, Node, ...), Dependencies in deps/sources.txt
 toolchain/     Docker-Image mit Emscripten und allen Build-Tools
 tools/         Skripte (WebKit holen, Patches, Builds, Seite fuer den Server packen)
 patches/webkit unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dateien
@@ -75,6 +82,7 @@ web/           Browser-Oberflaeche (HTML/CSS/JS ohne Build-Schritt) + Wisp-Clien
 relay/         Server im Container: Wisp-Relay + fertige Seite
 deploy/        Compose-Datei und Einrichtung des Servers (Proxmox-LXC mit Runner)
 tests/         JSC-Tests, Engine-Tests (node) und End-to-End Tests (Playwright)
+docs/          Hintergrund (siehe oben)
 ```
 
 ## Lizenz

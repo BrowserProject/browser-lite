@@ -46,10 +46,10 @@ node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
 ```
 
 Jeder `*-test.mjs` ist ein eigener Test, CI ruft sie einzeln auf: `network`, `input`,
-`storage`, `audio`, `media`, `webgl`, `compositing`, `pinch`, `serviceworker`, `webcodecs`,
-`mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`, `cache`, `devices`, `ui`,
-`parity` und (eigener Job) `site`. Was jeder prueft, steht oben in der Datei.
-Alle benutzen `harness.mjs`: Relay und Oberflaeche auf freien Ports (Tests laufen
+`storage`, `audio`, `media`, `webgl`, `compositing`, `paintworklet`, `pinch`,
+`serviceworker`, `webcodecs`, `mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`,
+`cache`, `devices`, `ui`, `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in
+der Datei. Alle benutzen `harness.mjs`: Relay und Oberflaeche auf freien Ports (Tests laufen
 auch parallel), Hilfsprozesse enden mit dem Test, `check()`/`finish()`, RESULT-Zeilen
 der Seite.
 
@@ -59,8 +59,10 @@ der Seite.
   (braucht `openssl`), auch die, die die Engine ablehnen muss.
 - `parity-test.mjs` vergleicht mit dem Host-Chromium. Fehler nur bei Rueckschritten
   gegen `parity-baseline.txt`, `PARITY_UPDATE=1` schreibt die Liste neu.
+- `ui-test.mjs` laesst die Engine mit `?env=BL_TEST_HOOKS=1` wirklich abstuerzen
+  (`bl_crash_for_testing`: abort und WASM-Trap), ohne den Schalter tut der Aufruf nichts.
 - `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,
   Screenshots `build/sites/<host>_<pfad>.png`), Schalter `SITE_*` im Kopf des Skripts.
-- `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs`, eingecheckt,
-  neu bauen mit `fixtures/build.sh` im Toolchain-Image.
+- `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs` (auch memory64),
+  eingecheckt, neu bauen mit `fixtures/build.sh` im Toolchain-Image.
 - Bildschirmfotos der Tests landen in `build/e2e-*.png`.

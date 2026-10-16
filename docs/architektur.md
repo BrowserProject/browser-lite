@@ -3,26 +3,46 @@
 ## Grosses Bild
 
 ```
-Haupt-Thread (Seite browser-lite)            Engine-Worker (WASM, pthreads)
-+--------------------------------+           +-------------------------------------+
-| UI (TS): Tabs, Adressleiste    |  post-    | WasmWebView (unser Embedding)       |
-| Canvas (OffscreenCanvas owner) |  Message  |   WebCore Page/Frame + Clients      |
-| Input: Maus/Tastatur/Scroll/   | <-------> |   JavaScriptCore (CLoop)            |
-|   Clipboard -> Events          |           |   Skia -> OffscreenCanvas (WebGL2)  |
-+--------------------------------+           |   Netzwerk: WebCore curl-Backend    |
-                                             |     libcurl + nghttp2 + OpenSSL     |
-                                             |     Sockets -> Transport-Interface  |
-                                             |   Storage: WasmFS + OPFS            |
-                                             +------------------|------------------+
-                                                                | Transport (austauschbar)
+Haupt-Thread (Oberflaeche, web/)          Engine-Worker (WASM, pthreads, je ein Web Worker)
++--------------------------------+         +------------------------------------------+
+| app.js: Tabs, Adressleiste,    |  post-  | Engine-Thread: WebView (unser Embedding) |
+|   Eingabe -> bl_*-Exporte      | Message |   WebCore Page/Frame + Clients           |
+| watchdog.js: Absturz, Haengen  | <-----> |   JavaScriptCore (CLoop), Loader (curl)  |
+| transport.js: Wisp-Client      |         | Compositor-Thread: Ebenen, Pinch-Zoom,   |
+| media.js, sw.js, devices.js,   |         |   WebGL 2, besitzt die Canvas der Tabs   |
+|   capture.js, webrtc.js        |         | Scroll-Thread, Kachel-Maler, curl,       |
++--------------------------------+         |   Web Worker der Seiten, Audio, ...      |
+                                           | Speicher: WasmFS, /data im OPFS          |
+                                           +--------------------|---------------------+
+                                                                | Sockets (engine/js/sockets.js)
                                                                 v
-                                             WispTransport (jetzt) / WireGuardTransport (spaeter)
+                                           Transport der Oberflaeche: Wisp (jetzt) / WireGuard (spaeter)
                                                                 | WebSocket (wss)
                                                                 v
-                                             Server: ein Container (Seite + COOP/COEP + Wisp-Relay)
+                                           Server: ein Container (Seite + COOP/COEP + Wisp-Relay)
 ```
 
 ## Die Teile
+
+### Oberflaeche
+Schlichtes HTML, CSS und JavaScript (ES-Module) ohne Build-Schritt, ein Modul pro Thema
+([web/README.md](../web/README.md)). Gemeinsame Helfer (Speicher, Base64, Fehler) liegen in
+`web/util.js`. Die Engine ruft die Oberflaeche ueber `Module.*`-Funktionen und Ereignisse wie
+`navigation`, `commit`, `external-url` auf, die Oberflaeche die Engine ueber `bl_*`-Exporte.
+
+- Absturz und Haengen (`web/watchdog.js`): eine Engine fuehrt alle Tabs. Bricht sie ab
+  (`Module.onAbort`, WASM-Trap, Fehler aus einem ihrer Threads), kommt eine Meldung mit
+  "Neu starten", die Sitzung bringt den letzten guten Stand zurueck. Vor Aufrufen, auf die die
+  Engine immer antwortet (Laden, Neu laden, Verlauf wiederherstellen, Suchen), ruft `app.js`
+  `expectAnswer()`; bleibt die Antwort 10 s aus, gibt es "Warten" oder "Neu starten"
+  (Entscheid 147).
+- Dialoge (`alert`/`confirm`/`prompt`) sind die echten Dialoge des Host mit dem Host der Seite
+  davor, Hintergrund-Tabs bekommen sofort eine Antwort (Entscheid 149).
+- `mailto:`, `tel:` und andere fremde Schemata gibt die Engine nach einem Klick als
+  `external-url` an die Oberflaeche, die sie mit `window.open(..., 'noopener')` an den Host
+  gibt (Entscheid 148).
+- `navigator.onLine` der Seiten: Netz des Host und Verbindung zum Relay (`bl_set_online`,
+  Entscheid 158).
 
 ### WebKit-Port `PORT=Wasm`
 WPE WebKit ist eigentlich multi-process (UI-, Web- und Network-Prozess mit IPC ueber
@@ -32,12 +52,13 @@ einen eigenen kleinen Port:
 - Basis ist der WebKit-Stand vom WPE-Release (siehe `versions.env`).
 - Aufbau wie der PlayStation-Port: WTF `RunLoopGeneric` (kein GLib), WebCore curl-Backend
   fuer Netzwerk, statisch gelinkt.
-- Grafik wie WPE: Skia (WPE nutzt seit 2.46 Skia statt Cairo).
+- Grafik wie WPE: Skia.
 - Kein WebKit2/IPC. WebCore laeuft single-process, wir binden `WebCore::Page` direkt an
-  (aehnlich wie frueher WebKitLegacy).
+  (aehnlich wie WebKitLegacy). Was in WebKit2 im Network-Prozess steckt (Service Worker,
+  Cache API, OPFS, Downloads), baut `engine/src/` direkt im Engine-Thread nach.
 - Ein neuer Port braucht in WebKit: Eintrag in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake`,
-  und pro Projekt `PlatformWasm.cmake`. Unser Code dafuer liegt in `port/`, die noetigen
-  Aenderungen an WebKit in `patches/webkit/`.
+  und pro Projekt `PlatformWasm.cmake` (Patch 0006). Alle Aenderungen an WebKit liegen als
+  Patches in `patches/webkit/`, unser Embedding (WebView, Clients, Exporte) in `engine/`.
 
 ### JavaScript
 JavaScriptCore mit dem **CLoop**-Interpreter (`ENABLE_JIT=OFF`, `ENABLE_C_LOOP=ON`).
@@ -52,6 +73,14 @@ schaltet sie ein. Gewinn im Benchmark (`tests/engine/jsbench.html`, bester von 5
 Aufrufe -37 %, Klassen -40 %, Arrays mit Callbacks -30 %, Closures -30 %. Test:
 `tests/jsc/calls.js`.
 
+**Watchdog:** alle Tabs teilen sich den Engine-Thread. Ein Einstieg in JS (Skript,
+Event-Handler, Timer) darf darum hoechstens 30 s laufen, dann bricht ihn JSCs Watchdog mit
+einer nicht abfangbaren TerminationException ab, die Seite bekommt eine Meldung in der Konsole
+(`engine/src/EngineLoop.cpp`, `BL_SCRIPT_TIMEOUT`, 0 = aus). Geprueft wird an `op_check_traps`,
+gemessen die Uhrzeit; die Zeit in `alert`/`confirm`/`prompt` zaehlt nicht. Gilt fuer die
+Fenster aller Tabs (`commonVM()`), nicht fuer Web Worker der Seiten, die eigene Threads haben.
+Test: `tests/engine/hang.html` (Entscheid 146).
+
 ### Garbage Collector (wichtigstes Risiko)
 JSC hat einen konservativen GC: er sucht auf dem Stack nach allem was wie ein Pointer
 aussieht. In WASM gibt es zwei Stacks:
@@ -63,16 +92,11 @@ Wenn ein Pointer auf ein JS-Objekt nur in einem WASM-Local liegt, sieht der GC i
 und kann das Objekt freigeben, obwohl es noch gebraucht wird. Das gibt seltene, schwer
 reproduzierbare Abstuerze.
 
-**Geloest in Phase 2** mit dem Binaryen-Pass `--spill-pointers` (Link-Flag
-`-sBINARYEN_EXTRA_PASSES=--spill-pointers`): alle pointer-grossen Locals werden vor Calls auf
-den Shadow-Stack geschrieben, und den scannt der GC sowieso. Nachweis mit
-`tests/jsc/gc-stress.js` und `--slowPathAllocsBetweenGCs=10`: ohne Pass 0/5 Laeufe ok
-(Absturz in `Structure::materializePropertyTable`), mit Pass 5/5 ok.
-
-**Besser geloest in Phase 8:** Der Pass kostet sehr viel. In der Engine war das Erstellen
-der ersten Seite 14x langsamer (4.6 s statt 0.33 s) und die .wasm 34 MB groesser. Die
-Engine braucht ihn darum nicht mehr. Stattdessen laeuft der GC nur noch, wenn nichts von
-JSC/WebCore auf dem Stack liegt:
+**GC nur auf leerem Stack:** der Binaryen-Pass `--spill-pointers` (alle pointer-grossen Locals
+vor Calls auf den Shadow-Stack) loest das, kostet aber sehr viel (erste Seite 14x langsamer,
+.wasm 34 MB groesser). Nur der `jsc`-Test nutzt ihn, weil dort ein ganzes Skript eine einzige
+Aufgabe ist (Nachweis mit `tests/jsc/gc-stress.js`). Die Engine laesst den GC stattdessen nur
+laufen, wenn nichts von JSC/WebCore auf dem Stack liegt:
 
 - Jede Arbeit auf dem Engine-Thread (ein Schritt des Event-Loops, ein Aufruf aus der
   Oberflaeche) laeuft unter JSLock und einem `DeferGC` (`engine/src/EngineLoop.cpp`).
@@ -83,17 +107,16 @@ JSC/WebCore auf dem Stack liegt:
 
 Nachweis: `tests/engine/gc-test.mjs` mit `JSC_slowPathAllocsBetweenGCs=10` (GC sehr oft).
 Ohne die Verschiebung stuerzt der Test ab ("memory access out of bounds"), mit ihr laeuft er
-durch. Der `jsc`-Test (Phase 2) nutzt weiter `--spill-pointers`, weil dort ein ganzes
-Skript eine einzige Aufgabe ist.
+durch.
 
 **GC an sicheren Punkten:** Ohne mehr laeuft waehrend einer einzelnen langen Aufgabe (ein
 grosses Skript beim Laden) kein GC. Der Muell sammelte sich bis zum Ende, und weil der
 WASM-Speicher nie schrumpft, blieb die Spitze fuer immer. Darum (auch Patch 0012): will der
 Heap sammeln, waehrend aufgeschoben ist, setzt er einen eigenen VM-Trap. Den bedient nur der
-Interpreter bei `op_check_traps`, also an einer Befehlsgrenze, wo alle Werte im JS-Stack von
-JSC im Speicher liegen. Gesammelt wird nur, wenn JS direkt aus der Engine kam (genau ein
-VM-Einstieg, kein C++ dazwischen) und nichts ausser dem `DeferGC` der Engine aufschiebt.
-Abschalten mit `?safepointgc=0`, Ausgabe mit `?safepointgc=debug`.
+Interpreter bei `op_check_traps` und beim Funktionseintritt, also an einer Befehlsgrenze, wo
+alle Werte im JS-Stack von JSC im Speicher liegen. Gesammelt wird nur, wenn JS direkt aus der
+Engine kam (genau ein VM-Einstieg, kein C++ dazwischen) und nichts ausser dem `DeferGC` der
+Engine aufschiebt. Abschalten mit `?safepointgc=0`, Ausgabe mit `?safepointgc=debug`.
 
 **Freigeben bei Wachstum:** Nach jeder Aufgabe schaut die Engine, wie gross der Bereich ist,
 den malloc vom System geholt hat (`malloc_footprint()`, kostet nichts). Ab 192 MB ruft sie bei
@@ -101,23 +124,34 @@ jedem Wachstum um 32 MB `WebCore::releaseMemory` auf, das sonst nur bei Speicher
 Caches, dekodierte Bilder, Back/Forward-Cache, kompilierter Code, danach ein voller GC. So
 wird zuerst der frei gewordene Platz wiederverwendet, bevor der WASM-Speicher waechst.
 Gemessen (CNN, Microsoft, YouTube, Wikipedia nacheinander): WASM-Speicher am Ende 369 MB statt
-443 MB, jede Freigabe 0.1-0.3 s. (Die erste Version nahm `mallinfo()`, das ueber den ganzen
-Heap laeuft und auf CNN ca. 25 ms pro Aufruf kostete.) Schwelle mit `BL_MEMORY_RELEASE_MB`
-(0 = aus).
+443 MB, jede Freigabe 0.1-0.3 s. Schwelle mit `BL_MEMORY_RELEASE_MB` (0 = aus).
 
 Ausserdem: `Thread::suspend` geht in WASM nicht (keine Signale). Darum pro JS-VM nur ein
 Thread, Sampling-Profiler aus.
 
 ### Rendering
-- Zuerst Skia CPU-Raster in einen Buffer, dann als ImageBitmap auf das Canvas.
-- Skia erkennt auf WASM keine CPU-Erweiterungen und nimmt sonst die skalare
-  Raster-Pipeline (ein Pixel pro Schritt, ohne die schnellen 16-Bit-Stufen). Patch 0020
-  baut Skia mit `-msse4.1`: Emscripten bildet SSE bis 4.1 auf WASM-SIMD ab, so laeuft der
-  SSE4.1-Pfad. Malen von `tests/engine/paintbench.html` (1280x2000): 907 -> ca. 430 ms,
-  Bild bis auf Rundung gleich (max. 4/255 bei 0.03 % der Werte). Nur skcms (Farbprofile)
-  bleibt bei seinem eigenen Vektor-Code, sonst wuerde es AVX-Header einbinden.
-- Spaeter Skia Ganesh auf WebGL2 im OffscreenCanvas mit Compositing (Scrollen ohne neu
-  malen).
+- Skia rastert per Ganesh auf WebGL 2 im Engine-Worker (Entscheid 86), ohne WebGL 2 oder mit
+  `?gpu=0` auf der CPU. Fuer die CPU baut Patch 0020 Skia mit `-msse4.1`: Emscripten bildet
+  SSE bis 4.1 auf WASM-SIMD ab, sonst naehme Skia die skalare Pipeline (ein Pixel pro
+  Schritt). Malen von `tests/engine/paintbench.html` (1280x2000): 907 -> ca. 430 ms.
+- Compositing mit Ebenen wie WPE (Coordinated Graphics, `engine/src/LayerTreeHostWasm.cpp`):
+  der Engine-Thread macht Rendering-Update und flush, die Kacheln malen Hintergrund-Threads,
+  ein eigener Compositor-Thread (`engine/src/Compositor.cpp`) setzt die Ebenen mit eigenem
+  WebGL-2-Kontext zusammen und zeigt das Bild im Canvas des Tabs, das ihm gehoert
+  (`transferControlToOffscreen`). Animationen von `transform`/`opacity` laufen so weiter,
+  auch wenn JS den Engine-Thread blockiert. `?compositing=0` schaltet ab.
+- Scrollen laeuft im Scroll-Thread von WebCore (`engine/src/ScrollingWasm.cpp`): Rad- und
+  Wisch-Events gehen ueber den Compositor-Thread direkt dorthin (Entscheid 101).
+- Pinch-Zoom: waehrend der Geste skaliert der Compositor die gezeigten Kacheln (Transformation
+  der Wurzel-Ebene, Rechnung in `engine/src/PinchZoom.h`), am Ende uebernimmt der Engine-Thread
+  einmal mit `Page::setPageScaleFactor` (Entscheid 150).
+- CSS-Filter: Blur und Schatten rechnet der Compositor auf der GPU, eine Ebene ohne Kinder
+  behaelt ihr gefiltertes Bild, solange sich nichts aendert (Patch 0036, Entscheid 156).
+  `url()`- und SVG-Filter malt die CPU in den Kacheln.
+- GPU-Verlust: der Engine-Worker malt bis zum `webglcontextrestored` auf der CPU, danach
+  registriert er denselben WebGL-Kontext neu und malt wieder auf der GPU. Ohne Compositor
+  kommen alle Views zurueck, mit Compositor nur neue Views mit Ebenen (Entscheid 157). Im Log:
+  `GPU: Views wieder auf der GPU: <n>`.
 
 ### WebGL
 - WebKits `GraphicsContextGLANGLE` ruft ANGLE-Funktionen auf (`GL_DrawArrays`, `EGL_...`).
@@ -137,7 +171,12 @@ Thread, Sampling-Profiler aus.
   "Standard"-VAO und Transform-Feedback-Objekt, und Textur-Einheiten, die ein Kontext nie
   benutzt hat, werden geleert. So sieht keine Seite Daten einer anderen.
 - Bild in die Seite: nach jedem Frame liest `GraphicsContextGLWasm` die Pixel mit
-  `readPixels` (kein Compositing, siehe Entscheid 26).
+  `readPixels`; ohne Compositing malt die Engine sie in die Seite, mit Compositing werden sie
+  Inhalt einer Ebene.
+- Kontextverlust: ein Kontext bleibt an seinem verlorenen Host-Kontext, bis er zerstoert wird,
+  und meldet `webglcontextlost` beim naechsten `clear` oder Zeichnen (`checkGPUStatus`). Nach
+  `preventDefault` macht WebKit einen neuen Kontext auf einem neuen Host-Kontext. Nie synchron
+  aus `makeContextCurrent` melden: WebGL haelt dabei oft `objectGraphLock`.
 
 ### WebAssembly der Seiten
 JSC kann mit dem C-Loop-Interpreter kein WebAssembly (der Wasm-Interpreter von JSC hat
@@ -152,16 +191,28 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   bzw. als 16-Byte-Slots im Speicher der Engine hin und her. Werte aus JSC (z.B. Funktionen
   fuer Imports, externref) bekommen eine id, Objekte des Browsers (Funktionen, Tabellen,
   Globals) auch.
+- Realms: alles gehoert dem globalen Objekt der Seite (eines Frames oder Workers). Die Werte,
+  die die Host-Seite haelt, haengen an einem privaten Symbol am globalen Objekt (fuer die
+  Seite unsichtbar) und sind keine GC-Wurzeln. Stirbt das globale Objekt (Navigation, Ende
+  eines Workers), gibt die Bruecke die Speicher der Realm frei und die Host-Seite ihre Objekte.
+  Speicher-Funktionen nehmen nur Speicher der eigenen Realm an, auch im Host
+  (`wasm-host.js`). Der Zustand der Bruecke lebt pro Thread bis zu dessen Ende.
 - `engine/js/wasm-host.js` fuehrt die Module im Engine-Worker aus. Imports aus JS rufen
   ueber `bl_wasm_call_guest` zurueck in JSC, Ausnahmen gehen in beide Richtungen durch.
+  Hoechstens 64 verschachtelte Aufrufe JS -> WebAssembly -> JS (Chrome lief nach ca. 125
+  ueber), dann ein RangeError.
 - Speicher: JavaScript der Seite muss `memory.buffer` direkt sehen, der ArrayBuffer muss
   also im Speicher der Engine liegen. Darum schreibt `engine/js/wasm-rewrite.js` jedes Modul
-  vor dem Kompilieren um: Speicher 0 wird der Speicher der Engine, jeder Zugriff bekommt
-  eine Grenzpruefung und die Basis des eigenen Bereichs dazu. memory.grow ruft die Bruecke,
-  die den Bereich bei Bedarf umzieht (der alte ArrayBuffer wird abgehaengt, wie im Standard).
-  Basis und Groesse liegen pro Funktion in Locals und werden nur nach Aufrufen neu geladen.
-  Kostet ca. 10-15 % Geschwindigkeit, dafuer kann ein Modul nur seinen eigenen Bereich
-  lesen und schreiben.
+  vor dem Kompilieren um: jeder Speicher des Moduls wird ein eigener Bereich im Speicher der
+  Engine, jeder Zugriff bekommt eine Grenzpruefung und die Basis des Bereichs dazu.
+  memory.grow ruft die Bruecke, die den Bereich bei Bedarf umzieht (der alte ArrayBuffer wird
+  abgehaengt, wie im Standard). Basis und Groesse liegen pro Funktion in Locals und werden nur
+  nach Aufrufen neu geladen. Kostet ca. 10-15 % Geschwindigkeit, dafuer kann ein Modul nur
+  seine eigenen Bereiche lesen und schreiben. Hoechstens 2 GB pro Speicher, `memory.buffer`
+  laesst sich nicht uebertragen.
+- memory64 und mehrere Speicher gehen (i64-Adressen werden geprueft und auf i32 gekuerzt,
+  Entscheid 152). Geteilter Speicher (Threads) und JSPI nicht, `validate()` sagt dafuer false
+  und `atomic.wait` trapt (Entscheid 153).
 
 ### Netzwerk
 - WebCore curl-Backend (`Source/WebCore/platform/network/curl/`), libcurl mit nghttp2
@@ -172,8 +223,9 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   im WASM. Nur Verbindung oeffnen, Daten senden und schliessen gehen asynchron an den
   Haupt-Thread (`engine/js/sockets.js`), der sie ueber den **Transport** der Oberflaeche
   schickt (`Module.blTransport`, heute Wisp aus `web/transport.js`). Ankommende Daten
-  schreibt der Haupt-Thread direkt in den Puffer. Vorher lief alles ueber Emscriptens SOCKFS
-  im JavaScript des Haupt-Threads: jedes `send/recv/poll` von curl war ein synchroner Umweg.
+  schreibt der Haupt-Thread direkt in den Puffer. Gesendet gilt erst, was der Transport
+  abgeschickt hat (`onsent`, `bl_socket_sent`), hoechstens 8 MB sind unterwegs. Schliesst das
+  Relay mit einem Fehlergrund, bekommt curl einen Fehler (errno) statt eines normalen Endes.
   `getaddrinfo` gibt fuer Hostnamen Platzhalter (172.29.x.y), `connect` macht daraus wieder
   den Namen, aufloesen tut das Relay.
 - Wichtig fuer allen Code, der auf dem Haupt-Thread laeuft: waehrend er auf ein Lock wartet
@@ -181,29 +233,58 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   dabei schon ein Lock, das eine dieser Aufgaben auch nimmt, wartet er auf sich selber. Das
   liess Seiten wie nzz.ch ab und zu haengen. Darum: auf dem Haupt-Thread unter einem Lock
   nichts, was warten kann (kein malloc/free).
+- Loader (`engine/src/LoaderStrategy.cpp`): alle Ladewege (Seiten-Ressourcen, Pings und
+  Beacons, Favicons, Downloads, Media, Soft-Update und Navigation Preload der Service Worker)
+  bauen ihre Anfrage mit denselben Helfern (`createCurlRequest`, `storeCookies`,
+  `followRedirect`, `networkResponse`): Cookies nur bei `allowCookies` (also nicht bei
+  `credentials: 'omit'`), Redirects hoechstens 20, nie nach `file:`, ohne Zugangsdaten und
+  ohne Authorization/Origin bei fremdem Ursprung. Pings pruefen wie WebKit2 CORS (mit
+  Preflight) und CSP auch nach Redirects. Downloads siehe Entscheid 163.
 - TLS: ChaCha20-Poly1305 zuerst (TLS 1.3 ueber `CURLOPT_TLS13_CIPHERS`, Patch 0021, und
   TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
   auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn
   der ChaCha bevorzugt (wie Handys ohne AES-Befehle).
 - HTTP-Cache: ohne Network-Prozess hat WebKit nur den Speicher-Cache, der mit der Engine
   verschwindet. `engine/src/HttpCache.cpp` legt cachebare Antworten (bis 10 MB) in die Cache
-  API des Host-Browsers (auf der Platte, wird nur bei Bedarf gelesen, Zugriff ueber
-  `engine/js/http-cache.js` auf dem Haupt-Thread; die URL-Liste haelt der Haupt-Thread im
+  API des Host-Browsers (`bl-http-v2`, auf der Platte, wird nur bei Bedarf gelesen, Zugriff
+  ueber `engine/js/http-cache.js` auf dem Haupt-Thread; die URL-Liste haelt der Haupt-Thread im
   Speicher, Anfragen ohne Eintrag kosten so keinen Plattenzugriff). Vor dem Netz: frisch ->
   direkt aus dem Cache, alt mit ETag/Last-Modified -> bedingte Anfrage, bei 304 aus dem Cache.
-  Frische, Alter und Vary rechnet WebCore (`CacheValidation.h`). Ueber 400 MB werden die
-  aeltesten Eintraege geloescht. "Gespeicherte Daten loeschen" leert ihn mit. Gemessen beim
-  zweiten Besuch: GitHub 135 von 136 Anfragen aus dem Cache, CNN 123 (davon 103 mit 304).
-  Test: `tests/e2e/cache-test.mjs`.
+  Frische, Alter und Vary rechnet WebCore (`CacheValidation.h`). Gezaehlt wird nur der eigene
+  Inhalt (Header `x-bl-size`), Grenze 400 MB und hoechstens ein Viertel der Quote, darueber
+  werden die aeltesten Eintraege bis 80 % geloescht (auch bei voller Quote). HTTP/1-Antworten,
+  die nur mit der Verbindung enden, kommen nicht hinein (ein Abbruch saehe aus wie ein Ende).
+  "Gespeicherte Daten loeschen" leert ihn mit. Gemessen beim zweiten Besuch: GitHub 135 von 136
+  Anfragen aus dem Cache, CNN 123 (davon 103 mit 304). Test: `tests/e2e/cache-test.mjs`,
+  `tests/engine/http-cache-test.mjs`.
 - WebCrypto (`crypto.subtle`) ueber den OpenSSL-Code von WebCore. Zwei Stellen gingen mit
   OpenSSL 3 nicht und sind in Patch 0010 repariert: AES-GCM (Padding wurde vor dem Init
   gesetzt) und RSA-OAEP/RSA-PSS (WebKit prueft mit `#if defined(...)` auf Makros, die in
   OpenSSL 3 Funktionen sind). Bot-Pruefungen wie AWS WAF brauchen AES-GCM. Ed25519/X25519
-  fehlen noch (WebKit hat dafuer keinen OpenSSL-Code). Test: `tests/engine/crypto.html`.
+  mit eigenem OpenSSL-Code (EVP, auch Patch 0010, Entscheid 73). Test:
+  `tests/engine/crypto.html`.
 - `WispTransport`: jede TCP-Verbindung ist ein Stream in einer Wisp-WebSocket-Verbindung.
-  Hostnamen werden vom Relay aufgeloest.
+  Hostnamen werden vom Relay aufgeloest. Jeder WebSocket macht seinen eigenen Handshake (15 s
+  Zeitlimit). Bricht eine stehende Verbindung ab, verbindet er einmal sofort neu, sonst alle
+  2 s, und meldet `connected` fuer `navigator.onLine`.
 - Spaeter `WireGuardTransport`: userspace TCP/IP + WireGuard im WASM, UDP-Pakete ueber
   Wisp-UDP. WebCore und curl merken davon nichts.
+
+### Service Worker und Speicher der Seiten
+Was in WebKit2 im Network-Prozess laeuft, sitzt im Engine-Thread, verbunden ohne IPC:
+
+- Service Worker und SharedWorker (`engine/src/ServiceWorkerWasm.cpp`, Entscheid 103): SWServer,
+  Client- und Context-Verbindung im selben Thread. Der Fetch-Abfang sitzt in der LoaderStrategy.
+  Hintergrund-Aktualisierung laedt der Server selber (`SWServerDelegate::softUpdate`, Patch 0033
+  erkennt seine eigenen Jobs). Navigation Preload, Benachrichtigungen aus dem Worker und
+  `clients.openWindow()` (nur nach `notificationclick`, nur http(s)) siehe Entscheid 154.
+  `WindowClient.navigate()` endet mit dem Laden des Frames: TypeError bei einem Fehler vor dem
+  Commit, sonst der neue Client oder null.
+- Cache API (`engine/src/CacheStorageWasm.cpp`): pro Ursprung eine Datei mit den Eintraegen
+  unter `/data/cachestorage`, jeder Inhalt als eigene Datei, gelesen erst bei `match`
+  (Entscheid 155), hoechstens 256 MB pro Ursprung.
+- Origin Private File System (`engine/src/FileSystemStorageWasm.cpp`, Entscheid 95): Dateien
+  unter `/data/opfs/<Ursprung>/`, `createWritable` in einer Kopie unter `/data/opfs-swap`.
 
 ### Threads
 Emscripten pthreads, braucht `SharedArrayBuffer`. Dafuer muss die Seite mit diesen Headern
@@ -215,12 +296,21 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 ### Speicher
-Cookies (SQLite), localStorage und IndexedDB liegen in der Engine unter `/data`. Die Engine
-benutzt WasmFS (`-sWASMFS`): das Dateisystem lebt im WASM, Datei-Syscalls aus jedem Thread
-gehen direkt, ohne Umweg ueber den UI-Thread. `/data` ist ein Verzeichnis im Origin Private
-File System (OPFS) des Host-Browsers (`engine/src/Storage.cpp`, WasmFS-Backend fuer OPFS,
-das ueber einen eigenen Worker mit synchronen Zugriffs-Handles arbeitet). Bleibt also
-zwischen Besuchen erhalten. Ohne OPFS (node-Tests) ist `/data` nur im Speicher.
+Cookies (SQLite), localStorage, IndexedDB, Cache API, Service Worker und OPFS der Seiten liegen
+in der Engine unter `/data`. Die Engine benutzt WasmFS (`-sWASMFS`): das Dateisystem lebt im
+WASM, Datei-Syscalls aus jedem Thread gehen direkt, ohne Umweg ueber den UI-Thread. `/data` ist
+ein Verzeichnis im Origin Private File System (OPFS) des Host-Browsers (`engine/src/Storage.cpp`,
+WasmFS-Backend fuer OPFS, das ueber einen eigenen Worker mit synchronen Zugriffs-Handles
+arbeitet). Bleibt also zwischen Besuchen erhalten. Ohne OPFS (node-Tests) ist `/data` nur im
+Speicher.
+
+- Nur ein Tab des Host besitzt `/data` (`navigator.locks` `bl-data`). Ein zweiter laeuft mit
+  `/data` im Speicher und zeigt einen Hinweis.
+- Ganze Dateien ersetzt `replaceWholeFile` atomar: Kopie in `/data/tmp`, dann `rename`.
+  `/data/tmp` wird beim Start geleert. Ein Lesefehler gilt nie als "Datei fehlt", sonst
+  wuerde eine leere Datei eine gute ueberschreiben.
+- Uploads, Drag & Drop und Einfuegen schreibt die Engine nach `/tmp/uploads/<Tab>/` (im
+  WASM-Speicher), der Ordner geht mit dem Tab (`bl_remove_path`).
 
 SQLite schreibt jede WAL-Seite einzeln (mit seek davor): beim Laden von CNN waren das ca.
 7000 Zugriffe nur fuer die Cookie-Datenbank. Darum gibt es ein eigenes SQLite-VFS
@@ -232,10 +322,10 @@ Engine-Thread) und wenn die letzte Verbindung zu einer Datenbank schliesst. Dana
 VFS wieder von der Platte, damit es stimmt, wenn WebKit Dateien selber loescht
 (`indexedDB.deleteDatabase`).
 
-Frueher war `/data` ein IDBFS von Emscripten (ganzer Baum beim Start geladen, alle 5 s
-abgeglichen, alles im UI-Thread). Diese Daten liest die Oberflaeche beim ersten Start mit
-WasmFS einmal aus der IndexedDB, die Engine uebernimmt sie, danach wird die alte Datenbank
-geloescht (#142). Der alte Weg laesst sich mit `-DBROWSER_LITE_WASMFS=OFF` noch bauen.
+Daten aus einem IDBFS von Emscripten (das Dateisystem vor WasmFS) liest die Oberflaeche beim
+ersten Start einmal aus der IndexedDB, die Engine uebernimmt sie, danach wird die alte
+Datenbank geloescht (Entscheid 142). Der IDBFS-Weg laesst sich mit
+`-DBROWSER_LITE_WASMFS=OFF` noch bauen.
 
 ### Ton (Web Audio)
 ```
@@ -262,6 +352,14 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
                       MediaFetch (curl, Range)  <--------  Service Worker (2-MB-Stuecke)
                       malt das Bild in die Seite <--------  Bild (drawImage) in WASM-Speicher
 ```
+- `MediaFetch` laedt http(s) mit curl (gleiche Helfer wie der Loader), `blob:` und `data:`
+  aus dem Speicher (`BlobResourceHandle`, mit Range). Ein `blob:` bleibt auch nach
+  `revokeObjectURL` abspielbar.
+- Bilder: jedes Bild bekommt einen eigenen Puffer, den die Engine uebernimmt; das naechste
+  schickt die Oberflaeche erst nach der Antwort `frame`. Das neuste Bild ist ein
+  unveraenderliches `NativeImage` ueber diesem Puffer, freigegeben erst, wenn auch die
+  Aufzeichnungen der Kachel-Maler es loslassen. `canvas.drawImage(video)` braucht keine Kopie.
+- `preload` (`none`, `metadata`, `auto`) und spaetere Aenderungen gehen an das Host-`<video>`.
 - Zustand (Zeit, Dauer, readyState, buffered) meldet die Oberflaeche bei jedem Event des
   Host-`<video>`, dazwischen rechnet die Engine die Zeit selber weiter.
 - MSE: WebCore bekommt Spuren und Zeitstempel aus `ContainerParser` (fMP4, WebM) und macht
@@ -272,8 +370,9 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
 
 ### Hosting
 Ein Container (`Dockerfile`, `relay/server.mjs`): liefert die Seite mit den Headern oben
-und vorkomprimiert (Brotli) aus und ist das Wisp-Relay. HTTPS kommt von einem Proxy davor
-(Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay blockiert private IP-Bereiche.
-Auf einem oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als
-Proxy), intern geht es ohne. Ablauf in
-[deploy/README.md](../deploy/README.md).
+und vorkomprimiert (Brotli, mit ETag/304) aus und ist das Wisp-Relay. HTTPS kommt von einem
+Proxy davor (Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay
+verbindet nur zu oeffentlichen Unicast-Adressen und erlaubten Ports; Namen prueft es bei der
+Aufloesung, so dass genau die gepruefte Adresse verbunden wird (Entscheid 159). Auf einem
+oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als Proxy),
+intern geht es ohne. Ablauf in [deploy/README.md](../deploy/README.md).

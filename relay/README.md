@@ -18,6 +18,7 @@ Betrieb und Deploy: [deploy/README.md](../deploy/README.md). Test: `tests/relay/
   Aufloesung selbst, so ist genau die Adresse geprueft, mit der es verbindet (kein
   DNS-Rebinding zwischen Pruefen und Verbinden).
 - Nur Ports 80, 443, 8080, 8443. UDP ist aus (kommt mit WireGuard).
+- `RELAY_ALLOW_LOCAL=1` hebt Adress- und Port-Sperre auf, nur fuer Tests mit lokalen Servern.
 - Pro Verbindung hoechstens 256 gleichzeitige Streams.
 - Das Relay loggt keine Inhalte (die sind sowieso TLS-verschluesselt).
 - SIGTERM beendet sofort (Node ist PID 1 im Container, ohne Handler kaeme erst nach 10 s

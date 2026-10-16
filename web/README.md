@@ -7,7 +7,7 @@ Die Browser-Oberflaeche: schlichtes HTML, CSS und JavaScript (ES-Module), ohne B
 | `index.html`, `style.css` | Tabs, Werkzeugleiste, Seitenbereich |
 | `app.js` | Start der Engine, Tabs, Eingabe, Uploads, Downloads, Drucken, Kontextmenue, Tastenkuerzel |
 | `watchdog.js` | Absturz (abort, OOM, Trap) und Haengen der Engine: Meldung und Neustart mit der Sitzung |
-| `transport.js` | Wisp-Client: die TCP-Verbindungen der Engine ueber das Relay |
+| `transport.js` | Wisp-Client: die TCP-Verbindungen der Engine ueber das Relay, Verbindungsstand fuer `navigator.onLine` |
 | `library.js` | Sitzung, Verlauf, Lesezeichen, Downloads, Einstellungen, Seitenpanel |
 | `pickers.js` | Liste von `<select>`, Farbe, Datum, Link-Adresse unten links |
 | `devices.js` | Berechtigungen, Standort, Sensoren, Benachrichtigungen, Gamepads, Sprache, Touch, Host-Bruecke der Polyfills |
@@ -42,6 +42,8 @@ ihrer Threads), zeigt `watchdog.js` eine Meldung mit "Neu starten". Die Sitzung 
 mehr gespeichert, der Neustart bringt den letzten guten Stand zurueck. Stuerzt sie innerhalb
 einer Minute wieder ab, laden die Tabs nach dem Neustart erst beim Anklicken.
 
-Haengen: auf Laden, Neu laden und Suchen antwortet die Engine immer, `app.js` ruft davor
-`expectAnswer()`. Kommt danach 10 s lang gar nichts von ihr, steckt ihr Thread fest (z.B. eine
-Endlosschleife), und es gibt "Warten" oder "Neu starten" (dann laden die Tabs erst beim Anklicken).
+Haengen: auf Laden, Neu laden, Verlauf wiederherstellen und Suchen antwortet die Engine immer,
+`app.js` ruft davor `expectAnswer()`. Kommt danach 10 s lang gar nichts von ihr, steckt ihr
+Thread fest, und es gibt "Warten" oder "Neu starten" (dann laden die Tabs erst beim Anklicken).
+Skripte einer Seite, die die Engine 30 s blockieren, bricht die Engine selber ab
+(`?env=BL_SCRIPT_TIMEOUT=<s>`, 0 = aus).
