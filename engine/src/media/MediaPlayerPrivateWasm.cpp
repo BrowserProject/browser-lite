@@ -9,14 +9,20 @@
 #include "MediaStreamWasm.h"
 #endif
 
+#include <WebCore/BlobRegistry.h>
+#include <WebCore/BlobRegistryImpl.h>
 #include <WebCore/ContentType.h>
+#include <WebCore/DataURLDecoder.h>
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/MediaSourcePrivateClient.h>
 #include <WebCore/MediaPlayer.h>
 #include <WebCore/NativeImage.h>
+#include <WebCore/SharedBuffer.h>
+#include <cstdlib>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
+#include <skia/core/SkData.h>
 #include <skia/core/SkImage.h>
 #include <skia/core/SkPixmap.h>
 #include <wtf/HashMap.h>
@@ -80,6 +86,16 @@ static int nextPlayerId = 1;
 MediaPlayerPrivateWasm* MediaPlayerPrivateWasm::fromId(int id)
 {
     return players().get(id);
+}
+
+static ASCIILiteral preloadName(MediaPlayer::Preload preload)
+{
+    switch (preload) {
+    case MediaPlayer::Preload::None: return "none"_s;
+    case MediaPlayer::Preload::MetaData: return "metadata"_s;
+    case MediaPlayer::Preload::Auto: return "auto"_s;
+    }
+    return "auto"_s;
 }
 
 // Antworten des Host merken: jede Frage geht synchron ueber den Haupt-Thread und
@@ -201,7 +217,12 @@ private:
             return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.type.isEmpty())
             return MediaPlayer::SupportsType::MayBeSupported;
-        return hostCanPlayType(parameters.type.raw());
+        auto answer = hostCanPlayType(parameters.type.raw());
+        // Nur aus der Endung geraten (z.B. .mov): der Host-Browser erkennt das
+        // Format beim Laden selber
+        if (answer == MediaPlayer::SupportsType::IsNotSupported && parameters.type.typeWasInferredFromExtension())
+            return MediaPlayer::SupportsType::MayBeSupported;
+        return answer;
     }
 };
 
@@ -254,8 +275,17 @@ void MediaPlayerPrivateWasm::setNetworkState(MediaPlayer::NetworkState state)
 void MediaPlayerPrivateWasm::load(const String& urlString)
 {
     m_url = URL { urlString };
-    // Nur was die Engine selber laden kann
-    if (!m_url.protocolIsInHTTPFamily()) {
+    // blob: und data: liefert MediaFetch aus diesen Bytes, auch nach revokeObjectURL
+    m_blob = nullptr;
+    if (m_url.protocolIsBlob())
+        m_blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(m_url);
+    else if (m_url.protocolIsData()) {
+        if (auto decoded = DataURLDecoder::decode(m_url, DataURLDecoder::ShouldValidatePadding::No)) {
+            m_blob = BlobData::create(decoded->contentType);
+            m_blob->appendData(DataSegment::create(WTF::move(decoded->data)));
+        }
+    }
+    if (!m_url.protocolIsInHTTPFamily() && !m_blob) {
         setNetworkState(MediaPlayer::NetworkState::FormatError);
         return;
     }
@@ -263,8 +293,26 @@ void MediaPlayerPrivateWasm::load(const String& urlString)
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
     send("create"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume,
-        ",\"rate\":"_s, m_rate, ",\"preload\":"_s, player && player->preload() == MediaPlayer::Preload::None ? "\"none\""_s : "\"auto\""_s, '}'));
+        ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\"}"_s));
     setNetworkState(MediaPlayer::NetworkState::Loading);
+}
+
+void MediaPlayerPrivateWasm::setPreload(MediaPlayer::Preload preload)
+{
+    if (preload == m_preload)
+        return;
+    m_preload = preload;
+    // Vor load() nur merken; MSE und MediaStream kennen kein preload
+    BL_IF_STREAM(return)
+    if (m_url.isEmpty() || m_isMediaSource)
+        return;
+    send("preload"_s, makeString("{\"preload\":\""_s, preloadName(preload), "\"}"_s));
+}
+
+// play() oder autoplay: wie AVFoundation alles laden
+void MediaPlayerPrivateWasm::prepareToPlay()
+{
+    setPreload(MediaPlayer::Preload::Auto);
 }
 
 #if ENABLE(MEDIA_SOURCE)
@@ -425,7 +473,7 @@ void MediaPlayerPrivateWasm::cancelLoad()
 bool MediaPlayerPrivateWasm::hasAvailableVideoFrame() const
 {
     BL_IF_STREAM(return !!m_stream->currentFrame())
-    return m_frame.pixels;
+    return m_frame;
 }
 
 void MediaPlayerPrivateWasm::play()
@@ -544,16 +592,6 @@ void MediaPlayerPrivateWasm::setPresentationSize(const IntSize& size)
     send("size"_s, makeString("{\"width\":"_s, size.width(), ",\"height\":"_s, size.height(), '}'));
 }
 
-static RefPtr<NativeImage> imageForFrame(uint8_t* pixels, int width, int height, bool copy)
-{
-    auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kOpaque_SkAlphaType);
-    SkPixmap pixmap(info, pixels, static_cast<size_t>(width) * 4);
-    auto image = copy ? SkImages::RasterFromPixmapCopy(pixmap) : SkImages::RasterFromPixmap(pixmap, nullptr, nullptr);
-    if (!image)
-        return nullptr;
-    return copy ? NativeImage::create(WTF::move(image)) : NativeImage::createTransient(WTF::move(image));
-}
-
 void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& rect)
 {
 #if ENABLE(MEDIA_STREAM)
@@ -563,11 +601,9 @@ void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& re
         return;
     }
 #endif
-    if (context.paintingDisabled() || !m_frame.pixels)
+    if (context.paintingDisabled() || !m_frame)
         return;
-    // Ohne Kopie: der Puffer gehoert dem Host und bleibt gueltig, gemalt wird sofort
-    if (RefPtr image = imageForFrame(m_frame.pixels, m_frame.width, m_frame.height, false))
-        context.drawNativeImage(*image, rect, FloatRect { 0, 0, static_cast<float>(m_frame.width), static_cast<float>(m_frame.height) });
+    context.drawNativeImage(*m_frame, rect, FloatRect { { }, m_frame->size() });
 }
 
 RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
@@ -578,18 +614,16 @@ RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
         return frame ? frame->copyNativeImage() : nullptr;
     }
 #endif
-    // Fuer canvas.drawImage(video): eine echte Kopie, die darf laenger leben
-    if (!m_frame.pixels)
-        return nullptr;
-    return imageForFrame(m_frame.pixels, m_frame.width, m_frame.height, true);
+    return m_frame;
 }
 
 RefPtr<VideoFrame> MediaPlayerPrivateWasm::videoFrameForCurrentTime()
 {
     BL_IF_STREAM(return m_stream->currentFrame())
-    if (!m_frame.pixels)
+    SkPixmap pixmap;
+    if (!m_frame || !m_frame->platformImage()->peekPixels(&pixmap))
         return nullptr;
-    return VideoFrameWasm::createRGBA(m_frame.pixels, static_cast<size_t>(m_frame.width) * 4, m_frame.width, m_frame.height, true, MediaTime::createWithDouble(m_frameMediaTime));
+    return VideoFrameWasm::createRGBA(pixmap.addr8(), pixmap.rowBytes(), pixmap.width(), pixmap.height(), true, MediaTime::createWithDouble(m_frameMediaTime));
 }
 
 DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
@@ -597,9 +631,15 @@ DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
     return DestinationColorSpace::SRGB();
 }
 
+// Der Puffer (malloc) gehoert ab jetzt dem Bild, web/media.js schreibt nie wieder hinein.
+// Frei wird er erst, wenn auch die letzte Aufzeichnung der Kacheln das Bild loslaesst.
+// Das naechste Bild schickt der Host erst nach "frame": nie mehr als eins unterwegs.
 void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 {
-    m_frame = { pixels, width, height };
+    size_t rowBytes = static_cast<size_t>(width) * 4;
+    auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kOpaque_SkAlphaType);
+    m_frame = NativeImage::create(SkImages::RasterFromData(info, SkData::MakeFromMalloc(pixels, rowBytes * height), rowBytes));
+    send("frame"_s);
     ++m_presentedFrames;
     m_frameArrival = MonotonicTime::now();
     m_frameMediaTime = currentTime().toDouble();
@@ -609,15 +649,15 @@ void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 
 std::optional<VideoFrameMetadata> MediaPlayerPrivateWasm::videoFrameMetadata()
 {
-    if (!m_frame.pixels || m_presentedFrames == m_lastMetadataFrame)
+    if (!m_frame || m_presentedFrames == m_lastMetadataFrame)
         return std::nullopt;
     m_lastMetadataFrame = m_presentedFrames;
     VideoFrameMetadata metadata;
     // Rohe MonotonicTime-Sekunden, HTMLVideoElement rechnet sie in die Zeit der Seite um
     metadata.presentationTime = m_frameArrival.secondsSinceEpoch().seconds();
     metadata.expectedDisplayTime = (m_frameArrival + 16_ms).secondsSinceEpoch().seconds();
-    metadata.width = m_frame.width;
-    metadata.height = m_frame.height;
+    metadata.width = m_frame->size().width();
+    metadata.height = m_frame->size().height();
     metadata.mediaTime = m_frameMediaTime;
     metadata.presentedFrames = m_presentedFrames;
     return metadata;

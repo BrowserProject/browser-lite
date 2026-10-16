@@ -6,11 +6,13 @@
 #include "config.h"
 #include "Clients.h"
 #include "Printing.h"
+#include "BackForwardList.h"
 #include "Choosers.h"
 
 #include "Engine.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
+#include "ServiceWorkerWasm.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
 #include "wasm/WasmBridge.h"
@@ -18,6 +20,7 @@
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/ScrollingCoordinator.h>
+#include <WebCore/BackForwardController.h>
 #include <WebCore/Chrome.h>
 #include <WebCore/Cursor.h>
 #include <WebCore/DataTransfer.h>
@@ -45,6 +48,7 @@
 #include <WebCore/JSDOMGlobalObject.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/ScriptController.h>
+#include <WebCore/SecurityOrigin.h>
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/MediaProducer.h>
@@ -54,6 +58,7 @@
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
+#include <WebCore/SandboxFlags.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StringWithDirection.h>
 #include <WebCore/UserAgent.h>
@@ -166,17 +171,22 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
 }
 
 // Dialoge: der Engine-Thread wartet, bis der Haupt-Thread den Dialog gezeigt hat.
-// Module.engineDialog(type, message, default) im Haupt-Thread liefert:
+// Module.engineDialog(viewId, type, origin, message, default) im Haupt-Thread liefert:
 //   alert -> 0, confirm -> 0/1, prompt -> Pointer auf UTF-8 (malloc) oder 0
-static intptr_t runDialog(int type, const String& message, const String& defaultValue)
+// origin ist der Ursprung des Frames, der fragt (wie "<host> meldet" in Chrome).
+static intptr_t runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue)
 {
+    RefPtr document = frame.document();
+    auto originUTF8 = (document ? document->securityOrigin().toString() : String { }).utf8();
     auto messageUTF8 = message.utf8();
     auto defaultUTF8 = defaultValue.utf8();
-    return MAIN_THREAD_EM_ASM_INT({
+    intptr_t answer = MAIN_THREAD_EM_ASM_INT({
         if (!Module.engineDialog)
             return 0;
-        return Module.engineDialog($0, UTF8ToString($1), UTF8ToString($2)) | 0;
-    }, type, messageUTF8.data(), defaultUTF8.data());
+        return Module.engineDialog($0, $1, UTF8ToString($2), UTF8ToString($3), UTF8ToString($4)) | 0;
+    }, viewId, type, originUTF8.data(), messageUTF8.data(), defaultUTF8.data());
+    restartScriptWatchdog();
+    return answer;
 }
 
 void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
@@ -201,19 +211,19 @@ void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
     }
 }
 
-void ChromeClient::runJavaScriptAlert(LocalFrame&, const String& message)
+void ChromeClient::runJavaScriptAlert(LocalFrame& frame, const String& message)
 {
-    runDialog(0, message, { });
+    runDialog(m_view->id(), frame, 0, message, { });
 }
 
-bool ChromeClient::runJavaScriptConfirm(LocalFrame&, const String& message)
+bool ChromeClient::runJavaScriptConfirm(LocalFrame& frame, const String& message)
 {
-    return runDialog(1, message, { });
+    return runDialog(m_view->id(), frame, 1, message, { });
 }
 
-bool ChromeClient::runJavaScriptPrompt(LocalFrame&, const String& message, const String& defaultValue, String& result)
+bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message, const String& defaultValue, String& result)
 {
-    auto* answer = reinterpret_cast<char*>(runDialog(2, message, defaultValue));
+    auto* answer = reinterpret_cast<char*>(runDialog(m_view->id(), frame, 2, message, defaultValue));
     if (!answer)
         return false;
     result = String::fromUTF8(answer);
@@ -360,10 +370,13 @@ FrameLoaderClient::FrameLoaderClient(FrameLoader& frameLoader, WebView& view)
 {
 }
 
+// Ein Prozess wie WebKitLegacy: der Eintrag beginnt immer beim Hauptframe, auch
+// wenn ein Iframe navigiert (WebKit2 setzt den Baum im UI-Prozess zusammen)
 RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, BackForwardItemIdentifier itemID) const
 {
     Ref frame = m_frameLoader->frame();
-    return frame->loader().history().createItemTree(frame, clipAtTarget, itemID);
+    Ref rootFrame = frame->rootFrame();
+    return rootFrame->loader().history().createItemTree(frame, clipAtTarget, itemID);
 }
 
 // Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h)
@@ -383,8 +396,48 @@ bool FrameLoaderClient::isMainFrame() const
     return m_frameLoader->frame().isMainFrame();
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse&, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
+// Adressen, die die Engine selber laedt (view-source: zeigt die Oberflaeche,
+// showSource in web/app.js), und filesystem:, das im Host-Browser der Speicher
+// der Oberflaeche waere. Alles andere (mailto:, tel:, zoommtg:, ...) kann nur
+// der Host-Browser an das System weitergeben.
+static bool isExternalURL(const URL& url)
 {
+    return url.isValid() && !(url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsAbout() || url.protocolIsData()
+        || url.protocolIsBlob() || url.protocolIsJavaScript() || url.protocolIs("view-source"_s) || url.protocolIs("filesystem"_s));
+}
+
+// Wie Chrome nur nach einem Klick oder aus der Adressleiste, sonst still
+// verworfen. Ein Iframe mit sandbox braucht dazu allow-popups,
+// allow-top-navigation(-to-custom-protocols) oder einen Klick mit
+// allow-top-navigation-by-user-activation (HTML "hand-off to external
+// software", wie frameSandboxAllowsOpeningExternalCustomProtocols in WebKit2).
+static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxFlags, const NavigationAction& action, const URL& url)
+{
+    bool userGesture = action.processingUserGesture();
+    if (!userGesture && !action.isRequestFromClientOrUserInput())
+        return;
+    if (!frame.isMainFrame() && sandboxFlags.containsAll({ SandboxFlag::Popups, SandboxFlag::TopNavigation, SandboxFlag::TopNavigationToCustomProtocols })
+        && (sandboxFlags.contains(SandboxFlag::TopNavigationByUserActivation) || !userGesture)) {
+        if (RefPtr document = frame.document())
+            document->addConsoleMessage(MessageSource::Security, MessageLevel::Error, "Ignoring request to open an external URL from a sandboxed iframe"_s);
+        return;
+    }
+    notifyHost(viewId, "external-url", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
+}
+
+void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse&, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags sandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
+{
+    if (isExternalURL(request.url())) {
+        openExternalURL(m_view->id(), m_frameLoader->frame(), sandboxFlags, action, request.url());
+        function(PolicyAction::Ignore);
+        return;
+    }
+    // <a download>: gleich herunterladen, ohne die Adresse erst als Seite zu
+    // laden (WebCore prueft sandbox, ruft dann startDownload)
+    if (!action.downloadAttribute().isNull()) {
+        function(PolicyAction::Download);
+        return;
+    }
     // Strg/Cmd+Klick oder Mittelklick auf einen Link: wie Chrome in einem neuen
     // Tab im Hintergrund, die Seite bleibt
     if (action.type() == NavigationType::LinkClicked && request.url().protocolIsInHTTPFamily()) {
@@ -398,19 +451,26 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
     function(PolicyAction::Use);
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest& request, const String& downloadAttribute, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest&, const String&, FramePolicyFunction&& function)
 {
-    if (!response.isAttachment() && downloadAttribute.isNull() && canShowMIMEType(response.mimeType())) {
-        function(PolicyAction::Use);
-        return;
-    }
-    // Download (Content-Disposition: attachment, <a download>, unbekannter Typ):
-    // nochmal mit eigenem Request laden, die Daten gehen an die Oberflaeche.
-    // Die URL der Antwort ist schon das Ziel nach allen Redirects.
+    // Download (Content-Disposition: attachment, unbekannter Typ): WebCore
+    // prueft sandbox und data:, dann convertMainResourceLoadToDownload
+    bool download = response.isAttachment() || !canShowMIMEType(response.mimeType());
+    function(download ? PolicyAction::Download : PolicyAction::Use);
+}
+
+void FrameLoaderClient::startDownload(const ResourceRequest& request, const String& suggestedName, FromDownloadAttribute)
+{
+    BrowserLite::startDownload(m_view->id(), request, suggestedName);
+}
+
+// Die Datei nochmal mit eigenem Request laden (entscheidungen.md #33). Die URL
+// der Antwort ist schon das Ziel nach allen Redirects.
+void FrameLoaderClient::convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest& request, const ResourceResponse& response)
+{
     auto downloadRequest = request;
     downloadRequest.setURL(URL { response.url() });
-    BrowserLite::startDownload(m_view->id(), downloadRequest, downloadAttribute);
-    function(PolicyAction::Ignore);
+    BrowserLite::startDownload(m_view->id(), downloadRequest, { });
 }
 
 // target=_blank und Links mit neuem Fenster (window.open geht ueber denselben
@@ -430,8 +490,15 @@ LocalFrame* FrameLoaderClient::dispatchCreatePage(const NavigationAction& action
     return newFrame.get();
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction&, const ResourceRequest&, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction& action, const ResourceRequest& request, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
 {
+    // mailto: mit target=_blank: kein leerer Tab
+    if (isExternalURL(request.url())) {
+        Ref frame = m_frameLoader->frame();
+        openExternalURL(m_view->id(), frame, frame->effectiveSandboxFlags(), action, request.url());
+        function(PolicyAction::Ignore);
+        return;
+    }
     // Neue Fenster (target=_blank, window.open) werden neue Tabs, siehe ChromeClient::createWindow
     function(PolicyAction::Use);
 }
@@ -439,6 +506,26 @@ void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationA
 bool FrameLoaderClient::canShowMIMEType(const String& mimeType) const
 {
     return MIMETypeRegistry::canShowMIMEType(mimeType);
+}
+
+// Wie WebLocalFrameLoaderClient in WebKit2, ohne Plugins: None zeigt den
+// Ersatzinhalt des <object>
+ObjectContentType FrameLoaderClient::objectContentType(const URL& url, const String& mimeTypeIn)
+{
+    String mimeType = mimeTypeIn.convertToASCIILowercase();
+    if (mimeType.isEmpty()) {
+        auto path = url.path();
+        auto dot = path.reverseFind('.');
+        if (dot != notFound)
+            mimeType = MIMETypeRegistry::mimeTypeForExtension(path.substring(dot + 1));
+        if (mimeType.isEmpty())
+            return ObjectContentType::Frame;
+    }
+    if (MIMETypeRegistry::isSupportedImageMIMEType(mimeType))
+        return ObjectContentType::Image;
+    if (canShowMIMEType(mimeType))
+        return ObjectContentType::Frame;
+    return ObjectContentType::None;
 }
 
 void FrameLoaderClient::committedLoad(DocumentLoader* loader, const SharedBuffer& data)
@@ -512,14 +599,42 @@ void FrameLoaderClient::dispatchDidReceiveTitle(const StringWithDirection& title
         m_view->didChangeTitle(title.string);
 }
 
-void FrameLoaderClient::dispatchDidChangeLocationWithinPage()
+// Auch aus Iframes: deren Eintraege zaehlen fuer Zurueck/Vor mit
+void FrameLoaderClient::dispatchDidNavigateWithinPage()
 {
-    if (isMainFrame())
-        m_view->didCommitLoad();
+    m_view->didNavigateWithinPage();
+}
+
+// pushState legt den Eintrag nur mit dem Baum des Iframes an (WebKit2 ergaenzt ihn
+// im UI-Prozess): wie bei createHistoryItemTree ab dem Hauptframe, mit dem
+// Eintrag von pushState an der Stelle des Iframes
+void FrameLoaderClient::dispatchDidPushStateWithinPage()
+{
+    Ref frame = m_frameLoader->frame();
+    RefPtr parent = dynamicDowncast<LocalFrame>(frame->tree().parent());
+    Ref history = frame->loader().history();
+    RefPtr item = history->currentItem();
+    RefPtr previous = history->previousItem();
+    auto& list = static_cast<BackForwardList&>(m_view->page().backForward().client());
+    RefPtr root = parent && item && previous && item == list.currentItem() ? createHistoryItemTree(true, item->itemID()) : nullptr;
+    if (root) {
+        // createItemTree gibt auch dem Iframe einen neuen aktuellen Eintrag
+        history->setCurrentItem(previous.releaseNonNull());
+        history->setCurrentItem(*item);
+        protect(parent->loader().history().currentItem())->setChildItem(*item);
+        list.replaceCurrentItem(root.releaseNonNull());
+    }
+    m_view->didNavigateWithinPage();
+}
+
+void FrameLoaderClient::dispatchDidReplaceStateWithinPage()
+{
+    m_view->didNavigateWithinPage();
 }
 
 void FrameLoaderClient::dispatchDidFinishLoad()
 {
+    ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), true);
     if (isMainFrame())
         m_view->didFinishLoading();
 }
@@ -532,13 +647,28 @@ void FrameLoaderClient::dispatchDidReachLayoutMilestone(OptionSet<LayoutMileston
 
 void FrameLoaderClient::dispatchDidFailLoad(const ResourceError& error)
 {
+    ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), true);
     if (isMainFrame())
-        m_view->didFailLoading(error.failingURL().string(), error.localizedDescription());
+        didEndLoadWithError(error);
 }
 
-void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& error, WillContinueLoading, WillInternallyHandleFailure)
+// WillContinueLoading::Yes kommt auch bei jedem Zurueck/Vor, das scheitert.
+// Weiter geht es nur, wenn WebCore selber einspringt (HTTPS zuerst, dann HTTP).
+void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& error, WillContinueLoading, WillInternallyHandleFailure willInternallyHandleFailure)
 {
-    if (isMainFrame() && !error.isCancellation())
+    if (willInternallyHandleFailure == WillInternallyHandleFailure::Yes)
+        return;
+    ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), false);
+    if (isMainFrame())
+        didEndLoadWithError(error);
+}
+
+// Abbruch (Stopp, neue Navigation, Download) ist kein Fehler, das Laden ist nur zu Ende
+void FrameLoaderClient::didEndLoadWithError(const ResourceError& error)
+{
+    if (error.isCancellation())
+        m_view->didStopLoading();
+    else
         m_view->didFailLoading(error.failingURL().string(), error.localizedDescription());
 }
 

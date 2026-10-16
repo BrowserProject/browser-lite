@@ -1,0 +1,42 @@
+<!doctype html><title>hang</title><body><script>
+// Endlosschleifen: der Watchdog der Engine (engine/src/EngineLoop.cpp) bricht
+// jede ab, auch eine zweite, und try/catch/finally der Seite sehen davon nichts.
+// Danach laufen Timer, Promises und neue Skripte weiter.
+//   BL_SCRIPT_TIMEOUT=2 RENDER_WAIT_FOR="HANG fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html /tmp/h.ppm 200 200
+// Am Ende "HANG fertig=ok", sonst "HANG fertig=<grund>".
+const start = Date.now();
+const state = { spins: 0, caught: false, finished: false, second: 0 };
+setTimeout(() => {
+  try {
+    for (;;)
+      state.spins++;
+  } catch (e) {
+    state.caught = true;
+  } finally {
+    state.finished = true;
+  }
+}, 0);
+// War schon faellig, waehrend die Schleife lief
+setTimeout(() => {
+  const first = Date.now() - start;
+  console.log(`HANG erste Schleife abgebrochen nach ${first} ms, ${state.spins} Runden`);
+  setTimeout(() => {
+    for (;;)
+      state.second++;
+  }, 0);
+  setTimeout(async () => {
+    const value = await Promise.resolve(42);
+    const evaluated = new Function('return 6 * 7')();
+    const problems = [];
+    if (!state.spins || !state.second)
+      problems.push('schleife-lief-nicht');
+    if (state.caught || state.finished)
+      problems.push('abbruch-abgefangen');
+    if (first < 1000)
+      problems.push('zu-frueh');
+    if (value !== 42 || evaluated !== 42)
+      problems.push('danach-kaputt');
+    console.log('HANG fertig=' + (problems.join(',') || 'ok'));
+  }, 10);
+}, 10);
+</script>

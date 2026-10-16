@@ -97,6 +97,10 @@ public:
     // Vom Compositor-Thread: das letzte Rendering-Update ist gezeigt
     void didComposite();
     void compositorLost();
+    // GPU des Engine-Workers verloren oder wieder da (GpuRaster.cpp)
+    void gpuLost() { dropGpuSurface(); }
+    // true, wenn der View wieder auf der GPU malt
+    bool gpuRestored();
 
     const uint8_t* pixels() const { return m_pixels.span().data(); }
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
@@ -140,7 +144,11 @@ public:
     // Fuer die Clients
     void didStartLoading();
     void didCommitLoad();
+    // Anker, pushState/replaceState, popstate: neue Adresse ohne neues Dokument
+    void didNavigateWithinPage();
     void didFinishLoading();
+    // Abgebrochen (Stopp, neue Navigation, Download): kein Fehler, nicht fertig
+    void didStopLoading();
     void didReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>);
     void didFailLoading(const String& url, const String& description);
     void didChangeTitle(const String&);

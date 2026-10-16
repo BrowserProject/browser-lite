@@ -1,5 +1,5 @@
 diff --git a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
-index 451c9c8c41..ebb187a32a 100644
+index 451c9c8c41..af84c016ab 100644
 --- a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
 +++ b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
 @@ -34,6 +34,12 @@
@@ -20,9 +20,9 @@ index 451c9c8c41..ebb187a32a 100644
      }
  
 +#if defined(__EMSCRIPTEN__)
-+    // WebAssembly (browser-lite): every file access goes through the main thread of the page
-+    // and the check below reads and scans the whole font file, for every candidate of every
-+    // match. The installed fonts never change, so remember the answer per file.
++    // WebAssembly (browser-lite): die Pruefung unten liest und durchsucht fuer jeden Kandidaten
++    // jedes Treffers die ganze Schriftdatei, ohne WasmFS jeden Zugriff ueber den Haupt-Thread der
++    // Seite. Die installierten Schriften aendern sich nie, darum das Ergebnis pro Datei merken.
      bool FontAccessible(FcPattern* font) const {
 +        const char* filename = get_string(font, FC_FILE, nullptr);
 +        if (nullptr == filename) {

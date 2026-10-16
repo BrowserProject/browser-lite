@@ -14,6 +14,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/UUID.h>
 #include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
@@ -24,7 +25,6 @@ namespace {
 
 // Wie FileSystemStorageError in WebKit2
 enum class Error : uint8_t {
-    AccessHandleActive,
     FileNotFound,
     InvalidDataType,
     InvalidModification,
@@ -39,8 +39,6 @@ enum class Error : uint8_t {
 Exception toException(Error error)
 {
     switch (error) {
-    case Error::AccessHandleActive:
-        return Exception { ExceptionCode::InvalidStateError, "Some AccessHandle is active"_s };
     case Error::FileNotFound:
         return Exception { ExceptionCode::NotFoundError };
     case Error::InvalidDataType:
@@ -99,6 +97,9 @@ struct FileLock {
 };
 
 constexpr uint64_t initialCapacity = 1024 * 1024;
+// Kopien fuer createWritable(): neben den Ordnern der Urspruenge, also im
+// selben Dateisystem wie die Dateien (close() benennt nur um)
+constexpr auto swapDirectory = "/data/opfs-swap"_s;
 
 class FileSystemStorageConnectionWasm final : public FileSystemStorageConnection {
 public:
@@ -106,6 +107,12 @@ public:
     {
         static NeverDestroyed<Ref<FileSystemStorageConnectionWasm>> connection = adoptRef(*new FileSystemStorageConnectionWasm);
         return connection.get();
+    }
+
+    FileSystemStorageConnectionWasm()
+    {
+        // Reste von Schreibvorgaengen, die nicht fertig wurden (Tab geschlossen)
+        FileSystem::deleteNonEmptyDirectory(swapDirectory);
     }
 
     ExceptionOr<StorageConnection::DirectoryInfo> rootDirectory(const ClientOrigin& origin)
@@ -228,9 +235,10 @@ private:
             FileSystem::deleteFile(writable.path);
             return std::nullopt;
         }
-        bool copied = FileSystem::copyFile(handle.path, writable.path);
+        if (FileSystem::moveFile(writable.path, handle.path))
+            return std::nullopt;
         FileSystem::deleteFile(writable.path);
-        return copied ? std::nullopt : std::optional { Error::Unknown };
+        return Error::Unknown;
     }
 
     // ---------------------------------------------------- FileSystemStorageConnection
@@ -261,13 +269,15 @@ private:
         auto* destination = find(destinationIdentifier);
         if (!handle || !destination)
             return completionHandler(toException(Error::Unknown));
-        if (handle->syncAccessHandle)
-            return completionHandler(toException(Error::AccessHandleActive));
+        if (hasActiveLock(handle->path))
+            return completionHandler(toException(Error::NoModificationAllowed));
         if (destination->kind != FileSystemHandleKind::Directory)
             return completionHandler(toException(Error::TypeMismatch));
         if (!isValidFileName(destination->path, newName))
             return completionHandler(toException(Error::InvalidName));
         auto destinationPath = FileSystem::pathByAppendingComponent(destination->path, newName);
+        if (destinationPath != handle->path && hasActiveLock(destinationPath))
+            return completionHandler(toException(Error::NoModificationAllowed));
         if (!FileSystem::moveFile(handle->path, destinationPath))
             return completionHandler(toException(Error::Unknown));
         handle->path = destinationPath;
@@ -425,7 +435,7 @@ private:
         });
     }
 
-    // createWritable(): in eine Kopie schreiben, bei close() zurueckkopieren
+    // createWritable(): in eine Kopie schreiben, close() ersetzt die Datei damit
     void createWritable(ScriptExecutionContextIdentifier, FileSystemHandleIdentifier identifier, bool keepExistingData, StreamCallback&& completionHandler) final
     {
         auto* handle = find(identifier);
@@ -435,11 +445,13 @@ private:
             return completionHandler(toException(Error::FileNotFound));
         if (!acquireLock(handle->path, false))
             return completionHandler(toException(Error::InvalidState));
-        auto path = FileSystem::createTemporaryFile("FileSystemWritableStream"_s);
-        if (keepExistingData)
-            FileSystem::copyFile(path, handle->path);
-        auto file = FileSystem::openFile(path, FileSystem::FileOpenMode::ReadWrite);
+        FileSystem::makeAllDirectories(swapDirectory);
+        auto path = FileSystem::pathByAppendingComponent(swapDirectory, createVersion4UUIDString());
+        FileSystem::FileHandle file;
+        if (!keepExistingData || FileSystem::copyFile(path, handle->path))
+            file = FileSystem::openFile(path, FileSystem::FileOpenMode::ReadWrite);
         if (!file) {
+            FileSystem::deleteFile(path);
             releaseLock(handle->path);
             return completionHandler(toException(Error::Unknown));
         }

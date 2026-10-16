@@ -2,6 +2,9 @@
 // Kacheln, CSS-Animation (transform) ohne neues Malen, fixierte Leiste beim
 // Scrollen, Blur-Filter und WebGL-Canvas in einer Ebene. Animation und Scrollen
 // laufen weiter, waehrend das JS der Seite blockiert (Compositor-/Scroll-Thread).
+// Nach einem GPU-Verlust ohne Ebenen, nach der Wiederherstellung neue Tabs mit.
+// Ohne Compositor (?compositing=0) malt der Engine-Worker selber auf der GPU
+// und nach Verlust und Wiederherstellung wieder dort.
 //
 //   cd tests/e2e && node compositing-test.mjs [engine-ordner]
 import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
@@ -56,7 +59,11 @@ document.getElementById('trap').addEventListener('wheel', (e) => { e.preventDefa
 console.log('RESULT ready=1');
 </script>`;
 
-const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
+const GPU_PAGE = `<!doctype html><title>GPU-Test</title><body style="margin:0">
+<div id="box" style="width:100px;height:100px;background:rgb(255,0,0)"></div>
+<script>console.log('RESULT gpuready=1')</script>`;
+
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/gpu' ? GPU_PAGE : PAGE));
 
 const stack = await startStack({ token: 'compositing-token-0123456789abcdef' });
 const browser = await launch({ args: SWIFTSHADER });
@@ -68,7 +75,7 @@ const logs = results.logs;
 await page.goto(stack.app({ url: siteURL, compositing: '1', debug: '1', env: process.env.COMP_ENV || '' }));
 check('Seite geladen', await result('ready') === '1');
 
-const pixelAt = (x, y) => page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+const pixelAt = (x, y, target = page) => target.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
 const near = (pixel, rgb, tolerance = 40) => pixel && rgb.every((value, i) => Math.abs(pixel[i] - value) <= tolerance);
 // Warten, bis ein Bild mit Inhalt da ist (Kacheln werden im Hintergrund gemalt)
 async function waitFor(condition, ms = 20000) {
@@ -76,7 +83,7 @@ async function waitFor(condition, ms = 20000) {
   while (Date.now() < end) {
     if (await condition())
       return true;
-    await page.waitForTimeout(200);
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   return false;
 }
@@ -124,16 +131,20 @@ check('requestAnimationFrame laeuft weiter', framesAfter - framesBefore > 10, `$
 
 // Die Animation laeuft im Compositor-Thread weiter, auch wenn das JS der Seite
 // den Engine-Thread 3 s blockiert
-await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 3000; while (Date.now() < end); return 1; })()'));
-await page.waitForTimeout(400);
-const busyPositions = new Set();
-const busyStartAnim = Date.now();
-while (Date.now() - busyStartAnim < 2000) {
-  const x = await moverX();
-  if (x !== null)
-    busyPositions.add(x);
-  await page.waitForTimeout(80);
+async function positionsWhileBlocked() {
+  await page.evaluate(() => window.__blEval('(() => { const end = Date.now() + 3000; while (Date.now() < end); return 1; })()'));
+  await page.waitForTimeout(400);
+  const positions = new Set();
+  const start = Date.now();
+  while (Date.now() - start < 2000) {
+    const x = await moverX();
+    if (x !== null)
+      positions.add(x);
+    await page.waitForTimeout(80);
+  }
+  return positions;
 }
+const busyPositions = await positionsWhileBlocked();
 check('Animation laeuft weiter, waehrend das JS blockiert', busyPositions.size >= 2, JSON.stringify([...busyPositions]));
 if (busyPositions.size < 2)
   console.log(logs.filter((line) => /Compositor|Kachel|GPU/.test(line)).slice(-20).join('\n'));
@@ -193,6 +204,63 @@ await waitFor(async () => near(afterLoss = await pixelAt(50, 130), [0, 0, 255]),
 const barAfterLoss = await pixelAt(500, 20);
 check('Nach GPU-Verlust weiter gemalt (ohne Ebenen)', near(afterLoss, [0, 0, 255]) && near(barAfterLoss, [255, 128, 0]), JSON.stringify({ afterLoss, barAfterLoss }));
 
+// Der Browser stellt den Kontext wieder her: ein neuer Tab bekommt wieder Ebenen
+await page.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
+check('GPU wiederhergestellt', await waitFor(async () => logs.some((line) => /GPU: WebGL-Kontext wieder da/.test(line)), 10000));
+const stopsBefore = logs.filter((line) => /Compositing aus/.test(line)).length;
+results.delete('ready');
+await page.click('#new-tab');
+await page.fill('#address', siteURL);
+await page.press('#address', 'Enter');
+check('Neuer Tab nach der Wiederherstellung', await result('ready') === '1');
+await waitFor(async () => near(await pixelAt(50, 90), [255, 0, 0]));
+const restoredPositions = await positionsWhileBlocked();
+check('Neuer Tab mit Ebenen: Animation laeuft, waehrend das JS blockiert', restoredPositions.size >= 2
+  && logs.filter((line) => /Compositing aus/.test(line)).length === stopsBefore, JSON.stringify([...restoredPositions]));
+
 await screenshot(page, 'compositing');
+await page.close();
+
+// Ohne Compositor: GPU verloren, dann wiederhergestellt. Danach malt der View
+// wieder auf der GPU (nicht nur irgendwie), ohne auf die CPU zurueckzufallen.
+const gpuPage = await browser.newPage({ viewport: { width: 600, height: 400 } });
+const gpuResults = collect(gpuPage);
+const gpuLogs = gpuResults.logs;
+const gpuLog = (pattern) => gpuLogs.some((line) => pattern.test(line));
+await gpuPage.goto(stack.app({ url: siteURL + 'gpu', compositing: '0', debug: '1' }));
+check('Ohne Compositor geladen', await gpuResults.wait('gpuready') === '1');
+const boxColor = (rgb) => gpuPage.evaluate((rgb) => window.__blEval(`document.getElementById("box").style.background = "rgb(${rgb})"`), rgb.join(', '));
+// Pixel des Kastens, sobald er die Farbe hat (sonst nach 10 s der letzte)
+const boxPixel = async (rgb) => {
+  let pixel = null;
+  await waitFor(async () => near(pixel = await pixelAt(50, 50, gpuPage), rgb), 10000);
+  return pixel;
+};
+let box = await boxPixel([255, 0, 0]);
+check('Ohne Compositor: Engine-Worker malt auf der GPU', near(box, [255, 0, 0])
+  && gpuLog(/GPU: Skia malt ueber WebGL 2/) && !gpuLog(/Compositor: eigener Thread/), JSON.stringify(box));
+await gpuPage.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
+await waitFor(async () => gpuLog(/GPU: WebGL-Kontext verloren/), 10000);
+await boxColor([0, 0, 255]);
+box = await boxPixel([0, 0, 255]);
+check('Ohne Compositor: nach GPU-Verlust auf der CPU gemalt', near(box, [0, 0, 255]), JSON.stringify(box));
+await gpuPage.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
+const viewsBack = await waitFor(async () => gpuLog(/GPU: Views wieder auf der GPU: 1/), 10000);
+await boxColor([0, 160, 0]);
+box = await boxPixel([0, 160, 0]);
+check('Ohne Compositor: nach der Wiederherstellung wieder auf der GPU gemalt', viewsBack && near(box, [0, 160, 0])
+  && !gpuLog(/Bild nicht auf die GPU gebracht/), JSON.stringify(box));
+// Verlust und Wiederherstellung direkt nacheinander, vor dem naechsten Bild:
+// keine Flaeche des alten Kontexts darf uebrig bleiben
+const restores = () => gpuLogs.filter((line) => /GPU: Views wieder auf der GPU: 1/.test(line)).length;
+await gpuPage.evaluate(() => {
+  window.__blEngine()._bl_gpu_lose_context_for_testing();
+  window.__blEngine()._bl_gpu_restore_context_for_testing();
+});
+const backAgain = await waitFor(async () => restores() === 2, 10000);
+await boxColor([255, 0, 255]);
+box = await boxPixel([255, 0, 255]);
+check('Ohne Compositor: Verlust und Wiederherstellung direkt nacheinander', backAgain && near(box, [255, 0, 255])
+  && !gpuLog(/Bild nicht auf die GPU gebracht/), JSON.stringify(box));
 await browser.close();
 finish();

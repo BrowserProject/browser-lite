@@ -25,6 +25,7 @@
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSLock.h>
+#include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/MediaProducer.h>
 #include <WebCore/Page.h>
 #include <WebCore/CommonVM.h>
@@ -324,6 +325,8 @@ EMSCRIPTEN_KEEPALIVE void bl_media_frame(int playerId, uint8_t* pixels, int widt
     runOnEngineThread([=] {
         if (auto* player = MediaPlayerPrivateWasm::fromId(playerId))
             player->hostFrame(pixels, width, height);
+        else
+            free(pixels);
     });
 }
 
@@ -370,10 +373,12 @@ EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers
     withView(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
 }
 
-// Berechtigungen, Standort, Benachrichtigungen (DeviceClients.cpp)
-EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int granted)
+// Berechtigungen, Standort, Benachrichtigungen (DeviceClients.cpp).
+// answer und decision wie PermissionDecision: 1 = erlaubt, 2 = blockiert,
+// 0 = ohne Entscheidung (Abfrage weg, weil der Tab zugeht: nicht gemerkt)
+EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int answer)
 {
-    runOnEngineThread([=] { answerPermission(requestId, granted); });
+    runOnEngineThread([=] { answerPermission(requestId, static_cast<PermissionDecision>(std::clamp(answer, 0, 2))); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_permission(char* kind, char* origin, int decision)
@@ -448,6 +453,13 @@ EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent)
     });
 }
 
+// navigator.onLine und die Ereignisse online/offline: Netz des Host-Browsers
+// und Verbindung zum Relay (web/app.js)
+EMSCRIPTEN_KEEPALIVE void bl_set_online(int onLine)
+{
+    runOnEngineThread([onLine] { WebCore::WasmPlatform::setOnLine(onLine); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
 {
     runOnEngineThread([text = takeString(text)] {
@@ -503,6 +515,18 @@ EMSCRIPTEN_KEEPALIVE void bl_write_file(char* path, uint8_t* data, int length)
     });
 }
 
+// Datei oder Ordner (mit Inhalt) wieder loeschen, z.B. die Uploads eines
+// geschlossenen Tabs. Im Engine-Thread nach allem, was vorher kam.
+EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
+{
+    runOnEngineThread([path = takeString(path)] {
+        if (FileSystem::fileType(path) == FileSystem::FileType::Directory)
+            FileSystem::deleteNonEmptyDirectory(path);
+        else
+            FileSystem::deleteFile(path);
+    });
+}
+
 // Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp).
 // Mit WasmFS im Engine-Thread (Schreiben nach OPFS, die Oberflaeche wartet
 // nicht), sonst auf dem Haupt-Thread des Host direkt vor dem Speichern des IDBFS.
@@ -554,4 +578,27 @@ EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
         }
     });
 }
+
+// Fuer Tests, nur mit BL_TEST_HOOKS=1 (Oberflaeche: ?env=BL_TEST_HOOKS=1): ein
+// echter Absturz im Engine-Thread. kind 0 = abort(), 1 = WASM-Trap
+EMSCRIPTEN_KEEPALIVE void bl_crash_for_testing(int kind)
+{
+    runOnEngineThread([kind] {
+        if (!getenv("BL_TEST_HOOKS"))
+            return;
+        log("Absturz fuer Tests: %s", kind ? "Trap" : "abort");
+        if (kind)
+            __builtin_trap();
+        abort();
+    });
+}
+
+#if ENABLE(WEBGL)
+// Fuer Tests: die WebGL-Kontexte des Host verlieren, auf denen die WebGL-Canvas
+// der Seiten zeichnen (ANGLEShimWasm.cpp)
+EMSCRIPTEN_KEEPALIVE void bl_webgl_lose_context_for_testing()
+{
+    runOnEngineThread([] { WebCore::angleShimLoseHostContextsForTesting(); });
+}
+#endif
 } // extern "C"

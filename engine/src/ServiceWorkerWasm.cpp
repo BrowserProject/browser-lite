@@ -3,6 +3,8 @@
 
 #include "CacheStorageWasm.h"
 #include "Engine.h"
+#include "HttpCache.h"
+#include "LoaderStrategy.h"
 #include "Storage.h"
 #include "Strategies.h"
 #include "WasmSocketProvider.h"
@@ -11,10 +13,16 @@
 #include <WebCore/BackgroundFetchRecordInformation.h>
 #include <WebCore/BackgroundFetchStore.h>
 #include <WebCore/CacheStorageProvider.h>
+#include <WebCore/ContentSecurityPolicyResponseHeaders.h>
 #include <WebCore/CookieChangeSubscription.h>
 #include <WebCore/CookieJar.h>
+#include <WebCore/CrossOriginEmbedderPolicy.h>
+#include <WebCore/CurlRequest.h>
+#include <WebCore/CurlRequestClient.h>
+#include <WebCore/CurlResponse.h>
 #include <WebCore/DatabaseProvider.h>
 #include <WebCore/Document.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentPage.h>
 #include <WebCore/EmptyClients.h>
@@ -22,11 +30,15 @@
 #include <WebCore/FetchLoader.h>
 #include <WebCore/FetchLoaderClient.h>
 #include <WebCore/FormData.h>
+#include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
+#include <WebCore/FrameLoader.h>
+#include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/MessageWithMessagePorts.h>
 #include <WebCore/NavigationPreloadState.h>
+#include <WebCore/NavigationScheduler.h>
 #include <WebCore/NetworkLoadMetrics.h>
 #include <WebCore/NotificationData.h>
 #include <WebCore/Page.h>
@@ -46,6 +58,7 @@
 #include <WebCore/SWServerWorker.h>
 #include <WebCore/ServiceWorkerClientData.h>
 #include <WebCore/ServiceWorkerFetch.h>
+#include <WebCore/ServiceWorkerJob.h>
 #include <WebCore/ServiceWorkerJobData.h>
 #include <WebCore/ServiceWorkerProvider.h>
 #include <WebCore/ServiceWorkerRegistrationData.h>
@@ -65,12 +78,15 @@
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/StorageProvider.h>
 #include <WebCore/StorageSessionProvider.h>
+#include <WebCore/TextResourceDecoder.h>
 #include <WebCore/UserContentProvider.h>
 #include <WebCore/WorkerFetchResult.h>
+#include <WebCore/WorkerScriptLoader.h>
 #include <wtf/Deque.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace BrowserLite::ServiceWorkers {
 
@@ -281,6 +297,72 @@ static RefPtr<SWServerToContextConnection> contextConnectionFor(ServiceWorkerIde
     return workerConnections().get(identifier);
 }
 
+// WindowClient.navigate() (WebPage::navigateServiceWorkerClient in WebKit2).
+// Fertig, wenn sich das neue Dokument im Frame als Client meldet (beim Commit)
+// oder das Laden des Frames endet (frameLoadEnded).
+struct PendingNavigation {
+    ClientOrigin workerOrigin;
+    SWContextManager::Connection::NavigateCallback callback;
+};
+
+static HashMap<FrameIdentifier, PendingNavigation>& pendingNavigations()
+{
+    static NeverDestroyed<HashMap<FrameIdentifier, PendingNavigation>> map;
+    return map;
+}
+
+static void finishNavigation(FrameIdentifier frame, ExceptionOr<std::optional<ServiceWorkerClientData>>&& result)
+{
+    auto it = pendingNavigations().find(frame);
+    if (it == pendingNavigations().end())
+        return;
+    auto callback = WTF::move(it->value.callback);
+    pendingNavigations().remove(it);
+    callback(WTF::move(result));
+}
+
+static Exception navigateFailed()
+{
+    return Exception { ExceptionCode::TypeError, "navigate failed"_s };
+}
+
+// Fremder Ursprung: null statt des Clients (Spezifikation)
+static std::optional<ServiceWorkerClientData> clientIfSameOrigin(ServiceWorkerClientData&& data, const ClientOrigin& clientOrigin, const ClientOrigin& workerOrigin)
+{
+    if (clientOrigin != workerOrigin)
+        return std::nullopt;
+    return WTF::move(data);
+}
+
+static void navigateClient(ScriptExecutionContextIdentifier client, ServiceWorkerIdentifier worker, const URL& url, SWContextManager::Connection::NavigateCallback&& callback)
+{
+    RefPtr serverWorker = SWServerWorker::existingWorkerForIdentifier(worker);
+    if (!serverWorker || !serverWorker->isClientActiveServiceWorker(client))
+        return callback(Exception { ExceptionCode::TypeError, "service worker is not the client active service worker"_s });
+    RefPtr document = Document::allDocumentsMap().get(client);
+    RefPtr frame = document ? document->frame() : nullptr;
+    if (!frame)
+        return callback(Exception { ExceptionCode::TypeError, "cannot navigate service worker client"_s });
+    document->navigateFromServiceWorker(url, [document, frame, url, workerOrigin = serverWorker->origin(), callback = WTF::move(callback)](ScheduleLocationChangeResult result) mutable {
+        switch (result) {
+        case ScheduleLocationChangeResult::Stopped:
+            return callback(navigateFailed());
+        case ScheduleLocationChangeResult::Completed: // nur der Anker
+            return callback(clientIfSameOrigin(ServiceWorkerClientData::from(*document), document->clientOrigin(), workerOrigin));
+        case ScheduleLocationChangeResult::Started:
+            break;
+        }
+        if (!frame->loader().provisionalDocumentLoader() && !frame->loader().policyDocumentLoader())
+            return callback(navigateFailed());
+        // Nicht HTTP (data: usw.): sicher ein fremder Ursprung
+        if (!url.protocolIsInHTTPFamily())
+            return callback(std::optional<ServiceWorkerClientData> { });
+        auto frameID = frame->frameID();
+        finishNavigation(frameID, navigateFailed());
+        pendingNavigations().set(frameID, PendingNavigation { workerOrigin, WTF::move(callback) });
+    });
+}
+
 // Was die Worker an "ihren Prozess" melden (WebSWContextManagerConnection).
 // Kommt von WebCore immer im Engine-Thread an.
 class ContextManagerConnection final : public SWContextManager::Connection, public RefCounted<ContextManagerConnection> {
@@ -378,7 +460,12 @@ private:
         callback(ServiceWorkerClientData::from(*document));
     }
     void openWindow(ServiceWorkerIdentifier, const URL&, OpenWindowCallback&& callback) final { callback(notSupported().toException()); }
-    void navigate(ScriptExecutionContextIdentifier, ServiceWorkerIdentifier, const URL&, NavigateCallback&& callback) final { callback(notSupported().toException()); }
+    void navigate(ScriptExecutionContextIdentifier client, ServiceWorkerIdentifier worker, const URL& url, NavigateCallback&& callback) final
+    {
+        post([client, worker, url, callback = WTF::move(callback)]() mutable {
+            navigateClient(client, worker, url, WTF::move(callback));
+        });
+    }
     void didFailHeartBeatCheck(ServiceWorkerIdentifier identifier) final
     {
         if (RefPtr connection = contextConnectionFor(identifier))
@@ -520,6 +607,151 @@ private:
     bool m_writeScheduled { false };
 };
 
+// ------------------------------------------------------------ Hintergrund-Aktualisierung
+
+// Laedt ein Worker-Skript ohne Seite (wie ServiceWorkerSoftUpdateLoader in
+// WebKit2): frisch aus dem HTTP-Cache, sonst vom Netz (mit ETag/Last-Modified
+// bedingt), keine Weiterleitungen. Der Server vergleicht das Ergebnis mit dem
+// gespeicherten Skript und installiert bei einer Aenderung den neuen Worker.
+class SoftUpdateLoad final : public RefCounted<SoftUpdateLoad>, public CurlRequestClient {
+public:
+    using Handler = CompletionHandler<void(WorkerFetchResult&&)>;
+
+    static void start(ServiceWorkerJobData&& job, bool shouldRefreshCache, ResourceRequest&& request, Handler&& handler)
+    {
+        Ref load = adoptRef(*new SoftUpdateLoad(WTF::move(job), WTF::move(handler)));
+        load->m_self = load.ptr();
+        if (request.httpUserAgent().isEmpty())
+            request.setHTTPUserAgent(standardUserAgent());
+        if (!HttpCache::canUse(request))
+            return load->loadFromNetwork(WTF::move(request));
+        HttpCache::lookup(request, [load, request, shouldRefreshCache](std::unique_ptr<HttpCache::Entry>&& entry) mutable {
+            auto use = entry ? HttpCache::decide(*entry, request) : HttpCache::Use::None;
+            if (use == HttpCache::Use::Fresh && !shouldRefreshCache)
+                return load->loadFromCache(*entry);
+            if (use != HttpCache::Use::None) {
+                HttpCache::addValidationHeaders(request, *entry);
+                load->m_cachedEntry = WTF::move(entry);
+            }
+            load->loadFromNetwork(WTF::move(request));
+        });
+    }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+private:
+    SoftUpdateLoad(ServiceWorkerJobData&& job, Handler&& handler)
+        : m_job(WTF::move(job))
+        , m_handler(WTF::move(handler))
+    {
+    }
+
+    void loadFromNetwork(ResourceRequest&& request)
+    {
+        m_request = createCurlRequest(WTF::move(request), *this);
+        m_request->resume();
+    }
+
+    void loadFromCache(HttpCache::Entry& entry)
+    {
+        if (!processResponse(entry.response))
+            return;
+        entry.body->forEachSegment([&](auto segment) {
+            appendScript(segment);
+        });
+        succeed();
+    }
+
+    // https://w3c.github.io/ServiceWorker/#update-algorithm, Schritte 9.7 bis 9.17
+    bool processResponse(const ResourceResponse& response)
+    {
+        auto source = m_job.workerType == WorkerType::Module ? WorkerScriptLoader::Source::ModuleScript : WorkerScriptLoader::Source::ClassicWorkerScript;
+        auto error = WorkerScriptLoader::validateWorkerResponse(response, source, FetchOptions::Destination::Serviceworker);
+        if (error.isNull())
+            error = ServiceWorkerJob::validateServiceWorkerResponse(m_job, response);
+        if (!error.isNull()) {
+            done(workerFetchError(error));
+            return false;
+        }
+        m_contentSecurityPolicy = ContentSecurityPolicyResponseHeaders { response };
+        m_crossOriginEmbedderPolicy = obtainCrossOriginEmbedderPolicy(response, nullptr);
+        m_referrerPolicy = response.httpHeaderField(HTTPHeaderName::ReferrerPolicy);
+        if (auto& certificateInfo = response.certificateInfo())
+            m_certificateInfo = *certificateInfo;
+        // Immer UTF-8 wie WorkerScriptLoader, sonst saehe der Server bei einem
+        // anderen charset ein geaendertes Skript
+        Ref decoder = TextResourceDecoder::create("text/javascript"_s, "UTF-8"_s);
+        decoder->setAlwaysUseUTF8();
+        m_decoder = WTF::move(decoder);
+        return true;
+    }
+
+    void appendScript(std::span<const uint8_t> data)
+    {
+        if (m_decoder && !data.empty())
+            m_script.append(m_decoder->decode(data));
+    }
+
+    void succeed()
+    {
+        if (m_decoder)
+            m_script.append(m_decoder->flush());
+        done({ ScriptBuffer { m_script.toString() }, m_job.scriptURL, m_certificateInfo, m_contentSecurityPolicy, m_crossOriginEmbedderPolicy, m_referrerPolicy, { } });
+    }
+
+    void done(WorkerFetchResult&& result)
+    {
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->cancel();
+            request->invalidateClient();
+        }
+        if (auto handler = std::exchange(m_handler, nullptr))
+            handler(WTF::move(result));
+        m_self = nullptr; // gibt uns frei
+    }
+
+    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
+    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
+    {
+        Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), curlResponse);
+        ResourceResponse response(curlResponse);
+        if (response.httpStatusCode() == 304) {
+            if (auto entry = std::exchange(m_cachedEntry, nullptr))
+                return loadFromCache(*entry);
+        }
+        if (processResponse(response))
+            request.completeDidReceiveResponse();
+    }
+    void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
+    {
+        appendScript(buffer->span());
+    }
+    void curlDidComplete(CurlRequest&, NetworkLoadMetrics&&) final
+    {
+        Ref protectedThis { *this };
+        succeed();
+    }
+    void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
+    {
+        Ref protectedThis { *this };
+        done(workerFetchError(error));
+    }
+
+    ServiceWorkerJobData m_job;
+    Handler m_handler;
+    RefPtr<CurlRequest> m_request;
+    std::unique_ptr<HttpCache::Entry> m_cachedEntry;
+    RefPtr<TextResourceDecoder> m_decoder;
+    StringBuilder m_script;
+    CertificateInfo m_certificateInfo;
+    ContentSecurityPolicyResponseHeaders m_contentSecurityPolicy;
+    CrossOriginEmbedderPolicy m_crossOriginEmbedderPolicy;
+    String m_referrerPolicy;
+    RefPtr<SoftUpdateLoad> m_self;
+};
+
 class ServerDelegate final : public SWServerDelegate, public CanMakeCheckedPtr<ServerDelegate> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(ServerDelegate);
     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(ServerDelegate);
@@ -531,12 +763,11 @@ public:
     void setDidBeginCheckedPtrDeletion() final { CanMakeCheckedPtr::setDidBeginCheckedPtrDeletion(); }
 
 private:
-    // Hintergrund-Aktualisierung des Worker-Skripts: noch nicht, der Worker
-    // bleibt bis zur naechsten Registrierung durch die Seite
-    void softUpdate(ServiceWorkerJobData&&, bool, ResourceRequest&& request, CompletionHandler<void(WorkerFetchResult&&)>&& callback) final
+    // Skripte einer Hintergrund-Aktualisierung (SWServer::startScriptFetch
+    // und refreshImportedScripts), in WebKit2 laedt sie der Netzwerk-Prozess
+    void softUpdate(ServiceWorkerJobData&& job, bool shouldRefreshCache, ResourceRequest&& request, CompletionHandler<void(WorkerFetchResult&&)>&& callback) final
     {
-        callback(workerFetchError(ResourceError { ResourceError::Type::Cancellation }));
-        UNUSED_PARAM(request);
+        SoftUpdateLoad::start(WTF::move(job), shouldRefreshCache, WTF::move(request), WTF::move(callback));
     }
     void createContextConnection(const Site& site, std::optional<ProcessIdentifier>, std::optional<ScriptExecutionContextIdentifier> pageIdentifier, CrossOriginEmbedderPolicyValue coep, CompletionHandler<void()>&& callback) final
     {
@@ -792,6 +1023,10 @@ void ServerConnection::postMessageToServiceWorker(ServiceWorkerIdentifier destin
 
 void ServerConnection::registerClient(ClientOrigin&& clientOrigin, ServiceWorkerClientData&& data, const std::optional<ServiceWorkerRegistrationIdentifier>& controllingRegistration, String&& userAgent, SWServer::IsBeingCreatedClient isBeingCreated)
 {
+    if (isBeingCreated == SWServer::IsBeingCreatedClient::No && data.frameIdentifier) {
+        if (auto it = pendingNavigations().find(*data.frameIdentifier); it != pendingNavigations().end())
+            finishNavigation(*data.frameIdentifier, clientIfSameOrigin(ServiceWorkerClientData { data }, clientOrigin, it->value.workerOrigin));
+    }
     auto& contextOrigin = clientOrigin.clientOrigin;
     // Wie WebKit2: keine Sandbox-Dokumente
     if (data.url.protocolIsInHTTPFamily() && contextOrigin != SecurityOriginData::fromURLWithoutStrictOpaqueness(data.url))
@@ -849,8 +1084,6 @@ void ServerConnection::resolveUnregistrationJobInClient(ServiceWorkerJobIdentifi
 
 void ServerConnection::startScriptFetchInClient(ServiceWorkerJobIdentifier job, const ServiceWorkerRegistrationKey& key, FetchOptions::Cache cache)
 {
-    // Auch Hintergrund-Aktualisierungen des Servers kommen hier an (gleiche
-    // Prozess-Kennung); die kennt die Seite nicht und meldet einen Fehler
     post([job, key = ServiceWorkerRegistrationKey { key }, cache]() mutable {
         if (RefPtr client = clientConnection())
             client->startScriptFetchForServer(job, WTF::move(key), cache);
@@ -1029,9 +1262,9 @@ void ContextConnection::terminateDueToUnresponsiveness()
 // den ResourceLoader der Seite.
 class FetchTask final : public ServiceWorkerFetch::Client {
 public:
-    static Ref<FetchTask> create(ResourceLoader& loader, Function<void()>&& networkLoad, ServiceWorkerIdentifier worker)
+    static Ref<FetchTask> create(ResourceLoader& loader, Function<void()>&& networkLoad, SWServerRegistration& registration, ServiceWorkerIdentifier worker)
     {
-        return adoptRef(*new FetchTask(loader, WTF::move(networkLoad), worker));
+        return adoptRef(*new FetchTask(loader, WTF::move(networkLoad), registration, worker));
     }
 
     ~FetchTask();
@@ -1046,9 +1279,11 @@ public:
     void cancelFromLoader();
 
 private:
-    FetchTask(ResourceLoader& loader, Function<void()>&& networkLoad, ServiceWorkerIdentifier worker)
+    FetchTask(ResourceLoader& loader, Function<void()>&& networkLoad, SWServerRegistration& registration, ServiceWorkerIdentifier worker)
         : m_loader(&loader)
         , m_networkLoad(WTF::move(networkLoad))
+        , m_registration(registration.identifier())
+        , m_shouldSoftUpdate(registration.shouldSoftUpdate(loader.options()))
         , m_worker(worker)
         , m_request(loader.request())
         , m_options(loader.options())
@@ -1075,13 +1310,17 @@ private:
     // Engine-Thread: der Reihe nach, Daten erst nach dem Ja zur Antwort
     void enqueue(Function<void(FetchTask&)>&&);
     void runQueue();
+    bool markDone();
     void finish();
+    void failWith(const ResourceError&);
     void readBlob(const URL&);
 
     class BlobReader;
 
     RefPtr<ResourceLoader> m_loader;
     Function<void()> m_networkLoad;
+    ServiceWorkerRegistrationIdentifier m_registration;
+    bool m_shouldSoftUpdate;
     ServiceWorkerIdentifier m_worker;
     FetchIdentifier m_identifier { FetchIdentifier::generate() };
     ResourceRequest m_request;
@@ -1126,10 +1365,7 @@ private:
     void didFail(const ResourceError& error) final
     {
         m_task.enqueue([error](FetchTask& task) {
-            RefPtr loader = std::exchange(task.m_loader, nullptr);
-            task.m_done = true;
-            if (loader)
-                loader->didFail(error);
+            task.failWith(error);
         });
     }
 
@@ -1165,9 +1401,8 @@ void FetchTask::didReceiveRedirection(const ResourceResponse& response)
             task.m_waitingForResponseCompletion = true;
             loader->willSendRequest(WTF::move(request), response, [task = Ref { task }](ResourceRequest&& newRequest) mutable {
                 task->m_waitingForResponseCompletion = false;
-                if (newRequest.isNull() || !task->m_loader)
+                if (newRequest.isNull() || !task->m_loader || !task->markDone())
                     return;
-                task->m_done = true;
                 fetchTasks().remove(std::exchange(task->m_loader, nullptr).get());
                 if (auto networkLoad = std::exchange(task->m_networkLoad, nullptr))
                     networkLoad();
@@ -1213,9 +1448,7 @@ void FetchTask::didReceiveFormDataAndFinish(Ref<FormData>&& formData)
             }
             auto blobURL = formData->asBlobURL();
             if (blobURL.isNull()) {
-                RefPtr loader = std::exchange(task.m_loader, nullptr);
-                task.m_done = true;
-                loader->didFail(ResourceError { ResourceError::Type::General });
+                task.failWith(ResourceError { ResourceError::Type::General });
                 return;
             }
             task.readBlob(blobURL);
@@ -1228,35 +1461,52 @@ void FetchTask::readBlob(const URL& url)
     RefPtr proxy = SWContextManager::singleton().serviceWorkerThreadProxy(m_worker);
     m_blobReader = BlobReader::create(*this);
     m_blobLoader = proxy ? proxy->createBlobLoader(*m_blobReader, url) : nullptr;
-    if (!m_blobLoader) {
-        RefPtr loader = std::exchange(m_loader, nullptr);
-        m_done = true;
-        loader->didFail(ResourceError { ResourceError::Type::General });
+    if (!m_blobLoader)
+        failWith(ResourceError { ResourceError::Type::General });
+}
+
+// Der Worker ist fertig mit der Anfrage (wie cleanup() in
+// WebServiceWorkerFetchTaskClient). false: war schon fertig
+bool FetchTask::markDone()
+{
+    if (std::exchange(m_done, true))
+        return false;
+    SWContextManager::singleton().removeFetch(m_worker, Process::identifier(), m_identifier, false);
+    // Nach Navigationen das Skript des Workers pruefen (wie ServiceWorkerFetchTask)
+    if (m_shouldSoftUpdate) {
+        if (RefPtr registration = registrationFor(m_registration))
+            registration->scheduleSoftUpdate(IsAppInitiated::No);
     }
+    return true;
 }
 
 void FetchTask::finish()
 {
+    Ref protectedThis { *this };
     RefPtr loader = std::exchange(m_loader, nullptr);
-    if (!loader || m_done)
+    if (!loader || !markDone())
         return;
-    m_done = true;
     fetchTasks().remove(loader.get());
-    SWContextManager::singleton().removeFetch(m_worker, Process::identifier(), m_identifier, false);
     NetworkLoadMetrics metrics;
     metrics.markComplete();
     loader->didFinishLoading(metrics);
+}
+
+void FetchTask::failWith(const ResourceError& error)
+{
+    Ref protectedThis { *this };
+    RefPtr loader = std::exchange(m_loader, nullptr);
+    if (!loader || !markDone())
+        return;
+    fetchTasks().remove(loader.get());
+    loader->didFail(error);
 }
 
 void FetchTask::didFail(const ResourceError& error)
 {
     callOnMainThread([protectedThis = Ref { *this }, error = error.isolatedCopy()] {
         protectedThis->enqueue([error](FetchTask& task) {
-            RefPtr loader = std::exchange(task.m_loader, nullptr);
-            task.m_done = true;
-            fetchTasks().remove(loader.get());
-            SWContextManager::singleton().removeFetch(task.m_worker, Process::identifier(), task.m_identifier, false);
-            loader->didFail(error);
+            task.failWith(error);
         });
     });
 }
@@ -1288,9 +1538,9 @@ void FetchTask::contextIsStopping()
 
 void FetchTask::notHandled()
 {
-    if (m_done || !m_loader || m_hasResponse)
+    Ref protectedThis { *this };
+    if (!m_loader || m_hasResponse || !markDone())
         return;
-    m_done = true;
     fetchTasks().remove(m_loader.get());
     m_loader = nullptr;
     if (auto networkLoad = std::exchange(m_networkLoad, nullptr))
@@ -1405,10 +1655,13 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
         return false;
     // Ohne fetch-Handler gleich ins Netz (wie WebKit2)
     auto source = worker->defaultRouterSource();
-    if (auto* value = std::get_if<RouterSourceEnum>(&source); value && *value == RouterSourceEnum::Network)
+    if (auto* value = std::get_if<RouterSourceEnum>(&source); value && *value == RouterSourceEnum::Network) {
+        if (registration->shouldSoftUpdate(options))
+            registration->scheduleSoftUpdate(IsAppInitiated::No);
         return false;
+    }
 
-    Ref task = FetchTask::create(loader, WTF::move(networkLoad), worker->identifier());
+    Ref task = FetchTask::create(loader, WTF::move(networkLoad), *registration, worker->identifier());
     fetchTasks().set(&loader, task.copyRef());
     worker->whenActivated([task, workerIdentifier = worker->identifier()](bool success) mutable {
         RefPtr server = ServiceWorkers::server();
@@ -1428,6 +1681,21 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
         });
     });
     return true;
+}
+
+void frameLoadEnded(LocalFrame& localFrame, bool committed)
+{
+    auto frame = localFrame.frameID();
+    if (!pendingNavigations().contains(frame))
+        return;
+    // Das neue Dokument meldet sich ueber den RunLoop als Client, also danach.
+    // Hat es das nicht getan, ist es keiner (Spezifikation: null)
+    post([frame, committed] {
+        if (committed)
+            finishNavigation(frame, std::optional<ServiceWorkerClientData> { });
+        else
+            finishNavigation(frame, navigateFailed());
+    });
 }
 
 bool cancelFetch(ResourceLoader& loader)

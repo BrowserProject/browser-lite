@@ -139,7 +139,24 @@ async function startEngine() {
 let storageReady = false;
 let storageSyncing = false;
 let storageSyncAgain = false;
+let storageNotice = '';
 const clearDataFlag = 'bl-clear-data';
+
+// Nur ein Tab der Oberflaeche darf /data im OPFS haben, sonst schreiben beide
+// ihre Datenbanken abwechselnd ueber die des anderen. Die Sperre gilt, bis die
+// Seite geht; nach einem Neuladen gibt die alte Seite sie erst kurz danach frei.
+const dataLockedNotice = 'browser-lite ist schon in einem anderen Tab offen, hier wird nichts gespeichert';
+function holdDataLock() {
+  if (!navigator.locks)
+    return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = AbortSignal.timeout(3000);
+    navigator.locks.request('bl-data', { signal: timeout }, () => {
+      resolve(true);
+      return new Promise(() => {});
+    }).catch(() => resolve(false));
+  });
+}
 
 // Alles im OPFS loeschen, solange die Engine noch nicht laeuft (sie haelt
 // sonst Dateien offen)
@@ -190,6 +207,11 @@ function mountStorage(module) {
     storageReady = true;
     module.addRunDependency('bl-storage');
     (async () => {
+      if (!(await holdDataLock())) {
+        module.ENV.BL_OPFS = '0';
+        storageNotice = dataLockedNotice;
+        return;
+      }
       if (storage(clearDataFlag)) {
         await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
         await deleteLegacyStorage();
@@ -206,14 +228,22 @@ function mountStorage(module) {
   }
   if (!window.indexedDB)
     return;
-  fs.mkdirTree('/data');
-  fs.mount(IDBFS, {}, '/data');
   module.addRunDependency('bl-storage');
-  fs.syncfs(true, (error) => {
-    if (error)
-      console.warn('Gespeicherte Daten konnten nicht geladen werden:', error);
-    storageReady = true;
-    module.removeRunDependency('bl-storage');
+  holdDataLock().then((locked) => {
+    // Ohne Sperre bleibt /data im Speicher und storageReady aus (kein syncfs)
+    if (!locked) {
+      storageNotice = dataLockedNotice;
+      module.removeRunDependency('bl-storage');
+      return;
+    }
+    fs.mkdirTree('/data');
+    fs.mount(IDBFS, {}, '/data');
+    fs.syncfs(true, (error) => {
+      if (error)
+        console.warn('Gespeicherte Daten konnten nicht geladen werden:', error);
+      storageReady = true;
+      module.removeRunDependency('bl-storage');
+    });
   });
 }
 
@@ -279,6 +309,23 @@ function installExtraCA(module) {
   (module || engine).ENV.BL_EXTRA_CA = pem;
 }
 
+// navigator.onLine der Seiten: Netz des Host-Browsers und Verbindung zum Relay.
+// Die Engine beginnt mit online.
+function watchOnLine() {
+  let onLine = true;
+  const update = () => {
+    const now = navigator.onLine && engine.blTransport.connected;
+    if (now === onLine || !engineReady)
+      return;
+    onLine = now;
+    engine._bl_set_online(now ? 1 : 0);
+  };
+  engine.blTransport.onconnectedchange = update;
+  addEventListener('online', update);
+  addEventListener('offline', update);
+  update();
+}
+
 // Bildschirm, Farbschema (prefers-color-scheme) und Touchscreen wie im Host
 const darkScheme = matchMedia('(prefers-color-scheme: dark)');
 function sendScreen() {
@@ -291,6 +338,7 @@ function onEngineReady() {
   $('boot').hidden = true;
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
+  watchOnLine();
   watchPixelRatio();
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
   initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker?.() });
@@ -306,6 +354,8 @@ function onEngineReady() {
   } else {
     newTab(START_URL);
   }
+  if (storageNotice && activeTab)
+    activeTab.notice = storageNotice;
 }
 
 // Link/Lesezeichen oeffnen: im aktiven Tab oder in einem neuen
@@ -585,6 +635,7 @@ function closeTab(tab) {
     URL.revokeObjectURL(tab.iconURL);
   setTimeout(persistSession);
   engine._bl_destroy_view(tab.id);
+  engine._bl_remove_path(toUTF8(uploadDirectory(tab)));
   tab.canvas.remove();
   tab.element.remove();
   tabs.delete(tab.id);
@@ -730,6 +781,13 @@ function onEngineEvent(viewId, type, payload) {
     openBackgroundTab(data.url);
     return;
   }
+  if (type === 'external-url') {
+    // mailto:, tel:, App-Links: der Host-Browser gibt sie an das System
+    // (mit seiner Rueckfrage), die Oberflaeche selber bleibt
+    window.open(data.url, '_blank', 'noopener');
+    setStatus('Extern geöffnet: ' + data.url);
+    return;
+  }
   if (type === 'newview') {
     // window.open / target=_blank: die Engine hat schon einen View geoeffnet
     newTab('', viewId);
@@ -845,6 +903,11 @@ function onEngineEvent(viewId, type, payload) {
   case 'progress':
     if (tab === activeTab)
       setProgress(data.progress);
+    break;
+  case 'commit':
+    // Neues Dokument: Dialoge wieder erlaubt (engineDialog)
+    tab.dialogsBlocked = tab.dialogsAsked = false;
+    tab.dialogBurst = 0;
     break;
   case 'first-layout':
     window.__blFirstLayout = true; // fuer die Tests (tests/e2e)
@@ -1174,9 +1237,14 @@ window.addEventListener('blur', hideContextMenu);
 const MAX_UPLOAD = 512 * 1024 * 1024;
 let uploadCounter = 0;
 
+// Ordner mit den Dateien eines Tabs. Die Seite liest sie, solange sie ihre
+// File-Objekte hat (auch nach dem Navigieren, Back/Forward-Cache), darum erst
+// beim Schliessen des Tabs geloescht.
+const uploadDirectory = (tab) => '/tmp/uploads/' + tab.id;
+
 // Dateien (Upload, Ablegen, Einfuegen) ins Dateisystem der Engine, gibt die
 // Pfade zurueck. Was sich nicht lesen laesst (weg, zu gross), faellt weg.
-async function writeUploads(files) {
+async function writeUploads(tab, files) {
   const paths = [];
   const skipped = [];
   for (const file of files) {
@@ -1188,7 +1256,10 @@ async function writeUploads(files) {
     }
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const path = '/tmp/uploads/' + (++uploadCounter) + '/' + name;
+      // Tab inzwischen zu: sein Upload-Ordner ist schon geloescht
+      if (!tabs.has(tab.id))
+        return [];
+      const path = uploadDirectory(tab) + '/' + (++uploadCounter) + '/' + name;
       writeEngineFile(path, bytes);
       paths.push(path);
     } catch (error) {
@@ -1214,22 +1285,46 @@ function openFileChooser(tab, data) {
     answered = true;
     engine._bl_choose_files(tab.id, toUTF8(paths.join('\n')));
   };
-  input.addEventListener('change', () => writeUploads(input.files).then(answer, () => answer([])));
+  input.addEventListener('change', () => writeUploads(tab, input.files).then(answer, () => answer([])));
   input.addEventListener('cancel', () => answer([]));
   input.click();
 }
 
-// alert/confirm/prompt der Seite
-function engineDialog(type, message, defaultValue) {
+// alert/confirm/prompt der Seite, wie Chrome mit der Herkunft ("<host> meldet:").
+// Hintergrund-Tabs bekommen sofort "Abbrechen". Kommen viele Dialoge kurz
+// nacheinander (Schleife), fragt die Oberflaeche einmal, ob der Tab weitere
+// zeigen darf: sonst bliebe nur der Haken des Host-Browsers, und der sperrt
+// die Dialoge aller Seiten.
+function engineDialog(viewId, type, origin, message, defaultValue) {
   engineAnswered();
-  if (type === 0) {
-    alert(message);
+  const tab = tabs.get(viewId);
+  if (!tab || tab !== activeTab || tab.dialogsBlocked)
     return 0;
+  let host = '';
+  try {
+    host = new URL(origin).host;
+  } catch {}
+  host = host || (origin && origin !== 'null' ? origin : 'Diese Seite');
+  const now = Date.now();
+  tab.dialogBurst = now - (tab.lastDialog || 0) < 1000 ? (tab.dialogBurst || 0) + 1 : 1;
+  if (tab.dialogBurst > 3 && !tab.dialogsAsked) {
+    tab.dialogsAsked = true;
+    if (!confirm(host + ' zeigt viele Dialoge. Weitere Dialoge dieser Seite zulassen?')) {
+      tab.dialogsBlocked = true;
+      return 0;
+    }
   }
+  const text = host + ' meldet:\n\n' + message;
+  let result = 0;
   if (type === 1)
-    return confirm(message) ? 1 : 0;
-  const answer = prompt(message, defaultValue);
-  return answer === null ? 0 : engine.stringToNewUTF8(answer);
+    result = confirm(text) ? 1 : 0;
+  else if (type === 2) {
+    const answer = prompt(text, defaultValue);
+    result = answer === null ? 0 : engine.stringToNewUTF8(answer);
+  } else
+    alert(text);
+  tab.lastDialog = Date.now();
+  return result;
 }
 
 // ------------------------------------------------------------------- Eingabe
@@ -1342,7 +1437,7 @@ function attachInput(tab) {
     const files = [...dataTransfer.files];
     const point = position(e);
     const modifiers = modifierBits(e);
-    data.files = await writeUploads(files);
+    data.files = await writeUploads(tab, files);
     data.fileCount = data.files.length;
     engine._bl_drag(tab.id, 2, ...point, modifiers, toUTF8(JSON.stringify(data)));
   });
@@ -1426,7 +1521,7 @@ ime.addEventListener('paste', async (e) => {
     data.html = html;
   // Nach einem await sind die Daten des Ereignisses weg
   const files = [...(clipboardData?.files || [])];
-  data.files = await writeUploads(files);
+  data.files = await writeUploads(tab, files);
   engine._bl_set_clipboard(toUTF8(JSON.stringify(data)));
   const fake = { key: 'v', code: 'KeyV', keyCode: 86, repeat: false, ctrlKey: true, shiftKey: false, altKey: false, metaKey: false };
   sendKey(tab, 0, fake);

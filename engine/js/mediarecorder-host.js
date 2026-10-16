@@ -101,8 +101,6 @@ var blRecorder = (function () {
 
   function writeBlock(state, block) {
     const ms = Math.round(block.timestamp / 1000);
-    if (state.firstMs === null)
-      state.firstMs = ms;
     const relative = ms - (state.clusterMs === null ? 0 : state.clusterMs);
     const newCluster = state.clusterMs === null || relative > 30000 || relative < -30000
       || (block.kind === 'video' && block.key && ms !== state.clusterMs)
@@ -163,7 +161,7 @@ var blRecorder = (function () {
   function create(id, configText) {
     try {
       const config = JSON.parse(configText);
-      const state = { id, config, tracks: [], pending: [], out: [], headerWritten: false, clusterMs: null, firstMs: null,
+      const state = { id, config, tracks: [], pending: [], out: [], headerWritten: false, clusterMs: null,
         video: null, audio: null, hasVideo: !!config.video, closed: false, error: null };
       if (config.video) {
         const codec = VIDEO_CODECS[config.video.codec];
@@ -289,14 +287,22 @@ var blRecorder = (function () {
     }
   }
 
-  // Fertige Bytes seit dem letzten Aufruf; Laenge nach lengthPtr, 0 = nichts
+  // Fertige Bytes seit dem letzten Aufruf; Laenge nach lengthPtr, 0 = nichts.
+  // Ohne Speicher bleiben sie fuer den naechsten Aufruf liegen.
   function take(id, lengthPtr) {
     const state = recorders.get(id);
     HEAP32[lengthPtr >> 2] = 0;
     if (!state || !state.out.length)
       return 0;
     const bytes = concat(state.out.splice(0));
-    const ptr = Module._malloc(Math.max(bytes.length, 1));
+    let ptr;
+    try {
+      ptr = Module.blAlloc(bytes.length);
+    } catch (e) {
+      state.out.unshift(bytes);
+      fail(state, e);
+      return 0;
+    }
     HEAPU8.set(bytes, ptr);
     HEAP32[lengthPtr >> 2] = bytes.length;
     return ptr;

@@ -48,8 +48,8 @@ export async function runEngine({ enginePath, html, url, width, height, onConsol
       else
         engine._bl_frame_presented(viewId);
     },
-    engineDialog(type, message) {
-      console.log('[dialog]', type, message);
+    engineDialog(viewId, type, origin, message) {
+      console.log('[dialog]', type, origin, message);
       return 0;
     },
     print: (text) => console.log(text),

@@ -1,7 +1,8 @@
 // End-to-End Test fuer Geraete und Berechtigungen (web/devices.js,
 // engine/src/DeviceClients.cpp): Markieren mit der Maus, Touch (Antippen,
 // Wischen scrollt), Farbschema des Systems, Standort und Benachrichtigungen mit
-// der Abfrage wie in Chrome, offene Abfragen beim Schliessen des Tabs.
+// der Abfrage wie in Chrome, offene Abfragen beim Schliessen des Tabs,
+// Antworten der Host-Bruecke auf einer ruhigen und auf einer verlassenen Seite.
 //
 //   cd tests/e2e && node devices-test.mjs [engine-ordner]
 import { TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
@@ -134,7 +135,17 @@ const PAGE = `<!doctype html><html><head><title>Geraete-Test</title>
   result('ready', 1);
 </script></body></html>`;
 
-const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
+// Host-Bruecke (engine/src/WebPlatformExtras.cpp): auf einer Seite ohne Timer
+// muss das Promise trotzdem aufgeloest werden; die Antwort fuer eine verlassene
+// Seite verfaellt still
+const HOST_PAGES = {
+  '/hostcall': `<!doctype html><title>Host-Aufruf</title><script>ImageDecoder.isTypeSupported('image/png')
+  .then((value) => console.log('RESULT hostsupported=' + value), (e) => console.log('RESULT hostsupported=' + e.name))</script>`,
+  '/weg': `<!doctype html><title>Weg</title><script>ImageDecoder.isTypeSupported('image/x-langsam')
+  .then(() => console.log('RESULT stale=called'), () => console.log('RESULT stale=rejected')); location.href = '/danach'</script>`,
+  '/danach': `<!doctype html><title>Danach</title><script>console.log('RESULT danach=1')</script>`,
+};
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(HOST_PAGES[req.url] || PAGE));
 
 const stack = await startStack({ token: 'devices-token-0123456789abcdef' });
 const browser = await launch();
@@ -198,6 +209,14 @@ await context.addInitScript(() => {
   window.showOpenFilePicker = async () => [new FakeFile('notiz.txt')];
   window.showSaveFilePicker = async (options) => new FakeFile(options?.suggestedName || 'neu.txt');
   window.showDirectoryPicker = async () => new FakeDirectory();
+
+  // Langsame Antwort des Host fuer den Test der verlassenen Seite
+  if (typeof ImageDecoder === 'function') {
+    const isTypeSupported = ImageDecoder.isTypeSupported.bind(ImageDecoder);
+    ImageDecoder.isTypeSupported = (type) => type === 'image/x-langsam'
+      ? new Promise((resolve) => setTimeout(() => { window.__slowAnswered = true; resolve(false); }, 2000))
+      : isTypeSupported(type);
+  }
 });
 const page = await context.newPage();
 const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
@@ -315,6 +334,39 @@ await page.click('#tab-list .tab.active .close');
 const promptGone = await page.locator('#permission-prompt').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false);
 const stored = await page.evaluate(() => localStorage.getItem('bl-permissions') || '');
 check('Geschlossener Tab: Abfrage weg und nicht gemerkt', promptGone && !stored.includes('camera'), stored);
+
+// 11) permissions.query antwortet mit den gemerkten Entscheidungen
+// (engine/src/Permissions.cpp); die Kamera ist nach dem geschlossenen Tab
+// weiter offen, auch in der Engine
+const queryPermissions = () => page.evaluate(() => window.__blEval(`Promise.all(['geolocation', 'notifications', 'microphone', 'camera']
+  .map((name) => navigator.permissions.query({ name }).then((s) => s.state, (e) => e.name))).then((states) => console.log('RESULT permissions=' + states.join(',')))`));
+await queryPermissions();
+check('permissions.query: erlaubt und offen', (await result('permissions', 10000)) === 'granted,granted,granted,prompt', results.get('permissions'));
+await page.evaluate(() => window.__blEval('navigator.mediaDevices.getUserMedia({ video: true }).then(() => console.log("RESULT camera=ok"), (e) => console.log("RESULT camera=" + e.name))'));
+const cameraAgain = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
+check('Kamera: Abfrage kommt wieder (Schliessen war keine Ablehnung)', cameraAgain && /Kamera/.test(await prompt.textContent()));
+if (cameraAgain)
+  await prompt.locator('button', { hasText: 'Blockieren' }).click();
+check('Kamera blockiert: getUserMedia abgelehnt', (await result('camera', 10000)) === 'NotAllowedError', results.get('camera'));
+results.delete('permissions');
+await queryPermissions();
+check('permissions.query: Kamera blockiert', (await result('permissions', 10000)) === 'granted,granted,granted,denied', results.get('permissions'));
+
+// 12) Host-Bruecke: Antwort auf einer ruhigen Seite, Antwort nach dem Verlassen
+async function go(address) {
+  await page.fill('#address', address);
+  await page.press('#address', 'Enter');
+}
+await go(siteURL + 'hostcall');
+check('Host-Aufruf: Promise auf einer ruhigen Seite aufgeloest', (await result('hostsupported', 15000)) === 'true', results.get('hostsupported'));
+await go(siteURL + 'weg');
+check('Host-Aufruf: Seite verlassen, bevor die Antwort kommt', (await result('danach', 15000))?.trim() === '1');
+const linesBefore = results.logs.length;
+await page.waitForFunction(() => window.__slowAnswered, null, { timeout: 10000 }).catch(() => {});
+await page.waitForTimeout(1000);
+const lateLines = results.logs.slice(linesBefore).filter((line) => /stale|Uncaught|Exception|Error/.test(line));
+check('Host-Aufruf: Antwort fuer die verlassene Seite verfaellt still', await page.evaluate(() => !!window.__slowAnswered)
+  && !results.has('stale') && !lateLines.length, lateLines.join(' | '));
 
 await browser.close();
 finish();

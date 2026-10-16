@@ -298,11 +298,6 @@ void SourceBufferPrivateWasm::didRemoveCodedFrames(const MediaTime& start, const
         source->send("sb-remove"_s, makeString("{\"sb\":"_s, m_id, ",\"start\":"_s, jsonTime(start), ",\"end\":"_s, jsonTime(end), '}'));
 }
 
-void SourceBufferPrivateWasm::removedFromMediaSource()
-{
-    SourceBufferPrivate::removedFromMediaSource();
-}
-
 bool SourceBufferPrivateWasm::canSwitchToType(const ContentType& type)
 {
     if (!MediaPlayerPrivateWasm::supportsMediaSourceType(type))

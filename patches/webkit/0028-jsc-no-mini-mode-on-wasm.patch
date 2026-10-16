@@ -1,5 +1,5 @@
 diff --git a/Source/JavaScriptCore/runtime/VM.h b/Source/JavaScriptCore/runtime/VM.h
-index 27cb0c2ff5..72e5aa9303 100644
+index 27cb0c2ff5..f347d84760 100644
 --- a/Source/JavaScriptCore/runtime/VM.h
 +++ b/Source/JavaScriptCore/runtime/VM.h
 @@ -725,7 +725,12 @@ public:
@@ -7,7 +7,7 @@ index 27cb0c2ff5..72e5aa9303 100644
      static bool isInMiniMode()
      {
 +#if OS(EMSCRIPTEN)
-+        // CLoop has no JIT at all; the mini mode (full GCs only, tiny heap growth, jettisoned bytecode) makes big pages spend a quarter of their time in GC.
++        // CLoop hat keinen JIT. Im Mini-Modus (nur volle GCs, Heap waechst kaum, Bytecode wird verworfen) verbringen grosse Seiten ein Viertel der Zeit im GC.
 +        return Options::forceMiniVMMode();
 +#else
          return !Options::useJIT() || Options::forceMiniVMMode();

@@ -8,7 +8,7 @@ void registerMemoryVFS();
 
 // Geaenderte Datenbanken ins Dateisystem schreiben (alle, die gerade nicht
 // mitten in einer Schreib-Transaktion sind). Von jedem Thread aus erlaubt,
-// auch vom Haupt-Thread des Host (vor dem Speichern des IDBFS).
+// auch vom Haupt-Thread des Host (ohne WasmFS, vor dem Speichern des IDBFS).
 // fromHostThread: blockiert nie (ueberspringt, wenn gerade jemand schreibt).
 void flushMemoryVFS(bool fromHostThread);
 

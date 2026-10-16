@@ -21,6 +21,10 @@ public:
         m_current = current;
     }
 
+    // Fuer pushState aus Iframes (FrameLoaderClient::dispatchDidPushStateWithinPage)
+    WebCore::HistoryItem* currentItem() const { return m_current ? m_entries[*m_current].ptr() : nullptr; }
+    void replaceCurrentItem(Ref<WebCore::HistoryItem>&& item) { m_entries[*m_current] = WTF::move(item); }
+
 private:
     void addItem(Ref<WebCore::HistoryItem>&&) final;
     void setChildItem(WebCore::BackForwardFrameItemIdentifier, Ref<WebCore::HistoryItem>&&) final;

@@ -3,11 +3,18 @@
 // In WebKit2 steckt die Umsetzung im Netzwerk-Prozess (CacheStorageManager).
 // Hier eine kleine eigene im Speicher der Engine, fuer alle Tabs gemeinsam,
 // nach Ursprung getrennt. Dauerhaft: pro Ursprung eine Datei unter
-// /data/cachestorage (wie alles unter /data im IndexedDB des Host), beim
-// ersten Zugriff gelesen und nach Aenderungen gebuendelt neu geschrieben.
+// /data/cachestorage (wie alles unter /data im OPFS des Host), beim ersten
+// Zugriff gelesen und nach Aenderungen gebuendelt als Ganzes ersetzt.
 // Das Format der Eintraege ist das von WebKits CacheStorageDiskStore.
+//
+// Alle Inhalte liegen im WASM-Speicher, den alle Tabs teilen. Darum hat jeder
+// Ursprung eine feste Grenze (maximumOriginSize), darueber lehnt cache.put mit
+// QuotaExceededError ab.
 #include "config.h"
 #include "CacheStorageWasm.h"
+
+#include "Engine.h"
+#include "Storage.h"
 
 #include <WebCore/DOMCacheEngine.h>
 
@@ -59,7 +66,10 @@ static bool matches(const ResourceRequest& request, const CrossThreadRecord& rec
 }
 
 static constexpr uint32_t fileVersion = 1;
+static constexpr uint64_t maximumOriginSize = 256 << 20;
 static constexpr auto storageDirectory = "/data/cachestorage"_s;
+static constexpr Seconds writeDelay = 500_ms;
+static constexpr Seconds retryDelay = 10_s;
 
 static String fileForOrigin(const ClientOrigin& origin)
 {
@@ -74,17 +84,21 @@ static void encodeRecord(WTF::Persistence::Encoder& encoder, const CrossThreadRe
     encoder << record.referrer;
     encoder << static_cast<uint8_t>(record.responseHeadersGuard);
     encoder << record.response;
-    // Formulardaten mit Dateien/Blobs speichert auch WebKit nicht
-    Vector<uint8_t> body = WTF::switchOn(record.responseBody, [](const Ref<FormData>& formData) {
-        return formData->flatten();
-    }, [](const Ref<SharedBuffer>& buffer) {
-        return Vector<uint8_t> { buffer->span() };
-    }, [](const std::nullptr_t&) {
-        return Vector<uint8_t> { };
-    });
     bool hasBody = !std::holds_alternative<std::nullptr_t>(record.responseBody);
     encoder << hasBody;
-    encoder << body;
+    // Wie Vector<uint8_t> (Laenge, dann die Bytes), aber ohne Kopie. Formulardaten
+    // mit Dateien/Blobs speichert auch WebKit nicht
+    auto encodeBytes = [&](std::span<const uint8_t> bytes) {
+        encoder << static_cast<uint64_t>(bytes.size());
+        encoder.encodeFixedLengthData(bytes);
+    };
+    WTF::switchOn(record.responseBody, [&](const Ref<FormData>& formData) {
+        encodeBytes(formData->flatten().span());
+    }, [&](const Ref<SharedBuffer>& buffer) {
+        encodeBytes(buffer->span());
+    }, [&](const std::nullptr_t&) {
+        encodeBytes({ });
+    });
     encoder << record.responseBodySize;
 }
 
@@ -133,15 +147,23 @@ private:
         Vector<CrossThreadRecord> records;
     };
 
-    // Gespeicherte Caches des Ursprungs beim ersten Zugriff lesen
+    // Gespeicherte Caches des Ursprungs beim ersten Zugriff lesen. Geht das
+    // Lesen schief, wird der Ursprung in dieser Sitzung nicht geschrieben,
+    // damit die Datei auf der Platte bleibt
     void ensureLoaded(const ClientOrigin& origin)
     {
         if (!m_loadedOrigins.add(origin).isNewEntry)
             return;
-        auto data = FileSystem::readEntireFile(fileForOrigin(origin));
-        if (!data)
+        auto file = fileForOrigin(origin);
+        std::vector<uint8_t> data;
+        auto result = readWholeFile(file.utf8().data(), data);
+        if (result == ReadResult::Failed) {
+            debugLog("Cache API: %s nicht lesbar, Aenderungen bleiben nur im Speicher", file.utf8().data());
+            m_unreadableOrigins.add(origin);
+        }
+        if (result != ReadResult::Done)
             return;
-        WTF::Persistence::Decoder decoder(data->span());
+        WTF::Persistence::Decoder decoder(std::span<const uint8_t> { data });
         std::optional<uint32_t> version;
         decoder >> version;
         std::optional<uint64_t> cacheCount;
@@ -161,6 +183,7 @@ private:
                 if (!record)
                     return;
                 record->identifier = ++m_nextRecordIdentifier;
+                m_originSizes.add(origin, 0).iterator->value += record->responseBodySize;
                 cache.records.append(WTF::move(*record));
             }
             auto identifier = DOMCacheIdentifier::generate();
@@ -175,17 +198,31 @@ private:
     void markChanged(const ClientOrigin& origin)
     {
         m_changedOrigins.add(origin);
+        scheduleWrite(writeDelay);
+    }
+
+    void scheduleWrite(Seconds delay)
+    {
         if (std::exchange(m_writeScheduled, true))
             return;
-        RunLoop::mainSingleton().dispatchAfter(500_ms, [this] {
+        RunLoop::mainSingleton().dispatchAfter(delay, [this] {
             m_writeScheduled = false;
-            for (auto& origin : std::exchange(m_changedOrigins, { }))
-                write(origin);
+            bool failed = false;
+            for (auto& origin : std::exchange(m_changedOrigins, { })) {
+                if (!write(origin)) {
+                    m_changedOrigins.add(origin);
+                    failed = true;
+                }
+            }
+            if (failed)
+                scheduleWrite(retryDelay);
         });
     }
 
-    void write(const ClientOrigin& origin)
+    bool write(const ClientOrigin& origin)
     {
+        if (m_unreadableOrigins.contains(origin))
+            return true;
         Vector<const Cache*> caches;
         for (auto identifier : m_order) {
             auto it = m_caches.find(identifier);
@@ -193,10 +230,8 @@ private:
                 caches.append(&it->value);
         }
         auto file = fileForOrigin(origin);
-        if (caches.isEmpty()) {
-            FileSystem::deleteFile(file);
-            return;
-        }
+        if (caches.isEmpty())
+            return FileSystem::deleteFile(file) || !FileSystem::fileExists(file);
         WTF::Persistence::Encoder encoder;
         encoder << fileVersion;
         encoder << static_cast<uint64_t>(caches.size());
@@ -207,7 +242,15 @@ private:
                 encodeRecord(encoder, record);
         }
         FileSystem::makeAllDirectories(storageDirectory);
-        FileSystem::overwriteEntireFile(file, encoder.span());
+        if (replaceWholeFile(file.utf8().data(), encoder.span()))
+            return true;
+        debugLog("Cache API: %s nicht geschrieben, neuer Versuch spaeter", file.utf8().data());
+        return false;
+    }
+
+    uint64_t& originSize(const ClientOrigin& origin)
+    {
+        return m_originSizes.add(origin, 0).iterator->value;
     }
 
     Ref<OpenPromise> open(const ClientOrigin& origin, const String& name) final
@@ -231,6 +274,9 @@ private:
         bool removed = it != m_caches.end();
         if (removed) {
             auto origin = it->value.origin;
+            auto& size = originSize(origin);
+            for (auto& record : it->value.records)
+                size -= std::min(size, record.responseBodySize);
             m_caches.remove(it);
             ++m_updateCounter;
             markChanged(origin);
@@ -271,10 +317,12 @@ private:
         if (it == m_caches.end())
             return BatchPromise::createAndReject(Error::Internal);
         Vector<uint64_t> removed;
+        auto& size = originSize(it->value.origin);
         it->value.records.removeAllMatching([&](auto& record) {
             if (!matches(request, record, options))
                 return false;
             removed.append(record.identifier);
+            size -= std::min(size, record.responseBodySize);
             return true;
         });
         if (!removed.isEmpty())
@@ -288,6 +336,20 @@ private:
         if (it == m_caches.end())
             return BatchPromise::createAndReject(Error::Internal);
         auto& stored = it->value.records;
+        // Erst pruefen, dann aendern: put/addAll gelingt ganz oder gar nicht
+        auto& size = originSize(it->value.origin);
+        uint64_t newSize = size;
+        HashSet<uint64_t> replaced;
+        for (auto& record : records) {
+            newSize += record.responseBodySize;
+            for (auto& existing : stored) {
+                if (matches(record.request, existing, { }) && replaced.add(existing.identifier).isNewEntry)
+                    newSize -= std::min(newSize, existing.responseBodySize);
+            }
+        }
+        if (newSize > maximumOriginSize)
+            return BatchPromise::createAndReject(Error::QuotaExceeded);
+        size = newSize;
         Vector<uint64_t> identifiers;
         for (auto& record : records) {
             // Gleiche Anfrage ersetzt den alten Eintrag (Cache.put)
@@ -312,6 +374,8 @@ private:
     Vector<DOMCacheIdentifier> m_order;
     HashSet<ClientOrigin> m_loadedOrigins;
     HashSet<ClientOrigin> m_changedOrigins;
+    HashSet<ClientOrigin> m_unreadableOrigins;
+    HashMap<ClientOrigin, uint64_t> m_originSizes;
     bool m_writeScheduled { false };
     uint64_t m_updateCounter { 0 };
     uint64_t m_nextRecordIdentifier { 0 };

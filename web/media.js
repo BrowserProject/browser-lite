@@ -86,10 +86,10 @@ class Player {
   constructor(id, options) {
     this.id = id;
     this.presentation = { width: 0, height: 0 };
-    this.frame = null; // { ptr, width, height } im WASM-Speicher
+    this.frames = 0; // an die Engine geschickte Bilder
+    this.frameInFlight = false; // bis die Engine es mit "frame" uebernommen hat
     this.lastTime = -1;
     this.forceFrame = true;
-    this.pendingSeek = null;
 
     const video = this.video = document.createElement('video');
     video.playsInline = true;
@@ -301,6 +301,13 @@ class Player {
     case 'pitch':
       video.preservesPitch = data.preservesPitch;
       break;
+    case 'frame':
+      this.frameInFlight = false;
+      break;
+    case 'preload':
+      // Ein hoeherer Wert gilt in Chrome von selber, load() wuerde neu anfangen
+      video.preload = data.preload;
+      break;
     case 'size':
       this.presentation = { width: data.width, height: data.height };
       this.forceFrame = true;
@@ -324,7 +331,7 @@ class Player {
   pump() {
     this.raf = requestAnimationFrame(() => this.pump());
     const video = this.video;
-    if (video.readyState < 2 || !video.videoWidth)
+    if (video.readyState < 2 || !video.videoWidth || this.frameInFlight)
       return;
     if (video.currentTime === this.lastTime && !this.forceFrame)
       return;
@@ -333,6 +340,8 @@ class Player {
     this.copyFrame();
   }
 
+  // Jedes Bild in einen eigenen Puffer, den die Engine uebernimmt und freigibt
+  // (MediaPlayerPrivateWasm::hostFrame). Wir fassen ihn danach nie wieder an.
   copyFrame() {
     const [width, height] = this.frameSize();
     if (!this.canvas || this.canvas.width !== width || this.canvas.height !== height) {
@@ -341,18 +350,13 @@ class Player {
     }
     this.ctx.drawImage(this.video, 0, 0, width, height);
     const pixels = this.ctx.getImageData(0, 0, width, height).data;
-    if (!this.frame || this.frame.width !== width || this.frame.height !== height) {
-      const old = this.frame;
-      const ptr = engine._malloc(width * height * 4);
-      if (!ptr)
-        return;
-      this.frame = { ptr, width, height };
-      // Die Engine malt vielleicht gerade noch das alte Bild
-      if (old)
-        setTimeout(() => engine._free(old.ptr), 1000);
-    }
-    engine.HEAPU8.set(pixels, this.frame.ptr);
-    engine._bl_media_frame(this.id, this.frame.ptr, width, height);
+    const ptr = engine._malloc(pixels.length);
+    if (!ptr)
+      return;
+    engine.HEAPU8.set(pixels, ptr);
+    this.frameInFlight = true;
+    this.frames++;
+    engine._bl_media_frame(this.id, ptr, width, height);
   }
 
   destroy() {
@@ -364,11 +368,6 @@ class Player {
     video.removeAttribute('src');
     video.load();
     video.remove();
-    if (this.frame) {
-      const ptr = this.frame.ptr;
-      setTimeout(() => engine._free(ptr), 1000);
-      this.frame = null;
-    }
   }
 }
 
@@ -395,7 +394,7 @@ export function mediaState() {
     const ranges = [];
     for (let i = 0; i < p.video.buffered.length; i++)
       ranges.push([p.video.buffered.start(i), p.video.buffered.end(i)]);
-    return { id: p.id, time: p.video.currentTime, paused: p.video.paused, width: p.video.videoWidth, frame: !!p.frame, buffered: ranges };
+    return { id: p.id, time: p.video.currentTime, paused: p.video.paused, width: p.video.videoWidth, frames: p.frames, preload: p.video.preload, buffered: ranges };
   });
 }
 

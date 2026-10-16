@@ -67,6 +67,8 @@ jobs:
         run: node tests/wasm/api-test.mjs
       - name: WebM-Muxer von MediaRecorder
         run: node tests/engine/recorder-test.mjs
+      - name: Aufraeumen des HTTP-Cache
+        run: node tests/engine/http-cache-test.mjs
 
   toolchain:
     name: Toolchain-Image
@@ -291,6 +293,11 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="LIMITS fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html build/limits.ppm 200 200 | tee build/limits.log
           grep -q "LIMITS fertig=ok" build/limits.log
+      - name: Watchdog (Endlosschleife wird abgebrochen, die Engine laeuft weiter)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e BL_SCRIPT_TIMEOUT=2 -e RENDER_WAIT_FOR="HANG fertig" "$IMAGE" \
+            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200 | tee build/hang.log
+          grep -q "HANG fertig=ok" build/hang.log
       - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \

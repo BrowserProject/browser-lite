@@ -131,6 +131,12 @@ bool isStorable(const ResourceRequest& request, const ResourceResponse& response
         return false;
     if (response.expectedContentLength() > static_cast<long long>(maximumEntrySize))
         return false;
+    // Endet nur mit der Verbindung (HTTP/1 ohne Laenge, nicht chunked): ein
+    // Abbruch sieht dann wie das Ende aus (CurlRequest::didCompleteTransfer
+    // nimmt auch einen Lesefehler als Ende), die Antwort kann abgeschnitten sein
+    if (response.httpVersion().startsWith("HTTP/1"_s) && response.httpHeaderField(HTTPHeaderName::ContentLength).isEmpty()
+        && !response.httpHeaderField(HTTPHeaderName::TransferEncoding).containsIgnoringASCIICase("chunked"_s))
+        return false;
     return hasValidators(response) || computeFreshnessLifetimeForHTTPFamily(response, WallTime::now()) > 0_s;
 }
 
@@ -206,7 +212,9 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
         WallTime time;
         String statusText;
         Vector<std::pair<String, String>> varying;
-        for (auto line : StringView(std::span<const char>(headers, headersLength)).split('\n')) {
+        // UTF-8 wie beim Speichern (store, UTF8ToString in http-cache.js)
+        auto text = String::fromUTF8(std::span(byteCast<char8_t>(headers), headersLength));
+        for (auto line : StringView(text).split('\n')) {
             auto colon = line.find(':');
             if (colon == notFound)
                 continue;

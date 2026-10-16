@@ -86,26 +86,35 @@ var blCodecs = (function () {
   async function copyVideoFrame(frame) {
     const visible = frame.visibleRect;
     const rect = { x: visible.x, y: visible.y, width: visible.width, height: visible.height };
-    const format = VIDEO_FORMATS.indexOf(frame.format) >= 0 ? frame.format : 'RGBA';
+    if (VIDEO_FORMATS.indexOf(frame.format) >= 0) {
+      try {
+        return await copyToHeap(frame.format, rect, (ptr, size, layout) => copyPlanes(frame, rect, layout, ptr, size));
+      } catch (e) {
+        // Ebenen, die copyTo nicht kann (z.B. ungerader Ausschnitt): ueber das Canvas
+      }
+    }
+    return copyToHeap('RGBA', rect, (ptr) => readViaCanvas(frame, rect, ptr));
+  }
+  async function copyToHeap(format, rect, copy) {
     const { layout, size } = videoLayout(format, rect.width, rect.height);
-    const ptr = Module._malloc(size);
+    const ptr = Module.blAlloc(size);
     try {
-      if (frame.format === format) {
-        try {
-          await frame.copyTo(heapView(ptr, size), { rect, layout });
-        } catch (e) {
-          // SharedArrayBuffer nicht erlaubt: ueber einen eigenen Puffer
-          const copy = new Uint8Array(size);
-          await frame.copyTo(copy, { rect, layout });
-          HEAPU8.set(copy, ptr);
-        }
-      } else
-        readViaCanvas(frame, rect, ptr);
+      await copy(ptr, size, layout);
     } catch (e) {
       Module._free(ptr);
       throw e;
     }
     return { ptr, size, format: VIDEO_FORMATS.indexOf(format), width: rect.width, height: rect.height };
+  }
+  async function copyPlanes(frame, rect, layout, ptr, size) {
+    try {
+      await frame.copyTo(heapView(ptr, size), { rect, layout });
+    } catch (e) {
+      // SharedArrayBuffer nicht erlaubt: ueber einen eigenen Puffer
+      const copy = new Uint8Array(size);
+      await frame.copyTo(copy, { rect, layout });
+      HEAPU8.set(copy, ptr);
+    }
   }
 
   async function deliverVideoFrame(id, state, generation, frame) {
@@ -131,17 +140,20 @@ var blCodecs = (function () {
   }
 
   // Kamera, Mikrofon, Bildschirm (engine/src/media/MediaStreamWasm.cpp): die
-  // Oberflaeche schickt den ReadableStream eines MediaStreamTrackProcessor
+  // Oberflaeche schickt den ReadableStream eines MediaStreamTrackProcessor.
+  // Einzelne kaputte Bilder fallen weg, bleibt es kaputt, endet die Spur.
+  const MAX_FAILED_FRAMES = 30;
   const captures = new Map(); // id -> reader
   function attachCapture(id, kind, readable) {
     detachCapture(id);
     const reader = readable.getReader();
     captures.set(id, reader);
     (async () => {
+      let failures = 0;
       for (;;) {
         const { value, done } = await reader.read();
         if (done)
-          break;
+          return;
         try {
           if (kind === 'video') {
             const copy = await copyVideoFrame(value);
@@ -151,18 +163,28 @@ var blCodecs = (function () {
               Module._free(copy.ptr);
           } else
             deliverCaptureAudio(id, value);
+          failures = 0;
+        } catch (e) {
+          if (++failures >= MAX_FAILED_FRAMES)
+            throw e;
         } finally {
           value.close();
         }
       }
-    })().catch(() => {}).finally(() => {
+    })().catch((e) => {
+      if (captures.get(id) !== reader)
+        return;
+      console.warn('[capture] ' + kind + ': ' + (e && e.message || e));
+      reader.cancel().catch(() => {});
+      Module._bl_capture_failed(id);
+    }).finally(() => {
       if (captures.get(id) === reader)
         captures.delete(id);
     });
   }
   function deliverCaptureAudio(id, data) {
     const frames = data.numberOfFrames, channels = data.numberOfChannels;
-    const ptr = Module._malloc(Math.max(frames * channels * 4, 4));
+    const ptr = Module.blAlloc(frames * channels * 4);
     try {
       const plane = new Float32Array(frames);
       for (let channel = 0; channel < channels; channel++) {
@@ -211,7 +233,7 @@ var blCodecs = (function () {
         sizes.push(bytes);
         size += bytes;
       }
-      ptr = Module._malloc(Math.max(size, 1));
+      ptr = Module.blAlloc(size);
       let offset = 0;
       for (let plane = 0; plane < planes; plane++) {
         const copy = new Uint8Array(sizes[plane]);
@@ -233,35 +255,49 @@ var blCodecs = (function () {
   }
 
   function bytesToHeap(bytes) {
-    const ptr = Module._malloc(Math.max(bytes.byteLength, 1));
+    const ptr = Module.blAlloc(bytes.byteLength);
     HEAPU8.set(new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength), ptr);
     return ptr;
   }
 
+  // Erst alles in den Speicher der Engine, dann melden: geht etwas schief,
+  // bekommt die Engine einen Fehler statt halber Daten
   function sendEncoded(id, state, chunk, metadata) {
     if (state.closed)
       return;
-    const decoderConfig = metadata && metadata.decoderConfig;
-    if (decoderConfig) {
-      let description = 0, length = -1;
-      if (decoderConfig.description) {
+    let description = 0, ptr = 0;
+    try {
+      const decoderConfig = metadata && metadata.decoderConfig;
+      let length = -1;
+      if (decoderConfig && decoderConfig.description) {
         const bytes = ArrayBuffer.isView(decoderConfig.description) ? decoderConfig.description : new Uint8Array(decoderConfig.description);
         description = bytesToHeap(bytes);
         length = bytes.byteLength;
       }
-      if (state.kind === 1)
-        Module._bl_codec_video_config(id, text(decoderConfig.codec), description, length,
-          decoderConfig.codedWidth || 0, decoderConfig.codedHeight || 0,
-          packColorSpace(decoderConfig.colorSpace));
-      else
-        Module._bl_codec_audio_config(id, text(decoderConfig.codec), description, length, decoderConfig.sampleRate || 0, decoderConfig.numberOfChannels || 0);
+      ptr = Module.blAlloc(chunk.byteLength);
+      const copy = new Uint8Array(chunk.byteLength);
+      chunk.copyTo(copy);
+      HEAPU8.set(copy, ptr);
+      if (decoderConfig) {
+        const config = description;
+        description = 0;
+        if (state.kind === 1)
+          Module._bl_codec_video_config(id, text(decoderConfig.codec), config, length,
+            decoderConfig.codedWidth || 0, decoderConfig.codedHeight || 0,
+            packColorSpace(decoderConfig.colorSpace));
+        else
+          Module._bl_codec_audio_config(id, text(decoderConfig.codec), config, length, decoderConfig.sampleRate || 0, decoderConfig.numberOfChannels || 0);
+      }
+      const data = ptr;
+      ptr = 0;
+      const temporal = metadata && metadata.svc && metadata.svc.temporalLayerId != null ? metadata.svc.temporalLayerId : -1;
+      Module._bl_codec_encoded(id, data, chunk.byteLength, chunk.type === 'key' ? 1 : 0, chunk.timestamp, chunk.duration == null ? -1 : chunk.duration, temporal);
+    } catch (e) {
+      Module._free(description);
+      Module._free(ptr);
+      if (!state.closed)
+        Module._bl_codec_error(id, errorText(e));
     }
-    const ptr = Module._malloc(Math.max(chunk.byteLength, 1));
-    const copy = new Uint8Array(chunk.byteLength);
-    chunk.copyTo(copy);
-    HEAPU8.set(copy, ptr);
-    const temporal = metadata && metadata.svc && metadata.svc.temporalLayerId != null ? metadata.svc.temporalLayerId : -1;
-    Module._bl_codec_encoded(id, ptr, chunk.byteLength, chunk.type === 'key' ? 1 : 0, chunk.timestamp, chunk.duration == null ? -1 : chunk.duration, temporal);
   }
 
   function create(id, kind, configText, description) {

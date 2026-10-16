@@ -1,6 +1,7 @@
 #include "config.h"
 #include "ContainerParser.h"
 
+#include <bit>
 #include <cstring>
 #include <wtf/StdLibExtras.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -9,6 +10,9 @@
 namespace BrowserLite {
 
 namespace {
+
+// Samples in einem trun ohne eigene Felder, mehr hat kein echtes Fragment
+constexpr uint32_t maxSamplesPerRun = 1 << 16;
 
 uint32_t be32(std::span<const uint8_t> data, size_t offset)
 {
@@ -300,6 +304,10 @@ private:
                         firstFlags = be32(box, offset);
                         offset += 4;
                     }
+                    // Die Anzahl muss zur Box passen (4 Bytes pro Feld und Sample)
+                    uint64_t entrySize = 4 * std::popcount(flags & 0xf00);
+                    if (offset > box.size() || (entrySize ? count * entrySize > box.size() - offset : count > maxSamplesPerRun))
+                        return false;
                     uint64_t decodeTime = baseDecodeTime.value_or(track.nextDecodeTime);
                     baseDecodeTime = std::nullopt; // weitere trun machen weiter
                     for (uint32_t i = 0; i < count; ++i) {

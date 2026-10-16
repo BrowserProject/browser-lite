@@ -19,6 +19,7 @@
 #include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/InitializeThreading.h>
+#include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/BackForwardCache.h>
 #include <WebCore/CommonAtomStrings.h>
 #include <WebCore/CommonVM.h>
@@ -34,7 +35,6 @@
 #include <fontconfig/fontconfig.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
-#include <sys/stat.h>
 #include <utime.h>
 #include <wtf/MainThread.h>
 #include <wtf/Threading.h>
@@ -76,13 +76,6 @@ static void addSpareWorkers(int count)
     }, count);
 }
 
-#if ENABLE(WEBGL)
-namespace WebCore {
-// platform/wasm/angle/ANGLEShimWasm.h (kein exportierter Header)
-void angleShimPrewarm();
-}
-#endif
-
 // Zusaetzliche CA-Zertifikate der Oberflaeche (web/app.js, installExtraCA)
 // kommen als Umgebungsvariable und werden hier, im Engine-Thread, zur Datei
 // fuer CurlSSLHandleWasm.cpp. Mit WasmFS geht das Dateisystem erst ab main().
@@ -116,9 +109,9 @@ int main(int, char**)
     WTF::initializeMainThread();
 
     // fontconfig gleich im Hintergrund einrichten: es liest seine Konfiguration
-    // mit vielen Dateizugriffen, die alle synchron ueber den UI-Thread laufen.
-    // Sonst passiert das mitten im Laden der ersten Seite (CNN: 0.5 s im
-    // Engine-Thread, bei der ersten Style-Berechnung).
+    // mit vielen Dateizugriffen (ohne WasmFS alle ueber den UI-Thread). Sonst
+    // passiert das mitten im Laden der ersten Seite (CNN: 0.5 s im Engine-Thread,
+    // bei der ersten Style-Berechnung).
     if (const char* value = getenv("BL_FONTCONFIG_EARLY"); !value || strcmp(value, "0"))
         Thread::create("fontconfig"_s, [] {
             FcInit();

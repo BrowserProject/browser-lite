@@ -92,8 +92,14 @@ private:
     void dispatchDecidePolicyForNewWindowAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, WebCore::FormState*, const String&, std::optional<WebCore::HitTestResult>&&, WebCore::FramePolicyFunction&&) final;
 
     bool canHandleRequest(const WebCore::ResourceRequest&) const final { return true; }
+    // Wie WebKit2: sonst schickt PingLoader <a ping> und CSP-Reports ohne Cookies
+    bool shouldUseCredentialStorage(WebCore::DocumentLoader*, WebCore::ResourceLoaderIdentifier) final { return true; }
     bool canShowMIMEType(const String&) const final;
     bool canShowMIMETypeAsHTML(const String&) const final { return true; }
+    // <object>/<embed>: Bild oder Frame nach dem MIME-Typ (Plugins gibt es nicht)
+    WebCore::ObjectContentType objectContentType(const URL&, const String& mimeType) final;
+    void startDownload(const WebCore::ResourceRequest&, const String& suggestedName, WebCore::FromDownloadAttribute) final;
+    void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) final;
     void committedLoad(WebCore::DocumentLoader*, const WebCore::SharedBuffer&) final;
     String userAgent(const URL&) const final;
 
@@ -104,7 +110,11 @@ private:
     void dispatchDidStartProvisionalLoad() final;
     void dispatchDidCommitLoad(std::optional<WebCore::HasInsecureContent>, std::optional<WebCore::UsedLegacyTLS>, std::optional<WebCore::WasPrivateRelayed>) final;
     void dispatchDidReceiveTitle(const WebCore::StringWithDirection&) final;
-    void dispatchDidChangeLocationWithinPage() final;
+    // Im selben Dokument (Anker, history.pushState/replaceState, Zurueck/Vor
+    // dorthin): neue Adresse und Verlauf an die Oberflaeche
+    void dispatchDidNavigateWithinPage() final;
+    void dispatchDidPushStateWithinPage() final;
+    void dispatchDidReplaceStateWithinPage() final;
     void dispatchDidFinishLoad() final;
     void dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) final;
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
@@ -118,6 +128,7 @@ private:
     bool canCachePage() const final { return true; }
 
     bool isMainFrame() const;
+    void didEndLoadWithError(const WebCore::ResourceError&);
 
     WeakRef<WebCore::FrameLoader> m_frameLoader;
     WeakRef<WebView> m_view;

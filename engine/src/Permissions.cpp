@@ -1,6 +1,7 @@
-// Antworten fuer navigator.permissions.query() wie in Chrome ohne bisherige
-// Entscheidung: "prompt" fuer alles, was spaeter eine Abfrage zeigt, "granted"
-// fuer das, was Chrome ohne Abfrage erlaubt.
+// Antworten fuer navigator.permissions.query(): zuerst die gemerkte
+// Entscheidung (Abfrage in der Oberflaeche, DeviceClients.cpp), sonst wie
+// Chrome ohne bisherige Entscheidung: "prompt" fuer alles, was spaeter eine
+// Abfrage zeigt, "granted" fuer das, was Chrome ohne Abfrage erlaubt.
 #include "config.h"
 #include "Engine.h"
 #include "DeviceClients.h"
@@ -15,6 +16,24 @@ using namespace WebCore;
 
 namespace BrowserLite {
 
+// Art und Ursprung, unter denen DeviceClients.cpp die Entscheidung merkt
+static PermissionDecision storedDecision(PermissionName name, const ClientOrigin& clientOrigin)
+{
+    auto top = clientOrigin.topOrigin.toString();
+    switch (name) {
+    case PermissionName::Geolocation:
+        return storedPermission("geolocation"_s, top);
+    case PermissionName::Camera:
+        return storedPermission("camera"_s, top);
+    case PermissionName::Microphone:
+        return storedPermission("microphone"_s, top);
+    case PermissionName::Notifications:
+        return storedPermission("notifications"_s, clientOrigin.clientOrigin.toString());
+    default:
+        return PermissionDecision::Ask;
+    }
+}
+
 class EnginePermissionController final : public PermissionController {
 public:
     static Ref<EnginePermissionController> create() { return adoptRef(*new EnginePermissionController); }
@@ -22,21 +41,15 @@ public:
 private:
     void query(ClientOrigin&& clientOrigin, PermissionDescriptor descriptor, const WeakPtr<Page>&, PermissionQuerySource, CompletionHandler<void(std::optional<PermissionState>)>&& completionHandler) final
     {
-        // Schon entschieden (Abfrage in der Oberflaeche, DeviceClients.cpp)?
-        String origin = clientOrigin.topOrigin.toString();
-        String kind = descriptor.name == PermissionName::Geolocation ? "geolocation"_s
-            : descriptor.name == PermissionName::Notifications ? "notifications"_s : String { };
-        if (!kind.isNull()) {
-            switch (storedPermission(kind, origin)) {
-            case PermissionDecision::Granted:
-                completionHandler(PermissionState::Granted);
-                return;
-            case PermissionDecision::Denied:
-                completionHandler(PermissionState::Denied);
-                return;
-            case PermissionDecision::Ask:
-                break;
-            }
+        switch (storedDecision(descriptor.name, clientOrigin)) {
+        case PermissionDecision::Granted:
+            completionHandler(PermissionState::Granted);
+            return;
+        case PermissionDecision::Denied:
+            completionHandler(PermissionState::Denied);
+            return;
+        case PermissionDecision::Ask:
+            break;
         }
         switch (descriptor.name) {
         case PermissionName::Accelerometer:

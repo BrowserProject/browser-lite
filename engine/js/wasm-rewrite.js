@@ -623,6 +623,12 @@ var blWasmRewrite = (function () {
       }
       needMemory();
       const arg = memarg();
+      // wait32/64 faengt auf nicht geteiltem Speicher, und der Speicher der Seite
+      // ist nie geteilt. Im geteilten Speicher der Engine wuerde es wirklich warten
+      if (sub === 1 || sub === 2) {
+        w.byte(0x00);
+        return;
+      }
       const emit = () => {
         w.byte(0xfe); w.u32(sub);
         writeMemarg(arg);
@@ -631,13 +637,6 @@ var blWasmRewrite = (function () {
         w.byte(0x21); w.u32(tB);
         address(arg.offset + 4);
         w.byte(0x20); w.u32(tB);
-      } else if (sub === 1 || sub === 2) { // wait32/64 [addr expected timeout]
-        const expected = sub === 1 ? tB : tL;
-        w.byte(0x21); w.u32(tL2);
-        w.byte(0x21); w.u32(expected);
-        address(arg.offset + (sub === 1 ? 4 : 8));
-        w.byte(0x20); w.u32(expected);
-        w.byte(0x20); w.u32(tL2);
       } else if (sub >= 0x10 && sub <= 0x16) { // load
         address(arg.offset + ATOMIC_WIDTH[sub - 0x10]);
       } else if (sub >= 0x17 && sub <= 0x47) { // store und rmw [addr value]
@@ -715,7 +714,9 @@ var blWasmRewrite = (function () {
     return sections;
   }
 
-  function rewrite(input) {
+  // Modul lesen (ohne den Code) und beschreiben. Wirft CompileError fuer alles,
+  // was sich nicht umschreiben laesst (auch fuer WebAssembly.validate)
+  function analyze(input) {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
     const sections = parseModule(bytes);
     const find = (id) => sections.find((s) => s.id === id);
@@ -836,11 +837,15 @@ var blWasmRewrite = (function () {
       memory,
       rewritten: false,
     };
+    if (memory && memory.shared)
+      throw new CompileError('geteilter Speicher (Threads) wird nicht unterstuetzt');
+    return { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memory, funcTypes, exportsList, info };
+  }
 
+  function rewrite(input) {
+    const { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memory, funcTypes, exportsList, info } = analyze(input);
     if (!memory)
       return { bytes, info };
-    if (memory.shared)
-      throw new CompileError('geteilter Speicher (Threads) wird nicht unterstuetzt');
 
     // Neue Typen, Importe, Indizes
     const typeCount = types.length;
@@ -954,6 +959,25 @@ var blWasmRewrite = (function () {
         w.raw(rewriteConstExpr(r, ctx));
       }
       built.set(SECTION.global, w.bytes().slice());
+    }
+
+    // Tabellen: Init-Ausdruecke umschreiben
+    if (find(SECTION.table)) {
+      const r = new Reader(find(SECTION.table).body);
+      const w = new Writer();
+      const count = r.u32();
+      w.u32(count);
+      for (let n = count; n; n--) {
+        const start = r.pos;
+        const init = r.bytes[r.pos] === 0x40;
+        if (init)
+          r.pos += 2;
+        readTableType(r);
+        w.raw(r.bytes.subarray(start, r.pos));
+        if (init)
+          w.raw(rewriteConstExpr(r, ctx));
+      }
+      built.set(SECTION.table, w.bytes().slice());
     }
 
     // Exporte: Speicher raus (kommt von der API), Indizes, __bl_init dazu
@@ -1164,6 +1188,7 @@ var blWasmRewrite = (function () {
     return { bytes: out.bytes().slice(), info };
   }
 
+  rewrite.analyze = analyze;
   rewrite.CompileError = CompileError;
   return rewrite;
 })();

@@ -2,7 +2,7 @@
 # fontconfig: Font-Auswahl. Skia/WebCore (FontCacheSkia) rufen es direkt auf.
 # Die Konfig-Dateien liegen zur Laufzeit im virtuellen Dateisystem unter /etc/fonts,
 # die Fonts unter /usr/share/fonts. Beim Installieren landen diese Dateien in
-# sysroot/runtime/ und werden spaeter ins WASM-Dateisystem gepackt.
+# sysroot/runtime/ und kommen beim Linken der Engine ins WASM-Dateisystem (engine.data).
 build() {
     local build="$BL_DEPS_BUILD/$DEP_NAME/build"
     local stage="$BL_DEPS_BUILD/$DEP_NAME/stage"
@@ -35,9 +35,8 @@ build() {
     cp -a "$stage$BL_SYSROOT/." "$BL_SYSROOT/"
     mkdir -p "$BL_SYSROOT/runtime"
     for d in etc usr; do
-        [ -d "$stage/$d" ] && cp -a "$stage/$d" "$BL_SYSROOT/runtime/"
+        if [ -d "$stage/$d" ]; then
+            cp -a "$stage/$d" "$BL_SYSROOT/runtime/"
+        fi
     done
-    # fontconfig sucht die Konfig ueber Symlinks in conf.d. Die Symlinks zeigen
-    # auf absolute Pfade (/usr/share/...), das passt im WASM-Dateisystem.
-    true
 }

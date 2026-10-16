@@ -57,7 +57,7 @@ RefPtr<ThreadedScrollingTree> treeForView(int viewId)
     return it == entries().end() ? nullptr : it->value.tree;
 }
 
-// Wie bisher: der Engine-Thread macht alles (DOM-Event und Scrollen)
+// Ohne Scroll-Thread: DOM-Event und Scrollen im Engine-Thread
 void sendToEngine(int viewId, const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
 {
     runOnEngineThread([viewId, event, steps] {

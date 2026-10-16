@@ -206,7 +206,6 @@ private:
     Deque<std::unique_ptr<QueuedFrame>> m_outgoingFrameQueue;
     OutgoingFrameQueueStatus m_outgoingFrameQueueStatus { OutgoingFrameQueueOpen };
 
-    // FIXME: Load two or more Blobs simultaneously for better performance.
     RefPtr<FileReaderLoader> m_blobLoader;
     BlobLoaderStatus m_blobLoaderStatus { BlobLoaderNotStarted };
 

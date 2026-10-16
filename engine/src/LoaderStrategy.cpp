@@ -16,26 +16,40 @@
 #include "HttpCache.h"
 #include "Strategies.h"
 
+#include <WebCore/BlobRegistry.h>
+#include <WebCore/BlobRegistryImpl.h>
+#include <WebCore/BlobResourceHandle.h>
 #include <WebCore/CacheValidation.h>
 #include <WebCore/CachedResource.h>
+#include <WebCore/ContentSecurityPolicy.h>
+#include <WebCore/CrossOriginAccessControl.h>
+#include <WebCore/CrossOriginPreflightResultCache.h>
 #include <WebCore/CurlRequest.h>
 #include <WebCore/CurlRequestClient.h>
 #include <WebCore/CurlResponse.h>
+#include <WebCore/DataURLDecoder.h>
+#include <WebCore/DocumentInlines.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/LoaderStrategy.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/NetworkLoadMetrics.h>
 #include <WebCore/NetworkStateNotifier.h>
 #include <WebCore/NetworkStorageSession.h>
+#include <WebCore/OriginAccessPatterns.h>
+#include <WebCore/Page.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceLoader.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
+#include <WebCore/SecurityOrigin.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/SubresourceLoader.h>
 #include <WebCore/UserAgent.h>
+#include <wtf/Expected.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
@@ -46,7 +60,7 @@ using namespace WebCore;
 
 static constexpr auto errorDomain = "BrowserLite"_s;
 
-void addCookieHeader(ResourceRequest& request)
+static void addCookieHeader(ResourceRequest& request)
 {
     auto& session = networkStorageSession();
     auto includeSecureCookies = request.url().protocolIs("https"_s) ? IncludeSecureCookies::Yes : IncludeSecureCookies::No;
@@ -54,6 +68,97 @@ void addCookieHeader(ResourceRequest& request)
     UNUSED_PARAM(secureCookiesAccessed);
     if (!cookies.isEmpty())
         request.setHTTPHeaderField(HTTPHeaderName::Cookie, cookies);
+}
+
+// allowCookies ist false bei credentials: 'omit' oder fremden CSP-Reports
+Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient& client)
+{
+    if (request.httpUserAgent().isEmpty())
+        request.setHTTPUserAgent(standardUserAgent());
+    if (request.allowCookies())
+        addCookieHeader(request);
+    return CurlRequest::create(request, client);
+}
+
+void storeCookies(const ResourceRequest& request, const CurlResponse& response)
+{
+    if (!request.allowCookies())
+        return;
+    static constexpr auto setCookie = "set-cookie:"_s;
+    for (auto& header : response.headers) {
+        if (!header.startsWithIgnoringASCIICase(setCookie))
+            continue;
+        String value = header.substring(setCookie.length()).trim(isASCIIWhitespace<char16_t>);
+        networkStorageSession().setCookiesFromHTTPResponse(request.firstPartyForCookies(), response.url, value);
+    }
+}
+
+bool isRedirect(const ResourceResponse& response)
+{
+    int status = response.httpStatusCode();
+    if (status < 300 || status >= 400 || status == 300 || status == 304 || status == 305 || status == 306)
+        return false;
+    return !response.httpHeaderField(HTTPHeaderName::Location).isEmpty();
+}
+
+static bool redirectAsGET(const ResourceRequest& request, const ResourceResponse& response, bool crossOrigin)
+{
+    if (request.httpMethod() == "GET"_s || request.httpMethod() == "HEAD"_s)
+        return false;
+    if (!request.url().protocolIsInHTTPFamily() || response.isSeeOther())
+        return true;
+    if ((response.isMovedPermanently() || response.isFound()) && request.httpMethod() == "POST"_s)
+        return true;
+    return crossOrigin && request.httpMethod() == "DELETE"_s;
+}
+
+// Naechste Anfrage nach einem Redirect wie in Chrome (Methode, Fragment,
+// Zugangsdaten). redirectCount zaehlt diesen Redirect schon mit.
+static Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
+{
+    if (redirectCount > 20)
+        return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Too many redirects"_s));
+
+    URL target { response.url(), response.httpHeaderField(HTTPHeaderName::Location) };
+    // Eine Webseite darf nie auf lokale Dateien im WASM-Dateisystem umleiten
+    if (target.protocolIsFile())
+        return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Redirect to file: blocked"_s));
+
+    ResourceRequest request = current;
+    if (!target.hasFragmentIdentifier() && request.url().hasFragmentIdentifier())
+        target.setFragmentIdentifier(request.url().fragmentIdentifier());
+
+    bool crossOrigin = !protocolHostAndPortAreEqual(request.url(), target);
+    request.setURL(WTF::move(target));
+    if (redirectAsGET(request, response, crossOrigin)) {
+        request.setHTTPMethod("GET"_s);
+        request.setHTTPBody(nullptr);
+        request.clearHTTPContentType();
+    }
+    request.removeCredentials();
+    if (crossOrigin) {
+        request.clearHTTPAuthorization();
+        request.clearHTTPOrigin();
+    }
+    // Die Cookies fuer das neue Ziel setzt createCurlRequest
+    request.removeHTTPHeaderField(HTTPHeaderName::Cookie);
+    return request;
+}
+
+ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient& client, const ResourceResponse& response, unsigned& redirectCount)
+{
+    auto next = redirectedRequest(curlRequest->resourceRequest(), response, ++redirectCount);
+    if (auto old = std::exchange(curlRequest, nullptr)) {
+        old->cancel();
+        old->invalidateClient();
+    }
+    if (!next)
+        return next.error();
+    if (!next->url().protocolIsInHTTPFamily())
+        return ResourceError(errorDomain, 0, response.url(), "Redirect to unsupported URL"_s);
+    curlRequest = createCurlRequest(WTF::move(*next), client);
+    curlRequest->resume();
+    return { };
 }
 
 // Ein Ladevorgang: ein ResourceLoader, ein CurlRequest (bei Redirects nacheinander mehrere)
@@ -119,7 +224,7 @@ private:
 
     void startNetwork(ResourceRequest&& request)
     {
-        m_curlRequest = createCurlRequest(WTF::move(request));
+        m_curlRequest = createCurlRequest(WTF::move(request), *this);
         m_curlRequest->resume();
     }
 
@@ -143,82 +248,22 @@ private:
         });
     }
 
-    Ref<CurlRequest> createCurlRequest(ResourceRequest&& request)
-    {
-        if (request.httpUserAgent().isEmpty())
-            request.setHTTPUserAgent(standardUserAgent());
-        addCookieHeader(request);
-        return CurlRequest::create(request, *this);
-    }
-
-    void storeCookies(const ResourceRequest& request, const CurlResponse& response)
-    {
-        static constexpr auto setCookie = "set-cookie:"_s;
-        for (auto& header : response.headers) {
-            if (!header.startsWithIgnoringASCIICase(setCookie))
-                continue;
-            String value = header.substring(setCookie.length()).trim(isASCIIWhitespace<char16_t>);
-            networkStorageSession().setCookiesFromHTTPResponse(request.firstPartyForCookies(), response.url, value);
-        }
-    }
-
     void finish()
     {
         if (auto done = std::exchange(m_done, nullptr))
             done(*this);
     }
 
-    bool isRedirect() const
-    {
-        int status = m_response.httpStatusCode();
-        if (status < 300 || status >= 400 || status == 300 || status == 304 || status == 305 || status == 306)
-            return false;
-        return !m_response.httpHeaderField(HTTPHeaderName::Location).isEmpty();
-    }
-
-    bool redirectAsGET(const ResourceRequest& request, bool crossOrigin) const
-    {
-        if (request.httpMethod() == "GET"_s || request.httpMethod() == "HEAD"_s)
-            return false;
-        if (!request.url().protocolIsInHTTPFamily() || m_response.isSeeOther())
-            return true;
-        if ((m_response.isMovedPermanently() || m_response.isFound()) && request.httpMethod() == "POST"_s)
-            return true;
-        return crossOrigin && request.httpMethod() == "DELETE"_s;
-    }
-
+    // Der ResourceLoader entscheidet ueber das neue Ziel (CORS, CSP, Service Worker)
     void redirect()
     {
-        if (++m_redirectCount > 20) {
-            fail(ResourceError(errorDomain, 0, m_response.url(), "Too many redirects"_s));
+        auto request = redirectedRequest(m_loader->request(), m_response, ++m_redirectCount);
+        if (!request) {
+            fail(request.error());
             return;
         }
 
-        URL target { m_response.url(), m_response.httpHeaderField(HTTPHeaderName::Location) };
-        // Eine Webseite darf nie auf lokale Dateien im WASM-Dateisystem umleiten
-        if (target.protocolIsFile()) {
-            fail(ResourceError(errorDomain, 0, m_response.url(), "Redirect to file: blocked"_s));
-            return;
-        }
-
-        ResourceRequest request = m_loader->request();
-        if (!target.hasFragmentIdentifier() && request.url().hasFragmentIdentifier())
-            target.setFragmentIdentifier(request.url().fragmentIdentifier());
-
-        bool crossOrigin = !protocolHostAndPortAreEqual(request.url(), target);
-        request.setURL(WTF::move(target));
-        if (redirectAsGET(request, crossOrigin)) {
-            request.setHTTPMethod("GET"_s);
-            request.setHTTPBody(nullptr);
-            request.clearHTTPContentType();
-        }
-        request.removeCredentials();
-        if (crossOrigin) {
-            request.clearHTTPAuthorization();
-            request.clearHTTPOrigin();
-        }
-
-        m_loader->willSendRequest(WTF::move(request), ResourceResponse { m_response }, [this, protectedThis = Ref { *this }](ResourceRequest&& newRequest) {
+        m_loader->willSendRequest(WTF::move(*request), ResourceResponse { m_response }, [this, protectedThis = Ref { *this }](ResourceRequest&& newRequest) {
             if (auto old = std::exchange(m_curlRequest, nullptr)) {
                 old->cancel();
                 old->invalidateClient();
@@ -227,7 +272,7 @@ private:
                 finish();
                 return;
             }
-            m_curlRequest = createCurlRequest(WTF::move(newRequest));
+            m_curlRequest = createCurlRequest(WTF::move(newRequest), *this);
             m_curlRequest->resume();
         });
     }
@@ -276,7 +321,7 @@ private:
             return;
         }
 
-        if (isRedirect()) {
+        if (isRedirect(m_response)) {
             redirect();
             return;
         }
@@ -334,7 +379,7 @@ private:
     RefPtr<CurlRequest> m_curlRequest;
     Function<void(ResourceLoad&)> m_done;
     ResourceResponse m_response;
-    int m_redirectCount { 0 };
+    unsigned m_redirectCount { 0 };
     // HTTP-Cache: Eintrag, der gerade nachgeprueft wird, und was gespeichert wird
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     bool m_storing { false };
@@ -342,34 +387,127 @@ private:
     SharedBufferBuilder m_cacheBody;
 };
 
-// Fire-and-forget fuer sendBeacon, <a ping>, CSP-Reports
+// Fire-and-forget fuer sendBeacon, <a ping> und Reports, die Seite sieht die
+// Antwort nicht. Prueft wie NetworkLoadChecker fuer PingLoad in WebKit2: Cookies
+// nach credentials, im Modus cors fuer fremde Ziele Origin und Preflight, bei
+// Redirects CORS und CSP (connect-src) fuer das neue Ziel. Die erste Anfrage
+// hat WebCore schon gegen die CSP geprueft. Reports folgen keinem Redirect.
 class PingLoad final : public RefCounted<PingLoad>, public CurlRequestClient {
 public:
-    static void start(ResourceRequest&& request, LoaderStrategy::PingLoadCompletionHandler&& completion)
+    static void start(Document& document, const ResourceRequest& request, const HTTPHeaderMap& originalHeaders, const FetchOptions& options, ContentSecurityPolicyImposition policyCheck, LoaderStrategy::PingLoadCompletionHandler&& completion)
     {
-        if (request.httpUserAgent().isEmpty())
-            request.setHTTPUserAgent(standardUserAgent());
-        Ref ping = adoptRef(*new PingLoad(WTF::move(completion)));
+        Ref ping = adoptRef(*new PingLoad(document, request, originalHeaders, options, policyCheck, WTF::move(completion)));
         ping->m_self = ping.ptr();
-        ping->m_request = CurlRequest::create(request, ping.get());
-        ping->m_request->resume();
+        ping->check(ResourceRequest { request });
     }
 
     void ref() const final { RefCounted::ref(); }
     void deref() const final { RefCounted::deref(); }
 
 private:
-    explicit PingLoad(LoaderStrategy::PingLoadCompletionHandler&& completion)
-        : m_completion(WTF::move(completion))
+    PingLoad(Document& document, const ResourceRequest& request, const HTTPHeaderMap& originalHeaders, const FetchOptions& options, ContentSecurityPolicyImposition policyCheck, LoaderStrategy::PingLoadCompletionHandler&& completion)
+        : m_options(options)
+        , m_origin(document.securityOrigin())
+        , m_topOrigin(document.topOrigin())
+        , m_sessionID(document.page() ? document.page()->sessionID() : PAL::SessionID::defaultSessionID())
+        , m_originalHeaders(originalHeaders)
+        , m_allowCookies(request.allowCookies())
+        , m_credentials(options.credentials == FetchOptions::Credentials::Omit ? StoredCredentialsPolicy::DoNotUse : StoredCredentialsPolicy::Use)
+        , m_completion(WTF::move(completion))
     {
+        // Eine Kopie: das Dokument kann weg sein, bevor der Redirect kommt
+        if (auto* policy = document.contentSecurityPolicy(); policy && policyCheck == ContentSecurityPolicyImposition::DoPolicyCheck && !document.shouldBypassMainWorldContentSecurityPolicy()) {
+            m_contentSecurityPolicy = makeUnique<ContentSecurityPolicy>(URL { m_origin->toRawString() }, nullptr, nullptr);
+            m_contentSecurityPolicy->didReceiveHeaders(policy->responseHeaders(), String { request.httpReferrer() }, ContentSecurityPolicy::ReportParsingErrors::No);
+        }
     }
 
-    void done(const ResourceError& error, const ResourceResponse& response)
+    bool canRequest(const URL& url) const { return m_origin->canRequest(url, OriginAccessPatternsForWebProcess::singleton()); }
+
+    // Fuer Preflight und Preflight-Cache zaehlen die Header der Seite, nicht
+    // die von WebCore dazugefuegten
+    ResourceRequest withOriginalHeaders(const ResourceRequest& request) const
+    {
+        ResourceRequest copy { request };
+        copy.setHTTPHeaderFields(HTTPHeaderMap { m_originalHeaders });
+        return copy;
+    }
+
+    // NetworkLoadChecker::continueCheckingRequest und checkCORSRequest
+    void check(ResourceRequest&& request)
+    {
+        bool sameOrigin = canRequest(request.url());
+        if (m_options.credentials == FetchOptions::Credentials::SameOrigin)
+            m_credentials = m_isSameOriginRequest && sameOrigin ? StoredCredentialsPolicy::Use : StoredCredentialsPolicy::DoNotUse;
+        m_isSameOriginRequest = m_isSameOriginRequest && sameOrigin;
+        request.setAllowCookies(m_allowCookies && m_credentials == StoredCredentialsPolicy::Use);
+        if (m_options.mode != FetchOptions::Mode::Cors || m_isSameOriginRequest)
+            return send(WTF::move(request));
+        updateRequestForAccessControl(request, m_origin.get(), m_credentials);
+        if (isSimpleCrossOriginAccessRequest(request.httpMethod(), m_originalHeaders)
+            || CrossOriginPreflightResultCache::singleton().canSkipPreflight(m_sessionID, { m_topOrigin->data(), m_origin->data() }, request.url(), m_credentials, request.httpMethod(), m_originalHeaders))
+            return send(WTF::move(request));
+        auto preflight = createAccessControlPreflightRequest(withOriginalHeaders(request), m_origin.get(), request.httpReferrer(), true);
+        m_afterPreflight = WTF::move(request);
+        send(WTF::move(preflight));
+    }
+
+    // NetworkLoadChecker::checkRedirection
+    void redirect()
+    {
+        if (m_options.redirect != FetchOptions::Redirect::Follow)
+            return fail("Not allowed to follow redirects"_s);
+        if (m_options.mode == FetchOptions::Mode::Cors && !m_isSameOriginRequest) {
+            if (auto result = passesAccessControlCheck(m_response, m_credentials, m_origin.get(), &CrossOriginAccessControlCheckDisabler::singleton()); !result)
+                return fail(makeString("Cross-origin redirection denied by Cross-Origin Resource Sharing policy: "_s, result.error()));
+            if (URL { m_response.url(), m_response.httpHeaderField(HTTPHeaderName::Location) }.hasCredentials())
+                return fail("Cross-origin redirection to a URL with credentials"_s);
+        }
+        URL previousURL = m_request->resourceRequest().url();
+        String previousMethod = m_request->resourceRequest().httpMethod();
+        auto next = redirectedRequest(m_request->resourceRequest(), m_response, ++m_redirectCount);
+        if (!next)
+            return done(next.error());
+        if (!next->url().protocolIsInHTTPFamily())
+            return fail("Redirect to unsupported URL"_s);
+        if (m_contentSecurityPolicy) {
+            m_contentSecurityPolicy->upgradeInsecureRequestIfNeeded(*next, ContentSecurityPolicy::InsecureRequestType::Load);
+            if (!m_contentSecurityPolicy->allowConnectToSource(next->url(), { }, ContentSecurityPolicy::RedirectResponseReceived::Yes))
+                return fail("Blocked by Content Security Policy"_s);
+        }
+        if (next->httpMethod() != previousMethod)
+            m_originalHeaders.removeRequestBodyHeaders();
+        // Fetch, HTTP-redirect fetch Schritt 10: weiter mit undurchsichtigem Ursprung
+        if (m_options.mode == FetchOptions::Mode::Cors && !canRequest(previousURL) && !protocolHostAndPortAreEqual(previousURL, next->url()))
+            m_origin = SecurityOrigin::createOpaque();
+        check(WTF::move(*next));
+    }
+
+    void send(ResourceRequest&& request)
+    {
+        stop();
+        m_request = createCurlRequest(WTF::move(request), *this);
+        m_request->resume();
+    }
+
+    void stop()
+    {
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->cancel();
+            request->invalidateClient();
+        }
+    }
+
+    void fail(String&& message)
+    {
+        done(ResourceError(errorDomain, 0, m_response.url(), WTF::move(message), ResourceError::Type::AccessControl));
+    }
+
+    void done(const ResourceError& error)
     {
         if (auto completion = std::exchange(m_completion, nullptr))
-            completion(error, response);
-        if (auto request = std::exchange(m_request, nullptr))
-            request->invalidateClient();
+            completion(error, m_response);
+        stop();
         m_self = nullptr; // gibt uns frei
     }
 
@@ -377,41 +515,61 @@ private:
     void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& response) final
     {
         Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), response);
         m_response = ResourceResponse(response);
+        if (auto pending = std::exchange(m_afterPreflight, std::nullopt)) {
+            if (auto result = validatePreflightResponse(m_sessionID, withOriginalHeaders(*pending), m_response, m_credentials, m_topOrigin.get(), m_origin.get(), &CrossOriginAccessControlCheckDisabler::singleton()); !result)
+                return fail(WTF::move(result.error()));
+            return send(WTF::move(*pending));
+        }
+        if (isRedirect(m_response))
+            return redirect();
         request.completeDidReceiveResponse();
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&&) final { }
     void curlDidComplete(CurlRequest&, NetworkLoadMetrics&&) final
     {
         Ref protectedThis { *this };
-        done({ }, m_response);
+        done({ });
     }
     void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
     {
         Ref protectedThis { *this };
-        done(error, m_response);
+        done(error);
     }
 
+    FetchOptions m_options;
+    Ref<SecurityOrigin> m_origin;
+    Ref<SecurityOrigin> m_topOrigin;
+    PAL::SessionID m_sessionID;
+    HTTPHeaderMap m_originalHeaders;
+    std::unique_ptr<ContentSecurityPolicy> m_contentSecurityPolicy;
+    bool m_allowCookies;
+    bool m_isSameOriginRequest { true };
+    StoredCredentialsPolicy m_credentials;
     LoaderStrategy::PingLoadCompletionHandler m_completion;
     RefPtr<CurlRequest> m_request;
+    std::optional<ResourceRequest> m_afterPreflight;
     RefPtr<PingLoad> m_self;
     ResourceResponse m_response;
+    unsigned m_redirectCount { 0 };
 };
 
 // Download: eigener CurlRequest, die Daten gehen stueckweise an die Oberflaeche,
-// die daraus eine Datei (Blob) macht.
+// die daraus eine Datei (Blob) macht. data: und blob: hat die Engine schon
+// selber, die gehen ohne Netz.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
     static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
     {
         static int nextID = 1;
-        if (request.httpUserAgent().isEmpty())
-            request.setHTTPUserAgent(standardUserAgent());
-        addCookieHeader(request);
-        Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename));
-        download->m_viewSource = viewSource;
+        Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename, viewSource));
+        if (request.url().protocolIsData() || request.url().protocolIsBlob()) {
+            download->loadLocally(request.url());
+            return;
+        }
         download->m_self = download.ptr();
-        download->m_request = CurlRequest::create(request, download.get());
+        download->m_request = createCurlRequest(WTF::move(request), download.get());
         download->m_request->resume();
     }
 
@@ -419,18 +577,69 @@ public:
     void deref() const final { RefCounted::deref(); }
 
 private:
-    Download(int id, int viewId, const String& suggestedFilename)
+    Download(int id, int viewId, const String& suggestedFilename, bool viewSource)
         : m_id(id)
         , m_viewId(viewId)
         , m_filename(suggestedFilename)
+        , m_viewSource(viewSource)
     {
+    }
+
+    void loadLocally(const URL& url)
+    {
+        ResourceResponse response;
+        ResourceError error;
+        Vector<uint8_t> data;
+        if (url.protocolIsData()) {
+            if (auto result = DataURLDecoder::decode(url)) {
+                response = ResourceResponse { URL { url }, WTF::move(result->mimeType), static_cast<long long>(result->data.size()), WTF::move(result->charset) };
+                data = WTF::move(result->data);
+            } else
+                error = ResourceError(errorDomain, 0, url, "Invalid data: URL"_s);
+        } else {
+            RefPtr blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(url);
+            BlobResourceHandle::loadResourceSynchronously(blob.get(), ResourceRequest { URL { url } }, error, response, data);
+        }
+        if (response.url().isEmpty())
+            response.setURL(URL { url });
+        announce(response);
+        if (!error.isNull()) {
+            finish(errorText(error));
+            return;
+        }
+        sendDownloadData(m_id, data.span());
+        finish({ });
+    }
+
+    // download-start: Name wie in Chrome aus download=, Content-Disposition
+    // oder der Adresse. Eine data:-Adresse hat keinen Namen und ist oft riesig.
+    void announce(const ResourceResponse& response)
+    {
+        bool isData = response.url().protocolIsData();
+        String filename = m_filename;
+        if (filename.isEmpty())
+            filename = response.suggestedFilename();
+        if (filename.isEmpty() && !isData)
+            filename = response.url().lastPathComponent().toString();
+        if (filename.isEmpty())
+            filename = "download"_s;
+        notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, isData ? String { "data:"_s } : jsonEscape(response.url().string()),
+            "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
+            "\",\"size\":"_s, response.expectedContentLength(), m_viewSource ? ",\"viewSource\":true}"_s : "}"_s));
+    }
+
+    static String errorText(const ResourceError& error)
+    {
+        return error.localizedDescription().isEmpty() ? "Fehler"_s : error.localizedDescription();
     }
 
     void finish(const String& error)
     {
         notifyHost(m_viewId, "download-done", makeString("{\"id\":"_s, m_id, ",\"error\":\""_s, jsonEscape(error), "\"}"_s));
-        if (auto request = std::exchange(m_request, nullptr))
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->cancel();
             request->invalidateClient();
+        }
         m_self = nullptr; // gibt uns frei
     }
 
@@ -438,17 +647,21 @@ private:
     void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
     {
         Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), curlResponse);
         ResourceResponse response(curlResponse);
-        String filename = m_filename;
-        if (filename.isEmpty())
-            filename = response.suggestedFilename();
-        if (filename.isEmpty())
-            filename = response.url().lastPathComponent().toString();
-        if (filename.isEmpty())
-            filename = "download"_s;
-        notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, jsonEscape(response.url().string()),
-            "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
-            "\",\"size\":"_s, response.expectedContentLength(), m_viewSource ? ",\"viewSource\":true}"_s : "}"_s));
+        if (isRedirect(response)) {
+            if (auto error = followRedirect(m_request, *this, response, m_redirectCount); !error.isNull()) {
+                announce(response);
+                finish(errorText(error));
+            }
+            return;
+        }
+        announce(response);
+        // Wie Chrome: eine Fehlerseite ist keine Datei (Quelltext zeigt sie aber)
+        if (!m_viewSource && response.httpStatusCode() >= 400) {
+            finish(makeString("HTTP "_s, response.httpStatusCode()));
+            return;
+        }
         request.completeDidReceiveResponse();
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
@@ -463,7 +676,7 @@ private:
     void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
     {
         Ref protectedThis { *this };
-        finish(error.localizedDescription().isEmpty() ? "Fehler"_s : error.localizedDescription());
+        finish(errorText(error));
     }
 
     int m_id;
@@ -471,6 +684,7 @@ private:
     String m_filename;
     // Quelltext anzeigen: die Oberflaeche zeigt die Daten als Text statt zu speichern
     bool m_viewSource { false };
+    unsigned m_redirectCount { 0 };
     RefPtr<CurlRequest> m_request;
     RefPtr<Download> m_self;
 };
@@ -494,13 +708,11 @@ public:
     static void start(int viewId, const URL& url)
     {
         ResourceRequest request(URL { url });
-        request.setHTTPUserAgent(standardUserAgent());
         request.setHTTPHeaderField(HTTPHeaderName::Accept, "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"_s);
         request.setFirstPartyForCookies(url);
-        addCookieHeader(request);
         Ref load = adoptRef(*new IconLoad(viewId, url));
         load->m_self = load.ptr();
-        load->m_request = CurlRequest::create(request, load.get());
+        load->m_request = createCurlRequest(WTF::move(request), load.get());
         load->m_request->resume();
     }
 
@@ -522,8 +734,10 @@ private:
         if (!success)
             m_data.clear();
         sendIconData(m_viewId, m_url.string(), m_mimeType, m_data.span());
-        if (auto request = std::exchange(m_request, nullptr))
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->cancel();
             request->invalidateClient();
+        }
         m_self = nullptr; // gibt uns frei
     }
 
@@ -531,7 +745,14 @@ private:
     void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
     {
         Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), curlResponse);
         ResourceResponse response(curlResponse);
+        // /favicon.ico liegt oft hinter einem Redirect (http -> https, www, CDN)
+        if (isRedirect(response)) {
+            if (!followRedirect(m_request, *this, response, m_redirectCount).isNull())
+                done(false);
+            return;
+        }
         m_ok = response.httpStatusCode() >= 200 && response.httpStatusCode() < 300;
         m_mimeType = response.mimeType();
         request.completeDidReceiveResponse();
@@ -559,6 +780,7 @@ private:
     URL m_url;
     String m_mimeType;
     bool m_ok { false };
+    unsigned m_redirectCount { 0 };
     Vector<uint8_t> m_data;
     RefPtr<CurlRequest> m_request;
     RefPtr<IconLoad> m_self;
@@ -630,9 +852,15 @@ private:
     void suspendPendingRequests() final { }
     void resumePendingRequests() final { }
 
-    void startPingLoad(LocalFrame&, ResourceRequest& request, const HTTPHeaderMap&, const FetchOptions&, ContentSecurityPolicyImposition, PingLoadCompletionHandler&& completion) final
+    void startPingLoad(LocalFrame& frame, ResourceRequest& request, const HTTPHeaderMap& originalRequestHeaders, const FetchOptions& options, ContentSecurityPolicyImposition policyCheck, PingLoadCompletionHandler&& completion) final
     {
-        PingLoad::start(ResourceRequest { request }, WTF::move(completion));
+        RefPtr document = frame.document();
+        if (!document) {
+            if (completion)
+                completion(cancelledError(request), { });
+            return;
+        }
+        PingLoad::start(*document, request, originalRequestHeaders, options, policyCheck, WTF::move(completion));
     }
 
     void preconnectTo(FrameLoader&, ResourceRequest&&, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&& completion) final

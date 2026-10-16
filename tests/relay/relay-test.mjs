@@ -1,6 +1,6 @@
 // Testet Relay (relay/server.mjs, relay/static.mjs) + Wisp-Client (web/transport.js) zusammen:
-// Token, Echo mit Flusskontrolle, Reconnect nach Neustart des Relays, SSRF-Sperre im offenen
-// Betrieb, Auslieferung der Seite (Header, Brotli, ETag/304, kaputte URLs, abgebrochene Downloads).
+// Token, Echo mit Flusskontrolle, Gegendruck (onsent), Reconnect nach Neustart des Relays, Verbindungszustand,
+// SSRF-Sperre im offenen Betrieb, Auslieferung der Seite (Header, Brotli, ETag/304, kaputte URLs, abgebrochene Downloads).
 //   node tests/relay/relay-test.mjs
 import fs from 'node:fs';
 import http from 'node:http';
@@ -35,6 +35,13 @@ const check = (name, ok, info = '') => {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const within = (promise, ms, fallback) => Promise.race([promise, sleep(ms).then(() => fallback)]);
+async function waitUntil(condition, ms) {
+  for (const end = Date.now() + ms; Date.now() < end; await sleep(50)) {
+    if (condition())
+      return true;
+  }
+  return condition();
+}
 
 // Startet das Relay. ready: true sobald es laeuft, false wenn es vorher endet.
 function startRelay(env) {
@@ -87,6 +94,35 @@ async function echoOver(transport, echoPort, total) {
   await within(done, 20000);
   stream.close();
   return { received, corrupt };
+}
+
+// Ziel liest nicht: der Relay gibt keinen Kredit mehr, onsent bleibt unter
+// dem, was gesendet wurde. Liest das Ziel wieder, kommt alles an.
+async function backpressure(transport) {
+  let paused = null;
+  const sink = net.createServer((socket) => {
+    paused = socket;
+    socket.pause();
+  }).listen(0, '127.0.0.1');
+  await new Promise((r) => sink.on('listening', r));
+  const total = 64 * 1024 * 1024;
+  const stream = transport.openTCP('127.0.0.1', sink.address().port);
+  let sent = 0;
+  stream.onsent = (bytes) => sent += bytes;
+  stream.onopen = () => {
+    const chunk = new Uint8Array(65536);
+    for (let queued = 0; queued < total; queued += chunk.length)
+      stream.send(chunk);
+  };
+  await sleep(3000);
+  const stalled = sent;
+  paused?.resume();
+  paused?.on('data', () => {});
+  for (let i = 0; i < 300 && sent < total; i++)
+    await sleep(100);
+  stream.close();
+  sink.close();
+  return { stalled, sent, total };
 }
 
 // Close-Grund eines Streams zu host:port, null wenn er offen bleibt
@@ -146,6 +182,10 @@ const { WispTransport } = await import(path.join(root, 'web', 'transport.js'));
   const big = await echoOver(transport, echoPort, 2 * 1024 * 1024);
   check('2 MB Echo', big.received === 2 * 1024 * 1024 && !big.corrupt, `${big.received} Bytes, korrupt=${big.corrupt}`);
 
+  const pressure = await backpressure(transport);
+  check('Gegendruck: ohne Lesen des Ziels stoppt onsent', pressure.stalled > 0 && pressure.stalled < pressure.total, `${pressure.stalled} von ${pressure.total} Bytes`);
+  check('Gegendruck: danach alles gesendet', pressure.sent === pressure.total, `${pressure.sent} Bytes`);
+
   const stopped = await stopRelay(relay);
   check('SIGTERM beendet das Relay sauber', stopped.code === 0, JSON.stringify(stopped));
 
@@ -153,6 +193,23 @@ const { WispTransport } = await import(path.join(root, 'web', 'transport.js'));
   await relay.ready;
   const again = await echoOver(transport, echoPort, 64 * 1024);
   check('gleicher Transport nach Neustart des Relays', again.received === 64 * 1024 && !again.corrupt, `${again.received} Bytes`);
+
+  // Verbindungszustand (navigator.onLine der Seiten): weg beim Stopp, danach
+  // von selber wieder da, ohne neuen Stream
+  const states = [];
+  transport.onconnectedchange = (connected) => states.push(connected);
+  // Schliesst nur die WebSocket (wie ein Proxy im Leerlauf), bleibt es online
+  const closedSocket = transport.ws;
+  closedSocket.close();
+  const replaced = await waitUntil(() => transport.connected && transport.ws !== closedSocket && transport.ws.readyState === 1, 3000);
+  check('WebSocket zu, Relay da: sofort neu verbunden, nie offline', replaced && states.length === 0, states.join());
+  await stopRelay(relay);
+  const down = await waitUntil(() => !transport.connected, 3000);
+  relay = startRelay(env);
+  await relay.ready;
+  const up = await waitUntil(() => transport.connected, 8000);
+  check('Verbindung weg und von selber wieder da', down && up && states.join() === 'false,true', states.join());
+  transport.onconnectedchange = null;
   transport.ws?.close();
   await stopRelay(relay);
 }

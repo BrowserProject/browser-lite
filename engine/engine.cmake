@@ -136,27 +136,37 @@ target_link_options(BrowserLiteEngine PRIVATE
     # Funktionsnamen behalten (Profile, Stacktraces; tools/optimize-site.mjs
     # entfernt sie fuer die Auslieferung)
     "SHELL:--profiling-funcs"
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js"
-    # WebAssembly der Seiten (engine/src/wasm/WasmBridge.cpp)
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js"
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js"
     # Sockets im WASM statt SOCKFS (engine/src/Sockets.cpp): die Funktionen
-    # beim Linken abfangen, Verbindungen ueber den Transport der Oberflaeche
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js"
-    # HTTP-Cache in der Cache API des Host (engine/src/HttpCache.cpp)
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js"
-    # Bytecode-Cache der Skripte, auch in der Cache API (engine/src/BytecodeCache.cpp)
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/bytecode-cache.js"
-    # WebCodecs der Seiten ueber die WebCodecs des Host (engine/src/media/WebCodecsWasm.cpp)
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/webcodecs-host.js"
-    # MediaRecorder: Encoder des Host + WebM (engine/src/media/MediaRecorderWasm.cpp)
-    "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/mediarecorder-host.js"
+    # beim Linken abfangen
     "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
     "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
     # access() auf feste Dateien gemerkt (engine/src/FileAccessCache.cpp)
     "SHELL:-Wl,--wrap=access"
 )
+
+# JS-Teile der Engine (--pre-js) in dieser Reihenfolge. Aendert sich eins,
+# wird neu gelinkt.
+set(BL_PRE_JS
+    engine-pre.js
+    # WebAssembly der Seiten (engine/src/wasm/WasmBridge.cpp)
+    wasm-rewrite.js
+    wasm-host.js
+    # Verbindungen ueber den Transport der Oberflaeche (engine/src/Sockets.cpp)
+    sockets.js
+    # HTTP-Cache in der Cache API des Host (engine/src/HttpCache.cpp)
+    http-cache.js
+    # Bytecode-Cache der Skripte, auch in der Cache API (engine/src/BytecodeCache.cpp)
+    bytecode-cache.js
+    # WebCodecs der Seiten ueber die WebCodecs des Host (engine/src/media/WebCodecsWasm.cpp)
+    webcodecs-host.js
+    # MediaRecorder: Encoder des Host + WebM (engine/src/media/MediaRecorderWasm.cpp)
+    mediarecorder-host.js
+)
+foreach (pre_js IN LISTS BL_PRE_JS)
+    target_link_options(BrowserLiteEngine PRIVATE "SHELL:--pre-js ${BROWSER_LITE_ENGINE_DIR}/js/${pre_js}")
+    set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/${pre_js})
+endforeach ()
 
 # Dateisystem: WasmFS (im WASM, Datei-Syscalls ohne Umweg ueber den UI-Thread)
 # oder das alte JS-Dateisystem mit IDBFS fuer /data (siehe web/app.js).
@@ -189,16 +199,8 @@ if (BROWSER_LITE_RUNTIME_DIR)
     )
 endif ()
 
-# JS-Teile und Datenpaket: bei Aenderung neu linken
-set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
-    ${BROWSER_LITE_ENGINE_DIR}/js/engine-pre.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-rewrite.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-host.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/sockets.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/http-cache.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/bytecode-cache.js
-    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
-)
+# Datenpaket: bei Aenderung der WebAssembly-API neu linken
+set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js)
 
 # Build-ID (Anfang des SHA-256 von engine.wasm) als Custom Section im Modul:
 # gespeicherter Bytecode gilt nur fuer genau diesen Build (BytecodeCache.cpp)

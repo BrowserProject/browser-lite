@@ -5,9 +5,11 @@
 //   cd tests/e2e && node wasm-test.mjs [engine-ordner]
 //
 // fixtures/ enthaelt ein kleines Modul (small.c) und ein Emscripten-Programm
-// mit JS-Glue (program.cpp), neu bauen mit fixtures/build.sh.
+// mit JS-Glue (program.cpp), neu bauen mit fixtures/build.sh. Weitere Module
+// von Hand (tests/wasm/wasm-bytes.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
+import { source as wasmBytes } from '../wasm/wasm-bytes.mjs';
 import { TIMEOUT, check, collect, finish, here, launch, serve, startStack, timeLimit } from './harness.mjs';
 
 // Ausgabe von program.cpp (in node mit dem Original gemessen)
@@ -16,16 +18,32 @@ timeLimit();
 
 const PAGE = `<!doctype html><title>WebAssembly-Test</title><body>WebAssembly<script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + value);
-const str = (t) => [t.length, ...new TextEncoder().encode(t)];
-const sec = (id, ...items) => { const body = [items.length, ...items.flat()]; return [id, body.length, ...body]; };
-const code = (...instr) => { const body = [0, ...instr, 11]; return [body.length, ...body]; };
+const errorName = (fn) => { try { fn(); return 'kein'; } catch (e) { return e.name; } };
+${wasmBytes}
 // (i32)->i32 ruft env.add, (i64)->i64 Identitaet, ()->i32 liest env.g
-const importsModule = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
-  ...sec(1, [96, 1, 127, 1, 127], [96, 1, 126, 1, 126], [96, 0, 1, 127]),
-  ...sec(2, [...str('env'), ...str('add'), 0, 0], [...str('env'), ...str('g'), 3, 127, 0]),
-  ...sec(3, [0], [1], [2]),
-  ...sec(7, [...str('call'), 0, 1], [...str('big'), 0, 2], [...str('read'), 0, 3]),
-  ...sec(10, code(32, 0, 16, 0), code(32, 0), code(35, 0))]);
+const importsModule = wasm(
+  sec(1, [96, 1, 127, 1, 127], [96, 1, 126, 1, 126], [96, 0, 1, 127]),
+  sec(2, [...str('env'), ...str('add'), 0, 0], [...str('env'), ...str('g'), 3, 127, 0]),
+  sec(3, [0], [1], [2]),
+  sec(7, [...str('call'), 0, 1], [...str('big'), 0, 2], [...str('read'), 0, 3]),
+  sec(10, code(32, 0, 16, 0), code(32, 0), code(35, 0)));
+// wait32 auf nicht geteiltem Speicher, Tabelle mit Init-Ausdruck (ref.func 1)
+const trapsModule = wasm(
+  sec(1, [96, 0, 1, 127]),
+  sec(3, [0], [0], [0], [0]),
+  sec(4, [0x40, 0, 0x70, 0, 1, 0xd2, 1, 11]),
+  sec(5, [0, 1]),
+  sec(7, [...str('wait'), 0, 0], [...str('table'), 0, 3]),
+  sec(10, code(65, 0, 65, 0, 66, 0, 0xfe, 1, 2, 0), code(65, 42), code(65, 7), code(65, 0, 0x11, 0, 0)));
+// (i32)->i32: ruft env.down (Rekursion ueber JS)
+const recursionModule = wasm(
+  sec(1, [96, 1, 127, 1, 127]),
+  sec(2, [...str('env'), ...str('down'), 0, 0]),
+  sec(3, [0]),
+  sec(7, [...str('down'), 0, 1]),
+  sec(10, code(32, 0, 16, 0)));
+const symbols = () => Object.getOwnPropertySymbols(globalThis).length;
+const symbolsBefore = symbols();
 
 (async () => {
   try {
@@ -62,6 +80,7 @@ const importsModule = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
     } catch (e) {
       thrown = e.message;
     }
+    result('symbole', symbolsBefore + ',' + symbols());
     result('aufrufe', i2.exports.call(5) + ',' + calls.join('/') + ',' + i2.exports.big(2n ** 40n) + ',' + i2.exports.read() + ',' + thrown);
 
     const memory = new WebAssembly.Memory({ initial: 1, maximum: 3 });
@@ -77,13 +96,42 @@ const importsModule = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
     } catch (e) {
       result('compileerror', e instanceof WebAssembly.CompileError);
     }
+
+    // memory.buffer ist nicht abloesbar, bleibt aber abgehaengt nach grow
+    const fixed = new WebAssembly.Memory({ initial: 1, maximum: 2 });
+    new Uint8Array(fixed.buffer)[10] = 7;
+    const before = fixed.buffer;
+    const transfer = errorName(() => fixed.buffer.transfer()) + ',' + errorName(() => structuredClone(fixed.buffer, { transfer: [fixed.buffer] }));
+    const copy = structuredClone(fixed.buffer);
+    fixed.grow(1);
+    result('abloesen', transfer + ',' + copy.byteLength + ',' + new Uint8Array(fixed.buffer)[10] + ',' + before.byteLength + ',' + fixed.buffer.byteLength);
+    result('grenze', errorName(() => new WebAssembly.Memory({ initial: 65536 })) + ',' + errorName(() => new WebAssembly.Memory({ initial: 1, maximum: 65536 }).grow(40000)));
+    result('features', WebAssembly.validate(wasm(sec(5, [3, 1, 1]))) + ',' + WebAssembly.validate(wasm(sec(5, [0, 1], [0, 1]))));
+    const traps = (await WebAssembly.instantiate(trapsModule)).instance.exports;
+    const refs = new WebAssembly.Table({ element: 'externref', initial: 1 });
+    refs.set(0, fixed);
+    result('umschreiben', errorName(() => traps.wait()) + ',' + traps.table() + ',' + (refs.get(0) === fixed));
+    let down;
+    down = new WebAssembly.Instance(new WebAssembly.Module(recursionModule), { env: { down: (n) => (n > 0 ? down(n - 1) + 1 : 0) } }).exports.down;
+    // Grenze 64 Ebenen (WasmBridge.cpp), weit unter dem Ueberlauf im Browser
+    result('rekursion', errorName(() => down(100)) + ',' + down(50) + ',' + errorName(() => down(100000)) + ',' + ex.sum());
     // Auch in einem Worker
     const workerCode = 'onmessage = async (e) => { try { const { instance } = await WebAssembly.instantiate(e.data, {}); '
       + 'postMessage(instance.exports.sum() + "," + new Uint8Array(instance.exports.memory.buffer, instance.exports.text_ptr(), 5).join(".")); '
       + '} catch (err) { postMessage("fehler " + err); } };';
-    const worker = new Worker(URL.createObjectURL(new Blob([workerCode], { type: 'text/javascript' })));
-    worker.onmessage = (e) => result('worker', e.data);
-    worker.postMessage(bytes);
+    // Zweimal: nach dem Ende des ersten Workers (Realm abgebaut) laeuft ein neuer
+    const workerURL = URL.createObjectURL(new Blob([workerCode], { type: 'text/javascript' }));
+    const runWorker = () => new Promise((resolve) => {
+      const worker = new Worker(workerURL);
+      worker.onmessage = (e) => {
+        worker.terminate();
+        resolve(e.data);
+      };
+      worker.postMessage(bytes);
+    });
+    const first = await runWorker();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    result('worker', first + '/' + await runWorker());
   } catch (e) {
     result('fehler', String(e && e.stack || e).replace(/\\s+/g, '_'));
   }
@@ -92,12 +140,98 @@ const importsModule = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0,
 
 const PROGRAM_PAGE = '<!doctype html><title>Emscripten</title><body>Emscripten<script src="/program.js"></script>';
 
+// Seite mit 64 MB Speicher und einem Zyklus ueber beide Seiten wie bei
+// Emscripten-Glue: der Import ruft Exporte der eigenen Instanz
+const LEAK_PAGES = 1024;
+const LEAK_PAGE = `<!doctype html><title>Zyklus</title><body>Zyklus<script>
+${wasmBytes}
+const leakModule = wasm(
+  sec(1, [96, 0, 1, 127]),
+  sec(2, [...str('env'), ...str('f'), 0, 0]),
+  sec(3, [0], [0]),
+  sec(5, [0, ...leb(${LEAK_PAGES})]),
+  sec(7, [...str('memory'), 2, 0], [...str('g'), 0, 1], [...str('callF'), 0, 2]),
+  sec(10, code(65, 0, 45, 0, 0), code(16, 0)));
+(async () => {
+  let ex;
+  const { instance } = await WebAssembly.instantiate(leakModule, { env: { f: () => ex.g() } });
+  ex = instance.exports;
+  new Uint8Array(ex.memory.buffer)[0] = 5;
+  console.log('RESULT ' + new URLSearchParams(location.search).get('key') + '=' + ex.callF());
+})();
+</script>`;
+
+// Zwei iframes verschiedener Herkunft im selben Thread der Engine: das zweite
+// raet die ids von Speichern und verbiegt WeakMap, damit die API sie benutzt.
+// Nur die eigene id darf gehen (Pruefung in WasmBridge.cpp und wasm-host.js).
+const REALMS_PAGE = (victimURL) => `<!doctype html><title>Realms</title><body>Realms<script>
+const frame = (src) => document.body.appendChild(Object.assign(document.createElement('iframe'), { src }));
+const victim = frame('${victimURL}');
+onmessage = ({ data: [key, value] }) => {
+  if (key === 'bereit')
+    frame('/attacker.html');
+  if (key === 'angriff')
+    victim.contentWindow.postMessage(['pruefen'], '*');
+  if (key !== 'bereit')
+    console.log('RESULT ' + key + '=' + value);
+};
+</script>`;
+const VICTIM_PAGE = `<!doctype html><title>Opfer</title><body>Opfer<script>
+const memory = new WebAssembly.Memory({ initial: 1, maximum: 4 });
+new Uint8Array(memory.buffer).set(new TextEncoder().encode('GEHEIM'));
+onmessage = () => parent.postMessage(['opfer', new TextDecoder().decode(new Uint8Array(memory.buffer, 0, 6)) + ',' + memory.buffer.byteLength], '*');
+parent.postMessage(['bereit'], '*');
+</script>`;
+const ATTACKER_PAGE = `<!doctype html><title>Angriff</title><body>Angriff<script>
+${wasmBytes}
+const { get, has, set } = WeakMap.prototype;
+let ownId, forgedId;
+WeakMap.prototype.set = function (key, value) {
+  if (value && value.kind === 'memory')
+    ownId = value.memoryId;
+  return set.call(this, key, value);
+};
+const own = new WebAssembly.Memory({ initial: 1 });
+WeakMap.prototype.set = set;
+const fake = {};
+WeakMap.prototype.get = function (key) { return key === fake ? { kind: 'memory', memoryId: forgedId } : get.call(this, key); };
+WeakMap.prototype.has = function (key) { return key === fake || has.call(this, key); };
+const works = (fn) => { try { fn(); return true; } catch (e) { return false; } };
+const buffer = Object.getOwnPropertyDescriptor(WebAssembly.Memory.prototype, 'buffer').get;
+// ()->i32: liest das erste Wort des importierten Speichers
+const memoryImport = new WebAssembly.Module(wasm(
+  sec(1, [96, 0, 1, 127]),
+  sec(2, [...str('env'), ...str('memory'), 2, 0, 1]),
+  sec(3, [0]),
+  sec(7, [...str('f'), 0, 0]),
+  sec(10, code(65, 0, 40, 2, 0))));
+const attempts = () => [
+  works(() => buffer.call(fake).byteLength),
+  works(() => WebAssembly.Memory.prototype.grow.call(fake, 1)),
+  works(() => new WebAssembly.Instance(memoryImport, { env: { memory: fake } }).exports.f()),
+];
+forgedId = ownId;
+const control = attempts().every(Boolean);
+const hits = [0, 0, 0];
+for (forgedId = 1; forgedId < ownId; forgedId++)
+  attempts().forEach((ok, i) => { hits[i] += ok ? 1 : 0; });
+Object.assign(WeakMap.prototype, { get, has });
+parent.postMessage(['angriff', control + ',' + hits.join(',') + ',' + (ownId > 1)], '*');
+</script>`;
+
 const fixtures = path.join(here, 'fixtures');
+const { url: victimURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(VICTIM_PAGE));
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/')
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
   if (req.url === '/program.html')
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PROGRAM_PAGE);
+  if (req.url === '/realms.html')
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(REALMS_PAGE(victimURL));
+  if (req.url === '/attacker.html')
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(ATTACKER_PAGE);
+  if (req.url.startsWith('/leak.html'))
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(LEAK_PAGE);
   const file = path.join(fixtures, path.basename(req.url));
   if (/\.(wasm|js)$/.test(req.url) && fs.existsSync(file))
     return res.writeHead(200, { 'Content-Type': req.url.endsWith('.wasm') ? 'application/wasm' : 'text/javascript' }).end(fs.readFileSync(file));
@@ -125,15 +259,44 @@ check('neue Seite beschreiben', (await result('poke')) === '1234,1234', results.
 check('Zugriff ausserhalb faengt', (await result('trap')) === 'true,RuntimeError', results.get('trap'));
 check('Atomics', (await result('atomic')) === '42', results.get('atomic'));
 check('Module.imports', (await result('imports')) === 'env.add:function/env.g:global', results.get('imports'));
+check('Bruecke ohne sichtbares Symbol', /^(\d+),\1$/.test(await result('symbole')), results.get('symbole'));
 check('Imports, i64, Ausnahme durch WASM', (await result('aufrufe')) === '6,13/5,1099511627776,42,aus JS', results.get('aufrufe'));
 check('Memory, Table, Global', (await result('objekte')) === '131072,7,true,9', results.get('objekte'));
 check('CompileError', (await result('compileerror')) === 'true', results.get('compileerror'));
-check('WebAssembly im Worker', (await result('worker')) === '80,72.97.108.108.111', results.get('worker'));
+check('memory.buffer nicht abloesbar', (await result('abloesen')) === 'TypeError,TypeError,65536,7,0,131072', results.get('abloesen'));
+check('Speicher-Grenze', (await result('grenze')) === 'RangeError,RangeError', results.get('grenze'));
+check('validate ohne Threads/mehrere Speicher', (await result('features')) === 'false,false', results.get('features'));
+check('wait faengt, Tabelle mit Init, Memory als externref', (await result('umschreiben')) === 'RuntimeError,42,true', results.get('umschreiben'));
+check('Rekursion JS <-> WASM zu tief', (await result('rekursion')) === 'RangeError,50,RangeError,80', results.get('rekursion'));
+check('WebAssembly im Worker, zweiter Worker danach', (await result('worker')) === '80,72.97.108.108.111/80,72.97.108.108.111', results.get('worker'));
 
 // Emscripten-Programm mit JS-Glue (instantiateStreaming, Speicher waechst)
 await page.fill('#address', siteURL + 'program.html');
 await page.press('#address', 'Enter');
 check('Emscripten-Programm', (await result('emscripten')) === PROGRAM_RESULT, results.get('emscripten'));
+
+// Speicher einer anderen Herkunft: kein buffer, grow oder Import mit seiner id
+await page.fill('#address', siteURL + 'realms.html');
+await page.press('#address', 'Enter');
+check('Fremder Speicher mit geratener id gesperrt', (await result('angriff')) === 'true,0,0,0,true', results.get('angriff'));
+check('Speicher der anderen Herkunft unveraendert', (await result('opfer')) === 'GEHEIM,65536', results.get('opfer'));
+
+// Viele Seiten mit Zyklus und 64 MB: der Speicher wird mit der Seite frei
+const engineBytes = () => page.evaluate(() => window.__blMemory());
+async function visitLeakPages(from, to) {
+  for (let i = from; i < to; i++) {
+    await page.fill('#address', siteURL + 'leak.html?key=leak' + i);
+    await page.press('#address', 'Enter');
+    if ((await result('leak' + i)) !== '5')
+      return false;
+  }
+  return true;
+}
+const warm = await visitLeakPages(0, 4);
+const start = await engineBytes();
+const visited = warm && await visitLeakPages(4, 24);
+const grown = (await engineBytes() - start) / 2 ** 20;
+check('Speicher alter Seiten frei', visited && grown < 8 * LEAK_PAGES / 16, `${grown} MB mehr nach 20 Seiten zu ${LEAK_PAGES / 16} MB`);
 
 await browser.close();
 finish();

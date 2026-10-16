@@ -5,8 +5,8 @@
 // Engine-Thread immer in den JS-Event-Loop zurueck (sonst zeigt Chrome kein
 // Bild) und bekommt Arbeit ueber Emscriptens Proxy-Queue. Die Canvas der Tabs
 // gehoeren seinem Worker (Oberflaeche: Module.blPresenterWorker). So laufen
-// Animationen und (spaeter) Scrollen weiter, auch wenn das JS der Seite den
-// Engine-Thread lange blockiert.
+// Animationen und Scrollen (ScrollingWasm.h) weiter, auch wenn das JS der
+// Seite den Engine-Thread lange blockiert.
 #pragma once
 
 #include <pthread.h>
@@ -28,8 +28,9 @@ pthread_t presenterThread();
 // Arbeit auf dem Compositor-Thread (von jedem Thread aus)
 void dispatch(Function<void()>&&);
 
-// Der WebGL-Kontext des Compositors ist verloren (Engine malt wieder ohne Ebenen)
+// Der WebGL-Kontext des Compositors ist verloren (neue Views malen ohne
+// Ebenen), bis der Browser ihn wiederherstellt (GpuRaster.cpp)
 bool isLost();
-void markLost();
+void setLost(bool);
 
 } // namespace BrowserLite::Compositor

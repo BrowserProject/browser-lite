@@ -39,6 +39,7 @@
 #include <JavaScriptCore/ArrayBuffer.h>
 #include <WebCore/Blob.h>
 #include <WebCore/CookieJar.h>
+#include <WebCore/DOMException.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentPage.h>
 #include <WebCore/ExceptionCode.h>
@@ -415,13 +416,12 @@ void WebSocketChannel::didFinishLoading()
 
 void WebSocketChannel::didFail(ExceptionCode errorCode)
 {
-    auto code = static_cast<int>(errorCode);
-    LOG(Network, "WebSocketChannel %p didFail() errorCode=%d", this, code);
+    LOG(Network, "WebSocketChannel %p didFail() errorCode=%d", this, static_cast<int>(errorCode));
     ASSERT(m_blobLoader);
     ASSERT(m_blobLoaderStatus == BlobLoaderStarted);
     m_blobLoader = nullptr;
     m_blobLoaderStatus = BlobLoaderFailed;
-    fail(makeString("Failed to load Blob: error code = "_s, code)); // FIXME: Generate human-friendly reason message.
+    fail(makeString("Failed to load Blob: "_s, DOMException::message(errorCode)));
     deref();
 }
 

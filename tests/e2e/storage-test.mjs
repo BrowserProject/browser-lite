@@ -40,6 +40,17 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
   console.log('RESULT cacheapi=' + (cachedResponse ? (await cachedResponse.text()) + ':' + cachedResponse.headers.get('X-Test') : 'leer'));
   await cache.put('/gespeichert', new Response('cache-wert', { headers: { 'X-Test': 'ja' } }));
   console.log('RESULT written=1');
+  // Grenze pro Ursprung (256 MB): zu gross wird abgelehnt, der Rest bleibt
+  if (local === 'leer') {
+    let quota;
+    try {
+      await cache.put('/gross', new Response(new Uint8Array(257 << 20)));
+      quota = 'gespeichert';
+    } catch (e) {
+      quota = e.name;
+    }
+    console.log('RESULT cachequota=' + quota + ',' + (await (await cache.match('/gespeichert')).text()) + ',' + !!(await cache.match('/gross')));
+  }
   // Origin Private File System: Datei lesen, schreiben, Ordner, resolve()
   try {
     const root = await navigator.storage.getDirectory();
@@ -63,10 +74,54 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
   } catch (e) {
     console.log('RESULT opfs=fehler:' + e.name);
   }
+  // Namen im OPFS waehlt die Seite, auch einer wie eine Kopie der Engine bleibt
+  try {
+    const root = await navigator.storage.getDirectory();
+    let kept = 'leer';
+    try {
+      kept = await (await (await root.getFileHandle('rest.bl-tmp')).getFile()).text();
+    } catch (e) {}
+    const writer = await (await root.getFileHandle('rest.bl-tmp', { create: true })).createWritable();
+    await writer.write('seite');
+    await writer.close();
+    console.log('RESULT opfsname=' + kept);
+  } catch (e) {
+    console.log('RESULT opfsname=fehler:' + e.name);
+  }
+  // Sperren: verschieben geht nicht, solange ein Writable offen ist. Ein
+  // Writable ersetzt die Datei erst bei close(), abort() laesst sie wie sie war
+  try {
+    const root = await navigator.storage.getDirectory();
+    const file = await root.getFileHandle('sperre-a.txt', { create: true });
+    const writer = await file.createWritable();
+    await writer.write('neu');
+    let moved = 'erlaubt';
+    try {
+      await file.move(root, 'sperre-b.txt');
+    } catch (e) {
+      moved = e.name;
+    }
+    await writer.close();
+    await file.move(root, 'sperre-b.txt');
+    const append = await file.createWritable({ keepExistingData: true });
+    await append.write({ type: 'write', position: 3, data: '+mehr' });
+    await append.close();
+    const aborted = await file.createWritable();
+    await aborted.write('weg');
+    await aborted.abort();
+    const text = await (await file.getFile()).text();
+    await root.removeEntry('sperre-b.txt');
+    console.log('RESULT opfslock=' + [moved, file.name, text].join(','));
+  } catch (e) {
+    console.log('RESULT opfslock=fehler:' + e.name);
+  }
   // Synchroner Zugriff gibt es nur in Workern
   const workerSource = \`onmessage = async () => {
     try {
       const root = await navigator.storage.getDirectory();
+      const again = await (await root.getFileHandle('sperre-a.txt', { create: true })).createSyncAccessHandle();
+      again.close();
+      await root.removeEntry('sperre-a.txt');
       const file = await root.getFileHandle('sync.bin', { create: true });
       const handle = await file.createSyncAccessHandle();
       handle.truncate(0);
@@ -131,6 +186,27 @@ check('Daten geschrieben', (await result('written')) === '1');
 check('Cache API am Anfang leer', results.get('cacheapi') === 'leer', results.get('cacheapi'));
 check('OPFS: Dateien, Ordner, resolve()', (await result('opfs')) === 'leer,notiz.txt+ordner,ordner/notiz.txt,innen', results.get('opfs'));
 check('OPFS: synchroner Zugriff im Worker', (await result('opfsworker')) === 'sync-ok', results.get('opfsworker'));
+check('OPFS: verschieben bei offenem Writable gesperrt, Writable ersetzt erst bei close()', (await result('opfslock')) === 'NoModificationAllowedError,sperre-b.txt,neu+mehr', results.get('opfslock'));
+check('Cache API: ueber der Grenze abgelehnt, alter Inhalt bleibt', (await result('cachequota')) === 'QuotaExceededError,cache-wert,false', results.get('cachequota'));
+
+check('OPFS: Datei mit eigenem Namen angelegt', (await result('opfsname')) === 'leer', results.get('opfsname'));
+
+// Rest einer abgebrochenen Kopie (replaceWholeFile, /data/tmp im OPFS des Host)
+const leftoverExists = () => page.evaluate(async () => {
+  try {
+    await (await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp')).getFileHandle('rest');
+    return 'da';
+  } catch (e) {
+    return e.name;
+  }
+});
+await page.evaluate(async () => {
+  const tmp = await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp', { create: true });
+  const writer = await (await tmp.getFileHandle('rest', { create: true })).createWritable();
+  await writer.write('abgebrochen');
+  await writer.close();
+});
+check('Rest in /data/tmp angelegt', (await leftoverExists()) === 'da');
 
 // Warten bis /data gespeichert ist (alle 5 s), dann alles neu laden
 await page.waitForTimeout(7000);
@@ -139,7 +215,9 @@ await page.reload();
 const second = await result('read');
 check('Nach Neuladen noch da (Cookie, localStorage, IndexedDB)', second === 'ja,gespeichert,idb-wert', String(second));
 check('Cache API: nach Neuladen noch da (mit Headern)', (await result('cacheapi')) === 'cache-wert:ja', results.get('cacheapi'));
-check('OPFS: nach Neuladen noch da', (await result('opfs')) === 'gespeichert,notiz.txt+ordner+sync.bin,ordner/notiz.txt,innen', results.get('opfs'));
+check('OPFS: nach Neuladen noch da', (await result('opfs')) === 'gespeichert,notiz.txt+ordner+rest.bl-tmp+sync.bin,ordner/notiz.txt,innen', results.get('opfs'));
+check('OPFS: Datei mit eigenem Namen nach Neustart noch da', (await result('opfsname')) === 'seite', results.get('opfsname'));
+check('Start leert /data/tmp', (await leftoverExists()) === 'NotFoundError');
 check('IndexedDB-Datenbank geloescht', (await result('deleted')) === 'weg', String(results.get('deleted')));
 
 // Nochmal neu laden: die geloeschte Datenbank darf nicht zurueckkommen
@@ -147,6 +225,22 @@ await page.waitForTimeout(7000);
 results.clear();
 await page.reload();
 check('Nach zweitem Neuladen: neuer Wert da, geloeschte Datenbank weg', (await result('third')) === 'zwei,weg', String(results.get('third')));
+
+// Zweiter Tab der Oberflaeche: /data gehoert dem ersten (navigator.locks), der
+// zweite hat nur Speicher und darf die Daten des ersten nicht ueberschreiben
+await page.waitForTimeout(7000);
+const secondTab = await context.newPage();
+const secondResults = collect(secondTab);
+await secondTab.goto(appURL);
+check('Zweiter Tab: eigener leerer Speicher', (await secondResults.wait('read')) === 'nein,leer,leer', String(secondResults.get('read')));
+await secondResults.wait('written');
+await secondTab.waitForTimeout(7000);
+await secondTab.close();
+results.clear();
+await page.reload();
+check('Erster Tab: Daten nicht ueberschrieben', (await result('read')) === 'ja,gespeichert,idb-wert', String(results.get('read')));
+await result('deleted');
+await result('opfsworker');
 
 // Daten aus dem IDBFS frueherer Versionen (IndexedDB "/data", ein Eintrag pro
 // Datei) uebernimmt die Engine beim ersten Start mit WasmFS nach /data (OPFS)

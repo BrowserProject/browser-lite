@@ -10,25 +10,31 @@
 #include "StorageTracker.h"
 #include "WebDatabaseProvider.h"
 #include "WebStorageNamespaceProvider.h"
+#include <cerrno>
+#include <atomic>
+#include <cstdio>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <wtf/FileSystem.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
 
 #if defined(BL_WASMFS)
 #include "Engine.h"
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <emscripten/wasmfs.h>
-#include <sys/stat.h>
 #endif
 
 static constexpr auto dataDirectory = "/data"_s;
 static constexpr auto localStorageDirectory = "/data/localstorage"_s;
 static constexpr auto indexedDBDirectory = "/data/indexeddb"_s;
+// Nur fuer replaceWholeFile, ausserhalb von /data/opfs, wo die Seiten die Namen waehlen
+static constexpr auto temporaryDirectory = "/data/tmp"_s;
 
 // In WebKitLegacy ist das pro Plattform (Mac: NSUserDefaults)
 String WebDatabaseProvider::indexedDatabaseDirectoryPath()
@@ -37,6 +43,53 @@ String WebDatabaseProvider::indexedDatabaseDirectoryPath()
 }
 
 namespace BrowserLite {
+
+bool replaceWholeFile(const char* path, std::span<const uint8_t> data)
+{
+    static std::atomic<unsigned> counter;
+    char temporary[64];
+    snprintf(temporary, sizeof(temporary), "%s/%u", temporaryDirectory.characters(), counter++);
+    int fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        return false;
+    bool ok = true;
+    for (size_t written = 0; ok && written < data.size();) {
+        ssize_t length = write(fd, data.data() + written, data.size() - written);
+        if (length < 0 && errno == EINTR)
+            continue;
+        ok = length > 0;
+        if (ok)
+            written += length;
+    }
+    ok = !close(fd) && ok;
+    if (ok && !rename(temporary, path))
+        return true;
+    unlink(temporary);
+    return false;
+}
+
+ReadResult readWholeFile(const char* path, std::vector<uint8_t>& data)
+{
+    data.clear();
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return errno == ENOENT ? ReadResult::Missing : ReadResult::Failed;
+    struct stat info;
+    if (!fstat(fd, &info) && info.st_size > 0)
+        data.reserve(info.st_size);
+    uint8_t buffer[65536];
+    ssize_t length;
+    for (;;) {
+        length = read(fd, buffer, sizeof(buffer));
+        if (length < 0 && errno == EINTR)
+            continue;
+        if (length <= 0)
+            break;
+        data.insert(data.end(), buffer, buffer + length);
+    }
+    close(fd);
+    return length < 0 ? ReadResult::Failed : ReadResult::Done;
+}
 
 #if defined(BL_WASMFS)
 
@@ -87,11 +140,7 @@ static bool writeWholeFile(const char* path, const uint8_t* data, size_t length)
     std::string directory = path;
     for (size_t slash = directory.find('/', 1); slash != std::string::npos; slash = directory.find('/', slash + 1))
         mkdir(directory.substr(0, slash).c_str(), 0755);
-    FILE* file = fopen(path, "wb");
-    if (!file)
-        return false;
-    bool ok = !length || fwrite(data, 1, length, file) == length;
-    return !fclose(file) && ok;
+    return replaceWholeFile(path, { data, length });
 }
 
 static void migrateLegacyStorage()
@@ -143,19 +192,19 @@ static void migrateLegacyStorage()
 // /data dauerhaft ueber das OPFS-Backend von WasmFS. Zugriffe laufen ueber
 // einen eigenen Worker von WasmFS, nie ueber den UI-Thread. Ohne OPFS (node,
 // alte Browser) bleibt /data im Speicher. BL_OPFS=0 schaltet ab.
-static void mountDataDirectory()
+static bool mountDataDirectory()
 {
     const char* value = getenv("BL_OPFS");
     if ((value && !strcmp(value, "0")) || !blJsHasOPFS()) {
         debugLog("Speicher: /data nur im Speicher (kein OPFS)");
-        return;
+        return false;
     }
     backend_t backend = wasmfs_create_opfs_backend();
     if (!backend || wasmfs_create_directory("/data", 0777, backend)) {
         debugLog("Speicher: OPFS nicht verfuegbar, /data nur im Speicher");
-        return;
+        return false;
     }
-    migrateLegacyStorage();
+    return true;
 }
 
 #endif
@@ -163,7 +212,14 @@ static void mountDataDirectory()
 void initializeStorage()
 {
 #if defined(BL_WASMFS)
-    mountDataDirectory();
+    bool persistent = mountDataDirectory();
+#endif
+    // Kopien von replaceWholeFile, deren Schreiben abgebrochen ist
+    FileSystem::deleteNonEmptyDirectory(temporaryDirectory);
+    FileSystem::makeAllDirectories(temporaryDirectory);
+#if defined(BL_WASMFS)
+    if (persistent)
+        migrateLegacyStorage();
 #endif
     // SQLite-Datenbanken unter /data im WASM-Speicher (MemoryVFS.cpp)
     registerMemoryVFS();

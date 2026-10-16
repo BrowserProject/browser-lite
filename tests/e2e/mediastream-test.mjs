@@ -12,13 +12,14 @@ timeLimit();
 
 
 const PAGE = `<!doctype html><title>MediaStream-Test</title>
-<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; } #listen { position: absolute; left: 740px; top: 20px; width: 200px; height: 60px; } #pipcam { position: absolute; left: 20px; top: 400px; width: 200px; height: 60px; } #pipcanvas { position: absolute; left: 260px; top: 400px; width: 200px; height: 60px; }</style>
+<style>body { margin: 0 } #start { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; } #screen { position: absolute; left: 260px; top: 20px; width: 200px; height: 60px; } #rec { position: absolute; left: 500px; top: 20px; width: 200px; height: 60px; } #listen { position: absolute; left: 740px; top: 20px; width: 200px; height: 60px; } #pipcam { position: absolute; left: 20px; top: 400px; width: 200px; height: 60px; } #pipcanvas { position: absolute; left: 260px; top: 400px; width: 200px; height: 60px; } #broken { position: absolute; left: 740px; top: 400px; width: 200px; height: 60px; }</style>
 <button id="start">Kamera an</button>
 <button id="screen">Bildschirm teilen</button>
 <button id="rec">Aufnehmen</button>
 <button id="listen">Anhoeren</button>
 <button id="pipcam">PiP Kamera</button>
 <button id="pipcanvas">PiP Canvas</button>
+<button id="broken">Kamera kaputt</button>
 <script>
 // Picture-in-Picture fuer srcObject-Streams: Kamera (Kopie der Host-Spur) und
 // Canvas (Senke der Engine)
@@ -65,6 +66,19 @@ document.getElementById('pipcanvas').addEventListener('click', async () => {
     clearInterval(timer);
   } catch (e) {
     log('piperror', e.name + ':' + e.message);
+  }
+});
+// Kamera, deren Bilder im Engine-Worker nicht mehr ankommen (der Test schickt
+// einen kaputten Stream): die Spur muss enden, statt mit eingefrorenem Bild
+// weiterzulaufen
+document.getElementById('broken').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
+    const track = stream.getVideoTracks()[0];
+    track.addEventListener('ended', () => log('brokenended', track.readyState));
+    log('brokenlive', track.readyState);
+  } catch (e) {
+    log('brokenerror', e.name + ':' + e.message);
   }
 });
 // Ton eines Streams in <audio>: 440 Hz aus Web Audio ueber srcObject
@@ -335,6 +349,41 @@ check('PiP-Fenster des Host zeigt das Canvas', (await hostPip()) === '160x120', 
 check('PiP Canvas: Ereignisse und exit', await result('pipcanvasevents', 30000) === 'enter|leave,true', results.get('pipcanvasevents') || pipErr());
 check('PiP-Video im Host aufgeraeumt', await page.evaluate(() => [...document.querySelectorAll('video')].every((v) => !(v.srcObject instanceof MediaStream) || v.srcObject.getVideoTracks().every((t) => t.readyState === 'live'))
   && !document.pictureInPictureElement));
+
+// Kaputte Bilder der Host-Kamera: die Seite bekommt "ended", die Kamera geht aus.
+// ImageBitmap hat close() aber kein visibleRect: jedes Bild scheitert erst beim Kopieren,
+// die Spur darf erst nach 30 Fehlern in Folge enden.
+await page.evaluate(() => {
+  const post = Worker.prototype.postMessage;
+  window.__blTestCaptures = [];
+  Worker.prototype.postMessage = function (message, transfer) {
+    if (message?.blCapture?.readable)
+      window.__blTestCaptures.push({ worker: this, id: message.blCapture.id, kind: message.blCapture.kind });
+    return post.call(this, message, transfer);
+  };
+});
+await page.mouse.click(box.x + 840, box.y + 430);
+check('Kamera fuer den Fehlerfall laeuft', await result('brokenlive', 30000) === 'live', results.get('brokenerror') || '');
+const captureFound = await page.evaluate(async () => {
+  for (let i = 0; i < 50 && !window.__blTestCaptures.some((c) => c.kind === 'video'); i++)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  const capture = window.__blTestCaptures.filter((c) => c.kind === 'video').pop();
+  if (!capture)
+    return false;
+  window.__blTestPulled = 0;
+  const readable = new ReadableStream({
+    pull: async (controller) => {
+      window.__blTestPulled++;
+      controller.enqueue(await createImageBitmap(new ImageData(2, 2)));
+    },
+  });
+  capture.worker.postMessage({ blCapture: { id: capture.id, kind: 'video', readable } }, [readable]);
+  return true;
+});
+check('Kaputte Bilder: Spur endet', captureFound && await result('brokenended', 20000) === 'ended', String(captureFound));
+const brokenPulled = await page.evaluate(() => window.__blTestPulled);
+check('Kaputte Bilder: erst nach 30 Fehlern in Folge', brokenPulled >= 30, String(brokenPulled));
+check('Kaputte Bilder: Aufnahme-Anzeige aus', await page.locator('#tab-list .tab.active .recording[hidden]').waitFor({ state: 'attached', timeout: 10000 }).then(() => true, () => false));
 
 await browser.close();
 finish();

@@ -12,8 +12,11 @@
 #include <JavaScriptCore/JSNativeStdFunction.h>
 #include <JavaScriptCore/StrongInlines.h>
 #include <WebCore/DOMWrapperWorld.h>
+#include <WebCore/EventLoop.h>
 #include <WebCore/Exception.h>
+#include <WebCore/JSDOMExceptionHandling.h>
 #include <WebCore/JSDOMGlobalObject.h>
+#include <WebCore/JSExecState.h>
 #include <WebCore/ScriptExecutionContext.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/ExceptionOr.h>
@@ -441,6 +444,14 @@ static constexpr auto polyfillSource = R"JS((() => {
       throw new TypeError("Failed to construct 'ImageDecoder': The provided data is not a BufferSource or ReadableStream.");
     };
     const imageState = new WeakMap();
+    // Der Decoder im Host lebt bis close() oder bis der GC den der Seite einsammelt
+    const releaseDecoder = (decoder) => {
+      if (decoder.closed)
+        return;
+      decoder.closed = true;
+      decoder.open.then(() => call('image-close', { id: decoder.id })).catch(() => {});
+    };
+    const decoders = new FinalizationRegistry(releaseDecoder);
     class ImageTrack {
       constructor() {
         throw new TypeError('Illegal constructor');
@@ -470,6 +481,7 @@ static constexpr auto polyfillSource = R"JS((() => {
         this.tracks = list;
         const decoder = { id: null, closed: false, complete: false };
         imageState.set(this, decoder);
+        decoders.register(this, decoder);
         decoder.open = readAll(init.data).then((bytes) => call('image-open', { data: toBase64(bytes), type: init.type, preferAnimation: init.preferAnimation ?? null }));
         listState.ready = decoder.open.then((info) => {
           decoder.id = info.id;
@@ -498,11 +510,7 @@ static constexpr auto polyfillSource = R"JS((() => {
       }
       reset() {}
       close() {
-        const decoder = imageState.get(this);
-        if (decoder.closed)
-          return;
-        decoder.closed = true;
-        decoder.open.then(() => call('image-close', { id: decoder.id })).catch(() => {});
+        releaseDecoder(imageState.get(this));
       }
       static isTypeSupported(type) {
         return call('image-supported', { type: String(type) }).then((value) => !!value, () => false);
@@ -541,8 +549,19 @@ static constexpr auto polyfillSource = R"JS((() => {
         return new Uint8Array(data);
       throw new TypeError('Unsupported data for FileSystemWritableFileStream.write()');
     };
+    // Ein Writable, das die Seite nie schliesst, sperrt die Datei im Host:
+    // einsammeln wie abort()
+    const writables = new FinalizationRegistry((state) => {
+      if (!state.done)
+        call('fs-write', { id: state.id, op: 'abort' }).catch(() => {});
+    });
     const makeWritable = (id) => {
+      const state = { id, done: false };
       const send = (operation) => call('fs-write', Object.assign({ id }, operation)).then(() => undefined);
+      const finish = (operation) => {
+        state.done = true;
+        return send(operation);
+      };
       const stream = new WritableStream({
         async write(chunk) {
           if (chunk && typeof chunk === 'object' && typeof chunk.type === 'string' && !(chunk instanceof Blob) && !ArrayBuffer.isView(chunk) && !(chunk instanceof ArrayBuffer)) {
@@ -554,9 +573,10 @@ static constexpr auto polyfillSource = R"JS((() => {
           }
           return send({ op: 'write', data: toBase64(await toBytes(chunk)) });
         },
-        close: () => send({ op: 'close' }),
-        abort: () => send({ op: 'abort' }),
+        close: () => finish({ op: 'close' }),
+        abort: () => finish({ op: 'abort' }),
       });
+      writables.register(stream, state);
       if (typeof FileSystemWritableFileStream === 'function')
         Object.setPrototypeOf(stream, FileSystemWritableFileStream.prototype);
       const write = (value) => {
@@ -680,20 +700,30 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
     MediaStreams::installBridge(globalObject);
 }
 
+// Die Antwort kommt als Aufgabe in den Event-Loop des Dokuments: ist es weg,
+// verfaellt sie, im Back/Forward-Cache wartet sie, bis die Seite wieder da ist.
+// Aufruf wie bei den Callbacks von WebCore: danach laufen die Microtasks (das
+// Promise der Seite), Fehler kommen in die Konsole der Seite.
 void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)
 {
     auto call = pendingHostCalls().take(identifier);
-    if (!call.callback)
+    auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(call.globalObject.get());
+    RefPtr context = globalObject ? globalObject->scriptExecutionContext() : nullptr;
+    if (!context || !call.callback)
         return;
-    auto* globalObject = call.globalObject.get();
-    auto& vm = globalObject->vm();
-    JSC::JSLockHolder lock(vm);
-    auto callData = JSC::getCallData(call.callback.get());
-    JSC::MarkedArgumentBuffer arguments;
-    arguments.append(JSC::jsBoolean(ok));
-    arguments.append(JSC::jsString(vm, resultJSON));
-    NakedPtr<JSC::Exception> exception;
-    JSC::call(globalObject, call.callback.get(), callData, JSC::jsUndefined(), arguments, exception);
+    context->eventLoop().queueTask(TaskSource::Networking, [call = WTF::move(call), ok, resultJSON] {
+        auto* globalObject = call.globalObject.get();
+        auto& vm = globalObject->vm();
+        JSC::JSLockHolder lock(vm);
+        auto callData = JSC::getCallData(call.callback.get());
+        JSC::MarkedArgumentBuffer arguments;
+        arguments.append(JSC::jsBoolean(ok));
+        arguments.append(JSC::jsString(vm, resultJSON));
+        NakedPtr<JSC::Exception> exception;
+        JSExecState::profiledCall(globalObject, JSC::ProfilingReason::Other, call.callback.get(), callData, JSC::jsUndefined(), arguments, exception);
+        if (exception)
+            reportException(globalObject, exception);
+    });
 }
 
 Ref<UserContentProvider> userContentProvider()

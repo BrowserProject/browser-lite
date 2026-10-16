@@ -22,16 +22,21 @@
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <pthread.h>
+#include <JavaScriptCore/ConsoleTypes.h>
 #include <JavaScriptCore/DeferGCInlines.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/VM.h>
+#include <JavaScriptCore/Watchdog.h>
 #include <WebCore/CommonVM.h>
+#include <WebCore/JSDOMGlobalObject.h>
 #include <WebCore/MemoryRelease.h>
+#include <WebCore/ScriptExecutionContext.h>
 #include <malloc.h>
 #include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
@@ -251,9 +256,58 @@ void scheduleRunLoopPump()
     }
 }
 
+// Alle Tabs teilen sich den Engine-Thread, eine Endlosschleife in einer Seite
+// haelt alle an. Dauert ein Einstieg in JS (ein Skript, ein Event-Handler, ein
+// Timer) laenger als die Grenze, bricht der Watchdog von JSC ihn ab, wie bei
+// einem beendeten Worker (TerminationException, nicht abfangbar). Die Seite
+// bekommt eine Meldung in der Konsole, ihre Timer und die anderen Tabs laufen
+// weiter. Geprueft wird an den Trap-Stellen des Interpreters (op_check_traps),
+// die Zeit misst ein Timer im Thread der VM-Traps (unter Emscripten zaehlt die
+// Uhrzeit, nicht die CPU-Zeit). BL_SCRIPT_TIMEOUT: Sekunden, 0 = aus.
+static double scriptTimeLimit()
+{
+    const char* value = getenv("BL_SCRIPT_TIMEOUT");
+    return value ? atof(value) : 30;
+}
+
+static bool terminateRunawayScript(JSC::JSGlobalObject* globalObject, void*, void*)
+{
+    auto message = makeString("Skript abgebrochen: es hat die Engine (alle Tabs) "_s, scriptTimeLimit(), " s lang blockiert"_s);
+    log("%s", message.utf8().data());
+    if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
+        if (RefPtr context = domGlobalObject->scriptExecutionContext())
+            context->addConsoleMessage(JSC::MessageSource::JS, JSC::MessageLevel::Error, message);
+    }
+    return true;
+}
+
+static void installScriptWatchdog()
+{
+    double limit = scriptTimeLimit();
+    if (limit <= 0)
+        return;
+    auto& vm = WebCore::commonVM();
+    JSC::JSLockHolder lock(vm);
+    vm.ensureWatchdog().setTimeLimit(WTF::Seconds(limit), terminateRunawayScript);
+    // Den Thread des Timers gleich starten, sonst wartet der Engine-Thread im
+    // ersten Skript, bis ein Worker dafuer bereit ist
+    JSC::VMTraps::queue();
+}
+
+// Mitten in einem Einstieg in JS setzt setTimeLimit die Frist neu ab jetzt
+void restartScriptWatchdog()
+{
+    auto& vm = WebCore::commonVM();
+    if (auto* watchdog = vm.watchdog()) {
+        JSC::JSLockHolder lock(vm);
+        watchdog->setTimeLimit(WTF::Seconds(scriptTimeLimit()), terminateRunawayScript);
+    }
+}
+
 void initializeEngineLoop()
 {
     RELEASE_ASSERT(isEngineThread());
+    installScriptWatchdog();
     // Wird aufgerufen, waehrend der RunLoop sein Lock haelt, eventuell von
     // einem anderen Thread: hier nur einplanen, nie direkt arbeiten.
     WTF::RunLoop::setWakeUpCallback([] {

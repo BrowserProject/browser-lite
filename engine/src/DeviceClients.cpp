@@ -49,6 +49,10 @@ namespace BrowserLite {
 
 // ------------------------------------------------------------ Berechtigungen
 
+// Eine Abfrage fuer Kamera und Mikrofon zusammen (getUserMedia mit beidem)
+// gilt fuer beide Arten einzeln
+static constexpr auto cameraAndMicrophone = "camera-microphone"_s;
+
 static HashMap<String, PermissionDecision>& decisions()
 {
     static NeverDestroyed<HashMap<String, PermissionDecision>> map;
@@ -62,20 +66,30 @@ static String decisionKey(const String& kind, const String& origin)
 
 PermissionDecision storedPermission(const String& kind, const String& origin)
 {
+    if (kind == cameraAndMicrophone) {
+        auto camera = storedPermission("camera"_s, origin);
+        auto microphone = storedPermission("microphone"_s, origin);
+        if (camera == PermissionDecision::Denied || microphone == PermissionDecision::Denied)
+            return PermissionDecision::Denied;
+        return camera == PermissionDecision::Granted && microphone == PermissionDecision::Granted ? PermissionDecision::Granted : PermissionDecision::Ask;
+    }
     return decisions().get(decisionKey(kind, origin));
 }
 
 void setStoredPermission(const String& kind, const String& origin, PermissionDecision decision)
 {
-    if (decision == PermissionDecision::Ask)
+    if (kind == cameraAndMicrophone) {
+        setStoredPermission("camera"_s, origin, decision);
+        setStoredPermission("microphone"_s, origin, decision);
+    } else if (decision == PermissionDecision::Ask)
         decisions().remove(decisionKey(kind, origin));
     else
         decisions().set(decisionKey(kind, origin), decision);
 }
 
-static HashMap<int, CompletionHandler<void(bool)>>& pendingRequests()
+static HashMap<int, CompletionHandler<void(PermissionDecision)>>& pendingRequests()
 {
-    static NeverDestroyed<HashMap<int, CompletionHandler<void(bool)>>> map;
+    static NeverDestroyed<HashMap<int, CompletionHandler<void(PermissionDecision)>>> map;
     return map;
 }
 
@@ -94,9 +108,11 @@ static void requestPermission(int viewId, const String& kind, const String& orig
     }
     static int nextRequestID = 1;
     int id = nextRequestID++;
-    pendingRequests().set(id, [kind, origin, completionHandler = WTF::move(completionHandler)](bool granted) mutable {
-        setStoredPermission(kind, origin, granted ? PermissionDecision::Granted : PermissionDecision::Denied);
-        completionHandler(granted);
+    pendingRequests().set(id, [kind, origin, completionHandler = WTF::move(completionHandler)](PermissionDecision answer) mutable {
+        // Ohne Entscheidung (Tab zu) gilt die Abfrage als abgelehnt, gemerkt wird nichts
+        if (answer != PermissionDecision::Ask)
+            setStoredPermission(kind, origin, answer);
+        completionHandler(answer == PermissionDecision::Granted);
     });
     notifyHost(viewId, "permission", makeString("{\"id\":"_s, id, ",\"kind\":\""_s, jsonEscape(kind), "\",\"origin\":\""_s, jsonEscape(origin), "\"}"_s));
 }
@@ -106,10 +122,10 @@ void requestDevicePermission(int viewId, const String& kind, const String& origi
     requestPermission(viewId, kind, origin, WTF::move(completionHandler));
 }
 
-void answerPermission(int requestId, bool granted)
+void answerPermission(int requestId, PermissionDecision answer)
 {
     if (auto completionHandler = pendingRequests().take(requestId))
-        completionHandler(granted);
+        completionHandler(answer);
 }
 
 // ------------------------------------------------------------ Standort
@@ -472,7 +488,7 @@ private:
     void start(SpeechRecognitionConnectionClientIdentifier identifier, const String& lang, bool continuous, bool interimResults, uint64_t maxAlternatives, ClientOrigin&& clientOrigin, FrameIdentifier) final
     {
         auto id = identifier.toUInt64();
-        auto origin = clientOrigin.clientOrigin.toString();
+        auto origin = clientOrigin.topOrigin.toString();
         requestPermission(m_viewId, "microphone"_s, origin, [viewId = m_viewId, id, lang = lang.isolatedCopy(), continuous, interimResults, maxAlternatives](bool granted) {
             RefPtr client = recognitionClients().get(id);
             if (!client)

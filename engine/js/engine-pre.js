@@ -5,6 +5,15 @@
 if (typeof Module === 'undefined')
   var Module = {};
 
+// malloc fuer die JS-Hosts: ohne ABORTING_MALLOC gibt _malloc bei vollem
+// Speicher 0 zurueck, geschrieben wuerde dann an den Anfang des WASM-Speichers
+Module.blAlloc = (size) => {
+  const ptr = Module._malloc(Math.max(size, 1));
+  if (!ptr)
+    throw new RangeError('Out of memory');
+  return ptr;
+};
+
 // Bilder direkt im Engine-Worker zeichnen: die Oberflaeche gibt das Canvas jedes
 // Tabs mit transferControlToOffscreen an den Worker des Engine-Threads
 // (web/app.js). Die Engine malt dann selber hinein (engine/src/Host.cpp), der

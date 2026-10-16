@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # libcurl: HTTP(S), HTTP/2, WebSockets fuer das WebCore curl-Backend.
-# Sockets werden spaeter auf unsere Transport-Schicht (Wisp) umgeleitet.
+# Die Sockets gehen ueber die Socket-Schicht der Engine (engine/src/Sockets.cpp, --wrap).
 build() {
     dep_cmake "$SRC" \
         -DBUILD_CURL_EXE=OFF \

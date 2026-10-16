@@ -9,11 +9,11 @@
 //   bridge.memoryCreate(seiten, max)     Speicher im Engine-Speicher -> id
 //   bridge.memoryBuffer(id)              ArrayBuffer direkt auf den Speicher
 //   bridge.memoryGrow(id, seiten)        -> alte Groesse oder -1
-//   bridge.memoryRetain(id) / memoryRelease(id)
+//   bridge.memoryRelease(id)             Memory-Objekt abgebaut
 // Werte gehen als Paare [tag, wert, ...], siehe wasm-host.js.
 (function (bridge) {
   'use strict';
-  const { host, memoryCreate, memoryBuffer, memoryGrow, memoryRetain, memoryRelease } = bridge;
+  const { host, memoryCreate, memoryBuffer, memoryGrow, memoryRelease } = bridge;
   const internals = new WeakMap();
   const freeze = Object.freeze;
   const define = (object, name, value) => Object.defineProperty(object, name, { value, writable: true, configurable: true, enumerable: false });
@@ -45,6 +45,7 @@
     if (live && live.deref())
       return;
     wrappers.delete(id);
+    signatures.delete(id);
     host(18, [2, id]);
   });
   function cached(id, create) {
@@ -248,7 +249,7 @@
       if (initial > 65536 || (maximum !== undefined && maximum > 65536))
         throw new RangeError('WebAssembly.Memory(): Property \'initial\': value is above the upper bound');
       const id = memoryCreate(initial, maximum === undefined ? -1 : maximum);
-      internals.set(this, { kind: 'memory', id });
+      internals.set(this, { kind: 'memory', memoryId: id });
       memoryFinalizer.register(this, id);
     }
     get buffer() {
@@ -265,12 +266,12 @@
     const inner = internals.get(memory);
     if (!inner || inner.kind !== 'memory')
       throw new TypeError('Receiver is not a WebAssembly.Memory');
-    return inner.id;
+    return inner.memoryId;
   }
   function memoryForModule(min, max) {
     const memory = Object.create(Memory.prototype);
     const id = memoryCreate(min, max === undefined ? -1 : max);
-    internals.set(memory, { kind: 'memory', id });
+    internals.set(memory, { kind: 'memory', memoryId: id });
     memoryFinalizer.register(memory, id);
     return memory;
   }
@@ -464,8 +465,6 @@
     }
   }
 
-  const instanceFinalizer = new FinalizationRegistry((memory) => memoryRelease(memory));
-
   class Instance {
     constructor(module, importObject) {
       const moduleInner = inner(module, 'module', 'Module');
@@ -517,12 +516,7 @@
       }
       if (info.memory && !info.memory.imported)
         memory = memoryForModule(info.memory.min, info.memory.max);
-      const memoryIdValue = memory ? memoryId(memory) : 0;
-      const result = run(2, [ref(module, 'module', 'Module'), memoryIdValue, ...imports]);
-      if (memory) {
-        memoryRetain(memoryIdValue);
-        instanceFinalizer.register(this, memoryIdValue);
-      }
+      const result = run(2, [ref(module, 'module', 'Module'), memory ? memoryId(memory) : 0, ...imports]);
       const exports = Object.create(null);
       let next = 1;
       for (const entry of info.exports) {

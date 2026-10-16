@@ -56,7 +56,6 @@ private:
     Ref<WebCore::MediaPromise> appendInternal(Ref<WebCore::SharedBuffer>&&) final;
     void resetParserStateInternal() final;
     void didRemoveCodedFrames(const MediaTime& start, const MediaTime& end) final;
-    void removedFromMediaSource() final;
     bool canSwitchToType(const WebCore::ContentType&) final;
     void startChangingType() final;
 

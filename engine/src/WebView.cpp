@@ -385,6 +385,12 @@ void WebView::dropGpuSurface()
     addDamage(IntRect { { }, m_size });
 }
 
+bool WebView::gpuRestored()
+{
+    createGpuSurfaceIfPossible();
+    return !!m_gpuSurface;
+}
+
 void WebView::loadURL(const String& urlString)
 {
     RefPtr frame = mainFrame();
@@ -777,6 +783,7 @@ void WebView::presentIfNeeded()
             return;
         }
         // Ging nicht (Kontext weg): ab jetzt auf der CPU, im naechsten Bild alles
+        log("View %d: Bild nicht auf die GPU gebracht, male auf der CPU", m_id);
         dropGpuSurface();
         return;
     }
@@ -1138,7 +1145,6 @@ bool WebView::keyEvent(int type, const String& key, const String& code, const St
     return frame->eventHandler().keyEvent(event);
 }
 
-// Fertiger Text aus der Texteingabe des Hosts (IME, tote Tasten, Bildschirmtastatur)
 void WebView::contextMenu(double x, double y)
 {
     RefPtr frame = mainFrame();
@@ -1177,6 +1183,7 @@ void WebView::executeCommand(const String& name)
         frame->editor().command(name).execute();
 }
 
+// Fertiger Text aus der Texteingabe des Hosts (IME, tote Tasten, Bildschirmtastatur)
 void WebView::insertText(const String& text)
 {
     RefPtr frame = m_page->focusController().focusedOrMainFrame();
@@ -1352,6 +1359,20 @@ void WebView::didStartLoading()
 void WebView::didCommitLoad()
 {
     debugLog("View %d: Commit", m_id);
+    notifyHost(m_id, "commit");
+    notifyNavigationState();
+}
+
+void WebView::didNavigateWithinPage()
+{
+    debugLog("View %d: Adresse im Dokument", m_id);
+    notifyNavigationState();
+}
+
+void WebView::didStopLoading()
+{
+    debugLog("View %d: Laden abgebrochen", m_id);
+    m_isLoading = false;
     notifyNavigationState();
 }
 

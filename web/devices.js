@@ -84,7 +84,7 @@ function showNextPrompt() {
     if (granted && request.kind === 'notifications' && typeof Notification !== 'undefined' && Notification.permission !== 'granted')
       granted = (await Notification.requestPermission().catch(() => 'denied')) === 'granted';
     saveDecision(request.kind, request.origin, granted);
-    api.engine()._bl_permission_answer(request.id, granted ? 1 : 0);
+    api.engine()._bl_permission_answer(request.id, granted ? 1 : 2);
     showNextPrompt();
   };
   allow.addEventListener('click', () => answer(true));

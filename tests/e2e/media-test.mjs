@@ -160,6 +160,60 @@ source.addEventListener('sourceopen', async () => {
 });
 </script>`;
 
+
+// blob: (aufgenommenes Video, wie Messenger und Editoren) und data: (kurzer Ton),
+// dazu preload="metadata" und ein spaeterer Wechsel auf "auto". clip.mov ohne
+// type: den Typ aus der Endung (video/quicktime) kennt der Host nicht, er
+// erkennt das Format (hier WebM) aber beim Laden selber.
+const BEEP = wav(0.5, 8000).toString('base64');
+const BLOB_PAGE = `<!doctype html><title>Blob-Test</title><body style="margin:0;background:#fff">
+<video id="video" muted loop playsinline style="position:absolute;left:20px;top:20px;width:320px;height:240px"></video>
+<audio id="lazy" src="/tone.wav" preload="metadata"></audio>
+<video id="mov" src="/clip.mov" muted preload="auto" style="position:absolute;left:600px;top:20px;width:80px;height:60px"></video>
+<script>
+const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const video = document.getElementById('video');
+video.addEventListener('loadedmetadata', () => {
+  result('blobmeta', video.videoWidth + 'x' + video.videoHeight);
+  // Die Engine haelt die Bytes selber, spaetere Range-Anfragen gehen trotzdem
+  URL.revokeObjectURL(video.src);
+});
+video.addEventListener('error', () => result('bloberror', video.error && video.error.code));
+// Danach canvas.drawImage(video) (Kopie des Bildes, das der Engine gehoert),
+// dann kleiner: die Bilder vom Host kommen ab da in einer anderen Groesse
+video.addEventListener('playing', () => {
+  result('blobplaying', '1');
+  setTimeout(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 24;
+    const context = canvas.getContext('2d');
+    context.drawImage(video, 0, 0, 32, 24);
+    const [r, g, b] = context.getImageData(16, 12, 1, 1).data;
+    result('blobdraw', r + ',' + g + ',' + b);
+    video.style.width = '160px';
+    video.style.height = '120px';
+    result('blobresized', '1');
+  }, 1000);
+}, { once: true });
+fetch('/clip.webm').then((r) => r.blob()).then((blob) => {
+  video.src = URL.createObjectURL(blob);
+  video.play().catch((e) => result('blobplay', e.name));
+});
+const beep = new Audio('data:audio/wav;base64,${BEEP}');
+beep.addEventListener('loadedmetadata', () => result('dataduration', beep.duration.toFixed(1)));
+beep.addEventListener('error', () => result('dataerror', beep.error && beep.error.code));
+const lazy = document.getElementById('lazy');
+lazy.addEventListener('loadedmetadata', () => result('lazymeta', lazy.duration.toFixed(1)));
+const mov = document.getElementById('mov');
+mov.addEventListener('loadedmetadata', () => result('movmeta', mov.videoWidth + 'x' + mov.videoHeight));
+mov.addEventListener('error', () => result('movmeta', 'fehler' + (mov.error && mov.error.code)));
+document.addEventListener('click', () => {
+  lazy.preload = 'auto';
+  result('lazyauto', '1');
+});
+</script>`;
+
 // Server mit Eigenheiten bei Range: /star.wav ohne bekannte Laenge (bytes a-b/*),
 // /short.wav mit leerem 206 ab 2 MB (Datei kuerzer als angegeben)
 const RANGE_PAGE = (file) => `<!doctype html><title>Range-Test</title><audio src="/${file}" muted preload="auto"></audio>`;
@@ -188,9 +242,10 @@ function oddRange(req, res) {
 
 const ranges = [];
 const { url: siteURL } = await serve((req, res) => {
-  const files = { '/clip.webm': [CLIP, 'video/webm'], '/tone.wav': [TONE, 'audio/wav'] };
-  if (req.url === '/' || req.url === '/mse.html') {
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/' ? PAGE : MSE_PAGE);
+  const files = { '/clip.webm': [CLIP, 'video/webm'], '/clip.mov': [CLIP, 'video/quicktime'], '/tone.wav': [TONE, 'audio/wav'] };
+  const html = { '/': PAGE, '/mse.html': MSE_PAGE, '/blob.html': BLOB_PAGE }[req.url];
+  if (html) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
     return;
   }
   const rangePage = /^\/range-(\w+)\.html$/.exec(req.url);
@@ -225,6 +280,25 @@ const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
 const results = collect(page);
 const result = (key, timeout = TIMEOUT) => results.wait(key, timeout);
 
+const pagePixel = async (x, y) => {
+  const [r, g, b] = await page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+  return { r, g, b };
+};
+const isRed = (p) => !!p && p.r > 180 && p.g < 60 && p.b < 60;
+const isWhite = (p) => !!p && p.r > 200 && p.g > 200 && p.b > 200;
+// Pixel der Seite, bis test(pixel) wahr ist (hoechstens 20 s)
+async function waitForPixel(x, y, test) {
+  let pixel = null;
+  const end = Date.now() + 20000;
+  while (Date.now() < end) {
+    pixel = await pagePixel(x, y);
+    if (test(pixel))
+      break;
+    await page.waitForTimeout(250);
+  }
+  return pixel;
+}
+
 await page.goto(stack.app({ url: siteURL }));
 
 check('Video: Metadaten', (await result('videometa')) === '320x240', results.get('videoerror') ? `Fehler ${results.get('videoerror')}` : results.get('videometa'));
@@ -232,18 +306,8 @@ check('Video: play() (stumm, ohne Klick)', (await result('videoplay')) === 'ok',
 check('Video: spielt', (await result('videoplaying')) === '1');
 
 // Ein rotes Bild muss an der Stelle des Videos in der Seite sein
-let pixel = null;
-const end = Date.now() + 20000;
-while (Date.now() < end) {
-  pixel = await page.evaluate(() => {
-    const [r, g, b] = window.blPagePixel(180, 140);
-    return { r, g, b };
-  });
-  if (pixel.r > 180 && pixel.g < 60 && pixel.b < 60)
-    break;
-  await page.waitForTimeout(250);
-}
-check('Video: Bild in der Seite gemalt', pixel && pixel.r > 180 && pixel.g < 60 && pixel.b < 60, JSON.stringify(pixel));
+const pixel = await waitForPixel(180, 140, isRed);
+check('Video: Bild in der Seite gemalt', isRed(pixel), JSON.stringify(pixel));
 
 check('Video: requestVideoFrameCallback', (await result('rvfc')) === 'ok,320x240,true', results.get('rvfc'));
 
@@ -276,18 +340,8 @@ check('MSE: play()', (await result('mseplay')) === 'ok', results.get('mseplay'))
 check('MSE: spielt', (await result('mseplaying')) === '1');
 const mseTime = Number(await result('msetime'));
 check('MSE: Zeit laeuft', mseTime > 1, String(mseTime));
-let msePixel = null;
-const mseEnd = Date.now() + 20000;
-while (Date.now() < mseEnd) {
-  msePixel = await page.evaluate(() => {
-    const [r, g, b] = window.blPagePixel(180, 140);
-    return { r, g, b };
-  });
-  if (msePixel.r > 180 && msePixel.g < 60 && msePixel.b < 60)
-    break;
-  await page.waitForTimeout(250);
-}
-check('MSE: Bild in der Seite gemalt', msePixel && msePixel.r > 180 && msePixel.g < 60 && msePixel.b < 60, JSON.stringify(msePixel));
+const msePixel = await waitForPixel(180, 140, isRed);
+check('MSE: Bild in der Seite gemalt', isRed(msePixel), JSON.stringify(msePixel));
 await screenshot(page, 'mse');
 const mseRemoved = await result('mseremoved');
 check('MSE: remove() in der Engine', Number(mseRemoved) > 2 && Number(mseRemoved) <= 2.5, mseRemoved);
@@ -301,6 +355,44 @@ while (Date.now() < removeEnd) {
   await page.waitForTimeout(250);
 }
 check('MSE: remove() auch im Host', hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6, JSON.stringify(hostBuffered));
+
+// ------------------------------------------------------ blob:, data:, preload
+const players = () => page.evaluate(() => window.__blMediaState());
+const before = new Set((await players()).map((p) => p.id));
+await page.fill('#address', siteURL + 'blob.html');
+await page.press('#address', 'Enter');
+check('blob: Metadaten', (await result('blobmeta')) === '320x240', results.get('bloberror') ? `Fehler ${results.get('bloberror')}` : results.get('blobmeta'));
+check('blob: spielt', (await result('blobplaying')) === '1', results.get('blobplay'));
+const blobPixel = await waitForPixel(180, 140, isRed);
+check('blob: Bild in der Seite gemalt', isRed(blobPixel), JSON.stringify(blobPixel));
+const draw = (await result('blobdraw')) || '';
+const [r, g, b] = draw.split(',').map(Number);
+check('blob: canvas.drawImage(video)', isRed({ r, g, b }), draw);
+await result('blobresized');
+const framesBefore = Math.max(0, ...(await players()).filter((p) => !before.has(p.id)).map((p) => p.frames));
+const outside = await waitForPixel(300, 220, isWhite);
+const smallPixel = await waitForPixel(100, 80, isRed);
+check('blob: kleiner gemalt nach Groessenwechsel', isWhite(outside) && isRed(smallPixel), JSON.stringify([outside, smallPixel]));
+await page.waitForTimeout(1500);
+const framesAfter = Math.max(0, ...(await players()).filter((p) => !before.has(p.id)).map((p) => p.frames));
+check('blob: Bilder kommen weiter (Schleife nach revokeObjectURL)', framesAfter > framesBefore, `${framesBefore} -> ${framesAfter}`);
+check('data: Ton mit Dauer', (await result('dataduration')) === '0.5', results.get('dataerror') ? `Fehler ${results.get('dataerror')}` : results.get('dataduration'));
+check('preload=metadata: Metadaten', (await result('lazymeta')) === '30.0', results.get('lazymeta'));
+check('Video mit unbekannter Endung (.mov ohne type): Metadaten', (await result('movmeta')) === '320x240', results.get('movmeta'));
+const lazy = (await players()).find((p) => !before.has(p.id) && p.preload === 'metadata');
+check('preload=metadata: Host-<video> mit metadata', !!lazy, JSON.stringify((await players()).map((p) => p.preload)));
+await page.mouse.click(box.x + 600, box.y + 400);
+await result('lazyauto');
+let lazyNow = null;
+const lazyEnd = Date.now() + 10000;
+while (lazy && Date.now() < lazyEnd) {
+  lazyNow = (await players()).find((p) => p.id === lazy.id);
+  if (lazyNow?.preload === 'auto')
+    break;
+  await page.waitForTimeout(250);
+}
+check('preload: Wechsel auf auto erreicht den Host', lazyNow?.preload === 'auto', JSON.stringify(lazyNow));
+await screenshot(page, 'media-blob');
 
 // ------------------------------------------- Range-Sonderfaelle (web/sw.js)
 // Die Antwort des Service Workers muss enden, statt endlos weiterzuladen.

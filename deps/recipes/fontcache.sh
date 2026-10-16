@@ -1,6 +1,10 @@
 # shellcheck shell=bash
 # Vorgebauter fontconfig-Cache fuer das Datenpaket der Engine
 # (siehe deps/tools/fc-precache.c). Spart beim ersten Seitenaufbau mehrere Sekunden.
+
+# Dateien ausser dem Rezept, die in den Stamp eingehen (deps/build-all.sh)
+DEP_FILES=(tools/fc-precache.c)
+
 build() {
     local root="$BL_SYSROOT/runtime"
     local out="$BL_DEPS_BUILD/$DEP_NAME"
@@ -10,7 +14,7 @@ build() {
     find "$cache" -type f -delete
 
     # shellcheck disable=SC2046,SC2086
-    emcc $BL_CFLAGS -o "$out/fc-precache.js" "$BL_DEPS_DIR/tools/fc-precache.c" \
+    emcc $BL_CFLAGS -o "$out/fc-precache.js" "$BL_DEPS_DIR/${DEP_FILES[0]}" \
         $(pkg-config --cflags --static fontconfig) $(pkg-config --libs --static fontconfig) \
         --embed-file "$root/etc/fonts@/etc/fonts" \
         --embed-file "$root/usr/share/fonts@/usr/share/fonts" \

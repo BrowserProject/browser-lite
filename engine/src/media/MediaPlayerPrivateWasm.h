@@ -3,11 +3,13 @@
 // Abgespielt wird in einem versteckten <video> des Host-Browsers (der kann
 // alle seine Formate). Die Daten holt der Host ueber einen Service Worker
 // (web/sw.js) bei der Engine, die sie mit curl ueber das Relay laedt
-// (Range-Requests, Stueck fuer Stueck). Die Bilder kopiert der Host in den
-// WASM-Speicher, die Engine malt sie an der richtigen Stelle der Seite.
+// (Range-Requests, Stueck fuer Stueck), blob: und data: aus dem Speicher.
+// Die Bilder kopiert der Host in den WASM-Speicher, die Engine malt sie an
+// der richtigen Stelle der Seite.
 // Der Ton kommt direkt aus dem Host-<video>.
 #pragma once
 
+#include <WebCore/BlobData.h>
 #include <WebCore/MediaPlayerPrivate.h>
 #include <WebCore/PlatformTimeRanges.h>
 #include <WebCore/VideoFrameMetadata.h>
@@ -55,6 +57,8 @@ public:
 #endif
     }
     const URL& url() const { return m_url; }
+    // Bytes von blob: und data:, sonst nullptr (laden mit curl)
+    WebCore::BlobData* blob() const { return m_blob.get(); }
     String referrer() const;
 
     // Von MediaSourcePrivateWasm
@@ -79,6 +83,8 @@ private:
     void load(WebCore::MediaStreamPrivate&) final;
 #endif
     void cancelLoad() final;
+    void setPreload(WebCore::MediaPlayer::Preload) final;
+    void prepareToPlay() final;
 
     void play() final;
     void pause() final;
@@ -126,6 +132,8 @@ private:
     ThreadSafeWeakPtr<WebCore::MediaPlayer> m_player;
     const int m_id;
     URL m_url;
+    RefPtr<WebCore::BlobData> m_blob;
+    WebCore::MediaPlayer::Preload m_preload { WebCore::MediaPlayer::Preload::Auto };
     bool m_isMediaSource { false };
 #if ENABLE(MEDIA_SOURCE)
     RefPtr<MediaSourcePrivateWasm> m_mediaSource;
@@ -157,12 +165,8 @@ private:
     bool m_seeking { false };
     std::optional<WebCore::MediaTimePromise::AutoRejectProducer> m_seekPromise;
 
-    struct Frame {
-        uint8_t* pixels { nullptr };
-        int width { 0 };
-        int height { 0 };
-    };
-    Frame m_frame;
+    // Unveraenderlich: Aufzeichnungen fuer die Kachel-Threads halten das Bild selbst fest
+    RefPtr<WebCore::NativeImage> m_frame;
     unsigned m_presentedFrames { 0 };
     unsigned m_lastMetadataFrame { 0 };
     MonotonicTime m_frameArrival;

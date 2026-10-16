@@ -145,7 +145,25 @@ check('Text aus dem Host ins Textfeld', await result('textdrop') === 'Text_vom_H
 // 4. Datei auf <input type=file> ablegen
 await dropOnCanvas(box.x + 100, box.y + 420, { file: { name: 'formular.csv', type: 'text/csv', content: 'a;b' } });
 check('Datei auf <input type=file>', await result('upload') === '1:formular.csv:a;b', results.get('upload'));
-
 await screenshot(page, 'dragdrop');
+
+// 5. Abgelegte Dateien liegen im Ordner des Tabs und gehen mit ihm weg (bl_remove_path)
+const uploadFolders = () => page.evaluate(() => {
+  try {
+    return window.__blEngine().FS.readdir('/tmp/uploads').filter((name) => name !== '.' && name !== '..').join(',');
+  } catch (e) {
+    return 'fehler:' + e.message;
+  }
+});
+const foldersBefore = await uploadFolders();
+check('Dateien im Ordner des Tabs', /^\d+$/.test(foldersBefore), foldersBefore);
+await page.click('#tab-list .tab.active .close');
+let foldersAfter = foldersBefore;
+for (let i = 0; i < 50 && foldersAfter === foldersBefore; i++) {
+  await page.waitForTimeout(100);
+  foldersAfter = await uploadFolders();
+}
+check('Tab zu: seine Dateien geloescht', foldersAfter === '', foldersAfter);
+
 await browser.close();
 finish();

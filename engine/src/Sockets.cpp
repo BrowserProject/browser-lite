@@ -10,7 +10,9 @@
 // oeffnen, Daten senden und schliessen gehen asynchron an den Haupt-Thread
 // (engine/js/sockets.js), der sie ueber den Transport der Oberflaeche (Wisp)
 // schickt. Ankommende Daten schreibt der Haupt-Thread direkt hier hinein
-// (bl_socket_data).
+// (bl_socket_data). Gesendet gilt erst, was der Transport wirklich verschickt
+// hat (bl_socket_sent): solange mehr als maxQueuedSend unterwegs ist, wartet
+// send() bzw. meldet poll kein POLLOUT.
 //
 // Auch die Namensaufloesung ist hier: getaddrinfo gibt fuer Hostnamen eine
 // Platzhalter-Adresse (172.29.x.y) zurueck, connect macht daraus wieder den
@@ -246,7 +248,6 @@ void pumpOnMainThread(void*)
         std::lock_guard lock(mutex);
         operations.swap(outbox);
     }
-    size_t sent = 0;
     for (auto& operation : operations) {
         switch (operation.type) {
         case Operation::Type::Open:
@@ -254,23 +255,31 @@ void pumpOnMainThread(void*)
             break;
         case Operation::Type::Send:
             blJsSocketSend(operation.id, operation.data.data(), operation.data.size());
-            sent += operation.data.size();
             break;
         case Operation::Type::Close:
             blJsSocketClose(operation.id);
             break;
         }
     }
-    if (!sent)
-        return;
-    std::lock_guard lock(mutex);
-    for (auto& operation : operations) {
-        if (operation.type != Operation::Type::Send)
-            continue;
-        if (auto it = socketsById.find(operation.id); it != socketsById.end())
-            it->second->queuedSend -= std::min(it->second->queuedSend, operation.data.size());
+}
+
+// Fehler fuer den Grund, mit dem das Relay einen Stream schliesst (Wisp)
+int errorForCloseReason(int reason, bool connecting)
+{
+    switch (reason) {
+    case 0x41: // ungueltige Angaben
+    case 0x42: // Host nicht erreichbar
+        return EHOSTUNREACH;
+    case 0x43: // keine Antwort
+    case 0x47: // Zeitlimit
+        return ETIMEDOUT;
+    case 0x44:
+        return ECONNREFUSED;
+    case 0x48: // Ziel gesperrt
+        return EACCES;
+    default:
+        return connecting ? ECONNREFUSED : ECONNRESET;
     }
-    changed.notify_all();
 }
 
 // Unter dem Lock aufrufen
@@ -319,6 +328,11 @@ ssize_t receive(Descriptor& descriptor, void* buffer, size_t length, bool peek)
             auto& socket = *descriptor.socket;
             if (socket.received.size)
                 return socket.received.read(static_cast<uint8_t*>(buffer), length, peek);
+            // Abbruch durch das Relay ist ein Fehler, kein normales Ende
+            if (socket.remoteClosed && socket.pendingError) {
+                errno = std::exchange(socket.pendingError, 0);
+                return -1;
+            }
             if (socket.remoteClosed)
                 return 0;
             if (socket.state == Socket::State::Created || socket.state == Socket::State::Closed) {
@@ -440,6 +454,17 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_data(int id, uint8_t* data, int length)
     free(chunk);
 }
 
+// Der Transport hat length Bytes wirklich verschickt
+EMSCRIPTEN_KEEPALIVE void bl_socket_sent(int id, int length)
+{
+    std::lock_guard lock(mutex);
+    if (auto it = socketsById.find(id); it != socketsById.end()) {
+        auto& socket = *it->second;
+        socket.queuedSend -= std::min<size_t>(socket.queuedSend, length);
+        changed.notify_all();
+    }
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
 {
     std::lock_guard lock(mutex);
@@ -447,8 +472,11 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
     if (it == socketsById.end())
         return;
     auto& socket = *it->second;
-    if (socket.state == Socket::State::Connecting)
-        socket.pendingError = reason == wispCloseVoluntary ? ECONNRESET : ECONNREFUSED;
+    bool connecting = socket.state == Socket::State::Connecting;
+    if (reason != wispCloseVoluntary)
+        socket.pendingError = errorForCloseReason(reason, connecting);
+    else if (connecting)
+        socket.pendingError = ECONNRESET;
     socket.remoteClosed = true;
     socket.state = Socket::State::Closed;
     changed.notify_all();
@@ -489,7 +517,11 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
             if (added) {
                 if (nextPlaceholder > 0xfffe)
                     nextPlaceholder = 1;
-                hostForAddress.erase(nextPlaceholder);
+                // Platz wird wieder frei: der alte Name bekommt beim naechsten Mal einen neuen
+                if (auto old = hostForAddress.find(nextPlaceholder); old != hostForAddress.end()) {
+                    addressForHost.erase(old->second);
+                    hostForAddress.erase(old);
+                }
                 it->second = nextPlaceholder++;
                 hostForAddress[it->second] = node;
             }

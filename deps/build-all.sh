@@ -5,8 +5,9 @@
 #   deps/build-all.sh --force    # alles neu
 #   deps/build-all.sh --only icu # nur eine Lib (ignoriert Stamps)
 #
-# Jede Lib hat einen Stamp (Hash aus Quelle, Rezept, Helfern, Compiler und dem
-# Stamp der vorherigen Lib). Aendert sich etwas, wird ab dieser Lib neu gebaut.
+# Jede Lib hat einen Stamp (Hash aus Quelle, Rezept, den Dateien in DEP_FILES des
+# Rezepts, Patches, Helfern, Compiler und dem Stamp der vorherigen Lib). Aendert
+# sich etwas, wird ab dieser Lib neu gebaut.
 set -euo pipefail
 # shellcheck source=deps/lib.sh
 source "$(dirname "$0")/lib.sh"
@@ -45,7 +46,11 @@ only=""
 while [ $# -gt 0 ]; do
     case "$1" in
     --force) force=1 ;;
-    --only) only="$2"; shift ;;
+    --only)
+        [ $# -ge 2 ] || bl_die "--only braucht den Namen einer Lib"
+        only="$2"
+        shift
+        ;;
     *) bl_die "Unbekannte Option: $1" ;;
     esac
     shift
@@ -62,7 +67,9 @@ for name in "${ORDER[@]}"; do
     recipe="$BL_DEPS_DIR/recipes/$name.sh"
     [ -f "$recipe" ] || bl_die "Rezept fehlt: $recipe"
     patches_hash="$( { cat "$BL_DEPS_DIR/patches/$name"/*.patch 2>/dev/null || true; } | sha256sum | cut -c1-16)"
-    stamp="$( { dep_source_line "$name"; cat "$recipe"; echo "$compiler_id $helpers_hash $patches_hash $prev"; } | sha256sum | cut -c1-32)"
+    # shellcheck disable=SC1090
+    files_hash="$( (DEP_FILES=(); source "$recipe"; for f in "${DEP_FILES[@]}"; do cat "$BL_DEPS_DIR/$f"; done) | sha256sum | cut -c1-16)"
+    stamp="$( { dep_source_line "$name"; cat "$recipe"; echo "$compiler_id $helpers_hash $patches_hash $files_hash $prev"; } | sha256sum | cut -c1-32)"
     prev="$stamp"
     stamp_file="$BL_SYSROOT/.stamps/$name"
 

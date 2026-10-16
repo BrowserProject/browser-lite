@@ -41,10 +41,27 @@ EM_JS(int, bl_gpu_create_context, (), {
     }
     if (handle) {
         Module.blGpuCanvas = canvas;
-        // GPU zurueckgesetzt (Treiber, Speicher): Engine malt wieder auf der CPU
-        canvas.addEventListener("webglcontextlost", function () { Module._bl_gpu_context_lost_event(); });
+        // GPU zurueckgesetzt (Treiber, Speicher, Ruhezustand). preventDefault:
+        // der Browser stellt den Kontext wieder her, sobald es geht
+        canvas.addEventListener("webglcontextlost", function (event) {
+            event.preventDefault();
+            Module._bl_gpu_context_lost_event();
+        });
+        canvas.addEventListener("webglcontextrestored", function () { Module._bl_gpu_context_restored_event(); });
     }
     return handle;
+});
+
+// Der Browser hat den Kontext wiederhergestellt: dasselbe WebGL-Objekt, aber
+// ohne die Erweiterungen, die Emscripten beim Anlegen eingeschaltet hat. Neu
+// angemeldet schaltet Emscripten sie wieder ein, ein neues Canvas braeuchte
+// einen weiteren der wenigen WebGL-Kontexte pro Worker.
+EM_JS(int, bl_gpu_register_restored_context, (int handle), {
+    var context = GL.contexts[handle];
+    if (!context || context.GLctx.isContextLost())
+        return 0;
+    GL.deleteContext(handle);
+    return GL.registerContext(context.GLctx, context.attributes);
 });
 
 EM_JS(int, bl_gpu_current_context, (), {
@@ -116,18 +133,34 @@ static bool enabled()
     return enabled;
 }
 
+static void dropLostContext()
+{
+    log("GPU: WebGL-Kontext verloren, male auf der CPU");
+    s_context->abandonContext();
+    s_context = nullptr;
+    // Der Compositor (LayerTreeHostWasm) darf ihn nicht mehr benutzen
+    if (Compositor::isCompositorThread()) {
+        WebCore::setSkiaGrContextForWasm(nullptr);
+        Compositor::setLost(true);
+    }
+}
+
+// Skia auf dem WebGL-Kontext s_handle
+static bool createSkiaContext()
+{
+    int previous = bl_gpu_current_context();
+    bl_gpu_make_current(s_handle);
+    auto interface = GrGLInterfaces::MakeWebGL();
+    if (interface)
+        s_context = GrDirectContexts::MakeGL(WTF::move(interface));
+    bl_gpu_make_current(previous);
+    return !!s_context;
+}
+
 GrDirectContext* context()
 {
     if (s_context && bl_gpu_context_lost(s_handle)) {
-        // GPU zurueckgesetzt: ab jetzt wieder auf der CPU
-        debugLog("GPU: WebGL-Kontext verloren, male wieder auf der CPU");
-        s_context->abandonContext();
-        s_context = nullptr;
-        // Der Compositor (LayerTreeHostWasm) darf ihn nicht mehr benutzen
-        if (Compositor::isCompositorThread()) {
-            WebCore::setSkiaGrContextForWasm(nullptr);
-            Compositor::markLost();
-        }
+        dropLostContext();
         return nullptr;
     }
     if (s_context || s_tried || !enabled())
@@ -139,18 +172,30 @@ GrDirectContext* context()
         debugLog("GPU: kein WebGL 2, male auf der CPU");
         return nullptr;
     }
-    int previous = bl_gpu_current_context();
-    bl_gpu_make_current(s_handle);
-    auto interface = GrGLInterfaces::MakeWebGL();
-    if (interface)
-        s_context = GrDirectContexts::MakeGL(WTF::move(interface));
-    bl_gpu_make_current(previous);
-    if (!s_context) {
+    if (!createSkiaContext()) {
         debugLog("GPU: Skia konnte WebGL 2 nicht nutzen, male auf der CPU");
         return nullptr;
     }
     debugLog("GPU: Skia malt ueber WebGL 2");
     return s_context.get();
+}
+
+// Im wiederhergestellten Kontext sind alle GL-Objekte weg, Skia faengt neu an
+static GrDirectContext* recreateContext()
+{
+    if (s_context || !s_handle)
+        return s_context.get();
+    // 0: schon wieder verloren, die naechste Wiederherstellung versucht es erneut
+    int handle = bl_gpu_register_restored_context(s_handle);
+    if (handle)
+        s_handle = handle;
+    auto* gr = handle && createSkiaContext() ? s_context.get() : nullptr;
+    if (gr && Compositor::isCompositorThread()) {
+        WebCore::setSkiaGrContextForWasm(gr);
+        Compositor::setLost(false);
+    }
+    log(gr ? "GPU: WebGL-Kontext wieder da" : "GPU: wiederhergestellter WebGL-Kontext nicht nutzbar, male weiter auf der CPU");
+    return gr;
 }
 
 Scope::Scope()
@@ -210,14 +255,15 @@ bool showFramebuffer(int viewId)
 
 } // namespace BrowserLite::Gpu
 
-// Kontext verloren: jeder View faellt beim naechsten Bild auf die CPU zurueck
-// (WebView::presentIfNeeded) und malt alles neu. Kommt vom Worker, dem der
-// Kontext gehoert (Engine- oder Compositor-Thread).
+// Kontext verloren: die Views malen auf der CPU alles neu. Kommt wie die
+// Wiederherstellung vom Worker, dem der Kontext gehoert (Engine- oder
+// Compositor-Thread).
 extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_context_lost_event()
 {
     using namespace BrowserLite;
+    if (Gpu::s_context)
+        Gpu::dropLostContext();
     if (Compositor::isCompositorThread()) {
-        Gpu::context(); // merkt den Verlust (Compositor::isLost)
         runOnEngineThread([] {
             WebView::forEach([](WebView& view) {
                 view.compositorLost();
@@ -226,29 +272,78 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_context_lost_event()
         return;
     }
     WebView::forEach([](WebView& view) {
-        view.addDamage({ { }, view.size() });
+        view.gpuLost();
     });
 }
 
-// Fuer Tests: den Kontext absichtlich verlieren (WEBGL_lose_context), mit
-// Compositor-Thread dessen Kontext
+// Wieder GPU. Im Engine-Thread malen alle Views wieder darauf. Mit Compositor
+// bekommen neue Views wieder Ebenen (LayerTreeHostWasm::isAvailable), Views,
+// die beim Verlust auf die CPU gewechselt sind, bleiben ohne Ebenen.
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_context_restored_event()
+{
+    using namespace BrowserLite;
+    if (!Gpu::recreateContext() || Compositor::isCompositorThread())
+        return;
+    int views = 0;
+    WebView::forEach([&](WebView& view) {
+        views += view.gpuRestored();
+    });
+    log("GPU: Views wieder auf der GPU: %d", views);
+}
+
+// Fuer Tests: den Kontext absichtlich verlieren und wiederherstellen
+// (WEBGL_lose_context), mit Compositor-Thread dessen Kontext
+static void runOnGpuThreadForTesting(Function<void()>&& function)
+{
+    if (BrowserLite::Compositor::isRunning())
+        BrowserLite::Compositor::dispatch(WTF::move(function));
+    else
+        BrowserLite::runOnEngineThread(WTF::move(function));
+}
+
 extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_lose_context_for_testing()
 {
-    auto run = [] {
+    runOnGpuThreadForTesting([] {
         using namespace BrowserLite::Gpu;
         if (!s_handle)
             return;
+        // restoreContext wirkt erst nach dem Event webglcontextlost (preventDefault),
+        // also ab der naechsten Aufgabe: kommt die Wiederherstellung frueher, folgt
+        // sie gleich darauf
         EM_ASM({
             var context = GL.contexts[$0];
             var extension = context && context.GLctx.getExtension("WEBGL_lose_context");
-            if (extension)
-                extension.loseContext();
+            if (!extension)
+                return;
+            var lost = false;
+            var restoreWhenLost = false;
+            Module.blGpuRestoreForTesting = function () {
+                if (lost)
+                    extension.restoreContext();
+                else
+                    restoreWhenLost = true;
+            };
+            context.GLctx.canvas.addEventListener("webglcontextlost", function () {
+                setTimeout(function () {
+                    lost = true;
+                    if (restoreWhenLost)
+                        extension.restoreContext();
+                });
+            }, { once: true });
+            extension.loseContext();
         }, s_handle);
-    };
-    if (BrowserLite::Compositor::isRunning())
-        BrowserLite::Compositor::dispatch(WTF::move(run));
-    else
-        BrowserLite::runOnEngineThread(WTF::move(run));
+    });
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_gpu_restore_context_for_testing()
+{
+    runOnGpuThreadForTesting([] {
+        EM_ASM({
+            if (Module.blGpuRestoreForTesting)
+                Module.blGpuRestoreForTesting();
+            Module.blGpuRestoreForTesting = null;
+        });
+    });
 }
 
 // Ruft Skia vor jedem GL-Aufruf auf (Patch 0020, GrGLAssembleWebGLInterfaceAutogen.cpp):

@@ -25,10 +25,13 @@ void runOnEngineThread(Function<void()>&&);
 
 // Event-Loop (EngineLoop.cpp)
 void initializeEngineLoop();
+void scheduleRunLoopPump();
+// Nach einem synchronen Warten auf den Nutzer (alert, confirm, prompt): die
+// Zeit bis dahin zaehlt nicht fuer den Abbruch blockierender Skripte
+void restartScriptWatchdog();
 
 // navigator.permissions.query() (Permissions.cpp)
 void installPermissionController();
-void scheduleRunLoopPump();
 
 // Log-Ausgabe, landet in der Konsole des Host-Browsers
 void log(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);

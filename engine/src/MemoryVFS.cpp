@@ -8,7 +8,7 @@
 //
 // Darum liegen Datenbank, -journal und -wal hier im Speicher, ebenso der
 // gemeinsame Speicher (shm) fuer den WAL-Modus. Ins Dateisystem kommen die
-// Dateien nur als Ganzes:
+// Dateien nur als Ganzes (ueber eine Kopie, replaceWholeFile in Storage.h):
 // - alle paar Sekunden auf Anstoss der Oberflaeche (bl_storage_flush; mit
 //   WasmFS im Engine-Thread, sonst im Haupt-Thread vor dem Speichern des IDBFS),
 // - wenn die letzte Verbindung zu einer Datenbank schliesst. Danach wird alles
@@ -25,17 +25,17 @@
 #include "config.h"
 #include "MemoryVFS.h"
 
+#include "Storage.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <memory>
 #include <mutex>
 #include <sqlite3.h>
 #include <string>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -144,39 +144,9 @@ std::shared_ptr<Family> findFamily(const std::string& name)
     return it == families->end() ? nullptr : it->second;
 }
 
-// Ohne Locks aufrufen (Dateizugriff)
-bool readFile(const std::string& path, std::vector<uint8_t>& data)
-{
-    int fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0)
-        return false;
-    struct stat info;
-    if (!fstat(fd, &info) && info.st_size > 0)
-        data.reserve(info.st_size);
-    uint8_t buffer[65536];
-    ssize_t length;
-    while ((length = read(fd, buffer, sizeof(buffer))) > 0)
-        data.insert(data.end(), buffer, buffer + length);
-    close(fd);
-    return true;
-}
-
 bool writeFile(const std::string& path, const std::vector<uint8_t>& data)
 {
-    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0)
-        return false;
-    size_t written = 0;
-    while (written < data.size()) {
-        ssize_t length = write(fd, data.data() + written, data.size() - written);
-        if (length <= 0) {
-            close(fd);
-            return false;
-        }
-        written += length;
-    }
-    close(fd);
-    return true;
+    return replaceWholeFile(path.c_str(), data);
 }
 
 // Geaenderte Dateien einer Datenbank schreiben. false: uebersprungen
@@ -575,14 +545,19 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         loaded = family->find(path)->loaded;
     }
     if (!loaded) {
-        // Ohne Lock von der Platte lesen
+        // Ohne Lock von der Platte lesen. Bei einem Lesefehler nicht oeffnen:
+        // sonst wuerde eine leere Datenbank die echte ueberschreiben
         std::vector<uint8_t> data;
-        bool exists = readFile(path, data);
+        auto result = readWholeFile(path.c_str(), data);
+        if (result == ReadResult::Failed) {
+            release();
+            return SQLITE_IOERR;
+        }
         std::lock_guard lock(family->mutex);
         auto* node = family->find(path);
         if (!node->loaded) {
             node->data = std::move(data);
-            node->exists = exists;
+            node->exists = result == ReadResult::Done;
             node->loaded = true;
         }
     }

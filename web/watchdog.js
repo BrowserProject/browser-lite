@@ -2,7 +2,8 @@
 // (abort, kein Speicher mehr, WASM-Trap) oder steckt ihr Thread fest (z.B. eine
 // Endlosschleife in einer Seite), steht alles. Dann kommt eine Meldung ueber
 // den Seitenbereich mit "Neu starten", die Sitzung (library.js) bringt die
-// Tabs zurueck.
+// Tabs zurueck. Ein Skript, das zu lange laeuft, bricht die Engine selber ab
+// (Watchdog in engine/src/EngineLoop.cpp), dann geht die Meldung wieder weg.
 
 import { storage } from './util.js';
 
@@ -100,7 +101,7 @@ function checkHang() {
   if (failed || hangShown || !waitingSince || Date.now() - waitingSince < HANG_TIMEOUT)
     return;
   hangShown = true;
-  showEngineMessage('Die Seite reagiert nicht.', ['Ein Skript blockiert die Engine und damit alle Tabs.'], [
+  showEngineMessage('Die Seite reagiert nicht.', ['Ein Skript blockiert die Engine und damit alle Tabs. Läuft es zu lange, bricht die Engine es ab.'], [
     ['Warten', () => {
       hangShown = false;
       waitingSince = Date.now();

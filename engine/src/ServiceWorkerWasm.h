@@ -16,6 +16,7 @@
 #include <wtf/Function.h>
 
 namespace WebCore {
+class LocalFrame;
 class ResourceLoader;
 class Settings;
 }
@@ -35,5 +36,9 @@ bool startFetch(WebCore::ResourceLoader&, Function<void()>&& networkLoad);
 // Der Loader ist weg (abgebrochen oder fertig): true = es war ein Worker-Fetch
 bool cancelFetch(WebCore::ResourceLoader&);
 bool isFetching(const WebCore::ResourceLoader&);
+
+// FrameLoaderClient: das Laden eines Frames ist zu Ende, committed = mit neuem
+// Dokument (fuer WindowClient.navigate())
+void frameLoadEnded(WebCore::LocalFrame&, bool committed);
 
 } // namespace BrowserLite::ServiceWorkers

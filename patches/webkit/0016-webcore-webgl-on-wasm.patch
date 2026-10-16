@@ -20,10 +20,10 @@ index f00f452204..a1d7e66d20 100644
  if (ENABLE_API_TESTS)
 diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
 new file mode 100644
-index 0000000000..9c02dfe7c7
+index 0000000000..cf5f007346
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.cpp
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,201 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -71,40 +71,52 @@ index 0000000000..9c02dfe7c7
 +
 +namespace WebCore {
 +
++// Kennung des Kontexts im ANGLE-Ersatz
++static int shimHandle(GCGLContext context)
++{
++    return static_cast<int>(reinterpret_cast<intptr_t>(context));
++}
++
 +// Diese GraphicsContextGLANGLE-Methoden definiert jede Plattform selber
 +
 +GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
 +{
-+    if (!makeContextCurrent())
-+        return;
-+    if (m_texture)
-+        GL_DeleteTextures(1, &m_texture);
-+    auto attributes = contextAttributes();
-+    if (attributes.antialias) {
-+        GL_DeleteRenderbuffers(1, &m_multisampleColorBuffer);
-+        if (attributes.stencil || attributes.depth)
-+            GL_DeleteRenderbuffers(1, &m_multisampleDepthStencilBuffer);
-+        GL_DeleteFramebuffers(1, &m_multisampleFBO);
-+    } else {
-+        if ((attributes.stencil || attributes.depth) && m_depthStencilBuffer)
-+            GL_DeleteRenderbuffers(1, &m_depthStencilBuffer);
-+        if (m_preserveDrawingBufferTexture)
-+            GL_DeleteTextures(1, &m_preserveDrawingBufferTexture);
-+        if (m_preserveDrawingBufferFBO)
-+            GL_DeleteFramebuffers(1, &m_preserveDrawingBufferFBO);
++    // Nach einem Verlust gibt es die GL-Objekte nicht mehr, den Kontext im
++    // ANGLE-Ersatz aber schon
++    if (makeContextCurrent()) {
++        if (m_texture)
++            GL_DeleteTextures(1, &m_texture);
++        auto attributes = contextAttributes();
++        if (attributes.antialias) {
++            GL_DeleteRenderbuffers(1, &m_multisampleColorBuffer);
++            if (attributes.stencil || attributes.depth)
++                GL_DeleteRenderbuffers(1, &m_multisampleDepthStencilBuffer);
++            GL_DeleteFramebuffers(1, &m_multisampleFBO);
++        } else {
++            if ((attributes.stencil || attributes.depth) && m_depthStencilBuffer)
++                GL_DeleteRenderbuffers(1, &m_depthStencilBuffer);
++            if (m_preserveDrawingBufferTexture)
++                GL_DeleteTextures(1, &m_preserveDrawingBufferTexture);
++            if (m_preserveDrawingBufferFBO)
++                GL_DeleteFramebuffers(1, &m_preserveDrawingBufferFBO);
++        }
++        GL_DeleteFramebuffers(1, &m_fbo);
 +    }
-+    GL_DeleteFramebuffers(1, &m_fbo);
 +    if (m_contextObj)
-+        angleShimDestroyContext(static_cast<int>(reinterpret_cast<intptr_t>(m_contextObj)));
++        angleShimDestroyContext(shimHandle(m_contextObj));
 +}
 +
 +bool GraphicsContextGLANGLE::makeContextCurrent()
 +{
-+    return m_contextObj && angleShimMakeCurrent(static_cast<int>(reinterpret_cast<intptr_t>(m_contextObj)));
++    return m_contextObj && angleShimMakeCurrent(shimHandle(m_contextObj));
 +}
 +
++// Nach Zeichenaufrufen: ist der Host-Kontext verloren, erfaehrt es die Seite
++// (webglcontextlost) und kann ihn wiederherstellen lassen
 +void GraphicsContextGLANGLE::checkGPUStatus()
 +{
++    if (!isContextLost() && m_contextObj && angleShimIsContextLost(shimHandle(m_contextObj)))
++        forceContextLost();
 +}
 +
 +void GraphicsContextGLANGLE::platformReleaseThreadResources()
@@ -215,10 +227,10 @@ index 0000000000..9c02dfe7c7
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
 new file mode 100644
-index 0000000000..60eeec01f4
+index 0000000000..e90ebc7526
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/GraphicsContextGLWasm.h
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,74 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -256,8 +268,9 @@ index 0000000000..60eeec01f4
 +class PixelBuffer;
 +
 +// WebGL fuer PORT=Wasm: die GL-Aufrufe gehen ueber den ANGLE-Ersatz
-+// (platform/wasm/angle) an einen WebGL-Kontext des Host-Browsers. Ohne
-+// Compositing: das Bild wird mit readPixels gelesen und in die Seite gemalt.
++// (platform/wasm/angle) an einen WebGL-Kontext des Host-Browsers. Das Bild wird
++// mit readPixels gelesen und in die Seite gemalt oder als Inhalt einer Ebene
++// uebergeben (Coordinated Graphics).
 +class GraphicsContextGLWasm final : public GraphicsContextGLANGLE {
 +    WTF_MAKE_TZONE_ALLOCATED(GraphicsContextGLWasm);
 +public:
@@ -1156,10 +1169,10 @@ index 0000000000..4fdf42a51d
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
 new file mode 100644
-index 0000000000..72c1080ce7
+index 0000000000..7dd00c1142
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
-@@ -0,0 +1,955 @@
+@@ -0,0 +1,991 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1237,10 +1250,24 @@ index 0000000000..72c1080ce7
 +
 +namespace {
 +
++// Ein echter WebGL-Kontext des Browsers
++struct HostContext {
++    int handle { 0 };
++    // ShimContexts darauf
++    int users { 0 };
++    // Kontext, dessen Zustand gerade im Host-Kontext steckt
++    int stateOwner { 0 };
++    // Hoechste Textur-Einheit, die irgendein Kontext benutzt hat
++    int maxTextureUnit { 0 };
++};
++
 +// Ein Kontext von WebKit (virtuell, teilt sich den Host-Kontext)
 +struct ShimContext {
 +    int id { 0 };
 +    bool webgl2 { false };
++    // Bleibt nach einem Verlust, auch wenn hosts[] schon einen neuen hat: so
++    // erfaehrt der Kontext beim naechsten Zeichnen vom Verlust (checkGPUStatus)
++    HostContext* host { nullptr };
 +    std::unordered_set<std::string> requestable;
 +    std::unordered_set<std::string> enabled;
 +    std::string enabledString;
@@ -1256,17 +1283,9 @@ index 0000000000..72c1080ce7
 +    int maxTextureUnit { 0 };
 +};
 +
-+// Ein echter WebGL-Kontext des Browsers
-+struct HostContext {
-+    int handle { 0 };
-+    // Kontext, dessen Zustand gerade im Host-Kontext steckt
-+    int stateOwner { 0 };
-+    // Hoechste Textur-Einheit, die irgendein Kontext benutzt hat
-+    int maxTextureUnit { 0 };
-+};
-+
 +thread_local std::unordered_map<int, ShimContext>* contextMap;
-+thread_local HostContext hosts[2];
++// Host-Kontext je Version (WebGL 1, WebGL 2) fuer neue Kontexte
++thread_local HostContext* hosts[2];
 +thread_local ShimContext* current = nullptr;
 +thread_local int nextId = 1;
 +
@@ -1275,11 +1294,6 @@ index 0000000000..72c1080ce7
 +    if (!contextMap)
 +        contextMap = new std::unordered_map<int, ShimContext>;
 +    return *contextMap;
-+}
-+
-+HostContext& hostFor(const ShimContext& context)
-+{
-+    return hosts[context.webgl2 ? 1 : 0];
 +}
 +
 +struct Mapping {
@@ -1638,24 +1652,34 @@ index 0000000000..72c1080ce7
 +    }, host.handle);
 +}
 +
++// Ein ersetzter Host-Kontext lebt, bis der letzte Kontext darauf weg ist
++void deleteHostIfUnused(HostContext* host)
++{
++    if (host->users || host == hosts[0] || host == hosts[1])
++        return;
++    EM_ASM({ GL.deleteContext($0); }, host->handle);
++    delete host;
++}
++
 +// Host-Kontext fuer die Version, beim ersten Mal (oder nach Verlust) neu
 +HostContext* ensureHost(bool webgl2)
 +{
-+    auto& host = hosts[webgl2 ? 1 : 0];
-+    if (host.handle && blIsContextLost(host.handle)) {
-+        // Verloren: alle Kontexte darauf sind sowieso kaputt
-+        EM_ASM({ GL.deleteContext($0); }, host.handle);
-+        host = { };
++    auto*& host = hosts[webgl2 ? 1 : 0];
++    if (host && blIsContextLost(host->handle)) {
++        auto* lost = host;
++        host = nullptr;
++        deleteHostIfUnused(lost);
 +    }
-+    if (!host.handle) {
-+        host.handle = blCreateGLContext(webgl2);
-+        if (!host.handle)
++    if (!host) {
++        int handle = blCreateGLContext(webgl2);
++        if (!handle)
 +            return nullptr;
-+        if (!makeHostCurrent(host))
++        host = new HostContext { handle };
++        if (!makeHostCurrent(*host))
 +            return nullptr;
 +        blSaveState(defaultStateKey(webgl2), webgl2, 0);
 +    }
-+    return &host;
++    return host;
 +}
 +
 +void drainErrors(std::vector<GLenum>* into)
@@ -1696,6 +1720,7 @@ index 0000000000..72c1080ce7
 +    ShimContext context;
 +    context.id = nextId++;
 +    context.webgl2 = webgl2;
++    context.host = host;
 +    // Eigene Objekte statt der geteilten Standard-Objekte des Host-Kontexts
 +    glGenVertexArrays(1, &context.defaultVertexArray);
 +    if (webgl2)
@@ -1733,6 +1758,7 @@ index 0000000000..72c1080ce7
 +    updateStrings(context);
 +    int id = context.id;
 +    contexts()[id] = std::move(context);
++    host->users++;
 +    return id;
 +}
 +
@@ -1746,15 +1772,16 @@ index 0000000000..72c1080ce7
 +    // GL-Kontext von Emscripten. Darum auch hier pruefen, ob der Host-Kontext
 +    // noch aktuell ist (kostet nur einen Vergleich in JS).
 +    if (current && current->id == id)
-+        return makeHostCurrent(hostFor(*current));
++        return makeHostCurrent(*current->host);
 +    auto it = contexts().find(id);
 +    if (it == contexts().end())
 +        return false;
 +    auto& context = it->second;
-+    auto& host = hostFor(context);
-+    if (!host.handle || !makeHostCurrent(host))
++    auto& host = *context.host;
++    if (!makeHostCurrent(host))
 +        return false;
-+    if (host.stateOwner != id) {
++    // Ein verlorener Host-Kontext hat keinen Zustand mehr
++    if (host.stateOwner != id && !blIsContextLost(host.handle)) {
 +        auto owner = contexts().find(host.stateOwner);
 +        if (owner != contexts().end()) {
 +            drainErrors(&owner->second.pendingErrors);
@@ -1776,17 +1803,40 @@ index 0000000000..72c1080ce7
 +    if (it == contexts().end())
 +        return;
 +    auto& context = it->second;
-+    auto& host = hostFor(context);
-+    if (host.handle && makeHostCurrent(host)) {
++    auto* host = context.host;
++    if (makeHostCurrent(*host)) {
 +        glDeleteVertexArrays(1, &context.defaultVertexArray);
 +        if (context.defaultTransformFeedback)
 +            glDeleteTransformFeedbacks(1, &context.defaultTransformFeedback);
 +    }
-+    if (host.stateOwner == id)
-+        host.stateOwner = 0;
++    if (host->stateOwner == id)
++        host->stateOwner = 0;
 +    blForgetState(id);
 +    current = nullptr;
 +    contexts().erase(it);
++    host->users--;
++    deleteHostIfUnused(host);
++}
++
++bool angleShimIsContextLost(int id)
++{
++    auto it = contexts().find(id);
++    if (it == contexts().end())
++        return true;
++    return blIsContextLost(it->second.host->handle);
++}
++
++void angleShimLoseHostContextsForTesting()
++{
++    for (auto* host : hosts) {
++        if (!host)
++            continue;
++        EM_ASM({
++            var extension = GL.getContext($0).GLctx.getExtension("WEBGL_lose_context");
++            if (extension)
++                extension.loseContext();
++        }, host->handle);
++    }
 +}
 +
 +} // namespace WebCore
@@ -1836,8 +1886,7 @@ index 0000000000..72c1080ce7
 +    if (current && texture >= GL_TEXTURE0 && texture < GL_TEXTURE0 + 256) {
 +        int unit = texture - GL_TEXTURE0;
 +        current->maxTextureUnit = std::max(current->maxTextureUnit, unit);
-+        auto& host = hostFor(*current);
-+        host.maxTextureUnit = std::max(host.maxTextureUnit, unit);
++        current->host->maxTextureUnit = std::max(current->host->maxTextureUnit, unit);
 +    }
 +    glActiveTexture(texture);
 +}
@@ -2117,10 +2166,10 @@ index 0000000000..72c1080ce7
 +#endif // ENABLE(WEBGL)
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
 new file mode 100644
-index 0000000000..3cb9d58960
+index 0000000000..61a892ff24
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,50 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -2159,8 +2208,14 @@ index 0000000000..3cb9d58960
 +int angleShimCreateContext(bool webgl2);
 +bool angleShimMakeCurrent(int handle);
 +void angleShimDestroyContext(int handle);
++// Ist der Host-Kontext verloren (GPU-Reset, Grenze an Kontexten pro Worker)?
++// Der Kontext bleibt dann verloren, WebKit legt beim Wiederherstellen einen
++// neuen an, der einen neuen Host-Kontext bekommt.
++bool angleShimIsContextLost(int handle);
 +// Host-Kontexte vorab anlegen (beim Start der Engine, solange die GPU frei ist)
 +void angleShimPrewarm();
++// Fuer Tests: die Host-Kontexte verlieren (WEBGL_lose_context)
++void angleShimLoseHostContextsForTesting();
 +
 +} // namespace WebCore
 +

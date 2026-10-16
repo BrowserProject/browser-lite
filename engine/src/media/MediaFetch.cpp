@@ -1,6 +1,7 @@
 // Daten fuer das Host-<video>: der Service Worker (web/sw.js) fragt ein Stueck
-// der Datei an (Range), die Engine laedt es mit curl ueber das Relay und gibt
-// Kopf und Daten an die Oberflaeche weiter. Mit Cookies und Referrer der Seite.
+// der Datei an (Range), die Engine laedt es und gibt Kopf und Daten an die
+// Oberflaeche weiter. HTTP mit curl ueber das Relay, mit Cookies und Referrer
+// der Seite; blob: und data: aus dem Speicher (BlobResourceHandle, kann Range).
 #include "config.h"
 #include "MediaFetch.h"
 
@@ -9,16 +10,17 @@
 #include "../LoaderStrategy.h"
 #include "MediaPlayerPrivateWasm.h"
 
+#include <WebCore/BlobResourceHandle.h>
 #include <WebCore/CurlRequest.h>
 #include <WebCore/CurlRequestClient.h>
 #include <WebCore/CurlResponse.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/NetworkLoadMetrics.h>
 #include <WebCore/ResourceError.h>
+#include <WebCore/ResourceHandleClient.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/SharedBuffer.h>
-#include <WebCore/UserAgent.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
@@ -35,83 +37,38 @@ static HashMap<int, RefPtr<MediaFetch>>& fetches()
     return map;
 }
 
-class MediaFetch final : public RefCounted<MediaFetch>, public CurlRequestClient {
+class MediaFetch : public RefCounted<MediaFetch> {
 public:
-    static void start(int fetchId, MediaPlayerPrivateWasm& player, double start, double end)
-    {
-        Ref fetch = adoptRef(*new MediaFetch(fetchId, player.referrer()));
-        if (start > 0 || end >= 0)
-            fetch->m_range = end >= 0 ? makeString("bytes="_s, static_cast<uint64_t>(start), '-', static_cast<uint64_t>(end)) : makeString("bytes="_s, static_cast<uint64_t>(start), '-');
-        fetches().set(fetchId, fetch.ptr());
-        fetch->load(player.url());
-    }
+    virtual ~MediaFetch() = default;
 
     void cancel()
     {
-        if (auto request = std::exchange(m_request, nullptr)) {
-            request->invalidateClient();
-            request->cancel();
-        }
+        Ref protectedThis { *this };
+        detach(true);
         fetches().remove(m_id);
     }
 
-    void ref() const final { RefCounted::ref(); }
-    void deref() const final { RefCounted::deref(); }
-
-private:
-    MediaFetch(int id, const String& referrer)
+protected:
+    MediaFetch(int id, double start, double end)
         : m_id(id)
-        , m_referrer(referrer)
     {
+        if (start > 0 || end >= 0)
+            m_range = end >= 0 ? makeString("bytes="_s, static_cast<uint64_t>(start), '-', static_cast<uint64_t>(end)) : makeString("bytes="_s, static_cast<uint64_t>(start), '-');
     }
 
-    void load(const URL& url)
+    // Laden loslassen (und abbrechen), danach kommt kein Rueckruf mehr
+    virtual void detach(bool cancelLoad) = 0;
+
+    ResourceRequest request(const URL& url) const
     {
         ResourceRequest request(URL { url });
-        request.setHTTPUserAgent(standardUserAgent());
-        request.setFirstPartyForCookies(url);
-        if (!m_referrer.isEmpty())
-            request.setHTTPReferrer(m_referrer);
-        // Kein gzip: die Byte-Positionen muessen zur Datei passen
-        request.setHTTPHeaderField(HTTPHeaderName::AcceptEncoding, "identity"_s);
         if (!m_range.isEmpty())
             request.setHTTPHeaderField(HTTPHeaderName::Range, m_range);
-        addCookieHeader(request);
-        m_url = url;
-        m_request = CurlRequest::create(request, *this);
-        m_request->resume();
+        return request;
     }
 
-    void finish(ASCIILiteral type, const String& json)
+    void sendHead(const ResourceResponse& response)
     {
-        Ref protectedThis { *this };
-        sendMediaFetch(m_id, type, json);
-        if (auto request = std::exchange(m_request, nullptr))
-            request->invalidateClient();
-        fetches().remove(m_id);
-    }
-
-    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
-
-    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
-    {
-        Ref protectedThis { *this };
-        ResourceResponse response(curlResponse);
-        // Weiterleitungen selber folgen (curl macht das hier nicht)
-        auto location = response.httpHeaderField(HTTPHeaderName::Location);
-        if (response.isRedirection() && !location.isEmpty() && m_redirects++ < 10) {
-            URL target { m_url, location };
-            if (auto old = std::exchange(m_request, nullptr)) {
-                old->invalidateClient();
-                old->cancel();
-            }
-            if (target.protocolIsInHTTPFamily()) {
-                load(target);
-                return;
-            }
-            finish("error"_s, "{\"message\":\"Weiterleitung\"}"_s);
-            return;
-        }
         auto header = [&](HTTPHeaderName name) {
             return jsonEscape(response.httpHeaderField(name));
         };
@@ -120,12 +77,88 @@ private:
             "\",\"length\":\""_s, header(HTTPHeaderName::ContentLength),
             "\",\"range\":\""_s, header(HTTPHeaderName::ContentRange),
             "\",\"acceptRanges\":\""_s, header(HTTPHeaderName::AcceptRanges), "\"}"_s));
+    }
+
+    void sendData(std::span<const uint8_t> data)
+    {
+        sendMediaFetch(m_id, "data"_s, { }, data);
+    }
+
+    void finish(ASCIILiteral type, const String& json)
+    {
+        Ref protectedThis { *this };
+        sendMediaFetch(m_id, type, json);
+        detach(false);
+        fetches().remove(m_id);
+    }
+
+    void fail(const ResourceError& error)
+    {
+        finish("error"_s, makeString("{\"message\":\""_s, jsonEscape(error.localizedDescription()), "\"}"_s));
+    }
+
+private:
+    const int m_id;
+    String m_range;
+};
+
+class NetworkMediaFetch final : public MediaFetch, public CurlRequestClient {
+public:
+    static Ref<NetworkMediaFetch> create(int id, double start, double end, const String& referrer)
+    {
+        return adoptRef(*new NetworkMediaFetch(id, start, end, referrer));
+    }
+
+    void ref() const final { MediaFetch::ref(); }
+    void deref() const final { MediaFetch::deref(); }
+
+    void load(const URL& url)
+    {
+        auto request = this->request(url);
+        request.setFirstPartyForCookies(url);
+        if (!m_referrer.isEmpty())
+            request.setHTTPReferrer(m_referrer);
+        // Kein gzip: die Byte-Positionen muessen zur Datei passen
+        request.setHTTPHeaderField(HTTPHeaderName::AcceptEncoding, "identity"_s);
+        m_request = createCurlRequest(WTF::move(request), *this);
+        m_request->resume();
+    }
+
+private:
+    NetworkMediaFetch(int id, double start, double end, const String& referrer)
+        : MediaFetch(id, start, end)
+        , m_referrer(referrer)
+    {
+    }
+
+    void detach(bool cancelLoad) final
+    {
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->invalidateClient();
+            if (cancelLoad)
+                request->cancel();
+        }
+    }
+
+    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
+
+    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
+    {
+        Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), curlResponse);
+        ResourceResponse response(curlResponse);
+        if (isRedirect(response)) {
+            if (auto error = followRedirect(m_request, *this, response, m_redirectCount); !error.isNull())
+                fail(error);
+            return;
+        }
+        sendHead(response);
         request.completeDidReceiveResponse();
     }
 
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
     {
-        sendMediaFetch(m_id, "data"_s, { }, buffer->span());
+        sendData(buffer->span());
     }
 
     void curlDidComplete(CurlRequest&, NetworkLoadMetrics&&) final
@@ -135,15 +168,77 @@ private:
 
     void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
     {
-        finish("error"_s, makeString("{\"message\":\""_s, jsonEscape(error.localizedDescription()), "\"}"_s));
+        fail(error);
     }
 
-    int m_id;
     String m_referrer;
-    String m_range;
-    URL m_url;
-    int m_redirects { 0 };
+    unsigned m_redirectCount { 0 };
     RefPtr<CurlRequest> m_request;
+};
+
+class BlobMediaFetch final : public MediaFetch, public ResourceHandleClient {
+public:
+    static Ref<BlobMediaFetch> create(int id, double start, double end)
+    {
+        return adoptRef(*new BlobMediaFetch(id, start, end));
+    }
+
+    void load(BlobData& blob, const URL& url)
+    {
+        Ref handle = BlobResourceHandle::createAsync(&blob, request(url), this);
+        handle->start();
+        m_handle = WTF::move(handle);
+    }
+
+private:
+    BlobMediaFetch(int id, double start, double end)
+        : MediaFetch(id, start, end)
+    {
+    }
+
+    void detach(bool cancelLoad) final
+    {
+        if (RefPtr handle = std::exchange(m_handle, nullptr)) {
+            handle->clearClient();
+            if (cancelLoad)
+                handle->cancel();
+        }
+    }
+
+    void willSendRequestAsync(ResourceHandle*, ResourceRequest&& request, ResourceResponse&&, CompletionHandler<void(ResourceRequest&&)>&& completion) final
+    {
+        completion(WTF::move(request));
+    }
+
+    void didReceiveResponseAsync(ResourceHandle*, ResourceResponse&& response, CompletionHandler<void()>&& completion) final
+    {
+        sendHead(response);
+        completion();
+    }
+
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+    void canAuthenticateAgainstProtectionSpaceAsync(ResourceHandle*, const ProtectionSpace&, CompletionHandler<void(bool)>&& completion) final
+    {
+        completion(false);
+    }
+#endif
+
+    void didReceiveData(ResourceHandle*, const SharedBuffer& buffer, int) final
+    {
+        sendData(buffer.span());
+    }
+
+    void didFinishLoading(ResourceHandle*, const NetworkLoadMetrics&) final
+    {
+        finish("end"_s, { });
+    }
+
+    void didFail(ResourceHandle*, const ResourceError& error) final
+    {
+        fail(error);
+    }
+
+    RefPtr<ResourceHandle> m_handle;
 };
 
 void startMediaFetch(int playerId, int fetchId, double start, double end)
@@ -153,7 +248,15 @@ void startMediaFetch(int playerId, int fetchId, double start, double end)
         sendMediaFetch(fetchId, "error"_s, "{\"message\":\"kein Player\"}"_s);
         return;
     }
-    MediaFetch::start(fetchId, *player, start, end);
+    if (RefPtr blob = player->blob()) {
+        Ref fetch = BlobMediaFetch::create(fetchId, start, end);
+        fetches().set(fetchId, fetch.ptr());
+        fetch->load(*blob, player->url());
+        return;
+    }
+    Ref fetch = NetworkMediaFetch::create(fetchId, start, end, player->referrer());
+    fetches().set(fetchId, fetch.ptr());
+    fetch->load(player->url());
 }
 
 void cancelMediaFetch(int fetchId)

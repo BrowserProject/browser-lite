@@ -1,6 +1,7 @@
 // End-to-End Test fuer WebGL: die Seite zeichnet mit WebGL 1 und WebGL 2,
 // die Engine leitet die GL-Aufrufe an das WebGL des Host-Browsers weiter
 // (platform/wasm/angle) und malt das Ergebnis in die Seite.
+// Dazu: Verlust der Host-Kontexte (webglcontextlost, webglcontextrestored).
 //
 //   cd tests/e2e && node webgl-test.mjs [engine-ordner]
 import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
@@ -252,6 +253,42 @@ function sharing() {
   return failed.length ? failed.join('+') : 'ok';
 }
 
+// Host-Kontext verloren (GPU-Reset): die Seite bekommt webglcontextlost, nach
+// preventDefault webglcontextrestored und zeichnet dann neu. Ein ruhiger
+// Kontext zeichnet erst wieder, wenn schon ein neuer Host-Kontext da ist
+// (quietDraw), und muss trotzdem verloren sein.
+let quiet;
+function startLossTest() {
+  quiet = document.createElement('canvas').getContext('webgl');
+  quiet.canvas.addEventListener('webglcontextlost', () => result('quietlost', quiet.isContextLost()));
+  quiet.clear(quiet.COLOR_BUFFER_BIT);
+  result('quietstart', quiet.getError());
+  for (const version of [1, 2]) {
+    const canvas = document.getElementById('gl' + version);
+    const gl = canvas.getContext(version === 2 ? 'webgl2' : 'webgl');
+    canvas.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault();
+      result('lost' + version, gl.isContextLost());
+    });
+    canvas.addEventListener('webglcontextrestored', () => result('restored' + version, draw(canvas, version)));
+    const frame = () => {
+      if (!gl.isContextLost()) {
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      requestAnimationFrame(frame);
+    };
+    frame();
+  }
+  result('losstest', 'bereit');
+}
+
+function quietDraw() {
+  quiet.bindTexture(quiet.TEXTURE_2D, quiet.createTexture());
+  quiet.clear(quiet.COLOR_BUFFER_BIT);
+  quiet.drawArrays(quiet.TRIANGLES, 0, 3);
+}
+
 // toDataURL beim 2D-Canvas in allen drei Formaten
 function dataURLs() {
   const canvas = document.createElement('canvas');
@@ -312,18 +349,38 @@ check('WebGL 1: Erweiterungen', extensions > 5, String(extensions));
 async function pixelAt(x, y) {
   return page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
 }
-let center1 = null, center2 = null, corner1 = null;
-const end = Date.now() + 20000;
-while (Date.now() < end) {
-  center1 = await pixelAt(120, 130);
-  center2 = await pixelAt(360, 130);
-  corner1 = await pixelAt(25, 25);
-  if (center1[0] > 200 && center1[2] < 60 && center2[0] > 200 && center2[1] > 200 && corner1[2] > 200)
-    break;
-  await page.waitForTimeout(250);
+const isPicture1 = ({ center1, corner1 }) => center1[0] > 200 && center1[1] < 60 && corner1[2] > 200;
+const isPicture2 = ({ center2 }) => center2[0] > 200 && center2[1] > 200 && center2[2] < 60;
+async function pagePicture() {
+  let picture = null;
+  for (const end = Date.now() + 20000; Date.now() < end; await page.waitForTimeout(250)) {
+    picture = { center1: await pixelAt(120, 130), center2: await pixelAt(360, 130), corner1: await pixelAt(25, 25) };
+    if (isPicture1(picture) && isPicture2(picture))
+      break;
+  }
+  return picture;
 }
-check('WebGL 1: Bild in der Seite (rot auf blau)', center1[0] > 200 && center1[1] < 60 && corner1[2] > 200, JSON.stringify({ center1, corner1 }));
-check('WebGL 2: Bild in der Seite (gelb)', center2[0] > 200 && center2[1] > 200 && center2[2] < 60, JSON.stringify(center2));
+const picture = await pagePicture();
+check('WebGL 1: Bild in der Seite (rot auf blau)', isPicture1(picture), JSON.stringify(picture));
+check('WebGL 2: Bild in der Seite (gelb)', isPicture2(picture), JSON.stringify(picture));
+
+// Die Host-Kontexte gehen verloren (wie bei einem GPU-Reset)
+await page.evaluate(() => window.__blEval('startLossTest()'));
+check('Verlust-Test bereit', await result('losstest') === 'bereit');
+check('Ruhiger Kontext ohne Fehler', await result('quietstart') === '0');
+await page.evaluate(() => window.__blEngine()._bl_webgl_lose_context_for_testing());
+for (const version of [1, 2]) {
+  const lost = await result('lost' + version);
+  check(`WebGL ${version}: Seite bekommt webglcontextlost`, lost === 'true', String(lost));
+  const restored = await result('restored' + version);
+  const expected = version === 2 ? '255,255,0,255/0,153,0,255/0' : '255,0,0,255/0,0,255,255/0';
+  check(`WebGL ${version}: nach webglcontextrestored zeichnet die Seite wieder`, restored?.startsWith(expected), String(restored));
+}
+await page.evaluate(() => window.__blEval('quietDraw()'));
+const quietLost = await result('quietlost');
+check('Ruhiger Kontext auf dem neuen Host-Kontext: webglcontextlost', quietLost === 'true', String(quietLost));
+const restoredPicture = await pagePicture();
+check('Nach der Wiederherstellung: Bild in der Seite', isPicture1(restoredPicture) && isPicture2(restoredPicture), JSON.stringify(restoredPicture));
 
 await screenshot(page, 'webgl');
 await browser.close();

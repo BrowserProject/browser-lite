@@ -1,7 +1,8 @@
-// Geraete und Berechtigungen ueber den Host-Browser: Standort (Geolocation)
-// und Benachrichtigungen. Fragt eine Seite zum ersten Mal, zeigt die
-// Oberflaeche eine Abfrage wie Chrome ("... moechte deinen Standort
-// verwenden"); die Entscheidung gilt pro Ursprung und Art.
+// Geraete und Berechtigungen ueber den Host-Browser: Standort (Geolocation),
+// Benachrichtigungen, Kamera und Mikrofon. Fragt eine Seite zum ersten Mal,
+// zeigt die Oberflaeche eine Abfrage wie Chrome ("... moechte deinen Standort
+// verwenden"). Die Entscheidung gilt pro Art und Ursprung der Seite oben
+// (topOrigin), bei Benachrichtigungen pro Ursprung des Dokuments.
 #pragma once
 
 #include <wtf/CompletionHandler.h>
@@ -28,7 +29,8 @@ PermissionDecision storedPermission(const String& kind, const String& origin);
 void requestDevicePermission(int viewId, const String& kind, const String& origin, CompletionHandler<void(bool)>&&);
 
 // Antworten der Oberflaeche (Engine-Thread)
-void answerPermission(int requestId, bool granted);
+// answer: Ask = ohne Entscheidung geschlossen (abgelehnt, nicht gemerkt)
+void answerPermission(int requestId, PermissionDecision answer);
 void setStoredPermission(const String& kind, const String& origin, PermissionDecision);
 void geolocationPosition(int viewId, double latitude, double longitude, double accuracy, double altitude, double altitudeAccuracy, double heading, double speed, double timestamp);
 void geolocationError(int viewId, int code, const String& message);

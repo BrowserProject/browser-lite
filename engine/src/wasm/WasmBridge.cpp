@@ -2,12 +2,19 @@
 //
 // Werte gehen als "Slots" zu 16 Bytes zur Host-Seite (Format in
 // engine/js/wasm-host.js). Auf der Seite von JSC sind es Paare [tag, wert].
+//
+// Alles gehoert einer Realm (einem globalen Objekt in JSC). Werte aus JSC, die
+// die Host-Seite haelt, haengen am globalen Objekt und sind keine GC-Wurzeln.
+// Stirbt es (Navigation, Ende eines Workers), gibt die Bruecke den Speicher der
+// Realm frei und die Host-Seite ihre Objekte. Zyklen ueber beide Seiten (Import
+// ruft Exporte der eigenen Instanz) leben so hoechstens so lange wie die Seite.
 #include "config.h"
 #include "WasmBridge.h"
 
 #include <JavaScriptCore/ArrayBuffer.h>
 #include <JavaScriptCore/CallData.h>
 #include <JavaScriptCore/Completion.h>
+#include <JavaScriptCore/ExceptionHelpers.h>
 #include <JavaScriptCore/GetterSetter.h>
 #include <JavaScriptCore/JSArray.h>
 #include <JavaScriptCore/JSArrayBuffer.h>
@@ -15,12 +22,18 @@
 #include <JavaScriptCore/JSBigInt.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/JSMapInlines.h>
+#include <JavaScriptCore/JSNativeStdFunction.h>
 #include <JavaScriptCore/ObjectConstructor.h>
+#include <JavaScriptCore/PrivateName.h>
 #include <JavaScriptCore/SourceCode.h>
-#include <JavaScriptCore/StrongInlines.h>
 #include <JavaScriptCore/TopExceptionScope.h>
+#include <JavaScriptCore/TypedArrayController.h>
+#include <JavaScriptCore/WeakHandleOwner.h>
+#include <JavaScriptCore/WeakInlines.h>
 #include <WebCore/WorkerOrWorkletGlobalScope.h>
 #include <WebCore/WorkerOrWorkletScriptController.h>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +41,9 @@
 #include <memory>
 #include <mutex>
 #include <wtf/HashMap.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/SharedTask.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/text/WTFString.h>
 
 using namespace JSC;
@@ -37,6 +53,13 @@ namespace BrowserLite {
 namespace {
 
 constexpr size_t pageSize = 65536;
+// Hoechstens 2 GB pro Speicher: die Engine selber liegt im gleichen 4-GB-Speicher
+constexpr uint32_t maxMemoryPages = 32768;
+// Verschachtelte Aufrufe JS -> WebAssembly -> JS. Jede Ebene braucht Stack des
+// Browsers in Frames der Engine (ca. 8 KB), den JSC nicht sieht. Ohne Grenze lief
+// er in Chrome nach ca. 125 Ebenen ueber, mitten in der Engine (JSC bleibt dann
+// halb abgebaut zurueck, die Engine haengt).
+constexpr unsigned maxCallDepth = 64;
 constexpr int slotCapacity = 1024;
 
 struct Slot {
@@ -66,63 +89,123 @@ enum Tag : uint32_t {
     Text = 10,
 };
 
+// Eindeutig ueber alle Threads: ein Worker der Engine bekommt nach dem Ende
+// eines Threads einen neuen, die Host-Seite darin bleibt dieselbe
+std::atomic<uint32_t> nextId { 1 };
+
+// Bereich im Engine-Speicher. Ihn halten der Speicher und der ArrayBuffer der
+// Seite darauf, der den Speicher ueberleben kann (wie im Standard).
+struct Region : ThreadSafeRefCounted<Region> {
+    explicit Region(uint8_t* base)
+        : base(base)
+    {
+    }
+    ~Region() { free(base); }
+    uint8_t* const base;
+    // Setzt sich zurueck, wenn der ArrayBuffer abgehaengt oder abgebaut wird
+    ArrayBuffer* buffer { nullptr };
+};
+
 struct MemoryRecord {
+    uint32_t realm { 0 };
     VM* vm { nullptr };
-    uint8_t* base { nullptr };
+    RefPtr<Region> region;
     uint32_t pages { 0 };
     uint32_t maxPages { 0 };
     uint32_t capacityPages { 0 };
+    // Das Memory-Objekt der Seite und jede Instanz auf der Host-Seite
     int references { 1 };
-    RefPtr<ArrayBuffer> buffer;
-    Strong<JSArrayBuffer> wrapper;
 };
 
-struct BridgeState {
-    HashMap<uint32_t, Strong<Unknown>> guests;
+class RealmOwner final : public WeakHandleOwner {
+    void finalize(Handle<Unknown>, void* context) final;
+};
+
+struct Realm {
+    // Werte aus JSC nach id, als unsichtbare Eigenschaft am globalen Objekt
+    Weak<JSMap> guests;
     uint32_t nextGuest { 1 };
+    // Freigaben von der Host-Seite kommen ausserhalb von JSC an (aus ihrer
+    // FinalizationRegistry), erledigt beim naechsten Aufruf der Bruecke
+    Vector<uint32_t> released;
+};
+
+RealmOwner& realmOwner()
+{
+    static NeverDestroyed<RealmOwner> owner;
+    return owner;
+}
+
+// Pro Thread (jeder Worker hat einen eigenen), lebt bis zum Ende des Threads.
+// Nie frueher freigeben: releaseRealm laeuft im GC, auch mitten in einer
+// Allokation, waehrend weiter oben im Stack noch eine Referenz darauf liegt.
+struct BridgeState {
+    HashMap<uint32_t, std::unique_ptr<Realm>> realms;
     HashMap<int, std::unique_ptr<MemoryRecord>> memories;
-    int nextMemory { 1 };
     Slot args[slotCapacity];
     Slot out[slotCapacity];
 };
 
-thread_local BridgeState* bridgeState;
+thread_local std::unique_ptr<BridgeState> bridgeState;
+thread_local unsigned callDepth;
 
 BridgeState& state()
 {
     if (!bridgeState)
-        bridgeState = new BridgeState;
+        bridgeState = std::make_unique<BridgeState>();
     return *bridgeState;
 }
 
-uint32_t registerGuest(VM& vm, JSValue value)
+Realm* findRealm(uint32_t id)
 {
-    auto& s = state();
-    uint32_t id = s.nextGuest++;
-    s.guests.add(id, Strong<Unknown>(vm, value));
+    if (!bridgeState)
+        return nullptr;
+    auto& realms = bridgeState->realms;
+    if (!realms.isValidKey(id))
+        return nullptr;
+    auto it = realms.find(id);
+    return it == realms.end() ? nullptr : it->value.get();
+}
+
+uint32_t registerGuest(JSGlobalObject* globalObject, Realm& realm, JSValue value)
+{
+    uint32_t id = realm.nextGuest++;
+    realm.guests->set(globalObject, jsNumber(id), value);
     return id;
 }
 
-JSValue guestValue(uint32_t id, bool release)
+JSValue guestValue(JSGlobalObject* globalObject, uint32_t realmId, uint32_t id, bool release)
 {
-    auto& s = state();
-    auto it = s.guests.find(id);
-    if (it == s.guests.end())
+    auto* realm = findRealm(realmId);
+    auto* guests = realm ? realm->guests.get() : nullptr;
+    if (!guests)
         return jsUndefined();
-    JSValue value = it->value.get();
+    JSValue key = jsNumber(id);
+    JSValue value = guests->get(globalObject, key);
     if (release)
-        s.guests.remove(it);
+        guests->remove(globalObject, key);
     return value;
+}
+
+void dropReleased(JSGlobalObject* globalObject, Realm& realm)
+{
+    auto* guests = realm.guests.get();
+    if (!guests)
+        return;
+    for (uint32_t id : realm.released)
+        guests->remove(globalObject, jsNumber(id));
+    realm.released.clear();
 }
 
 // Paare [tag, wert, ...] aus JSC in Slots. Texte werden mit malloc kopiert,
 // "texts" sammelt sie zum Freigeben nach dem Aufruf.
-int writePairs(JSGlobalObject* globalObject, JSValue pairsValue, Slot* slots, Vector<char*>& texts)
+int writePairs(JSGlobalObject* globalObject, uint32_t realmId, JSValue pairsValue, Slot* slots, Vector<char*>& texts)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
     auto* pairs = dynamicDowncast<JSArray>(pairsValue);
-    if (!pairs) {
+    auto* realm = findRealm(realmId);
+    if (!pairs || !realm) {
         throwTypeError(globalObject, scope, "browser-lite: Paare erwartet"_s);
         return -1;
     }
@@ -157,7 +240,8 @@ int writePairs(JSGlobalObject* globalObject, JSValue pairsValue, Slot* slots, Ve
             slot.word.lo = value.toBoolean(globalObject) ? 1 : 0;
             break;
         case Guest:
-            slot.word.lo = registerGuest(vm, value);
+            slot.a = realmId;
+            slot.word.lo = registerGuest(globalObject, *realm, value);
             break;
         case HostObject:
         case HostFunction:
@@ -224,7 +308,7 @@ JSArray* readPairs(JSGlobalObject* globalObject, const Slot* slots, int count)
             break;
         case Guest:
         case GuestOnce:
-            value = guestValue(slot.word.lo, tag == GuestOnce);
+            value = guestValue(globalObject, slot.a, slot.word.lo, tag == GuestOnce);
             tag = Guest;
             break;
         case HostObject:
@@ -252,18 +336,33 @@ JSArray* readPairs(JSGlobalObject* globalObject, const Slot* slots, int count)
 
 MemoryRecord* memoryRecord(int id)
 {
-    auto& memories = state().memories;
+    if (!bridgeState)
+        return nullptr;
+    auto& memories = bridgeState->memories;
+    if (!memories.isValidKey(id))
+        return nullptr;
     auto it = memories.find(id);
     return it == memories.end() ? nullptr : it->value.get();
 }
 
-uint8_t* allocatePages(uint32_t pages)
+// Speicher fuer Aufrufe aus JSC: nur der eigenen Realm. Die ids sind leicht zu
+// raten und wasm-guest.js laeuft mit den Built-ins der Seite.
+MemoryRecord* ownedMemory(int id, uint32_t realm)
 {
-    size_t bytes = std::max<size_t>(pages, 1) * pageSize;
+    auto* memory = memoryRecord(id);
+    return memory && memory->realm == realm ? memory : nullptr;
+}
+
+RefPtr<Region> allocateRegion(uint32_t pages)
+{
+    if (pages > maxMemoryPages)
+        return nullptr;
+    size_t bytes = static_cast<size_t>(std::max<uint32_t>(pages, 1)) * pageSize;
     auto* base = static_cast<uint8_t*>(aligned_alloc(pageSize, bytes));
-    if (base)
-        memset(base, 0, bytes);
-    return base;
+    if (!base)
+        return nullptr;
+    memset(base, 0, bytes);
+    return adoptRef(*new Region(base));
 }
 
 void updateHost(int id, uint8_t* base, int pages)
@@ -274,10 +373,8 @@ void updateHost(int id, uint8_t* base, int pages)
 // Alter ArrayBuffer ist nach grow nicht mehr gueltig (wie im Standard)
 void detachBuffer(MemoryRecord& memory)
 {
-    if (memory.buffer)
-        memory.buffer->detach(*memory.vm);
-    memory.buffer = nullptr;
-    memory.wrapper.clear();
+    if (auto* buffer = memory.region->buffer)
+        buffer->detach(*memory.vm);
 }
 
 int growMemory(int id, uint32_t delta)
@@ -289,62 +386,88 @@ int growMemory(int id, uint32_t delta)
     if (pages > memory->maxPages)
         return -1;
     uint32_t old = memory->pages;
+    RefPtr<Region> region = memory->region;
     if (pages > memory->capacityPages) {
         // Umziehen, mit Reserve, damit nicht jedes grow kopiert
         uint32_t capacity = static_cast<uint32_t>(std::min<uint64_t>(memory->maxPages, std::max<uint64_t>(pages, static_cast<uint64_t>(old) * 2)));
-        auto* base = allocatePages(capacity);
-        if (!base && capacity > pages) {
+        region = allocateRegion(capacity);
+        if (!region && capacity > pages) {
             capacity = static_cast<uint32_t>(pages);
-            base = allocatePages(capacity);
+            region = allocateRegion(capacity);
         }
-        if (!base)
+        if (!region)
             return -1;
-        memcpy(base, memory->base, static_cast<size_t>(old) * pageSize);
-        free(memory->base);
-        memory->base = base;
+        memcpy(region->base, memory->region->base, static_cast<size_t>(old) * pageSize);
         memory->capacityPages = capacity;
     }
-    memory->pages = static_cast<uint32_t>(pages);
     detachBuffer(*memory);
-    updateHost(id, memory->base, memory->pages);
+    memory->region = WTF::move(region);
+    memory->pages = static_cast<uint32_t>(pages);
+    updateHost(id, memory->region->base, memory->pages);
     return old;
+}
+
+// Ab jetzt faengt jeder Zugriff (Groesse 0). Den Bereich gibt der letzte frei,
+// der ihn haelt (evtl. ein ArrayBuffer der Seite).
+void dropMemory(int id)
+{
+    updateHost(id, nullptr, -1);
+    state().memories.remove(id);
 }
 
 void releaseMemory(int id)
 {
     auto* memory = memoryRecord(id);
-    if (!memory || --memory->references > 0)
-        return;
-    detachBuffer(*memory);
-    // Ab jetzt faengt jeder Zugriff (Groesse 0), falls noch ein Modul lebt
-    updateHost(id, nullptr, -1);
-    free(memory->base);
-    state().memories.remove(id);
+    if (memory && --memory->references <= 0)
+        dropMemory(id);
+}
+
+// Laeuft, wenn der GC das globale Objekt abbaut (auch beim Ende der VM eines
+// Workers). Darf JSC nicht benutzen.
+void releaseRealm(uint32_t id)
+{
+    auto& s = state();
+    Vector<int> owned;
+    for (auto& entry : s.memories) {
+        if (entry.value->realm == id)
+            owned.append(entry.key);
+    }
+    for (int memoryId : owned)
+        dropMemory(memoryId);
+    s.realms.remove(id);
+    EM_ASM({ blWasmHost.releaseRealm($0); }, id);
+}
+
+void RealmOwner::finalize(Handle<Unknown>, void* context)
+{
+    releaseRealm(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(context)));
 }
 
 // ------------------------------------------------------------ Funktionen fuer die API
 
-JSC_DEFINE_HOST_FUNCTION(bridgeHost, (JSGlobalObject* globalObject, CallFrame* callFrame))
+EncodedJSValue bridgeHost(JSGlobalObject* globalObject, CallFrame* callFrame, uint32_t realmId)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
+    auto& s = state();
+    if (auto* realm = findRealm(realmId))
+        dropReleased(globalObject, *realm);
     int op = callFrame->argument(0).toInt32(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
-    auto& s = state();
     Vector<char*> texts;
-    int count = writePairs(globalObject, callFrame->argument(1), s.args, texts);
+    int count = writePairs(globalObject, realmId, callFrame->argument(1), s.args, texts);
     if (count < 0 || scope.exception()) {
         for (auto* text : texts)
             free(text);
         return { };
     }
-    int results = EM_ASM_INT({ return blWasmHost.dispatch($0, $1, $2, $3, $4); }, op, s.args, count, s.out, slotCapacity);
+    int results = EM_ASM_INT({ return blWasmHost.dispatch($0, $1, $2, $3, $4, $5); }, realmId, op, s.args, count, s.out, slotCapacity);
     for (auto* text : texts)
         free(text);
     RELEASE_AND_RETURN(scope, JSValue::encode(readPairs(globalObject, s.out, results)));
 }
 
-JSC_DEFINE_HOST_FUNCTION(bridgeMemoryCreate, (JSGlobalObject* globalObject, CallFrame* callFrame))
+EncodedJSValue bridgeMemoryCreate(JSGlobalObject* globalObject, CallFrame* callFrame, uint32_t realmId)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -353,39 +476,48 @@ JSC_DEFINE_HOST_FUNCTION(bridgeMemoryCreate, (JSGlobalObject* globalObject, Call
     int32_t maximum = callFrame->argument(1).toInt32(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
     auto memory = std::make_unique<MemoryRecord>();
+    memory->realm = realmId;
     memory->vm = &vm;
     memory->pages = initial;
-    memory->maxPages = maximum < 0 ? 65536 : static_cast<uint32_t>(maximum);
+    memory->maxPages = maximum < 0 ? maxMemoryPages : std::min(static_cast<uint32_t>(maximum), maxMemoryPages);
     memory->capacityPages = std::max<uint32_t>(initial, 1);
-    memory->base = allocatePages(memory->capacityPages);
-    if (!memory->base)
+    memory->region = allocateRegion(memory->capacityPages);
+    if (!memory->region)
         return throwVMRangeError(globalObject, scope, "WebAssembly.Memory(): could not allocate memory"_s);
-    auto& s = state();
-    int id = s.nextMemory++;
-    uint8_t* base = memory->base;
-    s.memories.add(id, WTF::move(memory));
-    EM_ASM({ blWasmHost.memoryCreate($0, $1, $2); }, id, reinterpret_cast<uintptr_t>(base), initial);
+    int id = static_cast<int>(nextId++);
+    uint8_t* base = memory->region->base;
+    state().memories.add(id, WTF::move(memory));
+    EM_ASM({ blWasmHost.memoryCreate($0, $1, $2, $3); }, id, realmId, reinterpret_cast<uintptr_t>(base), initial);
     return JSValue::encode(jsNumber(id));
 }
 
-JSC_DEFINE_HOST_FUNCTION(bridgeMemoryBuffer, (JSGlobalObject* globalObject, CallFrame* callFrame))
+EncodedJSValue bridgeMemoryBuffer(JSGlobalObject* globalObject, CallFrame* callFrame, uint32_t realmId)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
-    auto* memory = memoryRecord(callFrame->argument(0).toInt32(globalObject));
+    int id = callFrame->argument(0).toInt32(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
+    auto* memory = ownedMemory(id, realmId);
     if (!memory)
         return throwVMTypeError(globalObject, scope, "WebAssembly.Memory: freigegeben"_s);
-    if (!memory->wrapper) {
-        // Direkt auf den Speicher, gehoert weiter dem Speicher-Objekt
-        memory->buffer = ArrayBuffer::createFromBytes(std::span<const uint8_t> { memory->base, static_cast<size_t>(memory->pages) * pageSize }, nullptr);
-        auto* wrapper = JSArrayBuffer::create(vm, globalObject->arrayBufferStructure(ArrayBufferSharingMode::Default), RefPtr { memory->buffer });
-        memory->wrapper = Strong<JSArrayBuffer>(vm, wrapper);
+    auto& region = *memory->region;
+    if (region.buffer) {
+        // WebCore cacht einen Wrapper pro ArrayBuffer, nicht pro Realm
+        auto* wrapper = vm.m_typedArrayController->toJS(globalObject, globalObject, *region.buffer);
+        if (wrapper->realm() != globalObject)
+            return throwVMTypeError(globalObject, scope, "WebAssembly.Memory: Buffer einer anderen Realm"_s);
+        return JSValue::encode(wrapper);
     }
-    return JSValue::encode(memory->wrapper.get());
+    // Direkt auf den Speicher. Nicht abloesbar wie im Standard: transfer() wirft,
+    // postMessage kopiert (sonst zeigte ein uebertragener Buffer auf freien Speicher)
+    auto buffer = ArrayBuffer::createFromBytes(std::span<const uint8_t> { region.base, static_cast<size_t>(memory->pages) * pageSize },
+        createSharedTask<void(void*)>([region = Ref { region }](void*) { region->buffer = nullptr; }));
+    buffer->makeWasmMemory();
+    region.buffer = buffer.ptr();
+    return JSValue::encode(JSArrayBuffer::create(vm, globalObject->arrayBufferStructure(ArrayBufferSharingMode::Default), WTF::move(buffer)));
 }
 
-JSC_DEFINE_HOST_FUNCTION(bridgeMemoryGrow, (JSGlobalObject* globalObject, CallFrame* callFrame))
+EncodedJSValue bridgeMemoryGrow(JSGlobalObject* globalObject, CallFrame* callFrame, uint32_t realmId)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -393,19 +525,19 @@ JSC_DEFINE_HOST_FUNCTION(bridgeMemoryGrow, (JSGlobalObject* globalObject, CallFr
     RETURN_IF_EXCEPTION(scope, { });
     uint32_t delta = callFrame->argument(1).toUInt32(globalObject);
     RETURN_IF_EXCEPTION(scope, { });
+    if (!ownedMemory(id, realmId))
+        return throwVMTypeError(globalObject, scope, "WebAssembly.Memory: freigegeben"_s);
     return JSValue::encode(jsNumber(growMemory(id, delta)));
 }
 
-JSC_DEFINE_HOST_FUNCTION(bridgeMemoryRetain, (JSGlobalObject* globalObject, CallFrame* callFrame))
+EncodedJSValue bridgeMemoryRelease(JSGlobalObject* globalObject, CallFrame* callFrame, uint32_t realmId)
 {
-    if (auto* memory = memoryRecord(callFrame->argument(0).toInt32(globalObject)))
-        memory->references++;
-    return JSValue::encode(jsUndefined());
-}
-
-JSC_DEFINE_HOST_FUNCTION(bridgeMemoryRelease, (JSGlobalObject* globalObject, CallFrame* callFrame))
-{
-    releaseMemory(callFrame->argument(0).toInt32(globalObject));
+    VM& vm = globalObject->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    int id = callFrame->argument(0).toInt32(globalObject);
+    RETURN_IF_EXCEPTION(scope, { });
+    if (ownedMemory(id, realmId))
+        releaseMemory(id);
     return JSValue::encode(jsUndefined());
 }
 
@@ -434,19 +566,38 @@ const String& guestSource()
     return source;
 }
 
+// Neue Realm fuer das globale Objekt, ihre Werte haengen daran
+uint32_t createRealm(JSGlobalObject* globalObject)
+{
+    VM& vm = globalObject->vm();
+    uint32_t id = nextId++;
+    auto* guests = JSMap::create(vm, globalObject->mapStructure());
+    globalObject->putDirect(vm, Identifier::fromUid(PrivateName(PrivateName::PrivateSymbol, "browser-lite wasm"_s)), guests,
+        static_cast<unsigned>(PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::ReadOnly));
+    auto realm = std::make_unique<Realm>();
+    realm->guests = Weak<JSMap>(guests, &realmOwner(), reinterpret_cast<void*>(static_cast<uintptr_t>(id)));
+    state().realms.add(id, WTF::move(realm));
+    return id;
+}
+
 JSObject* createBridge(JSGlobalObject* globalObject)
 {
     VM& vm = globalObject->vm();
+    uint32_t realm = createRealm(globalObject);
     JSObject* bridge = constructEmptyObject(globalObject);
-    auto add = [&](ASCIILiteral name, unsigned length, NativeFunction function) {
-        bridge->putDirectNativeFunction(vm, globalObject, Identifier::fromString(vm, name), length, function, ImplementationVisibility::Private, NoIntrinsic, 0);
+    auto put = [&](ASCIILiteral name, JSObject* function) {
+        bridge->putDirect(vm, Identifier::fromString(vm, name), function);
     };
-    add("host"_s, 2, bridgeHost);
-    add("memoryCreate"_s, 2, bridgeMemoryCreate);
-    add("memoryBuffer"_s, 1, bridgeMemoryBuffer);
-    add("memoryGrow"_s, 2, bridgeMemoryGrow);
-    add("memoryRetain"_s, 1, bridgeMemoryRetain);
-    add("memoryRelease"_s, 1, bridgeMemoryRelease);
+    auto withRealm = [&](ASCIILiteral name, unsigned length, EncodedJSValue (*function)(JSGlobalObject*, CallFrame*, uint32_t)) {
+        put(name, JSNativeStdFunction::create(vm, globalObject, length, String(name), [function, realm](JSGlobalObject* globalObject, CallFrame* callFrame) {
+            return function(globalObject, callFrame, realm);
+        }));
+    };
+    withRealm("host"_s, 2, bridgeHost);
+    withRealm("memoryCreate"_s, 2, bridgeMemoryCreate);
+    withRealm("memoryBuffer"_s, 1, bridgeMemoryBuffer);
+    withRealm("memoryGrow"_s, 2, bridgeMemoryGrow);
+    withRealm("memoryRelease"_s, 1, bridgeMemoryRelease);
     return bridge;
 }
 
@@ -514,47 +665,62 @@ using namespace BrowserLite;
 
 // WebAssembly ruft eine Funktion aus JS auf (Import). Die Funktion ist ein
 // Thunk aus wasm-guest.js, der Paare bekommt und Paare zurueckgibt.
-extern "C" EMSCRIPTEN_KEEPALIVE int bl_wasm_call_guest(uint32_t id, const Slot* args, int count, Slot* out, int capacity)
+extern "C" EMSCRIPTEN_KEEPALIVE int bl_wasm_call_guest(uint32_t realmId, uint32_t id, const Slot* args, int count, Slot* out, int capacity)
 {
-    JSValue function = guestValue(id, false);
+    auto* realm = findRealm(realmId);
+    auto* guests = realm ? realm->guests.get() : nullptr;
+    if (!guests || capacity < 2)
+        return 0;
+    VM& vm = guests->vm();
+    JSLockHolder lock(vm);
+    JSValue function = guestValue(guests->realm(), realmId, id, false);
     auto* object = function.getObject();
-    if (!object || capacity < 2)
+    if (!object)
         return 0;
     JSGlobalObject* globalObject = object->realm();
-    VM& vm = globalObject->vm();
-    JSLockHolder lock(vm);
     auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
     JSArray* pairs = readPairs(globalObject, args, count);
     JSValue result;
-    if (pairs && !scope.exception()) {
+    if (callDepth >= maxCallDepth) {
+        auto throwScope = DECLARE_THROW_SCOPE(vm);
+        throwStackOverflowError(globalObject, throwScope);
+    } else if (pairs && !scope.exception()) {
         MarkedArgumentBuffer arguments;
         arguments.append(pairs);
         auto callData = JSC::getCallData(function);
+        callDepth++;
         result = JSC::call(globalObject, function, callData, jsUndefined(), arguments);
+        callDepth--;
     }
     Vector<char*> texts;
     int written = -1;
     if (!scope.exception())
-        written = writePairs(globalObject, result, out, texts);
+        written = writePairs(globalObject, realmId, result, out, texts);
     if (JSC::Exception* exception = scope.exception()) {
         scope.clearException();
-        // Ausnahme weiterreichen: Status 1 und der Wert
-        out[0] = { };
-        out[0].tag = Number;
-        out[0].number = 1;
-        out[1] = { };
-        out[1].tag = Guest;
-        out[1].word.lo = registerGuest(vm, exception->value());
-        written = 2;
+        // Ausnahme weiterreichen: Status 1 und der Wert. Die Realm kann
+        // waehrend des Aufrufs abgebaut worden sein.
+        written = 0;
+        if (auto* current = findRealm(realmId)) {
+            out[0] = { };
+            out[0].tag = Number;
+            out[0].number = 1;
+            out[1] = { };
+            out[1].tag = Guest;
+            out[1].a = realmId;
+            out[1].word.lo = registerGuest(globalObject, *current, exception->value());
+            written = 2;
+        }
     }
     for (auto* text : texts)
         free(text);
     return written;
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void bl_wasm_release_guest(uint32_t id)
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_wasm_release_guest(uint32_t realmId, uint32_t id)
 {
-    guestValue(id, true);
+    if (auto* realm = findRealm(realmId))
+        realm->released.append(id);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE int bl_wasm_memory_grow(int id, int delta)
@@ -562,4 +728,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE int bl_wasm_memory_grow(int id, int delta)
     if (delta < 0)
         return -1;
     return growMemory(id, static_cast<uint32_t>(delta));
+}
+
+// Eine Instanz auf der Host-Seite benutzt den Speicher, bis sie abgebaut wird
+// (ihre FinalizationRegistry). Freigeben braucht JSC nicht.
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_wasm_memory_retain(int id)
+{
+    if (auto* memory = memoryRecord(id))
+        memory->references++;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_wasm_memory_release(int id)
+{
+    releaseMemory(id);
 }

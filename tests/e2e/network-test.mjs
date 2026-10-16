@@ -7,7 +7,7 @@
 // alles in den Titel, den wir in der Oberflaeche wieder auslesen.
 // Danach die Fehlerfaelle: falsche Zertifikate (selbst signiert, falscher Name,
 // abgelaufen), Verbindung abgelehnt, unbekannter Name, eine Navigation, die
-// scheitert, und ein Relay, das waehrend der Sitzung neu startet.
+// scheitert, und ein Relay, das waehrend der Sitzung neu startet (auch navigator.onLine).
 //
 //   cd tests/e2e && npm ci && node network-test.mjs [engine-ordner]
 //
@@ -18,7 +18,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import zlib from 'node:zlib';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
-import { TIMEOUT, check, finish, freePort, launch, root, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, TIMEOUT, check, finish, freePort, launch, root, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
 timeLimit(TIMEOUT + 240000);
 
@@ -200,10 +200,14 @@ const stack = await startStack({ token: 'e2e-token-0123456789abcdef' });
 
 // ------------------------------------------------------------- Chromium
 
-const browser = await launch();
+const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
 await page.addInitScript((pem) => { window.__blExtraCA = pem; }, testCA);
-page.on('console', (msg) => console.log('[chromium]', msg.text()));
+const consoleLines = [];
+page.on('console', (msg) => {
+  consoleLines.push(msg.text());
+  console.log('[chromium]', msg.text());
+});
 page.on('pageerror', (error) => console.log('[chromium fehler]', error.message));
 
 async function waitTitle(prefix, timeout = TIMEOUT) {
@@ -247,7 +251,24 @@ check('rote Box gemalt', isRed(pixel), JSON.stringify(pixel));
 await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
 await page.waitForTimeout(1500);
 const pixelAfterLoss = await redBox();
-check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss), JSON.stringify(pixelAfterLoss));
+check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss) && consoleLines.some((line) => line.includes('GPU: WebGL-Kontext verloren')), JSON.stringify(pixelAfterLoss));
+
+// Der Browser stellt den Kontext wieder her: die Engine malt wieder auf der GPU
+async function waitUntil(condition, ms = 10000) {
+  for (const end = Date.now() + ms; Date.now() < end; await page.waitForTimeout(200)) {
+    if (await condition())
+      return true;
+  }
+  return false;
+}
+await page.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
+const gpuBack = await waitUntil(() => consoleLines.some((line) => line.includes('GPU: WebGL-Kontext wieder da')));
+await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = "rgb(0, 0, 230)"'));
+let pixelAfterRestore = null;
+const isBlue = (pixel) => pixel && pixel.b > 200 && pixel.r < 40 && pixel.g < 40;
+await waitUntil(async () => isBlue(pixelAfterRestore = await redBox()));
+check('GPU wiederhergestellt, Aenderung danach gemalt', gpuBack && isBlue(pixelAfterRestore), JSON.stringify(pixelAfterRestore));
+await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = ""'));
 
 // Favicon: die Engine laedt es selber und gibt es der Oberflaeche
 const icon = await page.waitForFunction(() => {
@@ -286,6 +307,16 @@ await stack.restartRelay();
 await go(`${siteURL}/page`);
 const again = await waitTitle('E2E|', 60000);
 check('Nach Neustart des Relays: Seite laedt wieder vom Server', again.startsWith('E2E|') && again.includes('|hallo-gzip|') && pageLoads() > loadsBefore, again);
+
+// Relay weg: die Seite ist offline (navigator.onLine, Ereignis offline), danach
+// verbindet die Oberflaeche selber neu und die Seite ist wieder online
+await page.evaluate(() => window.__blEval('for (const type of ["offline", "online"]) addEventListener(type, () => console.log("NETZ " + type + " " + navigator.onLine))'));
+await page.waitForTimeout(500);
+await stack.restartRelay();
+const wentOffline = await waitUntil(() => consoleLines.some((line) => line.includes('NETZ offline false')), 10000);
+check('Relay weg: Ereignis offline, navigator.onLine false', wentOffline);
+const cameBack = await waitUntil(() => consoleLines.some((line) => line.includes('NETZ online true')), 20000);
+check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
 
 await browser.close();
 finish();

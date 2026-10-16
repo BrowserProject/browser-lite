@@ -26,6 +26,9 @@ globalThis.Module = {
     nextFree += (size + 7) & ~7;
     return ptr;
   },
+  blAlloc(size) {
+    return this._malloc(size);
+  },
   _bl_recorder_flushed: (id) => flushed.push(id),
 };
 globalThis.stringToNewUTF8 = (text) => {

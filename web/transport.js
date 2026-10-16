@@ -9,6 +9,12 @@
 //   transport.openTCP(host, port) -> stream
 //   stream.send(Uint8Array), stream.close()
 //   stream.onopen(), stream.ondata(Uint8Array), stream.onclose(reason)
+//   stream.onsent(bytes): so viele Bytes aus send() haben den Puffer des
+//   Transports verlassen (Gegendruck fuer die Sockets der Engine)
+//   transport.connected, transport.onconnectedchange(connected): steht die
+//   Verbindung (navigator.onLine der Seiten)? Mit onconnectedchange baut der
+//   Transport eine verlorene Verbindung selber wieder auf, sonst erst beim
+//   naechsten openTCP.
 
 const NativeWebSocket = globalThis.WebSocket;
 
@@ -24,6 +30,7 @@ const STREAM_TCP = 0x01;
 
 const CLOSE_VOLUNTARY = 0x02;
 const HANDSHAKE_TIMEOUT = 15000;
+const RECONNECT_DELAY = 2000;
 
 export class WispTransport {
   constructor(url) {
@@ -33,6 +40,10 @@ export class WispTransport {
     this.bufferSize = 0;
     this.ready = null;
     this.ws = null;
+    this.connected = true;
+    this.onconnectedchange = null;
+    this.reconnectTimer = null;
+    this.lastDrop = 0;
   }
 
   // Jeder WebSocket hat seinen eigenen Handshake. Geht er zu, baut das
@@ -58,6 +69,13 @@ export class WispTransport {
         this.streams.clear();
         if (!handshake)
           reject(new Error('Wisp-Verbindung fehlgeschlagen: ' + this.url));
+        // Bricht eine stehende Verbindung ab (z.B. schliesst ein Proxy sie im
+        // Leerlauf), gleich einmal neu verbinden: offline erst, wenn das scheitert
+        if (handshake && this.onconnectedchange && Date.now() - this.lastDrop > RECONNECT_DELAY) {
+          this.lastDrop = Date.now();
+          this.connect().catch(() => {});
+        } else
+          this.setConnected(false);
       };
       // Antwortet etwas ohne Wisp (z.B. ein Proxy), nicht ewig warten
       const timeout = setTimeout(() => {
@@ -79,6 +97,7 @@ export class WispTransport {
           clearTimeout(timeout);
           this.bufferSize = view.getUint32(5, true);
           resolve();
+          this.setConnected(true);
         }
       };
       ws.onclose = onClosed;
@@ -86,6 +105,19 @@ export class WispTransport {
       ws.onerror = onClosed;
     });
     return this.ready;
+  }
+
+  setConnected(connected) {
+    if (!connected && this.onconnectedchange && !this.reconnectTimer) {
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect().catch(() => {});
+      }, RECONNECT_DELAY);
+    }
+    if (connected === this.connected)
+      return;
+    this.connected = connected;
+    this.onconnectedchange?.(connected);
   }
 
   openTCP(host, port) {
@@ -141,6 +173,7 @@ class WispStream {
     this.isClosed = false;
     this.onopen = null;
     this.ondata = null;
+    this.onsent = null;
     this.onclose = null;
   }
 
@@ -168,10 +201,15 @@ class WispStream {
 
   // Flusskontrolle: nur so viele Pakete senden, wie der Server erlaubt
   flush() {
+    let sent = 0;
     while (this.isOpen && this.queue.length && this.credit > 0) {
-      this.transport.sendPacket(DATA, this.id, this.queue.shift());
+      const data = this.queue.shift();
+      this.transport.sendPacket(DATA, this.id, data);
       this.credit--;
+      sent += data.byteLength;
     }
+    if (sent)
+      this.onsent?.(sent);
   }
 
   received(data) {

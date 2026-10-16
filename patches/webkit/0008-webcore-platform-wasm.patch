@@ -871,10 +871,10 @@ index 0000000000..21f20a994d
 +#endif // !USE(COORDINATED_GRAPHICS)
 diff --git a/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp b/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp
 new file mode 100644
-index 0000000000..111c7400f0
+index 0000000000..52a8f422c9
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/MIMETypeRegistryWasm.cpp
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,168 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -904,38 +904,107 @@ index 0000000000..111c7400f0
 +
 +namespace WebCore {
 +
++// Endung <-> Typ wie in Chromium und Firefox. Fuer eine Endung gilt der erste
++// Eintrag, fuer einen Typ die erste Endung (Dateinamen von Downloads).
 +static const std::initializer_list<TypeExtensionPair>& platformMediaTypes()
 +{
 +    static std::initializer_list<TypeExtensionPair> platformMediaTypes = {
-+        { "image/bmp"_s, "bmp"_s },
-+        { "text/css"_s, "css"_s },
-+        { "image/gif"_s, "gif"_s },
-+        { "text/html"_s, "htm"_s },
++        // Web
 +        { "text/html"_s, "html"_s },
-+        { "image/x-icon"_s, "ico"_s },
-+        { "image/jpeg"_s, "jpeg"_s },
-+        { "image/jpeg"_s, "jpg"_s },
++        { "text/html"_s, "htm"_s },
++        { "application/xhtml+xml"_s, "xhtml"_s },
++        { "text/css"_s, "css"_s },
 +        { "text/javascript"_s, "js"_s },
 +        { "text/javascript"_s, "mjs"_s },
 +        { "application/json"_s, "json"_s },
++        { "application/manifest+json"_s, "webmanifest"_s },
 +        { "application/wasm"_s, "wasm"_s },
-+        { "image/webp"_s, "webp"_s },
-+        { "font/woff"_s, "woff"_s },
-+        { "font/woff2"_s, "woff2"_s },
-+        { "font/ttf"_s, "ttf"_s },
-+        { "font/otf"_s, "otf"_s },
-+        { "application/pdf"_s, "pdf"_s },
-+        { "image/png"_s, "png"_s },
-+        { "application/rss+xml"_s, "rss"_s },
-+        { "image/svg+xml"_s, "svg"_s },
-+        { "text/plain"_s, "text"_s },
-+        { "text/plain"_s, "txt"_s },
-+        { "text/vnd.wap.wml"_s, "wml"_s },
-+        { "application/vnd.wap.wmlc"_s, "wmlc"_s },
-+        { "image/x-xbitmap"_s, "xbm"_s },
-+        { "application/xhtml+xml"_s, "xhtml"_s },
 +        { "text/xml"_s, "xml"_s },
 +        { "text/xsl"_s, "xsl"_s },
++        { "application/rss+xml"_s, "rss"_s },
++        { "application/atom+xml"_s, "atom"_s },
++        { "text/vnd.wap.wml"_s, "wml"_s },
++        { "application/vnd.wap.wmlc"_s, "wmlc"_s },
++        // Text
++        { "text/plain"_s, "txt"_s },
++        { "text/plain"_s, "text"_s },
++        { "text/plain"_s, "log"_s },
++        { "text/csv"_s, "csv"_s },
++        { "text/tab-separated-values"_s, "tsv"_s },
++        { "text/markdown"_s, "md"_s },
++        { "text/markdown"_s, "markdown"_s },
++        { "text/calendar"_s, "ics"_s },
++        { "text/vcard"_s, "vcf"_s },
++        { "text/vtt"_s, "vtt"_s },
++        { "application/rtf"_s, "rtf"_s },
++        // Bilder
++        { "image/png"_s, "png"_s },
++        { "image/jpeg"_s, "jpg"_s },
++        { "image/jpeg"_s, "jpeg"_s },
++        { "image/jpeg"_s, "jfif"_s },
++        { "image/gif"_s, "gif"_s },
++        { "image/webp"_s, "webp"_s },
++        { "image/avif"_s, "avif"_s },
++        { "image/apng"_s, "apng"_s },
++        { "image/svg+xml"_s, "svg"_s },
++        { "image/svg+xml"_s, "svgz"_s },
++        { "image/bmp"_s, "bmp"_s },
++        { "image/x-icon"_s, "ico"_s },
++        { "image/tiff"_s, "tif"_s },
++        { "image/tiff"_s, "tiff"_s },
++        { "image/heic"_s, "heic"_s },
++        { "image/heif"_s, "heif"_s },
++        { "image/jxl"_s, "jxl"_s },
++        { "image/x-xbitmap"_s, "xbm"_s },
++        // Video
++        { "video/mp4"_s, "mp4"_s },
++        { "video/mp4"_s, "m4v"_s },
++        { "video/webm"_s, "webm"_s },
++        { "video/ogg"_s, "ogv"_s },
++        { "video/quicktime"_s, "mov"_s },
++        { "video/x-matroska"_s, "mkv"_s },
++        { "video/mpeg"_s, "mpeg"_s },
++        { "video/mpeg"_s, "mpg"_s },
++        { "video/3gpp"_s, "3gp"_s },
++        { "video/x-msvideo"_s, "avi"_s },
++        // Ton
++        { "audio/mpeg"_s, "mp3"_s },
++        { "audio/mp4"_s, "m4a"_s },
++        { "audio/aac"_s, "aac"_s },
++        { "audio/ogg"_s, "ogg"_s },
++        { "audio/ogg"_s, "oga"_s },
++        { "audio/ogg"_s, "opus"_s },
++        { "audio/webm"_s, "weba"_s },
++        { "audio/wav"_s, "wav"_s },
++        { "audio/flac"_s, "flac"_s },
++        { "audio/midi"_s, "mid"_s },
++        { "audio/midi"_s, "midi"_s },
++        // Schriften
++        { "font/woff2"_s, "woff2"_s },
++        { "font/woff"_s, "woff"_s },
++        { "font/ttf"_s, "ttf"_s },
++        { "font/otf"_s, "otf"_s },
++        // Dokumente
++        { "application/pdf"_s, "pdf"_s },
++        { "application/msword"_s, "doc"_s },
++        { "application/vnd.openxmlformats-officedocument.wordprocessingml.document"_s, "docx"_s },
++        { "application/vnd.ms-excel"_s, "xls"_s },
++        { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"_s, "xlsx"_s },
++        { "application/vnd.ms-powerpoint"_s, "ppt"_s },
++        { "application/vnd.openxmlformats-officedocument.presentationml.presentation"_s, "pptx"_s },
++        { "application/vnd.oasis.opendocument.text"_s, "odt"_s },
++        { "application/vnd.oasis.opendocument.spreadsheet"_s, "ods"_s },
++        { "application/vnd.oasis.opendocument.presentation"_s, "odp"_s },
++        { "application/epub+zip"_s, "epub"_s },
++        // Archive
++        { "application/zip"_s, "zip"_s },
++        { "application/gzip"_s, "gz"_s },
++        { "application/gzip"_s, "tgz"_s },
++        { "application/x-tar"_s, "tar"_s },
++        { "application/x-bzip2"_s, "bz2"_s },
++        { "application/x-xz"_s, "xz"_s },
++        { "application/x-7z-compressed"_s, "7z"_s },
++        { "application/vnd.rar"_s, "rar"_s },
 +    };
 +    return platformMediaTypes;
 +}
@@ -976,10 +1045,10 @@ index 0000000000..111c7400f0
 +} // namespace WebCore
 diff --git a/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
 new file mode 100644
-index 0000000000..8b5ba6fc77
+index 0000000000..7eb45474b2
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/NetworkStateNotifierWasm.cpp
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,62 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1008,18 +1077,37 @@ index 0000000000..8b5ba6fc77
 +#include "config.h"
 +#include "NetworkStateNotifier.h"
 +
++#include "WasmPlatform.h"
++#include <wtf/NeverDestroyed.h>
++
 +namespace WebCore {
 +
-+// Online/Offline: der Embedder meldet spaeter navigator.onLine vom Host.
-+// Bis dahin gelten wir immer als online.
++// Den Zustand meldet der Embedder (WasmPlatform::setOnLine)
++static bool hostOnLine = true;
++
++static Function<void()>& onLineChanged()
++{
++    static NeverDestroyed<Function<void()>> callback;
++    return callback;
++}
++
++void WasmPlatform::setOnLine(bool onLine)
++{
++    hostOnLine = onLine;
++    if (auto& callback = onLineChanged())
++        callback();
++}
 +
 +void NetworkStateNotifier::updateStateWithoutNotifying()
 +{
-+    m_isOnLine = true;
++    m_isOnLine = hostOnLine;
 +}
 +
 +void NetworkStateNotifier::startObserving()
 +{
++    onLineChanged() = [] {
++        singleton().updateState();
++    };
 +}
 +
 +} // namespace WebCore
@@ -1766,10 +1854,10 @@ index 0000000000..7660c42e7f
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..0e9c546f77
+index 0000000000..2004a8263d
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,128 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1847,6 +1935,10 @@ index 0000000000..0e9c546f77
 +
 +WEBCORE_EXPORT void setUserAgent(const String&);
 +WEBCORE_EXPORT String userAgent();
++
++// Online-Zustand der Seiten (navigator.onLine, online/offline): Netz des
++// Host-Browsers und Verbindung zum Relay. Am Anfang online.
++WEBCORE_EXPORT void setOnLine(bool);
 +
 +// Clipboard: Inhalt als Paare (MIME-Typ, Text). Der Embedder wird bei jedem
 +// Schreiben informiert und kann den Inhalt an den Host weitergeben.

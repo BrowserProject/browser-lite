@@ -614,27 +614,9 @@ private:
                 allow(true);
                 return;
             }
+            // "camera-microphone" gilt fuer beide einzeln (DeviceClients.cpp)
             String kind = audio && video ? "camera-microphone"_s : video ? "camera"_s : "microphone"_s;
-            if (audio && video) {
-                auto camera = storedPermission("camera"_s, originString);
-                auto microphone = storedPermission("microphone"_s, originString);
-                if (camera == PermissionDecision::Denied || microphone == PermissionDecision::Denied) {
-                    allow(false);
-                    return;
-                }
-                if (camera == PermissionDecision::Granted && microphone == PermissionDecision::Granted) {
-                    allow(true);
-                    return;
-                }
-            }
-            requestDevicePermission(viewId, kind, originString, [allow = WTF::move(allow), kind, originString](bool granted) mutable {
-                if (kind == "camera-microphone"_s) {
-                    auto decision = granted ? PermissionDecision::Granted : PermissionDecision::Denied;
-                    setStoredPermission("camera"_s, originString, decision);
-                    setStoredPermission("microphone"_s, originString, decision);
-                }
-                allow(granted);
-            });
+            requestDevicePermission(viewId, kind, originString, WTF::move(allow));
         }, request.request(), saltsFor(originString));
     }
 
@@ -896,9 +878,11 @@ EM_JS(void, blJsSinkClose, (int id), {
 
 // Bilder/Ton einer Spur der Seite (Canvas, Web Audio, ...) an den Host: dort
 // schreibt engine/js/webcodecs-host.js sie in einen MediaStreamTrackGenerator,
-// den web/webrtc.js an RTCPeerConnection gibt
+// den web/webrtc.js an RTCPeerConnection gibt. Endet die Quelle, geht die
+// Senke von selber weg (sonst mit "sink-stop" aus dem Polyfill).
 class TrackSink final
     : public ThreadSafeRefCounted<TrackSink>
+    , public RealtimeMediaSourceObserver
     , public RealtimeMediaSource::VideoFrameObserver
     , public RealtimeMediaSource::AudioSampleObserver
     , public CanMakeCheckedPtr<TrackSink> {
@@ -914,6 +898,7 @@ public:
         if (m_stopped)
             return;
         m_stopped = true;
+        m_source->removeObserver(*this);
         if (m_source->type() == RealtimeMediaSource::Type::Video)
             m_source->removeVideoFrameObserver(*this);
         else
@@ -927,11 +912,14 @@ private:
         , m_source(source)
         , m_start(MonotonicTime::now())
     {
+        source.addObserver(*this);
         if (source.type() == RealtimeMediaSource::Type::Video)
             source.addVideoFrameObserver(*this);
         else
             source.addAudioSampleObserver(*this);
     }
+
+    void sourceStopped() final;
 
     uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
     uint32_t checkedPtrCountWithoutThreadCheck() const final { return CanMakeCheckedPtr::checkedPtrCountWithoutThreadCheck(); }
@@ -984,6 +972,13 @@ HashMap<int, Ref<TrackSink>>& sinks()
 {
     static NeverDestroyed<HashMap<int, Ref<TrackSink>>> map;
     return map;
+}
+
+void TrackSink::sourceStopped()
+{
+    Ref protectedThis { *this };
+    sinks().remove(m_id);
+    stop();
 }
 
 int hostCaptureId(RealtimeMediaSource& source)
@@ -1177,13 +1172,6 @@ EMSCRIPTEN_KEEPALIVE void bl_capture_audio(int id, float* samples, int frames, i
         Ref { *source }->deliver(samples, frames, channels, sampleRate, timestamp);
 }
 
-// Aus engine/js/webcodecs-host.js (Engine-Thread): der Generator im Host ist weg
-EMSCRIPTEN_KEEPALIVE void bl_sink_closed(int id)
-{
-    if (auto sink = BrowserLite::sinks().take(id))
-        sink->stop();
-}
-
 // Von der Oberflaeche (Haupt-Thread): entfernte WebRTC-Spur stumm/wieder da
 // (wie Chrome: stumm, solange keine Pakete kommen)
 EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
@@ -1196,7 +1184,8 @@ EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
     });
 }
 
-// Von der Oberflaeche (Haupt-Thread): Host-Kamera verweigert oder beendet
+// Von der Oberflaeche (Haupt-Thread): Host-Kamera verweigert oder beendet.
+// failed auch aus engine/js/webcodecs-host.js, wenn keine Bilder mehr ankommen.
 EMSCRIPTEN_KEEPALIVE void bl_capture_failed(int id)
 {
     BrowserLite::runOnEngineThread([id] {

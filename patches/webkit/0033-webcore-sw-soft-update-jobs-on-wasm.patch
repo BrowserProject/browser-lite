@@ -1,0 +1,144 @@
+diff --git a/Source/WebCore/workers/service/server/SWServer.cpp b/Source/WebCore/workers/service/server/SWServer.cpp
+index 74acb473d..d12a89838 100644
+--- a/Source/WebCore/workers/service/server/SWServer.cpp
++++ b/Source/WebCore/workers/service/server/SWServer.cpp
+@@ -661,8 +661,10 @@ void SWServer::scheduleJob(ServiceWorkerJobData&& jobData)
+                 if (jobData.isEquivalent(lastJob)) {
+                     // FIXME: Per the spec, check if this job is equivalent to the last job on the queue.
+                     // If it is, stack it along with that job. For now, we just make sure to not call soft-update too often.
+-                    if (jobData.type == ServiceWorkerJobType::Update && jobData.connectionIdentifier() == Process::identifier())
++                    if (jobData.type == ServiceWorkerJobType::Update && protectedThis->isSoftUpdateJob(jobData)) {
++                        protectedThis->didFinishJob(jobData);
+                         return;
++                    }
+                 }
+                 jobQueue->enqueueJob(WTF::move(jobData));
+                 if (jobQueue->size() == 1)
+@@ -687,7 +689,7 @@ void SWServer::scheduleUnregisterJob(ServiceWorkerJobDataIdentifier jobDataIdent
+ void SWServer::rejectJob(const ServiceWorkerJobData& jobData, const ExceptionData& exceptionData)
+ {
+     LOG(ServiceWorker, "Rejected ServiceWorker job %s in server", jobData.identifier().loggingString().utf8().data());
+-    RefPtr connection = m_connections.get(jobData.connectionIdentifier());
++    RefPtr connection = connectionForJob(jobData);
+     if (!connection)
+         return;
+ 
+@@ -697,7 +699,7 @@ void SWServer::rejectJob(const ServiceWorkerJobData& jobData, const ExceptionDat
+ void SWServer::resolveRegistrationJob(const ServiceWorkerJobData& jobData, const ServiceWorkerRegistrationData& registrationData, ShouldNotifyWhenResolved shouldNotifyWhenResolved)
+ {
+     LOG(ServiceWorker, "Resolved ServiceWorker job %s in server with registration %s", jobData.identifier().loggingString().utf8().data(), registrationData.identifier.loggingString().utf8().data());
+-    RefPtr connection = m_connections.get(jobData.connectionIdentifier());
++    RefPtr connection = connectionForJob(jobData);
+     if (!connection) {
+         if (shouldNotifyWhenResolved == ShouldNotifyWhenResolved::Yes && jobData.connectionIdentifier() == Process::identifier())
+             didResolveRegistrationPromise(nullptr, registrationData.key);
+@@ -716,6 +718,35 @@ void SWServer::resolveUnregistrationJob(const ServiceWorkerJobData& jobData, con
+     connection->resolveUnregistrationJobInClient(jobData.identifier().jobIdentifier, registrationKey, unregistrationResult);
+ }
+ 
++bool SWServer::isSoftUpdateJob(const ServiceWorkerJobData& jobData) const
++{
++    if (jobData.connectionIdentifier() != Process::identifier())
++        return false;
++#if PLATFORM(WASM)
++    return m_softUpdateJobs.contains(jobData.identifier().jobIdentifier);
++#else
++    return true;
++#endif
++}
++
++RefPtr<SWServer::Connection> SWServer::connectionForJob(const ServiceWorkerJobData& jobData) const
++{
++#if PLATFORM(WASM)
++    if (isSoftUpdateJob(jobData))
++        return nullptr;
++#endif
++    return m_connections.get(jobData.connectionIdentifier());
++}
++
++void SWServer::didFinishJob(const ServiceWorkerJobData& jobData)
++{
++#if PLATFORM(WASM)
++    m_softUpdateJobs.remove(jobData.identifier().jobIdentifier);
++#else
++    UNUSED_PARAM(jobData);
++#endif
++}
++
+ ResourceRequest SWServer::createScriptRequest(const URL& url, const ServiceWorkerJobData& jobData, SWServerRegistration& registration)
+ {
+     ResourceRequest request { URL { url } };
+@@ -747,7 +778,7 @@ void SWServer::startScriptFetch(const ServiceWorkerJobData& jobData, SWServerReg
+     //   current time minus registration's last update check time is greater than 86400.
+     bool shouldRefreshCache = registration.updateViaCache() != ServiceWorkerUpdateViaCache::All || (registration.getNewestWorker() && registration.isStale());
+ 
+-    RefPtr connection = m_connections.get(jobData.connectionIdentifier());
++    RefPtr connection = connectionForJob(jobData);
+     if (connection) {
+         connection->startScriptFetchInClient(jobData.identifier().jobIdentifier, jobData.registrationKey(), shouldRefreshCache ? FetchOptions::Cache::NoCache : FetchOptions::Cache::Default);
+         return;
+@@ -1858,6 +1889,9 @@ void SWServer::softUpdate(SWServerRegistration& registration)
+     jobData.scopeURL = registration.scopeURLWithoutFragment();
+     jobData.workerType = newestWorker->type();
+     jobData.type = ServiceWorkerJobType::Update;
++#if PLATFORM(WASM)
++    m_softUpdateJobs.add(jobData.identifier().jobIdentifier);
++#endif
+     scheduleJob(WTF::move(jobData));
+ }
+ 
+diff --git a/Source/WebCore/workers/service/server/SWServer.h b/Source/WebCore/workers/service/server/SWServer.h
+index 103ffadd0..5c07e6f60 100644
+--- a/Source/WebCore/workers/service/server/SWServer.h
++++ b/Source/WebCore/workers/service/server/SWServer.h
+@@ -190,6 +190,7 @@ public:
+     void resolveUnregistrationJob(const ServiceWorkerJobData&, const ServiceWorkerRegistrationKey&, bool unregistrationResult);
+     void startScriptFetch(const ServiceWorkerJobData&, SWServerRegistration&);
+     void refreshImportedScripts(const ServiceWorkerJobData&, SWServerRegistration&, const Vector<URL>&, const std::optional<ProcessIdentifier>&);
++    void didFinishJob(const ServiceWorkerJobData&);
+ 
+     void updateWorker(const ServiceWorkerJobDataIdentifier&, const std::optional<ProcessIdentifier>&, SWServerRegistration&, const URL&, const ScriptBuffer&, const CertificateInfo&, const ContentSecurityPolicyResponseHeaders&, const CrossOriginEmbedderPolicy&, const String& referrerPolicy, WorkerType, MemoryCompactRobinHoodHashMap<URL, ServiceWorkerContextData::ImportedScript>&&, std::optional<ScriptExecutionContextIdentifier> serviceWorkerPageIdentifier);
+     void fireInstallEvent(SWServerWorker&);
+@@ -329,6 +330,9 @@ private:
+ 
+     void didResolveRegistrationPromise(Connection*, const ServiceWorkerRegistrationKey&);
+ 
++    bool isSoftUpdateJob(const ServiceWorkerJobData&) const;
++    RefPtr<Connection> connectionForJob(const ServiceWorkerJobData&) const;
++
+     void addClientServiceWorkerRegistration(Connection&, ServiceWorkerRegistrationIdentifier);
+     void removeClientServiceWorkerRegistration(Connection&, ServiceWorkerRegistrationIdentifier);
+     void registerServiceWorkerConnection(Connection&, ServiceWorkerIdentifier);
+@@ -364,6 +368,11 @@ private:
+     WeakPtr<SWServerDelegate> m_delegate;
+ 
+     HashMap<SWServerConnectionIdentifier, Ref<Connection>> m_connections;
++#if PLATFORM(WASM)
++    // Seite und Server teilen sich die Prozess-Kennung, darum merkt sich der
++    // Server seine Hintergrund-Aktualisierungen
++    HashSet<ServiceWorkerJobIdentifier> m_softUpdateJobs;
++#endif
+     HashMap<ServiceWorkerRegistrationKey, WeakRef<SWServerRegistration>> m_scopeToRegistrationMap;
+     HashMap<ServiceWorkerRegistrationIdentifier, Ref<SWServerRegistration>> m_registrations;
+     HashMap<ServiceWorkerRegistrationKey, std::unique_ptr<SWServerJobQueue>> m_jobQueues;
+diff --git a/Source/WebCore/workers/service/server/SWServerJobQueue.cpp b/Source/WebCore/workers/service/server/SWServerJobQueue.cpp
+index a55017417..3e696e49a 100644
+--- a/Source/WebCore/workers/service/server/SWServerJobQueue.cpp
++++ b/Source/WebCore/workers/service/server/SWServerJobQueue.cpp
+@@ -424,6 +424,7 @@ void SWServerJobQueue::finishCurrentJob()
+ {
+     ASSERT(!m_jobTimer.isActive());
+ 
++    protect(server())->didFinishJob(firstJob());
+     m_jobQueue.removeFirst();
+     if (!m_jobQueue.isEmpty())
+         runNextJob();
+@@ -435,6 +436,8 @@ void SWServerJobQueue::removeAllJobsMatching(NOESCAPE const Function<bool(Servic
+     bool didRemoveFirstJob = false;
+     m_jobQueue.removeAllMatching([&](auto& job) {
+         bool shouldRemove = matches(job);
++        if (shouldRemove)
++            protect(server())->didFinishJob(job);
+         if (isFirst) {
+             isFirst = false;
+             if (shouldRemove)

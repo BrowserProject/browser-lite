@@ -110,9 +110,9 @@ bool isLost()
     return s_lost.load(std::memory_order_acquire);
 }
 
-void markLost()
+void setLost(bool lost)
 {
-    s_lost.store(true, std::memory_order_release);
+    s_lost.store(lost, std::memory_order_release);
 }
 
 } // namespace BrowserLite::Compositor
