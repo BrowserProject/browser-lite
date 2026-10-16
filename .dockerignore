@@ -1,0 +1,6 @@
+# Nur was das Dockerfile braucht
+*
+!relay/package.json
+!relay/package-lock.json
+!relay/*.mjs
+!build/site/

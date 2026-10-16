@@ -97,9 +97,17 @@ cd relay && npm ci && RELAY_TOKEN=lokal-test-token-123456 node server.mjs
 # und die Seite mit ?relay=ws://localhost:5001/wisp/&token=lokal-test-token-123456 oeffnen
 ```
 
-## Relay und Hosting (VPS)
+Wie im Container (fertige Seite und Relay auf einem Port):
 
-Siehe [relay/README.md](../relay/README.md).
+```bash
+tools/package-site.sh build/webcore/bin build/site
+RELAY_TOKEN=lokal-test-token-123456 PORT=8080 SITE_DIR=build/site node relay/server.mjs
+# http://localhost:8080/?token=lokal-test-token-123456
+```
+
+## Container und Deploy
+
+Siehe [deploy/README.md](../deploy/README.md).
 
 ## CI
 
@@ -115,6 +123,11 @@ Siehe [relay/README.md](../relay/README.md).
 | deps | Dependencies bauen (Cache) + Smoke-Test, sysroot als Artefakt |
 | jsc | JavaScriptCore + Tests (inkl. GC-Stresstest) |
 | engine | WebCore + Engine bauen, Render-Test, Engine als Artefakt |
+| e2e | Oberflaeche + Engine + Relay in Chromium (Playwright) |
+| kompatibilitaet | echte Seiten laden, nur zur Info |
+
+Nach gruener CI auf `main` baut `.github/workflows/deploy.yml` das Image und startet es auf
+dem Server neu ([deploy/README.md](../deploy/README.md)).
 
 Der Engine-Job bricht nach 320 Minuten selber ab und speichert ccache. Der naechste Lauf
 macht dann mit dem Cache weiter (GitHub erlaubt hoechstens 6 Stunden pro Job).

@@ -1,0 +1,15 @@
+# browser-lite auf dem Server. Der Deploy-Workflow setzt IMAGE (immer per Digest).
+# RELAY_TOKEN steht in .env neben dieser Datei (nie im Repo).
+services:
+  browser-lite:
+    image: ${IMAGE:?IMAGE fehlt}
+    restart: unless-stopped
+    environment:
+      RELAY_TOKEN: ${RELAY_TOKEN:?RELAY_TOKEN fehlt in .env}
+    ports:
+      - "${PORT:-8080}:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local

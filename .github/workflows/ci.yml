@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: shellcheck
-        run: shellcheck -x tools/*.sh deps/*.sh deps/recipes/*.sh
+        run: shellcheck -x tools/*.sh deps/*.sh deps/recipes/*.sh deploy/*.sh
       - name: versions.env pruefen
         run: |
           # Nur KEY=VALUE oder Kommentare, keine Leerzeichen im Wert

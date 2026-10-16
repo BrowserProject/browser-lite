@@ -48,7 +48,7 @@ kommen zuerst.
 ## Phase 5: Netzwerk ueber Wisp  (fertig, lokal getestet)
 - [x] curl-Backend von WebCore ueber eigene LoaderStrategy, Sockets ueber Emscripten SOCKFS
   -> `TransportSocket` -> Wisp-Stream (`web/transport.js`)
-- [x] Relay (`relay/`) mit Token, ohne private Netze, nur Web-Ports; Caddy + docker-compose
+- [x] Relay (`relay/`) mit Token, ohne private Netze, nur Web-Ports; heute ein Container mit der Seite (deploy/)
 - [x] e2e in Chromium (`tests/e2e/network-test.mjs`): Redirect, Cookie, Skript, fetch mit gzip
 - [x] Echte HTTPS-Seiten (`tests/e2e/site-test.mjs`): example.com, Wikipedia, SRF, Google,
   Hacker News und GitHub laden und werden richtig gemalt

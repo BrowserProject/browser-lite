@@ -19,7 +19,7 @@ Haupt-Thread (Seite browser-lite)            Engine-Worker (WASM, pthreads)
                                              WispTransport (jetzt) / WireGuardTransport (spaeter)
                                                                 | WebSocket (wss)
                                                                 v
-                                             VPS: Caddy (Static + COOP/COEP) + Wisp-Relay (mit Auth)
+                                             Server: ein Container (Seite + COOP/COEP + Wisp-Relay mit Auth)
 ```
 
 ## Die Teile
@@ -271,6 +271,8 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
   Videos duerfen sofort laufen (wie in einem normalen Browser).
 
 ### Hosting
-Auf dem VPS mit Docker Compose: Caddy (HTTPS, die Header oben, Brotli) und das Wisp-Relay.
-Das Relay braucht Auth (sonst nutzen fremde Leute den Server als Proxy) und blockiert
-private IP-Bereiche.
+Ein Container (`Dockerfile`, `relay/server.mjs`): liefert die Seite mit den Headern oben
+und vorkomprimiert (Brotli) aus und ist das Wisp-Relay. HTTPS kommt von einem Proxy davor
+(Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay braucht Auth (sonst
+nutzen fremde Leute den Server als Proxy) und blockiert private IP-Bereiche. Ablauf in
+[deploy/README.md](../deploy/README.md).

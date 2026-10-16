@@ -1,80 +1,140 @@
 name: Deploy
 
-# Wenn die CI auf dem Standard-Branch gruen ist (oder von Hand): Seite + Relay auf den VPS.
-# Noetige Secrets (Settings -> Secrets and variables -> Actions):
-#   VPS_HOST      z.B. 203.0.113.10 oder browser.example.com
-#   VPS_USER      SSH-Benutzer (braucht Docker-Rechte)
-#   VPS_SSH_KEY   privater SSH-Schluessel (ed25519)
-#   VPS_PATH      optional, Standard /opt/browser-lite
-# Auf dem VPS muss in $VPS_PATH/.env DOMAIN und RELAY_TOKEN stehen (siehe relay/README.md).
+# Nach gruener CI auf main (oder von Hand): Image mit Relay + Seite bauen, testen, nach
+# ghcr.io pushen und auf dem Server neu starten. Der Server ist der Self-hosted Runner mit
+# Label browser-lite-deploy (deploy/setup-proxmox.sh), RELAY_TOKEN liegt dort in
+# /opt/browser-lite/.env.
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       run_id:
-        description: "ID des CI-Laufs, dessen Engine deployt werden soll"
-        required: true
+        description: "ID eines CI-Laufs auf main (leer = letzter gruener)"
+        required: false
 
 permissions:
   contents: read
   actions: read
+  packages: write
 
 concurrency:
   group: deploy
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    # Nur der Standard-Branch des Repos wird deployt (Einstellungen -> Default branch)
+  image:
+    name: Image bauen + testen
+    # Nur Pushes aus diesem Repo (ein Fork-Branch "main" darf nie deployen)
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == github.event.repository.default_branch)
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
-    env:
-      VPS_HOST: ${{ secrets.VPS_HOST }}
-      VPS_USER: ${{ secrets.VPS_USER }}
-      VPS_PATH: ${{ secrets.VPS_PATH }}
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+      sha: ${{ steps.run.outputs.sha }}
     steps:
-      - name: Secrets vorhanden?
-        id: check
+      - name: CI-Lauf bestimmen
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
         run: |
-          if [ -z "$VPS_HOST" ] || [ -z "$VPS_USER" ]; then
-            echo "::notice::VPS_HOST/VPS_USER/VPS_SSH_KEY nicht gesetzt, Deploy wird uebersprungen."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$RUN_ID" ]; then
+            RUN_ID="$(gh run list -R "$GITHUB_REPOSITORY" -w CI -b main -e push -s success -L 1 --json databaseId --jq '.[0].databaseId')"
           fi
+          read -r branch sha < <(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json headBranch,headSha --jq '.headBranch + " " + .headSha')
+          [ "$branch" = main ] || { echo "::error::CI-Lauf $RUN_ID ist nicht von main ($branch)"; exit 1; }
+          echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v5
-        if: steps.check.outputs.ok == 'true'
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ steps.run.outputs.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
       - name: Engine-Artefakt holen
-        if: steps.check.outputs.ok == 'true'
         uses: actions/download-artifact@v7
         with:
           name: engine
           path: engine-build
-          run-id: ${{ inputs.run_id || github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
       - name: Seite zusammenbauen
-        if: steps.check.outputs.ok == 'true'
-        run: tools/package-site.sh engine-build site
-      - name: Auf den VPS kopieren und starten
-        if: steps.check.outputs.ok == 'true'
-        env:
-          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: tools/package-site.sh engine-build build/site
+      - name: Image bauen
+        id: build
         run: |
-          target="${VPS_PATH:-/opt/browser-lite}"
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh_cmd="ssh -i ~/.ssh/id_deploy -o BatchMode=yes"
-          $ssh_cmd "$VPS_USER@$VPS_HOST" "mkdir -p '$target/www'"
-          rsync -az --delete -e "$ssh_cmd" --exclude node_modules --exclude .env --exclude www relay/ "$VPS_USER@$VPS_HOST:$target/"
-          rsync -az --delete -e "$ssh_cmd" site/ "$VPS_USER@$VPS_HOST:$target/www/"
-          $ssh_cmd "$VPS_USER@$VPS_HOST" "cd '$target' && test -f .env && docker compose up -d --build"
+          source versions.env
+          tag="$SITE_IMAGE:${{ steps.run.outputs.sha }}"
+          docker build -t "$tag" -t "$SITE_IMAGE:main" \
+            --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
+            --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Image testen (Seite, Header, Kompression, Relay-Token)
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          docker run -d --name smoke --read-only --cap-drop ALL -p 8080:8080 -e RELAY_TOKEN=smoke-token-0123456789 "$TAG"
+          trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
+          timeout 30 sh -c 'until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done'
+          curl -fsI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi '^cross-origin-embedder-policy: require-corp'
+          wasm="$(cd build/site && ls engine/*/engine.wasm)"
+          curl -fsI -H 'Accept-Encoding: br' "http://127.0.0.1:8080/$wasm" | tee /dev/stderr | grep -qi '^content-encoding: br'
+          code="$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            'http://127.0.0.1:8080/wisp/?token=falsch')"
+          [ "$code" = 403 ] || { echo "Relay ohne gueltigen Token: $code statt 403"; exit 1; }
+      - name: Bei ghcr.io anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image pushen
+        id: push
+        run: |
+          source versions.env
+          docker push "${{ steps.build.outputs.tag }}"
+          docker push "$SITE_IMAGE:main"
+          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "${{ steps.build.outputs.tag }}")" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Auf dem Server neu starten
+    needs: image
+    runs-on: [self-hosted, browser-lite-deploy]
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
+      DIR: /opt/browser-lite
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.image.outputs.sha }}
+          sparse-checkout: deploy
+      - name: Bei ghcr.io anmelden
+        env:
+          TOKEN: ${{ github.token }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Neu starten
+        run: |
+          install -m 644 deploy/compose.yml "$DIR/compose.yml"
+          printf 'IMAGE=%s\n' "$IMAGE" > "$DIR/image.env"
+          cd "$DIR"
+          docker compose -p browser-lite --env-file .env --env-file image.env pull -q
+          docker compose -p browser-lite --env-file .env --env-file image.env up -d --wait --wait-timeout 60
+          curl -fsS http://127.0.0.1:8080/healthz
+          running="$(docker inspect --format '{{.Image}}' browser-lite-browser-lite-1)"
+          [ "$running" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")" ] || { echo "Falsches Image laeuft"; exit 1; }
+      - name: Alte Images entfernen
+        run: docker image prune -af
+      - name: Abmelden
+        if: always()
+        run: docker logout ghcr.io
