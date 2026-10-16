@@ -102,6 +102,8 @@ kommen zuerst.
   den UI-Thread, alte IDBFS-Daten werden einmal uebernommen
 
 ## Phase 8: Performance + Kompatibilitaet  (angefangen)
+Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
+
 - [x] Auslieferung: Engine in `engine/<version>/`, Funktionsnamen raus, vorkomprimiert
   (`tools/optimize-site.mjs`, engine.wasm 120 MB -> 21 MB brotli)
 - [x] ICU-Datenfilter (33 MB -> 19 MB): nur noetige Konverter, Anzeigenamen nur fuer ca. 50 Sprachen

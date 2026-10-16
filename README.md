@@ -69,6 +69,7 @@ Mit `?debug=1` zeigt die Engine in der Konsole, was sie macht (Zeiten, GC, Netzw
 | [docs/architektur.md](docs/architektur.md) | Wie das Ganze aufgebaut ist |
 | [docs/entscheidungen.md](docs/entscheidungen.md) | Was wir entschieden haben und warum |
 | [docs/roadmap.md](docs/roadmap.md) | Phasen und aktueller Stand |
+| [docs/stand.md](docs/stand.md) | Kurzer Stand, Messwerte und was noch offen ist |
 | [docs/build.md](docs/build.md) | Selber bauen (lokal und CI) |
 | [docs/referenz-webkitwasm.md](docs/referenz-webkitwasm.md) | Was wir vom Projekt WebkitWasm gelernt haben |
 
