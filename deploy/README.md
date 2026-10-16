@@ -16,7 +16,10 @@ gehoert ein HTTPS-Proxy davor (hier `tailscale serve`, sonst z.B. Caddy).
      per Digest neu starten und `/healthz` pruefen
 
 Ist die CI rot, bleibt der letzte gruene Stand online. Von Hand: *Actions -> Deploy -> Run
-workflow* (ohne ID = letzter gruener CI-Lauf auf main).
+workflow* mit der ID eines gruenen Push-Laufs der CI auf main (ohne ID = der letzte). Andere
+Laeufe (rot, Pull Request, anderer Workflow) lehnt der Deploy ab.
+
+Lokal bauen: `docker build --build-arg NODE_IMAGE=<NODE_IMAGE aus versions.env> .`
 
 ## Server einrichten (Proxmox)
 
@@ -35,4 +38,6 @@ Das Repo ist oeffentlich und der Runner laeuft im LAN. Darum:
 - Workflows aus Forks laufen erst nach Freigabe (Repo-Einstellung: alle externen Mitwirkenden).
 - Nur der Job `deploy` nutzt das Label `browser-lite-deploy`, und nur nach einem Push auf
   `main` in diesem Repo. Nie einen anderen Job oder `pull_request` darauf laufen lassen.
+- Auf dem Runner laeuft keine Action (kein `uses:`), nur eigene Befehle. `compose.yml` holt
+  der Job per `curl` von der GitHub-API.
 - Der Container laeuft read-only, ohne Capabilities, als Benutzer `node`.

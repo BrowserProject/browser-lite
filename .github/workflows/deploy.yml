@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "ID eines CI-Laufs auf main (leer = letzter gruener)"
+        description: "ID eines gruenen Push-Laufs der CI auf main (leer = letzter gruener)"
         required: false
 
 permissions:
@@ -47,16 +47,24 @@ jobs:
           if [ -z "$RUN_ID" ]; then
             RUN_ID="$(gh run list -R "$GITHUB_REPOSITORY" -w CI -b main -e push -s success -L 1 --json databaseId --jq '.[0].databaseId')"
           fi
-          read -r branch sha < <(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" --json headBranch,headSha --jq '.headBranch + " " + .headSha')
-          [ "$branch" = main ] || { echo "::error::CI-Lauf $RUN_ID ist nicht von main ($branch)"; exit 1; }
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Ungueltige Lauf-ID: $RUN_ID"; exit 1; }
+          # Auch fuer eine von Hand angegebene ID: nur ein gruener Push-Lauf der CI auf main
+          IFS=$'\t' read -r workflow event branch conclusion sha < <(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" \
+            --json workflowName,event,headBranch,conclusion,headSha --jq '[.workflowName,.event,.headBranch,.conclusion,.headSha] | @tsv')
+          if [ "$workflow/$event/$branch/$conclusion" != CI/push/main/success ] || [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Lauf $RUN_ID ist kein gruener Push-Lauf der CI auf main ($workflow, $event, $branch, $conclusion, $sha)"
+            exit 1
+          fi
           echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v5
         with:
           ref: ${{ steps.run.outputs.sha }}
+      - name: Node-Version aus versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - name: Engine-Artefakt holen
         uses: actions/download-artifact@v7
         with:
@@ -71,7 +79,7 @@ jobs:
         run: |
           source versions.env
           tag="$SITE_IMAGE:${{ steps.run.outputs.sha }}"
-          docker build -t "$tag" -t "$SITE_IMAGE:main" \
+          docker build -t "$tag" -t "$SITE_IMAGE:main" --build-arg NODE_IMAGE="$NODE_IMAGE" \
             --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
             --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -89,6 +97,8 @@ jobs:
             -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
             'http://127.0.0.1:8080/wisp/' || true)"
           [ "$code" = 101 ] || { echo "Relay nimmt keine WebSocket-Verbindung an: $code statt 101"; exit 1; }
+          docker stop -t 5 smoke >/dev/null
+          [ "$(docker inspect --format '{{.State.ExitCode}}' smoke)" = 0 ] || { echo "Container endet nicht sauber auf SIGTERM"; exit 1; }
       - name: Bei ghcr.io anmelden
         uses: docker/login-action@v3
         with:
@@ -113,18 +123,22 @@ jobs:
     env:
       IMAGE: ${{ needs.image.outputs.image }}
       DIR: /opt/browser-lite
+    # Auf dem Runner im LAN laeuft keine fremde Action, compose.yml kommt direkt von der API
     steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ needs.image.outputs.sha }}
-          sparse-checkout: deploy
+      - name: compose.yml holen
+        env:
+          TOKEN: ${{ github.token }}
+          SHA: ${{ needs.image.outputs.sha }}
+        run: |
+          printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -fsSL --retry 3 --config - \
+            -H 'Accept: application/vnd.github.raw' -o "$RUNNER_TEMP/compose.yml" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/deploy/compose.yml?ref=$SHA"
       - name: Bei ghcr.io anmelden
         env:
           TOKEN: ${{ github.token }}
         run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Neu starten
         run: |
-          install -m 644 deploy/compose.yml "$DIR/compose.yml"
+          install -m 644 "$RUNNER_TEMP/compose.yml" "$DIR/compose.yml"
           printf 'IMAGE=%s\n' "$IMAGE" > "$DIR/image.env"
           cd "$DIR"
           docker compose -p browser-lite --env-file image.env pull -q

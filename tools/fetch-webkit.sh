@@ -21,6 +21,18 @@ SPARSE_PATTERNS='/*
 !/Source/WebInspectorUI/
 '
 
+# Netzwerk-Befehl bis zu 5 mal, mit wachsender Pause
+retry() {
+    local attempt=1 delay=2
+    until "$@"; do
+        [ "$attempt" -ge 5 ] && bl_die "$* ist $attempt mal fehlgeschlagen"
+        bl_log "fehlgeschlagen, neuer Versuch in ${delay}s"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
 if [ ! -d "$BL_WEBKIT_DIR/.git" ]; then
     bl_log "Initialisiere $BL_WEBKIT_DIR"
     mkdir -p "$BL_WEBKIT_DIR"
@@ -39,16 +51,10 @@ if [ "$current" = "$WEBKIT_COMMIT" ]; then
     git -C "$BL_WEBKIT_DIR" sparse-checkout reapply
 else
     bl_log "Lade WebKit $WEBKIT_TAG (${WEBKIT_COMMIT:0:12}), shallow"
-    attempt=1
-    delay=2
-    until git -C "$BL_WEBKIT_DIR" fetch -q --depth 1 --filter=blob:none origin "$WEBKIT_COMMIT"; do
-        [ "$attempt" -ge 5 ] && bl_die "git fetch ist $attempt mal fehlgeschlagen"
-        bl_log "fetch fehlgeschlagen, neuer Versuch in ${delay}s"
-        sleep "$delay"
-        attempt=$((attempt + 1))
-        delay=$((delay * 2))
-    done
-    git -C "$BL_WEBKIT_DIR" -c advice.detachedHead=false checkout -q -f FETCH_HEAD
+    # Ohne Blobs (--filter=blob:none): die eigentlichen Dateien laedt erst checkout nach,
+    # darum braucht auch checkout die Wiederholung
+    retry git -C "$BL_WEBKIT_DIR" fetch -q --depth 1 --filter=blob:none origin "$WEBKIT_COMMIT"
+    retry git -C "$BL_WEBKIT_DIR" -c advice.detachedHead=false checkout -q -f FETCH_HEAD
 fi
 
 actual="$(git -C "$BL_WEBKIT_DIR" rev-parse HEAD)"

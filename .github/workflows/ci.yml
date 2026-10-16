@@ -23,13 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: shellcheck
-        run: shellcheck -x tools/*.sh deps/*.sh deps/recipes/*.sh deploy/*.sh
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x
       - name: versions.env pruefen
         run: |
           # Nur KEY=VALUE oder Kommentare, keine Leerzeichen im Wert
           if grep -v -E '^(#.*|[A-Z0-9_]+=[^ ]+|)$' versions.env; then
             echo "versions.env hat ungueltige Zeilen (siehe oben)"; exit 1
           fi
+          source versions.env
+          [[ "$NODE_IMAGE" == "node:$NODE_VERSION-"* ]] || { echo "NODE_IMAGE passt nicht zu NODE_VERSION"; exit 1; }
 
   relay:
     name: Relay + Wisp-Client Test
@@ -37,34 +39,42 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - name: Node-Version aus versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - name: Relay installieren
         working-directory: relay
         run: npm ci --no-audit --no-fund
-      - name: Test (Token, 2 MB Echo ueber Wisp)
+      - name: Test (Token, Echo, Reconnect, SSRF-Sperre, statische Dateien)
         run: node tests/relay/relay-test.mjs
 
   wasm-js:
-    name: WebAssembly der Seiten (JS-Teile in node)
+    name: JS-Teile der Engine in node (WebAssembly der Seiten, MediaRecorder)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - name: Node-Version aus versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - name: Umgeschriebenes Modul gegen das Original
         run: node tests/wasm/rewrite-test.mjs
       - name: WebAssembly-API ueber die nachgebaute Bruecke
         run: node tests/wasm/api-test.mjs
+      - name: WebM-Muxer von MediaRecorder
+        run: node tests/engine/recorder-test.mjs
 
   toolchain:
     name: Toolchain-Image
     runs-on: ubuntu-24.04
     outputs:
       image: ${{ steps.tag.outputs.image }}
+      emsdk: ${{ steps.tag.outputs.emsdk }}
+      image_emsdk: ${{ steps.tag.outputs.image_emsdk }}
     steps:
       - uses: actions/checkout@v5
       - name: Image-Tag berechnen
@@ -73,6 +83,7 @@ jobs:
           source versions.env
           hash="$(find toolchain -type f | sort | xargs sha256sum | sha256sum | cut -c1-12)"
           echo "image=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}-${hash}" >> "$GITHUB_OUTPUT"
+          echo "image_emsdk=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
           echo "emsdk=${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Bei ghcr.io anmelden
         uses: docker/login-action@v3
@@ -174,6 +185,9 @@ jobs:
       BL_JOBS: 4
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_MAXSIZE: 3G
+      # Compiler ist emcc aus diesem emsdk. Ohne das vergleicht ccache das mtime von emcc,
+      # und jedes neue Toolchain-Image (gleiches emsdk) macht den ganzen Cache ungueltig.
+      CCACHE_COMPILERCHECK: string:emsdk-${{ needs.toolchain.outputs.emsdk }}
     steps:
       - uses: actions/checkout@v5
       - name: sysroot holen
@@ -191,7 +205,9 @@ jobs:
         with:
           path: build/ccache
           key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
-          restore-keys: ccache-jsc-${{ needs.toolchain.outputs.image }}-
+          restore-keys: |
+            ccache-jsc-${{ needs.toolchain.outputs.image }}-
+            ccache-jsc-${{ needs.toolchain.outputs.image_emsdk }}-
       - name: jsc bauen
         run: tools/build-jsc.sh
       - name: Tests (inkl. GC-Stresstest)
@@ -210,6 +226,8 @@ jobs:
     timeout-minutes: 355
     env:
       IMAGE: ${{ needs.toolchain.outputs.image }}
+      # Wie im Job jsc: ccache bleibt gueltig, solange das emsdk gleich bleibt
+      CCACHE_COMPILERCHECK: string:emsdk-${{ needs.toolchain.outputs.emsdk }}
     steps:
       - name: Platz schaffen (WebCore-Build braucht viel)
         run: |
@@ -239,12 +257,14 @@ jobs:
         with:
           path: build/ccache
           key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
-          restore-keys: ccache-engine-${{ needs.toolchain.outputs.image }}-
+          restore-keys: |
+            ccache-engine-${{ needs.toolchain.outputs.image }}-
+            ccache-engine-${{ needs.toolchain.outputs.image_emsdk }}-
       - name: WebCore + Engine bauen
         # Vor dem 6h-Limit selber abbrechen, damit ccache noch gespeichert wird.
         # Der naechste Lauf macht dann mit dem Cache weiter.
         run: |
-          docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 -e CCACHE_DIR=/src/build/ccache -e CCACHE_MAXSIZE=5G \
+          docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 -e CCACHE_DIR=/src/build/ccache -e CCACHE_MAXSIZE=5G -e CCACHE_COMPILERCHECK \
             "$IMAGE" timeout 320m tools/build-webcore.sh
       - name: ccache speichern (auch bei Abbruch)
         if: always()
@@ -266,6 +286,11 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="STACK fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/stack.html build/stack.ppm 200 200 | tee build/stack.log
           grep -q "STACK fertig=ok" build/stack.log
+      - name: Grenzen (tiefes DOM, lange Strings, Speicher bis zum Ende)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="LIMITS fertig" "$IMAGE" \
+            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html build/limits.ppm 200 200 | tee build/limits.log
+          grep -q "LIMITS fertig=ok" build/limits.log
       - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \
@@ -295,65 +320,82 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - name: Node-Version aus versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - name: Engine holen
         uses: actions/download-artifact@v7
         with:
           name: engine
           path: build/webcore/bin
       - name: Relay + Playwright installieren
+        id: setup
         run: |
           (cd relay && npm ci)
           (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
+      # Jeder Test laeuft, auch wenn ein frueherer rot war (der Job bleibt dann rot)
       - name: Netzwerk-Test
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node network-test.mjs
       - name: Eingabe-Test (Tippen, Klick, Download, Upload, Popup, select, Farbe, Datum, Scrollen)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node input-test.mjs
       - name: Speicher-Test (Cookie, localStorage, IndexedDB, OPFS nach Neuladen)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node storage-test.mjs
       - name: Audio-Test (Web Audio, decodeAudioData, Ton im AudioWorklet)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node audio-test.mjs
       - name: Media-Test (<video>/<audio> ueber Service Worker und Engine)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node media-test.mjs
       - name: WebGL-Test (WebGL 1 und 2 ueber WebGL des Host-Browsers)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webgl-test.mjs
       - name: Compositing-Test (Ebenen auf der GPU, Animation, Filter, Scrollen)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node compositing-test.mjs
       - name: Service-Worker-Test (Registrieren, Fetch abfangen, SharedWorker)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node serviceworker-test.mjs
       - name: WebCodecs-Test (VideoFrame, VP8 und Opus kodieren/dekodieren, Worker)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webcodecs-test.mjs
       - name: MediaStream-Test (Kamera, Mikrofon, Bildschirm ueber den Host)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node mediastream-test.mjs
       - name: WebRTC-Test (RTCPeerConnection, DataChannel, Verbindung zu Chromium)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webrtc-test.mjs
       - name: Drag-&-Drop-Test (in der Seite, Dateien und Text aus dem Host)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node dragdrop-test.mjs
       - name: Zwischenablage-Test (Einfuegen mit HTML und Bild, Kopieren mit HTML, Doppelklick)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node clipboard-test.mjs
       - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node wasm-test.mjs
       - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node cache-test.mjs
       - name: Geraete-Test (Markieren, Touch, Farbschema, Standort, Benachrichtigungen)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node devices-test.mjs
       - name: Oberflaeche-Test (Verlauf, Lesezeichen, Vorschlaege, Sitzung)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node ui-test.mjs
       - name: Messlatte gegen Chromium (Web-APIs, JS, CSS; rot nur bei Rueckschritt)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && PARITY_REPORT="$GITHUB_STEP_SUMMARY" node parity-test.mjs
       - name: Screenshots als Artefakt
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-screenshots
-          path: |
-            build/e2e-network.png
-            build/e2e-input.png
-            build/e2e-media.png
-            build/e2e-mse.png
-            build/e2e-webgl.png
+          path: build/e2e-*.png
           if-no-files-found: ignore
 
   kompatibilitaet:
@@ -365,9 +407,11 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v5
+      - name: Node-Version aus versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
       - name: Engine holen
         uses: actions/download-artifact@v7
         with:

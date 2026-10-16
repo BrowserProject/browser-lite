@@ -45,7 +45,7 @@ Der Self-hosted Runner (Label `browser-lite-deploy`) steht im LAN. Nur der Job `
 Vor dem Push, je nach Aenderung:
 
 ```bash
-shellcheck -x tools/*.sh deps/*.sh deps/recipes/*.sh deploy/*.sh
+git ls-files -z '*.sh' | xargs -0 shellcheck -x
 node tests/relay/relay-test.mjs
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 ```

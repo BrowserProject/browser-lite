@@ -1,7 +1,9 @@
 # Ein Container: Wisp-Relay + fertige Seite (relay/server.mjs mit SITE_DIR).
 # Vorher die Seite bauen: tools/package-site.sh <engine-ordner> build/site
 # HTTPS kommt von davor (Browser geben SharedArrayBuffer nur in einem sicheren Kontext).
-FROM node:22.23.3-alpine3.24
+# Bauen: docker build --build-arg NODE_IMAGE="$(grep '^NODE_IMAGE=' versions.env | cut -d= -f2)" .
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE}
 WORKDIR /app
 COPY relay/package.json relay/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund

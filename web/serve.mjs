@@ -5,14 +5,19 @@
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { serveStatic } from '../relay/static.mjs';
+import { parseRequest, serveStatic } from '../relay/static.mjs';
 
 const here = process.env.BL_WEB_ROOT ? path.resolve(process.env.BL_WEB_ROOT) : path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.argv[2] || 8080);
 const engineDir = path.resolve(process.argv[3] || path.join(here, '..', 'build', 'webcore', 'bin'));
 
 createServer((req, res) => {
-  const file = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+  const request = parseRequest(req);
+  if (!request) {
+    res.writeHead(400).end();
+    return;
+  }
+  const file = request.path;
   const found = file.startsWith('/engine/')
     ? serveStatic(req, res, engineDir, file.slice('/engine'.length), 'no-cache')
     : serveStatic(req, res, here, file, 'no-cache');
