@@ -46,7 +46,7 @@ node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
 ```
 
 Jeder `*-test.mjs` ist ein eigener Test, CI ruft sie einzeln auf: `network`, `input`,
-`storage`, `audio`, `media`, `webgl`, `compositing`, `serviceworker`, `webcodecs`,
+`storage`, `audio`, `media`, `webgl`, `compositing`, `pinch`, `serviceworker`, `webcodecs`,
 `mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`, `cache`, `devices`, `ui`,
 `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in der Datei.
 Alle benutzen `harness.mjs`: Relay und Oberflaeche auf freien Ports (Tests laufen

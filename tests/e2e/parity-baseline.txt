@@ -47,6 +47,7 @@ css:nesting
 css:offset-path
 css:oklch
 css:overscroll-behavior
+css:paint-worklet
 css:position-try
 css:print-color-adjust
 css:property-rule
@@ -84,6 +85,7 @@ dev:permissions
 dev:pointer-events
 dev:pointer-lock
 dev:screen-orientation
+dev:sw-notifications
 dev:touch-events
 dev:vibrate
 dev:wake-lock
@@ -194,6 +196,7 @@ js:string-isWellFormed
 js:string-localeCompare
 js:structuredClone
 js:temporal
+js:toLocaleString-number
 js:top-level-await-module
 js:uint8array-base64
 js:weakref
@@ -226,6 +229,7 @@ net:file-system-access
 net:indexeddb
 net:local-storage
 net:message-channel
+net:navigation-preload
 net:network-information
 net:online
 net:opfs
@@ -253,4 +257,5 @@ wasm:exceptions
 wasm:exnref
 wasm:js-string-builtins
 wasm:memory64
+wasm:multi-memory
 wasm:simd

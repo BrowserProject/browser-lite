@@ -32,21 +32,10 @@ HashMap<int, Entry>& entries() WTF_REQUIRES_LOCK(s_lock)
     return map;
 }
 
-HashMap<int, RefPtr<CompositorScene>>& scenes() WTF_REQUIRES_LOCK(s_lock)
-{
-    static NeverDestroyed<HashMap<int, RefPtr<CompositorScene>>> map;
-    return map;
-}
-
 // Der naechste Takt kommt mit dem naechsten Bild des Compositors
 void requestTick(int viewId)
 {
-    RefPtr<CompositorScene> scene;
-    {
-        Locker locker { s_lock };
-        scene = scenes().get(viewId);
-    }
-    if (scene)
+    if (RefPtr scene = CompositorScene::forView(viewId))
         scene->requestScrollingTick();
 }
 
@@ -111,15 +100,6 @@ void ScrollingCoordinatorWasm::hasNodeWithAnimatedScrollChanged(bool hasAnimated
 }
 
 namespace Scrolling {
-
-void setScene(int viewId, CompositorScene* scene)
-{
-    Locker locker { s_lock };
-    if (scene)
-        scenes().set(viewId, scene);
-    else
-        scenes().remove(viewId);
-}
 
 void stopForView(int viewId)
 {
@@ -190,7 +170,6 @@ bool displayDidRefresh(int viewId)
 namespace BrowserLite::Scrolling {
 
 // Ohne Scroll-Thread scrollt der Engine-Thread
-void setScene(int, CompositorScene*) { }
 void stopForView(int) { }
 void wheelEvent(int viewId, const WebCore::PlatformWheelEvent& event)
 {

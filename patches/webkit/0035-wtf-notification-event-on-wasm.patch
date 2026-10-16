@@ -1,0 +1,17 @@
+diff --git a/Source/WTF/wtf/PlatformEnable.h b/Source/WTF/wtf/PlatformEnable.h
+index ef46145d6c..9361c74a35 100644
+--- a/Source/WTF/wtf/PlatformEnable.h
++++ b/Source/WTF/wtf/PlatformEnable.h
+@@ -443,6 +443,12 @@
+ #define ENABLE_MOUSE_CURSOR_SCALE 0
+ #endif
+ 
++// browser-lite: wie GTK/WPE (PlatformEnableGlib.h), showNotification und
++// notificationclick im Service Worker
++#if PLATFORM(WASM) && ENABLE(NOTIFICATIONS) && !defined(ENABLE_NOTIFICATION_EVENT)
++#define ENABLE_NOTIFICATION_EVENT 1
++#endif
++
+ #if !defined(ENABLE_NOTIFICATION_EVENT)
+ #define ENABLE_NOTIFICATION_EVENT 0
+ #endif

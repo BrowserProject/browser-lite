@@ -12,6 +12,7 @@
 #include "Engine.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "LayerTreeHostWasm.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
@@ -207,6 +208,16 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
     // Mit Compositor-Thread: ueber ihn zum Scroll-Thread (ScrollingWasm.h), so
     // scrollt die Seite auch, wenn ihr JS den Engine-Thread blockiert
     if (Compositor::isRunning()) {
+        // Pinch-Zoom, den der Engine-Thread noch nicht zeigt: das Rad
+        // verschiebt die skalierte Ansicht, die Seite bekommt das Event nur
+        // zum Mitlesen (wie ein passiver wheel-Listener)
+        RefPtr scene = CompositorScene::forView(id);
+        if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
+            withView(id, [=](WebView& view) {
+                view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
+            });
+            return;
+        }
         Compositor::dispatch([=] {
             Scrolling::wheelEvent(id, WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers));
         });
@@ -271,6 +282,21 @@ EMSCRIPTEN_KEEPALIVE void bl_focus_initial(int id, int forward)
 EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
 {
     withView(id, [=](WebView& view) { view.setZoom(factor); });
+}
+
+// Pinch-Zoom (PinchZoom.h): phase 0 Anfang, 1 Schritt (factor relativ zum
+// letzten), 2 Ende, 3 Abbruch; x/y = Mittelpunkt in der View (CSS-Pixel).
+// Mit Ebenen skaliert der Compositor-Thread, auch wenn der Engine-Thread
+// blockiert ist.
+EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, double y)
+{
+    auto pinchPhase = static_cast<PinchPhase>(std::clamp(phase, 0, 3));
+    WebCore::FloatPoint focus(x, y);
+    if (RefPtr scene = Compositor::isRunning() ? CompositorScene::forView(id) : nullptr) {
+        scene->pinch(pinchPhase, factor, focus);
+        return;
+    }
+    withView(id, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
 }
 
 // Suchen: again = Weitersuchen mit derselben Eingabe (Enter / Shift+Enter)

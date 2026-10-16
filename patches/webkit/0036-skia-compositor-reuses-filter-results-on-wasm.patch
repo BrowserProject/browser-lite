@@ -1,0 +1,352 @@
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index ab23ed5932..e412ec581e 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -78,6 +78,9 @@ void SkiaCompositingLayer::invalidate()
+     m_maskImage = nullptr;
+     m_imageBackingStore = nullptr;
+     m_contentsBuffer = nullptr;
++#if PLATFORM(WASM)
++    m_filterResult = std::nullopt;
++#endif
+ 
+     m_mask = nullptr;
+     m_replica = nullptr;
+@@ -149,6 +152,9 @@ void SkiaCompositingLayer::removeFromParent()
+ 
+ void SkiaCompositingLayer::setUseBackingStore(bool useBackingStore, CoordinatedAnimatedBackingStoreClient* animatedBackingStoreClient)
+ {
++#if PLATFORM(WASM)
++    ++m_backingStoreVersion;
++#endif
+     if (!useBackingStore) {
+         m_backingStore = nullptr;
+         m_animatedBackingStoreClient = nullptr;
+@@ -167,6 +173,10 @@ void SkiaCompositingLayer::updateBackingStore(CoordinatedBackingStoreProxy::Upda
+         m_maskImage = nullptr;
+ 
+     ASSERT(m_backingStore);
++#if PLATFORM(WASM)
++    if (!update.isEmpty() || scale != m_backingStore->scale())
++        ++m_backingStoreVersion;
++#endif
+     m_backingStore->update(m_rect.size(), scale, WTF::move(update));
+ }
+ 
+@@ -177,6 +187,10 @@ bool SkiaCompositingLayer::hasPendingBackingStoreTileUpdates() const
+ 
+ void SkiaCompositingLayer::processPendingTileUpdates()
+ {
++#if PLATFORM(WASM)
++    if (hasPendingBackingStoreTileUpdates())
++        ++m_backingStoreVersion;
++#endif
+     if (m_backingStore)
+         m_backingStore->processPendingTileUpdates();
+ }
+@@ -632,6 +646,9 @@ bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameD
+ 
+         recursivePaint(canvas, context);
+         context.imageSetBatch.flushIfNeeded(canvas);
++#if PLATFORM(WASM)
++        hasRunningAnimations |= context.needsFrameForFilterResult;
++#endif
+     }
+ 
+     recursiveCleanUpAfterPaint();
+@@ -1351,7 +1368,58 @@ static std::optional<SkMatrix> computeDeviceAlignedSurfaceTransform(const Transf
+     return matrix;
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: Frames ohne Bewegung, nach denen ein verschobener Layer wieder auf die Geraetepixel
++// kommt. Scrollen und Animationen haben einzelne Frames ohne Bewegung dazwischen.
++static constexpr unsigned s_filterResultSettleFrames = 3;
++
++static bool nearlyEqual(const SkMatrix& a, const SkMatrix& b)
++{
++    for (int i = 0; i < 9; ++i) {
++        if (std::abs(a[i] - b[i]) > 1e-3f)
++            return false;
++    }
++    return true;
++}
++
++static bool hasSameLinearPart(const TransformationMatrix& a, const TransformationMatrix& b)
++{
++    return a.a() == b.a() && a.b() == b.b() && a.c() == b.c() && a.d() == b.d();
++}
++
++std::optional<SkiaCompositingLayer::FilterResult::Input> SkiaCompositingLayer::filterResultInput(const PaintContext& context) const
++{
++    // Nur Layer ohne Kinder, deren Inhalt sich nur mit neuem Stand aendert (nicht Video, Canvas, WebGL)
++    if (!m_children.isEmpty() || m_contentsBuffer || m_mask || m_replica || isReplica() || m_backdrop.filter || m_preserves3D)
++        return std::nullopt;
++    if (!context.accumulatedReplicaTransform.isIdentity() || context.paintingBackdropForLayer)
++        return std::nullopt;
++
++    auto filter = this->filter();
++    return FilterResult::Input {
++        .filter = filter ? filter->filter : nullptr,
++        .opacity = context.opacity,
++        .colorFilter = context.colorFilter,
++        .blendMode = context.blendMode,
++        .rect = m_rect,
++        .contentsRect = m_contentsRect,
++        .contentsTilingSize = m_contentsTiling.size,
++        .contentsTilingPhase = m_contentsTiling.phase,
++        .contentsClippingRect = m_contentsClippingRect,
++        .visible = m_visible,
++        .contentsVisible = m_contentsVisible,
++        .contentsOpaque = m_contentsOpaque,
++        .contentsSolidColor = m_contentsSolidColor,
++        .imageBackingStore = m_imageBackingStore,
++        .backingStoreVersion = m_backingStoreVersion,
++        .debugBorder = m_debugBorder,
++    };
++}
++
++void SkiaCompositingLayer::paintWithFilter(SkCanvas& canvas, PaintContext& context, const TransformationMatrix& layerTransform, const TransformationMatrix& inverseLayerTransform, const FloatRect& localBounds, const SkPaint& layerPaint, FilterSurfaceAlignment alignment, PaintFunction&& paintFunction, ReusesFilterResult reusesFilterResult)
++#else
+ void SkiaCompositingLayer::paintWithFilter(SkCanvas& canvas, PaintContext& context, const TransformationMatrix& layerTransform, const TransformationMatrix& inverseLayerTransform, const FloatRect& localBounds, const SkPaint& layerPaint, FilterSurfaceAlignment alignment, PaintFunction&& paintFunction)
++#endif
+ {
+     // Like Chromium, paint the subtree into a surface in the layer plane at a fixed scale, filter it there and
+     // draw the result with the layer transform. SkCanvas::saveLayer() would pick the layer resolution at the
+@@ -1359,6 +1427,26 @@ void SkiaCompositingLayer::paintWithFilter(SkCanvas& canvas, PaintContext& conte
+     auto* grContext = PlatformDisplay::sharedDisplay().skiaGrContext();
+     const auto scale = filterSurfaceScale(context);
+ 
++#if PLATFORM(WASM)
++    std::optional<FilterResult::Input> resultInput;
++    if (reusesFilterResult == ReusesFilterResult::Yes && layerTransform.isAffine())
++        resultInput = filterResultInput(context);
++    if (!resultInput || (m_filterResult && (m_filterResult->input != *resultInput || !hasSameLinearPart(m_filterResult->layerTransform, layerTransform))))
++        m_filterResult = std::nullopt;
++
++    // Ein Layer, der sich nur verschiebt, filtert in seiner Ebene: dort bleibt das Bild gleich.
++    bool moved = false;
++    bool keepsLayerPlane = false;
++    if (m_filterResult && alignment == FilterSurfaceAlignment::DevicePixels) {
++        moved = m_filterResult->layerTransform.e() != layerTransform.e() || m_filterResult->layerTransform.f() != layerTransform.f();
++        keepsLayerPlane = moved || (!m_filterResult->deviceAligned && m_filterResult->stillFrames < s_filterResultSettleFrames);
++        if (keepsLayerPlane) {
++            alignment = FilterSurfaceAlignment::LocalCoordinates;
++            context.needsFrameForFilterResult = true;
++        }
++    }
++#endif
++
+     // Align the surface with the device pixels if possible, so the result needs no resampling.
+     const auto deviceAlignedTransform = alignment == FilterSurfaceAlignment::DevicePixels ? computeDeviceAlignedSurfaceTransform(TransformationMatrix(canvas.getLocalToDevice()).multiply(layerTransform), localBounds) : std::nullopt;
+     const auto layerToScaled = deviceAlignedTransform.value_or(SkMatrix::Scale(scale.width(), scale.height()));
+@@ -1369,30 +1457,11 @@ void SkiaCompositingLayer::paintWithFilter(SkCanvas& canvas, PaintContext& conte
+     auto surfaceRect = enclosingIntRect(scaledBounds);
+     surfaceRect.setWidth(std::min(surfaceRect.width(), maxSurfaceSize));
+     surfaceRect.setHeight(std::min(surfaceRect.height(), maxSurfaceSize));
+-    if (surfaceRect.isEmpty())
+-        return;
+-
+-    auto imageInfo = SkImageInfo::Make(surfaceRect.width(), surfaceRect.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
+-    auto surface = SkSurfaces::RenderTarget(grContext, skgpu::Budgeted::kNo, imageInfo, 0, kTopLeft_GrSurfaceOrigin, nullptr);
+-    if (!surface)
+-        return;
+-
+-    auto* surfaceCanvas = surface->getCanvas();
+-    if (!surfaceCanvas)
++    if (surfaceRect.isEmpty()) {
++#if PLATFORM(WASM)
++        m_filterResult = std::nullopt;
++#endif
+         return;
+-
+-    context.imageSetBatch.flushIfNeeded(canvas);
+-
+-    surfaceCanvas->clear(SK_ColorTRANSPARENT);
+-    surfaceCanvas->translate(-surfaceRect.x(), -surfaceRect.y());
+-    surfaceCanvas->concat(layerToScaled);
+-    surfaceCanvas->concat(SkM44(inverseLayerTransform));
+-
+-    {
+-        // The filter may sample outside the damage, so paint the whole subtree and limit only the composite.
+-        SetForScope scopedNoDamageRestriction(context.compositingDamageRegion, std::nullopt);
+-        paintFunction(*surfaceCanvas, context);
+-        context.imageSetBatch.flushIfNeeded(*surfaceCanvas);
+     }
+ 
+     // Filter parameters are in layer units, the surface is in scaled pixels relative to its origin.
+@@ -1409,14 +1478,60 @@ void SkiaCompositingLayer::paintWithFilter(SkCanvas& canvas, PaintContext& conte
+     auto outputRect = intersection(enclosingIntRect(FloatRect(filter->computeFastBounds(sourceBounds))), enclosingIntRect(clipRect));
+     outputRect.setWidth(std::min(outputRect.width(), maxSurfaceSize));
+     outputRect.setHeight(std::min(outputRect.height(), maxSurfaceSize));
+-    if (outputRect.isEmpty())
+-        return;
+ 
++    context.imageSetBatch.flushIfNeeded(canvas);
++
++    sk_sp<SkImage> filtered;
+     SkIRect filteredSubset;
+     SkIPoint filteredOffset;
+-    auto filtered = SkImages::MakeWithFilter(grContext, surface->makeImageSnapshot(), filter.get(), sourceBounds.roundOut(), SkIRect(outputRect), &filteredSubset, &filteredOffset);
+-    if (!filtered)
+-        return;
++#if PLATFORM(WASM)
++    if (m_filterResult && m_filterResult->deviceAligned == !!deviceAlignedTransform && m_filterResult->surfaceSize == surfaceRect.size()
++        && m_filterResult->outputRect == outputRect && nearlyEqual(m_filterResult->layerToSurface, layerToSurface)) {
++        filtered = m_filterResult->image;
++        filteredSubset = m_filterResult->subset;
++        filteredOffset = m_filterResult->offset;
++    } else
++#endif
++    {
++        auto imageInfo = SkImageInfo::Make(surfaceRect.width(), surfaceRect.height(), kRGBA_8888_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
++        auto surface = SkSurfaces::RenderTarget(grContext, skgpu::Budgeted::kNo, imageInfo, 0, kTopLeft_GrSurfaceOrigin, nullptr);
++        if (!surface)
++            return;
++
++        auto* surfaceCanvas = surface->getCanvas();
++        if (!surfaceCanvas)
++            return;
++
++        surfaceCanvas->clear(SK_ColorTRANSPARENT);
++        surfaceCanvas->translate(-surfaceRect.x(), -surfaceRect.y());
++        surfaceCanvas->concat(layerToScaled);
++        surfaceCanvas->concat(SkM44(inverseLayerTransform));
++
++        {
++            // The filter may sample outside the damage, so paint the whole subtree and limit only the composite.
++            SetForScope scopedNoDamageRestriction(context.compositingDamageRegion, std::nullopt);
++            paintFunction(*surfaceCanvas, context);
++            context.imageSetBatch.flushIfNeeded(*surfaceCanvas);
++        }
++
++        if (outputRect.isEmpty()) {
++#if PLATFORM(WASM)
++            m_filterResult = std::nullopt;
++#endif
++            return;
++        }
++
++        filtered = SkImages::MakeWithFilter(grContext, surface->makeImageSnapshot(), filter.get(), sourceBounds.roundOut(), SkIRect(outputRect), &filteredSubset, &filteredOffset);
++        if (!filtered)
++            return;
++    }
++
++#if PLATFORM(WASM)
++    if (resultInput) {
++        unsigned stillFrames = m_filterResult && !moved ? m_filterResult->stillFrames + 1 : 0;
++        m_filterResult = FilterResult { WTF::move(*resultInput), layerTransform, !!deviceAlignedTransform, stillFrames, layerToSurface, surfaceRect.size(), outputRect, filtered, filteredSubset, filteredOffset };
++    }
++#endif
+ 
+     {
+         SkAutoCanvasRestore autoRestore(&canvas, true);
+@@ -1472,6 +1587,9 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+ {
+     auto filter = this->filter();
+     if (!filter || !filter->filter) {
++#if PLATFORM(WASM)
++        m_filterResult = std::nullopt;
++#endif
+         paintSelfAndChildren(canvas, context);
+         return;
+     }
+@@ -1480,6 +1598,9 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+     // we don't need to create an intermediate surface.
+     SkColorFilter* colorFilterPtr = nullptr;
+     if (filter->filter->asAColorFilter(&colorFilterPtr)) {
++#if PLATFORM(WASM)
++        m_filterResult = std::nullopt;
++#endif
+         sk_sp<SkColorFilter> colorFilter(colorFilterPtr);
+         SetForScope scopedColorFilter(context.colorFilter, colorFilter);
+         paintSelfAndChildren(canvas, context);
+@@ -1552,7 +1673,11 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+     auto paintFilteredSubtree = [&](SkCanvas& canvas, PaintContext& context) {
+         paintWithFilter(canvas, context, layerTransform, *inverseTransform, localBounds, layerPaint, FilterSurfaceAlignment::DevicePixels, [&](SkCanvas& canvas, PaintContext& context) {
+             paintSelfAndChildren(canvas, context);
++#if PLATFORM(WASM)
++        }, ReusesFilterResult::Yes);
++#else
+         });
++#endif
+     };
+ 
+     if (!m_mask) {
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+index 18ab7030d1..742112a20e 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+@@ -206,6 +206,10 @@ private:
+         RefPtr<SkiaCompositingLayer> paintingBackdropForLayer;
+         bool skipAfterBackdrop { false };
+         SkiaCompositingLayerImageSetBatch imageSetBatch;
++#if PLATFORM(WASM)
++        // browser-lite: ein gefiltertes Bild wartet in der Ebene seines Layers auf den Stillstand
++        bool needsFrameForFilterResult { false };
++#endif
+     };
+ 
+     struct Filter {
+@@ -253,7 +257,12 @@ private:
+     bool stopPaintingIntoBackdropIfNeeded(PaintContext&);
+     void paintSelfAndChildren(SkCanvas&, PaintContext&);
+     void paintWithIntermediateSurface(SkCanvas&, PaintContext&, const IntRect&, SkPaint*, PaintFunction&&);
++#if PLATFORM(WASM)
++    enum class ReusesFilterResult : bool { No, Yes };
++    void paintWithFilter(SkCanvas&, PaintContext&, const TransformationMatrix& layerTransform, const TransformationMatrix& inverseLayerTransform, const FloatRect& localBounds, const SkPaint&, FilterSurfaceAlignment, PaintFunction&&, ReusesFilterResult = ReusesFilterResult::No);
++#else
+     void paintWithFilter(SkCanvas&, PaintContext&, const TransformationMatrix& layerTransform, const TransformationMatrix& inverseLayerTransform, const FloatRect& localBounds, const SkPaint&, FilterSurfaceAlignment, PaintFunction&&);
++#endif
+     FloatSize filterSurfaceScale(const PaintContext&) const;
+     void paintWith3DRenderingContext(SkCanvas&, PaintContext&);
+     void paintBackdrop(SkCanvas&, PaintContext&);
+@@ -353,6 +362,48 @@ private:
+     } m_repaintCountOverlay;
+ 
+     std::optional<Filter> m_filter;
++#if PLATFORM(WASM)
++    // browser-lite: Das gefilterte Bild eines Layers ohne Kinder vom letzten Frame. Bleiben Inhalt,
++    // Filter und Lage in der Ebene gleich, zeichnet der Compositor es wieder, statt den Filter (Blur,
++    // Schatten) auf der GPU neu zu rechnen. Verschiebt sich der Layer nur (Animation, Scrollen),
++    // liegt die Flaeche in der Ebene des Layers statt auf den Geraetepixeln, bis er stillsteht.
++    struct FilterResult {
++        struct Input {
++            sk_sp<SkImageFilter> filter;
++            float opacity { 1 };
++            sk_sp<SkColorFilter> colorFilter;
++            std::optional<SkBlendMode> blendMode;
++            FloatRect rect;
++            FloatRect contentsRect;
++            FloatSize contentsTilingSize;
++            FloatSize contentsTilingPhase;
++            FloatRoundedRect contentsClippingRect;
++            bool visible { true };
++            bool contentsVisible { true };
++            bool contentsOpaque { false };
++            Color contentsSolidColor;
++            RefPtr<CoordinatedImageBackingStore> imageBackingStore;
++            unsigned backingStoreVersion { 0 };
++            std::optional<DebugBorder> debugBorder;
++
++            friend bool operator==(const Input&, const Input&) = default;
++        };
++
++        Input input;
++        TransformationMatrix layerTransform;
++        bool deviceAligned { false };
++        unsigned stillFrames { 0 };
++        SkMatrix layerToSurface;
++        IntSize surfaceSize;
++        IntRect outputRect;
++        sk_sp<SkImage> image;
++        SkIRect subset;
++        SkIPoint offset;
++    };
++    std::optional<FilterResult::Input> filterResultInput(const PaintContext&) const;
++    std::optional<FilterResult> m_filterResult;
++    unsigned m_backingStoreVersion { 0 };
++#endif
+     struct {
+         sk_sp<SkImageFilter> filter;
+         FloatRoundedRect clipRect;

@@ -35,12 +35,7 @@ private:
 };
 #endif
 
-class CompositorScene;
-
 namespace Scrolling {
-
-// Engine-Thread: Compositor-Stand des Views (LayerTreeHostWasm), nullptr = weg
-void setScene(int viewId, CompositorScene*);
 
 // Engine-Thread: Mausrad wieder ueber den Engine-Thread (z.B. nach GPU-Verlust)
 void stopForView(int viewId);

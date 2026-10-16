@@ -2,6 +2,7 @@
 #include "ServiceWorkerWasm.h"
 
 #include "CacheStorageWasm.h"
+#include "DeviceClients.h"
 #include "Engine.h"
 #include "HttpCache.h"
 #include "LoaderStrategy.h"
@@ -9,6 +10,7 @@
 #include "Strategies.h"
 #include "WasmSocketProvider.h"
 #include "WebPlatformExtras.h"
+#include "WebView.h"
 #include <WebCore/BackgroundFetchInformation.h>
 #include <WebCore/BackgroundFetchRecordInformation.h>
 #include <WebCore/BackgroundFetchStore.h>
@@ -32,6 +34,7 @@
 #include <WebCore/FormData.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
+#include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/LocalFrame.h>
@@ -62,6 +65,7 @@
 #include <WebCore/ServiceWorkerJobData.h>
 #include <WebCore/ServiceWorkerProvider.h>
 #include <WebCore/ServiceWorkerRegistrationData.h>
+#include <WebCore/SecurityOrigin.h>
 #include <WebCore/ServiceWorkerTypes.h>
 #include <WebCore/ServiceWorkerRoute.h>
 #include <WebCore/ServiceWorkerThreadProxy.h>
@@ -154,15 +158,13 @@ private:
     void finishFetchingScriptInServer(const ServiceWorkerJobDataIdentifier&, ServiceWorkerRegistrationKey&&, WorkerFetchResult&&) final;
     void scheduleJobInServer(const ServiceWorkerJobData&) final;
 
-    // Push, Benachrichtigungen aus dem Worker, Background Fetch und Cookie
-    // Store fuer Worker gibt es (noch) nicht
+    // Push, Background Fetch und Cookie Store fuer Worker gibt es (noch) nicht
     void subscribeToPushService(ServiceWorkerRegistrationIdentifier, const Vector<uint8_t>&, SubscribeToPushServiceCallback&& callback) final { callback(notSupported().toException()); }
     void unsubscribeFromPushService(ServiceWorkerRegistrationIdentifier, PushSubscriptionIdentifier, UnsubscribeFromPushServiceCallback&& callback) final { callback(false); }
     void getPushSubscription(ServiceWorkerRegistrationIdentifier, GetPushSubscriptionCallback&& callback) final { callback(std::optional<PushSubscriptionData> { }); }
     void getPushPermissionState(ServiceWorkerRegistrationIdentifier, GetPushPermissionStateCallback&& callback) final { callback(PushPermissionState::Denied); }
-#if ENABLE(NOTIFICATION_EVENT)
-    void getNotifications(const URL&, const String&, GetNotificationsCallback&& callback) final { callback(Vector<NotificationData> { }); }
-#endif
+    // Die noch angezeigten Benachrichtigungen der Registrierung
+    void getNotifications(const URL& registrationURL, const String& tag, GetNotificationsCallback&& callback) final { callback(shownPersistentNotifications(registrationURL, tag)); }
 
     void enableNavigationPreload(ServiceWorkerRegistrationIdentifier, ExceptionOrVoidCallback&&) final;
     void disableNavigationPreload(ServiceWorkerRegistrationIdentifier, ExceptionOrVoidCallback&&) final;
@@ -270,7 +272,7 @@ private:
     void terminateWorker(ServiceWorkerIdentifier) final;
     void didSaveScriptsToDisk(ServiceWorkerIdentifier, const ScriptBuffer&, const MemoryCompactRobinHoodHashMap<URL, ScriptBuffer>&) final { }
     void firePushEvent(ServiceWorkerIdentifier, const std::optional<Vector<uint8_t>>&, std::optional<NotificationPayload>&&, CompletionHandler<void(bool, std::optional<NotificationPayload>&&)>&& callback) final { callback(false, std::nullopt); }
-    void fireNotificationEvent(ServiceWorkerIdentifier, const NotificationData&, NotificationEventType, CompletionHandler<void(bool)>&& callback) final { callback(false); }
+    void fireNotificationEvent(ServiceWorkerIdentifier, const NotificationData&, NotificationEventType, CompletionHandler<void(bool)>&&) final;
     void fireBackgroundFetchEvent(ServiceWorkerIdentifier, const BackgroundFetchInformation&, CompletionHandler<void(bool)>&& callback) final { callback(false); }
     void fireBackgroundFetchClickEvent(ServiceWorkerIdentifier, const BackgroundFetchInformation&, CompletionHandler<void(bool)>&& callback) final { callback(false); }
     ProcessIdentifier webProcessIdentifier() const final { return Process::identifier(); }
@@ -361,6 +363,35 @@ static void navigateClient(ScriptExecutionContextIdentifier client, ServiceWorke
         finishNavigation(frameID, navigateFailed());
         pendingNavigations().set(frameID, PendingNavigation { workerOrigin, WTF::move(callback) });
     });
+}
+
+// clients.openWindow() (WebCore erlaubt es nur kurz nach notificationclick):
+// ein neuer Tab in der Oberflaeche. Fertig wie bei navigate(), wenn sich das
+// Dokument im neuen Tab als Client meldet oder sein Laden endet. Nur http(s)
+// und mit dem Worker als Anfragendem, nicht wie eine Eingabe in der
+// Adressleiste: sonst kaemen data: und file: (das Dateisystem unter /data) durch.
+static void openClientWindow(ServiceWorkerIdentifier worker, const URL& url, SWContextManager::Connection::OpenWindowCallback&& callback)
+{
+    RefPtr serverWorker = SWServerWorker::existingWorkerForIdentifier(worker);
+    if (!serverWorker)
+        return callback(Exception { ExceptionCode::TypeError, "service worker is gone"_s });
+    if (!url.protocolIsInHTTPFamily())
+        return callback(Exception { ExceptionCode::TypeError, makeString("ServiceWorkerClients.openWindow() cannot be called with URL "_s, url.string()) });
+    // Gleich gross wie die anderen Tabs, die Oberflaeche passt ihn sonst an
+    IntSize size { 800, 600 };
+    float deviceScaleFactor = 1;
+    WebView::forEach([&](WebView& view) {
+        size = view.size();
+        deviceScaleFactor = view.deviceScaleFactor();
+    });
+    auto& view = WebView::openFromEngine(0, size, deviceScaleFactor);
+    RefPtr frame = view.mainFrame();
+    RefPtr document = frame ? frame->document() : nullptr;
+    if (!document)
+        return callback(navigateFailed());
+    pendingNavigations().set(frame->frameID(), PendingNavigation { serverWorker->origin(), WTF::move(callback) });
+    Ref requester = serverWorker->origin().clientOrigin.securityOrigin();
+    frame->loader().load(FrameLoadRequest { document.releaseNonNull(), requester, ResourceRequest { URL { url } }, { }, InitiatedByMainFrame::Unknown });
 }
 
 // Was die Worker an "ihren Prozess" melden (WebSWContextManagerConnection).
@@ -459,7 +490,12 @@ private:
             return callback({ });
         callback(ServiceWorkerClientData::from(*document));
     }
-    void openWindow(ServiceWorkerIdentifier, const URL&, OpenWindowCallback&& callback) final { callback(notSupported().toException()); }
+    void openWindow(ServiceWorkerIdentifier worker, const URL& url, OpenWindowCallback&& callback) final
+    {
+        post([worker, url, callback = WTF::move(callback)]() mutable {
+            openClientWindow(worker, url, WTF::move(callback));
+        });
+    }
     void navigate(ScriptExecutionContextIdentifier client, ServiceWorkerIdentifier worker, const URL& url, NavigateCallback&& callback) final
     {
         post([client, worker, url, callback = WTF::move(callback)]() mutable {
@@ -1215,7 +1251,7 @@ void ContextConnection::installServiceWorkerContext(const ServiceWorkerContextDa
     page->setupForRemoteWorker(contextData.scriptURL, contextData.registration.key.topOrigin(), contextData.referrerPolicy, privacy);
 
     debugLog("Service Worker %s: starten", contextData.scriptURL.string().utf8().data());
-    auto proxy = ServiceWorkerThreadProxy::create(WTF::move(page), contextData.isolatedCopy(), workerData.isolatedCopy(), String { userAgent }, mode, cacheStorageProvider().get(), nullptr);
+    auto proxy = ServiceWorkerThreadProxy::create(WTF::move(page), contextData.isolatedCopy(), workerData.isolatedCopy(), String { userAgent }, mode, cacheStorageProvider().get(), createServiceWorkerNotificationClient());
     SWContextManager::singleton().registerServiceWorkerThreadForInstall(WTF::move(proxy));
 }
 
@@ -1254,13 +1290,227 @@ void ContextConnection::terminateDueToUnresponsiveness()
         SWContextManager::singleton().terminateWorker(identifier, 0_s, nullptr);
 }
 
+void ContextConnection::fireNotificationEvent(ServiceWorkerIdentifier identifier, const NotificationData& data, NotificationEventType type, CompletionHandler<void(bool)>&& callback)
+{
+    post([identifier, data = NotificationData { data }, type, callback = WTF::move(callback)]() mutable {
+        SWContextManager::singleton().fireNotificationEvent(identifier, WTF::move(data), type, WTF::move(callback));
+    });
+}
+
+void notificationEvent(NotificationData&& data, NotificationEventType type)
+{
+    if (RefPtr server = ServiceWorkers::server())
+        server->processNotificationEvent(WTF::move(data), type, [](bool) { });
+}
+
+// ------------------------------------------------------------ Navigation Preload
+
+// Laedt eine Navigation, waehrend der Worker startet (wie
+// ServiceWorkerNavigationPreloader in WebKit2), mit dem Kopf
+// Service-Worker-Navigation-Preload. Die Antwort geht als preloadResponse an
+// den Worker. Den Inhalt liest genau einer: die Navigation selber
+// (respondWith(preloadResponse)) oder der Lader im Worker, der den Inhalt der
+// preloadResponse holt (navigationPreloadIdentifier). Bis dahin haelt curl an.
+// Redirects folgt er nicht, der Worker bekommt sie als opaqueredirect.
+class NavigationPreloader final : public RefCounted<NavigationPreloader>, public CurlRequestClient {
+public:
+    class Reader {
+    public:
+        virtual ~Reader() = default;
+        virtual void preloadData(const SharedBuffer&) = 0;
+        virtual void preloadFinished(const NetworkLoadMetrics&) = 0;
+        virtual void preloadFailed(const ResourceError&) = 0;
+    };
+
+    static Ref<NavigationPreloader> create(ResourceRequest request, const NavigationPreloadState& state)
+    {
+        request.addHTTPHeaderField(HTTPHeaderName::ServiceWorkerNavigationPreload, state.headerValue);
+        Ref preloader = adoptRef(*new NavigationPreloader);
+        preloader->m_request = createCurlRequest(WTF::move(request), preloader.get());
+        preloader->m_request->resume();
+        return preloader;
+    }
+
+    ~NavigationPreloader() { stop(); }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    // Gleich, wenn die Antwort (oder der Fehler) schon da ist
+    void whenResponse(Function<void()>&& callback)
+    {
+        if (m_hasResponse || !m_error.isNull())
+            return callback();
+        m_responseCallback = WTF::move(callback);
+    }
+    const ResourceResponse& response() const { return m_response; }
+    const ResourceError& error() const { return m_error; }
+
+    // Erst nach whenResponse: der Inhalt geht an reader
+    void readBody(Reader& reader)
+    {
+        if (!m_error.isNull())
+            return reader.preloadFailed(m_error);
+        if (!m_request)
+            return reader.preloadFinished(m_metrics);
+        m_reader = &reader;
+        m_request->completeDidReceiveResponse();
+    }
+
+    void cancel()
+    {
+        m_reader = nullptr;
+        m_responseCallback = nullptr;
+        stop();
+    }
+
+private:
+    NavigationPreloader() = default;
+
+    void stop()
+    {
+        if (auto request = std::exchange(m_request, nullptr)) {
+            request->cancel();
+            request->invalidateClient();
+        }
+    }
+
+    void responseIsReady()
+    {
+        m_hasResponse = true;
+        if (auto callback = std::exchange(m_responseCallback, nullptr))
+            callback();
+    }
+
+    void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
+    void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
+    {
+        Ref protectedThis { *this };
+        storeCookies(request.resourceRequest(), curlResponse);
+        m_response = networkResponse(curlResponse);
+        if (isRedirect(m_response)) {
+            m_response.setTainting(ResourceResponse::Tainting::Opaqueredirect);
+            stop();
+        }
+        responseIsReady();
+    }
+    void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
+    {
+        Ref protectedThis { *this };
+        if (m_reader)
+            m_reader->preloadData(buffer.get());
+    }
+    void curlDidComplete(CurlRequest&, NetworkLoadMetrics&& metrics) final
+    {
+        Ref protectedThis { *this };
+        m_request = nullptr;
+        m_metrics = WTF::move(metrics);
+        if (auto* reader = std::exchange(m_reader, nullptr))
+            reader->preloadFinished(m_metrics);
+    }
+    void curlDidFailWithError(CurlRequest&, ResourceError&& error, CertificateInfo&&) final
+    {
+        Ref protectedThis { *this };
+        m_request = nullptr;
+        m_error = WTF::move(error);
+        if (auto* reader = std::exchange(m_reader, nullptr))
+            reader->preloadFailed(m_error);
+        if (auto callback = std::exchange(m_responseCallback, nullptr))
+            callback();
+    }
+
+    RefPtr<CurlRequest> m_request;
+    ResourceResponse m_response;
+    ResourceError m_error;
+    NetworkLoadMetrics m_metrics;
+    bool m_hasResponse { false };
+    Function<void()> m_responseCallback;
+    Reader* m_reader { nullptr };
+};
+
+// Noch von niemandem gelesene Preloads, nach der Kennung des Worker-Fetch
+static HashMap<FetchIdentifier, Ref<NavigationPreloader>>& unreadPreloaders()
+{
+    static NeverDestroyed<HashMap<FetchIdentifier, Ref<NavigationPreloader>>> map;
+    return map;
+}
+
+// Der Lader im Worker, der den Inhalt der preloadResponse holt
+class PreloadLoad final : public RefCounted<PreloadLoad>, public NavigationPreloader::Reader {
+public:
+    static Ref<PreloadLoad> create(ResourceLoader& loader, NavigationPreloader& preloader) { return adoptRef(*new PreloadLoad(loader, preloader)); }
+
+    void start();
+    void cancel()
+    {
+        m_loader = nullptr;
+        m_preloader->cancel();
+    }
+
+private:
+    PreloadLoad(ResourceLoader& loader, NavigationPreloader& preloader)
+        : m_loader(&loader)
+        , m_preloader(preloader)
+    {
+    }
+
+    void preloadData(const SharedBuffer& buffer) final
+    {
+        if (RefPtr loader = m_loader)
+            loader->didReceiveBuffer(buffer, buffer.size(), DataPayloadBytes);
+    }
+    void preloadFinished(const NetworkLoadMetrics& metrics) final
+    {
+        if (RefPtr loader = end())
+            loader->didFinishLoading(metrics);
+    }
+    void preloadFailed(const ResourceError& error) final
+    {
+        if (RefPtr loader = end())
+            loader->didFail(error);
+    }
+    RefPtr<ResourceLoader> end();
+
+    RefPtr<ResourceLoader> m_loader;
+    Ref<NavigationPreloader> m_preloader;
+};
+
+static HashMap<const ResourceLoader*, Ref<PreloadLoad>>& preloadLoads()
+{
+    static NeverDestroyed<HashMap<const ResourceLoader*, Ref<PreloadLoad>>> map;
+    return map;
+}
+
+void PreloadLoad::start()
+{
+    if (!m_loader)
+        return;
+    if (!m_preloader->error().isNull()) {
+        preloadFailed(m_preloader->error());
+        return;
+    }
+    m_loader->didReceiveResponse(ResourceResponse { m_preloader->response() }, [this, protectedThis = Ref { *this }] {
+        if (m_loader)
+            m_preloader->readBody(*this);
+    });
+}
+
+RefPtr<ResourceLoader> PreloadLoad::end()
+{
+    Ref protectedThis { *this };
+    RefPtr loader = std::exchange(m_loader, nullptr);
+    if (loader)
+        preloadLoads().remove(loader.get());
+    return loader;
+}
+
 // ------------------------------------------------------------ Fetch-Abfang
 
 // Eine Anfrage, die der Service Worker beantwortet (ServiceWorkerFetchTask und
 // WebServiceWorkerFetchTaskClient in WebKit2 zusammen). Die Aufrufe des
 // Workers kommen in seinem Thread an und gehen in den Engine-Thread, dort an
 // den ResourceLoader der Seite.
-class FetchTask final : public ServiceWorkerFetch::Client {
+class FetchTask final : public ServiceWorkerFetch::Client, public NavigationPreloader::Reader {
 public:
     static Ref<FetchTask> create(ResourceLoader& loader, Function<void()>&& networkLoad, SWServerRegistration& registration, ServiceWorkerIdentifier worker)
     {
@@ -1277,6 +1527,10 @@ public:
     // Engine-Thread
     void notHandled();
     void cancelFromLoader();
+    void startPreload(const NavigationPreloadState&);
+    bool hasPreload() const { return !!m_preloader; }
+    // Der Worker hat den Fetch: jetzt darf die preloadResponse zu ihm
+    void fetchStarted();
 
 private:
     FetchTask(ResourceLoader& loader, Function<void()>&& networkLoad, SWServerRegistration& registration, ServiceWorkerIdentifier worker)
@@ -1299,7 +1553,7 @@ private:
     void didFinish(const NetworkLoadMetrics&) final;
     void didNotHandle() final;
     void setCancelledCallback(Function<void()>&& callback) final { m_cancelledCallback = WTF::move(callback); }
-    void usePreload() final { didNotHandle(); }
+    void usePreload() final;
     void contextIsStopping() final;
     void doCancel() final
     {
@@ -1307,13 +1561,24 @@ private:
             callback();
     }
 
+    // NavigationPreloader::Reader (Engine-Thread)
+    void preloadData(const SharedBuffer&) final;
+    void preloadFinished(const NetworkLoadMetrics&) final;
+    void preloadFailed(const ResourceError&) final;
+
     // Engine-Thread: der Reihe nach, Daten erst nach dem Ja zur Antwort
     void enqueue(Function<void(FetchTask&)>&&);
     void runQueue();
+    void receiveRedirect(ResourceResponse&&);
+    void receiveResponse(ResourceResponse&&);
+    void receiveData(const SharedBuffer&);
     bool markDone();
     void finish();
     void failWith(const ResourceError&);
     void readBlob(const URL&);
+    void sendPreloadResponse();
+    void loadFromPreload();
+    void endPreload();
 
     class BlobReader;
 
@@ -1331,8 +1596,11 @@ private:
     bool m_waitingForResponseCompletion { false };
     bool m_done { false };
     std::atomic<bool> m_sentResponse { false };
+    std::atomic<bool> m_usesPreload { false };
     RefPtr<FetchLoader> m_blobLoader;
     RefPtr<BlobReader> m_blobReader;
+    RefPtr<NavigationPreloader> m_preloader;
+    bool m_readingPreload { false };
 };
 
 static HashMap<const ResourceLoader*, Ref<FetchTask>>& fetchTasks()
@@ -1389,24 +1657,46 @@ void FetchTask::runQueue()
         m_queue.clear();
 }
 
+void FetchTask::receiveRedirect(ResourceResponse&& response)
+{
+    RefPtr loader = m_loader;
+    auto request = loader->request().redirectedRequest(response, false, ResourceRequest::ShouldSetHash::Yes);
+    // Das Ziel der Weiterleitung laedt normal (wie WebKit2)
+    m_waitingForResponseCompletion = true;
+    loader->willSendRequest(WTF::move(request), response, [task = Ref { *this }](ResourceRequest&& newRequest) mutable {
+        task->m_waitingForResponseCompletion = false;
+        if (newRequest.isNull() || !task->m_loader || !task->markDone())
+            return;
+        fetchTasks().remove(std::exchange(task->m_loader, nullptr).get());
+        if (auto networkLoad = std::exchange(task->m_networkLoad, nullptr))
+            networkLoad();
+    });
+}
+
+void FetchTask::receiveResponse(ResourceResponse&& response)
+{
+    m_hasResponse = true;
+    m_waitingForResponseCompletion = true;
+    RefPtr loader = m_loader;
+    loader->didReceiveResponse(WTF::move(response), [task = Ref { *this }] {
+        task->m_waitingForResponseCompletion = false;
+        task->runQueue();
+    });
+}
+
+void FetchTask::receiveData(const SharedBuffer& buffer)
+{
+    m_loader->didReceiveBuffer(buffer, buffer.size(), DataPayloadBytes);
+}
+
 void FetchTask::didReceiveRedirection(const ResourceResponse& response)
 {
     m_sentResponse = true;
     callOnMainThread([protectedThis = Ref { *this }, data = response.crossThreadData()]() mutable {
-        protectedThis->enqueue([response = ResourceResponse::fromCrossThreadData(WTF::move(data))](FetchTask& task) mutable {
-            RefPtr loader = task.m_loader;
-            response.setSource(ResourceResponse::Source::ServiceWorker);
-            auto request = loader->request().redirectedRequest(response, false, ResourceRequest::ShouldSetHash::Yes);
-            // Das Ziel der Weiterleitung laedt normal (wie WebKit2)
-            task.m_waitingForResponseCompletion = true;
-            loader->willSendRequest(WTF::move(request), response, [task = Ref { task }](ResourceRequest&& newRequest) mutable {
-                task->m_waitingForResponseCompletion = false;
-                if (newRequest.isNull() || !task->m_loader || !task->markDone())
-                    return;
-                fetchTasks().remove(std::exchange(task->m_loader, nullptr).get());
-                if (auto networkLoad = std::exchange(task->m_networkLoad, nullptr))
-                    networkLoad();
-            });
+        auto response = ResourceResponse::fromCrossThreadData(WTF::move(data));
+        response.setSource(ResourceResponse::Source::ServiceWorker);
+        protectedThis->enqueue([response = WTF::move(response)](FetchTask& task) mutable {
+            task.receiveRedirect(WTF::move(response));
         });
     });
 }
@@ -1415,15 +1705,10 @@ void FetchTask::didReceiveResponse(ResourceResponse&& response)
 {
     m_sentResponse = true;
     callOnMainThread([protectedThis = Ref { *this }, data = response.crossThreadData()]() mutable {
-        protectedThis->enqueue([response = ResourceResponse::fromCrossThreadData(WTF::move(data))](FetchTask& task) mutable {
-            response.setSource(ResourceResponse::Source::ServiceWorker);
-            task.m_hasResponse = true;
-            task.m_waitingForResponseCompletion = true;
-            RefPtr loader = task.m_loader;
-            loader->didReceiveResponse(WTF::move(response), [task = Ref { task }] {
-                task->m_waitingForResponseCompletion = false;
-                task->runQueue();
-            });
+        auto response = ResourceResponse::fromCrossThreadData(WTF::move(data));
+        response.setSource(ResourceResponse::Source::ServiceWorker);
+        protectedThis->enqueue([response = WTF::move(response)](FetchTask& task) mutable {
+            task.receiveResponse(WTF::move(response));
         });
     });
 }
@@ -1432,9 +1717,95 @@ void FetchTask::didReceiveData(const SharedBuffer& buffer)
 {
     callOnMainThread([protectedThis = Ref { *this }, buffer = Ref { buffer }] {
         protectedThis->enqueue([buffer](FetchTask& task) {
-            task.m_loader->didReceiveBuffer(buffer.get(), buffer->size(), DataPayloadBytes);
+            task.receiveData(buffer.get());
         });
     });
+}
+
+// ------------------------------------------------------------ FetchTask: Preload
+
+void FetchTask::startPreload(const NavigationPreloadState& state)
+{
+    m_preloader = NavigationPreloader::create(m_request, state);
+    unreadPreloaders().set(m_identifier, Ref { *m_preloader });
+}
+
+void FetchTask::fetchStarted()
+{
+    if (RefPtr preloader = m_preloader) {
+        preloader->whenResponse([task = Ref { *this }] {
+            task->sendPreloadResponse();
+        });
+    }
+}
+
+void FetchTask::sendPreloadResponse()
+{
+    RefPtr proxy = SWContextManager::singleton().serviceWorkerThreadProxy(m_worker);
+    if (!proxy || !m_preloader || m_done)
+        return;
+    if (!m_preloader->error().isNull())
+        proxy->navigationPreloadFailed(Process::identifier(), m_identifier, ResourceError { m_preloader->error() });
+    else
+        proxy->navigationPreloadIsReady(Process::identifier(), m_identifier, ResourceResponse { m_preloader->response() });
+}
+
+// respondWith(preloadResponse): die Navigation bekommt die Antwort aus dem Netz
+void FetchTask::usePreload()
+{
+    m_usesPreload = true;
+    callOnMainThread([protectedThis = Ref { *this }] {
+        protectedThis->enqueue([](FetchTask& task) {
+            task.loadFromPreload();
+        });
+    });
+}
+
+void FetchTask::loadFromPreload()
+{
+    RefPtr preloader = m_preloader;
+    if (!preloader || !unreadPreloaders().remove(m_identifier))
+        return failWith(ResourceError { ResourceError::Type::General });
+    if (!preloader->error().isNull())
+        return failWith(preloader->error());
+    auto response = preloader->response();
+    if (isRedirect(response))
+        return receiveRedirect(WTF::move(response));
+    m_readingPreload = true;
+    receiveResponse(WTF::move(response));
+    enqueue([](FetchTask& task) {
+        if (RefPtr preloader = task.m_preloader)
+            preloader->readBody(task);
+    });
+}
+
+void FetchTask::preloadData(const SharedBuffer& buffer)
+{
+    enqueue([buffer = Ref { buffer }](FetchTask& task) {
+        task.receiveData(buffer.get());
+    });
+}
+
+void FetchTask::preloadFinished(const NetworkLoadMetrics&)
+{
+    enqueue([](FetchTask& task) {
+        task.finish();
+    });
+}
+
+void FetchTask::preloadFailed(const ResourceError& error)
+{
+    enqueue([error](FetchTask& task) {
+        task.failWith(error);
+    });
+}
+
+// Mit dem Fetch endet sein Preload, ausser der Worker liest ihn gerade selber
+void FetchTask::endPreload()
+{
+    RefPtr preloader = std::exchange(m_preloader, nullptr);
+    if (preloader && (m_readingPreload || unreadPreloaders().remove(m_identifier)))
+        preloader->cancel();
 }
 
 void FetchTask::didReceiveFormDataAndFinish(Ref<FormData>&& formData)
@@ -1472,6 +1843,7 @@ bool FetchTask::markDone()
     if (std::exchange(m_done, true))
         return false;
     SWContextManager::singleton().removeFetch(m_worker, Process::identifier(), m_identifier, false);
+    endPreload();
     // Nach Navigationen das Skript des Workers pruefen (wie ServiceWorkerFetchTask)
     if (m_shouldSoftUpdate) {
         if (RefPtr registration = registrationFor(m_registration))
@@ -1529,6 +1901,9 @@ void FetchTask::didNotHandle()
 
 void FetchTask::contextIsStopping()
 {
+    // Die Antwort kommt aus dem Netz, der Worker wird dafuer nicht gebraucht
+    if (m_usesPreload)
+        return;
     if (!m_sentResponse) {
         didNotHandle();
         return;
@@ -1551,6 +1926,7 @@ void FetchTask::cancelFromLoader()
 {
     m_loader = nullptr;
     m_queue.clear();
+    endPreload();
     if (std::exchange(m_done, true))
         return;
     m_networkLoad = nullptr;
@@ -1574,7 +1950,8 @@ void ContextConnection::startFetch(FetchTask& task)
     String resultingClientIdentifier;
     if (options.resultingClientIdentifier)
         resultingClientIdentifier = options.resultingClientIdentifier->toString();
-    proxy->startFetch(Process::identifier(), task.identifier(), Ref { task }, WTF::move(request), WTF::move(referrer), WTF::move(options), false, WTF::move(clientIdentifier), WTF::move(resultingClientIdentifier));
+    proxy->startFetch(Process::identifier(), task.identifier(), Ref { task }, WTF::move(request), WTF::move(referrer), WTF::move(options), task.hasPreload(), WTF::move(clientIdentifier), WTF::move(resultingClientIdentifier));
+    task.fetchStarted();
 }
 
 // Navigation: die neue Seite wird vom Worker kontrolliert (controlClient in WebKit2)
@@ -1609,10 +1986,20 @@ static HashSet<const ResourceLoader*>& pendingImports()
 
 bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 {
+    auto& options = loader.options();
+    // Der Worker holt den Inhalt seiner preloadResponse
+    if (auto identifier = options.navigationPreloadIdentifier) {
+        if (auto preloader = unreadPreloaders().take(*identifier)) {
+            Ref load = PreloadLoad::create(loader, *preloader);
+            preloadLoads().set(&loader, load.copyRef());
+            // Erst nach dem Anlegen des Laders antworten, wie aus dem Netz
+            post([load] { load->start(); });
+            return true;
+        }
+    }
     RefPtr server = ServiceWorkers::server();
     if (!server)
         return false;
-    auto& options = loader.options();
     if (options.serviceWorkersMode == ServiceWorkersMode::None)
         return false;
     auto& url = loader.request().url();
@@ -1663,6 +2050,9 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 
     Ref task = FetchTask::create(loader, WTF::move(networkLoad), *registration, worker->identifier());
     fetchTasks().set(&loader, task.copyRef());
+    // Navigation Preload: das Netz laedt schon, waehrend der Worker startet
+    if (options.mode == FetchOptions::Mode::Navigate && loader.request().httpMethod() == "GET"_s && registration->navigationPreloadState().enabled)
+        task->startPreload(registration->navigationPreloadState());
     worker->whenActivated([task, workerIdentifier = worker->identifier()](bool success) mutable {
         RefPtr server = ServiceWorkers::server();
         RefPtr worker = server && success ? server->workerByID(workerIdentifier) : nullptr;
@@ -1702,6 +2092,10 @@ bool cancelFetch(ResourceLoader& loader)
 {
     if (pendingImports().remove(&loader))
         return true;
+    if (auto load = preloadLoads().take(&loader)) {
+        load->cancel();
+        return true;
+    }
     auto task = fetchTasks().take(&loader);
     if (!task)
         return false;
@@ -1711,7 +2105,7 @@ bool cancelFetch(ResourceLoader& loader)
 
 bool isFetching(const ResourceLoader& loader)
 {
-    return fetchTasks().contains(&loader) || pendingImports().contains(&loader);
+    return fetchTasks().contains(&loader) || pendingImports().contains(&loader) || preloadLoads().contains(&loader);
 }
 
 
@@ -1916,8 +2310,8 @@ void initialize()
 void enableIn(Settings& settings)
 {
     settings.setServiceWorkersEnabled(true);
-    // Navigation Preload braucht den Netzwerk-Teil von WebKit2
-    settings.setServiceWorkerNavigationPreloadEnabled(false);
+    settings.setServiceWorkerNavigationPreloadEnabled(true);
+    settings.setNotificationEventEnabled(true);
     settings.setCacheAPIEnabled(true);
     settings.setSharedWorkerEnabled(true);
 }

@@ -11,6 +11,7 @@
 #include <WebCore/CoordinatedImageBackingStore.h>
 #include <WebCore/Damage.h>
 #include <WebCore/GraphicsLayerCoordinated.h>
+#include <WebCore/LocalFrameView.h>
 #include <WebCore/NativeImage.h>
 #include <WebCore/PlatformDisplay.h>
 #include <WebCore/ScrollingThread.h>
@@ -20,6 +21,7 @@
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkSurface.h>
 #include <skia/gpu/ganesh/GrDirectContext.h>
+#include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Scope.h>
 
@@ -54,6 +56,8 @@ static void compositeScene(CompositorScene& scene)
     IntSize pixelSize;
     float deviceScaleFactor = 1;
     HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
+    RefPtr<CoordinatedPlatformLayer> scrollLayer;
+    bool pinching = false;
     {
         Locker locker { scene.lock };
         scene.frameScheduled = false;
@@ -85,9 +89,21 @@ static void compositeScene(CompositorScene& scene)
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
         if (std::exchange(scene.hasPendingLayers, false))
             scene.committedLayers = std::exchange(scene.pendingLayers, { });
+        if (reasons.contains(CompositionReason::RenderingUpdate)) {
+            scene.viewport = { scene.pendingViewport.scale, scene.viewport.scrollPosition, scene.pendingViewport.documentRect, scene.pendingViewport.visibleSize };
+            scene.scrollLayer = scene.pendingScrollLayer;
+            // Der Engine-Thread zeigt das Ziel der Geste jetzt selber
+            if (scene.pinchZoom && !scene.pinchActive && scene.pendingPinchCommit >= scene.pinchCommit)
+                scene.pinchZoom = std::nullopt;
+        }
+        scrollLayer = scene.scrollLayer;
+        pinching = !!scene.pinchZoom;
         pixelSize = scene.pixelSize;
         deviceScaleFactor = scene.deviceScaleFactor;
     }
+    // Waehrend einer Geste die Scroll-Position jedes Bild aus den Ebenen lesen
+    if (pinching && !reasons.isEmpty())
+        reasons.add(CompositionReason::AsyncScrolling);
 
     auto notifyEngine = [&] {
         if (!notify)
@@ -109,11 +125,31 @@ static void compositeScene(CompositorScene& scene)
         return;
     }
 
+    std::optional<FloatPoint> shownScrollPosition;
     {
         Locker stateLocker { scene.stateLock };
         scene.rootLayer->flushPositionChanges(reasons, true);
         for (auto& layer : scene.committedLayers)
             layer->flushPositionChanges(reasons, true);
+        // Positionen sind jetzt wie gezeigt (sonst gleich wie im letzten Bild)
+        if (scrollLayer && reasons.containsAny({ CompositionReason::RenderingUpdate, CompositionReason::AsyncScrolling })) {
+            Locker locker { scrollLayer->lock() };
+            auto position = scrollLayer->position();
+            shownScrollPosition = FloatPoint { -position.x(), -position.y() };
+        }
+    }
+    // Pinch-Geste: die gezeigten Kacheln skalieren und verschieben, bis der
+    // Engine-Thread das Ziel uebernommen hat
+    std::optional<PinchViewport> shown;
+    std::optional<PinchViewport> target;
+    {
+        Locker locker { scene.lock };
+        if (shownScrollPosition)
+            scene.viewport.scrollPosition = *shownScrollPosition;
+        if (scene.pinchZoom) {
+            shown = scene.viewport;
+            target = scene.pinchZoom->target();
+        }
     }
 
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
@@ -136,6 +172,11 @@ static void compositeScene(CompositorScene& scene)
     auto& rootLayer = scene.rootLayer->ensureSkiaTarget();
     TransformationMatrix matrix;
     matrix.scale(deviceScaleFactor);
+    if (target) {
+        float factor = target->scale / shown->scale;
+        matrix.translate(factor * shown->scrollPosition.x() - target->scrollPosition.x(), factor * shown->scrollPosition.y() - target->scrollPosition.y());
+        matrix.scale(factor);
+    }
     rootLayer.setTransform(matrix);
 
     // Ohne Schadens-Verfolgung: jedes Mal das ganze Bild (auf der GPU billig)
@@ -159,7 +200,85 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl_compositor_frame(CompositorScene* sceneP
     compositeScene(scene);
 }
 
+void CompositorScene::pinch(PinchPhase phase, float factor, FloatPoint focus)
+{
+    Locker locker { lock };
+    switch (phase) {
+    case PinchPhase::Begin:
+        if (!scrollLayer)
+            return;
+        // Zeigt der Engine-Thread die letzte Geste noch nicht, ab deren Ziel weiter
+        pinchZoom.emplace(pinchZoom ? pinchZoom->target() : viewport, focus);
+        pinchActive = true;
+        return;
+    case PinchPhase::Update:
+        if (!pinchActive)
+            return;
+        pinchZoom->update(factor, focus);
+        break;
+    case PinchPhase::End:
+    case PinchPhase::Cancel:
+        if (!pinchActive)
+            return;
+        pinchActive = false;
+        if (phase == PinchPhase::Cancel)
+            pinchZoom->cancel();
+        commitPinchLocked();
+        break;
+    }
+    reasons.add(CompositionReason::AsyncScrolling);
+    scheduleFrameLocked();
+}
+
+bool CompositorScene::scrollPinch(FloatSize delta)
+{
+    Locker locker { lock };
+    if (!pinchZoom)
+        return false;
+    pinchZoom->scrollBy(delta);
+    if (!pinchActive)
+        commitPinchLocked();
+    reasons.add(CompositionReason::AsyncScrolling);
+    scheduleFrameLocked();
+    return true;
+}
+
+// Nach der Geste uebernimmt der Engine-Thread das Ziel (Kacheln werden scharf
+// neu gemalt, die Seite bekommt die visualViewport-Events). Kommt vorher noch
+// ein neues Ziel, nimmt er nur das letzte.
+void CompositorScene::commitPinchLocked()
+{
+    bool scheduled = pinchRequest.has_value();
+    pinchRequest = PinchRequest { pinchZoom->target().scale, pinchZoom->target().scrollPosition, ++pinchCommit };
+    if (scheduled)
+        return;
+    runOnEngineThread([scene = Ref { *this }] {
+        std::optional<PinchRequest> request;
+        {
+            Locker locker { scene->lock };
+            request = std::exchange(scene->pinchRequest, std::nullopt);
+        }
+        auto* view = WebView::fromID(scene->viewId);
+        if (request && view)
+            view->setPageScale(request->scale, request->scrollPosition, request->commit);
+    });
+}
+
 // ------------------------------------------------------------ CompositorScene
+
+static Lock s_scenesLock;
+
+static HashMap<int, RefPtr<CompositorScene>>& scenes() WTF_REQUIRES_LOCK(s_scenesLock)
+{
+    static NeverDestroyed<HashMap<int, RefPtr<CompositorScene>>> map;
+    return map;
+}
+
+RefPtr<CompositorScene> CompositorScene::forView(int viewId)
+{
+    Locker locker { s_scenesLock };
+    return scenes().get(viewId);
+}
 
 CompositorScene::CompositorScene(int viewId)
     : viewId(viewId)
@@ -237,7 +356,10 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
         m_scene->pixelSize = view.pixelSize();
         m_scene->deviceScaleFactor = view.deviceScaleFactor();
     }
-    Scrolling::setScene(view.id(), m_scene.ptr());
+    {
+        Locker locker { s_scenesLock };
+        scenes().set(view.id(), m_scene.ptr());
+    }
     // Kacheln malt die CPU (PlatformDisplay hat keinen GL-Kontext fuer
     // Hintergrund-Threads), den Proxy braucht nur DDL
     m_paintingEngine = SkiaPaintingEngine::create(nullptr);
@@ -245,7 +367,7 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
 
 LayerTreeHostWasm::~LayerTreeHostWasm()
 {
-    Scrolling::setScene(m_scene->viewId, nullptr);
+    detachScene();
     // Malende Threads duerfen uns danach nicht mehr erreichen
     HashSet<Ref<CoordinatedPlatformLayer>> layers;
     {
@@ -262,6 +384,8 @@ LayerTreeHostWasm::~LayerTreeHostWasm()
         m_scene->invalidated = true;
         layers.addAll(std::exchange(m_scene->pendingLayers, { }));
         layers.addAll(std::exchange(m_scene->pendingLayersToRemove, { }));
+        m_scene->pendingScrollLayer = nullptr;
+        m_scene->scrollLayer = nullptr;
     }
     // Die Ziele (Texturen) gehoeren dem Compositor-Thread
     Compositor::dispatch([scene = m_scene.copyRef(), layers = WTF::move(layers)]() mutable {
@@ -324,6 +448,19 @@ void LayerTreeHostWasm::forceRepaint()
     m_scene->requestComposition(CompositionReason::Animation);
 }
 
+void LayerTreeHostWasm::detachScene()
+{
+    Locker locker { s_scenesLock };
+    if (scenes().get(m_scene->viewId) == m_scene.ptr())
+        scenes().remove(m_scene->viewId);
+}
+
+void LayerTreeHostWasm::didApplyPinch(unsigned commit)
+{
+    m_pinchCommit = commit;
+    m_compositionRequired = true;
+}
+
 void LayerTreeHostWasm::flushLayerStates()
 {
     Locker stateLocker { m_scene->stateLock };
@@ -355,7 +492,18 @@ void LayerTreeHostWasm::flush()
     if (!std::exchange(m_compositionRequired, false))
         return;
     m_waitingForCompositor = true;
+    RefPtr<CoordinatedPlatformLayer> scrollLayer;
+    PinchViewport viewport;
+    if (m_view) {
+        viewport = m_view->pinchViewport();
+        auto* frameView = m_view->mainFrameView();
+        if (auto* layer = frameView ? frameView->graphicsLayerForScrolledContents() : nullptr)
+            scrollLayer = &downcast<GraphicsLayerCoordinated>(*layer).coordinatedPlatformLayer();
+    }
     Locker locker { m_scene->lock };
+    m_scene->pendingViewport = viewport;
+    m_scene->pendingScrollLayer = WTF::move(scrollLayer);
+    m_scene->pendingPinchCommit = m_pinchCommit;
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;
     m_scene->scheduleFrameLocked();

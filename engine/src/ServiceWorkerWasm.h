@@ -13,12 +13,14 @@
 // WebSharedWorkerServer), mit eigener Page wie die Service Worker.
 #pragma once
 
+#include <WebCore/NotificationEventType.h>
 #include <wtf/Function.h>
 
 namespace WebCore {
 class LocalFrame;
 class ResourceLoader;
 class Settings;
+struct NotificationData;
 }
 
 namespace BrowserLite::ServiceWorkers {
@@ -40,5 +42,9 @@ bool isFetching(const WebCore::ResourceLoader&);
 // FrameLoaderClient: das Laden eines Frames ist zu Ende, committed = mit neuem
 // Dokument (fuer WindowClient.navigate())
 void frameLoadEnded(WebCore::LocalFrame&, bool committed);
+
+// Klick oder Schliessen einer Benachrichtigung aus showNotification():
+// notificationclick/notificationclose im Worker der Registrierung
+void notificationEvent(WebCore::NotificationData&&, WebCore::NotificationEventType);
 
 } // namespace BrowserLite::ServiceWorkers

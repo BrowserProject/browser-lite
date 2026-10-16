@@ -442,9 +442,10 @@ export function onNotification(tab, data) {
   const notification = new Notification(data.title, { body: data.body, icon: data.icon || undefined, tag: data.tag || undefined, lang: data.lang || undefined, silent: data.silent });
   notifications.set(data.id, notification);
   notification.addEventListener('show', () => send(0));
+  // Aus showNotification() (persistent): den Klick behandelt der Service Worker
   notification.addEventListener('click', () => {
     window.focus();
-    const target = api.tabs().get(tab.id);
+    const target = !data.persistent && tab && api.tabs().get(tab.id);
     if (target)
       api.activateTab(target);
     send(1);
@@ -621,15 +622,20 @@ export function onSpeechRecognition(tab, data) {
 // ------------------------------------------------------- Touch
 // Finger gehen als Touch-Events an die Seite. Faengt die Seite sie nicht ab
 // (preventDefault), scrollt ein Wischen die Seite (mit Schwung), ein kurzes
-// Antippen wird ein Klick und langes Druecken das Kontextmenue - wie in Chrome.
+// Antippen wird ein Klick, langes Druecken das Kontextmenue und zwei Finger
+// zoomen die Ansicht - wie in Chrome.
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
 
 export function attachTouch(tab, canvas, position, modifierBits) {
-  const touches = new Map(); // pointerId -> { id, x, y }
+  const touches = new Map(); // pointerId -> { id, x, y, pinch }
   let gesture = null; // { startX, startY, lastX, lastY, lastTime, velocityX, velocityY, moved, consumed, timer }
   let fling = 0;
+  // Zwei Finger: Pinch-Zoom der Ansicht wie Chrome (engine/src/PinchZoom.h),
+  // wenn die Seite die Finger nicht selber will (preventDefault, touch-action)
+  let pinch = null; // { x, y, distance } der ersten zwei Finger
+  const startsWithoutResult = []; // pointerId je touchstart, Antworten kommen der Reihe nach
 
   const send = (type, changedId, state, e) => {
     const points = [...touches.entries()].map(([pointerId, t]) => ({
@@ -639,9 +645,36 @@ export function attachTouch(tab, canvas, position, modifierBits) {
     api.engine()._bl_touch(tab.id, type, api.toUTF8(JSON.stringify(points)), modifierBits(e));
   };
 
+  const fingers = () => {
+    const [a, b] = touches.values();
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y) };
+  };
+  const startPinch = () => {
+    if (pinch || touches.size !== 2 || ![...touches.values()].every((t) => t.pinch))
+      return;
+    pinch = fingers();
+    api.engine()._bl_pinch(tab.id, 0, 1, pinch.x, pinch.y);
+  };
+  // phase 2 Ende, 3 Abbruch (zurueck zum Anfang der Geste)
+  const stopPinch = (phase) => {
+    if (!pinch)
+      return;
+    api.engine()._bl_pinch(tab.id, phase, 1, pinch.x, pinch.y);
+    pinch = null;
+  };
+
   tab.onTouchResult = (data) => {
-    if (gesture && data.consumed)
-      gesture.consumed = true;
+    if (data.type === 0) {
+      const touch = touches.get(startsWithoutResult.shift());
+      if (touch)
+        touch.pinch = data.pinch && !data.consumed;
+      startPinch();
+    }
+    if (data.consumed) {
+      if (gesture)
+        gesture.consumed = true;
+      stopPinch(3);
+    }
   };
 
   const stopFling = () => {
@@ -660,7 +693,8 @@ export function attachTouch(tab, canvas, position, modifierBits) {
     stopFling();
     canvas.setPointerCapture(e.pointerId);
     const [x, y] = position(e);
-    touches.set(e.pointerId, { id: e.pointerId, x, y });
+    touches.set(e.pointerId, { id: e.pointerId, x, y, pinch: false });
+    startsWithoutResult.push(e.pointerId);
     send(0, e.pointerId, 1 /* gedrueckt */, e);
     if (touches.size === 1) {
       gesture = { startX: x, startY: y, lastX: x, lastY: y, lastTime: e.timeStamp, velocityX: 0, velocityY: 0, moved: false, consumed: false };
@@ -681,8 +715,14 @@ export function attachTouch(tab, canvas, position, modifierBits) {
       return;
     e.stopImmediatePropagation();
     const [x, y] = position(e);
-    touches.set(e.pointerId, { id: e.pointerId, x, y });
+    Object.assign(touches.get(e.pointerId), { x, y });
     send(1, e.pointerId, 2 /* bewegt */, e);
+    if (pinch && touches.size >= 2) {
+      const now = fingers();
+      if (pinch.distance > 0 && now.distance > 0)
+        api.engine()._bl_pinch(tab.id, 1, now.distance / pinch.distance, now.x, now.y);
+      pinch = now;
+    }
     if (!gesture || touches.size !== 1)
       return;
     if (!gesture.moved && Math.hypot(x - gesture.startX, y - gesture.startY) > TAP_DISTANCE) {
@@ -707,9 +747,11 @@ export function attachTouch(tab, canvas, position, modifierBits) {
       return;
     e.stopImmediatePropagation();
     const [x, y] = position(e);
-    touches.set(e.pointerId, { id: e.pointerId, x, y });
+    Object.assign(touches.get(e.pointerId), { x, y });
     send(cancelled ? 3 : 2, e.pointerId, cancelled ? 4 /* abgebrochen */ : 0 /* losgelassen */, e);
     touches.delete(e.pointerId);
+    if (touches.size < 2)
+      stopPinch(cancelled ? 3 : 2);
     if (!gesture || touches.size)
       return;
     const g = gesture;

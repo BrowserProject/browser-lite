@@ -93,6 +93,16 @@ void storeCookies(const ResourceRequest& request, const CurlResponse& response)
     }
 }
 
+ResourceResponse networkResponse(CurlResponse& curlResponse)
+{
+    ResourceResponse response(curlResponse);
+    if (response.mimeType().isEmpty()) {
+        auto type = MIMETypeRegistry::mimeTypeForPath(response.url().path());
+        response.setMimeType(type.isEmpty() || type == "application/octet-stream"_s ? "text/html"_s : WTF::move(type));
+    }
+    return response;
+}
+
 bool isRedirect(const ResourceResponse& response)
 {
     int status = response.httpStatusCode();
@@ -299,12 +309,7 @@ private:
         if (!m_loader || m_curlRequest != &request)
             return;
 
-        m_response = ResourceResponse(curlResponse);
-        // Ohne Content-Type raten wie andere Browser: nach der Endung, sonst HTML
-        if (m_response.mimeType().isEmpty()) {
-            auto type = MIMETypeRegistry::mimeTypeForPath(m_response.url().path());
-            m_response.setMimeType(type.isEmpty() || type == "application/octet-stream"_s ? "text/html"_s : WTF::move(type));
-        }
+        m_response = networkResponse(curlResponse);
         debugLog("Antwort %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
         storeCookies(request.resourceRequest(), curlResponse);
 

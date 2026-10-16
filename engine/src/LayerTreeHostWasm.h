@@ -14,11 +14,13 @@
 // dann kommt das naechste Rendering-Update.
 #pragma once
 
+#include "PinchZoom.h"
 #include <WebCore/CoordinatedCompositionReason.h>
 #include <WebCore/CoordinatedPlatformLayer.h>
 #include <WebCore/GraphicsLayerFactory.h>
 #include <WebCore/IntSize.h>
 #include <atomic>
+#include <optional>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
@@ -43,6 +45,8 @@ class WebView;
 class CompositorScene final : public ThreadSafeRefCounted<CompositorScene> {
 public:
     static Ref<CompositorScene> create(int viewId) { return adoptRef(*new CompositorScene(viewId)); }
+    // Von jedem Thread: Stand des Views, solange er mit Ebenen malt
+    static RefPtr<CompositorScene> forView(int viewId);
 
     const int viewId;
     const Ref<WebCore::CoordinatedPlatformLayer> rootLayer;
@@ -68,9 +72,38 @@ public:
     // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
+    // Ansicht zum letzten Rendering-Update (Pinch-Zoom): die Ebene, die der
+    // Hauptframe zum Scrollen verschiebt, und die letzte uebernommene Geste
+    PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);
+    RefPtr<WebCore::CoordinatedPlatformLayer> pendingScrollLayer WTF_GUARDED_BY_LOCK(lock);
+    unsigned pendingPinchCommit WTF_GUARDED_BY_LOCK(lock) { 0 };
+
+    // Was gerade zu sehen ist (die Scroll-Position kommt aus der Ebene)
+    PinchViewport viewport WTF_GUARDED_BY_LOCK(lock);
+    RefPtr<WebCore::CoordinatedPlatformLayer> scrollLayer WTF_GUARDED_BY_LOCK(lock);
+    // Ziel der Geste, bis ein Rendering-Update es zeigt
+    std::optional<PinchZoom> pinchZoom WTF_GUARDED_BY_LOCK(lock);
+    bool pinchActive WTF_GUARDED_BY_LOCK(lock) { false };
+    unsigned pinchCommit WTF_GUARDED_BY_LOCK(lock) { 0 };
+    // Ziel fuer den Engine-Thread, solange er es noch nicht abgeholt hat
+    struct PinchRequest {
+        float scale;
+        WebCore::FloatPoint scrollPosition;
+        unsigned commit;
+    };
+    std::optional<PinchRequest> pinchRequest WTF_GUARDED_BY_LOCK(lock);
 
     // Nur auf dem Compositor-Thread
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
+
+    // Von jedem Thread, die Oberflaeche ruft direkt auf: Pinch-Geste. Das Ziel
+    // geht von hier an den Engine-Thread, so kommen spaetere Eingaben der
+    // Oberflaeche (Klicks) erst nach der Uebernahme dort an.
+    void pinch(PinchPhase, float factor, WebCore::FloatPoint focus);
+    // Von jedem Thread: das Rad (DOM-Deltas) verschiebt die skalierte Ansicht,
+    // solange eine Geste laeuft oder der Engine-Thread sie noch nicht zeigt.
+    // false = keine Geste, das Rad geht normal an den Scroll-Thread
+    bool scrollPinch(WebCore::FloatSize delta);
 
     // Von jedem Thread: beim naechsten Bild des Compositors zusammensetzen
     void requestComposition(WebCore::CompositionReason);
@@ -81,6 +114,7 @@ public:
 
 private:
     explicit CompositorScene(int viewId);
+    void commitPinchLocked() WTF_REQUIRES_LOCK(lock);
 };
 
 class LayerTreeHostWasm final : public WebCore::GraphicsLayerFactory, public WebCore::CoordinatedPlatformLayer::Client {
@@ -104,6 +138,10 @@ public:
     void didComposite() { m_waitingForCompositor = false; }
     // Alles neu zeigen (z.B. neues Canvas)
     void forceRepaint();
+    // Der View malt ohne Ebenen weiter: nichts mehr ueber den Compositor
+    void detachScene();
+    // Der Engine-Thread hat das Ziel einer Pinch-Geste uebernommen
+    void didApplyPinch(unsigned commit);
 
 private:
     void updateRootLayer();
@@ -139,6 +177,7 @@ private:
     bool m_compositionRequired { false };
     bool m_layersChanged { false };
     bool m_waitingForCompositor { false };
+    unsigned m_pinchCommit { 0 };
     // Der Scroll-Thread hat Ebenen verschoben
     std::atomic<bool> m_compositionRequiredInScrollingThread { false };
 };

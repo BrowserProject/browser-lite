@@ -5,11 +5,11 @@
 //   cd tests/e2e && node wasm-test.mjs [engine-ordner]
 //
 // fixtures/ enthaelt ein kleines Modul (small.c) und ein Emscripten-Programm
-// mit JS-Glue (program.cpp), neu bauen mit fixtures/build.sh. Weitere Module
-// von Hand (tests/wasm/wasm-bytes.mjs).
+// mit JS-Glue (program.cpp, auch als memory64-Variante program64), neu bauen
+// mit fixtures/build.sh. Weitere Module von Hand (tests/wasm/wasm-bytes.mjs).
 import fs from 'node:fs';
 import path from 'node:path';
-import { source as wasmBytes } from '../wasm/wasm-bytes.mjs';
+import { MEMORY64_RESULT, MULTI_MEMORY_RESULT, source as wasmBytes } from '../wasm/wasm-bytes.mjs';
 import { TIMEOUT, check, collect, finish, here, launch, serve, startStack, timeLimit } from './harness.mjs';
 
 // Ausgabe von program.cpp (in node mit dem Original gemessen)
@@ -42,6 +42,15 @@ const recursionModule = wasm(
   sec(3, [0]),
   sec(7, [...str('down'), 0, 1]),
   sec(10, code(32, 0, 16, 0)));
+// table64 ohne Speicher: Tabelle "t" (i64, 2 Eintraege, t[0] gibt 42),
+// call(i64) ruft t[i] auf
+const table64Module = wasm(
+  sec(1, [96, 0, 1, 127], [96, 1, 126, 1, 127]),
+  sec(3, [0], [1]),
+  sec(4, [0x70, 0x04, 2]),
+  sec(7, [...str('t'), 1, 0], [...str('call'), 0, 1]),
+  sec(9, [0, 66, 0, 11, 1, 0]),
+  sec(10, code(65, 42), code(32, 0, 0x11, 0, 0)));
 const symbols = () => Object.getOwnPropertySymbols(globalThis).length;
 const symbolsBefore = symbols();
 
@@ -107,6 +116,20 @@ const symbolsBefore = symbols();
     result('abloesen', transfer + ',' + copy.byteLength + ',' + new Uint8Array(fixed.buffer)[10] + ',' + before.byteLength + ',' + fixed.buffer.byteLength);
     result('grenze', errorName(() => new WebAssembly.Memory({ initial: 65536 })) + ',' + errorName(() => new WebAssembly.Memory({ initial: 1, maximum: 65536 }).grow(40000)));
     result('features', WebAssembly.validate(wasm(sec(5, [3, 1, 1]))) + ',' + WebAssembly.validate(wasm(sec(5, [0, 1], [0, 1]))));
+    // Mehrere Speicher, memory64 und table64
+    const textAt = (memory, at, length) => new TextDecoder().decode(new Uint8Array(memory.buffer, at, length));
+    const multi = (await WebAssembly.instantiate(multiMemoryModule())).instance.exports;
+    result('mehrspeicher', multiMemoryRun(multi));
+    result('mehrspeicher_objekte', textAt(multi.m0, 0, 4) + textAt(multi.m1, 16, 4) + textAt(multi.m2, 0, 3) + ',' + (multi.m1 !== multi.m0) + ',' + multi.m1.buffer.byteLength);
+    const m64 = (await WebAssembly.instantiate(memory64Module())).instance.exports;
+    result('memory64', memory64Run(m64));
+    new BigUint64Array(m64.memory.buffer)[50] = 77n;
+    result('memory64_js', textAt(m64.memory, 8, 5) + ',' + m64.load(400n) + ',' + m64.memory.grow(1n) + ',' + m64.size() + ',' + m64.memory.buffer.byteLength
+      + ',' + errorName(() => m64.memory.grow(1)) + ',' + new WebAssembly.Memory({ address: 'i64', initial: 1n }).grow(2n));
+    const t64 = (await WebAssembly.instantiate(table64Module)).instance.exports;
+    const before64 = t64.t.length + ',' + t64.call(0n) + ',' + errorName(() => t64.call(1n)) + ',' + errorName(() => t64.t.get(0));
+    t64.t.set(1n, t64.t.get(0n));
+    result('table64', before64 + ',' + t64.call(1n) + ',' + t64.t.grow(1n) + ',' + t64.t.length + ',' + new WebAssembly.Table({ address: 'i64', element: 'anyfunc', initial: 1n }).length);
     const traps = (await WebAssembly.instantiate(trapsModule)).instance.exports;
     const refs = new WebAssembly.Table({ element: 'externref', initial: 1 });
     refs.set(0, fixed);
@@ -138,7 +161,7 @@ const symbolsBefore = symbols();
 })();
 </script>`;
 
-const PROGRAM_PAGE = '<!doctype html><title>Emscripten</title><body>Emscripten<script src="/program.js"></script>';
+const PROGRAM_PAGE = (name) => `<!doctype html><title>Emscripten</title><body>Emscripten<script src="/${name}.js"></script>`;
 
 // Seite mit 64 MB Speicher und einem Zyklus ueber beide Seiten wie bei
 // Emscripten-Glue: der Import ruft Exporte der eigenen Instanz
@@ -194,7 +217,7 @@ WeakMap.prototype.set = function (key, value) {
 const own = new WebAssembly.Memory({ initial: 1 });
 WeakMap.prototype.set = set;
 const fake = {};
-WeakMap.prototype.get = function (key) { return key === fake ? { kind: 'memory', memoryId: forgedId } : get.call(this, key); };
+WeakMap.prototype.get = function (key) { return key === fake ? { kind: 'memory', memoryId: forgedId, address: 'i32' } : get.call(this, key); };
 WeakMap.prototype.has = function (key) { return key === fake || has.call(this, key); };
 const works = (fn) => { try { fn(); return true; } catch (e) { return false; } };
 const buffer = Object.getOwnPropertyDescriptor(WebAssembly.Memory.prototype, 'buffer').get;
@@ -224,8 +247,8 @@ const { url: victimURL } = await serve((req, res) => res.writeHead(200, { 'Conte
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/')
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
-  if (req.url === '/program.html')
-    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PROGRAM_PAGE);
+  if (req.url === '/program.html' || req.url === '/program64.html')
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PROGRAM_PAGE(req.url.slice(1, -5)));
   if (req.url === '/realms.html')
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(REALMS_PAGE(victimURL));
   if (req.url === '/attacker.html')
@@ -265,7 +288,12 @@ check('Memory, Table, Global', (await result('objekte')) === '131072,7,true,9', 
 check('CompileError', (await result('compileerror')) === 'true', results.get('compileerror'));
 check('memory.buffer nicht abloesbar', (await result('abloesen')) === 'TypeError,TypeError,65536,7,0,131072', results.get('abloesen'));
 check('Speicher-Grenze', (await result('grenze')) === 'RangeError,RangeError', results.get('grenze'));
-check('validate ohne Threads/mehrere Speicher', (await result('features')) === 'false,false', results.get('features'));
+check('validate: ohne Threads, mit mehreren Speichern', (await result('features')) === 'false,true', results.get('features'));
+check('Mehrere Speicher', (await result('mehrspeicher')) === MULTI_MEMORY_RESULT, results.get('mehrspeicher'));
+check('Mehrere Speicher als Memory-Objekte', (await result('mehrspeicher_objekte')) === 'ZweiZweiDre,true,131072', results.get('mehrspeicher_objekte'));
+check('memory64', (await result('memory64')) === MEMORY64_RESULT, results.get('memory64'));
+check('memory64: buffer und grow mit BigInt', (await result('memory64_js')) === 'Hallo,77,3,4,262144,TypeError,1', results.get('memory64_js'));
+check('table64', (await result('table64')) === '2,42,RuntimeError,TypeError,42,2,3,1', results.get('table64'));
 check('wait faengt, Tabelle mit Init, Memory als externref', (await result('umschreiben')) === 'RuntimeError,42,true', results.get('umschreiben'));
 check('Rekursion JS <-> WASM zu tief', (await result('rekursion')) === 'RangeError,50,RangeError,80', results.get('rekursion'));
 check('WebAssembly im Worker, zweiter Worker danach', (await result('worker')) === '80,72.97.108.108.111/80,72.97.108.108.111', results.get('worker'));
@@ -274,6 +302,12 @@ check('WebAssembly im Worker, zweiter Worker danach', (await result('worker')) =
 await page.fill('#address', siteURL + 'program.html');
 await page.press('#address', 'Enter');
 check('Emscripten-Programm', (await result('emscripten')) === PROGRAM_RESULT, results.get('emscripten'));
+
+// Dasselbe Programm mit -sMEMORY64 (i64-Speicher und table64)
+results.delete('emscripten');
+await page.fill('#address', siteURL + 'program64.html');
+await page.press('#address', 'Enter');
+check('Emscripten-Programm mit memory64', (await result('emscripten')) === PROGRAM_RESULT, results.get('emscripten'));
 
 // Speicher einer anderen Herkunft: kein buffer, grow oder Import mit seiner id
 await page.fill('#address', siteURL + 'realms.html');

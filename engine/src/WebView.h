@@ -2,6 +2,7 @@
 // Pixel-Buffer und Eingabe-Events.
 #pragma once
 
+#include "PinchZoom.h"
 #include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
@@ -42,6 +43,10 @@ public:
     static Ref<WebView> create(int id, WebCore::IntSize, float deviceScaleFactor);
     // Offene Views gehoeren der Engine, bis close() sie wieder freigibt
     static WebView& open(int id, WebCore::IntSize, float deviceScaleFactor);
+    // Neuer Tab, den die Engine selber oeffnet (window.open, target=_blank,
+    // clients.openWindow): ID ab 2^20 (die Oberflaeche zaehlt ab 1), die
+    // Oberflaeche bekommt "newview". openerId 0 = ohne Tab dahinter
+    static WebView& openFromEngine(int openerId, WebCore::IntSize, float deviceScaleFactor);
     static void close(int id);
     ~WebView();
 
@@ -138,6 +143,12 @@ public:
     void setFocused(bool);
     void focusInitial(bool forward);
     void setZoom(float);
+    // Pinch-Zoom (PinchZoom.h): nur die Ansicht skalieren, Layout bleibt.
+    // pinch() nur ohne Compositor, sonst macht die Geste der Compositor-Thread
+    // und uebergibt am Ende mit setPageScale() (commit fuer LayerTreeHostWasm)
+    void pinch(PinchPhase, float factor, WebCore::FloatPoint focus);
+    void setPageScale(float scale, WebCore::FloatPoint scrollPosition, unsigned pinchCommit = 0);
+    PinchViewport pinchViewport() const;
     void find(const String&, bool backwards, bool again);
     void stopFind();
 
@@ -173,6 +184,7 @@ private:
     void updateDrag(WebCore::IntPoint, int modifiers);
     void endDrag(WebCore::IntPoint, bool drop, int modifiers);
     std::optional<DragSession> m_drag;
+    std::optional<PinchZoom> m_pinch;
 
     WebView(int id, WebCore::IntSize, float deviceScaleFactor);
     void createSurface();

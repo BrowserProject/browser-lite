@@ -4,7 +4,8 @@
 // laufen weiter, waehrend das JS der Seite blockiert (Compositor-/Scroll-Thread).
 // Nach einem GPU-Verlust ohne Ebenen, nach der Wiederherstellung neue Tabs mit.
 // Ohne Compositor (?compositing=0) malt der Engine-Worker selber auf der GPU
-// und nach Verlust und Wiederherstellung wieder dort.
+// und nach Verlust und Wiederherstellung wieder dort. CSS-Filter: Wiederverwendung,
+// Bildrate, Vergleich mit der CPU.
 //
 //   cd tests/e2e && node compositing-test.mjs [engine-ordner]
 import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
@@ -262,5 +263,97 @@ await boxColor([255, 0, 255]);
 box = await boxPixel([255, 0, 255]);
 check('Ohne Compositor: Verlust und Wiederherstellung direkt nacheinander', backAgain && near(box, [255, 0, 255])
   && !gpuLog(/Bild nicht auf die GPU gebracht/), JSON.stringify(box));
+await gpuPage.close();
+
+// CSS-Filter auf der GPU: Blur und Schatten rechnet der Compositor. Ein Layer ohne
+// Aenderung behaelt sein gefiltertes Bild (Patch 0036), ein verschobener filtert in
+// seiner Ebene und kommt nach dem Stillstand wieder auf die Geraetepixel.
+// Varianten: still (keine Bewegung), nofilter (ohne Filter, Vergleich der Bildrate)
+function filterPage(params) {
+  const still = params.has('still'), nofilter = params.has('nofilter');
+  const filter = (value) => nofilter ? 'none' : value;
+  const cards = [];
+  for (let i = 0; i < 12; i++) {
+    const left = 20 + (i % 6) * 160, top = 20 + Math.floor(i / 6) * 150;
+    cards.push(`<div class="card" style="left:${left}px;top:${top}px;filter:${filter(i % 2 ? 'drop-shadow(6px 6px 4px rgb(0,0,0))' : 'blur(4px)')}">Karte ${i}</div>`);
+  }
+  return `<!doctype html><title>Filter-Test</title><style>
+  body { margin: 0; background: #fff; font: 16px sans-serif; }
+  .card { position: absolute; width: 120px; height: 100px; background: linear-gradient(135deg, rgb(255, 160, 0), rgb(0, 120, 255)); color: #fff; }
+  #mover { top: 340px; left: 20px; filter: ${filter('blur(3px)')}; ${still ? '' : 'animation: slide 1s linear infinite alternate;'} }
+  @keyframes slide { from { transform: translateX(0); } to { transform: translateX(300px); } }
+  #change { position: absolute; top: 340px; left: 700px; width: 100px; height: 100px; background: rgb(255, 0, 0); filter: ${filter('blur(6px)')}; }
+  #settle { top: 500px; left: ${still ? 60 : 20}px; filter: ${filter('drop-shadow(6px 6px 4px rgb(0,0,0))')}; transition: transform 0.3s linear; }
+</style>${cards.join('')}
+<div class="card" id="mover">Bewegt</div><div id="change"></div><div class="card" id="settle">Steht</div>
+<script>
+${still ? '' : "requestAnimationFrame(() => requestAnimationFrame(() => { document.getElementById('settle').style.transform = 'translateX(40px)'; }));"}
+console.log('RESULT filterready=1');
+</script>`;
+}
+const { url: filterURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+  .end(filterPage(new URL(req.url, 'http://localhost').searchParams)));
+
+// Zeilen mit den stehenden Karten und dem Kasten, der nach der Bewegung steht
+const FILTER_ROWS = [40, 70, 100, 125, 190, 220, 250, 275, 520, 550, 580, 605];
+async function openFilterPage(query, compositing) {
+  const filterTab = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+  const filterResults = collect(filterTab);
+  await filterTab.goto(stack.app({ url: filterURL + query, compositing, debug: '1' }));
+  check(`Filter-Seite ${query} (compositing=${compositing}) geladen`, await filterResults.wait('filterready') === '1');
+  // Kacheln gemalt, Uebergang fertig, verschobene Layer wieder auf den Geraetepixeln
+  await waitFor(async () => (await pixelAt(80, 70, filterTab) || [255]).some((value) => value < 200));
+  await filterTab.waitForTimeout(2500);
+  return filterTab;
+}
+const filterRows = (target) => target.evaluate((ys) => ys.map((y) => window.blPageRow(y)), FILTER_ROWS);
+const rowDiff = (a, b) => {
+  let max = 0, sum = 0, count = 0;
+  a.forEach((row, i) => row.forEach((pixel, x) => pixel.forEach((value, c) => {
+    const diff = Math.abs(value - b[i][x][c]);
+    max = Math.max(max, diff);
+    sum += diff;
+    count++;
+  })));
+  return { max, mean: +(sum / count).toFixed(2) };
+};
+// Bilder des Compositors pro Sekunde (rAF in seinem Worker, aus dem Chrome-Trace)
+async function compositorFps(target) {
+  await browser.startTracing(target, { categories: ['devtools.timeline'] });
+  await target.waitForTimeout(3000);
+  const trace = JSON.parse((await browser.stopTracing()).toString());
+  const frames = new Map();
+  for (const event of trace.traceEvents) {
+    if (event.name === 'FireAnimationFrame' && event.ph === 'X')
+      frames.set(event.tid, (frames.get(event.tid) || 0) + 1);
+  }
+  return Math.max(0, ...frames.values()) / 3;
+}
+
+const animated = await openFilterPage('', '1');
+const animatedRows = await filterRows(animated);
+await animated.evaluate(() => window.__blEval('document.getElementById("change").style.background = "rgb(0, 0, 255)"'));
+let changed = null;
+await waitFor(async () => near(changed = await pixelAt(750, 390, animated), [0, 0, 255]), 10000);
+check('Gefilterter Layer zeigt neuen Inhalt', near(changed, [0, 0, 255]), JSON.stringify(changed));
+const filterFps = await compositorFps(animated);
+await animated.close();
+
+const plain = await openFilterPage('?nofilter', '1');
+const plainFps = await compositorFps(plain);
+await plain.close();
+check('Bildrate mit Blur und Schatten fast wie ohne Filter', plainFps > 10 && filterFps >= 0.5 * plainFps, `${filterFps.toFixed(1)} vs ${plainFps.toFixed(1)} Bilder/s`);
+
+const still = await openFilterPage('?still', '1');
+const stillRows = await filterRows(still);
+await still.close();
+const reuse = rowDiff(animatedRows, stillRows);
+check('Wiederverwendete und wieder ausgerichtete Filter wie ohne Bewegung', reuse.max <= 2, JSON.stringify(reuse));
+
+const cpu = await openFilterPage('?still', '0');
+const cpuRows = await filterRows(cpu);
+await cpu.close();
+const gpuVsCpu = rowDiff(stillRows, cpuRows);
+check('Filter auf der GPU wie auf der CPU (ohne Compositor)', gpuVsCpu.max <= 16 && gpuVsCpu.mean <= 1, JSON.stringify(gpuVsCpu));
 await browser.close();
 finish();

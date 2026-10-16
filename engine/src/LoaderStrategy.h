@@ -29,6 +29,9 @@ void storeCookies(const WebCore::ResourceRequest&, const WebCore::CurlResponse&)
 // Jeder CurlRequest der Engine: User-Agent, dazu Cookies, wenn die Anfrage
 // welche haben darf (allowCookies)
 Ref<WebCore::CurlRequest> createCurlRequest(WebCore::ResourceRequest&&, WebCore::CurlRequestClient&);
+// Antwort von curl wie fuer einen ResourceLoader: ohne Content-Type den
+// MIME-Typ raten wie andere Browser (nach der Endung, sonst HTML)
+WebCore::ResourceResponse networkResponse(WebCore::CurlResponse&);
 // curl folgt Redirects nicht selber: 3xx mit Location
 bool isRedirect(const WebCore::ResourceResponse&);
 // Fuer Lader ohne ResourceLoader: die laufende Anfrage endet, die naechste

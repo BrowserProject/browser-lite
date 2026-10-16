@@ -3,14 +3,17 @@
 //
 // Das Modul laeuft dann in der echten WASM-Engine des Browsers, JavaScript der
 // Seite (in JSC) sieht den Speicher trotzdem direkt als ArrayBuffer. Dafuer:
-// - Speicher 0 wird ein Import "__bl"."memory" (der Speicher der Engine)
-// - jeder Zugriff bekommt eine Grenzpruefung gegen "__bl"."bytes" und die
-//   Basis "__bl"."base" dazugezaehlt
-// - memory.size liest "__bl"."pages", memory.grow ruft "__bl"."grow"
+// - alle Speicher fallen weg, einziger Speicher ist der Import "__bl"."memory"
+//   (der Speicher der Engine)
+// - jeder Zugriff auf Speicher k bekommt eine Grenzpruefung gegen
+//   "__bl"."bytes<k>" und die Basis "__bl"."base<k>" dazugezaehlt
+// - memory.size liest "__bl"."pages<k>", memory.grow ruft "__bl"."grow<k>"
+// - memory64: Adressen sind i64, sie werden geprueft und dann auf i32 gekuerzt
 // - aktive Daten-Segmente werden passiv und von "__bl_init" geschrieben,
 //   die auch die Start-Funktion aufruft
-// Weil ein Funktions-Import und drei Globals dazukommen, verschieben sich die
-// Indizes der eigenen Funktionen (+1) und Globals (+3).
+// Weil pro Speicher ein Funktions-Import und drei Globals dazukommen,
+// verschieben sich die Indizes der eigenen Funktionen (+n) und Globals (+3n)
+// bei n Speichern.
 //
 // Laeuft in der Engine (--pre-js) und zum Testen in node.
 
@@ -36,6 +39,7 @@ var blWasmRewrite = (function () {
         throw new CompileError('unerwartetes Ende');
       return this.bytes[this.pos++];
     }
+    // Vorzeichenlos, auch u64 (ab 2^53 ungenau, reicht fuer Grenzen)
     u32() {
       let result = 0, shift = 0, b;
       do {
@@ -217,13 +221,14 @@ var blWasmRewrite = (function () {
     return types;
   }
 
+  // Grenzen von Speicher und Tabelle, address i64 bei memory64 und table64
   function readLimits(r) {
     const flags = r.byte();
-    const limits = { min: r.u32(), shared: !!(flags & 2), memory64: !!(flags & 4) };
+    if (flags & ~7)
+      throw new CompileError('unbekannte Grenzen 0x' + flags.toString(16));
+    const limits = { min: r.u32(), shared: !!(flags & 2), address: flags & 4 ? 'i64' : 'i32' };
     if (flags & 1)
       limits.max = r.u32();
-    if (flags & 4)
-      throw new CompileError('memory64 wird nicht unterstuetzt');
     return limits;
   }
 
@@ -255,11 +260,12 @@ var blWasmRewrite = (function () {
   const ATOMIC_WIDTH = [4, 8, 1, 2, 1, 2, 4];
   const ATOMIC_TYPE = ['i32', 'i64', 'i32', 'i32', 'i64', 'i64', 'i64'];
 
-  // Temporaere Locals, die jede Funktion zusaetzlich bekommt. Die letzten zwei
-  // halten Basis und Groesse des Speichers, damit nicht jeder Zugriff die
-  // importierten Globals lesen muss (neu geladen nach jedem Aufruf, nur dort
-  // kann der Speicher umziehen).
-  const TEMPS = ['i32', 'i32', 'i32', 'i64', 'i64', 'f32', 'f64', 'v128', 'i32', 'i64'];
+  // Temporaere Locals, die jede Funktion zusaetzlich bekommt. Danach kommen pro
+  // Speicher zwei (CACHE), die Basis und Groesse halten, damit nicht jeder
+  // Zugriff die importierten Globals lesen muss (neu geladen nach jedem Aufruf,
+  // nur dort kann der Speicher umziehen).
+  const TEMPS = ['i32', 'i32', 'i32', 'i64', 'i64', 'f32', 'f64', 'v128', 'i64', 'i64', 'i64'];
+  const CACHE = ['i32', 'i64'];
 
   // Abbruch, wenn eine Funktion try_table hat: dort werden Basis/Groesse nicht
   // zwischengespeichert (die Ziele der catch-Klauseln sind schwer zu finden)
@@ -284,8 +290,11 @@ var blWasmRewrite = (function () {
     };
     // temps: Index des ersten Hilfs-Locals oder null (konstante Ausdruecke)
     const tA = temps, tB = temps + 1, tC = temps + 2, tL = temps + 3, tL2 = temps + 4, tF = temps + 5, tD = temps + 6, tV = temps + 7;
-    const cBase = temps + 8, cBytes = temps + 9;
+    const tX = temps + 8, tY = temps + 9, tZ = temps + 10;
+    const cBase = (k) => temps + TEMPS.length + CACHE.length * k;
+    const cBytes = (k) => cBase(k) + 1;
     const valueTemp = (type) => ({ i32: tB, i64: tL, f32: tF, f64: tD, v128: tV })[type];
+    const memories = ctx.memories || [];
     let depth = 1;
     const copyFrom = (start) => {
       if (start === runEnd)
@@ -296,71 +305,108 @@ var blWasmRewrite = (function () {
         runEnd = r.pos;
       }
     };
-    const getBase = () => {
+    const getBase = (k) => {
       if (cache)
-        w.byte(0x20), w.u32(cBase);
+        w.byte(0x20), w.u32(cBase(k));
       else
-        w.byte(0x23), w.u32(ctx.baseGlobal);
+        w.byte(0x23), w.u32(memories[k].baseGlobal);
     };
-    const getBytes = () => {
+    const getBytes = (k) => {
       if (cache)
-        w.byte(0x20), w.u32(cBytes);
+        w.byte(0x20), w.u32(cBytes(k));
       else
-        w.byte(0x23), w.u32(ctx.bytesGlobal);
+        w.byte(0x23), w.u32(memories[k].bytesGlobal);
     };
     const reload = () => {
       if (!cache)
         return;
-      w.byte(0x23); w.u32(ctx.baseGlobal);
-      w.byte(0x21); w.u32(cBase);
-      w.byte(0x23); w.u32(ctx.bytesGlobal);
-      w.byte(0x21); w.u32(cBytes);
+      memories.forEach((memory, k) => {
+        w.byte(0x23); w.u32(memory.baseGlobal);
+        w.byte(0x21); w.u32(cBase(k));
+        w.byte(0x23); w.u32(memory.bytesGlobal);
+        w.byte(0x21); w.u32(cBytes(k));
+      });
     };
     reload();
 
+    const trapIf = () => {
+      w.byte(0x04); w.byte(0x40); w.byte(0x00); w.byte(0x0b);
+    };
     // Adresse oben auf dem Stack -> geprueft und mit Basis; "extra" = Offset + Breite
-    const address = (extra) => {
-      w.byte(0x22); w.u32(tA);
-      w.byte(0xad);
-      w.byte(0x42); w.s64(extra);
-      w.byte(0x7c);
-      getBytes();
-      w.byte(0x56);
-      w.byte(0x04); w.byte(0x40); w.byte(0x00); w.byte(0x0b);
-      w.byte(0x20); w.u32(tA);
-      getBase();
+    const address = (k, extra) => {
+      if (memories[k].address === 'i32') {
+        w.byte(0x22); w.u32(tA);
+        w.byte(0xad);
+        w.byte(0x42); w.s64(extra);
+        w.byte(0x7c);
+        getBytes(k);
+        w.byte(0x56);
+        trapIf();
+        w.byte(0x20); w.u32(tA);
+      } else {
+        // i64: erst Adresse <= Groesse, dann kann Adresse + extra nicht
+        // ueberlaufen (Groesse < 2^32, extra hoechstens 2^33)
+        w.byte(0x22); w.u32(tX);
+        getBytes(k);
+        w.byte(0x56);
+        w.byte(0x20); w.u32(tX);
+        w.byte(0x42); w.s64(Math.min(extra, 2 ** 33));
+        w.byte(0x7c);
+        getBytes(k);
+        w.byte(0x56);
+        w.byte(0x72);
+        trapIf();
+        w.byte(0x20); w.u32(tX);
+        w.byte(0xa7);
+      }
+      getBase(k);
       w.byte(0x6a);
     };
-    // Bereich [Local start, + Local length) muss im Speicher liegen
-    const checkRange = (startLocal, lengthLocal) => {
-      w.byte(0x20); w.u32(startLocal);
-      w.byte(0xad);
-      w.byte(0x20); w.u32(lengthLocal);
-      w.byte(0xad);
-      w.byte(0x7c);
-      getBytes();
-      w.byte(0x56);
-      w.byte(0x04); w.byte(0x40); w.byte(0x00); w.byte(0x0b);
+    // Operand oben auf dem Stack als i64 in ein Local (i32 vorzeichenlos)
+    const pop64 = (local, address) => {
+      if (address === 'i32')
+        w.byte(0xad);
+      w.byte(0x21); w.u32(local);
     };
-    const withBase = (local) => {
+    // Bereich [start, start + length) aus i64-Locals muss im Speicher k liegen
+    const checkRange = (start, length, k) => {
+      w.byte(0x20); w.u32(start);
+      getBytes(k);
+      w.byte(0x56);
+      w.byte(0x20); w.u32(length);
+      getBytes(k);
+      w.byte(0x20); w.u32(start);
+      w.byte(0x7d);
+      w.byte(0x56);
+      w.byte(0x72);
+      trapIf();
+    };
+    // Geprueftes i64-Local als i32, als Adresse mit der Basis von Speicher k
+    const narrow = (local) => {
       w.byte(0x20); w.u32(local);
-      getBase();
+      w.byte(0xa7);
+    };
+    const withBase = (local, k) => {
+      narrow(local);
+      getBase(k);
       w.byte(0x6a);
+    };
+    const memoryIndex = (index) => {
+      if (temps === null || index >= memories.length)
+        throw new CompileError('Speicherzugriff ohne Speicher');
+      return index;
     };
     const memarg = () => {
       const align = r.u32();
-      if (align & 0x40)
-        throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
+      const k = memoryIndex(align & 0x40 ? r.u32() : 0);
       const offset = r.u32();
-      return { align, offset };
+      return { k, align: align & ~0x40, offset };
     };
+    // Im Speicher der Engine (i32). Ein Offset ueber 4 GB (memory64) faengt
+    // schon bei der Pruefung
     const writeMemarg = (arg) => {
       w.u32(arg.align);
-      w.u32(arg.offset);
-    };
-    const needMemory = () => {
-      if (temps === null || !ctx.hasMemory)
-        throw new CompileError('Speicherzugriff ohne Speicher');
+      w.u32(arg.offset > 0xffffffff ? 0 : arg.offset);
     };
     const funcIndex = () => {
       const index = r.u32();
@@ -462,19 +508,33 @@ var blWasmRewrite = (function () {
         w.byte(op);
         globalIndex();
         break;
-      case 0x3f: // memory.size
-        needMemory();
-        if (r.byte() !== 0)
-          throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
-        w.byte(0x23); w.u32(ctx.pagesGlobal);
+      case 0x3f: { // memory.size
+        const memory = memories[memoryIndex(r.u32())];
+        w.byte(0x23); w.u32(memory.pagesGlobal);
+        if (memory.address === 'i64')
+          w.byte(0xad);
         break;
-      case 0x40: // memory.grow
-        needMemory();
-        if (r.byte() !== 0)
-          throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
-        w.byte(0x10); w.u32(ctx.growFunc);
+      }
+      case 0x40: { // memory.grow
+        const memory = memories[memoryIndex(r.u32())];
+        if (memory.address === 'i32') {
+          w.byte(0x10); w.u32(memory.growFunc);
+        } else {
+          // Mehr als 2^31 Seiten geht nie, sonst als i32 an grow
+          w.byte(0x22); w.u32(tX);
+          w.byte(0x42); w.s64(0x7fffffff);
+          w.byte(0x56);
+          w.byte(0x04); w.byte(0x7e);
+          w.byte(0x42); w.s64(-1);
+          w.byte(0x05);
+          narrow(tX);
+          w.byte(0x10); w.u32(memory.growFunc);
+          w.byte(0xac);
+          w.byte(0x0b);
+        }
         reload();
         break;
+      }
       case 0x41: case 0x42:
         r.skipLeb();
         copyFrom(start);
@@ -506,17 +566,15 @@ var blWasmRewrite = (function () {
         break;
       default:
         if (LOAD[op] !== undefined) {
-          needMemory();
           const arg = memarg();
-          address(arg.offset + LOAD[op]);
+          address(arg.k, arg.offset + LOAD[op]);
           w.byte(op);
           writeMemarg(arg);
         } else if (STORE[op] !== undefined) {
-          needMemory();
           const arg = memarg();
           const [width, type] = STORE[op];
           w.byte(0x21); w.u32(valueTemp(type));
-          address(arg.offset + width);
+          address(arg.k, arg.offset + width);
           w.byte(0x20); w.u32(valueTemp(type));
           w.byte(op);
           writeMemarg(arg);
@@ -536,46 +594,46 @@ var blWasmRewrite = (function () {
         return;
       }
       switch (sub) {
-      case 8: { // memory.init seg [d s n]
-        needMemory();
+      // Operanden als i64 in tX, tY, tZ, im Speicher der Engine wieder als i32
+      case 8: { // memory.init seg mem [d s n], s und n immer i32
         const segment = r.u32();
-        r.byte();
-        w.byte(0x21); w.u32(tC);
-        w.byte(0x21); w.u32(tB);
-        w.byte(0x21); w.u32(tA);
-        checkRange(tA, tC);
-        withBase(tA);
-        w.byte(0x20); w.u32(tB);
-        w.byte(0x20); w.u32(tC);
+        const k = memoryIndex(r.u32());
+        pop64(tZ, 'i32');
+        pop64(tY, 'i32');
+        pop64(tX, memories[k].address);
+        checkRange(tX, tZ, k);
+        withBase(tX, k);
+        narrow(tY);
+        narrow(tZ);
         w.byte(0xfc); w.u32(8); w.u32(segment); w.byte(0);
         return;
       }
-      case 10: // memory.copy [d s n]
-        needMemory();
-        r.byte();
-        r.byte();
-        w.byte(0x21); w.u32(tC);
-        w.byte(0x21); w.u32(tB);
-        w.byte(0x21); w.u32(tA);
-        checkRange(tA, tC);
-        checkRange(tB, tC);
-        withBase(tA);
-        withBase(tB);
-        w.byte(0x20); w.u32(tC);
+      case 10: { // memory.copy dst src [d s n], n ist i64 nur zwischen zwei i64
+        const dst = memoryIndex(r.u32()), src = memoryIndex(r.u32());
+        const dstAddress = memories[dst].address, srcAddress = memories[src].address;
+        pop64(tZ, dstAddress === 'i64' && srcAddress === 'i64' ? 'i64' : 'i32');
+        pop64(tY, srcAddress);
+        pop64(tX, dstAddress);
+        checkRange(tX, tZ, dst);
+        checkRange(tY, tZ, src);
+        withBase(tX, dst);
+        withBase(tY, src);
+        narrow(tZ);
         w.byte(0xfc); w.u32(10); w.byte(0); w.byte(0);
         return;
-      case 11: // memory.fill [d val n]
-        needMemory();
-        r.byte();
-        w.byte(0x21); w.u32(tC);
+      }
+      case 11: { // memory.fill mem [d val n]
+        const k = memoryIndex(r.u32());
+        pop64(tZ, memories[k].address);
         w.byte(0x21); w.u32(tB);
-        w.byte(0x21); w.u32(tA);
-        checkRange(tA, tC);
-        withBase(tA);
+        pop64(tX, memories[k].address);
+        checkRange(tX, tZ, k);
+        withBase(tX, k);
         w.byte(0x20); w.u32(tB);
-        w.byte(0x20); w.u32(tC);
+        narrow(tZ);
         w.byte(0xfc); w.u32(11); w.byte(0);
         return;
+      }
       case 9: case 13: case 15: case 16: case 17:
         r.u32();
         break;
@@ -593,12 +651,11 @@ var blWasmRewrite = (function () {
       const sub = r.u32();
       const mem = SIMD_MEM[sub];
       if (mem) {
-        needMemory();
         const arg = memarg();
         const lane = mem[2] ? r.byte() : null;
         if (mem[1])
           w.byte(0x21), w.u32(tV);
-        address(arg.offset + mem[0]);
+        address(arg.k, arg.offset + mem[0]);
         if (mem[1])
           w.byte(0x20), w.u32(tV);
         w.byte(0xfd); w.u32(sub);
@@ -621,7 +678,6 @@ var blWasmRewrite = (function () {
         copyFrom(start);
         return;
       }
-      needMemory();
       const arg = memarg();
       // wait32/64 faengt auf nicht geteiltem Speicher, und der Speicher der Seite
       // ist nie geteilt. Im geteilten Speicher der Engine wuerde es wirklich warten
@@ -635,22 +691,22 @@ var blWasmRewrite = (function () {
       };
       if (sub === 0) { // notify [addr count]
         w.byte(0x21); w.u32(tB);
-        address(arg.offset + 4);
+        address(arg.k, arg.offset + 4);
         w.byte(0x20); w.u32(tB);
       } else if (sub >= 0x10 && sub <= 0x16) { // load
-        address(arg.offset + ATOMIC_WIDTH[sub - 0x10]);
+        address(arg.k, arg.offset + ATOMIC_WIDTH[sub - 0x10]);
       } else if (sub >= 0x17 && sub <= 0x47) { // store und rmw [addr value]
         const variant = (sub - 0x17) % 7;
         const value = ATOMIC_TYPE[variant] === 'i32' ? tB : tL;
         w.byte(0x21); w.u32(value);
-        address(arg.offset + ATOMIC_WIDTH[variant]);
+        address(arg.k, arg.offset + ATOMIC_WIDTH[variant]);
         w.byte(0x20); w.u32(value);
       } else if (sub >= 0x48 && sub <= 0x4e) { // cmpxchg [addr expected replacement]
         const variant = sub - 0x48;
         const [first, second] = ATOMIC_TYPE[variant] === 'i32' ? [tB, tC] : [tL, tL2];
         w.byte(0x21); w.u32(second);
         w.byte(0x21); w.u32(first);
-        address(arg.offset + ATOMIC_WIDTH[variant]);
+        address(arg.k, arg.offset + ATOMIC_WIDTH[variant]);
         w.byte(0x20); w.u32(first);
         w.byte(0x20); w.u32(second);
       } else
@@ -725,7 +781,8 @@ var blWasmRewrite = (function () {
     const types = find(SECTION.type) ? readTypeSection(new Reader(find(SECTION.type).body)) : [];
     const imports = [];
     let importedFuncs = 0, importedGlobals = 0, importedTables = 0, importedTags = 0;
-    let memory = null;
+    // Speicher in der Reihenfolge ihrer Indizes: erst Importe, dann eigene
+    const memories = [];
     if (find(SECTION.import)) {
       const r = new Reader(find(SECTION.import).body);
       for (let n = r.u32(); n; n--) {
@@ -737,10 +794,8 @@ var blWasmRewrite = (function () {
           entry.table = readTableType(r);
           importedTables++;
         } else if (entry.kind === 2) {
-          if (memory)
-            throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
           entry.memory = readLimits(r);
-          memory = { ...entry.memory, imported: true, module: entry.module, name: entry.name };
+          memories.push({ ...entry.memory, imported: true });
         } else if (entry.kind === 3) {
           entry.global = readGlobalType(r);
           importedGlobals++;
@@ -755,11 +810,8 @@ var blWasmRewrite = (function () {
     }
     if (find(SECTION.memory)) {
       const r = new Reader(find(SECTION.memory).body);
-      const count = r.u32();
-      if (count + (memory ? 1 : 0) > 1)
-        throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
-      if (count)
-        memory = { ...readLimits(r), imported: false };
+      for (let n = r.u32(); n; n--)
+        memories.push({ ...readLimits(r), imported: false });
     }
     const funcTypes = [];
     if (find(SECTION.func)) {
@@ -830,39 +882,44 @@ var blWasmRewrite = (function () {
         }
         if (entry.kind === 1)
           out.table = tableTypes[entry.index];
+        if (entry.kind === 2)
+          out.index = entry.index;
         if (entry.kind === 3)
           out.global = globalTypes[entry.index];
         return out;
       }),
-      memory,
+      memories,
       rewritten: false,
     };
-    if (memory && memory.shared)
+    if (memories.some((memory) => memory.shared))
       throw new CompileError('geteilter Speicher (Threads) wird nicht unterstuetzt');
-    return { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memory, funcTypes, exportsList, info };
+    return { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memories, funcTypes, exportsList, info };
   }
 
   function rewrite(input) {
-    const { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memory, funcTypes, exportsList, info } = analyze(input);
-    if (!memory)
+    const { bytes, sections, find, types, importedFuncs, importedGlobals, memories, funcTypes, exportsList, info } = analyze(input);
+    if (!memories.length)
       return { bytes, info };
 
-    // Neue Typen, Importe, Indizes
+    // Neue Typen, Importe, Indizes: pro Speicher k grow (Funktion) und base,
+    // bytes, pages (Globals) hinter den importierten
     const typeCount = types.length;
     const growType = typeCount, initType = typeCount + 1;
     const ctx = {
-      hasMemory: true,
       importedFuncs,
       importedGlobals,
-      funcShift: 1,
-      globalShift: 3,
-      growFunc: importedFuncs,
-      baseGlobal: importedGlobals,
-      bytesGlobal: importedGlobals + 1,
-      pagesGlobal: importedGlobals + 2,
+      funcShift: memories.length,
+      globalShift: 3 * memories.length,
+      memories: memories.map((memory, k) => ({
+        address: memory.address,
+        growFunc: importedFuncs + k,
+        baseGlobal: importedGlobals + 3 * k,
+        bytesGlobal: importedGlobals + 3 * k + 1,
+        pagesGlobal: importedGlobals + 3 * k + 2,
+      })),
     };
     const definedFuncs = funcTypes.length;
-    const initFunc = importedFuncs + 1 + definedFuncs;
+    const initFunc = importedFuncs + ctx.funcShift + definedFuncs;
 
     const out = new Writer();
     out.raw([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
@@ -899,7 +956,8 @@ var blWasmRewrite = (function () {
       built.set(SECTION.type, w.bytes().slice());
     }
 
-    // Importe: Speicher ersetzen bzw. dazu, dann grow und die drei Globals
+    // Importe: ohne die Speicher, dazu der Speicher der Engine, grow und die
+    // drei Globals pro Speicher
     {
       const w = new Writer();
       const entries = [];
@@ -916,23 +974,22 @@ var blWasmRewrite = (function () {
           else if (kind === 2) readLimits(r);
           else if (kind === 3) readGlobalType(r);
           else { r.byte(); r.u32(); }
-          entries.push(kind === 2 ? 'memory' : old.body.subarray(start, r.pos));
+          if (kind !== 2)
+            entries.push(old.body.subarray(start, r.pos));
         }
       }
-      if (!memory.imported)
-        entries.push('memory');
-      const memoryImport = new Writer();
-      memoryImport.name('__bl');
-      memoryImport.name('memory');
-      memoryImport.raw([0x02, 0x03, 0x01]);
-      memoryImport.u32(65536);
-      w.u32(entries.length + 4);
+      w.u32(entries.length + 1 + 4 * memories.length);
       for (const entry of entries)
-        w.raw(entry === 'memory' ? memoryImport.bytes() : entry);
-      w.name('__bl'); w.name('grow'); w.byte(0x00); w.u32(growType);
-      w.name('__bl'); w.name('base'); w.byte(0x03); w.byte(0x7f); w.byte(0x01);
-      w.name('__bl'); w.name('bytes'); w.byte(0x03); w.byte(0x7e); w.byte(0x01);
-      w.name('__bl'); w.name('pages'); w.byte(0x03); w.byte(0x7f); w.byte(0x01);
+        w.raw(entry);
+      w.name('__bl'); w.name('memory'); w.raw([0x02, 0x03, 0x01]); w.u32(65536);
+      memories.forEach((memory, k) => {
+        w.name('__bl'); w.name('grow' + k); w.byte(0x00); w.u32(growType);
+      });
+      memories.forEach((memory, k) => {
+        w.name('__bl'); w.name('base' + k); w.byte(0x03); w.byte(0x7f); w.byte(0x01);
+        w.name('__bl'); w.name('bytes' + k); w.byte(0x03); w.byte(0x7e); w.byte(0x01);
+        w.name('__bl'); w.name('pages' + k); w.byte(0x03); w.byte(0x7f); w.byte(0x01);
+      });
       built.set(SECTION.import, w.bytes().slice());
     }
 
@@ -984,7 +1041,6 @@ var blWasmRewrite = (function () {
     {
       const w = new Writer();
       const kept = exportsList.filter((e) => e.kind !== 2);
-      info.memoryExports = exportsList.filter((e) => e.kind === 2).map((e) => e.name);
       w.u32(kept.length + 1);
       for (const entry of kept) {
         w.name(entry.name);
@@ -1045,14 +1101,15 @@ var blWasmRewrite = (function () {
       w.u32(dataCount);
       for (let i = 0; i < dataCount; i++) {
         const flags = r.u32();
-        if (flags === 1) {
-          w.u32(1);
-        } else {
-          if (flags === 2 && r.u32() !== 0)
-            throw new CompileError('mehrere Speicher werden nicht unterstuetzt');
-          activeData.push({ index: i, offset: rewriteConstExpr(r, ctx) });
-          w.u32(1);
+        if (flags > 2)
+          throw new CompileError('unbekanntes Daten-Segment');
+        if (flags !== 1) {
+          const memory = flags === 2 ? r.u32() : 0;
+          if (memory >= memories.length)
+            throw new CompileError('Daten-Segment ohne Speicher');
+          activeData.push({ index: i, memory, offset: rewriteConstExpr(r, ctx) });
         }
+        w.u32(1);
         const length = r.u32();
         if (activeData.length && activeData[activeData.length - 1].index === i)
           activeData[activeData.length - 1].length = length;
@@ -1092,12 +1149,13 @@ var blWasmRewrite = (function () {
           locals += howMany;
         }
         const f = new Writer();
-        f.u32(groups.length + TEMPS.length);
+        const extra = [...TEMPS, ...memories.flatMap(() => CACHE)];
+        f.u32(groups.length + extra.length);
         for (const [howMany, type] of groups) {
           f.u32(howMany);
           f.raw(type);
         }
-        for (const type of TEMPS) {
+        for (const type of extra) {
           f.u32(1);
           f.byte(VALTYPE_CODE[type]);
         }
@@ -1118,23 +1176,30 @@ var blWasmRewrite = (function () {
         w.raw(f.bytes());
         r.pos = end;
       }
-      // __bl_init: Daten schreiben, dann die Start-Funktion
+      // __bl_init: Daten schreiben, dann die Start-Funktion. Local 0 (i64) ist
+      // der Offset, geprueft wie checkRange
       const f = new Writer();
       f.u32(1);
       f.u32(1);
-      f.byte(0x7f);
+      f.byte(0x7e);
       for (const segment of activeData) {
+        const memory = ctx.memories[segment.memory];
         f.raw(segment.offset.subarray(0, segment.offset.length - 1));
-        f.byte(0x21); f.u32(0);
+        if (memory.address === 'i32')
+          f.byte(0xad);
+        f.byte(0x22); f.u32(0);
+        f.byte(0x23); f.u32(memory.bytesGlobal);
+        f.byte(0x56);
         f.byte(0x20); f.u32(0);
-        f.byte(0xad);
         f.byte(0x42); f.s64(segment.length);
         f.byte(0x7c);
-        f.byte(0x23); f.u32(ctx.bytesGlobal);
+        f.byte(0x23); f.u32(memory.bytesGlobal);
         f.byte(0x56);
+        f.byte(0x72);
         f.byte(0x04); f.byte(0x40); f.byte(0x00); f.byte(0x0b);
         f.byte(0x20); f.u32(0);
-        f.byte(0x23); f.u32(ctx.baseGlobal);
+        f.byte(0xa7);
+        f.byte(0x23); f.u32(memory.baseGlobal);
         f.byte(0x6a);
         f.byte(0x41); f.s32(0);
         f.byte(0x41); f.s32(segment.length);

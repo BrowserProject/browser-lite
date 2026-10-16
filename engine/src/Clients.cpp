@@ -231,14 +231,10 @@ bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message,
     return true;
 }
 
-// Neuer Tab fuer window.open / target=_blank. Die Engine vergibt die ID selber
-// (ab 2^20, die Oberflaeche zaehlt ab 1) und meldet den Tab der Oberflaeche.
+// Neuer Tab fuer window.open / target=_blank
 RefPtr<Page> ChromeClient::createWindow(LocalFrame&, const String&, const WindowFeatures&, const NavigationAction&)
 {
-    static int nextPopupID = 1 << 20;
-    int id = nextPopupID++;
-    auto& popup = WebView::open(id, m_view->size(), m_view->deviceScaleFactor());
-    notifyHost(id, "newview", makeString("{\"opener\":"_s, m_view->id(), '}'));
+    auto& popup = WebView::openFromEngine(m_view->id(), m_view->size(), m_view->deviceScaleFactor());
     return &popup.page();
 }
 

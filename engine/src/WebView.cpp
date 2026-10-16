@@ -69,11 +69,13 @@
 #include <WebCore/WasmPlatform.h>
 #include <WebCore/RemoteFrameGeometryTransformer.h>
 #include <WebCore/RenderLayerCompositor.h>
+#include <WebCore/RenderObjectInlines.h>
 #include <WebCore/RenderView.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Settings.h>
+#include <WebCore/StyleComputedStyle+GettersInlines.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/StorageSessionProvider.h>
@@ -122,6 +124,15 @@ WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
     if (hasWorkerCanvas(id))
         result.canvasAttached();
     return result;
+}
+
+WebView& WebView::openFromEngine(int openerId, IntSize size, float deviceScaleFactor)
+{
+    static int nextID = 1 << 20;
+    int id = nextID++;
+    auto& view = open(id, size, deviceScaleFactor);
+    notifyHost(id, "newview", makeString("{\"opener\":"_s, openerId, '}'));
+    return view;
 }
 
 void WebView::close(int id)
@@ -234,6 +245,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setMoveBeforeEnabled(true);
     settings.setSelectShowPickerEnabled(true);
     settings.setCSSScrollbarColorEnabled(true);
+    // Paint Worklet: das Laden des Skripts kommt aus Patch 0034
+    settings.setCSSPaintingAPIEnabled(true);
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
     ServiceWorkers::enableIn(settings);
@@ -614,6 +627,8 @@ void WebView::stopCompositing()
         return;
     debugLog("View %d: Compositing aus", m_id);
     m_compositing = false;
+    if (m_layerTreeHost)
+        m_layerTreeHost->detachScene();
     auto& settings = m_page->settings();
     settings.setForceCompositingMode(false);
     settings.setAcceleratedCompositingEnabled(false);
@@ -1041,13 +1056,32 @@ public:
         m_timestamp = MonotonicTime::now();
     }
 };
+
+// CSS touch-action am Punkt: duerfen zwei Finger die Ansicht zoomen?
+bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
+{
+    RefPtr view = frame.view();
+    if (!view)
+        return true;
+    auto result = frame.eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(point))), { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::AllowChildFrameContent });
+    RefPtr node = result.innerNode();
+    CheckedPtr renderer = node ? node->renderer() : nullptr;
+    if (!renderer)
+        return true;
+    auto touchAction = renderer->style().usedTouchAction();
+    if (touchAction.isAuto() || touchAction.isManipulation())
+        return true;
+    auto values = touchAction.tryEnumSet();
+    return values && values->contains(Style::TouchActionValue::PinchZoom);
+}
 }
 #endif
 
 // Touch (Chromebooks): type 0 Start, 1 Bewegung, 2 Ende, 3 Abbruch. Punkte als
 // JSON [{id, x, y, state, rx, ry, force}], state wie PlatformTouchPoint::State.
 // Die Oberflaeche erfaehrt, ob die Seite das Event abgefangen hat (dann kein
-// Scrollen und kein Klick daraus).
+// Scrollen und kein Klick daraus) und beim Start, ob touch-action an den neuen
+// Punkten Pinch-Zoom erlaubt.
 void WebView::touchEvent(int type, const String& json, int modifiers)
 {
 #if ENABLE(TOUCH_EVENTS)
@@ -1057,13 +1091,16 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
     if (!frame || !array)
         return;
     Vector<PlatformTouchPoint> points;
+    bool pinchAllowed = true;
     for (auto& item : *array) {
         auto point = item->asObject();
         if (!point)
             continue;
         auto state = static_cast<PlatformTouchPoint::State>(std::clamp(point->getInteger("state"_s).value_or(0), 0, 4));
-        points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state,
-            { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) },
+        DoublePoint position { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) };
+        if (state == PlatformTouchPoint::State::TouchPressed)
+            pinchAllowed = pinchAllowed && touchActionAllowsPinchZoom(*frame, position);
+        points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
     }
@@ -1071,7 +1108,8 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
     TouchEventWasm event { types[std::clamp(type, 0, 3)], WTF::move(points), modifiersFromBits(modifiers) };
     auto result = frame->eventHandler().handleTouchEvent(event);
     bool consumed = result && *result;
-    notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, consumed ? "true"_s : "false"_s, '}'));
+    notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, consumed ? "true"_s : "false"_s,
+        ",\"pinch\":"_s, pinchAllowed ? "true"_s : "false"_s, '}'));
 #else
     UNUSED_PARAM(type);
     UNUSED_PARAM(json);
@@ -1268,6 +1306,53 @@ void WebView::setZoom(float factor)
         frame->setPageZoomFactor(factor);
 }
 
+PinchViewport WebView::pinchViewport() const
+{
+    PinchViewport viewport;
+    viewport.scale = m_page->pageScaleFactor();
+    if (RefPtr view = mainFrameView()) {
+        viewport.scrollPosition = view->scrollPosition();
+        viewport.visibleSize = view->sizeForVisibleContent();
+        if (CheckedPtr renderView = view->renderView())
+            viewport.documentRect = renderView->unscaledDocumentRect();
+    }
+    return viewport;
+}
+
+void WebView::setPageScale(float scale, FloatPoint scrollPosition, unsigned pinchCommit)
+{
+    m_page->setPageScaleFactor(scale, roundedIntPoint(scrollPosition));
+    if (pinchCommit && m_layerTreeHost)
+        m_layerTreeHost->didApplyPinch(pinchCommit);
+    scheduleRenderingUpdate();
+}
+
+// Ohne Compositor skaliert jeder Schritt gleich die Seite
+void WebView::pinch(PinchPhase phase, float factor, FloatPoint focus)
+{
+    switch (phase) {
+    case PinchPhase::Begin:
+        m_pinch.emplace(pinchViewport(), focus);
+        return;
+    case PinchPhase::Update:
+        if (!m_pinch)
+            return;
+        m_pinch->update(factor, focus);
+        break;
+    case PinchPhase::Cancel:
+        if (!m_pinch)
+            return;
+        m_pinch->cancel();
+        break;
+    case PinchPhase::End:
+        m_pinch = std::nullopt;
+        return;
+    }
+    setPageScale(m_pinch->target().scale, m_pinch->target().scrollPosition);
+    if (phase == PinchPhase::Cancel)
+        m_pinch = std::nullopt;
+}
+
 // Suchen auf der Seite (Strg+F): alle Treffer markieren, zum naechsten springen,
 // der Oberflaeche "Treffer x von y" melden
 void WebView::find(const String& text, bool backwards, bool again)
@@ -1359,6 +1444,10 @@ void WebView::didStartLoading()
 void WebView::didCommitLoad()
 {
     debugLog("View %d: Commit", m_id);
+    // Neue Seite ohne Pinch-Zoom (Zurueck/Vor setzt den gemerkten wieder)
+    m_pinch = std::nullopt;
+    if (m_page->pageScaleFactor() != 1)
+        m_page->setPageScaleFactor(1, { });
     notifyHost(m_id, "commit");
     notifyNavigationState();
 }

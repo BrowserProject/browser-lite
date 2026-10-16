@@ -1,41 +1,53 @@
 // Umgeschriebenes Modul (engine/js/wasm-rewrite.js) gegen das Original:
-// gleiche Ergebnisse, auch nach grow (Speicher zieht um) und bei SIMD/Atomics.
+// gleiche Ergebnisse, auch nach grow (Speicher zieht um), bei SIMD/Atomics,
+// mehreren Speichern und memory64.
 //   node tests/wasm/rewrite-test.mjs [modul.wasm]
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { code, sec, str, wasm } from './wasm-bytes.mjs';
+import { MEMORY64_RESULT, MULTI_MEMORY_RESULT, code, memory64Module, memory64Run, multiMemoryModule, multiMemoryRun, sec, str, wasm } from './wasm-bytes.mjs';
 vm.runInThisContext(fs.readFileSync(new URL('../../engine/js/wasm-rewrite.js', import.meta.url), 'utf8'));
 const rewrite = globalThis.blWasmRewrite;
 
-// "Engine": geteilter Speicher, Bereich fuer das Modul bei 1 MB
+// "Engine": geteilter Speicher, ein Bereich pro Speicher des Moduls ab 1 MB.
+// grow zieht den Bereich immer ans Ende um
 async function instantiateRewritten(bytes, imports = {}) {
   const engine = new WebAssembly.Memory({ initial: 64, maximum: 65536, shared: true });
   const { bytes: out, info } = rewrite(bytes);
   WebAssembly.validate(out) || console.log('UNGUELTIG');
   const pageBytes = 65536;
-  const region = { base: 1 << 20 };
-  const g = {
-    base: new WebAssembly.Global({ value: 'i32', mutable: true }, region.base),
-    bytes: new WebAssembly.Global({ value: 'i64', mutable: true }, BigInt(info.memory.min * pageBytes)),
-    pages: new WebAssembly.Global({ value: 'i32', mutable: true }, info.memory.min),
+  let top = 1 << 20;
+  const reserve = (pages) => {
+    const base = top;
+    top += (pages + 1) * pageBytes;
+    if (top > engine.buffer.byteLength)
+      engine.grow(Math.ceil((top - engine.buffer.byteLength) / pageBytes));
+    return base;
   };
-  const grow = (delta) => {
-    const old = g.pages.value;
-    if (info.memory.max !== undefined && old + delta > info.memory.max) return -1;
-    // Neuer Bereich weiter hinten (umziehen), alter Inhalt kopiert
-    const newBase = region.base + (old + 16) * pageBytes;
-    const needed = newBase + (old + delta) * pageBytes;
-    if (needed > engine.buffer.byteLength) engine.grow(Math.ceil((needed - engine.buffer.byteLength) / pageBytes));
-    const view = new Uint8Array(engine.buffer);
-    view.copyWithin(newBase, region.base, region.base + old * pageBytes);
-    view.fill(0, newBase + old * pageBytes, needed);
-    region.base = newBase;
-    g.base.value = region.base; g.pages.value = old + delta; g.bytes.value = BigInt((old + delta) * pageBytes);
-    return old;
-  };
-  const instance = (await WebAssembly.instantiate(out, { ...imports, __bl: { memory: engine, grow, base: g.base, bytes: g.bytes, pages: g.pages } })).instance;
+  const __bl = { memory: engine };
+  const regions = info.memories.map((memory, k) => {
+    const region = { base: reserve(memory.min) };
+    const g = {
+      base: new WebAssembly.Global({ value: 'i32', mutable: true }, region.base),
+      bytes: new WebAssembly.Global({ value: 'i64', mutable: true }, BigInt(memory.min * pageBytes)),
+      pages: new WebAssembly.Global({ value: 'i32', mutable: true }, memory.min),
+    };
+    const grow = (delta) => {
+      const old = g.pages.value;
+      if (delta < 0 || (memory.max !== undefined && old + delta > memory.max)) return -1;
+      const newBase = reserve(old + delta);
+      const view = new Uint8Array(engine.buffer);
+      view.copyWithin(newBase, region.base, region.base + old * pageBytes);
+      view.fill(0, newBase + old * pageBytes, newBase + (old + delta) * pageBytes);
+      region.base = newBase;
+      g.base.value = region.base; g.pages.value = old + delta; g.bytes.value = BigInt((old + delta) * pageBytes);
+      return old;
+    };
+    Object.assign(__bl, { ['grow' + k]: grow, ['base' + k]: g.base, ['bytes' + k]: g.bytes, ['pages' + k]: g.pages });
+    return region;
+  });
+  const instance = (await WebAssembly.instantiate(out, { ...imports, __bl })).instance;
   instance.exports.__bl_init();
-  return { ex: instance.exports, info, engine, region };
+  return { ex: instance.exports, info, engine, region: regions[0] };
 }
 
 const results = [];
@@ -58,7 +70,7 @@ same('size nach grow', ex.size(), original.size());
 same('sum nach grow (umgezogen)', ex.sum(), original.sum());
 same('poke neue Seite', ex.poke(ex.size() - 1), original.poke(original.size() - 1));
 same('Zugriff ausserhalb faengt', trapName(() => ex.oob()), trapName(() => original.oob()));
-console.log(info.exports.map((e) => e.name).join(','), 'Speicher-Exporte:', info.memoryExports);
+console.log(info.exports.map((e) => e.name + ':' + e.kind).join(','));
 
 // Handgeschriebene Module: Original und umgeschrieben gleich
 async function both(name, module, run) {
@@ -97,5 +109,16 @@ await both('Start-Funktion nach den Daten', wasm(
   [8, 1, 0],
   sec(10, code(0x41, 0, 0x2d, 0, 0, 0x24, 0), code(0x23, 0)),
   sec(11, [0x00, 0x41, 0, 0x0b, 1, 65])), (e) => e.get());
+
+// Mehrere Speicher und memory64 gegen das gemessene Original (node 22 kann
+// memory.copy zwischen i32- und i64-Speicher noch nicht)
+async function expected(name, module, run, result) {
+  same(name, run((await instantiateRewritten(module)).ex), result);
+  const native = await WebAssembly.instantiate(module).catch(() => null);
+  if (native)
+    same(name + ' (Original)', run(native.instance.exports), result);
+}
+await expected('Mehrere Speicher', multiMemoryModule(), multiMemoryRun, MULTI_MEMORY_RESULT);
+await expected('memory64', memory64Module(), memory64Run, MEMORY64_RESULT);
 
 process.exit(results.every(Boolean) ? 0 : 1);

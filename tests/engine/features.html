@@ -64,7 +64,8 @@ const checks = {
   'js:intl-collator-de': has('["ä","z","a"].sort(new Intl.Collator("de").compare).join("") === "aäz"'),
   'js:intl-locale-info': has('typeof new Intl.Locale("de-CH").getWeekInfo === "function" || "weekInfo" in new Intl.Locale("de-CH")'),
   'js:string-localeCompare': has('"ä".localeCompare("z", "de") < 0'),
-  'js:toLocaleString-number': has('(1234.5).toLocaleString("de-CH") === "1’234.5"'),
+  // Tausender-Trennzeichen fuer de-CH ist seit CLDR 48 "'" statt "’"
+  'js:toLocaleString-number': has('["1’234.5", "1\'234.5"].includes((1234.5).toLocaleString("de-CH"))'),
 
   // WebAssembly
   'wasm:basic': wasmValid([0,97,115,109,1,0,0,0]),
@@ -75,6 +76,7 @@ const checks = {
   'wasm:exnref': has('typeof WebAssembly.Exception === "function"'),
   'wasm:jspi': has('typeof WebAssembly.Suspending === "function"'),
   'wasm:memory64': () => { try { new WebAssembly.Memory({ initial: 1n, address: 'i64' }); return true; } catch (e) { return false; } },
+  'wasm:multi-memory': wasmValid([0,97,115,109,1,0,0,0,5,5,2,0,1,0,1]),
   'wasm:compileStreaming': has('typeof WebAssembly.compileStreaming === "function"'),
   'wasm:js-string-builtins': () => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0]), { builtins: ['js-string'] }); } catch (e) { return false; } },
 
@@ -228,6 +230,7 @@ const checks = {
   'net:worker': has('typeof Worker === "function"'),
   'net:shared-worker': has('typeof SharedWorker === "function"'),
   'net:service-worker': has('"serviceWorker" in navigator'),
+  'net:navigation-preload': has('typeof NavigationPreloadManager === "function"'),
   'net:cache-api': has('typeof caches === "object"'),
   'net:indexeddb': has('typeof indexedDB === "object"'),
   'net:local-storage': has('typeof localStorage.setItem === "function"'),
@@ -273,6 +276,7 @@ const checks = {
   'dev:gamepad': has('typeof navigator.getGamepads === "function"'),
   'dev:geolocation': has('typeof navigator.geolocation === "object"'),
   'dev:notifications': has('typeof Notification === "function"'),
+  'dev:sw-notifications': has('typeof ServiceWorkerRegistration === "function" && "showNotification" in ServiceWorkerRegistration.prototype'),
   'dev:permissions': has('typeof navigator.permissions === "object"'),
   'dev:clipboard-text': has('navigator.clipboard && typeof navigator.clipboard.writeText === "function"'),
   'dev:clipboard-item': has('typeof ClipboardItem === "function"'),

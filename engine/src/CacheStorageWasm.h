@@ -1,4 +1,4 @@
-// Cache API der Seiten (caches.*), im Speicher der Engine (CacheStorageWasm.cpp)
+// Cache API der Seiten (caches.*), unter /data/cachestorage (CacheStorageWasm.cpp)
 #pragma once
 
 #include <wtf/Ref.h>

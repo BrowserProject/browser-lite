@@ -231,47 +231,71 @@
 
   const memoryFinalizer = new FinalizationRegistry((id) => memoryRelease(id));
   function toIndex(value, what) {
-    const number = Number(value);
+    // Unaeres Plus ist ToNumber aus dem Standard: BigInt wirft TypeError
+    const number = +value;
     if (!Number.isFinite(number) || number < 0 || number > 0xffffffff)
       throw new TypeError(what + ' must be convertible to a valid number');
     return Math.floor(number);
+  }
+  // Index oder Groesse fuer Speicher und Tabellen: bei address i64 (memory64,
+  // table64) als BigInt, hier immer als Zahl (ueber 2^32 nie erfuellbar)
+  function toAddress(value, address, what) {
+    if (address === 'i32')
+      return toIndex(value, what);
+    if (typeof value === 'number')
+      throw new TypeError('Cannot convert ' + value + ' to a BigInt');
+    const big = BigInt(value);
+    if (big < 0n || big > 0xffffffffffffffffn)
+      throw new TypeError(what + ' must be convertible to a valid number');
+    return big > 0xffffffffn ? 0xffffffff : Number(big);
+  }
+  const fromAddress = (value, address) => (address === 'i64' ? BigInt(value) : value);
+  function addressType(descriptor, name) {
+    const address = descriptor.address === undefined ? 'i32' : String(descriptor.address);
+    if (address !== 'i32' && address !== 'i64')
+      throw new TypeError('WebAssembly.' + name + '(): Property \'address\' must be \'i32\' or \'i64\'');
+    return address;
   }
   class Memory {
     constructor(descriptor) {
       if (descriptor === null || typeof descriptor !== 'object')
         throw new TypeError('WebAssembly.Memory(): Argument 0 must be a memory descriptor');
-      const initial = toIndex(descriptor.initial !== undefined ? descriptor.initial : descriptor.minimum, 'initial');
-      const maximum = descriptor.maximum === undefined ? undefined : toIndex(descriptor.maximum, 'maximum');
+      const address = addressType(descriptor, 'Memory');
+      const initial = toAddress(descriptor.initial !== undefined ? descriptor.initial : descriptor.minimum, address, 'initial');
+      const maximum = descriptor.maximum === undefined ? undefined : toAddress(descriptor.maximum, address, 'maximum');
       if (maximum !== undefined && maximum < initial)
         throw new RangeError('WebAssembly.Memory(): Property \'maximum\': value is below the lower bound');
       if (descriptor.shared)
         throw new TypeError('WebAssembly.Memory(): shared memory is not supported');
-      if (initial > 65536 || (maximum !== undefined && maximum > 65536))
+      // Grenzen wie in Chromium, die Engine hat eine eigene kleinere (WasmBridge.cpp)
+      const bound = address === 'i64' ? 262144 : 65536;
+      if (initial > bound || (maximum !== undefined && maximum > bound))
         throw new RangeError('WebAssembly.Memory(): Property \'initial\': value is above the upper bound');
-      const id = memoryCreate(initial, maximum === undefined ? -1 : maximum);
-      internals.set(this, { kind: 'memory', memoryId: id });
-      memoryFinalizer.register(this, id);
+      createMemory(this, { min: initial, max: maximum, address });
     }
     get buffer() {
-      return memoryBuffer(memoryId(this));
+      return memoryBuffer(memoryInner(this).memoryId);
     }
     grow(delta) {
-      const old = memoryGrow(memoryId(this), toIndex(delta, 'delta'));
+      const { memoryId, address } = memoryInner(this);
+      const old = memoryGrow(memoryId, toAddress(delta, address, 'delta'));
       if (old < 0)
         throw new RangeError('WebAssembly.Memory.grow(): Maximum memory size exceeded');
-      return old;
+      return fromAddress(old, address);
     }
   }
-  function memoryId(memory) {
+  function memoryInner(memory) {
     const inner = internals.get(memory);
     if (!inner || inner.kind !== 'memory')
       throw new TypeError('Receiver is not a WebAssembly.Memory');
-    return inner.memoryId;
+    return inner;
   }
-  function memoryForModule(min, max) {
-    const memory = Object.create(Memory.prototype);
-    const id = memoryCreate(min, max === undefined ? -1 : max);
-    internals.set(memory, { kind: 'memory', memoryId: id });
+  const memoryId = (memory) => memoryInner(memory).memoryId;
+  // Speicher im Engine-Speicher fuer ein neues Memory-Objekt. limits wie aus
+  // blWasmRewrite (min, max, address), max kann bei memory64 sehr gross sein
+  function createMemory(memory, limits) {
+    const id = memoryCreate(limits.min, limits.max === undefined ? -1 : Math.min(limits.max, 65536));
+    internals.set(memory, { kind: 'memory', memoryId: id, address: limits.address, maximum: limits.max });
     memoryFinalizer.register(memory, id);
     return memory;
   }
@@ -306,39 +330,42 @@
       if (descriptor === null || typeof descriptor !== 'object')
         throw new TypeError('WebAssembly.Table(): Argument 0 must be a table descriptor');
       const element = String(descriptor.element);
-      const initial = toIndex(descriptor.initial !== undefined ? descriptor.initial : descriptor.minimum, 'initial');
-      const maximum = descriptor.maximum === undefined ? undefined : toIndex(descriptor.maximum, 'maximum');
+      const address = addressType(descriptor, 'Table');
+      const initial = toAddress(descriptor.initial !== undefined ? descriptor.initial : descriptor.minimum, address, 'initial');
+      const maximum = descriptor.maximum === undefined ? undefined : toAddress(descriptor.maximum, address, 'maximum');
       const type = element === 'anyfunc' ? 'funcref' : element;
-      const args = [new Text(element), initial, maximum];
+      const args = [new Text(element), new Text(address), initial, maximum];
       if (arguments.length > 1)
         args.push(toWasm(value, type));
       const [table] = run(6, args);
       const id = internals.get(table).id;
-      internals.set(this, { kind: 'table', id, type });
+      internals.set(this, { kind: 'table', id, type, address });
       adopt(this, id);
     }
+    // Bei table64 gehen Index und Groesse als BigInt zur Host-Seite
     get length() {
       return run(10, [ref(this, 'table', 'Table')])[0];
     }
     get(index) {
-      const value = run(7, [ref(this, 'table', 'Table'), toIndex(index, 'index')])[0];
-      return value;
+      const table = inner(this, 'table', 'Table');
+      return run(7, [ref(this, 'table', 'Table'), tableIndex(index, table, 'index')])[0];
     }
     set(index, value) {
       const table = inner(this, 'table', 'Table');
-      const args = [ref(this, 'table', 'Table'), toIndex(index, 'index')];
+      const args = [ref(this, 'table', 'Table'), tableIndex(index, table, 'index')];
       if (arguments.length > 1)
         args.push(toWasm(value, table.type));
       run(8, args);
     }
     grow(delta, value) {
       const table = inner(this, 'table', 'Table');
-      const args = [ref(this, 'table', 'Table'), toIndex(delta, 'delta')];
+      const args = [ref(this, 'table', 'Table'), tableIndex(delta, table, 'delta')];
       if (arguments.length > 1)
         args.push(toWasm(value, table.type));
       return run(9, args)[0];
     }
   }
+  const tableIndex = (value, table, what) => fromAddress(toAddress(value, table.address, what), table.address);
 
   class Global {
     constructor(descriptor, value) {
@@ -472,7 +499,8 @@
       if (info.imports.length && (importObject === undefined || importObject === null || typeof importObject !== 'object'))
         throw new TypeError('WebAssembly.Instance(): Imports argument must be present and must be an object');
       const imports = [];
-      let memory = null;
+      // Nach dem Index im Modul: erst importierte, dann eigene
+      const memories = [];
       for (const entry of info.imports) {
         const namespace = importObject[entry.module];
         if (namespace === null || (typeof namespace !== 'object' && typeof namespace !== 'function'))
@@ -488,12 +516,20 @@
           else
             imports.push(importThunk(value, entry.signature));
           break;
-        case 'memory':
-          if (!(internals.has(value) && internals.get(value).kind === 'memory'))
+        case 'memory': {
+          const memory = internals.has(value) ? internals.get(value) : undefined;
+          if (!memory || memory.kind !== 'memory')
             throw new LinkError(where + ': memory import must be a WebAssembly.Memory object');
-          memory = value;
+          if (memory.address !== entry.memory.address)
+            throw new LinkError(where + ': cannot import ' + memory.address + ' memory as ' + entry.memory.address);
+          if (memoryBuffer(memory.memoryId).byteLength / 65536 < entry.memory.min)
+            throw new LinkError(where + ': memory import is smaller than the module\'s declared initial size');
+          if (entry.memory.max !== undefined && (memory.maximum === undefined || memory.maximum > entry.memory.max))
+            throw new LinkError(where + ': memory import has a larger maximum size than the module\'s declared maximum');
+          memories.push(value);
           imports.push(0);
           break;
+        }
         case 'table':
           if (!(internals.has(value) && internals.get(value).kind === 'table'))
             throw new LinkError(where + ': table import requires a WebAssembly.Table');
@@ -514,14 +550,16 @@
           break;
         }
       }
-      if (info.memory && !info.memory.imported)
-        memory = memoryForModule(info.memory.min, info.memory.max);
-      const result = run(2, [ref(module, 'module', 'Module'), memory ? memoryId(memory) : 0, ...imports]);
+      for (const limits of info.memories) {
+        if (!limits.imported)
+          memories.push(createMemory(Object.create(Memory.prototype), limits));
+      }
+      const result = run(2, [ref(module, 'module', 'Module'), ...memories.map(memoryId), ...imports]);
       const exports = Object.create(null);
       let next = 1;
       for (const entry of info.exports) {
         if (entry.kind === 'memory') {
-          exports[entry.name] = memory;
+          exports[entry.name] = memories[entry.index];
           continue;
         }
         const value = result[next++];
@@ -529,7 +567,7 @@
         if (entry.kind === 'function')
           exports[entry.name] = exportedFunction(id, entry.signature, entry.index);
         else if (entry.kind === 'table')
-          exports[entry.name] = hostObject(Table, 'table', id, { type: entry.table ? entry.table.element : 'funcref' });
+          exports[entry.name] = hostObject(Table, 'table', id, { type: entry.table.element, address: entry.table.address });
         else if (entry.kind === 'global')
           exports[entry.name] = hostObject(Global, 'global', id, entry.global ? { type: entry.global.value, mutable: entry.global.mutable } : {});
         else if (entry.kind === 'tag')

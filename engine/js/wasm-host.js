@@ -273,7 +273,8 @@ var blWasmHost = (function () {
     return [0, { module, info: result.info }, new Text(JSON.stringify(result.info))];
   }
 
-  function instantiate(state, compiled, memoryId, imports) {
+  // memoryIds: ein Speicher der Seite pro Speicher des Moduls
+  function instantiate(state, compiled, memoryIds, imports) {
     const { module, info } = compiled;
     const object = {};
     info.imports.forEach((entry, i) => {
@@ -287,17 +288,23 @@ var blWasmHost = (function () {
       (object[entry.module] || (object[entry.module] = {}))[entry.name] = value;
     });
     if (info.rewritten) {
-      // Die id kommt von der Seite: nur Speicher der eigenen Realm
-      const memory = memories.get(memoryId);
-      if (!memory || memory.realm !== state.realm)
-        throw new Error('Speicher fehlt');
-      object.__bl = { memory: wasmMemory, grow: memory.grow, base: memory.base, bytes: memory.bytes, pages: memory.pages };
+      const bl = { memory: wasmMemory };
+      memoryIds.forEach((id, k) => {
+        // Die ids kommen von der Seite: nur Speicher der eigenen Realm
+        const memory = memories.get(id);
+        if (!memory || memory.realm !== state.realm)
+          throw new Error('Speicher fehlt');
+        Object.assign(bl, { ['grow' + k]: memory.grow, ['base' + k]: memory.base, ['bytes' + k]: memory.bytes, ['pages' + k]: memory.pages });
+      });
+      object.__bl = bl;
     }
     const instance = new WebAssembly.Instance(module, object);
     if (info.rewritten) {
       instance.exports.__bl_init();
-      Module._bl_wasm_memory_retain(memoryId);
-      memoryUsers.register(instance, memoryId, state);
+      for (const id of memoryIds) {
+        Module._bl_wasm_memory_retain(id);
+        memoryUsers.register(instance, id, state);
+      }
     }
     const exports = [];
     for (const entry of info.exports) {
@@ -319,12 +326,19 @@ var blWasmHost = (function () {
 
   const ops = {
     1: ([bytes]) => compile(bytes),
-    2: ([compiled, memoryId, ...imports], state) => instantiate(state, compiled, memoryId, imports),
+    2: ([compiled, ...values], state) => {
+      const count = compiled.info.memories.length;
+      return instantiate(state, compiled, values.slice(0, count), values.slice(count));
+    },
     3: ([fn, ...args]) => [0, ...valueOf(fn(...args))],
-    6: ([element, initial, maximum, value]) => {
-      const descriptor = { element, initial };
+    6: ([element, address, initial, maximum, value]) => {
+      // table64: Grenzen als BigInt
+      const limit = address === 'i64' ? BigInt : Number;
+      const descriptor = { element, initial: limit(initial) };
+      if (address === 'i64')
+        descriptor.address = address;
       if (maximum !== undefined)
-        descriptor.maximum = maximum;
+        descriptor.maximum = limit(maximum);
       return [0, value === undefined ? new WebAssembly.Table(descriptor) : new WebAssembly.Table(descriptor, value)];
     },
     7: ([table, index]) => [0, table.get(index)],

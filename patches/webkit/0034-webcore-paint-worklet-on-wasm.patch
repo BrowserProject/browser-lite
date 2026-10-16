@@ -1,0 +1,297 @@
+diff --git a/Source/WebCore/css/DOMCSSPaintWorklet.cpp b/Source/WebCore/css/DOMCSSPaintWorklet.cpp
+index 0ed2852357..bc260d9710 100644
+--- a/Source/WebCore/css/DOMCSSPaintWorklet.cpp
++++ b/Source/WebCore/css/DOMCSSPaintWorklet.cpp
+@@ -32,6 +32,16 @@
+ #include "WorkletGlobalScopeProxy.h"
+ #include <wtf/text/WTFString.h>
+ 
++#if PLATFORM(WASM)
++#include "ContentSecurityPolicy.h"
++#include "MIMETypeRegistry.h"
++#include "ResourceRequest.h"
++#include "ScriptSourceCode.h"
++#include "WorkerRunLoop.h"
++#include "WorkerScriptLoader.h"
++#include "WorkerScriptLoaderClient.h"
++#endif
++
+ namespace WebCore {
+ DEFINE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DOMCSSPaintWorklet);
+ 
+@@ -51,6 +61,166 @@ DOMCSSPaintWorklet* DOMCSSPaintWorklet::from(DOMCSSNamespace& css)
+     return supplement;
+ }
+ 
++#if PLATFORM(WASM)
++
++// Laedt das Skript eines Paint Worklets wie ein Modul (CORS, MIME-Typ) und gibt es
++// dem Worklet zum Auswerten. Die Worklet-Umgebung laeuft im Haupt-Thread, sie hat
++// keine Ereignis-Schleife: das Skript wird darum klassisch ausgewertet.
++class PaintWorkletModuleLoader final : public RefCounted<PaintWorkletModuleLoader>, private WorkerScriptLoaderClient {
++public:
++    static Ref<PaintWorkletModuleLoader> create(PaintWorklet& worklet, URL&& url)
++    {
++        return adoptRef(*new PaintWorkletModuleLoader(worklet, WTF::move(url)));
++    }
++
++    void ref() const final { RefCounted::ref(); }
++    void deref() const final { RefCounted::deref(); }
++
++    const URL& url() const LIFETIME_BOUND { return m_url; }
++    const WorkerScriptLoader& scriptLoader() const LIFETIME_BOUND { return m_scriptLoader; }
++
++    void addPromise(DOMPromiseDeferred<void>&& promise) { m_promises.append(WTF::move(promise)); }
++    Vector<DOMPromiseDeferred<void>> takePromises() { return std::exchange(m_promises, { }); }
++
++    void load(Document& document, FetchRequestCredentials credentials)
++    {
++        FetchOptions options;
++        options.mode = FetchOptions::Mode::Cors;
++        options.credentials = credentials;
++        options.destination = FetchOptions::Destination::Paintworklet;
++        m_scriptLoader->loadAsynchronously(document, ResourceRequest { URL { m_url } }, WorkerScriptLoader::Source::ModuleScript, WTF::move(options),
++            ContentSecurityPolicyEnforcement::EnforceScriptSrcDirective, ServiceWorkersMode::All, *this, WorkerRunLoop::defaultMode());
++    }
++
++    void cancel() { m_scriptLoader->cancel(); }
++
++private:
++    PaintWorkletModuleLoader(PaintWorklet& worklet, URL&& url)
++        : m_worklet(worklet)
++        , m_scriptLoader(WorkerScriptLoader::create())
++        , m_url(WTF::move(url))
++    {
++    }
++
++    void didReceiveResponse(ScriptExecutionContextIdentifier, std::optional<ResourceLoaderIdentifier>, const ResourceResponse&) final { }
++
++    void notifyFinished(std::optional<ScriptExecutionContextIdentifier>) final
++    {
++        m_worklet->didLoadModule(*this);
++    }
++
++    const Ref<PaintWorklet> m_worklet;
++    const Ref<WorkerScriptLoader> m_scriptLoader;
++    const URL m_url;
++    Vector<DOMPromiseDeferred<void>> m_promises;
++};
++
++PaintWorklet::PaintWorklet(Document& document)
++    : Worklet(document)
++{
++}
++
++PaintWorklet::~PaintWorklet() = default;
++
++void PaintWorklet::addModule(const String& moduleURL, WorkletOptions&& options, DOMPromiseDeferred<void>&& promise)
++{
++    RefPtr document = this->document();
++    if (!document || !document->hasBrowsingContext()) {
++        promise.reject(Exception { ExceptionCode::InvalidStateError, "This frame is detached"_s });
++        return;
++    }
++
++    URL url = document->encodingParseURL(moduleURL);
++    if (!url.isValid()) {
++        promise.reject(Exception { ExceptionCode::SyntaxError, "Module URL is invalid"_s });
++        return;
++    }
++
++    // Umleitungen prueft der Loader (EnforceScriptSrcDirective)
++    if (!protect(document->contentSecurityPolicy())->allowScriptFromSource(url, document->currentParserSourcePosition())) {
++        promise.reject(Exception { ExceptionCode::SecurityError, "Not allowed by CSP"_s });
++        return;
++    }
++
++    // Wie die Module Map der Spezifikation: jede URL nur einmal laden und auswerten
++    if (m_loadedModules.contains(url)) {
++        promise.resolve();
++        return;
++    }
++    if (RefPtr loader = m_moduleLoaders.get(url)) {
++        loader->addPromise(WTF::move(promise));
++        return;
++    }
++
++    Ref loader = PaintWorkletModuleLoader::create(*this, WTF::move(url));
++    loader->addPromise(WTF::move(promise));
++    m_moduleLoaders.add(loader->url(), loader);
++    loader->load(*document, options.credentials);
++}
++
++void PaintWorklet::didLoadModule(PaintWorkletModuleLoader& loader)
++{
++    Ref protectedLoader { loader };
++    m_moduleLoaders.remove(loader.url());
++
++    auto result = evaluateModule(loader.scriptLoader());
++    if (!result.hasException())
++        m_loadedModules.add(loader.url());
++    for (auto& promise : loader.takePromises()) {
++        if (result.hasException())
++            promise.reject(Exception { result.exception() });
++        else
++            promise.resolve();
++    }
++}
++
++ExceptionOr<void> PaintWorklet::evaluateModule(const WorkerScriptLoader& scriptLoader)
++{
++    RefPtr document = this->document();
++    if (!document || !document->hasBrowsingContext())
++        return Exception { ExceptionCode::InvalidStateError, "This frame is detached"_s };
++
++    // Wie bei Modulen: nur mit JavaScript-MIME-Typ
++    if (scriptLoader.failed() || !MIMETypeRegistry::isSupportedJavaScriptMIMEType(scriptLoader.responseMIMEType()))
++        return Exception { ExceptionCode::AbortError, "Unable to load a worklet's module"_s };
++
++    // Paint Worklets haben keine heiklen APIs, die Herkunft des Quelltexts zaehlt nicht
++    auto maybeContext = PaintWorkletGlobalScope::tryCreate(*document, ScriptSourceCode(scriptLoader.script().toString(), JSC::SourceTaintedOrigin::Untainted, URL { scriptLoader.responseURL() }));
++    if (!maybeContext) [[unlikely]]
++        return Exception { ExceptionCode::OutOfMemoryError };
++    Ref context = maybeContext.releaseNonNull();
++    String exceptionMessage;
++    context->evaluate(&exceptionMessage);
++
++    // Jedes Modul hat eine eigene Umgebung. Wie in der gemeinsamen Umgebung der
++    // Spezifikation gilt ein Name nur einmal, die erste Registrierung bleibt.
++    bool registered = false;
++    if (exceptionMessage.isNull()) {
++        Locker locker { context->paintDefinitionLock() };
++        for (auto& name : context->paintDefinitionMap().keys()) {
++            if (document->paintWorkletGlobalScopeForName(name))
++                continue;
++            document->setPaintWorkletGlobalScopeForName(name, context.copyRef());
++            registered = true;
++        }
++    }
++    if (!registered)
++        context->prepareForDestruction();
++
++    if (!exceptionMessage.isNull())
++        return Exception { ExceptionCode::AbortError, exceptionMessage };
++    return { };
++}
++
++void PaintWorklet::stop()
++{
++    auto loaders = std::exchange(m_moduleLoaders, { });
++    for (Ref loader : loaders.values())
++        loader->cancel();
++}
++
++#else
++
+ // FIXME: Get rid of this override and rely on the standard-compliant Worklet::addModule() instead.
+ void PaintWorklet::addModule(const String& moduleURL, WorkletOptions&&, DOMPromiseDeferred<void>&& promise)
+ {
+@@ -82,6 +252,8 @@ void PaintWorklet::addModule(const String& moduleURL, WorkletOptions&&, DOMPromi
+     promise.resolve();
+ }
+ 
++#endif
++
+ Vector<Ref<WorkletGlobalScopeProxy>> PaintWorklet::createGlobalScopes()
+ {
+     // FIXME: Add implementation.
+diff --git a/Source/WebCore/css/DOMCSSPaintWorklet.h b/Source/WebCore/css/DOMCSSPaintWorklet.h
+index d2b4e04fa0..8a2cc343c6 100644
+--- a/Source/WebCore/css/DOMCSSPaintWorklet.h
++++ b/Source/WebCore/css/DOMCSSPaintWorklet.h
+@@ -30,12 +30,21 @@
+ 
+ #include <wtf/RefCounted.h>
+ #include <wtf/RefPtr.h>
++#if PLATFORM(WASM)
++#include "ExceptionOr.h"
++#include <wtf/HashMap.h>
++#include <wtf/URLHash.h>
++#endif
+ 
+ namespace WebCore {
+ 
+ class Document;
+ class Worklet;
+ class DOMCSSNamespace;
++#if PLATFORM(WASM)
++class PaintWorkletModuleLoader;
++class WorkerScriptLoader;
++#endif
+ 
+ class PaintWorklet final : public Worklet {
+ public:
+@@ -50,10 +59,27 @@ public:
+     void addModule(const String& moduleURL, WorkletOptions&&, DOMPromiseDeferred<void>&&) final;
+     Vector<Ref<WorkletGlobalScopeProxy>> NODELETE createGlobalScopes() final;
+ 
++#if PLATFORM(WASM)
++    ~PaintWorklet();
++    void didLoadModule(PaintWorkletModuleLoader&);
++#endif
++
+ private:
++#if PLATFORM(WASM)
++    explicit PaintWorklet(Document&);
++#else
+     explicit PaintWorklet(Document& document)
+         : Worklet(document)
+     { }
++#endif
++
++#if PLATFORM(WASM)
++    void stop() final;
++    ExceptionOr<void> evaluateModule(const WorkerScriptLoader&);
++
++    HashMap<URL, Ref<PaintWorkletModuleLoader>> m_moduleLoaders;
++    HashSet<URL> m_loadedModules;
++#endif
+ };
+ 
+ DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(DOMCSSPaintWorklet);
+diff --git a/Source/WebCore/worklets/PaintWorkletGlobalScope.cpp b/Source/WebCore/worklets/PaintWorkletGlobalScope.cpp
+index a28f27624c..64b22ae007 100644
+--- a/Source/WebCore/worklets/PaintWorkletGlobalScope.cpp
++++ b/Source/WebCore/worklets/PaintWorkletGlobalScope.cpp
+@@ -157,7 +157,11 @@ ExceptionOr<void> PaintWorkletGlobalScope::registerPaint(JSC::JSGlobalObject& gl
+ 
+     // FIXME: we should only repaint affected custom paint images <https://bugs.webkit.org/show_bug.cgi?id=192322>.
+     if (responsibleDocument() && responsibleDocument()->renderView())
++#if PLATFORM(WASM)
++        responsibleDocument()->renderView()->repaintViewAndCompositedLayers();
++#else
+         responsibleDocument()->renderView()->repaintRootContents();
++#endif
+ 
+     return { };
+ }
+diff --git a/Source/WebCore/worklets/WorkletGlobalScope.cpp b/Source/WebCore/worklets/WorkletGlobalScope.cpp
+index e8ad421958..7b6d85fc5a 100644
+--- a/Source/WebCore/worklets/WorkletGlobalScope.cpp
++++ b/Source/WebCore/worklets/WorkletGlobalScope.cpp
+@@ -116,10 +116,10 @@ String WorkletGlobalScope::userAgent(const URL& url) const
+     return protect(m_document)->userAgent(url);
+ }
+ 
+-void WorkletGlobalScope::evaluate()
++void WorkletGlobalScope::evaluate(String* returnedExceptionMessage)
+ {
+     if (m_code)
+-        script()->evaluate(*m_code);
++        script()->evaluate(*m_code, returnedExceptionMessage);
+ }
+ 
+ // https://html.spec.whatwg.org/multipage/webappapis.html#parse-a-url
+diff --git a/Source/WebCore/worklets/WorkletGlobalScope.h b/Source/WebCore/worklets/WorkletGlobalScope.h
+index eedb7120fd..8666bdd597 100644
+--- a/Source/WebCore/worklets/WorkletGlobalScope.h
++++ b/Source/WebCore/worklets/WorkletGlobalScope.h
+@@ -70,7 +70,7 @@ public:
+     const URL& url() const LIFETIME_BOUND final { return m_url; }
+     const URL& cookieURL() const LIFETIME_BOUND final { return url(); }
+ 
+-    void evaluate();
++    void evaluate(String* returnedExceptionMessage = nullptr);
+ 
+     void addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&&) final;
+ 

@@ -364,6 +364,12 @@ jobs:
       - name: Compositing-Test (Ebenen auf der GPU, Animation, Filter, Scrollen)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node compositing-test.mjs
+      - name: Paint-Worklet-Test (CSS.paintWorklet, paint() in CSS, Modul laden)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd tests/e2e && node paintworklet-test.mjs
+      - name: Pinch-Test (Pinch-Zoom im Compositor-Thread, visualViewport)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd tests/e2e && node pinch-test.mjs
       - name: Service-Worker-Test (Registrieren, Fetch abfangen, SharedWorker)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node serviceworker-test.mjs

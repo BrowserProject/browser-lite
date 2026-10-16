@@ -2,6 +2,7 @@
 #include "DeviceClients.h"
 
 #include "Host.h"
+#include "ServiceWorkerWasm.h"
 #include "WebView.h"
 #if ENABLE(DEVICE_ORIENTATION)
 // Nicht in den exportierten Headern von WebCore, aber im Include-Pfad (engine.cmake)
@@ -39,6 +40,7 @@
 #include <wtf/WeakPtr.h>
 #include <cmath>
 #include <wtf/HashMap.h>
+#include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringHash.h>
@@ -368,31 +370,47 @@ private:
         return origin ? origin->toString() : String { };
     }
 
+    // Der Service Worker ruft in seinem Thread. Die Maps hier und die Strings
+    // darin gehoeren dem Engine-Thread (wie WebNotificationClient in WebKit2).
+    static void onEngineThread(Function<void()>&& function)
+    {
+        if (isMainThread())
+            function();
+        else
+            callOnMainThreadAndWait(WTF::move(function));
+    }
+
     bool show(ScriptExecutionContext& context, NotificationData&& data, RefPtr<NotificationResources>&&, CompletionHandler<void()>&& completionHandler) final
     {
-        if (storedPermission("notifications"_s, originOf(context)) != PermissionDecision::Granted) {
-            completionHandler();
-            return false;
-        }
-        String id = data.notificationID.toString();
-        notifyHost(m_viewId, "notification", makeString("{\"id\":\""_s, id, "\",\"title\":\""_s, jsonEscape(data.title),
-            "\",\"body\":\""_s, jsonEscape(data.body), "\",\"icon\":\""_s, jsonEscape(data.iconURL),
-            "\",\"tag\":\""_s, jsonEscape(data.tag), "\",\"lang\":\""_s, jsonEscape(data.language),
-            "\",\"silent\":"_s, data.silent.value_or(false) ? "true"_s : "false"_s, '}'));
-        shownNotifications().set(id, std::make_unique<NotificationData>(WTF::move(data)));
+        bool shown = false;
+        onEngineThread([this, &shown, origin = originOf(context).isolatedCopy(), data = WTF::move(data).isolatedCopy()]() mutable {
+            if (storedPermission("notifications"_s, origin) != PermissionDecision::Granted)
+                return;
+            String id = data.notificationID.toString();
+            notifyHost(m_viewId, "notification", makeString("{\"id\":\""_s, id, "\",\"title\":\""_s, jsonEscape(data.title),
+                "\",\"body\":\""_s, jsonEscape(data.body), "\",\"icon\":\""_s, jsonEscape(data.iconURL),
+                "\",\"tag\":\""_s, jsonEscape(data.tag), "\",\"lang\":\""_s, jsonEscape(data.language),
+                "\",\"silent\":"_s, data.silent.value_or(false) ? "true"_s : "false"_s,
+                ",\"persistent\":"_s, data.isPersistent() ? "true"_s : "false"_s, '}'));
+            shownNotifications().set(id, std::make_unique<NotificationData>(WTF::move(data)));
+            shown = true;
+        });
         completionHandler();
-        return true;
+        return shown;
     }
 
     void cancel(NotificationData&& data) final
     {
-        String id = data.notificationID.toString();
-        notifyHost(m_viewId, "notification-close", makeString("{\"id\":\""_s, id, "\"}"_s));
+        onEngineThread([this, id = data.notificationID.toString().isolatedCopy()] {
+            notifyHost(m_viewId, "notification-close", makeString("{\"id\":\""_s, id, "\"}"_s));
+        });
     }
 
     void notificationObjectDestroyed(NotificationData&& data) final
     {
-        shownNotifications().remove(data.notificationID.toString());
+        onEngineThread([id = data.notificationID.toString().isolatedCopy()] {
+            shownNotifications().remove(id);
+        });
     }
 
     void notificationControllerDestroyed() final
@@ -411,7 +429,11 @@ private:
     {
         if (!context)
             return Permission::Default;
-        switch (storedPermission("notifications"_s, originOf(*context))) {
+        auto decision = PermissionDecision::Ask;
+        onEngineThread([&decision, origin = originOf(*context).isolatedCopy()] {
+            decision = storedPermission("notifications"_s, origin);
+        });
+        switch (decision) {
         case PermissionDecision::Granted:
             return Permission::Granted;
         case PermissionDecision::Denied:
@@ -425,6 +447,22 @@ private:
     int m_viewId;
 };
 
+// Ohne Tab: die Oberflaeche zeigt sie trotzdem, ein Klick holt keinen Tab nach vorne
+std::unique_ptr<NotificationClient> createServiceWorkerNotificationClient()
+{
+    return makeUnique<NotificationClientWasm>(0);
+}
+
+Vector<NotificationData> shownPersistentNotifications(const URL& registrationURL, const String& tag)
+{
+    Vector<NotificationData> result;
+    for (auto& data : shownNotifications().values()) {
+        if (data->serviceWorkerRegistrationURL == registrationURL && (tag.isEmpty() || data->tag == tag))
+            result.append(*data);
+    }
+    return result;
+}
+
 void notificationEvent(const String& notificationID, int type)
 {
     auto it = shownNotifications().find(notificationID);
@@ -433,6 +471,12 @@ void notificationEvent(const String& notificationID, int type)
     NotificationData data = *it->value;
     if (type >= 2)
         shownNotifications().remove(it);
+    // Aus showNotification(): Klick und Schliessen gehen an den Service Worker
+    if (data.isPersistent()) {
+        if (type == 1 || type == 2)
+            ServiceWorkers::notificationEvent(WTF::move(data), type == 1 ? NotificationEventType::Click : NotificationEventType::Close);
+        return;
+    }
     Notification::ensureOnNotificationThread(data, [type](Notification* notification) {
         if (!notification)
             return;

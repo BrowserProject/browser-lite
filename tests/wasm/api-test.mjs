@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 import { createBridgeSim, MAX_CALL_DEPTH, MAX_MEMORY_PAGES } from './bridge-sim.mjs';
-import { code, sec, str, wasm } from './wasm-bytes.mjs';
+import { MEMORY64_RESULT, MULTI_MEMORY_RESULT, code, memory64Module, memory64Run, multiMemoryModule, multiMemoryRun, sec, str, wasm } from './wasm-bytes.mjs';
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc');
 const sim = createBridgeSim();
@@ -71,7 +71,44 @@ const sharedMemory = wasm(sec(5, [0x03, 1, 1]));
 const memory64 = wasm(sec(5, [0x04, 1]));
 const twoMemories = wasm(sec(5, [0x00, 1], [0x00, 1]));
 check('validate: geteilter Speicher', WebAssembly.validate(sharedMemory) && !W.validate(sharedMemory));
-check('validate: memory64, mehrere Speicher', !W.validate(memory64) && !W.validate(twoMemories));
+check('validate: memory64, mehrere Speicher', W.validate(memory64) && W.validate(twoMemories));
+
+// Mehrere Speicher: jeder ein eigenes Memory-Objekt mit eigenem Bereich
+const multi = (await W.instantiate(multiMemoryModule())).instance.exports;
+const textAt = (memory, at, length) => new TextDecoder().decode(new Uint8Array(memory.buffer, at, length));
+const multiResult = multiMemoryRun(multi);
+check('Mehrere Speicher: Aufrufe', multiResult === MULTI_MEMORY_RESULT, multiResult);
+check('Mehrere Speicher: Objekte', multi.m0 instanceof W.Memory && multi.m1 !== multi.m0 && multi.m2 !== multi.m1
+  && textAt(multi.m1, 16, 4) === 'Zwei' && textAt(multi.m0, 0, 4) === 'Zwei' && textAt(multi.m2, 0, 3) === 'Dre'
+  && multi.m1.buffer.byteLength === 2 * 65536 && multi.m2.grow(1n) === 1n && multi.m2.buffer.byteLength === 2 * 65536);
+
+// memory64: Grenzen und grow mit BigInt wie in Chromium
+const m64 = (await W.instantiate(memory64Module())).instance.exports;
+const m64Result = memory64Run(m64);
+check('memory64: Aufrufe', m64Result === MEMORY64_RESULT, m64Result);
+check('memory64: Memory', textAt(m64.memory, 8, 5) === 'Hallo' && m64.memory.grow(1n) === 3n && m64.size() === 4n
+  && thrown(() => m64.memory.grow(1n)) instanceof RangeError);
+const own64 = new W.Memory({ address: 'i64', initial: 1n, maximum: 3n });
+check('memory64: neues Memory', own64.buffer.byteLength === 65536 && own64.grow(2n) === 1n && thrown(() => own64.grow(1n)) instanceof RangeError
+  && thrown(() => new W.Memory({ address: 'i64', initial: 1 })) instanceof TypeError && thrown(() => own64.grow(1)) instanceof TypeError
+  && thrown(() => new W.Memory({ address: 'i128', initial: 1 })) instanceof TypeError
+  && thrown(() => new W.Memory({ initial: 1n })) instanceof TypeError);
+
+// Importierte Speicher: Typ und Grenzen muessen passen
+const importsTwo = wasm(
+  sec(1, [0x60, 0, 1, i32]),
+  sec(2, [...str('env'), ...str('a'), 2, 0x01, 1, 2], [...str('env'), ...str('b'), 2, 0x04, 1]),
+  sec(3, [0]),
+  sec(7, [...str('f'), 0, 0]),
+  sec(10, code(0x42, 0, 0x28, 0x42, 1, 0, 0x41, 0, 0x28, 2, 0, 0x6a)));
+const importedA = new W.Memory({ initial: 1, maximum: 2 }), importedB = new W.Memory({ address: 'i64', initial: 1n });
+const twoModule = new W.Module(importsTwo);
+const linked = (a, b) => thrown(() => new W.Instance(twoModule, { env: { a, b } }));
+check('Speicher-Importe', new W.Instance(twoModule, { env: { a: importedA, b: importedB } }).exports.f() === 0
+  && linked(importedB, importedA) instanceof W.LinkError && linked(new W.Memory({ initial: 1 }), importedB) instanceof W.LinkError
+  && linked(new W.Memory({ initial: 1, maximum: 3 }), importedB) instanceof W.LinkError
+  && linked(new W.Memory({ initial: 0, maximum: 2 }), importedB) instanceof W.LinkError
+  && linked(importedA, new W.Memory({ address: 'i64', initial: 0n })) instanceof W.LinkError, String(linked(importedB, importedA)));
 
 // API-Objekte als externref kommen unveraendert zurueck
 const refTable = new W.Table({ element: 'externref', initial: 2 });
@@ -162,7 +199,7 @@ const memoryImport = wasm(
 const forged = (memoryId, work) => {
   const fake = {};
   const { get, has } = WeakMap.prototype;
-  WeakMap.prototype.get = function (key) { return key === fake ? { kind: 'memory', memoryId } : get.call(this, key); };
+  WeakMap.prototype.get = function (key) { return key === fake ? { kind: 'memory', memoryId, address: 'i32' } : get.call(this, key); };
   WeakMap.prototype.has = function (key) { return key === fake || has.call(this, key); };
   try {
     return work(fake);

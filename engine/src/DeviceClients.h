@@ -5,12 +5,15 @@
 // (topOrigin), bei Benachrichtigungen pro Ursprung des Dokuments.
 #pragma once
 
+#include <memory>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/UniqueRef.h>
 
 namespace WebCore {
+class NotificationClient;
 class Page;
+struct NotificationData;
 class SpeechRecognitionProvider;
 }
 
@@ -39,6 +42,10 @@ void deviceOrientation(int viewId, double alpha, double beta, double gamma, bool
 void deviceMotion(int viewId, const double* values, double interval);
 // type: 0 = gezeigt, 1 = angeklickt, 2 = geschlossen, 3 = Fehler
 void notificationEvent(const String& notificationID, int type);
+// Benachrichtigungen aus showNotification() im Service Worker und die noch
+// angezeigten einer Registrierung (getNotifications, tag leer = alle)
+std::unique_ptr<WebCore::NotificationClient> createServiceWorkerNotificationClient();
+Vector<WebCore::NotificationData> shownPersistentNotifications(const URL& registrationURL, const String& tag);
 // Spracherkennung: Provider fuer die PageConfiguration, Ereignisse vom Host
 // (type: 0 start, 1-6 Audio/Ton/Sprache an und aus, 7 Ergebnis, 8 nichts
 // erkannt, 9 Fehler, 10 Ende)

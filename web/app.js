@@ -768,6 +768,10 @@ function onEngineEvent(viewId, type, payload) {
   case 'speech-recognition':
     onSpeechRecognition(tab, data);
     return;
+  case 'notification':
+    // Auch ohne Tab: aus einem Service Worker (showNotification)
+    onNotification(tab, data);
+    return;
   case 'notification-close':
     onNotificationClose(data);
     return;
@@ -855,9 +859,6 @@ function onEngineEvent(viewId, type, payload) {
     return;
   case 'sensor-stop':
     onSensorStop(tab, data);
-    return;
-  case 'notification':
-    onNotification(tab, data);
     return;
   case 'touch-result':
     tab.onTouchResult?.(data);
@@ -1343,11 +1344,25 @@ function attachInput(tab) {
 
   // Finger zuerst: Touch-Events, Scrollen mit Schwung, Antippen (web/devices.js)
   attachTouch(tab, canvas, position, modifierBits);
+  // Zwei-Finger-Zoom auf dem Touchpad kommt als viele kleine wheel-Ereignisse
+  // mit ctrlKey (bruchzahlige Deltas): wie Chrome nur die Ansicht skalieren
+  // (engine/src/PinchZoom.h), um den Mauszeiger. Die Geste endet, wenn eine
+  // Weile nichts mehr kommt oder vor einer anderen Eingabe (die Engine
+  // uebernimmt das Ziel dann vor ihr, ein Klick trifft, was zu sehen ist).
+  let pinch = null; // { x, y, timer }
+  const endPinch = () => {
+    if (!pinch)
+      return;
+    clearTimeout(pinch.timer);
+    engine._bl_pinch(tab.id, 2, 1, pinch.x, pinch.y);
+    pinch = null;
+  };
   // Klickzahl (Doppel-/Dreifachklick: Wort/Absatz markieren, dblclick)
   // selber zaehlen: PointerEvent.detail ist in Chrome immer 0
   let lastDown = { time: 0, x: 0, y: 0, button: -1, count: 0 };
   canvas.addEventListener('pointerdown', (e) => {
     focusPage();
+    endPinch();
     canvas.setPointerCapture(e.pointerId);
     const [x, y] = position(e);
     const repeated = e.button === lastDown.button && e.timeStamp - lastDown.time < 500
@@ -1357,6 +1372,7 @@ function attachInput(tab) {
     e.preventDefault();
   });
   canvas.addEventListener('pointerup', (e) => {
+    endPinch();
     engine._bl_mouse(tab.id, 1, e.button, ...position(e), e.button === lastDown.button ? lastDown.count : 1, modifierBits(e));
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -1366,30 +1382,28 @@ function attachInput(tab) {
   });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    endPinch();
     engine._bl_context_menu(tab.id, ...position(e));
   });
-  // Zwei-Finger-Zoom auf dem Touchpad kommt als viele kleine wheel-Ereignisse
-  // mit ctrlKey (bruchzahlige Deltas): aufsummieren, eine Zoom-Stufe pro 40 px,
-  // sonst springt der Zoom bei jedem Ereignis eine Stufe weiter
-  let pinchSum = 0;
-  let pinchTimer = 0;
   canvas.addEventListener('wheel', (e) => {
-    // Strg + Mausrad: eine Zoom-Stufe pro Raste wie in Chrome
     if (e.ctrlKey && !e.altKey && e.deltaY) {
       e.preventDefault();
+      // Strg + Mausrad: eine Zoom-Stufe pro Raste wie in Chrome
       if (e.deltaMode !== 0 || (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50)) {
         changeZoom(tab, e.deltaY < 0 ? 1 : -1);
         return;
       }
-      pinchSum += e.deltaY;
-      clearTimeout(pinchTimer);
-      pinchTimer = setTimeout(() => { pinchSum = 0; }, 300);
-      if (Math.abs(pinchSum) >= 40) {
-        changeZoom(tab, pinchSum < 0 ? 1 : -1);
-        pinchSum = 0;
+      if (!pinch) {
+        const [x, y] = position(e);
+        pinch = { x, y, timer: 0 };
+        engine._bl_pinch(tab.id, 0, 1, x, y);
       }
+      clearTimeout(pinch.timer);
+      pinch.timer = setTimeout(endPinch, 200);
+      engine._bl_pinch(tab.id, 1, Math.exp(-e.deltaY / 100), pinch.x, pinch.y);
       return;
     }
+    endPinch();
     let factor = 1;
     if (e.deltaMode === 1) factor = 40;       // Zeilen
     else if (e.deltaMode === 2) factor = 800; // Seiten
