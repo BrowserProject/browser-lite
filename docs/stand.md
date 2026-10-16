@@ -7,16 +7,37 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
 ## Was laeuft
 
 - WebKit (WebCore + JavaScriptCore mit CLoop-Interpreter) als WebAssembly in
-  einem Tab, eigenes Netz ueber Wisp-Relay, TLS im WASM.
+  einem Tab, eigenes Netz ueber Wisp-Relay, TLS im WASM. Das Relay verbindet nur
+  zu oeffentlichen Adressen und Web-Ports.
 - Basis-Browser ohne Komfort-Funktionen (kein Passwort-Speicher, kein PDF-Viewer,
-  #130): Tabs, Verlauf, Lesezeichen, Downloads, Zoom, Suche auf der Seite.
+  #130): Tabs, Verlauf (auch `pushState`), Lesezeichen, Downloads, Zoom,
+  Pinch-Zoom wie Chrome (nur die Ansicht, im Compositor-Thread), Suche auf der
+  Seite. `mailto:`, `tel:` und andere Schemata gehen nach einem Klick an den
+  Host-Browser.
+- Absturz und Haengen: die Oberflaeche zeigt es an, "Neu starten" stellt die
+  Sitzung wieder her. Ein Skript, das die Engine laenger als 30 s blockiert, bricht
+  der Watchdog ab (`BL_SCRIPT_TIMEOUT`, 0 = aus).
 - GPU-Rastern (Skia ueber WebGL 2), Compositing mit eigenem Thread, asynchrones
-  Scrollen.
-- Medien (Video/Audio, MSE, WebCodecs, WebRTC, getUserMedia) ueber den Host-Browser.
-- Speicher: WasmFS, `/data` im OPFS (#142), HTTP- und Bytecode-Cache in der
-  Cache API (#70, #135).
-- Messlatte: 252 von 277 Funktionen wie Chromium (`tests/e2e/parity-test.mjs`).
-- CI gruen bis `120b0b8` (bzw. siehe letzter Lauf).
+  Scrollen, Blur und Schatten auf der GPU (gefilterte Ebenen werden
+  wiederverwendet), CSS Paint Worklet. Nach einem GPU-Verlust malt die Engine auf
+  der CPU weiter und kehrt auf die GPU zurueck, WebGL-Seiten bekommen
+  `webglcontextlost` und `webglcontextrestored`.
+- Medien (Video/Audio auch aus `blob:` und `data:`, MSE, WebCodecs, WebRTC,
+  getUserMedia) ueber den Host-Browser.
+- WebAssembly der Seiten in der WASM-Engine des Host, auch memory64, table64 und
+  mehrere Speicher (hoechstens 2 GB pro Speicher, 64 verschachtelte Aufrufe).
+- Service Worker mit Update im Hintergrund, Navigation Preload, Benachrichtigungen
+  und `clients.openWindow()` nach `notificationclick`.
+- Speicher: WasmFS, `/data` im OPFS (#142, nur ein Host-Tab besitzt es), HTTP- und
+  Bytecode-Cache in der Cache API (#70, #135), Inhalte der Cache API der Seiten als
+  eigene Dateien. `navigator.onLine` folgt der Verbindung zum Relay.
+- Messlatte: 257 von 280 Funktionen wie Chromium (`tests/e2e/parity-test.mjs`).
+- Tests: gemeinsames Geruest fuer die e2e-Tests (`tests/e2e/harness.mjs`, auch
+  parallel), dazu Grenzen (`limits.html`), Watchdog (`hang.html`), echte Abstuerze
+  (`BL_TEST_HOOKS=1`) und Netzfehler (falsche Zertifikate, DNS, Relay-Neustart).
+- CI und Deploy bei jedem Push auf `main` (Stand in GitHub Actions). Der Deploy
+  laeuft ueber den Self-hosted Runner auf den eigenen Proxmox-Server (LXC), auf dem
+  Runner laeuft keine fremde Action.
 
 ## Messwerte (lokal, erster Besuch)
 
@@ -60,6 +81,8 @@ der Oberflaeche:
 - Push, Background Sync, Storage Buckets, WebTransport, WebGPU.
 - WebRTC: Verkehr ueber das Relay (TURN), Insertable Streams.
 - Service Worker: Skript im Hintergrund aktualisieren, Navigation Preload.
+- Login mit Profil auf dem Server (Cookies, localStorage, kleine IndexedDB), Plan in
+  [profil.md](profil.md).
 
 ## Offen: Tests und Betrieb
 

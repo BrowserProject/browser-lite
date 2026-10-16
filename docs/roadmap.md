@@ -280,5 +280,9 @@ Service-Worker-Cache fuer das .wasm, CLoop-Tuning.
 - [x] MediaRecorder: WebM (VP8/VP9/AV1 + Opus) mit den Encodern des Host, Web Audio als Stream-Quelle
   (`createMediaStreamDestination`), Test in `mediastream-test.mjs` (Chromium spielt die Aufnahme ab)
 
+## Zukunft: Profil auf dem Server
+Login mit einem kleinen, verschluesselten Profil (Cookies, localStorage, kleine IndexedDB),
+Plan in [profil.md](profil.md).
+
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).
