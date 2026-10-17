@@ -219,6 +219,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setAsyncFrameScrollingEnabled(useAsyncScrolling);
     settings.setAsyncOverflowScrollingEnabled(useAsyncScrolling);
 #endif
+    // Polyfills auch im leeren Anfangsdokument eines Frames, der noch laedt:
+    // sonst fehlen dort ihre APIs, und die Bruecken (__blHost, ...) bleiben offen
+    settings.setShouldInjectUserScriptsInInitialEmptyDocument(true);
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
@@ -665,13 +668,22 @@ bool WebView::renderCompositedFrame(IntRect*)
     auto& host = *m_layerTreeHost;
     if (std::exchange(m_needsFullPresent, false))
         host.forceRepaint();
-    if (!m_renderingUpdateRequested || host.isWaitingForCompositor())
+    if (!m_renderingUpdateRequested)
         return false;
+    if (host.isWaitingForCompositor()) {
+        // Das Bild kommt, bevor der Compositor das letzte gezeigt hat (Engine
+        // beschaeftigt): didComposite holt es nach, statt auf ein neues zu warten
+        m_compositedFrameMissed = true;
+        return false;
+    }
     auto start = MonotonicTime::now();
     m_renderingUpdateRequested = false;
     m_page->updateRendering();
     m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
-    host.flush();
+    bool firstPaint = m_firstPaint == FirstPaint::WaitingForUpdate;
+    host.flush(firstPaint);
+    if (firstPaint && host.isWaitingForCompositor())
+        m_firstPaint = FirstPaint::None;
     // Nichts zu zeigen: das Bild ist trotzdem "fertig"
     if (!host.isWaitingForCompositor())
         didComposite();
@@ -687,7 +699,9 @@ void WebView::didComposite()
         m_layerTreeHost->didComposite();
     m_page->didCompleteRenderingUpdateDisplay();
     m_page->didCompleteRenderingFrame();
-    if (m_renderingUpdateRequested)
+    if (std::exchange(m_compositedFrameMissed, false))
+        presentIfNeeded();
+    else if (m_renderingUpdateRequested)
         requestComposite();
 }
 
@@ -758,6 +772,10 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     m_page->didCompleteRenderingUpdateDisplay();
     m_page->didCompleteRenderingFrame();
+    if (m_firstPaint == FirstPaint::WaitingForUpdate) {
+        m_firstPaint = FirstPaint::None;
+        firstPaintShown(m_id);
+    }
 
     auto end = MonotonicTime::now();
     if ((end - start).milliseconds() > 30)
@@ -1444,6 +1462,7 @@ void WebView::didStartLoading()
 void WebView::didCommitLoad()
 {
     debugLog("View %d: Commit", m_id);
+    m_firstPaint = FirstPaint::WaitingForLayout;
     // Neue Seite ohne Pinch-Zoom (Zurueck/Vor setzt den gemerkten wieder)
     m_pinch = std::nullopt;
     if (m_page->pageScaleFactor() != 1)
@@ -1481,6 +1500,14 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
         return;
     debugLog("View %d: erstes sichtbares Layout", m_id);
     notifyHost(m_id, "first-layout");
+    if (m_firstPaint == FirstPaint::WaitingForLayout)
+        m_firstPaint = FirstPaint::WaitingForUpdate;
+}
+
+void WebView::firstPaintShown(int id)
+{
+    debugLog("View %d: erstes Bild", id);
+    notifyHost(id, "first-paint");
 }
 
 void WebView::exitFullscreen()

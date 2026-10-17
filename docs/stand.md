@@ -41,38 +41,36 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
 
 ## Messwerte (lokal, erster Besuch)
 
-Aus `tests/e2e/site-test.mjs` (Spalte "erstes Layout" seit #144), Zeit ab Start
-der Oberflaeche:
+Aus `tests/e2e/site-test.mjs` (Spalten "erstes Layout" seit #144, "erstes Bild" seit #164),
+Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
 
-| Seite | Erstes Layout | Geladen |
-|---|---|---|
-| YouTube | 2.8 s | 5.6 s |
-| GitHub | 3.5 s | 3.0 s |
-| weather.com | 2.5 s | 58-97 s |
-| NZZ | 3.4 s | 14-21 s |
-| CNN | 4.6 s | 14-25 s |
-| Wikipedia (Schweiz) | 4.1-4.4 s | 7.5-8.3 s |
-| Twitch | 6.7 s | 8-34 s (Inhalt wechselt) |
-| 20min | 7.6 s | 22.5 s |
+| Seite | Erstes Layout | Erstes Bild | Geladen |
+|---|---|---|---|
+| YouTube | 2.5-3.1 s | 2.5-5.7 s | 5.1-6.7 s |
+| GitHub | 3.1-4.3 s | 3.4-4.6 s | 2.8-3.3 s |
+| weather.com | 2.3-2.8 s | 2.4-3.0 s | 5.2-6.4 s (Inhalt wechselt) |
+| NZZ | 3.4 s | - | 14-21 s |
+| CNN | 3.1-3.8 s | 3.2-4.0 s | 21-26 s |
+| Wikipedia (Schweiz) | 3.9-4.6 s | 4.1-4.8 s | 7.3-8.4 s |
+| Twitch | 6.7 s | - | 8-34 s (Inhalt wechselt) |
+| 20min | 3.7-8.6 s | 3.8-8.9 s | 27-29 s |
 
 ## Offen: Leistung (nach Nutzen)
 
-1. **Erstes Layout auf schweren Seiten** (Wikipedia, 20min, Twitch 4-7 s): der
-   HTML-Parser arbeitet lange Stuecke (1-1.5 s) ohne Pause, das erste Malen nach
-   dem ersten Layout kostet nochmals ca. 0.8 s. Zu pruefen: wann der Parser fuer ein
-   Rendering-Update unterbricht, was im ersten Rendering-Update so teuer ist.
+1. **Erstes Bild auf schweren Seiten**: meist 0.1-0.3 s nach dem ersten Layout (#164).
+   Faellt das erste Layout in ein langes Skript (20min: erzwungene Layouts, YouTube:
+   2.6-3 s Skript gleich danach), kommt das Bild erst nach dem Skript. Der HTML-Parser
+   arbeitet lange Stuecke (1-1.5 s) ohne Pause. Aufgaben anderer Threads warten unter
+   Last bis 3.7 s im Postfach von Emscripten, Abholen bei jedem Durchgang brachte nichts.
 2. **Kompilieren beim ersten Aufruf** (weather.com ca. 11 s Parser + Bytecode):
    beim zweiten Besuch hilft der Bytecode-Cache (#135), beim ersten nicht.
 3. **Interpreter-Eigenzeit** (CLoop, 15-21 % auf JS-lastigen Seiten): nur mit
    grossem Umbau deutlich schneller (Interpreter mit Tail-Calls oder ein JIT nach
    WASM). Kleine Caches sind gemacht (#143), polymorpher Cache lohnt laut Zaehlung
    nicht.
-4. **PiP-Teil des WebRTC-Polyfills**: fasst beim Start jedes Frames
-   `HTMLVideoElement`, `Document` und `ShadowRoot` an (ca. 0.2 s auf weather.com,
-   #145).
-5. **Erzwungenes Flex/Grid-Layout** durch JS (20min ca. 6.5 s, #141): kein
+4. **Erzwungenes Flex/Grid-Layout** durch JS (20min ca. 6.5 s, #141): kein
    billiger Fix gefunden.
-6. **GC** 5-7 % auf JS-lastigen Seiten (#60, #122).
+5. **GC** 5-7 % auf JS-lastigen Seiten (#60, #122).
 
 ## Offen: Funktionen
 

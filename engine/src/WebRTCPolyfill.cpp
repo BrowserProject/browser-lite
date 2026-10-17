@@ -30,60 +30,94 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   const internal = new WeakMap();
   const state = (object) => internal.get(object);
 
+  // Deskriptor fuer on<name> (Ereignis-Handler als Property)
+  const eventHandler = (name) => {
+    const key = Symbol(name);
+    return {
+      __proto__: null,
+      get() { return this[key] ?? null; },
+      set(handler) {
+        if (this[key])
+          this.removeEventListener(name, this[key]);
+        this[key] = typeof handler === 'function' ? handler : null;
+        if (this[key])
+          this.addEventListener(name, this[key]);
+      },
+      configurable: true,
+      enumerable: true,
+    };
+  };
   const eventHandlers = (prototype, names) => {
+    for (const name of names)
+      Object.defineProperty(prototype, 'on' + name, eventHandler(name));
+  };
+  // Getter auf globalThis: der erste Zugriff auf einen der Namen ruft build,
+  // das die Werte mit define anlegt
+  const lazyGlobals = (names, build) => {
+    let built = false;
+    const run = () => {
+      if (built)
+        return;
+      built = true;
+      try {
+        build();
+      } catch (e) {
+        reportError(e);
+      }
+    };
     for (const name of names) {
-      const key = Symbol(name);
-      Object.defineProperty(prototype, 'on' + name, {
-        get() { return this[key] ?? null; },
-        set(handler) {
-          if (this[key])
-            this.removeEventListener(name, this[key]);
-          this[key] = typeof handler === 'function' ? handler : null;
-          if (this[key])
-            this.addEventListener(name, this[key]);
+      Object.defineProperty(globalThis, name, {
+        get() {
+          run();
+          const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
+          return descriptor && 'value' in descriptor ? descriptor.value : undefined;
         },
+        set(value) { define(globalThis, name, value); },
         configurable: true,
-        enumerable: true,
+        enumerable: false,
       });
     }
   };
 
   // ---------------------------------------------------------------- Picture-in-Picture
   // Das <video> der Seite hat im Host ein verstecktes <video> (web/media.js), das
-  // geht ins PiP-Fenster von Chrome (mit Ton und Bedienelementen).
-  if (typeof HTMLVideoElement === 'function' && !('requestPictureInPicture' in HTMLVideoElement.prototype)) {
+  // geht ins PiP-Fenster von Chrome (mit Ton und Bedienelementen). Die Eintraege
+  // kommen erst auf HTMLVideoElement, Document und ShadowRoot, wenn das Fenster
+  // diese Prototypen anlegt (__blExtendPrototype): sonst kostet jedes Frame die
+  // Klassen HTMLVideoElement und ShadowRoot samt Vorfahren, auch ohne Video.
+  const extendPrototype = globalThis.__blExtendPrototype;
+  if (typeof extendPrototype === 'function') {
     let pipElement = null;
     let pipWindow = null;
     let pipSink = 0; // Engine-Senke eines Streams im PiP-Fenster
-    class PictureInPictureWindow extends EventTarget {
-      constructor() {
-        throw new TypeError('Illegal constructor');
+    const value = (fn) => ({ __proto__: null, value: fn, writable: true, configurable: true, enumerable: false });
+    const getter = (get, set) => ({ __proto__: null, get, set, configurable: true, enumerable: true });
+    let classes;
+    const pipClasses = () => {
+      if (classes)
+        return classes;
+      class PictureInPictureWindow extends EventTarget {
+        constructor() {
+          throw new TypeError('Illegal constructor');
+        }
+        get width() { return state(this).width; }
+        get height() { return state(this).height; }
       }
-      get width() { return state(this).width; }
-      get height() { return state(this).height; }
-    }
-    eventHandlers(PictureInPictureWindow.prototype, ['resize']);
-    class PictureInPictureEvent extends Event {
-      constructor(type, init = {}) {
-        super(type, init);
-        this.pictureInPictureWindow = init.pictureInPictureWindow;
+      eventHandlers(PictureInPictureWindow.prototype, ['resize']);
+      class PictureInPictureEvent extends Event {
+        constructor(type, init = {}) {
+          super(type, init);
+          this.pictureInPictureWindow = init.pictureInPictureWindow;
+        }
       }
-    }
-    Object.defineProperty(Document.prototype, 'pictureInPictureEnabled', { get() { return true; }, configurable: true, enumerable: true });
-    Object.defineProperty(Document.prototype, 'pictureInPictureElement', {
-      get() { return pipElement && pipElement.isConnected && pipElement.ownerDocument === this ? pipElement : null; },
-      configurable: true,
-      enumerable: true,
+      classes = { PictureInPictureWindow, PictureInPictureEvent };
+      return classes;
+    };
+    lazyGlobals(['PictureInPictureWindow', 'PictureInPictureEvent'], () => {
+      const { PictureInPictureWindow, PictureInPictureEvent } = pipClasses();
+      define(globalThis, 'PictureInPictureWindow', PictureInPictureWindow);
+      define(globalThis, 'PictureInPictureEvent', PictureInPictureEvent);
     });
-    if (typeof ShadowRoot === 'function')
-      Object.defineProperty(ShadowRoot.prototype, 'pictureInPictureElement', { get() { return null; }, configurable: true, enumerable: true });
-    Object.defineProperty(HTMLVideoElement.prototype, 'disablePictureInPicture', {
-      get() { return this.hasAttribute('disablepictureinpicture'); },
-      set(value) { this.toggleAttribute('disablepictureinpicture', !!value); },
-      configurable: true,
-      enumerable: true,
-    });
-    eventHandlers(HTMLVideoElement.prototype, ['enterpictureinpicture', 'leavepictureinpicture']);
     const leave = () => {
       if (!pipElement)
         return;
@@ -96,7 +130,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       pipSink = 0;
       state(window).width = 0;
       state(window).height = 0;
-      element.dispatchEvent(new PictureInPictureEvent('leavepictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
+      element.dispatchEvent(new (pipClasses().PictureInPictureEvent)('leavepictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
     };
     const watch = async (player, element, window) => {
       while (pipElement === element) {
@@ -118,7 +152,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         }
       }
     };
-    define(HTMLVideoElement.prototype, 'requestPictureInPicture', async function requestPictureInPicture() {
+    async function requestPictureInPicture() {
       if (this.disablePictureInPicture)
         throw new DOMException("Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': \"disablePictureInPicture\" attribute is present.", 'InvalidStateError');
       if (this.readyState === 0)
@@ -155,6 +189,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       }
       leave();
       pipSink = sink;
+      const { PictureInPictureWindow, PictureInPictureEvent } = pipClasses();
       const window = Reflect.construct(EventTarget, [], PictureInPictureWindow);
       internal.set(window, { width: size.width, height: size.height });
       pipElement = this;
@@ -162,45 +197,34 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       this.dispatchEvent(new PictureInPictureEvent('enterpictureinpicture', { bubbles: true, pictureInPictureWindow: window }));
       watch(player, this, window);
       return window;
-    });
-    define(Document.prototype, 'exitPictureInPicture', async function exitPictureInPicture() {
+    }
+    async function exitPictureInPicture() {
       if (!pipElement)
         throw new DOMException("Failed to execute 'exitPictureInPicture' on 'Document': There is no Picture-in-Picture element in this document.", 'InvalidStateError');
       await call('pip-exit', {});
       leave();
+    }
+    extendPrototype('HTMLVideoElement', {
+      __proto__: null,
+      requestPictureInPicture: value(requestPictureInPicture),
+      disablePictureInPicture: getter(function () { return this.hasAttribute('disablepictureinpicture'); }, function (value) { this.toggleAttribute('disablepictureinpicture', !!value); }),
+      onenterpictureinpicture: eventHandler('enterpictureinpicture'),
+      onleavepictureinpicture: eventHandler('leavepictureinpicture'),
     });
-    define(globalThis, 'PictureInPictureWindow', PictureInPictureWindow);
-    define(globalThis, 'PictureInPictureEvent', PictureInPictureEvent);
+    extendPrototype('Document', {
+      __proto__: null,
+      pictureInPictureEnabled: getter(() => true),
+      pictureInPictureElement: getter(function () { return pipElement && pipElement.isConnected && pipElement.ownerDocument === this ? pipElement : null; }),
+      exitPictureInPicture: value(exitPictureInPicture),
+    });
+    extendPrototype('ShadowRoot', { __proto__: null, pictureInPictureElement: getter(() => null) });
   }
 
   // ---------------------------------------------------------------- WebRTC
   // Erst beim ersten Zugriff auf eine der Klassen (Getter auf globalThis): die
   // vielen Klassen, Spuren-Haken und die Ereignis-Schleife kosten sonst in jedem
   // Frame Zeit (iframes von Werbung), auch wenn die Seite kein WebRTC nutzt.
-  const rtcNames = ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCSessionDescription', 'RTCIceCandidate', 'RTCDataChannel', 'RTCPeerConnectionIceEvent', 'RTCPeerConnectionIceErrorEvent', 'RTCDataChannelEvent', 'RTCError', 'RTCErrorEvent', 'RTCStatsReport', 'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCTrackEvent'];
-  let rtcInstalled = false;
-  function installRTC() {
-    if (rtcInstalled)
-      return;
-    rtcInstalled = true;
-    try {
-      buildRTC();
-    } catch (e) {
-      reportError(e);
-    }
-  }
-  for (const name of rtcNames) {
-    Object.defineProperty(globalThis, name, {
-      get() {
-        installRTC();
-        const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
-        return descriptor && 'value' in descriptor ? descriptor.value : undefined;
-      },
-      set(value) { define(globalThis, name, value); },
-      configurable: true,
-      enumerable: false,
-    });
-  }
+  lazyGlobals(['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCSessionDescription', 'RTCIceCandidate', 'RTCDataChannel', 'RTCPeerConnectionIceEvent', 'RTCPeerConnectionIceErrorEvent', 'RTCDataChannelEvent', 'RTCError', 'RTCErrorEvent', 'RTCStatsReport', 'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCTrackEvent'], buildRTC);
 
   function buildRTC() {
     // randomUUID gibt es nur auf sicheren Seiten

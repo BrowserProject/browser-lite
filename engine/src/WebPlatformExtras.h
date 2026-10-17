@@ -35,6 +35,8 @@ void screenOrientationMayHaveChanged();
 // Bruecke fuer die Polyfills zu APIs des Host-Browsers (EyeDropper, Akku,
 // Tastatur): __blHost(name, payload, callback) im window. Die Oberflaeche
 // (web/devices.js) fuehrt den Aufruf aus und antwortet mit hostCallFinished.
+// Dazu __blExtendPrototype(klasse, deskriptoren): Properties, die erst auf den
+// Prototyp einer DOM-Klasse kommen, wenn das Fenster ihn anlegt.
 void installHostBridge(JSC::JSGlobalObject&, int viewId);
 void hostCallFinished(uint64_t identifier, bool ok, const WTF::String& resultJSON);
 

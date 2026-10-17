@@ -68,6 +68,8 @@ public:
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
     MonotonicTime tilesWaitStart WTF_GUARDED_BY_LOCK(lock);
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
+    // Mit diesem Stand "erstes Bild" melden (WebView::firstPaintShown)
+    bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
     // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
@@ -130,8 +132,10 @@ public:
     void setViewOverlayRootLayer(WebCore::GraphicsLayer*);
     void sizeDidChange(WebCore::IntSize pixelSize, float deviceScaleFactor);
 
-    // Nach page->finalizeRenderingUpdate(): Stand der Ebenen an den Compositor
-    void flush();
+    // Nach page->finalizeRenderingUpdate(): Stand der Ebenen an den Compositor.
+    // firstPaint: er meldet WebView::firstPaintShown mit dem Bild, das diesen
+    // Stand zeigt
+    void flush(bool firstPaint = false);
     // Das letzte Rendering-Update ist noch nicht gezeigt
     bool isWaitingForCompositor() const { return m_waitingForCompositor; }
     // Vom Compositor (Engine-Thread)

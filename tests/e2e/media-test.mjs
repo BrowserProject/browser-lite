@@ -104,6 +104,15 @@ video.addEventListener('click', async () => {
     result('pip', e.name + ':' + e.message.replace(/\s/g, '_'));
   }
 });
+// Picture-in-Picture auch in einem Frame ohne <video>: die Eintraege kommen
+// erst auf die Prototypen, wenn das Fenster sie anlegt
+addEventListener('message', (e) => {
+  if (Array.isArray(e.data))
+    result('pipframe', e.data.join(','));
+});
+const pipFrame = document.createElement('iframe');
+pipFrame.srcdoc = '<script>parent.postMessage([typeof document.exitPictureInPicture, document.pictureInPictureElement, "requestPictureInPicture" in HTMLVideoElement.prototype, document.createElement("video").onenterpictureinpicture, document.createElement("div").attachShadow({ mode: "open" }).pictureInPictureElement, typeof PictureInPictureEvent].map(String), "*")<\\/script>';
+document.body.append(pipFrame);
 audio.addEventListener('loadedmetadata', () => result('audioduration', audio.duration.toFixed(1)));
 audio.addEventListener('error', () => result('audioerror', audio.error && audio.error.code));
 let seekedOnce = false;
@@ -316,6 +325,7 @@ const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 180, box.y + 140);
 check('Picture-in-Picture: requestPictureInPicture', (await result('pip', 20000)) === 'true,true,true', results.get('pip'));
 check('Picture-in-Picture: Ereignisse und exit', (await result('pipevents', 20000)) === 'enter:true|leave,true', results.get('pipevents'));
+check('Picture-in-Picture: in einem Frame ohne Video', (await result('pipframe')) === 'function,null,true,null,null,function', results.get('pipframe'));
 
 check('Audio: Dauer bekannt', (await result('audioduration')) === '30.0', results.get('audioerror') ? `Fehler ${results.get('audioerror')}` : results.get('audioduration'));
 check('Audio: play()', (await result('audioplay')) === 'ok', results.get('audioplay'));

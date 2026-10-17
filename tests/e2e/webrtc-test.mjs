@@ -3,7 +3,7 @@
 // Text, Binaer und Blob, Zustaende, getStats, close) und eine Verbindung
 // zwischen browser-lite und einer normalen Chromium-Seite. Medien: Canvas und
 // Web Audio im Loopback (Bild und Ton kommen an), Kamera in beide Richtungen
-// mit einer Chromium-Seite.
+// mit einer Chromium-Seite. Das Polyfill gilt auch im Anfangsdokument eines Frames.
 //
 //   cd tests/e2e && node webrtc-test.mjs [engine-ordner]
 import { SWIFTSHADER, TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
@@ -21,6 +21,11 @@ const until = (condition, ms = 20000) => new Promise((resolve, reject) => {
   check();
 });
 log('api', [typeof RTCPeerConnection, typeof RTCSessionDescription, typeof RTCIceCandidate, typeof RTCDataChannel].join(','));
+// Leeres Anfangsdokument eines Frames, der noch laedt: Polyfill da, Bruecken weg
+const loading = document.createElement('iframe');
+loading.src = '/langsam';
+document.body.append(loading);
+log('initial', typeof loading.contentWindow.RTCPeerConnection + ',' + (['__blHost', '__blMedia', '__blExtendPrototype'].filter((name) => name in loading.contentWindow).join('+') || 'keine'));
 const parsed = new RTCIceCandidate({ candidate: 'candidate:1 1 udp 2122260223 192.0.2.1 54321 typ host generation 0', sdpMid: '0' });
 log('candidate', [parsed.address, parsed.port, parsed.protocol, parsed.type, parsed.component].join(','));
 (async () => {
@@ -222,7 +227,13 @@ window.crossAnswer = async (answer) => {
 };
 </script>`;
 
-const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/blank' ? '<!doctype html><title>Gegenstelle</title>' : PAGE));
+const { url: siteURL } = await serve((req, res) => {
+  if (req.url === '/langsam') {
+    setTimeout(() => res.writeHead(200, { 'Content-Type': 'text/html' }).end('langsam'), 2000);
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/blank' ? '<!doctype html><title>Gegenstelle</title>' : PAGE);
+});
 
 const stack = await startStack({ token: 'webrtc-token-0123456789abcdef' });
 const browser = await launch({ args: [...SWIFTSHADER, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
@@ -234,6 +245,7 @@ const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('e
 await page.goto(stack.app({ url: siteURL }));
 const err = () => results.get('error') || '';
 check('RTCPeerConnection & Co. vorhanden', await result('api') === 'function,function,function,function', results.get('api'));
+check('Frame, der noch laedt: Polyfill da, Bruecken nicht', await result('initial') === 'function,keine', results.get('initial'));
 check('RTCIceCandidate zerlegt den Kandidaten', await result('candidate') === '192.0.2.1,54321,udp,host,rtp', results.get('candidate'));
 check('createDataChannel sofort da', await result('channel', 30000) === 'chat,connecting,true,true', results.get('channel') || err());
 check('Angebot (createOffer/setLocalDescription)', await result('offer', 30000) === 'have-local-offer,offer,true', results.get('offer') || err());

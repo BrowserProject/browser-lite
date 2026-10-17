@@ -1,0 +1,53 @@
+diff --git a/Source/WebCore/bindings/js/JSDOMWrapperCache.cpp b/Source/WebCore/bindings/js/JSDOMWrapperCache.cpp
+index b60bf4eecc..5bd1cb4649 100644
+--- a/Source/WebCore/bindings/js/JSDOMWrapperCache.cpp
++++ b/Source/WebCore/bindings/js/JSDOMWrapperCache.cpp
+@@ -32,17 +32,27 @@ Structure* getCachedDOMStructure(const JSDOMGlobalObject& globalObject, const Cl
+     return globalObject.structures().get(classInfo).get();
+ }
+ 
++#if PLATFORM(WASM)
++void (*domStructureCreatedHook)(JSDOMGlobalObject&, Structure&, const ClassInfo*) = nullptr;
++#endif
++
+ Structure* cacheDOMStructure(JSDOMGlobalObject& globalObject, Structure* structure, const ClassInfo* classInfo)
+ {
+     auto addToStructures = [](JSDOMStructureMap& structures, JSDOMGlobalObject& globalObject, Structure* structure, const ClassInfo* classInfo) {
+         ASSERT(!structures.contains(classInfo));
+         return structures.set(classInfo, WriteBarrier<Structure>(globalObject.vm(), &globalObject, structure)).iterator->value.get();
+     };
++    Structure* cached;
+     if (globalObject.vm().heap.mutatorShouldBeFenced()) {
+         Locker locker { globalObject.gcLock() };
+-        return addToStructures(globalObject.structures(), globalObject, structure, classInfo);
+-    }
+-    return addToStructures(globalObject.structures(NoLockingNecessary), globalObject, structure, classInfo);
++        cached = addToStructures(globalObject.structures(), globalObject, structure, classInfo);
++    } else
++        cached = addToStructures(globalObject.structures(NoLockingNecessary), globalObject, structure, classInfo);
++#if PLATFORM(WASM)
++    if (domStructureCreatedHook)
++        domStructureCreatedHook(globalObject, *cached, classInfo);
++#endif
++    return cached;
+ }
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/bindings/js/JSDOMWrapperCache.h b/Source/WebCore/bindings/js/JSDOMWrapperCache.h
+index 947c25460a..56161ed3c6 100644
+--- a/Source/WebCore/bindings/js/JSDOMWrapperCache.h
++++ b/Source/WebCore/bindings/js/JSDOMWrapperCache.h
+@@ -42,6 +42,13 @@ namespace WebCore {
+ WEBCORE_EXPORT JSC::Structure* getCachedDOMStructure(const JSDOMGlobalObject&, const JSC::ClassInfo*);
+ WEBCORE_EXPORT JSC::Structure* cacheDOMStructure(JSDOMGlobalObject&, JSC::Structure*, const JSC::ClassInfo*);
+ 
++#if PLATFORM(WASM)
++// Fuer die Einbettung: wird gerufen, wenn ein globales Objekt die Structure
++// (und damit den Prototyp) einer DOM-Klasse zum ersten Mal anlegt. browser-lite
++// traegt dort die Polyfills fuer diese Klasse ein.
++WEBCORE_EXPORT extern void (*domStructureCreatedHook)(JSDOMGlobalObject&, JSC::Structure&, const JSC::ClassInfo*);
++#endif
++
+ template<typename WrapperClass> JSC::Structure* getDOMStructure(JSC::VM&, JSDOMGlobalObject&);
+ template<typename WrapperClass> JSC::Structure* deprecatedGetDOMStructure(JSC::JSGlobalObject*);
+ template<typename WrapperClass> JSC::JSObject* getDOMPrototype(JSC::VM&, JSC::JSGlobalObject*);

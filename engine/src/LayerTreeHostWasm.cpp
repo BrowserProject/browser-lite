@@ -53,6 +53,7 @@ static void compositeScene(CompositorScene& scene)
     });
     OptionSet<CompositionReason> reasons;
     bool notify = false;
+    bool firstPaint = false;
     IntSize pixelSize;
     float deviceScaleFactor = 1;
     HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
@@ -86,6 +87,11 @@ static void compositeScene(CompositorScene& scene)
         scene.tilesWaitStart = { };
         reasons = std::exchange(scene.reasons, { });
         notify = std::exchange(scene.notifyEngine, false);
+        // Das erste Bild mit dem Rendering-Update melden, das es bringt: dessen
+        // Kacheln sind im Bild, auch nach den 100 ms (processPendingBackingStoreTileUpdates
+        // wartet, bis sie gemalt sind)
+        if (reasons.contains(CompositionReason::RenderingUpdate))
+            firstPaint = std::exchange(scene.firstPaint, false);
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
         if (std::exchange(scene.hasPendingLayers, false))
             scene.committedLayers = std::exchange(scene.pendingLayers, { });
@@ -187,6 +193,8 @@ static void compositeScene(CompositorScene& scene)
     canvas->restore();
     grContext->flushAndSubmit(surface.get());
     Gpu::showFramebuffer(scene.viewId);
+    if (firstPaint)
+        WebView::firstPaintShown(scene.viewId);
 
     if (hasRunningAnimations)
         scene.requestComposition(CompositionReason::Animation);
@@ -469,7 +477,7 @@ void LayerTreeHostWasm::flushLayerStates()
         layer->flushPendingState();
 }
 
-void LayerTreeHostWasm::flush()
+void LayerTreeHostWasm::flush(bool firstPaint)
 {
     flushLayerStates();
 
@@ -506,6 +514,7 @@ void LayerTreeHostWasm::flush()
     m_scene->pendingPinchCommit = m_pinchCommit;
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;
+    m_scene->firstPaint |= firstPaint;
     m_scene->scheduleFrameLocked();
 }
 

@@ -10,12 +10,15 @@
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSNativeStdFunction.h>
+#include <JavaScriptCore/ObjectConstructor.h>
+#include <JavaScriptCore/PropertyNameArray.h>
 #include <JavaScriptCore/StrongInlines.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/EventLoop.h>
 #include <WebCore/Exception.h>
 #include <WebCore/JSDOMExceptionHandling.h>
 #include <WebCore/JSDOMGlobalObject.h>
+#include <WebCore/JSDOMWrapperCache.h>
 #include <WebCore/JSExecState.h>
 #include <WebCore/ScriptExecutionContext.h>
 #include <WebCore/SecurityOrigin.h>
@@ -321,6 +324,7 @@ static constexpr auto polyfillSource = R"JS((() => {
   // Die Bruecke ist nur hier sichtbar, die Seite sieht sie nicht.
   const host = globalThis.__blHost;
   delete globalThis.__blHost;
+  delete globalThis.__blExtendPrototype;
   if (typeof host !== 'function' || typeof Navigator !== 'function')
     return;
   const call = (name, payload) => new Promise((resolve, reject) => {
@@ -671,6 +675,162 @@ bool isAllowedHostCall(const String& name)
 
 }
 
+// ---------------------------------------------------------------- Prototypen bei Bedarf
+
+// Eintraege der Polyfills fuer DOM-Prototypen, die das Fenster noch nicht
+// angelegt hat (Klassenname -> Properties). Liegt unter einem privaten Namen
+// am globalen Objekt, die Seite sieht es nicht.
+static const JSC::Identifier& pendingPrototypeExtensionsName()
+{
+    static NeverDestroyed<JSC::Identifier> name = JSC::Identifier::fromUid(JSC::PrivateName(JSC::PrivateName::PrivateSymbol, "blPendingPrototypeExtensions"_s));
+    return name;
+}
+
+// Wie Object.defineProperties liest es die Deskriptoren (dabei kann Code der
+// Seite laufen) und legt sie als Objekte ohne Prototyp an, die nur die Engine
+// kennt: Name -> Deskriptor, Felder wie bei Object.defineProperty
+static JSC::JSObject* readDescriptors(JSC::JSGlobalObject& globalObject, JSC::JSObject& descriptors)
+{
+    auto& vm = globalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    auto& names = vm.propertyNames;
+    JSC::PropertyNameArrayBuilder propertyNames(vm, JSC::PropertyNameMode::StringsAndSymbols, JSC::PrivateSymbolMode::Exclude);
+    descriptors.methodTable()->getOwnPropertyNames(&descriptors, &globalObject, propertyNames, JSC::DontEnumPropertiesMode::Exclude);
+    RETURN_IF_EXCEPTION(scope, nullptr);
+    auto* entries = JSC::constructEmptyObject(vm, globalObject.nullPrototypeObjectStructure());
+    for (auto& name : propertyNames) {
+        // Zahlen als Namen braucht kein Polyfill
+        if (JSC::parseIndex(name))
+            continue;
+        auto value = descriptors.get(&globalObject, name);
+        RETURN_IF_EXCEPTION(scope, nullptr);
+        JSC::PropertyDescriptor descriptor;
+        bool valid = JSC::toPropertyDescriptor(&globalObject, value, descriptor);
+        RETURN_IF_EXCEPTION(scope, nullptr);
+        if (!valid)
+            return nullptr;
+        auto* entry = JSC::constructEmptyObject(vm, globalObject.nullPrototypeObjectStructure());
+        if (descriptor.value())
+            entry->putDirect(vm, names->value, descriptor.value());
+        if (descriptor.getterPresent())
+            entry->putDirect(vm, names->get, descriptor.getter());
+        if (descriptor.setterPresent())
+            entry->putDirect(vm, names->set, descriptor.setter());
+        if (descriptor.writablePresent())
+            entry->putDirect(vm, names->writable, JSC::jsBoolean(descriptor.writable()));
+        if (descriptor.enumerablePresent())
+            entry->putDirect(vm, names->enumerable, JSC::jsBoolean(descriptor.enumerable()));
+        if (descriptor.configurablePresent())
+            entry->putDirect(vm, names->configurable, JSC::jsBoolean(descriptor.configurable()));
+        entries->putDirect(vm, name, entry);
+    }
+    return entries;
+}
+
+// Die Eintraege von readDescriptors auf den Prototyp. Hier laeuft kein Code der
+// Seite: die Objekte hat die Engine angelegt, es wird nur direkt gelesen.
+static void defineProperties(JSC::JSGlobalObject& globalObject, JSC::JSObject& target, JSC::JSObject& entries)
+{
+    auto& vm = globalObject.vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    auto& names = vm.propertyNames;
+    JSC::PropertyNameArrayBuilder propertyNames(vm, JSC::PropertyNameMode::StringsAndSymbols, JSC::PrivateSymbolMode::Exclude);
+    entries.getOwnNonIndexPropertyNames(&globalObject, propertyNames, JSC::DontEnumPropertiesMode::Exclude);
+    RETURN_IF_EXCEPTION(scope, void());
+    for (auto& name : propertyNames) {
+        auto* entry = asObject(entries.getDirect(vm, name));
+        JSC::PropertyDescriptor descriptor;
+        if (auto value = entry->getDirect(vm, names->value))
+            descriptor.setValue(value);
+        if (auto getter = entry->getDirect(vm, names->get))
+            descriptor.setGetter(getter);
+        if (auto setter = entry->getDirect(vm, names->set))
+            descriptor.setSetter(setter);
+        if (auto writable = entry->getDirect(vm, names->writable))
+            descriptor.setWritable(writable.isTrue());
+        if (auto enumerable = entry->getDirect(vm, names->enumerable))
+            descriptor.setEnumerable(enumerable.isTrue());
+        if (auto configurable = entry->getDirect(vm, names->configurable))
+            descriptor.setConfigurable(configurable.isTrue());
+        target.methodTable()->defineOwnProperty(&target, &globalObject, name, descriptor, false);
+        RETURN_IF_EXCEPTION(scope, void());
+    }
+}
+
+// WebCore legt die Structure einer DOM-Klasse an (domStructureCreatedHook,
+// Patch 0037). Hier laeuft nie Code der Seite, auch kein Fehler-Ereignis.
+static void domStructureCreated(JSDOMGlobalObject& globalObject, JSC::Structure& structure, const JSC::ClassInfo* classInfo)
+{
+    // Eintraege gibt es nur in Fenstern (Haupt-Thread)
+    if (!isMainThread())
+        return;
+    auto& vm = globalObject.vm();
+    auto pending = globalObject.getDirect(vm, pendingPrototypeExtensionsName());
+    if (!pending)
+        return;
+    auto entries = asObject(pending)->getDirect(vm, JSC::Identifier::fromString(vm, classInfo->className));
+    if (!entries)
+        return;
+    auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
+    // Eine Ausnahme von vorher gehoert dem Aufrufer
+    if (scope.exception())
+        return;
+    defineProperties(globalObject, *structure.storedPrototypeObject(), *asObject(entries));
+    if (auto* exception = scope.exception(); exception && !vm.isTerminationException(exception)) {
+        log("Polyfill: Prototyp %s nicht erweitert", classInfo->className.characters());
+        scope.clearException();
+    }
+}
+
+// __blExtendPrototype(klasse, deskriptoren) fuer die Polyfills: die Properties
+// kommen auf den Prototyp der DOM-Klasse, sobald das Fenster ihn anlegt (oder
+// gleich, wenn es ihn schon gibt). Neue Klassen und Prototypen kosten in jedem
+// Frame Zeit, auch wenn die Seite sie nie braucht.
+static void installPrototypeExtensions(JSC::JSGlobalObject& globalObject)
+{
+    static bool hookInstalled;
+    if (!std::exchange(hookInstalled, true))
+        domStructureCreatedHook = domStructureCreated;
+    auto& vm = globalObject.vm();
+    auto* function = JSC::JSNativeStdFunction::create(vm, &globalObject, 2, "__blExtendPrototype"_s, [](JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
+        auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(lexicalGlobalObject);
+        auto& vm = lexicalGlobalObject->vm();
+        auto scope = DECLARE_THROW_SCOPE(vm);
+        auto className = callFrame->argument(0).toWTFString(lexicalGlobalObject);
+        RETURN_IF_EXCEPTION(scope, { });
+        auto* descriptors = callFrame->argument(1).getObject();
+        if (!globalObject || !descriptors)
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        auto classIdentifier = JSC::Identifier::fromString(vm, className);
+        if (JSC::parseIndex(classIdentifier))
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        auto* entries = readDescriptors(*globalObject, *descriptors);
+        RETURN_IF_EXCEPTION(scope, { });
+        if (!entries)
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        JSC::JSObject* prototype = nullptr;
+        for (auto& entry : std::as_const(*globalObject).structures()) {
+            if (className == entry.key->className) {
+                prototype = entry.value->storedPrototypeObject();
+                break;
+            }
+        }
+        if (prototype) {
+            scope.release();
+            defineProperties(*globalObject, *prototype, *entries);
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
+        auto pending = globalObject->getDirect(vm, pendingPrototypeExtensionsName());
+        if (!pending) {
+            pending = JSC::constructEmptyObject(vm, globalObject->nullPrototypeObjectStructure());
+            globalObject->putDirect(vm, pendingPrototypeExtensionsName(), pending, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+        }
+        asObject(pending)->putDirect(vm, classIdentifier, entries);
+        return JSC::JSValue::encode(JSC::jsUndefined());
+    });
+    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blExtendPrototype"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+}
+
 void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
 {
     auto& vm = globalObject.vm();
@@ -698,6 +858,7 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
     });
     globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blHost"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
     MediaStreams::installBridge(globalObject);
+    installPrototypeExtensions(globalObject);
 }
 
 // Die Antwort kommt als Aufgabe in den Event-Loop des Dokuments: ist es weg,

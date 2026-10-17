@@ -913,6 +913,9 @@ function onEngineEvent(viewId, type, payload) {
   case 'first-layout':
     window.__blFirstLayout = true; // fuer die Tests (tests/e2e)
     break;
+  case 'first-paint':
+    window.__blFirstPaint = true; // fuer die Tests (tests/e2e)
+    break;
   case 'load':
     tab.loading = false;
     window.__blLoaded = true; // fuer die Tests (tests/e2e)

@@ -102,6 +102,8 @@ public:
     // Vom Compositor-Thread: das letzte Rendering-Update ist gezeigt
     void didComposite();
     void compositorLost();
+    // Von jedem Thread: das erste Bild nach dem ersten sichtbaren Layout ist zu sehen
+    static void firstPaintShown(int id);
     // GPU des Engine-Workers verloren oder wieder da (GpuRaster.cpp)
     void gpuLost() { dropGpuSurface(); }
     // true, wenn der View wieder auf der GPU malt
@@ -221,6 +223,12 @@ private:
     bool m_frameRequested { false };
     bool m_frameInFlight { false };
     bool m_needsFullPresent { false };
+    bool m_compositedFrameMissed { false };
+    // Erstes Bild nach dem ersten sichtbaren Layout einer Seite (Ereignis
+    // "first-paint"): das naechste Rendering-Update traegt es, mit Ebenen
+    // meldet es der Compositor-Thread mit dem Bild, das es zeigt
+    enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
+    FirstPaint m_firstPaint { FirstPaint::None };
     void loadFavicon();
 
     bool m_isLoading { false };
