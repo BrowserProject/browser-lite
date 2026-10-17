@@ -278,6 +278,12 @@ const { WispTransport } = await import(path.join(root, 'web', 'transport.js'));
   for (const stream of [...held, other, freed])
     stream?.close();
 
+  // Ein Name mit IPv6 zuerst (localhost: ::1), das Ziel hoert nur auf IPv4: das Relay
+  // versucht alle gepruften Adressen wie ein Browser (Server ohne IPv6, z.B. CI)
+  const dualStack = await echoStream(transport, 'localhost', echoPort);
+  check('Name mit IPv6 zuerst, Ziel nur auf IPv4', Boolean(dualStack));
+  dualStack?.close();
+
   const pressure = await backpressure(transport);
   check('Gegendruck: ohne Lesen des Ziels stoppt onsent', pressure.stalled > 0 && pressure.stalled < pressure.total, `${pressure.stalled} von ${pressure.total} Bytes`);
   check('Gegendruck: danach alles gesendet', pressure.sent === pressure.total, `${pressure.sent} Bytes`);

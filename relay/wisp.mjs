@@ -24,7 +24,8 @@ const KEEPALIVE = 3000;
 const CLOSE_TIMEOUT = 10000; // so lange darf das Ziel nach dem Schliessen noch lesen
 
 function reasonFor(error) {
-  switch (error?.code) {
+  // Mehrere Adressen (autoSelectFamily): AggregateError, der letzte Versuch zaehlt
+  switch (error?.code ?? error?.errors?.at(-1)?.code) {
   case 'ECONNREFUSED':
     return reasons.ConnRefused;
   case 'ETIMEDOUT':
@@ -58,16 +59,17 @@ export function createWispHandler({ allowAddress, streamsPerHost = Infinity }) {
         this.failure = reasons.ConnThrottled;
         throw new Error(`zu viele Streams zu ${this.hostname}`);
       }
-      let address = this.hostname;
-      if (!net.isIP(address)) {
+      let addresses = [{ address: this.hostname, family: net.isIP(this.hostname) }];
+      if (!addresses[0].family) {
         try {
-          ({ address } = await dns.lookup(this.hostname));
+          addresses = await dns.lookup(this.hostname, { all: true });
         } catch (error) {
           this.failure = reasons.UnreachableHost;
           throw error;
         }
       }
-      if (!allowAddress(address)) {
+      addresses = addresses.filter(({ address }) => allowAddress(address));
+      if (!addresses.length) {
         this.failure = reasons.HostBlocked;
         throw new Error(`${this.hostname} ist keine oeffentliche Adresse`);
       }
@@ -75,7 +77,15 @@ export function createWispHandler({ allowAddress, streamsPerHost = Infinity }) {
       // wird, ist er schon weg: eine Verbindung danach zaehlte zu keiner Grenze
       if (this.closed)
         throw new Error('Stream schon geschlossen');
-      const socket = net.connect({ host: address, port: this.port, noDelay: true });
+      // Nur zu den geprueften Adressen, IPv6 und IPv4 abwechselnd wie ein Browser
+      // (ohne IPv6 auf dem Server ginge sonst ein Name mit AAAA-Eintrag zuerst nicht)
+      const socket = net.connect({
+        host: this.hostname,
+        port: this.port,
+        noDelay: true,
+        autoSelectFamily: true,
+        lookup: (hostname, options, callback) => (options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family)),
+      });
       this.socket = socket;
       await new Promise((resolve, reject) => {
         socket.on('connect', () => {

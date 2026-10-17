@@ -18,7 +18,8 @@ Betrieb und Deploy: [deploy/README.md](../deploy/README.md). Test: `tests/relay/
   wie `::ffff:127.0.0.1` wird vorher in IPv4 umgewandelt). Gesperrt sind also Loopback,
   private Netze, Link-Local, ULA (`fd00::/8`), NAT64 usw. Jede Adresse, mit der das Relay
   verbindet, prueft sein Socket (`wisp.mjs`) direkt davor (kein DNS-Rebinding zwischen
-  Pruefen und Verbinden).
+  Pruefen und Verbinden). Ein Name kann mehrere Adressen haben: verbunden wird nur zu den
+  geprueften, IPv6 und IPv4 abwechselnd wie in einem Browser (`autoSelectFamily`).
 - Nur Ports 80, 443, 8080, 8443. Nur TCP-Streams, jeden anderen Typ (auch UDP, kommt mit
   WireGuard) lehnt `wisp.mjs` mit 0x48 ab.
 - `RELAY_ALLOW_LOCAL=1` hebt Adress- und Port-Sperre auf, nur fuer Tests mit lokalen Servern.
