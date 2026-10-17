@@ -19,7 +19,11 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - Tabs mit Favicons, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge
   (auch beforeunload), Kontextmenue, Vollbild; Hintergrund-Tabs gedrosselt wie in Chrome
 - Tastatur inkl. Schweizer Layout und tote Tasten, Copy/Paste, Scrollen
-- Cookies, localStorage und IndexedDB bleiben nach dem Neuladen erhalten
+- Cookies, localStorage und IndexedDB bleiben nach dem Neuladen erhalten; das Profil im
+  Container nimmt Anmeldungen, Einstellungen und Lesezeichen auf ein anderes Geraet mit
+  ([docs/profil.md](docs/profil.md))
+- Einstellungen: Geraet (Mac, iPhone, iPad), Sprachen, Zeitzone, JavaScript, Bilder, Global
+  Privacy Control
 - WebSockets der Seiten (ws:// und wss://)
 - Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
 - `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
@@ -39,8 +43,9 @@ Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 ## Betrieb
 
 Alles laeuft in einem Container (`Dockerfile`): `relay/server.mjs` liefert die fertige Seite
-aus und ist das Wisp-Relay. Jeder gruene CI-Lauf auf `main` baut das Image, pusht es nach
-`ghcr.io/browserproject/browser-lite` und startet es auf dem Server neu (Workflow *Deploy*).
+aus, ist das Wisp-Relay und hostet das Browser-Profil im Volume `profile` (`/data`). Jeder
+gruene CI-Lauf auf `main` baut das Image, pusht es nach `ghcr.io/browserproject/browser-lite`
+und startet es auf dem Server neu (Workflow *Deploy*).
 Einrichten und Ablauf: [deploy/README.md](deploy/README.md).
 
 ## Lokal ausprobieren
@@ -54,7 +59,8 @@ node web/serve.mjs 8080
 # im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/
 ```
 
-`?relay=` gilt nur fuer diesen Browser-Tab. Mit `?debug=1` zeigt die Engine in der Konsole,
+Mit `PROFILE_DIR=<ordner>` vor `node web/serve.mjs` gibt es auch das Profil, ohne bleibt alles
+lokal. `?relay=` gilt nur fuer diesen Browser-Tab. Mit `?debug=1` zeigt die Engine in der Konsole,
 was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/README.md).
 
 ## Doku
@@ -68,7 +74,7 @@ was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/RE
 | [docs/stand.md](docs/stand.md) | Kurzer Stand, Messwerte und was noch offen ist |
 | [docs/build.md](docs/build.md) | Selber bauen (lokal und CI) |
 | [docs/kompatibilitaet.md](docs/kompatibilitaet.md) | Welche echten Seiten gehen |
-| [docs/profil.md](docs/profil.md) | Plan: Profil auf dem Server (Login auf jedem Geraet) |
+| [docs/profil.md](docs/profil.md) | Profil im Container |
 | [docs/referenz-webkitwasm.md](docs/referenz-webkitwasm.md) | Was wir vom Projekt WebkitWasm gelernt haben |
 
 ## Ordner
@@ -81,7 +87,7 @@ patches/webkit unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dat
 deps/          Dependencies nach WASM bauen (zlib, ICU, OpenSSL, curl, Fonts, ...)
 engine/        Embedding: WebView, Clients, Netzwerk, Speicher, WebSockets, Event-Loop
 web/           Browser-Oberflaeche (HTML/CSS/JS ohne Build-Schritt) + Wisp-Client
-relay/         Server im Container: Wisp-Relay + fertige Seite
+relay/         Server im Container: Wisp-Relay + fertige Seite + Browser-Profil
 deploy/        Compose-Datei und Einrichtung des Servers (Proxmox-LXC mit Runner)
 tests/         JSC-Tests, Engine-Tests (node) und End-to-End Tests (Playwright)
 docs/          Hintergrund (siehe oben)

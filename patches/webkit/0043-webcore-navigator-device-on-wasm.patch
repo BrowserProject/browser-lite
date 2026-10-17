@@ -1,0 +1,146 @@
+diff --git a/Source/WebCore/page/Navigator.cpp b/Source/WebCore/page/Navigator.cpp
+index ae4bfda764..95f5eba516 100644
+--- a/Source/WebCore/page/Navigator.cpp
++++ b/Source/WebCore/page/Navigator.cpp
+@@ -64,6 +64,10 @@
+ #include <wtf/TZoneMallocInlines.h>
+ #include <wtf/WeakPtr.h>
+ 
++#if PLATFORM(WASM)
++#include "WasmPlatform.h"
++#endif
++
+ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(Navigator);
+@@ -455,6 +459,9 @@ void Navigator::clearAppBadge(ScriptExecutionContext& callingContext, Ref<Deferr
+ 
+ int Navigator::maxTouchPoints() const
+ {
++#if PLATFORM(WASM)
++    return WasmPlatform::screenInfo().hasTouch ? 5 : 0;
++#else
+ #if ENABLE(IOS_TOUCH_EVENTS) && !PLATFORM(MACCATALYST)
+     RefPtr document = this->document();
+     if (!document || !document->quirks().needsZeroMaxTouchPointsQuirk())
+@@ -462,6 +469,7 @@ int Navigator::maxTouchPoints() const
+ #endif
+ 
+     return 0;
++#endif
+ }
+ 
+ NavigatorUAData& Navigator::userAgentData() const
+diff --git a/Source/WebCore/page/NavigatorBase.cpp b/Source/WebCore/page/NavigatorBase.cpp
+index 93a8e71c57..06577148bd 100644
+--- a/Source/WebCore/page/NavigatorBase.cpp
++++ b/Source/WebCore/page/NavigatorBase.cpp
+@@ -55,6 +55,10 @@
+ #import <pal/system/ios/Device.h>
+ #endif
+ 
++#if PLATFORM(WASM)
++#include "WasmPlatform.h"
++#endif
++
+ #ifndef WEBCORE_NAVIGATOR_PRODUCT
+ #define WEBCORE_NAVIGATOR_PRODUCT "Gecko"_s
+ #endif // ifndef WEBCORE_NAVIGATOR_PRODUCT
+@@ -96,7 +100,9 @@ String NavigatorBase::appVersion() const
+ 
+ String NavigatorBase::platform() const
+ {
+-#if OS(LINUX)
++#if PLATFORM(WASM)
++    return WasmPlatform::platform();
++#elif OS(LINUX)
+     static NeverDestroyed<String> platformName = [] {
+         struct utsname osname;
+         return uname(&osname) >= 0 ? makeString(unsafeSpan(osname.sysname), " "_s, unsafeSpan(osname.machine)) : emptyString();
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+index 7660c42e7f..b6ee29389e 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.cpp
++++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+@@ -26,6 +26,7 @@
+ #include "config.h"
+ #include "WasmPlatform.h"
+ 
++#include <wtf/Lock.h>
+ #include <wtf/NeverDestroyed.h>
+ 
+ namespace WebCore::WasmPlatform {
+@@ -46,16 +47,19 @@ const ScreenInfo& screenInfo()
+     return screenStorage();
+ }
+ 
++// WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
++static constexpr auto defaultUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s;
++static constexpr auto defaultPlatform = "Linux x86_64"_s;
++
+ static String& userAgentStorage()
+ {
+-    // WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
+-    static NeverDestroyed<String> userAgent { "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s };
++    static NeverDestroyed<String> userAgent { defaultUserAgent };
+     return userAgent;
+ }
+ 
+ void setUserAgent(const String& userAgent)
+ {
+-    userAgentStorage() = userAgent;
++    userAgentStorage() = userAgent.isEmpty() ? String { defaultUserAgent } : userAgent;
+ }
+ 
+ String userAgent()
+@@ -63,6 +67,27 @@ String userAgent()
+     return userAgentStorage();
+ }
+ 
++// Worker lesen navigator.platform in ihrem eigenen Thread
++static Lock platformLock;
++
++static String& platformStorage() WTF_REQUIRES_LOCK(platformLock)
++{
++    static NeverDestroyed<String> platform { defaultPlatform };
++    return platform;
++}
++
++void setPlatform(const String& platform)
++{
++    Locker locker { platformLock };
++    platformStorage() = platform.isEmpty() ? String { defaultPlatform } : platform.isolatedCopy();
++}
++
++String platform()
++{
++    Locker locker { platformLock };
++    return platformStorage().isolatedCopy();
++}
++
+ static ClipboardItems& clipboardStorage()
+ {
+     static NeverDestroyed<ClipboardItems> items;
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+index 2004a8263d..e44c8d2af6 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.h
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -68,13 +68,19 @@ struct ScreenInfo {
+     bool prefersDarkMode { false };
+     // Hat das Geraet einen Touchscreen (navigator.maxTouchPoints im Host)?
+     bool hasTouch { false };
++    // Mobilgeraet: Haupt-Zeiger grob ohne Hover
++    bool mobile { false };
+ };
+ 
+ WEBCORE_EXPORT void setScreenInfo(const ScreenInfo&);
+ WEBCORE_EXPORT const ScreenInfo& screenInfo();
+ 
++// Leer = Standard (Safari-artig unter Linux)
+ WEBCORE_EXPORT void setUserAgent(const String&);
+ WEBCORE_EXPORT String userAgent();
++// navigator.platform in Fenstern und Workern, leer = Standard passend zum User-Agent
++WEBCORE_EXPORT void setPlatform(const String&);
++WEBCORE_EXPORT String platform();
+ 
+ // Online-Zustand der Seiten (navigator.onLine, online/offline): Netz des
+ // Host-Browsers und Verbindung zum Relay. Am Anfang online.

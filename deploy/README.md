@@ -1,17 +1,24 @@
 # deploy/
 
-Ein Container (`Dockerfile` im Hauptordner): `relay/server.mjs` mit der fertigen Seite.
-Port 8080, ohne HTTPS und ohne Relay-Token: der Server ist nur intern zum Testen. Fuer einen
-oeffentlichen Server `RELAY_TOKEN` setzen (mindestens 16 Zeichen) und die Seite einmal mit
-`?token=...` oeffnen. Browser geben SharedArrayBuffer nur in einem sicheren Kontext, darum
-gehoert ein HTTPS-Proxy davor (hier `tailscale serve`, sonst z.B. Caddy).
+Ein Container (`Dockerfile` im Hauptordner): `relay/server.mjs` mit der fertigen Seite und dem
+Browser-Profil in `/data` (benanntes Volume `profile` in `compose.yml`, bleibt bei jedem
+Deploy). Port 8080, ohne HTTPS und ohne Relay-Token: der Server ist nur intern zum Testen. Das
+Profil (Cookies, also Anmeldungen) liegt unverschluesselt auf dem Server und ist ohne Token fuer
+jeden lesbar, der den Server erreicht ([docs/profil.md](../docs/profil.md)). Fuer einen
+oeffentlichen Server darum immer `RELAY_TOKEN` setzen (mindestens 16 Zeichen) und die Seite
+einmal mit `?token=...` oeffnen. Browser geben SharedArrayBuffer nur in einem sicheren Kontext,
+darum gehoert ein HTTPS-Proxy davor (hier `tailscale serve`, sonst z.B. Caddy).
+
+Gegen DNS-Rebinding antwortet `/profile/` nur unter IP-Adressen, `localhost` und den Namen aus
+`PROFILE_HOSTS` (in `compose.yml` `.ts.net` fuer `tailscale serve`, mit `PROFILE_HOSTS` in der
+Umgebung von `docker compose` aenderbar), sonst 403.
 
 ## Ablauf bei jedem Push auf main
 
 1. *CI* baut und testet die Engine.
 2. *Deploy* (`.github/workflows/deploy.yml`, nur nach gruener CI):
    - Seite packen (`tools/package-site.sh`), Image bauen und read-only testen (Header, Brotli,
-     Relay, sauberes Ende auf SIGTERM)
+     Relay, Profil, sauberes Ende auf SIGTERM)
    - nach `ghcr.io/browserproject/browser-lite` pushen (Tags `<commit>` und `main`)
    - auf dem Server (Self-hosted Runner, Label `browser-lite-deploy`) mit `compose.yml`
      per Digest neu starten und `/healthz` pruefen
@@ -50,4 +57,5 @@ Das Repo ist oeffentlich und der Runner laeuft im LAN. Darum:
   der Job per `curl` von der GitHub-API.
 - Beides prueft der Lint der CI (`tools/check-style.sh`), dazu: alle Actions sind per Commit
   gepinnt.
-- Der Container laeuft read-only, ohne Capabilities, als Benutzer `node`.
+- Der Container laeuft read-only, ohne Capabilities, als Benutzer `node`. Schreiben kann er
+  nur ins Volume `/data` (Profil).

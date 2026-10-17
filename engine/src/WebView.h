@@ -53,6 +53,16 @@ public:
     static WebView* fromID(int);
     static void forEach(const Function<void(WebView&)>&);
     void setDarkAppearance(bool);
+
+    // Einstellungen der Oberflaeche fuer alle Tabs (bl_set_preferences), nur im Engine-Thread
+    enum class Preference : uint8_t {
+        NoJavaScript = 1 << 0,
+        NoImages = 1 << 1,
+        GlobalPrivacyControl = 1 << 2,
+    };
+    static void setPreferences(OptionSet<Preference>);
+    static OptionSet<Preference> preferences();
+
     int id() const { return m_id; }
     void exitFullscreen();
 

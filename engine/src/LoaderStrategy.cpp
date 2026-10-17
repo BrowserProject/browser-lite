@@ -15,6 +15,7 @@
 #include "Host.h"
 #include "HttpCache.h"
 #include "Strategies.h"
+#include "WebView.h"
 
 #include <WebCore/BlobRegistry.h>
 #include <WebCore/BlobRegistryImpl.h>
@@ -74,6 +75,8 @@ Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient&
 {
     if (request.httpUserAgent().isEmpty())
         request.setHTTPUserAgent(standardUserAgent());
+    if (WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl))
+        request.setHTTPHeaderField("Sec-GPC"_s, "1"_s);
     if (request.allowCookies())
         addCookieHeader(request);
     return CurlRequest::create(request, client);

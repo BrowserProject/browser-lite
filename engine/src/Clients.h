@@ -51,6 +51,13 @@ private:
     void contentsSizeChanged(WebCore::LocalFrame&, const WebCore::IntSize&) const final;
     void setCursor(const WebCore::Cursor&) final;
 
+    // CSS pointer/hover: Maus, mit Touchscreen dazu grob; Mobilgeraet nur Touch
+    // (WasmPlatform::ScreenInfo, bl_set_screen)
+    bool hoverSupportedByPrimaryPointingDevice() const final;
+    bool hoverSupportedByAnyAvailablePointingDevice() const final;
+    std::optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final;
+    OptionSet<WebCore::PointerCharacteristics> pointerCharacteristicsOfAllAvailablePointingDevices() const final;
+
     void addMessageToConsole(JSC::MessageSource, JSC::MessageLevel, const String& message, unsigned lineNumber, unsigned columnNumber, const String& sourceID) final;
     void runJavaScriptAlert(WebCore::LocalFrame&, const String&) final;
     void print(WebCore::LocalFrame&, const WebCore::StringWithDirection&) final;

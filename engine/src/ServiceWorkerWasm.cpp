@@ -1240,6 +1240,7 @@ static Ref<Page> createWorkerPage()
     Ref page = Page::create(WTF::move(configuration));
     auto& settings = page->settings();
     settings.setScriptEnabled(true);
+    settings.setGlobalPrivacyControlEnabled(WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl));
     enableIn(settings);
     return page;
 }
@@ -1302,6 +1303,9 @@ void ContextConnection::fireNotificationEvent(ServiceWorkerIdentifier identifier
 
 void notificationEvent(NotificationData&& data, NotificationEventType type)
 {
+    // Ohne JavaScript laeuft kein Service Worker (applyPreferences in WebView.cpp)
+    if (WebView::preferences().contains(WebView::Preference::NoJavaScript))
+        return;
     if (RefPtr server = ServiceWorkers::server())
         server->processNotificationEvent(WTF::move(data), type, [](bool) { });
 }

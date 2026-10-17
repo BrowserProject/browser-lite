@@ -5,7 +5,7 @@
 // Tabs zurueck. Ein Skript, das zu lange laeuft, bricht die Engine selber ab
 // (Watchdog in engine/src/EngineLoop.cpp), dann geht die Meldung wieder weg.
 
-import { reloadUI, storage } from './util.js';
+import { restartUI, storage } from './util.js';
 
 const HANG_TIMEOUT = 10000;
 // Stuerzt sie so kurz nach dem letzten Absturz wieder ab, laden die Tabs nach
@@ -121,11 +121,7 @@ export function takeSafeStart() {
 function restart(safe) {
   if (safe)
     storage(SAFE_START_KEY, '1', true);
-  // Ohne ?url=, sonst oeffnet der Start diese Adresse statt der Sitzung
-  const url = new URL(location.href);
-  url.searchParams.delete('url');
-  url.hash = '';
-  reloadUI(url);
+  restartUI();
 }
 
 function checkHang() {

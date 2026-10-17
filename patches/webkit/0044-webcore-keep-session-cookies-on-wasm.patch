@@ -1,0 +1,35 @@
+diff --git a/Source/WebCore/platform/network/curl/CookieJarDB.cpp b/Source/WebCore/platform/network/curl/CookieJarDB.cpp
+index d49c4431f7..1630f3cf25 100644
+--- a/Source/WebCore/platform/network/curl/CookieJarDB.cpp
++++ b/Source/WebCore/platform/network/curl/CookieJarDB.cpp
+@@ -93,6 +93,16 @@ WTF_MAKE_TZONE_ALLOCATED_IMPL(CookieJarDB);
+ // - Add upgrade logic in verifySchemaVersion to migrate databases from the previous schema version
+ static constexpr int schemaVersion = 1;
+ 
++#if PLATFORM(WASM)
++// browser-lite: mit "Tabs beim Start wiederherstellen" bleiben Sitzungs-Cookies (wie Chrome)
++static bool keepSessionCookies()
++{
++    const char* value = getenv("BL_KEEP_SESSION_COOKIES");
++    return value && value[0] == '1' && !value[1];
++}
++#else
++static constexpr bool keepSessionCookies() { return false; }
++#endif
+ 
+ CookieJarDB::CookieJarDB(const String& databasePath)
+     : m_databasePath(databasePath)
+@@ -124,9 +134,10 @@ bool CookieJarDB::openDatabase()
+ 
+     if (existsDatabaseFile) {
+         if (m_database.open(m_databasePath)) {
+-            if (checkDatabaseValidity())
+-                executeSQLStatement(m_database.prepareStatement(DELETE_ALL_SESSION_COOKIE_SQL));
+-            else {
++            if (checkDatabaseValidity()) {
++                if (!keepSessionCookies())
++                    executeSQLStatement(m_database.prepareStatement(DELETE_ALL_SESSION_COOKIE_SQL));
++            } else {
+                 // delete database and try to re-create again
+                 LOG_ERROR("Cookie database validity check failed, attempting to recreate the database");
+                 m_database.close();

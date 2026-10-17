@@ -311,9 +311,10 @@ Offen: siehe [stand.md](stand.md).
 - [x] `<video>`/`<audio>` mit `blob:` (auch nach `revokeObjectURL`) und `data:`, `preload` (none,
   metadata, auto) bis zum Host-`<video>` (Test in `media-test.mjs`)
 
-## Zukunft: Profil auf dem Server
-Login mit einem kleinen, verschluesselten Profil (Cookies, localStorage, kleine IndexedDB),
-Plan in [profil.md](profil.md).
+## Profil auf dem Server
+- [x] Ein Profil pro Container (Cookies, localStorage, kleine IndexedDB, Einstellungen,
+  Lesezeichen), nur ein Geraet schreibt ([profil.md](profil.md), Test `profile-test.mjs`)
+- [ ] Login, Ende-zu-Ende-Verschluesselung, mehrere Profile
 
 ## Zukunft: WireGuard
 `WireGuardTransport` (userspace TCP/IP + WireGuard im WASM, UDP ueber Wisp).

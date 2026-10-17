@@ -332,7 +332,7 @@ const cameraPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, (
 check('Geschlossener Tab: Abfrage fuer die Kamera erscheint', cameraPrompt && /Kamera/.test(await prompt.textContent()));
 await page.click('#tab-list .tab.active .close');
 const promptGone = await page.locator('#permission-prompt').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false);
-const stored = await page.evaluate(() => localStorage.getItem('bl-permissions') || '');
+const stored = await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('bl-profile-prefs') || '{}').permissions || {}));
 check('Geschlossener Tab: Abfrage weg und nicht gemerkt', promptGone && !stored.includes('camera'), stored);
 
 // 11) permissions.query antwortet mit den gemerkten Entscheidungen

@@ -38,6 +38,7 @@
 #include <WebCore/WasmPlatform.h>
 #include <malloc.h>
 #include <wtf/FileSystem.h>
+#include <wtf/Language.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/JSDOMWindowBase.h>
 #include <WebCore/LocalFrameInlines.h>
@@ -408,7 +409,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
     withView(id, [=](WebView& view) { view.setVisible(visible); });
 }
 
-// flags: 1 = dunkles Farbschema (prefers-color-scheme), 2 = Touchscreen
+// flags: 1 = dunkles Farbschema (prefers-color-scheme), 2 = Touchscreen,
+// 4 = Mobilgeraet (Haupt-Zeiger grob ohne Hover)
 EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
 {
     runOnEngineThread([=] {
@@ -417,10 +419,15 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
         info.availableRect = WebCore::FloatRect(0, 0, availableWidth, availableHeight);
         info.prefersDarkMode = flags & 1;
         info.hasTouch = flags & 2;
-        bool darkChanged = info.prefersDarkMode != WebCore::WasmPlatform::screenInfo().prefersDarkMode;
+        info.mobile = flags & 4;
+        auto& old = WebCore::WasmPlatform::screenInfo();
+        bool darkChanged = info.prefersDarkMode != old.prefersDarkMode;
+        bool pointerChanged = info.hasTouch != old.hasTouch || info.mobile != old.mobile;
         WebCore::WasmPlatform::setScreenInfo(info);
         if (darkChanged)
             WebView::forEach([&](WebView& view) { view.setDarkAppearance(info.prefersDarkMode); });
+        if (pointerChanged)
+            WebCore::Page::updateStyleForAllPagesAfterGlobalChangeInEnvironment();
         screenOrientationMayHaveChanged();
     });
 }
@@ -503,10 +510,36 @@ EMSCRIPTEN_KEEPALIVE void bl_speech_recognition_event(double id, int type, char*
     runOnEngineThread([id, type, json = takeString(json)] { speechRecognitionEvent(static_cast<uint64_t>(id), type, json); });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent)
+// User-Agent und navigator.platform, leer = Standard. Vor dem ersten View
+EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent, char* platform)
 {
-    runOnEngineThread([userAgent = takeString(userAgent)] {
+    runOnEngineThread([userAgent = takeString(userAgent), platform = takeString(platform)] {
         WebCore::WasmPlatform::setUserAgent(userAgent);
+        WebCore::WasmPlatform::setPlatform(platform);
+    });
+}
+
+// Sprachen der Seiten (navigator.languages, Accept-Language, Intl) als
+// Komma-Liste wie "de-CH,de,en", leer = Standard (en-US)
+EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
+{
+    runOnEngineThread([languages = takeString(languages)] {
+        Vector<String> list;
+        for (auto& language : languages.split(',')) {
+            auto trimmed = language.trim(isASCIIWhitespace<char16_t>);
+            if (!trimmed.isEmpty())
+                list.append(WTF::move(trimmed));
+        }
+        WTF::overrideUserPreferredLanguages(list);
+    });
+}
+
+// Fuer alle Tabs (WebView::Preference): 1 = JavaScript aus, 2 = Bilder aus,
+// 4 = Global Privacy Control
+EMSCRIPTEN_KEEPALIVE void bl_set_preferences(int flags)
+{
+    runOnEngineThread([flags] {
+        WebView::setPreferences(OptionSet<WebView::Preference>::fromRaw(flags & 7));
     });
 }
 

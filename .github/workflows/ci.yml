@@ -43,6 +43,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Test (Token, Echo, Reconnect, SSRF-Sperre, statische Dateien)
         run: node tests/relay/relay-test.mjs
+      - name: Test Profil (open, Pfade, Grenzen, Uebernahme, reset, Neustart)
+        run: node tests/relay/profile-test.mjs
 
   wasm-js:
     name: JS-Teile der Engine in node (WebAssembly der Seiten, MediaRecorder)
@@ -354,6 +356,12 @@ jobs:
       - name: Speicher-Test (Cookie, localStorage, IndexedDB, OPFS nach Neuladen)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node storage-test.mjs
+      - name: Profil-Test (zweites Geraet, Uebernahme, Zuruecksetzen, Nachholen beim Start, ohne Server)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd tests/e2e && node profile-test.mjs
+      - name: Einstellungen-Test (Dialog, Geraet, JavaScript und Bilder aus, Sitzung nach Neustart)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: cd tests/e2e && node settings-test.mjs
       - name: Audio-Test (Web Audio, decodeAudioData, Ton im AudioWorklet)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node audio-test.mjs

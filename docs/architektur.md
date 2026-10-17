@@ -19,7 +19,7 @@ Haupt-Thread (Oberflaeche, web/)          Engine-Worker (WASM, pthreads, je ein 
                                            Transport der Oberflaeche: Wisp (jetzt) / WireGuard (spaeter)
                                                                 | WebSocket (wss)
                                                                 v
-                                           Server: ein Container (Seite + COOP/COEP + Wisp-Relay)
+                                           Server: ein Container (Seite + COOP/COEP, Relay, Profil)
 ```
 
 ## Die Teile
@@ -48,6 +48,10 @@ Schlichtes HTML, CSS und JavaScript (ES-Module) ohne Build-Schritt, ein Modul pr
   gibt (Entscheid 148).
 - `navigator.onLine` der Seiten: Netz des Host und Verbindung zum Relay (`bl_set_online`,
   Entscheid 158).
+- Einstellungen (`web/settings.js`, eine Seite ueber dem Browser): Geraet (nur
+  Safari-User-Agents, ein Mobilgeraet mit Groesse, Pixeldichte, Touch und grobem Zeiger),
+  Sprachen, Zeitzone, JavaScript, Bilder und Global Privacy Control gelten ab dem Start der
+  Engine (Entscheide 193 bis 196). Sie liegen wie Lesezeichen und Berechtigungen im Profil.
 
 ### WebKit-Port `PORT=Wasm`
 WPE WebKit ist eigentlich multi-process (UI-, Web- und Network-Prozess mit IPC ueber
@@ -269,8 +273,9 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   Inhalt (Header `x-bl-size`), Grenze 400 MB und hoechstens ein Viertel der Quote, darueber
   werden die aeltesten Eintraege bis 80 % geloescht (auch bei voller Quote). HTTP/1-Antworten,
   die nur mit der Verbindung enden, kommen nicht hinein (ein Abbruch saehe aus wie ein Ende).
-  "Gespeicherte Daten loeschen" leert ihn mit. Gemessen beim zweiten Besuch: GitHub 135 von 136
-  Anfragen aus dem Cache, CNN 123 (davon 103 mit 304). Test: `tests/e2e/cache-test.mjs`,
+  "Websitedaten loeschen" und "Profil zuruecksetzen" leeren ihn mit. Gemessen beim zweiten
+  Besuch: GitHub 135 von 136 Anfragen aus dem Cache, CNN 123 (davon 103 mit 304). Test:
+  `tests/e2e/cache-test.mjs`,
   `tests/engine/http-cache-test.mjs`.
 - WebCrypto (`crypto.subtle`) ueber den OpenSSL-Code von WebCore. Zwei Stellen gingen mit
   OpenSSL 3 nicht und sind in Patch 0010 repariert: AES-GCM (Padding wurde vor dem Init
@@ -331,6 +336,8 @@ Speicher.
   dem Tab (`bl_remove_path`).
 - IndexedDB hoechstens 256 MB pro Ursprung, begrenzt ist nur das Schreiben (Patch 0040,
   Entscheid 179).
+- Profil: Cookies, localStorage und kleine IndexedDBs kommen vor dem Start der Engine vom
+  Server ins OPFS, danach laedt `web/profile.js` Geaendertes hoch ([profil.md](profil.md)).
 
 SQLite schreibt jede WAL-Seite einzeln (mit seek davor): beim Laden von CNN waren das ca.
 7000 Zugriffe nur fuer die Cookie-Datenbank. Darum gibt es ein eigenes SQLite-VFS
@@ -392,4 +399,6 @@ Proxy davor (Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das
 verbindet nur zu oeffentlichen Unicast-Adressen und erlaubten Ports; jede Adresse prueft sein
 Socket direkt vor dem Verbinden (`relay/wisp.mjs`, Entscheide 159, 175). Auf einem
 oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als Proxy),
-intern geht es ohne. Ablauf in [deploy/README.md](../deploy/README.md).
+intern geht es ohne. Mit `PROFILE_DIR` (im Container `/data`, ein Volume) hostet er auch
+genau ein Browser-Profil (`relay/profile.mjs`, [profil.md](profil.md)), ohne Token offen wie
+das Relay. Ablauf in [deploy/README.md](../deploy/README.md).

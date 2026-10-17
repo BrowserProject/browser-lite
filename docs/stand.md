@@ -62,6 +62,15 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   Dateien. Ohne Platz im OPFS des Host bekommen die
   Seiten im OPFS `QuotaExceededError` (#166). `navigator.onLine` folgt der Verbindung zum
   Relay.
+- Profil im Container (#188 bis #192, #197, [profil.md](profil.md)): Cookies, localStorage und
+  IndexedDBs bis 256 KB pro Datenbank, Einstellungen, Lesezeichen und Berechtigungen liegen auf
+  dem Server, man bleibt auch auf einem anderen Geraet angemeldet. Nur das zuletzt geoeffnete
+  Geraet schreibt, ohne Server laeuft alles lokal weiter. Sitzungs-Cookies bleiben, wenn die
+  Tabs wiederhergestellt werden.
+- Einstellungen als Seite ueber dem Browser: Profil mit Daten pro Website, Websitedaten
+  loeschen, Profil zuruecksetzen; Geraet (Desktop, Mac, iPhone, iPad, nur Safari-User-Agents),
+  Sprachen und Zeitzone (Standard: die des Host), Farbschema, Standard-Zoom, JavaScript, Bilder,
+  Global Privacy Control. Zeiger und Hover stimmen jetzt fuer Desktop und Mobil (#193 bis #196).
 - IndexedDB: hoechstens 256 MB pro Ursprung nur fuers Schreiben (`QuotaExceededError`,
   Geloeschtes gibt Platz frei, `navigator.storage.estimate()` meldet Grenze und Platz),
   Oeffnen, Lesen und Loeschen gehen auch ueber der Grenze; zu grosse Dateien laedt das VFS
@@ -72,8 +81,11 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
 - Tests: gemeinsames Geruest fuer die e2e-Tests (`tests/e2e/harness.mjs`, auch
   parallel), dazu Grenzen (`limits.html`), Watchdog (`hang.html`), echte Abstuerze
   (`BL_TEST_HOOKS=1`), Netzfehler (falsche Zertifikate, DNS, Relay-Neustart, Relay als
-  Attrappe), Hintergrund-Tabs (`background-test.mjs`) und ein langer Lauf
-  (`soak-test.mjs`: 200 Navigationen, 30 Tabs, Dokumente und Speicher bleiben begrenzt).
+  Attrappe), Hintergrund-Tabs (`background-test.mjs`), ein langer Lauf
+  (`soak-test.mjs`: 200 Navigationen, 30 Tabs, Dokumente und Speicher bleiben begrenzt) und
+  das Profil (`profile-test.mjs`: zweites Geraet am selben Server, Uebernahme, Zuruecksetzen,
+  Nachholen beim Start, ohne Server; `settings-test.mjs`: Einstellungen, Geraet, Neustart;
+  Server allein in `tests/relay/profile-test.mjs`).
 - CI und Deploy bei jedem Push auf `main` (Stand in GitHub Actions). Der Deploy
   laeuft ueber den Self-hosted Runner auf den eigenen Proxmox-Server (LXC), auf dem
   Runner laeuft keine fremde Action. Actions sind per Commit gepinnt, der Lint prueft die
@@ -117,8 +129,13 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
 
 ## Offen: Funktionen
 
-- Login mit Profil auf dem Server (Cookies, localStorage, kleine IndexedDB), Plan in
-  [profil.md](profil.md).
+- Profil: nur eines pro Container, ohne Login und ohne Ende-zu-Ende-Verschluesselung, die
+  Dateien liegen offen auf dem Server (darum nur intern oder mit `RELAY_TOKEN`). Spaeter Login
+  und mehrere Profile. Anmeldungen in grossen IndexedDBs (WhatsApp Web, Telegram Web) folgen
+  nicht auf ein anderes Geraet. Aenderungen der letzten Sekunden vor dem Schliessen gehen erst
+  beim naechsten Start dieses Geraets hoch, oeffnet vorher ein anderes das Profil, fehlen sie.
+- Einstellungen fuer Geraet, Sprache, Zeitzone, JavaScript und Bilder gelten erst nach einem
+  Neustart der Engine. Ein Mobilgeraet dreht sich nicht (kein Hochformat/Querformat-Wechsel).
 - Pinch-Zoom: `visualViewport`-Events kommen erst am Ende der Geste (jeder
   Zwischenstand wuerde alle Kacheln neu malen). Zwei Finger warten auf die
   touchstart-Antwort der Seite, auch ohne blockierende Touch-Listener (braucht
@@ -183,4 +200,5 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
 - Echte Seiten schwanken stark (Werbung, wechselnder Inhalt): Leistung immer mit
   mehreren Laeufen und mit Inklusivzeiten aus dem Profil vergleichen, nicht nur mit
   der Ladezeit.
+- Das Volume `profile` auf dem Server hat kein Backup.
 - Spaeter: WireGuard statt Wisp (Transport ist austauschbar gebaut).

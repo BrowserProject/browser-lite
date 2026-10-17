@@ -115,6 +115,30 @@ static HashMap<int, Ref<WebView>>& openViews()
     return views;
 }
 
+static OptionSet<WebView::Preference> currentPreferences;
+
+OptionSet<WebView::Preference> WebView::preferences()
+{
+    return currentPreferences;
+}
+
+static void applyPreferences(Settings& settings)
+{
+    bool script = !currentPreferences.contains(WebView::Preference::NoJavaScript);
+    settings.setScriptEnabled(script);
+    // Sonst faengt ein registrierter Service Worker Navigationen ab und fuehrt sein Skript aus.
+    // Gilt ab der naechsten Navigation (DocumentLoader::startLoadingMainResource)
+    settings.setServiceWorkersEnabled(script);
+    settings.setLoadsImagesAutomatically(!currentPreferences.contains(WebView::Preference::NoImages));
+    settings.setGlobalPrivacyControlEnabled(currentPreferences.contains(WebView::Preference::GlobalPrivacyControl));
+}
+
+void WebView::setPreferences(OptionSet<Preference> preferences)
+{
+    currentPreferences = preferences;
+    forEach([](WebView& view) { applyPreferences(view.page().settings()); });
+}
+
 WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
 {
     Ref view = create(id, size, deviceScaleFactor);
@@ -198,8 +222,6 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     m_page->setUseColorAppearance(WasmPlatform::screenInfo().prefersDarkMode, false);
 
     auto& settings = m_page->settings();
-    settings.setScriptEnabled(true);
-    settings.setLoadsImagesAutomatically(true);
     // Compositing mit Ebenen, wenn die GPU geht (BL_COMPOSITING=0 bzw.
     // ?compositing=0 in der Oberflaeche schaltet ab)
     const char* compositing = getenv("BL_COMPOSITING");
@@ -317,6 +339,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setSansSerifFontFamily("Noto Sans"_s);
     settings.setSerifFontFamily("Noto Serif"_s);
     settings.setFixedFontFamily("Noto Sans Mono"_s);
+    // Zuletzt, ueberschreibt ServiceWorkers::enableIn
+    applyPreferences(settings);
 
     m_page->setDeviceScaleFactor(m_deviceScaleFactor);
     debugLog("View %d: Einstellungen gesetzt", id);

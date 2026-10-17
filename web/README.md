@@ -8,19 +8,53 @@ Die Browser-Oberflaeche: schlichtes HTML, CSS und JavaScript (ES-Module), ohne B
 | `app.js` | Start der Engine, Tabs, Eingabe, Uploads, Downloads, Drucken, Kontextmenue, Tastenkuerzel |
 | `watchdog.js` | Absturz (abort, OOM, Trap) und Haengen der Engine: Meldung und Neustart mit der Sitzung |
 | `transport.js` | Wisp-Client: die TCP-Verbindungen der Engine ueber das Relay, Verbindungsstand fuer `navigator.onLine`, erkennt tote Verbindungen |
-| `library.js` | Sitzung, Verlauf, Lesezeichen, Downloads, Einstellungen, Seitenpanel |
+| `library.js` | Sitzung, Verlauf, Lesezeichen, Downloads, Seitenpanel |
+| `profile.js` | Profil auf dem Server: Cookies, localStorage, kleine IndexedDBs und prefs, Abgleich |
+| `settings.js` | Einstellungen (Seite ueber dem Browser), Geraet, User-Agent, Sprache, Zeitzone beim Start |
 | `pickers.js` | Liste von `<select>`, Farbe, Datum, Link-Adresse unten links |
 | `devices.js` | Berechtigungen, Standort, Sensoren, Benachrichtigungen, Gamepads, Sprache, Touch, Host-Bruecke der Polyfills |
 | `media.js`, `sw.js` | `<video>`/`<audio>` ueber ein verstecktes Video und den Service Worker, Picture-in-Picture |
 | `audio.js`, `audio-worklet.js` | Ton der Engine (Web Audio) |
 | `capture.js` | Kamera, Mikrofon und Bildschirm fuer die Seiten |
 | `webrtc.js` | WebRTC der Seiten mit echtem Gegenstueck im Host |
-| `util.js` | gemeinsame Helfer (Speicher, Base64, Fehler, Neuladen der Oberflaeche ohne beforeunload) |
-| `serve.mjs` | Entwicklungs-Server mit COOP/COEP |
+| `util.js` | gemeinsame Helfer (Speicher, Token, Base64, Fehler, Groessen, Neuladen der Oberflaeche ohne beforeunload) |
+| `serve.mjs` | Entwicklungs-Server mit COOP/COEP, mit `PROFILE_DIR` auch das Profil |
 
 Lokal: `node web/serve.mjs 8080`, dann `http://localhost:8080/?relay=ws://localhost:5001/wisp/`
 ([docs/build.md](../docs/build.md)). Fuer den Server packt `tools/package-site.sh` alles mit
 Versionsnummer zusammen.
+
+## Profil
+
+Cookies, localStorage und IndexedDB der Seiten liegen im OPFS des Host (`/data` der Engine).
+Vor dem Start der Engine holt `profile.js` das Profil vom Server (`POST /profile/open`,
+relay/README.md) und legt es ins OPFS, danach laedt es Geaendertes hoch: alle 2 s, nach dem
+Verstecken, versteckt alle 30 s. Im Profil sind `cookies.db`, die `.localstorage`-Dateien und
+die Ordner der IndexedDBs, ausser `cookies.db` nur bis zur Grenze pro Datenbank (Standard 256 KB,
+in den Einstellungen). Groessere, Cache API, Service Worker und die Dateien der Seiten bleiben
+als Cache auf dem Geraet, ebenso Verlauf und Sitzung. Die Datei `profile-id` im OPFS sagt, welches
+Profil darin liegt: ein anderes (neues Geraet, zurueckgesetzt) leert das OPFS zuerst. Was vor
+dem Schliessen nicht mehr hochgeladen wurde, laedt der naechste Start vorher nach, solange kein
+anderes Geraet das Profil inzwischen geoeffnet hat (`localStorage['bl-profile-sync']`). Geht
+das nicht, bleibt es auf dem Geraet und geht spaeter hoch, statt vom Server ueberschrieben zu
+werden.
+
+Einstellungen, Lesezeichen und Berechtigungen sind die prefs des Profils (`prefs()`,
+`savePrefs()`), mit einer Kopie in `localStorage['bl-profile-prefs']` fuer den Start ohne Server.
+Was nicht auf den Server kam, gilt beim naechsten Start mit Server von hier.
+Oeffnet ein anderes Geraet das Profil, antwortet der Server diesem mit 409: der Abgleich stoppt,
+ein Hinweis bietet "Neu laden" (uebernimmt das Profil wieder). Ohne Server laeuft alles lokal
+weiter, ein zweiter Tab der Oberflaeche (ohne die Sperre `bl-data`) hat kein Profil. Den Token
+nimmt `profile.js` wie das Relay der eigenen Seite (`?token=`). Hintergrund:
+[docs/profil.md](../docs/profil.md).
+
+Geraet, User-Agent, Sprachen, Zeitzone (`ENV.TZ`), Farbschema, Standard-Zoom, JavaScript, Bilder
+und Global Privacy Control gelten ab dem Start der Engine (`settings.js`, "Jetzt neu starten").
+Ein Mobilgeraet (iPhone, iPad) hat Groesse und Pixeldichte des Geraets, Touch, einen groben
+Zeiger ohne Hover, die Maus tippt. Das iPad meldet sich wie echtes iPadOS als Mac. Mit "Tabs
+beim Start wiederherstellen" bleiben die Sitzungs-Cookies (`BL_KEEP_SESSION_COOKIES=1`), nach
+"Jetzt neu starten" immer. Die Einstellungen sind ein modaler `<dialog>`, Websitedaten loeschen
+und Profil zuruecksetzen gehen nur im Tab mit dem Profil.
 
 ## URL-Parameter
 

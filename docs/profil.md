@@ -1,68 +1,89 @@
-# Profil auf dem Server (Plan)
+# Profil im Container
 
-Noch nicht umgesetzt. Das ist die bevorzugte Loesung, falls browser-lite ein Login bekommt:
-ein kleines Profil, das einem auf jedes Geraet folgt, damit man auf Webseiten angemeldet bleibt.
+Der Container hostet genau ein Browser-Profil: Cookies, localStorage und kleine IndexedDBs der
+Seiten, dazu Einstellungen, Lesezeichen und Berechtigungen der Oberflaeche. So bleibt man auf
+Websites angemeldet, auch nach dem Wechsel auf ein anderes Geraet. Server: `relay/profile.mjs`
+(API in [relay/README.md](../relay/README.md)), Oberflaeche: `web/profile.js` und
+`web/settings.js` ([web/README.md](../web/README.md)).
 
-## Was ins Profil kommt
+## Was im Profil ist
 
-Alles liegt schon unter `/data` (siehe [architektur.md](architektur.md), Speicher). Synchronisiert
-wird nur, was Anmeldungen haelt, nicht was sich neu laden laesst:
+Nur was Anmeldungen haelt, nicht was sich neu laden laesst. Die Pfade sind die von `/data` der
+Engine, also des OPFS im Host (siehe [architektur.md](architektur.md), Speicher).
 
 | Daten | Pfad | Im Profil |
 |---|---|---|
-| Cookies | `/data/cookies.db` | ja |
-| localStorage | `/data/localstorage/` (eine Datei pro Ursprung und `StorageTracker.db`) | ja |
-| IndexedDB | `/data/indexeddb/v1/<Ursprung>/<Ursprung>/<Name>/`, ein Ordner pro Datenbank | nur Datenbanken bis 256 KB |
-| OPFS der Seiten, Cache API, Service Worker | `/data/opfs`, `/data/cachestorage`, `/data/serviceworkers` | nein |
-| HTTP- und Bytecode-Cache | Cache API des Host | nein |
+| Cookies | `cookies.db` | immer (24-60 KB) |
+| localStorage | `localstorage/<Ursprung>.localstorage` | bis zur Grenze |
+| IndexedDB | `indexeddb/v1/<oben>/[<Frame>/]<SHA-256 des Namens>/`, `IndexedDB.sqlite3` und Blobs | ganzer Ordner bis zur Grenze |
+| `localstorage/LegacyStorageTracker.db` | | nein, WebKit baut sie beim Start aus den Dateien neu auf |
+| Cache API, Service Worker, OPFS der Seiten, HTTP- und Bytecode-Cache | | nein, Cache des Geraets |
+| Einstellungen, Lesezeichen, Berechtigungen | `prefs/<name>.json` auf dem Server | ja |
+| Verlauf, offene Tabs, Downloads | localStorage des Host | nein |
 
-Die Grenze bei IndexedDB ist der Mittelweg: Auth-Datenbanken sind winzig (z.B.
-`firebaseLocalStorageDb` von Firebase Auth), die grossen sind fast immer Caches (YouTube,
-Mail offline, Editoren). So bleibt ein Profil bei einigen KB bis wenigen MB. Waechst eine
-Datenbank ueber die Grenze, faellt sie heraus, schlimmstenfalls meldet man sich dort neu an.
+Auf dem Server liegt das Profil unter `PROFILE_DIR` (Container: `/data`, Volume `profile`),
+jede Datei atomar geschrieben. Grenzen dort: 32 MB pro Datei, `PROFILE_MAX_MB` (64) fuer alles.
 
-Offen: ob auch die Daten der Oberflaeche (Sitzung, Verlauf, Lesezeichen, Einstellungen in
-`web/library.js`, `bl-permissions`) mitkommen, oder ob das der Host-Browser macht (#130).
+## Grenze pro Datenbank
+
+Eine Datenbank ist `cookies.db`, eine `.localstorage`-Datei oder ein IndexedDB-Ordner (alle
+Dateien zusammen). Ausser `cookies.db` kommt sie nur ins Profil, wenn sie hoechstens `DB_LIMIT`
+gross ist: Standard 256 KB, in den Einstellungen 128 KB bis 4 MB. Gemessen (abgemeldet):
+
+- Eine leere IndexedDB von WebKit hat immer 77824 Bytes (19 Seiten). Von 18 Datenbanken echter
+  Seiten lagen 16 zwischen 64 und 128 KB, eine bei 176 KB, die von Telegram (ein Cache) bei 268 KB.
+- localStorage kann selber ein grosser Cache sein: Notion 2.6 MB, Wikipedia 1.9 MB, alle anderen
+  hoechstens 40 KB.
+
+Darum eine Grenze fuer beide Arten. Waechst eine Datenbank darueber, faellt sie aus dem Profil
+und bleibt als Cache auf dem Geraet, schlimmstenfalls meldet man sich dort neu an.
 
 ## Ablauf
 
-1. **Login** am Server mit Passkey. Die Sitzung ersetzt auch den `RELAY_TOKEN`: das Relay
-   bekommt nur, wer angemeldet ist.
-2. **Start:** Die Oberflaeche laedt das Profil, entschluesselt es und gibt die Dateien vor dem
-   Start der Engine nach `/data` (ein Import in `initializeStorage` in
-   `engine/src/Storage.cpp`, noch zu bauen).
-3. **Laufzeit:** Nach jedem Flush (kurz nach jeder Aenderung und beim Verlassen) meldet die
-   Engine, welche Dateien des Profils sich geaendert haben. Die Oberflaeche verschluesselt und
-   laedt nur diese hoch. Die Dateien sind dann immer ganz: das MemoryVFS schreibt SQLite nur
-   ausserhalb einer Schreib-Transaktion.
-4. **Abmelden:** wie "Gespeicherte Daten loeschen", `/data` wird geleert. Auf fremden Geraeten
-   ohne OPFS (`BL_OPFS=0`): das Profil liegt nur im Speicher, lokal bleibt nichts.
-5. **Server:** pro Nutzer verschluesselte Dateien, nach Inhalt adressiert, einige Versionen
-   zum Zuruecksetzen. Der Container braucht dafuer ein Volume und Backups.
+1. **Start** (`mountStorage` in `web/app.js`, mit der Sperre `bl-data`, bevor die Engine
+   laeuft): Was beim letzten Mal nicht mehr hochging, laedt `profile.js` zuerst nach
+   (`localStorage['bl-profile-sync']`: Session, Stand jeder Datei, nicht gesendete prefs).
+   Dann `POST /profile/open`: der Server schickt alle Dateien und prefs in einer Antwort und
+   gibt eine neue Session, die sofort mit dem Kopf der Antwort gespeichert wird (10 s bis zum
+   Kopf, 120 s fuer die Dateien). Die Datei `profile-id` im OPFS sagt, welches Profil dort
+   liegt. Ein anderes (neues Geraet, zurueckgesetzt) leert erst das ganze OPFS. Sonst gilt der
+   Server: seine Datenbanken ersetzen die lokalen, eine lokale, die im Profil war und die er
+   nicht mehr hat, wurde anderswo geloescht. Datenbanken, die nie im Profil waren (zu gross),
+   bleiben als Cache. Was beim Nachholen nicht hochging (Netz, Server lehnt ab), bleibt wie es
+   ist und geht danach hoch, ausser ein anderes Geraet hat das Profil inzwischen geoeffnet.
+2. **Laufzeit:** Die Engine schreibt jede SQLite-Datei ganz per `rename`, ca. 1 s nach einer
+   Aenderung (Entscheid 180). `syncProfile` liest das OPFS alle 2 s (versteckt alle 30 s, 2.5 s
+   nach dem Verstecken), vergleicht Groesse und Zeit mit dem zuletzt Hochgeladenen, laedt
+   Geaendertes hoch und loescht auf dem Server, was lokal fehlt (erst beim zweiten Mal, die
+   Engine kann die Datei gerade ersetzen) oder zu gross geworden ist. prefs gehen sofort hoch.
+3. **Uebernahme:** Jedes `open` macht eine neue Session, nur die letzte darf schreiben. Das
+   vorige Geraet bekommt 409, der Abgleich stoppt mit dem Hinweis "Das Profil wurde auf einem
+   anderen Geraet geoeffnet" und "Neu laden" (holt es zurueck). Viele Seiten tauschen
+   Refresh-Tokens bei jeder Nutzung aus, zwei Geraete gleichzeitig wuerden sich gegenseitig
+   abmelden. Die Session steht in `profile.json` und ueberlebt einen Deploy.
+4. **Zuruecksetzen** (Einstellungen, Profil, nur im Tab mit dem Profil): "Websitedaten
+   loeschen" loescht Dateien und Berechtigungen, "Profil zuruecksetzen" auch Einstellungen und
+   Lesezeichen. Das Profil bekommt
+   eine neue id, das OPFS wird beim naechsten Start geleert, die anderen Geraete bekommen 409
+   und leeren ihr OPFS beim naechsten Start.
+5. **Ohne Server** (404, 503, Netz, Zeit um): alles laeuft lokal weiter, prefs aus der Kopie in
+   `localStorage['bl-profile-prefs']`, Hinweis am Tab. Was so geaendert wurde, auch prefs,
+   geht beim naechsten Start mit Server hoch und gilt dort, ausser ein anderes Geraet hat das
+   Profil inzwischen geoeffnet. Ein zweiter Tab der Oberflaeche (ohne `bl-data`) hat kein
+   Profil.
 
-## Pflicht
+Sitzungs-Cookies loescht WebKit beim Oeffnen von `cookies.db`. Mit "Tabs beim Start
+wiederherstellen" (Standard) bleiben sie wie in Chrome: die Oberflaeche setzt
+`BL_KEEP_SESSION_COOKIES=1` (Patch 0044). Sonst waere man nach jedem Neustart dort abgemeldet,
+wo die Seite nur ein Sitzungs-Cookie setzt. "Jetzt neu starten" (und der Neustart nach einem
+Absturz) behaelt Sitzung und Sitzungs-Cookies immer.
 
-- **Ende-zu-Ende verschluesselt.** Wer die Cookies hat, ist ueberall angemeldet. Schluessel aus
-  der PRF-Erweiterung des Passkeys (sonst aus einem eigenen Passwort), verschluesselt wird im
-  Host (WebCrypto, AES-GCM). Schuetzt gegen Lecks auf dem Server und in Backups, nicht gegen
-  einen boeswilligen Server: der liefert auch die Engine aus.
-- **Nur ein Geraet gleichzeitig.** Viele Seiten tauschen Refresh-Tokens bei jeder Nutzung aus
-  (Google, Microsoft, OAuth). Legt ein zweites Geraet ein schon verbrauchtes Token vor, gilt das
-  als Diebstahl und alle Sitzungen werden abgemeldet. Darum eine Sperre pro Profil auf dem
-  Server mit Uebernahme (altes Geraet flusht und schliesst zuerst). Im selben Host-Browser
-  besitzt schon heute nur ein Tab `/data` (Web Lock `bl-data` in `web/app.js`).
+## Nicht gemacht
 
-## Was nach einem Geraetewechsel fehlt
-
-- Anmeldungen in grossen IndexedDB-Datenbanken, z.B. WhatsApp Web und Telegram Web: neu koppeln.
-- Offline-Daten und PWAs starten leer und laden neu.
-
-Weil der ganze Verkehr ueber das Relay geht (gleiche IP, gleicher User-Agent), sieht ein
-mitgenommenes Profil fuer die Seiten wie dasselbe Geraet aus.
-
-## Schritte
-
-1. Konto und Login am Server, Sitzung statt `RELAY_TOKEN`.
-2. Profil wie oben: Cookies, localStorage, kleine IndexedDB, verschluesselt, mit Sperre.
-3. Spaeter: Kontingent pro Nutzer, Versionen zuruecksetzen, mehrere Profile pro Host
-   (`/data/<Profil>` statt `/data`).
+- Keine Ende-zu-Ende-Verschluesselung und kein Login: die Dateien liegen unverschluesselt auf
+  dem Server, wer ihn erreicht, hat das Profil (also die Anmeldungen). Darum nur intern, sonst
+  mit `RELAY_TOKEN` ([deploy/README.md](../deploy/README.md)).
+- Ein Profil pro Container. Spaeter: Login (Passkey), mehrere Profile, verschluesselt im Host
+  (WebCrypto), Versionen zum Zuruecksetzen.
+- Anmeldungen in grossen IndexedDBs (WhatsApp Web, Telegram Web) folgen nicht auf ein anderes
+  Geraet, Offline-Daten und PWAs laden dort neu.

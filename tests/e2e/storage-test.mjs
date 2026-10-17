@@ -382,9 +382,9 @@ check('Erster Tab: Daten nicht ueberschrieben', (await result('read')) === 'ja,g
 await result('deleted');
 await result('opfsworker');
 
-// "Daten loeschen": die Oberflaeche laedt neu und leert /data vor dem Start
-// der Engine, danach ist die Datei weg. Zuerst in einem neuen Profil eine
-// Datei im OPFS der Seite anlegen
+// "Websitedaten loeschen" (Einstellungen, Profil): die Oberflaeche laedt neu und
+// leert /data vor dem Start der Engine, danach ist die Datei weg. Zuerst in einem
+// neuen Profil eine Datei im OPFS der Seite anlegen
 const freshContext = await launchProfile();
 const fresh = freshContext.pages()[0] || await freshContext.newPage();
 results.clear();
@@ -399,7 +399,8 @@ check('Neues Profil: Datei im OPFS gespeichert', saved?.startsWith('gespeichert,
 await fresh.waitForTimeout(2000);
 results.clear();
 fresh.once('dialog', (dialog) => dialog.accept());
-await fresh.evaluate(() => document.getElementById('clear-data').click());
+await fresh.click('#clear-data');
+await fresh.click('#settings-clear-site-data');
 const cleared = await result('opfs');
 check('Daten loeschen leert /data', cleared?.startsWith('leer,'), String(cleared));
 

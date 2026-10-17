@@ -1,18 +1,14 @@
-// Was ein Browser sich merkt: Sitzung (offene Tabs), Verlauf, Lesezeichen,
-// Downloads und Einstellungen. Alles im localStorage des Host-Browsers, nur
-// auf diesem Geraet. Dazu ein Seitenpanel (Strg+H, Strg+J, Strg+Umschalt+O,
-// Einstellungen) und Vorschlaege in der Adressleiste wie in Chrome.
+// Was ein Browser sich merkt: Sitzung (offene Tabs), Verlauf und Downloads nur auf
+// diesem Geraet (localStorage des Host), Lesezeichen im Profil (profile.js). Dazu ein
+// Seitenpanel (Menue, Strg+H, Strg+J, Strg+Umschalt+O) und Vorschlaege in der Adressleiste
+// wie in Chrome.
 
-const KEYS = { session: 'bl-session', history: 'bl-history', bookmarks: 'bl-bookmarks', settings: 'bl-settings' };
+import { prefs, savePrefs } from './profile.js';
+import { SEARCH_ENGINES, settings, startSettings } from './settings.js';
+import { element, formatSize, formatTime } from './util.js';
+
+const KEYS = { session: 'bl-session', history: 'bl-history' };
 const MAX_HISTORY = 3000;
-
-const SEARCH_ENGINES = {
-  duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/html/?q=%s' },
-  google: { name: 'Google', url: 'https://www.google.com/search?q=%s' },
-  bing: { name: 'Bing', url: 'https://www.bing.com/search?q=%s' },
-  startpage: { name: 'Startpage', url: 'https://www.startpage.com/do/search?q=%s' },
-  ecosia: { name: 'Ecosia', url: 'https://www.ecosia.org/search?q=%s' },
-};
 
 function read(key, fallback) {
   try {
@@ -38,21 +34,11 @@ function write(key, value) {
 
 const isInternal = (url) => !url || url === 'about:blank' || url.startsWith('data:') || url.startsWith('blob:');
 
-let api; // { openURL(url, newTab), activeTab(), tabs(), downloadsList() }
+let api; // { openURL(url, newTab), activeTab(), tabs(), downloadsList(), find(), print(), openSettings() }
 
 export function initLibrary(options) {
   api = options;
   buildToolbar();
-}
-
-// ------------------------------------------------------------ Einstellungen
-
-export function settings() {
-  return { searchEngine: 'duckduckgo', restoreSession: true, homePage: '', ...read(KEYS.settings, {}) };
-}
-
-function saveSettings(changes) {
-  write(KEYS.settings, { ...settings(), ...changes });
 }
 
 // Text aus der Adressleiste -> URL (Adresse oder Suche)
@@ -90,7 +76,7 @@ export function saveSession(tabs, active) {
 }
 
 export function sessionToRestore() {
-  if (!settings().restoreSession)
+  if (!startSettings().restoreSession)
     return null;
   const session = read(KEYS.session, null);
   return session && session.tabs && session.tabs.length ? session.tabs : null;
@@ -122,7 +108,7 @@ function clearHistory() {
 // ------------------------------------------------------------ Lesezeichen
 
 function bookmarks() {
-  return read(KEYS.bookmarks, []);
+  return prefs('bookmarks') || [];
 }
 
 export function isBookmarked(url) {
@@ -138,7 +124,7 @@ export function toggleBookmark(url, title) {
     list.splice(index, 1);
   else
     list.push({ url, title: title || url, time: Date.now() });
-  write(KEYS.bookmarks, list);
+  savePrefs('bookmarks', list);
   updateStar(url);
   if (panelName === 'bookmarks')
     renderPanel();
@@ -231,17 +217,6 @@ export function refreshDownloadsPanel() {
     renderPanel();
 }
 
-function element(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  Object.assign(node, props);
-  node.append(...children);
-  return node;
-}
-
-function formatTime(time) {
-  return new Date(time).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' });
-}
-
 function linkRow(entry, extra) {
   const row = element('div', { className: 'panel-row', title: entry.url });
   const open = element('button', { className: 'panel-link' }, element('span', { className: 'panel-title', textContent: entry.title || entry.url }), element('span', { className: 'panel-url', textContent: entry.url }));
@@ -256,14 +231,14 @@ function renderPanel() {
   panel.textContent = '';
   const close = element('button', { className: 'panel-close', title: 'Schliessen', textContent: '×' });
   close.addEventListener('click', () => togglePanel(null));
-  const titles = { menu: 'Menü', history: 'Verlauf', bookmarks: 'Lesezeichen', downloads: 'Downloads', settings: 'Einstellungen' };
+  const titles = { menu: 'Menü', history: 'Verlauf', bookmarks: 'Lesezeichen', downloads: 'Downloads' };
   panel.append(element('header', {}, element('h2', { textContent: titles[panelName] }), close));
 
   if (panelName === 'menu') {
     const items = [['Neuer Tab', 'Strg+T', () => api.openURL('', true)], ['Verlauf', 'Strg+H', () => togglePanel('history')],
       ['Lesezeichen', 'Strg+Umschalt+O', () => togglePanel('bookmarks')], ['Downloads', 'Strg+J', () => togglePanel('downloads')],
       ['Suchen auf der Seite', 'Strg+F', () => { togglePanel(null); api.find(); }], ['Drucken …', 'Strg+P', () => { togglePanel(null); api.print(); }],
-      ['Einstellungen', '', () => togglePanel('settings')]];
+      ['Einstellungen', '', () => { togglePanel(null); api.openSettings(); }]];
     for (const [label, key, action] of items) {
       const button = element('button', { className: 'panel-menu-item' }, element('span', { textContent: label }), element('kbd', { textContent: key }));
       button.addEventListener('click', action);
@@ -341,35 +316,7 @@ function renderPanel() {
     if (!downloads.length)
       list.append(element('p', { className: 'panel-empty', textContent: 'Noch keine Downloads.' }));
     panel.append(list);
-    return;
   }
-
-  if (panelName === 'settings') {
-    const current = settings();
-    const engineSelect = element('select', { id: 'setting-search' });
-    for (const [key, engine] of Object.entries(SEARCH_ENGINES))
-      engineSelect.append(element('option', { value: key, textContent: engine.name, selected: key === current.searchEngine }));
-    engineSelect.addEventListener('change', () => saveSettings({ searchEngine: engineSelect.value }));
-    const restore = element('input', { type: 'checkbox', id: 'setting-restore', checked: current.restoreSession });
-    restore.addEventListener('change', () => saveSettings({ restoreSession: restore.checked }));
-    const home = element('input', { type: 'text', id: 'setting-home', value: current.homePage, placeholder: 'leer = leerer Tab' });
-    home.addEventListener('change', () => saveSettings({ homePage: home.value.trim() }));
-    panel.append(
-      element('label', { className: 'panel-setting' }, element('span', { textContent: 'Suchmaschine' }), engineSelect),
-      element('label', { className: 'panel-setting' }, element('span', { textContent: 'Tabs beim Start wiederherstellen' }), restore),
-      element('label', { className: 'panel-setting' }, element('span', { textContent: 'Startseite für neue Tabs' }), home),
-    );
-  }
-}
-
-export function formatSize(bytes) {
-  if (bytes == null)
-    return '?';
-  if (bytes < 1024)
-    return bytes + ' B';
-  if (bytes < 1024 * 1024)
-    return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
 export function panelIsOpen() {

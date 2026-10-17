@@ -83,11 +83,11 @@ jobs:
             --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
             --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Image testen (Seite, Header, Kompression, Relay)
+      - name: Image testen (Seite, Header, Kompression, Relay, Profil)
         env:
           TAG: ${{ steps.build.outputs.tag }}
         run: |
-          docker run -d --name smoke --read-only --cap-drop ALL -p 8080:8080 "$TAG"
+          docker run -d --name smoke --read-only --tmpfs /data:uid=1000,gid=1000 --cap-drop ALL -p 8080:8080 "$TAG"
           trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
           timeout 30 sh -c 'until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done'
           curl -fsI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi '^cross-origin-embedder-policy: require-corp'
@@ -97,6 +97,7 @@ jobs:
             -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
             'http://127.0.0.1:8080/wisp/' || true)"
           [ "$code" = 101 ] || { echo "Relay nimmt keine WebSocket-Verbindung an: $code statt 101"; exit 1; }
+          curl -fsS http://127.0.0.1:8080/profile/info | tee /dev/stderr | grep -q '"maxBytes"'
           docker stop -t 5 smoke >/dev/null
           [ "$(docker inspect --format '{{.State.ExitCode}}' smoke)" = 0 ] || { echo "Container endet nicht sauber auf SIGTERM"; exit 1; }
       - name: Bei ghcr.io anmelden

@@ -125,10 +125,12 @@ check('Vorschlag oeffnen', await waitLoaded('Seite eins'));
 // Suchmaschine in den Einstellungen: Text ohne Punkt wird eine Suche
 await tab.click('#menu-button');
 await tab.locator('#side-panel .panel-menu-item', { hasText: 'Einstellungen' }).click();
+check('Einstellungen als ganze Seite', await tab.evaluate(() => document.getElementById('settings').open && document.getElementById('side-panel').hidden));
 await tab.selectOption('#setting-search', 'google');
 const searchURL = await tab.evaluate(async () => (await import('./library.js')).addressToURL('wetter bern'));
 check('Suchmaschine', searchURL === 'https://www.google.com/search?q=wetter%20bern', searchURL);
 await tab.keyboard.press('Escape');
+check('Einstellungen mit Esc zu', await tab.waitForFunction(() => !document.getElementById('settings').open, null, { timeout: 5000 }).then(() => true, () => false));
 
 // Sitzung: zweiter Tab, dann die Oberflaeche ohne ?url= neu oeffnen
 await tab.click('#new-tab');
@@ -521,13 +523,14 @@ const dialogsBeforeHost = unloadDialogs.length;
 await unloadTab.close({ runBeforeUnload: true });
 await new Promise((resolve) => setTimeout(resolve, 2000));
 check('beforeunload: Host fragt beim Schliessen, Abbrechen bleibt', unloadDialogs[dialogsBeforeHost]?.startsWith('beforeunload:') && !unloadTab.isClosed(), JSON.stringify(unloadDialogs.slice(dialogsBeforeHost)));
-// Daten loeschen laedt die Oberflaeche absichtlich neu: ohne Rueckfrage des Hosts
+// Websitedaten loeschen laedt die Oberflaeche absichtlich neu: ohne Rueckfrage des Hosts
 dialogAnswer = 'accept';
 const dialogsBeforeClear = unloadDialogs.length;
 const clearReload = unloadTab.waitForEvent('load', { timeout: 30000 }).then(() => true, () => false);
 await unloadTab.click('#clear-data');
-check('beforeunload: Daten loeschen laedt ohne Rueckfrage des Hosts neu', await clearReload
-  && JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)) === JSON.stringify(['confirm:Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?']),
+await unloadTab.click('#settings-clear-site-data');
+check('beforeunload: Websitedaten loeschen laedt ohne Rueckfrage des Hosts neu', await clearReload
+  && unloadDialogs.slice(dialogsBeforeClear).length === 1 && unloadDialogs[dialogsBeforeClear].startsWith('confirm:Websitedaten löschen?'),
   JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)));
 
 await browser.close();

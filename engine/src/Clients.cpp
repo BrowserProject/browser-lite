@@ -170,6 +170,31 @@ void ChromeClient::setCursor(const Cursor& cursor)
     m_view->didChangeCursor(String { cssCursorName(cursor.type()) });
 }
 
+bool ChromeClient::hoverSupportedByPrimaryPointingDevice() const
+{
+    return !WasmPlatform::screenInfo().mobile;
+}
+
+bool ChromeClient::hoverSupportedByAnyAvailablePointingDevice() const
+{
+    return !WasmPlatform::screenInfo().mobile;
+}
+
+std::optional<PointerCharacteristics> ChromeClient::pointerCharacteristicsOfPrimaryPointingDevice() const
+{
+    return WasmPlatform::screenInfo().mobile ? PointerCharacteristics::Coarse : PointerCharacteristics::Fine;
+}
+
+OptionSet<PointerCharacteristics> ChromeClient::pointerCharacteristicsOfAllAvailablePointingDevices() const
+{
+    auto& screen = WasmPlatform::screenInfo();
+    if (screen.mobile)
+        return PointerCharacteristics::Coarse;
+    if (screen.hasTouch)
+        return { PointerCharacteristics::Fine, PointerCharacteristics::Coarse };
+    return PointerCharacteristics::Fine;
+}
+
 void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel level, const String& message, unsigned lineNumber, unsigned, const String& sourceID)
 {
     m_view->didReceiveConsoleMessage(static_cast<int>(level), message, sourceID, lineNumber);

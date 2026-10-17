@@ -5,11 +5,11 @@
 
 import { rtcHostCalls } from './webrtc.js';
 import { pipHostCalls } from './media.js';
+import { prefs, savePrefs } from './profile.js';
 import { bytesToBase64, base64ToBytes, domError } from './util.js';
 
 let api; // { engine(), toUTF8(text), tabs(), activeTab(), activateTab(tab), focusPage() }
 
-const PERMISSIONS_KEY = 'bl-permissions';
 const KIND_TEXT = {
   geolocation: 'möchte deinen Standort verwenden',
   notifications: 'möchte Benachrichtigungen anzeigen',
@@ -18,26 +18,13 @@ const KIND_TEXT = {
   'camera-microphone': 'möchte deine Kamera und dein Mikrofon verwenden',
 };
 
+// Entscheidungen im Profil (profile.js): { "<art> <ursprung>": 1 erlaubt | 2 blockiert }
 function loadDecisions() {
-  try {
-    return JSON.parse(localStorage.getItem(PERMISSIONS_KEY) || '{}');
-  } catch (e) {
-    return {};
-  }
+  return prefs('permissions') || {};
 }
 
 function saveDecision(kind, origin, granted) {
-  const decisions = loadDecisions();
-  decisions[kind + ' ' + origin] = granted ? 1 : 2;
-  try {
-    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(decisions));
-  } catch (e) {}
-}
-
-export function clearPermissions() {
-  try {
-    localStorage.removeItem(PERMISSIONS_KEY);
-  } catch (e) {}
+  savePrefs('permissions', { ...loadDecisions(), [kind + ' ' + origin]: granted ? 1 : 2 });
 }
 
 export function initDevices(options) {
@@ -623,12 +610,13 @@ export function onSpeechRecognition(tab, data) {
 // Finger gehen als Touch-Events an die Seite. Faengt die Seite sie nicht ab
 // (preventDefault), scrollt ein Wischen die Seite (mit Schwung), ein kurzes
 // Antippen wird ein Klick, langes Druecken das Kontextmenue und zwei Finger
-// zoomen die Ansicht, wie in Chrome.
+// zoomen die Ansicht, wie in Chrome. Bei einem nachgebildeten Mobilgeraet (settings.js) ist
+// die linke Maustaste ein Finger, die Maus ohne Taste bewegt nichts in der Seite.
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
 
-export function attachTouch(tab, canvas, position, modifierBits) {
+export function attachTouch(tab, canvas, position, modifierBits, mouseIsTouch) {
   const touches = new Map(); // pointerId -> { id, x, y, pinch }
   let gesture = null; // { startX, startY, lastX, lastY, lastTime, velocityX, velocityY, moved, consumed, timer }
   let fling = 0;
@@ -683,9 +671,10 @@ export function attachTouch(tab, canvas, position, modifierBits) {
   };
 
   const scrollBy = (x, y, dx, dy) => api.engine()._bl_wheel(tab.id, x, y, dx, dy, 0);
+  const isTouch = (e) => e.pointerType === 'touch' || (mouseIsTouch && e.pointerType === 'mouse');
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (e.pointerType !== 'touch')
+    if (!isTouch(e) || (e.pointerType === 'mouse' && e.button !== 0))
       return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -711,8 +700,13 @@ export function attachTouch(tab, canvas, position, modifierBits) {
   }, true);
 
   canvas.addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'touch' || !touches.has(e.pointerId))
+    if (!isTouch(e))
       return;
+    if (!touches.has(e.pointerId)) {
+      if (e.pointerType === 'mouse')
+        e.stopImmediatePropagation();
+      return;
+    }
     e.stopImmediatePropagation();
     const [x, y] = position(e);
     Object.assign(touches.get(e.pointerId), { x, y });
@@ -743,7 +737,7 @@ export function attachTouch(tab, canvas, position, modifierBits) {
   }, true);
 
   const end = (e, cancelled) => {
-    if (e.pointerType !== 'touch' || !touches.has(e.pointerId))
+    if (!isTouch(e) || !touches.has(e.pointerId))
       return;
     e.stopImmediatePropagation();
     const [x, y] = position(e);

@@ -8,11 +8,13 @@ import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
 import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch, pictureInPictureView } from './media.js';
 import { initCapture, onCaptureStart, onCaptureStop } from './capture.js';
-import { initDevices, clearPermissions, forgetTab, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
-import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen, formatSize } from './library.js';
+import { initDevices, forgetTab, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
+import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, panelIsOpen } from './library.js';
 import { initPickers, closePickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
 import { engineAnswered, engineFailed, expectAnswer, inputSent, restartWait, showEngineMessage, takeSafeStart, watchEngine } from './watchdog.js';
-import { reloadUI, storage, uiReloading } from './util.js';
+import { openProfile } from './profile.js';
+import { ZOOM_LEVELS, applyEngineSettings, engineEnvironment, initSettings, openSettings, settings, settingsOpen, startSettings } from './settings.js';
+import { formatSize, storage, tokenKey, uiReloading } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -29,7 +31,7 @@ if (params.has('relay'))
 const RELAY_BASE = storage('bl-relay-url', undefined, true) || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
 // Der Zugangs-Token (einmal ?token=...) gilt nur fuer das Relay, mit dem er
 // gesetzt wurde. Ein anderes Relay bekommt ihn nie zu sehen.
-const RELAY_TOKEN_KEY = 'bl-relay-token ' + URL.parse(RELAY_BASE)?.host;
+const RELAY_TOKEN_KEY = tokenKey(URL.parse(RELAY_BASE)?.host);
 if (params.get('token'))
   storage(RELAY_TOKEN_KEY, params.get('token'));
 
@@ -132,11 +134,11 @@ async function startEngine() {
 // Cookies, localStorage und IndexedDB der Seiten liegen in der Engine unter
 // /data, einem Verzeichnis im OPFS des Browsers. Die Engine liest und schreibt
 // es selber (engine/src/Storage.cpp); hier wird nur beim Verstecken und
-// Verlassen der Seite das Schreiben der Datenbanken angestossen.
+// Verlassen der Seite das Schreiben der Datenbanken angestossen. Vor dem Start
+// kommt das Profil vom Server ins OPFS (profile.js).
 
 let storageReady = false;
 let storageNotice = '';
-const clearDataFlag = 'bl-clear-data';
 
 // Nur ein Tab der Oberflaeche darf /data im OPFS haben, sonst schreiben beide
 // ihre Datenbanken abwechselnd ueber die des anderen. Die Sperre gilt, bis die
@@ -154,15 +156,7 @@ function holdDataLock() {
   });
 }
 
-// Alles im OPFS loeschen, solange die Engine noch nicht laeuft (sie haelt
-// sonst Dateien offen)
-async function clearOPFS() {
-  const root = await navigator.storage.getDirectory();
-  for await (const name of root.keys())
-    await root.removeEntry(name, { recursive: true }).catch((error) => console.warn('OPFS:', name, error));
-}
-
-// Vor dem Start der Engine (preRun) aufraeumen
+// Vor dem Start der Engine (preRun): Profil ins OPFS, dann gelten seine Einstellungen
 function mountStorage(module) {
   storageReady = true;
   module.addRunDependency('bl-storage');
@@ -172,11 +166,11 @@ function mountStorage(module) {
       storageNotice = dataLockedNotice;
       return;
     }
-    if (storage(clearDataFlag)) {
-      await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
-      storage(clearDataFlag, null);
-    }
-  })().finally(() => module.removeRunDependency('bl-storage'));
+    storageNotice = await openProfile();
+  })().catch((error) => console.warn('Profil:', error)).finally(() => {
+    Object.assign(module.ENV, engineEnvironment());
+    module.removeRunDependency('bl-storage');
+  });
 }
 
 // waitMilliseconds: beim Schliessen des Tabs so lange auf das Schreiben warten
@@ -195,19 +189,16 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => saveStorage(500));
 
-async function clearStorage() {
-  if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?'))
-    return;
-  storageReady = false; // nichts mehr zurueckschreiben
-  clearPermissions();
-  // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
-  await engine?.blClearHttpCache().catch(() => {});
-  // Bytecode der Skripte (engine/js/bytecode-cache.js)
-  await engine?.blClearBytecodeCache().catch(() => {});
-  // Das OPFS beim naechsten Start leeren, bevor die Engine laeuft
-  storage(clearDataFlag, '1');
-  reloadUI();
-}
+// Einstellungen (settings.js): nach dem Schliessen zurueck in die Seite, Websitedaten loeschen
+// und Profil zuruecksetzen leeren auch die Caches der Engine
+initSettings({
+  focusPage: () => focusPage(),
+  async clearCaches() {
+    // HTTP-Cache (Cache API, engine/js/http-cache.js) und Bytecode der Skripte (engine/js/bytecode-cache.js)
+    await engine?.blClearHttpCache().catch(() => {});
+    await engine?.blClearBytecodeCache().catch(() => {});
+  },
+});
 
 // Zusaetzliche CA-Zertifikate (PEM), z.B. eine Firmen-CA oder fuer Tests.
 // Die Engine haengt sie an das Mozilla-Bundle an (CurlSSLHandleWasm.cpp).
@@ -236,23 +227,44 @@ function watchOnLine() {
   update();
 }
 
-// Bildschirm, Farbschema (prefers-color-scheme) und Touchscreen wie im Host
+// Bildschirm, Farbschema (prefers-color-scheme) und Touchscreen wie im Host bzw. wie das
+// nachgebildete Mobilgeraet (settings.js: Groesse, Pixeldichte, Touch, Zeiger grob ohne Hover)
 const darkScheme = matchMedia('(prefers-color-scheme: dark)');
 function sendScreen() {
-  const flags = (darkScheme.matches ? 1 : 0) | (navigator.maxTouchPoints > 0 ? 2 : 0);
-  engine._bl_set_screen(screen.width, screen.height, screen.availWidth, screen.availHeight, flags);
+  const { device, colorScheme } = startSettings();
+  const dark = colorScheme === 'system' ? darkScheme.matches : colorScheme === 'dark';
+  const flags = (dark ? 1 : 0) | (device || navigator.maxTouchPoints > 0 ? 2 : 0) | (device ? 4 : 0);
+  if (device)
+    engine._bl_set_screen(device.width, device.height, device.width, device.height, flags);
+  else
+    engine._bl_set_screen(screen.width, screen.height, screen.availWidth, screen.availHeight, flags);
+}
+
+const pixelRatio = () => startSettings().device?.scale || devicePixelRatio;
+
+// Mobilgeraet: der Seitenbereich so gross wie sein Bildschirm, hoechstens so gross wie der Platz
+function emulateDevice() {
+  const { device } = startSettings();
+  if (!device)
+    return;
+  const viewport = $('viewport');
+  viewport.classList.add('device');
+  viewport.style.setProperty('--device-width', device.width + 'px');
+  viewport.style.setProperty('--device-height', device.height + 'px');
 }
 
 function onEngineReady() {
   engineReady = true;
   $('boot').hidden = true;
+  applyEngineSettings(engine, toUTF8);
+  emulateDevice();
   sendScreen();
   darkScheme.addEventListener('change', sendScreen);
   watchOnLine();
   watchPixelRatio();
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
   initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker() });
-  initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab) });
+  initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab), openSettings: () => openSettings() });
   // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
   const session = params.get('url') ? null : sessionToRestore();
   if (session) {
@@ -318,7 +330,6 @@ class Tab {
     // Steht nach dem naechsten Laden in der Statuszeile
     this.notice = null;
     this.frameRequested = false;
-    this.zoom = 1;
 
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'page';
@@ -356,10 +367,12 @@ class Tab {
     if (viewId) {
       // Von der Engine sichtbar geoeffnet, newTab zeigt ihn gleich
       this.visible = true;
-      engine._bl_resize(this.id, width, height, devicePixelRatio);
+      engine._bl_resize(this.id, width, height, pixelRatio());
+      setZoom(this, startSettings().zoom);
       return;
     }
-    engine._bl_create_view(this.id, width, height, devicePixelRatio);
+    engine._bl_create_view(this.id, width, height, pixelRatio());
+    setZoom(this, startSettings().zoom);
     // Versteckt bis activateTab (updateVisibility)
     this.visible = false;
     engine._bl_set_visible(this.id, 0);
@@ -626,7 +639,7 @@ function updateToolbar() {
   $('forward').disabled = !tab.canGoForward;
   $('reload').innerHTML = tab.loading ? '&#215;' : '&#8635;';
   $('reload').title = tab.loading ? 'Stoppen' : 'Neu laden';
-  $('zoom').hidden = tab.zoom === 1;
+  $('zoom').hidden = tab.zoom === startSettings().zoom;
   $('zoom').textContent = Math.round(tab.zoom * 100) + ' %';
   if (document.activeElement !== $('address'))
     $('address').value = tab.url === 'about:blank' ? '' : tab.url;
@@ -1390,7 +1403,7 @@ function attachInput(tab) {
   };
 
   // Finger zuerst: Touch-Events, Scrollen mit Schwung, Antippen (web/devices.js)
-  attachTouch(tab, canvas, position, modifierBits);
+  attachTouch(tab, canvas, position, modifierBits, !!startSettings().device);
   const wheelDelta = (e) => {
     const factor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1; // Zeilen, Seiten
     return [e.deltaX * factor, e.deltaY * factor];
@@ -1684,7 +1697,10 @@ $('reload').addEventListener('click', () => {
   else
     reloadTab(activeTab);
 });
-$('clear-data').addEventListener('click', clearStorage);
+$('clear-data').addEventListener('click', () => {
+  togglePanel(null);
+  openSettings('profile');
+});
 $('new-tab').addEventListener('click', () => openURL('', true));
 
 // --------------------------------------------------- Vorschlaege der Adressleiste
@@ -1753,7 +1769,7 @@ function resizeAllTabs() {
     return;
   const { width, height } = viewportSize();
   for (const tab of tabs.values())
-    engine._bl_resize(tab.id, width, height, devicePixelRatio);
+    engine._bl_resize(tab.id, width, height, pixelRatio());
 }
 new ResizeObserver(resizeAllTabs).observe($('viewport'));
 
@@ -1792,8 +1808,6 @@ document.addEventListener('pointerlockchange', () => {
 
 // ------------------------------------------------------------------ Zoom
 
-const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
-
 function setZoom(tab, zoom) {
   tab.zoom = zoom;
   engine._bl_set_zoom(tab.id, zoom);
@@ -1801,10 +1815,10 @@ function setZoom(tab, zoom) {
     updateToolbar();
 }
 
-// direction: +1 groesser, -1 kleiner, 0 zuruecksetzen
+// direction: +1 groesser, -1 kleiner, 0 zuruecksetzen (Standard-Zoom der Einstellungen)
 function changeZoom(tab, direction) {
   if (!direction)
-    return setZoom(tab, 1);
+    return setZoom(tab, startSettings().zoom);
   const index = ZOOM_LEVELS.findIndex((level) => level >= tab.zoom - 0.001);
   const next = direction > 0
     ? ZOOM_LEVELS[Math.min(index + (ZOOM_LEVELS[index] > tab.zoom + 0.001 ? 0 : 1), ZOOM_LEVELS.length - 1)]
@@ -1880,6 +1894,9 @@ function switchTab(offset) {
 }
 
 function shortcut(e) {
+  // Die Einstellungen sind modal (Esc schliesst sie selber)
+  if (settingsOpen())
+    return false;
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const tab = activeTab;

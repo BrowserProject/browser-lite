@@ -1,15 +1,21 @@
-// browser-lite Server: Wisp-Relay (TCP ueber WebSocket), optional mit Token, und mit
-// SITE_DIR, die fertige Seite (tools/package-site.sh). Laeuft so im Container (Dockerfile).
+// browser-lite Server: Wisp-Relay (TCP ueber WebSocket), optional mit Token, mit SITE_DIR
+// die fertige Seite (tools/package-site.sh) und mit PROFILE_DIR das Browser-Profil
+// (profile.mjs). Laeuft so im Container (Dockerfile).
 //
 // Der Browser im Browser schickt hier nur verschluesselte TLS-Bytes durch,
 // das Relay sieht keine Inhalte. DNS loest das Relay auf.
 //
 // Umgebungsvariablen:
-//   RELAY_TOKEN    Optional. Gesetzt wird ohne passenden ?token=... jede Verbindung abgelehnt,
-//                  ohne ist das Relay offen (nur fuer interne Server).
+//   RELAY_TOKEN    Optional. Gesetzt wird ohne passenden ?token=... jede Verbindung abgelehnt
+//                  und /profile/ nur mit "Authorization: Bearer <token>" beantwortet, ohne ist
+//                  der Server offen (nur fuer interne Server).
 //   PORT           Standard 5001
 //   HOST           Standard 0.0.0.0
 //   SITE_DIR       Ordner der fertigen Seite. Ohne nur Relay.
+//   PROFILE_DIR    Ordner des Profils. Ohne antwortet /profile/ mit 404.
+//   PROFILE_MAX_MB Grenze des Profils, Standard 64
+//   PROFILE_HOSTS  Namen, unter denen /profile/ antwortet, mit Komma (".ts.net" fuer alle
+//                  Namen, die so enden). IP-Adressen und localhost gehen immer.
 //   RELAY_ALLOW_LOCAL=1  Nur fuer Tests: lokale Adressen und alle Ports erlauben
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -17,6 +23,7 @@ import net from 'node:net';
 import path from 'node:path';
 import ipaddr from 'ipaddr.js';
 import { server as wisp, logging } from '@mercuryworkshop/wisp-js/server';
+import { createProfileHandler } from './profile.mjs';
 import { parseRequest, serveStatic } from './static.mjs';
 import { createWispHandler } from './wisp.mjs';
 
@@ -30,6 +37,7 @@ if (!token)
 const port = Number(process.env.PORT || 5001);
 const host = process.env.HOST || '0.0.0.0';
 const siteDir = process.env.SITE_DIR ? path.resolve(process.env.SITE_DIR) : null;
+const profileDir = process.env.PROFILE_DIR ? path.resolve(process.env.PROFILE_DIR) : null;
 
 // UDP braucht erst WireGuard (spaeter), bis dahin aus
 wisp.options.allow_udp_streams = false;
@@ -60,7 +68,8 @@ const handleWisp = createWispHandler({ allowAddress, streamsPerHost: STREAMS_PER
 // Ein Fehler in einer einzelnen Verbindung darf nie das ganze Relay beenden
 process.on('uncaughtException', (error) => console.error('Fehler (Relay laeuft weiter):', error));
 process.on('unhandledRejection', (error) => console.error('Fehler (Relay laeuft weiter):', error));
-// Als PID 1 im Container beendet SIGTERM Node nur mit Handler. Zu sichern gibt es nichts.
+// Als PID 1 im Container beendet SIGTERM Node nur mit Handler. Das Profil wird atomar
+// geschrieben (rename), darum sofort beenden.
 for (const signal of ['SIGTERM', 'SIGINT'])
   process.on(signal, () => process.exit(0));
 
@@ -71,6 +80,13 @@ function tokenOK(given) {
   const b = Buffer.from(token);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+const bearer = (req) => /^Bearer (\S+)$/.exec(req.headers.authorization || '')?.[1];
+const handleProfile = profileDir ? createProfileHandler({
+  dir: profileDir,
+  authorize: (req) => tokenOK(bearer(req)),
+  hosts: process.env.PROFILE_HOSTS,
+}) : () => false;
 
 // Engine-Dateien liegen in engine/<version>/ und aendern sich nie mehr
 function cacheControl(urlPath) {
@@ -87,6 +103,8 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok\n');
     return;
   }
+  if (handleProfile(req, res, request))
+    return;
   const isRead = req.method === 'GET' || req.method === 'HEAD';
   if (siteDir && isRead && serveStatic(req, res, siteDir, request.path, cacheControl(request.path)))
     return;
@@ -120,5 +138,5 @@ const failToStart = (error) => {
 server.once('error', failToStart);
 server.listen(port, host, () => {
   server.off('error', failToStart);
-  console.log(`Relay laeuft auf ${host}:${port}${siteDir ? `, Seite aus ${siteDir}` : ''}`);
+  console.log(`Relay laeuft auf ${host}:${port}${siteDir ? `, Seite aus ${siteDir}` : ''}${profileDir ? `, Profil in ${profileDir}` : ''}`);
 });

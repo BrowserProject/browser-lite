@@ -22,11 +22,11 @@ export const VERBOSE = !!process.env.E2E_VERBOSE;
 export const SWIFTSHADER = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 
 const children = new Set();
-const profiles = new Set();
+const tempDirs = new Set();
 process.on('exit', () => {
   for (const child of children)
     child.kill();
-  for (const dir of profiles)
+  for (const dir of tempDirs)
     fs.rmSync(dir, { recursive: true, force: true });
 });
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]])
@@ -128,14 +128,27 @@ function relayEnv(token, allowLocal, port) {
   return { RELAY_TOKEN: token, PORT: String(port), HOST: '127.0.0.1', ...(allowLocal ? { RELAY_ALLOW_LOCAL: '1' } : {}) };
 }
 
-// Relay (Wisp) und Oberflaeche (web/serve.mjs). allowLocal erlaubt dem Relay
-// lokale Adressen (die Testserver), ohne laeuft es wie auf dem Server.
+async function stop(child) {
+  if (child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    child.kill();
+    await exited;
+  }
+}
+
+// Relay (Wisp) und Oberflaeche (web/serve.mjs) mit dem Profil auf dem Server in einem neuen
+// leeren Ordner (stack.profileDir). Ein zweites Geraet ist ein zweiter Browser (launchProfile)
+// am selben Stack. allowLocal erlaubt dem Relay lokale Adressen (die Testserver), ohne laeuft
+// es wie auf dem Server.
 export async function startStack({ token, allowLocal = true, engine = engineDir } = {}) {
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-server-profile-'));
+  tempDirs.add(profileDir);
   const relayScript = path.join(root, 'relay', 'server.mjs');
   const relay = await startOnFreePort((port) => start(relayScript, [], relayEnv(token, allowLocal, port)));
-  const ui = await startOnFreePort((port) => start(path.join(root, 'web', 'serve.mjs'), [String(port), engine], {}));
+  const ui = await startOnFreePort((port) => start(path.join(root, 'web', 'serve.mjs'), [String(port), engine], { PROFILE_DIR: profileDir }));
   const stack = {
     token,
+    profileDir,
     relay: relay.child,
     ui: ui.child,
     relayPort: relay.port,
@@ -149,12 +162,7 @@ export async function startStack({ token, allowLocal = true, engine = engineDir 
     },
     // Relay faellt aus und kommt auf demselben Port wieder
     async restartRelay() {
-      const { relay } = stack;
-      if (relay.exitCode === null && relay.signalCode === null) {
-        const exited = new Promise((resolve) => relay.once('exit', resolve));
-        relay.kill();
-        await exited;
-      }
+      await stop(stack.relay);
       stack.relay = await start(relayScript, [], relayEnv(token, allowLocal, stack.relayPort));
     },
   };
@@ -178,7 +186,7 @@ export function launch({ args = [], ...options } = {}) {
 // (mehrere Tests parallel)
 export function launchProfile({ args = [], ...options } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-profile-'));
-  profiles.add(dir);
+  tempDirs.add(dir);
   return chromium.launchPersistentContext(dir, { executablePath: process.env.CHROMIUM_PATH || undefined, args, ...options });
 }
 
