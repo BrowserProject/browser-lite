@@ -15,6 +15,8 @@ Unser Embedding von WebCore: das Programm `engine.js`/`engine.wasm`, das die Obe
   - `http-cache.js`, `bytecode-cache.js`: HTTP- und Bytecode-Cache in der Cache API des Host
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs und MediaRecorder mit den Codecs
     des Host (WebM-Muxer)
+  - `wasmfs-opfs.js` (`--js-library`): ersetzt das Schreiben des OPFS-Backends von WasmFS,
+    "kein Platz" im Host kommt als `ENOSPC` an
 - `src/`: C++ der Engine
   - Start und Ablauf: `main.cpp`, `Engine.h`, `EngineLoop.cpp` (Event-Loop, Watchdog),
     `Exports.cpp` (C-Schnittstelle `bl_*` fuer die Oberflaeche), `Host.cpp` (Events an die

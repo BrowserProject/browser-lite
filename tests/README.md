@@ -55,6 +55,9 @@ der Seite.
 
 - `E2E_TIMEOUT` (ms, Standard 180000), `E2E_VERBOSE=1` (Konsole der Seite und der
   Server, Ablauf der Engine mit `?debug=1`), `CHROMIUM_PATH` (eigenes Chromium).
+- `storage-test.mjs` startet Chromium mit eigenem Profil auf der Platte (`launchProfile`):
+  in einem Kontext von `newContext()` (wie inkognito) liegt das OPFS im RAM, und Chromium
+  lehnt Schreiben ab, wenn der Rechner wenig freien Speicher hat.
 - `network-test.mjs` macht sich eine Test-CA und Zertifikate in `build/e2e-certs/`
   (braucht `openssl`), auch die, die die Engine ablehnen muss.
 - `parity-test.mjs` vergleicht mit dem Host-Chromium. Fehler nur bei Rueckschritten

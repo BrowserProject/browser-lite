@@ -3,7 +3,7 @@
 // (/data in der Engine liegt im OPFS des Host-Browsers).
 //
 //   cd tests/e2e && node storage-test.mjs [engine-ordner]
-import { TIMEOUT, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
+import { TIMEOUT, check, collect, finish, launchProfile, serve, startStack, timeLimit } from './harness.mjs';
 
 timeLimit(3 * TIMEOUT + 120000);
 
@@ -115,6 +115,39 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
   } catch (e) {
     console.log('RESULT opfslock=fehler:' + e.name);
   }
+  // Eine gelesene Datei mit einem zweiten Handle bleibt verschiebbar: die
+  // Engine haelt sie im OPFS des Host nicht zum Schreiben offen
+  try {
+    const root = await navigator.storage.getDirectory();
+    const file = await root.getFileHandle('lesen.txt', { create: true });
+    const writer = await file.createWritable();
+    await writer.write('gelesen');
+    await writer.close();
+    const text = await (await file.getFile()).text();
+    await root.getFileHandle('lesen.txt', { create: true });
+    await file.move(root, 'verschoben.txt');
+    const left = await root.getFileHandle('lesen.txt').then(() => 'da', (e) => e.name);
+    await root.removeEntry('verschoben.txt');
+    console.log('RESULT opfsread=' + [text, left].join(','));
+  } catch (e) {
+    console.log('RESULT opfsread=fehler:' + e.name);
+  }
+  // Ordner verschieben (im OPFS des Host als Kopie, siehe moveDirectory)
+  try {
+    const root = await navigator.storage.getDirectory();
+    const folder = await root.getDirectoryHandle('umzug', { create: true });
+    const writer = await (await folder.getFileHandle('kiste.txt', { create: true })).createWritable();
+    await writer.write('inhalt');
+    await writer.close();
+    await folder.move(root, 'umgezogen');
+    const moved = await root.getDirectoryHandle('umgezogen');
+    const text = await (await (await moved.getFileHandle('kiste.txt')).getFile()).text();
+    const left = await root.getDirectoryHandle('umzug').then(() => 'da', (e) => e.name);
+    await root.removeEntry('umgezogen', { recursive: true });
+    console.log('RESULT opfsdir=' + [folder.name, text, left].join(','));
+  } catch (e) {
+    console.log('RESULT opfsdir=fehler:' + e.name);
+  }
   // Synchroner Zugriff gibt es nur in Workern
   const workerSource = \`onmessage = async () => {
     try {
@@ -171,9 +204,9 @@ const { url: siteURL } = await serve((req, res) => {
 });
 
 const stack = await startStack({ token: 'store-token-0123456789abcdef' });
-const browser = await launch();
-const context = await browser.newContext();
-const page = await context.newPage();
+// Profil auf der Platte, OPFS in Dateien (siehe launchProfile)
+const context = await launchProfile();
+const page = context.pages()[0] || await context.newPage();
 const results = collect(page);
 const result = (key) => results.wait(key);
 
@@ -189,6 +222,8 @@ check('OPFS: synchroner Zugriff im Worker', (await result('opfsworker')) === 'sy
 check('OPFS: verschieben bei offenem Writable gesperrt, Writable ersetzt erst bei close()', (await result('opfslock')) === 'NoModificationAllowedError,sperre-b.txt,neu+mehr', results.get('opfslock'));
 check('Cache API: ueber der Grenze abgelehnt, alter Inhalt bleibt', (await result('cachequota')) === 'QuotaExceededError,cache-wert,false', results.get('cachequota'));
 
+check('OPFS: gelesene Datei mit zweitem Handle verschiebbar', (await result('opfsread')) === 'gelesen,NotFoundError', results.get('opfsread'));
+check('OPFS: Ordner verschoben', (await result('opfsdir')) === 'umgezogen,inhalt,NotFoundError', results.get('opfsdir'));
 check('OPFS: Datei mit eigenem Namen angelegt', (await result('opfsname')) === 'leer', results.get('opfsname'));
 
 // Rest einer abgebrochenen Kopie (replaceWholeFile, /data/tmp im OPFS des Host)
@@ -245,7 +280,8 @@ await result('opfsworker');
 // Daten aus dem IDBFS frueherer Versionen (IndexedDB "/data", ein Eintrag pro
 // Datei) uebernimmt die Engine beim ersten Start mit WasmFS nach /data (OPFS)
 // und loescht die alte Datenbank danach (web/app.js, engine/src/Storage.cpp)
-const fresh = await (await browser.newContext()).newPage();
+const freshContext = await launchProfile();
+const fresh = freshContext.pages()[0] || await freshContext.newPage();
 results.clear();
 results.watch(fresh);
 await fresh.goto(stack.uiURL + 'nicht-da');
@@ -278,5 +314,6 @@ await fresh.evaluate(() => document.getElementById('clear-data').click());
 const cleared = await result('opfs');
 check('Daten loeschen leert /data', cleared?.startsWith('leer,'), String(cleared));
 
-await browser.close();
+await freshContext.close();
+await context.close();
 finish();

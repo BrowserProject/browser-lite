@@ -9,6 +9,8 @@
 #include <WebCore/ScriptExecutionContext.h>
 #include <WebCore/WorkerFileSystemStorageConnection.h>
 #include <WebCore/WorkerGlobalScope.h>
+#include <cerrno>
+#include <cstdio>
 #include <wtf/Expected.h>
 #include <wtf/FileSystem.h>
 #include <wtf/HashMap.h>
@@ -33,6 +35,7 @@ enum class Error : uint8_t {
     MissingArgument,
     NoModificationAllowed,
     TypeMismatch,
+    QuotaError,
     Unknown,
 };
 
@@ -55,10 +58,33 @@ Exception toException(Error error)
         return Exception { ExceptionCode::NoModificationAllowedError };
     case Error::TypeMismatch:
         return Exception { ExceptionCode::TypeMismatchError, "File type is incompatible with handle type"_s };
+    case Error::QuotaError:
+        return Exception { ExceptionCode::QuotaExceededError, "Requested space above quota"_s };
     case Error::Unknown:
         break;
     }
     return Exception { ExceptionCode::UnknownError };
+}
+
+// Schreiben ging nicht: bei ENOSPC hat das OPFS des Host keinen Platz mehr
+Error writeError()
+{
+    return errno == ENOSPC ? Error::QuotaError : Error::Unknown;
+}
+
+// Nur umbenennen: FileSystem::moveFile kopiert, wenn das nicht geht. Die Kopie
+// ist nicht atomar (ohne Platz bleibt das Ziel halb geschrieben) und meldet
+// Erfolg, auch wenn die Quelle nicht geloescht wurde
+bool renameFile(const String& from, const String& to)
+{
+    return !rename(FileSystem::fileSystemRepresentation(from).data(), FileSystem::fileSystemRepresentation(to).data());
+}
+
+// Ordner kann WasmFS im OPFS des Host nicht umbenennen (EBUSY), sie gehen nur
+// als Kopie von moveFile
+bool moveDirectory(const String& from, const String& to)
+{
+    return FileSystem::moveFile(from, to) && (from == to || !FileSystem::fileExists(from));
 }
 
 ExceptionOr<void> toExceptionOr(std::optional<Error> error)
@@ -145,10 +171,13 @@ private:
                 return makeUnexpected(Error::TypeMismatch);
             kind = existingKind;
         }
-        bool canAccess = false;
+        // Eine vorhandene Datei nicht oeffnen: zum Schreiben offen haelt WasmFS
+        // sie im OPFS des Host gesperrt, solange sie noch jemand liest (move()
+        // und das Ersetzen bei close() gehen dort dann nicht)
+        bool canAccess = true;
         if (*kind == FileSystemHandleKind::Directory)
             canAccess = FileSystem::makeAllDirectories(path);
-        else
+        else if (!exists)
             canAccess = !!FileSystem::openFile(path, FileSystem::FileOpenMode::ReadWrite);
         if (!canAccess)
             return makeUnexpected(Error::Unknown);
@@ -235,7 +264,7 @@ private:
             FileSystem::deleteFile(writable.path);
             return std::nullopt;
         }
-        if (FileSystem::moveFile(writable.path, handle.path))
+        if (renameFile(writable.path, handle.path))
             return std::nullopt;
         FileSystem::deleteFile(writable.path);
         return Error::Unknown;
@@ -278,7 +307,8 @@ private:
         auto destinationPath = FileSystem::pathByAppendingComponent(destination->path, newName);
         if (destinationPath != handle->path && hasActiveLock(destinationPath))
             return completionHandler(toException(Error::NoModificationAllowed));
-        if (!FileSystem::moveFile(handle->path, destinationPath))
+        bool moved = handle->kind == FileSystemHandleKind::Directory ? moveDirectory(handle->path, destinationPath) : renameFile(handle->path, destinationPath);
+        if (!moved)
             return completionHandler(toException(Error::Unknown));
         handle->path = destinationPath;
         handle->name = newName;
@@ -485,7 +515,7 @@ private:
                 if (position && !file.seek(*position, FileSystem::FileSeekOrigin::Beginning))
                     return Error::Unknown;
                 if (!file.write(dataBytes))
-                    return Error::Unknown;
+                    return writeError();
                 return std::nullopt;
             case FileSystemWriteCommandType::Seek:
                 if (!position)

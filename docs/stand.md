@@ -1,4 +1,4 @@
-# Stand und offene Punkte (16.10.2026)
+# Stand und offene Punkte (17.10.2026)
 
 Kurze Uebersicht, wo das Projekt gerade steht und was noch offen ist. Details zu
 den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
@@ -30,7 +30,8 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   und `clients.openWindow()` nach `notificationclick`.
 - Speicher: WasmFS, `/data` im OPFS (#142, nur ein Host-Tab besitzt es), HTTP- und
   Bytecode-Cache in der Cache API (#70, #135), Inhalte der Cache API der Seiten als
-  eigene Dateien. `navigator.onLine` folgt der Verbindung zum Relay.
+  eigene Dateien. Ohne Platz im OPFS des Host bekommen die Seiten im OPFS
+  `QuotaExceededError` (#166). `navigator.onLine` folgt der Verbindung zum Relay.
 - Messlatte: 257 von 280 Funktionen wie Chromium (`tests/e2e/parity-test.mjs`).
 - Tests: gemeinsames Geruest fuer die e2e-Tests (`tests/e2e/harness.mjs`, auch
   parallel), dazu Grenzen (`limits.html`), Watchdog (`hang.html`), echte Abstuerze

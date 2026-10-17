@@ -5,8 +5,10 @@
 // Umgebung: E2E_TIMEOUT (ms, Standard 180000), E2E_VERBOSE=1 (Konsole der Seite
 // und der Server ausgeben, Ablauf der Engine mit ?debug=1), CHROMIUM_PATH.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -20,11 +22,13 @@ export const VERBOSE = !!process.env.E2E_VERBOSE;
 export const SWIFTSHADER = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 
 const children = new Set();
-const killChildren = () => {
+const profiles = new Set();
+process.on('exit', () => {
   for (const child of children)
     child.kill();
-};
-process.on('exit', killChildren);
+  for (const dir of profiles)
+    fs.rmSync(dir, { recursive: true, force: true });
+});
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]])
   process.on(signal, () => process.exit(code));
 
@@ -166,6 +170,16 @@ export async function serve(handler) {
 
 export function launch({ args = [], ...options } = {}) {
   return chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args, ...options });
+}
+
+// Chromium mit eigenem Profil auf der Platte, wie ein normaler Browser. Ein
+// Kontext von newContext() ist wie inkognito: dort liegt das OPFS im RAM, und
+// Chromium lehnt Schreiben ab, wenn der Rechner wenig freien Speicher hat
+// (mehrere Tests parallel)
+export function launchProfile({ args = [], ...options } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-profile-'));
+  profiles.add(dir);
+  return chromium.launchPersistentContext(dir, { executablePath: process.env.CHROMIUM_PATH || undefined, args, ...options });
 }
 
 // Sammelt "RESULT name=wert" aus der Konsole einer oder mehrerer Seiten

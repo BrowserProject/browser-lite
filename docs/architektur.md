@@ -285,6 +285,7 @@ Was in WebKit2 im Network-Prozess laeuft, sitzt im Engine-Thread, verbunden ohne
   (Entscheid 155), hoechstens 256 MB pro Ursprung.
 - Origin Private File System (`engine/src/FileSystemStorageWasm.cpp`, Entscheid 95): Dateien
   unter `/data/opfs/<Ursprung>/`, `createWritable` in einer Kopie unter `/data/opfs-swap`.
+  `close()` und `move()` einer Datei nur mit `rename`, Ordner als Kopie (Entscheid 166).
 
 ### Threads
 Emscripten pthreads, braucht `SharedArrayBuffer`. Dafuer muss die Seite mit diesen Headern
