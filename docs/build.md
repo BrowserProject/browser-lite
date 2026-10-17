@@ -11,19 +11,19 @@ npm-Pakete in den `package-lock.json`. Nie Versionen direkt in Skripten eintrage
 ## Toolchain
 
 ```bash
-source versions.env
-docker build -t browser-lite-toolchain --build-arg EMSDK_VERSION="$EMSDK_VERSION" toolchain/
+tools/build-toolchain.sh   # Pins aus versions.env, Image browser-lite-toolchain
 
 # Test: kann emcc ein Programm mit pthreads bauen und ausfuehren?
 docker run --rm -v "$PWD:/src" browser-lite-toolchain tools/check-toolchain.sh
 ```
 
-Falls Docker Hub "429 Too Many Requests" sagt, einen Mirror nehmen:
-`--build-arg BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04`. Weitere Build-Args in
-[toolchain/README.md](../toolchain/README.md).
+Falls Docker Hub "429 Too Many Requests" sagt, das gleiche Basis-Image von einem Mirror
+nehmen: `BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04@sha256:<Digest> tools/build-toolchain.sh`
+(Digest aus `versions.env`).
+Details in [toolchain/README.md](../toolchain/README.md).
 
 In CI wird das Image automatisch gebaut und nach `ghcr.io` gepusht (Tag enthaelt die
-Emscripten-Version und einen Hash ueber `toolchain/`). Wenn es das Image schon gibt, wird es
+Emscripten-Version und einen Hash ueber `toolchain/` und die Pins). Gibt es das Image schon, wird es
 nicht neu gebaut.
 
 ## WebKit

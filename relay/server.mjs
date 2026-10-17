@@ -117,4 +117,13 @@ server.on('upgrade', (req, socket, head) => {
   wisp.routeRequest(req, socket, head);
 });
 
-server.listen(port, host, () => console.log(`Relay laeuft auf ${host}:${port}${siteDir ? `, Seite aus ${siteDir}` : ''}`));
+// Ohne Port (z.B. belegt) nicht still mit Code 0 enden
+const failToStart = (error) => {
+  console.error('Relay startet nicht:', error.message);
+  process.exit(1);
+};
+server.once('error', failToStart);
+server.listen(port, host, () => {
+  server.off('error', failToStart);
+  console.log(`Relay laeuft auf ${host}:${port}${siteDir ? `, Seite aus ${siteDir}` : ''}`);
+});

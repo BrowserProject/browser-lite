@@ -125,11 +125,6 @@ der Oberflaeche:
 - Zu pruefen: in Seiten-Workern kehrt der Engine-Thread nie in den Event-Loop des
   Host zurueck, die FinalizationRegistry der WASM-Bruecke im Host feuert dort
   vermutlich nie (Werte erst mit dem Worker frei).
-- Relay: ist der Port belegt, endet es mit Code 0 statt 1.
-- Gemeinsames `bl_retry` in `tools/env.sh` statt dem eigenen `retry()` in
-  `fetch-webkit.sh`, damit auch `deps/lib.sh` Git-Quellen wiederholt holt. `MESON_VERSION` und das
-  Ubuntu-Image stehen in `toolchain/Dockerfile` statt in `versions.env` (Umzug
-  baut die Toolchain und alles danach neu).
 - Echte Seiten schwanken stark (Werbung, wechselnder Inhalt): Leistung immer mit
   mehreren Laeufen und mit Inklusivzeiten aus dem Profil vergleichen, nicht nur mit
   der Ladezeit.

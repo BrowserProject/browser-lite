@@ -1,18 +1,18 @@
 # Toolchain fuer browser-lite: alles was man braucht um WebKit + Dependencies
 # mit Emscripten nach WebAssembly zu bauen. Lokal und in CI das gleiche Image.
 #
-# Bauen:  docker build -t browser-lite-toolchain --build-arg EMSDK_VERSION=6.0.10 toolchain/
-# (CI liest EMSDK_VERSION aus versions.env)
-
-# Basis-Image ueberschreibbar, z.B. mit einem Mirror falls Docker Hub limitiert:
-#   --build-arg BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04
-ARG BASE_IMAGE=ubuntu:24.04
+# Bauen: tools/build-toolchain.sh (alle Build-Args kommen aus versions.env)
+ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG EMSDK_VERSION
+ARG EMSDK_COMMIT
+ARG MESON_VERSION
+ARG MESON_SHA256
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN test -n "$EMSDK_VERSION" || (echo "EMSDK_VERSION fehlt" && exit 1)
+RUN test -n "$EMSDK_VERSION" && test -n "$EMSDK_COMMIT" && test -n "$MESON_VERSION" && test -n "$MESON_SHA256" \
+    || { echo "Build-Args fehlen, mit tools/build-toolchain.sh bauen"; exit 1; }
 
 # Host-Tools fuer WebKit (cmake, ninja, perl, python, ruby, gperf, unifdef)
 # und fuer die Dependencies (autotools, meson, pkg-config).
@@ -44,10 +44,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# Emscripten SDK, fix gepinnt
+# Emscripten SDK, Tag und Commit gepinnt
 ENV EMSDK=/opt/emsdk
 RUN git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$EMSDK" \
     && cd "$EMSDK" \
+    && test "$(git rev-parse HEAD)" = "$EMSDK_COMMIT" \
     && ./emsdk install "$EMSDK_VERSION" \
     && ./emsdk activate "$EMSDK_VERSION" \
     && rm -rf "$EMSDK/downloads" \
@@ -72,8 +73,9 @@ RUN true \
     && chmod -R a+rwX "$EM_CACHE"
 
 # Meson aus pip: Ubuntu hat nur 1.3, fontconfig braucht >= 1.6.1
-ARG MESON_VERSION=1.12.0
-RUN pip install --no-cache-dir --break-system-packages "meson==${MESON_VERSION}"
+RUN printf 'meson==%s --hash=sha256:%s\n' "$MESON_VERSION" "$MESON_SHA256" > /tmp/meson.txt \
+    && pip install --no-cache-dir --break-system-packages --only-binary=:all: --require-hashes -r /tmp/meson.txt \
+    && rm /tmp/meson.txt
 
 RUN emcc --version && node --version && meson --version && cmake --version && ninja --version
 

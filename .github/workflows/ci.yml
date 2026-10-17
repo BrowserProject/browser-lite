@@ -83,8 +83,16 @@ jobs:
         id: tag
         run: |
           source versions.env
-          hash="$(find toolchain -type f ! -name README.md | sort | xargs sha256sum | sha256sum | cut -c1-12)"
+          # Dateien des Images und seine Pins aus versions.env
+          pins="$(grep -E '^(TOOLCHAIN_BASE_IMAGE|EMSDK_|MESON_)' versions.env)"
+          hash="$( { find toolchain -type f ! -name README.md | sort | xargs sha256sum; echo "$pins"; } | sha256sum | cut -c1-12)"
           echo "image=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}-${hash}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'build_args<<EOF'
+            echo "BASE_IMAGE=$TOOLCHAIN_BASE_IMAGE"
+            grep -E '^(EMSDK_|MESON_)' versions.env
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
           echo "image_emsdk=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
           echo "emsdk=${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
       - name: Bei ghcr.io anmelden
@@ -108,7 +116,7 @@ jobs:
           context: toolchain
           push: true
           tags: ${{ steps.tag.outputs.image }}
-          build-args: EMSDK_VERSION=${{ steps.tag.outputs.emsdk }}
+          build-args: ${{ steps.tag.outputs.build_args }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
   toolchain-check:

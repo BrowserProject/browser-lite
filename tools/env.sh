@@ -22,3 +22,15 @@ bl_die() {
     printf 'FEHLER: %s\n' "$*" >&2
     exit 1
 }
+
+# Befehl bis zu 5 mal versuchen (Netz), Pause 2, 4, 8, 16 s
+bl_retry() {
+    local attempt=1 delay=2
+    until "$@"; do
+        [ "$attempt" -ge 5 ] && bl_die "$* ist $attempt mal fehlgeschlagen"
+        bl_log "fehlgeschlagen, neuer Versuch in ${delay}s"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}

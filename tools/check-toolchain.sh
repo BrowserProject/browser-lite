@@ -14,6 +14,8 @@ done
 emver="$(emcc -dumpversion)"
 [ "$emver" = "$EMSDK_VERSION" ] || bl_die "emcc ist $emver, erwartet $EMSDK_VERSION (versions.env)"
 bl_log "emcc $emver ok"
+mesonver="$(meson --version)"
+[ "$mesonver" = "$MESON_VERSION" ] || bl_die "meson ist $mesonver, erwartet $MESON_VERSION (versions.env)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

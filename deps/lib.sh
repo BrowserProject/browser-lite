@@ -57,7 +57,7 @@ dep_fetch() {
     git)
         bl_log "$name: git $version"
         git -C "$src" init -q
-        git -C "$src" fetch -q --depth 1 "$url" "refs/tags/$version"
+        bl_retry git -C "$src" fetch -q --depth 1 "$url" "refs/tags/$version"
         git -C "$src" -c advice.detachedHead=false checkout -q FETCH_HEAD
         local actual
         actual="$(git -C "$src" rev-parse HEAD)"

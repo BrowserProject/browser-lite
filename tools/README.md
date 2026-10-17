@@ -6,7 +6,8 @@ Skripte fuer Build und Auslieferung. Die Shell-Skripte laden `env.sh` (Pfade, `v
 | Datei | Was |
 | --- | --- |
 | `env.sh` | gemeinsame Pfade und Versionen, wird mit `source` geladen |
-| `check-toolchain.sh` | prueft das Toolchain-Image (emcc mit pthreads) |
+| `build-toolchain.sh` | baut das Toolchain-Image mit den Pins aus `versions.env` |
+| `check-toolchain.sh` | prueft das Toolchain-Image (emcc mit pthreads, Meson-Version) |
 | `fetch-webkit.sh` | holt den gepinnten WebKit-Commit nach `third_party/WebKit` (shallow, sparse) |
 | `apply-patches.sh` | setzt WebKit zurueck und wendet `patches/webkit/` an, `--check` prueft nur |
 | `export-patch.sh` | speichert neue Aenderungen in `third_party/WebKit` als Patch |
