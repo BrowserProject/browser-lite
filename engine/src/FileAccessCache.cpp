@@ -2,10 +2,9 @@
 // CA-Liste).
 //
 // Skia prueft bei jeder Schriftsuche mit access(), ob die Schriftdatei lesbar
-// ist. Ohne WasmFS (BROWSER_LITE_WASMFS=OFF) geht jeder Aufruf ueber den
-// Haupt-Thread der Seite (CNN: 1.6 s Warten), auch mit WasmFS spart der Cache
-// die vielen Pruefungen. Unter /usr/share und /etc liegt nur, was beim Start aus
-// engine.data kommt, das aendert sich nie. Eingebunden mit -Wl,--wrap=access.
+// ist. Der Cache spart die vielen Pruefungen. Unter /usr/share und /etc liegt
+// nur, was beim Start aus engine.data kommt, das aendert sich nie. Eingebunden
+// mit -Wl,--wrap=access.
 #include "config.h"
 
 #include <cstring>

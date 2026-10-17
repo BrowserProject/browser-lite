@@ -235,7 +235,7 @@ private:
     }
 
     // Inhalte ohne Eintrag (Abbruch zwischen dem Schreiben des Inhalts und dem
-    // der Datei des Ursprungs, alte Formate)
+    // der Datei des Ursprungs)
     void deleteUnusedBodies(const ClientOrigin& origin)
     {
         HashSet<String> used;

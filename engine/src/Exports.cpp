@@ -584,24 +584,18 @@ EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
     });
 }
 
-// Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp).
-// Mit WasmFS im Engine-Thread (Schreiben nach OPFS), die Oberflaeche wartet
-// hoechstens waitMilliseconds darauf (beim Schliessen des Tabs). Sonst auf dem
-// Haupt-Thread des Host direkt vor dem Speichern des IDBFS.
+// Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp), im
+// Engine-Thread (Schreiben nach OPFS). Die Oberflaeche wartet hoechstens
+// waitMilliseconds darauf (beim Schliessen des Tabs).
 EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
 {
-#if defined(BL_WASMFS)
     if (waitMilliseconds > 0)
         flushMemoryVFSAndWait(Seconds::fromMilliseconds(waitMilliseconds));
     else {
         runOnEngineThread([] {
-            flushMemoryVFS(false);
+            flushMemoryVFS();
         });
     }
-#else
-    UNUSED_PARAM(waitMilliseconds);
-    flushMemoryVFS(true);
-#endif
 }
 
 // Belegter Speicher (malloc) fuer Tests. mallinfo laeuft ueber den ganzen Heap

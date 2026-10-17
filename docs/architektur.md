@@ -341,12 +341,8 @@ gerade keine Schreib-Transaktion laeuft: kurz nach jeder Aenderung (im Engine-Th
 Schliessen des Tabs mit Warten (`bl_storage_flush`) und wenn die letzte Verbindung zu einer
 Datenbank schliesst (Entscheid 180). Danach liest das
 VFS wieder von der Platte, damit es stimmt, wenn WebKit Dateien selber loescht
-(`indexedDB.deleteDatabase`).
-
-Daten aus einem IDBFS von Emscripten (das Dateisystem vor WasmFS) liest die Oberflaeche beim
-ersten Start einmal aus der IndexedDB, die Engine uebernimmt sie, danach wird die alte
-Datenbank geloescht (Entscheid 142). Der IDBFS-Weg laesst sich mit
-`-DBROWSER_LITE_WASMFS=OFF` noch bauen.
+(`indexedDB.deleteDatabase`). `-journal` und `-wal` liegen nur im Speicher, nie auf der
+Platte.
 
 ### Ton (Web Audio)
 ```

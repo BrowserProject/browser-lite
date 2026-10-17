@@ -78,7 +78,7 @@ static void addSpareWorkers(int count)
 
 // Zusaetzliche CA-Zertifikate der Oberflaeche (web/app.js, installExtraCA)
 // kommen als Umgebungsvariable und werden hier, im Engine-Thread, zur Datei
-// fuer CurlSSLHandleWasm.cpp. Mit WasmFS geht das Dateisystem erst ab main().
+// fuer CurlSSLHandleWasm.cpp. Das Dateisystem (WasmFS) gibt es erst ab main().
 static void installExtraCertificates()
 {
     const char* pem = getenv("BL_EXTRA_CA");
@@ -114,9 +114,8 @@ int main(int, char**)
     WTF::initializeMainThread();
 
     // fontconfig gleich im Hintergrund einrichten: es liest seine Konfiguration
-    // mit vielen Dateizugriffen (ohne WasmFS alle ueber den UI-Thread). Sonst
-    // passiert das mitten im Laden der ersten Seite (CNN: 0.5 s im Engine-Thread,
-    // bei der ersten Style-Berechnung).
+    // mit vielen Dateizugriffen. Sonst passiert das mitten im Laden der ersten
+    // Seite (CNN: 0.5 s im Engine-Thread, bei der ersten Style-Berechnung).
     if (const char* value = getenv("BL_FONTCONFIG_EARLY"); !value || strcmp(value, "0"))
         Thread::create("fontconfig"_s, [] {
             FcInit();

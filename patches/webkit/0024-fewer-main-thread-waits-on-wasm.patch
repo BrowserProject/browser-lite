@@ -21,8 +21,8 @@ index 451c9c8c41..af84c016ab 100644
  
 +#if defined(__EMSCRIPTEN__)
 +    // WebAssembly (browser-lite): die Pruefung unten liest und durchsucht fuer jeden Kandidaten
-+    // jedes Treffers die ganze Schriftdatei, ohne WasmFS jeden Zugriff ueber den Haupt-Thread der
-+    // Seite. Die installierten Schriften aendern sich nie, darum das Ergebnis pro Datei merken.
++    // jedes Treffers die ganze Schriftdatei. Die installierten Schriften aendern sich nie, darum
++    // das Ergebnis pro Datei merken.
      bool FontAccessible(FcPattern* font) const {
 +        const char* filename = get_string(font, FC_FILE, nullptr);
 +        if (nullptr == filename) {

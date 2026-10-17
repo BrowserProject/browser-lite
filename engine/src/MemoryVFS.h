@@ -11,16 +11,13 @@ namespace BrowserLite {
 void registerMemoryVFS();
 
 // Geaenderte Datenbanken jetzt ins Dateisystem schreiben (alle, die gerade
-// nicht mitten in einer Schreib-Transaktion sind). Von jedem Thread aus erlaubt,
-// auch vom Haupt-Thread des Host (ohne WasmFS, vor dem Speichern des IDBFS).
-// fromHostThread: blockiert nie (ueberspringt, wenn gerade jemand schreibt).
-void flushMemoryVFS(bool fromHostThread);
+// nicht mitten in einer Schreib-Transaktion sind). Im Engine-Thread oder einem
+// anderen Worker-Thread.
+void flushMemoryVFS();
 
-#if defined(BL_WASMFS)
 // Haupt-Thread des Host (pagehide): den Engine-Thread schreiben lassen und
 // hoechstens timeout darauf warten. false: nicht rechtzeitig fertig
 bool flushMemoryVFSAndWait(Seconds timeout);
-#endif
 
 // Belegter Platz der Dateien direkt in directory (ohne Unterordner): offene
 // Datenbanken, wie sie im Speicher sind (mit WAL), alles andere auf der Platte.

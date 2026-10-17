@@ -48,7 +48,7 @@ window.__blEngine = () => engine; // Fehlersuche: Emscripten-Modul (FS, Exporte)
 // Fehlersuche: JS in der Seite des aktiven Tabs, Ergebnis in der Konsole ([eval])
 window.__blEval = (source) => engine._bl_eval_script(activeTab.id, toUTF8(source));
 window.__blMemory = (report) => {
-  if (report && engine && engine._bl_memory_report)
+  if (report && engine)
     engine._bl_memory_report(report === 2 ? 2 : report === 3 ? 0 : report === 4 ? 3 : 1);
   return engine && engine.HEAPU8 ? engine.HEAPU8.length : 0;
 };
@@ -130,15 +130,11 @@ async function startEngine() {
 
 // ------------------------------------------------------------ Speicher
 // Cookies, localStorage und IndexedDB der Seiten liegen in der Engine unter
-// /data. Mit WasmFS (Standard) ist das ein Verzeichnis im OPFS des Browsers,
-// die Engine liest und schreibt es selber (engine/src/Storage.cpp); hier wird
-// nur beim Verstecken und Verlassen der Seite das Schreiben der Datenbanken
-// angestossen. Aeltere Engine-Builds ohne WasmFS haben ein IDBFS:
-// beim Start aus der IndexedDB laden, danach regelmaessig zurueckschreiben.
+// /data, einem Verzeichnis im OPFS des Browsers. Die Engine liest und schreibt
+// es selber (engine/src/Storage.cpp); hier wird nur beim Verstecken und
+// Verlassen der Seite das Schreiben der Datenbanken angestossen.
 
 let storageReady = false;
-let storageSyncing = false;
-let storageSyncAgain = false;
 let storageNotice = '';
 const clearDataFlag = 'bl-clear-data';
 
@@ -166,119 +162,32 @@ async function clearOPFS() {
     await root.removeEntry(name, { recursive: true }).catch((error) => console.warn('OPFS:', name, error));
 }
 
-function deleteLegacyStorage() {
-  return new Promise((resolve) => {
-    const request = indexedDB.deleteDatabase('/data');
-    request.onsuccess = request.onerror = request.onblocked = resolve;
-  });
-}
-
-// Daten aus dem IDBFS frueherer Versionen lesen; die Engine uebernimmt sie
-// beim Start einmal nach /data und meldet sich dann (onLegacyStorageMigrated)
-async function readLegacyStorage() {
-  if (!indexedDB.databases || !(await indexedDB.databases()).some((db) => db.name === '/data'))
-    return [];
-  const db = await new Promise((resolve, reject) => {
-    const request = indexedDB.open('/data');
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  try {
-    if (!db.objectStoreNames.contains('FILE_DATA'))
-      return [];
-    const store = db.transaction('FILE_DATA', 'readonly').objectStore('FILE_DATA');
-    const [keys, values] = await Promise.all(['getAllKeys', 'getAll'].map((method) => new Promise((resolve, reject) => {
-      const request = store[method]();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    })));
-    return keys.map((path, i) => [path, values[i]?.contents]).filter(([path, contents]) => typeof path === 'string' && contents instanceof Uint8Array);
-  } finally {
-    db.close();
-  }
-}
-
+// Vor dem Start der Engine (preRun) aufraeumen
 function mountStorage(module) {
-  module = module || engine;
-  const fs = module.FS;
-  const IDBFS = fs.filesystems?.IDBFS;
-  if (!IDBFS) {
-    // WasmFS: vor dem Start der Engine aufraeumen bzw. alte Daten lesen
-    storageReady = true;
-    module.addRunDependency('bl-storage');
-    (async () => {
-      if (!(await holdDataLock())) {
-        module.ENV.BL_OPFS = '0';
-        storageNotice = dataLockedNotice;
-        return;
-      }
-      if (storage(clearDataFlag)) {
-        await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
-        await deleteLegacyStorage();
-        storage(clearDataFlag, null);
-      } else if (window.indexedDB) {
-        module.blLegacyStorage = await readLegacyStorage().catch((error) => {
-          console.warn('Alte Daten konnten nicht gelesen werden:', error);
-          return [];
-        });
-        module.onLegacyStorageMigrated = deleteLegacyStorage;
-      }
-    })().finally(() => module.removeRunDependency('bl-storage'));
-    return;
-  }
-  if (!window.indexedDB)
-    return;
+  storageReady = true;
   module.addRunDependency('bl-storage');
-  holdDataLock().then((locked) => {
-    // Ohne Sperre bleibt /data im Speicher und storageReady aus (kein syncfs)
-    if (!locked) {
+  (async () => {
+    if (!(await holdDataLock())) {
+      module.ENV.BL_OPFS = '0';
       storageNotice = dataLockedNotice;
-      module.removeRunDependency('bl-storage');
       return;
     }
-    fs.mkdirTree('/data');
-    fs.mount(IDBFS, {}, '/data');
-    fs.syncfs(true, (error) => {
-      if (error)
-        console.warn('Gespeicherte Daten konnten nicht geladen werden:', error);
-      storageReady = true;
-      module.removeRunDependency('bl-storage');
-    });
-  });
+    if (storage(clearDataFlag)) {
+      await clearOPFS().catch((error) => console.warn('OPFS konnte nicht geleert werden:', error));
+      storage(clearDataFlag, null);
+    }
+  })().finally(() => module.removeRunDependency('bl-storage'));
 }
 
 // waitMilliseconds: beim Schliessen des Tabs so lange auf das Schreiben warten
 function saveStorage(waitMilliseconds = 0) {
   if (!storageReady || !engineReady)
     return;
-  // WasmFS: die Engine schreibt die Datenbanken kurz nach jeder Aenderung im
-  // eigenen Thread nach /data (engine/src/MemoryVFS.cpp)
-  if (!engine.FS.syncfs) {
-    engine._bl_storage_flush(waitMilliseconds);
-    return;
-  }
-  if (storageSyncing) {
-    storageSyncAgain = true;
-    return;
-  }
-  storageSyncing = true;
-  // Datenbanken liegen in der Engine im Speicher (engine/src/MemoryVFS.cpp),
-  // zuerst ins Dateisystem schreiben
-  if (engine._bl_storage_flush)
-    engine._bl_storage_flush(0);
-  engine.FS.syncfs(false, (error) => {
-    storageSyncing = false;
-    if (error)
-      console.warn('Daten konnten nicht gespeichert werden:', error);
-    if (storageSyncAgain) {
-      storageSyncAgain = false;
-      saveStorage();
-    }
-  });
+  // Die Engine schreibt die Datenbanken kurz nach jeder Aenderung im eigenen
+  // Thread nach /data (engine/src/MemoryVFS.cpp), hier nur beim Verstecken
+  engine._bl_storage_flush(waitMilliseconds);
 }
 
-// Mit WasmFS plant die Engine das Schreiben selber (MemoryVFS.cpp, flushFamily)
-setInterval(() => engine?.FS.syncfs && saveStorage(), 5000);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden)
     saveStorage();
@@ -292,14 +201,11 @@ async function clearStorage() {
   storageReady = false; // nichts mehr zurueckschreiben
   clearPermissions();
   // HTTP-Cache der Engine (Cache API, engine/js/http-cache.js)
-  await engine?.blClearHttpCache?.().catch(() => {});
+  await engine?.blClearHttpCache().catch(() => {});
   // Bytecode der Skripte (engine/js/bytecode-cache.js)
-  await engine?.blClearBytecodeCache?.().catch(() => {});
-  if (engine && !engine.FS.syncfs) {
-    // WasmFS: das OPFS beim naechsten Start leeren, bevor die Engine laeuft
-    storage(clearDataFlag, '1');
-  } else
-    await deleteLegacyStorage();
+  await engine?.blClearBytecodeCache().catch(() => {});
+  // Das OPFS beim naechsten Start leeren, bevor die Engine laeuft
+  storage(clearDataFlag, '1');
   reloadUI();
 }
 
@@ -345,7 +251,7 @@ function onEngineReady() {
   watchOnLine();
   watchPixelRatio();
   initDevices({ engine: () => engine, toUTF8, tabs: () => tabs, activeTab: () => activeTab, activateTab: (tab) => activateTab(tab), focusPage: () => focusPage() });
-  initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker?.() });
+  initCapture({ engine: () => engine, engineWorker: () => engine.blEngineWorker() });
   initLibrary({ openURL, activeTab: () => activeTab, tabs: () => tabs, downloadsList: () => downloadHistory, find: () => openFind(), print: () => printTab(activeTab) });
   // ?url= hat Vorrang, sonst die Tabs vom letzten Mal (wie Chrome "Weitermachen, wo ich aufgehoert habe")
   const session = params.get('url') ? null : sessionToRestore();
@@ -418,10 +324,9 @@ class Tab {
     this.canvas.className = 'page';
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;outline:none;display:none;touch-action:none';
     $('viewport').appendChild(this.canvas);
-    // Das Canvas geht an den Worker des Compositors (sonst des Engine-Threads),
-    // der malt selber hinein. Nur wo das nicht geht, kopieren wir die Pixel
-    // hier (onEngineFrame).
-    const worker = typeof this.canvas.transferControlToOffscreen === 'function' && (engine.blPresenterWorker || engine.blEngineWorker)?.();
+    // Das Canvas geht an den Worker, der malt (engine-pre.js, blPresenterWorker).
+    // Nur wo das nicht geht, kopieren wir die Pixel hier (onEngineFrame).
+    const worker = typeof this.canvas.transferControlToOffscreen === 'function' && engine.blPresenterWorker();
     if (worker) {
       const offscreen = this.canvas.transferControlToOffscreen();
       worker.postMessage({ blCanvas: offscreen, viewId: this.id }, [offscreen]);
@@ -1348,9 +1253,8 @@ let uploadCounter = 0;
 // Ordner mit den Dateien eines Tabs, unter /data/tmp im OPFS (nicht im
 // WASM-Speicher, die Engine leert ihn beim Start). Die Seite liest sie, solange
 // sie ihre File-Objekte hat (auch nach dem Navigieren, Back/Forward-Cache),
-// darum erst beim Schliessen des Tabs geloescht. Ohne WasmFS ausserhalb von
-// /data, sonst kopierte das IDBFS sie in die IndexedDB des Browsers.
-const uploadDirectory = (tab) => (engine.FS.syncfs ? '/tmp' : '/data/tmp') + '/uploads/' + tab.id;
+// darum erst beim Schliessen des Tabs geloescht.
+const uploadDirectory = (tab) => '/data/tmp/uploads/' + tab.id;
 
 // Dateien (Upload, Ablegen, Einfuegen) ins Dateisystem der Engine, gibt die
 // Pfade zurueck. Was sich nicht lesen laesst (weg, zu gross), faellt weg. Der

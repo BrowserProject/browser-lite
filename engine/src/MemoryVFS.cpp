@@ -1,10 +1,8 @@
 // SQLite-Datenbanken unter /data im WASM-Speicher.
 //
 // SQLite schreibt jede WAL-Seite einzeln, mit seek davor: beim Laden von CNN
-// waren das ca. 7000 Dateizugriffe nur fuer die Cookie-Datenbank. Mit dem
-// JS-Dateisystem von Emscripten (IDBFS ueber MEMFS, ohne WasmFS) war jeder ein
-// synchroner Umweg ueber den Haupt-Thread, mit WasmFS ist /data im OPFS, jeder
-// Zugriff ein Umweg ueber dessen Worker.
+// waren das ca. 7000 Dateizugriffe nur fuer die Cookie-Datenbank. /data liegt im
+// OPFS, jeder Zugriff ist ein Umweg ueber den Worker von WasmFS.
 //
 // Darum liegen Datenbank, -journal und -wal hier im Speicher (in Bloecken,
 // Content), ebenso der gemeinsame Speicher (shm) fuer den WAL-Modus. Auf die
@@ -17,18 +15,13 @@
 // Geschrieben wird, wenn gerade keine Schreib-Transaktion laeuft:
 // - kurz nach einer Aenderung (flushDelay, eine grosse Datenbank seltener),
 // - auf Anstoss der Oberflaeche (bl_storage_flush; beim Schliessen des Tabs
-//   wartet sie darauf, ohne WasmFS im Haupt-Thread vor dem Speichern des IDBFS),
+//   wartet sie darauf),
 // - wenn die letzte Verbindung zu einer Datenbank schliesst. Danach wird alles
 //   wieder von der Platte gelesen, so stimmt es auch, wenn WebKit die Dateien
 //   selber loescht (z.B. indexedDB.deleteDatabase).
 //
-// Regeln gegen Deadlocks: Dateizugriffe unter dem Lock einer Datenbank nur mit
-// ioMutex. Ohne WasmFS geht jeder Zugriff eines Worker-Threads ueber den
-// Haupt-Thread, und der nimmt ioMutex nur mit try_lock, wartet also nie auf das
-// Lock einer Datenbank, waehrend ein Worker-Thread darunter auf ihn wartet. Auf
-// dem Haupt-Thread unter dem Lock nichts, was warten kann (auch kein malloc):
-// waehrend er auf malloc wartet, arbeitet Emscripten die Warteschlange ab
-// (siehe Sockets.cpp).
+// Regel gegen Deadlocks: Dateizugriffe unter dem Lock einer Datenbank nur mit
+// ioMutex.
 
 #include "config.h"
 #include "MemoryVFS.h"
@@ -39,8 +32,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <emscripten/threading.h>
 #include <fcntl.h>
 #include <memory>
 #include <mutex>
@@ -53,13 +48,8 @@
 #include <vector>
 #include <wtf/FileSystem.h>
 #include <wtf/MonotonicTime.h>
-#include <wtf/text/WTFString.h>
-
-#if defined(BL_WASMFS)
-#include <climits>
-#include <emscripten/threading.h>
 #include <wtf/RunLoop.h>
-#endif
+#include <wtf/text/WTFString.h>
 
 namespace BrowserLite {
 
@@ -183,9 +173,6 @@ struct Node {
     Content content;
     bool loaded { false }; // Inhalt (bzw. "gibt es nicht") ist bekannt
     bool exists { false };
-    // Liegt so auf der Platte: -journal und -wal frueherer Versionen, die
-    // beim naechsten Schreiben weg muessen
-    bool onDisk { false };
 };
 
 struct Family {
@@ -384,9 +371,8 @@ void writeDatabase(FileReplacement& file, const Content& database, const Content
     file.truncate(size);
 }
 
-// Unter dem Lock der Familie und ioMutex. Alte Nebendateien kommen erst weg,
-// wenn die Kopie geschrieben ist, und vor dem Umbenennen: ein altes WAL neben
-// der neuen Datenbank spielte SQLite sonst beim Oeffnen ein
+// Unter dem Lock der Familie und ioMutex. Die Kopie ersetzt die Datenbank in
+// einem Schritt
 bool writeFamily(Family& family)
 {
     Node* database = nullptr;
@@ -404,31 +390,18 @@ bool writeFamily(Family& family)
         if (!file->ok())
             return false;
     }
-    for (auto& node : family.nodes) {
-        if (!node->onDisk || node.get() == database)
-            continue;
-        if (unlink(node->path.c_str()) && errno != ENOENT)
-            return false;
-        node->onDisk = false;
-    }
     if (file)
         return file->commit(family.name.c_str());
     return !unlink(family.name.c_str()) || errno == ENOENT;
 }
 
-enum class Flush : uint8_t { Scheduled, Now, FromHostThread };
+enum class Flush : uint8_t { Scheduled, Now };
 
 // Eine Datenbank auf die Platte. false: noch nicht (Schreib-Transaktion,
 // ioMutex belegt, zu frueh oder Fehler)
 bool flushFamily(Family& family, Flush mode)
 {
-    std::unique_lock ioLock(ioMutex, std::defer_lock);
-    if (mode == Flush::FromHostThread) {
-        if (!ioLock.try_lock())
-            return false;
-    } else
-        ioLock.lock();
-
+    std::lock_guard ioLock(ioMutex);
     // Unter dem Lock ohne Kopie: solange schreibt niemand in die Datenbank
     std::lock_guard lock(family.mutex);
     if (!family.dirty)
@@ -448,29 +421,14 @@ bool flushFamily(Family& family, Flush mode)
     return written;
 }
 
-// Alle Familien, ohne malloc unter dem Lock (Haupt-Thread, siehe oben).
-// false: nicht alle (der Haupt-Thread wartet nie auf das Lock)
-bool listFamilies(std::vector<std::shared_ptr<Family>>& all, bool fromHostThread)
+std::vector<std::shared_ptr<Family>> listFamilies()
 {
-    std::unique_lock registryLock(registryMutex, std::defer_lock);
-    auto lock = [&] {
-        if (!fromHostThread)
-            registryLock.lock();
-        return registryLock.owns_lock() || registryLock.try_lock();
-    };
-    if (!lock())
-        return false;
-    size_t count = families->size();
-    registryLock.unlock();
-    all.reserve(count + 8);
-    if (!lock())
-        return false;
-    for (auto& [name, family] : *families) {
-        if (all.size() == all.capacity())
-            return false;
+    std::lock_guard registryLock(registryMutex);
+    std::vector<std::shared_ptr<Family>> all;
+    all.reserve(families->size());
+    for (auto& [name, family] : *families)
         all.push_back(family);
-    }
-    return true;
+    return all;
 }
 
 // false: nicht alles geschrieben
@@ -478,14 +436,12 @@ bool flushAll(Flush mode)
 {
     if (!families)
         return true;
-    std::vector<std::shared_ptr<Family>> all;
-    bool complete = listFamilies(all, mode == Flush::FromHostThread);
-    for (auto& family : all)
+    bool complete = true;
+    for (auto& family : listFamilies())
         complete = flushFamily(*family, mode) && complete;
     return complete;
 }
 
-#if defined(BL_WASMFS)
 // Kurz nach einer Aenderung schreiben, im Engine-Thread
 constexpr Seconds flushDelay = 1_s;
 std::atomic<bool> flushScheduled;
@@ -502,16 +458,12 @@ void scheduleFlush()
         });
     });
 }
-#endif
 
 // Unter dem Lock der Familie
 void markDirty(Family& family)
 {
-    if (std::exchange(family.dirty, true))
-        return;
-#if defined(BL_WASMFS)
-    scheduleFlush();
-#endif
+    if (!std::exchange(family.dirty, true))
+        scheduleFlush();
 }
 
 // ---------------------------------------------------------------- Dateien
@@ -843,7 +795,12 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         std::lock_guard lock(family->mutex);
         loaded = family->find(path)->loaded;
     }
-    if (!loaded) {
+    if (!loaded && path != family->name) {
+        // -journal und -wal liegen nur im Speicher (writeFamily)
+        std::lock_guard lock(family->mutex);
+        auto* node = family->find(path);
+        node->loaded = true;
+    } else if (!loaded) {
         // Ohne Lock von der Platte lesen. Bei einem Lesefehler (auch zu wenig
         // Speicher) nicht oeffnen: sonst wuerde eine leere Datenbank die echte
         // ueberschreiben
@@ -865,7 +822,7 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         auto* node = family->find(path);
         if (!node->loaded) {
             node->content = WTF::move(content);
-            node->exists = node->onDisk = result == ReadResult::Done;
+            node->exists = result == ReadResult::Done;
             node->loaded = true;
         }
     }
@@ -929,28 +886,20 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
     if (!inMemoryDomain(name))
         return baseVFS->xAccess(baseVFS, name, flags, result);
     std::string path(name);
-    auto family = findFamily(familyName(path));
-    if (family) {
+    auto databaseName = familyName(path);
+    if (auto family = findFamily(databaseName)) {
         std::lock_guard lock(family->mutex);
         if (auto* node = family->find(path); node && node->loaded) {
             *result = node->exists;
             return SQLITE_OK;
         }
     }
-    int status = baseVFS->xAccess(baseVFS, name, flags, result);
-    // "Gibt es nicht" merken, solange die Datenbank offen ist (SQLite fragt
-    // bei jeder Transaktion nach -journal bzw. -wal)
-    if (status == SQLITE_OK && !*result && family) {
-        std::lock_guard lock(family->mutex);
-        if (family->openCount) {
-            auto& node = family->findOrCreate(path);
-            if (!node.loaded) {
-                node.loaded = true;
-                node.exists = false;
-            }
-        }
+    // -journal und -wal liegen nur im Speicher (writeFamily)
+    if (path != databaseName) {
+        *result = 0;
+        return SQLITE_OK;
     }
-    return status;
+    return baseVFS->xAccess(baseVFS, name, flags, result);
 }
 
 int memoryFullPathname(sqlite3_vfs*, const char* name, int size, char* out)
@@ -1075,12 +1024,11 @@ void registerMemoryVFS()
     sqlite3_vfs_register(&memoryVFS, 1);
 }
 
-void flushMemoryVFS(bool fromHostThread)
+void flushMemoryVFS()
 {
-    flushAll(fromHostThread ? Flush::FromHostThread : Flush::Now);
+    flushAll(Flush::Now);
 }
 
-#if defined(BL_WASMFS)
 bool flushMemoryVFSAndWait(Seconds timeout)
 {
     auto done = std::make_shared<std::atomic<uint32_t>>(0);
@@ -1098,7 +1046,6 @@ bool flushMemoryVFSAndWait(Seconds timeout)
     }
     return true;
 }
-#endif
 
 uint64_t memoryVFSDirectorySize(const String& directory)
 {
@@ -1108,7 +1055,7 @@ uint64_t memoryVFSDirectorySize(const String& directory)
     std::vector<std::string> inMemory;
     std::vector<std::shared_ptr<Family>> all;
     if (families)
-        listFamilies(all, false);
+        all = listFamilies();
     for (auto& family : all) {
         if (!family->name.starts_with(prefix) || family->name.find('/', prefix.size()) != std::string::npos)
             continue;

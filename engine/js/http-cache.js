@@ -24,7 +24,6 @@ var blHttpCache = {
       return blHttpCache.ready;
     if (typeof caches === 'undefined' || Module['blHttpCacheDisabled'])
       return blHttpCache.ready = Promise.resolve(null);
-    caches.delete('bl-http-v1').catch(function () { });
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (estimate) {
         if (estimate.quota)

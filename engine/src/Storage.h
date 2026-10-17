@@ -1,8 +1,7 @@
 // Speicher der Seiten: Cookies, localStorage und IndexedDB liegen unter /data.
-// Mit WasmFS ist /data ein Verzeichnis im OPFS des Host-Browsers (Storage.cpp),
-// sonst haengt die Oberflaeche dort ein IDBFS ein und speichert es regelmaessig.
-// So bleibt alles nach einem Neuladen erhalten. Ohne Host (node-Tests) ist /data
-// nur im Speicher.
+// /data ist ein Verzeichnis im OPFS des Host-Browsers (Storage.cpp), so bleibt
+// alles nach einem Neuladen erhalten. Ohne OPFS (node-Tests, zweiter Host-Tab)
+// ist /data nur im Speicher.
 #pragma once
 
 #include <cstdint>
@@ -35,8 +34,7 @@ uint64_t directorySize(const String& directory);
 // Ganze Dateien unter /data (Datenbanken, Cache API) ersetzen: erst eine Kopie
 // in /data/tmp schreiben, dann umbenennen. Bricht das Schreiben ab (Tab zu,
 // Platte voll), bleibt die alte Datei ganz (initializeStorage leert /data/tmp
-// beim naechsten Start). Ohne malloc, das MemoryVFS schreibt auf dem
-// Haupt-Thread auch unter einem Lock.
+// beim naechsten Start).
 class FileReplacement {
 public:
     FileReplacement();

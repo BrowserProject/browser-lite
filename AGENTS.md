@@ -20,8 +20,10 @@ Einfacher, verstaendlicher, dauerhafter Code. Features sauber in die Architektur
 anhaengen, auch wenn das mehr Arbeit ist. Was an mehreren Stellen gebraucht wird, gibt es einmal
 als wiederverwendbares Modul (z.B. `relay/static.mjs` fuer beide Server).
 
-Keine Rueckwaertskompatibilitaet ohne Not, lieber sauber umstellen. Bevor ein Feature entfernt
-wird, das nicht klar verlangt wurde: fragen.
+Das Projekt ist ein Test und nicht produktiv, darum keine Rueckwaertskompatibilitaet: keine
+Uebernahme alter gespeicherter Daten, keine alten Build-Varianten, keine alten Namen oder
+Formate behalten, immer sauber umstellen. Bevor ein Feature entfernt wird, das nicht klar
+verlangt wurde: fragen.
 
 Doku kurz, nur was noetig ist, und aktuell halten (README des Ordners, passendes Kapitel in
 `docs/`, `docs/stand.md`). Kommentare sparsam, nur fuer Nicht-Offensichtliches, nie fuer

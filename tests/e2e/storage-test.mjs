@@ -348,7 +348,7 @@ await page.evaluate(async () => {
 });
 check('Rest in /data/tmp angelegt', (await leftoverExists()) === 'da');
 
-// Warten bis /data gespeichert ist (alle 5 s), dann alles neu laden
+// Warten bis /data gespeichert ist, dann alles neu laden
 await page.waitForTimeout(7000);
 results.clear();
 await page.reload();
@@ -382,37 +382,21 @@ check('Erster Tab: Daten nicht ueberschrieben', (await result('read')) === 'ja,g
 await result('deleted');
 await result('opfsworker');
 
-// Daten aus dem IDBFS frueherer Versionen (IndexedDB "/data", ein Eintrag pro
-// Datei) uebernimmt die Engine beim ersten Start mit WasmFS nach /data (OPFS)
-// und loescht die alte Datenbank danach (web/app.js, engine/src/Storage.cpp)
+// "Daten loeschen": die Oberflaeche laedt neu und leert /data vor dem Start
+// der Engine, danach ist die Datei weg. Zuerst in einem neuen Profil eine
+// Datei im OPFS der Seite anlegen
 const freshContext = await launchProfile();
 const fresh = freshContext.pages()[0] || await freshContext.newPage();
 results.clear();
 results.watch(fresh);
-await fresh.goto(stack.uiURL + 'nicht-da');
-const origin = encodeURIComponent(siteURL.slice(0, -1));
-await fresh.evaluate((file) => new Promise((resolve, reject) => {
-  const open = indexedDB.open('/data', 21);
-  open.onupgradeneeded = () => open.result.createObjectStore('FILE_DATA').createIndex('timestamp', 'timestamp', { unique: false });
-  open.onerror = () => reject(open.error);
-  open.onsuccess = () => {
-    const tx = open.result.transaction('FILE_DATA', 'readwrite');
-    tx.objectStore('FILE_DATA').put({ timestamp: new Date(), mode: 16877 }, '/data/opfs');
-    tx.objectStore('FILE_DATA').put({ timestamp: new Date(), mode: 33188, contents: new TextEncoder().encode('alt-daten') }, file);
-    tx.oncomplete = () => { open.result.close(); resolve(); };
-    tx.onerror = () => reject(tx.error);
-  };
-}), `/data/opfs/${origin}/${origin}/notiz.txt`);
 await fresh.goto(appURL);
-const migrated = await result('opfs');
-check('Alte IDBFS-Daten uebernommen', migrated?.startsWith('alt-daten,'), String(migrated));
-await fresh.waitForTimeout(1000);
-const legacyGone = await fresh.evaluate(async () => !(await indexedDB.databases()).some((db) => db.name === '/data'));
-check('Alte IDBFS-Datenbank geloescht', legacyGone);
-
-// "Daten loeschen": die Oberflaeche laedt neu und leert /data vor dem Start
-// der Engine, danach ist die Datei weg
-await fresh.waitForTimeout(6000);
+await result('opfs');
+await fresh.waitForTimeout(2000);
+results.clear();
+await fresh.reload();
+const saved = await result('opfs');
+check('Neues Profil: Datei im OPFS gespeichert', saved?.startsWith('gespeichert,'), String(saved));
+await fresh.waitForTimeout(2000);
 results.clear();
 fresh.once('dialog', (dialog) => dialog.accept());
 await fresh.evaluate(() => document.getElementById('clear-data').click());

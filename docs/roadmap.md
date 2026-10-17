@@ -94,12 +94,10 @@ kommen zuerst.
 
 ## Phase 7: Persistenz  (fertig)
 - [x] Cookies in SQLite, localStorage und IndexedDB (aus `WebKitLegacy/Storage`) unter `/data`
-- [x] `/data` als IDBFS: beim Start aus der IndexedDB des Host-Browsers geladen und alle 5 s
-  sowie beim Verlassen gespeichert (abgeloest durch WasmFS mit OPFS, siehe unten)
 - [x] Knopf "Gespeicherte Daten loeschen"
 - [x] e2e-Test `tests/e2e/storage-test.mjs`
 - [x] WasmFS statt JS-Dateisystem, `/data` im OPFS (#142): keine Datei-Syscalls mehr ueber
-  den UI-Thread, alte IDBFS-Daten werden einmal uebernommen
+  den UI-Thread
 
 ## Phase 8: Performance + Kompatibilitaet  (laeuft)
 Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).

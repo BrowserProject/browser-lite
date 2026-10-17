@@ -29,8 +29,8 @@ Offen: ob auch die Daten der Oberflaeche (Sitzung, Verlauf, Lesezeichen, Einstel
 1. **Login** am Server mit Passkey. Die Sitzung ersetzt auch den `RELAY_TOKEN`: das Relay
    bekommt nur, wer angemeldet ist.
 2. **Start:** Die Oberflaeche laedt das Profil, entschluesselt es und gibt die Dateien vor dem
-   Start der Engine nach `/data`, auf dem gleichen Weg wie die Uebernahme aus dem alten IDBFS
-   (`migrateLegacyStorage` in `engine/src/Storage.cpp`, daraus wird ein allgemeiner Import).
+   Start der Engine nach `/data` (ein Import in `initializeStorage` in
+   `engine/src/Storage.cpp`, noch zu bauen).
 3. **Laufzeit:** Nach jedem Flush (kurz nach jeder Aenderung und beim Verlassen) meldet die
    Engine, welche Dateien des Profils sich geaendert haben. Die Oberflaeche verschluesselt und
    laedt nur diese hoch. Die Dateien sind dann immer ganz: das MemoryVFS schreibt SQLite nur

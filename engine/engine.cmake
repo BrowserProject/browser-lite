@@ -165,18 +165,10 @@ foreach (pre_js IN LISTS BL_PRE_JS)
 endforeach ()
 
 # Dateisystem: WasmFS (im WASM, Datei-Syscalls ohne Umweg ueber den UI-Thread)
-# oder das alte JS-Dateisystem mit IDBFS fuer /data (siehe web/app.js).
-option(BROWSER_LITE_WASMFS "WasmFS statt JS-Dateisystem" ON)
-if (BROWSER_LITE_WASMFS)
-    target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sWASMFS")
-    target_compile_definitions(BrowserLiteEngine PRIVATE BL_WASMFS=1)
-    # Fehler beim Schreiben ins OPFS des Host genauer (engine/js/wasmfs-opfs.js)
-    target_link_options(BrowserLiteEngine PRIVATE "SHELL:--js-library ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js")
-    set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js)
-else ()
-    # Dauerhafter Speicher (/data) ueber IndexedDB des Host-Browsers
-    target_link_options(BrowserLiteEngine PRIVATE "SHELL:-lidbfs.js")
-endif ()
+target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sWASMFS")
+# Fehler beim Schreiben ins OPFS des Host genauer (engine/js/wasmfs-opfs.js)
+target_link_options(BrowserLiteEngine PRIVATE "SHELL:--js-library ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js")
+set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js)
 
 # GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
 # laufen (engine/src/EngineLoop.cpp, Patch 0012), darum braucht es den Pass

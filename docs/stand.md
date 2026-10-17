@@ -58,9 +58,10 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
 - Service Worker mit Update im Hintergrund, Navigation Preload (auch aus dem HTTP-Cache,
   #182), Benachrichtigungen und `clients.openWindow()` nach `notificationclick`.
 - Speicher: WasmFS, `/data` im OPFS (#142, nur ein Host-Tab besitzt es), HTTP- und
-  Bytecode-Cache in der Cache API (#70, #135), Inhalte der Cache API der Seiten als
-  eigene Dateien. Ohne Platz im OPFS des Host bekommen die Seiten im OPFS
-  `QuotaExceededError` (#166). `navigator.onLine` folgt der Verbindung zum Relay.
+  Bytecode-Cache in der Cache API (#70, #135), Inhalte der Cache API der Seiten als eigene
+  Dateien. Ohne Platz im OPFS des Host bekommen die
+  Seiten im OPFS `QuotaExceededError` (#166). `navigator.onLine` folgt der Verbindung zum
+  Relay.
 - IndexedDB: hoechstens 256 MB pro Ursprung nur fuers Schreiben (`QuotaExceededError`,
   Geloeschtes gibt Platz frei, `navigator.storage.estimate()` meldet Grenze und Platz),
   Oeffnen, Lesen und Loeschen gehen auch ueber der Grenze; zu grosse Dateien laedt das VFS
