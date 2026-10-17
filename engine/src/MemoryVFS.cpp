@@ -6,25 +6,34 @@
 // synchroner Umweg ueber den Haupt-Thread, mit WasmFS ist /data im OPFS, jeder
 // Zugriff ein Umweg ueber dessen Worker.
 //
-// Darum liegen Datenbank, -journal und -wal hier im Speicher, ebenso der
-// gemeinsame Speicher (shm) fuer den WAL-Modus. Ins Dateisystem kommen die
-// Dateien nur als Ganzes (ueber eine Kopie, replaceWholeFile in Storage.h):
-// - alle paar Sekunden auf Anstoss der Oberflaeche (bl_storage_flush; mit
-//   WasmFS im Engine-Thread, sonst im Haupt-Thread vor dem Speichern des IDBFS),
+// Darum liegen Datenbank, -journal und -wal hier im Speicher (in Bloecken,
+// Content), ebenso der gemeinsame Speicher (shm) fuer den WAL-Modus. Auf die
+// Platte kommt nur die Datenbank, als Ganzes und mit allen bestaetigten Seiten
+// aus dem WAL wie nach einem Checkpoint (writeFamily), ueber eine Kopie und ein
+// rename (FileReplacement in Storage.h). Datenbank und WAL getrennt zu
+// ersetzen waere nicht atomar: bricht es dazwischen ab, spielt SQLite ein
+// altes WAL in eine neue Datenbank ein.
+//
+// Geschrieben wird, wenn gerade keine Schreib-Transaktion laeuft:
+// - kurz nach einer Aenderung (flushDelay, eine grosse Datenbank seltener),
+// - auf Anstoss der Oberflaeche (bl_storage_flush; beim Schliessen des Tabs
+//   wartet sie darauf, ohne WasmFS im Haupt-Thread vor dem Speichern des IDBFS),
 // - wenn die letzte Verbindung zu einer Datenbank schliesst. Danach wird alles
 //   wieder von der Platte gelesen, so stimmt es auch, wenn WebKit die Dateien
 //   selber loescht (z.B. indexedDB.deleteDatabase).
-// Geschrieben wird nur, wenn gerade keine Schreib-Transaktion laeuft, damit
-// Datenbank und WAL zusammenpassen.
 //
-// Regeln gegen Deadlocks: in Worker-Threads kein Dateizugriff, waehrend ein
-// Lock hier gehalten wird (der wartet auf den Haupt-Thread, der vielleicht
-// gerade selber auf dieses Lock wartet). Auf dem Haupt-Thread unter dem Lock
-// nichts, was warten kann (auch kein malloc), siehe flushFamily.
+// Regeln gegen Deadlocks: Dateizugriffe unter dem Lock einer Datenbank nur mit
+// ioMutex. Ohne WasmFS geht jeder Zugriff eines Worker-Threads ueber den
+// Haupt-Thread, und der nimmt ioMutex nur mit try_lock, wartet also nie auf das
+// Lock einer Datenbank, waehrend ein Worker-Thread darunter auf ihn wartet. Auf
+// dem Haupt-Thread unter dem Lock nichts, was warten kann (auch kein malloc):
+// waehrend er auf malloc wartet, arbeitet Emscripten die Warteschlange ab
+// (siehe Sockets.cpp).
 
 #include "config.h"
 #include "MemoryVFS.h"
 
+#include "Engine.h"
 #include "Storage.h"
 
 #include <algorithm>
@@ -32,13 +41,25 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sqlite3.h>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
+#include <wtf/FileSystem.h>
+#include <wtf/MonotonicTime.h>
+#include <wtf/text/WTFString.h>
+
+#if defined(BL_WASMFS)
+#include <climits>
+#include <emscripten/threading.h>
+#include <wtf/RunLoop.h>
+#endif
 
 namespace BrowserLite {
 
@@ -46,18 +67,135 @@ namespace {
 
 constexpr char rootPrefix[] = "/data/";
 
+// Groesste Datei im Speicher (BL_DATABASE_MAX_MB, Standard 512 MB). Groessere
+// oeffnet das VFS nicht, statt sie zu laden: der WASM-Speicher hat hoechstens
+// 4 GB fuer alles. IndexedDB hat eine kleinere Grenze pro Ursprung nur fuers
+// Schreiben (Storage.cpp), das hier gilt auch beim Oeffnen und fuer alle anderen.
+uint64_t maximumFileSize()
+{
+    static const uint64_t size = [] {
+        const char* value = getenv("BL_DATABASE_MAX_MB");
+        return (value && *value ? strtoull(value, nullptr, 10) : 512) << 20;
+    }();
+    return size;
+}
+
+// Inhalt einer Datei in Bloecken fester Groesse. Wachsen kopiert nichts um
+// (ein std::vector braucht dabei alten und neuen Platz, mit der Verdoppelung
+// bis zum Dreifachen der Datei), und fehlt Speicher, bekommt SQLite
+// SQLITE_FULL statt die Engine einen Absturz.
+class Content {
+public:
+    Content() = default;
+    Content(Content&& other)
+        : m_blocks(std::exchange(other.m_blocks, { }))
+        , m_size(std::exchange(other.m_size, 0))
+    {
+    }
+    Content& operator=(Content&& other)
+    {
+        resize(0);
+        m_blocks = std::exchange(other.m_blocks, { });
+        m_size = std::exchange(other.m_size, 0);
+        return *this;
+    }
+    ~Content() { resize(0); }
+
+    uint64_t size() const { return m_size; }
+
+    // false: zu gross oder kein Speicher, dann bleibt alles wie es war
+    bool resize(uint64_t size)
+    {
+        if (size > maximumFileSize())
+            return false;
+        size_t count = (size + blockSize - 1) / blockSize;
+        size_t before = m_blocks.size();
+        while (m_blocks.size() < count) {
+            auto* block = static_cast<uint8_t*>(calloc(1, blockSize));
+            if (!block) {
+                while (m_blocks.size() > before) {
+                    free(m_blocks.back());
+                    m_blocks.pop_back();
+                }
+                return false;
+            }
+            m_blocks.push_back(block);
+        }
+        while (m_blocks.size() > count) {
+            free(m_blocks.back());
+            m_blocks.pop_back();
+        }
+        // Hinter dem Ende stehen immer Nullen: waechst die Datei wieder, liest
+        // SQLite dort nichts Altes
+        if (size < m_size && size % blockSize)
+            memset(m_blocks.back() + size % blockSize, 0, blockSize - size % blockSize);
+        m_size = size;
+        return true;
+    }
+
+    bool write(const uint8_t* data, size_t length, uint64_t offset)
+    {
+        if (offset + length > m_size && !resize(offset + length))
+            return false;
+        forEach(offset, length, [&](uint8_t* block, size_t part) {
+            memcpy(block, data, part);
+            data += part;
+        });
+        return true;
+    }
+
+    // Liest hoechstens bis zum Ende, gibt die gelesene Laenge zurueck
+    size_t read(uint8_t* data, size_t length, uint64_t offset) const
+    {
+        if (offset >= m_size)
+            return 0;
+        length = std::min<uint64_t>(length, m_size - offset);
+        forEach(offset, length, [&](const uint8_t* block, size_t part) {
+            memcpy(data, block, part);
+            data += part;
+        });
+        return length;
+    }
+
+    // Die Stuecke von [offset, offset + length) der Reihe nach (innerhalb von
+    // size()). Sie beginnen und enden an Vielfachen von 8, wenn offset und
+    // length das tun
+    template<typename Function>
+    void forEach(uint64_t offset, uint64_t length, Function&& function) const
+    {
+        while (length) {
+            size_t start = offset % blockSize;
+            size_t part = std::min<uint64_t>(length, blockSize - start);
+            function(m_blocks[offset / blockSize] + start, part);
+            offset += part;
+            length -= part;
+        }
+    }
+
+private:
+    static constexpr size_t blockSize = 64 << 10;
+    std::vector<uint8_t*> m_blocks;
+    uint64_t m_size { 0 };
+};
+
 struct Node {
     std::string path;
-    std::vector<uint8_t> data;
+    Content content;
     bool loaded { false }; // Inhalt (bzw. "gibt es nicht") ist bekannt
     bool exists { false };
-    bool dirty { false };
+    // Liegt so auf der Platte: -journal und -wal frueherer Versionen, die
+    // beim naechsten Schreiben weg muessen
+    bool onDisk { false };
 };
 
 struct Family {
+    std::string name; // Pfad der Datenbank
     std::mutex mutex;
     std::vector<std::unique_ptr<Node>> nodes; // Datenbank, -journal, -wal
     int openCount { 0 };
+    bool dirty { false }; // seit dem letzten Schreiben geaendert
+    // Eine grosse Datenbank nicht dauernd ganz neu schreiben (flushFamily)
+    MonotonicTime nextWrite;
     // Locks auf der Datenbank (Rollback-Journal)
     int sharedCount { 0 };
     bool reserved { false };
@@ -144,70 +282,236 @@ std::shared_ptr<Family> findFamily(const std::string& name)
     return it == families->end() ? nullptr : it->second;
 }
 
-bool writeFile(const std::string& path, const std::vector<uint8_t>& data)
+// ---------------------------------------------------------------- Schreiben
+
+// Format des WAL: https://www.sqlite.org/fileformat2.html#walformat
+constexpr uint64_t walHeaderSize = 32;
+constexpr uint64_t walFrameHeaderSize = 24;
+
+uint32_t get32(const uint8_t* data)
 {
-    return replaceWholeFile(path.c_str(), data);
+    return static_cast<uint32_t>(data[0]) << 24 | data[1] << 16 | data[2] << 8 | data[3];
 }
 
-// Geaenderte Dateien einer Datenbank schreiben. false: uebersprungen
-bool flushFamily(Family& family, bool fromHostThread)
+// walChecksumBytes in wal.c, length ist ein Vielfaches von 8
+void walChecksum(bool bigEndian, const uint8_t* data, size_t length, uint32_t sum[2])
 {
-    struct Pending {
-        std::string path;
-        bool exists;
-        std::vector<uint8_t> data;
-    };
+    for (size_t i = 0; i < length; i += 8) {
+        uint32_t first;
+        uint32_t second;
+        memcpy(&first, data + i, 4);
+        memcpy(&second, data + i + 4, 4);
+        if (bigEndian) {
+            first = __builtin_bswap32(first);
+            second = __builtin_bswap32(second);
+        }
+        sum[0] += first + sum[1];
+        sum[1] += second + sum[0];
+    }
+}
+
+struct WalFrames {
+    uint32_t pageSize { 0 };
+    uint32_t count { 0 }; // Frames bis zum letzten Commit
+    uint32_t databasePages { 0 }; // Seiten der Datenbank nach diesem Commit
+};
+
+// Wie die Wiederherstellung in SQLite (walIndexRecover in wal.c): gueltig sind
+// Frames mit dem Salz aus dem Kopf und verketteter Pruefsumme, bestaetigt ist
+// alles bis zum letzten Frame mit Commit
+WalFrames committedFrames(const Content& wal)
+{
+    uint8_t header[walHeaderSize];
+    if (wal.read(header, sizeof(header), 0) < sizeof(header))
+        return { };
+    uint32_t magic = get32(header);
+    uint32_t pageSize = get32(header + 8);
+    if ((magic & ~1u) != 0x377f0682 || get32(header + 4) != 3007000 || pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)))
+        return { };
+    bool bigEndian = magic & 1;
+    uint32_t sum[2] = { 0, 0 };
+    walChecksum(bigEndian, header, 24, sum);
+    if (sum[0] != get32(header + 24) || sum[1] != get32(header + 28))
+        return { };
+
+    WalFrames result { pageSize };
+    uint64_t frameSize = walFrameHeaderSize + pageSize;
+    for (uint64_t index = 0; walHeaderSize + (index + 1) * frameSize <= wal.size(); ++index) {
+        uint64_t offset = walHeaderSize + index * frameSize;
+        uint8_t frame[walFrameHeaderSize];
+        wal.read(frame, sizeof(frame), offset);
+        if (memcmp(frame + 8, header + 16, 8) || !get32(frame))
+            break;
+        walChecksum(bigEndian, frame, 8, sum);
+        wal.forEach(offset + walFrameHeaderSize, pageSize, [&](const uint8_t* data, size_t length) {
+            walChecksum(bigEndian, data, length, sum);
+        });
+        if (sum[0] != get32(frame + 16) || sum[1] != get32(frame + 20))
+            break;
+        if (uint32_t pages = get32(frame + 4)) {
+            result.count = index + 1;
+            result.databasePages = pages;
+        }
+    }
+    return result;
+}
+
+// Die Datenbank, wie SQLite sie nach einem vollen Checkpoint haette: erst der
+// Inhalt der Datei, darueber die bestaetigten Seiten aus dem WAL der Reihe nach
+// (eine spaetere Fassung einer Seite ueberschreibt die fruehere)
+void writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
+{
+    auto frames = wal ? committedFrames(*wal) : WalFrames { };
+    uint64_t size = frames.count ? static_cast<uint64_t>(frames.databasePages) * frames.pageSize : database.size();
+    uint64_t offset = 0;
+    database.forEach(0, std::min(size, database.size()), [&](const uint8_t* data, size_t length) {
+        file.write({ data, length }, offset);
+        offset += length;
+    });
+    for (uint64_t index = 0; index < frames.count; ++index) {
+        uint64_t frame = walHeaderSize + index * (walFrameHeaderSize + frames.pageSize);
+        uint8_t header[walFrameHeaderSize];
+        wal->read(header, sizeof(header), frame);
+        uint32_t page = get32(header);
+        if (page > frames.databasePages)
+            continue;
+        uint64_t target = static_cast<uint64_t>(page - 1) * frames.pageSize;
+        wal->forEach(frame + walFrameHeaderSize, frames.pageSize, [&](const uint8_t* data, size_t length) {
+            file.write({ data, length }, target);
+            target += length;
+        });
+    }
+    file.truncate(size);
+}
+
+// Unter dem Lock der Familie und ioMutex. Alte Nebendateien kommen erst weg,
+// wenn die Kopie geschrieben ist, und vor dem Umbenennen: ein altes WAL neben
+// der neuen Datenbank spielte SQLite sonst beim Oeffnen ein
+bool writeFamily(Family& family)
+{
+    Node* database = nullptr;
+    Node* wal = nullptr;
+    for (auto& node : family.nodes) {
+        if (node->path == family.name)
+            database = node.get();
+        else if (endsWith(node->path, "-wal") && node->exists)
+            wal = node.get();
+    }
+    std::optional<FileReplacement> file;
+    if (database && database->exists) {
+        file.emplace();
+        writeDatabase(*file, database->content, wal ? &wal->content : nullptr);
+        if (!file->ok())
+            return false;
+    }
+    for (auto& node : family.nodes) {
+        if (!node->onDisk || node.get() == database)
+            continue;
+        if (unlink(node->path.c_str()) && errno != ENOENT)
+            return false;
+        node->onDisk = false;
+    }
+    if (file)
+        return file->commit(family.name.c_str());
+    return !unlink(family.name.c_str()) || errno == ENOENT;
+}
+
+enum class Flush : uint8_t { Scheduled, Now, FromHostThread };
+
+// Eine Datenbank auf die Platte. false: noch nicht (Schreib-Transaktion,
+// ioMutex belegt, zu frueh oder Fehler)
+bool flushFamily(Family& family, Flush mode)
+{
     std::unique_lock ioLock(ioMutex, std::defer_lock);
-    if (fromHostThread) {
+    if (mode == Flush::FromHostThread) {
         if (!ioLock.try_lock())
             return false;
     } else
         ioLock.lock();
 
-    if (fromHostThread) {
-        // Auf dem Haupt-Thread gehen Dateizugriffe direkt (kein Warten), darum
-        // ohne Kopie unter dem Lock schreiben. Kopieren hiesse malloc, und
-        // waehrend der Haupt-Thread auf malloc wartet, arbeitet Emscripten die
-        // Warteschlange ab (siehe Sockets.cpp)
-        std::lock_guard lock(family.mutex);
-        if (family.writeLocked())
-            return false;
-        bool ok = true;
-        for (auto& node : family.nodes) {
-            if (!node->dirty)
-                continue;
-            bool written = node->exists ? writeFile(node->path, node->data) : (!unlink(node->path.c_str()) || errno == ENOENT);
-            if (written)
-                node->dirty = false;
-            else
-                ok = false;
-        }
-        return ok;
-    }
+    // Unter dem Lock ohne Kopie: solange schreibt niemand in die Datenbank
+    std::lock_guard lock(family.mutex);
+    if (!family.dirty)
+        return true;
+    if (family.writeLocked())
+        return false;
+    auto start = MonotonicTime::now();
+    if (mode == Flush::Scheduled && start < family.nextWrite)
+        return false;
+    bool written = writeFamily(family);
+    // Hoechstens ein Fuenftel der Zeit mit Schreiben verbringen, auch wenn es
+    // immer wieder fehlschlaegt (z.B. OPFS voll)
+    auto end = MonotonicTime::now();
+    family.nextWrite = end + (end - start) * 4;
+    if (written)
+        family.dirty = false;
+    return written;
+}
 
-    std::vector<Pending> pending;
-    {
-        std::lock_guard lock(family.mutex);
-        if (family.writeLocked())
+// Alle Familien, ohne malloc unter dem Lock (Haupt-Thread, siehe oben).
+// false: nicht alle (der Haupt-Thread wartet nie auf das Lock)
+bool listFamilies(std::vector<std::shared_ptr<Family>>& all, bool fromHostThread)
+{
+    std::unique_lock registryLock(registryMutex, std::defer_lock);
+    auto lock = [&] {
+        if (!fromHostThread)
+            registryLock.lock();
+        return registryLock.owns_lock() || registryLock.try_lock();
+    };
+    if (!lock())
+        return false;
+    size_t count = families->size();
+    registryLock.unlock();
+    all.reserve(count + 8);
+    if (!lock())
+        return false;
+    for (auto& [name, family] : *families) {
+        if (all.size() == all.capacity())
             return false;
-        for (auto& node : family.nodes) {
-            if (!node->dirty)
-                continue;
-            pending.push_back({ node->path, node->exists, node->exists ? node->data : std::vector<uint8_t> { } });
-            node->dirty = false;
-        }
+        all.push_back(family);
     }
-    bool ok = true;
-    for (auto& file : pending) {
-        bool written = file.exists ? writeFile(file.path, file.data) : (!unlink(file.path.c_str()) || errno == ENOENT);
-        if (!written) {
-            ok = false;
-            std::lock_guard lock(family.mutex);
-            if (auto* node = family.find(file.path))
-                node->dirty = true;
-        }
-    }
-    return ok;
+    return true;
+}
+
+// false: nicht alles geschrieben
+bool flushAll(Flush mode)
+{
+    if (!families)
+        return true;
+    std::vector<std::shared_ptr<Family>> all;
+    bool complete = listFamilies(all, mode == Flush::FromHostThread);
+    for (auto& family : all)
+        complete = flushFamily(*family, mode) && complete;
+    return complete;
+}
+
+#if defined(BL_WASMFS)
+// Kurz nach einer Aenderung schreiben, im Engine-Thread
+constexpr Seconds flushDelay = 1_s;
+std::atomic<bool> flushScheduled;
+
+void scheduleFlush()
+{
+    if (flushScheduled.exchange(true))
+        return;
+    runOnEngineThread([] {
+        RunLoop::mainSingleton().dispatchAfter(flushDelay, [] {
+            flushScheduled = false;
+            if (!flushAll(Flush::Scheduled))
+                scheduleFlush();
+        });
+    });
+}
+#endif
+
+// Unter dem Lock der Familie
+void markDirty(Family& family)
+{
+    if (std::exchange(family.dirty, true))
+        return;
+#if defined(BL_WASMFS)
+    scheduleFlush();
+#endif
 }
 
 // ---------------------------------------------------------------- Dateien
@@ -228,12 +532,8 @@ void dropIfUnused(Family* family)
 {
     std::lock_guard registryLock(registryMutex);
     std::lock_guard lock(family->mutex);
-    if (family->openCount)
+    if (family->openCount || family->dirty)
         return;
-    for (auto& node : family->nodes) {
-        if (node->dirty)
-            return;
-    }
     for (auto it = families->begin(); it != families->end(); ++it) {
         if (it->second.get() == family) {
             families->erase(it);
@@ -264,7 +564,7 @@ int memoryClose(sqlite3_file* file)
     if (last) {
         // Letzte Verbindung: jetzt schreiben (WebKit loescht die Dateien danach
         // vielleicht selber, z.B. bei indexedDB.deleteDatabase)
-        flushFamily(*family, false);
+        flushFamily(*family, Flush::Now);
         dropIfUnused(family.get());
     }
     return SQLITE_OK;
@@ -274,12 +574,10 @@ int memoryRead(sqlite3_file* file, void* buffer, int amount, sqlite3_int64 offse
 {
     auto* memory = reinterpret_cast<MemoryFile*>(file);
     std::lock_guard lock(memory->family->mutex);
-    auto& data = memory->node->data;
-    size_t available = offset < static_cast<sqlite3_int64>(data.size()) ? std::min<size_t>(amount, data.size() - offset) : 0;
-    if (available)
-        memcpy(buffer, data.data() + offset, available);
+    auto* data = static_cast<uint8_t*>(buffer);
+    size_t available = memory->node->content.read(data, amount, offset);
     if (available < static_cast<size_t>(amount)) {
-        memset(static_cast<uint8_t*>(buffer) + available, 0, amount - available);
+        memset(data + available, 0, amount - available);
         return SQLITE_IOERR_SHORT_READ;
     }
     return SQLITE_OK;
@@ -290,12 +588,10 @@ int memoryWrite(sqlite3_file* file, const void* buffer, int amount, sqlite3_int6
     auto* memory = reinterpret_cast<MemoryFile*>(file);
     std::lock_guard lock(memory->family->mutex);
     auto& node = *memory->node;
-    size_t end = offset + amount;
-    if (end > node.data.size())
-        node.data.resize(end);
-    memcpy(node.data.data() + offset, buffer, amount);
+    if (!node.content.write(static_cast<const uint8_t*>(buffer), amount, offset))
+        return SQLITE_FULL;
     node.exists = true;
-    node.dirty = true;
+    markDirty(*memory->family);
     return SQLITE_OK;
 }
 
@@ -303,8 +599,9 @@ int memoryTruncate(sqlite3_file* file, sqlite3_int64 size)
 {
     auto* memory = reinterpret_cast<MemoryFile*>(file);
     std::lock_guard lock(memory->family->mutex);
-    memory->node->data.resize(size);
-    memory->node->dirty = true;
+    if (!memory->node->content.resize(size))
+        return SQLITE_FULL;
+    markDirty(*memory->family);
     return SQLITE_OK;
 }
 
@@ -317,7 +614,7 @@ int memoryFileSize(sqlite3_file* file, sqlite3_int64* size)
 {
     auto* memory = reinterpret_cast<MemoryFile*>(file);
     std::lock_guard lock(memory->family->mutex);
-    *size = memory->node->data.size();
+    *size = memory->node->content.size();
     return SQLITE_OK;
 }
 
@@ -523,8 +820,10 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
     {
         std::lock_guard registryLock(registryMutex);
         auto& slot = (*families)[familyName(path)];
-        if (!slot)
+        if (!slot) {
             slot = std::make_shared<Family>();
+            slot->name = familyName(path);
+        }
         family = slot;
         std::lock_guard lock(family->mutex);
         family->openCount++; // haelt die Familie in der Liste
@@ -545,10 +844,19 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         loaded = family->find(path)->loaded;
     }
     if (!loaded) {
-        // Ohne Lock von der Platte lesen. Bei einem Lesefehler nicht oeffnen:
-        // sonst wuerde eine leere Datenbank die echte ueberschreiben
-        std::vector<uint8_t> data;
-        auto result = readWholeFile(path.c_str(), data);
+        // Ohne Lock von der Platte lesen. Bei einem Lesefehler (auch zu wenig
+        // Speicher) nicht oeffnen: sonst wuerde eine leere Datenbank die echte
+        // ueberschreiben
+        struct stat info;
+        if (!stat(path.c_str(), &info) && static_cast<uint64_t>(info.st_size) > maximumFileSize()) {
+            log("Speicher: %s hat %llu MB, zu gross fuer den Speicher, nicht geoeffnet", path.c_str(), static_cast<unsigned long long>(info.st_size >> 20));
+            release();
+            return SQLITE_CANTOPEN;
+        }
+        Content content;
+        auto result = readWholeFile(path.c_str(), scopedLambda<bool(std::span<const uint8_t>)>([&](std::span<const uint8_t> chunk) {
+            return content.write(chunk.data(), chunk.size(), content.size());
+        }));
         if (result == ReadResult::Failed) {
             release();
             return SQLITE_IOERR;
@@ -556,8 +864,8 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         std::lock_guard lock(family->mutex);
         auto* node = family->find(path);
         if (!node->loaded) {
-            node->data = std::move(data);
-            node->exists = result == ReadResult::Done;
+            node->content = WTF::move(content);
+            node->exists = node->onDisk = result == ReadResult::Done;
             node->loaded = true;
         }
     }
@@ -571,8 +879,10 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
                 node = nullptr;
             } else {
                 node->exists = true;
-                node->data.clear();
-                node->dirty = true;
+                node->content.resize(0);
+                // Ein leeres -journal oder -wal aendert nichts auf der Platte
+                if (path == family->name)
+                    markDirty(*family);
             }
         }
     }
@@ -605,8 +915,8 @@ int memoryDelete(sqlite3_vfs*, const char* name, int syncDirectory)
             auto& node = family->findOrCreate(path);
             node.loaded = true;
             node.exists = false;
-            node.data = { };
-            node.dirty = true;
+            node.content = { };
+            markDirty(*family);
             return SQLITE_OK;
         }
     }
@@ -673,6 +983,71 @@ int memoryCurrentTimeInt64(sqlite3_vfs*, sqlite3_int64* time)
     return baseVFS->xCurrentTimeInt64(baseVFS, time);
 }
 
+// Kopf einer Datenbank: https://www.sqlite.org/fileformat2.html#database_header
+constexpr size_t databaseHeaderSize = 100;
+
+// Belegte Seiten laut Kopf (Seite 1). Freie Seiten zaehlen nicht: SQLite gibt
+// sie nie an die Datei zurueck (IndexedDB macht kein VACUUM), Platz von
+// geloeschten Daten waere sonst nie wieder frei. pages 0: Zahl aus dem Kopf.
+// Kein Kopf von SQLite: fileSize
+uint64_t usedDatabaseSize(const uint8_t* header, uint64_t fileSize, uint32_t pages)
+{
+    if (memcmp(header, "SQLite format 3", 16))
+        return fileSize;
+    uint32_t pageSize = header[16] << 8 | header[17];
+    if (pageSize == 1)
+        pageSize = 65536;
+    if (pageSize < 512 || (pageSize & (pageSize - 1)))
+        return fileSize;
+    if (!pages && get32(header + 24) == get32(header + 92))
+        pages = get32(header + 28);
+    if (!pages)
+        return fileSize;
+    return static_cast<uint64_t>(pages - std::min(get32(header + 36), pages)) * pageSize;
+}
+
+// Eine offene Datenbank, wie sie nach einem Checkpoint waere: Seite 1 aus dem
+// letzten bestaetigten Frame des WAL, sonst aus der Datei
+uint64_t usedDatabaseSize(const Content& database, const Content* wal)
+{
+    uint8_t header[databaseHeaderSize] = { };
+    database.read(header, sizeof(header), 0);
+    auto frames = wal ? committedFrames(*wal) : WalFrames { };
+    for (uint64_t index = frames.count; index-- > 0;) {
+        uint64_t frame = walHeaderSize + index * (walFrameHeaderSize + frames.pageSize);
+        uint8_t frameHeader[walFrameHeaderSize];
+        wal->read(frameHeader, sizeof(frameHeader), frame);
+        if (get32(frameHeader) == 1) {
+            wal->read(header, sizeof(header), frame + walFrameHeaderSize);
+            break;
+        }
+    }
+    uint64_t size = frames.count ? static_cast<uint64_t>(frames.databasePages) * frames.pageSize : database.size();
+    return usedDatabaseSize(header, size, frames.databasePages);
+}
+
+// Dateien direkt in directory auf der Platte, ohne die in skip
+uint64_t diskSize(const String& directory, const std::vector<std::string>& skip)
+{
+    uint64_t total = 0;
+    for (auto& name : FileSystem::listDirectory(directory)) {
+        auto path = FileSystem::pathByAppendingComponent(directory, name).utf8();
+        if (std::find(skip.begin(), skip.end(), path.data()) != skip.end())
+            continue;
+        int fd = open(path.data(), O_RDONLY);
+        if (fd < 0)
+            continue;
+        struct stat info;
+        uint8_t header[databaseHeaderSize] = { };
+        if (!fstat(fd, &info) && S_ISREG(info.st_mode)) {
+            ssize_t length = pread(fd, header, sizeof(header), 0);
+            total += length == sizeof(header) ? usedDatabaseSize(header, info.st_size, 0) : info.st_size;
+        }
+        close(fd);
+    }
+    return total;
+}
+
 } // namespace
 
 void registerMemoryVFS()
@@ -702,26 +1077,63 @@ void registerMemoryVFS()
 
 void flushMemoryVFS(bool fromHostThread)
 {
-    if (!families)
-        return;
-    // Liste ohne malloc unter dem Lock (Haupt-Thread, siehe flushFamily)
+    flushAll(fromHostThread ? Flush::FromHostThread : Flush::Now);
+}
+
+#if defined(BL_WASMFS)
+bool flushMemoryVFSAndWait(Seconds timeout)
+{
+    auto done = std::make_shared<std::atomic<uint32_t>>(0);
+    runOnEngineThread([done] {
+        flushAll(Flush::Now);
+        done->store(1);
+        emscripten_futex_wake(done.get(), INT_MAX);
+    });
+    auto deadline = MonotonicTime::now() + timeout;
+    while (!done->load()) {
+        auto left = deadline - MonotonicTime::now();
+        if (left <= 0_s)
+            return false;
+        emscripten_futex_wait(done.get(), 0, left.milliseconds());
+    }
+    return true;
+}
+#endif
+
+uint64_t memoryVFSDirectorySize(const String& directory)
+{
+    std::string prefix = directory.utf8().data();
+    prefix += '/';
+    uint64_t total = 0;
+    std::vector<std::string> inMemory;
     std::vector<std::shared_ptr<Family>> all;
-    size_t count;
-    {
-        std::lock_guard registryLock(registryMutex);
-        count = families->size();
-    }
-    all.reserve(count + 8);
-    {
-        std::lock_guard registryLock(registryMutex);
-        for (auto& [name, family] : *families) {
-            if (all.size() == all.capacity())
-                break; // der Rest beim naechsten Mal
-            all.push_back(family);
+    if (families)
+        listFamilies(all, false);
+    for (auto& family : all) {
+        if (!family->name.starts_with(prefix) || family->name.find('/', prefix.size()) != std::string::npos)
+            continue;
+        std::lock_guard lock(family->mutex);
+        Node* database = nullptr;
+        Node* wal = nullptr;
+        for (auto& node : family->nodes) {
+            if (!node->loaded)
+                continue;
+            inMemory.push_back(node->path);
+            if (!node->exists)
+                continue;
+            if (node->path == family->name)
+                database = node.get();
+            else if (endsWith(node->path, "-wal"))
+                wal = node.get();
+            else
+                total += node->content.size();
         }
+        if (database)
+            total += usedDatabaseSize(database->content, wal ? &wal->content : nullptr);
     }
-    for (auto& family : all)
-        flushFamily(*family, fromHostThread);
+    // Der Rest liegt auf der Platte: Datenbanken, die gerade nicht offen sind,
+    // und andere Dateien (z.B. Blobs von IndexedDB)
+    return total + diskSize(directory, inMemory);
 }
 
 } // namespace BrowserLite

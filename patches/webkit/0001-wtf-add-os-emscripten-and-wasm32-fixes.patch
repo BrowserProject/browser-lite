@@ -41,7 +41,7 @@ index e3184e90a1..d16a511b69 100644
  #define WTF_OS_FREEBSD 1
  #endif
  
-+/* OS(EMSCRIPTEN) - WebAssembly via Emscripten (browser-lite) */
++/* OS(EMSCRIPTEN): WebAssembly via Emscripten (browser-lite) */
 +#if defined(__EMSCRIPTEN__)
 +#define WTF_OS_EMSCRIPTEN 1
 +#endif

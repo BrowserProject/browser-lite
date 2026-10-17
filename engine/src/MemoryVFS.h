@@ -1,15 +1,30 @@
 // SQLite-Datenbanken unter /data im WASM-Speicher (siehe MemoryVFS.cpp).
 #pragma once
 
+#include <cstdint>
+#include <wtf/Forward.h>
+#include <wtf/Seconds.h>
+
 namespace BrowserLite {
 
 // Vor dem ersten Oeffnen einer Datenbank aufrufen: wird das Standard-VFS
 void registerMemoryVFS();
 
-// Geaenderte Datenbanken ins Dateisystem schreiben (alle, die gerade nicht
-// mitten in einer Schreib-Transaktion sind). Von jedem Thread aus erlaubt,
+// Geaenderte Datenbanken jetzt ins Dateisystem schreiben (alle, die gerade
+// nicht mitten in einer Schreib-Transaktion sind). Von jedem Thread aus erlaubt,
 // auch vom Haupt-Thread des Host (ohne WasmFS, vor dem Speichern des IDBFS).
 // fromHostThread: blockiert nie (ueberspringt, wenn gerade jemand schreibt).
 void flushMemoryVFS(bool fromHostThread);
+
+#if defined(BL_WASMFS)
+// Haupt-Thread des Host (pagehide): den Engine-Thread schreiben lassen und
+// hoechstens timeout darauf warten. false: nicht rechtzeitig fertig
+bool flushMemoryVFSAndWait(Seconds timeout);
+#endif
+
+// Belegter Platz der Dateien direkt in directory (ohne Unterordner): offene
+// Datenbanken, wie sie im Speicher sind (mit WAL), alles andere auf der Platte.
+// Von Datenbanken zaehlen nur die belegten Seiten, nicht die freien.
+uint64_t memoryVFSDirectorySize(const String& directory);
 
 } // namespace BrowserLite

@@ -1,6 +1,8 @@
 #include "config.h"
 #include "FileSystemStorageWasm.h"
 
+#include "Storage.h"
+
 #include <WebCore/ClientOrigin.h>
 #include <WebCore/Exception.h>
 #include <WebCore/ExceptionOr.h>
@@ -24,6 +26,12 @@ namespace BrowserLite {
 using namespace WebCore;
 
 namespace {
+
+// Pro oberstem Ursprung und Ursprung ein Ordner (wie die Partitionierung von WebKit2)
+String rootPath(const ClientOrigin& origin)
+{
+    return FileSystem::pathByAppendingComponent(FileSystem::pathByAppendingComponent("/data/opfs"_s, FileSystem::encodeForFileName(origin.topOrigin.toString())), FileSystem::encodeForFileName(origin.clientOrigin.toString()));
+}
 
 // Wie FileSystemStorageError in WebKit2
 enum class Error : uint8_t {
@@ -143,9 +151,7 @@ public:
 
     ExceptionOr<StorageConnection::DirectoryInfo> rootDirectory(const ClientOrigin& origin)
     {
-        // Pro oberstem Ursprung und Ursprung ein Ordner (wie die Partitionierung von WebKit2)
-        auto path = FileSystem::pathByAppendingComponent(FileSystem::pathByAppendingComponent("/data/opfs"_s, FileSystem::encodeForFileName(origin.topOrigin.toString())), FileSystem::encodeForFileName(origin.clientOrigin.toString()));
-        auto result = createHandle(FileSystemHandleKind::Directory, WTF::move(path), { }, true);
+        auto result = createHandle(FileSystemHandleKind::Directory, rootPath(origin), { }, true);
         if (!result)
             return toException(result.error());
         auto [globalIdentifier, identifier] = *result;
@@ -586,6 +592,11 @@ void fileSystemGetDirectory(const ClientOrigin& origin, StorageConnection::GetDi
 {
     ASSERT(isMainThread());
     completionHandler(FileSystemStorageConnectionWasm::singleton().rootDirectory(origin));
+}
+
+uint64_t fileSystemUsage(const ClientOrigin& origin)
+{
+    return directorySize(rootPath(origin));
 }
 
 } // namespace BrowserLite

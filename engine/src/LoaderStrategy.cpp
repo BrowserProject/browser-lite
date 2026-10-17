@@ -19,7 +19,6 @@
 #include <WebCore/BlobRegistry.h>
 #include <WebCore/BlobRegistryImpl.h>
 #include <WebCore/BlobResourceHandle.h>
-#include <WebCore/CacheValidation.h>
 #include <WebCore/CachedResource.h>
 #include <WebCore/ContentSecurityPolicy.h>
 #include <WebCore/CrossOriginAccessControl.h>
@@ -187,33 +186,15 @@ public:
     void start()
     {
         debugLog("lade %s", m_loader->request().url().string().utf8().data());
-        auto& request = m_loader->request();
-        // Zuerst im HTTP-Cache nachsehen (HttpCache.cpp), ausser beim Neuladen
-        if (HttpCache::canUse(request) && request.cachePolicy() != ResourceRequestCachePolicy::ReloadIgnoringCacheData) {
-            HttpCache::lookup(request, [this, protectedThis = Ref { *this }](std::unique_ptr<HttpCache::Entry>&& entry) {
-                if (!m_loader)
-                    return;
-                ResourceRequest request { m_loader->request() };
-                if (entry) {
-                    auto use = HttpCache::decide(*entry, request);
-                    debugLog("Cache %s: %s", use == HttpCache::Use::Fresh ? "frisch" : use == HttpCache::Use::Revalidate ? "nachpruefen" : "nicht nutzbar", request.url().string().utf8().data());
-                    switch (use) {
-                    case HttpCache::Use::Fresh:
-                        serveFromCache(WTF::move(entry), ResourceResponse::Source::DiskCache);
-                        return;
-                    case HttpCache::Use::Revalidate:
-                        HttpCache::addValidationHeaders(request, *entry);
-                        m_cachedEntry = WTF::move(entry);
-                        break;
-                    case HttpCache::Use::None:
-                        break;
-                    }
-                }
-                startNetwork(WTF::move(request));
-            });
-            return;
-        }
-        startNetwork(ResourceRequest { request });
+        // Zuerst im HTTP-Cache nachsehen (HttpCache.cpp)
+        HttpCache::lookupForLoad(ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) {
+            if (!m_loader)
+                return;
+            if (lookup.fresh)
+                return serveFromCache(WTF::move(lookup.entry), ResourceResponse::Source::DiskCache);
+            m_cachedEntry = WTF::move(lookup.entry);
+            startNetwork(WTF::move(lookup.request));
+        });
     }
 
     void cancel()
@@ -319,9 +300,7 @@ private:
                 old->cancel();
                 old->invalidateClient();
             }
-            updateResponseHeadersAfterRevalidation(entry->response, m_response);
-            entry->responseTime = WallTime::now();
-            HttpCache::store(m_loader->request(), entry->response, entry->responseTime, entry->body.get());
+            HttpCache::didRevalidate(m_loader->request(), *entry, m_response);
             serveFromCache(WTF::move(entry), ResourceResponse::Source::DiskCacheAfterValidation);
             return;
         }

@@ -6,36 +6,17 @@
 // und ein WebM-Clip, aufgenommen mit MediaRecorder im Test-Chromium.
 //
 //   cd tests/e2e && node media-test.mjs [engine-ordner]
-import { TIMEOUT, canvasOrigin, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { TIMEOUT, canvasOrigin, check, collect, finish, launch, pagePixel, screenshot, serve, serveBytes, startStack, timeLimit, waitFor, wav } from './harness.mjs';
 
 timeLimit(TIMEOUT + 180000);
 
 // --------------------------------------------------------- Testdateien
 
-function wav(seconds, rate = 44100) {
-  const frames = seconds * rate;
-  const buffer = Buffer.alloc(44 + frames * 2);
-  buffer.write('RIFF', 0);
-  buffer.writeUInt32LE(36 + frames * 2, 4);
-  buffer.write('WAVEfmt ', 8);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(1, 22);
-  buffer.writeUInt32LE(rate, 24);
-  buffer.writeUInt32LE(rate * 2, 28);
-  buffer.writeUInt16LE(2, 32);
-  buffer.writeUInt16LE(16, 34);
-  buffer.write('data', 36);
-  buffer.writeUInt32LE(frames * 2, 40);
-  for (let i = 0; i < frames; i++)
-    buffer.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * i / rate) * 8000), 44 + i * 2);
-  return buffer;
-}
-const TONE = wav(30);
+const TONE = wav(30, { rate: 44100 });
 
 const browser = await launch();
 
-// WebM: 3 s, Canvas immer rot (Farbe pruefen wir spaeter in der Engine)
+// WebM: 3 s, Canvas immer rot (die Farbe prueft "Video: Bild in der Seite gemalt")
 async function recordClip() {
   const recorder = await browser.newPage();
   await recorder.goto('about:blank');
@@ -174,7 +155,7 @@ source.addEventListener('sourceopen', async () => {
 // dazu preload="metadata" und ein spaeterer Wechsel auf "auto". clip.mov ohne
 // type: den Typ aus der Endung (video/quicktime) kennt der Host nicht, er
 // erkennt das Format (hier WebM) aber beim Laden selber.
-const BEEP = wav(0.5, 8000).toString('base64');
+const BEEP = wav(0.5, { rate: 8000 }).toString('base64');
 const BLOB_PAGE = `<!doctype html><title>Blob-Test</title><body style="margin:0;background:#fff">
 <video id="video" muted loop playsinline style="position:absolute;left:20px;top:20px;width:320px;height:240px"></video>
 <audio id="lazy" src="/tone.wav" preload="metadata"></audio>
@@ -271,17 +252,9 @@ const { url: siteURL } = await serve((req, res) => {
     res.writeHead(404).end();
     return;
   }
-  const [data, type] = file;
-  const match = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
-  if (!match) {
-    res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Accept-Ranges': 'bytes' }).end(data);
-    return;
-  }
-  const start = Number(match[1]);
-  const end = match[2] ? Math.min(Number(match[2]), data.length - 1) : data.length - 1;
-  ranges.push(`${req.url}:${start}-${end}`);
-  res.writeHead(206, { 'Content-Type': type, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${data.length}`, 'Accept-Ranges': 'bytes' });
-  res.end(data.subarray(start, end + 1));
+  const range = serveBytes(req, res, ...file);
+  if (range)
+    ranges.push(`${req.url}:${range[0]}-${range[1]}`);
 });
 
 const stack = await startStack({ token: 'media-token-0123456789abcdef' });
@@ -289,22 +262,15 @@ const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
 const results = collect(page);
 const result = (key, timeout = TIMEOUT) => results.wait(key, timeout);
 
-const pagePixel = async (x, y) => {
-  const [r, g, b] = await page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
-  return { r, g, b };
-};
 const isRed = (p) => !!p && p.r > 180 && p.g < 60 && p.b < 60;
 const isWhite = (p) => !!p && p.r > 200 && p.g > 200 && p.b > 200;
 // Pixel der Seite, bis test(pixel) wahr ist (hoechstens 20 s)
 async function waitForPixel(x, y, test) {
   let pixel = null;
-  const end = Date.now() + 20000;
-  while (Date.now() < end) {
-    pixel = await pagePixel(x, y);
-    if (test(pixel))
-      break;
-    await page.waitForTimeout(250);
-  }
+  await waitFor(async () => {
+    const [r, g, b] = await pagePixel(page, x, y);
+    return test(pixel = { r, g, b });
+  }, 20000, 250);
   return pixel;
 }
 

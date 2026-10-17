@@ -121,7 +121,9 @@ void presentFrameOnCompositor(int viewId, const uint8_t* pixels, int width, int 
 
 void notifyHost(int viewId, const char* type, const String& payload)
 {
-    // Kopien im gemeinsamen Speicher, der Haupt-Thread gibt sie wieder frei
+    // Kopien im gemeinsamen Speicher, der Haupt-Thread gibt sie wieder frei.
+    // Nur Meldungen aus dem Engine-Thread zeigen, dass er nicht haengt
+    // (der Compositor meldet z.B. first-paint auch waehrend einer Blockade).
     char* typeCopy = strdup(type);
     char* payloadCopy = strdup(payload.utf8().data());
     MAIN_THREAD_ASYNC_EM_ASM({
@@ -130,8 +132,8 @@ void notifyHost(int viewId, const char* type, const String& payload)
         _free($1);
         _free($2);
         if (Module.onEngineEvent)
-            Module.onEngineEvent($0, type, payload);
-    }, viewId, typeCopy, payloadCopy);
+            Module.onEngineEvent($0, type, payload, !!$3);
+    }, viewId, typeCopy, payloadCopy, isEngineThread());
 }
 
 void presentFrameToHost(int viewId, const uint8_t* pixels, int width, int height, int dirtyX, int dirtyY, int dirtyWidth, int dirtyHeight)

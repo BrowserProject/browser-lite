@@ -32,6 +32,7 @@
 #include <WebCore/CommonVM.h>
 #include <WebCore/Document.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
+#include <WebCore/FrameLoader.h>
 #include <WebCore/MemoryCache.h>
 #include <WebCore/MemoryRelease.h>
 #include <WebCore/WasmPlatform.h>
@@ -105,6 +106,18 @@ EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withView(id, [](WebView& view)
 EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withView(id, [](WebView& view) { view.reload(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_stop(int id) { withView(id, [](WebView& view) { view.stop(); }); }
 
+// Tab schliessen: erst beforeunload der Seite (mit Rueckfrage), die Antwort
+// kommt als Ereignis "try-close"
+EMSCRIPTEN_KEEPALIVE void bl_try_close(int id)
+{
+    runOnEngineThread([id] {
+        RefPtr view = WebView::fromID(id);
+        RefPtr frame = view ? view->mainFrame() : nullptr;
+        bool close = !frame || frame->loader().shouldClose();
+        notifyHost(id, "try-close", close ? "{\"close\":true}"_s : "{\"close\":false}"_s);
+    });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_resize(int id, int width, int height, float deviceScaleFactor)
 {
     withView(id, [=](WebView& view) { view.resize({ width, height }, deviceScaleFactor); });
@@ -116,7 +129,6 @@ EMSCRIPTEN_KEEPALIVE void bl_frame(int id)
     withView(id, [](WebView& view) { view.presentIfNeeded(); });
 }
 
-// Das Canvas des Views ist jetzt im Engine-Worker (engine-pre.js)
 // Kommt aus dem Worker, der die Canvas bekommt (bl_presenter_thread)
 EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
 {
@@ -224,6 +236,19 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         return;
     }
     withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, modifiers); });
+}
+
+// Strg + Rad (Zoom) geht wie in Chrome zuerst an die Seite (Karten, Editoren
+// zoomen selber). Rueckgabe 1: die Seite kann preventDefault rufen, die
+// Antwort kommt als "wheel-result". 0: nur zum Mitlesen geschickt (kein
+// blockierender Listener an der Stelle oder nicht cancelable), die
+// Oberflaeche zoomt gleich, auch wenn das JS den Engine-Thread blockiert.
+EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers, int cancelable)
+{
+    auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers);
+    bool blocking = cancelable && Scrolling::mayCancelWheelEvent(id, event);
+    withView(id, [event, blocking](WebView& view) { view.zoomWheelEvent(event, blocking); });
+    return blocking;
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* text, int keyCode, int repeat, int modifiers)
@@ -377,6 +402,12 @@ EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
     withView(id, [=](WebView& view) { view.setFocused(focused); });
 }
 
+// Tab zu sehen (1) oder versteckt (0): im Hintergrund oder der Tab des Host verdeckt
+EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
+{
+    withView(id, [=](WebView& view) { view.setVisible(visible); });
+}
+
 // flags: 1 = dunkles Farbschema (prefers-color-scheme), 2 = Touchscreen
 EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
 {
@@ -519,26 +550,26 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
 }
 
 
-// Datei der Oberflaeche (Upload, Drag & Drop, Einfuegen) ins Dateisystem der
-// Engine schreiben. Laeuft im Engine-Thread, vor den Aufrufen, die danach
-// kommen (bl_choose_files, bl_drag, ...), damit die Datei dann da ist.
-// Uebernimmt path und data (malloc).
-EMSCRIPTEN_KEEPALIVE void bl_write_file(char* path, uint8_t* data, int length)
+// Ein Stueck einer Datei der Oberflaeche (Upload, Drag & Drop, Einfuegen) ins
+// Dateisystem der Engine schreiben, offset 0 legt sie neu an. Nur im
+// Engine-Thread: engine/js/engine-pre.js liest die Dateien des Host dort
+// selber in Stuecken. 1: geschrieben
+EMSCRIPTEN_KEEPALIVE int bl_write_file(const char* path, const uint8_t* data, int length, double offset)
 {
-    runOnEngineThread([path, data, length] {
+    ASSERT(isEngineThread());
+    if (!offset) {
         String directory = String::fromUTF8(path);
         size_t slash = directory.reverseFind('/');
         if (slash != notFound && slash > 0)
             FileSystem::makeAllDirectories(directory.left(slash));
-        if (FILE* file = fopen(path, "wb")) {
-            if (length > 0)
-                fwrite(data, 1, length, file);
-            fclose(file);
-        } else
-            debugLog("bl_write_file: %s nicht schreibbar", path);
-        free(path);
-        free(data);
-    });
+    }
+    FILE* file = fopen(path, offset ? "r+b" : "wb");
+    if (!file) {
+        debugLog("bl_write_file: %s nicht schreibbar", path);
+        return 0;
+    }
+    bool ok = !fseeko(file, static_cast<off_t>(offset), SEEK_SET) && fwrite(data, 1, length, file) == static_cast<size_t>(length);
+    return !fclose(file) && ok;
 }
 
 // Datei oder Ordner (mit Inhalt) wieder loeschen, z.B. die Uploads eines
@@ -554,21 +585,27 @@ EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
 }
 
 // Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp).
-// Mit WasmFS im Engine-Thread (Schreiben nach OPFS, die Oberflaeche wartet
-// nicht), sonst auf dem Haupt-Thread des Host direkt vor dem Speichern des IDBFS.
-EMSCRIPTEN_KEEPALIVE void bl_storage_flush()
+// Mit WasmFS im Engine-Thread (Schreiben nach OPFS), die Oberflaeche wartet
+// hoechstens waitMilliseconds darauf (beim Schliessen des Tabs). Sonst auf dem
+// Haupt-Thread des Host direkt vor dem Speichern des IDBFS.
+EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
 {
 #if defined(BL_WASMFS)
-    runOnEngineThread([] {
-        flushMemoryVFS(false);
-    });
+    if (waitMilliseconds > 0)
+        flushMemoryVFSAndWait(Seconds::fromMilliseconds(waitMilliseconds));
+    else {
+        runOnEngineThread([] {
+            flushMemoryVFS(false);
+        });
+    }
 #else
+    UNUSED_PARAM(waitMilliseconds);
     flushMemoryVFS(true);
 #endif
 }
 
-// Belegter Speicher (malloc) fuer das Verwerfen von Tabs in der Oberflaeche.
-// mallinfo laeuft ueber den ganzen Heap (auf CNN ca. 25 ms), darum nur selten.
+// Belegter Speicher (malloc) fuer Tests. mallinfo laeuft ueber den ganzen Heap
+// (auf CNN ca. 25 ms) und haelt dabei das Lock von malloc.
 EMSCRIPTEN_KEEPALIVE double bl_memory_used()
 {
     return static_cast<double>(mallinfo().uordblks);

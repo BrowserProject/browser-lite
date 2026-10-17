@@ -161,6 +161,12 @@ bool displayDidRefresh(int viewId)
     return animatedScroll;
 }
 
+bool mayCancelWheelEvent(int viewId, const PlatformWheelEvent& event)
+{
+    RefPtr tree = treeForView(viewId);
+    return !tree || tree->determineWheelEventProcessing(event).contains(WheelEventProcessingSteps::BlockingDOMEventDispatch);
+}
+
 } // namespace Scrolling
 
 } // namespace BrowserLite
@@ -178,6 +184,7 @@ void wheelEvent(int viewId, const WebCore::PlatformWheelEvent& event)
             view->dispatchWheelEvent(event, { WebCore::WheelEventProcessingSteps::SynchronousScrolling, WebCore::WheelEventProcessingSteps::BlockingDOMEventDispatch });
     });
 }
+bool mayCancelWheelEvent(int, const WebCore::PlatformWheelEvent&) { return true; }
 bool displayDidRefresh(int) { return false; }
 
 } // namespace BrowserLite::Scrolling

@@ -1,0 +1,24 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 6b75aeaace..b9484e8c15 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3617,8 +3617,19 @@ HandleUserInputEventResult EventHandler::handleWheelEventInternal(const Platform
+                 if (auto wheelEventDataForRemoteFrame = userInputEventDataForRemoteFrame(remoteSubframe.get(), result.doublePointInInnerNodeFrame()))
+                     return *wheelEventDataForRemoteFrame;
+             } else if (RefPtr widget = widgetForElement(*element)) {
++#if PLATFORM(WASM)
++                // browser-lite: was der Subframe mit dem Ereignis gemacht hat (z.B. preventDefault),
++                // gilt fuer das ganze Ereignis, sonst sieht der Aufrufer im Hauptframe es nicht.
++                if (RefPtr frameView = dynamicDowncast<LocalFrameView>(*widget)) {
++                    auto [subframeResult, subframeHandling] = frameView->frame().eventHandler().handleWheelEvent(event, processingSteps);
++                    handling.add(subframeHandling);
++                    if (subframeResult.wasHandled())
++                        return completeWidgetWheelEvent(event, widget, scrollableArea);
++                }
++#else
+                 if (passWheelEventToWidget(event, *widget, processingSteps))
+                     return completeWidgetWheelEvent(event, widget, scrollableArea);
++#endif
+             }
+         }
+ 

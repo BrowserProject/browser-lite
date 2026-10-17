@@ -6,7 +6,7 @@
 
 namespace BrowserLite {
 
-// Ruft im Haupt-Thread Module.onEngineEvent(viewId, type, payload) auf (asynchron).
+// Ruft im Haupt-Thread Module.onEngineEvent(viewId, type, payload, fromEngineThread) auf (asynchron).
 // payload ist meist JSON. Ohne Host (node-Tests) passiert nichts.
 void notifyHost(int viewId, const char* type, const String& payload = { });
 

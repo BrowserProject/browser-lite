@@ -1,11 +1,13 @@
 // End-to-End Test fuer dauerhaften Speicher: Cookie, localStorage und
 // IndexedDB muessen ein Neuladen der ganzen Oberflaeche ueberleben
-// (/data in der Engine liegt im OPFS des Host-Browsers).
+// (/data in der Engine liegt im OPFS des Host-Browsers), auch gleich nach dem
+// Schreiben. Dazu die Grenze fuer IndexedDB, zu grosse Datenbanken und
+// Uploads im OPFS statt im Speicher der Engine.
 //
 //   cd tests/e2e && node storage-test.mjs [engine-ordner]
-import { TIMEOUT, check, collect, finish, launchProfile, serve, startStack, timeLimit } from './harness.mjs';
+import { TIMEOUT, canvasOrigin, check, collect, finish, launchProfile, serve, startStack, timeLimit } from './harness.mjs';
 
-timeLimit(3 * TIMEOUT + 120000);
+timeLimit(4 * TIMEOUT + 120000);
 
 // Erster Besuch speichert, zweiter Besuch (nach Neuladen) liest
 const PAGE = `<!doctype html><title>Speicher-Test</title><script>
@@ -193,10 +195,113 @@ const PAGE = `<!doctype html><title>Speicher-Test</title><script>
 })();
 </script>`;
 
+// Schreibt IndexedDB und ein Cookie, die Oberflaeche laedt gleich danach neu
+const QUICK_PAGE = `<!doctype html><title>Schnell</title><script>
+(async () => {
+  const db = await new Promise((resolve) => {
+    const open = indexedDB.open('schnell', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('w');
+    open.onsuccess = () => resolve(open.result);
+  });
+  const value = await new Promise((resolve) => {
+    const get = db.transaction('w').objectStore('w').get('x');
+    get.onsuccess = () => resolve(get.result || 'leer');
+    get.onerror = () => resolve('fehler');
+  });
+  console.log('RESULT quick=' + value + ',' + ((document.cookie.match(/bl_schnell=(\\w+)/) || [])[1] || 'leer'));
+  if (value !== 'leer')
+    return;
+  document.cookie = 'bl_schnell=keks; Path=/; Max-Age=86400';
+  await new Promise((resolve) => {
+    const tx = db.transaction('w', 'readwrite');
+    tx.objectStore('w').put('wert', 'x');
+    tx.oncomplete = tx.onerror = resolve;
+  });
+  console.log('RESULT quickwritten=1');
+})();
+</script>`;
+
+// Grenze fuer IndexedDB (hier mit BL_INDEXEDDB_QUOTA_MB klein): ?fuellen
+// schreibt 1-MB-Eintraege bis QuotaExceededError, ?voll und ?ueber lesen,
+// schreiben und loeschen an bzw. ueber der Grenze und schreiben danach noch
+// einmal, sonst ist die Datenbank zu gross fuer den Speicher (BL_DATABASE_MAX_MB)
+const QUOTA_PAGE = `<!doctype html><title>Grenze</title><script>
+const request = (r) => new Promise((resolve, reject) => {
+  r.onsuccess = () => resolve(r.result);
+  r.onerror = () => reject(r.error);
+});
+const openDB = () => new Promise((resolve, reject) => {
+  const open = indexedDB.open('gross', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('b');
+  open.onsuccess = () => resolve(open.result);
+  open.onerror = () => reject(open.error);
+});
+const put = (db, key) => new Promise((resolve, reject) => {
+  const tx = db.transaction('b', 'readwrite');
+  tx.objectStore('b').put(new Uint8Array(1 << 20).fill(key + 1), key);
+  tx.oncomplete = resolve;
+  tx.onabort = () => reject(tx.error);
+});
+const names = async () => (await indexedDB.databases()).some((db) => db.name === 'gross') ? 'gross' : 'keine';
+const outcome = (promise) => promise.then(() => 'ok', (e) => e.name);
+(async () => {
+  if (location.search === '?fuellen') {
+    const db = await openDB();
+    let stored = 0;
+    let error = 'keiner';
+    for (let i = 0; i < 12; i++) {
+      try {
+        await put(db, i);
+        stored++;
+      } catch (e) {
+        error = e.name;
+        break;
+      }
+    }
+    const first = await request(db.transaction('b').objectStore('b').get(0));
+    db.close();
+    console.log('RESULT quotafill=' + error + ',' + stored + ',' + first.length + ':' + first[0]);
+    return;
+  }
+  if (location.search === '?voll' || location.search === '?ueber') {
+    const db = await openDB();
+    const first = await request(db.transaction('b').objectStore('b').get(0));
+    const written = await outcome(put(db, 20));
+    const tx = db.transaction('b', 'readwrite');
+    tx.objectStore('b').delete(1);
+    const deleted = await outcome(new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onabort = () => reject(tx.error);
+    }));
+    const again = await outcome(put(db, 21));
+    db.close();
+    console.log('RESULT quotaopen=' + [await names(), first.length, written, deleted, again].join(','));
+    return;
+  }
+  const opened = await openDB().then((db) => { db.close(); return 'offen'; }, (e) => e.name);
+  const deleted = await outcome(request(indexedDB.deleteDatabase('gross')));
+  console.log('RESULT toobig=' + opened + ',' + deleted);
+})();
+</script>`;
+
+// Datei-Upload: die Seite liest nur Groesse und Ende
+const UPLOAD_PAGE = `<!doctype html><title>Upload</title>
+<input type=file id=datei style="position:absolute;left:0;top:0;width:400px;height:200px">
+<script>
+document.getElementById('datei').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  console.log('RESULT upload=' + file.name + ':' + file.size + ':' + await file.slice(file.size - 4).text());
+});
+console.log('RESULT uploadready=1');
+</script>`;
+
 // Das Cookie kommt nur beim ersten Besuch, danach muss es aus dem
 // gespeicherten Cookie-Speicher der Engine kommen
 let visits = 0;
 const { url: siteURL } = await serve((req, res) => {
+  const extra = { '/schnell': QUICK_PAGE, '/quota': QUOTA_PAGE, '/upload': UPLOAD_PAGE }[req.url.split('?')[0]];
+  if (extra)
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(extra);
   const headers = { 'Content-Type': 'text/html; charset=utf-8' };
   if (visits++ === 0)
     headers['Set-Cookie'] = 'bl_store=ja; Path=/; Max-Age=86400';
@@ -313,6 +418,92 @@ fresh.once('dialog', (dialog) => dialog.accept());
 await fresh.evaluate(() => document.getElementById('clear-data').click());
 const cleared = await result('opfs');
 check('Daten loeschen leert /data', cleared?.startsWith('leer,'), String(cleared));
+
+// Gleich nach dem Schreiben neu geladen: beim Schliessen (pagehide) wartet die
+// Oberflaeche kurz, bis die Engine die Datenbanken geschrieben hat
+results.clear();
+await fresh.goto(stack.app({ url: siteURL + 'schnell' }));
+check('Schnell: am Anfang leer', (await result('quick')) === 'leer,leer', results.get('quick'));
+await result('quickwritten');
+results.clear();
+await fresh.reload();
+check('Sofort nach dem Schreiben neu geladen: IndexedDB und Cookie da', (await result('quick')) === 'wert,keks', results.get('quick'));
+
+// Grenze fuer IndexedDB pro Ursprung: QuotaExceededError, was vorher kam, bleibt
+results.clear();
+await fresh.goto(stack.app({ url: siteURL + 'quota?fuellen', env: 'BL_INDEXEDDB_QUOTA_MB=4' }));
+const filled = (await result('quotafill'))?.split(',') || [];
+check('IndexedDB: ueber der Grenze QuotaExceededError, der Rest bleibt', filled[0] === 'QuotaExceededError' && filled[1] >= 1 && filled[1] <= 4 && filled[2] === '1048576:1', results.get('quotafill'));
+await fresh.waitForTimeout(2000);
+// Beim naechsten Besuch an der Grenze bzw. darueber: oeffnen, lesen und
+// loeschen gehen (wie Chrome), nur Schreiben nicht. Geloeschtes gibt Platz
+// frei, auch wenn die Datei von SQLite nicht kleiner wird
+for (const [search, quota, again] of [['voll', 4, 'ok'], ['ueber', 1, 'QuotaExceededError']]) {
+  results.clear();
+  await fresh.goto(stack.app({ url: siteURL + 'quota?' + search, env: 'BL_INDEXEDDB_QUOTA_MB=' + quota }));
+  check(`IndexedDB ${search}: oeffnen, lesen, loeschen ja, schreiben nein, nach dem Loeschen ${again}`, (await result('quotaopen')) === 'gross,1048576,QuotaExceededError,ok,' + again, results.get('quotaopen'));
+  await fresh.waitForTimeout(2000);
+}
+// Zu gross fuer den Speicher der Engine: nicht geladen, aber loeschbar, danach
+// ist die Datei im OPFS weg
+const databaseFiles = () => fresh.evaluate(async () => {
+  const files = [];
+  const walk = async (directory) => {
+    for await (const [name, handle] of directory.entries()) {
+      if (handle.kind === 'directory')
+        await walk(handle);
+      else if (name.endsWith('.sqlite3'))
+        files.push((await handle.getFile()).size);
+    }
+  };
+  await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle('indexeddb'));
+  return files;
+});
+const bigFiles = (files) => files.filter((size) => size > (1 << 20)).length;
+const filesBefore = await databaseFiles();
+results.clear();
+await fresh.goto(stack.app({ url: siteURL + 'quota', env: 'BL_DATABASE_MAX_MB=1' }));
+const tooBig = (await result('toobig'))?.split(',') || [];
+const filesAfter = await databaseFiles();
+check('Datenbank zu gross fuer den Speicher: nicht geladen, loeschbar, Datei weg', bigFiles(filesBefore) === 1 && tooBig[0] !== 'offen' && tooBig[1] === 'ok' && !bigFiles(filesAfter), `${results.get('toobig')} Dateien ${filesBefore} -> ${filesAfter}`);
+
+// Uploads liegen im OPFS (/data/tmp/uploads), nicht im WASM-Speicher der Engine
+const engineMallocMB = async () => {
+  const line = fresh.waitForEvent('console', { predicate: (msg) => /malloc belegt \d+ MB/.test(msg.text()), timeout: 30000 });
+  await fresh.evaluate(() => window.__blMemory(3));
+  return Number(/malloc belegt (\d+) MB/.exec((await line).text())[1]);
+};
+results.clear();
+await fresh.goto(stack.app({ url: siteURL + 'upload' }));
+await result('uploadready');
+await fresh.waitForTimeout(1000);
+const mallocBefore = await engineMallocMB();
+const size = 32 << 20;
+const content = Buffer.alloc(size, 'a');
+content.write('Ende', size - 4);
+const chooserPromise = fresh.waitForEvent('filechooser', { timeout: 30000 }).catch(() => null);
+const { x, y } = await canvasOrigin(fresh);
+await fresh.mouse.click(x + 100, y + 50);
+const chooser = await chooserPromise;
+await chooser?.setFiles({ name: 'gross.bin', mimeType: 'application/octet-stream', buffer: content });
+check('Upload: Datei in der Seite', (await result('upload')) === 'gross.bin:' + size + ':Ende', results.get('upload'));
+const mallocAfter = await engineMallocMB();
+check('Upload: nicht im WASM-Speicher', mallocAfter - mallocBefore < 12, `${mallocBefore} -> ${mallocAfter} MB`);
+const uploaded = await fresh.evaluate(async () => {
+  const sizes = [];
+  const walk = async (directory) => {
+    for await (const [, handle] of directory.entries()) {
+      if (handle.kind === 'directory')
+        await walk(handle);
+      else
+        sizes.push(handle.name + ':' + (await handle.getFile()).size);
+    }
+  };
+  const tmp = await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp');
+  await walk(await tmp.getDirectoryHandle('uploads'));
+  return sizes.join(',');
+});
+check('Upload: Datei im OPFS', uploaded === 'gross.bin:' + size, uploaded);
 
 await freshContext.close();
 await context.close();

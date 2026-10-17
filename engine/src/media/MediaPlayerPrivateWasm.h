@@ -92,7 +92,7 @@ private:
     WebCore::FloatSize naturalSize() const final { return m_naturalSize; }
     bool hasVideo() const final;
     bool hasAudio() const final;
-    void setPageIsVisible(bool) final { }
+    void setPageIsVisible(bool) final;
 
     MediaTime duration() const final;
     MediaTime currentTime() const final;
@@ -172,6 +172,7 @@ private:
     MonotonicTime m_frameArrival;
     double m_frameMediaTime { 0 };
     WebCore::IntSize m_presentationSize;
+    bool m_pageIsVisible { true };
 };
 
 } // namespace BrowserLite

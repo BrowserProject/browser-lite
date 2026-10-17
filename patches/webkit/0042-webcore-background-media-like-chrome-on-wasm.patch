@@ -1,0 +1,21 @@
+diff --git a/Source/WebCore/html/MediaElementSession.cpp b/Source/WebCore/html/MediaElementSession.cpp
+index d01dc3abc9..9e67938734 100644
+--- a/Source/WebCore/html/MediaElementSession.cpp
++++ b/Source/WebCore/html/MediaElementSession.cpp
+@@ -316,6 +316,16 @@ void MediaElementSession::visibilityChanged()
+ 
+     bool isPlayingAudio = element->isPlaying() && element->hasAudio() && !element->muted() && element->volume();
+     if (!isPlayingAudio) {
++#if PLATFORM(WASM)
++        // browser-lite: wie Chrome haelt im Hintergrund nur Video ohne Tonspur an,
++        // MediaStreams (Videokonferenz, Kamera) und Stummes mit Tonspur laufen weiter
++        bool keepsPlaying = element->hasAudio();
++#if ENABLE(MEDIA_STREAM)
++        keepsPlaying = keepsPlaying || element->hasMediaStreamSrcObject();
++#endif
++        if (elementIsHidden && keepsPlaying)
++            return;
++#endif
+         if (elementIsHidden) {
+             ALWAYS_LOG(LOGIDENTIFIER, "Suspending silent playback after page visibility: hidden");
+             beginInterruption(PlatformMediaSession::InterruptionType::EnteringBackground);

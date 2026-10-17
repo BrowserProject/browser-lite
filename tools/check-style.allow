@@ -1,0 +1,8 @@
+# Ausnahmen fuer tools/check-style.sh, eine pro Zeile: <Regel> <Pfad-Muster> <Grund>
+# Regeln: umlaut (echte Umlaute, Eszett), dash (Gedankenstriche). In einer Datei mit
+# Ausnahme gilt die Regel nur noch fuer Kommentare. Das Muster ist ein Shell-Muster,
+# * passt auch ueber / hinweg.
+umlaut web/*                    Texte der Oberflaeche
+umlaut tests/*                  Testdaten und erwartete Texte der Oberflaeche
+umlaut deps/tests/*             Testdaten
+umlaut engine/src/ErrorPage.cpp Texte der Fehlerseite

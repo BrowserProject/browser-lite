@@ -3,7 +3,8 @@
 // (Hintergrund-Tabs laden erst beim Anklicken), ?relay=/?token=/?env= aus der URL,
 // Haengen der Engine (Meldung, der Watchdog von JSC bricht das Skript ab, die
 // Zeit in einem Dialog zaehlt nicht), echter Absturz (abort, WASM-Trap) mit
-// Neustart (web/watchdog.js), Zurueck/Vor, das scheitert, und Stopp.
+// Neustart (web/watchdog.js), Zurueck/Vor, das scheitert, und Stopp,
+// beforeunload (Navigation, Neu laden, Tab und Host-Tab schliessen, Schleife) und window.focus().
 //
 //   cd tests/e2e && node ui-test.mjs [engine-ordner]
 import { TIMEOUT, VERBOSE, check, finish, launch, serve, startStack, timeLimit, watchErrors } from './harness.mjs';
@@ -156,11 +157,10 @@ check('Sitzung: Vor laedt wieder die letzte Seite', await waitLoaded('Seite eins
 
 // Wenig Speicher: der Hintergrund-Tab wird verworfen und laedt beim Anklicken neu
 const dreiBefore = loads.get('drei') || 0;
-const discarded = await tab.evaluate(() => window.__blCheckMemory(1));
+const discarded = await tab.evaluate(() => window.__blCheckMemory());
 const titlesAfter = await tab.locator('#tab-list .tab .title').allTextContents();
 check('Speicher knapp: Hintergrund-Tab verworfen, Titel bleibt', discarded > 0 && JSON.stringify(titlesAfter) === JSON.stringify(['Seite eins', 'Seite drei']), `${discarded} ${JSON.stringify(titlesAfter)}`);
 check('Aktiver Tab wird nie verworfen', await tab.evaluate(() => window.__blCheckMemory()) === 0);
-await tab.evaluate(() => window.__blCheckMemory(2.5 * 1024 ** 3));
 loaded = [];
 await tab.click('#tab-list .tab:nth-child(2) .title');
 check('Verworfener Tab laedt beim Anklicken neu', await waitLoaded('Seite drei') && (loads.get('drei') || 0) === dreiBefore + 1, `${loads.get('drei')} Aufrufe`);
@@ -261,14 +261,18 @@ const waitBoot = (text, timeout) => tab.waitForFunction((t) => !document.getElem
 
 // Haengen: eine Endlosschleife blockiert den Engine-Thread, Neu laden bekommt
 // keine Antwort. Nach 15 s (hier eingestellt) bricht der Watchdog
-// (engine/src/EngineLoop.cpp) sie ab.
-await tab.evaluate(() => window.__blEval('(() => { for (;;); })()'));
-await tab.waitForTimeout(300);
+// (engine/src/EngineLoop.cpp) sie ab. Erst klicken, wenn die Schleife laeuft.
+loaded = [];
+await tab.evaluate(() => window.__blEval('(() => { console.log("RESULT loaded=Schleife"); for (;;); })()'));
+check('Haengen: Schleife laeuft', await waitLoaded('Schleife', 30000), loaded.join('|'));
 loaded = [];
 await tab.click('#reload');
 check('Haengen: Meldung nach 10 s ohne Antwort', await waitBoot('reagiert nicht', 14000), await bootText());
 check('Haengen: Meldung geht weg, sobald der Watchdog das Skript abbricht', await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: 15000 }).then(() => true, () => false));
-check('Haengen: Meldung in der Konsole der Seite', pageErrors.some((text) => /\[seite \d+\] Skript abgebrochen/.test(text)), pageErrors.join(' | '));
+const abortLogged = () => pageErrors.some((text) => /\[seite \d+\] Skript abgebrochen/.test(text));
+for (const end = Date.now() + 20000; !abortLogged() && Date.now() < end;)
+  await tab.waitForTimeout(200);
+check('Haengen: Meldung in der Konsole der Seite', abortLogged(), pageErrors.join(' | '));
 check('Haengen: danach laedt der Tab neu', await waitLoaded('Seite nachher'), loaded.join('|'));
 await tab.evaluate(() => window.__blEval('setTimeout(() => console.log("RESULT loaded=Timer nach Abbruch"), 10)'));
 check('Haengen: Timer laufen weiter', await waitLoaded('Timer nach Abbruch', 10000));
@@ -306,8 +310,8 @@ check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'Nach dem Ne
 // Stopp, waehrend die Seite schon zu sehen ist: kein Fehler und kein 'load',
 // nur das Laden ist zu Ende. Danach Zurueck/Vor auf einen Eintrag, der nicht
 // mehr im Back/Forward-Cache liegt (hoechstens 3 Seiten), und der Server
-// bricht ab (curl versucht es auf neuer Verbindung nochmals): Fehler in der
-// Statuszeile, der Tab laedt nicht mehr.
+// bricht ab (curl versucht es auf neuer Verbindung nochmals): Fehlerseite unter
+// der Adresse des Eintrags, der Tab laedt nicht mehr.
 const navTab = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
 watchErrors(navTab);
 const navLoaded = [];
@@ -345,9 +349,10 @@ check('Stopp: Laden zu Ende, kein Fehler, kein load', stopped && afterStop.statu
 slowResponse?.end();
 failNavA = true;
 await navTab.evaluate(() => window.__blEval('history.go(-4)'));
-const backFailed = await navTab.waitForFunction(() => document.getElementById('status').textContent.startsWith('Fehler')
-  && document.getElementById('reload').title === 'Neu laden', null, { timeout: 15000 }).then(() => true, () => false);
-check('Zurueck/Vor scheitert: Fehler, Tab laedt nicht mehr', backFailed && (loads.get('nav-a') || 0) >= 2, `${JSON.stringify(await navState())}, ${loads.get('nav-a')} Aufrufe`);
+const backFailed = await navTab.waitForFunction((url) => document.getElementById('address').value === url
+  && document.querySelector('#tab-list .tab.active .title')?.textContent === new URL(url).hostname
+  && document.getElementById('reload').title === 'Neu laden', siteURL + 'nav-a', { timeout: 15000 }).then(() => true, () => false);
+check('Zurueck/Vor scheitert: Fehlerseite, Tab laedt nicht mehr', backFailed && (loads.get('nav-a') || 0) >= 2, `${JSON.stringify(await navState())}, ${loads.get('nav-a')} Aufrufe`);
 
 // Die Zeit, in der confirm() auf den Nutzer wartet, zaehlt nicht fuer den
 // Watchdog (hier 2 s): das Skript laeuft nach der Antwort weiter, eine
@@ -373,6 +378,157 @@ const answered = await dialogLine(/RESULT confirm=true/, 15000);
 const aborted = await dialogLine(/Skript abgebrochen/, 10000);
 check('Dialog: Skript laeuft nach 3,5 s im confirm() weiter', answered >= 0 && (aborted < 0 || aborted > answered), dialogLines.filter((line) => /confirm|abgebrochen/.test(line)).join(' | '));
 check('Dialog: Endlosschleife danach abgebrochen', aborted > answered && answered >= 0);
+
+
+// beforeunload wie in Chrome: Rueckfrage nur nach einer Benutzer-Aktion in der
+// Seite, beim Wegnavigieren, Neuladen und Schliessen des Tabs (ein Hintergrund-
+// Tab kommt dafuer nach vorne, ohne Benutzer-Aktion nicht), ohne Frage aus einem
+// Hintergrund-Tab und nicht endlos in einer Schleife. Der Host-Tab fragt nur,
+// solange ein Tab mit Listener eine Benutzer-Aktion hatte.
+// Danach window.focus() vom Opener: der Popup-Tab kommt nach vorne, das
+// Fenster selber darf es aus dem Hintergrund nicht.
+const unloadLoads = new Map();
+const { url: unloadURL } = await serve((req, res) => {
+  const name = req.url.slice(1);
+  unloadLoads.set(name, (unloadLoads.get(name) || 0) + 1);
+  const body = name === 'unload'
+    ? `<script>addEventListener('beforeunload', (e) => { console.log('RESULT beforeunload=' + Date.now()); e.preventDefault(); })</script>`
+    : name === 'opener' ? `<script>addEventListener('click', () => { window.popup = open('/popup'); })</script>` : '';
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(`<!doctype html><title>Seite ${name}</title><body style="margin:0;height:600px">${body}<script>addEventListener('click', () => console.log('RESULT clicked=Seite ${name}')); console.log('RESULT loaded=Seite ${name}')</script>`);
+});
+const unloadTab = await (await browser.newContext({ viewport: { width: 1100, height: 700 } })).newPage();
+watchErrors(unloadTab);
+const unloadLines = [];
+let unloadLoaded = [];
+unloadTab.on('console', (msg) => {
+  unloadLines.push(msg.text());
+  const match = loadedPattern.exec(msg.text());
+  if (match)
+    unloadLoaded.push(match[1].trim());
+});
+const unloadDialogs = [];
+let dialogAnswer = 'dismiss';
+unloadTab.on('dialog', (dialog) => {
+  unloadDialogs.push(dialog.type() + ':' + dialog.message());
+  dialog[dialogAnswer]().catch(() => {});
+});
+const tabTitles = () => unloadTab.evaluate(() => [...document.querySelectorAll('#tab-list .tab')].map((el) => (el.classList.contains('active') ? '*' : '') + el.querySelector('.title').textContent));
+const activateUnloadPage = async () => {
+  const canvas = await unloadTab.evaluate(() => {
+    const rect = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').getBoundingClientRect();
+    return { x: rect.left, y: rect.top };
+  });
+  const clicked = unloadLines.length;
+  await unloadTab.mouse.click(canvas.x + 300, canvas.y + 300);
+  // erst wenn die Seite den Klick hatte, fragt WebCore bei beforeunload
+  for (let i = 0; i < 100 && !unloadLines.slice(clicked).some((line) => line.includes('RESULT clicked=')); i++)
+    await unloadTab.waitForTimeout(100);
+};
+// Der Listener kommt einen Engine-Schritt nach "RESULT loaded=" bei der Oberflaeche an
+const waitHostAsks = () => unloadTab.waitForFunction(() => typeof window.onbeforeunload === 'function', null, { timeout: 10000 }).catch(() => {});
+const LEAVE = 'Von dir vorgenommene Änderungen werden möglicherweise nicht gespeichert.';
+await unloadTab.goto(stack.app({ url: unloadURL + 'unload' }));
+check('beforeunload: Seite geladen', await waitLoaded('Seite unload', TIMEOUT, unloadLoaded));
+await go(unloadURL + 'eins', unloadTab);
+check('beforeunload: ohne Benutzer-Aktion keine Rueckfrage', await waitLoaded('Seite eins', 30000, unloadLoaded) && unloadDialogs.length === 0
+  && unloadLines.some((line) => line.includes('RESULT beforeunload=')), JSON.stringify(unloadDialogs));
+unloadLoaded = [];
+await go(unloadURL + 'unload', unloadTab);
+check('beforeunload: wieder geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
+await activateUnloadPage();
+await go(unloadURL + 'zwei', unloadTab);
+await unloadTab.waitForTimeout(2000);
+check('beforeunload: Wegnavigieren fragt, Abbrechen bleibt', JSON.stringify(unloadDialogs) === JSON.stringify(['confirm:Website verlassen?\n\n' + LEAVE])
+  && !unloadLoaded.includes('Seite zwei') && !unloadLoads.has('zwei'), JSON.stringify(unloadDialogs));
+const unloadCount = unloadLoads.get('unload');
+await unloadTab.click('#reload');
+await unloadTab.waitForTimeout(2000);
+check('beforeunload: Neu laden fragt, Abbrechen bleibt', unloadDialogs[1] === 'confirm:Website neu laden?\n\n' + LEAVE && unloadLoads.get('unload') === unloadCount, JSON.stringify(unloadDialogs));
+check('beforeunload: Host-Tab fragt beim Schliessen', await unloadTab.evaluate(() => typeof window.onbeforeunload === 'function'));
+// Navigation aus dem Hintergrund: ohne Frage
+await unloadTab.evaluate(() => window.__blEval('setTimeout(() => { location.href = "/drei"; }, 2000)'));
+await unloadTab.click('#new-tab');
+await unloadTab.keyboard.press('Escape');
+check('beforeunload: Navigation im Hintergrund-Tab ohne Rueckfrage', await waitLoaded('Seite drei', 30000, unloadLoaded) && unloadDialogs.length === 2, JSON.stringify(unloadDialogs));
+await unloadTab.waitForFunction(() => window.onbeforeunload === null, null, { timeout: 10000 }).catch(() => {});
+check('beforeunload: ohne Listener fragt der Host-Tab nicht mehr', await unloadTab.evaluate(() => window.onbeforeunload === null));
+// Schliessen eines Hintergrund-Tabs mit Listener: kommt nach vorne und fragt
+unloadLoaded = [];
+await go(unloadURL + 'unload', unloadTab);
+check('beforeunload: zweiter Tab geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
+await activateUnloadPage();
+await waitHostAsks();
+await unloadTab.click('#tab-list .tab:first-child .title');
+await unloadTab.click('#tab-list .tab:nth-child(2) .close');
+await unloadTab.waitForTimeout(1500);
+check('beforeunload: Schliessen fragt, Tab vorne und bleibt', unloadDialogs[2] === 'confirm:Website verlassen?\n\n' + LEAVE
+  && JSON.stringify(await tabTitles()) === JSON.stringify(['Seite drei', '*Seite unload']), `${JSON.stringify(unloadDialogs)} ${JSON.stringify(await tabTitles())}`);
+dialogAnswer = 'accept';
+await unloadTab.click('#tab-list .tab:nth-child(2) .close');
+await unloadTab.waitForFunction(() => document.querySelectorAll('#tab-list .tab').length === 1, null, { timeout: 10000 }).catch(() => {});
+check('beforeunload: Verlassen schliesst den Tab', unloadDialogs.length === 4 && JSON.stringify(await tabTitles()) === JSON.stringify(['*Seite drei']), `${JSON.stringify(unloadDialogs)} ${JSON.stringify(await tabTitles())}`);
+// Hintergrund-Tab mit Listener, aber ohne Benutzer-Aktion: der Listener laeuft, ohne
+// Frage, der Tab kommt nicht nach vorne, der aktive bleibt es
+await unloadTab.click('#new-tab');
+await unloadTab.keyboard.press('Escape');
+unloadLoaded = [];
+await go(unloadURL + 'unload', unloadTab);
+check('beforeunload: Tab ohne Benutzer-Aktion geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
+// Der Listener kommt einen Engine-Schritt nach dem Laden an (ohne Benutzer-Aktion fragt der Host-Tab nicht)
+await unloadTab.waitForTimeout(1500);
+await unloadTab.click('#tab-list .tab:first-child .title');
+const listenerRuns = unloadLines.filter((line) => line.includes('RESULT beforeunload=')).length;
+await unloadTab.click('#tab-list .tab:nth-child(2) .close');
+await unloadTab.waitForFunction(() => document.querySelectorAll('#tab-list .tab').length === 1, null, { timeout: 10000 }).catch(() => {});
+check('beforeunload: Hintergrund-Tab ohne Benutzer-Aktion zu, aktiver Tab bleibt', unloadDialogs.length === 4
+  && unloadLines.filter((line) => line.includes('RESULT beforeunload=')).length > listenerRuns
+  && JSON.stringify(await tabTitles()) === JSON.stringify(['*Seite drei']), `${JSON.stringify(unloadDialogs)} ${JSON.stringify(await tabTitles())}`);
+// Navigiert die Seite in einer Schleife, kaeme nach jedem "Abbrechen" sofort die
+// naechste Frage (jede blockiert die ganze Oberflaeche): nach zwei darf sie gehen
+dialogAnswer = 'dismiss';
+unloadLoaded = [];
+await go(unloadURL + 'unload', unloadTab);
+check('beforeunload: Seite fuer die Schleife geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
+await activateUnloadPage();
+const dialogsBeforeLoop = unloadDialogs.length;
+await unloadTab.evaluate(() => window.__blEval('setInterval(() => { location.href = "/schleife"; }, 100)'));
+check('beforeunload: Schleife hoechstens zwei Fragen, dann weg', await waitLoaded('Seite schleife', 15000, unloadLoaded)
+  && unloadDialogs.length - dialogsBeforeLoop === 2, JSON.stringify(unloadDialogs.slice(dialogsBeforeLoop)));
+dialogAnswer = 'accept';
+// window.focus(): Popup aus einem Klick, der Opener holt ihn zurueck nach vorne
+await go(unloadURL + 'opener', unloadTab);
+check('focus: Opener geladen', await waitLoaded('Seite opener', 30000, unloadLoaded));
+await activateUnloadPage();
+check('focus: Popup geladen', await waitLoaded('Seite popup', 30000, unloadLoaded));
+await unloadTab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Seite popup', null, { timeout: 10000 }).catch(() => {});
+await unloadTab.evaluate(() => window.__blEval('setTimeout(() => { window.focus(); console.log("RESULT selffocus=1"); }, 1500)'));
+await unloadTab.click('#tab-list .tab:first-child .title');
+await unloadTab.waitForTimeout(3000);
+check('focus: Fenster im Hintergrund holt sich nicht selber nach vorne', unloadLines.some((line) => line.includes('RESULT selffocus=1'))
+  && JSON.stringify(await tabTitles()) === JSON.stringify(['*Seite opener', 'Seite popup']), JSON.stringify(await tabTitles()));
+await unloadTab.evaluate(() => window.__blEval('window.popup.focus()'));
+const popupFront = await unloadTab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Seite popup', null, { timeout: 10000 }).then(() => true, () => false);
+check('focus: window.focus() vom Opener holt den Popup-Tab nach vorne', popupFront, JSON.stringify(await tabTitles()));
+// Host-Tab schliessen: mit Listener und Benutzer-Aktion fragt der Host
+unloadLoaded = [];
+await go(unloadURL + 'unload', unloadTab);
+check('beforeunload: Seite fuer den Host-Tab geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
+await activateUnloadPage();
+await waitHostAsks();
+dialogAnswer = 'dismiss';
+const dialogsBeforeHost = unloadDialogs.length;
+await unloadTab.close({ runBeforeUnload: true });
+await new Promise((resolve) => setTimeout(resolve, 2000));
+check('beforeunload: Host fragt beim Schliessen, Abbrechen bleibt', unloadDialogs[dialogsBeforeHost]?.startsWith('beforeunload:') && !unloadTab.isClosed(), JSON.stringify(unloadDialogs.slice(dialogsBeforeHost)));
+// Daten loeschen laedt die Oberflaeche absichtlich neu: ohne Rueckfrage des Hosts
+dialogAnswer = 'accept';
+const dialogsBeforeClear = unloadDialogs.length;
+const clearReload = unloadTab.waitForEvent('load', { timeout: 30000 }).then(() => true, () => false);
+await unloadTab.click('#clear-data');
+check('beforeunload: Daten loeschen laedt ohne Rueckfrage des Hosts neu', await clearReload
+  && JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)) === JSON.stringify(['confirm:Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?']),
+  JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)));
 
 await browser.close();
 finish();

@@ -34,10 +34,15 @@ Schlichtes HTML, CSS und JavaScript (ES-Module) ohne Build-Schritt, ein Modul pr
   (`Module.onAbort`, WASM-Trap, Fehler aus einem ihrer Threads), kommt eine Meldung mit
   "Neu starten", die Sitzung bringt den letzten guten Stand zurueck. Vor Aufrufen, auf die die
   Engine immer antwortet (Laden, Neu laden, Verlauf wiederherstellen, Suchen), ruft `app.js`
-  `expectAnswer()`; bleibt die Antwort 10 s aus, gibt es "Warten" oder "Neu starten"
-  (Entscheid 147).
+  `expectAnswer()`; nach Klicks und Tasten schickt sie eine Marke (`inputSent`), die der
+  Engine-Thread nach der Eingabe im Speicher ablegt. Bleibt die Antwort bzw. Marke 10 s aus,
+  gibt es "Warten" oder "Neu starten" (Entscheide 147, 172).
 - Dialoge (`alert`/`confirm`/`prompt`) sind die echten Dialoge des Host mit dem Host der Seite
-  davor, Hintergrund-Tabs bekommen sofort eine Antwort (Entscheid 149).
+  davor, Hintergrund-Tabs bekommen sofort eine Antwort (Entscheid 149), unterdrueckte Dialoge
+  zeigt ein Zeichen am Tab. beforeunload fragt mit den Texten von Chrome (Entscheid 168).
+- Nur der aktive Tab ist fuer seine Seite sichtbar, und nur solange der Tab des Host es ist
+  (`bl_set_visible`, Entscheid 170). Meldet die Engine `memory-pressure`, verwirft die
+  Oberflaeche den am laengsten nicht benutzten Hintergrund-Tab (Entscheid 171).
 - `mailto:`, `tel:` und andere fremde Schemata gibt die Engine nach einem Klick als
   `external-url` an die Oberflaeche, die sie mit `window.open(..., 'noopener')` an den Host
   gibt (Entscheid 148).
@@ -103,7 +108,9 @@ laufen, wenn nichts von JSC/WebCore auf dem Stack liegt:
 - Patch 0012: Auch explizite Anforderungen (`collectAsync`, `collectSync`) warten, solange
   ein `DeferGC` offen ist. Am Ende des aeussersten `DeferGC` laeuft der GC dann auf leerem
   Stack und findet alle Wurzeln im Speicher.
-- Gleich fuer die Web Worker der Seiten (`WorkerRunLoop`) und den IndexedDB-Thread.
+- Gleich fuer die Web Worker der Seiten (`WorkerRunLoop`) und den IndexedDB-Thread. Die Web
+  Worker laufen wie der Engine-Thread aus dem Event-Loop des Host (Patch 0041, Entscheid 183),
+  darum feuern dort FinalizationRegistry und WeakRefs der Host-Seite.
 
 Nachweis: `tests/engine/gc-test.mjs` mit `JSC_slowPathAllocsBetweenGCs=10` (GC sehr oft).
 Ohne die Verschiebung stuerzt der Test ab ("memory access out of bounds"), mit ihr laeuft er
@@ -144,7 +151,8 @@ Thread, Sampling-Profiler aus.
   Wisch-Events gehen ueber den Compositor-Thread direkt dorthin (Entscheid 101).
 - Pinch-Zoom: waehrend der Geste skaliert der Compositor die gezeigten Kacheln (Transformation
   der Wurzel-Ebene, Rechnung in `engine/src/PinchZoom.h`), am Ende uebernimmt der Engine-Thread
-  einmal mit `Page::setPageScaleFactor` (Entscheid 150).
+  einmal mit `Page::setPageScaleFactor` (Entscheid 150). Strg + Rad geht vorher an die Seite,
+  gezoomt wird nur ohne `preventDefault` (Entscheid 167).
 - CSS-Filter: Blur und Schatten rechnet der Compositor auf der GPU, eine Ebene ohne Kinder
   behaelt ihr gefiltertes Bild, solange sich nichts aendert (Patch 0036, Entscheid 156).
   `url()`- und SVG-Filter malt die CPU in den Kacheln.
@@ -206,8 +214,9 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   vor dem Kompilieren um: jeder Speicher des Moduls wird ein eigener Bereich im Speicher der
   Engine, jeder Zugriff bekommt eine Grenzpruefung und die Basis des Bereichs dazu.
   memory.grow ruft die Bruecke, die den Bereich bei Bedarf umzieht (der alte ArrayBuffer wird
-  abgehaengt, wie im Standard). Basis und Groesse liegen pro Funktion in Locals und werden nur
-  nach Aufrufen neu geladen. Kostet ca. 10-15 % Geschwindigkeit, dafuer kann ein Modul nur
+  abgehaengt, wie im Standard), mit einem Viertel Reserve, hoechstens 96 MB. Jeden Bereich
+  meldet die Bruecke dem GC von JSC als Extra-Speicher (Entscheid 184). Basis und Groesse
+  liegen pro Funktion in Locals und werden nur nach Aufrufen neu geladen. Kostet ca. 10-15 % Geschwindigkeit, dafuer kann ein Modul nur
   seine eigenen Bereiche lesen und schreiben. Hoechstens 2 GB pro Speicher, `memory.buffer`
   laesst sich nicht uebertragen.
 - memory64 und mehrere Speicher gehen (i64-Adressen werden geprueft und auf i32 gekuerzt,
@@ -225,7 +234,9 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   schickt (`Module.blTransport`, heute Wisp aus `web/transport.js`). Ankommende Daten
   schreibt der Haupt-Thread direkt in den Puffer. Gesendet gilt erst, was der Transport
   abgeschickt hat (`onsent`, `bl_socket_sent`), hoechstens 8 MB sind unterwegs. Schliesst das
-  Relay mit einem Fehlergrund, bekommt curl einen Fehler (errno) statt eines normalen Endes.
+  Relay mit einem Fehlergrund, bekommt curl einen Fehler (errno) statt eines normalen Endes,
+  ohne Relay ENETUNREACH. Patch 0039 macht aus dem errno den Code von curl (Entscheid 175).
+  Ein Deskriptor lebt, solange ihn ein Thread benutzt (`shared_ptr`).
   `getaddrinfo` gibt fuer Hostnamen Platzhalter (172.29.x.y), `connect` macht daraus wieder
   den Namen, aufloesen tut das Relay.
 - Wichtig fuer allen Code, der auf dem Haupt-Thread laeuft: waehrend er auf ein Lock wartet
@@ -239,7 +250,10 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   `followRedirect`, `networkResponse`): Cookies nur bei `allowCookies` (also nicht bei
   `credentials: 'omit'`), Redirects hoechstens 20, nie nach `file:`, ohne Zugangsdaten und
   ohne Authorization/Origin bei fremdem Ursprung. Pings pruefen wie WebKit2 CORS (mit
-  Preflight) und CSP auch nach Redirects. Downloads siehe Entscheid 163.
+  Preflight) und CSP auch nach Redirects. Downloads siehe Entscheid 163. curl hat hoechstens
+  64 Verbindungen, 6 pro Host (Entscheid 176).
+- Fehlerseite (`engine/src/ErrorPage.cpp`): scheitert die Navigation des Hauptframes in curl,
+  laedt die Engine eine Seite wie Chrome unter der Adresse, die nicht ging (Entscheid 174).
 - TLS: ChaCha20-Poly1305 zuerst (TLS 1.3 ueber `CURLOPT_TLS13_CIPHERS`, Patch 0021, und
   TLS 1.2). In WASM gibt es keine AES-Hardware; AES-GCM in Software kostete auf CNN 1.6 s
   auf dem curl-Thread, ChaCha20 0.38 s. Server folgen meist der Reihenfolge des Clients, wenn
@@ -249,7 +263,8 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
   API des Host-Browsers (`bl-http-v2`, auf der Platte, wird nur bei Bedarf gelesen, Zugriff
   ueber `engine/js/http-cache.js` auf dem Haupt-Thread; die URL-Liste haelt der Haupt-Thread im
   Speicher, Anfragen ohne Eintrag kosten so keinen Plattenzugriff). Vor dem Netz: frisch ->
-  direkt aus dem Cache, alt mit ETag/Last-Modified -> bedingte Anfrage, bei 304 aus dem Cache.
+  direkt aus dem Cache, alt mit ETag/Last-Modified -> bedingte Anfrage, bei 304 aus dem Cache
+  (`lookupForLoad`, `didRevalidate`, fuer alle Lader, Entscheid 182).
   Frische, Alter und Vary rechnet WebCore (`CacheValidation.h`). Gezaehlt wird nur der eigene
   Inhalt (Header `x-bl-size`), Grenze 400 MB und hoechstens ein Viertel der Quote, darueber
   werden die aeltesten Eintraege bis 80 % geloescht (auch bei voller Quote). HTTP/1-Antworten,
@@ -266,7 +281,8 @@ Browsers, mit voller Geschwindigkeit, SIMD, Ausnahmen usw.:
 - `WispTransport`: jede TCP-Verbindung ist ein Stream in einer Wisp-WebSocket-Verbindung.
   Hostnamen werden vom Relay aufgeloest. Jeder WebSocket macht seinen eigenen Handshake (15 s
   Zeitlimit). Bricht eine stehende Verbindung ab, verbindet er einmal sofort neu, sonst alle
-  2 s, und meldet `connected` fuer `navigator.onLine`.
+  2 s, und meldet `connected` fuer `navigator.onLine`. Kommt 10 s nach dem Senden nichts
+  zurueck, fragt er beim Relay nach und verwirft eine tote Verbindung (Entscheid 177).
 - Spaeter `WireGuardTransport`: userspace TCP/IP + WireGuard im WASM, UDP-Pakete ueber
   Wisp-UDP. WebCore und curl merken davon nichts.
 
@@ -310,16 +326,20 @@ Speicher.
 - Ganze Dateien ersetzt `replaceWholeFile` atomar: Kopie in `/data/tmp`, dann `rename`.
   `/data/tmp` wird beim Start geleert. Ein Lesefehler gilt nie als "Datei fehlt", sonst
   wuerde eine leere Datei eine gute ueberschreiben.
-- Uploads, Drag & Drop und Einfuegen schreibt die Engine nach `/tmp/uploads/<Tab>/` (im
-  WASM-Speicher), der Ordner geht mit dem Tab (`bl_remove_path`).
+- Uploads, Drag & Drop und Einfuegen schreibt die Engine nach `/data/tmp/uploads/<Tab>/`
+  (OPFS), der Engine-Thread liest sie selber in Stuecken (Entscheid 181). Der Ordner geht mit
+  dem Tab (`bl_remove_path`).
+- IndexedDB hoechstens 256 MB pro Ursprung, begrenzt ist nur das Schreiben (Patch 0040,
+  Entscheid 179).
 
 SQLite schreibt jede WAL-Seite einzeln (mit seek davor): beim Laden von CNN waren das ca.
 7000 Zugriffe nur fuer die Cookie-Datenbank. Darum gibt es ein eigenes SQLite-VFS
 (`engine/src/MemoryVFS.cpp`): Datenbank, `-journal`, `-wal` und der gemeinsame Speicher fuer
-den WAL-Index liegen im WASM-Speicher (Locks nur im Prozess). Ins Dateisystem kommen die
-Dateien als Ganzes, wenn gerade keine Schreib-Transaktion laeuft: alle 5 s und beim
-Verlassen der Seite (die Oberflaeche ruft `bl_storage_flush`, geschrieben wird im
-Engine-Thread) und wenn die letzte Verbindung zu einer Datenbank schliesst. Danach liest das
+den WAL-Index liegen im WASM-Speicher (in Bloecken von 64 KB, Locks nur im Prozess). Auf die
+Platte kommt nur die Datenbank mit den bestaetigten Seiten aus dem WAL, als eine Datei, wenn
+gerade keine Schreib-Transaktion laeuft: kurz nach jeder Aenderung (im Engine-Thread), beim
+Schliessen des Tabs mit Warten (`bl_storage_flush`) und wenn die letzte Verbindung zu einer
+Datenbank schliesst (Entscheid 180). Danach liest das
 VFS wieder von der Platte, damit es stimmt, wenn WebKit Dateien selber loescht
 (`indexedDB.deleteDatabase`).
 
@@ -373,7 +393,7 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
 Ein Container (`Dockerfile`, `relay/server.mjs`): liefert die Seite mit den Headern oben
 und vorkomprimiert (Brotli, mit ETag/304) aus und ist das Wisp-Relay. HTTPS kommt von einem
 Proxy davor (Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay
-verbindet nur zu oeffentlichen Unicast-Adressen und erlaubten Ports; Namen prueft es bei der
-Aufloesung, so dass genau die gepruefte Adresse verbunden wird (Entscheid 159). Auf einem
+verbindet nur zu oeffentlichen Unicast-Adressen und erlaubten Ports; jede Adresse prueft sein
+Socket direkt vor dem Verbinden (`relay/wisp.mjs`, Entscheide 159, 175). Auf einem
 oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als Proxy),
 intern geht es ohne. Ablauf in [deploy/README.md](../deploy/README.md).

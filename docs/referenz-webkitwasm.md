@@ -56,7 +56,8 @@ aber mit bekannten Problemen.
   GC nicht gesehen werden (eine Structure wird zu frueh freigegeben). Das gehen wir in
   Phase 2 von Anfang an an (`--spill-pointers` oder GC nur an sicheren Punkten) und testen
   es mit GC-Stresstests. Ist aber nur eine Hypothese, kann auch ein anderer Bug sein.
-- **WebKit-Version**: Sie sind auf `webkitglib/2.52`, wir auf `wpewebkit-2.54.1`.
+- **WebKit-Version**: Sie sind auf `webkitglib/2.52`, wir auf einem WPE-Release (`WEBKIT_TAG` in
+  `versions.env`).
 - **Netzwerk austauschbar** (Transport-Interface) wegen WireGuard spaeter.
 - **Groesse**: Ihr .wasm ist ca. 107 MB. Wir wollen mit Feature-Trimming, `-Oz`/`-O3` je
   nach Teil und Brotli deutlich drunter kommen.

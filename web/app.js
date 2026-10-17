@@ -6,13 +6,13 @@
 
 import { WispTransport } from './transport.js';
 import { audioState, onEngineAudio } from './audio.js';
-import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch } from './media.js';
+import { initMedia, mediaState, onEngineMedia, onEngineMediaFetch, pictureInPictureView } from './media.js';
 import { initCapture, onCaptureStart, onCaptureStop } from './capture.js';
 import { initDevices, clearPermissions, forgetTab, onPermissionRequest, onGeolocationStart, onGeolocationStop, onSensorStart, onSensorStop, onHostCall, onNotification, onNotificationClose, onGamepadMonitor, onGamepadEffect, onSpeak, onSpeechCommand, onSpeechRecognition, attachTouch } from './devices.js';
 import { initLibrary, addressToURL, saveSession, sessionToRestore, recordVisit, toggleBookmark, updateStar, togglePanel, refreshDownloadsPanel, suggestions, settings, panelIsOpen, formatSize } from './library.js';
 import { initPickers, closePickers, showSelectPopup, hideSelectPopup, showColorPicker, showDateTimePicker, hidePicker, showHover, clearHover } from './pickers.js';
-import { engineAnswered, engineFailed, expectAnswer, showEngineMessage, takeSafeStart, watchEngine } from './watchdog.js';
-import { storage } from './util.js';
+import { engineAnswered, engineFailed, expectAnswer, inputSent, restartWait, showEngineMessage, takeSafeStart, watchEngine } from './watchdog.js';
+import { reloadUI, storage, uiReloading } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -132,8 +132,8 @@ async function startEngine() {
 // Cookies, localStorage und IndexedDB der Seiten liegen in der Engine unter
 // /data. Mit WasmFS (Standard) ist das ein Verzeichnis im OPFS des Browsers,
 // die Engine liest und schreibt es selber (engine/src/Storage.cpp); hier wird
-// nur alle paar Sekunden und beim Verlassen der Seite das Schreiben der
-// Datenbanken angestossen. Aeltere Engine-Builds ohne WasmFS haben ein IDBFS:
+// nur beim Verstecken und Verlassen der Seite das Schreiben der Datenbanken
+// angestossen. Aeltere Engine-Builds ohne WasmFS haben ein IDBFS:
 // beim Start aus der IndexedDB laden, danach regelmaessig zurueckschreiben.
 
 let storageReady = false;
@@ -247,12 +247,14 @@ function mountStorage(module) {
   });
 }
 
-function saveStorage() {
+// waitMilliseconds: beim Schliessen des Tabs so lange auf das Schreiben warten
+function saveStorage(waitMilliseconds = 0) {
   if (!storageReady || !engineReady)
     return;
-  // WasmFS: die Engine schreibt die Datenbanken im eigenen Thread nach /data
+  // WasmFS: die Engine schreibt die Datenbanken kurz nach jeder Aenderung im
+  // eigenen Thread nach /data (engine/src/MemoryVFS.cpp)
   if (!engine.FS.syncfs) {
-    engine._bl_storage_flush();
+    engine._bl_storage_flush(waitMilliseconds);
     return;
   }
   if (storageSyncing) {
@@ -263,7 +265,7 @@ function saveStorage() {
   // Datenbanken liegen in der Engine im Speicher (engine/src/MemoryVFS.cpp),
   // zuerst ins Dateisystem schreiben
   if (engine._bl_storage_flush)
-    engine._bl_storage_flush();
+    engine._bl_storage_flush(0);
   engine.FS.syncfs(false, (error) => {
     storageSyncing = false;
     if (error)
@@ -275,12 +277,14 @@ function saveStorage() {
   });
 }
 
-setInterval(saveStorage, 5000);
+// Mit WasmFS plant die Engine das Schreiben selber (MemoryVFS.cpp, flushFamily)
+setInterval(() => engine?.FS.syncfs && saveStorage(), 5000);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden)
     saveStorage();
+  updateVisibility();
 });
-window.addEventListener('pagehide', saveStorage);
+window.addEventListener('pagehide', () => saveStorage(500));
 
 async function clearStorage() {
   if (!confirm('Alle gespeicherten Daten (Cookies, Logins, Website-Daten) löschen?'))
@@ -296,7 +300,7 @@ async function clearStorage() {
     storage(clearDataFlag, '1');
   } else
     await deleteLegacyStorage();
-  location.reload();
+  reloadUI();
 }
 
 // Zusaetzliche CA-Zertifikate (PEM), z.B. eine Firmen-CA oder fuer Tests.
@@ -389,14 +393,6 @@ function persistSession() {
 
 const toUTF8 = (text) => engine.stringToNewUTF8(text ?? '');
 
-// Datei ins Dateisystem der Engine schreiben. Das passiert im Engine-Thread
-// (bl_write_file), nicht hier: so wartet die Oberflaeche nie auf Locks des
-// Dateisystems, und die Datei ist vor dem naechsten Aufruf an die Engine da.
-function writeEngineFile(path, bytes) {
-  const data = engine._malloc(Math.max(bytes.length, 1));
-  engine.HEAPU8.set(bytes, data);
-  engine._bl_write_file(toUTF8(path), data, bytes.length);
-}
 initPickers({ engine: () => engine, toUTF8, focusPage: () => focusPage() });
 
 // --------------------------------------------------------------------- Tabs
@@ -437,7 +433,7 @@ class Tab {
 
     this.element = document.createElement('div');
     this.element.className = 'tab';
-    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><span class="recording" title="Kamera, Mikrofon oder Bildschirm in Gebrauch" hidden>&#9679;</span><button class="audio" hidden></button><button class="close" title="Tab schliessen">&#215;</button>';
+    this.element.innerHTML = '<img class="icon" alt="" hidden><span class="title"></span><span class="recording" title="Kamera, Mikrofon oder Bildschirm in Gebrauch" hidden>&#9679;</span><span class="dialog-blocked" title="Dialog unterdrückt" hidden>&#8856;</span><button class="audio" hidden></button><button class="close" title="Tab schliessen">&#215;</button>';
     this.audible = false;
     this.muted = false;
     // Lautsprecher wie in Chrome: zeigt Ton an, Klick schaltet den Tab stumm
@@ -447,22 +443,32 @@ class Tab {
       if (!e.target.classList.contains('close') && !e.target.classList.contains('audio'))
         activateTab(this);
     });
-    this.element.querySelector('.close').addEventListener('click', () => closeTab(this));
+    this.element.querySelector('.close').addEventListener('click', () => requestCloseTab(this));
     $('tab-list').appendChild(this.element);
     this.updateTitle();
 
     const { width, height } = viewportSize();
     if (viewId) {
+      // Von der Engine sichtbar geoeffnet, newTab zeigt ihn gleich
+      this.visible = true;
       engine._bl_resize(this.id, width, height, devicePixelRatio);
       return;
     }
     engine._bl_create_view(this.id, width, height, devicePixelRatio);
+    // Versteckt bis activateTab (updateVisibility)
+    this.visible = false;
+    engine._bl_set_visible(this.id, 0);
     if (lazy) {
       this.pendingURL = url;
       this.pendingHistory = lazy.history?.entries?.length ? lazy.history : null;
     }
     else if (url)
       loadURL(this, url);
+  }
+
+  // Zeichen am Tab: Dialoge gesperrt oder im Hintergrund verworfen (engineDialog)
+  updateDialogMarker() {
+    this.element.querySelector('.dialog-blocked').hidden = !this.dialogsBlocked && !this.dialogSuppressed;
   }
 
   // Favicon: die Engine hat es geladen, wir bekommen die Bytes
@@ -567,6 +573,8 @@ function activateTab(tab) {
     engine._bl_focus(activeTab.id, 0);
   }
   activeTab = tab;
+  tab.dialogSuppressed = false;
+  tab.updateDialogMarker();
   clearHover();
   updateStar(tab.url);
   if (tab.pendingURL) {
@@ -582,32 +590,47 @@ function activateTab(tab) {
   persistSession();
   tab.canvas.style.display = 'block';
   tab.element.classList.add('active');
+  updateVisibility();
   engine._bl_focus(tab.id, 1);
   focusPage();
   updateToolbar();
   tab.updateTitle();
 }
 
+// Nur der aktive Tab ist zu sehen, und nur solange der Tab des Host es ist.
+// Die anderen sind fuer ihre Seiten versteckt wie in Chrome (visibilityState,
+// kein rAF, gedrosselte Timer, kein Malen; WebView::setVisible).
+function updateVisibility() {
+  if (!engineReady)
+    return;
+  for (const tab of tabs.values()) {
+    const visible = tab === activeTab && !document.hidden;
+    if (tab.visible !== visible) {
+      tab.visible = visible;
+      engine._bl_set_visible(tab.id, visible ? 1 : 0);
+    }
+  }
+}
+
 // Wie Chrome bei wenig Speicher: alle Tabs teilen sich den WASM-Speicher der
-// Engine (hoechstens 4 GB, er schrumpft nie). Wird er knapp, ersetzen wir den
-// am laengsten nicht benutzten Hintergrund-Tab durch einen, der erst beim
-// Anklicken neu laedt. Tabs mit Ton oder Kamera/Mikrofon bleiben.
-let discardLimit = 2.5 * 1024 ** 3;
-function checkMemory() {
-  if (!engineReady || engine._bl_memory_used() < discardLimit)
+// Engine (hoechstens 4 GB, er schrumpft nie). Muss malloc oben weiter wachsen,
+// meldet die Engine "memory-pressure" (engine/src/EngineLoop.cpp), bei jedem
+// Wachstum um 32 MB einmal. Dann ersetzen wir den am laengsten nicht benutzten
+// Hintergrund-Tab durch einen, der erst beim Anklicken neu laedt. Tabs mit Ton
+// oder Kamera/Mikrofon bleiben. Tabs mit PiP-Fenster oder Eingaben, nach denen
+// die Seite beim Verlassen fragen wuerde, kommen erst dran, wenn es sonst keine gibt.
+function discardForMemory() {
+  if (!engineReady)
     return null;
   const candidates = [...tabs.values()].filter((tab) => tab !== activeTab && !tab.pendingURL && !tab.audible
     && !tab.capturing && /^(https?|file):/.test(tab.url || ''));
-  candidates.sort((a, b) => (a.lastActive || 0) - (b.lastActive || 0));
+  const pip = pictureInPictureView();
+  const kept = (tab) => tab.id === pip || (tab.beforeUnload && tab.userActivated) ? 1 : 0;
+  candidates.sort((a, b) => kept(a) - kept(b) || (a.lastActive || 0) - (b.lastActive || 0));
   return candidates.length ? discardTab(candidates[0]) : null;
 }
-setInterval(checkMemory, 15000);
-// Fuer Tests: Grenze setzen und sofort pruefen
-window.__blCheckMemory = (limit) => {
-  if (limit !== undefined)
-    discardLimit = limit;
-  return checkMemory()?.id ?? 0;
-};
+// Fuer Tests: wie eine Meldung der Engine
+window.__blCheckMemory = () => discardForMemory()?.id ?? 0;
 
 function discardTab(tab) {
   const fresh = new Tab(tab.url, 0, { title: tab.title, history: tab.history });
@@ -626,6 +649,46 @@ function discardTab(tab) {
   return fresh;
 }
 
+// Schliessen durch den Benutzer: hat die Seite einen beforeunload-Listener,
+// fragt sie erst, die Antwort kommt als "try-close". Nach vorne kommt der Tab
+// wie in Chrome nur, wenn ein Dialog kommen kann: WebCore fragt erst nach einer
+// Benutzer-Aktion. Vor dem Dialog nach vorne, sonst malt der Host den Wechsel
+// erst danach (pageDialog holt es nach, falls doch einer kommt). Nach dem
+// Schliessen geht es zurueck zum Tab davor.
+function requestCloseTab(tab) {
+  if (!tab.beforeUnload || !engineReady) {
+    closeTab(tab);
+    return;
+  }
+  if (tab.closing)
+    return;
+  tab.closing = true;
+  tab.closeReturn = activeTab !== tab ? activeTab : null;
+  if (tab.userActivated)
+    activateTab(tab);
+  expectAnswer();
+  engine._bl_try_close(tab.id);
+}
+
+// Fragt der Host beim Schliessen bzw. Neuladen der Oberflaeche nach? Nur wenn
+// ein Tab einen beforeunload-Listener hat und der Benutzer dort etwas getan hat,
+// den Handler selber kann die Oberflaeche hier nicht mehr fragen
+function updateHostBeforeUnload() {
+  const ask = [...tabs.values()].some((tab) => tab.beforeUnload && tab.userActivated);
+  window.onbeforeunload = ask ? (e) => {
+    if (engineReady && !uiReloading())
+      e.preventDefault();
+  } : null;
+}
+
+// Klick, Taste, Text oder Einfuegen in der Seite (bis zum naechsten Dokument)
+function noteUserActivation(tab) {
+  if (!tab.userActivated) {
+    tab.userActivated = true;
+    updateHostBeforeUnload();
+  }
+}
+
 function closeTab(tab) {
   forgetTab(tab);
   closePickers(tab);
@@ -639,6 +702,7 @@ function closeTab(tab) {
   tab.canvas.remove();
   tab.element.remove();
   tabs.delete(tab.id);
+  updateHostBeforeUnload();
   if (activeTab === tab) {
     activeTab = null;
     const next = [...tabs.values()].pop();
@@ -661,23 +725,27 @@ function updateToolbar() {
   $('zoom').textContent = Math.round(tab.zoom * 100) + ' %';
   if (document.activeElement !== $('address'))
     $('address').value = tab.url === 'about:blank' ? '' : tab.url;
-  updateSecurity(tab.url);
+  updateSecurity(tab);
 }
 
 // Sicherheitsanzeige wie Chrome: Schloss bei HTTPS (die Engine prueft das
 // Zertifikat selber, ohne gueltiges Zertifikat laedt die Seite gar nicht),
-// "Nicht sicher" bei HTTP
-function updateSecurity(url) {
+// "Nicht sicher" bei HTTP und bei der Fehlerseite fuer ein ungueltiges
+// Zertifikat, bei anderen Fehlerseiten nichts (tab.errorPage, "commit")
+function updateSecurity(tab) {
   const security = $('security');
   const form = $('address-form');
-  const https = /^https:/.test(url || '');
-  const http = /^http:/.test(url || '');
-  security.hidden = !https && !http;
-  security.textContent = https ? '\u{1F512}' : http ? 'Nicht sicher' : '';
-  security.title = https ? 'Verbindung ist sicher (TLS)' : http ? 'Die Verbindung zu dieser Seite ist nicht verschlüsselt' : '';
-  security.classList.toggle('insecure', http);
-  form.classList.toggle('with-security', https || http);
-  form.classList.toggle('insecure', http);
+  const url = tab.url || '';
+  const certificate = tab.errorPage === 'certificate';
+  const https = !tab.errorPage && /^https:/.test(url);
+  const insecure = certificate || (!tab.errorPage && /^http:/.test(url));
+  security.hidden = !https && !insecure;
+  security.textContent = https ? '\u{1F512}' : insecure ? 'Nicht sicher' : '';
+  security.title = https ? 'Verbindung ist sicher (TLS)' : certificate ? 'Das Zertifikat dieser Website ist nicht gültig'
+    : insecure ? 'Die Verbindung zu dieser Seite ist nicht verschlüsselt' : '';
+  security.classList.toggle('insecure', insecure);
+  form.classList.toggle('with-security', https || insecure);
+  form.classList.toggle('insecure', insecure);
 }
 
 // --------------------------------------------------------- Vollbild
@@ -714,10 +782,15 @@ document.addEventListener('fullscreenchange', () => {
 
 // --------------------------------------------------------- Meldungen der Engine
 
-function onEngineEvent(viewId, type, payload) {
-  engineAnswered();
+function onEngineEvent(viewId, type, payload, fromEngineThread) {
+  if (fromEngineThread)
+    engineAnswered();
   const tab = tabs.get(viewId);
   const data = payload ? JSON.parse(payload) : {};
+  if (type === 'memory-pressure') {
+    discardForMemory();
+    return;
+  }
   if (type === 'console') {
     // Reihenfolge von JSC::MessageLevel
     const method = ['log', 'warn', 'error', 'debug', 'info'][data.level] || 'log';
@@ -803,6 +876,28 @@ function onEngineEvent(viewId, type, payload) {
     closeTab(tab);
     return;
   }
+  if (type === 'try-close') {
+    const previous = tab.closeReturn;
+    tab.closing = false;
+    tab.closeReturn = null;
+    if (data.close) {
+      if (activeTab === tab && previous && tabs.has(previous.id))
+        activateTab(previous);
+      closeTab(tab);
+    }
+    return;
+  }
+  if (type === 'beforeunload') {
+    tab.beforeUnload = data.listener;
+    updateHostBeforeUnload();
+    return;
+  }
+  if (type === 'focus') {
+    // window.focus() bzw. WindowClient.focus(), WebCore hat es erlaubt
+    window.focus();
+    activateTab(tab);
+    return;
+  }
   if (type === 'contextmenu') {
     showContextMenu(tab, data);
     return;
@@ -863,6 +958,9 @@ function onEngineEvent(viewId, type, payload) {
   case 'touch-result':
     tab.onTouchResult?.(data);
     return;
+  case 'wheel-result':
+    tab.onWheelResult?.(data);
+    return;
   case 'pointerlock':
     setPointerLock(tab, data.on);
     return;
@@ -906,9 +1004,15 @@ function onEngineEvent(viewId, type, payload) {
       setProgress(data.progress);
     break;
   case 'commit':
-    // Neues Dokument: Dialoge wieder erlaubt (engineDialog)
+    tab.errorPage = data.errorPage || null;
+    if (tab === activeTab)
+      updateSecurity(tab);
+    // Neues Dokument: Dialoge wieder erlaubt (engineDialog), noch ohne Benutzer-Aktion
     tab.dialogsBlocked = tab.dialogsAsked = false;
     tab.dialogBurst = 0;
+    tab.updateDialogMarker();
+    tab.userActivated = false;
+    updateHostBeforeUnload();
     break;
   case 'first-layout':
     window.__blFirstLayout = true; // fuer die Tests (tests/e2e)
@@ -1241,36 +1345,41 @@ window.addEventListener('blur', hideContextMenu);
 const MAX_UPLOAD = 512 * 1024 * 1024;
 let uploadCounter = 0;
 
-// Ordner mit den Dateien eines Tabs. Die Seite liest sie, solange sie ihre
-// File-Objekte hat (auch nach dem Navigieren, Back/Forward-Cache), darum erst
-// beim Schliessen des Tabs geloescht.
-const uploadDirectory = (tab) => '/tmp/uploads/' + tab.id;
+// Ordner mit den Dateien eines Tabs, unter /data/tmp im OPFS (nicht im
+// WASM-Speicher, die Engine leert ihn beim Start). Die Seite liest sie, solange
+// sie ihre File-Objekte hat (auch nach dem Navigieren, Back/Forward-Cache),
+// darum erst beim Schliessen des Tabs geloescht. Ohne WasmFS ausserhalb von
+// /data, sonst kopierte das IDBFS sie in die IndexedDB des Browsers.
+const uploadDirectory = (tab) => (engine.FS.syncfs ? '/tmp' : '/data/tmp') + '/uploads/' + tab.id;
 
 // Dateien (Upload, Ablegen, Einfuegen) ins Dateisystem der Engine, gibt die
-// Pfade zurueck. Was sich nicht lesen laesst (weg, zu gross), faellt weg.
+// Pfade zurueck. Was sich nicht lesen laesst (weg, zu gross), faellt weg. Der
+// Engine-Thread liest die Dateien selber (engine-pre.js, blWriteFiles), die
+// Pfade gehen erst danach an die Engine.
 async function writeUploads(tab, files) {
-  const paths = [];
+  const uploads = [];
   const skipped = [];
   for (const file of files) {
     // Ein eingefuegtes Bild hat in Chrome den Namen "image.png"
     const name = (file.name || 'image.png').replace(/[\/\n]/g, '_');
-    if (file.size > MAX_UPLOAD) {
+    if (file.size > MAX_UPLOAD)
       skipped.push(name + ' (zu gross, höchstens ' + formatSize(MAX_UPLOAD) + ')');
-      continue;
-    }
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      // Tab inzwischen zu: sein Upload-Ordner ist schon geloescht
-      if (!tabs.has(tab.id))
-        return [];
-      const path = uploadDirectory(tab) + '/' + (++uploadCounter) + '/' + name;
-      writeEngineFile(path, bytes);
-      paths.push(path);
-    } catch (error) {
-      console.warn('Datei nicht lesbar:', name, error);
-      skipped.push(name);
-    }
+    else
+      uploads.push({ name, file, path: uploadDirectory(tab) + '/' + (++uploadCounter) + '/' + name });
   }
+  const written = uploads.length ? await engine.blWriteFiles(uploads.map(({ file, path }) => ({ file, path }))) : [];
+  // Tab inzwischen zu: sein Ordner ist geloescht, was danach kam wieder weg
+  if (!tabs.has(tab.id)) {
+    engine._bl_remove_path(toUTF8(uploadDirectory(tab)));
+    return [];
+  }
+  const paths = [];
+  uploads.forEach((upload, i) => {
+    if (written[i])
+      paths.push(upload.path);
+    else
+      skipped.push(upload.name);
+  });
   if (skipped.length)
     setStatus('Nicht übernommen: ' + skipped.join(', '));
   return paths;
@@ -1298,23 +1407,54 @@ function openFileChooser(tab, data) {
 // Hintergrund-Tabs bekommen sofort "Abbrechen". Kommen viele Dialoge kurz
 // nacheinander (Schleife), fragt die Oberflaeche einmal, ob der Tab weitere
 // zeigen darf: sonst bliebe nur der Haken des Host-Browsers, und der sperrt
-// die Dialoge aller Seiten.
-function engineDialog(viewId, type, origin, message, defaultValue) {
+// die Dialoge aller Seiten. Jeder Dialog blockiert die ganze Oberflaeche.
+function engineDialog(...args) {
   engineAnswered();
+  try {
+    return pageDialog(...args);
+  } finally {
+    restartWait();
+  }
+}
+
+// Der wievielte Dialog in Folge, jeder weniger als 1 s nach dem letzten?
+function countDialog(tab) {
+  tab.dialogBurst = Date.now() - (tab.lastDialog || 0) < 1000 ? (tab.dialogBurst || 0) + 1 : 1;
+  return tab.dialogBurst;
+}
+
+function pageDialog(viewId, type, origin, message, defaultValue) {
   const tab = tabs.get(viewId);
-  if (!tab || tab !== activeTab || tab.dialogsBlocked)
+  // beforeunload (3 verlassen, 4 neu laden): ohne Text der Seite wie in Chrome,
+  // im Hintergrund (ausser beim Schliessen), gesperrt oder in einer Schleife
+  // (die Seite navigiert immer wieder) geht es ohne Frage weiter
+  if (type >= 3) {
+    if (!tab || tab.dialogsBlocked || (tab !== activeTab && !tab.closing) || countDialog(tab) > 2)
+      return 1;
+    if (tab !== activeTab)
+      activateTab(tab);
+    const leave = confirm((type === 4 ? 'Website neu laden?' : 'Website verlassen?')
+      + '\n\nVon dir vorgenommene Änderungen werden möglicherweise nicht gespeichert.');
+    tab.lastDialog = Date.now();
+    return leave ? 1 : 0;
+  }
+  if (!tab || tab !== activeTab || tab.dialogsBlocked) {
+    if (tab && tab !== activeTab) {
+      tab.dialogSuppressed = true;
+      tab.updateDialogMarker();
+    }
     return 0;
+  }
   let host = '';
   try {
     host = new URL(origin).host;
   } catch {}
   host = host || (origin && origin !== 'null' ? origin : 'Diese Seite');
-  const now = Date.now();
-  tab.dialogBurst = now - (tab.lastDialog || 0) < 1000 ? (tab.dialogBurst || 0) + 1 : 1;
-  if (tab.dialogBurst > 3 && !tab.dialogsAsked) {
+  if (countDialog(tab) > 3 && !tab.dialogsAsked) {
     tab.dialogsAsked = true;
     if (!confirm(host + ' zeigt viele Dialoge. Weitere Dialoge dieser Seite zulassen?')) {
       tab.dialogsBlocked = true;
+      tab.updateDialogMarker();
       return 0;
     }
   }
@@ -1347,23 +1487,79 @@ function attachInput(tab) {
 
   // Finger zuerst: Touch-Events, Scrollen mit Schwung, Antippen (web/devices.js)
   attachTouch(tab, canvas, position, modifierBits);
+  const wheelDelta = (e) => {
+    const factor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1; // Zeilen, Seiten
+    return [e.deltaX * factor, e.deltaY * factor];
+  };
+  // Strg + Rad geht wie in Chrome zuerst an die Seite (Karten und Editoren
+  // zoomen selber), gezoomt wird nur ohne preventDefault. Ohne blockierenden
+  // wheel-Listener an der Stelle sofort, sonst nach der Antwort der Engine
+  // (wheel-result, der Reihe nach).
+  const wheelAnswers = [];
+  tab.onWheelResult = (data) => wheelAnswers.shift()?.(data.consumed);
+  const zoomWheel = (e, cancelable, answer) => {
+    if (engine._bl_zoom_wheel(tab.id, ...position(e), ...wheelDelta(e), modifierBits(e), cancelable ? 1 : 0))
+      wheelAnswers.push(answer);
+    else
+      answer(false);
+  };
   // Zwei-Finger-Zoom auf dem Touchpad kommt als viele kleine wheel-Ereignisse
   // mit ctrlKey (bruchzahlige Deltas): wie Chrome nur die Ansicht skalieren
-  // (engine/src/PinchZoom.h), um den Mauszeiger. Die Geste endet, wenn eine
-  // Weile nichts mehr kommt oder vor einer anderen Eingabe (die Engine
-  // uebernimmt das Ziel dann vor ihr, ein Klick trifft, was zu sehen ist).
-  let pinch = null; // { x, y, timer }
+  // (engine/src/PinchZoom.h), um den Mauszeiger. Das erste Ereignis
+  // entscheidet: ruft die Seite preventDefault, gehoert ihr die ganze Geste,
+  // sonst liest sie den Rest nur mit. Die Geste endet, wenn eine Weile nichts
+  // mehr kommt oder vor einer anderen Eingabe (die Engine uebernimmt das Ziel
+  // dann vor ihr, ein Klick trifft, was zu sehen ist).
+  let pinch = null; // { x, y, timer, owner: null (wartet) | 'page' | 'view', queued, ended }
+  const pinchStep = (e) => {
+    const view = pinch.owner === 'view';
+    zoomWheel(e, !view, () => {});
+    if (view)
+      engine._bl_pinch(tab.id, 1, Math.exp(-e.deltaY / 100), pinch.x, pinch.y);
+  };
   const endPinch = () => {
     if (!pinch)
       return;
     clearTimeout(pinch.timer);
-    engine._bl_pinch(tab.id, 2, 1, pinch.x, pinch.y);
+    if (pinch.owner === 'view')
+      engine._bl_pinch(tab.id, 2, 1, pinch.x, pinch.y);
     pinch = null;
+  };
+  const touchpadPinch = (e) => {
+    if (!pinch) {
+      const [x, y] = position(e);
+      const gesture = pinch = { x, y, timer: 0, owner: null, queued: [], ended: false };
+      zoomWheel(e, true, (consumed) => {
+        if (pinch !== gesture)
+          return; // vorher von einer anderen Eingabe beendet
+        gesture.owner = consumed ? 'page' : 'view';
+        if (!consumed) {
+          engine._bl_pinch(tab.id, 0, 1, x, y);
+          engine._bl_pinch(tab.id, 1, Math.exp(-e.deltaY / 100), x, y);
+        }
+        gesture.queued.splice(0).forEach(pinchStep);
+        if (gesture.ended)
+          endPinch();
+      });
+    } else if (!pinch.owner) {
+      pinch.queued.push(e);
+    } else {
+      pinchStep(e);
+    }
+    pinch.ended = false;
+    clearTimeout(pinch.timer);
+    pinch.timer = setTimeout(() => {
+      if (pinch.owner)
+        endPinch();
+      else
+        pinch.ended = true;
+    }, 200);
   };
   // Klickzahl (Doppel-/Dreifachklick: Wort/Absatz markieren, dblclick)
   // selber zaehlen: PointerEvent.detail ist in Chrome immer 0
   let lastDown = { time: 0, x: 0, y: 0, button: -1, count: 0 };
   canvas.addEventListener('pointerdown', (e) => {
+    noteUserActivation(tab);
     focusPage();
     endPinch();
     canvas.setPointerCapture(e.pointerId);
@@ -1372,6 +1568,7 @@ function attachInput(tab) {
       && Math.abs(x - lastDown.x) <= 4 && Math.abs(y - lastDown.y) <= 4;
     lastDown = { time: e.timeStamp, x, y, button: e.button, count: repeated ? lastDown.count + 1 : 1 };
     engine._bl_mouse(tab.id, 0, e.button, x, y, lastDown.count, modifierBits(e));
+    inputSent();
     e.preventDefault();
   });
   canvas.addEventListener('pointerup', (e) => {
@@ -1393,24 +1590,15 @@ function attachInput(tab) {
       e.preventDefault();
       // Strg + Mausrad: eine Zoom-Stufe pro Raste wie in Chrome
       if (e.deltaMode !== 0 || (Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50)) {
-        changeZoom(tab, e.deltaY < 0 ? 1 : -1);
+        const direction = e.deltaY < 0 ? 1 : -1;
+        zoomWheel(e, true, (consumed) => consumed || changeZoom(tab, direction));
         return;
       }
-      if (!pinch) {
-        const [x, y] = position(e);
-        pinch = { x, y, timer: 0 };
-        engine._bl_pinch(tab.id, 0, 1, x, y);
-      }
-      clearTimeout(pinch.timer);
-      pinch.timer = setTimeout(endPinch, 200);
-      engine._bl_pinch(tab.id, 1, Math.exp(-e.deltaY / 100), pinch.x, pinch.y);
+      touchpadPinch(e);
       return;
     }
     endPinch();
-    let factor = 1;
-    if (e.deltaMode === 1) factor = 40;       // Zeilen
-    else if (e.deltaMode === 2) factor = 800; // Seiten
-    engine._bl_wheel(tab.id, ...position(e), e.deltaX * factor, e.deltaY * factor, modifierBits(e));
+    engine._bl_wheel(tab.id, ...position(e), ...wheelDelta(e), modifierBits(e));
     e.preventDefault();
   }, { passive: false });
 
@@ -1490,6 +1678,7 @@ ime.addEventListener('keydown', (e) => {
   // Einfuegen: erst das paste-Event abwarten, dort kennen wir den Inhalt
   if (!activeTab || isPasteShortcut(e) || isTextInput(e))
     return;
+  noteUserActivation(activeTab);
   sendKey(activeTab, 0, e);
   // Browser-Kurzbefehle wie Tab, Backspace, Leertaste nicht an die UI weitergeben
   if (!(e.key === 'F5' || e.key === 'F12'))
@@ -1512,15 +1701,19 @@ ime.addEventListener('compositionupdate', (e) => {
 });
 ime.addEventListener('compositionend', (e) => {
   composing = false;
-  if (activeTab)
+  if (activeTab) {
+    noteUserActivation(activeTab);
     engine._bl_confirm_composition(activeTab.id, toUTF8(e.data || ''));
+  }
   ime.value = '';
 });
 ime.addEventListener('input', (e) => {
   if (composing || e.isComposing)
     return;
-  if (activeTab && e.data && (e.inputType === 'insertText' || e.inputType === 'insertReplacementText'))
+  if (activeTab && e.data && (e.inputType === 'insertText' || e.inputType === 'insertReplacementText')) {
+    noteUserActivation(activeTab);
     engine._bl_insert_text(activeTab.id, toUTF8(e.data));
+  }
   ime.value = '';
 });
 // Einfuegen: Text, HTML (formatierter Text) und Dateien/Bilder (z.B. ein
@@ -1531,6 +1724,7 @@ ime.addEventListener('paste', async (e) => {
     return;
   e.preventDefault();
   const tab = activeTab;
+  noteUserActivation(tab);
   const clipboardData = e.clipboardData;
   const data = { text: clipboardData?.getData('text/plain') ?? '', files: [] };
   const html = clipboardData?.getData('text/html');
@@ -1559,6 +1753,8 @@ function keyText(e) {
 
 function sendKey(tab, type, e) {
   engine._bl_key(tab.id, type, toUTF8(e.key), toUTF8(e.code), toUTF8(keyText(e)), e.keyCode || 0, e.repeat ? 1 : 0, modifierBits(e));
+  if (type === 0)
+    inputSent();
 }
 
 // ------------------------------------------------------------------ Werkzeuge
@@ -1797,7 +1993,7 @@ function shortcut(e) {
     case 'h': togglePanel('history'); return true;
     case 'j': togglePanel('downloads'); return true;
     case 'd': if (tab) toggleBookmark(tab.url, tab.title); return true;
-    case 'w': if (tab) closeTab(tab); return true;
+    case 'w': if (tab) requestCloseTab(tab); return true;
     case 'l': $('address').focus(); $('address').select(); return true;
     case 'f':
     case 'g': if (key === 'g' && !findBar.hidden) runFind(e.shiftKey, true); else openFind(); return true;

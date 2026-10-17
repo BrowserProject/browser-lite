@@ -15,6 +15,8 @@
 //   Verbindung (navigator.onLine der Seiten)? Mit onconnectedchange baut der
 //   Transport eine verlorene Verbindung selber wieder auf, sonst erst beim
 //   naechsten openTCP.
+// onclose bekommt den Grund von Wisp. Erreicht der Transport sein Relay nicht,
+// schliesst er den Stream vor onopen (die Engine meldet dann "kein Relay").
 
 const NativeWebSocket = globalThis.WebSocket;
 
@@ -31,6 +33,8 @@ const STREAM_TCP = 0x01;
 const CLOSE_VOLUNTARY = 0x02;
 const HANDSHAKE_TIMEOUT = 15000;
 const RECONNECT_DELAY = 2000;
+const SILENCE = 10000;
+const PROBE_TIMEOUT = 5000;
 
 export class WispTransport {
   constructor(url) {
@@ -44,6 +48,14 @@ export class WispTransport {
     this.onconnectedchange = null;
     this.reconnectTimer = null;
     this.lastDrop = 0;
+    // Lebt die Verbindung noch? (expectAnswer)
+    this.received = 0;
+    this.sent = 0;
+    this.watchdog = null;
+    this.probeTimer = null;
+    this.drop = null;
+    // Nach einem Netzwechsel ist die alte Verbindung oft tot, ohne dass sie zugeht
+    globalThis.addEventListener?.('online', () => this.probe());
   }
 
   // Jeder WebSocket hat seinen eigenen Handshake. Geht er zu, baut das
@@ -55,6 +67,7 @@ export class WispTransport {
       const ws = new NativeWebSocket(this.url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
+      this.sent = 0;
       let handshake = false;
       let closed = false;
       const onClosed = () => {
@@ -62,8 +75,13 @@ export class WispTransport {
           return;
         closed = true;
         clearTimeout(timeout);
-        if (this.ws === ws)
+        if (this.ws === ws) {
           this.ready = null;
+          this.drop = null;
+          clearTimeout(this.watchdog);
+          clearTimeout(this.probeTimer);
+          this.watchdog = this.probeTimer = null;
+        }
         for (const stream of this.streams.values())
           stream.closed(0x03); // Netzwerkfehler
         this.streams.clear();
@@ -77,16 +95,21 @@ export class WispTransport {
         } else
           this.setConnected(false);
       };
-      // Antwortet etwas ohne Wisp (z.B. ein Proxy), nicht ewig warten
-      const timeout = setTimeout(() => {
+      // Sofort aufgeben, ohne auf das Schliessen der WebSocket zu warten
+      const drop = () => {
         onClosed();
         ws.close();
-      }, HANDSHAKE_TIMEOUT);
+      };
+      // Antwortet etwas ohne Wisp (z.B. ein Proxy), nicht ewig warten
+      const timeout = setTimeout(drop, HANDSHAKE_TIMEOUT);
       ws.onmessage = (event) => {
         if (closed)
           return;
         const packet = new Uint8Array(event.data);
         if (handshake) {
+          this.received++;
+          clearTimeout(this.probeTimer);
+          this.probeTimer = null;
           this.handlePacket(packet);
           return;
         }
@@ -96,6 +119,7 @@ export class WispTransport {
           handshake = true;
           clearTimeout(timeout);
           this.bufferSize = view.getUint32(5, true);
+          this.drop = drop;
           resolve();
           this.setConnected(true);
         }
@@ -134,6 +158,50 @@ export class WispTransport {
     view.setUint32(1, streamId, true);
     packet.set(payload, 5);
     this.ws.send(packet);
+    this.sent += packet.byteLength;
+    if (type !== CLOSE)
+      this.expectAnswer();
+  }
+
+  // Wisp hat kein Ping. Kommt nach dem Senden 10 s gar nichts zurueck (halb offene
+  // Verbindung, z.B. nach dem Ruhezustand), fragt der Transport nach: ein CONNECT auf
+  // ein leeres Ziel muss das Relay laut Spezifikation sofort mit CLOSE beantworten.
+  // Bleibt auch das aus, ist die Verbindung tot: zu (die Streams enden mit 0x03), neu verbinden.
+  // Die Nachfrage stuende hinter allem, was noch im Puffer der WebSocket liegt (langsamer
+  // Upload): solange er abfliesst, lebt die Verbindung, gefragt wird erst, wenn er leer ist.
+// Was schon im Puffer des Betriebssystems liegt, sieht die Seite nicht: dafuer meldet sich
+// unser Relay bei offenen Streams spaetestens alle 3 s (relay/wisp.mjs), die Stille kommt so nur
+// bei toter Verbindung oder einem Relay ohne dieses Lebenszeichen.
+  expectAnswer() {
+    if (this.watchdog || this.probeTimer)
+      return;
+    const received = this.received;
+    const drained = this.drained();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (this.received === received)
+        this.probe(drained);
+    }, SILENCE);
+  }
+
+  // So viele Bytes hat die WebSocket schon ans Netz gegeben
+  drained() {
+    return this.sent - (this.ws?.bufferedAmount ?? 0);
+  }
+
+  // drained: Stand vor der Stille (expectAnswer)
+  probe(drained = -1) {
+    if (this.probeTimer || !this.drop || this.ws?.readyState !== NativeWebSocket.OPEN)
+      return;
+    if (this.ws.bufferedAmount > 0) {
+      if (this.drained() > drained)
+        this.expectAnswer();
+      else
+        this.drop(); // 10 s ist nichts abgeflossen
+      return;
+    }
+    this.probeTimer = setTimeout(this.drop, PROBE_TIMEOUT);
+    this.sendPacket(CONNECT, this.nextStreamId++, new Uint8Array([STREAM_TCP, 0, 0]));
   }
 
   handlePacket(packet) {

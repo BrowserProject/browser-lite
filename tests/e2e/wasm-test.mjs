@@ -184,6 +184,36 @@ const leakModule = wasm(
 })();
 </script>`;
 
+// Langlebiger Worker, pro Auftrag eine neue Instanz mit 16 MB und einem
+// Import aus JS. Der Worker-Thread muss dazwischen in den Event-Loop des Host
+// zurueck, sonst feuert dort keine FinalizationRegistry (Speicher und Werte aus
+// JS blieben bis zum Ende des Workers).
+const JOB_PAGES = 256;
+const JOBS_WORKER = `${wasmBytes}
+const jobModule = wasm(
+  sec(1, [96, 0, 1, 127]),
+  sec(2, [...str('env'), ...str('f'), 0, 0]),
+  sec(3, [0], [0]),
+  sec(5, [0, ...leb(${JOB_PAGES})]),
+  sec(7, [...str('memory'), 2, 0], [...str('g'), 0, 1], [...str('callF'), 0, 2]),
+  sec(10, code(65, 0, 45, 0, 0), code(16, 0)));
+let finalized = false;
+const registry = new FinalizationRegistry(() => { finalized = true; });
+registry.register({}, 0);
+onmessage = async ({ data: n }) => {
+  const ex = (await WebAssembly.instantiate(jobModule, { env: { f: () => n } })).instance.exports;
+  new Uint8Array(ex.memory.buffer)[0] = n % 100;
+  // Etwas Muell, damit JSC sammelt
+  for (let i = 0; i < 20000; i++) new Array(8);
+  postMessage([n, ex.callF() + '.' + ex.g() + ',' + finalized]);
+};`;
+const JOBS_PAGE = `<!doctype html><title>Auftraege</title><body>Auftraege<script>
+const worker = new Worker(URL.createObjectURL(new Blob([${JSON.stringify(JOBS_WORKER)}], { type: 'text/javascript' })));
+worker.onmessage = ({ data: [n, value] }) => console.log('RESULT job' + n + '=' + value);
+window.job = (n) => worker.postMessage(n);
+console.log('RESULT jobs=bereit');
+</script>`;
+
 // Zwei iframes verschiedener Herkunft im selben Thread der Engine: das zweite
 // raet die ids von Speichern und verbiegt WeakMap, damit die API sie benutzt.
 // Nur die eigene id darf gehen (Pruefung in WasmBridge.cpp und wasm-host.js).
@@ -255,6 +285,10 @@ const { url: siteURL } = await serve((req, res) => {
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(ATTACKER_PAGE);
   if (req.url.startsWith('/leak.html'))
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(LEAK_PAGE);
+  if (req.url === '/jobs.html')
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(JOBS_PAGE);
+  if (req.url === '/grow.html')
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<!doctype html><title>Wachsen</title><body>Wachsen<script>console.log("RESULT wachsen=bereit")</script>');
   const file = path.join(fixtures, path.basename(req.url));
   if (/\.(wasm|js)$/.test(req.url) && fs.existsSync(file))
     return res.writeHead(200, { 'Content-Type': req.url.endsWith('.wasm') ? 'application/wasm' : 'text/javascript' }).end(fs.readFileSync(file));
@@ -262,7 +296,8 @@ const { url: siteURL } = await serve((req, res) => {
 });
 
 const stack = await startStack({ token: 'wasm-token-0123456789abcdef' });
-const browser = await launch();
+// gc() in den Web Workern der Engine (Host-Seite der Bruecke)
+const browser = await launch({ args: ['--js-flags=--expose-gc'] });
 const page = await browser.newPage();
 const results = collect(page, /RESULT (\w+)=(.*?)(?: \((?:https?|file):[^)]*\))?$/);
 async function result(key) {
@@ -314,6 +349,51 @@ await page.fill('#address', siteURL + 'realms.html');
 await page.press('#address', 'Enter');
 check('Fremder Speicher mit geratener id gesperrt', (await result('angriff')) === 'true,0,0,0,true', results.get('angriff'));
 check('Speicher der anderen Herkunft unveraendert', (await result('opfer')) === 'GEHEIM,65536', results.get('opfer'));
+
+// Belegter Speicher der Engine in MB (malloc)
+const usedMB = () => page.evaluate(() => window.__blEngine()._bl_memory_used() / 2 ** 20);
+const run = (source) => page.evaluate((source) => window.__blEval(source), source);
+
+// Auftraege im Worker: Speicher und Werte frueherer Instanzen werden frei.
+// gc() der Host-Seite in allen Workern der Engine, die gerade antworten.
+async function hostGC() {
+  await Promise.all(page.workers().map((worker) => Promise.race([
+    worker.evaluate(() => globalThis.gc && gc()).catch(() => {}),
+    new Promise((resolve) => setTimeout(resolve, 200)),
+  ])));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+await page.fill('#address', siteURL + 'jobs.html');
+await page.press('#address', 'Enter');
+await result('jobs');
+async function runJobs(from, to) {
+  let last = null;
+  for (let n = from; n < to; n++) {
+    await run(`job(${n})`);
+    last = await result('job' + n);
+    await hostGC();
+  }
+  return last;
+}
+await runJobs(0, 4);
+const beforeJobs = await usedMB();
+const lastJob = await runJobs(4, 24);
+const jobsGrown = await usedMB() - beforeJobs;
+check('Worker: Speicher frueherer Instanzen frei', lastJob === '23.23,true' && jobsGrown < 6 * JOB_PAGES / 16,
+  `${lastJob}, ${jobsGrown.toFixed(0)} MB mehr nach 20 Auftraegen zu ${JOB_PAGES / 16} MB`);
+
+// Wachsen wie im Standard um genau die Seiten, mit begrenzter Reserve: 128 MB
+// um 1 MB belegen ein Viertel Reserve dazu, nicht das Doppelte
+await page.fill('#address', siteURL + 'grow.html');
+await page.press('#address', 'Enter');
+await result('wachsen');
+await run('window.grown = new WebAssembly.Memory({ initial: 2048 }); console.log("RESULT angelegt=1")');
+await result('angelegt');
+const beforeGrow = await usedMB();
+await run('grown.grow(16); console.log("RESULT gewachsen=" + grown.buffer.byteLength / 2 ** 20)');
+const grownSize = Number(await result('gewachsen'));
+const grownUsed = await usedMB() - beforeGrow;
+check('memory.grow mit begrenzter Reserve', grownSize === 129 && grownUsed < 48, `${grownUsed.toFixed(0)} MB mehr fuer 128 -> ${grownSize} MB`);
 
 // Viele Seiten mit Zyklus und 64 MB: der Speicher wird mit der Seite frei
 const engineBytes = () => page.evaluate(() => window.__blMemory());

@@ -7,7 +7,8 @@
 // die Host-Seite haelt, haengen am globalen Objekt und sind keine GC-Wurzeln.
 // Stirbt es (Navigation, Ende eines Workers), gibt die Bruecke den Speicher der
 // Realm frei und die Host-Seite ihre Objekte. Zyklen ueber beide Seiten (Import
-// ruft Exporte der eigenen Instanz) leben so hoechstens so lange wie die Seite.
+// ruft Exporte der eigenen Instanz, wie im Glue von Emscripten) leben so
+// hoechstens so lange wie die Seite bzw. der Worker.
 #include "config.h"
 #include "WasmBridge.h"
 
@@ -353,7 +354,10 @@ MemoryRecord* ownedMemory(int id, uint32_t realm)
     return memory && memory->realm == realm ? memory : nullptr;
 }
 
-RefPtr<Region> allocateRegion(uint32_t pages)
+// Neuer Bereich: die ersten "copied" Seiten aus "from", der Rest null. JSC
+// erfaehrt die Groesse (wie V8 im Browser), sonst sammelt es kaum: die
+// Memory-Objekte sind klein, alte findet erst ein voller GC.
+RefPtr<Region> allocateRegion(VM& vm, uint32_t pages, const uint8_t* from = nullptr, uint32_t copied = 0)
 {
     if (pages > maxMemoryPages)
         return nullptr;
@@ -361,8 +365,21 @@ RefPtr<Region> allocateRegion(uint32_t pages)
     auto* base = static_cast<uint8_t*>(aligned_alloc(pageSize, bytes));
     if (!base)
         return nullptr;
-    memset(base, 0, bytes);
+    size_t copiedBytes = static_cast<size_t>(copied) * pageSize;
+    if (copiedBytes)
+        memcpy(base, from, copiedBytes);
+    memset(base + copiedBytes, 0, bytes - copiedBytes);
+    vm.heap.deprecatedReportExtraMemory(bytes);
     return adoptRef(*new Region(base));
+}
+
+// Reserve beim Umziehen, damit nicht jedes grow kopiert: ein Viertel, hoechstens
+// 96 MB (wie Emscripten selber waechst). Beim Umziehen liegen alter und neuer
+// Bereich zugleich im Speicher, darum bleibt die Reserve klein.
+uint32_t capacityFor(uint64_t pages, uint32_t maxPages)
+{
+    constexpr uint64_t maxReserve = (96 << 20) / pageSize;
+    return static_cast<uint32_t>(std::min<uint64_t>(maxPages, pages + std::min(pages / 4, maxReserve)));
 }
 
 void updateHost(int id, uint8_t* base, int pages)
@@ -388,16 +405,14 @@ int growMemory(int id, uint32_t delta)
     uint32_t old = memory->pages;
     RefPtr<Region> region = memory->region;
     if (pages > memory->capacityPages) {
-        // Umziehen, mit Reserve, damit nicht jedes grow kopiert
-        uint32_t capacity = static_cast<uint32_t>(std::min<uint64_t>(memory->maxPages, std::max<uint64_t>(pages, static_cast<uint64_t>(old) * 2)));
-        region = allocateRegion(capacity);
+        uint32_t capacity = capacityFor(pages, memory->maxPages);
+        region = allocateRegion(*memory->vm, capacity, memory->region->base, old);
         if (!region && capacity > pages) {
             capacity = static_cast<uint32_t>(pages);
-            region = allocateRegion(capacity);
+            region = allocateRegion(*memory->vm, capacity, memory->region->base, old);
         }
         if (!region)
             return -1;
-        memcpy(region->base, memory->region->base, static_cast<size_t>(old) * pageSize);
         memory->capacityPages = capacity;
     }
     detachBuffer(*memory);
@@ -481,7 +496,7 @@ EncodedJSValue bridgeMemoryCreate(JSGlobalObject* globalObject, CallFrame* callF
     memory->pages = initial;
     memory->maxPages = maximum < 0 ? maxMemoryPages : std::min(static_cast<uint32_t>(maximum), maxMemoryPages);
     memory->capacityPages = std::max<uint32_t>(initial, 1);
-    memory->region = allocateRegion(memory->capacityPages);
+    memory->region = allocateRegion(vm, memory->capacityPages);
     if (!memory->region)
         return throwVMRangeError(globalObject, scope, "WebAssembly.Memory(): could not allocate memory"_s);
     int id = static_cast<int>(nextId++);

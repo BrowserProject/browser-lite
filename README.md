@@ -16,8 +16,8 @@ sieht also nur verschluesselte Bytes. Spaeter soll statt dem Relay auch WireGuar
 Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 
 - echte HTTPS-Seiten (z.B. Wikipedia, SRF, Google, GitHub, YouTube, OpenStreetMap)
-- Tabs mit Favicons, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge,
-  Kontextmenue, Vollbild
+- Tabs mit Favicons, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge
+  (auch beforeunload), Kontextmenue, Vollbild; Hintergrund-Tabs gedrosselt wie in Chrome
 - Tastatur inkl. Schweizer Layout und tote Tasten, Copy/Paste, Scrollen
 - Cookies, localStorage und IndexedDB bleiben nach dem Neuladen erhalten
 - WebSockets der Seiten (ws:// und wss://)
@@ -30,6 +30,7 @@ Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
 - Service Worker, Cache API, OPFS, Benachrichtigungen
 - Pinch-Zoom, Drucken, Drag & Drop
 - Absturz oder Haengen der Engine: Meldung mit "Neu starten", die Sitzung kommt zurueck
+- Fehlerseiten wie Chrome, wenn eine Seite nicht erreichbar ist
 
 Noch nicht: DRM (EME), WireGuard. JavaScript ist langsamer als in einem
 normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md), welche
@@ -67,6 +68,7 @@ was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/RE
 | [docs/stand.md](docs/stand.md) | Kurzer Stand, Messwerte und was noch offen ist |
 | [docs/build.md](docs/build.md) | Selber bauen (lokal und CI) |
 | [docs/kompatibilitaet.md](docs/kompatibilitaet.md) | Welche echten Seiten gehen |
+| [docs/profil.md](docs/profil.md) | Plan: Profil auf dem Server (Login auf jedem Geraet) |
 | [docs/referenz-webkitwasm.md](docs/referenz-webkitwasm.md) | Was wir vom Projekt WebkitWasm gelernt haben |
 
 ## Ordner

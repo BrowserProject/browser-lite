@@ -90,6 +90,8 @@ class Player {
     this.frameInFlight = false; // bis die Engine es mit "frame" uebernommen hat
     this.lastTime = -1;
     this.forceFrame = true;
+    // Seite versteckt (Hintergrund-Tab): keine Bilder an die Engine, der Ton laeuft weiter
+    this.hidden = !!options.hidden;
 
     const video = this.video = document.createElement('video');
     video.playsInline = true;
@@ -304,6 +306,10 @@ class Player {
     case 'frame':
       this.frameInFlight = false;
       break;
+    case 'visible':
+      this.hidden = !data.visible;
+      this.forceFrame = true;
+      break;
     case 'preload':
       // Ein hoeherer Wert gilt in Chrome von selber, load() wuerde neu anfangen
       video.preload = data.preload;
@@ -331,7 +337,7 @@ class Player {
   pump() {
     this.raf = requestAnimationFrame(() => this.pump());
     const video = this.video;
-    if (video.readyState < 2 || !video.videoWidth || this.frameInFlight)
+    if (this.hidden || video.readyState < 2 || !video.videoWidth || this.frameInFlight)
       return;
     if (video.currentTime === this.lastTime && !this.forceFrame)
       return;
@@ -485,25 +491,36 @@ async function enterStreamPip(info, origin) {
   }
 }
 
+async function enterPlayerPip(payload) {
+  const id = Number(payload?.player);
+  const player = players.get(id);
+  if (!player)
+    throw domError('InvalidStateError', 'The video is gone.');
+  if (!document.pictureInPictureEnabled)
+    throw domError('NotSupportedError', 'Picture-in-Picture is disabled.');
+  const video = player.video;
+  if (!player.pipHooked) {
+    player.pipHooked = true;
+    video.addEventListener('leavepictureinpicture', () => pipPush(id, { type: 'leave' }));
+  }
+  pipQueue(id).events.length = 0;
+  const pipWindow = await video.requestPictureInPicture();
+  pipWindow.addEventListener('resize', () => pipPush(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }));
+  return { width: pipWindow.width, height: pipWindow.height };
+}
+
+let pipView = 0; // Tab mit dem PiP-Fenster (Chrome hat hoechstens eines)
+
+// Tab, dessen Video gerade im PiP-Fenster ist, sonst 0
+export function pictureInPictureView() {
+  return document.pictureInPictureElement ? pipView : 0;
+}
+
 export const pipHostCalls = {
-  async 'pip-enter'(payload, origin) {
-    if (payload?.track)
-      return enterStreamPip(payload.track, origin);
-    const id = Number(payload?.player);
-    const player = players.get(id);
-    if (!player)
-      throw domError('InvalidStateError', 'The video is gone.');
-    if (!document.pictureInPictureEnabled)
-      throw domError('NotSupportedError', 'Picture-in-Picture is disabled.');
-    const video = player.video;
-    if (!player.pipHooked) {
-      player.pipHooked = true;
-      video.addEventListener('leavepictureinpicture', () => pipPush(id, { type: 'leave' }));
-    }
-    pipQueue(id).events.length = 0;
-    const pipWindow = await video.requestPictureInPicture();
-    pipWindow.addEventListener('resize', () => pipPush(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }));
-    return { width: pipWindow.width, height: pipWindow.height };
+  async 'pip-enter'(payload, origin, view) {
+    const result = await (payload?.track ? enterStreamPip(payload.track, origin) : enterPlayerPip(payload));
+    pipView = view;
+    return result;
   },
   async 'pip-exit'() {
     if (document.pictureInPictureElement)

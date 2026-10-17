@@ -8,6 +8,19 @@
 set(BL_ENGINE_SRC "${BROWSER_LITE_ENGINE_DIR}/src")
 set(BL_LEGACY_STORAGE "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/Storage")
 
+# localStorage + IndexedDB aus WebKitLegacy (ohne den Rest von WebKitLegacy)
+set(BL_LEGACY_STORAGE_SOURCES
+    ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageAreaSync.cpp
+    ${BL_LEGACY_STORAGE}/StorageNamespaceImpl.cpp
+    ${BL_LEGACY_STORAGE}/StorageSyncManager.cpp
+    ${BL_LEGACY_STORAGE}/StorageThread.cpp
+    ${BL_LEGACY_STORAGE}/StorageTracker.cpp
+    ${BL_LEGACY_STORAGE}/WebDatabaseProvider.cpp
+    ${BL_LEGACY_STORAGE}/WebStorageNamespaceProvider.cpp
+)
+
 add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/BackForwardList.cpp
     ${BL_ENGINE_SRC}/Choosers.cpp
@@ -26,6 +39,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/ServiceWorkerWasm.cpp
     ${BL_ENGINE_SRC}/WebPlatformExtras.cpp
     ${BL_ENGINE_SRC}/WebRTCPolyfill.cpp
+    ${BL_ENGINE_SRC}/ErrorPage.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
@@ -54,31 +68,13 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandleCurl.cpp
     ${BL_ENGINE_SRC}/websocket/WebSocketChannel.cpp
 
-    # localStorage + IndexedDB aus WebKitLegacy (ohne den Rest von WebKitLegacy)
-    ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
-    ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
-    ${BL_LEGACY_STORAGE}/StorageAreaSync.cpp
-    ${BL_LEGACY_STORAGE}/StorageNamespaceImpl.cpp
-    ${BL_LEGACY_STORAGE}/StorageSyncManager.cpp
-    ${BL_LEGACY_STORAGE}/StorageThread.cpp
-    ${BL_LEGACY_STORAGE}/StorageTracker.cpp
-    ${BL_LEGACY_STORAGE}/WebDatabaseProvider.cpp
-    ${BL_LEGACY_STORAGE}/WebStorageNamespaceProvider.cpp
+    ${BL_LEGACY_STORAGE_SOURCES}
 )
 set_target_properties(BrowserLiteEngine PROPERTIES OUTPUT_NAME engine)
 
 # Die WebKitLegacy-Dateien haben kein #include "config.h" (dort macht das ein
 # Prefix-Header), darum hier per -include
-set_source_files_properties(
-    ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
-    ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
-    ${BL_LEGACY_STORAGE}/StorageAreaSync.cpp
-    ${BL_LEGACY_STORAGE}/StorageNamespaceImpl.cpp
-    ${BL_LEGACY_STORAGE}/StorageSyncManager.cpp
-    ${BL_LEGACY_STORAGE}/StorageThread.cpp
-    ${BL_LEGACY_STORAGE}/StorageTracker.cpp
-    ${BL_LEGACY_STORAGE}/WebDatabaseProvider.cpp
-    ${BL_LEGACY_STORAGE}/WebStorageNamespaceProvider.cpp
+set_source_files_properties(${BL_LEGACY_STORAGE_SOURCES}
     PROPERTIES COMPILE_OPTIONS "-includeconfig.h"
 )
 

@@ -623,7 +623,7 @@ export function onSpeechRecognition(tab, data) {
 // Finger gehen als Touch-Events an die Seite. Faengt die Seite sie nicht ab
 // (preventDefault), scrollt ein Wischen die Seite (mit Schwung), ein kurzes
 // Antippen wird ein Klick, langes Druecken das Kontextmenue und zwei Finger
-// zoomen die Ansicht - wie in Chrome.
+// zoomen die Ansicht, wie in Chrome.
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;

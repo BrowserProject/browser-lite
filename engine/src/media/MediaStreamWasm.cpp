@@ -998,6 +998,8 @@ int hostCaptureId(RealtimeMediaSource& source)
 //   "capture", track  -> Id der Host-Kamera/-Mikrofon-Spur oder 0
 //   "sink", track     -> Id einer neuen Senke (Bilder/Ton an den Host)
 //   "sink-stop", id
+//   "player", element -> Id des Host-Players eines <video> oder 0
+//   "pip-shown", element
 //   "remote", kind, label -> [MediaStreamTrack, Id] einer neuen entfernten Spur
 static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame)
 {
@@ -1036,6 +1038,15 @@ static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObj
         RefPtr player = element ? element->player() : nullptr;
         auto* wasmPlayer = player ? static_cast<MediaPlayerPrivateWasm*>(player->playerPrivate()) : nullptr;
         return JSC::JSValue::encode(JSC::jsNumber(wasmPlayer && wasmPlayer->hasHostElement() ? wasmPlayer->id() : 0));
+    }
+    // Im PiP-Fenster ist das Video zu sehen wie in einem Canvas: dann haelt WebKit
+    // es auch auf versteckten Seiten nicht an (HTMLMediaElement::elementIsHidden).
+    // Bleibt danach so, wie nach drawImage.
+    if (op == "pip-shown"_s) {
+        RefPtr element = JSHTMLMediaElement::toWrapped(vm, callFrame->argument(1));
+        if (RefPtr player = element ? element->player() : nullptr)
+            player->setVisibleForCanvas(true);
+        return JSC::JSValue::encode(JSC::jsUndefined());
     }
     if (op == "remote"_s) {
         auto kind = callFrame->argument(1).toWTFString(globalObject);

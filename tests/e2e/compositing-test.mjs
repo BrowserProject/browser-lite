@@ -8,7 +8,7 @@
 // Bildrate, Vergleich mit der CPU.
 //
 //   cd tests/e2e && node compositing-test.mjs [engine-ordner]
-import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, check, collect, finish, launch, near, pagePixel, screenshot, serve, startStack, timeLimit, waitFor } from './harness.mjs';
 
 timeLimit();
 
@@ -76,19 +76,8 @@ const logs = results.logs;
 await page.goto(stack.app({ url: siteURL, compositing: '1', debug: '1', env: process.env.COMP_ENV || '' }));
 check('Seite geladen', await result('ready') === '1');
 
-const pixelAt = (x, y, target = page) => target.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
-const near = (pixel, rgb, tolerance = 40) => pixel && rgb.every((value, i) => Math.abs(pixel[i] - value) <= tolerance);
+const pixelAt = (x, y, target = page) => pagePixel(target, x, y);
 // Warten, bis ein Bild mit Inhalt da ist (Kacheln werden im Hintergrund gemalt)
-async function waitFor(condition, ms = 20000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await condition())
-      return true;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  return false;
-}
-
 await waitFor(async () => near(await pixelAt(50, 90), [255, 0, 0]));
 await screenshot(page, 'compositing-top');
 const red = await pixelAt(50, 90), green = await pixelAt(130, 90), blue = await pixelAt(210, 90);

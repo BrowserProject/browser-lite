@@ -27,7 +27,8 @@ Unser Embedding von WebCore: das Programm `engine.js`/`engine.wasm`, das die Obe
   - Grafik: `GpuRaster.cpp` (Skia ueber WebGL 2), `LayerTreeHostWasm.cpp` und `Compositor.cpp`
     (Ebenen im Compositor-Thread), `ScrollingWasm.cpp` (Scrollen im eigenen Thread)
   - Netz: `LoaderStrategy.cpp` (Laden mit curl, Downloads, Ping), `Sockets.cpp`, `HttpCache.cpp`,
-    `BytecodeCache.cpp`, `PlatformStrategies.cpp`, `Strategies.h` (Cookies)
+    `BytecodeCache.cpp`, `PlatformStrategies.cpp`, `Strategies.h` (Cookies), `ErrorPage.cpp`
+    (Fehlerseite wie Chrome, wenn eine Navigation nicht ankommt)
   - Speicher: `Storage.cpp` (Cookies, localStorage, IndexedDB unter `/data`), `MemoryVFS.cpp`
     (SQLite), `CacheStorageWasm.cpp`, `FileSystemStorageWasm.cpp` (OPFS), `FileAccessCache.cpp`
   - Worker und Plattform: `ServiceWorkerWasm.cpp` (Service Worker, SharedWorker),

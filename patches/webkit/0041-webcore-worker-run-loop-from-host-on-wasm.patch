@@ -1,0 +1,313 @@
+diff --git a/Source/WTF/wtf/generic/RunLoopGeneric.cpp b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+index 7f441950b2..f6349bfddf 100644
+--- a/Source/WTF/wtf/generic/RunLoopGeneric.cpp
++++ b/Source/WTF/wtf/generic/RunLoopGeneric.cpp
+@@ -239,7 +239,15 @@ void RunLoop::run()
+ 
+ void RunLoop::setWakeUpCallback(WTF::Function<void()>&& function)
+ {
++#if OS(EMSCRIPTEN)
++    // browser-lite: wakeUp() ruft den Callback von anderen Threads unter m_loopLock,
++    // die Worker setzen ihn zur Laufzeit neu (WorkerDedicatedRunLoop::runFromHost)
++    auto& runLoop = RunLoop::currentSingleton();
++    Locker locker { runLoop.m_loopLock };
++    runLoop.m_wakeUpCallback = WTF::move(function);
++#else
+     RunLoop::currentSingleton().m_wakeUpCallback = WTF::move(function);
++#endif
+ }
+ 
+ #if OS(EMSCRIPTEN)
+diff --git a/Source/WebCore/workers/WorkerOrWorkletThread.cpp b/Source/WebCore/workers/WorkerOrWorkletThread.cpp
+index a7f8478095..b6f59af8d4 100644
+--- a/Source/WebCore/workers/WorkerOrWorkletThread.cpp
++++ b/Source/WebCore/workers/WorkerOrWorkletThread.cpp
+@@ -193,6 +193,19 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
+             evaluateCallback(message);
+     });
+ 
++#if OS(EMSCRIPTEN)
++    // browser-lite: Der Thread geht zurueck in den Event-Loop des Host, der Loop
++    // laeuft von dort weiter (WorkerDedicatedRunLoop::runFromHost)
++    downcast<WorkerDedicatedRunLoop>(m_runLoop.get()).runFromHost(*globalScope(), [this, protectedThis = WTF::move(protectedThis)]() mutable {
++        if (!m_childThreads.isEmptyIgnoringNullReferences()) {
++            m_runWhenLastChildThreadIsGone = [this, protectedThis = WTF::move(protectedThis)]() mutable {
++                destroyWorkerGlobalScope(WTF::move(protectedThis));
++            };
++            return;
++        }
++        destroyWorkerGlobalScope(WTF::move(protectedThis));
++    });
++#else
+     runEventLoop();
+ 
+ #if USE(GLIB)
+@@ -206,6 +219,7 @@ void WorkerOrWorkletThread::workerOrWorkletThread()
+         return;
+     }
+     destroyWorkerGlobalScope(WTF::move(protectedThis));
++#endif
+ }
+ 
+ void WorkerOrWorkletThread::destroyWorkerGlobalScope(Ref<WorkerOrWorkletThread>&& protectedThis)
+diff --git a/Source/WebCore/workers/WorkerRunLoop.cpp b/Source/WebCore/workers/WorkerRunLoop.cpp
+index 570e870d9c..0983a097d8 100644
+--- a/Source/WebCore/workers/WorkerRunLoop.cpp
++++ b/Source/WebCore/workers/WorkerRunLoop.cpp
+@@ -56,6 +56,12 @@
+ #include <wtf/AutodrainedPool.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
++#if OS(EMSCRIPTEN)
++#include <emscripten/eventloop.h>
++#include <emscripten/proxying.h>
++#include <wtf/RunLoop.h>
++#endif
++
+ #if PLATFORM(COCOA)
+ #include <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
+ #endif
+@@ -119,6 +125,30 @@ private:
+     bool m_allowEventLoopTasks;
+ };
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: Jeder Thread ist ein Web Worker des Browsers. Blockiert er in
++// run(), kommt sein JS-Event-Loop nie mehr dran: die FinalizationRegistry der
++// Host-Seite feuert nie, WeakRefs halten ihr Ziel fuer immer (WebAssembly der
++// Seiten). Darum laeuft der Loop wie im Engine-Thread aus dem Event-Loop: neue
++// Aufgaben, das Ende und die Timer (von WebCore und vom RunLoop des Threads,
++// darin die Timer von JSC) planen einen Durchgang ein, danach geht der Thread
++// zurueck in den Event-Loop.
++class RunLoopSetup;
++
++struct WorkerDedicatedRunLoop::HostLoop {
++    WTF_MAKE_TZONE_ALLOCATED_INLINE(HostLoop);
++public:
++    HostLoop(WorkerDedicatedRunLoop&, WorkerOrWorkletGlobalScope&, Function<void()>&& done);
++    ~HostLoop();
++
++    std::unique_ptr<RunLoopSetup> setup;
++    RefPtr<WorkerOrWorkletGlobalScope> context;
++    Function<void()> done;
++    int timer { 0 };
++    MonotonicTime timerDeadline;
++};
++#endif
++
+ WorkerDedicatedRunLoop::WorkerDedicatedRunLoop() = default;
+ 
+ WorkerDedicatedRunLoop::~WorkerDedicatedRunLoop()
+@@ -249,6 +279,133 @@ void WorkerDedicatedRunLoop::run(WorkerOrWorkletGlobalScope* context)
+     runCleanupTasks(context);
+ }
+ 
++#if OS(EMSCRIPTEN)
++WorkerDedicatedRunLoop::HostLoop::HostLoop(WorkerDedicatedRunLoop& runLoop, WorkerOrWorkletGlobalScope& context, Function<void()>&& done)
++    : setup(std::make_unique<RunLoopSetup>(runLoop, RunLoopSetup::IsForDebugging::No))
++    , context(&context)
++    , done(WTF::move(done))
++{
++}
++
++WorkerDedicatedRunLoop::HostLoop::~HostLoop() = default;
++
++static thread_local WorkerDedicatedRunLoop* hostDrivenRunLoop;
++
++void WorkerDedicatedRunLoop::runFromHost(WorkerOrWorkletGlobalScope& context, Function<void()>&& done)
++{
++    m_hostLoop = makeUnique<HostLoop>(*this, context, WTF::move(done));
++    hostDrivenRunLoop = this;
++    m_hostThread = pthread_self();
++    // Der Thread endet mit stopFromHost, nicht mit seiner Startfunktion
++    emscripten_runtime_keepalive_push();
++    RunLoop::setWakeUpCallback([this] {
++        scheduleHostPump();
++    });
++    // Wie beim Warten in runInMode: ohne Zugriff auf den Heap, solange nichts laeuft
++    if (CheckedPtr script = context.script())
++        script->releaseHeapAccess();
++    m_hostDriven = true;
++    pumpFromHost();
++}
++
++// Von jedem Thread
++void WorkerDedicatedRunLoop::scheduleHostPump()
++{
++    if (!m_hostDriven || m_hostPumpScheduled.exchange(true))
++        return;
++    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), m_hostThread, hostPump, nullptr))
++        m_hostPumpScheduled = false;
++}
++
++// Ueber den Thread, nicht ueber "this": ein Aufruf kann nach dem Ende ankommen
++void WorkerDedicatedRunLoop::hostPump(void*)
++{
++    if (auto* runLoop = hostDrivenRunLoop)
++        runLoop->pumpFromHost();
++}
++
++void WorkerDedicatedRunLoop::hostTimerFired(void*)
++{
++    if (auto* runLoop = hostDrivenRunLoop) {
++        runLoop->m_hostLoop->timer = 0;
++        runLoop->pumpFromHost();
++    }
++}
++
++void WorkerDedicatedRunLoop::pumpFromHost()
++{
++    m_hostPumpScheduled = false;
++    bool terminated = false;
++    {
++        RefPtr context = m_hostLoop->context;
++        CheckedPtr script = context->script();
++        if (script)
++            script->acquireHeapAccess();
++        ModePredicate predicate(defaultMode(), false);
++        auto start = MonotonicTime::now();
++        while (true) {
++            {
++                JSC::JSLockHolder lock(context->vm());
++                JSC::DeferGC deferGC(context->vm());
++                RunLoop::cycle();
++            }
++            bool timerDue = m_sharedTimer->isActive() && m_sharedTimer->fireTimeDelay() <= 0_s;
++            if (m_messageQueue.isEmpty() && !m_messageQueue.killed() && !timerDue)
++                break;
++            if (runInMode(context.get(), predicate).messageQueueResult == MessageQueueTerminated) {
++                terminated = true;
++                break;
++            }
++            // Auch bei Dauerarbeit kommt der Event-Loop regelmaessig dran
++            if (MonotonicTime::now() - start > 50_ms) {
++                scheduleHostPump();
++                break;
++            }
++        }
++        if (script && !terminated)
++            script->releaseHeapAccess();
++    }
++    if (terminated)
++        stopFromHost();
++    else
++        armHostTimer();
++}
++
++void WorkerDedicatedRunLoop::armHostTimer()
++{
++    auto& host = *m_hostLoop;
++    auto next = RunLoop::nextTimerFireTime();
++    if (m_sharedTimer->isActive()) {
++        auto sharedTimer = MonotonicTime::now() + m_sharedTimer->fireTimeDelay();
++        next = next ? std::min(*next, sharedTimer) : sharedTimer;
++    }
++    if (host.timer && (!next || *next < host.timerDeadline)) {
++        emscripten_clear_timeout(host.timer);
++        host.timer = 0;
++    }
++    if (!next || host.timer)
++        return;
++    host.timerDeadline = *next;
++    host.timer = emscripten_set_timeout(hostTimerFired, std::max(0.0, (*next - MonotonicTime::now()).milliseconds()), nullptr);
++}
++
++void WorkerDedicatedRunLoop::stopFromHost()
++{
++    auto host = std::exchange(m_hostLoop, nullptr);
++    m_hostDriven = false;
++    hostDrivenRunLoop = nullptr;
++    if (host->timer)
++        emscripten_clear_timeout(host->timer);
++    RunLoop::setWakeUpCallback({ });
++    runCleanupTasks(host->context.get());
++    auto done = WTF::move(host->done);
++    host = nullptr;
++    // Danach kann "this" schon abgebaut sein
++    done();
++    emscripten_runtime_keepalive_pop();
++}
++#endif
++
+ MessageQueueWaitResult WorkerDedicatedRunLoop::runInDebuggerMode(WorkerOrWorkletGlobalScope& context)
+ {
+     RunLoopSetup setup(*this, RunLoopSetup::IsForDebugging::Yes);
+@@ -412,6 +569,9 @@ void WorkerDedicatedRunLoop::runCleanupTasks(WorkerOrWorkletGlobalScope* context
+ void WorkerDedicatedRunLoop::terminate()
+ {
+     m_messageQueue.kill();
++#if OS(EMSCRIPTEN)
++    scheduleHostPump();
++#endif
+ }
+ 
+ void WorkerRunLoop::postTask(ScriptExecutionContext::Task&& task)
+@@ -422,11 +582,17 @@ void WorkerRunLoop::postTask(ScriptExecutionContext::Task&& task)
+ void WorkerDedicatedRunLoop::postTaskAndTerminate(ScriptExecutionContext::Task&& task)
+ {
+     m_messageQueue.appendAndKill(makeUnique<Task>(WTF::move(task), defaultMode()));
++#if OS(EMSCRIPTEN)
++    scheduleHostPump();
++#endif
+ }
+ 
+ void WorkerDedicatedRunLoop::postTaskForMode(ScriptExecutionContext::Task&& task, const String& mode)
+ {
+     m_messageQueue.append(makeUnique<Task>(WTF::move(task), mode));
++#if OS(EMSCRIPTEN)
++    scheduleHostPump();
++#endif
+ }
+ 
+ void WorkerRunLoop::postDebuggerTask(ScriptExecutionContext::Task&& task)
+diff --git a/Source/WebCore/workers/WorkerRunLoop.h b/Source/WebCore/workers/WorkerRunLoop.h
+index babe8f93db..ef0f8a2440 100644
+--- a/Source/WebCore/workers/WorkerRunLoop.h
++++ b/Source/WebCore/workers/WorkerRunLoop.h
+@@ -37,6 +37,11 @@
+ #include <wtf/MessageQueue.h>
+ #include <wtf/TZoneMalloc.h>
+ 
++#if OS(EMSCRIPTEN)
++#include <atomic>
++#include <pthread.h>
++#endif
++
+ namespace WebCore {
+ 
+ class WeakPtrImplWithEventTargetData;
+@@ -78,6 +83,12 @@ public:
+     // Blocking call. Waits for tasks and timers, invokes the callbacks.
+     void run(WorkerOrWorkletGlobalScope*);
+ 
++#if OS(EMSCRIPTEN)
++    // browser-lite: wie run(), kehrt aber sofort zurueck. Der Loop laeuft danach
++    // aus dem Event-Loop des Host weiter, done kommt nach seinem Ende.
++    void runFromHost(WorkerOrWorkletGlobalScope&, Function<void()>&& done);
++#endif
++
+     // Waits for a single task and returns.
+     bool runInMode(WorkerOrWorkletGlobalScope*, const String& mode, bool) final;
+     MessageQueueWaitResult runInDebuggerMode(WorkerOrWorkletGlobalScope&);
+@@ -127,6 +138,21 @@ private:
+     std::unique_ptr<WorkerSharedTimer> m_sharedTimer;
+     int m_nestedCount { 0 };
+     int m_debugCount { 0 };
++
++#if OS(EMSCRIPTEN)
++    struct HostLoop;
++    void scheduleHostPump();
++    void pumpFromHost();
++    void armHostTimer();
++    void stopFromHost();
++    static void hostPump(void*);
++    static void hostTimerFired(void*);
++
++    std::unique_ptr<HostLoop> m_hostLoop;
++    pthread_t m_hostThread { };
++    std::atomic<bool> m_hostDriven { false };
++    std::atomic<bool> m_hostPumpScheduled { false };
++#endif
+ };
+ 
+ class WorkerMainRunLoop final : public WorkerRunLoop, public CanMakeWeakPtr<WorkerMainRunLoop, WeakPtrFactoryInitialization::Eager>, public CanMakeCheckedPtr<WorkerMainRunLoop> {

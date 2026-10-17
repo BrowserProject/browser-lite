@@ -189,6 +189,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       }
       leave();
       pipSink = sink;
+      media('pip-shown', this);
       const { PictureInPictureWindow, PictureInPictureEvent } = pipClasses();
       const window = Reflect.construct(EventTarget, [], PictureInPictureWindow);
       internal.set(window, { width: size.width, height: size.height });

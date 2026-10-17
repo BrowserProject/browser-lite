@@ -49,6 +49,7 @@ Vor dem Push, je nach Aenderung:
 
 ```bash
 git ls-files -z '*.sh' | xargs -0 shellcheck -x
+tools/check-style.sh
 node tests/relay/relay-test.mjs
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 node tests/engine/recorder-test.mjs && node tests/engine/http-cache-test.mjs

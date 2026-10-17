@@ -71,6 +71,8 @@ public:
     // Mit diesem Stand "erstes Bild" melden (WebView::firstPaintShown)
     bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
+    // Versteckter Tab (WebView::setVisible): keine Bilder, was ansteht, kommt beim Zeigen
+    bool hidden WTF_GUARDED_BY_LOCK(lock) { false };
     // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
@@ -113,6 +115,7 @@ public:
     // Von jedem Thread: beim naechsten Bild den Scroll-Thread takten
     // (ScrollingWasm.h), auch wenn nichts neu zusammenzusetzen ist
     void requestScrollingTick();
+    void setHidden(bool);
 
 private:
     explicit CompositorScene(int viewId);
@@ -142,6 +145,8 @@ public:
     void didComposite() { m_waitingForCompositor = false; }
     // Alles neu zeigen (z.B. neues Canvas)
     void forceRepaint();
+    // Versteckt setzt der Compositor den View nicht zusammen (auch keine Animationen)
+    void setVisible(bool visible) { m_scene->setHidden(!visible); }
     // Der View malt ohne Ebenen weiter: nichts mehr ueber den Compositor
     void detachScene();
     // Der Engine-Thread hat das Ziel einer Pinch-Geste uebernommen

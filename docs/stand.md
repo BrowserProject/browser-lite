@@ -8,15 +8,40 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
 
 - WebKit (WebCore + JavaScriptCore mit CLoop-Interpreter) als WebAssembly in
   einem Tab, eigenes Netz ueber Wisp-Relay, TLS im WASM. Das Relay verbindet nur
-  zu oeffentlichen Adressen und Web-Ports.
+  zu oeffentlichen Adressen und Web-Ports, hoechstens 64 Streams einer Verbindung
+  zum gleichen Ziel (#178).
 - Basis-Browser ohne Komfort-Funktionen (kein Passwort-Speicher, kein PDF-Viewer,
   #130): Tabs, Verlauf (auch `pushState`), Lesezeichen, Downloads, Zoom,
   Pinch-Zoom wie Chrome (nur die Ansicht, im Compositor-Thread), Suche auf der
   Seite. `mailto:`, `tel:` und andere Schemata gehen nach einem Klick an den
   Host-Browser.
-- Absturz und Haengen: die Oberflaeche zeigt es an, "Neu starten" stellt die
-  Sitzung wieder her. Ein Skript, das die Engine laenger als 30 s blockiert, bricht
-  der Watchdog ab (`BL_SCRIPT_TIMEOUT`, 0 = aus).
+- Strg + Rad geht wie in Chrome zuerst an die Seite, auch in iframes (Patch 0038): ruft
+  ein wheel-Listener `preventDefault` (Karten, Editoren), zoomt nur die Seite selber. Ohne
+  blockierenden Listener an der Stelle zoomt die Ansicht sofort, auch wenn das JS
+  blockiert (#167).
+- Tabs im Hintergrund und bei verdecktem Host-Tab sind fuer ihre Seiten versteckt
+  (`visibilityState` hidden, kein rAF, keine CSS-Animationen, verschachtelte Timer und
+  `setInterval` hoechstens 1/s, kein Malen, auch nicht im Compositor). Mit Ton laufen
+  Ton und Timer weiter, ein stummes Video im PiP-Fenster laeuft auch, angehalten wird wie in
+  Chrome nur Video ohne Tonspur (#170, Patch 0042). Wird der WASM-Speicher
+  knapp, meldet die Engine das und die Oberflaeche verwirft Hintergrund-Tabs, solange es
+  geht nicht die mit PiP-Fenster oder Eingaben (#171).
+- Dialoge: beforeunload wie Chrome ("Website verlassen?" bzw. "Website neu laden?") beim
+  Wegnavigieren, Neu laden und Schliessen, nur nach einer Benutzer-Aktion; ein
+  Hintergrund-Tab kommt zum Fragen nach vorne, der Host-Tab fragt beim Schliessen selber,
+  eine Seite, die in einer Schleife navigiert, fragt hoechstens zweimal (#168). `window.focus()` und `WindowClient.focus()` holen den Tab nach vorne, Popups haben
+  Opener, Namen und Sandbox (#169). Unterdrueckte Dialoge zeigt ein Zeichen am Tab.
+- Absturz und Haengen: die Oberflaeche zeigt es an, auch wenn ein Klick oder eine
+  Taste 10 s ohne Antwort bleibt (#172), "Neu starten" stellt die Sitzung wieder her.
+  Ein Skript, das die Engine laenger als 30 s blockiert, bricht der Watchdog ab
+  (`BL_SCRIPT_TIMEOUT`, 0 = aus).
+- Netzfehler: Fehlerseite wie Chrome mit dem Grund vom Relay (`ERR_NAME_NOT_RESOLVED`,
+  `ERR_CONNECTION_REFUSED`, `ERR_CONNECTION_TIMED_OUT`, `ERR_ACCESS_DENIED`,
+  `ERR_ADDRESS_UNREACHABLE`, `ERR_PROXY_CONNECTION_FAILED`, Zertifikat, TLS) und "Neu
+  laden" unter der Adresse, die nicht ging, ohne Schloss in der Adressleiste; kommt die
+  Verbindung wieder, laedt die Engine sie neu, ein Formular erst mit "Erneut senden" (#174,
+  #175, Patch 0039). Eine halb offene Verbindung zum Relay erkennt der
+  Transport und verbindet neu (#177). curl: hoechstens 64 Verbindungen, 6 pro Host (#176).
 - GPU-Rastern (Skia ueber WebGL 2), Compositing mit eigenem Thread, asynchrones
   Scrollen, Blur und Schatten auf der GPU (gefilterte Ebenen werden
   wiederverwendet), CSS Paint Worklet. Nach einem GPU-Verlust malt die Engine auf
@@ -26,19 +51,32 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   getUserMedia) ueber den Host-Browser.
 - WebAssembly der Seiten in der WASM-Engine des Host, auch memory64, table64 und
   mehrere Speicher (hoechstens 2 GB pro Speicher, 64 verschachtelte Aufrufe).
-- Service Worker mit Update im Hintergrund, Navigation Preload, Benachrichtigungen
-  und `clients.openWindow()` nach `notificationclick`.
+  `memory.grow` zieht mit einem Viertel Reserve um (hoechstens 96 MB, #184). Web Worker der
+  Seiten laufen aus dem Event-Loop des Host (Patch 0041): Speicher frueherer Instanzen
+  wird auch in langlebigen Workern frei, FinalizationRegistry und Timer von JSC laufen
+  dort (#183).
+- Service Worker mit Update im Hintergrund, Navigation Preload (auch aus dem HTTP-Cache,
+  #182), Benachrichtigungen und `clients.openWindow()` nach `notificationclick`.
 - Speicher: WasmFS, `/data` im OPFS (#142, nur ein Host-Tab besitzt es), HTTP- und
   Bytecode-Cache in der Cache API (#70, #135), Inhalte der Cache API der Seiten als
   eigene Dateien. Ohne Platz im OPFS des Host bekommen die Seiten im OPFS
   `QuotaExceededError` (#166). `navigator.onLine` folgt der Verbindung zum Relay.
+- IndexedDB: hoechstens 256 MB pro Ursprung nur fuers Schreiben (`QuotaExceededError`,
+  Geloeschtes gibt Platz frei, `navigator.storage.estimate()` meldet Grenze und Platz),
+  Oeffnen, Lesen und Loeschen gehen auch ueber der Grenze; zu grosse Dateien laedt das VFS
+  nicht, sie lassen sich nur loeschen (#179, Patch 0040). SQLite kommt als eine Datei mit
+  dem WAL darin auf die Platte, 1 s nach einer Aenderung und beim Schliessen des Tabs (#180).
+  Uploads liest der Engine-Thread in Stuecken direkt ins OPFS (#181).
 - Messlatte: 257 von 280 Funktionen wie Chromium (`tests/e2e/parity-test.mjs`).
 - Tests: gemeinsames Geruest fuer die e2e-Tests (`tests/e2e/harness.mjs`, auch
   parallel), dazu Grenzen (`limits.html`), Watchdog (`hang.html`), echte Abstuerze
-  (`BL_TEST_HOOKS=1`) und Netzfehler (falsche Zertifikate, DNS, Relay-Neustart).
+  (`BL_TEST_HOOKS=1`), Netzfehler (falsche Zertifikate, DNS, Relay-Neustart, Relay als
+  Attrappe), Hintergrund-Tabs (`background-test.mjs`) und ein langer Lauf
+  (`soak-test.mjs`: 200 Navigationen, 30 Tabs, Dokumente und Speicher bleiben begrenzt).
 - CI und Deploy bei jedem Push auf `main` (Stand in GitHub Actions). Der Deploy
   laeuft ueber den Self-hosted Runner auf den eigenen Proxmox-Server (LXC), auf dem
-  Runner laeuft keine fremde Action.
+  Runner laeuft keine fremde Action. Actions sind per Commit gepinnt, der Lint prueft die
+  Regeln aus AGENTS.md (`tools/check-style.sh`, #185).
 
 ## Messwerte (lokal, erster Besuch)
 
@@ -78,13 +116,22 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
 - Login mit Profil auf dem Server (Cookies, localStorage, kleine IndexedDB), Plan in
   [profil.md](profil.md).
 - Pinch-Zoom: `visualViewport`-Events kommen erst am Ende der Geste (jeder
-  Zwischenstand wuerde alle Kacheln neu malen). Strg + Rad geht nicht zuerst an die
-  Seite (eigener Zoom von Karten und Editoren). Zwei Finger warten auf die
-  touchstart-Antwort der Seite, auch ohne blockierende Touch-Listener. Die
+  Zwischenstand wuerde alle Kacheln neu malen). Zwei Finger warten auf die
+  touchstart-Antwort der Seite, auch ohne blockierende Touch-Listener (braucht
+  Touch-Event- und touch-action-Regions in WebKit, also einen vollen Neubau). Die
   Uebernahme am Ende kostet einen Style- und Layout-Durchlauf.
-- WebAssembly: geteilter Speicher (Threads) und JSPI, `validate()` sagt dafuer
-  false und Seiten nehmen ihre Variante ohne. Zyklen zwischen Seite und Modul werden
-  erst mit der Seite frei.
+- Hintergrund-Tabs: `scheduler.yield()` und `postTask` laufen ueber `setTimeout` und sind
+  versteckt gedrosselt wie verschachtelte Timer (Chrome drosselt sie nicht; ueber
+  MessageChannel kamen sie spaeter als ein 5-ms-Timer und die Reihenfolge brach). Stumme
+  Videos halten versteckt an wie in Safari, ausser nach PiP (Chrome laesst sie laufen).
+  Verwerfen bei Speicherdruck verschont Tabs mit beforeunload-Listener und Eingaben nicht
+  (Chrome schon).
+- beforeunload: der Host-Tab fragt beim Schliessen, sobald ein Tab mit Listener eine
+  Benutzer-Aktion hatte, auch wenn dessen Handler nicht fragen wuerde. Listener nur in
+  Iframes fragen beim Schliessen des Tabs nicht (nur Navigation und Neu laden).
+- WebAssembly: geteilter Speicher (Threads) und JSPI, `validate()` sagt dafuer false
+  und Seiten nehmen ihre Variante ohne. Zyklen zwischen Seite und Modul (Glue von
+  Emscripten) werden erst mit der Seite bzw. dem Worker frei.
 - CSS: `url(#...)`- und SVG-Filter malt die CPU. Gefilterte Ebenen mit Kindern,
   Maske oder Video/Canvas/WebGL, Filter-Animationen und teilweise sichtbare Ebenen
   beim Scrollen rechnen den Filter jedes Bild neu, ohne Ebenen laeuft alles auf der
@@ -97,18 +144,24 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
   naechsten Zeichnen.
 - Medien: EME (DRM), MSE in Workern (#121), WebCodecs-Bilder direkt als Textur.
   WebRTC: Verkehr ueber das Relay (TURN), Insertable Streams. Die Engine-Senke
-  eines gesendeten Tracks bleibt bis `stop()` oder bis die Quelle endet (schwach
-  gehalten wurde die Spur im GC zerstoert und beendete die Quelle, Absturz). Fehler
+  eines gesendeten Tracks bleibt bis `stop()` oder bis die Quelle endet. Fehler
   des MediaRecorder beim Abholen der Daten erreichen die Seite nicht als Ereignis.
-- Service Worker: Push, Background Sync, Background Fetch. `WindowClient.focus()`
-  holt den Tab nicht nach vorne, Navigation Preload fragt den HTTP-Cache nicht.
-- Netz: WebTransport, Streams als Request-Body, Storage Buckets, WebSocketStream
-  ohne Gegendruck beim Lesen (#120).
+  Ein stummes Autoplay-Video meldet gleich nach dem Laden kurz `pause` und wieder
+  `playing` (Chrome nicht).
+- Service Worker: Push, Background Sync, Background Fetch.
+- Netz: HTTP-Authentifizierung (401 mit Basic/Digest) ohne Login-Dialog, die Seite zeigt
+  den Inhalt der 401-Antwort. WebTransport, Streams als Request-Body, Storage Buckets,
+  WebSocketStream ohne Gegendruck beim Lesen (#120).
+- Speicher: localStorage schreibt WebKitLegacy erst 1 s nach einer Aenderung nach
+  SQLite, beim Schliessen kann das fehlen. Mit `/data` im Speicher (zweiter
+  Host-Tab) liegen Uploads im WASM-Speicher.
 - Messung und Geraete: Layout-Shift- und Long-Animation-Frame-Eintraege,
   IdleDetector, `document.featurePolicy`.
 - Oberflaeche: Ziehen und Loslassen ausserhalb einer Ablage oeffnet nichts (#125,
-  Chrome oeffnet einen Tab). Eingefuegte Dateien bleiben bis zum Schliessen des Tabs
-  im WASM-Speicher. Unterdrueckte Dialoge sind am Tab nicht zu sehen.
+  Chrome laedt Link oder Datei im selben Tab; bewusst nicht, ein versehentliches Ablegen
+  wuerde die Seite ersetzen).
+- Geraete und Identitaet: WebAuthn, Credential Management, Payment Request, Web
+  MIDI/USB/HID/Serial, WebXR.
 
 ## Offen: Tests und Betrieb
 
@@ -116,14 +169,13 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
   Uhr des AudioContext und schreibt `rectime=<Wand>:<Audio>` ins Log, um Timing von einem
   Fehler im Recorder zu unterscheiden.
 - Unter Last knapp: die Speicher-Pruefung in `wasm-test.mjs` (Grenze 512 MB,
-  parallel bis 446 MB gemessen) und in `compositing-test.mjs` "Animation laeuft,
-  waehrend das JS blockiert" (einmal rot, parallel zu drei anderen Tests).
+  parallel bis 446 MB gemessen), in `compositing-test.mjs` "Animation laeuft,
+  waehrend das JS blockiert" (einmal rot, parallel zu drei anderen Tests) und in
+  `ui-test.mjs` die beiden Pruefungen "Haengen" (Meldung nach 10 s). `serviceworker-test.mjs`
+  war parallel unter Last ab "Nach Neustart" rot, allein gruen.
 - Ohne Test: die Grenze fuer die Zahl der Samples in fMP4 (`trun`), das Aufraeumen
-  von Host-Objekten durch die GC, Set-Cookie beim Update eines Service
-  Workers.
-- Zu pruefen: in Seiten-Workern kehrt der Engine-Thread nie in den Event-Loop des
-  Host zurueck, die FinalizationRegistry der WASM-Bruecke im Host feuert dort
-  vermutlich nie (Werte erst mit dem Worker frei).
+  anderer Host-Objekte als WebAssembly durch die GC, Set-Cookie beim Update eines
+  Service Workers, das Zeitlimit beim Schreiben der Datenbanken (#180).
 - Echte Seiten schwanken stark (Werbung, wechselnder Inhalt): Leistung immer mit
   mehreren Laeufen und mit Inklusivzeiten aus dem Profil vergleichen, nicht nur mit
   der Ladezeit.

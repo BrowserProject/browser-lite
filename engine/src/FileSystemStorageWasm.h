@@ -13,5 +13,7 @@ namespace BrowserLite {
 
 // Fuer StorageConnection::fileSystemGetDirectory (Engine-Thread)
 void fileSystemGetDirectory(const WebCore::ClientOrigin&, WebCore::StorageConnection::GetDirectoryCallback&&);
+// Belegter Platz im OPFS eines Ursprungs
+uint64_t fileSystemUsage(const WebCore::ClientOrigin&);
 
 } // namespace BrowserLite

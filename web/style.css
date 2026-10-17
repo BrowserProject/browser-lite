@@ -29,6 +29,8 @@ body { display: flex; flex-direction: column; }
 .tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab .recording { color: #d93025; font-size: 11px; }
 .tab .recording[hidden] { display: none; }
+.tab .dialog-blocked { color: var(--muted); font-size: 12px; }
+.tab .dialog-blocked[hidden] { display: none; }
 .tab .audio { border: none; background: none; color: var(--fg); cursor: pointer; padding: 0 2px; font-size: 13px; line-height: 1; }
 .tab .audio[hidden] { display: none; }
 .tab .audio.muted { opacity: 0.7; }

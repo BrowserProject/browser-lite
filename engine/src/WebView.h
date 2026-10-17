@@ -123,6 +123,9 @@ public:
     static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
     // Auch vom Scroll-Thread (ScrollingWasm.cpp), mit den Schritten, die noch fehlen
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
+    // Strg + Rad: nur das DOM-Event, kein Scrollen. Mit cancelable meldet die
+    // Engine "wheel-result", ob die Seite preventDefault gerufen hat
+    void zoomWheelEvent(const WebCore::PlatformWheelEvent&, bool cancelable);
     // ChromeClient: Scrollen im eigenen Thread, wenn mit Ebenen
     RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const;
 #if ENABLE(POINTER_LOCK)
@@ -143,6 +146,11 @@ public:
     // Editor-Befehl wie "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);
+    // Hintergrund-Tab oder Tab des Host verdeckt: die Seite ist versteckt
+    // (visibilityState, kein rAF, Timer gedrosselt) und malt nicht
+    void setVisible(bool);
+    // Seite spielt Ton: versteckt werden ihre Timer nicht gedrosselt (wie Chrome)
+    void setAudible(bool);
     void focusInitial(bool forward);
     void setZoom(float);
     // Pinch-Zoom (PinchZoom.h): nur die Ansicht skalieren, Layout bleibt.
@@ -156,6 +164,8 @@ public:
 
     // Fuer die Clients
     void didStartLoading();
+    // Die naechste Fehlerseite (ErrorPage.cpp) ist wegen eines ungueltigen Zertifikats
+    void willCommitErrorPage(bool certificate) { m_errorPageCertificate = certificate; }
     void didCommitLoad();
     // Anker, pushState/replaceState, popstate: neue Adresse ohne neues Dokument
     void didNavigateWithinPage();
@@ -220,7 +230,12 @@ private:
     Vector<PendingScroll> m_pendingScrolls;
     void applyPendingScrolls(WebCore::IntRect& presented);
     bool m_renderingUpdateRequested { false };
+    // Ein Bild ist gewuenscht; versteckt fragt erst setVisible(true) den Host
     bool m_frameRequested { false };
+    void requestFrame();
+    bool m_visible { true };
+    bool m_audible { false };
+    void updateActivityState();
     bool m_frameInFlight { false };
     bool m_needsFullPresent { false };
     bool m_compositedFrameMissed { false };
@@ -229,6 +244,7 @@ private:
     // meldet es der Compositor-Thread mit dem Bild, das es zeigt
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
+    bool m_errorPageCertificate { false };
     void loadFavicon();
 
     bool m_isLoading { false };

@@ -517,4 +517,9 @@ Ref<CacheStorageProvider> createCacheStorageProvider()
     return CacheStorageProviderWasm::create();
 }
 
+uint64_t cacheStorageUsage(const ClientOrigin& origin)
+{
+    return FileSystem::fileSize(fileForOrigin(origin)).value_or(0) + directorySize(bodyDirectory(origin));
+}
+
 } // namespace BrowserLite

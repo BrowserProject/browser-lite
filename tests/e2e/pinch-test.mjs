@@ -5,18 +5,24 @@
 // Skalierung (visualViewport mit resize-Event), das Layout bleibt gleich breit.
 // Klick und Rad gleich nach der Geste gehen nicht verloren und treffen, was zu
 // sehen ist. touch-action: none und preventDefault der Seite verhindern das
-// Zoomen, Strg + Mausrad bleibt Seiten-Zoom,
+// Zoomen, Strg + Mausrad bleibt Seiten-Zoom. Strg + Rad geht zuerst an die
+// Seite: ruft ein wheel-Listener preventDefault (wie Karten), zoomt nur sie,
+// auch in einem iframe (eingebettete Karte), ohne blockierenden Listener an
+// der Stelle zoomt die Ansicht sofort,
 // eine neue Seite beginnt bei 1 (Zurueck stellt wieder her). Ohne Compositor
 // (?compositing=0) skaliert der Engine-Thread.
 //
 //   cd tests/e2e && node pinch-test.mjs [engine-ordner]
-import { SWIFTSHADER, canvasOrigin, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, canvasOrigin, check, collect, finish, launch, near, pagePixel, screenshot, serve, startStack, timeLimit, waitFor } from './harness.mjs';
 
 timeLimit();
 
 // Rotes Feld 100..200, gruenes 250..300 (oben links), blaues Feld mit
 // touch-action: none, graues mit touchmove-Listener, der zwei Finger selber
-// will. Die Leiste #wide ist so breit wie das Layout.
+// will, und wheel-Listener ohne preventDefault. Die "Karte" (orange) zoomt
+// mit Strg + Rad selber, ebenso die eingebettete Karte im iframe (gelb, Listener
+// auf ihrem Dokument), das Dokument liest Strg + Rad passiv mit. Die Leiste
+// #wide ist so breit wie das Layout.
 const PAGE = `<!doctype html><title>Pinch-Test</title>
 <style>
   body { margin: 0; background: #fff; height: 2000px; }
@@ -29,6 +35,8 @@ const PAGE = `<!doctype html><title>Pinch-Test</title>
 <div class="box" style="left:100px;top:400px;width:100px;height:100px;background:rgb(255,0,255)"></div>
 <div id="nozoom" class="box" style="left:500px;top:300px;width:400px;height:300px;background:rgb(0,0,255);touch-action:none"></div>
 <div id="grab" class="box" style="left:500px;top:50px;width:400px;height:200px;background:rgb(120,120,120)"></div>
+<div id="map" class="box" style="left:250px;top:550px;width:150px;height:100px;background:rgb(255,160,0)"></div>
+<iframe src="/frame" class="box" style="left:50px;top:550px;width:150px;height:100px;border:0"></iframe>
 <script>
 let resizes = 0;
 visualViewport.addEventListener('resize', () => console.log('RESULT vvresize=' + ++resizes));
@@ -39,10 +47,37 @@ document.getElementById('grab').addEventListener('touchmove', (e) => {
     console.log('RESULT grabbed=1');
   }
 }, { passive: false });
+let grabWheels = 0;
+document.getElementById('grab').addEventListener('wheel', (e) => {
+  if (e.ctrlKey && !grabWheels++)
+    console.log('RESULT grabcancelable=' + e.cancelable);
+  else if (e.ctrlKey && !e.cancelable)
+    console.log('RESULT grabpassive=1');
+}, { passive: false });
+let mapZooms = 0;
+document.getElementById('map').addEventListener('wheel', (e) => {
+  if (e.ctrlKey) {
+    e.preventDefault();
+    console.log('RESULT mapzoom=' + ++mapZooms);
+  }
+}, { passive: false });
+let ctrlWheels = 0;
+document.addEventListener('wheel', (e) => e.ctrlKey && console.log('RESULT ctrlwheel=' + ++ctrlWheels), { passive: true });
 console.log('RESULT ready=1');
 </script>`;
 
-const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
+const FRAME = `<!doctype html><style>body { margin: 0; background: rgb(255, 220, 0); }</style>
+<script>
+let frameZooms = 0;
+document.addEventListener('wheel', (e) => {
+  if (e.ctrlKey) {
+    e.preventDefault();
+    console.log('RESULT framezoom=' + ++frameZooms);
+  }
+}, { passive: false });
+</script>`;
+
+const { url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(req.url === '/frame' ? FRAME : PAGE));
 const stack = await startStack({ token: 'pinch-token-0123456789abcdef' });
 const browser = await launch({ args: SWIFTSHADER });
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, hasTouch: true });
@@ -54,20 +89,10 @@ const cdp = await context.newCDPSession(page);
 await page.goto(stack.app({ url: siteURL, debug: '1' }));
 check('Seite geladen', await result('ready') === '1');
 
-const pixelAt = (x, y) => page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+const pixelAt = (x, y) => pagePixel(page, x, y);
 // Die Geste endet nicht genau bei 2 (Schritte multiplizieren sich), darum +-1 px
 const clickAt190 = (text) => text && text.split(',').every((v) => Math.abs(Number(v) - 190) <= 1);
-const near = (pixel, rgb, tolerance = 40) => pixel && rgb.every((value, i) => Math.abs(pixel[i] - value) <= tolerance);
 const RED = [255, 0, 0], GREEN = [0, 160, 0], WHITE = [255, 255, 255], MAGENTA = [255, 0, 255];
-async function waitFor(condition, ms = 10000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await condition())
-      return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return false;
-}
 // Wert aus der Seite (JSON), ueber die Konsole
 let asked = 0;
 async function pageValue(expression) {
@@ -101,6 +126,8 @@ const shownWhileBlocked = await waitFor(scaledTwice, 2500);
 check('Touchpad-Pinch zeigt sofort, waehrend das JS blockiert', shownWhileBlocked && Date.now() - pinchStart < 4500,
   JSON.stringify({ ms: Date.now() - pinchStart, red: await pixelAt(250, 250), green: await pixelAt(450, 150) }));
 await screenshot(page, 'pinch-blocked');
+// Der passive wheel-Listener des Dokuments hat nicht blockiert und liest mit
+check('Die Seite liest den Touchpad-Pinch passiv mit', await result('ctrlwheel', 15000) !== null);
 
 // 2) Danach kennt die Seite die Skalierung, das Layout ist gleich breit
 check('Seite bekommt visualViewport resize', await result('vvresize', 15000) !== null);
@@ -185,14 +212,54 @@ check('Danach: Skalierung 2 an der gescrollten Stelle', Math.abs(scrolledZoom?.s
 await zoomOutToTop();
 
 // 4) Strg + Mausrad bleibt Seiten-Zoom (Stufe 110 %), ohne Pinch
-await page.evaluate(({ x, y }) => {
+const ctrlWheelAt = (point, target = page) => target.evaluate(({ x, y }) => {
   const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
   canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
-}, at(300, 300));
-const zoomLabel = await page.evaluate(() => document.getElementById('zoom').textContent);
+}, point);
+const zoomText = (target = page) => target.evaluate(() => document.getElementById('zoom').textContent);
+await ctrlWheelAt(at(300, 300));
+const zoomLabel = await zoomText();
 check('Strg + Mausrad: Seiten-Zoom', zoomLabel === '110 %' && (await viewport())?.scale === 1, zoomLabel);
 await page.click('#zoom');
 await waitFor(async () => (await viewport())?.layout === before.layout, 10000);
+
+// 4b) Strg + Rad geht zuerst an die Seite: die "Karte" ruft preventDefault,
+// dann zoomt weder die Ansicht (Touchpad) noch die Seite (Mausrad)
+await cdp.send('Input.synthesizePinchGesture', { ...at(325, 600), scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
+await result('mapzoom', 10000);
+await page.waitForTimeout(1000);
+// Jedes Ereignis der Geste geht cancelable an die Seite
+check('Touchpad-Pinch auf der Karte: die Seite zoomt selber, die Ansicht nicht', Number(results.get('mapzoom')) > 1
+  && (await viewport())?.scale === 1 && await unscaled(),
+  JSON.stringify({ mapzoom: results.get('mapzoom'), viewport: await viewport() }));
+const zoomsBefore = Number(results.get('mapzoom'));
+await ctrlWheelAt(at(325, 600));
+await waitFor(() => Number(results.get('mapzoom')) > zoomsBefore, 10000);
+await page.waitForTimeout(500);
+check('Strg + Mausrad auf der Karte: kein Seiten-Zoom', Number(results.get('mapzoom')) === zoomsBefore + 1 && await zoomText() === '100 %',
+  await zoomText());
+
+// 4b') Dasselbe mit der Karte im iframe: das preventDefault ihres Dokuments zaehlt
+await cdp.send('Input.synthesizePinchGesture', { ...at(125, 600), scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
+await result('framezoom', 10000);
+await page.waitForTimeout(1000);
+check('Touchpad-Pinch auf der Karte im iframe: nur sie zoomt', Number(results.get('framezoom')) > 1
+  && (await viewport())?.scale === 1 && await unscaled(),
+  JSON.stringify({ framezoom: results.get('framezoom'), viewport: await viewport() }));
+const frameZoomsBefore = Number(results.get('framezoom'));
+await ctrlWheelAt(at(125, 600));
+await waitFor(() => Number(results.get('framezoom')) > frameZoomsBefore, 10000);
+await page.waitForTimeout(500);
+check('Strg + Mausrad auf der Karte im iframe: kein Seiten-Zoom', Number(results.get('framezoom')) === frameZoomsBefore + 1
+  && await zoomText() === '100 %', JSON.stringify({ framezoom: results.get('framezoom'), zoom: await zoomText() }));
+
+// 4c) Ein wheel-Listener ohne preventDefault: das erste Ereignis ist
+// cancelable, nach der Antwort zoomt die Ansicht, die Seite liest den Rest mit
+await cdp.send('Input.synthesizePinchGesture', { ...at(700, 150), scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
+const grabZoomed = await waitFor(async () => Math.abs((await viewport())?.scale - 2) < 0.05, 10000);
+check('Listener ohne preventDefault: Touchpad-Pinch zoomt die Ansicht', grabZoomed && results.get('grabcancelable') === 'true'
+  && results.get('grabpassive') === '1', JSON.stringify({ cancelable: results.get('grabcancelable'), passive: results.get('grabpassive'), viewport: await viewport() }));
+await zoomOutToTop();
 
 // 5) Zwei Finger: auf einem Feld mit touch-action: none zoomt nichts
 const touchPinch = async (cx, cy, from, to) => {
@@ -249,10 +316,30 @@ const plain = await context.newPage();
 const plainResults = collect(plain);
 await plain.goto(stack.app({ url: siteURL, compositing: '0' }));
 check('Ohne Compositor geladen', await plainResults.wait('ready') === '1');
-const plainPixel = (x, y) => plain.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+const plainPixel = (x, y) => pagePixel(plain, x, y);
 await waitFor(async () => near(await plainPixel(150, 150), RED), 20000);
 const plainCDP = await context.newCDPSession(plain);
 const plainOrigin = await canvasOrigin(plain);
+// Auch hier geht Strg + Rad zuerst an die Seite: die Karte zoomt selber
+const plainResizes = plainResults.get('vvresize');
+await plainCDP.send('Input.synthesizePinchGesture', { x: plainOrigin.x + 325, y: plainOrigin.y + 600, scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
+const plainMap = await plainResults.wait('mapzoom', 10000);
+await plain.waitForTimeout(1000);
+check('Ohne Compositor: die Karte zoomt selber, die Ansicht nicht', plainMap !== null && plainResults.get('vvresize') === plainResizes
+  && near(await plainPixel(250, 250), WHITE) && near(await plainPixel(150, 150), RED),
+  JSON.stringify({ mapzoom: plainMap, resizes: [plainResizes, plainResults.get('vvresize')], red: await plainPixel(150, 150), white: await plainPixel(250, 250) }));
+await plainCDP.send('Input.synthesizePinchGesture', { x: plainOrigin.x + 125, y: plainOrigin.y + 600, scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
+await plainResults.wait('framezoom', 10000);
+await plain.waitForTimeout(1000);
+const plainFrameZooms = Number(plainResults.get('framezoom'));
+await ctrlWheelAt({ x: plainOrigin.x + 125, y: plainOrigin.y + 600 }, plain);
+await waitFor(() => Number(plainResults.get('framezoom')) > plainFrameZooms, 10000);
+await plain.waitForTimeout(500);
+check('Ohne Compositor: die Karte im iframe zoomt selber, weder Ansicht noch Seite', plainFrameZooms > 1
+  && Number(plainResults.get('framezoom')) === plainFrameZooms + 1 && plainResults.get('vvresize') === plainResizes
+  && near(await plainPixel(250, 250), WHITE) && await zoomText(plain) === '100 %',
+  JSON.stringify({ framezoom: plainResults.get('framezoom'), resizes: [plainResizes, plainResults.get('vvresize')], zoom: await zoomText(plain) }));
+plainResults.delete('vvresize');
 await plainCDP.send('Input.synthesizePinchGesture', { x: plainOrigin.x + 100, y: plainOrigin.y + 100, scaleFactor: 2, relativeSpeed: 1600, gestureSourceType: 'mouse' });
 const plainScaled = await waitFor(async () => near(await plainPixel(250, 250), RED) && near(await plainPixel(450, 150), GREEN), 10000);
 check('Ohne Compositor: Pinch-Zoom', plainScaled && await plainResults.wait('vvresize', 10000) !== null,

@@ -1,11 +1,11 @@
 // Netzwerk-Sockets der Engine ohne Umweg ueber den Haupt-Thread.
 //
-// Vorher liefen socket/connect/send/recv/poll ueber Emscriptens SOCKFS. Das
-// lebt im JavaScript des Haupt-Threads: jeder Aufruf von curl (eigener
-// Thread) war ein synchroner Umweg dorthin, auf CNN ca. 0.5 s Wartezeit.
+// socket/connect/send/recv/poll fangen wir beim Linken ab (-Wl,--wrap=..., siehe
+// engine.cmake), statt Emscriptens SOCKFS zu nehmen: das lebt im JavaScript des
+// Haupt-Threads, jeder Aufruf von curl (eigener Thread) waere ein synchroner
+// Umweg dorthin (auf CNN ca. 0.5 s Wartezeit).
 //
-// Jetzt fangen wir die Funktionen beim Linken ab (-Wl,--wrap=..., siehe
-// engine.cmake). TCP-Sockets und Pipes (die Weck-Pipe von curl) leben hier im
+// TCP-Sockets und Pipes (die Weck-Pipe von curl) leben hier im
 // WASM-Speicher, poll wartet auf eine Condition-Variable. Nur Verbindungen
 // oeffnen, Daten senden und schliessen gehen asynchron an den Haupt-Thread
 // (engine/js/sockets.js), der sie ueber den Transport der Oberflaeche (Wisp)
@@ -192,10 +192,12 @@ struct Pipe {
     bool writerOpen { true };
 };
 
+// Wer einen Deskriptor benutzt, haelt eine Referenz: close() in einem anderen
+// Thread nimmt ihn nur aus der Tabelle
 struct Descriptor {
     enum class Kind { Socket, PipeRead, PipeWrite };
     Kind kind;
-    bool nonBlocking { false };
+    std::atomic<bool> nonBlocking { false };
     std::shared_ptr<Socket> socket;
     std::shared_ptr<Pipe> pipe;
 };
@@ -211,7 +213,9 @@ struct Operation {
 
 std::mutex mutex;
 std::condition_variable changed;
-std::atomic<Descriptor*> descriptors[maxDescriptors];
+std::shared_ptr<Descriptor> descriptors[maxDescriptors];
+// Ohne Lock lesbar: gehoert die Nummer uns? read/write/close aller anderen Dateien kommen auch hier vorbei
+std::atomic<bool> ours[maxDescriptors];
 std::unordered_map<int, std::shared_ptr<Socket>> socketsById;
 int nextSocketId = 1;
 std::vector<Operation> outbox;
@@ -221,11 +225,38 @@ std::unordered_map<std::string, uint32_t> addressForHost;
 std::unordered_map<uint32_t, std::string> hostForAddress;
 uint32_t nextPlaceholder = 1;
 
-Descriptor* descriptorFor(int fd)
+bool isOurs(int fd)
 {
-    if (fd < 0 || fd >= maxDescriptors)
+    return fd >= 0 && fd < maxDescriptors && ours[fd].load(std::memory_order_acquire);
+}
+
+std::shared_ptr<Descriptor> descriptorFor(int fd)
+{
+    if (!isOurs(fd))
         return nullptr;
-    return descriptors[fd].load(std::memory_order_acquire);
+    std::lock_guard lock(mutex);
+    return descriptors[fd];
+}
+
+// Unter dem Lock
+Descriptor* descriptorLocked(int fd)
+{
+    return isOurs(fd) ? descriptors[fd].get() : nullptr;
+}
+
+// Unter dem Lock
+void storeDescriptor(int fd, std::shared_ptr<Descriptor>&& descriptor)
+{
+    descriptors[fd] = std::move(descriptor);
+    ours[fd].store(true, std::memory_order_release);
+}
+
+std::shared_ptr<Descriptor> createDescriptor(Descriptor::Kind kind, bool nonBlocking)
+{
+    auto descriptor = std::make_shared<Descriptor>();
+    descriptor->kind = kind;
+    descriptor->nonBlocking = nonBlocking;
+    return descriptor;
 }
 
 // Eine echte Nummer im Dateisystem reservieren (selten, darf warten)
@@ -263,22 +294,27 @@ void pumpOnMainThread(void*)
     }
 }
 
-// Fehler fuer den Grund, mit dem das Relay einen Stream schliesst (Wisp)
-int errorForCloseReason(int reason, bool connecting)
+// Fehler fuer den Grund, mit dem ein Stream endet (Wisp). Wisp bestaetigt den Aufbau
+// nicht, der Stream gilt sofort als offen: ein Aufbau, der beim Relay scheitert, endet
+// erst danach. Aus diesen Fehlern macht CurlRequest wieder die Codes von curl (Patch 0039).
+int errorForCloseReason(int reason, bool opened)
 {
     switch (reason) {
-    case 0x41: // ungueltige Angaben
-    case 0x42: // Host nicht erreichbar
+    case 0x42: // Host nicht erreichbar: ein Name, den das Relay nicht aufloesen kann
+        return EADDRNOTAVAIL;
+    case 0x4a: // Name aufgeloest, Adresse nicht erreichbar (relay/wisp.mjs, nicht in Wisp)
         return EHOSTUNREACH;
     case 0x43: // keine Antwort
     case 0x47: // Zeitlimit
         return ETIMEDOUT;
     case 0x44:
         return ECONNREFUSED;
+    case 0x41: // ungueltige Angaben
     case 0x48: // Ziel gesperrt
         return EACCES;
     default:
-        return connecting ? ECONNREFUSED : ECONNRESET;
+        // Vor dem Oeffnen schliesst nur der Transport selber: er erreicht das Relay nicht
+        return opened ? ECONNRESET : ENETUNREACH;
     }
 }
 
@@ -314,7 +350,7 @@ short readyEvents(const Descriptor& descriptor)
     return 0;
 }
 
-ssize_t receive(Descriptor& descriptor, void* buffer, size_t length, bool peek)
+ssize_t receive(Descriptor& descriptor, void* buffer, size_t length, bool peek, bool nonBlocking)
 {
     std::unique_lock lock(mutex);
     for (;;) {
@@ -343,7 +379,7 @@ ssize_t receive(Descriptor& descriptor, void* buffer, size_t length, bool peek)
             errno = EBADF;
             return -1;
         }
-        if (descriptor.nonBlocking) {
+        if (nonBlocking) {
             errno = EAGAIN;
             return -1;
         }
@@ -474,7 +510,7 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
     auto& socket = *it->second;
     bool connecting = socket.state == Socket::State::Connecting;
     if (reason != wispCloseVoluntary)
-        socket.pendingError = errorForCloseReason(reason, connecting);
+        socket.pendingError = errorForCloseReason(reason, !connecting);
     else if (connecting)
         socket.pendingError = ECONNRESET;
     socket.remoteClosed = true;
@@ -573,19 +609,18 @@ int __wrap_socket(int domain, int type, int protocol)
     int fd = reserveDescriptor();
     if (fd < 0)
         return -1;
-    auto* descriptor = new Descriptor { Descriptor::Kind::Socket };
-    descriptor->nonBlocking = type & SOCK_NONBLOCK;
+    auto descriptor = createDescriptor(Descriptor::Kind::Socket, type & SOCK_NONBLOCK);
     descriptor->socket = std::make_shared<Socket>();
     std::lock_guard lock(mutex);
     descriptor->socket->id = nextSocketId++;
     socketsById[descriptor->socket->id] = descriptor->socket;
-    descriptors[fd].store(descriptor, std::memory_order_release);
+    storeDescriptor(fd, std::move(descriptor));
     return fd;
 }
 
 int __wrap_connect(int fd, const struct sockaddr* address, socklen_t length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_connect(fd, address, length);
     if (descriptor->kind != Descriptor::Kind::Socket || !address || (address->sa_family != AF_INET && address->sa_family != AF_INET6)) {
@@ -618,14 +653,14 @@ int __wrap_connect(int fd, const struct sockaddr* address, socklen_t length)
 
 int __wrap_bind(int fd, const struct sockaddr* address, socklen_t length)
 {
-    if (!descriptorFor(fd))
+    if (!isOurs(fd))
         return __real_bind(fd, address, length);
     return 0;
 }
 
 ssize_t __wrap_send(int fd, const void* buffer, size_t length, int flags)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_send(fd, buffer, length, flags);
     return transmit(*descriptor, buffer, length);
@@ -633,28 +668,23 @@ ssize_t __wrap_send(int fd, const void* buffer, size_t length, int flags)
 
 ssize_t __wrap_recv(int fd, void* buffer, size_t length, int flags)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_recv(fd, buffer, length, flags);
-    if (flags & MSG_DONTWAIT) {
-        Descriptor copy = *descriptor;
-        copy.nonBlocking = true;
-        return receive(copy, buffer, length, flags & MSG_PEEK);
-    }
-    return receive(*descriptor, buffer, length, flags & MSG_PEEK);
+    return receive(*descriptor, buffer, length, flags & MSG_PEEK, descriptor->nonBlocking || (flags & MSG_DONTWAIT));
 }
 
 ssize_t __wrap_read(int fd, void* buffer, size_t length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_read(fd, buffer, length);
-    return receive(*descriptor, buffer, length, false);
+    return receive(*descriptor, buffer, length, false, descriptor->nonBlocking);
 }
 
 ssize_t __wrap_write(int fd, const void* buffer, size_t length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_write(fd, buffer, length);
     return transmit(*descriptor, buffer, length);
@@ -662,12 +692,13 @@ ssize_t __wrap_write(int fd, const void* buffer, size_t length)
 
 int __wrap_close(int fd)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_close(fd);
     {
         std::lock_guard lock(mutex);
-        descriptors[fd].store(nullptr, std::memory_order_release);
+        ours[fd].store(false, std::memory_order_release);
+        descriptors[fd] = nullptr;
         switch (descriptor->kind) {
         case Descriptor::Kind::Socket: {
             auto& socket = *descriptor->socket;
@@ -685,10 +716,6 @@ int __wrap_close(int fd)
         }
         changed.notify_all();
     }
-    // Ein anderer Thread koennte den Zeiger gerade noch lesen (z.B. poll ohne
-    // Lock): erst spaeter freigeben waere sauberer, Deskriptoren sind aber nur
-    // in einem Thread gleichzeitig in Gebrauch (curl).
-    delete descriptor;
     return __real_close(fd);
 }
 
@@ -703,11 +730,12 @@ int __wrap_pipe2(int fds[2], int flags)
         return -1;
     }
     auto pipe = std::make_shared<Pipe>();
-    auto* reader = new Descriptor { Descriptor::Kind::PipeRead, bool(flags & O_NONBLOCK), nullptr, pipe };
-    auto* writer = new Descriptor { Descriptor::Kind::PipeWrite, bool(flags & O_NONBLOCK), nullptr, pipe };
+    auto reader = createDescriptor(Descriptor::Kind::PipeRead, flags & O_NONBLOCK);
+    auto writer = createDescriptor(Descriptor::Kind::PipeWrite, flags & O_NONBLOCK);
+    reader->pipe = writer->pipe = pipe;
     std::lock_guard lock(mutex);
-    descriptors[readFd].store(reader, std::memory_order_release);
-    descriptors[writeFd].store(writer, std::memory_order_release);
+    storeDescriptor(readFd, std::move(reader));
+    storeDescriptor(writeFd, std::move(writer));
     fds[0] = readFd;
     fds[1] = writeFd;
     return 0;
@@ -719,7 +747,7 @@ int __wrap_fcntl(int fd, int command, ...)
     va_start(arguments, command);
     long argument = va_arg(arguments, long);
     va_end(arguments);
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_fcntl(fd, command, argument);
     switch (command) {
@@ -735,7 +763,7 @@ int __wrap_fcntl(int fd, int command, ...)
 
 int __wrap_getsockopt(int fd, int level, int name, void* value, socklen_t* length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_getsockopt(fd, level, name, value, length);
     int result = 0;
@@ -752,14 +780,14 @@ int __wrap_getsockopt(int fd, int level, int name, void* value, socklen_t* lengt
 
 int __wrap_setsockopt(int fd, int level, int name, const void* value, socklen_t length)
 {
-    if (!descriptorFor(fd))
+    if (!isOurs(fd))
         return __real_setsockopt(fd, level, name, value, length);
     return 0;
 }
 
 int __wrap_getpeername(int fd, struct sockaddr* address, socklen_t* length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_getpeername(fd, address, length);
     if (descriptor->kind != Descriptor::Kind::Socket) {
@@ -779,7 +807,7 @@ int __wrap_getpeername(int fd, struct sockaddr* address, socklen_t* length)
 
 int __wrap_getsockname(int fd, struct sockaddr* address, socklen_t* length)
 {
-    auto* descriptor = descriptorFor(fd);
+    auto descriptor = descriptorFor(fd);
     if (!descriptor)
         return __real_getsockname(fd, address, length);
     sockaddr_in local { };
@@ -793,19 +821,19 @@ int __wrap_getsockname(int fd, struct sockaddr* address, socklen_t* length)
 
 int __wrap_poll(struct pollfd* fds, nfds_t count, int timeout)
 {
-    bool ours = false;
+    bool ownFound = false;
     std::vector<pollfd> foreign;
     std::vector<nfds_t> foreignIndex;
     for (nfds_t i = 0; i < count; ++i) {
         fds[i].revents = 0;
-        if (descriptorFor(fds[i].fd))
-            ours = true;
+        if (isOurs(fds[i].fd))
+            ownFound = true;
         else if (fds[i].fd >= 0) {
             foreign.push_back(fds[i]);
             foreignIndex.push_back(i);
         }
     }
-    if (!ours)
+    if (!ownFound)
         return __real_poll(fds, count, timeout);
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout < 0 ? 0 : timeout);
@@ -813,7 +841,7 @@ int __wrap_poll(struct pollfd* fds, nfds_t count, int timeout)
     for (;;) {
         int ready = 0;
         for (nfds_t i = 0; i < count; ++i) {
-            if (auto* descriptor = descriptorFor(fds[i].fd)) {
+            if (auto* descriptor = descriptorLocked(fds[i].fd)) {
                 short events = readyEvents(*descriptor);
                 fds[i].revents = events & (fds[i].events | POLLERR | POLLHUP);
                 if (fds[i].revents)
@@ -848,12 +876,12 @@ int __wrap_poll(struct pollfd* fds, nfds_t count, int timeout)
 
 int __wrap_select(int count, fd_set* readSet, fd_set* writeSet, fd_set* errorSet, struct timeval* timeout)
 {
-    bool ours = false;
-    for (int fd = 0; fd < count && !ours; ++fd) {
-        if (((readSet && FD_ISSET(fd, readSet)) || (writeSet && FD_ISSET(fd, writeSet)) || (errorSet && FD_ISSET(fd, errorSet))) && descriptorFor(fd))
-            ours = true;
+    bool ownFound = false;
+    for (int fd = 0; fd < count && !ownFound; ++fd) {
+        if (((readSet && FD_ISSET(fd, readSet)) || (writeSet && FD_ISSET(fd, writeSet)) || (errorSet && FD_ISSET(fd, errorSet))) && isOurs(fd))
+            ownFound = true;
     }
-    if (!ours)
+    if (!ownFound)
         return __real_select(count, readSet, writeSet, errorSet, timeout);
     std::vector<pollfd> fds;
     for (int fd = 0; fd < count; ++fd) {

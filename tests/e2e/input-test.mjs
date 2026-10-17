@@ -395,7 +395,11 @@ await page.evaluate(() => window.__blEval('setTimeout(() => console.log("RESULT 
 await page.click('#tab-list .tab:nth-child(2) .title');
 const backgroundAlert = await result('bgalert');
 check('alert aus Hintergrund-Tab ohne Dialog', backgroundAlert === 'undefined' && (await page.evaluate(() => window.__dialogs.length)) === 1, String(backgroundAlert));
+// Zeichen am Tab, bis er wieder vorne ist
+const dialogMarker = (n) => page.evaluate((n) => !document.querySelector(`#tab-list .tab:nth-child(${n}) .dialog-blocked`).hidden, n);
+check('Unterdrueckter Dialog: Zeichen am Hintergrund-Tab', await dialogMarker(1));
 await page.click('#tab-list .tab:first-child .title');
+check('Unterdrueckter Dialog: Zeichen weg, wenn der Tab vorne ist', !await dialogMarker(1));
 
 // 5a2) Viele Dialoge kurz hintereinander: nach drei fragt die Oberflaeche
 // einmal, ob die Seite weitere zeigen darf. Nein sperrt den Tab, eine neue
@@ -411,12 +415,13 @@ await result('loopdone');
 const loopDialogs = await page.evaluate(() => window.__dialogs.map((text) => text.split('\n').pop()));
 check('Dialog-Schleife: drei Dialoge, eine Rueckfrage, dann gesperrt', loopDialogs.length === 4 && loopDialogs[2] === 'Schleife 2'
   && loopDialogs[3].includes('zeigt viele Dialoge'), JSON.stringify(loopDialogs));
+check('Dialog-Schleife: Zeichen am gesperrten Tab', await dialogMarker(2));
 results.delete('popup');
 await page.evaluate(() => window.__blEval('location.reload()'));
 await result('popup');
 await page.evaluate(() => window.__blEval('alert("Nach dem Neuladen"); console.log("RESULT reloaddone=1")'));
 await result('reloaddone');
-check('Dialog-Schleife: neue Seite gibt den Tab frei', (await page.evaluate(() => window.__dialogs.at(-1))).endsWith('Nach dem Neuladen'));
+check('Dialog-Schleife: neue Seite gibt den Tab frei', (await page.evaluate(() => window.__dialogs.at(-1))).endsWith('Nach dem Neuladen') && !await dialogMarker(2));
 await page.click('#tab-list .tab:first-child .title');
 
 // 5b) Rechtsklick: eigenes Menue der Seite bekommt das Event, unser Menue bleibt zu

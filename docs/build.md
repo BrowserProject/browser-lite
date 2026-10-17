@@ -124,11 +124,11 @@ Siehe [deploy/README.md](../deploy/README.md).
 
 ## CI
 
-`.github/workflows/ci.yml`:
+`.github/workflows/ci.yml` (Actions immer als `uses: <action>@<commit> # <version>`):
 
 | Job | Was |
 |---|---|
-| lint | shellcheck fuer alle `*.sh` im Repo, Format von `versions.env`, `NODE_IMAGE` passt zu `NODE_VERSION` |
+| lint | shellcheck fuer alle `*.sh` im Repo, `tools/check-style.sh` (Umlaute und Gedankenstriche, in Patches nur die hinzugefuegten Zeilen, `set -euo pipefail`, `versions.env` mit Digests, Actions per Commit, Runner im LAN nur fuer `deploy`) |
 | relay | Relay + Wisp-Client zusammen (`tests/relay/relay-test.mjs`) |
 | wasm-js | JS-Teile der Engine in node: `tests/wasm/rewrite-test.mjs`, `api-test.mjs`, `tests/engine/recorder-test.mjs`, `http-cache-test.mjs` |
 | toolchain | Toolchain-Image bauen + nach ghcr.io pushen (nur wenn noch nicht vorhanden) |
@@ -140,7 +140,8 @@ Siehe [deploy/README.md](../deploy/README.md).
 | e2e | Oberflaeche + Engine + Relay in Chromium (Playwright), jeder Test ein Schritt (auch `paintworklet` und `pinch`), alle laufen auch nach einem roten |
 | kompatibilitaet | echte Seiten laden, nur zur Info |
 
-Node kommt in allen Jobs aus `NODE_VERSION` in `versions.env`.
+Node kommt aus `NODE_VERSION` in `versions.env` (`actions/setup-node`), in den Jobs im
+Toolchain-Image (toolchain-check, deps, jsc, engine) ist es das Node von emsdk.
 
 Nach gruener CI auf `main` baut `.github/workflows/deploy.yml` das Image und startet es auf
 dem Server neu ([deploy/README.md](../deploy/README.md)).

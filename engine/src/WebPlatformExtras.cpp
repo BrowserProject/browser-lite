@@ -1,10 +1,12 @@
 #include "config.h"
 #include "WebPlatformExtras.h"
 
+#include "CacheStorageWasm.h"
 #include "Engine.h"
 #include "FileSystemStorageWasm.h"
 #include "Host.h"
 #include "MediaStreamWasm.h"
+#include "Storage.h"
 
 #include <JavaScriptCore/CallData.h>
 #include <JavaScriptCore/JSCInlines.h>
@@ -30,8 +32,6 @@
 #include <WebCore/UserContentController.h>
 #include <WebCore/UserScript.h>
 #include <WebCore/WasmPlatform.h>
-#include <filesystem>
-#include <system_error>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RefCounted.h>
 #include <wtf/TZoneMallocInlines.h>
@@ -44,20 +44,12 @@ using namespace WebCore;
 
 // ---------------------------------------------------------------- navigator.storage
 
-// Alles Dauerhafte liegt unter /data (IDBFS, web/app.js). Die Quote ist eine
-// feste Groesse wie bei Chrome auf einem kleinen Geraet; die echte Grenze setzt
-// der Host-Browser fuer browser-lite als Ganzes.
-static constexpr uint64_t storageQuota = 2ull * 1024 * 1024 * 1024;
-
-static uint64_t storageUsage()
+// Pro Ursprung wie OriginQuotaManager in WebKit2: Quote ist die Grenze von
+// IndexedDB (Storage.cpp), belegt ist, was der Ursprung in IndexedDB, Cache API
+// und OPFS hat. Die Uploads der Tabs in /data/tmp zaehlen nicht.
+static uint64_t storageUsage(const ClientOrigin& origin)
 {
-    uint64_t usage = 0;
-    std::error_code error;
-    for (auto it = std::filesystem::recursive_directory_iterator("/data", error); !error && it != std::filesystem::recursive_directory_iterator(); it.increment(error)) {
-        if (it->is_regular_file(error))
-            usage += it->file_size(error);
-    }
-    return usage;
+    return indexedDBUsage(origin) + cacheStorageUsage(origin) + fileSystemUsage(origin);
 }
 
 class StorageConnectionWasm final : public StorageConnection {
@@ -71,9 +63,9 @@ public:
         // Origin Private File System (FileSystemStorageWasm.cpp)
         BrowserLite::fileSystemGetDirectory(origin, WTF::move(completionHandler));
     }
-    void getEstimate(ClientOrigin&&, GetEstimateCallback&& completionHandler) final
+    void getEstimate(ClientOrigin&& origin, GetEstimateCallback&& completionHandler) final
     {
-        completionHandler(ExceptionOr<StorageEstimate> { StorageEstimate { storageUsage(), storageQuota } });
+        completionHandler(ExceptionOr<StorageEstimate> { StorageEstimate { storageUsage(origin), indexedDBQuota() } });
     }
 };
 

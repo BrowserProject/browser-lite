@@ -2,7 +2,7 @@
 
 | Ordner | Was | Braucht | CI |
 |---|---|---|---|
-| `relay/` | `relay-test.mjs`: Relay und Wisp-Client zusammen (Token, Flusskontrolle, Reconnect, SSRF-Sperre, Auslieferung der Seite) | node | ja |
+| `relay/` | `relay-test.mjs`: Relay und Wisp-Client zusammen (Token, Flusskontrolle, Reconnect, tote Verbindung, SSRF-Sperre, Gruende und Grenze pro Ziel, Auslieferung der Seite) | node | ja |
 | `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
 | `engine/` | Engine in node ohne Browser: Bild rendern, WebCrypto, Stack-Grenze, GC unter Stress, Grenzen (Speicher, DOM, Strings), Watchdog, WebM-Muxer, Aufraeumen des HTTP-Cache | Engine-Build, `recorder-test.mjs` und `http-cache-test.mjs` nur node | ja |
@@ -11,6 +11,7 @@
 ## Ohne Build
 
 ```bash
+tools/check-style.sh
 node tests/relay/relay-test.mjs
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 node tests/engine/recorder-test.mjs
@@ -48,7 +49,7 @@ node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
 Jeder `*-test.mjs` ist ein eigener Test, CI ruft sie einzeln auf: `network`, `input`,
 `storage`, `audio`, `media`, `webgl`, `compositing`, `paintworklet`, `pinch`,
 `serviceworker`, `webcodecs`, `mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`,
-`cache`, `devices`, `ui`, `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in
+`cache`, `devices`, `ui`, `background`, `soak`, `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in
 der Datei. Alle benutzen `harness.mjs`: Relay und Oberflaeche auf freien Ports (Tests laufen
 auch parallel), Hilfsprozesse enden mit dem Test, `check()`/`finish()`, RESULT-Zeilen
 der Seite.
@@ -62,6 +63,9 @@ der Seite.
   (braucht `openssl`), auch die, die die Engine ablehnen muss.
 - `parity-test.mjs` vergleicht mit dem Host-Chromium. Fehler nur bei Rueckschritten
   gegen `parity-baseline.txt`, `PARITY_UPDATE=1` schreibt die Liste neu.
+- `soak-test.mjs`: langer Lauf (viele Navigationen, Tabs auf und zu), Dokumente und Speicher
+  muessen begrenzt bleiben. `SOAK_ROUNDS` (Standard 40 Runden durch 5 Seiten), `SOAK_TABS`
+  (Standard 30).
 - `ui-test.mjs` laesst die Engine mit `?env=BL_TEST_HOOKS=1` wirklich abstuerzen
   (`bl_crash_for_testing`: abort und WASM-Trap), ohne den Schalter tut der Aufruf nichts.
 - `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,

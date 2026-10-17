@@ -16,9 +16,7 @@ export BL_CFLAGS="-O3 -pthread -msimd128"
 export BL_CXXFLAGS="$BL_CFLAGS"
 export BL_LDFLAGS="-pthread"
 
-# pkg-config soll nur unser sysroot sehen, nie die .pc Dateien vom Host.
-export PKG_CONFIG_LIBDIR="$BL_SYSROOT/lib/pkgconfig:$BL_SYSROOT/share/pkgconfig"
-unset PKG_CONFIG_PATH
+bl_sysroot_pkg_config
 
 # Zeile aus sources.txt fuer einen Namen: "name type version url hash"
 dep_source_line() {

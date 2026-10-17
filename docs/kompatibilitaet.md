@@ -45,8 +45,9 @@ und im browser-lite. Stand 2026-10-16: **257 von 280 wie Chromium (91.8 %)**. Es
   IdleDetector
 - was eigenen Netz- oder Engine-Code braucht: WebTransport (QUIC ueber das Relay), JSPI, MSE in
   Workern (Compile-Schalter und threadsichere MSE-Klassen, #121)
-- bewusst Weggelassenes: WebAuthn, Credential Management, Payment Request, Web
-  MIDI/USB/HID/Serial, WebXR, EME, WebGPU, Push, `userAgentData` (#90)
+- noch Offenes ohne Entscheidung ([stand.md](stand.md)): WebAuthn, Credential Management,
+  Payment Request, Web MIDI/USB/HID/Serial, WebXR, EME, WebGPU, Push; bewusst weggelassen
+  nur `userAgentData` (#90)
 
 Dafuer kann browser-lite schon `Math.sumPrecise`, Temporal und `ReadableStream.from`, die das
 Host-Chromium noch nicht hat. `toLocaleString` fuer de-CH: seit CLDR 48 ist der

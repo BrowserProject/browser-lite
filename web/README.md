@@ -7,7 +7,7 @@ Die Browser-Oberflaeche: schlichtes HTML, CSS und JavaScript (ES-Module), ohne B
 | `index.html`, `style.css` | Tabs, Werkzeugleiste, Seitenbereich |
 | `app.js` | Start der Engine, Tabs, Eingabe, Uploads, Downloads, Drucken, Kontextmenue, Tastenkuerzel |
 | `watchdog.js` | Absturz (abort, OOM, Trap) und Haengen der Engine: Meldung und Neustart mit der Sitzung |
-| `transport.js` | Wisp-Client: die TCP-Verbindungen der Engine ueber das Relay, Verbindungsstand fuer `navigator.onLine` |
+| `transport.js` | Wisp-Client: die TCP-Verbindungen der Engine ueber das Relay, Verbindungsstand fuer `navigator.onLine`, erkennt tote Verbindungen |
 | `library.js` | Sitzung, Verlauf, Lesezeichen, Downloads, Einstellungen, Seitenpanel |
 | `pickers.js` | Liste von `<select>`, Farbe, Datum, Link-Adresse unten links |
 | `devices.js` | Berechtigungen, Standort, Sensoren, Benachrichtigungen, Gamepads, Sprache, Touch, Host-Bruecke der Polyfills |
@@ -15,7 +15,7 @@ Die Browser-Oberflaeche: schlichtes HTML, CSS und JavaScript (ES-Module), ohne B
 | `audio.js`, `audio-worklet.js` | Ton der Engine (Web Audio) |
 | `capture.js` | Kamera, Mikrofon und Bildschirm fuer die Seiten |
 | `webrtc.js` | WebRTC der Seiten mit echtem Gegenstueck im Host |
-| `util.js` | gemeinsame Helfer (Speicher, Base64, Fehler) |
+| `util.js` | gemeinsame Helfer (Speicher, Base64, Fehler, Neuladen der Oberflaeche ohne beforeunload) |
 | `serve.mjs` | Entwicklungs-Server mit COOP/COEP |
 
 Lokal: `node web/serve.mjs 8080`, dann `http://localhost:8080/?relay=ws://localhost:5001/wisp/`
@@ -45,5 +45,8 @@ einer Minute wieder ab, laden die Tabs nach dem Neustart erst beim Anklicken.
 Haengen: auf Laden, Neu laden, Verlauf wiederherstellen und Suchen antwortet die Engine immer,
 `app.js` ruft davor `expectAnswer()`. Kommt danach 10 s lang gar nichts von ihr, steckt ihr
 Thread fest, und es gibt "Warten" oder "Neu starten" (dann laden die Tabs erst beim Anklicken).
+Nach Klicks und Tasten schickt `app.js` eine Marke (`inputSent`), die der Engine-Thread nach der
+Eingabe in seinem Speicher ablegt; bleibt sie 10 s zurueck, kommt dieselbe Meldung. Die Zeit in
+einem Dialog der Seite zaehlt nicht.
 Skripte einer Seite, die die Engine 30 s blockieren, bricht die Engine selber ab
 (`?env=BL_SCRIPT_TIMEOUT=<s>`, 0 = aus).

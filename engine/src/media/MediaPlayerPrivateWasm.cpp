@@ -293,7 +293,7 @@ void MediaPlayerPrivateWasm::load(const String& urlString)
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
     send("create"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume,
-        ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\"}"_s));
+        ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
 }
 
@@ -326,7 +326,8 @@ void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourc
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
     // Zuerst den Host-Player anlegen, gleich danach kommen schon die SourceBuffer
-    send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate, '}'));
+    send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate,
+        ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
     if (RefPtr existing = client.mediaSourcePrivate(); existing && existing->platformType() == MediaPlatformType::Wasm) {
         // Wiederverwenden (z.B. nach einem Wechsel des Players): der Host faengt neu an
@@ -590,6 +591,16 @@ void MediaPlayerPrivateWasm::setPresentationSize(const IntSize& size)
         return;
     m_presentationSize = size;
     send("size"_s, makeString("{\"width\":"_s, size.width(), ",\"height\":"_s, size.height(), '}'));
+}
+
+// Versteckte Seite: der Host schickt keine Bilder, der Ton laeuft weiter
+void MediaPlayerPrivateWasm::setPageIsVisible(bool visible)
+{
+    if (visible == m_pageIsVisible)
+        return;
+    m_pageIsVisible = visible;
+    BL_IF_STREAM(return)
+    send("visible"_s, visible ? "{\"visible\":true}"_s : "{\"visible\":false}"_s);
 }
 
 void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& rect)

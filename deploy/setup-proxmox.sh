@@ -45,15 +45,21 @@ id runner >/dev/null 2>&1 || useradd -m -s /bin/bash -G docker runner
 install -d -o runner -g runner -m 750 /opt/browser-lite
 
 dir=/home/runner/actions-runner
-if [ ! -f "\$dir/.runner" ]; then
+# Der Runner aktualisiert sich nicht selber (--disableupdate). Eine neue RUNNER_VERSION
+# installiert ihn hier frisch und registriert ihn unter gleichem Namen neu.
+if [ "\$(cat "\$dir/.bl-version" 2>/dev/null || true)" != "$RUNNER_VERSION" ]; then
+    if [ -f "\$dir/.service" ]; then (cd "\$dir" && ./svc.sh stop && ./svc.sh uninstall); fi
+    rm -rf "\$dir"
     curl -fsSL -o /tmp/runner.tgz "https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz"
     echo "$RUNNER_SHA256  /tmp/runner.tgz" | sha256sum -c -
     install -d -o runner -g runner "\$dir"
     tar xzf /tmp/runner.tgz -C "\$dir" && rm /tmp/runner.tgz
     chown -R runner:runner "\$dir"
     "\$dir/bin/installdependencies.sh" >/dev/null
-    su runner -c "cd \$dir && ./config.sh --unattended --replace --url https://github.com/$repo --token $token --name browser-lite-\$PVE_HOST --labels browser-lite-deploy"
+    # Token ueber die Umgebung (su behaelt sie), auf der Kommandozeile saehe ihn jeder Prozess
+    ACTIONS_RUNNER_INPUT_TOKEN='$token' su runner -c "cd \$dir && ./config.sh --unattended --replace --disableupdate --url https://github.com/$repo --name browser-lite-\$PVE_HOST --no-default-labels --labels browser-lite-deploy"
     (cd "\$dir" && ./svc.sh install runner && ./svc.sh start)
+    echo "$RUNNER_VERSION" > "\$dir/.bl-version"
 fi
 CT
 

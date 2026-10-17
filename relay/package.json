@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@mercuryworkshop/wisp-js": "0.4.1",
-    "ipaddr.js": "2.5.0"
+    "ipaddr.js": "2.5.0",
+    "ws": "8.22.0"
   }
 }

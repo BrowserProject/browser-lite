@@ -13,6 +13,7 @@
 
 #include "config.h"
 #include "Engine.h"
+#include "Host.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -78,6 +79,19 @@ static size_t memoryReleaseThreshold()
     return threshold;
 }
 
+// Muss malloc auch oberhalb dieser Grenze weiter wachsen, wird der WASM-Speicher
+// (hoechstens 4 GB) knapp, auch wenn wenig belegt ist (Fragmentierung, grosse
+// Bloecke): bei jedem Wachstum um 32 MB meldet die Engine "memory-pressure",
+// die Oberflaeche verwirft einen Hintergrund-Tab. BL_MEMORY_PRESSURE_MB: Grenze in MB.
+static size_t memoryPressureThreshold()
+{
+    static size_t threshold = [] {
+        const char* value = getenv("BL_MEMORY_PRESSURE_MB");
+        return static_cast<size_t>(value ? atoi(value) : 3072) << 20;
+    }();
+    return threshold;
+}
+
 static void releaseMemoryIfNeeded()
 {
     static size_t footprintAtRelease;
@@ -94,6 +108,25 @@ static void releaseMemoryIfNeeded()
         debugLog("Speicher freigegeben (malloc-Bereich %zu MB): belegt %zu -> %zu MB in %.0f ms", footprint >> 20,
             usedBefore >> 20, static_cast<size_t>(mallinfo().uordblks) >> 20, (WTF::MonotonicTime::now() - start).milliseconds());
     }
+    if (footprint >= memoryPressureThreshold())
+        notifyHost(0, "memory-pressure", makeString("{\"footprint\":"_s, footprint, '}'));
+}
+
+// Eingaben ohne Antwort erkennen (web/watchdog.js): nach einer Eingabe schickt
+// die Oberflaeche eine Marke hinterher, der Engine-Thread legt sie nach der
+// Eingabe hier ab. Die Oberflaeche liest sie direkt im Speicher; bleibt sie
+// lange zurueck, haengt der Engine-Thread (Skript, C++-Schleife, Lock).
+static std::atomic<uint32_t> s_inputMark;
+static_assert(std::atomic<uint32_t>::is_always_lock_free);
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_input_mark(uint32_t mark)
+{
+    runOnEngineThread([mark] { s_inputMark.store(mark, std::memory_order_release); });
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_input_mark_address()
+{
+    return reinterpret_cast<uintptr_t>(&s_inputMark);
 }
 
 // Jede Arbeit auf dem Engine-Thread laeuft unter JSLock und einem DeferGC.

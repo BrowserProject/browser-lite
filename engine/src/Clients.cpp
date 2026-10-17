@@ -10,6 +10,7 @@
 #include "Choosers.h"
 
 #include "Engine.h"
+#include "ErrorPage.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
@@ -39,6 +40,7 @@
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
+#include <WebCore/FrameTree.h>
 #include <WebCore/FrameTreeSyncData.h>
 #include <WebCore/HTMLFrameOwnerElement.h>
 #include <WebCore/LocalFrame.h>
@@ -51,6 +53,9 @@
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/NavigationAction.h>
 #include <WebCore/NodeInlines.h>
+#include <WebCore/EventNames.h>
+#include <WebCore/LocalDOMWindow.h>
+#include <WebCore/PolicyChecker.h>
 #include <WebCore/MediaProducer.h>
 #include <WebCore/Page.h>
 #include <WebCore/PointerLockController.h>
@@ -172,7 +177,8 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
 
 // Dialoge: der Engine-Thread wartet, bis der Haupt-Thread den Dialog gezeigt hat.
 // Module.engineDialog(viewId, type, origin, message, default) im Haupt-Thread liefert:
-//   alert -> 0, confirm -> 0/1, prompt -> Pointer auf UTF-8 (malloc) oder 0
+//   alert (0) -> 0, confirm (1) -> 0/1, prompt (2) -> Pointer auf UTF-8 (malloc) oder 0,
+//   beforeunload beim Verlassen (3) oder Neuladen (4) -> 0/1
 // origin ist der Ursprung des Frames, der fragt (wie "<host> meldet" in Chrome).
 static intptr_t runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue)
 {
@@ -200,6 +206,7 @@ void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
     bool audible = state.contains(MediaProducerMediaState::IsPlayingAudio);
     if (audible != m_audible) {
         m_audible = audible;
+        m_view->setAudible(audible);
         notifyHost(m_view->id(), "media-state", audible ? "{\"audio\":true}"_s : "{\"audio\":false}"_s);
     }
     // Kamera, Mikrofon oder Bildschirm in Gebrauch: roter Punkt im Tab
@@ -231,10 +238,49 @@ bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message,
     return true;
 }
 
-// Neuer Tab fuer window.open / target=_blank
-RefPtr<Page> ChromeClient::createWindow(LocalFrame&, const String&, const WindowFeatures&, const NavigationAction&)
+// beforeunload (Navigation, Neu laden, Tab schliessen ueber bl_try_close): wie
+// Chrome ohne den Text der Seite. Die Oberflaeche fragt "Verlassen" (3) oder
+// "Neu laden" (4), 1 heisst weiter. Nach einer Benutzer-Aktion fragt WebCore nur.
+bool ChromeClient::runBeforeUnloadConfirmPanel(String&&, LocalFrame& frame)
+{
+    RefPtr mainFrame = dynamicDowncast<LocalFrame>(frame.mainFrame());
+    bool reload = mainFrame && mainFrame->loader().policyDocumentLoader() && isReload(mainFrame->loader().policyChecker().loadType());
+    return runDialog(m_view->id(), frame, reload ? 4 : 3, { }, { });
+}
+
+// Erst im naechsten Schritt: beim Melden ist der Listener noch nicht
+// eingetragen bzw. entfernt, und Seiten aus dem Back/Forward-Cache melden nichts
+void ChromeClient::reportBeforeUnload(WebView& view)
+{
+    runOnEngineThread([weakView = WeakPtr { view }] {
+        RefPtr view = weakView.get();
+        if (!view)
+            return;
+        RefPtr frame = view->mainFrame();
+        RefPtr window = frame && frame->document() ? frame->document()->window() : nullptr;
+        bool listener = window && window->hasEventListeners(eventNames().beforeunloadEvent);
+        notifyHost(view->id(), "beforeunload", listener ? "{\"listener\":true}"_s : "{\"listener\":false}"_s);
+    });
+}
+
+void ChromeClient::focus()
+{
+    notifyHost(m_view->id(), "focus");
+}
+
+// Neuer Tab fuer window.open / target=_blank. Wie WebChromeClient in
+// WebKitLegacy: Opener (ausser noopener), Name und Sandbox des Fensters
+RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedMainFrameName, const WindowFeatures& features, const NavigationAction&)
 {
     auto& popup = WebView::openFromEngine(m_view->id(), m_view->size(), m_view->deviceScaleFactor());
+    Ref mainFrame = popup.page().mainFrame();
+    if (!features.wantsNoOpener())
+        mainFrame->setOpenerForWebKitLegacy(&frame);
+    auto sandboxFlags = frame.effectiveSandboxFlags();
+    if (!sandboxFlags.contains(SandboxFlag::PropagatesToAuxiliaryBrowsingContexts))
+        sandboxFlags = { };
+    mainFrame->updateSandboxFlags(sandboxFlags, Frame::NotifyUIProcess::No);
+    mainFrame->tree().setSpecifiedName(AtomString { openedMainFrameName });
     return &popup.page();
 }
 
@@ -375,7 +421,8 @@ RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, 
     return rootFrame->loader().history().createItemTree(frame, clipAtTarget, itemID);
 }
 
-// Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h)
+// Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h),
+// dazu die Bruecken zum Host und, in einer Fehlerseite, ihr Knopf (ErrorPage.cpp)
 void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& world)
 {
     if (!world.isNormal())
@@ -384,6 +431,7 @@ void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& wor
     if (auto* globalObject = frame->script().globalObject(world)) {
         installWebAssembly(*globalObject);
         installHostBridge(*globalObject, m_view->id());
+        ErrorPage::installBridge(frame, *globalObject);
     }
 }
 
@@ -477,13 +525,12 @@ LocalFrame* FrameLoaderClient::dispatchCreatePage(const NavigationAction& action
     RefPtr page = opener->page();
     if (!page)
         return nullptr;
-    RefPtr newPage = page->chrome().createWindow(opener, openedMainFrameName, { }, action);
+    WindowFeatures features;
+    features.noopener = openerPolicy == NewFrameOpenerPolicy::Suppress;
+    RefPtr newPage = page->chrome().createWindow(opener, openedMainFrameName, features, action);
     if (!newPage)
         return nullptr;
-    RefPtr newFrame = dynamicDowncast<LocalFrame>(newPage->mainFrame());
-    if (newFrame && openerPolicy == NewFrameOpenerPolicy::Allow)
-        newFrame->setOpenerForWebKitLegacy(opener.ptr());
-    return newFrame.get();
+    return dynamicDowncast<LocalFrame>(newPage->mainFrame());
 }
 
 void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction& action, const ResourceRequest& request, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
@@ -585,8 +632,10 @@ void FrameLoaderClient::dispatchDidStartProvisionalLoad()
 
 void FrameLoaderClient::dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>)
 {
-    if (isMainFrame())
+    if (isMainFrame()) {
         m_view->didCommitLoad();
+        ChromeClient::reportBeforeUnload(m_view.get());
+    }
 }
 
 void FrameLoaderClient::dispatchDidReceiveTitle(const StringWithDirection& title)
@@ -655,8 +704,12 @@ void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& erro
     if (willInternallyHandleFailure == WillInternallyHandleFailure::Yes)
         return;
     ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), false);
-    if (isMainFrame())
+    if (isMainFrame()) {
         didEndLoadWithError(error);
+        // Wie Chrome eine Fehlerseite, gleich hier: so nimmt WebCore sie fuer die Adresse
+        if (auto kind = ErrorPage::show(m_frameLoader->frame(), error))
+            m_view->willCommitErrorPage(*kind == ErrorPage::Kind::Certificate);
+    }
 }
 
 // Abbruch (Stopp, neue Navigation, Download) ist kein Fehler, das Laden ist nur zu Ende

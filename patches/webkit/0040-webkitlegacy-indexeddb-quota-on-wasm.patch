@@ -1,0 +1,130 @@
+diff --git a/Source/WebCore/Modules/indexeddb/server/UniqueIDBDatabase.cpp b/Source/WebCore/Modules/indexeddb/server/UniqueIDBDatabase.cpp
+index 897f5e5100..cc3e3be3f8 100644
+--- a/Source/WebCore/Modules/indexeddb/server/UniqueIDBDatabase.cpp
++++ b/Source/WebCore/Modules/indexeddb/server/UniqueIDBDatabase.cpp
+@@ -55,6 +55,13 @@ using namespace JSC;
+ namespace IDBServer {
+ 
+ static const uint64_t defaultWriteOperationCost = 4;
++#if PLATFORM(WASM)
++// Oeffnen braucht keinen Platz: an der Grenze kann eine Seite ihre Daten noch
++// lesen und loeschen (wie Chrome), nur Schreiben schlaegt fehl
++static const uint64_t openOperationCost = 0;
++#else
++static const uint64_t openOperationCost = defaultWriteOperationCost;
++#endif
+ 
+ static inline uint64_t estimateSize(const IDBKeyData& keyData)
+ {
+@@ -211,7 +218,7 @@ void UniqueIDBDatabase::performCurrentOpenOperation()
+         return;
+ 
+     m_openDBRequestsForSpaceCheck.add(requestIdentifier);
+-    manager->requestSpace(m_identifier.origin(), defaultWriteOperationCost, [weakThis = WeakPtr { *this }, requestIdentifier](bool granted) mutable {
++    manager->requestSpace(m_identifier.origin(), openOperationCost, [weakThis = WeakPtr { *this }, requestIdentifier](bool granted) mutable {
+         CheckedPtr checkedThis = weakThis.get();
+         if (!checkedThis)
+             return;
+diff --git a/Source/WebKitLegacy/Storage/InProcessIDBServer.cpp b/Source/WebKitLegacy/Storage/InProcessIDBServer.cpp
+index b641c54d43..ba60929b96 100644
+--- a/Source/WebKitLegacy/Storage/InProcessIDBServer.cpp
++++ b/Source/WebKitLegacy/Storage/InProcessIDBServer.cpp
+@@ -56,6 +56,15 @@ Ref<InProcessIDBServer> InProcessIDBServer::create(PAL::SessionID sessionID, con
+     return adoptRef(*new InProcessIDBServer(sessionID, databaseDirectoryPath));
+ }
+ 
++#if PLATFORM(WASM)
++Ref<InProcessIDBServer> InProcessIDBServer::create(PAL::SessionID sessionID, const String& databaseDirectoryPath, IDBServer::IDBServer::SpaceRequester&& spaceRequester)
++{
++    ASSERT(!sessionID.isEphemeral());
++
++    return adoptRef(*new InProcessIDBServer(sessionID, databaseDirectoryPath, WTF::move(spaceRequester)));
++}
++#endif
++
+ InProcessIDBServer::~InProcessIDBServer()
+ {
+     BinarySemaphore semaphore;
+@@ -68,19 +77,22 @@ InProcessIDBServer::~InProcessIDBServer()
+     semaphore.wait();
+ }
+ 
+-InProcessIDBServer::InProcessIDBServer(PAL::SessionID sessionID, const String& databaseDirectoryPath)
++InProcessIDBServer::InProcessIDBServer(PAL::SessionID sessionID, const String& databaseDirectoryPath, IDBServer::IDBServer::SpaceRequester&& spaceRequester)
+     : m_queue(WorkQueue::create("com.apple.WebKit.IndexedDBServer"_s))
+ {
+     ASSERT(isMainThread());
+     m_connectionToServer = IDBClient::IDBConnectionToServer::create(*this, sessionID);
+-    dispatchTask([this, protectedThis = Ref { *this }, directory = databaseDirectoryPath.isolatedCopy()] () mutable {
++    dispatchTask([this, protectedThis = Ref { *this }, directory = databaseDirectoryPath.isolatedCopy(), spaceRequester = WTF::move(spaceRequester)] () mutable {
+         assertIsCurrent(m_queue.get());
+         Ref connectionToClient = IDBServer::IDBConnectionToClient::create(*this);
+         m_connectionToClient = connectionToClient.copyRef();
+ 
+-        m_server = makeUnique<IDBServer::IDBServer>(directory, [](const ClientOrigin&, uint64_t) {
+-            return true;
+-        });
++        if (!spaceRequester) {
++            spaceRequester = [](const ClientOrigin&, uint64_t) {
++                return true;
++            };
++        }
++        m_server = makeUnique<IDBServer::IDBServer>(directory, WTF::move(spaceRequester));
+         m_server->registerConnection(connectionToClient);
+     });
+ }
+diff --git a/Source/WebKitLegacy/Storage/InProcessIDBServer.h b/Source/WebKitLegacy/Storage/InProcessIDBServer.h
+index ba503c9881..ffc4ecf20d 100644
+--- a/Source/WebKitLegacy/Storage/InProcessIDBServer.h
++++ b/Source/WebKitLegacy/Storage/InProcessIDBServer.h
+@@ -61,6 +61,10 @@ class InProcessIDBServer final : public WebCore::IDBClient::IDBConnectionToServe
+ public:
+     static Ref<InProcessIDBServer> create(PAL::SessionID);
+     static Ref<InProcessIDBServer> create(PAL::SessionID, const String& databaseDirectoryPath);
++#if PLATFORM(WASM)
++    // Mit Grenze pro Ursprung (in WebKit2 OriginQuotaManager)
++    static Ref<InProcessIDBServer> create(PAL::SessionID, const String& databaseDirectoryPath, WebCore::IDBServer::IDBServer::SpaceRequester&&);
++#endif
+ 
+     virtual ~InProcessIDBServer();
+ 
+@@ -132,7 +136,7 @@ public:
+     void dispatchTaskReply(Function<void()>&&);
+ 
+ private:
+-    InProcessIDBServer(PAL::SessionID, const String& databaseDirectoryPath = nullString());
++    InProcessIDBServer(PAL::SessionID, const String& databaseDirectoryPath = nullString(), WebCore::IDBServer::IDBServer::SpaceRequester&& = nullptr);
+ 
+     std::unique_ptr<WebCore::IDBServer::IDBServer> m_server WTF_GUARDED_BY_CAPABILITY(m_queue.get());
+     RefPtr<WebCore::IDBClient::IDBConnectionToServer> m_connectionToServer;
+diff --git a/Source/WebKitLegacy/Storage/WebDatabaseProvider.cpp b/Source/WebKitLegacy/Storage/WebDatabaseProvider.cpp
+index a8ab9d6444..eb610e5cd7 100644
+--- a/Source/WebKitLegacy/Storage/WebDatabaseProvider.cpp
++++ b/Source/WebKitLegacy/Storage/WebDatabaseProvider.cpp
+@@ -41,7 +41,11 @@ WebDatabaseProvider::~WebDatabaseProvider() = default;
+ WebCore::IDBClient::IDBConnectionToServer& WebDatabaseProvider::idbConnectionToServerForSession(PAL::SessionID sessionID)
+ {
+     return m_idbServerMap.ensure(sessionID, [&sessionID] {
++#if PLATFORM(WASM)
++        return sessionID.isEphemeral() ? InProcessIDBServer::create(sessionID) : InProcessIDBServer::create(sessionID, indexedDatabaseDirectoryPath(), requestIndexedDatabaseSpace);
++#else
+         return sessionID.isEphemeral() ? InProcessIDBServer::create(sessionID) : InProcessIDBServer::create(sessionID, indexedDatabaseDirectoryPath());
++#endif
+     }).iterator->value->connectionToServer();
+ }
+ 
+diff --git a/Source/WebKitLegacy/Storage/WebDatabaseProvider.h b/Source/WebKitLegacy/Storage/WebDatabaseProvider.h
+index fa2c2795b9..607f32d062 100644
+--- a/Source/WebKitLegacy/Storage/WebDatabaseProvider.h
++++ b/Source/WebKitLegacy/Storage/WebDatabaseProvider.h
+@@ -45,6 +45,10 @@ private:
+     explicit WebDatabaseProvider();
+ 
+     static String indexedDatabaseDirectoryPath();
++#if PLATFORM(WASM)
++    // Grenze fuer IndexedDB pro Ursprung, gibt der Port vor
++    static bool requestIndexedDatabaseSpace(const WebCore::ClientOrigin&, uint64_t spaceRequested);
++#endif
+ 
+     HashMap<PAL::SessionID, RefPtr<InProcessIDBServer>> m_idbServerMap;
+ };

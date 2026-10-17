@@ -10,19 +10,22 @@
 #include "StorageTracker.h"
 #include "WebDatabaseProvider.h"
 #include "WebStorageNamespaceProvider.h"
+#include "Engine.h"
+#include <WebCore/ClientOrigin.h>
+#include <WebCore/IDBDatabaseIdentifier.h>
 #include <cerrno>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <wtf/FileSystem.h>
+#include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
 
 #if defined(BL_WASMFS)
-#include "Engine.h"
-#include <cstdlib>
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
@@ -33,7 +36,8 @@
 static constexpr auto dataDirectory = "/data"_s;
 static constexpr auto localStorageDirectory = "/data/localstorage"_s;
 static constexpr auto indexedDBDirectory = "/data/indexeddb"_s;
-// Nur fuer replaceWholeFile, ausserhalb von /data/opfs, wo die Seiten die Namen waehlen
+// Kopien von FileReplacement und mit WasmFS die Uploads der Tabs (web/app.js), ausserhalb
+// von /data/opfs, wo die Seiten die Namen waehlen. Wird beim Start geleert.
 static constexpr auto temporaryDirectory = "/data/tmp"_s;
 
 // In WebKitLegacy ist das pro Plattform (Mac: NSUserDefaults)
@@ -42,41 +46,123 @@ String WebDatabaseProvider::indexedDatabaseDirectoryPath()
     return indexedDBDirectory;
 }
 
+// Grenze fuer IndexedDB pro Ursprung (Patch 0040), gerechnet wie
+// OriginQuotaManager in WebKit2: ein Vorrat bis zur Grenze, erst wenn er
+// aufgebraucht ist, wird neu gezaehlt (indexedDBUsage). Offene
+// Datenbanken liegen ganz im WASM-Speicher (MemoryVFS.cpp), der hoechstens
+// 4 GB hat und nie schrumpft. Oeffnen, Lesen und Loeschen brauchen keinen
+// Platz, eine Seite an der Grenze kommt also an ihre Daten; zu grosse Dateien
+// laedt das VFS nicht (BL_DATABASE_MAX_MB). Laeuft im Thread des IDBServer.
+bool WebDatabaseProvider::requestIndexedDatabaseSpace(const WebCore::ClientOrigin& origin, uint64_t size)
+{
+    uint64_t quota = BrowserLite::indexedDBQuota();
+    static NeverDestroyed<HashMap<WebCore::ClientOrigin, uint64_t>> remaining;
+    auto& left = remaining->add(origin, 0).iterator->value;
+    if (size > left) {
+        uint64_t usage = BrowserLite::indexedDBUsage(origin);
+        left = usage < quota ? quota - usage : 0;
+        if (size > left)
+            BrowserLite::log("IndexedDB: Grenze von %llu MB erreicht (%llu MB belegt)", static_cast<unsigned long long>(quota >> 20), static_cast<unsigned long long>(usage >> 20));
+    }
+    if (size > left)
+        return false;
+    left -= size;
+    return true;
+}
+
 namespace BrowserLite {
+
+uint64_t indexedDBQuota()
+{
+    static const uint64_t quota = [] {
+        const char* value = getenv("BL_INDEXEDDB_QUOTA_MB");
+        return (value && *value ? strtoull(value, nullptr, 10) : 256) << 20;
+    }();
+    return quota;
+}
+
+// Wie SQLiteIDBBackingStore::databasesSizeForDirectory: ein Ordner pro
+// Datenbank (mit ihren Blobs) direkt unter dem des Ursprungs. Darunter liegen
+// beim obersten Ursprung auch die Partitionen seiner Frames, die zaehlen fuer sich.
+uint64_t indexedDBUsage(const WebCore::ClientOrigin& origin)
+{
+    uint64_t usage = 0;
+    for (auto version : { "v0"_s, "v1"_s }) {
+        auto directory = WebCore::IDBDatabaseIdentifier::databaseDirectoryRelativeToRoot(origin, indexedDBDirectory, version);
+        for (auto& name : FileSystem::listDirectory(directory))
+            usage += memoryVFSDirectorySize(FileSystem::pathByAppendingComponent(directory, name));
+    }
+    return usage;
+}
+
+uint64_t directorySize(const String& directory)
+{
+    uint64_t total = 0;
+    for (auto& name : FileSystem::listDirectory(directory)) {
+        auto path = FileSystem::pathByAppendingComponent(directory, name);
+        if (FileSystem::fileType(path) == FileSystem::FileType::Directory)
+            total += directorySize(path);
+        else
+            total += FileSystem::fileSize(path).value_or(0);
+    }
+    return total;
+}
+
+FileReplacement::FileReplacement()
+{
+    static std::atomic<unsigned> counter;
+    snprintf(m_temporary, sizeof(m_temporary), "%s/%u", temporaryDirectory.characters(), counter++);
+    m_fd = open(m_temporary, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    m_ok = m_fd >= 0;
+}
+
+FileReplacement::~FileReplacement()
+{
+    if (m_fd < 0)
+        return;
+    close(m_fd);
+    unlink(m_temporary);
+}
+
+void FileReplacement::write(std::span<const uint8_t> data, uint64_t offset)
+{
+    for (size_t written = 0; m_ok && written < data.size();) {
+        ssize_t length = pwrite(m_fd, data.data() + written, data.size() - written, offset + written);
+        if (length < 0 && errno == EINTR)
+            continue;
+        m_ok = length > 0;
+        if (m_ok)
+            written += length;
+    }
+}
+
+void FileReplacement::truncate(uint64_t size)
+{
+    m_ok = m_ok && !ftruncate(m_fd, size);
+}
+
+bool FileReplacement::commit(const char* path)
+{
+    if (m_fd < 0)
+        return false;
+    bool ok = !close(std::exchange(m_fd, -1)) && m_ok && !rename(m_temporary, path);
+    if (!ok)
+        unlink(m_temporary);
+    return ok;
+}
 
 bool replaceWholeFile(const char* path, std::span<const uint8_t> data)
 {
-    static std::atomic<unsigned> counter;
-    char temporary[64];
-    snprintf(temporary, sizeof(temporary), "%s/%u", temporaryDirectory.characters(), counter++);
-    int fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0)
-        return false;
-    bool ok = true;
-    for (size_t written = 0; ok && written < data.size();) {
-        ssize_t length = write(fd, data.data() + written, data.size() - written);
-        if (length < 0 && errno == EINTR)
-            continue;
-        ok = length > 0;
-        if (ok)
-            written += length;
-    }
-    ok = !close(fd) && ok;
-    if (ok && !rename(temporary, path))
-        return true;
-    unlink(temporary);
-    return false;
+    FileReplacement file;
+    file.write(data, 0);
+    return file.commit(path);
 }
 
-ReadResult readWholeFile(const char* path, std::vector<uint8_t>& data)
+ReadResult readWholeFile(const char* path, const ScopedLambda<bool(std::span<const uint8_t>)>& append)
 {
-    data.clear();
     int fd = open(path, O_RDONLY);
     if (fd < 0)
         return errno == ENOENT ? ReadResult::Missing : ReadResult::Failed;
-    struct stat info;
-    if (!fstat(fd, &info) && info.st_size > 0)
-        data.reserve(info.st_size);
     uint8_t buffer[65536];
     ssize_t length;
     for (;;) {
@@ -85,10 +171,25 @@ ReadResult readWholeFile(const char* path, std::vector<uint8_t>& data)
             continue;
         if (length <= 0)
             break;
-        data.insert(data.end(), buffer, buffer + length);
+        if (!append(std::span<const uint8_t> { buffer, static_cast<size_t>(length) })) {
+            length = -1;
+            break;
+        }
     }
     close(fd);
     return length < 0 ? ReadResult::Failed : ReadResult::Done;
+}
+
+ReadResult readWholeFile(const char* path, std::vector<uint8_t>& data)
+{
+    data.clear();
+    struct stat info;
+    if (!stat(path, &info) && info.st_size > 0)
+        data.reserve(info.st_size);
+    return readWholeFile(path, scopedLambda<bool(std::span<const uint8_t>)>([&](std::span<const uint8_t> chunk) {
+        data.insert(data.end(), chunk.begin(), chunk.end());
+        return true;
+    }));
 }
 
 #if defined(BL_WASMFS)

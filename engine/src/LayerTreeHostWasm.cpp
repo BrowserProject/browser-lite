@@ -308,9 +308,17 @@ void CompositorScene::requestScrollingTick()
     scheduleFrameLocked();
 }
 
+void CompositorScene::setHidden(bool value)
+{
+    Locker locker { lock };
+    hidden = value;
+    if (!hidden && (!reasons.isEmpty() || scrollingTick || notifyEngine))
+        scheduleFrameLocked();
+}
+
 void CompositorScene::scheduleFrameLocked()
 {
-    if (frameScheduled || invalidated)
+    if (frameScheduled || invalidated || hidden)
         return;
     frameScheduled = true;
     Compositor::dispatch([scene = Ref { *this }]() mutable {

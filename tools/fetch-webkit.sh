@@ -5,8 +5,7 @@ set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
 
-# Ordner, die wir nicht brauchen (zusammen viele GB). JSTests/test262 holen wir
-# in Phase 2 separat, wenn wir es fuer Tests brauchen. Von ANGLE nur die Header
+# Ordner, die wir nicht brauchen (zusammen viele GB). Von ANGLE nur die Header
 # (WebGL geht direkt auf das WebGL2 des Host-Browsers, ohne ANGLE zu bauen).
 SPARSE_PATTERNS='/*
 !/LayoutTests/

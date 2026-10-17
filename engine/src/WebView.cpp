@@ -500,10 +500,7 @@ void WebView::addDamage(const IntRect& rect)
     if (clipped.isEmpty())
         return;
     m_damage.unite(Region { clipped });
-    if (!m_frameRequested) {
-        m_frameRequested = true;
-        requestFrameFromHost(m_id);
-    }
+    requestFrame();
 }
 
 void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, const IntRect& clipRect)
@@ -536,10 +533,7 @@ void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, co
     exposed.subtract(kept);
     for (auto& rect : exposed.rects())
         addDamage(rect);
-    if (!m_frameRequested) {
-        m_frameRequested = true;
-        requestFrameFromHost(m_id);
-    }
+    requestFrame();
 }
 
 // Verschiebt die Pixel im Buffer (Geraete-Pixel). presented bekommt den
@@ -588,21 +582,22 @@ void WebView::applyPendingScrolls(IntRect& presented)
     }
 }
 
+void WebView::requestFrame()
+{
+    if (std::exchange(m_frameRequested, true) || !m_visible)
+        return;
+    requestFrameFromHost(m_id);
+}
+
 void WebView::scheduleRenderingUpdate()
 {
     m_renderingUpdateRequested = true;
-    if (!m_frameRequested) {
-        m_frameRequested = true;
-        requestFrameFromHost(m_id);
-    }
+    requestFrame();
 }
 
 void WebView::requestComposite()
 {
-    if (!m_frameRequested) {
-        m_frameRequested = true;
-        requestFrameFromHost(m_id);
-    }
+    requestFrame();
 }
 
 GraphicsLayerFactory* WebView::graphicsLayerFactory() const
@@ -795,6 +790,12 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
 void WebView::presentIfNeeded()
 {
+    // Versteckt malen wir nicht, auch nicht fuer ein Bild, das der Host noch
+    // von vorher schickt: setVisible(true) holt es nach
+    if (!m_visible) {
+        m_frameRequested = true;
+        return;
+    }
     if (m_frameInFlight) {
         // Host malt noch das letzte Bild. Sobald er fertig ist, kommt bl_frame_presented
         // und wir werden erneut aufgerufen.
@@ -838,10 +839,7 @@ void WebView::canvasAttached()
     m_canvasAttached = true;
     createGpuSurfaceIfPossible();
     m_needsFullPresent = true;
-    if (!m_frameRequested) {
-        m_frameRequested = true;
-        requestFrameFromHost(m_id);
-    }
+    requestFrame();
 }
 
 static OptionSet<PlatformEvent::Modifier> modifiersFromBits(int bits)
@@ -1033,6 +1031,17 @@ void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<Whee
     if (!frame)
         return;
     frame->eventHandler().handleWheelEvent(event, steps);
+}
+
+void WebView::zoomWheelEvent(const PlatformWheelEvent& event, bool cancelable)
+{
+    bool consumed = false;
+    if (RefPtr frame = mainFrame()) {
+        auto handling = frame->eventHandler().handleWheelEvent(event, { cancelable ? WheelEventProcessingSteps::BlockingDOMEventDispatch : WheelEventProcessingSteps::NonBlockingDOMEventDispatch }).second;
+        consumed = handling.contains(EventHandling::DefaultPrevented);
+    }
+    if (cancelable)
+        notifyHost(m_id, "wheel-result", consumed ? "{\"consumed\":true}"_s : "{\"consumed\":false}"_s);
 }
 
 RefPtr<ScrollingCoordinator> WebView::createScrollingCoordinator(Page& page) const
@@ -1310,6 +1319,40 @@ void WebView::setFocused(bool focused)
     m_page->focusController().setFocused(focused);
 }
 
+// Wie WebKit2 fuer eine versteckte Seite (DrawingArea::visibilityDidChange):
+// WebCore haelt rAF und CSS-Animationen an, drosselt Timer
+// (HiddenPageDOMTimerThrottling) und meldet visibilitychange; wir malen nicht
+// mehr, auch der Compositor nicht. Das letzte Bild bleibt im Canvas.
+void WebView::setVisible(bool visible)
+{
+    if (visible == m_visible)
+        return;
+    m_visible = visible;
+    updateActivityState();
+    if (m_layerTreeHost)
+        m_layerTreeHost->setVisible(visible);
+    if (visible && m_frameRequested)
+        requestFrameFromHost(m_id);
+}
+
+void WebView::setAudible(bool audible)
+{
+    m_audible = audible;
+    updateActivityState();
+}
+
+void WebView::updateActivityState()
+{
+    // Auch waehrend der Abbau der Page noch Medien meldet
+    if (!m_page)
+        return;
+    auto state = m_page->activityState();
+    state.set({ ActivityState::IsVisible, ActivityState::IsVisibleOrOccluded }, m_visible);
+    state.set(ActivityState::IsVisuallyIdle, !m_visible && !m_audible);
+    state.set(ActivityState::IsAudible, m_audible);
+    m_page->setActivityState(state);
+}
+
 // Tab aus der Adressleiste in die Seite: erstes bzw. letztes Element fokussieren
 void WebView::focusInitial(bool forward)
 {
@@ -1467,7 +1510,13 @@ void WebView::didCommitLoad()
     m_pinch = std::nullopt;
     if (m_page->pageScaleFactor() != 1)
         m_page->setPageScaleFactor(1, { });
-    notifyHost(m_id, "commit");
+    // Fehlerseite: die Adressleiste zeigt kein Schloss, bei einem ungueltigen Zertifikat "Nicht sicher"
+    RefPtr frame = mainFrame();
+    RefPtr loader = frame ? frame->loader().documentLoader() : nullptr;
+    if (loader && !loader->unreachableURL().isEmpty())
+        notifyHost(m_id, "commit", m_errorPageCertificate ? "{\"errorPage\":\"certificate\"}"_s : "{\"errorPage\":\"network\"}"_s);
+    else
+        notifyHost(m_id, "commit");
     notifyNavigationState();
 }
 

@@ -6,7 +6,7 @@
 // CSP auch nach Umleitung. Mit und ohne Compositing.
 //
 //   cd tests/e2e && node paintworklet-test.mjs [engine-ordner]
-import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, check, collect, finish, launch, near, pagePixel, screenshot, serve, startStack, timeLimit, waitFor } from './harness.mjs';
 
 timeLimit();
 
@@ -103,22 +103,11 @@ const { url: siteURL } = await serve((req, res) => {
 const stack = await startStack({ token: 'paintworklet-token-0123456789abcdef' });
 const browser = await launch({ args: SWIFTSHADER });
 
-const near = (pixel, rgb, tolerance = 40) => pixel && rgb.every((value, i) => Math.abs(pixel[i] - value) <= tolerance);
-async function waitFor(condition, ms = 20000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    if (await condition())
-      return true;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  return false;
-}
-
 for (const compositing of ['1', '0']) {
   const label = compositing === '1' ? 'mit Compositing' : 'ohne Compositing';
   const page = await browser.newPage({ viewport: { width: 800, height: 400 } });
   const results = collect(page);
-  const pixelAt = (x, y) => page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+  const pixelAt = (x, y) => pagePixel(page, x, y);
   karoRequests = 0;
   foreignRequests.length = 0;
   await page.goto(stack.app({ url: siteURL, compositing }));

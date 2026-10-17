@@ -26,6 +26,7 @@
 #include <WebCore/Document.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
+#include <WebCore/Chrome.h>
 #include <WebCore/DocumentPage.h>
 #include <WebCore/EmptyClients.h>
 #include <WebCore/ExceptionData.h>
@@ -394,6 +395,18 @@ static void openClientWindow(ServiceWorkerIdentifier worker, const URL& url, SWC
     frame->loader().load(FrameLoadRequest { document.releaseNonNull(), requester, ResourceRequest { URL { url } }, { }, InitiatedByMainFrame::Unknown });
 }
 
+// WindowClient.focus() (WebCore erlaubt es nur kurz nach notificationclick):
+// der Tab des Dokuments kommt nach vorne wie bei window.focus()
+static std::optional<ServiceWorkerClientData> focusClient(ScriptExecutionContextIdentifier identifier)
+{
+    RefPtr document = Document::allDocumentsMap().get(identifier);
+    if (!document)
+        return std::nullopt;
+    if (RefPtr page = document->page())
+        page->chrome().focus();
+    return ServiceWorkerClientData::from(*document);
+}
+
 // Was die Worker an "ihren Prozess" melden (WebSWContextManagerConnection).
 // Kommt von WebCore immer im Engine-Thread an.
 class ContextManagerConnection final : public SWContextManager::Connection, public RefCounted<ContextManagerConnection> {
@@ -485,10 +498,7 @@ private:
     }
     void focus(ScriptExecutionContextIdentifier identifier, CompletionHandler<void(std::optional<ServiceWorkerClientData>&&)>&& callback) final
     {
-        RefPtr document = Document::allDocumentsMap().get(identifier);
-        if (!document)
-            return callback({ });
-        callback(ServiceWorkerClientData::from(*document));
+        callback(focusClient(identifier));
     }
     void openWindow(ServiceWorkerIdentifier worker, const URL& url, OpenWindowCallback&& callback) final
     {
@@ -659,17 +669,11 @@ public:
         load->m_self = load.ptr();
         if (request.httpUserAgent().isEmpty())
             request.setHTTPUserAgent(standardUserAgent());
-        if (!HttpCache::canUse(request))
-            return load->loadFromNetwork(WTF::move(request));
-        HttpCache::lookup(request, [load, request, shouldRefreshCache](std::unique_ptr<HttpCache::Entry>&& entry) mutable {
-            auto use = entry ? HttpCache::decide(*entry, request) : HttpCache::Use::None;
-            if (use == HttpCache::Use::Fresh && !shouldRefreshCache)
-                return load->loadFromCache(*entry);
-            if (use != HttpCache::Use::None) {
-                HttpCache::addValidationHeaders(request, *entry);
-                load->m_cachedEntry = WTF::move(entry);
-            }
-            load->loadFromNetwork(WTF::move(request));
+        HttpCache::lookupForLoad(WTF::move(request), shouldRefreshCache, [load](HttpCache::Lookup&& lookup) {
+            if (lookup.fresh)
+                return load->loadFromCache(*lookup.entry);
+            load->m_cachedEntry = WTF::move(lookup.entry);
+            load->loadFromNetwork(WTF::move(lookup.request));
         });
     }
 
@@ -754,8 +758,10 @@ private:
         storeCookies(request.resourceRequest(), curlResponse);
         ResourceResponse response(curlResponse);
         if (response.httpStatusCode() == 304) {
-            if (auto entry = std::exchange(m_cachedEntry, nullptr))
+            if (auto entry = std::exchange(m_cachedEntry, nullptr)) {
+                HttpCache::didRevalidate(request.resourceRequest(), *entry, response);
                 return loadFromCache(*entry);
+            }
         }
         if (processResponse(response))
             request.completeDidReceiveResponse();
@@ -1194,10 +1200,7 @@ void ServerConnection::postMessageToServiceWorkerClient(ScriptExecutionContextId
 
 void ServerConnection::focusServiceWorkerClient(ScriptExecutionContextIdentifier identifier, CompletionHandler<void(std::optional<ServiceWorkerClientData>&&)>&& callback)
 {
-    RefPtr document = Document::allDocumentsMap().get(identifier);
-    if (!document)
-        return callback({ });
-    callback(ServiceWorkerClientData::from(*document));
+    callback(focusClient(identifier));
 }
 
 void ServerConnection::updateBackgroundFetchRegistration(const BackgroundFetchInformation& information)
@@ -1311,7 +1314,9 @@ void notificationEvent(NotificationData&& data, NotificationEventType type)
 // den Worker. Den Inhalt liest genau einer: die Navigation selber
 // (respondWith(preloadResponse)) oder der Lader im Worker, der den Inhalt der
 // preloadResponse holt (navigationPreloadIdentifier). Bis dahin haelt curl an.
-// Redirects folgt er nicht, der Worker bekommt sie als opaqueredirect.
+// Redirects folgt er nicht, der Worker bekommt sie als opaqueredirect. Zuerst
+// fragt er wie WebKit2 den HTTP-Cache: frisch kommt die Antwort von dort,
+// sonst geht die Anfrage (bedingt) mit dem Kopf ans Netz.
 class NavigationPreloader final : public RefCounted<NavigationPreloader>, public CurlRequestClient {
 public:
     class Reader {
@@ -1324,10 +1329,17 @@ public:
 
     static Ref<NavigationPreloader> create(ResourceRequest request, const NavigationPreloadState& state)
     {
-        request.addHTTPHeaderField(HTTPHeaderName::ServiceWorkerNavigationPreload, state.headerValue);
         Ref preloader = adoptRef(*new NavigationPreloader);
-        preloader->m_request = createCurlRequest(WTF::move(request), preloader.get());
-        preloader->m_request->resume();
+        HttpCache::lookupForLoad(WTF::move(request), false, [preloader, headerValue = state.headerValue](HttpCache::Lookup&& lookup) {
+            if (preloader->m_cancelled)
+                return;
+            if (lookup.fresh)
+                return preloader->useCacheEntry(*lookup.entry, ResourceResponse::Source::DiskCache);
+            lookup.request.addHTTPHeaderField(HTTPHeaderName::ServiceWorkerNavigationPreload, headerValue);
+            preloader->m_cachedEntry = WTF::move(lookup.entry);
+            preloader->m_request = createCurlRequest(WTF::move(lookup.request), preloader.get());
+            preloader->m_request->resume();
+        });
         return preloader;
     }
 
@@ -1351,6 +1363,12 @@ public:
     {
         if (!m_error.isNull())
             return reader.preloadFailed(m_error);
+        if (RefPtr body = std::exchange(m_cachedBody, nullptr)) {
+            Ref protectedThis { *this };
+            if (body->size())
+                reader.preloadData(*body);
+            return reader.preloadFinished(m_metrics);
+        }
         if (!m_request)
             return reader.preloadFinished(m_metrics);
         m_reader = &reader;
@@ -1359,6 +1377,7 @@ public:
 
     void cancel()
     {
+        m_cancelled = true;
         m_reader = nullptr;
         m_responseCallback = nullptr;
         stop();
@@ -1366,6 +1385,16 @@ public:
 
 private:
     NavigationPreloader() = default;
+
+    // Antwort aus dem HTTP-Cache, der Inhalt liegt schon da
+    void useCacheEntry(HttpCache::Entry& entry, ResourceResponse::Source source)
+    {
+        m_response = entry.response;
+        m_response.setSource(source);
+        m_cachedBody = entry.body->makeContiguous();
+        m_metrics.markComplete();
+        responseIsReady();
+    }
 
     void stop()
     {
@@ -1388,6 +1417,11 @@ private:
         Ref protectedThis { *this };
         storeCookies(request.resourceRequest(), curlResponse);
         m_response = networkResponse(curlResponse);
+        if (auto entry = std::exchange(m_cachedEntry, nullptr); entry && m_response.httpStatusCode() == 304) {
+            HttpCache::didRevalidate(request.resourceRequest(), *entry, m_response);
+            stop();
+            return useCacheEntry(*entry, ResourceResponse::Source::DiskCacheAfterValidation);
+        }
         if (isRedirect(m_response)) {
             m_response.setTainting(ResourceResponse::Tainting::Opaqueredirect);
             stop();
@@ -1424,8 +1458,12 @@ private:
     ResourceError m_error;
     NetworkLoadMetrics m_metrics;
     bool m_hasResponse { false };
+    bool m_cancelled { false };
     Function<void()> m_responseCallback;
     Reader* m_reader { nullptr };
+    // HTTP-Cache: Eintrag, der nachgeprueft wird, bzw. Inhalt aus dem Cache
+    std::unique_ptr<HttpCache::Entry> m_cachedEntry;
+    RefPtr<SharedBuffer> m_cachedBody;
 };
 
 // Noch von niemandem gelesene Preloads, nach der Kennung des Worker-Fetch

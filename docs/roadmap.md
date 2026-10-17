@@ -5,7 +5,7 @@ kommen zuerst.
 
 ## Phase 0: Grundlagen  (fertig)
 - [x] Repo-Struktur, Lizenz, Doku
-- [x] Versions-Pins in `versions.env` (WebKit `wpewebkit-2.54.1`, Emscripten 6.0.10)
+- [x] Versions-Pins in `versions.env` (WebKit-Tag und Commit, Emscripten, Node, Images)
 - [x] WebKit holen (shallow, sparse, blobless) + Patch-Workflow
 - [x] Toolchain-Docker-Image
 - [x] CI: Lint, Toolchain-Image bauen + testen, WebKit holen + Patches pruefen
@@ -159,8 +159,8 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
   perf-Map von V8 (`--perf-basic-prof`). Dabei auch: der GC waehrend langer Skripte kam auf
   echten Seiten fast nie dran, jetzt auch beim Funktionseintritt
 - [x] Messlatte gegen Chromium (`tests/engine/features.html`, `tests/e2e/parity-test.mjs`):
-  277 Pruefungen (JS, WebAssembly, DOM, Grafik, CSS, Netz, Medien, Geraete). Stand:
-  206 von 277 wie Chromium (74 %). In CI als Bericht, rot nur bei Rueckschritt
+  Pruefungen fuer JS, WebAssembly, DOM, Grafik, CSS, Netz, Medien und Geraete, Stand in
+  [stand.md](stand.md). In CI als Bericht, rot nur bei Rueckschritt
 - [x] Viele fertige WebKit-Funktionen waren nur per Einstellung aus (Standard fuer WebCore allein):
   Navigation API, Compression Streams, Permissions, Lazy Loading, Visual Viewport, Beacon,
   `<datalist>`, Async Clipboard, Datum/Farbe, Formular-Pruefung mit Hinweis, Quirks u.a.
@@ -192,7 +192,8 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
 - [x] Pinch-Zoom wie Chrome: Touchpad und zwei Finger skalieren nur die Ansicht (visual viewport),
   sofort im Compositor-Thread, auch wenn das JS blockiert. Der Engine-Thread uebernimmt am Ende
   (`Page::setPageScaleFactor`, Layout-Breite bleibt), die Seite bekommt `visualViewport`-Events.
-  Rad und Klick gleich danach gehen nicht verloren (`pinch-test.mjs`). Offen: siehe stand.md
+  Rad und Klick gleich danach gehen nicht verloren (`pinch-test.mjs`). Strg + Rad geht wie in
+  Chrome zuerst an die Seite, auch in iframes (Patch 0038). Offen: siehe stand.md
 - [x] Warten auf den UI-Thread beim Laden (CPU-Profil des Engine-Workers + Chrome-Trace): die
   Engine malt jetzt selber in das Canvas des Tabs (`transferControlToOffscreen`), der UI-Thread
   kopiert keine Bilder mehr und blockiert nicht beim Compositor-Commit. Dazu Antworten merken
@@ -230,9 +231,9 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
   Messlatte 234 von 277 (84.5 %)
 - [x] Service Worker (SWServer im selben Prozess, Fetch abfangen) und SharedWorker
   (`serviceworker-test.mjs`). Registrierungen und Cache API bleiben nach einem Neustart.
-  Dazu Update im Hintergrund (Patch 0033), Navigation Preload, `clients.openWindow()` nach
-  `notificationclick`, Benachrichtigungen aus dem Worker (Patch 0035), Inhalte der Cache API als
-  eigene Dateien. Offen: Push, Background Fetch
+  Dazu Update im Hintergrund (Patch 0033), Navigation Preload (auch aus dem HTTP-Cache),
+  `clients.openWindow()` nach `notificationclick`, Benachrichtigungen aus dem Worker (Patch 0035),
+  Inhalte der Cache API als eigene Dateien. Offen: Push, Background Fetch
 - [x] Robustheit: Absturz und Haengen der Engine erkennt die Oberflaeche, Neustart mit Sitzung;
   Watchdog bricht Skripte nach 30 s ab; GPU zurueck nach Kontextverlust, WebGL-Seiten bekommen
   `webglcontextlost`/`restored`; `navigator.onLine` folgt dem Relay; Relay nur zu oeffentlichen
@@ -249,6 +250,18 @@ Kurzer Stand und die offenen Punkte nach Nutzen: [stand.md](stand.md).
   bewegt 12 -> 54 Bilder/s, alle bewegt 11 -> 51 (ohne Filter 57), Scrollen 17 -> 37 (ohne Filter
   41). Pixelgleich, Abweichung zur CPU hoechstens 6/255 (`compositing-test.mjs`)
 - [x] Messlatte 257 von 280 (91.8 %)
+- [x] Hintergrund-Tabs versteckt wie in Chrome (gedrosselt, kein Malen), Tabs verwerfen nach
+  Meldung der Engine, Haengen auch nach Eingaben (`background-test.mjs`); langer Lauf mit 200
+  Navigationen und 30 Tabs (`soak-test.mjs`)
+- [x] beforeunload, `window.focus()`, Opener und Sandbox fuer Popups, Zeichen fuer unterdrueckte
+  Dialoge (`ui-test.mjs`)
+- [x] Fehlerseiten wie Chrome mit dem Grund vom Relay (Patch 0039), tote Relay-Verbindung
+  erkennen, 64 Verbindungen fuer curl (`network-test.mjs`, `relay-test.mjs`)
+- [x] IndexedDB-Grenze (Patch 0040), SQLite als eine Datei, Uploads ohne Kopie im WASM-Speicher
+  (`storage-test.mjs`)
+- [x] Web Worker der Seiten aus dem Event-Loop des Host (Patch 0041), `memory.grow` mit kleiner
+  Reserve (`wasm-test.mjs`)
+- [x] CI: Actions per Commit gepinnt, Lint fuer die Regeln aus AGENTS.md (`tools/check-style.sh`)
 - [ ] Timer-Queries (`EXT_disjoint_timer_query`): in WebKit hinter einer Einstellung, aus
 - [ ] Laufende Queries/Transform Feedback ueber einen Kontext-Wechsel hinweg (selten)
 - [ ] WebGL-Bild ohne `readPixels` direkt als Textur in die Ebene

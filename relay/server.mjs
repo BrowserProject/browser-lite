@@ -13,12 +13,12 @@
 //   RELAY_ALLOW_LOCAL=1  Nur fuer Tests: lokale Adressen und alle Ports erlauben
 import http from 'node:http';
 import crypto from 'node:crypto';
-import dns from 'node:dns/promises';
 import net from 'node:net';
 import path from 'node:path';
 import ipaddr from 'ipaddr.js';
 import { server as wisp, logging } from '@mercuryworkshop/wisp-js/server';
 import { parseRequest, serveStatic } from './static.mjs';
+import { createWispHandler } from './wisp.mjs';
 
 const token = process.env.RELAY_TOKEN;
 if (token && token.length < 16) {
@@ -33,11 +33,12 @@ const siteDir = process.env.SITE_DIR ? path.resolve(process.env.SITE_DIR) : null
 
 // UDP braucht erst WireGuard (spaeter), bis dahin aus
 wisp.options.allow_udp_streams = false;
-// Begrenzungen gegen Missbrauch. (stream_limit_per_host ist in wisp-js 0.4.1
-// kaputt: "connection.streams is not iterable", darum nur das Gesamtlimit.)
+// Begrenzungen gegen Missbrauch: Streams pro Verbindung, davon pro Ziel (wisp.mjs)
 wisp.options.stream_limit_total = 256;
+const STREAMS_PER_HOST = 64;
 logging.set_level(logging.WARN);
 
+let allowAddress = () => true;
 if (process.env.RELAY_ALLOW_LOCAL === '1') {
   console.warn('ACHTUNG: RELAY_ALLOW_LOCAL=1, nur fuer Tests verwenden!');
   wisp.options.allow_private_ips = true;
@@ -45,20 +46,16 @@ if (process.env.RELAY_ALLOW_LOCAL === '1') {
 } else {
   // Kein Zugriff auf das eigene Netz des Servers (SSRF-Schutz), nur Web-Ports.
   // Die Pruefung von wisp-js kennt ::ffff:127.0.0.1, fd00::/8 usw. nicht, darum zusaetzlich
-  // eine eigene: nur oeffentliche Adressen. IP-Literale prueft die Blacklist. Namen prueft
-  // die DNS-Aufloesung selbst, so ist jede Adresse geprueft, mit der wisp-js verbindet.
+  // eine eigene: nur oeffentliche Adressen. IP-Literale prueft schon die Blacklist, jede
+  // Adresse, mit der das Relay wirklich verbindet, prueft der Socket (wisp.mjs, nur TCP).
   const isPublic = (address) => ipaddr.isValid(address) && ipaddr.process(address).range() === 'unicast';
+  allowAddress = isPublic;
   wisp.options.allow_private_ips = false;
   wisp.options.allow_loopback_ips = false;
   wisp.options.port_whitelist = [80, 443, 8080, 8443];
   wisp.options.hostname_blacklist = [{ test: (name) => net.isIP(name) !== 0 && !isPublic(name) }];
-  wisp.options.dns_method = async (name) => {
-    const { address } = await dns.lookup(name);
-    if (!isPublic(address))
-      throw new Error(`${name} ist keine oeffentliche Adresse`);
-    return address;
-  };
 }
+const handleWisp = createWispHandler({ allowAddress, streamsPerHost: STREAMS_PER_HOST });
 
 // Ein Fehler in einer einzelnen Verbindung darf nie das ganze Relay beenden
 process.on('uncaughtException', (error) => console.error('Fehler (Relay laeuft weiter):', error));
@@ -112,9 +109,7 @@ server.on('upgrade', (req, socket, head) => {
     refuse(socket, '403 Forbidden');
     return;
   }
-  // wisp-js erkennt Wisp nur an einem Pfad, der auf "/" endet: Token entfernen
-  req.url = '/wisp/';
-  wisp.routeRequest(req, socket, head);
+  handleWisp(req, socket, head);
 });
 
 // Ohne Port (z.B. belegt) nicht still mit Code 0 enden

@@ -1,24 +1,30 @@
 // End-to-End Test: die ganze Kette im echten Chromium.
 //
-//   Oberflaeche (web/) -> Engine (WASM) -> curl -> SOCKFS -> Wisp -> Relay -> Testserver
+//   Oberflaeche (web/) -> Engine (WASM) -> curl -> Sockets der Engine -> Wisp -> Relay -> Testserver
 //
 // Der Testserver liefert eine Seite ueber einen Redirect aus, setzt ein Cookie,
 // laedt ein Skript nach und eine gzip-Antwort per fetch(). Das Skript schreibt
 // alles in den Titel, den wir in der Oberflaeche wieder auslesen.
 // Danach die Fehlerfaelle: falsche Zertifikate (selbst signiert, falscher Name,
-// abgelaufen), Verbindung abgelehnt, unbekannter Name, eine Navigation, die
-// scheitert, und ein Relay, das waehrend der Sitzung neu startet (auch navigator.onLine).
+// abgelaufen), Verbindung abgelehnt, unbekannter Name, Navigationen, die scheitern
+// (Fehlerseite mit Grund, Neu laden, Zurueck, Anzeige in der Adressleiste), viele
+// haengende Verbindungen (Grenze von curl) und ein Relay, das waehrend der Sitzung neu
+// startet (auch navigator.onLine und die Fehlerseite "Keine Verbindung zum Relay", die
+// sich danach selber neu laedt, ein Formular dagegen erst mit "Erneut senden"). Zuletzt
+// Gruende, die nur ein Relay als Attrappe sicher liefert (keine Antwort, gesperrt,
+// Adresse nicht erreichbar).
 //
 //   cd tests/e2e && npm ci && node network-test.mjs [engine-ordner]
 //
 // Standard fuer den Engine-Ordner ist build/webcore/bin.
+import http from 'node:http';
 import https from 'node:https';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import zlib from 'node:zlib';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
-import { SWIFTSHADER, TIMEOUT, check, finish, freePort, launch, root, screenshot, serve, startStack, timeLimit, watchErrors } from './harness.mjs';
+import { SWIFTSHADER, TIMEOUT, check, finish, freePort, launch, pagePixel, root, screenshot, serve, startStack, timeLimit, waitFor, watchErrors } from './harness.mjs';
 
 timeLimit(TIMEOUT + 240000);
 
@@ -100,8 +106,26 @@ const socket = (url) => new Promise((resolve) => {
 })();
 </script>`;
 
+// Viele haengende Anfragen (Long-Polls, EventSource) auf mehrere Server: danach muss eine
+// weitere Anfrage trotzdem durchgehen. WebKit allein erlaubt curl nur 17 Verbindungen.
+const POOL = `<!doctype html><title>laedt</title><body>Verbindungen<script>
+(async () => {
+  const hanging = new AbortController();
+  for (const url of HANG_URLS)
+    fetch(url, { mode: 'no-cors', signal: hanging.signal }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  const result = await fetch(FREE_URL, { mode: 'no-cors', signal: controller.signal }).then(() => 'ok', () => 'zeitlimit');
+  clearTimeout(timer);
+  hanging.abort();
+  document.title = 'POOL|' + result;
+})();
+</script>`;
+
 const requests = [];
 let secureURLs = null;
+let poolScript = '';
 // Port ohne Server: die Verbindung wird abgewiesen (Port 1 sperrt WebKit schon vorher)
 const closedURL = `http://127.0.0.1:${await freePort()}/`;
 const { server: site, url: siteRoot } = await serve((req, res) => {
@@ -120,6 +144,22 @@ const { server: site, url: siteRoot } = await serve((req, res) => {
   case '/script.js':
     res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(secureScript() + SCRIPT);
     break;
+  case '/pool':
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(POOL.replace('<script>', '<script>' + poolScript));
+    break;
+  case '/frei':
+    res.writeHead(200, { 'Content-Type': 'text/plain' }).end('frei');
+    break;
+  case '/formular':
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      .end('<title>FORM|</title><form method="post" action="/gesendet"><input name="feld" value="wert"></form>');
+    break;
+  case '/gesendet': {
+    let body = '';
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', () => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(`<title>GESENDET|${req.method}|${body}</title>`));
+    break;
+  }
   case '/negativ': {
     const urls = [['gut', secureURLs.good + '/secure.txt'], ['selbst', secureURLs.selfSigned + '/'], ['name', secureURLs.wrongName + '/'],
       ...(secureURLs.expired ? [['abgelaufen', secureURLs.expired + '/']] : []),
@@ -194,6 +234,19 @@ secureURLs = {
   expired: expired ? await secureServer(expired, 'abgelaufen') : null,
 };
 
+// 4 Server, die Verbindungen annehmen und nie antworten, je 6 Anfragen (Grenze pro Host)
+const hangServers = [];
+let hangConnections = 0;
+for (let i = 0; i < 4; i++) {
+  const { server } = await serve(() => {});
+  server.on('connection', () => hangConnections++);
+  hangServers.push(server);
+}
+{
+  const hangURLs = hangServers.flatMap((server) => Array.from({ length: 6 }, (_, i) => `http://127.0.0.1:${server.address().port}/haengt/${i}`));
+  poolScript = `const HANG_URLS = ${JSON.stringify(hangURLs)};\nconst FREE_URL = ${JSON.stringify(siteURL + '/frei')};\n`;
+}
+
 // ------------------------------------------------------- Relay + Oberflaeche
 
 const stack = await startStack({ token: 'e2e-token-0123456789abcdef' });
@@ -238,10 +291,10 @@ check('<video> als HTMLMediaElement', title.includes('|media-ok'), title.split('
 check('Redirect ueber /start', requests.includes('/start') && requests.includes('/page'), requests.join(' '));
 
 // Ein Frame mit der roten Box sollte auf dem Canvas sein
-const redBox = () => page.evaluate(() => {
-  const color = window.blPagePixel(70, 70);
+const redBox = async () => {
+  const color = await pagePixel(page, 70, 70);
   return color && { r: color[0], g: color[1], b: color[2] };
-});
+};
 const isRed = (pixel) => pixel && pixel.r > 200 && pixel.g < 40 && pixel.b < 40;
 await page.waitForTimeout(1000);
 const pixel = await redBox();
@@ -254,19 +307,12 @@ const pixelAfterLoss = await redBox();
 check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss) && consoleLines.some((line) => line.includes('GPU: WebGL-Kontext verloren')), JSON.stringify(pixelAfterLoss));
 
 // Der Browser stellt den Kontext wieder her: die Engine malt wieder auf der GPU
-async function waitUntil(condition, ms = 10000) {
-  for (const end = Date.now() + ms; Date.now() < end; await page.waitForTimeout(200)) {
-    if (await condition())
-      return true;
-  }
-  return false;
-}
 await page.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
-const gpuBack = await waitUntil(() => consoleLines.some((line) => line.includes('GPU: WebGL-Kontext wieder da')));
+const gpuBack = await waitFor(() => consoleLines.some((line) => line.includes('GPU: WebGL-Kontext wieder da')), 10000);
 await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = "rgb(0, 0, 230)"'));
 let pixelAfterRestore = null;
 const isBlue = (pixel) => pixel && pixel.b > 200 && pixel.r < 40 && pixel.g < 40;
-await waitUntil(async () => isBlue(pixelAfterRestore = await redBox()));
+await waitFor(async () => isBlue(pixelAfterRestore = await redBox()), 10000);
 check('GPU wiederhergestellt, Aenderung danach gemalt', gpuBack && isBlue(pixelAfterRestore), JSON.stringify(pixelAfterRestore));
 await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = ""'));
 
@@ -294,11 +340,62 @@ check('Verbindung abgewiesen (Port zu)', outcome.abgewiesen === 'abgelehnt:TypeE
 check('Unbekannter Name (DNS)', outcome.dns === 'abgelehnt:TypeError', outcome.dns);
 check('Server mit falschem Zertifikat bekommen keine Anfrage', !requests.some((r) => /^(selbst|name|abgelaufen):/.test(r)), requests.join(' '));
 
-// Navigation, die scheitert: Meldung in der Statuszeile
+// Viele haengende Verbindungen: eine weitere Anfrage geht trotzdem durch
+await go(`${siteURL}/pool`);
+const pool = await waitTitle('POOL|', 60000);
+check('24 haengende Verbindungen, weitere Anfrage geht durch', pool.startsWith('POOL|ok') && hangConnections >= 24, `${pool} (${hangConnections} Verbindungen)`);
+for (const server of hangServers)
+  server.closeAllConnections?.();
+
+// Navigation, die scheitert: Fehlerseite im Tab mit Grund und Code (wie Chrome)
+async function errorPage(code, ms = 60000) {
+  let shown = null;
+  for (const end = Date.now() + ms; Date.now() < end && !shown; await page.waitForTimeout(300)) {
+    const from = consoleLines.length;
+    // Gleich nach dem Laden der Oberflaeche gibt es noch keinen Tab
+    await page.evaluate(() => window.__blEval('"FEHLERSEITE|" + [document.querySelector("h1")?.textContent, document.querySelector("main p")?.textContent, document.querySelector(".code")?.textContent].join("|")')).catch(() => {});
+    await page.waitForTimeout(200);
+    const line = consoleLines.slice(from).find((l) => l.includes('FEHLERSEITE|'));
+    const [, title, text, shownCode] = line ? line.slice(line.indexOf('FEHLERSEITE|')).split(' (Malen')[0].split('|') : [];
+    if (shownCode === code)
+      shown = { title, text, code: shownCode };
+  }
+  return shown || {};
+}
+const address = () => page.inputValue('#address');
+
 await go(closedURL);
-const status = await page.waitForFunction(() => document.getElementById('status')?.textContent.startsWith('Fehler'), null, { timeout: 60000 })
-  .then(() => true, () => false);
-check('Navigation ohne Server: Fehler in der Statuszeile', status, await page.evaluate(() => document.getElementById('status')?.textContent));
+const refused = await errorPage('ERR_CONNECTION_REFUSED');
+check('Fehlerseite: Verbindung abgelehnt', refused.title === 'Die Website ist nicht erreichbar' && refused.text === '127.0.0.1 hat die Verbindung abgelehnt.', JSON.stringify(refused));
+check('Fehlerseite: Adressleiste zeigt die Adresse, die nicht ging', await address() === closedURL, await address());
+// "Neu laden" auf der Fehlerseite laedt die Adresse, die nicht ging
+{
+  const revived = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>WIEDER|da</title>'));
+  await new Promise((resolve) => revived.listen(Number(new URL(closedURL).port), '127.0.0.1', resolve));
+  await page.evaluate(() => window.__blEval('document.getElementById("reload").click()'));
+  const reloaded = await waitTitle('WIEDER|', 30000);
+  check('Fehlerseite: Neu laden laedt die Adresse', reloaded.startsWith('WIEDER|') && await address() === closedURL, reloaded);
+  revived.close();
+  revived.closeAllConnections();
+}
+
+await go('http://nonexistent.invalid/');
+const dns = await errorPage('ERR_NAME_NOT_RESOLVED');
+check('Fehlerseite: Name nicht gefunden', dns.text === 'Die Server-IP-Adresse von nonexistent.invalid wurde nicht gefunden.', JSON.stringify(dns));
+
+await go(secureURLs.selfSigned + '/');
+const certificate = await errorPage('NET::ERR_CERT_INVALID');
+check('Fehlerseite: Zertifikat ungueltig (mit Umlaut)', certificate.title === 'Ihre Verbindung ist nicht privat' && certificate.text?.includes('nicht gültig'), JSON.stringify(certificate));
+// Adressleiste: kein Schloss, sondern "Nicht sicher" (wie Chrome), andere Fehlerseiten ohne Anzeige
+const security = () => page.evaluate(() => ({ text: document.getElementById('security').textContent, hidden: document.getElementById('security').hidden }));
+const certificateSecurity = await security();
+check('Fehlerseite Zertifikat: Adressleiste "Nicht sicher"', certificateSecurity.text === 'Nicht sicher' && !certificateSecurity.hidden, JSON.stringify(certificateSecurity));
+
+// Zurueck: wieder die Adresse ohne Namen, wieder mit Fehlerseite
+await page.click('#back');
+const backAgain = await errorPage('ERR_NAME_NOT_RESOLVED');
+check('Fehlerseite: Zurueck zur Adresse davor', backAgain.code === 'ERR_NAME_NOT_RESOLVED' && await address() === 'http://nonexistent.invalid/', await address());
+check('Fehlerseite: Adressleiste ohne Anzeige', (await security()).hidden, JSON.stringify(await security()));
 
 // Relay faellt aus und kommt wieder: die naechste Seite laedt ueber eine neue Verbindung
 const pageLoads = () => requests.filter((r) => r === '/page').length;
@@ -313,10 +410,73 @@ check('Nach Neustart des Relays: Seite laedt wieder vom Server', again.startsWit
 await page.evaluate(() => window.__blEval('for (const type of ["offline", "online"]) addEventListener(type, () => console.log("NETZ " + type + " " + navigator.onLine))'));
 await page.waitForTimeout(500);
 await stack.restartRelay();
-const wentOffline = await waitUntil(() => consoleLines.some((line) => line.includes('NETZ offline false')), 10000);
+const wentOffline = await waitFor(() => consoleLines.some((line) => line.includes('NETZ offline false')), 10000);
 check('Relay weg: Ereignis offline, navigator.onLine false', wentOffline);
-const cameBack = await waitUntil(() => consoleLines.some((line) => line.includes('NETZ online true')), 20000);
+const cameBack = await waitFor(() => consoleLines.some((line) => line.includes('NETZ online true')), 20000);
 check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
+
+// Relay weg beim Navigieren: Fehlerseite "Keine Verbindung zum Relay", sobald es wieder
+// da ist, laedt sie sich selber neu
+{
+  const exited = new Promise((resolve) => stack.relay.once('exit', resolve));
+  stack.relay.kill();
+  await exited;
+  const loadsBefore = pageLoads();
+  await go(`${siteURL}/page`);
+  const noRelay = await errorPage('ERR_PROXY_CONNECTION_FAILED', 30000);
+  check('Fehlerseite: keine Verbindung zum Relay', noRelay.title === 'Keine Verbindung zum Relay', JSON.stringify(noRelay));
+  await stack.restartRelay();
+  const reloaded = await waitTitle('E2E|', 60000);
+  check('Fehlerseite laedt neu, sobald das Relay wieder da ist', reloaded.startsWith('E2E|') && pageLoads() > loadsBefore, reloaded);
+}
+
+// Formular (POST), waehrend das Relay weg ist: die Fehlerseite schickt es nicht von selber
+// noch einmal ab, erst "Erneut senden", und dann als POST mit den Daten
+{
+  await go(`${siteURL}/formular`);
+  await waitTitle('FORM|', 30000);
+  const exited = new Promise((resolve) => stack.relay.once('exit', resolve));
+  stack.relay.kill();
+  await exited;
+  await page.evaluate(() => window.__blEval('document.forms[0].submit()'));
+  await errorPage('ERR_PROXY_CONNECTION_FAILED', 30000);
+  const button = () => page.evaluate(() => window.__blEval('console.log("KNOPF|" + document.getElementById("reload")?.textContent)'));
+  const from = consoleLines.length;
+  await button();
+  await page.waitForTimeout(300);
+  check('Fehlerseite nach POST: Knopf "Erneut senden"', consoleLines.slice(from).some((line) => line.includes('KNOPF|Erneut senden')), consoleLines.slice(from).join(' | '));
+  await stack.restartRelay();
+  await page.waitForTimeout(5000);
+  check('Fehlerseite nach POST: kein Neuladen von selber', !requests.includes('/gesendet'), requests.slice(-5).join(' '));
+  await page.evaluate(() => window.__blEval('document.getElementById("reload").click()'));
+  const sent = await waitTitle('GESENDET|', 30000);
+  check('Fehlerseite nach POST: Erneut senden schickt POST mit Daten', sent.startsWith('GESENDET|POST|feld=wert'), sent);
+}
+
+// Wisp-Relay als Attrappe: beantwortet jedes CONNECT sofort mit dem Grund fuer den Namen
+{
+  const REASONS = { 'zeitlimit.test': 0x43, 'gesperrt.test': 0x48, 'unerreichbar.test': 0x4a };
+  const standIn = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await new Promise((resolve) => standIn.on('listening', resolve));
+  standIn.on('connection', (ws) => {
+    ws.send(Uint8Array.of(0x03, 0, 0, 0, 0, 128, 0, 0, 0));
+    ws.on('message', (data) => {
+      const packet = new Uint8Array(data);
+      if (packet[0] === 0x01)
+        ws.send(Uint8Array.of(0x04, ...packet.subarray(1, 5), REASONS[Buffer.from(packet.subarray(8)).toString()] ?? 0x41));
+    });
+  });
+  await page.goto(stack.app({ url: 'http://zeitlimit.test/', relay: `ws://127.0.0.1:${standIn.address().port}/` }));
+  const timedOut = await errorPage('ERR_CONNECTION_TIMED_OUT');
+  check('Fehlerseite: keine Antwort', timedOut.text === 'zeitlimit.test hat zu lange nicht geantwortet.', JSON.stringify(timedOut));
+  await go('http://gesperrt.test/');
+  const denied = await errorPage('ERR_ACCESS_DENIED');
+  check('Fehlerseite: Relay sperrt das Ziel', denied.text === 'Das Relay verbindet nicht mit gesperrt.test, es erlaubt nur öffentliche Adressen und Web-Ports.', JSON.stringify(denied));
+  await go('http://unerreichbar.test/');
+  const unreachable = await errorPage('ERR_ADDRESS_UNREACHABLE');
+  check('Fehlerseite: Adresse nicht erreichbar', unreachable.text === 'unerreichbar.test ist nicht erreichbar.', JSON.stringify(unreachable));
+  standIn.close();
+}
 
 await browser.close();
 finish();

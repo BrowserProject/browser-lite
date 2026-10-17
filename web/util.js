@@ -15,6 +15,18 @@ export function storage(key, value, session = false) {
   }
 }
 
+// Absichtliches Neuladen der Oberflaeche (Neustart, Daten loeschen): dann
+// fragt der Host nicht nach beforeunload der Seiten (app.js)
+let reloading = false;
+export const uiReloading = () => reloading;
+export function reloadUI(url) {
+  reloading = true;
+  if (url)
+    location.replace(url);
+  else
+    location.reload();
+}
+
 // Fehler mit DOMException-Namen fuer die Polyfills der Seite (Host-Bruecke)
 export function domError(name, message) {
   return Object.assign(new Error(message), { name });

@@ -31,6 +31,13 @@ CT_IP=<ip>/<netz> CT_GW=<gateway> CT_STORAGE=<storage> deploy/setup-proxmox.sh r
 Legt einen unprivilegierten LXC mit Docker an, registriert den Runner und macht die Seite ueber `tailscale serve`
 des Hosts per HTTPS im Tailnet erreichbar. Wiederholbar, bestehendes bleibt.
 
+Der Runner hat nur das Label `browser-lite-deploy` (keine Standard-Labels wie `self-hosted`) und
+aktualisiert sich nicht selber: er bleibt auf `RUNNER_VERSION` aus `versions.env`. Fuer eine
+neue Version `RUNNER_VERSION` und `RUNNER_SHA256` aendern und das Skript erneut ausfuehren, es
+installiert den Runner dann frisch. GitHub nimmt veraltete Runner nach einiger Zeit nicht mehr
+an, dann haengt der Deploy in der Warteschlange. Der Registrierungs-Token geht nie ueber eine
+Kommandozeile.
+
 Danach ist die Seite unter `https://<host>/` im Tailnet erreichbar.
 
 ## Sicherheit
@@ -41,4 +48,6 @@ Das Repo ist oeffentlich und der Runner laeuft im LAN. Darum:
   `main` in diesem Repo. Nie einen anderen Job oder `pull_request` darauf laufen lassen.
 - Auf dem Runner laeuft keine Action (kein `uses:`), nur eigene Befehle. `compose.yml` holt
   der Job per `curl` von der GitHub-API.
+- Beides prueft der Lint der CI (`tools/check-style.sh`), dazu: alle Actions sind per Commit
+  gepinnt.
 - Der Container laeuft read-only, ohne Capabilities, als Benutzer `node`.

@@ -8,7 +8,7 @@
 // Navigation), WindowClient.navigate() laedt ein Fenster neu, registration.update()
 // der Seite waehrend einer Hintergrund-Aktualisierung, navigate() auf ein
 // gesperrtes Ziel und showNotification() mit notificationclick, das per
-// clients.openWindow() einen Tab oeffnet.
+// clients.openWindow() einen Tab oeffnet bzw. mit WindowClient.focus() einen nach vorne holt.
 //
 //   cd tests/e2e && node serviceworker-test.mjs [engine-ordner]
 import { SWIFTSHADER, TIMEOUT, canvasOrigin, check, collect, finish, launch, serve, startStack, timeLimit } from './harness.mjs';
@@ -115,13 +115,15 @@ const CACHE_CHECK_PAGE = `<!doctype html><title>Cache lesen</title><body><script
 const NOTIFY_PAGE = `<!doctype html><title>Benachrichtigung</title><body style="margin:0">
 <button id="allow" style="width:100%;height:400px">Erlauben</button><script>
 const log = (text) => console.log('RESULT ' + text);
-navigator.serviceWorker.addEventListener('message', (e) => log('notifymsg=' + e.data));
+navigator.serviceWorker.addEventListener('message', (e) => log((e.data.startsWith('focus:') ? 'focus=' : 'notifymsg=') + e.data));
 document.getElementById('allow').addEventListener('click', async () => {
   log('notifypermission=' + await Notification.requestPermission());
   const reg = await navigator.serviceWorker.ready;
   navigator.serviceWorker.controller.postMessage('open-without-click');
   await reg.showNotification('Hallo', { body: 'aus dem Test', tag: 't1' });
   log('notifylist=' + (await reg.getNotifications()).map((n) => n.title + ':' + n.tag).join(','));
+  navigator.serviceWorker.controller.postMessage('focus-without-click');
+  await reg.showNotification('Fokus', { tag: 'focus' });
 });
 log('notifyready=1');
 </script>`;
@@ -133,6 +135,9 @@ console.log('RESULT opened=' + !!navigator.serviceWorker.controller);
 
 // Kopf Service-Worker-Navigation-Preload pro Anfrage
 const preloadRequests = { '/preload-use': [], '/preload-read': [] };
+// Navigation Preload aus dem HTTP-Cache: frisch bzw. nachgeprueft (ETag, 304).
+// Pro Anfrage Kopf und If-None-Match
+const cachedPreloads = { '/preload-fresh': [], '/preload-etag': [] };
 
 let swVersion = 1;
 let swScriptFetches = 0;
@@ -160,11 +165,19 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(e.preloadResponse);
   else if (url.pathname === '/preload-read')
     e.respondWith(e.preloadResponse.then((r) => r.text()).then((text) => new Response('<title>Preload</title><script>console.log("RESULT preloadread=" + ' + JSON.stringify(text) + ')</script>', { headers: { 'Content-Type': 'text/html' } })));
+  else if (url.pathname.startsWith('/preload-') && e.request.mode === 'navigate')
+    e.respondWith(e.preloadResponse);
 });
 // Klick auf eine Benachrichtigung aus showNotification(): neues Fenster, aber
 // nie data: oder file: (Antwort an die Seite mit der Benachrichtigung)
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  // WindowClient.focus(): der Tab der Seite kommt nach vorne
+  if (e.notification.tag === 'focus') {
+    e.waitUntil(self.clients.matchAll().then((clients) => clients.find((c) => new URL(c.url).pathname === '/notify').focus())
+      .then((client) => client.postMessage('focus:' + new URL(client.url).pathname)));
+    return;
+  }
   const blocked = Promise.all(['data:text/html,<title>x</title>', 'file:///data/cachestorage/'].map((url) => self.clients.openWindow(url).then(() => 'opened', (error) => error.name)))
     .then((names) => self.clients.matchAll().then((clients) => clients.filter((c) => new URL(c.url).pathname === '/notify').forEach((c) => c.postMessage('blocked:' + names.join(',')))));
   const opened = self.clients.openWindow('/opened').then((client) => client.postMessage('client:' + new URL(client.url).pathname + ':' + e.notification.tag));
@@ -177,6 +190,8 @@ self.addEventListener('message', (e) => {
     e.source.navigate('/navigated').then((client) => client.postMessage('client:' + new URL(client.url).pathname), (error) => console.log('RESULT navigate=' + error.name));
   else if (e.data === 'navigate-blocked')
     e.source.navigate('http://127.0.0.1:1/').then((client) => e.source.postMessage('resolved:' + client), (error) => e.source.postMessage(error.name));
+  else if (e.data === 'focus-without-click')
+    e.source.focus().then(() => e.source.postMessage('focus:focused'), (error) => e.source.postMessage('focus:' + error.name));
   else if (e.data === 'open-without-click')
     self.clients.openWindow('/opened').then(() => e.source.postMessage('window'), (error) => e.source.postMessage('nowindow:' + error.name));
   else
@@ -216,6 +231,16 @@ const { url: siteURL } = await serve((req, res) => {
     return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(NAVIGATED_PAGE);
   if (req.url === '/network')
     return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('net');
+  if (req.url in cachedPreloads) {
+    const requests = cachedPreloads[req.url];
+    requests.push((req.headers['service-worker-navigation-preload'] || 'none') + ':' + (req.headers['if-none-match'] || 'none'));
+    const etag = req.url === '/preload-etag';
+    if (etag && req.headers['if-none-match'] === '"v1"')
+      return res.writeHead(304, { ETag: '"v1"', 'Cache-Control': 'no-cache' }).end();
+    const name = etag ? 'preloadetag' : 'preloadfresh';
+    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...(etag ? { ETag: '"v1"', 'Cache-Control': 'no-cache' } : { 'Cache-Control': 'max-age=600' }) })
+      .end(`<title>Preload</title><script>console.log('RESULT ${name}=${requests.length}')</script>`);
+  }
   if (req.url in preloadRequests) {
     const header = req.headers['service-worker-navigation-preload'] || 'none';
     preloadRequests[req.url].push(header);
@@ -294,6 +319,14 @@ check('Navigation Preload: eine Anfrage', preloadRequests['/preload-use'].join()
 await page.evaluate(() => window.__blEval('location.href = "/preload-read"'));
 check('Navigation Preload: Worker liest den Inhalt', await result('preloadread', 30000) === 'preload-body:bl-test', results.get('preloadread'));
 check('Navigation Preload: eine Anfrage beim Lesen', preloadRequests['/preload-read'].join() === 'bl-test', preloadRequests['/preload-read'].join());
+
+// Navigation Preload ueber den HTTP-Cache: fetch() der Seite legt die Antwort
+// in den Cache (asynchron, darum kurz warten), die Navigation danach nimmt sie
+// frisch von dort bzw. prueft sie mit If-None-Match nach (304)
+for (const [path, name, expected] of [['/preload-fresh', 'preloadfresh', 'none:none'], ['/preload-etag', 'preloadetag', 'none:none,bl-test:"v1"']]) {
+  await page.evaluate((target) => window.__blEval(`fetch('${target}').then((r) => r.text()).then(() => setTimeout(() => { location.href = '${target}'; }, 1000))`), path);
+  check(`Navigation Preload aus dem HTTP-Cache (${name})`, await result(name, 30000) === '1' && cachedPreloads[path].join() === expected, `${results.get(name)} ${cachedPreloads[path].join()}`);
+}
 
 // Cache API: grosse Inhalte liegen in Dateien, nicht im Speicher der Engine
 async function engineMallocMB() {
@@ -388,6 +421,16 @@ check('notificationclick: clients.openWindow oeffnet einen kontrollierten Tab', 
 check('clients.openWindow gibt den Client des neuen Tabs', await result('openedmsg', 30000) === 'client:/opened:t1', results.get('openedmsg'));
 check('clients.openWindow lehnt data: und file: ab', await result('notifymsg', 30000) === 'blocked:TypeError,TypeError', results.get('notifymsg'));
 check('Neuer Tab in der Oberflaeche', await tabCount() === tabsBefore + 1, `${tabsBefore} -> ${await tabCount()}`);
+
+// WindowClient.focus() nur nach notificationclick: holt den Tab der Seite nach vorne
+const activeTitle = () => page.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent);
+check('WindowClient.focus ohne Klick abgelehnt', await result('focus', 30000) === 'focus:InvalidAccessError', results.get('focus'));
+results.delete('focus');
+check('Vor WindowClient.focus: neuer Tab vorne', await activeTitle() === 'Geoeffnet', await activeTitle());
+await page.evaluate(() => window.__blNotifications.find((n) => n.title === 'Fokus').dispatchEvent(new Event('click')));
+const focused = await result('focus', 30000);
+const front = await page.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Benachrichtigung', null, { timeout: 10000 }).then(() => true, () => false);
+check('notificationclick: WindowClient.focus holt den Tab nach vorne', focused === 'focus:/notify' && front, `${focused}, ${await activeTitle()}`);
 
 await browser.close();
 finish();

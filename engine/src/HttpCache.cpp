@@ -1,14 +1,14 @@
 // Dauerhafter HTTP-Cache der Engine.
 //
 // Ohne Network-Prozess hat WebKit hier nur den Speicher-Cache (MemoryCache),
-// der mit der Engine verschwindet. Bei jedem Besuch einer Seite kam darum
-// alles wieder ueber das Relay. Jetzt liegen cachebare Antworten in der
+// der mit der Engine verschwindet. Damit nicht jeder Besuch einer Seite alles
+// wieder ueber das Relay holt, liegen cachebare Antworten in der
 // Cache API des Host-Browsers (auf der Platte, wird nur bei Bedarf gelesen),
 // Zugriff ueber engine/js/http-cache.js auf dem Haupt-Thread.
 //
-// Ablauf (LoaderStrategy.cpp): vor dem Netz nachsehen. Frisch: direkt aus dem
-// Cache. Alt, aber mit ETag/Last-Modified: bedingte Anfrage, bei 304 aus dem
-// Cache. Cachebare 200-Antworten (bis 10 MB) werden gespeichert. Frische und
+// Ablauf (lookupForLoad, fuer alle Lader): vor dem Netz nachsehen. Frisch:
+// direkt aus dem Cache. Alt, aber mit ETag/Last-Modified: bedingte Anfrage,
+// bei 304 aus dem Cache. Cachebare 200-Antworten (bis 10 MB) werden gespeichert. Frische und
 // Alter rechnet WebCore (CacheValidation.h) wie im Network-Prozess.
 
 #include "config.h"
@@ -298,6 +298,31 @@ void store(const ResourceRequest& request, const ResourceResponse& response, Wal
         blJsHttpCacheStore(job->url.data(), job->status, job->headers.data(), job->body, job->length);
         free(job->body);
     }, job);
+}
+
+void lookupForLoad(ResourceRequest&& request, bool alwaysRevalidate, CompletionHandler<void(Lookup&&)>&& completion)
+{
+    if (!canUse(request) || request.cachePolicy() == ResourceRequestCachePolicy::ReloadIgnoringCacheData)
+        return completion({ WTF::move(request) });
+    ResourceRequest key { request };
+    lookup(key, [request = WTF::move(request), alwaysRevalidate, completion = WTF::move(completion)](std::unique_ptr<Entry>&& entry) mutable {
+        auto use = entry ? decide(*entry, request) : Use::None;
+        if (entry)
+            debugLog("Cache %s: %s", use == Use::Fresh ? "frisch" : use == Use::Revalidate ? "nachpruefen" : "nicht nutzbar", request.url().string().utf8().data());
+        if (use == Use::Fresh && !alwaysRevalidate)
+            return completion({ WTF::move(request), WTF::move(entry), true });
+        if (use == Use::None)
+            return completion({ WTF::move(request) });
+        addValidationHeaders(request, *entry);
+        completion({ WTF::move(request), WTF::move(entry) });
+    });
+}
+
+void didRevalidate(const ResourceRequest& request, Entry& entry, const ResourceResponse& notModified)
+{
+    updateResponseHeadersAfterRevalidation(entry.response, notModified);
+    entry.responseTime = WallTime::now();
+    store(request, entry.response, entry.responseTime, entry.body.get());
 }
 
 } // namespace BrowserLite::HttpCache

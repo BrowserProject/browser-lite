@@ -17,13 +17,24 @@ class ChromeClient final : public WebCore::EmptyChromeClient {
 public:
     explicit ChromeClient(WebView&);
 
+    // Hat das Hauptdokument einen beforeunload-Listener? Geht als Ereignis
+    // "beforeunload" an die Oberflaeche, die beim Schliessen des Host-Tabs fragt.
+    static void reportBeforeUnload(WebView&);
+
+    // Eine echte Seite, keine Hilfsseite wie ein SVG-Bild (das hiesse
+    // EmptyChromeClient): sonst gibt ~Page ihre Seiten im Back/Forward-Cache
+    // nicht frei, sie leben weiter und der Cache stuerzt beim Aufraeumen ab
+    bool isEmptyChromeClient() const final { return false; }
+
 private:
     void chromeDestroyed() final { }
 
     WebCore::FloatRect windowRect() const final;
     WebCore::FloatRect pageRect() const final;
 
-    void focus() final { }
+    // window.focus(), window.open() auf ein offenes Fenster, WindowClient.focus():
+    // Tab nach vorne (ob die Seite das darf, prueft WebCore vorher)
+    void focus() final;
     void unfocus() final { }
     bool canTakeFocus(WebCore::FocusDirection) const final { return true; }
     void takeFocus(WebCore::FocusDirection) final;
@@ -47,6 +58,11 @@ private:
     void isPlayingMediaDidChange(WebCore::MediaProducerMediaStateFlags) final;
     bool runJavaScriptConfirm(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptPrompt(WebCore::LocalFrame&, const String& message, const String& defaultValue, String& result) final;
+    bool canRunBeforeUnloadConfirmPanel() final { return true; }
+    bool runBeforeUnloadConfirmPanel(String&& message, WebCore::LocalFrame&) final;
+    // So meldet WebCore unload- und beforeunload-Listener
+    void enableSuddenTermination() final { reportBeforeUnload(m_view.get()); }
+    void disableSuddenTermination() final { reportBeforeUnload(m_view.get()); }
 
     RefPtr<WebCore::Page> createWindow(WebCore::LocalFrame&, const String&, const WebCore::WindowFeatures&, const WebCore::NavigationAction&) final;
     void closeWindow() final;

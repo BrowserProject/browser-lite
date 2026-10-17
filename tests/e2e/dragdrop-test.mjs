@@ -150,7 +150,7 @@ await screenshot(page, 'dragdrop');
 // 5. Abgelegte Dateien liegen im Ordner des Tabs und gehen mit ihm weg (bl_remove_path)
 const uploadFolders = () => page.evaluate(() => {
   try {
-    return window.__blEngine().FS.readdir('/tmp/uploads').filter((name) => name !== '.' && name !== '..').join(',');
+    return window.__blEngine().FS.readdir('/data/tmp/uploads').filter((name) => name !== '.' && name !== '..').join(',');
   } catch (e) {
     return 'fehler:' + e.message;
   }

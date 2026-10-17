@@ -1,0 +1,59 @@
+diff --git a/Source/WebCore/platform/network/curl/CurlRequest.cpp b/Source/WebCore/platform/network/curl/CurlRequest.cpp
+index dba3460cfb..62bb437956 100644
+--- a/Source/WebCore/platform/network/curl/CurlRequest.cpp
++++ b/Source/WebCore/platform/network/curl/CurlRequest.cpp
+@@ -42,10 +42,42 @@
+ #include <wtf/TZoneMallocInlines.h>
+ #include <wtf/text/MakeString.h>
+ 
++#if PLATFORM(WASM)
++#include <cerrno>
++#endif
++
+ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(CurlRequest);
+ 
++#if PLATFORM(WASM)
++// Die Sockets der Engine gehen ueber ein Relay (Wisp), das einen neuen Stream nicht
++// bestaetigt: er gilt sofort als offen, ein Aufbau, der beim Relay scheitert, zeigt sich
++// erst beim Lesen oder Schreiben. Der Fehler des Sockets sagt, was war (Sockets.cpp im
++// Embedding), daraus der Code, den curl beim Verbinden gaebe. Das Relay ist der Proxy.
++static CURLcode connectionErrorOnWasm(CURLcode result, long socketError)
++{
++    switch (socketError) {
++    case EADDRNOTAVAIL: // ein Name, den das Relay nicht aufloesen kann
++        return CURLE_COULDNT_RESOLVE_HOST;
++    case ECONNREFUSED:
++        return CURLE_COULDNT_CONNECT;
++    case EHOSTUNREACH:
++        // Fuer curl ist das auch CURLE_COULDNT_CONNECT. CURLE_INTERFACE_FAILED gibt es
++        // sonst nie (kein CURLOPT_INTERFACE), so bleibt es von "abgewiesen" getrennt.
++        return CURLE_INTERFACE_FAILED;
++    case ETIMEDOUT:
++        return CURLE_OPERATION_TIMEDOUT;
++    case ENETUNREACH: // kein Relay
++        return CURLE_COULDNT_RESOLVE_PROXY;
++    case EACCES: // das Relay sperrt das Ziel
++        return CURLE_REMOTE_ACCESS_DENIED;
++    default:
++        return result;
++    }
++}
++#endif
++
+ CurlRequest::CurlRequest(const ResourceRequest&request, CurlRequestClient* client, CaptureNetworkLoadMetrics captureExtraMetrics)
+     : m_client(client)
+     , m_request(request.isolatedCopy())
+@@ -484,6 +516,11 @@ void CurlRequest::didCompleteTransfer(CURLcode result)
+             client.curlDidComplete(request, WTF::move(networkLoadMetrics));
+         });
+     } else {
++#if PLATFORM(WASM)
++        long socketError = 0;
++        if (!m_response.statusCode && m_curlHandle && curl_easy_getinfo(m_curlHandle->handle(), CURLINFO_OS_ERRNO, &socketError) == CURLE_OK)
++            result = connectionErrorOnWasm(result, socketError);
++#endif
+         auto type = (result == CURLE_OPERATION_TIMEDOUT && timeoutInterval()) ? ResourceError::Type::Timeout : ResourceError::Type::General;
+         auto resourceError = ResourceError(result, m_request.url(), type);
+ 

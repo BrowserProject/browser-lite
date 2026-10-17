@@ -44,6 +44,10 @@ void stopForView(int viewId);
 // Engine-Thread
 void wheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
 
+// Jeder Thread: hat die Seite an der Stelle einen wheel-Listener, der
+// preventDefault rufen kann (Wheel-Event-Regions)? Ohne Scroll-Thread: ja
+bool mayCancelWheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
+
 // Compositor-Thread, nach jedem Bild: Scroll-Animationen weiterfuehren.
 // true = es laeuft eine, also bald wieder ein Bild
 bool displayDidRefresh(int viewId);

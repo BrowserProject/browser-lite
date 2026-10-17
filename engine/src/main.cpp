@@ -105,6 +105,11 @@ int main(int, char**)
     setenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf", 1);
     prepareFontCache("/usr/share/fonts");
 
+    // Alle Tabs teilen sich curl. WebKit erlaubt 6 Verbindungen pro Host (wie Chrome), aber
+    // nur 17 insgesamt: ein paar Long-Polls in Hintergrund-Tabs liessen den aktiven Tab
+    // warten. 64 liegt weit unter den 256 Streams des Relays, Platz fuer die WebSockets.
+    setenv("WEBKIT_CURL_MAX_TOTAL_CONNECTIONS", "64", 0);
+
     JSC::initialize();
     WTF::initializeMainThread();
 

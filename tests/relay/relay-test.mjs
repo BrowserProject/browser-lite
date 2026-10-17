@@ -1,7 +1,8 @@
 // Testet Relay (relay/server.mjs, relay/static.mjs) + Wisp-Client (web/transport.js) zusammen:
 // Token, Echo mit Flusskontrolle, Gegendruck (onsent), Reconnect nach Neustart des Relays, Verbindungszustand,
-// SSRF-Sperre im offenen Betrieb, Auslieferung der Seite (Header, Brotli, ETag/304, kaputte URLs, abgebrochene Downloads).
+// Gruende fuer gescheiterte Streams, nur TCP, sofort geschlossene Streams, Socket zu nach dem Schliessen, Lebenszeichen des Relays, halb offene Verbindungen, langsamer Upload, SSRF-Sperre im offenen Betrieb, Auslieferung der Seite (Header, Brotli, ETag/304, kaputte URLs, abgebrochene Downloads).
 //   node tests/relay/relay-test.mjs
+import dgram from 'node:dgram';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -14,13 +15,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const TOKEN = 'test-token-0123456789abcdef';
 const TOKEN_PORT = 15001;
 const OPEN_PORT = 15002;
+const INVALID_INFO = 0x41;
+const UNREACHABLE_HOST = 0x42;
+const CONNECTION_REFUSED = 0x44;
+const ADDRESS_UNREACHABLE = 0x4a; // relay/wisp.mjs
 const HOST_BLOCKED = 0x48;
+const CONN_THROTTLED = 0x49;
+const STREAMS_PER_HOST = 64; // wie relay/server.mjs
 
 // Nie ewig haengen (z.B. Port belegt, Relay startet nicht)
 setTimeout(() => {
-  console.log('FAIL Zeitlimit (90 s)');
+  console.log('FAIL Zeitlimit (180 s)');
   process.exit(1);
-}, 90000).unref();
+}, 180000).unref();
 
 const children = new Set();
 process.on('exit', () => {
@@ -125,9 +132,37 @@ async function backpressure(transport) {
   return { stalled, sent, total };
 }
 
+// Stream, der ein Echo beantwortet (also wirklich verbunden ist), sonst null
+async function echoStream(transport, host, port) {
+  const stream = transport.openTCP(host, port);
+  const answered = await within(new Promise((resolve) => {
+    stream.ondata = () => resolve(true);
+    stream.onclose = () => resolve(false);
+    stream.onopen = () => stream.send(new Uint8Array([1]));
+  }), 5000, false);
+  return answered ? stream : null;
+}
+
 // Close-Grund eines Streams zu host:port, null wenn er offen bleibt
 async function closeReason(transport, host, port) {
   const stream = transport.openTCP(host, port);
+  return within(new Promise((resolve) => {
+    stream.onclose = resolve;
+  }), 5000, null);
+}
+
+// Wie closeReason, aber CONNECT mit einem anderen Stream-Typ als TCP
+async function closeReasonOfType(transport, type, host, port) {
+  const stream = transport.openTCP(host, port);
+  stream.start = function () {
+    const name = new TextEncoder().encode(host);
+    const payload = new Uint8Array(3 + name.length);
+    payload[0] = type;
+    new DataView(payload.buffer).setUint16(1, port, true);
+    payload.set(name, 3);
+    this.transport.sendPacket(0x01, this.id, payload);
+    this.isOpen = true;
+  };
   return within(new Promise((resolve) => {
     stream.onclose = resolve;
   }), 5000, null);
@@ -182,9 +217,127 @@ const { WispTransport } = await import(path.join(root, 'web', 'transport.js'));
   const big = await echoOver(transport, echoPort, 2 * 1024 * 1024);
   check('2 MB Echo', big.received === 2 * 1024 * 1024 && !big.corrupt, `${big.received} Bytes, korrupt=${big.corrupt}`);
 
+  // Gescheiterte Streams mit Grund (Fehlerseite der Engine): abgewiesen, Name unbekannt,
+  // leeres Ziel (die Nachfrage des Transports, ob die Verbindung lebt)
+  const closedPort = await new Promise((resolve) => {
+    const probe = net.createServer().listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+  check('Port zu: Grund abgewiesen', await closeReason(transport, '127.0.0.1', closedPort) === CONNECTION_REFUSED);
+  check('Unbekannter Name: Grund Host nicht erreichbar', await closeReason(transport, 'nonexistent.invalid', 80) === UNREACHABLE_HOST);
+  check('Leeres Ziel: Grund ungueltig', await closeReason(transport, '', 0) === INVALID_INFO);
+  // Adresse ohne Weg dorthin (Dokumentationsnetz), nur wenn dieser Rechner das auch so sieht
+  const unreachable = await new Promise((resolve) => {
+    const socket = net.connect({ host: '2001:db8::1', port: 80 });
+    const done = (result) => {
+      socket.destroy();
+      resolve(result);
+    };
+    socket.on('error', (error) => done(['EHOSTUNREACH', 'ENETUNREACH'].includes(error.code)));
+    socket.on('connect', () => done(false));
+    setTimeout(() => done(false), 3000).unref();
+  });
+  if (unreachable)
+    check('Adresse nicht erreichbar: eigener Grund', await closeReason(transport, '2001:db8::1', 80) === ADDRESS_UNREACHABLE);
+  else
+    console.log('Hinweis: 2001:db8::1 ist hier nicht sofort unerreichbar, Fall uebersprungen');
+
+  // Schliesst der Client einen Stream gleich nach CONNECT (noch beim Aufloesen des Namens),
+  // verbindet das Relay danach nicht mehr: sonst hielte es Verbindungen ausserhalb jeder Grenze
+  {
+    let accepted = 0;
+    const target = net.createServer((socket) => {
+      accepted++;
+      socket.destroy();
+    }).listen(0);
+    await new Promise((r) => target.on('listening', r));
+    for (let i = 0; i < 20; i++) {
+      const stream = transport.openTCP('localhost', target.address().port);
+      stream.onopen = () => stream.close();
+    }
+    await sleep(1500);
+    check('Sofort geschlossene Streams verbinden nicht', accepted === 0, `${accepted} Verbindungen`);
+    target.close();
+  }
+
+  // Grenze pro Ziel (Name und Port): weitere Streams dorthin enden mit "gedrosselt", auch
+  // anders geschrieben; ein anderer Name, ein anderer Port und ein frei gewordener Platz gehen
+  const held = await Promise.all(Array.from({ length: STREAMS_PER_HOST }, () => echoStream(transport, '127.0.0.1', echoPort)));
+  check(`${STREAMS_PER_HOST} Streams zum gleichen Ziel`, held.every(Boolean), `${held.filter(Boolean).length} verbunden`);
+  check('Ein Stream mehr: Grund gedrosselt', await closeReason(transport, '127.0.0.1', echoPort) === CONN_THROTTLED);
+  check('Mit Punkt am Ende: auch gedrosselt', await closeReason(transport, '127.0.0.1.', echoPort) === CONN_THROTTLED);
+  check('Anderer Port: nicht gedrosselt', await closeReason(transport, '127.0.0.1', closedPort) === CONNECTION_REFUSED);
+  // "127.1" ist ein anderer Name, den getaddrinfo auch zu 127.0.0.1 aufloest
+  const other = await echoStream(transport, '127.1', echoPort);
+  check('Anderes Ziel geht trotzdem', Boolean(other));
+  held.pop()?.close();
+  const freed = await echoStream(transport, '127.0.0.1', echoPort);
+  check('Nach dem Schliessen eines Streams wieder Platz', Boolean(freed));
+  for (const stream of [...held, other, freed])
+    stream?.close();
+
   const pressure = await backpressure(transport);
   check('Gegendruck: ohne Lesen des Ziels stoppt onsent', pressure.stalled > 0 && pressure.stalled < pressure.total, `${pressure.stalled} von ${pressure.total} Bytes`);
   check('Gegendruck: danach alles gesendet', pressure.sent === pressure.total, `${pressure.sent} Bytes`);
+
+  // Nur TCP: jeder andere Typ ginge an der Pruefung der Adresse vorbei (hier waere
+  // Loopback sogar erlaubt)
+  {
+    const udp = dgram.createSocket('udp4');
+    let datagrams = 0;
+    udp.on('message', () => datagrams++);
+    await new Promise((r) => udp.bind(0, '127.0.0.1', r));
+    const reasons = [];
+    for (const type of [0x02, 0x03, 0xff])
+      reasons.push(await closeReasonOfType(transport, type, '127.0.0.1', udp.address().port));
+    await sleep(300);
+    check('Andere Stream-Typen als TCP gesperrt', reasons.every((reason) => reason === HOST_BLOCKED) && datagrams === 0, `Gruende ${reasons}, ${datagrams} Datagramme`);
+    udp.close();
+  }
+
+  // Schliesst der Client einen Stream, ist auch der Socket zum Ziel zu, selbst wenn das Ziel
+  // weiter sendet: sonst hielte er Verbindungen ausserhalb jeder Grenze und pufferte ohne Ende
+  {
+    let targetClosed = false;
+    const target = net.createServer({ allowHalfOpen: true }, (socket) => {
+      const chunk = Buffer.alloc(64 * 1024);
+      const pump = () => {
+        while (!socket.destroyed && socket.write(chunk));
+      };
+      socket.on('drain', pump);
+      socket.on('error', () => {});
+      socket.on('close', () => {
+        targetClosed = true;
+      });
+      pump();
+    }).listen(0, '127.0.0.1');
+    await new Promise((r) => target.on('listening', r));
+    const stream = transport.openTCP('127.0.0.1', target.address().port);
+    await within(new Promise((resolve) => {
+      stream.ondata = resolve;
+    }), 5000);
+    stream.close();
+    check('Geschlossener Stream: Socket zum Ziel zu, obwohl es weiter sendet', await waitUntil(() => targetClosed, 3000));
+    target.close();
+  }
+
+  // Offene Streams ohne Verkehr: das Relay meldet sich trotzdem regelmaessig
+  {
+    const silent = net.createServer(() => {}).listen(0, '127.0.0.1');
+    await new Promise((r) => silent.on('listening', r));
+    const stream = await new Promise((resolve) => {
+      const opened = transport.openTCP('127.0.0.1', silent.address().port);
+      opened.onopen = () => resolve(opened);
+    });
+    await sleep(500);
+    const before = transport.received;
+    await sleep(4000);
+    check('Stiller Stream: Relay meldet sich', transport.received > before, `${transport.received - before} Pakete`);
+    stream.close();
+    silent.close();
+  }
 
   const stopped = await stopRelay(relay);
   check('SIGTERM beendet das Relay sauber', stopped.code === 0, JSON.stringify(stopped));
@@ -250,10 +403,13 @@ try {
     check('Port 22 gesperrt', reason === HOST_BLOCKED, `Grund ${reason}`);
   }
   {
-    // Namen sperrt die eigene Aufloesung (dns_method), wisp-js meldet das als Verbindungsfehler
     const reason = await closeReason(transport, 'localhost', 80);
-    check('localhost gesperrt', reason === 0x03 && relay.log.includes('localhost ist keine oeffentliche Adresse'),
-      `Grund ${reason}`);
+    check('localhost gesperrt', reason === HOST_BLOCKED, `Grund ${reason}`);
+  }
+  {
+    // Die Nachfrage des Transports kommt auch an der Port-Sperre vorbei und fuellt kein Log
+    const reason = await closeReason(transport, '', 0);
+    check('Leeres Ziel: Grund ungueltig, ohne Warnung', reason === INVALID_INFO && !relay.log.includes('stream to :0'), `Grund ${reason}`);
   }
   transport.ws?.close();
 
@@ -319,6 +475,140 @@ try {
   await stopRelay(relay);
 } finally {
   fs.rmSync(site, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------- halb offene Verbindung
+// Ein "Relay", das nach dem Handshake nichts mehr sagt (wie nach dem Ruhezustand): der
+// Transport fragt nach, bekommt keine Antwort, schliesst die Streams mit 0x03 und verbindet
+// neu. Beantwortet es die Nachfrage (wie ein Long-Poll, der lange keine Daten hat), bleibt
+// der Stream offen.
+{
+  const { WebSocketServer } = await import(path.join(root, 'relay', 'node_modules', 'ws', 'wrapper.mjs'));
+  let answerProbes = true;
+  let connections = 0;
+  const silent = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await new Promise((r) => silent.on('listening', r));
+  silent.on('connection', (ws) => {
+    connections++;
+    ws.send(Uint8Array.of(0x03, 0, 0, 0, 0, 128, 0, 0, 0));
+    ws.on('message', (data) => {
+      const packet = new Uint8Array(data);
+      // CONNECT auf Port 0 ist die Nachfrage
+      if (answerProbes && packet[0] === 0x01 && packet[6] === 0 && packet[7] === 0)
+        ws.send(Uint8Array.of(0x04, ...packet.subarray(1, 5), INVALID_INFO));
+    });
+  });
+  const transport = new WispTransport(`ws://127.0.0.1:${silent.address().port}/`);
+  const waitForAnswer = async (ms) => {
+    const stream = transport.openTCP('example.org', 80);
+    stream.onopen = () => stream.send(new TextEncoder().encode('GET / HTTP/1.1\r\n\r\n'));
+    const started = Date.now();
+    const reason = await within(new Promise((resolve) => {
+      stream.onclose = resolve;
+    }), ms, null);
+    stream.close();
+    return { reason, seconds: ((Date.now() - started) / 1000).toFixed(1) };
+  };
+  const alive = await waitForAnswer(18000);
+  check('Nachfrage beantwortet: Stream bleibt offen', alive.reason === null && connections === 1, JSON.stringify(alive));
+  answerProbes = false;
+  const dead = await waitForAnswer(25000);
+  check('Keine Antwort: Stream endet mit Netzwerkfehler', dead.reason === 0x03, JSON.stringify(dead));
+  const again = transport.openTCP('example.org', 80);
+  await waitUntil(() => connections === 2, 3000);
+  check('danach neue Verbindung', connections === 2, `${connections} Verbindungen`);
+  again.close();
+  transport.ws?.close();
+  silent.close();
+}
+
+// ---------------------------------------------------------------- langsamer Upload
+// Eine WebSocket ueber eine langsame Leitung zu einem Relay, das lebt: es beantwortet die
+// Nachfrage, sobald sie ankommt, und sagt sonst nichts. Der Upload dauert laenger, als der
+// Transport auf eine Antwort wartet: er darf die Verbindung trotzdem nicht aufgeben. Steht
+// die Leitung (Rate 0, der Puffer leert sich nie), ist sie tot. Liegt der Upload ausserhalb der
+// WebSocket (Puffer des Betriebssystems, bufferedAmount 0), haelt das Lebenszeichen des Relays
+// (CONTINUE auf Stream 0, relay/wisp.mjs) die Verbindung.
+{
+  class SlowLink {
+    static OPEN = 1;
+    constructor(url) {
+      const params = new URL(url).searchParams;
+      this.rate = Number(params.get('rate'));
+      this.hidden = params.has('versteckt');
+      this.readyState = 0;
+      this.bufferedAmount = 0;
+      this.queue = [];
+      this.offset = 0; // vom ersten Paket schon uebertragen
+      this.uploaded = 0;
+      setTimeout(() => {
+        this.readyState = 1;
+        this.deliver(Uint8Array.of(0x03, 0, 0, 0, 0, 128, 0, 0, 0));
+      }, 10);
+      this.timer = setInterval(() => this.transfer(this.rate / 10), 100);
+      if (this.hidden)
+        this.keepalive = setInterval(() => this.deliver(Uint8Array.of(0x03, 0, 0, 0, 0, 128, 0, 0, 0)), 3000);
+    }
+    deliver(packet) {
+      this.onmessage?.({ data: packet.buffer });
+    }
+    send(packet) {
+      this.queue.push(packet);
+      if (!this.hidden)
+        this.bufferedAmount += packet.byteLength;
+    }
+    transfer(budget) {
+      while (budget > 0 && this.queue.length) {
+        const packet = this.queue[0];
+        const part = Math.min(budget, packet.byteLength - this.offset);
+        budget -= part;
+        this.offset += part;
+        if (!this.hidden)
+          this.bufferedAmount -= part;
+        if (this.offset < packet.byteLength)
+          break;
+        this.queue.shift();
+        this.offset = 0;
+        if (packet[0] === 0x02)
+          this.uploaded += packet.byteLength - 5;
+        if (packet[0] === 0x01 && packet[6] === 0 && packet[7] === 0)
+          this.deliver(Uint8Array.of(0x04, ...packet.subarray(1, 5), INVALID_INFO));
+      }
+    }
+    close() {
+      clearInterval(this.timer);
+      clearInterval(this.keepalive);
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+  // Eigene Kopie des Transports, die SlowLink fuer ihre WebSocket nimmt
+  const NativeWebSocket = globalThis.WebSocket;
+  globalThis.WebSocket = SlowLink;
+  const { WispTransport: SlowTransport } = await import(path.join(root, 'web', 'transport.js') + '?langsam');
+  globalThis.WebSocket = NativeWebSocket;
+
+  const PACKET = 32 * 1024;
+  const upload = async (rate, packets, ms, hidden = false) => {
+    const transport = new SlowTransport(`ws://langsam/?rate=${rate}${hidden ? '&versteckt' : ''}`);
+    const stream = transport.openTCP('example.org', 80);
+    stream.onopen = () => {
+      for (let i = 0; i < packets; i++)
+        stream.send(new Uint8Array(PACKET));
+    };
+    const reason = await within(new Promise((resolve) => {
+      stream.onclose = resolve;
+    }), ms, null);
+    const uploaded = transport.ws.uploaded;
+    stream.close();
+    transport.ws.close();
+    return { reason, uploaded };
+  };
+  // 1.8 MB mit 100 KB/s: die Nachfrage nach 10 s kaeme erst nach 18 s an
+  const [slow, hidden, stalled] = await Promise.all([upload(100 * 1024, 56, 23000), upload(100 * 1024, 56, 23000, true), upload(0, 4, 15000)]);
+  check('Langsamer Upload: Verbindung bleibt, alles angekommen', slow.reason === null && slow.uploaded === 56 * PACKET, JSON.stringify(slow));
+  check('Upload im Puffer des Betriebssystems: Lebenszeichen haelt die Verbindung', hidden.reason === null && hidden.uploaded === 56 * PACKET, JSON.stringify(hidden));
+  check('Leitung steht: Stream endet mit Netzwerkfehler', stalled.reason === 0x03, JSON.stringify(stalled));
 }
 
 echo.close();

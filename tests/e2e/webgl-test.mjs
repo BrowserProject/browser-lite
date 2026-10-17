@@ -4,7 +4,7 @@
 // Dazu: Verlust der Host-Kontexte (webglcontextlost, webglcontextrestored).
 //
 //   cd tests/e2e && node webgl-test.mjs [engine-ordner]
-import { SWIFTSHADER, check, collect, finish, launch, screenshot, serve, startStack, timeLimit } from './harness.mjs';
+import { SWIFTSHADER, check, collect, finish, launch, pagePixel, screenshot, serve, startStack, timeLimit } from './harness.mjs';
 
 timeLimit();
 
@@ -346,9 +346,7 @@ const extensions = Number(await result('extensions'));
 check('WebGL 1: Erweiterungen', extensions > 5, String(extensions));
 
 // Das Bild muss auch in der Seite ankommen
-async function pixelAt(x, y) {
-  return page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
-}
+const pixelAt = (x, y) => pagePixel(page, x, y);
 const isPicture1 = ({ center1, corner1 }) => center1[0] > 200 && center1[1] < 60 && corner1[2] > 200;
 const isPicture2 = ({ center2 }) => center2[0] > 200 && center2[1] > 200 && center2[2] < 60;
 async function pagePicture() {
