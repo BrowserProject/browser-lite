@@ -99,8 +99,11 @@ Zeit ab Start der Oberflaeche, je 3 Laeufe am 16.10.2026:
 1. **Erstes Bild auf schweren Seiten**: meist 0.1-0.3 s nach dem ersten Layout (#164).
    Faellt das erste Layout in ein langes Skript (20min: erzwungene Layouts, YouTube:
    2.6-3 s Skript gleich danach), kommt das Bild erst nach dem Skript. Der HTML-Parser
-   arbeitet lange Stuecke (1-1.5 s) ohne Pause. Aufgaben anderer Threads warten unter
-   Last bis 3.7 s im Postfach von Emscripten, Abholen bei jedem Durchgang brachte nichts.
+   arbeitet lange Stuecke (1-1.5 s) ohne Pause, eine kuerzere Zeitgrenze brachte nichts
+   ohne Kosten (#186). Aufgaben anderer Threads warten unter Last bis 3.7 s im Postfach
+   von Emscripten, Abholen bei jedem Durchgang brachte nichts. Zu pruefen: mit
+   `?env=...` (egal welcher Wert) kam das erste Bild auf YouTube in 32 von 36 Laeufen
+   unter 3.5 s, ohne in 10 von 24 (#186). Twitch laedt zweigeteilt (6-7 s oder ca. 20 s).
 2. **Kompilieren beim ersten Aufruf** (weather.com ca. 11 s Parser + Bytecode):
    beim zweiten Besuch hilft der Bytecode-Cache (#135), beim ersten nicht.
 3. **Interpreter-Eigenzeit** (CLoop, 15-21 % auf JS-lastigen Seiten): nur mit
