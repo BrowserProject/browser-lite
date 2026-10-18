@@ -544,6 +544,15 @@ check(
   fullscreen === 'ok' && (await result('fson')) === '1' && hostFullscreen,
   `page: ${fullscreen}, host: ${hostFullscreen}`,
 );
+// Crash and hang messages and the find bar stay visible in fullscreen
+check(
+  'fullscreen holds the engine messages and the find bar',
+  await page.evaluate(() =>
+    ['boot', 'find-bar'].every((id) =>
+      document.fullscreenElement?.contains(document.getElementById(id)),
+    ),
+  ),
+);
 await page.evaluate(() => document.exitFullscreen().catch(() => {}));
 check('ending fullscreen reaches the page', (await result('fsoff')) === '1');
 

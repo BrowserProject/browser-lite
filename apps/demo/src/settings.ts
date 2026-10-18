@@ -1,6 +1,5 @@
 import type { BrowserOptions, ColorScheme } from '@browser-lite/core';
 import { DEFAULT_DB_LIMIT_KB } from '@browser-lite/profile';
-import { takeRestart } from './reload.js';
 import { profile } from './runtime.js';
 
 /** Search engines of the address bar; `%s` is the query. */
@@ -107,28 +106,35 @@ export interface StartSettings {
   zoom: number;
   restoreSession: boolean;
   /** Options of createBrowser. */
-  options: Pick<
-    BrowserOptions,
-    | 'userAgent'
-    | 'platform'
-    | 'languages'
-    | 'timeZone'
-    | 'colorScheme'
-    | 'device'
-    | 'preferences'
-    | 'keepSessionCookies'
-  >;
+  options: Required<
+    Pick<
+      BrowserOptions,
+      | 'userAgent'
+      | 'platform'
+      | 'languages'
+      | 'timeZone'
+      | 'colorScheme'
+      | 'preferences'
+      | 'keepSessionCookies'
+    >
+  > &
+    Pick<BrowserOptions, 'device'>;
 }
 
 let start: StartSettings | null = null;
 
-/** Settings of this start (computed once, after the profile prefs arrived). */
+/** Settings of the running start. */
 export function startSettings(): StartSettings {
-  if (start) return start;
+  return start ?? updateStartSettings(false);
+}
+
+/**
+ * Computes the settings of the running start from the current prefs. `restarted`: "Restart now"
+ * or the restart after a crash, which always keep the session.
+ */
+export function updateStartSettings(restarted: boolean): StartSettings {
   const current = settings();
   const device = DEVICES[current.device] ?? (DEVICES.desktop as DeviceProfile);
-  // "Restart now" and the restart after a crash always keep the session
-  const restarted = takeRestart();
   const restoreSession = current.restoreSession || restarted;
   const languages = current.languages
     .split(',')
@@ -157,7 +163,12 @@ export function startSettings(): StartSettings {
   return start;
 }
 
-/** Computes the start settings again at the next start (restart in the page). */
-export function resetStartSettings(): void {
-  start = null;
+/**
+ * True when `next` needs another engine than `running`: the time zone, the emulated device and
+ * keeping session cookies only apply at the start of the engine.
+ */
+export function needsNewEngine(running: StartSettings, next: StartSettings): boolean {
+  const fixed = ({ options }: StartSettings) =>
+    JSON.stringify([options.timeZone, options.device ?? null, options.keepSessionCookies]);
+  return fixed(running) !== fixed(next);
 }

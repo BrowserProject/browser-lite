@@ -2,7 +2,8 @@
 // signed in on a second device (a new Chromium profile at the same server) with cookie, session
 // cookie, localStorage and a small IndexedDB; large databases stay on the device, one that grew
 // over the limit drops out of the profile; deleted locally is gone on the server too; takeover
-// and reset by the other device; settings and bookmarks in the profile; what did not go up
+// and reset by the other device; settings (already at the first start of the other device) and
+// bookmarks in the profile; what did not go up
 // before closing comes at the next start and is not overwritten by the server; reset the profile;
 // without the server everything stays local and goes up at the next start with the server. The
 // settings page itself: settings-test.mjs.
@@ -74,7 +75,8 @@ open.onsuccess = () => {
     open.onerror = () => resolve('error');
   });
   console.log('RESULT read=' + [...['lasting', 'session', 'later', 'late', 'pending'].map((name) => name + ':' + cookie(name)),
-    'local:' + (localStorage.getItem('login') || 'empty'), 'small:' + await get('small'), 'large:' + await get('large')].join(','));
+    'local:' + (localStorage.getItem('login') || 'empty'), 'small:' + await get('small'), 'large:' + await get('large'),
+    'tz:' + Intl.DateTimeFormat().resolvedOptions().timeZone, 'lang:' + navigator.language].join(','));
 })();
 </script>`,
   delete: `<title>Delete</title><script>
@@ -303,7 +305,8 @@ check(
 );
 check('device 1: sync stopped', (await profileStatus(one.page)) === 'taken');
 
-// 4) Device 2 deletes a database, changes settings and adds a bookmark
+// 4) Device 2 deletes a database, changes settings (also ones that apply at the start of the
+// engine) and adds a bookmark
 await go(two.page, siteA + 'delete');
 check('device 2: database deleted', (await two.results.wait('deleted')) === '1');
 const deleted = await waitFor(
@@ -321,12 +324,23 @@ check(
 await openSettings(two.page, 'general');
 await two.page.selectOption('#setting-search', 'google');
 await two.page.keyboard.press('Escape');
+await two.page.evaluate(() => {
+  const { profile } = window.blTest;
+  profile.savePrefs('settings', {
+    ...profile.prefs('settings'),
+    timeZone: 'Asia/Tokyo',
+    languages: 'fr-CH',
+    zoom: 1.25,
+  });
+});
 await two.page.click('#bookmark');
 check(
   'settings and bookmarks on the server',
   await waitFor(
     () =>
-      serverPrefs('settings')?.searchEngine === 'google' && serverPrefs('bookmarks')?.length === 1,
+      serverPrefs('settings')?.searchEngine === 'google' &&
+      serverPrefs('settings')?.timeZone === 'Asia/Tokyo' &&
+      serverPrefs('bookmarks')?.length === 1,
     10000,
   ),
   JSON.stringify([serverPrefs('settings'), serverPrefs('bookmarks')]),
@@ -343,6 +357,17 @@ check(
     onOne.local === 'yes' &&
     onOne.small === 'none',
   JSON.stringify(onOne),
+);
+// Device 1 had the old settings: the ones of the server apply at this start already
+check(
+  'device 1 again: time zone and language of device 2 at the first start',
+  onOne.tz === 'Asia/Tokyo' && onOne.lang === 'fr-CH',
+  JSON.stringify(onOne),
+);
+check(
+  'device 1 again: zoom of device 2, profile connected',
+  (await one.page.evaluate(() => window.blTest.view().zoom)) === 1.25 &&
+    (await profileStatus(one.page)) === 'connected',
 );
 check(
   'device 1 again: large IndexedDB still there',
@@ -372,6 +397,12 @@ const idBefore = (await info()).id;
 two.results.clear();
 await two.page.goto(stack.app({ url: siteA + 'read' }));
 await two.results.wait('read');
+// A setting the running engine takes without a new start
+await two.page.evaluate(() => {
+  const { profile } = window.blTest;
+  profile.savePrefs('settings', { ...profile.prefs('settings'), languages: 'it-CH' });
+});
+await waitFor(() => serverPrefs('settings')?.languages === 'it-CH', 10000);
 await two.page.click('#clear-data');
 const twoReloaded = two.page.waitForEvent('load', { timeout: 30000 }).then(
   () => true,
@@ -409,6 +440,11 @@ const fresh = await reopen(one);
 check(
   'device 1 after clearing on device 2: signed out',
   fresh.lasting === 'no' && fresh.local === 'empty',
+  JSON.stringify(fresh),
+);
+check(
+  'device 1: language of device 2 at the first start',
+  fresh.lang === 'it-CH' && fresh.tz === 'Asia/Tokyo',
   JSON.stringify(fresh),
 );
 one.results.clear();
@@ -504,10 +540,15 @@ check(
       local: 'empty',
       small: 'none',
       large: 'none',
+      tz: 'Europe/Zurich',
+      lang: 'de-CH',
     }),
   JSON.stringify(cleared),
 );
-check('settings default again (DuckDuckGo)', (await searchEngine(one.page)) === 'duckduckgo');
+check(
+  'settings default again (DuckDuckGo, time zone and language of the host)',
+  (await searchEngine(one.page)) === 'duckduckgo',
+);
 
 // 10) Server not reachable: a notice, everything stays on the device, also changed settings. At
 // the next start with the server everything goes up.

@@ -1,4 +1,5 @@
 import {
+  type Browser,
   BrowserLiteError,
   type BrowserOptions,
   checkSupport,
@@ -16,10 +17,10 @@ import { initFindBar, openFind } from './find-bar.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
 import { profilePermissions } from './permissions.js';
 import { onPreviewClosed } from './print-preview.js';
-import { addressWithoutUrl, markRestart, reloadUI } from './reload.js';
+import { addressWithoutUrl, markRestart, reloadUI, takeRestart } from './reload.js';
 import { profile, runtime } from './runtime.js';
 import { sessionToRestore } from './session.js';
-import { resetStartSettings, type StartSettings, startSettings } from './settings.js';
+import { needsNewEngine, type StartSettings, updateStartSettings } from './settings.js';
 import { openSettings } from './settings-page.js';
 import { installShortcuts } from './shortcuts.js';
 import { initSidePanel, panelOpen, togglePanel } from './side-panel.js';
@@ -72,11 +73,16 @@ function emulateDevice(start: StartSettings): void {
   viewport.style.setProperty('--device-height', `${screen.height}px`);
 }
 
-function browserOptions(start: StartSettings, transport: WispTransport): BrowserOptions {
+/** `openProfile`: download the profile into the storage directory before the engine starts. */
+function browserOptions(
+  start: StartSettings,
+  transport: WispTransport,
+  openProfile: boolean,
+): BrowserOptions {
   const options: BrowserOptions = {
     engineUrl: new URL(import.meta.env.VITE_ENGINE_BASE || 'engine/', location.href),
     transport,
-    storage: { beforeStart: profile.beforeStart },
+    storage: openProfile ? { beforeStart: profile.beforeStart } : {},
     serviceWorker: { url: new URL('sw.js', location.href) },
     // WebRTC of the pages goes through the host browser (not the relay), like in Chrome
     services: [...defaultServices(), webrtc()],
@@ -177,8 +183,46 @@ async function restart(safe: boolean): Promise<void> {
   await browser?.destroy().catch((error: unknown) => console.warn('destroy:', error));
   closeTransport();
   clearTabs();
-  resetStartSettings();
+  // A page in fullscreen belonged to the old engine
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   await start(true);
+}
+
+/** Creates the browser with its own transport; null after an error (shown or reloading). */
+async function launch(
+  settings: StartSettings,
+  restarted: boolean,
+  openProfile: boolean,
+): Promise<Browser | null> {
+  const token = tokenFor(relayUrl.host);
+  transport = new WispTransport({ url: relayUrl, ...(token ? { token } : {}) });
+  testState.transport = transport;
+  const options = browserOptions(settings, transport, openProfile);
+  testState.options = options;
+  try {
+    return await createBrowser(options);
+  } catch (error) {
+    closeTransport();
+    // An engine that could not be stopped keeps running: only a reload helps
+    if (restarted && error instanceof BrowserLiteError && error.code === 'already-running') {
+      reloadUI(addressWithoutUrl());
+      return null;
+    }
+    console.error(error);
+    showMessage(`Error at start: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/** Applies what changed from `running` to `next` and the engine takes without a new start. */
+function applyChanges(browser: Browser, running: StartSettings, next: StartSettings): void {
+  const changed = (...keys: (keyof StartSettings['options'])[]) =>
+    keys.some((key) => JSON.stringify(running.options[key]) !== JSON.stringify(next.options[key]));
+  const { options } = next;
+  if (changed('userAgent', 'platform')) browser.setUserAgent(options.userAgent, options.platform);
+  if (changed('languages')) browser.setLanguages(options.languages);
+  if (changed('colorScheme')) browser.setColorScheme(options.colorScheme);
+  if (changed('preferences')) browser.setPreferences(options.preferences);
 }
 
 async function start(restarted: boolean): Promise<void> {
@@ -189,27 +233,24 @@ async function start(restarted: boolean): Promise<void> {
     ]);
     return;
   }
-  const settings = startSettings();
-  emulateDevice(settings);
-  const token = tokenFor(relayUrl.host);
-  transport = new WispTransport({ url: relayUrl, ...(token ? { token } : {}) });
-  testState.transport = transport;
-  const options = browserOptions(settings, transport);
-  testState.options = options;
-  let browser: Awaited<ReturnType<typeof createBrowser>>;
-  try {
-    browser = await createBrowser(options);
-  } catch (error) {
+  // "Restart now" and the restart after a crash always keep the session
+  const keepSession = takeRestart();
+  // The prefs of the last start on this device: the profile of the server only arrives in
+  // storage.beforeStart, after the options of the engine are fixed
+  const cached = updateStartSettings(keepSession);
+  let browser = await launch(cached, restarted, true);
+  if (!browser) return;
+  const settings = updateStartSettings(keepSession);
+  if (needsNewEngine(cached, settings)) {
+    // The profile is already in the storage directory
+    await browser.destroy().catch((error: unknown) => console.warn('destroy:', error));
     closeTransport();
-    // An engine that could not be stopped keeps running: only a reload helps
-    if (restarted && error instanceof BrowserLiteError && error.code === 'already-running') {
-      reloadUI(addressWithoutUrl());
-      return;
-    }
-    console.error(error);
-    showMessage(`Error at start: ${(error as Error).message}`);
-    return;
+    browser = await launch(settings, true, false);
+    if (!browser) return;
+  } else {
+    applyChanges(browser, cached, settings);
   }
+  emulateDevice(settings);
   runtime.browser = browser;
   runtime.stopped = false;
   profile.attach(browser);

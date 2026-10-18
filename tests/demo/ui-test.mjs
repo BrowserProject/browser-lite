@@ -429,9 +429,33 @@ check(
   await waitLoaded('Page with-token', TIMEOUT),
   loaded.join('|'),
 );
-// Empty ?relay= takes the own relay without a foreign token. ?env= sets only engine switches.
+// ?env= goes unchanged to engine.env: createBrowser refuses switches the core owns (so a link
+// never sets BL_EXTRA_CA) and foreign variables, the demo shows why
+for (const [env, key] of [
+  ['BL_EXTRA_CA=x', 'BL_EXTRA_CA'],
+  ['https_proxy=http://evil', 'https_proxy'],
+]) {
+  await tab.goto(`${stack.origin}/?debug=1&relay=&env=${encodeURIComponent(env)}&url=about:blank`);
+  const refused = await tab
+    .waitForFunction(
+      () => document.getElementById('boot').textContent.includes('Error at start'),
+      null,
+      { timeout: TIMEOUT },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+  const text = await tab.evaluate(() => document.getElementById('boot').textContent);
+  check(
+    `?env=${key} refused at the start`,
+    refused && text.includes(key) && (await tab.evaluate(() => window.blTest.browser === null)),
+    text,
+  );
+}
+// Empty ?relay= takes the own relay without a foreign token
 await tab.goto(
-  `${stack.origin}/?debug=1&relay=&env=BL_EXTRA_CA=x,SSLKEYLOGFILE=/tmp/keys,https_proxy=http://evil,BL_TEST_FLAG=1,BL_SCRIPT_TIMEOUT=9&url=about:blank`,
+  `${stack.origin}/?debug=1&relay=&env=BL_TEST_FLAG=1&scripttimeout=9&url=about:blank`,
 );
 await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: TIMEOUT });
 const envState = await tab.evaluate(() => ({
@@ -439,7 +463,7 @@ const envState = await tab.evaluate(() => ({
   relay: window.blTest.relay,
 }));
 check(
-  '?env=BL_EXTRA_CA and foreign variables are ignored',
+  '?env= and ?scripttimeout= in the engine options',
   JSON.stringify(envState.engine) ===
     JSON.stringify({ scriptTimeoutSeconds: 9, env: { BL_TEST_FLAG: '1' } }),
   JSON.stringify(envState),
@@ -449,7 +473,7 @@ check(
   envState.relay.url === `${stack.origin.replace('http', 'ws')}/wisp/` && !envState.relay.token,
   JSON.stringify(envState.relay),
 );
-// BL_SCRIPT_TIMEOUT=9 of ?env= reaches the engine: its watchdog stops an endless loop after 9 s
+// ?scripttimeout=9 reaches the engine: its watchdog stops an endless loop after 9 s
 loaded = [];
 await tab.evaluate(() =>
   window.blTest.eval('(() => { console.log("RESULT loaded=env-loop"); for (;;); })()'),
@@ -462,7 +486,7 @@ await tab.evaluate(() =>
 const envAfter = envLoop && (await waitLoaded('env-after', 20000));
 const loopSeconds = (Date.now() - loopStart) / 1000;
 check(
-  '?env=BL_SCRIPT_TIMEOUT=9 stops the loop after about 9 s',
+  '?scripttimeout=9 stops the loop after about 9 s',
   envAfter && loopSeconds > 6 && loopSeconds < 13,
   `${loopSeconds.toFixed(1)} s ${loaded.join('|')}`,
 );
@@ -485,7 +509,7 @@ check(
 // Two tabs for hang and crash (intended, not watched from here on)
 stopWatchingTab();
 loaded = [];
-await tab.goto(stack.app({ url: siteURL + 'before', env: 'BL_SCRIPT_TIMEOUT=15' }));
+await tab.goto(stack.app({ url: siteURL + 'before', scripttimeout: '15' }));
 check('crash: first tab', await waitLoaded('Page before', TIMEOUT));
 await tab.click('#new-tab');
 await go(siteURL + 'after');
@@ -774,7 +798,7 @@ async function dialogLine(pattern, timeout) {
   }
   return -1;
 }
-await dialogTab.goto(stack.app({ url: siteURL + 'dialog', env: 'BL_SCRIPT_TIMEOUT=2' }));
+await dialogTab.goto(stack.app({ url: siteURL + 'dialog', scripttimeout: '2' }));
 check('dialog: page loaded', (await dialogLine(/RESULT loaded=Page dialog/, TIMEOUT)) >= 0);
 await dialogTab.evaluate(() =>
   window.blTest.eval('console.log("RESULT confirm=" + confirm("Continue?")); for (;;);'),

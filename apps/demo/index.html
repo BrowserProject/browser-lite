@@ -30,14 +30,16 @@
     <div id="progress"></div>
   </header>
   <main id="viewport">
-    <div id="pages"></div>
-    <div id="boot" role="status">Loading engine...</div>
-    <div id="find-bar" hidden>
-      <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page">
-      <span id="find-count"></span>
-      <button type="button" id="find-prev" title="Previous match (Shift+Enter)">&#8963;</button>
-      <button type="button" id="find-next" title="Next match (Enter)">&#8964;</button>
-      <button type="button" id="find-close" title="Close (Esc)">&#215;</button>
+    <!-- The views go into #pages, which a page in fullscreen takes: messages and find bar too -->
+    <div id="pages">
+      <div id="boot" role="status">Loading engine...</div>
+      <div id="find-bar" hidden>
+        <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page">
+        <span id="find-count"></span>
+        <button type="button" id="find-prev" title="Previous match (Shift+Enter)">&#8963;</button>
+        <button type="button" id="find-next" title="Next match (Enter)">&#8964;</button>
+        <button type="button" id="find-close" title="Close (Esc)">&#215;</button>
+      </div>
     </div>
   </main>
   <aside id="side-panel" hidden></aside>
