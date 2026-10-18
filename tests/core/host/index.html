@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>browser-lite core host</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  #view { position: fixed; inset: 0; background: #fff; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "@browser-lite/core": "/packages/core/dist/index.js",
+    "@browser-lite/transport-wisp": "/packages/transport-wisp/dist/index.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="view"></div>
+<script type="module" src="host.js"></script>
+</body>
+</html>

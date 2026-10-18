@@ -211,6 +211,7 @@ export interface BrowserStorage {
 export interface BrowserEvents {
   /** window.open or target=_blank: the engine already created the view. */
   'new-view': { view: View; opener: View | null };
+  /** A download started; without any listener the file is saved automatically when done. */
   download: { download: Download };
   /** The engine's memory grows: close or discard background views. */
   'memory-pressure': Record<string, never>;
@@ -297,6 +298,8 @@ export interface ViewEvents {
   };
   title: { title: string; url: string };
   progress: { value: number };
+  /** The zoom changed (setZoom or Ctrl + mouse wheel over the page). */
+  zoom: { zoom: number };
   /** A new document; `errorPage` is the kind of error page (for example 'certificate') or null. */
   commit: { errorPage: string | null };
   load: Record<string, never>;
@@ -315,6 +318,8 @@ export interface ViewEvents {
   fullscreen: { active: boolean };
   'media-state': { audible: boolean };
   'capture-state': { active: boolean };
+  /** A video of this view went into the host's picture-in-picture window or left it. */
+  'picture-in-picture': { active: boolean };
   'beforeunload-state': { hasListener: boolean };
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
@@ -414,6 +419,8 @@ export interface ColorRequest {
   rect: Rect;
   value: string;
   signal: AbortSignal;
+  /** Shows a value in the page while the picker is open (live preview). */
+  preview(value: string): void;
 }
 
 export interface DateTimeRequest {
@@ -427,6 +434,8 @@ export interface DateTimeRequest {
   max: number;
   step: number;
   signal: AbortSignal;
+  /** Shows a value in the page while the picker is open (live preview). */
+  preview(value: string): void;
 }
 
 /** Remembered permission decisions per origin. */
@@ -469,6 +478,8 @@ export interface DebugApi {
   audioState(): unknown;
   mediaState(): unknown;
   rtcState(): unknown;
+  /** Crashes the engine thread for real: abort() or a WebAssembly trap. */
+  crash(kind: 'abort' | 'trap'): void;
   /** Behaves like a memory-pressure message of the engine. */
   memoryPressure(): void;
 }

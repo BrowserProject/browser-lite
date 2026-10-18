@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "moduleDetection": "legacy",
+    "allowJs": true,
+    "checkJs": true,
+    "rootDir": "src/sw",
+    "outDir": "dist/sw",
+    "lib": ["ES2023", "WebWorker"],
+    "types": []
+  },
+  "include": ["src/sw/*.js"]
+}

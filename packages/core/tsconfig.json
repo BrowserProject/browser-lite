@@ -6,6 +6,7 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": []
   },
-  "include": ["src"],
-  "references": []
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/worklet"],
+  "references": [{ "path": "./tsconfig.sw.json" }, { "path": "./tsconfig.worklet.json" }]
 }
