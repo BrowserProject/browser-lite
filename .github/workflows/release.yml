@@ -1,0 +1,116 @@
+name: Release
+
+# On a version tag v<version> (the version of the root package.json): takes the engine the CI
+# built and tested for the tagged commit on main (artifact engine-dist), packs the npm packages
+# and creates the GitHub release with browser-lite-engine-<version>.tar.gz (engine, manifest,
+# third party notices), the package tarballs and SHA256SUMS. Pushes the server image
+# (Dockerfile target server) as SERVER_IMAGE:<version>.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  actions: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Node version from versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Check the tag against package.json
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the version $version of package.json"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Find the green CI run of the tagged commit on main
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status="$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$GITHUB_SHA" --jq '.status')"
+          if [ "$status" != identical ] && [ "$status" != behind ]; then
+            echo "::error::Commit $GITHUB_SHA is not on main ($status)"
+            exit 1
+          fi
+          run_id="$(gh run list -R "$GITHUB_REPOSITORY" -w CI -b main -e push -s success --commit "$GITHUB_SHA" -L 1 \
+            --json databaseId --jq '.[0].databaseId // empty')"
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "::error::No green push run of the CI on main for $GITHUB_SHA"; exit 1; }
+          echo "id=$run_id" >> "$GITHUB_OUTPUT"
+      - name: Get the packaged engine
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: engine-dist
+          path: build/engine-dist
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+      - name: Build the packages
+        run: |
+          npm ci
+          npm run build
+      - name: Release files (engine, npm packages, SHA256SUMS)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p build/release
+          npm pack --pack-destination build/release -w @browser-lite/core -w @browser-lite/transport-wisp \
+            -w @browser-lite/ui -w @browser-lite/profile -w @browser-lite/server
+          engines=(build/engine-dist/engine/*/)
+          [ "${#engines[@]}" = 1 ] || { echo "::error::engine-dist holds ${#engines[@]} engines"; exit 1; }
+          engine="${engines[0]%/}"
+          [ -s "$engine/THIRD_PARTY_NOTICES.txt" ] || { echo "::error::THIRD_PARTY_NOTICES.txt missing"; exit 1; }
+          manifest_version="$(node -p "require('./$engine/manifest.json').version")"
+          [ "$manifest_version" = "$VERSION" ] || { echo "::error::Engine manifest has version $manifest_version"; exit 1; }
+          name="browser-lite-engine-$VERSION"
+          mkdir -p "build/$name"
+          cp -r "$engine"/. "build/$name/"
+          tar -czf "build/release/$name.tar.gz" -C build "$name"
+          (cd build/release && sha256sum -- * > SHA256SUMS)
+          cat build/release/SHA256SUMS
+          {
+            echo "Engine build ID \`$(node -p "require('./$engine/manifest.json').buildId")\`,"
+            echo "WebKit $(grep '^WEBKIT_TAG=' versions.env | cut -d= -f2), served from \`engine/$(basename "$engine")/\`."
+            echo
+            echo "Server image: \`$(grep '^SERVER_IMAGE=' versions.env | cut -d= -f2):$VERSION\`"
+          } > build/release-notes.md
+      - name: Build and test the server image
+        run: tools/build-images.sh - "$GITHUB_SHA"
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" build/release/* -R "$GITHUB_REPOSITORY" --verify-tag \
+            --title "browser-lite $VERSION" --notes-file build/release-notes.md "${prerelease[@]}"
+      - name: Log in to ghcr.io
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the server image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          source versions.env
+          docker tag "$SERVER_IMAGE:$GITHUB_SHA" "$SERVER_IMAGE:$VERSION"
+          docker push "$SERVER_IMAGE:$VERSION"

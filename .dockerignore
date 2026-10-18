@@ -1,4 +1,4 @@
-# Only what the Dockerfile needs
+# Only what the Dockerfile needs (the demo site comes as its own build context)
 *
 !package.json
 !package-lock.json
@@ -7,4 +7,3 @@
 !packages/server/dist/
 packages/server/dist/**/*.map
 packages/server/dist/**/*.d.ts
-!build/demo/

@@ -1,6 +1,6 @@
 # apps/demo/deploy/
 
-One container (`Dockerfile` in the repository root): `browser-lite-server`
+One container (target `demo` of the `Dockerfile` in the repository root): `browser-lite-server`
 ([packages/server](../../../packages/server/README.md)) with the packaged demo and the browser
 profile in `/data` (named volume `profile` in `compose.yml`, kept across deploys). Port 8080,
 without HTTPS and without a relay token: the server is for internal testing only. The profile
@@ -17,11 +17,13 @@ Against DNS rebinding `/profile/` answers only under IP addresses, `localhost` a
 
 ## On every push to main
 
-1. *CI* builds and tests the engine.
+1. *CI* builds and tests the engine and packages it (artifact `engine-dist`).
 2. *Deploy* (`.github/workflows/deploy.yml`, only after a green CI):
-   - packages the demo (`tools/package-demo.sh`), builds the image and tests it read-only
-     (headers, Brotli, relay, profile, clean exit on SIGTERM)
-   - pushes it to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)
+   - takes the demo site the CI tested (artifact `demo-site`) or packages it from
+     `engine-dist` (`tools/package-demo.sh`)
+   - builds the images and tests them read-only (`tools/build-images.sh`: headers, Brotli,
+     relay, profile, clean exit on SIGTERM)
+   - pushes the demo image to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)
    - restarts it on the server (self-hosted runner, label `browser-lite-deploy`) with
      `compose.yml` by digest and checks `/healthz`
 
@@ -30,7 +32,7 @@ workflow* with the ID of a green push run of the CI on main (without ID: the lat
 refuses other runs (red, pull request, another workflow).
 
 Build locally: `npm ci && npm run build && tools/package-demo.sh <engine-dir> build/demo`, then
-`docker build --build-arg NODE_IMAGE=<NODE_IMAGE of versions.env> .`
+`tools/build-images.sh build/demo local` (images `<DEMO_IMAGE>:local` and `<SERVER_IMAGE>:local`).
 
 ## Set up the server (Proxmox)
 

@@ -25,7 +25,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ---
 
-Hinweis: WebKit selber ist nicht in diesem Repo enthalten, es wird per
-tools/fetch-webkit.sh geholt. WebKit steht unter LGPL-2.1 und BSD-Lizenzen.
-Die Patches in engine/patches/ sind Aenderungen an WebKit und stehen darum
-unter den gleichen Lizenzen wie die jeweils geaenderten WebKit-Dateien.
+Note: this license covers the code of browser-lite itself. WebKit is not part of this
+repository, tools/fetch-webkit.sh fetches it. WebKit is licensed under the LGPL 2.1 (or 2.0)
+and BSD licenses. The patches in engine/patches/ are changes to WebKit and are therefore
+licensed like the WebKit files they change. The engine builds (engine.js, engine.wasm,
+engine.data) contain WebKit and third party libraries under their own licenses: see
+docs/licensing.md and the THIRD_PARTY_NOTICES.txt that comes with every engine build.

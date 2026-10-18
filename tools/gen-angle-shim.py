@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# Erzeugt den ANGLE-Ersatz fuer PORT=Wasm (WebGL ohne ANGLE).
+# Generates the ANGLE replacement of PORT=Wasm (WebGL without ANGLE).
 #
-# WebKits WebGL ruft ANGLE-Einsprungpunkte auf (GL_ActiveTexture, EGL_...).
-# Wir bauen ANGLE nicht, sondern leiten die Aufrufe an Emscriptens GLES
-# (= WebGL des Host-Browsers im Engine-Worker) weiter. Dieses Skript schreibt:
-#   platform/wasm/angle/ANGLE/entry_points_*.h   Deklarationen GL_*/EGL_*
-#   platform/wasm/angle/ANGLEShimForwardWasm.cpp GL_Xxx -> glXxx (generiert)
-# Alles in CUSTOM ist von Hand in ANGLEShimWasm.cpp geschrieben.
+# The WebGL of WebKit calls ANGLE entry points (GL_ActiveTexture, EGL_...).
+# We do not build ANGLE but forward the calls to the GLES of Emscripten
+# (the WebGL of the host browser in the engine worker). This script writes:
+#   platform/wasm/angle/ANGLE/entry_points_*.h   declarations GL_*/EGL_*
+#   platform/wasm/angle/ANGLEShimForwardWasm.cpp GL_Xxx -> glXxx (generated)
+# Everything in CUSTOM is written by hand in ANGLEShimWasm.cpp. The output goes into
+# patch 0016, so its texts stay as they are in the patch.
 #
-#   tools/gen-angle-shim.py [webkit-ordner]
+#   tools/gen-angle-shim.py [webkit-dir]
 import glob
 import os
 import re
@@ -19,20 +20,20 @@ webcore = os.path.join(webkit, 'Source', 'WebCore')
 angle_include = os.path.join(webkit, 'Source', 'ThirdParty', 'ANGLE', 'include')
 out_dir = os.path.join(webcore, 'platform', 'wasm', 'angle')
 
-# Von Hand: fehlt in Emscripten oder braucht eine Anpassung
+# By hand: missing in Emscripten or needs an adaptation
 CUSTOM = {
-    # Erweiterungen und Strings
+    # Extensions and strings
     'GL_GetString', 'GL_RequestExtensionANGLE', 'GL_GetTranslatedShaderSourceANGLE',
-    # Geteilter Host-Kontext: Fehler, Textur-Einheiten, eigene Standard-VAO/TF
+    # Shared host context: errors, texture units, own default VAO/TF
     'GL_GetError', 'GL_ActiveTexture', 'GL_BindVertexArray', 'GL_BindVertexArrayOES',
     'GL_DeleteVertexArrays', 'GL_DeleteVertexArraysOES', 'GL_BindTransformFeedback', 'GL_DeleteTransformFeedbacks',
-    # Emscripten kann beim Mappen nicht lesen
+    # Emscripten cannot read when mapping
     'GL_MapBufferRange', 'GL_UnmapBuffer',
-    # Schalter, die es in WebGL nicht gibt (Primitive Restart, Debug-Ausgabe)
+    # Switches WebGL does not have (primitive restart, debug output)
     'GL_Enable', 'GL_Disable', 'GL_IsEnabled',
-    # WebGL1 kennt DEPTH24_STENCIL8/DEPTH_COMPONENT24 nicht
+    # WebGL1 does not know DEPTH24_STENCIL8/DEPTH_COMPONENT24
     'GL_RenderbufferStorage',
-    # ANGLE-Varianten, die es in WebGL nicht gibt oder anders heissen
+    # ANGLE variants WebGL does not have or names differently
     'GL_BlitFramebufferANGLE', 'GL_BlitFramebufferNV', 'GL_RenderbufferStorageMultisampleANGLE',
     'GL_DiscardFramebufferEXT', 'GL_PolygonModeANGLE', 'GL_ProvokingVertexANGLE',
     'GL_DebugMessageCallbackKHR', 'GL_DebugMessageControlKHR',
@@ -40,7 +41,7 @@ CUSTOM = {
     'GL_ColorMaskiOES', 'GL_DisableiOES', 'GL_EnableiOES',
 }
 
-# Robust-Varianten (ANGLE_robust_client_memory): gleiche Funktion ohne bufSize/length
+# Robust variants (ANGLE_robust_client_memory): same function without bufSize/length
 ROBUST = re.compile(r'^GL_(\w+)RobustANGLE$')
 
 
@@ -86,7 +87,7 @@ def main():
     protos = prototypes()
     missing = [n for n in names if n not in protos]
     if missing:
-        sys.exit('Kein Prototyp fuer: ' + ', '.join(missing))
+        sys.exit('No prototype for: ' + ', '.join(missing))
 
     os.makedirs(os.path.join(out_dir, 'ANGLE'), exist_ok=True)
     declarations = ['// Generiert von tools/gen-angle-shim.py, nicht von Hand aendern.',
@@ -101,7 +102,7 @@ def main():
     declarations += ['}', '']
     with open(os.path.join(out_dir, 'ANGLEShimEntryPoints.h'), 'w') as f:
         f.write('\n'.join(declarations))
-    # Die Namen, die WebKit erwartet (ANGLEHeaders.h)
+    # The names WebKit expects (ANGLEHeaders.h)
     for header in ('entry_points_egl_autogen.h', 'entry_points_egl_ext_autogen.h', 'entry_points_gles_2_0_autogen.h',
                    'entry_points_gles_3_0_autogen.h', 'entry_points_gles_ext_autogen.h'):
         with open(os.path.join(out_dir, 'ANGLE', header), 'w') as f:
@@ -116,10 +117,10 @@ def main():
     for name in names:
         robust = ROBUST.match(name)
         if robust and name not in CUSTOM:
-            # Gleiche Funktion ohne die Groessen-Angaben; length/columns/rows nutzt WebKit nicht
+            # Same function without the sizes; WebKit does not use length/columns/rows
             ret, params, _ = protos[name]
             base = robust.group(1)
-            # Manche gibt es nur als EXT (Timer-Queries)
+            # Some exist only as EXT (timer queries)
             if 'GL_' + base not in protos and 'GL_' + base + 'EXT' in protos:
                 base += 'EXT'
             plain = 'GL_' + base
@@ -128,20 +129,20 @@ def main():
             if target not in declared:
                 targets.append(f'{protos[plain][0]} GL_APIENTRY {target}({plain_params});')
                 declared.add(target)
-            # Argumente nach dem normalen Prototyp; die Groesse heisst dort bufSize oder count
+            # Arguments of the plain prototype; the size is called bufSize or count there
             robust_args = argument_names(params)
             args = []
             for a in argument_names(plain_params):
                 if a not in robust_args and a in ('bufSize', 'count'):
                     a = next(b for b in ('paramCount', 'bufSize') if b in robust_args)
                 if a not in robust_args:
-                    sys.exit(f'{name}: Argument {a} fehlt')
+                    sys.exit(f'{name}: argument {a} missing')
                 args.append(a)
             outputs = [a for a in ('length', 'columns', 'rows') if a in robust_args]
             unused = ''.join(f'(void){a}; ' for a in robust_args if a not in args and a not in outputs)
             args = ', '.join(args)
             body = f'return {target}({args});' if ret != 'void' else f'{target}({args});'
-            # columns/rows = geschriebene Breite/Hoehe (ReadPixels), length nutzt WebKit nicht
+            # columns/rows = written width/height (ReadPixels), WebKit does not use length
             written = {'length': '0', 'columns': 'width', 'rows': 'height'}
             reset = unused + ''.join(f'if ({a}) *{a} = {written[a]}; ' for a in outputs)
             forward.append(f'{ret} GL_APIENTRY {name}({params}) {{ {reset}{body} }}')
@@ -162,7 +163,7 @@ def main():
 
     robust = [n for n in names if ROBUST.match(n)]
     custom = [n for n in names if n in CUSTOM or n.startswith('EGL_')]
-    print(f'{len(names)} Funktionen, {len(names) - len(custom)} generiert ({len(robust)} Robust), von Hand: {len(custom)}')
+    print(f'{len(names)} functions, {len(names) - len(custom)} generated ({len(robust)} robust), by hand: {len(custom)}')
 
 
 main()

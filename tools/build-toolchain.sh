@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Baut das Toolchain-Image lokal mit den Pins aus versions.env (die CI reicht
-# dieselben Werte an docker/build-push-action).
+# Builds the toolchain image locally with the pins of versions.env (the CI passes
+# the same values to docker/build-push-action).
 #
-#   tools/build-toolchain.sh [tag]     # Standard: browser-lite-toolchain
+#   tools/build-toolchain.sh [tag]     # default: browser-lite-toolchain
 #   BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04@sha256:... tools/build-toolchain.sh
-#                                      # gleiches Basis-Image von einem Mirror
+#                                      # same base image from a mirror
 set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Holt genau den gepinnten WebKit-Commit (shallow + sparse), ohne die riesigen
-# Test-Ordner. Ergebnis: third_party/WebKit. Kann beliebig oft laufen.
+# Fetches exactly the pinned WebKit commit (shallow + sparse), without the huge
+# test folders. Result: third_party/WebKit. Can run any number of times.
 set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
 
-# Ordner, die wir nicht brauchen (zusammen viele GB). Von ANGLE nur die Header
-# (WebGL geht direkt auf das WebGL2 des Host-Browsers, ohne ANGLE zu bauen).
+# Folders we do not need (many GB together). Of ANGLE only the headers
+# (WebGL goes directly to the WebGL2 of the host browser, without building ANGLE).
 SPARSE_PATTERNS='/*
 !/LayoutTests/
 !/JSTests/
@@ -21,7 +21,7 @@ SPARSE_PATTERNS='/*
 '
 
 if [ ! -d "$BL_WEBKIT_DIR/.git" ]; then
-    bl_log "Initialisiere $BL_WEBKIT_DIR"
+    bl_log "Initializing $BL_WEBKIT_DIR"
     mkdir -p "$BL_WEBKIT_DIR"
     git -C "$BL_WEBKIT_DIR" init -q
     git -C "$BL_WEBKIT_DIR" remote add origin "$WEBKIT_REPO"
@@ -33,17 +33,17 @@ printf '%s' "$SPARSE_PATTERNS" > "$BL_WEBKIT_DIR/.git/info/sparse-checkout"
 
 current="$(git -C "$BL_WEBKIT_DIR" rev-parse -q --verify HEAD 2>/dev/null || true)"
 if [ "$current" = "$WEBKIT_COMMIT" ]; then
-    bl_log "WebKit ist schon auf $WEBKIT_TAG (${WEBKIT_COMMIT:0:12})"
-    # Geaenderte Muster (z.B. neue Ordner) uebernehmen, lokale Aenderungen bleiben
+    bl_log "WebKit is already at $WEBKIT_TAG (${WEBKIT_COMMIT:0:12})"
+    # Take changed patterns (for example new folders), local changes stay
     git -C "$BL_WEBKIT_DIR" sparse-checkout reapply
 else
-    bl_log "Lade WebKit $WEBKIT_TAG (${WEBKIT_COMMIT:0:12}), shallow"
-    # Ohne Blobs (--filter=blob:none): die eigentlichen Dateien laedt erst checkout nach,
-    # darum braucht auch checkout die Wiederholung
+    bl_log "Fetching WebKit $WEBKIT_TAG (${WEBKIT_COMMIT:0:12}), shallow"
+    # Without blobs (--filter=blob:none): checkout loads the actual files, so checkout
+    # needs the retry as well
     bl_retry git -C "$BL_WEBKIT_DIR" fetch -q --depth 1 --filter=blob:none origin "$WEBKIT_COMMIT"
     bl_retry git -C "$BL_WEBKIT_DIR" -c advice.detachedHead=false checkout -q -f FETCH_HEAD
 fi
 
 actual="$(git -C "$BL_WEBKIT_DIR" rev-parse HEAD)"
-[ "$actual" = "$WEBKIT_COMMIT" ] || bl_die "Falscher Commit: $actual statt $WEBKIT_COMMIT"
-bl_log "Fertig: $(du -sh "$BL_WEBKIT_DIR" --exclude=.git | cut -f1) Quellcode in $BL_WEBKIT_DIR"
+[ "$actual" = "$WEBKIT_COMMIT" ] || bl_die "Wrong commit: $actual instead of $WEBKIT_COMMIT"
+bl_log "Done: $(du -sh "$BL_WEBKIT_DIR" --exclude=.git | cut -f1) of sources in $BL_WEBKIT_DIR"

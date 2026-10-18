@@ -1,0 +1,34 @@
+# License of every dependency in deps/sources.txt, read by tools/gen-notices.mjs.
+# Kept outside deps/ so the cache keys of the dependency build do not change.
+#
+#   <name>  <SPDX expression>  <license files>
+#
+# <license files>: comma separated paths inside the source (a tar archive without its top
+# folder), "-" is the downloaded file itself, ":<from>-<to>" takes only these lines, an
+# absolute path is a file of the toolchain image. SPDX "-": no third party source, the recipe
+# generates the files itself.
+zlib            Zlib                                  LICENSE
+brotli          MIT                                   LICENSE
+zstd            BSD-3-Clause OR GPL-2.0-only          LICENSE
+libpng          libpng-2.0                            LICENSE
+libjpeg-turbo   IJG AND BSD-3-Clause AND Zlib         LICENSE.md,README.ijg
+libwebp         BSD-3-Clause                          COPYING,PATENTS
+expat           MIT                                   COPYING
+libxml2         MIT                                   Copyright
+libxslt         MIT                                   Copyright
+sqlite          blessing                              sqlite3.h:1-10
+icu             Unicode-3.0                           LICENSE
+freetype        FTL OR GPL-2.0-or-later               LICENSE.TXT,docs/FTL.TXT
+harfbuzz        MIT-Modern-Variant                    COPYING
+fontconfig      HPND-sell-variant                     COPYING
+woff2           MIT                                   LICENSE
+libpsl          MIT AND MPL-2.0                       LICENSE,list/public_suffix_list.dat:1-3,/usr/share/common-licenses/MPL-2.0
+openssl         Apache-2.0                            LICENSE.txt
+nghttp2         MIT                                   COPYING
+curl            curl                                  COPYING
+notosans        OFL-1.1                               OFL.txt
+notoserif       OFL-1.1                               OFL.txt
+notosansmono    OFL-1.1                               OFL.txt
+cacert          MPL-2.0                               -:1-19,/usr/share/common-licenses/MPL-2.0
+fontconfig-conf -                                     -
+fontcache       -                                     -

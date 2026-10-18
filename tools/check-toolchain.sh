@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prueft ob alle Tools da sind und Emscripten ein kleines Programm mit pthreads
-# bauen und ausfuehren kann. Laeuft im Toolchain-Image (lokal und CI).
+# Checks that all tools are there and that Emscripten can build and run a small
+# program with pthreads. Runs in the toolchain image (locally and in CI).
 set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"
@@ -9,13 +9,13 @@ missing=""
 for t in emcc em++ emcmake node cmake ninja perl python3 ruby gperf unifdef pkg-config git; do
     command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
 done
-[ -z "$missing" ] || bl_die "Es fehlen Tools:$missing"
+[ -z "$missing" ] || bl_die "Tools missing:$missing"
 
 emver="$(emcc -dumpversion)"
-[ "$emver" = "$EMSDK_VERSION" ] || bl_die "emcc ist $emver, erwartet $EMSDK_VERSION (versions.env)"
+[ "$emver" = "$EMSDK_VERSION" ] || bl_die "emcc is $emver, expected $EMSDK_VERSION (versions.env)"
 bl_log "emcc $emver ok"
 mesonver="$(meson --version)"
-[ "$mesonver" = "$MESON_VERSION" ] || bl_die "meson ist $mesonver, erwartet $MESON_VERSION (versions.env)"
+[ "$mesonver" = "$MESON_VERSION" ] || bl_die "meson is $mesonver, expected $MESON_VERSION (versions.env)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -37,5 +37,5 @@ CPP
 em++ -O2 -pthread -sPROXY_TO_PTHREAD -sEXIT_RUNTIME -o "$tmp/hello.js" "$tmp/hello.cpp"
 out="$(node "$tmp/hello.js")"
 echo "$out"
-[ "$out" = "hello from wasm, counter=42" ] || bl_die "Testprogramm hat falsche Ausgabe"
+[ "$out" = "hello from wasm, counter=42" ] || bl_die "Test program printed the wrong output"
 bl_log "Toolchain ok"
