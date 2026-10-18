@@ -1,4 +1,20 @@
 {
   "files": [],
-  "references": []
+  "references": [
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/transport-wisp"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "packages/profile"
+    },
+    {
+      "path": "packages/server"
+    }
+  ]
 }

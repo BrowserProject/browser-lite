@@ -1,0 +1,28 @@
+{
+  "name": "@browser-lite/transport-wisp",
+  "version": "0.1.0",
+  "description": "Wisp v1 transport for browser-lite (TCP over WebSocket)",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "peerDependencies": {
+    "@browser-lite/core": "0.1.0"
+  },
+  "devDependencies": {
+    "@browser-lite/core": "0.1.0"
+  }
+}
