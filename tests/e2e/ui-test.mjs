@@ -1,9 +1,9 @@
-// End-to-End Test fuer die Oberflaeche (web/library.js): Verlauf, Lesezeichen,
+// End-to-End Test fuer die Oberflaeche (apps/demo): Verlauf, Lesezeichen,
 // Vorschlaege in der Adressleiste, Suchmaschine, Sitzung wiederherstellen
 // (Hintergrund-Tabs laden erst beim Anklicken), ?relay=/?token=/?env= aus der URL,
 // Haengen der Engine (Meldung, der Watchdog von JSC bricht das Skript ab, die
 // Zeit in einem Dialog zaehlt nicht), echter Absturz (abort, WASM-Trap) mit
-// Neustart (web/watchdog.js), Zurueck/Vor, das scheitert, und Stopp,
+// Neustart in der Seite (auch aus dem Haengen), Zurueck/Vor, das scheitert, und Stopp,
 // beforeunload (Navigation, Neu laden, Tab und Host-Tab schliessen, Schleife) und window.focus().
 //
 //   cd tests/e2e && node ui-test.mjs [engine-ordner]
@@ -238,12 +238,26 @@ const relayState = await tab.evaluate((host) => ({ local: localStorage.getItem('
   token: localStorage.getItem('bl-relay-token ' + host), relay: window.blTest.relay }), `127.0.0.1:${stack.relayPort}`);
 check('?relay= nur fuer diese Seite, nirgends gespeichert', relayState.local === null && relayState.session === null && relayState.relay.url === stack.relayURL, JSON.stringify(relayState));
 check('Token gehoert zu diesem Relay', relayState.token === stack.token && relayState.relay.token, JSON.stringify(relayState));
+// Without ?token= the stored token goes to the relay (it refuses connections without it)
+loaded = [];
+await tab.goto(`${stack.uiURL}?debug=1&relay=${encodeURIComponent(stack.relayURL)}&url=${encodeURIComponent(siteURL + 'mit-token')}`);
+check('Gespeicherter Token geht ans Relay: Seite laedt', await waitLoaded('Seite mit-token', TIMEOUT), loaded.join('|'));
 // Empty ?relay= takes the own relay without a foreign token. ?env= sets only engine switches.
 await tab.goto(`${stack.uiURL}?debug=1&relay=&env=BL_EXTRA_CA=x,SSLKEYLOGFILE=/tmp/keys,https_proxy=http://boese,BL_TEST_FLAG=1,BL_SCRIPT_TIMEOUT=9&url=about:blank`);
 await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: TIMEOUT });
 const envState = await tab.evaluate(() => ({ engine: window.blTest.options.engine, relay: window.blTest.relay }));
 check('?env=BL_EXTRA_CA und fremde Variablen werden ignoriert', JSON.stringify(envState.engine) === JSON.stringify({ scriptTimeoutSeconds: 9, env: { BL_TEST_FLAG: '1' } }), JSON.stringify(envState));
 check('Leeres ?relay=: eigenes Relay ohne Token', envState.relay.url === `ws://localhost:${stack.uiPort}/wisp/` && !envState.relay.token, JSON.stringify(envState.relay));
+// BL_SCRIPT_TIMEOUT=9 of ?env= reaches the engine: its watchdog stops an endless loop after 9 s
+loaded = [];
+await tab.evaluate(() => window.blTest.eval('(() => { console.log("RESULT loaded=env-loop"); for (;;); })()'));
+const envLoop = await waitLoaded('env-loop', 10000);
+const loopStart = Date.now();
+await tab.evaluate(() => window.blTest.eval('setTimeout(() => console.log("RESULT loaded=env-after"), 0)'));
+const envAfter = envLoop && await waitLoaded('env-after', 20000);
+const loopSeconds = (Date.now() - loopStart) / 1000;
+check('?env=BL_SCRIPT_TIMEOUT=9 stoppt die Schleife nach etwa 9 s', envAfter && loopSeconds > 6 && loopSeconds < 13, `${loopSeconds.toFixed(1)} s ${loaded.join('|')}`);
+pageErrors.length = 0;
 // Without ?debug=1 ?relay= and ?env= do nothing: the own relay of the demo server allows no local
 // addresses, so the test page cannot load, and there are no test hooks
 loaded = [];
@@ -311,6 +325,22 @@ check('Zweiter Absturz: Tabs da, aber nicht geladen', safeTitles.length === 3 &&
   && (loads.get('nachher') || 0) === nachherLoads && (loads.get('vorher') || 0) === vorherLoads, `${JSON.stringify(safeTitles)} ${loads.get('nachher')}`);
 const safeStatus = await tab.locator('#status').textContent();
 check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'After the restart the tabs load only when clicked', safeStatus);
+
+// Neustart aus dem Haengen: destroy() waehrend der Engine-Thread in der Schleife steckt, dann
+// startet ein neuer Browser in der Seite
+await tab.evaluate(() => { window.hungBrowser = window.blTest.browser; });
+await tab.evaluate(() => document.getElementById('status').replaceChildren());
+loaded = [];
+await tab.evaluate(() => window.blTest.eval('(() => { console.log("RESULT loaded=Schleife 2"); for (;;); })()'));
+check('Haengen und Neustart: Schleife laeuft', await waitLoaded('Schleife 2', 30000), loaded.join('|'));
+await tab.click('#reload');
+check('Haengen und Neustart: Meldung', await waitBoot('not responding', 14000), await bootText());
+await tab.click('#boot button.primary', { timeout: 3000 }).catch(() => {});
+const hangRestart = await tab.waitForFunction(() => window.blTest.browser && window.blTest.browser !== window.hungBrowser
+  && window.blTest.browser.state === 'ready' && document.getElementById('boot').hidden, null, { timeout: TIMEOUT }).then(() => true, () => false);
+check('Haengen und Neustart: neuer Browser laeuft', hangRestart, await bootText());
+const hangStatus = await tab.locator('#status').textContent();
+check('Haengen und Neustart: Hinweis in der Statuszeile', hangStatus === 'After the restart the tabs load only when clicked', hangStatus);
 
 // Stopp, waehrend die Seite schon zu sehen ist: kein Fehler und kein 'load',
 // nur das Laden ist zu Ende. Danach Zurueck/Vor auf einen Eintrag, der nicht

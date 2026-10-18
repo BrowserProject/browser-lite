@@ -8,8 +8,8 @@ without HTTPS and without a relay token: the server is for internal testing only
 server can read it ([docs/profil.md](../../../docs/profil.md)). For a public server always set
 `RELAY_TOKEN` (at least 16 characters) and open the demo once with `?token=...`. Browsers grant
 SharedArrayBuffer only in a secure context, so an HTTPS proxy belongs in front (here
-`tailscale serve`, otherwise for example Caddy). `RELAY_TRUST_PROXY=1` takes the client address
-from `X-Forwarded-For` of that proxy, so the per address connection limit applies per user.
+`tailscale serve`, otherwise for example Caddy). `RELAY_TRUST_PROXY` stays unset: port 8080 is
+reachable in the LAN without the proxy, so `X-Forwarded-For` could be forged there.
 
 Against DNS rebinding `/profile/` answers only under IP addresses, `localhost` and the names of
 `PROFILE_HOSTS` (in `compose.yml` `.ts.net` for `tailscale serve`, changeable with

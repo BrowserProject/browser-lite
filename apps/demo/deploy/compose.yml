@@ -9,8 +9,6 @@ services:
     environment:
       # Names the profile answers under (default: tailscale serve)
       PROFILE_HOSTS: ${PROFILE_HOSTS:-.ts.net}
-      # Clients arrive through tailscale serve: the client address is in X-Forwarded-For
-      RELAY_TRUST_PROXY: "1"
     read_only: true
     volumes:
       - profile:/data

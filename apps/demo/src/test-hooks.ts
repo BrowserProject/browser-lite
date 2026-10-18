@@ -44,7 +44,7 @@ export function withTestOptions(options: BrowserOptions): BrowserOptions {
 
 /**
  * window.blTest for the e2e tests (spec of tests/e2e): the browser, its views and the debug API,
- * plus hooks of the demo (checkMemory, gpu, profile, settings, addressToURL, transport, relay,
+ * plus hooks of the demo (checkMemory, memoryUsed, gpu, profile, settings, addressToURL, transport, relay,
  * options).
  */
 export function installTestHooks(state: TestState): void {
@@ -79,8 +79,8 @@ export function installTestHooks(state: TestState): void {
     flags,
     /** Discards a background tab like on memory pressure; the id of the new view or 0. */
     checkMemory: () => discardForMemory()?.view.id ?? 0,
-    gpu: (action: 'lose' | 'restore' | 'lose-webgl') =>
-      (debugApi() as DebugApi & { gpu(action: string): void }).gpu(action),
+    memoryUsed: () => debugApi().memoryUsed(),
+    gpu: (action: 'lose' | 'restore' | 'lose-webgl') => debugApi().gpu(action),
     profile,
     settings,
     addressToURL,

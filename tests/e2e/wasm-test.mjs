@@ -351,7 +351,7 @@ check('Fremder Speicher mit geratener id gesperrt', (await result('angriff')) ==
 check('Speicher der anderen Herkunft unveraendert', (await result('opfer')) === 'GEHEIM,65536', results.get('opfer'));
 
 // Belegter Speicher der Engine in MB (malloc)
-const usedMB = () => page.evaluate(() => window.blTest.browser.debug.module._bl_memory_used() / 2 ** 20);
+const usedMB = () => page.evaluate(() => window.blTest.memoryUsed() / 2 ** 20);
 const run = (source) => page.evaluate((source) => window.blTest.eval(source), source);
 
 // Auftraege im Worker: Speicher und Werte frueherer Instanzen werden frei.

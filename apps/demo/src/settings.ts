@@ -128,7 +128,8 @@ export function startSettings(): StartSettings {
   const current = settings();
   const device = DEVICES[current.device] ?? (DEVICES.desktop as DeviceProfile);
   // "Restart now" and the restart after a crash always keep the session
-  const restoreSession = current.restoreSession || takeRestart();
+  const restarted = takeRestart();
+  const restoreSession = current.restoreSession || restarted;
   const languages = current.languages
     .split(',')
     .map((language) => language.trim())

@@ -46,8 +46,14 @@ const DEFAULT_URL = 'https://example.com/';
 const REPEAT_WINDOW = 60000;
 const CRASH_KEY = 'bl-crash-time';
 const SAFE_START_KEY = 'bl-safe-start';
+// After "Wait" the hang message comes back while the engine still does not answer
+const HANG_REPEAT = 10000;
 
 const testState: TestState = { transport: null, options: null };
+/** Relay connection of the running browser: a restart closes it and opens a new one. */
+let transport: WispTransport | null = null;
+let hung = false;
+let hangTimer = 0;
 
 /** Status line text, also after the next load of the active tab. */
 function showNotice(text: string): void {
@@ -66,10 +72,7 @@ function emulateDevice(start: StartSettings): void {
   viewport.style.setProperty('--device-height', `${screen.height}px`);
 }
 
-function browserOptions(start: StartSettings): BrowserOptions {
-  const token = tokenFor(relayUrl.host);
-  const transport = new WispTransport({ url: relayUrl, ...(token ? { token } : {}) });
-  testState.transport = transport;
+function browserOptions(start: StartSettings, transport: WispTransport): BrowserOptions {
   const options: BrowserOptions = {
     engineUrl: new URL(import.meta.env.VITE_ENGINE_BASE || 'engine/', location.href),
     transport,
@@ -114,6 +117,31 @@ function openStartTabs(restarted: boolean): void {
   else openTab(DEFAULT_URL);
 }
 
+function closeTransport(): void {
+  transport?.close();
+  transport = null;
+}
+
+function showHang(): void {
+  showMessage(
+    'The page is not responding.',
+    ['A script blocks the engine and with it all tabs. If it runs too long, the engine stops it.'],
+    [
+      [
+        'Wait',
+        () => {
+          hideMessage();
+          clearTimeout(hangTimer);
+          hangTimer = window.setTimeout(() => {
+            if (hung && !runtime.stopped) showHang();
+          }, HANG_REPEAT);
+        },
+      ],
+      ['Restart', () => void restart(true)],
+    ],
+  );
+}
+
 function crashed(reason: string): void {
   runtime.stopped = true;
   const now = Date.now();
@@ -141,10 +169,13 @@ async function restart(safe: boolean): Promise<void> {
   markRestart();
   history.replaceState(history.state, '', addressWithoutUrl());
   runtime.stopped = true;
+  hung = false;
+  clearTimeout(hangTimer);
   const browser = runtime.browser;
   runtime.browser = null;
   showMessage('Restarting…');
   await browser?.destroy().catch((error: unknown) => console.warn('destroy:', error));
+  closeTransport();
   clearTabs();
   resetStartSettings();
   await start(true);
@@ -160,12 +191,16 @@ async function start(restarted: boolean): Promise<void> {
   }
   const settings = startSettings();
   emulateDevice(settings);
-  const options = browserOptions(settings);
+  const token = tokenFor(relayUrl.host);
+  transport = new WispTransport({ url: relayUrl, ...(token ? { token } : {}) });
+  testState.transport = transport;
+  const options = browserOptions(settings, transport);
   testState.options = options;
   let browser: Awaited<ReturnType<typeof createBrowser>>;
   try {
     browser = await createBrowser(options);
   } catch (error) {
+    closeTransport();
     // An engine that could not be stopped keeps running: only a reload helps
     if (restarted && error instanceof BrowserLiteError && error.code === 'already-running') {
       reloadUI(addressWithoutUrl());
@@ -183,18 +218,12 @@ async function start(restarted: boolean): Promise<void> {
   browser.on('memory-pressure', () => discardForMemory());
   browser.on('crash', ({ reason }) => crashed(reason));
   browser.on('unresponsive', () => {
-    showMessage(
-      'The page is not responding.',
-      [
-        'A script blocks the engine and with it all tabs. If it runs too long, the engine stops it.',
-      ],
-      [
-        ['Wait', hideMessage],
-        ['Restart', () => void restart(true)],
-      ],
-    );
+    hung = true;
+    showHang();
   });
   browser.on('responsive', () => {
+    hung = false;
+    clearTimeout(hangTimer);
     if (!runtime.stopped) hideMessage();
   });
   browser.on('warning', ({ code }) => {

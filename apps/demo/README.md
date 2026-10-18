@@ -42,8 +42,8 @@ An extra CA certificate only comes through code: with `debug=1` a test sets
 `eval(source)`, `pagePixel(x, y)`, `pageRow(y)`, `memory(report?)`, `memoryPressure()`,
 `crash(kind)`, `audioState()`, `mediaState()`, `rtcState()`, `flags` (`firstLayout`,
 `firstPaint`, `loaded`), and for the demo `checkMemory()` (discards a background tab, returns the
-new view id or 0), `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`, `transport`,
-`relay`, `options`.
+new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`,
+`transport`, `relay`, `options`.
 
 ## Storage
 
