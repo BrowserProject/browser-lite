@@ -5,9 +5,8 @@ permission prompt, Chrome-like native dialogs, the context menu and the link sta
 The elements carry class names and `data-bl-*` attributes; only position and size are set
 inline, the page styles the rest.
 
-```sh
-npm install @browser-lite/core @browser-lite/ui
-```
+Not on npm yet: install the tarballs of a GitHub release together with `@browser-lite/core`
+([README, Install](../../README.md#install)).
 
 ## Example
 
@@ -19,7 +18,8 @@ const browser = await createBrowser({ engineUrl, transport, handlers: defaultHan
 const view = browser.createView({ url: 'https://example.com/', container });
 
 view.on('context-menu', (info) => {
-  const items = defaultMenuItems(view, info, { openTab: (url) => browser.createView({ url }) });
+  // A tabbed UI would create a view with its own container instead
+  const items = defaultMenuItems(view, info, { openTab: (url) => view.load(url) });
   showContextMenu(view, info, items);
 });
 const removeStatus = linkStatus(view);
@@ -86,4 +86,4 @@ Every element also has `data-bl-ui` with its name (for example `data-bl-ui="sele
 
 `npm test` runs the unit tests in Node against `dist/` (build first with `npx tsc -b` at the
 repository root). `node test/browser.mjs` runs the DOM tests in headless Chromium (playwright of
-the workspace).
+the workspace); CI runs them with `node tests/run.mjs packages`.

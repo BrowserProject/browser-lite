@@ -31,18 +31,15 @@ function stripNameSection(bytes) {
 function* files(folder) {
   for (const entry of readdirSync(folder, { withFileTypes: true })) {
     const full = path.join(folder, entry.name);
-    if (entry.isDirectory())
-      yield* files(full);
-    else
-      yield full;
+    if (entry.isDirectory()) yield* files(full);
+    else yield full;
   }
 }
 
-const mb = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
+const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 for (const file of [...files(dir)]) {
-  if (file.endsWith('.br') || file.endsWith('.gz'))
-    continue;
+  if (file.endsWith('.br') || file.endsWith('.gz')) continue;
   let data = readFileSync(file);
   if (file.endsWith('.wasm')) {
     const [stripped, removed] = stripNameSection(data);
@@ -52,8 +49,7 @@ for (const file of [...files(dir)]) {
       data = stripped;
     }
   }
-  if (stripOnly || statSync(file).size < 1024)
-    continue;
+  if (stripOnly || statSync(file).size < 1024) continue;
   const br = zlib.brotliCompressSync(data, {
     params: {
       [zlib.constants.BROTLI_PARAM_QUALITY]: 11,
@@ -62,7 +58,7 @@ for (const file of [...files(dir)]) {
     },
   });
   const gz = zlib.gzipSync(data, { level: 9 });
-  writeFileSync(file + '.br', br);
-  writeFileSync(file + '.gz', gz);
+  writeFileSync(`${file}.br`, br);
+  writeFileSync(`${file}.gz`, gz);
   console.log(`${file}: ${mb(data.length)} -> br ${mb(br.length)}, gz ${mb(gz.length)}`);
 }

@@ -7,9 +7,8 @@ encrypted bytes. Protocol and server rules: [PROTOCOL.md](PROTOCOL.md). The matc
 
 ## Install
 
-```bash
-npm install @browser-lite/core @browser-lite/transport-wisp
-```
+Not on npm yet: install the tarballs of a GitHub release together with `@browser-lite/core`
+([README, Install](../../README.md#install)).
 
 ## Example
 
@@ -24,7 +23,7 @@ const transport = new WispTransport({
   token: async () => (await fetch('/relay-token')).text(),
 });
 transport.addEventListener('connectedchange', () => console.log('online', transport.connected));
-const browser = await createBrowser({ engineUrl: '/engine/', transport });
+const browser = await createBrowser({ engineUrl: '/engine/0.1.0/', transport });
 ```
 
 ## API

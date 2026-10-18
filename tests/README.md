@@ -6,6 +6,7 @@
 | `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache cleanup | node | js (`npm test`) |
 | `engine/` | the engine in node without a browser: test pages (`pages/`), error page, GC stress | engine build | engine |
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
+| `packages` | DOM tests of the packages in Chromium (`packages/*/test/browser.mjs`: ui popups, prompts and dialogs, profile sync with the real OPFS) | packages, Playwright | e2e-core |
 | `core/` | `@browser-lite/core` in Chromium through the test host page `core/host/`: every engine feature | engine build, packages, Playwright | e2e-core |
 | `demo/` | the demo UI (`apps/demo`) in Chromium: tabs, prompts, dialogs, settings, profile | engine build, packages, Playwright | e2e-demo |
 | [`examples/test.mjs`](../examples/test.mjs) | both [examples](../examples/README.md) in Chromium: rendering, relay tokens, own service worker, iframe, strict CSP, Vite build | engine build, packages, Playwright | e2e-core |
@@ -22,6 +23,7 @@ npm ci && npm run build && npx playwright install chromium
 npm test                                  # package unit tests and engine-js
 node tests/run.mjs contract
 node tests/run.mjs engine  [filter] [--engine=<dir>]
+node tests/run.mjs packages [package]
 node tests/run.mjs core    [filter] [--engine=<dir>]
 node tests/run.mjs demo    [filter] [--engine=<dir>]
 node tests/core/input-test.mjs [engine-dir]   # a single test

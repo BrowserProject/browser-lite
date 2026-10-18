@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { pins, root, version } from './pins.mjs';
+import { pins, version } from './pins.mjs';
 import { wasmSections } from './wasm-sections.mjs';
 
 const dir = process.argv[2];

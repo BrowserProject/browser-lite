@@ -111,8 +111,8 @@ performance with several runs and inclusive times from profiles, not only load t
 
 ## Open: tests and operations
 
-- `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (also with
-  the old UI; looks like a main thread futex spin). Run browser tests with `ulimit -c 0`.
+- `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
+  like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.

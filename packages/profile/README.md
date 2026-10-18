@@ -5,9 +5,8 @@ pages, plus prefs of the app (settings, bookmarks, permissions), so users stay s
 websites, also on another device. The server side is `createProfileStore` of
 `@browser-lite/server`.
 
-```sh
-npm install @browser-lite/core @browser-lite/profile
-```
+Not on npm yet: install the tarballs of a GitHub release together with `@browser-lite/core`
+([README, Install](../../README.md#install)).
 
 ## Example
 
@@ -67,4 +66,4 @@ starting with `bl-profile <url>`.
 
 `npm test` runs the unit tests in Node against `dist/` with an in-memory file system and server.
 `node test/browser.mjs` runs the client with the real origin private file system in headless
-Chromium.
+Chromium; CI runs it with `node tests/run.mjs packages`.

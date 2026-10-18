@@ -34,35 +34,24 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 | `/app/engine/`, `/app/lib/` | engine files, dist folders of the packages for the import map |
 | `/app/sw.js` | the site's own service worker; first line `importScripts('media-sw.js')` |
 
-`app/main.js` checks `/session` first, asks `/token` for every relay connection (`WispTransport` `token` function),
-registers `sw.js` itself and passes the registration (`serviceWorker: { registration }`), and
-uses its own storage namespace.
+`app/main.js` checks `/session` first, asks `/token` for every relay connection (`WispTransport`
+`token` function), registers `sw.js` itself and passes the registration
+(`serviceWorker: { registration }`), and uses its own storage namespace.
 
 ## Hosting notes
 
-- Headers: every response under `/app/` carries `Cross-Origin-Opener-Policy: same-origin`,
-  `Cross-Origin-Embedder-Policy: require-corp` and `Cross-Origin-Resource-Policy: same-origin`
-  (`serveStatic` sends them). Pages outside `/app/` stay as they are. Everything an isolated
-  page loads from another origin needs CORS or `Cross-Origin-Resource-Policy: cross-origin`.
-- Service worker: its scope must cover the browser pages (here `/app/`). `media-sw.js` answers
-  only `bl-media/` below the scope and messages with a field `bl`; the site's own fetch handler
-  must leave those alone and keep COOP/COEP/CORP on the responses it answers. The worker
-  calls `skipWaiting()` and `clients.claim()`, else videos play only after a reload.
-- Iframe: a frame is only cross-origin isolated if its parent is, so the parent page needs the
-  same headers. The `allow` attribute lists the features the services use:
-  `cross-origin-isolated; fullscreen; autoplay; picture-in-picture; clipboard-read;
-  clipboard-write; camera; microphone; display-capture; geolocation; gamepad; accelerometer;
-  gyroscope; magnetometer; keyboard-map`. A frame from the same origin has most of them by
-  default; a frame from another origin needs all of them and its responses need
-  `Cross-Origin-Resource-Policy: cross-origin` (or `same-site`).
-- Content Security Policy (`/app/csp.html`, verified by `examples/test.mjs`):
-  `default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-<import map>';
-  worker-src 'self'; connect-src 'self'; media-src 'self' blob:; style-src 'self';
-  base-uri 'none'; form-action 'self'; frame-ancestors 'self'`.
-  `'wasm-unsafe-eval'` compiles the engine, `media-src 'self'` covers the service worker URLs of
-  `<video>`, `blob:` the Media Source Extensions. The core and the ui set styles only through
-  the CSSOM, so `style-src` needs no `'unsafe-inline'`. A relay on another origin goes into
-  `connect-src` (`wss://relay.example.org`). The server computes the hash of the inline import
-  map at start.
-- Relay: `allowedOrigins` lists the origin of the pages; tokens are short-lived and fetched per
-  connection, so they never sit in the page URL or in storage.
+The rules behind these points are in [docs/embedding.md](../../docs/embedding.md); this is where
+the example applies them.
+
+- [Headers](../../docs/embedding.md#headers): `server.mjs` serves everything under `/app/`
+  with `serveStatic`, which sends COOP, COEP and CORP; pages outside `/app/` stay as they are.
+- [Service worker](../../docs/embedding.md#service-worker): `app/sw.js` (scope `/app/`) loads
+  `media-sw.js` first, calls `skipWaiting()` and `clients.claim()`, and its own fetch handler
+  answers only its own URL, so the isolation headers of the other responses stay.
+- [Iframe](../../docs/embedding.md#embedding-modes): `app/iframe.html` is isolated like the
+  frame and carries the tested `allow` list.
+- [Content Security Policy](../../docs/embedding.md#content-security-policy): `server.mjs`
+  sends it with `/app/csp.html` only and computes the hash of the inline import map at start;
+  `examples/test.mjs` checks that no violation occurs.
+- [Relay](../../docs/embedding.md#relay): `allowedOrigins` is `PUBLIC_ORIGIN`; tokens are
+  short-lived and fetched per connection, so they never sit in the page URL or in storage.
