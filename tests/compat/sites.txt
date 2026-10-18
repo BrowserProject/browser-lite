@@ -1,6 +1,6 @@
 # Compatibility list: real sites the CI job "compat" loads (tests/compat/site-test.mjs).
 # One URL per line. The result is in the summary of the CI run, screenshots in the artifact
-# "compat". State: docs/kompatibilitaet.md
+# "compat". State: docs/compatibility.md
 https://example.com/
 https://www.google.com/search?q=wetter+bern
 https://www.google.com/maps

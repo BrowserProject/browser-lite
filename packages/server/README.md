@@ -92,6 +92,8 @@ server: only for internal use.
 
 ## Security
 
+Threat model and production checklist: [docs/security.md](../../docs/security.md).
+
 - Only global unicast addresses unless `allowPrivateAddresses` (IPv4-mapped IPv6 is converted
   first, so `::ffff:127.0.0.1`, `fd00::/8`, NAT64 and link-local are blocked). The relay resolves
   the name itself and connects only to the checked addresses (no DNS rebinding), IPv6 and IPv4

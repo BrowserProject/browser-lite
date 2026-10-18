@@ -1,0 +1,186 @@
+# Embedding browser-lite
+
+What a site needs to run browser-lite: a cross-origin isolated page, the engine files on the same
+origin, a relay, and optionally a service worker for media. Complete setups are in
+`examples/minimal/` (own route, Vite, one view) and `examples/existing-site/` (existing site with
+`node:http`, the server package and its own service worker). API details are in the package
+READMEs ([core](../packages/core/README.md), [transport-wisp](../packages/transport-wisp/README.md),
+[ui](../packages/ui/README.md), [profile](../packages/profile/README.md),
+[server](../packages/server/README.md)); threats and a production checklist in
+[security.md](security.md).
+
+## Embedding modes
+
+The engine uses pthreads, which need `SharedArrayBuffer`, which needs a cross-origin isolated
+page (`crossOriginIsolated === true`).
+
+| Mode | When | Notes |
+|---|---|---|
+| Own route or subdomain | Recommended (a subdomain in production, [security.md](security.md)) | Serve one route (for example `/browser/`) or a subdomain with the headers below; the rest of the site stays unchanged. A subdomain also gives the browser its own storage origin; with a route, the browser's stored data (OPFS, caches) is readable by every page of the origin |
+| Inside an existing page | The page is cross-origin isolated already, or can become so | Every subresource must be same-origin or allow embedding (CORP or CORS). `Cross-Origin-Embedder-Policy: credentialless` instead of `require-corp` relaxes this for third-party resources in Chromium and Firefox |
+| In an iframe | Only inside a cross-origin isolated top-level page | The top-level page and the frame both send COOP/COEP, a cross-origin frame also `Cross-Origin-Resource-Policy: cross-origin`, and the iframe delegates the features: `allow="cross-origin-isolated; fullscreen; clipboard-read; clipboard-write; autoplay; picture-in-picture; camera; microphone; display-capture; geolocation"` (only what you enable) |
+| `Document-Isolation-Policy` | To evaluate | Chromium-only header that isolates a single document without COOP/COEP on the top-level page; not tested with browser-lite yet |
+
+COOP `same-origin` puts the page into its own browsing context group: `window.opener` between the
+browser page and other pages of the site is cut. `checkSupport()` reports what is missing, and
+`createBrowser` throws `not-cross-origin-isolated` or `unsupported`.
+
+## Headers
+
+| Response | Headers |
+|---|---|
+| The page with the browser, and in an iframe setup the top-level page | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` |
+| Worker and worklet scripts (`engine.js`, `sw.js`, `media-sw.js`, `audio-worklet.js`) | Same as the page |
+| Every subresource of the page | Same-origin, or `Cross-Origin-Resource-Policy` (`cross-origin` for shared CDNs) or CORS |
+
+The simplest rule: send COOP, COEP and CORP with every response of the browser route. That is
+what `coiHeaders()` and `serveStatic()` of `@browser-lite/server/static` do. If the site's own
+service worker answers navigations from a cache, the cached HTML responses must keep their COOP
+and COEP headers, and synthesized subresource responses need CORP; otherwise the page loses
+isolation.
+
+## Serving the engine
+
+- The engine folder (`engine.js`, `engine.wasm`, `engine.data`) must be **same-origin** with the
+  page: the engine starts its workers from `engine.js`. `createBrowser` rejects a cross-origin
+  `engineUrl`. A CDN works only behind the same origin (reverse proxy).
+- Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
+  it is. `audio-worklet.js` must stay a file next to the core's `dist/` code (Vite: keep `.js`
+  assets out of `assetsInlineLimit`).
+- Put each engine version in its own folder (for example `engine/<hash>/`, as
+  `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
+- `engine.wasm` as `application/wasm` (streaming compilation), precompressed. Sizes of a
+  packaged engine (name section stripped):
+
+| File | Raw | Brotli |
+|---|---|---|
+| `engine.wasm` | about 89 MB | about 19 MB |
+| `engine.data` (fonts, CA bundle, fontconfig, HRTF data) | about 5 MB | about 1.7 MB |
+| `engine.js` | about 0.3 MB | about 0.06 MB |
+
+A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache. The host
+browser compiles the module on every start, which takes a few seconds (Chrome's code cache did
+not help in measurements, #132 in [decisions.md](decisions.md)).
+
+## Content Security Policy
+
+A policy for the browser page with the relay on the same origin:
+
+```
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self';
+connect-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; style-src 'self';
+object-src 'none'; base-uri 'none'; frame-ancestors 'self'
+```
+
+- `'wasm-unsafe-eval'`: compiling `engine.wasm`. The engine does not use `eval`.
+- `worker-src 'self'`: engine threads and the service worker; `script-src 'self'`: `engine.js`
+  and the audio worklet.
+- `connect-src`: fetching the engine files and the Wisp WebSocket; add the relay origin
+  (`wss://relay.example.com`) when it runs elsewhere.
+- `media-src 'self' blob:`: hidden media elements play `bl-media/` URLs of the service worker and
+  MediaSource object URLs.
+- `style-src 'self'`: the core and `@browser-lite/ui` set only CSSOM styles, no inline style
+  attributes. Your own UI may need more.
+- `frame-ancestors 'self'`: in the iframe mode list the embedding origin instead.
+- If your server sends a CSP header also with `engine.js`, that policy applies to the engine
+  workers and needs `'wasm-unsafe-eval'` too (pages' WebAssembly is compiled there).
+
+Pages inside the engine are not affected by this policy; the engine enforces their own CSP.
+
+## Service worker
+
+Needed only for `<video>` and `<audio>` with media files; the core never registers one.
+
+- No own service worker: copy `dist/sw/sw.js` and `dist/sw/media-sw.js` of `@browser-lite/core`
+  into one folder and pass `serviceWorker: { url: '/sw.js' }` (scope default: the folder of the
+  URL).
+- Own service worker: `importScripts('media-sw.js')` in it and pass
+  `serviceWorker: { registration }`. `media-sw.js` adds its own `fetch` and `message` listeners,
+  answers only URLs below `bl-media/` relative to the scope and messages with a `bl` field, and
+  touches no lifecycle.
+- The scope must cover the browser page. Without a worker media files do not play and the browser
+  emits the warning `media-sw-missing`.
+
+## Relay
+
+The engine opens TCP connections through a `Transport`; `WispTransport` talks to a Wisp relay.
+
+- Run `createRelay` in your Node server (`server.on('upgrade', ...)`, see the
+  [server README](../packages/server/README.md)), or the `browser-lite-server` command, or the
+  demo's container image (`Dockerfile`, built with `tools/package-demo.sh`) with `SITE_DIR=` and
+  `PROFILE_DIR=` set empty and `RELAY_SECRET` or `RELAY_TOKEN` set, as a relay only.
+- `authorize(req, url)` is required. Use signed short-lived tokens: your backend signs with
+  `signToken({ secret, ttlSeconds, subject })` after its own login, the page passes
+  `token: () => fetch('/relay-token').then((r) => r.text())` so every reconnect gets a fresh one,
+  and the relay checks with `authorizeToken({ secret })`.
+- `allowedOrigins`: by default only pages whose `Origin` host equals the relay's `Host`. Set it
+  when the relay runs on another host.
+- `clientAddress(req)`: behind a reverse proxy return the client address from the proxy's header
+  (the command: `RELAY_TRUST_PROXY`), otherwise all clients share the limit `connectionsPerIp`.
+- The relay connects only to public addresses and the ports 80, 443, 8080 and 8443 by default
+  (`policy`).
+
+## Storage
+
+- `storage.namespace` (default `browserlite`) is the OPFS directory, the prefix of the Cache API
+  names (`<ns>-http`, `<ns>-bytecode-<build>`) and the Web Lock `<ns>-data`. Use one namespace per
+  independent browser on an origin.
+- One running browser per namespace across all tabs of the origin. A second tab gets the warning
+  `storage-locked` and keeps its data in memory (the caches stay shared). One browser per page:
+  a second `createBrowser` before `destroy()` throws `already-running`.
+- `storage.persistent: false` keeps everything in memory (no OPFS, no HTTP or bytecode cache).
+- The core does not call `navigator.storage.persist()`; call it yourself if the browser data must
+  not be evicted under storage pressure.
+- `clearStorage(namespace)` deletes the OPFS directory and caches of a namespace; it throws
+  `storage-locked` while a browser uses it. `browser.storage.clearCaches()` empties only the caches.
+- `storage.beforeStart(dir)` runs before the engine starts (for example `@browser-lite/profile`).
+
+## Permissions and services
+
+The host browser grants camera, microphone, location, notifications and so on to **your**
+origin, once for all pages inside browser-lite. The engine then asks per page origin through the
+`permission` handler (default: deny), and the core remembers answers in the `PermissionStore` you
+pass (default: in memory). Grant `notifications` only after `Notification.requestPermission()`
+of the host succeeded (the `@browser-lite/ui` prompt does this).
+
+`services` decides what pages can reach at all; a feature without its service is missing for the
+pages. `defaultServices()` is `[audio(), media(), capture(), devices()]`. `webrtc()` is opt-in:
+its connections bypass the relay and reveal the device's IP address. With an iframe setup also
+delegate the matching `allow=` features.
+
+## Lifecycle
+
+- `browser.destroy()` closes all views, stops the engine threads and releases the storage lock;
+  afterwards `createBrowser` can start a new one in the same page. If the old engine could not be
+  stopped, `createBrowser` throws `already-running` and only a page reload helps.
+- `crash` (with `reason`) means the engine is gone (`state === 'crashed'`): destroy it and create a
+  new browser. Keep each view's `history` (from `navigation` events) to restore the session with
+  `createView({ history })`.
+- `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
+  Offer to wait or to restart.
+- `memory-pressure`: close or discard background views.
+- Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
+
+## Browser support
+
+Chromium (Chrome, Edge, Chromebooks) is supported and tested in CI. Firefox and Safari are best
+effort: some APIs the engine and its services rely on are missing or behave differently there.
+Call `checkSupport()` before showing the browser and fall back gracefully.
+
+## Updating the engine
+
+The engine and `@browser-lite/core` share a contract ([engine/abi.json](../engine/abi.json)):
+always deploy the engine release with the same version as the core. Serve the new engine in a new
+folder; the bytecode cache is keyed by build and old entries are removed automatically. Stored
+data in OPFS stays.
+
+## Resource use
+
+- Memory: one WebAssembly memory of 256 MB that grows up to 4 GB and never shrinks; the engine
+  releases caches above 192 MB and reports `memory-pressure` above 3 GB.
+- Threads: at least 12 Web Workers (a pool of 8 plus 4 spare), more when pages start workers.
+- CPU: JavaScript runs in an interpreter; large news sites take 10 to 60 s to load
+  ([status.md](status.md)).
+- Disk: the OPFS namespace plus the HTTP cache (at most 400 MB or a quarter of the quota) and the
+  bytecode cache.
+- Network: everything of the pages goes through the relay as TLS.

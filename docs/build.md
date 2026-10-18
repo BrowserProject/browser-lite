@@ -1,75 +1,97 @@
-# Bauen
+# Building
 
-## Voraussetzungen
+The packages build in seconds; the engine (WebKit to WebAssembly) takes hours the first time.
+Most work on the packages, the demo or the docs needs only an engine from CI.
 
-- Linux (oder WSL2) mit `git` und `docker`
-- Fuer WebCore und Engine: viel RAM (16 GB+) und Platz (30 GB+)
+## Packages and demo
 
-Versionen stehen in `versions.env`, die der Dependencies mit SHA256 in `deps/sources.txt`,
-npm-Pakete in den `package-lock.json`. Nie Versionen direkt in Skripten eintragen.
+```bash
+npm ci && npm run build                 # tsc -b: every package to its dist/
+npm run check                           # style, Biome, types, contract tests
+npm test                                # unit tests of all workspaces
+```
+
+Run the demo against an engine folder (from CI or built below):
+
+```bash
+PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &   # relay and profile on :5001
+npm run dev -w @browser-lite/demo       # Vite on :5173, engine from build/webcore/bin (BL_ENGINE_DIR)
+```
+
+Open `http://localhost:5173/?url=https://example.com`. Like in the container (packaged demo and
+relay on one port):
+
+```bash
+tools/package-demo.sh build/webcore/bin build/demo
+PORT=8080 SITE_DIR=build/demo node packages/server/dist/bin/browser-lite-server.js
+```
+
+An engine from CI: download the artifact `engine` of a green CI run into `build/webcore/bin/`.
+
+## Requirements for the engine
+
+- Linux (or WSL2) with `git` and `docker`.
+- RAM: about 1.5 GB per compiler process (16 GB for 4 jobs), disk: 30 GB or more.
+
+Versions live only in `versions.env`, those of the dependencies with SHA256 in
+`deps/sources.txt`, npm packages in `package-lock.json`. Never put versions into scripts.
 
 ## Toolchain
 
 ```bash
-tools/build-toolchain.sh   # Pins aus versions.env, Image browser-lite-toolchain
-
-# Test: kann emcc ein Programm mit pthreads bauen und ausfuehren?
-docker run --rm -v "$PWD:/src" browser-lite-toolchain tools/check-toolchain.sh
+tools/build-toolchain.sh   # image browser-lite-toolchain with the pins of versions.env
+docker run --rm -v "$PWD:/src" browser-lite-toolchain tools/check-toolchain.sh   # emcc with pthreads works
 ```
 
-Falls Docker Hub "429 Too Many Requests" sagt, das gleiche Basis-Image von einem Mirror
-nehmen: `BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04@sha256:<Digest> tools/build-toolchain.sh`
-(Digest aus `versions.env`).
-Details in [toolchain/README.md](../toolchain/README.md).
-
-In CI wird das Image automatisch gebaut und nach `ghcr.io` gepusht (Tag enthaelt die
-Emscripten-Version und einen Hash ueber `toolchain/` und die Pins). Gibt es das Image schon, wird es
-nicht neu gebaut.
+If Docker Hub answers "429 Too Many Requests", take the same base image from a mirror:
+`BASE_IMAGE=mirror.gcr.io/library/ubuntu:24.04@sha256:<digest> tools/build-toolchain.sh` (digest
+from `versions.env`). Details: [toolchain/README.md](../toolchain/README.md). CI builds the image
+once and pushes it to `ghcr.io` (tag: Emscripten version plus a hash of `toolchain/` and the pins).
 
 ## WebKit
 
 ```bash
-tools/fetch-webkit.sh      # holt den gepinnten Commit nach third_party/WebKit
-tools/apply-patches.sh     # setzt zurueck und wendet engine/patches/*.patch an
+tools/fetch-webkit.sh      # the pinned commit into third_party/WebKit (shallow, sparse, blobless, about 300 MB)
+tools/apply-patches.sh     # reset, then apply engine/patches/*.patch
 ```
 
-`fetch-webkit.sh` laedt nur einen Commit (shallow), ohne die riesigen Test-Ordner
-(sparse) und Dateiinhalte erst beim Auschecken (blobless). Ca. 300 MB Download.
-Netzfehler beim Holen und Auschecken werden wiederholt.
+### Changing WebKit
 
-## WebKit aendern (Patch-Workflow)
+1. `tools/apply-patches.sh` (puts the patched state into the git index of `third_party/WebKit`).
+2. Edit files in `third_party/WebKit`.
+3. `tools/export-patch.sh 0045-short-description` saves the new changes as
+   `engine/patches/0045-short-description.patch`.
+4. `tools/apply-patches.sh --check` verifies that all patches apply in order.
 
-1. `tools/apply-patches.sh` (legt den gepatchten Stand ins Git-Index von third_party/WebKit)
-2. Dateien in `third_party/WebKit` aendern
-3. `tools/export-patch.sh 0005-kurze-beschreibung` speichert die neuen Aenderungen als
-   `engine/patches/0005-kurze-beschreibung.patch`
-4. `tools/apply-patches.sh --check` pruefen ob alle Patches sauber hintereinander passen
+Rules: small patches, one topic each, the number gives the order. What does not have to be in
+WebKit belongs in `engine/`. Mark changes in WebKit with `PLATFORM(WASM)` or `__EMSCRIPTEN__`.
+Porting traps worth knowing: the `EmptyFrameLoaderClient` defaults block everything (policies
+dropped, `canHandleRequest()` false), so the engine has a full client; `ENABLE_FTPDIR=ON` breaks
+curl without FTP support (every protocol list fails); `Thread::suspend` cannot work without
+signals (one thread per VM, no sampling profiler).
 
-Regeln:
-- Patches klein halten, ein Thema pro Patch, Nummer vorne fuer die Reihenfolge.
-- Was nicht in WebKit sein muss, gehoert nach `engine/`.
-- In Code-Aenderungen in WebKit immer `PLATFORM(WASM)` bzw. `__EMSCRIPTEN__` verwenden,
-  damit klar ist was von uns kommt.
+Changes to `toolchain/`, `deps/` or `engine/patches/` rebuild large parts of WebKit. Keep the
+paths of `build/`, `sysroot/`, `third_party/`, `toolchain/` and `deps/` stable: they are part of
+cache keys.
 
 ## Dependencies
 
 ```bash
-docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/build-all.sh   # ca. 30-45 min
-docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/test.sh        # Smoke-Test
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/build-all.sh   # about 30 to 45 min
+docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain deps/test.sh        # smoke test
 ```
 
-Das Ergebnis landet in `sysroot/`. Laufzeit-Dateien (Fonts, fontconfig, CA-Zertifikate)
-liegen in `sysroot/runtime/` und kommen beim Linken der Engine als Datenpaket (`engine.data`)
-ins WASM-Dateisystem. Stamps, Rezepte und `DEP_FILES`: [deps/README.md](../deps/README.md).
+Output: `sysroot/` (headers, static libraries) and `sysroot/runtime/` (fonts, fontconfig, CA
+certificates), which becomes `engine.data`. Recipes and stamps: [deps/README.md](../deps/README.md).
 
-## JavaScriptCore alleine
+## JavaScriptCore alone
 
 ```bash
 docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain tools/build-jsc.sh
 docker run --rm -v "$PWD:/src" -w /src browser-lite-toolchain tests/jsc/run.sh
 ```
 
-## Engine (WebCore + engine/)
+## Engine
 
 ```bash
 source versions.env
@@ -78,69 +100,42 @@ docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 \
   browser-lite-toolchain tools/build-webcore.sh
 ```
 
-Braucht viel RAM (ca. 1.5 GB pro Compiler-Prozess) und mehrere Stunden beim ersten Mal.
-`ccache` ist im Image. Mit `CCACHE_DIR` im Repo bleibt der Cache nach dem Container
-erhalten, `CCACHE_COMPILERCHECK` haelt ihn auch nach einem neuen Toolchain-Image mit
-gleichem Emscripten gueltig. Gleich fuer `tools/build-jsc.sh`. Ergebnis:
-`build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`.
-
-Test in node (rendert eine Seite in ein Bild, weitere Tests in
-[tests/README.md](../tests/README.md)):
+Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`. `ccache` is in the image;
+with `CCACHE_DIR` inside the repository the cache survives the container, and
+`CCACHE_COMPILERCHECK` keeps it valid for a new toolchain image with the same Emscripten (#161 in
+[decisions.md](decisions.md)). Same for `tools/build-jsc.sh`. Quick check in node:
 
 ```bash
 node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm
 node tests/engine/check-basic.mjs build/basic.ppm
 ```
 
-## Run the demo locally
+More suites: [tests/README.md](../tests/README.md).
 
-```bash
-npm ci && npm run build                 # the packages (the demo uses their dist/)
-PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &   # relay and profile on :5001
-npm run dev -w @browser-lite/demo       # Vite on :5173, engine from build/webcore/bin (BL_ENGINE_DIR)
-```
+## Packaging
 
-Then open `http://localhost:5173/?url=https://example.com`. The dev server forwards `/wisp/` and
-`/profile/` to the server (`BL_SERVER`, default `http://localhost:5001`). URL parameters:
-[apps/demo/README.md](../apps/demo/README.md).
-
-Like in the container (packaged demo and relay on one port):
-
-```bash
-npm ci && npm run build
-tools/package-demo.sh build/webcore/bin build/demo
-PORT=8080 SITE_DIR=build/demo node packages/server/dist/bin/browser-lite-server.js
-# http://localhost:8080/
-```
-
-## Container and deploy
-
-See [apps/demo/deploy/README.md](../apps/demo/deploy/README.md).
+- `tools/package-engine.sh` packs an engine folder as a release asset.
+- `tools/package-demo.sh <engine-dir> <out>` builds the demo with Vite, puts the engine into
+  `engine/<hash>/` and precompresses everything (`tools/optimize-assets.mjs`); the result is
+  `SITE_DIR` of `browser-lite-server` and of the container image (`Dockerfile`). Deploy:
+  [apps/demo/deploy/README.md](../apps/demo/deploy/README.md).
 
 ## CI
 
-`.github/workflows/ci.yml` (Actions immer als `uses: <action>@<commit> # <version>`):
+`.github/workflows/ci.yml` runs on pushes to `main` and on pull requests; the job list with
+names is in the file. In short: lint and style, the JavaScript job (`npm run check` parts, unit
+tests, engine JS parts in node, demo build), the toolchain image, WebKit fetch and patch check,
+dependencies, JSC with its tests, the engine with node tests, browser suites in Chromium, and the
+informational compatibility job with real sites ([compatibility.md](compatibility.md)). After a
+green run on `main`, `.github/workflows/deploy.yml` builds the container and deploys the demo.
 
-| Job | Was |
-|---|---|
-| lint | shellcheck fuer alle `*.sh` im Repo, `tools/check-style.sh` (Umlaute und Gedankenstriche, in Patches nur die hinzugefuegten Zeilen, `set -euo pipefail`, `versions.env` mit Digests, Actions per Commit, Runner im LAN nur fuer `deploy`) |
-| js | `npm run build`, package tests (`npm test -w @browser-lite/server`, `-w @browser-lite/transport-wisp`), JS parts of the engine in node: `tests/wasm/rewrite-test.mjs`, `api-test.mjs`, `tests/engine/recorder-test.mjs`, `http-cache-test.mjs` |
-| toolchain | Toolchain-Image bauen + nach ghcr.io pushen (nur wenn noch nicht vorhanden) |
-| toolchain-check | `tools/check-toolchain.sh` im Image |
-| webkit-source | WebKit holen + Patches pruefen |
-| deps | Dependencies bauen (Cache) + Smoke-Test, sysroot als Artefakt |
-| jsc | JavaScriptCore + Tests (inkl. GC-Stresstest) |
-| engine | WebCore + Engine bauen, dann in node: Render-Test, WebCrypto, Stack-Grenze, Grenzen (`limits.html`), Watchdog (`hang.html`), GC-Stresstest. Engine als Artefakt |
-| e2e | Oberflaeche + Engine + Relay in Chromium (Playwright), jeder Test ein Schritt (auch `paintworklet` und `pinch`), alle laufen auch nach einem roten |
-| kompatibilitaet | echte Seiten laden, nur zur Info |
+Costs and caches:
 
-Node kommt aus `NODE_VERSION` in `versions.env` (`actions/setup-node`), in den Jobs im
-Toolchain-Image (toolchain-check, deps, jsc, engine) ist es das Node von emsdk.
-
-Nach gruener CI auf `main` baut `.github/workflows/deploy.yml` das Image und startet es auf
-dem Server neu ([apps/demo/deploy/README.md](../apps/demo/deploy/README.md)).
-
-Der Engine-Job bricht nach 320 Minuten selber ab und speichert ccache. Der naechste Lauf
-macht dann mit dem Cache weiter (GitHub erlaubt hoechstens 6 Stunden pro Job). ccache in
-jsc und engine laeuft mit `CCACHE_COMPILERCHECK=string:emsdk-<version>` und nimmt nach einem
-neuen Toolchain-Image den Cache eines Images mit gleichem Emscripten.
+- The engine is cached by a hash of everything that goes into it; an unchanged engine skips the
+  build. The sysroot is cached by `deps/` and the toolchain image.
+- A cold WebKit build takes longer than GitHub's 6 hour job limit. The jsc and engine jobs stop
+  themselves before it (`timeout 320m`) and save ccache under a key with `github.run_attempt`, so
+  **re-running the failed job** continues from the saved cache. Older engine ccache entries are
+  deleted (10 GB cache limit per repository).
+- Node comes from `NODE_VERSION` in `versions.env`; jobs inside the toolchain image use the Node
+  of emsdk.

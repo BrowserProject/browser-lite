@@ -1,102 +1,133 @@
 # browser-lite
 
-Ein richtiger Browser, der komplett in einem Browser-Tab laeuft.
+A real browser engine inside a web page: WebKit (WebCore and JavaScriptCore) compiled to
+WebAssembly, packaged as libraries you can embed in your own site.
 
-WebKit (WebCore + JavaScriptCore) wird mit Emscripten nach WebAssembly kompiliert.
-Die Seiten werden von WebKit selber geladen, ausgefuehrt und gerendert, die Ausgabe
-landet auf einem Canvas. Es gibt kein URL-Rewriting, kein Pixel-Streaming und keine
-emulierte VM.
+## How it works
 
-Netzwerk geht ueber das [Wisp](https://github.com/MercuryWorkshop/wisp-protocol)-Protokoll
-(WebSocket) zu einem kleinen Relay auf dem eigenen Server. TLS passiert im WASM, das Relay
-sieht also nur verschluesselte Bytes. Spaeter soll statt dem Relay auch WireGuard moeglich sein.
+- WebKit runs in Web Workers of your page and loads, runs and renders sites itself into a canvas:
+  no URL rewriting, no pixel streaming, no VM.
+- JavaScript runs in JSC's interpreter (no JIT in WASM); page WebAssembly runs in the host engine.
+- Network: every TCP connection goes as a stream over one WebSocket ([Wisp](https://github.com/MercuryWorkshop/wisp-protocol))
+  to a small relay. TLS happens inside the engine, the relay sees only encrypted bytes.
+- Media, audio, camera, WebGL and WebCodecs use the host browser's implementations.
+- Storage (cookies, IndexedDB, service workers, caches) lives in the origin private file system.
 
-## Stand
+Details: [docs/architecture.md](docs/architecture.md).
 
-Laeuft in Chrome (Chromebook) und Chromium. Getestet und in CI:
+## What you get
 
-- echte HTTPS-Seiten (z.B. Wikipedia, SRF, Google, GitHub, YouTube, OpenStreetMap)
-- Tabs mit Favicons, Zurueck/Vor, Popups als neue Tabs, Downloads, Datei-Upload, Dialoge
-  (auch beforeunload), Kontextmenue, Vollbild; Hintergrund-Tabs gedrosselt wie in Chrome
-- Tastatur inkl. Schweizer Layout und tote Tasten, Copy/Paste, Scrollen
-- Cookies, localStorage und IndexedDB bleiben nach dem Neuladen erhalten; das Profil im
-  Container nimmt Anmeldungen, Einstellungen und Lesezeichen auf ein anderes Geraet mit
-  ([docs/profil.md](docs/profil.md))
-- Einstellungen: Geraet (Mac, iPhone, iPad), Sprachen, Zeitzone, JavaScript, Bilder, Global
-  Privacy Control
-- WebSockets der Seiten (ws:// und wss://)
-- Web Audio mit Ton (nach dem ersten Klick, wie in Chrome), `decodeAudioData`
-- `<video>` und `<audio>` mit Dateien (MP4, WebM, MP3, ...) und MSE (Video-Streaming)
-- WebGL 1 und 2 (ueber das WebGL des eigenen Browsers)
-- WebAssembly der Seiten (laeuft in der WASM-Engine des eigenen Browsers), auch in Workern,
-  ohne Threads
-- WebRTC, WebCodecs, Kamera, Mikrofon und Bildschirm (ueber den eigenen Browser)
-- Service Worker, Cache API, OPFS, Benachrichtigungen
-- Pinch-Zoom, Drucken, Drag & Drop
-- Absturz oder Haengen der Engine: Meldung mit "Neu starten", die Sitzung kommt zurueck
-- Fehlerseiten wie Chrome, wenn eine Seite nicht erreichbar ist
+| Package | |
+|---|---|
+| [@browser-lite/core](packages/core/README.md) | `createBrowser`, views, input, storage, host services, media service worker |
+| [@browser-lite/transport-wisp](packages/transport-wisp/README.md) | Wisp v1 client, the network of the engine |
+| [@browser-lite/ui](packages/ui/README.md) | Unstyled select popup, pickers, permission prompt, dialogs, context menu |
+| [@browser-lite/profile](packages/profile/README.md) | Optional server-side profile (stay signed in across devices) |
+| [@browser-lite/server](packages/server/README.md) | Node: Wisp relay, static files with isolation headers, tokens, profile store, CLI |
+| Engine | `engine.js`, `engine.wasm`, `engine.data` ([engine/](engine/README.md)) |
 
-Noch nicht: DRM (EME), WireGuard. JavaScript ist langsamer als in einem
-normalen Browser (kein JIT in WASM). Details in [docs/roadmap.md](docs/roadmap.md), welche
-Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
+## Requirements
 
-## Betrieb
+- A Chromium based browser (Chrome, Edge, Chromebooks). Firefox and Safari are best effort.
+- A cross-origin isolated page (`Cross-Origin-Opener-Policy: same-origin`,
+  `Cross-Origin-Embedder-Policy: require-corp`) over HTTPS, with the engine on the same origin.
+- A relay: Node 22 or newer with `@browser-lite/server`, or the container image.
 
-Everything runs in one container (`Dockerfile`): `browser-lite-server`
-([packages/server](packages/server/README.md)) delivers the packaged demo
-([apps/demo](apps/demo/README.md)), is the Wisp relay and hosts the browser profile in the volume
-`profile` (`/data`). Every green CI run on `main` builds the image, pushes it to `DEMO_IMAGE`
-of `versions.env` and restarts it on the server (workflow *Deploy*).
-Setup and flow: [apps/demo/deploy/README.md](apps/demo/deploy/README.md).
+## Install
 
-## Lokal ausprobieren
+Until the packages are on npm, every GitHub release carries the package tarballs and the engine:
 
-Fertige Engine aus der CI (Artefakt `engine` eines CI-Laufs) nach `build/webcore/bin/` legen
-oder selber bauen (siehe [docs/build.md](docs/build.md)), dann:
+```bash
+npm install ./browser-lite-core-0.1.0.tgz ./browser-lite-transport-wisp-0.1.0.tgz
+npm install ./browser-lite-server-0.1.0.tgz      # on the server
+```
+
+Unpack the engine archive of the same release into a folder of your site, for example
+`public/engine/`. Engine and core versions must match.
+
+## Quick start
+
+```js
+import { createBrowser } from '@browser-lite/core';
+import { WispTransport } from '@browser-lite/transport-wisp';
+
+const browser = await createBrowser({
+  engineUrl: '/engine/',
+  transport: new WispTransport({ url: '/wisp/', token: () => fetch('/relay-token').then((r) => r.text()) }),
+  serviceWorker: { url: '/sw.js' }, // dist/sw/sw.js and media-sw.js of the core, for <video>/<audio>
+});
+const view = browser.createView({ container: document.querySelector('#browser'), url: 'https://example.com/' });
+view.on('title', ({ title }) => (document.title = title));
+```
+
+On the server:
+
+```js
+import { createRelay } from '@browser-lite/server';
+import { authorizeToken } from '@browser-lite/server/token';
+
+const relay = createRelay({ authorize: authorizeToken({ secret: process.env.RELAY_SECRET }) });
+httpServer.on('upgrade', (req, socket, head) => relay.handleUpgrade(req, socket, head) || socket.destroy());
+```
+
+Headers, service worker, CSP, storage and lifecycle: [docs/embedding.md](docs/embedding.md).
+Before production: [docs/security.md](docs/security.md).
+
+## Limitations
+
+JavaScript is slower than in a normal browser (big news sites take 10 to 60 s to load). No DRM,
+no WebGPU, no shared-memory WebAssembly. Some sites block the relay's datacenter IP. Everything
+the pages do runs in your origin: no third-party scripts on the browser page. More in
+[docs/status.md](docs/status.md) and [docs/compatibility.md](docs/compatibility.md).
+
+## Try the demo
+
+`apps/demo` is a full browser (tabs, history, bookmarks, settings, profile) on the packages. With
+an engine from CI (artifact `engine` of a green run) in `build/webcore/bin/`:
 
 ```bash
 npm ci && npm run build
-PROFILE_DIR=build/profile PORT=5001 node packages/server/dist/bin/browser-lite-server.js &
-npm run dev -w @browser-lite/demo
-# in the browser: http://localhost:5173/
+PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &
+npm run dev -w @browser-lite/demo      # http://localhost:5173/
 ```
 
-The Vite dev server serves the engine from `build/webcore/bin` (`BL_ENGINE_DIR`) and forwards
-`/wisp/` and `/profile/` to the server. With `?log=1` the engine logs what it does (times, GC,
-network). All URL parameters: [apps/demo/README.md](apps/demo/README.md).
+URL parameters and modules: [apps/demo/README.md](apps/demo/README.md); deployment on the home
+server: [apps/demo/deploy/README.md](apps/demo/deploy/README.md).
 
-## Doku
+## Build the engine
 
-| Datei | Inhalt |
+Docker toolchain, WebKit fetch, patches, dependencies and the engine build (hours the first
+time): [docs/build.md](docs/build.md).
+
+## Repository layout
+
+```
+engine/        WebKit embedder (C++ and JS), patches/ for WebKit, abi.json (contract with the core)
+packages/      npm packages: core, transport-wisp, ui, profile, server
+apps/demo/     the demo browser (Vite) and deploy/ for the home server
+tests/         contract, engine, JSC and browser suites (tests/README.md)
+tools/         build, patch, packaging and style scripts
+toolchain/     Docker image with Emscripten and the build tools
+deps/          libraries built for WASM (ICU, OpenSSL, curl, fonts, ...)
+docs/          documentation (below)
+versions.env   version pins
+```
+
+## Documentation
+
+| File | |
 |---|---|
-| [AGENTS.md](AGENTS.md) | Regeln fuer die Arbeit am Repo (auch fuer Agents) |
-| [docs/architektur.md](docs/architektur.md) | Wie das Ganze aufgebaut ist |
-| [docs/entscheidungen.md](docs/entscheidungen.md) | Was wir entschieden haben und warum |
-| [docs/roadmap.md](docs/roadmap.md) | Phasen und aktueller Stand |
-| [docs/stand.md](docs/stand.md) | Kurzer Stand, Messwerte und was noch offen ist |
-| [docs/build.md](docs/build.md) | Selber bauen (lokal und CI) |
-| [docs/kompatibilitaet.md](docs/kompatibilitaet.md) | Welche echten Seiten gehen |
-| [docs/profil.md](docs/profil.md) | Profil im Container |
-| [docs/referenz-webkitwasm.md](docs/referenz-webkitwasm.md) | Was wir vom Projekt WebkitWasm gelernt haben |
+| [docs/embedding.md](docs/embedding.md) | Embedding in a site: modes, headers, engine files, CSP, service worker, relay, storage, lifecycle |
+| [docs/security.md](docs/security.md) | Threat model and production checklist |
+| [docs/architecture.md](docs/architecture.md) | Layers, threads, frames, network, storage, media, GC |
+| [docs/build.md](docs/build.md) | Building the packages and the engine, CI |
+| [docs/compatibility.md](docs/compatibility.md) | Real sites and the yardstick against Chromium |
+| [docs/status.md](docs/status.md) | What works, measurements, open items, plans |
+| [docs/decisions.md](docs/decisions.md) | Decisions and why |
+| [docs/licensing.md](docs/licensing.md) | Licenses and obligations when distributing the engine |
+| [AGENTS.md](AGENTS.md) | Rules for working on the repository |
 
-## Ordner
+## License
 
-```
-versions.env   Versions-Pins (WebKit, Emscripten, Node, ...), Dependencies in deps/sources.txt
-toolchain/     Docker-Image mit Emscripten und allen Build-Tools
-tools/         Skripte (WebKit holen, Patches, Builds, Demo fuer den Server packen)
-engine/patches unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dateien
-deps/          Dependencies nach WASM bauen (zlib, ICU, OpenSSL, curl, Fonts, ...)
-engine/        Embedding: WebView, Clients, Netzwerk, Speicher, WebSockets, Event-Loop
-packages/      npm packages: server (Wisp relay, site, profile, CLI), transport-wisp, core, ...
-apps/demo/     full demo browser (Vite) on the packages, deploy/ for the home server
-tests/         JSC-Tests, Engine-Tests (node) und End-to-End Tests (Playwright)
-docs/          Hintergrund (siehe oben)
-```
-
-## Lizenz
-
-Unser eigener Code: BSD-2-Clause (siehe [LICENSE](LICENSE)).
-WebKit wird nicht mitgeliefert und steht unter LGPL-2.1/BSD. Einzelne Dateien in
-`engine/src/websocket/` und die mitgebauten Dateien aus `WebKitLegacy/Storage` stammen aus
-WebKit und behalten ihre Lizenzkoepfe.
+Our code is BSD-2-Clause ([LICENSE](LICENSE)). The engine contains WebKit (LGPL-2.1 and BSD) and
+other libraries; what that means when you serve it: [docs/licensing.md](docs/licensing.md).

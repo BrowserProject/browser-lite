@@ -101,8 +101,11 @@ A feature without its service is missing for the pages, like in a browser withou
 
 - The page is cross-origin isolated: `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp` (`checkSupport()` tells what is missing).
-- Engine files and `audio-worklet.js` on the same origin.
+- Engine files and `audio-worklet.js` on the same origin; never bundle `engine.js`.
 - For media files a service worker whose scope covers the page and which loads `media-sw.js`.
 - One running browser per storage namespace across the tabs of the origin (Web Lock); a second
   tab keeps its data in memory (the HTTP and bytecode caches stay shared) and gets the warning
   `storage-locked`.
+
+Embedding modes, headers, CSP, relay, storage and lifecycle in detail:
+[docs/embedding.md](../../docs/embedding.md); before production: [docs/security.md](../../docs/security.md).
