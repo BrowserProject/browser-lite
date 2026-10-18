@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# woff2: WOFF2-Webfonts entpacken (WebKit USE_WOFF2)
+# woff2: decodes WOFF2 web fonts (WebKit USE_WOFF2)
 build() {
-    # Die woff2-Tools (woff2_decompress, ...) linken brotlidec ohne brotlicommon,
-    # darum brotlicommon fuer alle Programme mitgeben.
+    # The woff2 tools (woff2_decompress, ...) link brotlidec without brotlicommon,
+    # so pass brotlicommon to all programs.
     dep_cmake "$SRC" -DCANONICAL_PREFIXES=ON \
         -DCMAKE_EXE_LINKER_FLAGS="$BL_LDFLAGS -L$BL_SYSROOT/lib -lbrotlicommon"
 }

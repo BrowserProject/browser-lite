@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libpsl: Public Suffix List (Cookies, curl). Liste wird fest eingebaut.
+# libpsl: Public Suffix List (cookies, curl). The list is built in.
 build() {
     dep_meson "$SRC" \
         -Druntime=no \

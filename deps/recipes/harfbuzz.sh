@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# HarfBuzz: Text-Shaping (WebKit braucht die ICU-Anbindung)
+# HarfBuzz: text shaping (WebKit needs the ICU integration)
 build() {
     dep_meson "$SRC" \
         -Dicu=enabled \

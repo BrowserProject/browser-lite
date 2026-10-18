@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libjpeg-turbo: JPEG-Bilder (ohne SIMD-Assembler, gibt es fuer WASM nicht)
+# libjpeg-turbo: JPEG images (without SIMD assembly, not available for WASM)
 build() {
     dep_cmake "$SRC" \
         -DENABLE_SHARED=OFF \

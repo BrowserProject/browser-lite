@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Gemeinsame Helfer fuer die Dependency-Rezepte in deps/recipes/.
-# Wird von deps/build-all.sh geladen, nicht direkt ausfuehren.
+# Shared helpers for the dependency recipes in deps/recipes/.
+# Sourced by deps/build-all.sh, do not run directly.
 
 # shellcheck source=tools/env.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../tools/env.sh"
@@ -10,25 +10,25 @@ export BL_DOWNLOADS="${BL_DOWNLOADS:-$BL_THIRD_PARTY/downloads}"
 export BL_DEPS_BUILD="${BL_DEPS_BUILD:-$BL_BUILD_DIR/deps}"
 export BL_JOBS="${BL_JOBS:-$(nproc)}"
 
-# Flags fuer alles was nach WASM geht. -pthread ueberall, sonst passen die
-# Objektdateien nicht zusammen (atomics/bulk-memory muessen ueberall gleich sein).
+# Flags for everything built for WASM. -pthread everywhere, otherwise the object
+# files do not link together (atomics/bulk-memory must match everywhere).
 export BL_CFLAGS="-O3 -pthread -msimd128"
 export BL_CXXFLAGS="$BL_CFLAGS"
 export BL_LDFLAGS="-pthread"
 
 bl_sysroot_pkg_config
 
-# Zeile aus sources.txt fuer einen Namen: "name type version url hash"
+# Line from sources.txt for a name: "name type version url hash"
 dep_source_line() {
     awk -v n="$1" '$1 == n { print; found = 1 } END { if (!found) exit 1 }' "$BL_DEPS_DIR/sources.txt" \
-        || bl_die "$1 steht nicht in deps/sources.txt"
+        || bl_die "$1 is not in deps/sources.txt"
 }
 
 dep_version() {
     dep_source_line "$1" | awk '{ print $3 }'
 }
 
-# Holt die Quellen nach $BL_DEPS_BUILD/<name>/src (immer frisch ausgepackt).
+# Fetches the sources into $BL_DEPS_BUILD/<name>/src (always freshly unpacked).
 dep_fetch() {
     local name="$1" type version url hash
     read -r _ type version url hash <<< "$(dep_source_line "$name")"
@@ -41,11 +41,11 @@ dep_fetch() {
         local file
         file="$BL_DOWNLOADS/$(basename "$url")"
         if [ ! -f "$file" ] || ! echo "$hash  $file" | sha256sum -c --status; then
-            bl_log "$name: lade $url"
+            bl_log "$name: downloading $url"
             curl -sSfL --retry 4 --retry-delay 2 -o "$file.part" "$url"
             mv "$file.part" "$file"
         fi
-        echo "$hash  $file" | sha256sum -c --status || bl_die "$name: SHA256 stimmt nicht ($file)"
+        echo "$hash  $file" | sha256sum -c --status || bl_die "$name: SHA256 mismatch ($file)"
         case "$type" in
         tar) tar -xf "$file" -C "$src" --strip-components=1 ;;
         zip) unzip -q "$file" -d "$src" ;;
@@ -59,26 +59,26 @@ dep_fetch() {
         git -C "$src" -c advice.detachedHead=false checkout -q FETCH_HEAD
         local actual
         actual="$(git -C "$src" rev-parse HEAD)"
-        [ "$actual" = "$hash" ] || bl_die "$name: Commit $actual statt $hash"
+        [ "$actual" = "$hash" ] || bl_die "$name: commit $actual instead of $hash"
         ;;
     none)
-        # Keine Quellen, das Rezept erzeugt alles selber
+        # No sources, the recipe generates everything itself
         ;;
     *)
-        bl_die "$name: unbekannter Typ $type"
+        bl_die "$name: unknown type $type"
         ;;
     esac
 
-    # Eigene Patches fuer die Lib (deps/patches/<name>/*.patch)
+    # Own patches for the lib (deps/patches/<name>/*.patch)
     local p
     for p in "$BL_DEPS_DIR/patches/$name"/*.patch; do
         [ -e "$p" ] || continue
-        bl_log "$name: Patch $(basename "$p")"
+        bl_log "$name: patch $(basename "$p")"
         patch -d "$src" -p1 --quiet < "$p"
     done
 }
 
-# CMake-Projekt bauen + installieren.  dep_cmake <quelldir> [cmake-optionen...]
+# Builds and installs a CMake project.  dep_cmake <srcdir> [cmake-options...]
 dep_cmake() {
     local src="$1"
     shift
@@ -100,11 +100,11 @@ dep_cmake() {
     cmake --install "$build"
 }
 
-# Meson-Cross-File fuer Emscripten (einmal pro Build erzeugt).
+# Meson cross file for Emscripten (generated once per build).
 dep_meson_cross_file() {
     local f="$BL_DEPS_BUILD/emscripten.meson"
     local q_cflags q_ldflags
-    # shellcheck disable=SC2086 # Flags sollen hier gesplittet werden
+    # shellcheck disable=SC2086 # flags are meant to be split here
     q_cflags="$(printf "'%s', " $BL_CFLAGS)"
     # shellcheck disable=SC2086
     q_ldflags="$(printf "'%s', " $BL_LDFLAGS)"
@@ -136,7 +136,7 @@ MESON
     echo "$f"
 }
 
-# Meson-Projekt bauen + installieren.  dep_meson <quelldir> [meson-optionen...]
+# Builds and installs a Meson project.  dep_meson <srcdir> [meson-options...]
 dep_meson() {
     local src="$1"
     shift
@@ -154,7 +154,7 @@ dep_meson() {
     meson install -C "$build" --no-rebuild
 }
 
-# Autotools-Projekt bauen + installieren.  dep_autotools <quelldir> [configure-optionen...]
+# Builds and installs an autotools project.  dep_autotools <srcdir> [configure-options...]
 dep_autotools() {
     local src="$1"
     shift

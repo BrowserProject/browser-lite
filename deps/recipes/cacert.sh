@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# CA-Zertifikate (Mozilla, via curl.se) fuer TLS im WASM
+# CA certificates (Mozilla, via curl.se) for TLS in WASM
 build() {
     local dest="$BL_SYSROOT/runtime/etc/ssl/certs"
     mkdir -p "$dest"

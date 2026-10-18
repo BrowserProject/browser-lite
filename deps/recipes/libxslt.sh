@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libxslt: XSLT fuer WebCore
+# libxslt: XSLT for WebCore
 build() {
     dep_cmake "$SRC" \
         -DLIBXSLT_WITH_PYTHON=OFF \

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# FreeType: Font-Rasterung (Skia, fontconfig, harfbuzz)
+# FreeType: font rasterization (Skia, fontconfig, harfbuzz)
 build() {
     dep_cmake "$SRC" \
         -DFT_REQUIRE_ZLIB=ON \

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# nghttp2: HTTP/2 fuer curl
+# nghttp2: HTTP/2 for curl
 build() {
     dep_cmake "$SRC" \
         -DENABLE_LIB_ONLY=ON \

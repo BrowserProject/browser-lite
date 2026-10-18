@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# sqlite: Cookies, IndexedDB, localStorage. Wir bauen direkt die Amalgamation
-# (eine .c Datei), das ist einfacher als das autosetup-Buildsystem.
+# sqlite: cookies, IndexedDB, localStorage. Builds the amalgamation (one .c file)
+# directly, simpler than the autosetup build system.
 build() {
     local out="$BL_DEPS_BUILD/$DEP_NAME/build"
     mkdir -p "$out" "$BL_SYSROOT/include" "$BL_SYSROOT/lib/pkgconfig"

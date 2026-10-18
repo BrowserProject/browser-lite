@@ -1,15 +1,15 @@
-// Erzeugt den fontconfig-Cache fuer das WASM-Dateisystem der Engine.
+// Generates the fontconfig cache for the engine's WASM file system.
 //
-// fontconfig liest beim ersten Gebrauch alle Schriften mit FreeType ein, um
-// seinen Cache aufzubauen. In der Engine dauert das ueber 5 Sekunden (jeder
-// Dateizugriff geht ueber den Haupt-Thread). Darum bauen wir den Cache schon
-// beim Build, mit genau denselben Pfaden wie in der Engine und mit der
-// gleichen Architektur (wasm32), und legen ihn ins Datenpaket.
+// On first use fontconfig reads all fonts with FreeType to build its cache.
+// In the engine that takes over 5 seconds (every file access goes through the
+// main thread). So the cache is built at build time, with exactly the same
+// paths and the same architecture (wasm32) as in the engine, and put into the
+// data package.
 //
-// fontconfig haelt einen Cache fuer gueltig, wenn das Verzeichnis die mtime 0
-// hat. Das setzen wir hier und in der Engine (engine/src/main.cpp).
+// fontconfig considers a cache valid when the directory has mtime 0. This is
+// set here and in the engine (engine/src/main.cpp).
 //
-//   node fc-precache.js <host-ordner-fuer-den-cache> [-v]
+//   node fc-precache.js <host-dir-for-the-cache> [-v]
 #include <dirent.h>
 #include <errno.h>
 #include <emscripten/emscripten.h>
@@ -20,8 +20,8 @@
 #include <sys/stat.h>
 #include <utime.h>
 
-// Emscriptens link() meldet EMLINK, dann gibt fontconfig beim Sperren auf und
-// schreibt keinen Cache. Mit EPERM nimmt es den Ersatzweg (mkdir als Sperre).
+// Emscripten's link() reports EMLINK, then fontconfig gives up locking and
+// writes no cache. With EPERM it takes the fallback (mkdir as lock).
 int link(const char* from, const char* to)
 {
     (void)from;
@@ -54,7 +54,7 @@ static void zeroMtimes(const char* path)
 int main(int argc, char** argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "Aufruf: fc-precache.js <cache-ordner>\n");
+        fprintf(stderr, "Usage: fc-precache.js <cache-dir>\n");
         return 2;
     }
     EM_ASM({ FS.mkdirTree('/var/cache/fontconfig'); });
@@ -63,23 +63,23 @@ int main(int argc, char** argv)
         setenv("FC_DEBUG", "16", 1);
 
     if (!FcInit()) {
-        fprintf(stderr, "FcInit fehlgeschlagen\n");
+        fprintf(stderr, "FcInit failed\n");
         return 1;
     }
     FcPattern* pattern = FcPatternCreate();
     FcObjectSet* objects = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, (char*)0);
     FcFontSet* fonts = FcFontList(NULL, pattern, objects);
     int count = fonts ? fonts->nfont : 0;
-    printf("fontconfig: %d Schriften im Cache\n", count);
+    printf("fontconfig: %d fonts in cache\n", count);
     if (fonts)
         FcFontSetDestroy(fonts);
     FcObjectSetDestroy(objects);
     FcPatternDestroy(pattern);
     FcFini();
 
-    // fontconfig schreibt in /var/cache/fontconfig (im Speicher). In einen
-    // eingehaengten NODEFS-Ordner schreibt es nichts (atomares Umbenennen
-    // klappt dort nicht), darum die fertigen Dateien von Hand kopieren.
+    // fontconfig writes to /var/cache/fontconfig (in memory). It writes nothing
+    // into a mounted NODEFS folder (atomic rename fails there), so copy the
+    // finished files by hand.
     count = EM_ASM_INT({
         var fs = require('fs');
         var path = require('path');
@@ -93,6 +93,6 @@ int main(int argc, char** argv)
         });
         return copied;
     }, argv[1]);
-    printf("fontconfig: %d Cache-Dateien geschrieben\n", count);
+    printf("fontconfig: %d cache files written\n", count);
     return count > 0 ? 0 : 1;
 }

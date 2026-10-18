@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# fontconfig: Font-Auswahl. Skia/WebCore (FontCacheSkia) rufen es direkt auf.
-# Die Konfig-Dateien liegen zur Laufzeit im virtuellen Dateisystem unter /etc/fonts,
-# die Fonts unter /usr/share/fonts. Beim Installieren landen diese Dateien in
-# sysroot/runtime/ und kommen beim Linken der Engine ins WASM-Dateisystem (engine.data).
+# fontconfig: font matching, called directly by Skia/WebCore (FontCacheSkia).
+# At runtime the config files live in the virtual file system under /etc/fonts,
+# the fonts under /usr/share/fonts. Install puts these files into sysroot/runtime/,
+# linking the engine packs them into the WASM file system (engine.data).
 build() {
     local build="$BL_DEPS_BUILD/$DEP_NAME/build"
     local stage="$BL_DEPS_BUILD/$DEP_NAME/stage"

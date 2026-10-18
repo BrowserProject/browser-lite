@@ -1,15 +1,15 @@
 # shellcheck shell=bash
-# Vorgebauter fontconfig-Cache fuer das Datenpaket der Engine
-# (siehe deps/tools/fc-precache.c). Spart beim ersten Seitenaufbau mehrere Sekunden.
+# Prebuilt fontconfig cache for the engine's data package
+# (see deps/tools/fc-precache.c). Saves several seconds on the first page load.
 
-# Dateien ausser dem Rezept, die in den Stamp eingehen (deps/build-all.sh)
+# Files besides the recipe that go into the stamp (deps/build-all.sh)
 DEP_FILES=(tools/fc-precache.c)
 
 build() {
     local root="$BL_SYSROOT/runtime"
     local out="$BL_DEPS_BUILD/$DEP_NAME"
     local cache="$root/var/cache/fontconfig"
-    [ -f "$root/etc/fonts/fonts.conf" ] || bl_die "fontcache: fonts.conf fehlt (fontconfig-conf zuerst)"
+    [ -f "$root/etc/fonts/fonts.conf" ] || bl_die "fontcache: fonts.conf missing (build fontconfig-conf first)"
     mkdir -p "$out" "$cache"
     find "$cache" -type f -delete
 
@@ -22,6 +22,6 @@ build() {
     FONTCONFIG_FILE=/etc/fonts/fonts.conf node "$out/fc-precache.js" "$cache"
     local files
     files="$(find "$cache" -type f | wc -l)"
-    [ "$files" -gt 0 ] || bl_die "fontcache: kein Cache erzeugt"
-    bl_log "fontcache: $files Cache-Dateien in $cache"
+    [ "$files" -gt 0 ] || bl_die "fontcache: no cache generated"
+    bl_log "fontcache: $files cache files in $cache"
 }

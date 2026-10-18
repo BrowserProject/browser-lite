@@ -1,13 +1,13 @@
 # shellcheck shell=bash
-# fontconfig-Konfiguration fuer das WASM-Dateisystem.
-# Emscriptens --preload-file kann keine Symlinks, darum kopieren wir die
-# gewuenschten Regeln aus conf.avail als normale Dateien nach conf.d und
-# ergaenzen eigene Regeln (Noto als Standard, Arial/Helvetica/Times-Ersatz).
+# fontconfig configuration for the WASM file system.
+# Emscripten's --preload-file cannot handle symlinks, so the wanted rules are
+# copied from conf.avail into conf.d as regular files, plus own rules (Noto as
+# default, substitutes for Arial/Helvetica/Times).
 build() {
     local root="$BL_SYSROOT/runtime"
     local avail="$root/usr/share/fontconfig/conf.avail"
     local confd="$root/etc/fonts/conf.d"
-    [ -d "$avail" ] || bl_die "fontconfig-conf: $avail fehlt (fontconfig zuerst bauen)"
+    [ -d "$avail" ] || bl_die "fontconfig-conf: $avail missing (build fontconfig first)"
     mkdir -p "$confd" "$root/var/cache/fontconfig"
     find "$confd" -maxdepth 1 -name '*.conf' -delete
 
@@ -22,7 +22,7 @@ build() {
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
-  <!-- browser-lite: Noto als Standardschriften -->
+  <!-- browser-lite: Noto as default fonts -->
   <alias binding="strong">
     <family>sans-serif</family>
     <prefer><family>Noto Sans</family></prefer>

@@ -16,7 +16,6 @@ german web/*                translation pending
 ascii docs/*                translation pending
 
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
-german deps/*               comments change cache keys and stamps
 german toolchain/*          comments change the toolchain image tag
 german engine/patches/*     comments change WebKit sources
 

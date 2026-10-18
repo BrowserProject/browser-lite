@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# OpenSSL: TLS im WASM. Das WebCore curl-Backend benutzt direkt die OpenSSL-API.
+# OpenSSL: TLS in WASM. The WebCore curl backend uses the OpenSSL API directly.
 build() {
     local out="$BL_DEPS_BUILD/$DEP_NAME/build"
     mkdir -p "$out"
     (
         cd "$out" || exit 1
-        # linux-generic32 = 32-bit ohne Assembler, passt fuer wasm32
+        # linux-generic32 = 32-bit without assembly, fits wasm32
         # shellcheck disable=SC2086
         CC=emcc CXX=em++ AR=emar RANLIB=emranlib \
             perl "$SRC/Configure" linux-generic32 \

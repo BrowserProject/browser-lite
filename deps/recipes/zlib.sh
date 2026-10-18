@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# zlib: Kompression (fuer libpng, freetype, curl, ...)
+# zlib: compression (for libpng, freetype, curl, ...)
 build() {
     dep_cmake "$SRC" -DZLIB_BUILD_EXAMPLES=OFF
-    # zlib installiert immer auch eine "shared" Variante, die wir nicht wollen.
+    # zlib always installs a "shared" variant too, which is not wanted.
     rm -f "$BL_SYSROOT"/lib/libz.so* "$BL_SYSROOT"/lib/libz.js "$BL_SYSROOT"/lib/libz.wasm
 }

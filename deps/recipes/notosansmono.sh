@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Font NotoSansMono (OFL), statische Schnitte ohne Hinting (klein, auf HiDPI gut genug)
+# Font NotoSansMono (OFL), static unhinted styles (small, good enough on HiDPI)
 build() {
     local dest="$BL_SYSROOT/runtime/usr/share/fonts/noto"
     mkdir -p "$dest"
@@ -7,5 +7,5 @@ build() {
         \( -name '*-Regular.ttf' -o -name '*-Bold.ttf' -o -name '*-Italic.ttf' -o -name '*-BoldItalic.ttf' \) \
         -exec cp {} "$dest/" \;
     find "$SRC" -name 'OFL.txt' -exec cp {} "$dest/NotoSansMono-OFL.txt" \; -quit
-    ls "$dest"/NotoSansMono-*.ttf >/dev/null || bl_die "notosansmono: keine Fonts gefunden"
+    ls "$dest"/NotoSansMono-*.ttf >/dev/null || bl_die "notosansmono: no fonts found"
 }

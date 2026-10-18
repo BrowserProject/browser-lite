@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libxml2: XML/XHTML/SVG-Parser von WebCore
+# libxml2: XML/XHTML/SVG parser for WebCore
 build() {
     dep_cmake "$SRC" \
         -DLIBXML2_WITH_PYTHON=OFF \

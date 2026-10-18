@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Font NotoSerif (OFL), statische Schnitte ohne Hinting (klein, auf HiDPI gut genug)
+# Font NotoSerif (OFL), static unhinted styles (small, good enough on HiDPI)
 build() {
     local dest="$BL_SYSROOT/runtime/usr/share/fonts/noto"
     mkdir -p "$dest"
@@ -7,5 +7,5 @@ build() {
         \( -name '*-Regular.ttf' -o -name '*-Bold.ttf' -o -name '*-Italic.ttf' -o -name '*-BoldItalic.ttf' \) \
         -exec cp {} "$dest/" \;
     find "$SRC" -name 'OFL.txt' -exec cp {} "$dest/NotoSerif-OFL.txt" \; -quit
-    ls "$dest"/NotoSerif-*.ttf >/dev/null || bl_die "notoserif: keine Fonts gefunden"
+    ls "$dest"/NotoSerif-*.ttf >/dev/null || bl_die "notoserif: no fonts found"
 }

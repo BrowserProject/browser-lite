@@ -1,5 +1,5 @@
-// Smoke-Test fuer das sysroot: linkt alle Dependencies in ein Programm und ruft
-// pro Lib etwas Echtes auf. Laeuft mit node (pthreads an, wie spaeter WebKit).
+// Smoke test for the sysroot: links all dependencies into one program and calls
+// something real in each lib. Runs with node (pthreads on, like WebKit later).
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -42,7 +42,7 @@ static void check(const char* name, bool ok, const std::string& info)
 
 int main()
 {
-    // zlib: komprimieren und wieder entpacken
+    // zlib: compress and decompress again
     {
         const char text[] = "hallo hallo hallo hallo hallo";
         unsigned char packed[128];
@@ -95,7 +95,7 @@ int main()
         char vs[U_MAX_VERSION_STRING_LENGTH];
         u_getVersion(v);
         u_versionToString(v, vs);
-        // Collation braucht die eingebauten ICU-Daten, testet also auch die.
+        // Collation needs the built-in ICU data, so this tests it too.
         UErrorCode status = U_ZERO_ERROR;
         UCollator* coll = ucol_open("de_CH", &status);
         bool ok = U_SUCCESS(status) && coll;
@@ -136,7 +136,7 @@ int main()
     check("fontconfig", FcGetVersion() > 0, std::to_string(FcGetVersion()));
 
     {
-        // Kaputte Daten muessen sauber abgelehnt werden
+        // Broken data must be rejected cleanly
         const uint8_t junk[] = { 'w', 'O', 'F', '2', 0, 0, 0, 0 };
         bool ok = woff2::ComputeWOFF2FinalSize(junk, sizeof(junk)) == 0;
         check("woff2", ok, "decode lib");
@@ -170,6 +170,6 @@ int main()
         curl_global_cleanup();
     }
 
-    std::printf("%s\n", failures ? "SMOKE TEST FEHLGESCHLAGEN" : "alle Libs ok");
+    std::printf("%s\n", failures ? "SMOKE TEST FAILED" : "all libs ok");
     return failures ? 1 : 0;
 }

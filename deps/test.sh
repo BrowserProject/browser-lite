@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Baut deps/tests/smoke.cpp gegen das sysroot und fuehrt es mit node aus.
+# Builds deps/tests/smoke.cpp against the sysroot and runs it with node.
 set -euo pipefail
 # shellcheck source=deps/lib.sh
 source "$(dirname "$0")/lib.sh"

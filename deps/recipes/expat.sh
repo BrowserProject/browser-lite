@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# expat: XML-Parser fuer fontconfig
+# expat: XML parser for fontconfig
 build() {
     dep_cmake "$SRC" \
         -DEXPAT_BUILD_TOOLS=OFF \

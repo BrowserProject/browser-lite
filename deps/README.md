@@ -1,23 +1,43 @@
 # deps/
 
-Die Bibliotheken der Engine (zlib, ICU, freetype, harfbuzz, fontconfig, libxml2, sqlite,
-OpenSSL, nghttp2, libcurl, ...), nach WASM gebaut. Skia kommt mit WebKit.
+The engine's libraries (zlib, ICU, freetype, harfbuzz, fontconfig, libxml2, sqlite, OpenSSL,
+nghttp2, libcurl, ...) built for WASM, plus runtime files (Noto fonts, fontconfig config and
+cache, CA certificates). Skia comes with WebKit.
 
-- `sources.txt`: Quelle jeder Lib mit Version und SHA256 (bzw. Git-Commit). Nur hier stehen
-  ihre Versionen.
-- `recipes/<name>.sh`: wie eine Lib gebaut wird (Funktion `build`). Liest ein Rezept weitere
-  Dateien (z.B. `deps/tools/fc-precache.c`), stehen sie in `DEP_FILES` und zaehlen zum
-  Stamp.
-- `build-all.sh`: Reihenfolge und Stamps. Baut ab der ersten Lib, die sich geaendert hat, neu
-  (`--force` alles, `--only <name>` nur eine).
-- `lib.sh`: gemeinsame Helfer der Rezepte (Flags, Download mit Pruefsumme, cmake, meson,
-  autotools).
-- `relocate-pc.sh`: passt die pkg-config-Dateien an den Pfad des sysroot an.
-- `test.sh`: Smoke-Test gegen das fertige sysroot (`tests/smoke.cpp`).
+- `sources.txt`: source of each lib with version and SHA256 (or git commit). The only place
+  where their versions live.
+- `recipes/<name>.sh`: how a lib is built (function `build`).
+- `build-all.sh`: build order and stamps.
+- `lib.sh`: shared recipe helpers (flags, download with checksum, cmake, meson, autotools).
+- `relocate-pc.sh`: rewrites the pkg-config files to the current sysroot path.
+- `test.sh`: smoke test against the finished sysroot (`tests/smoke.cpp`).
+- `tools/fc-precache.c`: generates the fontconfig cache at build time.
 
-Ausgabe: `sysroot/` (Header, statische Libs, pkg-config) und `sysroot/runtime/` (Fonts,
-fontconfig, CA-Zertifikate), das beim Linken der Engine zu `engine.data` wird. Beides ist
-gitignored. Bauen siehe [docs/build.md](../docs/build.md).
+Output: `sysroot/` (headers, static libs, pkg-config) and `sysroot/runtime/` (fonts,
+fontconfig, CA certificates), which becomes `engine.data` when the engine is linked. Both are
+gitignored. Run inside the toolchain image, see [docs/build.md](../docs/build.md).
 
-OpenSSL, curl und die CA-Zertifikate (`cacert`) regelmaessig aktualisieren: sie verarbeiten
-Daten beliebiger Server, und das Zertifikat-Bundle ist fest in der Engine.
+## Building
+
+```bash
+deps/build-all.sh               # everything that changed
+deps/build-all.sh --force       # rebuild everything
+deps/build-all.sh --only icu    # one lib only, ignores stamps
+deps/test.sh                    # smoke test
+```
+
+Each lib has a stamp in `sysroot/.stamps/`: a hash of its `sources.txt` line, recipe, the files
+in `DEP_FILES`, patches in `patches/<name>/`, `lib.sh`, `build-all.sh`, compiler flags and the
+stamp of the previous lib. Everything from the first changed lib onwards is rebuilt.
+
+## Adding a dependency
+
+1. Line in `sources.txt` (`name type version url sha256`, type `tar`, `zip`, `file`, `git`
+   with commit, or `none`).
+2. `recipes/<name>.sh` with a `build` function, usually `dep_cmake`, `dep_meson` or
+   `dep_autotools "$SRC" ...`. Extra files the recipe reads go into `DEP_FILES`.
+3. Add the name to `ORDER` in `build-all.sh` after its dependencies, and to `pkgs` plus a
+   check in `tests/smoke.cpp` / `test.sh` if it is a library.
+
+Update OpenSSL, curl and the CA certificates (`cacert`) regularly: they process data from
+arbitrary servers, and the certificate bundle is baked into the engine.

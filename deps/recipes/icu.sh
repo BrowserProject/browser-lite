@@ -1,19 +1,19 @@
 # shellcheck shell=bash
-# ICU: Unicode, Zeichensaetze, Textumbruch, Collation. WebKit braucht >= 70.1.
-# Cross-Build: zuerst ICU fuer den Host bauen (die Tools erzeugen die Daten),
-# dann fuer WASM mit --with-cross-build. Daten werden statisch eingelinkt:
-# Der WASM-Build baut nur Stub-Daten (das data/ Verzeichnis braucht die Tools),
-# darum machen wir libicudata.a selber aus dem .dat Archiv vom Host-Build.
-# ---- Datenfilter: macht das ICU-Datenarchiv kleiner (33 MB -> 19 MB).
+# ICU: Unicode, charsets, line breaking, collation. WebKit needs >= 70.1.
+# Cross build: first ICU for the host (its tools generate the data), then for
+# WASM with --with-cross-build. Data is linked statically: the WASM build only
+# produces stub data (data/ needs the tools), so libicudata.a is made here from
+# the .dat archive of the host build.
+# ---- Data filter: shrinks the ICU data archive (33 MB -> 19 MB).
 #
-#   icu_filter_list < liste-aller-items   gibt die Items aus, die weg koennen
+#   icu_filter_list < list-of-all-items   prints the items that can be removed
 #
-# Behalten wird:
-#  - alles Grundlegende (Normalisierung, Umbruch, Locale-Hauptdaten aller Sprachen)
-#  - nur die Zeichensatz-Konverter, die WebKit braucht (TextCodecICU, EncodingTables)
-#  - Anzeigenamen, Waehrungen, Einheiten, Zeitzonen, Collation, Zahlwoerter nur
-#    fuer die Sprachen in ICU_KEEP_LANGS (andere fallen auf root zurueck)
-# Entfernt: Transliteration (braucht WebKit nicht).
+# Kept:
+#  - all basics (normalization, breaking, main locale data of all languages)
+#  - only the charset converters WebKit needs (TextCodecICU, EncodingTables)
+#  - display names, currencies, units, time zones, collation, spellout only
+#    for the languages in ICU_KEEP_LANGS (others fall back to root)
+# Removed: transliteration (not used by WebKit).
 
 ICU_KEEP_CONVERTERS="ibm-912_P100-1995 ibm-914_P100-1995 ibm-915_P100-1995 iso-8859_10-1998
 ibm-921_P100-1995 iso-8859_14-1998 ibm-923_P100-1998 ibm-878_P100-1996 macos-0_2-10.2
@@ -52,8 +52,8 @@ icu_filter_list() {
 }
 
 # icu_filter_dat <icupkg> <in.dat> <out.dat>
-# Entfernt die Items aus icu_filter_list. Braucht ein behaltenes Item ein
-# entferntes (z.B. zh_Hant_HK -> yue), bleibt dieses drin (neuer Versuch).
+# Removes the items from icu_filter_list. If a kept item depends on a removed
+# one (e.g. zh_Hant_HK -> yue), that one is kept (next attempt).
 icu_filter_dat() {
     local icupkg="$1" in="$2" out="$3"
     local work
@@ -65,15 +65,15 @@ icu_filter_dat() {
     for try in $(seq 1 50); do
         rm -f "$out"
         if "$icupkg" -r "$work/remove.txt" "$in" "$out" 2> "$work/log.txt"; then
-            bl_log "icu: $(wc -l < "$work/remove.txt") von $(wc -l < "$work/items.txt") Daten-Items entfernt (Versuch $try)"
+            bl_log "icu: removed $(wc -l < "$work/remove.txt") of $(wc -l < "$work/items.txt") data items (attempt $try)"
             return 0
         fi
         missing="$(sed -n 's/.*depends on missing item \(.*\)$/\1/p' "$work/log.txt" | sort -u)"
-        [ -n "$missing" ] || { cat "$work/log.txt" >&2; bl_die "icu: icupkg -r fehlgeschlagen"; }
+        [ -n "$missing" ] || { cat "$work/log.txt" >&2; bl_die "icu: icupkg -r failed"; }
         grep -vxF -f <(printf '%s\n' "$missing") "$work/remove.txt" > "$work/remove.new" || true
         mv "$work/remove.new" "$work/remove.txt"
     done
-    bl_die "icu: Abhaengigkeiten beim Filtern nicht aufgeloest"
+    bl_die "icu: could not resolve dependencies while filtering"
 }
 
 build() {
@@ -81,7 +81,7 @@ build() {
     local out="$BL_DEPS_BUILD/$DEP_NAME/build"
     local cfg="$SRC/source/config"
 
-    bl_log "icu: Host-Build (fuer die Daten-Tools)"
+    bl_log "icu: host build (for the data tools)"
     mkdir -p "$host"
     (
         cd "$host" || exit 1
@@ -92,12 +92,12 @@ build() {
         make -j "$BL_JOBS"
     )
 
-    # ICU kennt Emscripten nicht und nimmt dann config/mh-unknown. Wir nehmen die
-    # Linux-Einstellungen, aber ohne GENCCODE_ASSEMBLY: sonst erzeugt genccode
-    # x86-Assembler fuer die Daten, den emcc nicht versteht. So wird es C-Code.
+    # ICU does not know Emscripten and falls back to config/mh-unknown. Use the
+    # Linux settings without GENCCODE_ASSEMBLY: otherwise genccode emits x86
+    # assembly for the data, which emcc cannot handle. This way it emits C.
     sed '/^GENCCODE_ASSEMBLY/d' "$cfg/mh-linux" > "$cfg/mh-unknown"
 
-    bl_log "icu: WASM-Build"
+    bl_log "icu: WASM build"
     mkdir -p "$out"
     (
         cd "$out" || exit 1
@@ -111,21 +111,23 @@ build() {
             --disable-tools --disable-tests --disable-samples --disable-extras \
             --disable-icuio --disable-layoutex \
             --with-data-packaging=static
-        emmake make -j "$BL_JOBS"
-        emmake make install
+        # Without the data folder (DATASUBDIR=): libicudata.a is built below from the filtered
+        # host archive. Its pkgdata would also try to write host object code for wasm.
+        emmake make -j "$BL_JOBS" DATASUBDIR=
+        emmake make install DATASUBDIR=
     )
 
-    bl_log "icu: Daten als statische Lib"
+    bl_log "icu: data as static lib"
     local dat
     dat="$(find "$host/data/out" -maxdepth 1 -name 'icudt*l.dat' | head -n 1)"
-    [ -n "$dat" ] || bl_die "icu: kein .dat Archiv im Host-Build gefunden"
+    [ -n "$dat" ] || bl_die "icu: no .dat archive found in the host build"
     local gen="$BL_DEPS_BUILD/$DEP_NAME/data"
     mkdir -p "$gen/filtered"
     LD_LIBRARY_PATH="$host/lib" icu_filter_dat "$host/bin/icupkg" "$dat" "$gen/filtered/$(basename "$dat")"
     dat="$gen/filtered/$(basename "$dat")"
-    # genccode macht aus dem Archiv eine .c Datei mit dem Symbol icudtNN_dat
-    # -e: Name des Einstiegspunkts ohne Endianness-Buchstaben (icudt78l.dat -> icudt78),
-    # so wie ICU ihn beim Laden sucht (Symbol icudt78_dat).
+    # genccode turns the archive into a .c file with the symbol icudtNN_dat.
+    # -e: entry point name without the endianness letter (icudt78l.dat -> icudt78),
+    # as ICU looks it up when loading (symbol icudt78_dat).
     local entry
     entry="$(basename "$dat" .dat)"
     entry="${entry%l}"

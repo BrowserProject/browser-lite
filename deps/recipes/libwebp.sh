@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libwebp: WebP-Bilder (WebKit braucht demux, Skia braucht mux)
+# libwebp: WebP images (WebKit needs demux, Skia needs mux)
 build() {
     dep_cmake "$SRC" \
         -DWEBP_BUILD_ANIM_UTILS=OFF \

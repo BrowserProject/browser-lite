@@ -228,6 +228,10 @@ jobs:
     name: WebCore + engine (PORT=Wasm) + engine tests
     needs: [toolchain, deps]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      actions: write
     timeout-minutes: 355
     env:
       IMAGE: ${{ needs.toolchain.outputs.image }}
@@ -288,6 +292,15 @@ jobs:
         with:
           path: build/ccache
           key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}-${{ github.run_attempt }}
+      # Caches are limited to 10 GB per repo: keep only the newest ccache, or the large ccache
+      # entries push out the sysroot and download caches
+      - name: Delete older ccache entries
+        if: always() && steps.engine-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh cache list -R "$GITHUB_REPOSITORY" --key ccache-engine- --sort created_at --order desc -L 100 --json id --jq '.[1:][].id' |
+            while read -r id; do gh cache delete -R "$GITHUB_REPOSITORY" "$id" || true; done
       - name: Save engine to cache
         if: steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0

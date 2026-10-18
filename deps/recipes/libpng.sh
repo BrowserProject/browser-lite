@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# libpng: PNG-Bilder
+# libpng: PNG images
 build() {
     dep_cmake "$SRC" \
         -DPNG_SHARED=OFF \

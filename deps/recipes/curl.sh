@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# libcurl: HTTP(S), HTTP/2, WebSockets fuer das WebCore curl-Backend.
-# Die Sockets gehen ueber die Socket-Schicht der Engine (engine/src/Sockets.cpp, --wrap).
+# libcurl: HTTP(S), HTTP/2, WebSockets for the WebCore curl backend.
+# Sockets go through the engine's socket layer (engine/src/Sockets.cpp, --wrap).
 build() {
     dep_cmake "$SRC" \
         -DBUILD_CURL_EXE=OFF \
