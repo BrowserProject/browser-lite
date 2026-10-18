@@ -92,38 +92,30 @@ node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic
 node tests/engine/check-basic.mjs build/basic.ppm
 ```
 
-## Oberflaeche lokal starten
+## Run the demo locally
 
 ```bash
-npm ci && npm run build                 # packages, serve.mjs uses @browser-lite/server
-node web/serve.mjs 8080                 # liefert web/ und /engine/ aus build/webcore/bin
+npm ci && npm run build                 # the packages (the demo uses their dist/)
+PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &   # relay and profile on :5001
+npm run dev -w @browser-lite/demo       # Vite on :5173, engine from build/webcore/bin (BL_ENGINE_DIR)
 ```
 
-Dann `http://localhost:8080/?url=https://example.com` oeffnen. Fuer echte Seiten braucht es
-das Relay, lokal z.B.:
+Then open `http://localhost:5173/?url=https://example.com`. The dev server forwards `/wisp/` and
+`/profile/` to the server (`BL_SERVER`, default `http://localhost:5001`). URL parameters:
+[apps/demo/README.md](../apps/demo/README.md).
+
+Like in the container (packaged demo and relay on one port):
 
 ```bash
 npm ci && npm run build
-RELAY_ALLOWED_ORIGINS=http://localhost:8080 node packages/server/dist/bin/browser-lite-server.js
-# und die Seite mit ?relay=ws://localhost:5001/wisp/ oeffnen
-```
-
-`?relay=` gilt nur fuer diesen Browser-Tab, ein leeres `?relay=` nimmt wieder das Relay der
-eigenen Seite. Ein Token (`?token=`) wird pro Relay gespeichert. Alle URL-Parameter:
-[web/README.md](../web/README.md).
-
-Wie im Container (fertige Seite und Relay auf einem Port):
-
-```bash
-tools/package-site.sh build/webcore/bin build/site
-npm ci && npm run build
-PORT=8080 SITE_DIR=build/site node packages/server/dist/bin/browser-lite-server.js
+tools/package-demo.sh build/webcore/bin build/demo
+PORT=8080 SITE_DIR=build/demo node packages/server/dist/bin/browser-lite-server.js
 # http://localhost:8080/
 ```
 
-## Container und Deploy
+## Container and deploy
 
-Siehe [deploy/README.md](../deploy/README.md).
+See [apps/demo/deploy/README.md](../apps/demo/deploy/README.md).
 
 ## CI
 
@@ -146,7 +138,7 @@ Node kommt aus `NODE_VERSION` in `versions.env` (`actions/setup-node`), in den J
 Toolchain-Image (toolchain-check, deps, jsc, engine) ist es das Node von emsdk.
 
 Nach gruener CI auf `main` baut `.github/workflows/deploy.yml` das Image und startet es auf
-dem Server neu ([deploy/README.md](../deploy/README.md)).
+dem Server neu ([apps/demo/deploy/README.md](../apps/demo/deploy/README.md)).
 
 Der Engine-Job bricht nach 320 Minuten selber ab und speichert ccache. Der naechste Lauf
 macht dann mit dem Cache weiter (GitHub erlaubt hoechstens 6 Stunden pro Job). ccache in

@@ -122,7 +122,7 @@ if (dropsBefore)
 
 // 2. Datei aus dem Host ablegen (Ereignisse auf dem Canvas wie beim Ziehen aus dem Dateimanager)
 const dropOnCanvas = (x, y, fill) => page.evaluate(([x, y, fill]) => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none');
   const dataTransfer = new DataTransfer();
   if (fill.file)
     dataTransfer.items.add(new File([fill.file.content], fill.file.name, { type: fill.file.type }));
@@ -150,7 +150,7 @@ await screenshot(page, 'dragdrop');
 // 5. Abgelegte Dateien liegen im Ordner des Tabs und gehen mit ihm weg (bl_remove_path)
 const uploadFolders = () => page.evaluate(() => {
   try {
-    return window.__blEngine().FS.readdir('/data/tmp/uploads').filter((name) => name !== '.' && name !== '..').join(',');
+    return window.blTest.browser.debug.module.FS.readdir('/data/tmp/uploads').filter((name) => name !== '.' && name !== '..').join(',');
   } catch (e) {
     return 'fehler:' + e.message;
   }

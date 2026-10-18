@@ -26,7 +26,7 @@ Haupt-Thread (Oberflaeche, web/)          Engine-Worker (WASM, pthreads, je ein 
 
 ### Oberflaeche
 Schlichtes HTML, CSS und JavaScript (ES-Module) ohne Build-Schritt, ein Modul pro Thema
-([web/README.md](../web/README.md)). Gemeinsame Helfer (Speicher, Base64, Fehler) liegen in
+([apps/demo/README.md](../apps/demo/README.md)). Gemeinsame Helfer (Speicher, Base64, Fehler) liegen in
 `web/util.js`. Die Engine ruft die Oberflaeche ueber `Module.*`-Funktionen und Ereignisse wie
 `navigation`, `commit`, `external-url` auf, die Oberflaeche die Engine ueber `bl_*`-Exporte.
 
@@ -401,4 +401,4 @@ Socket direkt vor dem Verbinden (eigener Wisp-v1-Server in `packages/server/src/
 oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als Proxy),
 intern geht es ohne. Mit `PROFILE_DIR` (im Container `/data`, ein Volume) hostet er auch
 genau ein Browser-Profil (`createProfileStore`, [profil.md](profil.md)), ohne Token offen wie
-das Relay. Ablauf in [deploy/README.md](../deploy/README.md).
+das Relay. Ablauf in [apps/demo/deploy/README.md](../apps/demo/deploy/README.md).

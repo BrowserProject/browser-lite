@@ -238,15 +238,15 @@ const page = await context.newPage();
 const results = collect(page);
 const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
-await page.goto(stack.app({ url: siteURL, debug: '1' }));
+await page.goto(stack.app({ url: siteURL, log: '1' }));
 check('mediaDevices.getUserMedia/getDisplayMedia vorhanden', await result('api') === 'function,function', results.get('api'));
 const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 120, box.y + 50);
-const prompt = page.locator('#permission-prompt:not([hidden])');
+const prompt = page.locator('.bl-permission-prompt:not([hidden])');
 const promptShown = await prompt.waitFor({ timeout: 15000 }).then(() => true, () => false);
-check('Abfrage fuer Kamera und Mikrofon', promptShown && /Kamera und dein Mikrofon/.test(await prompt.textContent()), promptShown ? await prompt.textContent() : '');
+check('Abfrage fuer Kamera und Mikrofon', promptShown && /camera and microphone/.test(await prompt.textContent()), promptShown ? await prompt.textContent() : '');
 if (promptShown)
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 const err = () => results.get('error') || '';
 check('Stream mit Video- und Tonspur', await result('tracks', 30000) === '1:1', results.get('tracks') || err());
 check('Aufnahme-Anzeige im Tab', await page.locator('#tab-list .tab.active .recording:not([hidden])').waitFor({ timeout: 10000 }).then(() => true, () => false));
@@ -312,7 +312,7 @@ const hostPeak = async (done) => {
   let peak = null;
   const until = Date.now() + 15000;
   while (Date.now() < until) {
-    peak = (await page.evaluate(() => window.__blAudioState())).peak;
+    peak = (await page.evaluate(() => window.blTest.audioState())).peak;
     if (done(peak))
       break;
     await page.waitForTimeout(250);

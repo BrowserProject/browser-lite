@@ -131,14 +131,14 @@ for (const compositing of ['1', '0']) {
   const stripe = await pixelAt(350, 70);
   check(`${label}: paint() mit Argument`, near(stripe, [255, 0, 255]), JSON.stringify(stripe));
 
-  await page.evaluate(() => window.__blEval('umfaerben()'));
+  await page.evaluate(() => window.blTest.eval('umfaerben()'));
   let changed = null;
   await waitFor(async () => near(changed = await pixelAt(70, 40), [200, 0, 0]), 10000);
   check(`${label}: neu gemalt nach Aenderung von --farbe`, near(changed, [200, 0, 0]), JSON.stringify(changed));
   // Weitere Module mit dem Namen karo: kein Leck (vorher ca. 7 MB je Modul), es bleibt die erste Registrierung
-  const memory = () => page.evaluate(() => window.__blEngine()._bl_memory_used());
+  const memory = () => page.evaluate(() => window.blTest.browser.debug.module._bl_memory_used());
   const before = await memory();
-  await page.evaluate(() => window.__blEval('nochmal(20)'));
+  await page.evaluate(() => window.blTest.eval('nochmal(20)'));
   check(`${label}: Name in weiteren Modulen`, await results.wait('again') === '1', results.get('again'));
   const grown = (await memory() - before) / 1048576;
   check(`${label}: kein Speicherleck bei doppeltem Namen`, grown < 40, `${grown.toFixed(1)} MB`);

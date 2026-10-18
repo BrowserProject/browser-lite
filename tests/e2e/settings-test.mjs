@@ -73,11 +73,11 @@ const settingsOpen = () => page.evaluate(() => document.getElementById('settings
 const settingsClosed = () => page.waitForFunction(() => !document.getElementById('settings').open, null, { timeout: 5000 }).then(() => true, () => false);
 const focused = () => page.evaluate(() => {
   const element = document.activeElement;
-  return element.id || element.dataset?.section || element.tagName;
+  return element.id || element.dataset?.section || (element.hasAttribute('data-bl-ime') ? 'page' : element.tagName);
 });
 async function openSettings(section) {
   await page.click('#menu-button');
-  await page.locator('#side-panel .panel-menu-item', { hasText: 'Einstellungen' }).click();
+  await page.locator('#side-panel .panel-menu-item', { hasText: 'Settings' }).click();
   await page.click(`#settings nav button[data-section=${section}]`);
 }
 async function setText(selector, value) {
@@ -113,22 +113,22 @@ await page.keyboard.press('Control+t');
 check('Strg+T hinter den Einstellungen wirkt nicht', (await tabCount()) === tabsBefore);
 await page.click('#settings nav button[data-section=device]');
 check('Abschnitt wechseln: Fokus bleibt auf dem Knopf', (await focused()) === 'device'
-  && (await page.textContent('#settings h2')) === 'Gerät und Browser'
+  && (await page.textContent('#settings h2')) === 'Device and browser'
   && (await page.getAttribute('#settings nav button[data-section=device]', 'aria-current')) === 'page');
 await page.keyboard.press('Escape');
-check('Esc schliesst, Fokus zurueck in der Seite', await settingsClosed() && (await focused()) === 'ime', await focused());
+check('Esc schliesst, Fokus zurueck in der Seite', await settingsClosed() && (await focused()) === 'page', await focused());
 
 // 3) Profil: was nur auf diesem Geraet liegt (sobald die Engine die Datenbanken geschrieben hat)
 await page.click('#clear-data');
-const expected = [`127.0.0.1:${new URL(siteA).port}: IndexedDB (über der Grenze)`, `127.0.0.1:${new URL(siteB).port}: localStorage (über der Grenze)`];
+const expected = [`127.0.0.1:${new URL(siteA).port}: IndexedDB (over the limit)`, `127.0.0.1:${new URL(siteB).port}: localStorage (over the limit)`];
 let localList = '';
 await waitFor(async () => {
   await page.click('#settings nav button[data-section=profile]');
-  localList = await page.waitForFunction(() => document.querySelector('#settings .settings-local')?.textContent.includes('Service Worker'), null, { timeout: 10000 })
+  localList = await page.waitForFunction(() => document.querySelector('#settings .settings-local')?.textContent.includes('Service workers'), null, { timeout: 10000 })
     .then(() => page.textContent('#settings .settings-local'), () => '');
   return expected.every((text) => localList.includes(text));
 }, 30000, 1000);
-check('"Nur auf diesem Gerät": grosse IndexedDB und grosses localStorage', expected.every((text) => localList.includes(text)), localList);
+check('"Only on this device": grosse IndexedDB und grosses localStorage', expected.every((text) => localList.includes(text)), localList);
 await page.keyboard.press('Escape');
 await settingsClosed();
 
@@ -172,7 +172,7 @@ check('iPhone: Bildschirm 390x844, DPR 3, Touch, grober Zeiger ohne Hover', phon
 check('Eigene Sprache und Zeitzone', phone.languages === 'fr-CH' && phone.acceptLanguage === 'fr-CH, fr' && phone.timeZone === 'America/New_York', JSON.stringify(phone));
 check('Dunkel und Global Privacy Control', phone.dark === true && phone.gpc === 'true/1', JSON.stringify(phone));
 const box = await page.evaluate(() => {
-  const rect = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').getBoundingClientRect();
+  const rect = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none').getBoundingClientRect();
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, width: rect.width };
 });
 check('iPhone: Seitenbereich so breit wie das Geraet', Math.round(box.width) === 390, String(box.width));

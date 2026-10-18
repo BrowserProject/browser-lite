@@ -124,10 +124,10 @@ check('Vorschlag oeffnen', await waitLoaded('Seite eins'));
 
 // Suchmaschine in den Einstellungen: Text ohne Punkt wird eine Suche
 await tab.click('#menu-button');
-await tab.locator('#side-panel .panel-menu-item', { hasText: 'Einstellungen' }).click();
+await tab.locator('#side-panel .panel-menu-item', { hasText: 'Settings' }).click();
 check('Einstellungen als ganze Seite', await tab.evaluate(() => document.getElementById('settings').open && document.getElementById('side-panel').hidden));
 await tab.selectOption('#setting-search', 'google');
-const searchURL = await tab.evaluate(async () => (await import('./library.js')).addressToURL('wetter bern'));
+const searchURL = await tab.evaluate(() => window.blTest.addressToURL('wetter bern'));
 check('Suchmaschine', searchURL === 'https://www.google.com/search?q=wetter%20bern', searchURL);
 await tab.keyboard.press('Escape');
 check('Einstellungen mit Esc zu', await tab.waitForFunction(() => !document.getElementById('settings').open, null, { timeout: 5000 }).then(() => true, () => false));
@@ -159,10 +159,10 @@ check('Sitzung: Vor laedt wieder die letzte Seite', await waitLoaded('Seite eins
 
 // Wenig Speicher: der Hintergrund-Tab wird verworfen und laedt beim Anklicken neu
 const dreiBefore = loads.get('drei') || 0;
-const discarded = await tab.evaluate(() => window.__blCheckMemory());
+const discarded = await tab.evaluate(() => window.blTest.checkMemory());
 const titlesAfter = await tab.locator('#tab-list .tab .title').allTextContents();
 check('Speicher knapp: Hintergrund-Tab verworfen, Titel bleibt', discarded > 0 && JSON.stringify(titlesAfter) === JSON.stringify(['Seite eins', 'Seite drei']), `${discarded} ${JSON.stringify(titlesAfter)}`);
-check('Aktiver Tab wird nie verworfen', await tab.evaluate(() => window.__blCheckMemory()) === 0);
+check('Aktiver Tab wird nie verworfen', await tab.evaluate(() => window.blTest.checkMemory()) === 0);
 loaded = [];
 await tab.click('#tab-list .tab:nth-child(2) .title');
 check('Verworfener Tab laedt beim Anklicken neu', await waitLoaded('Seite drei') && (loads.get('drei') || 0) === dreiBefore + 1, `${loads.get('drei')} Aufrufe`);
@@ -175,7 +175,7 @@ check('Seite mit Link', await waitLoaded('Seite links'));
 const tabCount = () => tab.locator('#tab-list .tab').count();
 const before = await tabCount();
 const box = await tab.evaluate(() => {
-  const rect = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').getBoundingClientRect();
+  const rect = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none').getBoundingClientRect();
   return { x: rect.left + 100, y: rect.top + 30 };
 });
 await tab.keyboard.down('Control');
@@ -186,22 +186,22 @@ check('Strg+Klick: neuer Tab im Hintergrund', (await tabCount()) === before + 1 
 await tab.mouse.click(box.x, box.y, { button: 'middle' });
 await tab.waitForTimeout(1500);
 check('Mittelklick: genau ein neuer Tab', (await tabCount()) === before + 2, `${await tabCount()} Tabs`);
-check('Sicherheitsanzeige bei HTTP', await tab.evaluate(() => !document.getElementById('security').hidden && document.getElementById('security').textContent === 'Nicht sicher'));
+check('Sicherheitsanzeige bei HTTP', await tab.evaluate(() => !document.getElementById('security').hidden && document.getElementById('security').textContent === 'Not secure'));
 
 // history.pushState/replaceState (SPA): Adressleiste, Zurueck und Sitzung folgen,
 // ohne dass die Seite neu laedt; history.back() geht ueber popstate zurueck
 const address = () => tab.evaluate(() => document.getElementById('address').value);
 const waitAddress = (url) => tab.waitForFunction((u) => document.getElementById('address').value === u, url, { timeout: 10000 }).then(() => true, () => false);
 const sessionURL = () => tab.evaluate(() => JSON.parse(localStorage.getItem('bl-session')).tabs.find((t) => t.active).url);
-await tab.evaluate(() => window.__blEval('history.pushState({}, "", "/spa/eins")'));
+await tab.evaluate(() => window.blTest.eval('history.pushState({}, "", "/spa/eins")'));
 check('pushState: Adressleiste', await waitAddress(siteURL + 'spa/eins'), await address());
 check('pushState: Zurueck aktiv, Sitzung, kein Laden', await tab.evaluate(() => !document.getElementById('back').disabled)
   && await sessionURL() === siteURL + 'spa/eins' && !loads.has('spa/eins'), await sessionURL());
-await tab.evaluate(() => window.__blEval('history.replaceState({}, "", "/spa/zwei")'));
+await tab.evaluate(() => window.blTest.eval('history.replaceState({}, "", "/spa/zwei")'));
 check('replaceState: Adressleiste', await waitAddress(siteURL + 'spa/zwei'), await address());
-await tab.evaluate(() => window.__blEval('history.back()'));
+await tab.evaluate(() => window.blTest.eval('history.back()'));
 check('history.back() nach pushState', await waitAddress(siteURL + 'links'), await address());
-await tab.evaluate(() => window.__blEval('history.forward()'));
+await tab.evaluate(() => window.blTest.eval('history.forward()'));
 check('history.forward() zur ersetzten Adresse', await waitAddress(siteURL + 'spa/zwei'), await address());
 
 // Quelltext (Strg+U): neuer Tab mit dem HTML der Seite
@@ -214,7 +214,7 @@ check('Quelltext anzeigen (Strg+U)', sourceTab, await tab.evaluate(() => documen
 await tab.locator('#tab-list .tab.active .title').click();
 await go(siteURL + 'drucken');
 check('Seite zum Drucken', await waitLoaded('Seite drucken'));
-await tab.evaluate(() => window.__blEval('window.print()'));
+await tab.evaluate(() => window.blTest.eval('window.print()'));
 const preview = tab.locator('#print-preview:not([hidden]) iframe');
 const previewShown = await preview.waitFor({ state: 'attached', timeout: 20000 }).then(() => true, () => false);
 const pdf = previewShown ? await tab.evaluate(async () => {
@@ -232,27 +232,30 @@ await tab.keyboard.press('Control+p');
 check('Strg+P zeigt die Vorschau', await preview.waitFor({ state: 'attached', timeout: 20000 }).then(() => true, () => false));
 await tab.evaluate(() => document.querySelector('#print-preview .print-close').click());
 
-// ?relay= gilt nur fuer diesen Browser-Tab, der Token nur fuer genau dieses Relay
+// ?relay= (only with ?debug=1) applies to this load only and is never stored, the token belongs
+// to exactly this relay
 const relayState = await tab.evaluate((host) => ({ local: localStorage.getItem('bl-relay-url'), session: sessionStorage.getItem('bl-relay-url'),
-  token: localStorage.getItem('bl-relay-token ' + host), url: window.__blEngine().blTransport.url }), `127.0.0.1:${stack.relayPort}`);
-check('?relay= nur fuer die Sitzung, nicht im localStorage', relayState.local === null && relayState.session === stack.relayURL, JSON.stringify(relayState));
-check('Token gehoert zu diesem Relay', relayState.token === stack.token && relayState.url === `${stack.relayURL}?token=${stack.token}`, relayState.url);
-// Leeres ?relay= nimmt wieder das eigene Relay, ohne fremden Token. ?env= setzt nur Schalter der Engine.
-await tab.goto(`${stack.uiURL}?relay=&env=BL_EXTRA_CA=x,SSLKEYLOGFILE=/tmp/keys,https_proxy=http://boese,BL_TEST_FLAG=1&url=about:blank`);
+  token: localStorage.getItem('bl-relay-token ' + host), relay: window.blTest.relay }), `127.0.0.1:${stack.relayPort}`);
+check('?relay= nur fuer diese Seite, nirgends gespeichert', relayState.local === null && relayState.session === null && relayState.relay.url === stack.relayURL, JSON.stringify(relayState));
+check('Token gehoert zu diesem Relay', relayState.token === stack.token && relayState.relay.token, JSON.stringify(relayState));
+// Empty ?relay= takes the own relay without a foreign token. ?env= sets only engine switches.
+await tab.goto(`${stack.uiURL}?debug=1&relay=&env=BL_EXTRA_CA=x,SSLKEYLOGFILE=/tmp/keys,https_proxy=http://boese,BL_TEST_FLAG=1,BL_SCRIPT_TIMEOUT=9&url=about:blank`);
 await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: TIMEOUT });
-const envState = await tab.evaluate(() => {
-  const engine = window.__blEngine();
-  return { ca: engine.ENV.BL_EXTRA_CA ?? null, keys: engine.ENV.SSLKEYLOGFILE ?? null, proxy: engine.ENV.https_proxy ?? null, flag: engine.ENV.BL_TEST_FLAG ?? null,
-    url: engine.blTransport.url, session: sessionStorage.getItem('bl-relay-url') };
-});
-check('?env=BL_EXTRA_CA und fremde Variablen werden ignoriert', envState.ca === null && envState.keys === null && envState.proxy === null && envState.flag === '1', JSON.stringify(envState));
-check('Leeres ?relay=: eigenes Relay ohne Token', envState.session === null && envState.url === `ws://localhost:${stack.uiPort}/wisp/`, envState.url);
+const envState = await tab.evaluate(() => ({ engine: window.blTest.options.engine, relay: window.blTest.relay }));
+check('?env=BL_EXTRA_CA und fremde Variablen werden ignoriert', JSON.stringify(envState.engine) === JSON.stringify({ scriptTimeoutSeconds: 9, env: { BL_TEST_FLAG: '1' } }), JSON.stringify(envState));
+check('Leeres ?relay=: eigenes Relay ohne Token', envState.relay.url === `ws://localhost:${stack.uiPort}/wisp/` && !envState.relay.token, JSON.stringify(envState.relay));
+// Without ?debug=1 ?relay= and ?env= do nothing: the own relay of the demo server allows no local
+// addresses, so the test page cannot load, and there are no test hooks
+loaded = [];
+await tab.goto(`${stack.uiURL}?relay=${encodeURIComponent(stack.relayURL)}&env=BL_TEST_FLAG=1&url=${encodeURIComponent(siteURL + 'ohne-debug')}`);
+await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: TIMEOUT });
+check('Ohne ?debug=1: kein ?relay=, keine Test-Hooks', !(await waitLoaded('Seite ohne-debug', 8000)) && await tab.evaluate(() => window.blTest === undefined) && !loads.has('ohne-debug'),
+  loaded.join('|'));
 
 // Zwei Tabs fuer Haengen und Absturz (gewollt, ab hier nicht mehr beobachtet)
 stopWatchingTab();
 loaded = [];
-// BL_TEST_HOOKS: bl_crash_for_testing geht nur damit
-await tab.goto(stack.app({ url: siteURL + 'vorher', env: 'BL_TEST_HOOKS=1,BL_SCRIPT_TIMEOUT=15' }));
+await tab.goto(stack.app({ url: siteURL + 'vorher', env: 'BL_SCRIPT_TIMEOUT=15' }));
 check('Absturz: erster Tab', await waitLoaded('Seite vorher', TIMEOUT));
 await tab.click('#new-tab');
 await go(siteURL + 'nachher');
@@ -265,23 +268,23 @@ const waitBoot = (text, timeout) => tab.waitForFunction((t) => !document.getElem
 // keine Antwort. Nach 15 s (hier eingestellt) bricht der Watchdog
 // (engine/src/EngineLoop.cpp) sie ab. Erst klicken, wenn die Schleife laeuft.
 loaded = [];
-await tab.evaluate(() => window.__blEval('(() => { console.log("RESULT loaded=Schleife"); for (;;); })()'));
+await tab.evaluate(() => window.blTest.eval('(() => { console.log("RESULT loaded=Schleife"); for (;;); })()'));
 check('Haengen: Schleife laeuft', await waitLoaded('Schleife', 30000), loaded.join('|'));
 loaded = [];
 await tab.click('#reload');
-check('Haengen: Meldung nach 10 s ohne Antwort', await waitBoot('reagiert nicht', 14000), await bootText());
+check('Haengen: Meldung nach 10 s ohne Antwort', await waitBoot('not responding', 14000), await bootText());
 check('Haengen: Meldung geht weg, sobald der Watchdog das Skript abbricht', await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: 15000 }).then(() => true, () => false));
-const abortLogged = () => pageErrors.some((text) => /\[seite \d+\] Script terminated/.test(text));
+const abortLogged = () => pageErrors.some((text) => /\[page \d+\] Script terminated/.test(text));
 for (const end = Date.now() + 20000; !abortLogged() && Date.now() < end;)
   await tab.waitForTimeout(200);
 check('Haengen: Meldung in der Konsole der Seite', abortLogged(), pageErrors.join(' | '));
 check('Haengen: danach laedt der Tab neu', await waitLoaded('Seite nachher'), loaded.join('|'));
-await tab.evaluate(() => window.__blEval('setTimeout(() => console.log("RESULT loaded=Timer nach Abbruch"), 10)'));
+await tab.evaluate(() => window.blTest.eval('setTimeout(() => console.log("RESULT loaded=Timer nach Abbruch"), 10)'));
 check('Haengen: Timer laufen weiter', await waitLoaded('Timer nach Abbruch', 10000));
 
 // Absturz: WASM-Trap im Engine-Thread (Emscripten wirft den Fehler des Workers im Haupt-Thread weiter)
-await tab.evaluate(() => window.__blEngine()._bl_crash_for_testing(1));
-check('Absturz: Meldung mit Neu starten', await waitBoot('abgestürzt', 10000) && await tab.locator('#boot button.primary').textContent() === 'Neu starten', await bootText());
+await tab.evaluate(() => window.blTest.crash('trap'));
+check('Absturz: Meldung mit Neu starten', await waitBoot('crashed', 10000) && await tab.locator('#boot button.primary').textContent() === 'Restart', await bootText());
 loaded = [];
 const vorherLoads = loads.get('vorher') || 0;
 await tab.click('#boot button.primary');
@@ -297,9 +300,9 @@ check('Absturz: Hintergrund-Tab laedt noch nicht', (loads.get('vorher') || 0) ==
 
 // Gleich wieder ein Absturz (abort() im Engine-Thread): danach laden die Tabs erst beim Anklicken
 const nachherLoads = loads.get('nachher') || 0;
-await tab.waitForFunction(() => window.__blEngine?.()?._bl_crash_for_testing && document.getElementById('boot').hidden, null, { timeout: 10000 }).catch(() => {});
-await tab.evaluate(() => window.__blEngine()._bl_crash_for_testing(0));
-check('Zweiter Absturz: Meldung', await waitBoot('Schon wieder', 5000), await bootText());
+await tab.waitForFunction(() => window.blTest?.browser?.state === 'ready' && document.getElementById('boot').hidden, null, { timeout: 10000 }).catch(() => {});
+await tab.evaluate(() => window.blTest.crash('abort'));
+check('Zweiter Absturz: Meldung', await waitBoot('again', 5000), await bootText());
 await tab.click('#boot button.primary');
 await tab.waitForFunction(() => document.getElementById('boot').hidden && document.querySelectorAll('#tab-list .tab').length === 3, null, { timeout: TIMEOUT }).catch(() => {});
 await tab.waitForTimeout(1500);
@@ -307,7 +310,7 @@ const safeTitles = await tab.locator('#tab-list .tab .title').allTextContents();
 check('Zweiter Absturz: Tabs da, aber nicht geladen', safeTitles.length === 3 && safeTitles[0] === 'Seite vorher' && safeTitles[1] === 'Seite nachher'
   && (loads.get('nachher') || 0) === nachherLoads && (loads.get('vorher') || 0) === vorherLoads, `${JSON.stringify(safeTitles)} ${loads.get('nachher')}`);
 const safeStatus = await tab.locator('#status').textContent();
-check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'Nach dem Neustart laden die Tabs erst beim Anklicken', safeStatus);
+check('Zweiter Absturz: Hinweis in der Statuszeile', safeStatus === 'After the restart the tabs load only when clicked', safeStatus);
 
 // Stopp, waehrend die Seite schon zu sehen ist: kein Fehler und kein 'load',
 // nur das Laden ist zu Ende. Danach Zurueck/Vor auf einen Eintrag, der nicht
@@ -322,12 +325,12 @@ navTab.on('console', (msg) => {
   if (match)
     navLoaded.push(match[1].trim());
 });
-const navState = () => navTab.evaluate(() => ({ status: document.getElementById('status').textContent, button: document.getElementById('reload').title, loaded: window.__blLoaded }));
+const navState = () => navTab.evaluate(() => ({ status: document.getElementById('status').textContent, button: document.getElementById('reload').title, loaded: window.blTest?.flags.loaded }));
 await navTab.goto(stack.app({ url: siteURL + 'nav-a' }));
 let navPages = await waitLoaded('Seite nav-a', TIMEOUT, navLoaded);
 // pushState in einem Iframe legt einen Eintrag der ganzen Seite an: Zurueck
 // wird aktiv, der Eintrag hat die Adresse der Seite, nicht die des Iframes
-await navTab.evaluate(() => window.__blEval(`const frame = document.createElement('iframe');
+await navTab.evaluate(() => window.blTest.eval(`const frame = document.createElement('iframe');
   frame.src = '/rahmen';
   frame.onload = () => frame.contentWindow.history.pushState({}, '', '/rahmen-2');
   document.body.append(frame);`));
@@ -341,19 +344,19 @@ for (const name of ['nav-b', 'nav-c', 'nav-d']) {
 check('Stopp/Zurueck: vier Seiten geladen', navPages, navLoaded.join('|'));
 await go(siteURL + 'langsam', navTab);
 check('Stopp: Seite zu sehen, laedt noch', await waitLoaded('Seite langsam', 30000, navLoaded)
-  && (await navState()).button === 'Stoppen', JSON.stringify(await navState()));
-await navTab.evaluate(() => { window.__blLoaded = false; });
+  && (await navState()).button === 'Stop', JSON.stringify(await navState()));
+await navTab.evaluate(() => { window.blTest.flags.loaded = false; });
 await navTab.click('#reload');
-const stopped = await navTab.waitForFunction(() => document.getElementById('reload').title === 'Neu laden', null, { timeout: 10000 }).then(() => true, () => false);
+const stopped = await navTab.waitForFunction(() => document.getElementById('reload').title === 'Reload', null, { timeout: 10000 }).then(() => true, () => false);
 await navTab.waitForTimeout(500);
 const afterStop = await navState();
 check('Stopp: Laden zu Ende, kein Fehler, kein load', stopped && afterStop.status === '' && afterStop.loaded === false, JSON.stringify(afterStop));
 slowResponse?.end();
 failNavA = true;
-await navTab.evaluate(() => window.__blEval('history.go(-4)'));
+await navTab.evaluate(() => window.blTest.eval('history.go(-4)'));
 const backFailed = await navTab.waitForFunction((url) => document.getElementById('address').value === url
   && document.querySelector('#tab-list .tab.active .title')?.textContent === new URL(url).hostname
-  && document.getElementById('reload').title === 'Neu laden', siteURL + 'nav-a', { timeout: 15000 }).then(() => true, () => false);
+  && document.getElementById('reload').title === 'Reload', siteURL + 'nav-a', { timeout: 15000 }).then(() => true, () => false);
 check('Zurueck/Vor scheitert: Fehlerseite, Tab laedt nicht mehr', backFailed && (loads.get('nav-a') || 0) >= 2, `${JSON.stringify(await navState())}, ${loads.get('nav-a')} Aufrufe`);
 
 // Die Zeit, in der confirm() auf den Nutzer wartet, zaehlt nicht fuer den
@@ -375,7 +378,7 @@ async function dialogLine(pattern, timeout) {
 }
 await dialogTab.goto(stack.app({ url: siteURL + 'dialog', env: 'BL_SCRIPT_TIMEOUT=2' }));
 check('Dialog: Seite geladen', await dialogLine(/RESULT loaded=Seite dialog/, TIMEOUT) >= 0);
-await dialogTab.evaluate(() => window.__blEval('console.log("RESULT confirm=" + confirm("Weiter?")); for (;;);'));
+await dialogTab.evaluate(() => window.blTest.eval('console.log("RESULT confirm=" + confirm("Weiter?")); for (;;);'));
 const answered = await dialogLine(/RESULT confirm=true/, 15000);
 const aborted = await dialogLine(/Script terminated/, 10000);
 check('Dialog: Skript laeuft nach 3,5 s im confirm() weiter', answered >= 0 && (aborted < 0 || aborted > answered), dialogLines.filter((line) => /confirm|terminated/.test(line)).join(' | '));
@@ -418,7 +421,7 @@ unloadTab.on('dialog', (dialog) => {
 const tabTitles = () => unloadTab.evaluate(() => [...document.querySelectorAll('#tab-list .tab')].map((el) => (el.classList.contains('active') ? '*' : '') + el.querySelector('.title').textContent));
 const activateUnloadPage = async () => {
   const canvas = await unloadTab.evaluate(() => {
-    const rect = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').getBoundingClientRect();
+    const rect = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none').getBoundingClientRect();
     return { x: rect.left, y: rect.top };
   });
   const clicked = unloadLines.length;
@@ -429,7 +432,7 @@ const activateUnloadPage = async () => {
 };
 // Der Listener kommt einen Engine-Schritt nach "RESULT loaded=" bei der Oberflaeche an
 const waitHostAsks = () => unloadTab.waitForFunction(() => typeof window.onbeforeunload === 'function', null, { timeout: 10000 }).catch(() => {});
-const LEAVE = 'Von dir vorgenommene Änderungen werden möglicherweise nicht gespeichert.';
+const LEAVE = 'Changes that you made may not be saved.';
 await unloadTab.goto(stack.app({ url: unloadURL + 'unload' }));
 check('beforeunload: Seite geladen', await waitLoaded('Seite unload', TIMEOUT, unloadLoaded));
 await go(unloadURL + 'eins', unloadTab);
@@ -441,15 +444,15 @@ check('beforeunload: wieder geladen', await waitLoaded('Seite unload', 30000, un
 await activateUnloadPage();
 await go(unloadURL + 'zwei', unloadTab);
 await unloadTab.waitForTimeout(2000);
-check('beforeunload: Wegnavigieren fragt, Abbrechen bleibt', JSON.stringify(unloadDialogs) === JSON.stringify(['confirm:Website verlassen?\n\n' + LEAVE])
+check('beforeunload: Wegnavigieren fragt, Abbrechen bleibt', JSON.stringify(unloadDialogs) === JSON.stringify(['confirm:Leave site?\n\n' + LEAVE])
   && !unloadLoaded.includes('Seite zwei') && !unloadLoads.has('zwei'), JSON.stringify(unloadDialogs));
 const unloadCount = unloadLoads.get('unload');
 await unloadTab.click('#reload');
 await unloadTab.waitForTimeout(2000);
-check('beforeunload: Neu laden fragt, Abbrechen bleibt', unloadDialogs[1] === 'confirm:Website neu laden?\n\n' + LEAVE && unloadLoads.get('unload') === unloadCount, JSON.stringify(unloadDialogs));
+check('beforeunload: Neu laden fragt, Abbrechen bleibt', unloadDialogs[1] === 'confirm:Reload site?\n\n' + LEAVE && unloadLoads.get('unload') === unloadCount, JSON.stringify(unloadDialogs));
 check('beforeunload: Host-Tab fragt beim Schliessen', await unloadTab.evaluate(() => typeof window.onbeforeunload === 'function'));
 // Navigation aus dem Hintergrund: ohne Frage
-await unloadTab.evaluate(() => window.__blEval('setTimeout(() => { location.href = "/drei"; }, 2000)'));
+await unloadTab.evaluate(() => window.blTest.eval('setTimeout(() => { location.href = "/drei"; }, 2000)'));
 await unloadTab.click('#new-tab');
 await unloadTab.keyboard.press('Escape');
 check('beforeunload: Navigation im Hintergrund-Tab ohne Rueckfrage', await waitLoaded('Seite drei', 30000, unloadLoaded) && unloadDialogs.length === 2, JSON.stringify(unloadDialogs));
@@ -464,7 +467,7 @@ await waitHostAsks();
 await unloadTab.click('#tab-list .tab:first-child .title');
 await unloadTab.click('#tab-list .tab:nth-child(2) .close');
 await unloadTab.waitForTimeout(1500);
-check('beforeunload: Schliessen fragt, Tab vorne und bleibt', unloadDialogs[2] === 'confirm:Website verlassen?\n\n' + LEAVE
+check('beforeunload: Schliessen fragt, Tab vorne und bleibt', unloadDialogs[2] === 'confirm:Leave site?\n\n' + LEAVE
   && JSON.stringify(await tabTitles()) === JSON.stringify(['Seite drei', '*Seite unload']), `${JSON.stringify(unloadDialogs)} ${JSON.stringify(await tabTitles())}`);
 dialogAnswer = 'accept';
 await unloadTab.click('#tab-list .tab:nth-child(2) .close');
@@ -494,7 +497,7 @@ await go(unloadURL + 'unload', unloadTab);
 check('beforeunload: Seite fuer die Schleife geladen', await waitLoaded('Seite unload', 30000, unloadLoaded));
 await activateUnloadPage();
 const dialogsBeforeLoop = unloadDialogs.length;
-await unloadTab.evaluate(() => window.__blEval('setInterval(() => { location.href = "/schleife"; }, 100)'));
+await unloadTab.evaluate(() => window.blTest.eval('setInterval(() => { location.href = "/schleife"; }, 100)'));
 check('beforeunload: Schleife hoechstens zwei Fragen, dann weg', await waitLoaded('Seite schleife', 15000, unloadLoaded)
   && unloadDialogs.length - dialogsBeforeLoop === 2, JSON.stringify(unloadDialogs.slice(dialogsBeforeLoop)));
 dialogAnswer = 'accept';
@@ -504,12 +507,12 @@ check('focus: Opener geladen', await waitLoaded('Seite opener', 30000, unloadLoa
 await activateUnloadPage();
 check('focus: Popup geladen', await waitLoaded('Seite popup', 30000, unloadLoaded));
 await unloadTab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Seite popup', null, { timeout: 10000 }).catch(() => {});
-await unloadTab.evaluate(() => window.__blEval('setTimeout(() => { window.focus(); console.log("RESULT selffocus=1"); }, 1500)'));
+await unloadTab.evaluate(() => window.blTest.eval('setTimeout(() => { window.focus(); console.log("RESULT selffocus=1"); }, 1500)'));
 await unloadTab.click('#tab-list .tab:first-child .title');
 await unloadTab.waitForTimeout(3000);
 check('focus: Fenster im Hintergrund holt sich nicht selber nach vorne', unloadLines.some((line) => line.includes('RESULT selffocus=1'))
   && JSON.stringify(await tabTitles()) === JSON.stringify(['*Seite opener', 'Seite popup']), JSON.stringify(await tabTitles()));
-await unloadTab.evaluate(() => window.__blEval('window.popup.focus()'));
+await unloadTab.evaluate(() => window.blTest.eval('window.popup.focus()'));
 const popupFront = await unloadTab.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Seite popup', null, { timeout: 10000 }).then(() => true, () => false);
 check('focus: window.focus() vom Opener holt den Popup-Tab nach vorne', popupFront, JSON.stringify(await tabTitles()));
 // Host-Tab schliessen: mit Listener und Benutzer-Aktion fragt der Host
@@ -530,7 +533,7 @@ const clearReload = unloadTab.waitForEvent('load', { timeout: 30000 }).then(() =
 await unloadTab.click('#clear-data');
 await unloadTab.click('#settings-clear-site-data');
 check('beforeunload: Websitedaten loeschen laedt ohne Rueckfrage des Hosts neu', await clearReload
-  && unloadDialogs.slice(dialogsBeforeClear).length === 1 && unloadDialogs[dialogsBeforeClear].startsWith('confirm:Websitedaten löschen?'),
+  && unloadDialogs.slice(dialogsBeforeClear).length === 1 && unloadDialogs[dialogsBeforeClear].startsWith('confirm:Delete site data?'),
   JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)));
 
 await browser.close();

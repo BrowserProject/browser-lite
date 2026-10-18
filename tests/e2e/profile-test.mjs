@@ -1,4 +1,4 @@
-// End-to-End Test fuer das Profil auf dem Server (web/profile.js, relay/profile.mjs): angemeldet
+// End-to-End Test fuer das Profil auf dem Server (packages/profile, packages/server/src/profile.ts): angemeldet
 // bleiben auf einem zweiten Geraet (neues Chromium-Profil am selben Server) mit Cookie,
 // Sitzungs-Cookie, localStorage und kleiner IndexedDB; grosse Datenbanken bleiben auf dem
 // Geraet, eine ueber die Grenze gewachsene faellt aus dem Profil; lokal geloescht ist auch auf
@@ -138,14 +138,32 @@ const opfsFiles = (page, dir) => page.evaluate(async (name) => {
   return files;
 }, dir).catch((error) => [String(error)]);
 const lesen = (text) => Object.fromEntries((text || '').split(',').map((pair) => pair.split(':')));
-const evaluateModule = (page, module, expression) => page.evaluate(`import('./${module}').then((m) => ${expression})`);
-const setCookie = (page, cookie) => page.evaluate((text) => window.__blEval(`document.cookie = ${JSON.stringify(text)}`), cookie);
+const profileStatus = (page) => page.evaluate(() => window.blTest.profile.status);
+const searchEngine = (page) => page.evaluate(() => window.blTest.settings().searchEngine);
+// Device 1 uploads what changed right after its start; before another device takes over, that
+// upload must be done (else it gets 'taken' instead of the later 'reset'): the server stays
+// unchanged for 3 s
+async function serverSettled() {
+  let last = '';
+  let since = Date.now();
+  for (const end = Date.now() + 30000; Date.now() < end; await new Promise((r) => setTimeout(r, 500))) {
+    const state = JSON.stringify((await info()).files);
+    if (state !== last) {
+      last = state;
+      since = Date.now();
+    } else if (Date.now() - since >= 3000) {
+      return true;
+    }
+  }
+  return false;
+}
+const setCookie = (page, cookie) => page.evaluate((text) => window.blTest.eval(`document.cookie = ${JSON.stringify(text)}`), cookie);
 // Uploads ins Profil scheitern (Netz weg), open geht
 const blockUploads = (context) => context.route('**/profile/files/**', (route) => (route.request().method() === 'PUT' ? route.abort() : route.continue()));
 const unblockUploads = (context) => context.unroute('**/profile/files/**');
 async function openSettings(page, section) {
   await page.click('#menu-button');
-  await page.locator('#side-panel .panel-menu-item', { hasText: 'Einstellungen' }).click();
+  await page.locator('#side-panel .panel-menu-item', { hasText: 'Settings' }).click();
   await page.click(`#settings nav button[data-section=${section}]`);
 }
 
@@ -193,8 +211,8 @@ check('Geraet 2: grosses localStorage nicht uebertragen', (await two.results.wai
 // 3) Geraet 1 merkt die Uebernahme beim naechsten Schreiben und hoert auf
 await setCookie(one.page, 'nach=ja; Path=/; Max-Age=3600');
 const notice = await one.page.waitForSelector('#profile-notice:not([hidden])', { timeout: 30000 }).then((element) => element.textContent(), () => '');
-check('Geraet 1: Hinweis "auf einem anderen Gerät geöffnet" mit Neu laden', notice.includes('anderen Gerät geöffnet') && notice.includes('Neu laden'), notice);
-check('Geraet 1: Abgleich gestoppt', (await evaluateModule(one.page, 'profile.js', 'm.profileStatus().state')) === 'taken');
+check('Geraet 1: Hinweis "opened on another device" mit Reload', notice.includes('opened on another device') && notice.includes('Reload'), notice);
+check('Geraet 1: Abgleich gestoppt', (await profileStatus(one.page)) === 'taken');
 
 // 4) Geraet 2 loescht eine Datenbank, aendert Einstellungen und setzt ein Lesezeichen
 await go(two.page, siteA + 'loeschen');
@@ -216,11 +234,12 @@ check('Geraet 1 wieder: grosse IndexedDB noch da', onOne.gross === '600000', JSO
 await go(one.page, siteB + 'lesen');
 check('Geraet 1 wieder: grosses localStorage noch da', (await one.results.wait('grosslesen')) === '200000', one.results.get('grosslesen'));
 check('Geraet 1 wieder: Suchmaschine und Lesezeichen von Geraet 2',
-  (await evaluateModule(one.page, 'settings.js', 'm.settings().searchEngine')) === 'google' && (await evaluateModule(one.page, 'profile.js', 'm.prefs("bookmarks")?.length')) === 1);
+  (await searchEngine(one.page)) === 'google' && (await one.page.evaluate(() => window.blTest.profile.prefs('bookmarks')?.length)) === 1);
 check('Geraet 1 wieder: kein Hinweis', await one.page.evaluate(() => document.getElementById('profile-notice').hidden));
 
 // 6) Geraet 2 uebernimmt und loescht die Websitedaten: Geraet 1 bekommt "zurueckgesetzt",
 // Einstellungen und Lesezeichen bleiben im Profil
+check('Geraet 1 wieder: Abgleich fertig', await serverSettled());
 const idBefore = (await info()).id;
 two.results.clear();
 await two.page.goto(stack.app({ url: siteA + 'lesen' }));
@@ -234,7 +253,7 @@ check('Server: Websitedaten weg, Einstellungen und Lesezeichen bleiben', profile
   && serverPrefs('settings')?.searchEngine === 'google' && serverPrefs('bookmarks')?.length === 1, JSON.stringify(paths(profile)));
 await setCookie(one.page, 'nach=ja; Path=/; Max-Age=3600');
 const resetNotice = await one.page.waitForSelector('#profile-notice:not([hidden])', { timeout: 30000 }).then((element) => element.textContent(), () => '');
-check('Geraet 1: Hinweis "zurückgesetzt"', resetNotice.includes('zurückgesetzt') && (await evaluateModule(one.page, 'profile.js', 'm.profileStatus().state')) === 'reset', resetNotice);
+check('Geraet 1: Hinweis "was reset"', resetNotice.includes('was reset') && (await profileStatus(one.page)) === 'reset', resetNotice);
 await booted(two.page);
 await two.context.close();
 
@@ -272,7 +291,7 @@ const before = await info();
 await one.page.click('#clear-data');
 const table = await one.page.waitForSelector('#settings .settings-table table', { timeout: 20000 }).then((element) => element.textContent(), () => '');
 check('Einstellungen Profil: Tabelle pro Website', table.includes('127.0.0.1'), table);
-check('Einstellungen Profil: verbunden', (await one.page.textContent('#profile-state')).includes('verbunden'));
+check('Einstellungen Profil: verbunden', (await one.page.textContent('#profile-state')).includes('Connected'));
 const resetDone = one.page.waitForEvent('load', { timeout: 30000 }).then(() => true, () => false);
 await one.page.click('#settings-reset-profile');
 check('Profil zuruecksetzen laedt neu', await resetDone);
@@ -283,7 +302,7 @@ await booted(one.page);
 await go(one.page, siteA + 'lesen');
 const cleared = lesen(await one.results.wait('lesen'));
 check('Geraet 1 nach dem Zuruecksetzen leer', JSON.stringify(cleared) === JSON.stringify({ dauer: 'nein', sitzung: 'nein', nach: 'nein', spaet: 'nein', offen: 'nein', local: 'leer', klein: 'keine', gross: 'keine' }), JSON.stringify(cleared));
-check('Einstellungen wieder Standard (DuckDuckGo)', (await evaluateModule(one.page, 'settings.js', 'm.settings().searchEngine')) === 'duckduckgo');
+check('Einstellungen wieder Standard (DuckDuckGo)', (await searchEngine(one.page)) === 'duckduckgo');
 
 // 10) Server nicht erreichbar: Hinweis, alles bleibt auf dem Geraet, auch geaenderte
 // Einstellungen. Beim naechsten Start mit Server geht alles hoch.
@@ -291,11 +310,11 @@ await one.context.route('**/profile/**', (route) => route.abort());
 one.results.clear();
 await one.page.goto(stack.app({ url: siteA + 'schreiben' }));
 check('Ohne Server: Daten geschrieben', (await one.results.wait('geschrieben')) === '1');
-const offline = await one.page.waitForFunction(() => document.getElementById('status').textContent.includes('Profil-Server nicht erreichbar'), null, { timeout: 20000 }).then(() => true, () => false);
+const offline = await one.page.waitForFunction(() => document.getElementById('status').textContent.includes('Profile server not reachable'), null, { timeout: 20000 }).then(() => true, () => false);
 check('Ohne Server: Hinweis am Tab', offline, await one.page.textContent('#status'));
 await openSettings(one.page, 'profile');
 const localState = await one.page.locator('#profile-state').getAttribute('data-state');
-check('Ohne Server: Einstellungen zeigen "nur lokal", Loeschen geht', localState === 'local' && (await one.page.textContent('#profile-state')).includes('nicht erreichbar')
+check('Ohne Server: Einstellungen zeigen "nur lokal", Loeschen geht', localState === 'local' && (await one.page.textContent('#profile-state')).includes('not reachable')
   && await one.page.isEnabled('#settings-clear-site-data'), localState);
 await one.page.click('#settings nav button[data-section=general]');
 await one.page.selectOption('#setting-search', 'bing');
@@ -303,7 +322,7 @@ await one.page.keyboard.press('Escape');
 await one.page.waitForTimeout(3000);
 const local = await reopen(one);
 check('Ohne Server: Daten bleiben auf dem Geraet', local.dauer === 'ja' && local.local === 'ja' && local.klein === 'wert' && local.gross === '600000', JSON.stringify(local));
-check('Ohne Server: Einstellung bleibt', (await evaluateModule(one.page, 'settings.js', 'm.settings().searchEngine')) === 'bing');
+check('Ohne Server: Einstellung bleibt', (await searchEngine(one.page)) === 'bing');
 check('Ohne Server: nichts hochgeladen', (await info()).files.length === 0 && !serverPrefs('settings'));
 await one.context.unroute('**/profile/**');
 await reopen(one);
@@ -311,7 +330,7 @@ check('Wieder mit Server: Daten und Einstellung hochgeladen', await waitFor(asyn
   profile = await info();
   return paths(profile).includes('cookies.db') && databases(profile, originA).length === 1 && serverPrefs('settings')?.searchEngine === 'bing';
 }, 20000, 500), `${JSON.stringify(paths(profile))} ${JSON.stringify(serverPrefs('settings'))}`);
-check('Wieder mit Server: Einstellung von hier', (await evaluateModule(one.page, 'settings.js', 'm.settings().searchEngine')) === 'bing');
+check('Wieder mit Server: Einstellung von hier', (await searchEngine(one.page)) === 'bing');
 
 await one.context.close();
 finish();

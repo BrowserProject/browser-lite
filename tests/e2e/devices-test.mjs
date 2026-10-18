@@ -278,27 +278,27 @@ check('Farbschema dunkel kommt an', (await result('darkchange', 10000)) === 'tru
 
 // 5) Standort: Abfrage wie Chrome, nach "Zulassen" kommt die Position
 await page.mouse.click(...await at(120, 220));
-const prompt = page.locator('#permission-prompt:not([hidden])');
+const prompt = page.locator('.bl-permission-prompt:not([hidden])');
 const promptShown = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
-check('Standort: Abfrage erscheint', promptShown && /Standort/.test(await prompt.textContent()));
+check('Standort: Abfrage erscheint', promptShown && /location/.test(await prompt.textContent()));
 if (promptShown)
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 check('Standort kommt an', (await result('geo', 15000)) === '46.95,7.45', results.get('geo'));
 
 // 6) Benachrichtigungen: Abfrage, danach "granted"
 await page.mouse.click(...await at(360, 220));
 const notifyPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
 if (notifyPrompt)
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 check('Benachrichtigungen erlaubt', notifyPrompt && (await result('notifypermission', 15000)) === 'granted' && (await result('notifystate')) === 'granted',
   `${results.get('notifypermission')} / ${results.get('notifystate')}`);
 
 // 7) Spracherkennung: Abfrage fuer das Mikrofon, dann Ergebnis vom Host
 await page.mouse.click(...await at(600, 220));
 const speechPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
-check('Spracherkennung: Abfrage fuer das Mikrofon', speechPrompt && /Mikrofon/.test(await prompt.textContent()));
+check('Spracherkennung: Abfrage fuer das Mikrofon', speechPrompt && /microphone/.test(await prompt.textContent()));
 if (speechPrompt)
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 check('Spracherkennung: Ergebnis kommt an', (await result('speechresult', 15000)) === 'hallo_welt:true:0.9', results.get('speechresult') || results.get('speecherror'));
 check('Spracherkennung: start/audio/end', (await result('speechend', 15000)) === 'start+audio', results.get('speechend'));
 check('Spracherkennung: Sprache an den Host', (await page.evaluate(() => window.__speechLang)) === 'de-CH');
@@ -327,26 +327,26 @@ await page.click('#new-tab');
 await page.fill('#address', siteURL + '?zweiter-tab');
 await page.press('#address', 'Enter');
 await page.waitForFunction(() => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Geraete-Test', null, { timeout: 30000 }).catch(() => {});
-await page.evaluate(() => window.__blEval('navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {})'));
+await page.evaluate(() => window.blTest.eval('navigator.mediaDevices.getUserMedia({ video: true }).catch(() => {})'));
 const cameraPrompt = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
-check('Geschlossener Tab: Abfrage fuer die Kamera erscheint', cameraPrompt && /Kamera/.test(await prompt.textContent()));
+check('Geschlossener Tab: Abfrage fuer die Kamera erscheint', cameraPrompt && /camera/.test(await prompt.textContent()));
 await page.click('#tab-list .tab.active .close');
-const promptGone = await page.locator('#permission-prompt').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false);
-const stored = await page.evaluate(() => JSON.stringify(JSON.parse(localStorage.getItem('bl-profile-prefs') || '{}').permissions || {}));
+const promptGone = await page.locator('.bl-permission-prompt').waitFor({ state: 'hidden', timeout: 5000 }).then(() => true, () => false);
+const stored = await page.evaluate(() => JSON.stringify(window.blTest.profile.prefs('permissions') || {}));
 check('Geschlossener Tab: Abfrage weg und nicht gemerkt', promptGone && !stored.includes('camera'), stored);
 
 // 11) permissions.query antwortet mit den gemerkten Entscheidungen
 // (engine/src/Permissions.cpp); die Kamera ist nach dem geschlossenen Tab
 // weiter offen, auch in der Engine
-const queryPermissions = () => page.evaluate(() => window.__blEval(`Promise.all(['geolocation', 'notifications', 'microphone', 'camera']
+const queryPermissions = () => page.evaluate(() => window.blTest.eval(`Promise.all(['geolocation', 'notifications', 'microphone', 'camera']
   .map((name) => navigator.permissions.query({ name }).then((s) => s.state, (e) => e.name))).then((states) => console.log('RESULT permissions=' + states.join(',')))`));
 await queryPermissions();
 check('permissions.query: erlaubt und offen', (await result('permissions', 10000)) === 'granted,granted,granted,prompt', results.get('permissions'));
-await page.evaluate(() => window.__blEval('navigator.mediaDevices.getUserMedia({ video: true }).then(() => console.log("RESULT camera=ok"), (e) => console.log("RESULT camera=" + e.name))'));
+await page.evaluate(() => window.blTest.eval('navigator.mediaDevices.getUserMedia({ video: true }).then(() => console.log("RESULT camera=ok"), (e) => console.log("RESULT camera=" + e.name))'));
 const cameraAgain = await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false);
-check('Kamera: Abfrage kommt wieder (Schliessen war keine Ablehnung)', cameraAgain && /Kamera/.test(await prompt.textContent()));
+check('Kamera: Abfrage kommt wieder (Schliessen war keine Ablehnung)', cameraAgain && /camera/.test(await prompt.textContent()));
 if (cameraAgain)
-  await prompt.locator('button', { hasText: 'Blockieren' }).click();
+  await prompt.locator('button', { hasText: 'Block' }).click();
 check('Kamera blockiert: getUserMedia abgelehnt', (await result('camera', 10000)) === 'NotAllowedError', results.get('camera'));
 results.delete('permissions');
 await queryPermissions();

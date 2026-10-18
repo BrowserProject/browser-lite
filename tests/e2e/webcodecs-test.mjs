@@ -217,7 +217,7 @@ const results = collect(page);
 const result = (key, ms = TIMEOUT) => results.wait(key, ms, () => results.has('error'));
 
 // E2E_DIRECT=1: dieselbe Seite direkt in Chromium (zum Vergleich)
-await page.goto(process.env.E2E_DIRECT ? siteURL : stack.app({ url: siteURL, debug: '1' }));
+await page.goto(process.env.E2E_DIRECT ? siteURL : stack.app({ url: siteURL, log: '1' }));
 const err = (part) => results.get(part + 'error') || results.get('error') || '';
 check('WebCodecs-API vorhanden', await result('api') === Array(7).fill('function').join(','), results.get('api'));
 check('VideoFrame aus Canvas', await result('canvasframe', 30000) === 'RGBA:64x48', results.get('canvasframe') || err('canvas'));

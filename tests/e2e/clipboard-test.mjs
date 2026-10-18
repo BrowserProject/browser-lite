@@ -71,7 +71,7 @@ await page.evaluate(() => {
   dataTransfer.setData('text/html', '<meta charset="utf-8">Hallo <b>fett</b>');
   const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
   dataTransfer.items.add(new File([png], 'image.png', { type: 'image/png' }));
-  document.getElementById('ime').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true }));
+  document.activeElement.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true }));
 });
 const types = await result('pastetypes');
 check('paste: Typen wie Chrome (text/plain, text/html, Files)', types === 'text/plain,text/html,Files', types);
@@ -122,9 +122,9 @@ await cdp.send('Input.insertText', { text: '日本' });
 // steht die Vorschau "に" schon im Feld, vor dem Ende kommt der fertige Text
 check('IME: compositionstart/update (Vorschau im Feld) und end', await result('composition') === 'start|update:に:|update:にほ:に|update:日本:にほ|end:日本|日本', results.get('composition'));
 const imePlace = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none');
   const rect = canvas.getBoundingClientRect();
-  const ime = document.getElementById('ime');
+  const ime = canvas.nextElementSibling;
   return { x: parseFloat(ime.style.left) - rect.left, y: parseFloat(ime.style.top) - rect.top };
 });
 check('IME-Feld steht beim Cursor (fuer das Kandidatenfenster)', imePlace.x > 15 && imePlace.x < 80 && imePlace.y > 290 && imePlace.y < 340, JSON.stringify(imePlace));

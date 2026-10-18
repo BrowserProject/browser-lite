@@ -504,8 +504,9 @@ export class WebRTCService extends Service {
       if (typeof RTCPeerConnection !== 'function')
         throw domError('NotSupportedError', 'WebRTC is not available');
       const client = clientFor(payload?.client, origin, true);
+      // The polyfill numbers its connections: the id is used as it comes, like in every lookup
       const id = payload?.pc;
-      if (typeof id !== 'string' || client.pcs.has(id))
+      if ((typeof id !== 'string' && typeof id !== 'number') || client.pcs.has(id))
         throw domError('InvalidStateError', 'Duplicate connection');
       const pc: RTCPeerConnection & { blSequence?: number } = new RTCPeerConnection(
         sanitizeConfig(payload?.config),

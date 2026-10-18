@@ -159,7 +159,7 @@ check('currentTime laeuft', time > 1 && time < 3, `(${time} s)`);
 let state = null;
 const end = Date.now() + 20000;
 while (Date.now() < end) {
-  state = await page.evaluate(() => window.__blAudioState());
+  state = await page.evaluate(() => window.blTest.audioState());
   if (state.state === 'running' && state.peak > 0.3)
     break;
   await page.waitForTimeout(250);
@@ -173,7 +173,7 @@ const peakUntil = async (done) => {
   let peak = null;
   for (let i = 0; i < 40; i++) {
     await page.waitForTimeout(250);
-    peak = (await page.evaluate(() => window.__blAudioState())).peak;
+    peak = (await page.evaluate(() => window.blTest.audioState())).peak;
     if (done(peak))
       break;
   }

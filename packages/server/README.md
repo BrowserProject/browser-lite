@@ -77,7 +77,7 @@ sent nothing), `coiHeaders({ corp? })` (COOP, COEP, CORP), `contentType(path)`.
 | Variable | |
 | --- | --- |
 | `PORT`, `HOST` | default `5001`, `0.0.0.0` |
-| `SITE_DIR` | directory of the built site (`tools/package-site.sh`); `/engine/` is cached as immutable |
+| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable |
 | `PROFILE_DIR` | directory of the profile; without it `/profile/` answers 404 |
 | `PROFILE_MAX_MB` | limit of the profile, default 64 |
 | `PROFILE_HOSTS` | further host names for `/profile/`, comma separated (`.ts.net` matches all names ending so) |

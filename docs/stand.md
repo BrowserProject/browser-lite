@@ -12,8 +12,10 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   zum gleichen Ziel (#178).
 - The relay is our own Wisp v1 server in `@browser-lite/server` (BSD, replaces the AGPL
   wisp-js): policy per instance, required `authorize`, origin check, connections per client
-  address, static or signed tokens. The client is `@browser-lite/transport-wisp`; the demo UI
-  still uses `web/transport.js`.
+  address, static or signed tokens. The client is `@browser-lite/transport-wisp`.
+- The demo browser is `apps/demo` (Vite, TypeScript) on the public package APIs only; `web/`
+  is gone. `tools/package-demo.sh` packages it with the engine for the container, the e2e tests
+  drive it through `window.blTest` (`?debug=1`).
 - Basis-Browser ohne Komfort-Funktionen (kein Passwort-Speicher, kein PDF-Viewer,
   #130): Tabs, Verlauf (auch `pushState`), Lesezeichen, Downloads, Zoom,
   Pinch-Zoom wie Chrome (nur die Ansicht, im Compositor-Thread), Suche auf der

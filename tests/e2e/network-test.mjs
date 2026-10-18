@@ -63,7 +63,7 @@ async function webSocketStreamEcho() {
   }
 }
 function secure() {
-  // HTTPS und WSS gegen den lokalen TLS-Server (Test-CA ueber window.__blExtraCA)
+  // HTTPS und WSS gegen den lokalen TLS-Server (Test-CA ueber window.blTestOptions)
   return fetch(SECURE.good + '/secure.txt').then((r) => r.text()).then((text) => new Promise((resolve) => {
     const socket = new WebSocket(SECURE.good.replace('https', 'wss') + '/echo');
     const timer = setTimeout(() => resolve(text.trim() + ',wss-zeitlimit'), 20000);
@@ -191,7 +191,7 @@ site.on('upgrade', (req, socket, head) => {
 });
 
 // TLS-Server mit eigener Test-CA: prueft TLS in der Engine (OpenSSL im WASM),
-// HTTPS und WSS. Die CA kommt ueber window.__blExtraCA in die Engine.
+// HTTPS und WSS. Die CA kommt ueber window.blTestOptions (engine.extraCA) in die Engine.
 // Dazu Server mit Zertifikaten, die die Engine ablehnen muss.
 const certDir = path.join(root, 'build', 'e2e-certs');
 mkdirSync(certDir, { recursive: true });
@@ -255,7 +255,7 @@ const stack = await startStack({ token: 'e2e-token-0123456789abcdef' });
 
 const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-await page.addInitScript((pem) => { window.__blExtraCA = pem; }, testCA);
+await page.addInitScript((pem) => { window.blTestOptions = { engine: { extraCA: pem } }; }, testCA);
 const consoleLines = [];
 page.on('console', (msg) => {
   consoleLines.push(msg.text());
@@ -301,20 +301,20 @@ const pixel = await redBox();
 check('rote Box gemalt', isRed(pixel), JSON.stringify(pixel));
 
 // GPU-Kontext verloren (GPU-Reset): die Engine malt auf der CPU weiter
-await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
+await page.evaluate(() => window.blTest.gpu('lose'));
 await page.waitForTimeout(1500);
 const pixelAfterLoss = await redBox();
 check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss) && consoleLines.some((line) => line.includes('GPU: WebGL context lost')), JSON.stringify(pixelAfterLoss));
 
 // Der Browser stellt den Kontext wieder her: die Engine malt wieder auf der GPU
-await page.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
+await page.evaluate(() => window.blTest.gpu('restore'));
 const gpuBack = await waitFor(() => consoleLines.some((line) => line.includes('GPU: WebGL context is back')), 10000);
-await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = "rgb(0, 0, 230)"'));
+await page.evaluate(() => window.blTest.eval('document.getElementById("box").style.background = "rgb(0, 0, 230)"'));
 let pixelAfterRestore = null;
 const isBlue = (pixel) => pixel && pixel.b > 200 && pixel.r < 40 && pixel.g < 40;
 await waitFor(async () => isBlue(pixelAfterRestore = await redBox()), 10000);
 check('GPU wiederhergestellt, Aenderung danach gemalt', gpuBack && isBlue(pixelAfterRestore), JSON.stringify(pixelAfterRestore));
-await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = ""'));
+await page.evaluate(() => window.blTest.eval('document.getElementById("box").style.background = ""'));
 
 // Favicon: die Engine laedt es selber und gibt es der Oberflaeche
 const icon = await page.waitForFunction(() => {
@@ -353,7 +353,7 @@ async function errorPage(code, ms = 60000) {
   for (const end = Date.now() + ms; Date.now() < end && !shown; await page.waitForTimeout(300)) {
     const from = consoleLines.length;
     // Gleich nach dem Laden der Oberflaeche gibt es noch keinen Tab
-    await page.evaluate(() => window.__blEval('"FEHLERSEITE|" + [document.querySelector("h1")?.textContent, document.querySelector("main p")?.textContent, document.querySelector(".code")?.textContent].join("|")')).catch(() => {});
+    await page.evaluate(() => window.blTest.eval('"FEHLERSEITE|" + [document.querySelector("h1")?.textContent, document.querySelector("main p")?.textContent, document.querySelector(".code")?.textContent].join("|")')).catch(() => {});
     await page.waitForTimeout(200);
     const line = consoleLines.slice(from).find((l) => l.includes('FEHLERSEITE|'));
     const [, title, text, shownCode] = line ? line.slice(line.indexOf('FEHLERSEITE|')).split(' (painting')[0].split('|') : [];
@@ -372,7 +372,7 @@ check('Fehlerseite: Adressleiste zeigt die Adresse, die nicht ging', await addre
 {
   const revived = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>WIEDER|da</title>'));
   await new Promise((resolve) => revived.listen(Number(new URL(closedURL).port), '127.0.0.1', resolve));
-  await page.evaluate(() => window.__blEval('document.querySelector("[data-bl-retry]").click()'));
+  await page.evaluate(() => window.blTest.eval('document.querySelector("[data-bl-retry]").click()'));
   const reloaded = await waitTitle('WIEDER|', 30000);
   check('Fehlerseite: Neu laden laedt die Adresse', reloaded.startsWith('WIEDER|') && await address() === closedURL, reloaded);
   revived.close();
@@ -389,7 +389,7 @@ check('Fehlerseite: Zertifikat ungueltig', certificate.title === 'Your connectio
 // Adressleiste: kein Schloss, sondern "Nicht sicher" (wie Chrome), andere Fehlerseiten ohne Anzeige
 const security = () => page.evaluate(() => ({ text: document.getElementById('security').textContent, hidden: document.getElementById('security').hidden }));
 const certificateSecurity = await security();
-check('Fehlerseite Zertifikat: Adressleiste "Nicht sicher"', certificateSecurity.text === 'Nicht sicher' && !certificateSecurity.hidden, JSON.stringify(certificateSecurity));
+check('Fehlerseite Zertifikat: Adressleiste "Not secure"', certificateSecurity.text === 'Not secure' && !certificateSecurity.hidden, JSON.stringify(certificateSecurity));
 
 // Zurueck: wieder die Adresse ohne Namen, wieder mit Fehlerseite
 await page.click('#back');
@@ -407,7 +407,7 @@ check('Nach Neustart des Relays: Seite laedt wieder vom Server', again.startsWit
 
 // Relay weg: die Seite ist offline (navigator.onLine, Ereignis offline), danach
 // verbindet die Oberflaeche selber neu und die Seite ist wieder online
-await page.evaluate(() => window.__blEval('for (const type of ["offline", "online"]) addEventListener(type, () => console.log("NETZ " + type + " " + navigator.onLine))'));
+await page.evaluate(() => window.blTest.eval('for (const type of ["offline", "online"]) addEventListener(type, () => console.log("NETZ " + type + " " + navigator.onLine))'));
 await page.waitForTimeout(500);
 await stack.restartRelay();
 const wentOffline = await waitFor(() => consoleLines.some((line) => line.includes('NETZ offline false')), 10000);
@@ -438,9 +438,9 @@ check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
   const exited = new Promise((resolve) => stack.relay.once('exit', resolve));
   stack.relay.kill();
   await exited;
-  await page.evaluate(() => window.__blEval('document.forms[0].submit()'));
+  await page.evaluate(() => window.blTest.eval('document.forms[0].submit()'));
   await errorPage('ERR_PROXY_CONNECTION_FAILED', 30000);
-  const button = () => page.evaluate(() => window.__blEval('console.log("KNOPF|" + document.querySelector("[data-bl-retry]")?.textContent)'));
+  const button = () => page.evaluate(() => window.blTest.eval('console.log("KNOPF|" + document.querySelector("[data-bl-retry]")?.textContent)'));
   const from = consoleLines.length;
   await button();
   await page.waitForTimeout(300);
@@ -448,7 +448,7 @@ check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
   await stack.restartRelay();
   await page.waitForTimeout(5000);
   check('Fehlerseite nach POST: kein Neuladen von selber', !requests.includes('/gesendet'), requests.slice(-5).join(' '));
-  await page.evaluate(() => window.__blEval('document.querySelector("[data-bl-retry]").click()'));
+  await page.evaluate(() => window.blTest.eval('document.querySelector("[data-bl-retry]").click()'));
   const sent = await waitTitle('GESENDET|', 30000);
   check('Fehlerseite nach POST: Erneut senden schickt POST mit Daten', sent.startsWith('GESENDET|POST|feld=wert'), sent);
 }

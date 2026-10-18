@@ -269,7 +269,7 @@ check('Spur nach close() in neuer Verbindung', await result('reuse', 60000) === 
 await result('medialoop', 30000);
 
 // Verbindung zu einer normalen Chromium-Seite
-await page.evaluate(() => window.__blEval('window.crossConnect()'));
+await page.evaluate(() => window.blTest.eval('window.crossConnect()'));
 const offer = await result('crossoffer', 30000);
 const peer = await context.newPage();
 await peer.goto(siteURL + 'blank');
@@ -290,9 +290,9 @@ const answer = offer ? await peer.evaluate(async (offer) => {
   return btoa(JSON.stringify(pc.localDescription));
 }, offer) : null;
 if (answer)
-  await page.evaluate((answer) => window.__blEval(`window.crossAnswer('${answer}')`), answer);
+  await page.evaluate((answer) => window.blTest.eval(`window.crossAnswer('${answer}')`), answer);
 if (!offer)
-  console.log('Host:', JSON.stringify(await page.evaluate(() => window.__blRtcState())));
+  console.log('Host:', JSON.stringify(await page.evaluate(() => window.blTest.rtcState())));
 check('Antwort von Chromium gesetzt', await result('crossanswered', 30000) === 'stable', results.get('crossanswered'));
 check('Nachricht von Chromium angekommen', await result('crossmessage', 30000) === 'hallo_von_chromium', results.get('crossmessage'));
 const received = await peer.evaluate(() => window.received?.join('|'));
@@ -303,11 +303,11 @@ check('Nachricht bei Chromium angekommen', received === 'hallo von browser-lite'
 const box = await canvasOrigin(page);
 await page.bringToFront();
 await page.mouse.click(box.x + 120, box.y + 50);
-const prompt = page.locator('#permission-prompt:not([hidden])');
+const prompt = page.locator('.bl-permission-prompt:not([hidden])');
 if (await prompt.waitFor({ timeout: 15000 }).then(() => true, () => false))
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 check('Kamera in browser-lite', await result('cam', 30000) === '1', results.get('cam'));
-await page.evaluate(() => window.__blEval('window.camConnect()'));
+await page.evaluate(() => window.blTest.eval('window.camConnect()'));
 const camOffer = await result('camoffer', 30000);
 const camAnswer = camOffer ? await peer.evaluate(async (offer) => {
   const pc = window.camPc = new RTCPeerConnection();
@@ -332,7 +332,7 @@ const camAnswer = camOffer ? await peer.evaluate(async (offer) => {
   return btoa(JSON.stringify(pc.localDescription));
 }, camOffer) : null;
 if (camAnswer)
-  await page.evaluate((answer) => window.__blEval(`window.camAnswer('${answer}')`), camAnswer);
+  await page.evaluate((answer) => window.blTest.eval(`window.camAnswer('${answer}')`), camAnswer);
 check('Kamera-Antwort gesetzt', await result('camanswered', 30000) === 'stable', results.get('camanswered'));
 // WebRTC faengt je nach Bandbreiten-Schaetzung kleiner an: nur Bild da pruefen
 check('browser-lite empfaengt die Kamera von Chromium', /^[1-9]\d*x[1-9]\d*$/.test(await result('camreceived', 60000) || ''), results.get('camreceived'));

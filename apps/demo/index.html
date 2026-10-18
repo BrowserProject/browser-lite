@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>browser-lite</title>
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <header id="chrome">
+    <div id="tabs">
+      <div id="tab-list"></div>
+      <button type="button" id="new-tab" title="New tab">+</button>
+    </div>
+    <div id="toolbar">
+      <button type="button" id="back" title="Back" disabled>&#8592;</button>
+      <button type="button" id="forward" title="Forward" disabled>&#8594;</button>
+      <button type="button" id="reload" title="Reload">&#8635;</button>
+      <form id="address-form">
+        <span id="security" hidden></span>
+        <input id="address" type="text" spellcheck="false" autocomplete="off" placeholder="Enter address">
+      </form>
+      <span id="status"></span>
+      <button type="button" id="bookmark" title="Bookmark (Ctrl+D)" disabled>&#9734;</button>
+      <button type="button" id="zoom" title="Reset zoom" hidden></button>
+      <button type="button" id="clear-data" title="Profile and site data">&#128465;</button>
+      <button type="button" id="menu-button" title="Menu">&#8942;</button>
+    </div>
+    <div id="profile-notice" role="alert" hidden><span></span><button type="button">Reload</button></div>
+    <div id="progress"></div>
+  </header>
+  <main id="viewport">
+    <div id="pages"></div>
+    <div id="boot" role="status">Loading engine...</div>
+    <div id="find-bar" hidden>
+      <input id="find-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in page">
+      <span id="find-count"></span>
+      <button type="button" id="find-prev" title="Previous match (Shift+Enter)">&#8963;</button>
+      <button type="button" id="find-next" title="Next match (Enter)">&#8964;</button>
+      <button type="button" id="find-close" title="Close (Esc)">&#215;</button>
+    </div>
+  </main>
+  <aside id="side-panel" hidden></aside>
+  <div id="suggestions" hidden></div>
+  <div id="print-preview" role="dialog" aria-label="Print preview" hidden>
+    <header><span class="print-title"></span><button type="button" class="print-now primary">Print</button><button type="button" class="print-save">Save as PDF</button><button type="button" class="print-close" aria-label="Close">&#215;</button></header>
+  </div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

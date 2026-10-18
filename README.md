@@ -42,11 +42,12 @@ Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 
 ## Betrieb
 
-Alles laeuft in einem Container (`Dockerfile`): `browser-lite-server` ([packages/server](packages/server/README.md)) liefert die fertige Seite
-aus, ist das Wisp-Relay und hostet das Browser-Profil im Volume `profile` (`/data`). Jeder
-gruene CI-Lauf auf `main` baut das Image, pusht es nach `ghcr.io/browserproject/browser-lite`
-und startet es auf dem Server neu (Workflow *Deploy*).
-Einrichten und Ablauf: [deploy/README.md](deploy/README.md).
+Everything runs in one container (`Dockerfile`): `browser-lite-server`
+([packages/server](packages/server/README.md)) delivers the packaged demo
+([apps/demo](apps/demo/README.md)), is the Wisp relay and hosts the browser profile in the volume
+`profile` (`/data`). Every green CI run on `main` builds the image, pushes it to `DEMO_IMAGE`
+of `versions.env` and restarts it on the server (workflow *Deploy*).
+Setup and flow: [apps/demo/deploy/README.md](apps/demo/deploy/README.md).
 
 ## Lokal ausprobieren
 
@@ -55,14 +56,14 @@ oder selber bauen (siehe [docs/build.md](docs/build.md)), dann:
 
 ```bash
 npm ci && npm run build
-RELAY_ALLOWED_ORIGINS=http://localhost:8080 PORT=5001 node packages/server/dist/bin/browser-lite-server.js &
-node web/serve.mjs 8080
-# im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/
+PROFILE_DIR=build/profile PORT=5001 node packages/server/dist/bin/browser-lite-server.js &
+npm run dev -w @browser-lite/demo
+# in the browser: http://localhost:5173/
 ```
 
-Mit `PROFILE_DIR=<ordner>` vor `node web/serve.mjs` gibt es auch das Profil, ohne bleibt alles
-lokal. `?relay=` gilt nur fuer diesen Browser-Tab. Mit `?debug=1` zeigt die Engine in der Konsole,
-was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/README.md).
+The Vite dev server serves the engine from `build/webcore/bin` (`BL_ENGINE_DIR`) and forwards
+`/wisp/` and `/profile/` to the server. With `?log=1` the engine logs what it does (times, GC,
+network). All URL parameters: [apps/demo/README.md](apps/demo/README.md).
 
 ## Doku
 
@@ -83,13 +84,12 @@ was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/RE
 ```
 versions.env   Versions-Pins (WebKit, Emscripten, Node, ...), Dependencies in deps/sources.txt
 toolchain/     Docker-Image mit Emscripten und allen Build-Tools
-tools/         Skripte (WebKit holen, Patches, Builds, Seite fuer den Server packen)
+tools/         Skripte (WebKit holen, Patches, Builds, Demo fuer den Server packen)
 engine/patches unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dateien
 deps/          Dependencies nach WASM bauen (zlib, ICU, OpenSSL, curl, Fonts, ...)
 engine/        Embedding: WebView, Clients, Netzwerk, Speicher, WebSockets, Event-Loop
-web/           Browser-Oberflaeche (HTML/CSS/JS ohne Build-Schritt) + Wisp-Client
 packages/      npm packages: server (Wisp relay, site, profile, CLI), transport-wisp, core, ...
-deploy/        Compose-Datei und Einrichtung des Servers (Proxmox-LXC mit Runner)
+apps/demo/     full demo browser (Vite) on the packages, deploy/ for the home server
 tests/         JSC-Tests, Engine-Tests (node) und End-to-End Tests (Playwright)
 docs/          Hintergrund (siehe oben)
 ```

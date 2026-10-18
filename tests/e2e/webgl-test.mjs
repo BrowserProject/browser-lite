@@ -363,10 +363,10 @@ check('WebGL 1: Bild in der Seite (rot auf blau)', isPicture1(picture), JSON.str
 check('WebGL 2: Bild in der Seite (gelb)', isPicture2(picture), JSON.stringify(picture));
 
 // Die Host-Kontexte gehen verloren (wie bei einem GPU-Reset)
-await page.evaluate(() => window.__blEval('startLossTest()'));
+await page.evaluate(() => window.blTest.eval('startLossTest()'));
 check('Verlust-Test bereit', await result('losstest') === 'bereit');
 check('Ruhiger Kontext ohne Fehler', await result('quietstart') === '0');
-await page.evaluate(() => window.__blEngine()._bl_webgl_lose_context_for_testing());
+await page.evaluate(() => window.blTest.gpu('lose-webgl'));
 for (const version of [1, 2]) {
   const lost = await result('lost' + version);
   check(`WebGL ${version}: Seite bekommt webglcontextlost`, lost === 'true', String(lost));
@@ -374,7 +374,7 @@ for (const version of [1, 2]) {
   const expected = version === 2 ? '255,255,0,255/0,153,0,255/0' : '255,0,0,255/0,0,255,255/0';
   check(`WebGL ${version}: nach webglcontextrestored zeichnet die Seite wieder`, restored?.startsWith(expected), String(restored));
 }
-await page.evaluate(() => window.__blEval('quietDraw()'));
+await page.evaluate(() => window.blTest.eval('quietDraw()'));
 const quietLost = await result('quietlost');
 check('Ruhiger Kontext auf dem neuen Host-Kontext: webglcontextlost', quietLost === 'true', String(quietLost));
 const restoredPicture = await pagePicture();

@@ -33,30 +33,30 @@ const rows = [];
 async function checkSite(site, page, log) {
   // Optional eigene CA (z.B. wenn ein TLS-Proxy dazwischen ist): SITE_EXTRA_CA=datei.pem
   if (extraCA)
-    await page.addInitScript((pem) => { window.__blExtraCA = pem; }, extraCA);
+    await page.addInitScript((pem) => { window.blTestOptions = { engine: { extraCA: pem } }; }, extraCA);
   page.on('console', (msg) => log.push(msg.text()));
   // SITE_DEBUG=1: Ablauf der Engine mitschreiben (wird nur bei Problemen ausgegeben)
   // SITE_ENV=NAME=wert,...: Umgebungsvariablen der Engine (zum Vergleichen von Schaltern)
-  const params = { url: site, ...(process.env.SITE_DEBUG ? { debug: '1' } : {}), ...(process.env.SITE_ENV ? { env: process.env.SITE_ENV } : {}) };
+  const params = { url: site, ...(process.env.SITE_DEBUG ? { log: '1' } : {}), ...(process.env.SITE_ENV ? { env: process.env.SITE_ENV } : {}) };
   const started = Date.now();
   await page.goto(stack.app(params));
   // Erstes sichtbares Layout der Seite und das erste Bild danach (die Engine
   // meldet "first-layout" und "first-paint")
   let firstLayout = '-';
   let firstPaint = '-';
-  page.waitForFunction(() => window.__blFirstLayout === true, null, { timeout: TIMEOUT, polling: 100 })
+  page.waitForFunction(() => window.blTest?.flags.firstLayout === true, null, { timeout: TIMEOUT, polling: 100 })
     .then(() => { firstLayout = ((Date.now() - started) / 1000).toFixed(1); }).catch(() => {});
-  page.waitForFunction(() => window.__blFirstPaint === true, null, { timeout: TIMEOUT, polling: 100 })
+  page.waitForFunction(() => window.blTest?.flags.firstPaint === true, null, { timeout: TIMEOUT, polling: 100 })
     .then(() => { firstPaint = ((Date.now() - started) / 1000).toFixed(1); }).catch(() => {});
   let result = 'ok';
   try {
     // Fertig, wenn der Tab nicht mehr laedt (Reload-Knopf statt Stop) oder ein Fehler kommt
     await page.waitForFunction(() => {
       const status = document.getElementById('status')?.textContent || '';
-      return status.startsWith('Fehler') || window.__blLoaded === true;
+      return status.startsWith('Error') || window.blTest?.flags.loaded === true;
     }, null, { timeout: TIMEOUT, polling: 250 });
     const status = await within(page.evaluate(() => document.getElementById('status')?.textContent || ''), 10000, 'Status');
-    if (status.startsWith('Fehler'))
+    if (status.startsWith('Error'))
       result = status;
   } catch {
     result = 'Zeitlimit';
@@ -74,9 +74,9 @@ async function checkSite(site, page, log) {
   // kurze 403-Antwort einer IP-Sperre), auch wenn der Tab fertig meldet
   if (result === 'ok' && (!title || /^Neuer Tab/.test(title))) {
     const marker = `SITECHECK${Date.now()}`;
-    await within(page.evaluate((m) => window.__blEval(`console.log("${m} " + JSON.stringify((document.body ? document.body.innerText : '').trim().slice(0, 200)))`), marker), 10000, 'Text').catch(() => {});
+    await within(page.evaluate((m) => window.blTest.eval(`console.log("${m} " + JSON.stringify((document.body ? document.body.innerText : '').trim().slice(0, 200)))`), marker), 10000, 'Text').catch(() => {});
     await page.waitForTimeout(1000);
-    // Log der Seite: '[seite N] SITECHECK... "<Text>"'
+    // Log der Seite: '[page N] SITECHECK... "<Text>"'
     const line = log.find((l) => l.includes(marker));
     const text = line ? line.slice(line.indexOf(marker) + marker.length + 1).replace(/ \(.*\)$/, '') : null;
     if (text !== null && text.length < 200)

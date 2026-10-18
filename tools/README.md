@@ -16,5 +16,5 @@ Skripte fuer Build und Auslieferung. Die Shell-Skripte laden `env.sh` (Pfade, `v
 | `build-jsc.sh` | JavaScriptCore und die `jsc`-Shell nach `build/jsc/bin/` |
 | `build-webcore.sh` | WebCore und Engine nach `build/webcore/bin/` |
 | `wasm-build-id.py` | haengt die Build-ID an `engine.wasm` (ruft der Engine-Build auf) |
-| `package-site.sh` | packt Oberflaeche und Engine fuer den Server (z.B. nach `build/site`) |
-| `optimize-site.mjs` | macht den gepackten Ordner kleiner (ohne "name"-Section, .br/.gz) |
+| `package-demo.sh` | packages the demo (`apps/demo`) and the engine for the server (for example into `build/demo`) |
+| `optimize-assets.mjs` | makes delivered files smaller (no "name" section in .wasm, .br/.gz) |

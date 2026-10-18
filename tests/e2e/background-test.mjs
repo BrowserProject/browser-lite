@@ -99,7 +99,7 @@ async function openApp(params) {
     const text = msg.text();
     if (VERBOSE)
       console.log('   ', text);
-    const match = /\[seite (\d+)\] RESULT (\w+)=(\S*)/.exec(text);
+    const match = /\[page (\d+)\] RESULT (\w+)=(\S*)/.exec(text);
     if (match)
       results.push([Number(match[1]), match[2], match[3]]);
   });
@@ -131,7 +131,7 @@ async function openApp(params) {
 
 // Bild-Wuensche der Engine je View (Module.onEngineNeedsFrame, engine/src/Host.cpp)
 const countFrames = (page) => page.evaluate(() => {
-  const engine = window.__blEngine();
+  const engine = window.blTest.browser.debug.module;
   if (!engine.blFrameCount) {
     const original = engine.onEngineNeedsFrame;
     engine.blFrameCount = {};
@@ -144,7 +144,7 @@ const countFrames = (page) => page.evaluate(() => {
 });
 
 // Lage der roten Box in einer Zeile der sichtbaren Seite
-const boxRow = (page) => page.evaluate(() => window.blPageRow(50).findIndex(([r, g, b]) => r > 200 && g < 80 && b < 80));
+const boxRow = (page) => page.evaluate(() => window.blTest.pageRow(50).findIndex(([r, g, b]) => r > 200 && g < 80 && b < 80));
 
 async function visibility(label, params) {
   const app = await openApp({ url: siteURL + 'bewegt', ...params });
@@ -168,7 +168,7 @@ async function visibility(label, params) {
   // Das Canvas des versteckten Tabs nur in der Oberflaeche zeigen: auch der
   // Compositor bewegt die Box (Animation auf der GPU) nicht mehr
   const hiddenRows = await app.page.evaluate(async () => {
-    const canvas = document.querySelectorAll('canvas.page')[0];
+    const canvas = document.querySelectorAll('canvas[data-bl-view]')[0];
     canvas.style.display = 'block';
     const rows = [];
     for (let i = 0; i < 6; i++) {
@@ -218,13 +218,13 @@ async function visibility(label, params) {
   // Mit Ton: Ton und Timer laufen im Hintergrund weiter
   await app.go(siteURL + 'ton');
   const tonLoaded = await app.wait('loaded');
-  await app.page.evaluate(() => window.__blEval('document.querySelector("audio").play().then(() => console.log("RESULT play=ok"), (e) => console.log("RESULT play=" + e.name))'));
+  await app.page.evaluate(() => window.blTest.eval('document.querySelector("audio").play().then(() => console.log("RESULT play=ok"), (e) => console.log("RESULT play=" + e.name))'));
   const play = await app.wait('play');
   const audible = await app.page.waitForFunction(() => !document.querySelector('#tab-list .tab.active .audio').hidden, null, { timeout: 15000 }).then(() => true, () => false);
   check(`${label}: Ton spielt`, play?.[2] === 'ok' && audible, JSON.stringify(play));
   await app.selectTab(2);
   check(`${label}: Tab mit Ton im Hintergrund versteckt`, (await app.wait('hidden'))?.[0] === tonLoaded?.[0]);
-  const playerTime = () => app.page.evaluate(() => window.__blMediaState().map((p) => [p.time, p.paused]));
+  const playerTime = () => app.page.evaluate(() => window.blTest.mediaState().map((p) => [p.time, p.paused]));
   const timeBefore = await playerTime();
   await app.page.waitForTimeout(3000);
   const timeAfter = await playerTime();
@@ -254,11 +254,11 @@ async function memorySession(params) {
   return app;
 }
 const probe = await memorySession({});
-const baseMB = Math.ceil(await probe.page.evaluate(() => window.__blMemory()) / 2 ** 20);
+const baseMB = Math.ceil(await probe.page.evaluate(() => window.blTest.memory()) / 2 ** 20);
 await probe.context.close();
 const app = await memorySession({ env: `BL_MEMORY_PRESSURE_MB=${baseMB + 96}` });
 check('Speicherdruck: vorher kein Tab verworfen', !app.results.some((r) => r[1] === 'gone'), `Grenze ${baseMB + 96} MB`);
-const allocate = (mb) => app.page.evaluate((size) => window.__blEval(`(window.big ||= []).push(new Uint8Array(${size} << 20).fill(1)); console.log("RESULT allocated=" + big.length)`), mb);
+const allocate = (mb) => app.page.evaluate((size) => window.blTest.eval(`(window.big ||= []).push(new Uint8Array(${size} << 20).fill(1)); console.log("RESULT allocated=" + big.length)`), mb);
 const gone = [];
 for (let i = 0; i < 12 && gone.length < 2; i++) {
   await allocate(64);
@@ -284,11 +284,11 @@ const boot = () => hang.page.evaluate(() => (document.getElementById('boot').hid
 await hang.page.mouse.click(origin.x + 100, origin.y + 100);
 await hang.page.waitForTimeout(11500);
 check('Klick ohne Haengen: keine Meldung', (await boot()) === '', await boot());
-await hang.page.evaluate(() => window.__blEval('location.hash = "los"'));
+await hang.page.evaluate(() => window.blTest.eval('location.hash = "los"'));
 await hang.page.waitForTimeout(500);
 const clicked = Date.now();
 await hang.page.mouse.click(origin.x + 100, origin.y + 100);
-const shownHang = await hang.page.waitForFunction(() => document.getElementById('boot').textContent.includes('reagiert nicht') && !document.getElementById('boot').hidden,
+const shownHang = await hang.page.waitForFunction(() => document.getElementById('boot').textContent.includes('not responding') && !document.getElementById('boot').hidden,
   null, { timeout: 14000 }).then(() => true, () => false);
 check('Klick in eine haengende Seite: Meldung nach 10 s', shownHang && Date.now() - clicked >= 9500, `${Date.now() - clicked} ms, ${await boot()}`);
 const recovered = await hang.page.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: 15000 }).then(() => true, () => false);
@@ -312,7 +312,7 @@ await dialog.page.evaluate(() => {
   window.blHangSeen = 0;
   const box = document.getElementById('boot');
   new MutationObserver(() => {
-    if (!box.hidden && box.textContent.includes('reagiert nicht'))
+    if (!box.hidden && box.textContent.includes('not responding'))
       window.blHangSeen++;
   }).observe(box, { attributes: true, childList: true, subtree: true, characterData: true });
 });
@@ -323,7 +323,7 @@ dialog.page.keyboard.press('a').catch(() => {});
 const alerted = await dialog.wait('alerted', null, 30000);
 await dialog.page.waitForTimeout(2500);
 const hangSeen = await dialog.page.evaluate(() => window.blHangSeen);
-check('Langer alert nach Taste: keine Meldung "reagiert nicht"', alerts === 1 && !!alerted && hangSeen === 0, `${alerts} Dialoge, Meldung ${hangSeen}x`);
+check('Langer alert nach Taste: keine Meldung "not responding"', alerts === 1 && !!alerted && hangSeen === 0, `${alerts} Dialoge, Meldung ${hangSeen}x`);
 await dialog.context.close();
 
 // Stumm im Hintergrund wie Chrome: ein srcObject-Stream und Ton mit muted laufen weiter
@@ -355,16 +355,16 @@ check('PiP: Video im PiP-Fenster', entered?.[2] === 'ok' && hostPip, JSON.string
 pip.results.length = 0;
 await pip.newTab(siteURL + 'leer');
 check('PiP: Tab im Hintergrund versteckt', !!(await pip.wait('state', 'hidden')));
-const pipBefore = await pip.page.evaluate(() => window.__blMediaState().map((p) => p.time));
+const pipBefore = await pip.page.evaluate(() => window.blTest.mediaState().map((p) => p.time));
 await pip.page.waitForTimeout(3000);
-const pipAfter = await pip.page.evaluate(() => window.__blMediaState().map((p) => [p.time, p.paused]));
+const pipAfter = await pip.page.evaluate(() => window.blTest.mediaState().map((p) => [p.time, p.paused]));
 const paused = pip.results.find((r) => r[1] === 'pause');
 check('PiP: Video laeuft im Hintergrund weiter', !paused && pipAfter.length === 1 && !pipAfter[0][1] && pipAfter[0][0] !== pipBefore[0],
   `${JSON.stringify(paused)} ${JSON.stringify(pipBefore)} -> ${JSON.stringify(pipAfter)}`);
 // Speicherdruck: der Tab mit dem PiP-Fenster ist der aelteste, verworfen wird trotzdem ein anderer
 await pip.newTab(siteURL + 'speicher?neu');
 await pip.wait('loaded', 'neu');
-const discarded = await pip.page.evaluate(() => window.__blCheckMemory());
+const discarded = await pip.page.evaluate(() => window.blTest.checkMemory());
 const pipTitles = await pip.page.locator('#tab-list .tab .title').allTextContents();
 check('Speicherdruck: Tab mit PiP-Fenster bleibt', discarded > 0 && await pip.page.evaluate(() => !!document.pictureInPictureElement) && !pip.results.some((r) => r[1] === 'pause'),
   `verworfen ${discarded}, Tabs ${pipTitles}`);

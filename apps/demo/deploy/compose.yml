@@ -1,0 +1,23 @@
+# browser-lite on the server. The deploy workflow sets IMAGE (always by digest).
+# Without RELAY_TOKEN relay and profile are open, so internal use only (see README.md).
+services:
+  browser-lite:
+    image: ${IMAGE:?IMAGE missing}
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # Names the profile answers under (default: tailscale serve)
+      PROFILE_HOSTS: ${PROFILE_HOSTS:-.ts.net}
+      # Clients arrive through tailscale serve: the client address is in X-Forwarded-For
+      RELAY_TRUST_PROXY: "1"
+    read_only: true
+    volumes:
+      - profile:/data
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: local
+
+volumes:
+  profile:

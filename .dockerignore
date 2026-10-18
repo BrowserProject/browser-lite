@@ -7,4 +7,4 @@
 !packages/server/dist/
 packages/server/dist/**/*.map
 packages/server/dist/**/*.d.ts
-!build/site/
+!build/demo/

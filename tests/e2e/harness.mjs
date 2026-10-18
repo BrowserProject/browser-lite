@@ -1,10 +1,11 @@
-// Gemeinsames Geruest der End-to-End Tests: Relay und Oberflaeche auf freien
-// Ports starten (Tests laufen auch parallel), Hilfsprozesse bei jedem Ende
-// beenden, Chromium starten, RESULT-Zeilen der Seite sammeln, check()/finish().
+// Common frame of the end-to-end tests: builds the demo (apps/demo) once, starts the demo server
+// and the relay (both browser-lite-server) on free ports, ends helper processes on every exit,
+// starts Chromium, collects RESULT lines of the pages, check()/finish().
 //
-// Umgebung: E2E_TIMEOUT (ms, Standard 180000), E2E_VERBOSE=1 (Konsole der Seite
-// und der Server ausgeben, Ablauf der Engine mit ?debug=1), CHROMIUM_PATH.
-import { spawn } from 'node:child_process';
+// Environment: E2E_TIMEOUT (ms, default 180000), E2E_VERBOSE=1 (console of the pages and the
+// servers, engine log with ?log=1), E2E_SITE_DIR (a packaged demo with engine/, see
+// tools/package-demo.sh, instead of building one), CHROMIUM_PATH.
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -32,10 +33,10 @@ process.on('exit', () => {
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]])
   process.on(signal, () => process.exit(code));
 
-// Nie ewig haengen: harte Grenze fuer den ganzen Test
+// Never hang forever: hard limit for the whole test
 export function timeLimit(ms = TIMEOUT + 120000) {
   setTimeout(() => {
-    console.log('FAIL Zeitlimit fuer den ganzen Test');
+    console.log('FAIL time limit of the whole test');
     process.exit(1);
   }, ms).unref();
 }
@@ -62,8 +63,8 @@ export function check(name, ok, info = '') {
 }
 export function finish() {
   if (engineCrashes.length)
-    check('Engine ohne Absturz', false, engineCrashes.join(' | '));
-  console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
+    check('Engine without crash', false, engineCrashes.join(' | '));
+  console.log(failed ? `${failed} check(s) failed` : 'All checks ok');
   process.exit(failed ? 1 : 0);
 }
 
@@ -78,7 +79,7 @@ export function start(script, args, env, { ready = /listening on/, ms = 30000 } 
     let output = '';
     const timer = setTimeout(() => {
       child.kill();
-      reject(new Error(`${name} nach ${ms / 1000} s nicht bereit`));
+      reject(new Error(`${name} not ready after ${ms / 1000} s`));
     }, ms);
     child.stdout.on('data', (data) => {
       if (VERBOSE)
@@ -95,7 +96,7 @@ export function start(script, args, env, { ready = /listening on/, ms = 30000 } 
     });
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
-      reject(new Error(`${name} beendet (${signal || code}), bevor es bereit war`));
+      reject(new Error(`${name} ended (${signal || code}) before it was ready`));
     });
   });
 }
@@ -124,7 +125,7 @@ async function startOnFreePort(launch) {
   }
 }
 
-// The pages come from the UI server, another origin than the relay
+// The pages come from the demo server, another origin than the relay
 function relayEnv(token, allowLocal, port, origin) {
   return { RELAY_TOKEN: token, PORT: String(port), HOST: '127.0.0.1', RELAY_ALLOWED_ORIGINS: origin, ...(allowLocal ? { RELAY_ALLOW_LOCAL: '1' } : {}) };
 }
@@ -137,17 +138,39 @@ async function stop(child) {
   }
 }
 
-// Relay (Wisp) und Oberflaeche (web/serve.mjs) mit dem Profil auf dem Server in einem neuen
-// leeren Ordner (stack.profileDir). Ein zweites Geraet ist ein zweiter Browser (launchProfile)
-// am selben Stack. allowLocal erlaubt dem Relay lokale Adressen (die Testserver), ohne laeuft
-// es wie auf dem Server.
+const serverScript = path.join(root, 'packages', 'server', 'dist', 'bin', 'browser-lite-server.js');
+const sites = new Map();
+
+// The demo for an engine: E2E_SITE_DIR, or the Vite build of apps/demo (packages built with
+// npm run build) in a temporary folder whose engine/ links to the engine folder
+function demoSite(engine) {
+  if (process.env.E2E_SITE_DIR)
+    return path.resolve(process.env.E2E_SITE_DIR);
+  if (sites.has(engine))
+    return sites.get(engine);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-site-'));
+  tempDirs.add(dir);
+  const vite = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
+  const build = spawnSync(process.execPath, [vite, 'build', path.join(root, 'apps', 'demo'), '--outDir', dir, '--emptyOutDir', '--logLevel', 'warn'],
+    { stdio: 'inherit', env: { ...process.env, VITE_ENGINE_BASE: 'engine/' } });
+  if (build.status !== 0)
+    throw new Error('vite build of apps/demo failed');
+  fs.symlinkSync(engine, path.join(dir, 'engine'));
+  sites.set(engine, dir);
+  return dir;
+}
+
+// Relay and demo (browser-lite-server with SITE_DIR and the profile on the server in a new empty
+// folder, stack.profileDir). A second device is a second browser (launchProfile) at the same
+// stack. allowLocal lets the relay reach local addresses (the test servers); without it, it runs
+// like on the server.
 export async function startStack({ token, allowLocal = true, engine = engineDir } = {}) {
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-server-profile-'));
   tempDirs.add(profileDir);
-  const relayScript = path.join(root, 'packages', 'server', 'dist', 'bin', 'browser-lite-server.js');
-  const ui = await startOnFreePort((port) => start(path.join(root, 'web', 'serve.mjs'), [String(port), engine], { PROFILE_DIR: profileDir }));
+  const site = demoSite(engine);
+  const ui = await startOnFreePort((port) => start(serverScript, [], { SITE_DIR: site, PROFILE_DIR: profileDir, PORT: String(port), HOST: '127.0.0.1' }));
   const origin = `http://localhost:${ui.port}`;
-  const relay = await startOnFreePort((port) => start(relayScript, [], relayEnv(token, allowLocal, port, origin)));
+  const relay = await startOnFreePort((port) => start(serverScript, [], relayEnv(token, allowLocal, port, origin)));
   const stack = {
     token,
     profileDir,
@@ -157,17 +180,16 @@ export async function startStack({ token, allowLocal = true, engine = engineDir 
     uiPort: ui.port,
     relayURL: `ws://127.0.0.1:${relay.port}/wisp/`,
     uiURL: `http://localhost:${ui.port}/`,
-    // Adresse der Oberflaeche mit diesem Relay und Token, dazu weitere Parameter (url, debug, ...)
-    // BL_TEST_HOOKS: the tests evaluate scripts through __blEval (engine/abi.json)
+    // Address of the demo with this relay and token and further parameters (url, env, ...).
+    // debug=1: window.blTest, browser.debug and the engine test hooks; ?relay= needs it
     app(params = {}) {
-      const env = ['BL_TEST_HOOKS=1', params.env].filter(Boolean).join(',');
-      const query = new URLSearchParams({ relay: stack.relayURL, token, ...(VERBOSE ? { debug: '1' } : {}), ...params, env });
+      const query = new URLSearchParams({ relay: stack.relayURL, token, debug: '1', ...(VERBOSE ? { log: '1' } : {}), ...params });
       return `${stack.uiURL}?${query}`;
     },
-    // Relay faellt aus und kommt auf demselben Port wieder
+    // The relay fails and comes back on the same port
     async restartRelay() {
       await stop(stack.relay);
-      stack.relay = await start(relayScript, [], relayEnv(token, allowLocal, stack.relayPort, origin));
+      stack.relay = await start(serverScript, [], relayEnv(token, allowLocal, stack.relayPort, origin));
     },
   };
   return stack;
@@ -294,17 +316,17 @@ export class Results extends Map {
 }
 export const collect = (page, pattern) => new Results(pattern).watch(page);
 
-// Linke obere Ecke des sichtbaren Tab-Canvas im Fenster
+// Top left corner of the visible view canvas in the window
 export function canvasOrigin(page) {
   return page.evaluate(() => {
-    const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+    const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none');
     const rect = canvas.getBoundingClientRect();
     return { x: rect.left, y: rect.top };
   });
 }
 
-// Farbe [r, g, b] der sichtbaren Seite an x, y (blPagePixel der Oberflaeche), null ohne Tab
-export const pagePixel = (page, x, y) => page.evaluate(([x, y]) => window.blPagePixel(x, y), [x, y]);
+// Color [r, g, b] of the visible page at x, y (window.blTest of the demo), null without a view
+export const pagePixel = (page, x, y) => page.evaluate(([x, y]) => (window.blTest.view() ? window.blTest.pagePixel(x, y) : null), [x, y]);
 
 // Farbe ungefaehr gleich: jeder Kanal hoechstens tolerance daneben
 export const near = (pixel, rgb, tolerance = 40) => !!pixel && rgb.every((value, i) => Math.abs(pixel[i] - value) <= tolerance);

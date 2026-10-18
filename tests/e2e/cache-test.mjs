@@ -158,7 +158,7 @@ const expected = (version, all) => {
 };
 async function visitBytecode(hash) {
   results.clear();
-  await page.goto(stack.app({ url: siteURL + 'bc' + hash, debug: '1' }));
+  await page.goto(stack.app({ url: siteURL + 'bc' + hash, log: '1' }));
   const commits = bytecodeCommits;
   const value = await result('bc');
   // Gespeichert wird 5 s nach dem Laden (dabei wird erst kodiert), dann

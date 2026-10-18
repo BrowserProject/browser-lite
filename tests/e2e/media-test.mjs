@@ -324,7 +324,7 @@ check('MSE: remove() in der Engine', Number(mseRemoved) > 2 && Number(mseRemoved
 let hostBuffered = null;
 const removeEnd = Date.now() + 10000;
 while (Date.now() < removeEnd) {
-  const players = await page.evaluate(() => window.__blMediaState());
+  const players = await page.evaluate(() => window.blTest.mediaState());
   hostBuffered = players.length ? players[players.length - 1].buffered : null;
   if (hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6)
     break;
@@ -333,7 +333,7 @@ while (Date.now() < removeEnd) {
 check('MSE: remove() auch im Host', hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6, JSON.stringify(hostBuffered));
 
 // ------------------------------------------------------ blob:, data:, preload
-const players = () => page.evaluate(() => window.__blMediaState());
+const players = () => page.evaluate(() => window.blTest.mediaState());
 const before = new Set((await players()).map((p) => p.id));
 await page.fill('#address', siteURL + 'blob.html');
 await page.press('#address', 'Enter');
@@ -370,16 +370,16 @@ while (lazy && Date.now() < lazyEnd) {
 check('preload: Wechsel auf auto erreicht den Host', lazyNow?.preload === 'auto', JSON.stringify(lazyNow));
 await screenshot(page, 'media-blob');
 
-// ------------------------------------------- Range-Sonderfaelle (web/sw.js)
+// ------------------------------------------- Range-Sonderfaelle (media-sw.js of the core)
 // Die Antwort des Service Workers muss enden, statt endlos weiterzuladen.
-// Wir lesen bl-media/<player> direkt, wie es das <video> der Oberflaeche tut.
+// Wir lesen bl-media/<instance>/<player>/... direkt, wie es das <video> des Host tut.
 async function openPlayer(url) {
-  const before = new Set((await page.evaluate(() => window.__blMediaState())).map((p) => p.id));
+  const before = new Set((await page.evaluate(() => window.blTest.mediaState())).map((p) => p.id));
   await page.fill('#address', url);
   await page.press('#address', 'Enter');
   const end = Date.now() + 20000;
   while (Date.now() < end) {
-    const fresh = (await page.evaluate(() => window.__blMediaState())).find((p) => !before.has(p.id));
+    const fresh = (await page.evaluate(() => window.blTest.mediaState())).find((p) => !before.has(p.id));
     if (fresh)
       return fresh.id;
     await page.waitForTimeout(250);
@@ -390,7 +390,9 @@ const mediaFetch = (id, range) => page.evaluate(async ({ id, range }) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(`bl-media/${id}/range-test`, { headers: range ? { Range: range } : {}, signal: controller.signal });
+    // The hidden host video of the player has bl-media/<instance>/<player>/<nonce> as src
+    const src = [...document.querySelectorAll('[data-bl-media] video')].map((video) => video.src).find((url) => url.includes(`/bl-media/`) && url.split('/').at(-2) === String(id));
+    const response = await fetch(src.replace(/[^/]+$/, 'range-test'), { headers: range ? { Range: range } : {}, signal: controller.signal });
     const length = (await response.arrayBuffer()).byteLength;
     return `${response.status} ${response.headers.get('Content-Range') || '-'} ${length}`;
   } catch (e) {

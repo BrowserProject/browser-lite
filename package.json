@@ -6,11 +6,12 @@
   "license": "BSD-2-Clause",
   "workspaces": [
     "packages/*",
+    "apps/*",
     "tests/e2e"
   ],
   "scripts": {
     "build": "tsc -b",
-    "check": "tools/check-style.sh && biome ci && tsc -b",
+    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo",
     "test": "npm test --workspaces --if-present"
   },
   "devDependencies": {

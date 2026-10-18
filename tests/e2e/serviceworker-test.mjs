@@ -291,7 +291,7 @@ async function softUpdateDone(fetchesBefore) {
   return swScriptFetches > fetchesBefore;
 }
 
-const appURL = stack.app({ url: siteURL, debug: '1' });
+const appURL = stack.app({ url: siteURL, log: '1' });
 await page.goto(appURL);
 check('navigator.serviceWorker vorhanden', await result('registered') === '1' || results.get('sw') !== 'none', results.get('error') || '');
 check('Registriert (ready)', await result('registered') === '1', results.get('error') || '');
@@ -307,16 +307,16 @@ check('SharedWorker antwortet', await result('sharedA', 30000) === 'a:1', result
 check('Zweites SharedWorker-Objekt nutzt denselben Worker', await result('sharedB', 30000) === 'b:2', results.get('sharedB'));
 
 // Navigation, die der Worker beantwortet (die Seite gibt es auf dem Server nicht)
-await page.evaluate(() => window.__blEval('location.href = "/sw-page"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/sw-page"'));
 check('Navigation vom Worker beantwortet und kontrolliert', await result('swpage', 30000) === 'true', results.get('swpage'));
 check('Navigation Preload am Anfang aus', results.get('preloadbefore') === 'false:true', results.get('preloadbefore'));
 
 // Navigation Preload: die Antwort aus dem Netz (mit Kopf) als Seite und vom
 // Worker gelesen, je nur eine Anfrage
-await page.evaluate(() => window.__blEval('location.href = "/preload-use"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/preload-use"'));
 check('Navigation Preload: respondWith(preloadResponse)', await result('preloaduse', 30000) === 'bl-test', results.get('preloaduse'));
 check('Navigation Preload: eine Anfrage', preloadRequests['/preload-use'].join() === 'bl-test', preloadRequests['/preload-use'].join());
-await page.evaluate(() => window.__blEval('location.href = "/preload-read"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/preload-read"'));
 check('Navigation Preload: Worker liest den Inhalt', await result('preloadread', 30000) === 'preload-body:bl-test', results.get('preloadread'));
 check('Navigation Preload: eine Anfrage beim Lesen', preloadRequests['/preload-read'].join() === 'bl-test', preloadRequests['/preload-read'].join());
 
@@ -324,14 +324,14 @@ check('Navigation Preload: eine Anfrage beim Lesen', preloadRequests['/preload-r
 // in den Cache (asynchron, darum kurz warten), die Navigation danach nimmt sie
 // frisch von dort bzw. prueft sie mit If-None-Match nach (304)
 for (const [path, name, expected] of [['/preload-fresh', 'preloadfresh', 'none:none'], ['/preload-etag', 'preloadetag', 'none:none,bl-test:"v1"']]) {
-  await page.evaluate((target) => window.__blEval(`fetch('${target}').then((r) => r.text()).then(() => setTimeout(() => { location.href = '${target}'; }, 1000))`), path);
+  await page.evaluate((target) => window.blTest.eval(`fetch('${target}').then((r) => r.text()).then(() => setTimeout(() => { location.href = '${target}'; }, 1000))`), path);
   check(`Navigation Preload aus dem HTTP-Cache (${name})`, await result(name, 30000) === '1' && cachedPreloads[path].join() === expected, `${results.get(name)} ${cachedPreloads[path].join()}`);
 }
 
 // Cache API: grosse Inhalte liegen in Dateien, nicht im Speicher der Engine
 async function engineMallocMB() {
   const line = page.waitForEvent('console', { predicate: (msg) => /malloc used \d+ MB/.test(msg.text()), timeout: 30000 });
-  await page.evaluate(() => window.__blMemory(3));
+  await page.evaluate(() => window.blTest.memory(0));
   return Number(/malloc used (\d+) MB/.exec((await line).text())[1]);
 }
 // Dateien mit Inhalten der Cache API im OPFS der Oberflaeche (/data/cachestorage/*.bodies)
@@ -349,7 +349,7 @@ const bodyFiles = () => page.evaluate(async () => {
   return count;
 });
 const mallocBefore = await engineMallocMB();
-await page.evaluate(() => window.__blEval('location.href = "/cache-big"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/cache-big"'));
 check('Cache API: 48 MB gespeichert', await result('bigput', 60000) === 'ok', results.get('bigput'));
 await page.waitForTimeout(1500);
 const mallocAfter = await engineMallocMB();
@@ -368,7 +368,7 @@ check('Nach Neustart: Cache API des Workers noch da', await result('cached', 300
 check('Nach Neustart: Skript im Hintergrund geprueft', await softUpdateDone(restartFetches), `${swScriptFetches - restartFetches} Abrufe`);
 check('Nach Neustart: Navigation Preload noch an', await result('preloadbefore', 30000) === 'true:bl-test', results.get('preloadbefore'));
 const checkFetches = swScriptFetches;
-await page.evaluate(() => window.__blEval('location.href = "/cache-check"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/cache-check"'));
 check('Nach Neustart: grosse Inhalte der Cache API gelesen', await result('bigcheck', 60000) === '16777216:65:65:48,16777216:66:66:49,16777216:67:67:50', results.get('bigcheck'));
 check('Cache API: Cache geloescht', await result('bigdeleted', 30000) === 'true', results.get('bigdeleted'));
 await page.waitForTimeout(1500);
@@ -380,7 +380,7 @@ await softUpdateDone(checkFetches);
 // uebernimmt (skipWaiting, clients.claim)
 swVersion = 2;
 const fetchesBefore = swScriptFetches;
-await page.evaluate(() => window.__blEval('location.href = "/noreg"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/noreg"'));
 check('Seite ohne register() kontrolliert', await result('noreg', 30000) === 'true', results.get('noreg'));
 check('Hintergrund-Aktualisierung: neues Skript aktiv (als UTF-8)', await result('update', 60000) === 'version:2:äöü', results.get('update'));
 check('Hintergrund-Aktualisierung: Skript mit Service-Worker-Header geladen', swScriptFetches > fetchesBefore, `${swScriptFetches - fetchesBefore} Abrufe`);
@@ -393,7 +393,7 @@ check('WindowClient.navigate: Client der neuen Seite', await result('navresult',
 // der Navigation noch auf das Skript wartet: kommt danach dran
 check('Nach WindowClient.navigate: Skript im Hintergrund geprueft', await softUpdateDone(fetchesBefore + 1));
 holdScript = true;
-await page.evaluate(() => window.__blEval('location.href = "/update"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/update"'));
 check('update() der Seite waehrend Hintergrund-Aktualisierung erledigt', await result('pageupdate', 30000) === 'ok', results.get('pageupdate'));
 
 // Gesperrter Port: das Laden endet, bevor eine Anfrage startet
@@ -403,13 +403,13 @@ check('WindowClient.navigate auf gesperrtes Ziel schlaegt fehl', await result('b
 // an den Worker, der darf dann mit clients.openWindow() einen Tab oeffnen
 const tabCount = () => page.locator('#tab-list .tab').count();
 const tabsBefore = await tabCount();
-await page.evaluate(() => window.__blEval('location.href = "/notify"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/notify"'));
 check('Seite fuer Benachrichtigungen geladen', await result('notifyready', 30000) === '1');
 const origin = await canvasOrigin(page);
 await page.mouse.click(origin.x + 200, origin.y + 100);
-const prompt = page.locator('#permission-prompt:not([hidden])');
+const prompt = page.locator('.bl-permission-prompt:not([hidden])');
 if (await prompt.waitFor({ timeout: 10000 }).then(() => true, () => false))
-  await prompt.locator('button', { hasText: 'Zulassen' }).click();
+  await prompt.locator('button', { hasText: 'Allow' }).click();
 check('Benachrichtigungen erlaubt', await result('notifypermission', 15000) === 'granted', results.get('notifypermission'));
 check('clients.openWindow ohne Klick abgelehnt', await result('notifymsg', 30000) === 'nowindow:InvalidAccessError', results.get('notifymsg'));
 check('getNotifications findet sie', await result('notifylist', 30000) === 'Hallo:t1', results.get('notifylist'));

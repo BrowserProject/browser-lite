@@ -6,11 +6,9 @@ german README.md            translation pending
 german versions.env         translation pending
 german LICENSE              translation pending
 german .github/*            translation pending
-german deploy/*             translation pending
 german docs/*               translation pending
 german tests/*              translation pending
 german tools/*              translation pending
-german web/*                translation pending
 ascii docs/*                translation pending
 
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update

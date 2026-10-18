@@ -2,7 +2,7 @@ name: Deploy
 
 # Nach gruener CI auf main (oder von Hand): Image mit Relay + Seite bauen, testen, nach
 # ghcr.io pushen und auf dem Server neu starten. Der Server ist der Self-hosted Runner mit
-# Label browser-lite-deploy (deploy/setup-proxmox.sh).
+# Label browser-lite-deploy (apps/demo/deploy/setup-proxmox.sh).
 
 on:
   workflow_run:
@@ -72,18 +72,18 @@ jobs:
           path: engine-build
           run-id: ${{ steps.run.outputs.id }}
           github-token: ${{ github.token }}
-      - name: Seite zusammenbauen
-        run: tools/package-site.sh engine-build build/site
-      - name: Build the packages (the image copies packages/server/dist)
+      - name: Build the packages (the image copies packages/server/dist, the demo uses them)
         run: |
           npm ci
           npm run build
+      - name: Package the demo
+        run: tools/package-demo.sh engine-build build/demo
       - name: Image bauen
         id: build
         run: |
           source versions.env
-          tag="$SITE_IMAGE:${{ steps.run.outputs.sha }}"
-          docker build -t "$tag" -t "$SITE_IMAGE:main" --build-arg NODE_IMAGE="$NODE_IMAGE" \
+          tag="$DEMO_IMAGE:${{ steps.run.outputs.sha }}"
+          docker build -t "$tag" -t "$DEMO_IMAGE:main" --build-arg NODE_IMAGE="$NODE_IMAGE" \
             --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
             --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -95,7 +95,7 @@ jobs:
           trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
           timeout 30 sh -c 'until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done'
           curl -fsI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi '^cross-origin-embedder-policy: require-corp'
-          wasm="$(cd build/site && ls engine/*/engine.wasm)"
+          wasm="$(cd build/demo && ls engine/*/engine.wasm)"
           curl -fsI -H 'Accept-Encoding: br' "http://127.0.0.1:8080/$wasm" | tee /dev/stderr | grep -qi '^content-encoding: br'
           code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
             -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
@@ -115,7 +115,7 @@ jobs:
         run: |
           source versions.env
           docker push "${{ steps.build.outputs.tag }}"
-          docker push "$SITE_IMAGE:main"
+          docker push "$DEMO_IMAGE:main"
           echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "${{ steps.build.outputs.tag }}")" >> "$GITHUB_OUTPUT"
 
   deploy:
@@ -136,7 +136,7 @@ jobs:
           SHA: ${{ needs.image.outputs.sha }}
         run: |
           printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -fsSL --retry 3 --config - \
-            -H 'Accept: application/vnd.github.raw' -o "$RUNNER_TEMP/compose.yml" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/deploy/compose.yml?ref=$SHA"
+            -H 'Accept: application/vnd.github.raw' -o "$RUNNER_TEMP/compose.yml" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/apps/demo/deploy/compose.yml?ref=$SHA"
       - name: Bei ghcr.io anmelden
         env:
           TOKEN: ${{ github.token }}

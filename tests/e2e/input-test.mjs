@@ -270,14 +270,14 @@ let missingDownload = false;
 const onMissing = () => { missingDownload = true; };
 page.on('download', onMissing);
 await page.mouse.click(...await at(610, 118));
-const missingStatus = await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Download fehlgeschlagen'), null, { timeout: 15000 })
+const missingStatus = await page.waitForFunction(() => document.getElementById('status').textContent.startsWith('Download failed'), null, { timeout: 15000 })
   .then(() => page.evaluate(() => document.getElementById('status').textContent), () => null);
 page.off('download', onMissing);
-check('Download 404 wird Fehler', missingStatus === 'Download fehlgeschlagen: fehlt.txt (HTTP 404)' && !missingDownload, String(missingStatus));
+check('Download 404 wird Fehler', missingStatus === 'Download failed: fehlt.txt (HTTP 404)' && !missingDownload, String(missingStatus));
 
 // 3c2) Ohne Content-Type gilt die Endung: ein Archiv wird ein Download, keine Seite
 const zipPromise = page.waitForEvent('download', { timeout: 30000 }).catch(() => null);
-await page.evaluate(() => window.__blEval('location.href = "/archiv.zip"'));
+await page.evaluate(() => window.blTest.eval('location.href = "/archiv.zip"'));
 const zipDownload = await zipPromise;
 check('Ohne Content-Type: .zip wird ein Download', zipDownload?.suggestedFilename() === 'archiv.zip', String(zipDownload?.suggestedFilename()));
 
@@ -290,10 +290,10 @@ await page.evaluate(() => {
 await page.mouse.click(...await at(610, 158));
 const opened = await page.waitForFunction(() => window.__opened.length > 0, null, { timeout: 10000 }).then(() => page.evaluate(() => window.__opened[0]), () => null);
 check('mailto: an den Host-Browser', opened?.[0] === 'mailto:info@example.com?subject=Hallo' && opened?.[1] === '_blank' && opened?.[2] === 'noopener', JSON.stringify(opened));
-await page.evaluate(() => window.__blEval('location.href = "tel:+41000000000"'));
+await page.evaluate(() => window.blTest.eval('location.href = "tel:+41000000000"'));
 await page.waitForTimeout(1000);
 const external = await page.evaluate(() => ({ opened: window.__opened.length, status: document.getElementById('status').textContent }));
-check('tel: ohne Klick: nichts geoeffnet, kein Fehler', external.opened === 1 && !external.status.startsWith('Fehler'), JSON.stringify(external));
+check('tel: ohne Klick: nichts geoeffnet, kein Fehler', external.opened === 1 && !external.status.startsWith('Error'), JSON.stringify(external));
 
 // 3d2) Iframe mit sandbox="allow-scripts": kein tel: an den Host-Browser, kein
 // Download (ohne allow-downloads). Mit allow-top-navigation-to-custom-protocols
@@ -320,7 +320,7 @@ check('CSP-Report folgt keinem Redirect', cspRequests.length > 0 && !cspRequests
 // 3e2) sendBeacon an einen fremden Ursprung: application/json nur nach einem
 // erlaubten Preflight, dann mit Cookie und Origin. Ein Redirect ohne CORS-Header
 // endet, connect-src der Seite gilt auch fuer das Ziel eines Redirects.
-await page.evaluate((foreign) => window.__blEval(`
+await page.evaluate((foreign) => window.blTest.eval(`
   const json = () => new Blob(['{}'], { type: 'application/json' });
   navigator.sendBeacon('${foreign}verboten', json());
   navigator.sendBeacon('${foreign}umleiten', json());
@@ -387,11 +387,11 @@ await page.evaluate(() => {
   window.confirm = (text) => { window.__dialogs.push(text); return true; };
   window.alert = (text) => { window.__dialogs.push(text); };
 });
-await page.evaluate(() => window.__blEval('console.log("RESULT confirm=" + confirm("Wirklich?"))'));
+await page.evaluate(() => window.blTest.eval('console.log("RESULT confirm=" + confirm("Wirklich?"))'));
 const confirmed = await result('confirm');
 const dialogs = await page.evaluate(() => window.__dialogs);
-check('confirm mit Herkunft', confirmed === 'true' && dialogs.length === 1 && dialogs[0] === new URL(siteURL).host + ' meldet:\n\nWirklich?', JSON.stringify(dialogs));
-await page.evaluate(() => window.__blEval('setTimeout(() => console.log("RESULT bgalert=" + alert("Hintergrund")), 2000)'));
+check('confirm mit Herkunft', confirmed === 'true' && dialogs.length === 1 && dialogs[0] === new URL(siteURL).host + ' says:\n\nWirklich?', JSON.stringify(dialogs));
+await page.evaluate(() => window.blTest.eval('setTimeout(() => console.log("RESULT bgalert=" + alert("Hintergrund")), 2000)'));
 await page.click('#tab-list .tab:nth-child(2) .title');
 const backgroundAlert = await result('bgalert');
 check('alert aus Hintergrund-Tab ohne Dialog', backgroundAlert === 'undefined' && (await page.evaluate(() => window.__dialogs.length)) === 1, String(backgroundAlert));
@@ -408,18 +408,18 @@ await page.click('#tab-list .tab:nth-child(2) .title');
 await page.evaluate(() => {
   window.__dialogs = [];
   window.alert = (text) => { window.__dialogs.push(text); };
-  window.confirm = (text) => { window.__dialogs.push(text); return !text.includes('viele Dialoge'); };
+  window.confirm = (text) => { window.__dialogs.push(text); return !text.includes('many dialogs'); };
 });
-await page.evaluate(() => window.__blEval('for (let i = 0; i < 6; i++) alert("Schleife " + i); console.log("RESULT loopdone=1")'));
+await page.evaluate(() => window.blTest.eval('for (let i = 0; i < 6; i++) alert("Schleife " + i); console.log("RESULT loopdone=1")'));
 await result('loopdone');
 const loopDialogs = await page.evaluate(() => window.__dialogs.map((text) => text.split('\n').pop()));
 check('Dialog-Schleife: drei Dialoge, eine Rueckfrage, dann gesperrt', loopDialogs.length === 4 && loopDialogs[2] === 'Schleife 2'
-  && loopDialogs[3].includes('zeigt viele Dialoge'), JSON.stringify(loopDialogs));
+  && loopDialogs[3].includes('is showing many dialogs'), JSON.stringify(loopDialogs));
 check('Dialog-Schleife: Zeichen am gesperrten Tab', await dialogMarker(2));
 results.delete('popup');
-await page.evaluate(() => window.__blEval('location.reload()'));
+await page.evaluate(() => window.blTest.eval('location.reload()'));
 await result('popup');
-await page.evaluate(() => window.__blEval('alert("Nach dem Neuladen"); console.log("RESULT reloaddone=1")'));
+await page.evaluate(() => window.blTest.eval('alert("Nach dem Neuladen"); console.log("RESULT reloaddone=1")'));
 await result('reloaddone');
 check('Dialog-Schleife: neue Seite gibt den Tab frei', (await page.evaluate(() => window.__dialogs.at(-1))).endsWith('Nach dem Neuladen') && !await dialogMarker(2));
 await page.click('#tab-list .tab:first-child .title');
@@ -428,11 +428,11 @@ await page.click('#tab-list .tab:first-child .title');
 await page.mouse.click(...await at(470, 50), { button: 'right' });
 check('Rechtsklick: Menue der Seite', (await result('ownmenu')) === '1');
 await page.waitForTimeout(500);
-check('Rechtsklick: unser Menue bleibt zu', await page.evaluate(() => document.getElementById('context-menu').hidden));
+check('Rechtsklick: unser Menue bleibt zu', await page.evaluate(() => !document.querySelector('.bl-context-menu')));
 
 // 5c) Rechtsklick auf den Link: unser Menue, "Link in neuem Tab oeffnen"
 await page.mouse.click(...await at(40, 138), { button: 'right' });
-const menuItem = page.locator('#context-menu button', { hasText: 'Link in neuem Tab öffnen' });
+const menuItem = page.locator('.bl-context-menu button[data-bl-item=open-link]', { hasText: 'Open link in new tab' });
 const menuShown = await menuItem.waitFor({ timeout: 10000 }).then(() => true, () => false);
 check('Rechtsklick auf Link: Menue', menuShown);
 if (menuShown) {
@@ -445,13 +445,13 @@ if (menuShown) {
 // 5d) <select>: Klick oeffnet unsere Liste, die Auswahl kommt bei der Seite an
 const selectPopup = async () => {
   await page.mouse.click(...await at(60, 312));
-  return page.waitForSelector('#select-popup:not([hidden]) .option', { timeout: 10000 }).then(() => true, () => false);
+  return page.waitForSelector('.bl-select-popup .bl-option', { timeout: 10000 }).then(() => true, () => false);
 };
 let popupShown = await selectPopup();
-const popupRows = await page.evaluate(() => [...document.querySelectorAll('#select-popup > div')].map((d) => d.classList[0] + ':' + d.textContent.trim()).join('|'));
+const popupRows = await page.evaluate(() => [...document.querySelectorAll('.bl-select-popup > div')].map((d) => d.classList[0].replace('bl-', '') + ':' + d.textContent.trim()).join('|'));
 check('select: Liste geht auf', popupShown && popupRows === 'option:Eins|group:Gruppe|option:Zwei|option:Drei', popupRows);
 if (popupShown) {
-  await page.locator('#select-popup .option', { hasText: 'Drei' }).click();
+  await page.locator('.bl-select-popup .bl-option', { hasText: 'Drei' }).click();
   check('select: Auswahl mit der Maus', (await result('select')) === 'c', results.get('select'));
 }
 results.delete('select');
@@ -463,28 +463,28 @@ results.delete('select');
 popupShown = await selectPopup();
 await page.keyboard.press('Escape');
 await page.waitForTimeout(500);
-check('select: Esc schliesst ohne Auswahl', popupShown && !results.has('select') && await page.evaluate(() => document.getElementById('select-popup').hidden));
+check('select: Esc schliesst ohne Auswahl', popupShown && !results.has('select') && await page.evaluate(() => !document.querySelector('.bl-select-popup')));
 
 // 5e) Link unter der Maus: Adresse unten links, title als Tooltip
 await page.mouse.move(...await at(40, 352));
 const linkShown = await page.waitForFunction(() => {
-  const status = document.getElementById('link-status');
-  return !status.hidden && status.textContent.endsWith('/ziel');
+  const status = document.querySelector('.bl-link-status');
+  return status && !status.hidden && status.textContent.endsWith('/ziel');
 }, null, { timeout: 10000 }).then(() => true, () => false);
 check('Link-Adresse unten links', linkShown);
-const tooltip = await page.evaluate(() => [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none').title);
+const tooltip = await page.evaluate(() => [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none').title);
 check('Tooltip (title)', tooltip === 'Ein Tipp', JSON.stringify(tooltip));
 await page.mouse.move(...await at(600, 600));
-check('Link-Adresse geht wieder weg', await page.waitForFunction(() => document.getElementById('link-status').hidden, null, { timeout: 10000 }).then(() => true, () => false));
+check('Link-Adresse geht wieder weg', await page.waitForFunction(() => document.querySelector('.bl-link-status')?.hidden, null, { timeout: 10000 }).then(() => true, () => false));
 
 // 5f) Farbe: verstecktes Farbfeld des Host-Browsers, Wert geht an die Seite
 await page.mouse.click(...await at(50, 395));
-const colorPicker = await page.waitForSelector('input.host-picker[type=color]', { state: 'attached', timeout: 10000 }).then(() => true, () => false);
+const colorPicker = await page.waitForSelector('input.bl-host-picker[type=color]', { state: 'attached', timeout: 10000 }).then(() => true, () => false);
 check('Farbauswahl geht auf', colorPicker);
 if (colorPicker) {
-  const startValue = await page.evaluate(() => document.querySelector('input.host-picker').value);
+  const startValue = await page.evaluate(() => document.querySelector('input.bl-host-picker').value);
   await page.evaluate(() => {
-    const input = document.querySelector('input.host-picker');
+    const input = document.querySelector('input.bl-host-picker');
     input.value = '#445566';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -494,11 +494,11 @@ if (colorPicker) {
 
 // 5g) Datum: verstecktes Datumsfeld des Host-Browsers
 await page.mouse.click(...await at(165, 443));
-const datePicker = await page.waitForSelector('input.host-picker[type=date]', { state: 'attached', timeout: 10000 }).then(() => true, () => false);
+const datePicker = await page.waitForSelector('input.bl-host-picker[type=date]', { state: 'attached', timeout: 10000 }).then(() => true, () => false);
 check('Datumsauswahl geht auf', datePicker);
 if (datePicker) {
   await page.evaluate(() => {
-    const input = document.querySelector('input.host-picker');
+    const input = document.querySelector('input.bl-host-picker');
     input.value = '2027-03-04';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -511,9 +511,9 @@ await page.mouse.click(...await at(600, 600));
 await page.keyboard.press('Control+f');
 const findOpen = await page.waitForSelector('#find-bar:not([hidden])', { timeout: 5000 }).then(() => true, () => false);
 await page.keyboard.type('Darueber');
-const findCount = await page.waitForFunction(() => document.getElementById('find-count').textContent.includes('von'), null, { timeout: 10000 })
+const findCount = await page.waitForFunction(() => document.getElementById('find-count').textContent.includes(' of '), null, { timeout: 10000 })
   .then(() => page.evaluate(() => document.getElementById('find-count').textContent), () => null);
-check('Suchen auf der Seite', findOpen && findCount === '1 von 1', String(findCount));
+check('Suchen auf der Seite', findOpen && findCount === '1 of 1', String(findCount));
 await page.keyboard.press('Escape');
 check('Suche schliessen', await page.evaluate(() => document.getElementById('find-bar').hidden));
 
@@ -541,7 +541,7 @@ await page.waitForTimeout(500);
 await page.mouse.click(...await at(60, 265));
 const fullscreenClick = await result('fsclick', 10000);
 const fullscreen = await result('fs');
-const hostFullscreen = await page.waitForFunction(() => document.fullscreenElement?.id === 'viewport', null, { timeout: 10000 }).then(() => true, () => false);
+const hostFullscreen = await page.waitForFunction(() => document.fullscreenElement?.id === 'pages', null, { timeout: 10000 }).then(() => true, () => false);
 check('Vollbild (requestFullscreen)', fullscreen === 'ok' && (await result('fson')) === '1' && hostFullscreen, `Klick: ${fullscreenClick}, Seite: ${fullscreen}, Host: ${hostFullscreen}`);
 await page.evaluate(() => document.exitFullscreen().catch(() => {}));
 check('Vollbild beenden kommt bei der Seite an', (await result('fsoff')) === '1');

@@ -351,8 +351,8 @@ check('Fremder Speicher mit geratener id gesperrt', (await result('angriff')) ==
 check('Speicher der anderen Herkunft unveraendert', (await result('opfer')) === 'GEHEIM,65536', results.get('opfer'));
 
 // Belegter Speicher der Engine in MB (malloc)
-const usedMB = () => page.evaluate(() => window.__blEngine()._bl_memory_used() / 2 ** 20);
-const run = (source) => page.evaluate((source) => window.__blEval(source), source);
+const usedMB = () => page.evaluate(() => window.blTest.browser.debug.module._bl_memory_used() / 2 ** 20);
+const run = (source) => page.evaluate((source) => window.blTest.eval(source), source);
 
 // Auftraege im Worker: Speicher und Werte frueherer Instanzen werden frei.
 // gc() der Host-Seite in allen Workern der Engine, die gerade antworten.
@@ -396,7 +396,7 @@ const grownUsed = await usedMB() - beforeGrow;
 check('memory.grow mit begrenzter Reserve', grownSize === 129 && grownUsed < 48, `${grownUsed.toFixed(0)} MB mehr fuer 128 -> ${grownSize} MB`);
 
 // Viele Seiten mit Zyklus und 64 MB: der Speicher wird mit der Seite frei
-const engineBytes = () => page.evaluate(() => window.__blMemory());
+const engineBytes = () => page.evaluate(() => window.blTest.memory());
 async function visitLeakPages(from, to) {
   for (let i = from; i < to; i++) {
     await page.fill('#address', siteURL + 'leak.html?key=leak' + i);

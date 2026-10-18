@@ -12,7 +12,7 @@ push at any time without asking, also just to try something. That is the normal 
 be done. Never force-push.
 
 Every push to `main` runs through CI and then through *Deploy*, which brings the demo server to
-exactly that state ([deploy/README.md](deploy/README.md)). After a push wait
+exactly that state ([apps/demo/deploy/README.md](apps/demo/deploy/README.md)). After a push wait
 for both runs (`gh run watch`), fix and push again if red. Do not push again while a deploy is
 pending. Green only means it builds and starts: if behaviour changes, check in a real browser.
 

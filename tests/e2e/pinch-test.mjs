@@ -86,7 +86,7 @@ const results = collect(page);
 const result = (key, ms) => results.wait(key, ms);
 const cdp = await context.newCDPSession(page);
 
-await page.goto(stack.app({ url: siteURL, debug: '1' }));
+await page.goto(stack.app({ url: siteURL, log: '1' }));
 check('Seite geladen', await result('ready') === '1');
 
 const pixelAt = (x, y) => pagePixel(page, x, y);
@@ -97,12 +97,12 @@ const RED = [255, 0, 0], GREEN = [0, 160, 0], WHITE = [255, 255, 255], MAGENTA =
 let asked = 0;
 async function pageValue(expression) {
   const key = 'value' + ++asked;
-  await page.evaluate(([key, expression]) => window.__blEval(`console.log("RESULT ${key}=" + JSON.stringify(${expression}))`), [key, expression]);
+  await page.evaluate(([key, expression]) => window.blTest.eval(`console.log("RESULT ${key}=" + JSON.stringify(${expression}))`), [key, expression]);
   const value = await result(key, 10000);
   return value === null ? null : JSON.parse(value);
 }
 const viewport = () => pageValue('{ scale: visualViewport.scale, width: visualViewport.width, left: visualViewport.pageLeft, top: visualViewport.pageTop, layout: document.documentElement.clientWidth, wide: document.getElementById("wide").getBoundingClientRect().width }');
-const blockEngine = (ms) => page.evaluate((ms) => window.__blEval(`(() => { const end = Date.now() + ${ms}; while (Date.now() < end); return 1; })()`), ms);
+const blockEngine = (ms) => page.evaluate((ms) => window.blTest.eval(`(() => { const end = Date.now() + ${ms}; while (Date.now() < end); return 1; })()`), ms);
 const origin = await canvasOrigin(page);
 const at = (x, y) => ({ x: origin.x + x, y: origin.y + y });
 // Rot und Gruen doppelt so gross, Mittelpunkt (100, 100) bleibt stehen
@@ -213,7 +213,7 @@ await zoomOutToTop();
 
 // 4) Strg + Mausrad bleibt Seiten-Zoom (Stufe 110 %), ohne Pinch
 const ctrlWheelAt = (point, target = page) => target.evaluate(({ x, y }) => {
-  const canvas = [...document.querySelectorAll('canvas.page')].find((c) => c.style.display !== 'none');
+  const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find((c) => c.style.display !== 'none');
   canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, clientX: x, clientY: y, bubbles: true, cancelable: true }));
 }, point);
 const zoomText = (target = page) => target.evaluate(() => document.getElementById('zoom').textContent);

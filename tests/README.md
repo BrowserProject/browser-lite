@@ -6,7 +6,7 @@
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
 | `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) | node | ja |
 | `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, error page, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
-| `e2e/` | Ganze Kette im echten Chromium (Playwright): Oberflaeche, Engine, Relay, lokale Testserver | Engine-Build, `npm ci && npm run build` | ja |
+| `e2e/` | Whole chain in a real Chromium (Playwright): demo (`apps/demo`), engine, relay, local test servers | Engine-Build, `npm ci && npm run build` | ja |
 
 ## Ohne Build
 
@@ -57,12 +57,14 @@ Jeder `*-test.mjs` ist ein eigener Test, CI ruft sie einzeln auf: `network`, `in
 `storage`, `audio`, `media`, `webgl`, `compositing`, `paintworklet`, `pinch`,
 `serviceworker`, `webcodecs`, `mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`,
 `cache`, `devices`, `ui`, `background`, `soak`, `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in
-der Datei. Alle benutzen `harness.mjs`: Relay und Oberflaeche auf freien Ports (Tests laufen
-auch parallel), Hilfsprozesse enden mit dem Test, `check()`/`finish()`, RESULT-Zeilen
-der Seite.
+der Datei. All use `harness.mjs`: it builds the demo once per test with Vite (its `engine/`
+links to the engine folder), starts it with `browser-lite-server` (`SITE_DIR`, profile) and a
+second server as the relay on free ports, ends helper processes with the test, `check()`/
+`finish()`, RESULT lines of the pages.
 
-- `E2E_TIMEOUT` (ms, Standard 180000), `E2E_VERBOSE=1` (Konsole der Seite und der
-  Server, Ablauf der Engine mit `?debug=1`), `CHROMIUM_PATH` (eigenes Chromium).
+- `E2E_TIMEOUT` (ms, default 180000), `E2E_VERBOSE=1` (console of the pages and the servers,
+  engine log with `?log=1`), `E2E_SITE_DIR` (a packaged demo of `tools/package-demo.sh`
+  instead of the Vite build), `CHROMIUM_PATH` (own Chromium).
 - `storage-test.mjs` startet Chromium mit eigenem Profil auf der Platte (`launchProfile`):
   in einem Kontext von `newContext()` (wie inkognito) liegt das OPFS im RAM, und Chromium
   lehnt Schreiben ab, wenn der Rechner wenig freien Speicher hat.
@@ -73,9 +75,10 @@ der Seite.
 - `soak-test.mjs`: langer Lauf (viele Navigationen, Tabs auf und zu), Dokumente und Speicher
   muessen begrenzt bleiben. `SOAK_ROUNDS` (Standard 40 Runden durch 5 Seiten), `SOAK_TABS`
   (Standard 30).
-- `stack.app()` always adds `?env=BL_TEST_HOOKS=1`: without it `__blEval` (`bl_eval_script`),
-  `bl_memory_report` and `bl_crash_for_testing` do nothing. `ui-test.mjs` uses it to really
-  crash the engine (abort and WASM trap).
+- `stack.app()` always adds `?debug=1`: `window.blTest` of the demo (`eval`, `pagePixel`,
+  `memory`, `crash`, ... through `browser.debug`, see [apps/demo/README.md](../apps/demo/README.md))
+  and the engine test hooks; `?relay=` and `?env=` work only with it. A test sets extra
+  options before the start with `window.blTestOptions` (for example `{ engine: { extraCA } }`).
 - `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,
   Screenshots `build/sites/<host>_<pfad>.png`), Schalter `SITE_*` im Kopf des Skripts.
 - `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs` (auch memory64),

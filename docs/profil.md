@@ -3,8 +3,8 @@
 Der Container hostet genau ein Browser-Profil: Cookies, localStorage und kleine IndexedDBs der
 Seiten, dazu Einstellungen, Lesezeichen und Berechtigungen der Oberflaeche. So bleibt man auf
 Websites angemeldet, auch nach dem Wechsel auf ein anderes Geraet. Server: `createProfileStore`
-(API in [packages/server/README.md](../packages/server/README.md)), Oberflaeche: `web/profile.js` und
-`web/settings.js` ([web/README.md](../web/README.md)).
+(API in [packages/server/README.md](../packages/server/README.md)), client: `packages/profile`, settings page of the demo: `apps/demo/src/settings-page.ts`
+([apps/demo/README.md](../apps/demo/README.md)).
 
 ## Was im Profil ist
 
@@ -82,7 +82,7 @@ Absturz) behaelt Sitzung und Sitzungs-Cookies immer.
 
 - Keine Ende-zu-Ende-Verschluesselung und kein Login: die Dateien liegen unverschluesselt auf
   dem Server, wer ihn erreicht, hat das Profil (also die Anmeldungen). Darum nur intern, sonst
-  mit `RELAY_TOKEN` ([deploy/README.md](../deploy/README.md)).
+  mit `RELAY_TOKEN` ([apps/demo/deploy/README.md](../apps/demo/deploy/README.md)).
 - Ein Profil pro Container. Spaeter: Login (Passkey), mehrere Profile, verschluesselt im Host
   (WebCrypto), Versionen zum Zuruecksetzen.
 - Anmeldungen in grossen IndexedDBs (WhatsApp Web, Telegram Web) folgen nicht auf ein anderes

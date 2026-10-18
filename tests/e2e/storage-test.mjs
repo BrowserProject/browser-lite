@@ -455,7 +455,7 @@ check('Datenbank zu gross fuer den Speicher: nicht geladen, loeschbar, Datei weg
 // Uploads liegen im OPFS (/data/tmp/uploads), nicht im WASM-Speicher der Engine
 const engineMallocMB = async () => {
   const line = fresh.waitForEvent('console', { predicate: (msg) => /malloc used \d+ MB/.test(msg.text()), timeout: 30000 });
-  await fresh.evaluate(() => window.__blMemory(3));
+  await fresh.evaluate(() => window.blTest.memory(0));
   return Number(/malloc used (\d+) MB/.exec((await line).text())[1]);
 };
 results.clear();
