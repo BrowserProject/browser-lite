@@ -670,6 +670,11 @@ try {
   }, NS);
   check('OPFS root holds the namespace directory with files', ownFiles.names.includes(NS) && ownFiles.files.length > 0, JSON.stringify(ownFiles));
   check(
+    'own namespace caches exist',
+    ownFiles.caches.includes(`${NS}-http`) && ownFiles.caches.some((name) => name.startsWith(`${NS}-bytecode-`)),
+    ownFiles.caches.join(),
+  );
+  check(
     'caches only with the prefixes of the namespaces',
     ownFiles.caches.every((name) => name.startsWith(`${NS}-`) || name.startsWith('browserlite-')),
     ownFiles.caches.join(),

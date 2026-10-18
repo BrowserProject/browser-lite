@@ -104,4 +104,5 @@ A feature without its service is missing for the pages, like in a browser withou
 - Engine files and `audio-worklet.js` on the same origin.
 - For media files a service worker whose scope covers the page and which loads `media-sw.js`.
 - One running browser per storage namespace across the tabs of the origin (Web Lock); a second
-  tab runs in memory and gets the warning `storage-locked`.
+  tab keeps its data in memory (the HTTP and bytecode caches stay shared) and gets the warning
+  `storage-locked`.
