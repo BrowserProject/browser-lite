@@ -8,16 +8,27 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./static": {
+      "types": "./dist/static.d.ts",
+      "default": "./dist/static.js"
+    },
+    "./token": {
+      "types": "./dist/token.d.ts",
+      "default": "./dist/token.js"
     }
   },
   "types": "./dist/index.d.ts",
+  "bin": {
+    "browser-lite-server": "dist/bin/browser-lite-server.js"
+  },
   "files": [
     "dist",
     "README.md"
   ],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "ipaddr.js": "2.5.0",

@@ -2,17 +2,17 @@
 
 | Ordner | Was | Braucht | CI |
 |---|---|---|---|
-| `relay/` | `relay-test.mjs`: Relay und Wisp-Client zusammen (Token, Flusskontrolle, Reconnect, tote Verbindung, SSRF-Sperre, Gruende und Grenze pro Ziel, Auslieferung der Seite) | node | ja |
 | `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
 | `engine/` | Engine in node ohne Browser: Bild rendern, WebCrypto, Stack-Grenze, GC unter Stress, Grenzen (Speicher, DOM, Strings), Watchdog, WebM-Muxer, Aufraeumen des HTTP-Cache | Engine-Build, `recorder-test.mjs` und `http-cache-test.mjs` nur node | ja |
-| `e2e/` | Ganze Kette im echten Chromium (Playwright): Oberflaeche, Engine, Relay, lokale Testserver | Engine-Build, `npm ci` | ja |
+| `e2e/` | Ganze Kette im echten Chromium (Playwright): Oberflaeche, Engine, Relay, lokale Testserver | Engine-Build, `npm ci && npm run build` | ja |
 
 ## Ohne Build
 
 ```bash
 tools/check-style.sh
-node tests/relay/relay-test.mjs
+npm run build
+npm test -w @browser-lite/server -w @browser-lite/transport-wisp
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 node tests/engine/recorder-test.mjs
 node tests/engine/http-cache-test.mjs
@@ -42,7 +42,7 @@ Testseiten mit `RENDER_WAIT_FOR` melden am Ende `<NAME> fertig=ok`: `crypto.html
 ## e2e/
 
 ```bash
-npm ci && npx playwright install chromium
+npm ci && npm run build && npx playwright install chromium
 node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
 ```
 

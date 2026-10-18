@@ -2,12 +2,10 @@
   "name": "browser-lite",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "WebKit compiled to WebAssembly: a full browser engine inside a web page",
   "license": "BSD-2-Clause",
   "workspaces": [
     "packages/*",
-    "relay",
     "tests/e2e"
   ],
   "scripts": {

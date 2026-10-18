@@ -10,6 +10,10 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   einem Tab, eigenes Netz ueber Wisp-Relay, TLS im WASM. Das Relay verbindet nur
   zu oeffentlichen Adressen und Web-Ports, hoechstens 64 Streams einer Verbindung
   zum gleichen Ziel (#178).
+- The relay is our own Wisp v1 server in `@browser-lite/server` (BSD, replaces the AGPL
+  wisp-js): policy per instance, required `authorize`, origin check, connections per client
+  address, static or signed tokens. The client is `@browser-lite/transport-wisp`; the demo UI
+  still uses `web/transport.js`.
 - Basis-Browser ohne Komfort-Funktionen (kein Passwort-Speicher, kein PDF-Viewer,
   #130): Tabs, Verlauf (auch `pushState`), Lesezeichen, Downloads, Zoom,
   Pinch-Zoom wie Chrome (nur die Ansicht, im Compositor-Thread), Suche auf der
@@ -85,7 +89,7 @@ den einzelnen Punkten stehen in [entscheidungen.md](entscheidungen.md) (Nummern
   (`soak-test.mjs`: 200 Navigationen, 30 Tabs, Dokumente und Speicher bleiben begrenzt) und
   das Profil (`profile-test.mjs`: zweites Geraet am selben Server, Uebernahme, Zuruecksetzen,
   Nachholen beim Start, ohne Server; `settings-test.mjs`: Einstellungen, Geraet, Neustart;
-  Server allein in `tests/relay/profile-test.mjs`).
+  Server allein in `packages/server/test/profile.test.mjs`).
 - CI und Deploy bei jedem Push auf `main` (Stand in GitHub Actions). Der Deploy
   laeuft ueber den Self-hosted Runner auf den eigenen Proxmox-Server (LXC), auf dem
   Runner laeuft keine fremde Action. Actions sind per Commit gepinnt, der Lint prueft die

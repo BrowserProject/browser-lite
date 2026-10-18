@@ -1,6 +1,6 @@
 # deploy/
 
-Ein Container (`Dockerfile` im Hauptordner): `relay/server.mjs` mit der fertigen Seite und dem
+Ein Container (`Dockerfile` im Hauptordner): `browser-lite-server` ([packages/server](../packages/server/README.md)) mit der fertigen Seite und dem
 Browser-Profil in `/data` (benanntes Volume `profile` in `compose.yml`, bleibt bei jedem
 Deploy). Port 8080, ohne HTTPS und ohne Relay-Token: der Server ist nur intern zum Testen. Das
 Profil (Cookies, also Anmeldungen) liegt unverschluesselt auf dem Server und ist ohne Token fuer

@@ -74,6 +74,10 @@ jobs:
           github-token: ${{ github.token }}
       - name: Seite zusammenbauen
         run: tools/package-site.sh engine-build build/site
+      - name: Build the packages (the image copies packages/server/dist)
+        run: |
+          npm ci
+          npm run build
       - name: Image bauen
         id: build
         run: |

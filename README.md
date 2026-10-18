@@ -42,7 +42,7 @@ Seiten gehen steht in [docs/kompatibilitaet.md](docs/kompatibilitaet.md).
 
 ## Betrieb
 
-Alles laeuft in einem Container (`Dockerfile`): `relay/server.mjs` liefert die fertige Seite
+Alles laeuft in einem Container (`Dockerfile`): `browser-lite-server` ([packages/server](packages/server/README.md)) liefert die fertige Seite
 aus, ist das Wisp-Relay und hostet das Browser-Profil im Volume `profile` (`/data`). Jeder
 gruene CI-Lauf auf `main` baut das Image, pusht es nach `ghcr.io/browserproject/browser-lite`
 und startet es auf dem Server neu (Workflow *Deploy*).
@@ -54,7 +54,8 @@ Fertige Engine aus der CI (Artefakt `engine` eines CI-Laufs) nach `build/webcore
 oder selber bauen (siehe [docs/build.md](docs/build.md)), dann:
 
 ```bash
-(cd relay && npm ci && PORT=5001 node server.mjs) &
+npm ci && npm run build
+RELAY_ALLOWED_ORIGINS=http://localhost:8080 PORT=5001 node packages/server/dist/bin/browser-lite-server.js &
 node web/serve.mjs 8080
 # im Browser: http://localhost:8080/?relay=ws://localhost:5001/wisp/
 ```
@@ -87,7 +88,7 @@ engine/patches unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dat
 deps/          Dependencies nach WASM bauen (zlib, ICU, OpenSSL, curl, Fonts, ...)
 engine/        Embedding: WebView, Clients, Netzwerk, Speicher, WebSockets, Event-Loop
 web/           Browser-Oberflaeche (HTML/CSS/JS ohne Build-Schritt) + Wisp-Client
-relay/         Server im Container: Wisp-Relay + fertige Seite + Browser-Profil
+packages/      npm packages: server (Wisp relay, site, profile, CLI), transport-wisp, core, ...
 deploy/        Compose-Datei und Einrichtung des Servers (Proxmox-LXC mit Runner)
 tests/         JSC-Tests, Engine-Tests (node) und End-to-End Tests (Playwright)
 docs/          Hintergrund (siehe oben)

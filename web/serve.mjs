@@ -1,32 +1,38 @@
-// Kleiner Entwicklungs-Server mit den noetigen Headern fuer SharedArrayBuffer.
-//   node web/serve.mjs [port] [engine-ordner]
-// Liefert web/ aus und /engine/ aus dem Engine-Build (Standard: build/webcore/bin).
-// Mit BL_WEB_ROOT=build/site wird statt web/ die fertige Seite ausgeliefert, mit PROFILE_DIR
-// gibt es das Browser-Profil unter /profile/ (relay/profile.mjs, ohne Token, weitere Namen
-// ausser IP-Adressen und localhost mit PROFILE_HOSTS wie in relay/server.mjs).
+// Small development server with the headers needed for SharedArrayBuffer.
+//   npm run build && node web/serve.mjs [port] [engine-dir]
+// Serves web/ and /engine/ from the engine build (default: build/webcore/bin). With
+// BL_WEB_ROOT=build/site the built site is served instead of web/, with PROFILE_DIR the browser
+// profile answers under /profile/ (without token; names besides IP addresses and localhost with
+// PROFILE_HOSTS, comma separated, like browser-lite-server).
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createProfileHandler } from '../relay/profile.mjs';
-import { parseRequest, serveStatic } from '../relay/static.mjs';
+import { createProfileStore } from '@browser-lite/server';
+import { serveStatic } from '@browser-lite/server/static';
 
 const here = process.env.BL_WEB_ROOT ? path.resolve(process.env.BL_WEB_ROOT) : path.dirname(fileURLToPath(import.meta.url));
 const port = Number(process.argv[2] || 8080);
 const engineDir = path.resolve(process.argv[3] || path.join(here, '..', 'build', 'webcore', 'bin'));
-const handleProfile = process.env.PROFILE_DIR ? createProfileHandler({ dir: path.resolve(process.env.PROFILE_DIR), hosts: process.env.PROFILE_HOSTS }) : () => false;
+const profile = process.env.PROFILE_DIR
+  ? createProfileStore({ dir: path.resolve(process.env.PROFILE_DIR), hosts: (process.env.PROFILE_HOSTS || '').split(',') })
+  : null;
+
+async function respond(req, res) {
+  if (profile && await profile.handle(req, res))
+    return;
+  const urlPath = new URL(req.url, 'http://localhost').pathname;
+  const found = urlPath.startsWith('/engine/')
+    ? await serveStatic(req, res, engineDir, { urlPath: decodeURIComponent(urlPath.slice('/engine'.length)) })
+    : await serveStatic(req, res, here);
+  if (!found)
+    res.writeHead(404).end('not found');
+}
 
 createServer((req, res) => {
-  const request = parseRequest(req);
-  if (!request) {
-    res.writeHead(400).end();
-    return;
-  }
-  if (handleProfile(req, res, request))
-    return;
-  const file = request.path;
-  const found = file.startsWith('/engine/')
-    ? serveStatic(req, res, engineDir, file.slice('/engine'.length), 'no-cache')
-    : serveStatic(req, res, here, file, 'no-cache');
-  if (!found)
-    res.writeHead(404).end('nicht gefunden');
-}).listen(port, () => console.log(`browser-lite auf http://localhost:${port}/ (Engine aus ${engineDir})`));
+  respond(req, res).catch(() => {
+    if (!res.headersSent)
+      res.writeHead(400).end();
+    else
+      res.destroy();
+  });
+}).listen(port, () => console.log(`browser-lite dev server listening on http://localhost:${port}/ (engine from ${engineDir})`));

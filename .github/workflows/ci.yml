@@ -33,7 +33,7 @@ jobs:
         run: tools/check-style.sh
 
   js:
-    name: JavaScript (relay, Wisp client, engine JS parts in node)
+    name: JavaScript (packages, engine JS parts in node)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -43,12 +43,14 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Install
-        run: npm ci
-      - name: Relay and Wisp client (token, echo, reconnect, SSRF, static files)
-        run: node tests/relay/relay-test.mjs
-      - name: Profile server
-        run: node tests/relay/profile-test.mjs
+      - name: Install and build the packages
+        run: |
+          npm ci
+          npm run build
+      - name: Server (relay, SSRF, limits, static files, tokens, profile store, CLI)
+        run: npm test -w @browser-lite/server
+      - name: Wisp transport against the server (token, echo, reconnect, dead connection probe)
+        run: npm test -w @browser-lite/transport-wisp
       - name: Rewritten module against the original
         run: node tests/wasm/rewrite-test.mjs
       - name: WebAssembly API over the simulated bridge
@@ -361,6 +363,7 @@ jobs:
         id: setup
         run: |
           npm ci
+          npm run build
           npx playwright install --with-deps chromium
       # Every test runs even if an earlier one failed (the job stays red then)
       - name: Network
@@ -465,6 +468,7 @@ jobs:
       - name: Install (packages + Playwright Chromium)
         run: |
           npm ci
+          npm run build
           npx playwright install --with-deps chromium
       - name: Load the sites from tests/e2e/sites.txt
         run: cd tests/e2e && SITE_WAIT=5000 SITE_DEBUG=1 SITE_TIMEOUT=180000 node site-test.mjs $(grep -v "^#" sites.txt)

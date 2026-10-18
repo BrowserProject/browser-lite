@@ -13,16 +13,19 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "PROTOCOL.md"
   ],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "peerDependencies": {
     "@browser-lite/core": "0.1.0"
   },
   "devDependencies": {
-    "@browser-lite/core": "0.1.0"
+    "@browser-lite/core": "0.1.0",
+    "@browser-lite/server": "0.1.0",
+    "ws": "8.22.0"
   }
 }

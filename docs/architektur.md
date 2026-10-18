@@ -393,12 +393,12 @@ HTMLMediaElement  ->  MediaPlayerPrivateWasm  --create-->  verstecktes <video sr
   Videos duerfen sofort laufen (wie in einem normalen Browser).
 
 ### Hosting
-Ein Container (`Dockerfile`, `relay/server.mjs`): liefert die Seite mit den Headern oben
+Ein Container (`Dockerfile`, `browser-lite-server` aus `packages/server`): liefert die Seite mit den Headern oben
 und vorkomprimiert (Brotli, mit ETag/304) aus und ist das Wisp-Relay. HTTPS kommt von einem
 Proxy davor (Browser geben SharedArrayBuffer nur in einem sicheren Kontext). Das Relay
 verbindet nur zu oeffentlichen Unicast-Adressen und erlaubten Ports; jede Adresse prueft sein
-Socket direkt vor dem Verbinden (`relay/wisp.mjs`, Entscheide 159, 175). Auf einem
+Socket direkt vor dem Verbinden (eigener Wisp-v1-Server in `packages/server/src/wisp/`, Entscheide 159, 175; Protokoll in [PROTOCOL.md](../packages/transport-wisp/PROTOCOL.md)). Auf einem
 oeffentlichen Server braucht es `RELAY_TOKEN` (sonst nutzen fremde Leute ihn als Proxy),
 intern geht es ohne. Mit `PROFILE_DIR` (im Container `/data`, ein Volume) hostet er auch
-genau ein Browser-Profil (`relay/profile.mjs`, [profil.md](profil.md)), ohne Token offen wie
+genau ein Browser-Profil (`createProfileStore`, [profil.md](profil.md)), ohne Token offen wie
 das Relay. Ablauf in [deploy/README.md](../deploy/README.md).
