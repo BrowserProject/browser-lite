@@ -142,7 +142,8 @@ test('select popup: rendering, position, keyboard and Enter', async () => {
     const view = makeView();
     const pageKeys = [];
     const onPageKey = (e) => pageKeys.push(e.key);
-    document.addEventListener('keydown', onPageKey);
+    // Registered first and in the capture phase of the document, still after the popup
+    document.addEventListener('keydown', onPageKey, true);
     const promise = selectPopup({
       view,
       rect: { x: 10, y: 20, width: 120, height: 24 },
@@ -159,6 +160,7 @@ test('select popup: rendering, position, keyboard and Enter', async () => {
       left: popup.style.left,
       minWidth: popup.style.minWidth,
       position: popup.style.position,
+      overflowY: popup.style.overflowY,
     };
     const attrs = {
       role: popup.getAttribute('role'),
@@ -176,7 +178,7 @@ test('select popup: rendering, position, keyboard and Enter', async () => {
     key('End');
     key('Enter');
     const index = await promise;
-    document.removeEventListener('keydown', onPageKey);
+    document.removeEventListener('keydown', onPageKey, true);
     key('x');
     return {
       rows,
@@ -206,6 +208,7 @@ test('select popup: rendering, position, keyboard and Enter', async () => {
     left: '60px',
     minWidth: '120px',
     position: 'fixed',
+    overflowY: 'auto',
   });
   assert.deepEqual(result.attrs, {
     role: 'listbox',
@@ -619,11 +622,13 @@ test('color and date/time pickers', async () => {
     const input = () => document.querySelector('input.bl-host-picker');
     const rect = { x: 5, y: 6, width: 70, height: 22 };
     const out = {};
+    const previews = [];
     let promise = colorPicker({
       view,
       rect,
       value: '#ff0000',
       signal: new AbortController().signal,
+      preview: (value) => previews.push(value),
     });
     out.color = [
       input().type,
@@ -633,9 +638,13 @@ test('color and date/time pickers', async () => {
       input().style.width,
       input().style.opacity,
     ];
+    input().value = '#0000ff';
+    input().dispatchEvent(new Event('input'));
     input().value = '#00ff00';
+    input().dispatchEvent(new Event('input'));
     input().dispatchEvent(new Event('change'));
     out.chosen = await promise;
+    out.previews = [...previews];
     out.removed = !input();
     const controller = new AbortController();
     promise = colorPicker({ view, rect, value: '', signal: controller.signal });
@@ -706,11 +715,37 @@ test('color and date/time pickers', async () => {
     out.ownClick = !!input();
     input().dispatchEvent(new Event('change'));
     out.empty = await promise;
+    // Composed on their own, both pickers still share the one picker of the document
+    const separate = { ...ui.colorPicker(), ...ui.dateTimePicker() };
+    promise = separate.dateTimePicker({
+      view,
+      rect,
+      type: 'date',
+      value: '2024-05-06',
+      min: 0,
+      max: 0,
+      step: 0,
+      signal: new AbortController().signal,
+      preview: (value) => previews.push(value),
+    });
+    input().value = '2024-05-07';
+    input().dispatchEvent(new Event('input'));
+    const color = separate.colorPicker({
+      view,
+      rect,
+      value: '#abcdef',
+      signal: new AbortController().signal,
+    });
+    out.separate = [await promise, document.querySelectorAll('input.bl-host-picker').length];
+    out.datePreview = previews.at(-1);
+    pointerdown(document.body);
+    out.separateColor = await color;
     return out;
   });
   assert.deepEqual(result, {
     color: ['color', '#ff0000', '55px', '66px', '70px', '0'],
     chosen: '#00ff00',
+    previews: ['#0000ff', '#00ff00'],
     removed: true,
     defaultColor: '#000000',
     aborted: null,
@@ -725,6 +760,9 @@ test('color and date/time pickers', async () => {
     fallback: ['date', ''],
     ownClick: true,
     empty: null,
+    separate: ['2024-05-07', 1],
+    datePreview: '2024-05-07',
+    separateColor: '#abcdef',
   });
 });
 
@@ -798,34 +836,28 @@ test('native dialogs show Chrome-like texts and protect against loops', async ()
   ]);
 });
 
-test('valueFromNumber matches valueAsNumber of the host browser', async () => {
-  const mismatches = await page.evaluate(() => {
-    const wrong = [];
-    const input = document.createElement('input');
-    const numbers = {
-      date: [],
-      'datetime-local': [],
-      week: [],
-      time: [],
-      month: [],
-    };
-    for (let i = 0; i < 400; i++) {
-      const ms = Date.UTC(1900 + ((i * 37) % 250), (i * 5) % 12, 1 + ((i * 11) % 28));
-      numbers.date.push(ms);
-      numbers['datetime-local'].push(ms + ((i * 7919) % 86400) * 1000 + (i % 3 === 0 ? i : 0));
-      numbers.week.push(ms - ((new Date(ms).getUTCDay() + 6) % 7) * 86400000);
-      numbers.time.push(((i * 104729) % 86400) * 1000 + (i % 4 === 0 ? i % 1000 : 0));
-      numbers.month.push(((i * 13) % 3000) - 800);
-    }
-    for (const [type, list] of Object.entries(numbers)) {
-      input.type = type;
-      for (const number of list) {
-        input.valueAsNumber = number;
-        const ours = ui.valueFromNumber(type, number);
-        if (input.value !== ours) wrong.push(`${type} ${number}: host ${input.value} ours ${ours}`);
-      }
-    }
-    return wrong;
+test('valueFromNumber converts through the host browser', async () => {
+  const values = await page.evaluate(() => {
+    const day = Date.UTC(2024, 1, 29);
+    return [
+      ['date', day],
+      ['datetime-local', day + 13 * 3_600_000 + 5 * 60_000],
+      ['time', 9 * 3_600_000 + 30 * 60_000],
+      ['month', (2024 - 1970) * 12 + 11],
+      ['week', Date.UTC(2020, 11, 28)],
+      ['bogus', day],
+      ['date', Number.NaN],
+      ['date', 1e20],
+    ].map(([type, number]) => ui.valueFromNumber(document, type, number));
   });
-  assert.deepEqual(mismatches.slice(0, 10), []);
+  assert.deepEqual(values, [
+    '2024-02-29',
+    '2024-02-29T13:05',
+    '09:30',
+    '2024-12',
+    '2020-W53',
+    '2024-02-29',
+    '',
+    '',
+  ]);
 });

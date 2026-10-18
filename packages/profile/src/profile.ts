@@ -1,5 +1,13 @@
 import type { Browser } from '@browser-lite/core';
-import { clearDirectory, folder, folderSize, readText, removePath, writeFile } from './opfs.js';
+import {
+  clearDirectory,
+  folder,
+  folderSize,
+  isTransient,
+  readText,
+  removePath,
+  writeFile,
+} from './opfs.js';
 import {
   filePath,
   hostDevice,
@@ -319,6 +327,8 @@ class ProfileClient implements Profile {
 
   async beforeStart(dir: FileSystemDirectoryHandle): Promise<void> {
     if (this.#browser && this.#browser.state !== 'ready') this.#detach();
+    // A sync of the previous browser must finish before the record is read and the seed runs
+    await this.#syncing;
     this.#top = dir;
     try {
       if (this.#store.read('clear')) {
@@ -412,8 +422,7 @@ class ProfileClient implements Profile {
   }
 
   #onVisibility = () => {
-    // Write the databases of the engine before the sync (the page may be closed soon)
-    if (isHidden() && this.#browser?.state === 'ready') this.#browser.storage.flush();
+    // The core flushes the storage itself when the page is hidden
     this.#scheduleSync(isHidden() ? AFTER_HIDE : VISIBLE_INTERVAL);
   };
 
@@ -543,12 +552,12 @@ class ProfileClient implements Profile {
         this.#record.files[file.path] = [snapshot.size, snapshot.lastModified];
         return;
       } catch (error) {
-        const { name, status } = error as { name?: string; status?: number };
-        if (name === 'NotFoundError' || name === 'NotReadableError') {
+        if (isTransient(error)) {
           if (attempt === 3) return;
           await sleep(250);
           continue;
         }
+        const status = (error as { status?: number }).status;
         if (status === 400 || status === 413 || status === 507) {
           this.#rejected.set(file.path, stamp);
           return;

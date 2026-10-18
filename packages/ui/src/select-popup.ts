@@ -118,7 +118,7 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
         };
         // Keys go to the popup while it is open, wherever the focus is (the page keeps it)
         const stopListening = listen([
-          [doc, 'keydown', onKey, true],
+          [win, 'keydown', onKey, true],
           [doc, 'pointerdown', onPointer, true],
           [win, 'blur', () => choose(-1)],
           [win, 'resize', () => choose(-1)],
@@ -148,6 +148,7 @@ function place(
   style.position = 'fixed';
   style.minWidth = `${anchor.width}px`;
   style.maxHeight = '';
+  style.overflowY = 'auto';
   const below = win.innerHeight - (anchor.y + anchor.height) - 8;
   const above = anchor.y - 8;
   const height = popup.offsetHeight;

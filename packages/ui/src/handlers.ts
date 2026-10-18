@@ -1,7 +1,6 @@
 import type { RequestHandlers } from '@browser-lite/core';
 import { type NativeDialogOptions, nativeDialogs } from './dialogs.js';
-import { hostPickers } from './host-picker.js';
-import { context } from './options.js';
+import { colorPicker, dateTimePicker } from './host-picker.js';
 import { permissionPrompt } from './permission-prompt.js';
 import { selectPopup } from './select-popup.js';
 
@@ -12,7 +11,8 @@ import { selectPopup } from './select-popup.js';
 export function defaultHandlers(options?: NativeDialogOptions): Partial<RequestHandlers> {
   return {
     ...selectPopup(options),
-    ...hostPickers(context(options)),
+    ...colorPicker(options),
+    ...dateTimePicker(options),
     ...permissionPrompt(options),
     ...nativeDialogs(options),
   };

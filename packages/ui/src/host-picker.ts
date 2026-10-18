@@ -13,99 +13,81 @@ interface PickerRequest {
   view: View;
   rect: ColorRequest['rect'];
   signal: AbortSignal;
+  preview?(value: string): void;
 }
 
-type OpenPicker = (
+/** Finishes the open picker of a document; the host browser shows one picker at a time. */
+const openPickers = new WeakMap<Document, () => void>();
+
+/**
+ * Shows the native picker of the host browser: a hidden input at the place of the field of the
+ * page, opened with showPicker(). Every input event previews the value in the page. Resolves
+ * its value on change or when the user clicks elsewhere, null when aborted. A new picker in the
+ * same document finishes the open one.
+ */
+function openHostPicker(
+  ui: UiContext,
   request: PickerRequest,
   type: string,
   value: string,
   setup?: (input: HTMLInputElement) => void,
-) => Promise<string | null>;
-
-/**
- * Shows the native picker of the host browser: a hidden input at the place of the field of the
- * page, opened with showPicker(). Resolves its value on change or when the user clicks
- * elsewhere, null when aborted. A new picker finishes the open one.
- */
-function createHostPicker(ui: UiContext): OpenPicker {
-  let current: (() => void) | null = null;
-
-  return (request, type, value, setup) => {
-    current?.();
-    return new Promise((resolve) => {
-      if (request.signal.aborted) {
-        resolve(null);
-        return;
-      }
-      const root = ui.root();
-      const doc = root.ownerDocument;
-      const input = element(root, 'input', 'host-picker');
-      input.type = type;
-      input.tabIndex = -1;
-      const anchor = viewportRect(request.view, request.rect);
-      Object.assign(input.style, {
-        position: 'fixed',
-        left: `${anchor.x}px`,
-        top: `${anchor.y}px`,
-        width: `${Math.max(anchor.width, 1)}px`,
-        height: `${Math.max(anchor.height, 1)}px`,
-        opacity: '0',
-        pointerEvents: 'none',
-      });
-      setup?.(input);
-      input.value = value;
-
-      const finish = (result: string | null) => {
-        if (current !== done) return;
-        current = null;
-        stopListening();
-        request.signal.removeEventListener('abort', onAbort);
-        input.remove();
-        resolve(result);
-      };
-      const done = () => finish(input.value || null);
-      const onAbort = () => finish(null);
-      current = done;
-      const stopListening = listen([
-        [input, 'change', done],
-        [
-          doc,
-          'pointerdown',
-          (event) => {
-            if (event.target !== input) done();
-          },
-          true,
-        ],
-      ]);
-      request.signal.addEventListener('abort', onAbort);
-      root.append(input);
-      try {
-        input.showPicker();
-      } catch {
-        // showPicker needs a user activation; the focused field still opens with a key
-        input.focus();
-      }
+): Promise<string | null> {
+  const root = ui.root();
+  const doc = root.ownerDocument;
+  openPickers.get(doc)?.();
+  return new Promise((resolve) => {
+    if (request.signal.aborted) {
+      resolve(null);
+      return;
+    }
+    const input = element(root, 'input', 'host-picker');
+    input.type = type;
+    input.tabIndex = -1;
+    const anchor = viewportRect(request.view, request.rect);
+    Object.assign(input.style, {
+      position: 'fixed',
+      left: `${anchor.x}px`,
+      top: `${anchor.y}px`,
+      width: `${Math.max(anchor.width, 1)}px`,
+      height: `${Math.max(anchor.height, 1)}px`,
+      opacity: '0',
+      pointerEvents: 'none',
     });
-  };
-}
+    setup?.(input);
+    input.value = value;
 
-/** Color and date/time picker sharing one hidden input: opening one finishes the other. */
-export function hostPickers(
-  ui: UiContext,
-): Pick<RequestHandlers, 'colorPicker' | 'dateTimePicker'> {
-  const open = createHostPicker(ui);
-  return {
-    colorPicker: (request: ColorRequest) => open(request, 'color', request.value || '#000000'),
-    dateTimePicker(request: DateTimeRequest) {
-      const type = dateTimeType(request.type);
-      return open(request, type, request.value || '', (input) => {
-        if (request.min) input.min = valueFromNumber(type, request.min);
-        if (request.max) input.max = valueFromNumber(type, request.max);
-        const step = stepAttribute(type, request.step);
-        if (step) input.step = step;
-      });
-    },
-  };
+    const finish = (result: string | null) => {
+      if (openPickers.get(doc) !== done) return;
+      openPickers.delete(doc);
+      stopListening();
+      request.signal.removeEventListener('abort', onAbort);
+      input.remove();
+      resolve(result);
+    };
+    const done = () => finish(input.value || null);
+    const onAbort = () => finish(null);
+    openPickers.set(doc, done);
+    const stopListening = listen([
+      [input, 'input', () => request.preview?.(input.value)],
+      [input, 'change', done],
+      [
+        doc,
+        'pointerdown',
+        (event) => {
+          if (event.target !== input) done();
+        },
+        true,
+      ],
+    ]);
+    request.signal.addEventListener('abort', onAbort);
+    root.append(input);
+    try {
+      input.showPicker();
+    } catch {
+      // showPicker needs a user activation; the focused field still opens with a key
+      input.focus();
+    }
+  });
 }
 
 /**
@@ -113,7 +95,11 @@ export function hostPickers(
  * `input.bl-host-picker`.
  */
 export function colorPicker(options?: UiOptions): Pick<RequestHandlers, 'colorPicker'> {
-  return { colorPicker: hostPickers(context(options)).colorPicker };
+  const ui = context(options);
+  return {
+    colorPicker: (request: ColorRequest) =>
+      openHostPicker(ui, request, 'color', request.value || '#000000'),
+  };
 }
 
 /**
@@ -121,5 +107,17 @@ export function colorPicker(options?: UiOptions): Pick<RequestHandlers, 'colorPi
  * browser, limited by min, max and step of the field. Element: hidden `input.bl-host-picker`.
  */
 export function dateTimePicker(options?: UiOptions): Pick<RequestHandlers, 'dateTimePicker'> {
-  return { dateTimePicker: hostPickers(context(options)).dateTimePicker };
+  const ui = context(options);
+  return {
+    dateTimePicker(request: DateTimeRequest) {
+      const type = dateTimeType(request.type);
+      return openHostPicker(ui, request, type, request.value || '', (input) => {
+        const doc = input.ownerDocument;
+        if (request.min) input.min = valueFromNumber(doc, type, request.min);
+        if (request.max) input.max = valueFromNumber(doc, type, request.max);
+        const step = stepAttribute(type, request.step);
+        if (step) input.step = step;
+      });
+    },
+  };
 }

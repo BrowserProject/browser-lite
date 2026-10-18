@@ -36,7 +36,7 @@ profile.on('status', () => console.log(profile.status, profile.statusText));
 core. It uploads what did not reach the server last time (while this device still holds the
 profile), then downloads the profile (`POST open`) into the directory. Afterwards only the
 engine writes there. `attach(browser)` starts the sync: every 2 s while the page is visible,
-every 30 s while hidden and 2.5 s after hiding (after `browser.storage.flush()`). The sync scans
+every 30 s while hidden and 2.5 s after hiding (the core flushes the storage on hide). The sync scans
 the directory, uploads changed files and deletes on the server what is gone locally.
 
 A database of the profile is `cookies.db`, one `.localstorage` file or the directory of one

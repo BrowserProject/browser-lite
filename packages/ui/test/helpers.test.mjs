@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { dateTimeType, isoWeek, stepAttribute, valueFromNumber } from '../dist/datetime.js';
+import { dateTimeType, stepAttribute } from '../dist/datetime.js';
 import { defaultTexts } from '../dist/index.js';
 import { createTypeahead, moveHighlight } from '../dist/select-keys.js';
 import { format, hostOf, resolveTexts } from '../dist/texts.js';
@@ -28,38 +28,6 @@ test('hostOf', () => {
   assert.equal(hostOf('null'), '');
   assert.equal(hostOf(''), '');
   assert.equal(hostOf('file://'), 'file://');
-});
-
-test('valueFromNumber for every date and time type', () => {
-  const day = Date.UTC(2024, 1, 29);
-  assert.equal(valueFromNumber('date', day), '2024-02-29');
-  assert.equal(valueFromNumber('date', 0), '1970-01-01');
-  assert.equal(valueFromNumber('date', Date.UTC(-5, 0, 1)), '-0005-01-01');
-  assert.equal(
-    valueFromNumber('datetime-local', day + 13 * 3_600_000 + 5 * 60_000),
-    '2024-02-29T13:05',
-  );
-  assert.equal(valueFromNumber('datetime-local', day + 1000 + 7), '2024-02-29T00:00:01.007');
-  assert.equal(valueFromNumber('datetime-local', day + 1000 + 70), '2024-02-29T00:00:01.07');
-  assert.equal(valueFromNumber('time', 9 * 3_600_000 + 30 * 60_000), '09:30');
-  assert.equal(valueFromNumber('time', 23 * 3_600_000 + 59 * 60_000 + 59_000), '23:59:59');
-  assert.equal(valueFromNumber('time', 500), '00:00:00.500');
-  assert.equal(valueFromNumber('month', 0), '1970-01');
-  assert.equal(valueFromNumber('month', (2024 - 1970) * 12 + 11), '2024-12');
-  assert.equal(valueFromNumber('month', -1), '1969-12');
-  assert.equal(valueFromNumber('week', Date.UTC(2024, 0, 1)), '2024-W01');
-  assert.equal(valueFromNumber('week', Date.UTC(2020, 11, 28)), '2020-W53');
-  assert.equal(valueFromNumber('week', Date.UTC(2019, 11, 30)), '2020-W01');
-  assert.equal(valueFromNumber('week', Date.UTC(2021, 0, 4)), '2021-W01');
-  assert.equal(valueFromNumber('unknown', day), '2024-02-29', 'falls back to date');
-  assert.equal(valueFromNumber('date', Number.NaN), '');
-  assert.equal(valueFromNumber('date', 1e20), '');
-});
-
-test('isoWeek across year boundaries', () => {
-  assert.deepEqual(isoWeek(Date.UTC(2016, 0, 3)), [2015, 53]);
-  assert.deepEqual(isoWeek(Date.UTC(2026, 9, 18)), [2026, 42]);
-  assert.deepEqual(isoWeek(Date.UTC(2026, 9, 18, 23, 59)), [2026, 42]);
 });
 
 test('stepAttribute converts the engine step to attribute units', () => {

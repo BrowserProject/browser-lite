@@ -102,7 +102,7 @@ export function showContextMenu(
       true,
     ],
     [
-      doc,
+      win,
       'keydown',
       (event) => {
         if ((event as KeyboardEvent).key !== 'Escape') return;

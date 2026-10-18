@@ -272,6 +272,40 @@ test('restart catches up on changes that were not uploaded and keeps them', asyn
   assert.equal(dir.text('localstorage/https_s.com_0.localstorage'), 'server');
 });
 
+test('a restart in the same page waits for the running sync, then catches up', {
+  timeout: 10000,
+}, async () => {
+  server.files.set('cookies.db', new TextEncoder().encode('v1'));
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let held = 0;
+  const fetch = async (input, init) => {
+    if (init?.method === 'PUT') {
+      held++;
+      await gate;
+    }
+    return server.fetch(input, init);
+  };
+  const dir = new FakeDir();
+  const profile = open({ fetch });
+  await profile.beforeStart(dir);
+  const browser = fakeBrowser(dir);
+  profile.attach(browser);
+  dir.put('cookies.db', 'v2');
+  while (!held) await sleep(50);
+  // The engine writes once more while it shuts down; the running sync scanned before
+  dir.put('cookies.db', 'v3');
+  browser.state = 'destroyed';
+  const restart = profile.beforeStart(dir);
+  await sleep(100);
+  release();
+  await restart;
+  assert.equal(dir.text('cookies.db'), 'v3', 'the newest local change survives the seed');
+  assert.equal(text(server.files.get('cookies.db')), 'v3');
+});
+
 test('a database deleted on another device is deleted here', async () => {
   server.files.set('cookies.db', new TextEncoder().encode('c'));
   server.files.set('localstorage/https_a.com_0.localstorage', new TextEncoder().encode('a'));
@@ -359,8 +393,14 @@ test('localStats sums the local only directories', async () => {
   assert.deepEqual(stats.databases, []);
 });
 
-test('hiding the page flushes the engine storage and syncs soon', { timeout: 10000 }, async () => {
+test('hiding the page syncs soon, the core flushes the storage', { timeout: 10000 }, async () => {
   const doc = Object.assign(new EventTarget(), { hidden: false });
+  let listeners = 0;
+  const add = doc.addEventListener.bind(doc);
+  doc.addEventListener = (...args) => {
+    listeners++;
+    add(...args);
+  };
   globalThis.document = doc;
   try {
     const dir = new FakeDir();
@@ -372,7 +412,8 @@ test('hiding the page flushes the engine storage and syncs soon', { timeout: 100
     dir.put('cookies.db', 'before hide');
     doc.hidden = true;
     doc.dispatchEvent(new Event('visibilitychange'));
-    assert.deepEqual(browser.flushes, [0], 'one flush, attach twice adds no second listener');
+    assert.equal(listeners, 1, 'attach twice adds no second listener');
+    assert.deepEqual(browser.flushes, [], 'flushing on hide is the job of the core');
     await sleep(2200);
     assert.ok(!server.files.has('cookies.db'), 'hidden: sync waits 2.5 s after hide');
     await sleep(600);
