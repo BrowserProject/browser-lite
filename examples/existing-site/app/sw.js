@@ -6,6 +6,12 @@ self.addEventListener('install', () => self.skipWaiting());
 // Control the open pages right away, so videos play on the first visit too
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
+const isolation = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
+
 // The site's own fetch logic. Responses for the pages and the engine must keep their
 // COOP/COEP/CORP headers, so this worker only answers its own URL and passes the rest through.
 self.addEventListener('fetch', (event) => {
@@ -15,5 +21,7 @@ self.addEventListener('fetch', (event) => {
     url.pathname !== new URL('sw-info.json', registration.scope).pathname
   )
     return;
-  event.respondWith(Response.json({ worker: 'example-site', scope: registration.scope }));
+  event.respondWith(
+    Response.json({ worker: 'example-site', scope: registration.scope }, { headers: isolation }),
+  );
 });

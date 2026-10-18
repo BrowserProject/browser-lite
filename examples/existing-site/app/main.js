@@ -36,8 +36,13 @@ async function start() {
     showNotice(`This browser cannot run browser-lite (missing: ${support.missing.join(', ')}).`);
     return;
   }
-  if ((await fetch('/token', { method: 'HEAD', cache: 'no-store' })).status === 401) {
-    showNotice('Sign in on the home page first.');
+  const session = await fetch('/session', { cache: 'no-store' });
+  if (!session.ok) {
+    showNotice(
+      session.status === 401
+        ? 'Sign in on the home page first.'
+        : `Session check failed (HTTP ${session.status}).`,
+    );
     return;
   }
   // The site's own service worker; its first line imports media-sw.js of the core

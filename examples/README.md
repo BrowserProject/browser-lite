@@ -21,9 +21,9 @@ the site; mode (b) isolates only the pages under `/app/`.
 npm ci && npm run build                     # in the repository: the packages (dist/)
 
 # (a) minimal: relay in one terminal, Vite in another
-node packages/server/dist/bin/browser-lite-server.js       # relay on :5001
+HOST=127.0.0.1 npm run relay -w @browser-lite/example-minimal   # relay on 127.0.0.1:5001
 ENGINE_DIR=build/webcore/bin npm run copy-engine -w @browser-lite/example-minimal
-npm run dev -w @browser-lite/example-minimal                # http://localhost:5173/
+npm run dev -w @browser-lite/example-minimal                       # http://localhost:5173/
 
 # (b) existing-site: one Node process with pages, tokens, relay and engine
 ENGINE_DIR=build/webcore/bin node examples/existing-site/server.mjs   # http://localhost:8080/

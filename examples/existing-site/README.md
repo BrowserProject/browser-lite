@@ -26,7 +26,7 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 | URL | |
 | --- | --- |
 | `/` | the site's own pages, no special headers |
-| `POST /login`, `/token` | session cookie; `/token` gives signed-in users a relay token valid for 60 s (`signToken`), else 401 |
+| `POST /login`, `/session`, `/token` | session cookie (`Secure` behind an https `PUBLIC_ORIGIN`); `/session` answers 204 or 401; `/token` gives signed-in users a relay token valid for 60 s (`signToken`), else 401 |
 | `/app/` | the browser in a section of an ordinary page |
 | `/app/iframe.html` | the browser page `frame.html` in an iframe of an isolated parent |
 | `/app/csp.html` | the browser under a strict Content Security Policy |
@@ -34,7 +34,7 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 | `/app/engine/`, `/app/lib/` | engine files, dist folders of the packages for the import map |
 | `/app/sw.js` | the site's own service worker; first line `importScripts('media-sw.js')` |
 
-`app/main.js` asks `/token` for every relay connection (`WispTransport` `token` function),
+`app/main.js` checks `/session` first, asks `/token` for every relay connection (`WispTransport` `token` function),
 registers `sw.js` itself and passes the registration (`serviceWorker: { registration }`), and
 uses its own storage namespace.
 

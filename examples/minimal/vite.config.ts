@@ -12,7 +12,7 @@ const isolation = {
 };
 
 // browser-lite-server (relay under /wisp/), started separately
-const relay = process.env.RELAY_URL ?? 'http://localhost:5001';
+const relay = process.env.RELAY_URL ?? 'http://127.0.0.1:5001';
 
 // The service worker of the core: sw.js loads media-sw.js next to itself
 const swDir = path.join(

@@ -1,5 +1,6 @@
 // An existing website with a Node backend that adds browser-lite under /app/:
 //   /             the site's own pages (no special headers), /login and /logout
+//   /session      204 when signed in, else 401
 //   /token        short-lived relay token for signed-in users (session cookie)
 //   /app/         browser pages, cross-origin isolated (COOP/COEP/CORP), the site's service worker
 //   /app/wisp/    Wisp relay (WebSocket), only with a valid token and from the site's origin
@@ -25,11 +26,12 @@ const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '127.0.0.1';
 const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? `http://localhost:${PORT}`;
 const RELAY_SECRET = process.env.RELAY_SECRET || randomBytes(32).toString('hex');
-const ENGINE_DIR = process.env.ENGINE_DIR;
-if (!ENGINE_DIR) {
+if (!process.env.ENGINE_DIR) {
   console.error('Set ENGINE_DIR to the folder with engine.js, engine.wasm and engine.data');
   process.exit(1);
 }
+// npm runs scripts in the package folder; INIT_CWD is where the command was typed
+const ENGINE_DIR = path.resolve(process.env.INIT_CWD ?? process.cwd(), process.env.ENGINE_DIR);
 
 // Where npm installed the packages: their dist folders are served as they are
 const require = createRequire(import.meta.url);
@@ -60,10 +62,11 @@ async function cspFor(file) {
     "frame-ancestors 'self'",
   ].join('; ');
 }
-const CSP = { '/app/csp.html': await cspFor('csp.html') };
+const CSP = { '/csp.html': await cspFor('csp.html') };
 
 // A stand-in for the site's real login: a random session id in a cookie
 const sessions = new Map();
+const SECURE = PUBLIC_ORIGIN.startsWith('https:') ? '; Secure' : '';
 function sessionUser(req) {
   const id = /(?:^|;\s*)session=([0-9a-f]{32})/.exec(req.headers.cookie ?? '')?.[1];
   return (id && sessions.get(id)) ?? null;
@@ -117,7 +120,7 @@ async function handle(req, res) {
     res
       .writeHead(303, {
         Location: '/app/',
-        'Set-Cookie': `session=${id}; Path=/; HttpOnly; SameSite=Strict`,
+        'Set-Cookie': `session=${id}; Path=/; HttpOnly; SameSite=Strict${SECURE}`,
       })
       .end();
     return;
@@ -126,6 +129,10 @@ async function handle(req, res) {
     const id = /(?:^|;\s*)session=([0-9a-f]{32})/.exec(req.headers.cookie ?? '')?.[1];
     if (id) sessions.delete(id);
     res.writeHead(303, { Location: '/', 'Set-Cookie': 'session=; Path=/; Max-Age=0' }).end();
+    return;
+  }
+  if (pathname === '/session') {
+    res.writeHead(sessionUser(req) ? 204 : 401, { 'Cache-Control': 'no-store' }).end();
     return;
   }
   // A relay token for the signed-in user; WispTransport fetches a fresh one for every connect
@@ -156,8 +163,10 @@ async function handle(req, res) {
   } else if (rest === '/media-sw.js') {
     found = await serveStatic(req, res, path.join(LIBS.core, 'sw'), { urlPath: rest });
   } else {
-    if (CSP[pathname]) res.setHeader('Content-Security-Policy', CSP[pathname]);
-    found = await serveStatic(req, res, APP_DIR, { urlPath: rest });
+    // Normalized, so /app//csp.html cannot skip the policy of /app/csp.html
+    const page = path.posix.normalize(rest);
+    if (Object.hasOwn(CSP, page)) res.setHeader('Content-Security-Policy', CSP[page]);
+    found = await serveStatic(req, res, APP_DIR, { urlPath: page });
   }
   if (!found) {
     res.removeHeader('Content-Security-Policy');
@@ -175,7 +184,9 @@ const server = http.createServer((req, res) => {
 server.on('upgrade', (req, socket, head) => {
   if (!relay.handleUpgrade(req, socket, head)) socket.destroy();
 });
-server.listen(PORT, HOST, () => console.log(`Listening on http://${HOST}:${PORT}/`));
+server.listen(PORT, HOST, () =>
+  console.log(`Listening on ${HOST}:${PORT}, open ${PUBLIC_ORIGIN}/`),
+);
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, () => {
     relay.close().then(() => server.close(() => process.exit(0)));

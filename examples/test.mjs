@@ -9,6 +9,7 @@
 // Environment: E2E_TIMEOUT (ms per wait, default 60000), E2E_VERBOSE=1, CHROMIUM_PATH.
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -259,6 +260,10 @@ await new Promise((resolve) => pages.listen(0, '127.0.0.1', resolve));
 const PAGE_URL = `http://127.0.0.1:${pages.address().port}/`;
 
 const minimalDir = path.join(here, 'minimal');
+// Only what the test creates is removed at the end, not an engine copy or build of the developer
+const minimalOutputs = ['public/engine', 'dist']
+  .map((dir) => path.join(minimalDir, dir))
+  .filter((dir) => !existsSync(dir));
 try {
   // ----------------------------------------------------------- existing-site
   const sitePort = await freePort();
@@ -293,8 +298,20 @@ try {
     'existing-site: /token without session is 401',
     (await fetch(`${SITE}/token`)).status === 401,
   );
+  check(
+    'existing-site: /session without session is 401',
+    (await fetch(`${SITE}/session`)).status === 401,
+  );
+  check(
+    'existing-site: CSP also on /app//csp.html',
+    (await fetch(`${SITE}/app//csp.html`)).headers.has('content-security-policy'),
+  );
   const login = await fetch(`${SITE}/login`, { method: 'POST', redirect: 'manual' });
   const cookie = login.headers.get('set-cookie')?.split(';')[0] ?? '';
+  check(
+    'existing-site: /session with session is 204',
+    (await fetch(`${SITE}/session`, { headers: { cookie } })).status === 204,
+  );
   const tokenResponse = await fetch(`${SITE}/token`, { headers: { cookie } });
   const token = await tokenResponse.text();
   check(
@@ -460,8 +477,10 @@ try {
   await context.close();
 
   // ----------------------------------------------------------- minimal
+  // Like `npm run copy-engine -w ...` in the repository root with a relative ENGINE_DIR
   await run(process.execPath, [path.join(minimalDir, 'scripts', 'copy-engine.mjs')], {
-    env: { ...process.env, ENGINE_DIR: engineDir },
+    cwd: minimalDir,
+    env: { ...process.env, INIT_CWD: root, ENGINE_DIR: path.relative(root, engineDir) || '.' },
   });
   const vite = path.join(root, 'node_modules', 'vite', 'bin', 'vite.js');
   let built = true;
@@ -533,8 +552,7 @@ try {
   await browser.close();
   pages.close();
   for (const child of children) child.kill();
-  await rm(path.join(minimalDir, 'public', 'engine'), { recursive: true, force: true });
-  await rm(path.join(minimalDir, 'dist'), { recursive: true, force: true });
+  for (const dir of minimalOutputs) await rm(dir, { recursive: true, force: true });
 }
 console.log(failed ? `${failed} check(s) failed` : 'All checks ok');
 process.exit(failed ? 1 : 0);

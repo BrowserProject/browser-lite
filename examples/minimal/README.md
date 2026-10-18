@@ -7,16 +7,17 @@ worker of the core. Vite and TypeScript.
 ## Run
 
 ```bash
-node packages/server/dist/bin/browser-lite-server.js        # relay on :5001 (separately)
+HOST=127.0.0.1 npm run relay                                # relay on 127.0.0.1:5001 (separately)
 ENGINE_DIR=/path/to/engine npm run copy-engine              # engine into public/engine/
 npm run dev                                                 # http://localhost:5173/
 npm run build && npm run preview                            # production build in dist/
 ```
 
-`?url=https://example.org/` opens another first page. `RELAY_URL` points the dev and preview
-proxy for `/wisp/` to another `browser-lite-server` (default `http://localhost:5001`). Without a
-token the server's relay is open to everyone who reaches it: only for internal use, see
-[packages/server](../../packages/server/README.md) for `RELAY_TOKEN` and `RELAY_SECRET`.
+`?url=https://example.org/` opens another first page. `npm run relay` starts `browser-lite-server`
+of `@browser-lite/server`. Without `RELAY_TOKEN` or `RELAY_SECRET` its relay is open to everyone
+who reaches it, so keep it on `127.0.0.1` (the CLI listens on all interfaces by default); the
+README of `@browser-lite/server` describes tokens and the other settings. `RELAY_URL` points the
+dev and preview proxy for `/wisp/` to another relay (default `http://127.0.0.1:5001`).
 
 ## Files
 
