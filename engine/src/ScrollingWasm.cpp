@@ -21,6 +21,8 @@ namespace {
 struct Entry {
     RefPtr<ThreadedScrollingTree> tree;
     bool animatedScroll { false };
+    // A wheel event scrolled, the next frame of the compositor has not come yet
+    bool wheelScrolled { false };
 };
 
 Lock s_lock;
@@ -135,6 +137,12 @@ void wheelEvent(int viewId, const PlatformWheelEvent& event)
         // busy with the page's JS)
         if (result.wasHandled) {
             tree->didScheduleRenderingUpdate();
+            {
+                Locker locker { s_lock };
+                auto it = entries().find(viewId);
+                if (it != entries().end())
+                    it->value.wheelScrolled = true;
+            }
             requestTick(viewId);
         }
         if (result.needsMainThreadProcessing())
@@ -146,6 +154,7 @@ bool displayDidRefresh(int viewId)
 {
     RefPtr<ThreadedScrollingTree> tree;
     bool animatedScroll = false;
+    bool wheelScrolled = false;
     {
         Locker locker { s_lock };
         auto it = entries().find(viewId);
@@ -153,7 +162,14 @@ bool displayDidRefresh(int viewId)
             return false;
         tree = it->value.tree;
         animatedScroll = it->value.animatedScroll;
+        wheelScrolled = std::exchange(it->value.wheelScrolled, false);
     }
+    // The tree only takes a refresh within 50 ms of the last wheel event
+    // (ScrollingTree::hasRecentActivity). On a slow machine this frame may come
+    // later, then the new position would wait for the engine thread, which may
+    // be busy with the page's JS.
+    if (wheelScrolled)
+        tree->willProcessWheelEvent();
     // Scroll animation: apply new positions, even without a rendering update
     if (animatedScroll)
         tree->didScheduleRenderingUpdate();

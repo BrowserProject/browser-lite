@@ -149,6 +149,8 @@ private:
     float m_streamVolume { 1 };
     bool m_streamMuted { false };
     bool m_ended { false };
+    // Looping: the host <video> stopped at the end and was told to play on
+    bool m_loopRestart { false };
     bool m_hasVideo { false };
     bool m_hasAudio { false };
     double m_rate { 1 };
