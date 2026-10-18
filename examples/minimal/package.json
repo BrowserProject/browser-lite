@@ -1,0 +1,27 @@
+{
+  "name": "@browser-lite/example-minimal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "browser-lite on its own cross-origin isolated route: Vite, one view, address input",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "scripts": {
+    "copy-engine": "node scripts/copy-engine.mjs",
+    "relay": "browser-lite-server",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@browser-lite/core": "0.1.0",
+    "@browser-lite/transport-wisp": "0.1.0",
+    "@browser-lite/ui": "0.1.0"
+  },
+  "devDependencies": {
+    "@browser-lite/server": "0.1.0",
+    "@types/node": "22.20.5",
+    "typescript": "7.0.2",
+    "vite": "8.3.3"
+  }
+}

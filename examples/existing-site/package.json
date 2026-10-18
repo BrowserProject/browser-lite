@@ -1,0 +1,17 @@
+{
+  "name": "@browser-lite/example-existing-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "browser-lite inside an existing website with a Node backend, its own service worker and CSP",
+  "license": "BSD-2-Clause",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@browser-lite/core": "0.1.0",
+    "@browser-lite/server": "0.1.0",
+    "@browser-lite/transport-wisp": "0.1.0",
+    "@browser-lite/ui": "0.1.0"
+  }
+}

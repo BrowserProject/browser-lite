@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example Site: Browser frame</title>
+<link rel="stylesheet" href="app.css">
+<script type="importmap">
+{
+  "imports": {
+    "@browser-lite/core": "./lib/core/index.js",
+    "@browser-lite/transport-wisp": "./lib/transport-wisp/index.js",
+    "@browser-lite/ui": "./lib/ui/index.js"
+  }
+}
+</script>
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<section class="browser full" data-browser>
+  <form class="address-form">
+    <input type="text" spellcheck="false" autocomplete="off" placeholder="Enter address" aria-label="Address">
+    <span class="page-title"></span>
+  </form>
+  <p class="notice" hidden></p>
+  <div class="view"></div>
+</section>
+</body>
+</html>

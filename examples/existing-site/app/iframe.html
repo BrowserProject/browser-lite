@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example Site: Browser in an iframe</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header><a href="/">Example Site</a></header>
+<main>
+<h1>Browser in an iframe</h1>
+<p>The browser page (frame.html) runs in an iframe. The engine needs a cross-origin isolated
+document, and a frame is only isolated when its parent is too: this page is served with the same
+COOP/COEP/CORP headers as the browser page. The allow attribute passes the features the
+browser's services use; for a frame of the same origin most of them are allowed by default, for a
+frame from another origin (for example a subdomain) all of them, cross-origin-isolated included,
+are required.</p>
+<iframe class="browser-frame" title="Browser"
+  allow="cross-origin-isolated; fullscreen; autoplay; picture-in-picture; clipboard-read; clipboard-write; camera; microphone; display-capture; geolocation; gamepad; accelerometer; gyroscope; magnetometer; keyboard-map"></iframe>
+</main>
+<script src="iframe.js"></script>
+</body>
+</html>

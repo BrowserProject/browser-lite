@@ -7,14 +7,16 @@
   "workspaces": [
     "packages/*",
     "apps/*",
+    "examples/*",
     "tests"
   ],
   "scripts": {
     "build": "tsc -b",
-    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo && node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs",
+    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo && tsc --noEmit -p examples/minimal && node tests/run.mjs contract",
     "test": "npm test --workspaces --if-present && node tests/run.mjs engine-js",
     "test:core": "node tests/run.mjs core",
-    "test:demo": "node tests/run.mjs demo"
+    "test:demo": "node tests/run.mjs demo",
+    "test:examples": "node examples/test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
