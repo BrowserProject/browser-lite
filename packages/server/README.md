@@ -130,7 +130,7 @@ still runs and `/profile/` answers 503.
 - Against DNS rebinding only with `Host` as an IP address, `localhost` or a name from `hosts`,
   else 403. Against CSRF no call is a simple cross-site request (there is no CORS): `open` needs
   JSON, the other writing calls PUT/DELETE or `X-Profile-Session`.
-- With `authorize` (the command: `RELAY_TOKEN`/`RELAY_SECRET` as `Authorization: Bearer`) else
+- With `authorize` (the command: `RELAY_TOKEN`/`RELAY_SECRET`, only as `Authorization: Bearer`) else
   403. The files are stored unencrypted on the server.
 
 ## Tests

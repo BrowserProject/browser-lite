@@ -18,7 +18,8 @@ import { createBrowser } from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
 
 const transport = new WispTransport({
-  url: new URL('/wisp/', location.href.replace(/^http/, 'ws')),
+  // Relative URLs resolve against location, http(s) stands for ws(s)
+  url: '/wisp/',
   // Static token, or a function that fetches a fresh signed token for every connect
   token: async () => (await fetch('/relay-token')).text(),
 });
@@ -28,7 +29,8 @@ const browser = await createBrowser({ engineUrl: '/engine/', transport });
 
 ## API
 
-`new WispTransport({ url, token? })` implements `Transport` of `@browser-lite/core`.
+`new WispTransport({ url, token? })` implements `Transport` of `@browser-lite/core`. `url` may be
+relative (resolved against `location`) and `ws:`, `wss:`, `http:` or `https:`, else TypeError.
 
 | Member | |
 | --- | --- |

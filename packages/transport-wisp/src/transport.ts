@@ -12,7 +12,10 @@ import { type StreamLink, WispStream } from './stream.js';
 
 /** Options of {@link WispTransport}. */
 export interface WispTransportOptions {
-  /** WebSocket URL of the relay, for example `wss://example.org/wisp/`. */
+  /**
+   * WebSocket URL of the relay, for example `wss://example.org/wisp/`. Relative URLs resolve
+   * against `location`; `http:` and `https:` stand for `ws:` and `wss:`.
+   */
   url: string | URL;
   /**
    * Token for the relay, appended as `?token=` on every (re)connect. A function is called for
@@ -34,7 +37,7 @@ const PROBE_TIMEOUT_MS = 5000;
  * until {@link close}. Uses the `WebSocket` of `globalThis` at construction time.
  */
 export class WispTransport extends EventTarget implements Transport {
-  private readonly url: string | URL;
+  private readonly url: URL;
   private readonly token: WispTransportOptions['token'];
   private readonly WebSocketClass: typeof WebSocket;
   private readonly streams = new Map<number, WispStream>();
@@ -59,7 +62,13 @@ export class WispTransport extends EventTarget implements Transport {
     super();
     if (!o || (typeof o.url !== 'string' && !(o.url instanceof URL)))
       throw new TypeError('WispTransport: url is required');
-    this.url = o.url;
+    const base = (globalThis as { location?: { href: string } }).location?.href;
+    this.url = new URL(o.url, base);
+    // Older browsers only accept ws: and wss: in the WebSocket constructor
+    if (this.url.protocol === 'http:') this.url.protocol = 'ws:';
+    else if (this.url.protocol === 'https:') this.url.protocol = 'wss:';
+    if (this.url.protocol !== 'ws:' && this.url.protocol !== 'wss:')
+      throw new TypeError(`WispTransport: not a WebSocket URL: ${this.url.href}`);
     this.token = o.token;
     this.WebSocketClass = globalThis.WebSocket;
     const transport = this;
@@ -148,8 +157,15 @@ export class WispTransport extends EventTarget implements Transport {
       this.ready = null;
       return Promise.reject(new Error('transport closed'));
     }
+    let ws: WebSocket;
+    try {
+      ws = new this.WebSocketClass(url);
+    } catch (error) {
+      this.ready = null;
+      this.setConnected(false);
+      return Promise.reject(error);
+    }
     return new Promise((resolve, reject) => {
-      const ws = new this.WebSocketClass(url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
       this.sent = 0;

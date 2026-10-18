@@ -231,11 +231,12 @@ export class WispConnection {
     socket.on('error', (error) => {
       if (!stream.connected) stream.failure = reasonForError(error);
     });
-    socket.on('close', (hadError) => {
+    // Once connected every end is voluntary, a reset after data too: the engine reads it as end
+    // of stream, which responses delimited by the connection close rely on
+    socket.on('close', () => {
       stream.socket = null;
       if (stream.closed) return;
-      if (!stream.connected) this.fail(stream, stream.failure);
-      else this.fail(stream, hadError ? Reason.networkError : Reason.voluntary);
+      this.fail(stream, stream.connected ? Reason.voluntary : stream.failure);
     });
   }
 

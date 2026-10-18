@@ -394,6 +394,20 @@ describe('streams', () => {
     server.close();
   });
 
+  test('a target reset after data also ends the stream voluntarily', async () => {
+    const { server, port } = await tcpServer((socket) => {
+      socket.on('error', () => {});
+      socket.write('hello', () => setTimeout(() => socket.resetAndDestroy(), 50));
+    });
+    try {
+      client.connectTCP(73, '127.0.0.1', port);
+      assert.equal(await client.closeReason(73), VOLUNTARY);
+      assert.equal(client.data(73).toString(), 'hello');
+    } finally {
+      server.close();
+    }
+  });
+
   test('keepalive: CONTINUE on stream 0 while a silent stream is open', async () => {
     const { server, port } = await tcpServer(() => {});
     client.connectTCP(72, '127.0.0.1', port);

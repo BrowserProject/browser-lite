@@ -58,7 +58,8 @@ export function createApp(config: CliConfig, logger: Pick<Console, 'warn' | 'err
         dir: config.profileDir,
         maxBytes: config.profileMaxBytes,
         hosts: config.profileHosts,
-        authorize,
+        // Only the Authorization header: tokens in profile URLs would end up in proxy logs
+        authorize: (req) => authorize(req, new URL('http://localhost/')),
         logger,
       })
     : null;

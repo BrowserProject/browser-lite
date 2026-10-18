@@ -31,6 +31,59 @@ after(() => echo.server.close());
 test('constructor needs a url', () => {
   assert.throws(() => new WispTransport({}), TypeError);
   assert.throws(() => new WispTransport(), TypeError);
+  assert.throws(() => new WispTransport({ url: 'ftp://127.0.0.1:1/wisp/' }), TypeError);
+  // Relative without a location to resolve against
+  assert.throws(() => new WispTransport({ url: '/wisp/' }), TypeError);
+});
+
+test('relative and http URLs resolve against location', async () => {
+  const relay = await startRelay();
+  const RealWebSocket = globalThis.WebSocket;
+  const urls = [];
+  globalThis.WebSocket = class extends RealWebSocket {
+    constructor(url) {
+      urls.push(url);
+      super(url);
+    }
+  };
+  globalThis.location = { href: `http://127.0.0.1:${relay.port}/demo/index.html` };
+  const transport = new WispTransport({ url: '/wisp/' });
+  delete globalThis.location;
+  globalThis.WebSocket = RealWebSocket;
+  try {
+    assert.equal((await echoOver(transport, echo.port, 1000)).received, 1000);
+    assert.deepEqual(urls, [`ws://127.0.0.1:${relay.port}/wisp/`]);
+  } finally {
+    transport.close();
+    await relay.stop();
+  }
+});
+
+test('a throwing WebSocket constructor goes offline and reconnects', async () => {
+  const relay = await startRelay();
+  const RealWebSocket = globalThis.WebSocket;
+  let attempts = 0;
+  globalThis.WebSocket = class extends RealWebSocket {
+    constructor(url) {
+      if (++attempts === 1) throw new SyntaxError('refused');
+      super(url);
+    }
+  };
+  const transport = new WispTransport({ url: relay.url });
+  globalThis.WebSocket = RealWebSocket;
+  try {
+    const states = connectionLog(transport);
+    const first = await closeReason(transport, '127.0.0.1', echo.port);
+    assert.deepEqual(first, { reason: 'transport-down', opened: false });
+    assert.equal(transport.connected, false);
+    assert.ok(await waitUntil(() => transport.connected, 5000), 'reconnected');
+    assert.deepEqual(states, [false, true]);
+    assert.equal(attempts, 2);
+    assert.equal((await echoOver(transport, echo.port, 1000)).received, 1000);
+  } finally {
+    transport.close();
+    await relay.stop();
+  }
 });
 
 describe('with token', () => {

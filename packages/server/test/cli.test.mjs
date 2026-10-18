@@ -55,6 +55,21 @@ describe('tokens', () => {
     assert.ok(!cli.log.includes(TOKEN));
   });
 
+  test('profile takes the token only as Authorization: Bearer', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-lite-profile-'));
+    const cli = await startCli({ RELAY_TOKEN: TOKEN, PROFILE_DIR: dir });
+    try {
+      const info = (urlPath, headers) => request(cli.port, urlPath, { headers });
+      assert.equal((await info('/profile/info')).status, 403);
+      assert.equal((await info(`/profile/info?token=${TOKEN}`)).status, 403);
+      const bearer = { authorization: `Bearer ${TOKEN}` };
+      assert.equal((await info('/profile/info', bearer)).status, 200);
+    } finally {
+      await stopCli(cli);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('signed tokens with RELAY_SECRET', async () => {
     const cli = await startCli({ RELAY_SECRET: SECRET });
     try {
