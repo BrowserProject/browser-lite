@@ -230,7 +230,7 @@ let box = await boxPixel([255, 0, 0]);
 check('Ohne Compositor: Engine-Worker malt auf der GPU', near(box, [255, 0, 0])
   && gpuLog(/GPU: Skia paints through WebGL 2/) && !gpuLog(/Compositor: own thread/), JSON.stringify(box));
 await gpuPage.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
-await waitFor(async () => gpuLog(/GPU: WebGL-Kontext verloren/), 10000);
+await waitFor(async () => gpuLog(/GPU: WebGL context lost/), 10000);
 await boxColor([0, 0, 255]);
 box = await boxPixel([0, 0, 255]);
 check('Ohne Compositor: nach GPU-Verlust auf der CPU gemalt', near(box, [0, 0, 255]), JSON.stringify(box));
@@ -239,7 +239,7 @@ const viewsBack = await waitFor(async () => gpuLog(/GPU: views back on the GPU: 
 await boxColor([0, 160, 0]);
 box = await boxPixel([0, 160, 0]);
 check('Ohne Compositor: nach der Wiederherstellung wieder auf der GPU gemalt', viewsBack && near(box, [0, 160, 0])
-  && !gpuLog(/Bild nicht auf die GPU gebracht/), JSON.stringify(box));
+  && !gpuLog(/frame not brought to the GPU/), JSON.stringify(box));
 // Verlust und Wiederherstellung direkt nacheinander, vor dem naechsten Bild:
 // keine Flaeche des alten Kontexts darf uebrig bleiben
 const restores = () => gpuLogs.filter((line) => /GPU: views back on the GPU: 1/.test(line)).length;
@@ -251,7 +251,7 @@ const backAgain = await waitFor(async () => restores() === 2, 10000);
 await boxColor([255, 0, 255]);
 box = await boxPixel([255, 0, 255]);
 check('Ohne Compositor: Verlust und Wiederherstellung direkt nacheinander', backAgain && near(box, [255, 0, 255])
-  && !gpuLog(/Bild nicht auf die GPU gebracht/), JSON.stringify(box));
+  && !gpuLog(/frame not brought to the GPU/), JSON.stringify(box));
 await gpuPage.close();
 
 // CSS-Filter auf der GPU: Blur und Schatten rechnet der Compositor. Ein Layer ohne

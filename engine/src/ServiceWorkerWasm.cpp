@@ -1236,7 +1236,6 @@ static Ref<Page> createWorkerPage()
     configuration.socketProvider = createSocketProvider();
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = cacheStorageProvider().copyRef();
-    configuration.userContentProvider = userContentProvider();
     Ref page = Page::create(WTF::move(configuration));
     auto& settings = page->settings();
     settings.setScriptEnabled(true);

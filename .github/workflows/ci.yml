@@ -328,6 +328,10 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_URL="file:///test/?features=all" -e RENDER_WAIT_FOR="BRIDGES done" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges-all.ppm 200 200 | tee build/bridges-all.log
           grep -q "BRIDGES done=ok" build/bridges-all.log
+      - name: Error page (custom template, escaping, CSP, retry, close reasons)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" \
+            node tests/engine/error-page-test.mjs build/webcore/bin/engine.js
       - name: GC stress test in the engine (GC very often, only on an empty stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \

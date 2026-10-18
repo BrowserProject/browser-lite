@@ -10,7 +10,9 @@ import path from 'node:path';
 // onConsole(message): console of the page. onLoad({ engine, viewId }): page loaded.
 // onFrame({ engine, viewId, ptr, width, height }): finished frame (RGBA in engine
 // memory); without onFrame every frame is reported as presented right away.
-export async function runEngine({ enginePath, html, url, width, height, onConsole = () => {}, onLoad = () => {}, onFrame = null }) {
+// onEvent({ engine, viewId, type, payload }): every engine event. onPrint(text): stdout of the
+// engine. Without html the view loads url like an address typed by the user (bl_load_url).
+export async function runEngine({ enginePath, html, url, width, height, onConsole = () => {}, onLoad = () => {}, onFrame = null, onEvent = () => {}, onPrint = () => {} }) {
   const createEngine = createRequire(import.meta.url)(path.resolve(enginePath));
   // Emscripten (MODULARIZE) uses exactly this object as Module, so the exports
   // (_bl_...) are available on it in the callbacks already.
@@ -26,9 +28,13 @@ export async function runEngine({ enginePath, html, url, width, height, onConsol
     onEngineReady() {
       console.log('Engine ready');
       engine._bl_create_view(1, width, height, 1);
-      engine._bl_load_html(1, engine.stringToNewUTF8(html), engine.stringToNewUTF8(url));
+      if (html === undefined)
+        engine._bl_load_url(1, engine.stringToNewUTF8(url));
+      else
+        engine._bl_load_html(1, engine.stringToNewUTF8(html), engine.stringToNewUTF8(url));
     },
     onEngineEvent(viewId, type, payload) {
+      onEvent({ engine, viewId, type, payload });
       if (type === 'console') {
         const { message } = JSON.parse(payload);
         console.log('[page]', message);
@@ -53,7 +59,10 @@ export async function runEngine({ enginePath, html, url, width, height, onConsol
       console.log('[dialog]', type, origin, message);
       return 0;
     },
-    print: (text) => console.log(text),
+    print: (text) => {
+      console.log(text);
+      onPrint(text);
+    },
     printErr: (text) => console.error(text),
   };
   await createEngine(engine);

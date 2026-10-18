@@ -140,10 +140,9 @@ int main(int, char**)
         installSpeech();
     // Service workers of the pages (ServiceWorkerWasm.cpp)
     ServiceWorkers::initialize();
-    // <video>/<audio> through the host <video> (media/). Without it no media
-    // engine exists and canPlayType answers ''
-    if (featureEnabled(Feature::Media))
-        WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
+    // <video>/<audio> through the host <video> (media/). Always registered:
+    // srcObject streams play without the media feature, files and MSE do not
+    WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     // WebCodecs of the pages through the WebCodecs of the host (media/WebCodecsWasm.cpp)
     WebCodecs::initialize();
     BytecodeCache::initialize();

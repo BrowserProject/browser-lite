@@ -200,7 +200,6 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = createCacheStorageProvider();
     configuration.screenOrientationManager = screenOrientationManager();
-    configuration.userContentProvider = userContentProvider();
 
     // The empty configuration is meant for SVG images: everything sandboxed, no
     // script. For real pages: without sandbox and with our FrameLoaderClient.

@@ -18,15 +18,12 @@ class JSGlobalObject;
 namespace WebCore {
 class ScreenOrientationManager;
 class StorageProvider;
-class UserContentProvider;
 }
 
 namespace BrowserLite {
 
 WTF::UniqueRef<WebCore::StorageProvider> createStorageProvider();
 WebCore::ScreenOrientationManager& screenOrientationManager();
-// Without user scripts (the polyfills come from installPageExtensions)
-WTF::Ref<WebCore::UserContentProvider> userContentProvider();
 // WebRTC and picture-in-picture through the host (WebRTCPolyfill.cpp), runs
 // before the general polyfill
 extern const char* const webrtcPolyfillSource;

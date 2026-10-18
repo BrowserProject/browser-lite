@@ -32,7 +32,6 @@
 #include <WebCore/ScreenOrientationType.h>
 #include <WebCore/StorageConnection.h>
 #include <WebCore/StorageProvider.h>
-#include <WebCore/UserContentController.h>
 #include <WebCore/UserScript.h>
 #include <WebCore/WasmPlatform.h>
 #include <wtf/NeverDestroyed.h>
@@ -854,11 +853,16 @@ static JSC::JSObject* createHostCaller(JSC::JSGlobalObject& globalObject, int vi
         auto payload = callFrame->argument(1).toWTFString(globalObject);
         RETURN_IF_EXCEPTION(scope, { });
         auto* callback = callFrame->argument(2).getObject();
-        if (!callback || !callback->isCallable() || !isAllowedHostCall(name))
+        if (!callback || !callback->isCallable())
             return JSC::JSValue::encode(JSC::jsUndefined());
         static uint64_t nextIdentifier;
         auto identifier = ++nextIdentifier;
         pendingHostCalls().add(identifier, PendingHostCall { { vm, globalObject }, { vm, callback } });
+        // Rejected like the host rejects (asynchronously), so the page's promise settles
+        if (!isAllowedHostCall(name)) {
+            hostCallFinished(identifier, false, "{\"name\":\"NotSupportedError\",\"message\":\"Not supported\"}"_s);
+            return JSC::JSValue::encode(JSC::jsUndefined());
+        }
         // The origin of the page: the host hands out handles (files) only to it again
         String origin;
         if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
@@ -942,14 +946,6 @@ void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)
         if (exception)
             reportException(globalObject, exception);
     });
-}
-
-// Polyfills are installed by installPageExtensions, not as user scripts: those
-// would need the bridge as a global the page could see
-Ref<UserContentProvider> userContentProvider()
-{
-    static NeverDestroyed<Ref<UserContentController>> controller = UserContentController::create();
-    return controller.get();
 }
 
 } // namespace BrowserLite

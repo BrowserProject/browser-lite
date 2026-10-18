@@ -69,7 +69,16 @@ The full list is `abi.json`; the rules behind it:
   `main()` (`EngineConfig.cpp`). `BL_FEATURES` lists the host services a page may reach;
   a disabled feature looks like a browser without it, and no `__bl*` global is ever visible to
   page scripts. `BL_STORAGE_NAMESPACE` selects the OPFS directory of `/data` and the prefix of
-  the Cache API names. `BL_ERROR_PAGE` replaces the error page template.
+  the Cache API names. `BL_ERROR_PAGE` replaces the error page template (below).
+- Error page: shown under the failed address when a main frame navigation does not arrive.
+  A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
+  `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host), `{{heading}}`,
+  `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and `{{retryLabel}}`.
+  The engine inserts `<meta http-equiv="Content-Security-Policy" content="default-src 'none';
+  style-src 'unsafe-inline'; img-src data:">` at the start, after a leading doctype: no scripts
+  and no external resources, inline styles and `data:` images only. A click on any
+  `[data-bl-retry]` element retries (a listener the engine installs, the page needs no script).
+  The `commit` event reports `errorPage: '<kind>'`.
 - Shutdown: `Module.blShutdown()` closes all transport streams and terminates all engine
   threads, so the host can drop the module.
 

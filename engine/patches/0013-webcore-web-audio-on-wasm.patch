@@ -364,7 +364,7 @@ index 0000000000..b03ade7f53
 +    request->context = context;
 +    EM_ASM({
 +        var request = $0;
-+        var debug = Module.ENV && Module.ENV.BL_DEBUG;
++        var debug = Module.ENV && Module.ENV.BL_DEBUG && Module.ENV.BL_DEBUG !== '0';
 +        if (debug)
 +            console.log('[audio] dekodieren: ' + $2 + ' Bytes, Rate ' + $3);
 +        var bytes = HEAPU8.slice($1, $1 + $2);

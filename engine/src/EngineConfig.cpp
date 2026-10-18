@@ -138,13 +138,18 @@ void loadEngineConfig()
     config.testHooks = flag("BL_TEST_HOOKS", false);
     config.features = parseFeatures(getenv("BL_FEATURES"));
     config.opfs = flag("BL_OPFS", true);
+    config.httpCache = flag("BL_HTTP_CACHE", true);
+    config.bytecodeCache = flag("BL_BYTECODE_CACHE", true);
     config.storageNamespace = defaultStorageNamespace;
     if (const char* name = value("BL_STORAGE_NAMESPACE")) {
         if (isValidNamespace(name))
             config.storageNamespace = name;
         else {
+            // Nothing persistent, so the default namespace is never touched
             log("BL_STORAGE_NAMESPACE: invalid name, storage stays in memory");
             config.opfs = false;
+            config.httpCache = false;
+            config.bytecodeCache = false;
         }
     }
     if (const char* page = value("BL_ERROR_PAGE"))
@@ -152,8 +157,6 @@ void loadEngineConfig()
     config.gpu = flag("BL_GPU", true);
     config.compositing = flag("BL_COMPOSITING", true);
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
-    config.httpCache = flag("BL_HTTP_CACHE", true);
-    config.bytecodeCache = flag("BL_BYTECODE_CACHE", true);
     if (const char* buildID = getenv("BL_BUILD_ID"))
         config.buildID = buildID;
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))

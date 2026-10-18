@@ -2,6 +2,7 @@
 #include "MediaPlayerPrivateWasm.h"
 
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Host.h"
 #include "MediaSourceWasm.h"
 #include "VideoFrameWasm.h"
@@ -196,6 +197,8 @@ private:
 
     void getSupportedTypes(HashSet<String>& types) const final
     {
+        if (!featureEnabled(Feature::Media))
+            return;
         for (auto type : { "video/mp4"_s, "video/webm"_s, "video/ogg"_s, "audio/mp4"_s, "audio/mpeg"_s, "audio/mp3"_s,
             "audio/aac"_s, "audio/ogg"_s, "audio/webm"_s, "audio/wav"_s, "audio/flac"_s, "video/quicktime"_s })
             types.add(type);
@@ -203,6 +206,13 @@ private:
 
     MediaPlayer::SupportsType supportsTypeAndCodecs(const MediaEngineSupportParameters& parameters) const final
     {
+#if ENABLE(MEDIA_STREAM)
+        if (parameters.platformType == PlatformMediaDecodingType::MediaStream)
+            return MediaPlayer::SupportsType::IsSupported;
+#endif
+        // Without the media feature only MediaStream plays (it needs no host <video>)
+        if (!featureEnabled(Feature::Media))
+            return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.platformType == PlatformMediaDecodingType::MediaSource) {
 #if ENABLE(MEDIA_SOURCE)
             return MediaPlayerPrivateWasm::supportsMediaSourceType(parameters.type) ? MediaPlayer::SupportsType::IsSupported : MediaPlayer::SupportsType::IsNotSupported;
@@ -210,10 +220,6 @@ private:
             return MediaPlayer::SupportsType::IsNotSupported;
 #endif
         }
-#if ENABLE(MEDIA_STREAM)
-        if (parameters.platformType == PlatformMediaDecodingType::MediaStream)
-            return MediaPlayer::SupportsType::IsSupported;
-#endif
         if (parameters.platformType != PlatformMediaDecodingType::FileOrHLS)
             return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.type.isEmpty())
@@ -230,7 +236,8 @@ private:
 void MediaPlayerPrivateWasm::registerMediaEngine(MediaEngineRegistrar registrar)
 {
     registrar(makeUnique<MediaPlayerFactoryWasm>());
-    prefetchHostAnswers();
+    if (featureEnabled(Feature::Media))
+        prefetchHostAnswers();
 }
 
 MediaPlayerPrivateWasm::MediaPlayerPrivateWasm(MediaPlayer& player)
@@ -276,6 +283,11 @@ void MediaPlayerPrivateWasm::setNetworkState(MediaPlayer::NetworkState state)
 void MediaPlayerPrivateWasm::load(const String& urlString)
 {
     m_url = URL { urlString };
+    // A load without a type lands here too (the engine stays registered for MediaStream)
+    if (!featureEnabled(Feature::Media)) {
+        setNetworkState(MediaPlayer::NetworkState::FormatError);
+        return;
+    }
     // MediaFetch delivers blob: and data: from these bytes, even after revokeObjectURL
     m_blob = nullptr;
     if (m_url.protocolIsBlob())
@@ -322,6 +334,10 @@ void MediaPlayerPrivateWasm::prepareToPlay()
 void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourcePrivateClient& client)
 {
     m_url = url;
+    if (!featureEnabled(Feature::Media)) {
+        setNetworkState(MediaPlayer::NetworkState::FormatError);
+        return;
+    }
     m_isMediaSource = true;
     RefPtr player = m_player.get();
     bool muted = player && player->muted();

@@ -128,8 +128,6 @@ async function startEngine() {
       // ?httpcache=0 turns the persistent HTTP cache off (for tests)
       if (params.get('httpcache') === '0')
         (module || engine).ENV.BL_HTTP_CACHE = '0';
-      // The e2e tests use __blEval and friends (engine/abi.json, BL_TEST_HOOKS)
-      (module || engine).ENV.BL_TEST_HOOKS = '1';
       // Zum Testen: ?env=JSC_verifyGC=1,BL_DEBUG=1 setzt Umgebungsvariablen.
       // Nur Schalter der Engine: BL_EXTRA_CA (installExtraCA) oder Variablen
       // von curl/OpenSSL (Proxy, Zertifikate, Schluessel-Log) darf ein Link nie setzen.

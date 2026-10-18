@@ -6,7 +6,7 @@
 | `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
 | `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) | node | ja |
-| `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
+| `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, error page, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
 | `e2e/` | Ganze Kette im echten Chromium (Playwright): Oberflaeche, Engine, Relay, lokale Testserver | Engine-Build, `npm ci` | ja |
 
 ## Ohne Build
@@ -33,6 +33,7 @@ RENDER_WAIT_FOR="CRYPTO done" node tests/engine/render-test.mjs build/webcore/bi
 BL_SCRIPT_TIMEOUT=2 RENDER_WAIT_FOR="HANG done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200
 BL_FEATURES= RENDER_URL="file:///test/?features=none" RENDER_WAIT_FOR="BRIDGES done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges.ppm 200 200
 JSC_slowPathAllocsBetweenGCs=10 node tests/engine/gc-test.mjs build/webcore/bin/engine.js
+node tests/engine/error-page-test.mjs build/webcore/bin/engine.js
 ```
 
 Test pages with `RENDER_WAIT_FOR` report `<NAME> done=ok` at the end: `crypto.html`,
@@ -40,6 +41,8 @@ Test pages with `RENDER_WAIT_FOR` report `<NAME> done=ok` at the end: `crypto.ht
 `bridges.html` (`?features=none` with `BL_FEATURES=` or `?features=all`).
 `RENDER_TIMEOUT` (seconds, default 120) changes the time limit, `RENDER_URL` the page URL,
 `JSC_*` and `BL_*` (e.g. `BL_DEBUG=1`) go to the engine.
+`error-page-test.mjs` loads without a transport and checks a custom `BL_ERROR_PAGE`
+(placeholders, escaping, CSP, retry) and the close reason `name-not-resolved`.
 `features.html` is the list for `e2e/parity-test.mjs`. `jsbench.html`, `framebench.html`
 and `paintbench.html` are benchmarks to measure by hand, no tests.
 
@@ -70,8 +73,9 @@ der Seite.
 - `soak-test.mjs`: langer Lauf (viele Navigationen, Tabs auf und zu), Dokumente und Speicher
   muessen begrenzt bleiben. `SOAK_ROUNDS` (Standard 40 Runden durch 5 Seiten), `SOAK_TABS`
   (Standard 30).
-- `ui-test.mjs` laesst die Engine mit `?env=BL_TEST_HOOKS=1` wirklich abstuerzen
-  (`bl_crash_for_testing`: abort und WASM-Trap), ohne den Schalter tut der Aufruf nichts.
+- `stack.app()` always adds `?env=BL_TEST_HOOKS=1`: without it `__blEval` (`bl_eval_script`),
+  `bl_memory_report` and `bl_crash_for_testing` do nothing. `ui-test.mjs` uses it to really
+  crash the engine (abort and WASM trap).
 - `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,
   Screenshots `build/sites/<host>_<pfad>.png`), Schalter `SITE_*` im Kopf des Skripts.
 - `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs` (auch memory64),
