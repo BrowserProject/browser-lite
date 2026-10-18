@@ -77,6 +77,10 @@ export class Debug implements DebugApi {
     return this.host.debugState('rtc');
   }
 
+  crash(kind: 'abort' | 'trap'): void {
+    if (this.host.ready) this.host.module._bl_crash_for_testing(kind === 'trap' ? 1 : 0);
+  }
+
   memoryPressure(): void {
     this.host.memoryPressure();
   }

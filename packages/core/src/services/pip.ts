@@ -1,4 +1,5 @@
 import { domError } from '../util.js';
+import type { ViewImpl } from '../view.js';
 import type { CaptureApi } from './capture.js';
 import { trackGenerator } from './host-apis.js';
 import type { MediaHost } from './media.js';
@@ -24,13 +25,32 @@ interface Queue {
  * Picture-in-picture of the pages (polyfill in engine WebRTCPolyfill.cpp): the hidden <video>
  * of a player goes into the host's picture-in-picture window. srcObject streams have no player:
  * they get their own hidden <video> with the track (negative ids). The page fetches window
- * events with "pip-wait".
+ * events with "pip-wait". The view whose video is in the window gets 'picture-in-picture' events
+ * (the host has at most one window).
  */
 export function installPictureInPicture(host: MediaHost): void {
   const { ctx, players } = host;
   const queues = new Map<number, Queue>();
   const streamPips = new Map<number, { video: HTMLVideoElement; track: MediaStreamTrack }>();
   let nextStreamPip = -1;
+  let pipVideo: HTMLVideoElement | null = null;
+  let pipView: ViewImpl | undefined;
+
+  const entered = (video: HTMLVideoElement, view: ViewImpl | undefined) => {
+    const previous = pipView;
+    pipVideo = video;
+    pipView = view;
+    if (previous === view) return;
+    previous?.emit('picture-in-picture', { active: false });
+    view?.emit('picture-in-picture', { active: true });
+  };
+  const left = (video: HTMLVideoElement) => {
+    if (video !== pipVideo) return;
+    const view = pipView;
+    pipVideo = null;
+    pipView = undefined;
+    view?.emit('picture-in-picture', { active: false });
+  };
 
   const queueOf = (id: number) => {
     let queue = queues.get(id);
@@ -59,7 +79,7 @@ export function installPictureInPicture(host: MediaHost): void {
   const notAvailable = () =>
     domError('NotSupportedError', 'Picture-in-Picture is not available for this video.');
 
-  const enterStream = async (info: TrackInfo | undefined) => {
+  const enterStream = async (info: TrackInfo | undefined, view: ViewImpl | undefined) => {
     if (info?.kind !== 'video') throw notAvailable();
     let track: MediaStreamTrack;
     const Generator = trackGenerator();
@@ -96,6 +116,7 @@ export function installPictureInPicture(host: MediaHost): void {
         () => {
           push(id, { type: 'leave' });
           closeStreamPip(id);
+          left(video);
         },
         { once: true },
       );
@@ -105,6 +126,7 @@ export function installPictureInPicture(host: MediaHost): void {
       });
       queueOf(id).events.length = 0;
       const pipWindow = await video.requestPictureInPicture();
+      entered(video, view);
       pipWindow.addEventListener('resize', () =>
         push(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }),
       );
@@ -115,7 +137,7 @@ export function installPictureInPicture(host: MediaHost): void {
     }
   };
 
-  const enterPlayer = async (payload: { player?: number } | null) => {
+  const enterPlayer = async (payload: { player?: number } | null, view: ViewImpl | undefined) => {
     const id = Number(payload?.player);
     const player = players.get(id);
     if (!player) throw domError('InvalidStateError', 'The video is gone.');
@@ -124,18 +146,24 @@ export function installPictureInPicture(host: MediaHost): void {
     const video = player.video;
     if (!player.pipHooked) {
       player.pipHooked = true;
-      video.addEventListener('leavepictureinpicture', () => push(id, { type: 'leave' }));
+      video.addEventListener('leavepictureinpicture', () => {
+        push(id, { type: 'leave' });
+        left(video);
+      });
     }
     queueOf(id).events.length = 0;
     const pipWindow = await video.requestPictureInPicture();
+    entered(video, view);
     pipWindow.addEventListener('resize', () =>
       push(id, { type: 'resize', width: pipWindow.width, height: pipWindow.height }),
     );
     return { width: pipWindow.width, height: pipWindow.height };
   };
 
-  ctx.hostCall<{ player?: number; track?: TrackInfo } | null>('pip-enter', (payload) =>
-    payload?.track ? enterStream(payload.track) : enterPlayer(payload),
+  ctx.hostCall<{ player?: number; track?: TrackInfo } | null>(
+    'pip-enter',
+    (payload, _origin, view) =>
+      payload?.track ? enterStream(payload.track, view) : enterPlayer(payload, view),
   );
   ctx.hostCall('pip-exit', async () => {
     if (document.pictureInPictureElement) await document.exitPictureInPicture();

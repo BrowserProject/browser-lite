@@ -6,7 +6,6 @@ import { installImageDecoder } from './devices/image-decoder.js';
 import { installNotifications } from './devices/notifications.js';
 import {
   installBattery,
-  installClipboard,
   installEyeDropper,
   installKeyboard,
   installNetworkInfo,
@@ -38,7 +37,7 @@ export type DeviceSwitches = Partial<
 
 type Part = {
   feature: string | null;
-  install(ctx: ServiceContext): void;
+  install?(ctx: ServiceContext): void;
   start?(ctx: ServiceContext): void;
 };
 
@@ -49,7 +48,8 @@ const PARTS: Record<keyof DeviceSwitches, Part> = {
   speech: { feature: 'speech', install: installSpeech, start: startSpeech },
   notifications: { feature: 'notifications', install: installNotifications },
   fileSystemAccess: { feature: 'fs-access', install: installFileSystemAccess },
-  clipboard: { feature: 'clipboard', install: installClipboard },
+  // Only the navigator.clipboard API of the pages; copy and cut always reach the host
+  clipboard: { feature: 'clipboard' },
   eyedropper: { feature: 'eyedropper', install: installEyeDropper },
   battery: { feature: 'battery', install: installBattery },
   keyboard: { feature: 'keyboard', install: installKeyboard },
@@ -75,7 +75,7 @@ export class DevicesService extends Service {
   }
 
   setup(ctx: ServiceContext): void {
-    for (const part of this.parts) part.install(ctx);
+    for (const part of this.parts) part.install?.(ctx);
   }
 
   override start(ctx: ServiceContext): void {

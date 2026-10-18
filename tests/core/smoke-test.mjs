@@ -2,7 +2,8 @@
 // browser through the public API with a real engine, a relay and local test pages, then checks
 // rendering, navigation and title events, keyboard input, a download, a <select> popup through
 // a request handler, Web Audio through the audio worklet, a media file through the service
-// worker, option errors, destroy() and a second createBrowser().
+// worker, option errors, crash detection, destroy() and a second createBrowser() without services
+// (copy still reaches the host clipboard).
 //
 //   node tests/core/smoke-test.mjs [engine-dir]      (default build/webcore/bin)
 // Environment: E2E_TIMEOUT (ms per wait, default 60000), E2E_VERBOSE=1, CHROMIUM_PATH.
@@ -403,6 +404,7 @@ try {
     const codeOf = (promise) => promise.then(() => 'resolved', (error) => error.code);
     const transport = new EventTarget();
     transport.openTCP = () => {};
+    transport.connected = true;
     return {
       running: await codeOf(createBrowser({ engineUrl: '/engine/', transport })),
       namespace: await codeOf(createBrowser({ engineUrl: '/engine/', transport, storage: { namespace: 'Bad!' } })),
@@ -417,8 +419,17 @@ try {
   check('cross-origin engine: invalid-options', errors.crossOrigin === 'invalid-options', errors.crossOrigin);
   check('clearStorage bad namespace: invalid-options', errors.clear === 'invalid-options', errors.clear);
 
+  // A trap in WebAssembly of the embedding page is no engine crash
+  await page.evaluate(() => {
+    const bytes = [0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 7, 5, 1, 1, 0x66, 0, 0, 0x0a, 5, 1, 3, 0, 0, 0x0b];
+    const { f } = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(bytes))).exports;
+    setTimeout(f);
+  });
+  await page.waitForTimeout(500);
+  check('foreign WebAssembly trap is no crash', (await page.evaluate(() => window.blTest.browser.state)) === 'ready');
+
   // Crash (engine test hook, needs debug): crash event, state crashed
-  await page.evaluate(() => window.blTest.browser.debug.module._bl_crash_for_testing(0));
+  await page.evaluate(() => window.blTest.browser.debug.crash('abort'));
   check('crash event', await waitFor(() => window.blTest.events.some((e) => e.startsWith('crash:'))));
   const crashed = await page.evaluate(() => {
     let code = '';
@@ -453,7 +464,8 @@ try {
   check('destroy: state destroyed', destroyed.state === 'destroyed', JSON.stringify(destroyed));
   check('destroy: view closed and canvas removed', destroyed.closed && destroyed.canvases === 0 && destroyed.events);
   check('createView after destroy: destroyed', destroyed.code === 'destroyed');
-  const second = await page.evaluate(() => window.blTest.start().then(() => 'ready', () => window.blTest.error?.code));
+  // The second browser runs without services: copy in a page still reaches the host clipboard
+  const second = await page.evaluate(() => window.blTest.start({ services: [] }).then(() => 'ready', () => window.blTest.error?.code));
   if (oldEngine) {
     check('second createBrowser with an engine without blShutdown: already-running', second === 'already-running', second);
   } else {
@@ -466,6 +478,25 @@ try {
           const [r, g, b] = window.blTest.pagePixel(50, 50);
           return r > 200 && g < 60 && b < 60;
         }),
+      );
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://localhost:${hostPort}` });
+      await page.evaluate((url) => window.blTest.open(url), MORE_URL);
+      await waitFor(() => window.blTest.title === 'More');
+      await page.evaluate(() => {
+        window.blTest.view.command('SelectAll');
+        window.blTest.view.command('Copy');
+      });
+      check(
+        'copy reaches the host clipboard without devices()',
+        await waitFor(async () => (await navigator.clipboard.readText().catch(() => '')).includes('findme'), undefined, 10000),
+        await page.evaluate(() => navigator.clipboard.readText().catch((error) => error.message)),
+      );
+      // A WebAssembly trap in the engine thread (worker error event) is a crash
+      await page.evaluate(() => window.blTest.browser.debug.crash('trap'));
+      check(
+        'trap in the engine: crash event',
+        await waitFor(() => window.blTest.events.filter((e) => e.startsWith('crash:')).length === 2),
+        await page.evaluate(() => window.blTest.events.filter((e) => e.startsWith('crash:')).join(' | ')),
       );
     }
   }

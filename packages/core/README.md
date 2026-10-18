@@ -21,13 +21,15 @@ import { WispTransport } from '@browser-lite/transport-wisp';
 const browser = await createBrowser({
   engineUrl: '/engine/',
   transport: new WispTransport({ url: 'wss://example.com/wisp/' }),
-  serviceWorker: { url: '/sw.js' }, // copy of dist/sw/sw.js, needed for <video>/<audio>
+  serviceWorker: { url: '/sw.js' }, // needed for <video>/<audio>, see below
 });
 const view = browser.createView({ container: document.querySelector('#page'), url: 'https://example.com/' });
 view.on('title', ({ title }) => console.log(title));
 ```
 
 The container needs a size (for example `height: 100vh`); the view fills it and follows its size.
+For the service worker copy `dist/sw/sw.js` and `dist/sw/media-sw.js` into the same folder
+(`sw.js` loads `media-sw.js` next to itself).
 
 ## Options of createBrowser
 
@@ -74,12 +76,17 @@ or the engine ends. Without a `download` listener finished downloads are saved a
 
 - `audio()`: Web Audio through an AudioWorklet (`dist/audio-worklet.js`).
 - `media({ pictureInPicture })`: `<video>`/`<audio>` through hidden media elements of the host;
-  media files need the service worker (`dist/sw/media-sw.js`, or the standalone `dist/sw/sw.js`).
+  media files need the service worker: the standalone `dist/sw/sw.js` together with
+  `dist/sw/media-sw.js` in the same folder, or `importScripts('media-sw.js')` in a worker of
+  the site.
   Without it a `warning` event with code `media-sw-missing` follows.
+  A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
 - `capture()`: camera, microphone and screen.
 - `webrtc()`: opt-in; the connections bypass the transport and reveal the IP of the device.
 - `devices({ ... })`: geolocation, sensors, gamepad, speech, notifications, fileSystemAccess,
   clipboard, eyedropper, battery, keyboard, networkInfo, imageDecoder, touch (all on by default).
+  The `clipboard` switch covers the `navigator.clipboard` API of the pages; copy and cut in a page
+  always reach the clipboard of the host.
 
 A feature without its service is missing for the pages, like in a browser without it.
 
@@ -99,5 +106,3 @@ whose engine has no `blShutdown`, then reload the page), `invalid-options`, `sto
 - For media files a service worker whose scope covers the page and which loads `media-sw.js`.
 - One running browser per storage namespace across the tabs of the origin (Web Lock); a second
   tab runs in memory and gets the warning `storage-locked`.
-
-Details follow in `docs/embedding.md`.

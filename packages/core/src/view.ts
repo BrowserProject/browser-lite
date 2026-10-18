@@ -429,8 +429,8 @@ export class ViewImpl implements View {
     this.ime.style.height = `${Math.max(caret.height, 10)}px`;
   }
 
-  /** @internal Engine event of this view; false when not a view event. */
-  engineEvent(type: string, data: Record<string, unknown>): boolean {
+  /** @internal Engine event of this view (other types are ignored). */
+  engineEvent(type: string, data: Record<string, unknown>): void {
     switch (type) {
       case 'navigation': {
         const url = String(data.url ?? '');
@@ -455,67 +455,67 @@ export class ViewImpl implements View {
           loading: this.loading,
           history: this.history,
         });
-        return true;
+        return;
       }
       case 'title':
         this.title = String(data.title ?? '');
         this.emit('title', { title: this.title, url: String(data.url ?? this.url) });
-        return true;
+        return;
       case 'progress':
         this.emit('progress', { value: Number(data.progress) || 0 });
-        return true;
+        return;
       case 'commit':
         // A new document: no user activation yet
         this.userActivated = false;
         this.emit('commit', { errorPage: (data.errorPage as string | undefined) || null });
-        return true;
+        return;
       case 'first-layout':
       case 'first-paint':
         this.emit(type, {});
-        return true;
+        return;
       case 'load':
         this.loading = false;
         this.emit('load', {});
-        return true;
+        return;
       case 'error':
         this.loading = false;
         this.emit('error', { description: String(data.description ?? '') });
-        return true;
+        return;
       case 'hover':
         this.canvas.title = String(data.tooltip ?? '');
         this.emit('hover', { url: (data.link as string) || null });
-        return true;
+        return;
       case 'find':
         this.emit('find', { matches: Number(data.matches) || 0, index: Number(data.index) || 0 });
-        return true;
+        return;
       case 'fullscreen':
         this.host.setFullscreen(this, !!data.on);
         this.emit('fullscreen', { active: !!data.on });
-        return true;
+        return;
       case 'pointerlock':
         this.host.setPointerLock(this, !!data.on);
-        return true;
+        return;
       case 'media-state':
         this.audible = !!data.audio;
         this.emit('media-state', { audible: this.audible });
-        return true;
+        return;
       case 'capture-state':
         this.emit('capture-state', { active: !!data.active });
-        return true;
+        return;
       case 'beforeunload':
         this.hasBeforeUnload = !!data.listener;
         this.emit('beforeunload-state', { hasListener: this.hasBeforeUnload });
-        return true;
+        return;
       case 'open-tab':
       case 'external-url':
         this.emit(type, { url: String(data.url ?? '') });
-        return true;
+        return;
       case 'focus':
         this.emit('focus-request', {});
-        return true;
+        return;
       case 'takefocus':
         this.emit('take-focus', { forward: data.forward !== false });
-        return true;
+        return;
       case 'contextmenu':
         this.emit('context-menu', {
           x: Number(data.x) || 0,
@@ -527,29 +527,28 @@ export class ViewImpl implements View {
           canGoBack: !!data.canGoBack,
           canGoForward: !!data.canGoForward,
         } satisfies ContextMenuInfo);
-        return true;
+        return;
       case 'cursor':
         this.canvas.style.cursor = String(data.cursor ?? '');
-        return true;
+        return;
       case 'caret':
         this.caret = data as unknown as Caret;
         this.placeIme();
-        return true;
+        return;
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);
-        return true;
+        return;
       case 'try-close': {
         const resolve = this.resolveClosing;
         this.closing = null;
         this.resolveClosing = null;
         if (data.close) this.dispose();
         resolve?.(!!data.close);
-        return true;
+        return;
       }
       case 'close':
         this.dispose();
-        return true;
+        return;
     }
-    return false;
   }
 }

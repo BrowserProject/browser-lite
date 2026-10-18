@@ -252,7 +252,8 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
   if (
     !isObject(transport) ||
     typeof transport.openTCP !== 'function' ||
-    typeof transport.addEventListener !== 'function'
+    typeof transport.addEventListener !== 'function' ||
+    typeof transport.connected !== 'boolean'
   )
     invalid('transport must implement Transport (openTCP, connected, EventTarget)');
   const storage = (options.storage ?? {}) as Record<string, unknown>;

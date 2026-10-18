@@ -412,10 +412,16 @@ export class MediaService extends Service {
     this.features = pictureInPicture ? ['media', 'pip'] : ['media'];
   }
 
-  async setup(ctx: ServiceContext): Promise<void> {
+  setup(ctx: ServiceContext): Promise<void> {
     const instance = crypto.randomUUID();
-    const registration = await serviceWorkerRegistration(ctx);
-    const scope = registration?.scope ?? new URL('./', location.href).href;
+    // The registration runs while the engine loads; players only come once the browser is
+    // ready, which waits for it
+    let scope = new URL('./', location.href).href;
+    const registered = serviceWorkerRegistration(ctx).then((registration) => {
+      if (registration) scope = registration.scope;
+      if ('serviceWorker' in navigator)
+        navigator.serviceWorker.controller?.postMessage({ bl: 'media-hello', instance });
+    });
     const players = new Map<number, Player>();
     // Must be in the document, Chrome throttles detached videos
     const container = document.createElement('div');
@@ -456,7 +462,6 @@ export class MediaService extends Service {
         },
         { signal: ctx.signal },
       );
-      navigator.serviceWorker.controller?.postMessage({ bl: 'media-hello', instance });
     }
     ctx.module.onEngineMediaFetch = (fetchId, type, data, bytes) => {
       const entry = fetchSources.get(fetchId);
@@ -514,5 +519,6 @@ export class MediaService extends Service {
       players.clear();
       container.remove();
     });
+    return registered;
   }
 }

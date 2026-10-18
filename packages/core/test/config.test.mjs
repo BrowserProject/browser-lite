@@ -52,6 +52,7 @@ test('engine folder must be same-origin and gets a trailing slash', () => {
 test('invalid options', () => {
   const bad = [
     { ...base, transport: {} },
+    { ...base, transport: Object.assign(new EventTarget(), { openTCP() {} }) },
     { ...base, storage: { namespace: 'Bad-Name' } },
     { ...base, storage: { namespace: 'x'.repeat(33) } },
     { ...base, storage: { persistent: 'yes' } },

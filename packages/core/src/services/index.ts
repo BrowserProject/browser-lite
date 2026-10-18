@@ -33,7 +33,7 @@ export function webrtc(): HostService {
 
 /**
  * Devices and platform APIs (geolocation, sensors, gamepads, speech, notifications, file system
- * access, clipboard writes, eyedropper, battery, keyboard, network information, image decoder,
+ * access, navigator.clipboard, eyedropper, battery, keyboard, network information, image decoder,
  * touch input). Every switch defaults to true.
  */
 export function devices(switches?: DeviceSwitches): HostService {

@@ -396,7 +396,7 @@ export class WebRTCService extends Service {
         return {};
       },
       async setRemoteDescription(pc, payload) {
-        if (payload.description) await pc.setRemoteDescription(payload.description);
+        await pc.setRemoteDescription(payload.description as RTCSessionDescriptionInit);
         return {};
       },
       async addIceCandidate(pc, payload) {
@@ -435,7 +435,8 @@ export class WebRTCService extends Service {
               : transceiver.direction === 'inactive'
                 ? 'sendonly'
                 : transceiver.direction;
-        } else if (track) {
+        } else {
+          if (!track) throw domError('TypeError', 'Missing track');
           const transceiver = pc.addTransceiver(track, { direction: 'sendrecv', streams });
           remember(client, payload.pc as string, payload.transceiver as string, transceiver);
         }

@@ -93,19 +93,3 @@ export function installNetworkInfo(ctx: ServiceContext): void {
     };
   });
 }
-
-/** Copies of the pages go to the clipboard of the host (with HTML like Chrome). */
-export function installClipboard(ctx: ServiceContext): void {
-  ctx.on<{ text?: string; html?: string }>('clipboard', (data) => {
-    const clipboard = navigator.clipboard;
-    if (!clipboard) return;
-    const writeText = () => clipboard.writeText(data.text || '').catch(() => {});
-    if (data.html && typeof ClipboardItem === 'function') {
-      const item = new ClipboardItem({
-        'text/plain': new Blob([data.text || ''], { type: 'text/plain' }),
-        'text/html': new Blob([data.html], { type: 'text/html' }),
-      });
-      clipboard.write([item]).catch(writeText);
-    } else writeText();
-  });
-}

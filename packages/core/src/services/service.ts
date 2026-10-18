@@ -19,7 +19,6 @@ export interface ServiceContext {
   readonly signal: AbortSignal;
   /** UTF-8 copy for an export (the engine frees it). */
   text(value: string | null | undefined): number;
-  view(id: number): ViewImpl | undefined;
   /** Worker of the engine thread (capture streams, sinks). */
   engineWorker(): Worker | null;
   /** Handles an engine event (notifyHost type). */
@@ -43,7 +42,10 @@ export abstract class Service implements HostService {
 
   constructor(readonly name: string) {}
 
-  /** Before the engine starts: module hooks, event handlers, async preparation. */
+  /**
+   * Before the engine loads: module hooks and event handlers synchronously. A returned promise
+   * (async preparation) runs while the engine loads; the browser is ready once it settles.
+   */
   abstract setup(context: ServiceContext): void | Promise<void>;
 
   /** After the engine is ready. */

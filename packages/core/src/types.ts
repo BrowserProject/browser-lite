@@ -318,6 +318,8 @@ export interface ViewEvents {
   fullscreen: { active: boolean };
   'media-state': { audible: boolean };
   'capture-state': { active: boolean };
+  /** A video of this view went into the host's picture-in-picture window or left it. */
+  'picture-in-picture': { active: boolean };
   'beforeunload-state': { hasListener: boolean };
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
@@ -476,6 +478,8 @@ export interface DebugApi {
   audioState(): unknown;
   mediaState(): unknown;
   rtcState(): unknown;
+  /** Crashes the engine thread for real: abort() or a WebAssembly trap. */
+  crash(kind: 'abort' | 'trap'): void;
   /** Behaves like a memory-pressure message of the engine. */
   memoryPressure(): void;
 }

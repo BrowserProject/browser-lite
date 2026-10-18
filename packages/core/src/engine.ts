@@ -61,6 +61,7 @@ export interface EngineExports {
   _bl_input_mark_address: Export;
   _bl_eval_script: Export;
   _bl_memory_report: Export;
+  _bl_crash_for_testing: Export;
   _bl_host_call_result: Export;
   _bl_media_event: Export;
   _bl_media_frame: Export;

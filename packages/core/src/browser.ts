@@ -190,25 +190,35 @@ class BrowserImpl implements Browser, ViewHost {
     }
     this.storage.persistent = persistent;
 
-    for (const service of config.services) await service.setup(this.context);
+    // The synchronous part of setup (module hooks, handlers) runs now, async preparation
+    // (service worker) while the engine loads
+    const prepared = Promise.all(config.services.map((service) => service.setup(this.context)));
+    prepared.catch(() => {});
     const features = [...new Set(config.services.flatMap((service) => service.features))];
     const env = engineEnv(config, features, persistent);
     this.module.preRun = [(module) => Object.assign(module.ENV, env)];
 
-    // Engine errors (traps, aborts in threads) reach the page as error events
-    const isEngineError = (error: unknown) =>
-      error instanceof WebAssembly.RuntimeError || error instanceof ErrorEvent;
+    // Engine errors (traps, aborts in threads) reach the page as error events. Only errors
+    // of the engine scripts count: the embedding page may run WebAssembly of its own.
+    const fromEngine = (error: unknown, filename = '') => {
+      if (!(error instanceof WebAssembly.RuntimeError || error instanceof ErrorEvent)) return false;
+      const base = config.engineBase;
+      if (filename.startsWith(base)) return true;
+      if (error instanceof ErrorEvent) return error.filename.startsWith(base);
+      return (error.stack ?? '').includes(base);
+    };
     addEventListener(
       'error',
       (event) => {
-        if (isEngineError(event.error)) this.crashed(event.error.message || event.message);
+        if (fromEngine(event.error, event.filename))
+          this.crashed(event.error.message || event.message);
       },
       { signal },
     );
     addEventListener(
       'unhandledrejection',
       (event) => {
-        if (isEngineError(event.reason)) this.crashed(event.reason.message);
+        if (fromEngine(event.reason)) this.crashed(event.reason.message);
       },
       { signal },
     );
@@ -234,6 +244,7 @@ class BrowserImpl implements Browser, ViewHost {
       ),
       failed,
     ]);
+    await Promise.race([prepared, failed]);
     this.failStart = null;
     if (this.phase !== 'starting')
       throw new BrowserLiteError('destroyed', 'Destroyed while starting');
@@ -362,6 +373,20 @@ class BrowserImpl implements Browser, ViewHost {
         if (view && !view.closed) fn(view, data);
       };
     this.handle('memory-pressure', () => this.events.emit('memory-pressure', {}));
+    // Copy and cut in a page go to the clipboard of the host (with HTML like Chrome)
+    this.handle('clipboard', (data) => {
+      const clipboard = navigator.clipboard;
+      if (!clipboard) return;
+      const text = String(data.text ?? '');
+      const writeText = () => clipboard.writeText(text).catch(() => {});
+      if (data.html && typeof ClipboardItem === 'function') {
+        const item = new ClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([String(data.html)], { type: 'text/html' }),
+        });
+        clipboard.write([item]).catch(writeText);
+      } else writeText();
+    });
     this.handle('console', (data, view) => {
       const level = CONSOLE_LEVELS[Number(data.level)] ?? 'log';
       const message = String(data.message ?? '');
@@ -643,7 +668,6 @@ class BrowserImpl implements Browser, ViewHost {
       config: this.config,
       signal: this.lifetime.signal,
       text: (value) => this.text(value),
-      view: (id) => this.views.get(id),
       engineWorker: () => this.module.blEngineWorker?.() ?? null,
       on: <T>(type: string, handler: (data: T, view: ViewImpl | undefined) => void) =>
         this.handle(type, handler as unknown as EventHandler),
@@ -743,14 +767,13 @@ class BrowserImpl implements Browser, ViewHost {
     if (this.phase === 'destroyed') return;
     const wasReady = this.ready;
     if (wasReady) this.storage.flush(500);
-    this.phase = 'destroyed';
-    this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.watchdog.stop();
     this.requests.abortAll();
+    // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
+    this.phase = 'destroyed';
+    this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.lifetime.abort();
-    if (document.fullscreenElement && this.fullscreenView)
-      await document.exitFullscreen().catch(() => {});
     const module = this.module;
     if (typeof module.blShutdown === 'function') {
       try {
