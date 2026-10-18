@@ -91,8 +91,8 @@ test('a throwing WebSocket constructor goes offline and reconnects', async () =>
 });
 
 test('a relay refusing the token after the upgrade: error event, slower retries, new token', async () => {
-  // Completes the WebSocket upgrade and closes at once with 4401, like a relay that checks the
-  // token after the upgrade
+  // Completes the WebSocket upgrade (selecting the subprotocol wisp, as the client offers one) and
+  // closes at once with 4401, like a relay that checks the token after the upgrade
   const server = http.createServer();
   const sockets = new Set();
   server.on('upgrade', (req, socket) => {
@@ -101,7 +101,7 @@ test('a relay refusing the token after the upgrade: error event, slower retries,
       .update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
       .digest('base64');
     socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: wisp\r\n\r\n`,
     );
     socket.end(Buffer.from([0x88, 0x02, 0x11, 0x31]));
     socket.on('error', () => {});

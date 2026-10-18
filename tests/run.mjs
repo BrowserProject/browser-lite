@@ -17,7 +17,16 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const SUITES = ['contract', 'engine-js', 'engine', 'packages', 'core', 'demo', 'examples', 'compat'];
+const SUITES = [
+  'contract',
+  'engine-js',
+  'engine',
+  'packages',
+  'core',
+  'demo',
+  'examples',
+  'compat',
+];
 const WITH_ENGINE = new Set(['engine', 'core', 'demo', 'examples', 'compat']);
 
 const args = process.argv.slice(2);
