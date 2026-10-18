@@ -261,7 +261,7 @@ const PAGE_URL = `http://127.0.0.1:${pages.address().port}/`;
 
 const minimalDir = path.join(here, 'minimal');
 // Only what the test creates is removed at the end, not an engine copy or build of the developer
-const minimalOutputs = ['public/engine', 'dist']
+const minimalOutputs = ['public', 'public/engine', 'dist']
   .map((dir) => path.join(minimalDir, dir))
   .filter((dir) => !existsSync(dir));
 try {
