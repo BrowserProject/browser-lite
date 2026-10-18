@@ -1,5 +1,5 @@
-// WebSockets fuer die Seiten: WebSocketChannel (aus WebKitLegacy) mit unserem
-// curl-Socket. WebTransport gibt es nicht.
+// WebSockets for the pages: WebSocketChannel (from WebKitLegacy) with our curl
+// socket. There is no WebTransport.
 #pragma once
 
 #include <WebCore/SocketProvider.h>

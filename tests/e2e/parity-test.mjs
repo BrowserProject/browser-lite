@@ -16,7 +16,7 @@ timeLimit(2 * TIMEOUT + 60000);
 const PAGE = readFileSync(path.join(root, 'tests', 'engine', 'features.html'));
 const { server: site, url: siteURL } = await serve((req, res) => res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE));
 
-// Sammelt "FEATURE name=wert" aus der Konsole, bis "FEATURE fertig" kommt
+// Sammelt "FEATURE name=wert" aus der Konsole, bis "FEATURE done" kommt
 async function collect(page, load) {
   const results = new Map();
   let done;
@@ -27,7 +27,7 @@ async function collect(page, load) {
     const match = /FEATURE ([\w:.-]+)=(\S+)/.exec(msg.text());
     if (!match)
       return;
-    if (match[1] === 'fertig')
+    if (match[1] === 'done')
       done();
     else
       results.set(match[1], match[2] === '1');

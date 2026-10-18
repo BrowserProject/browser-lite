@@ -1,31 +1,30 @@
-// WebAssembly der Seiten: Modul so umschreiben, dass sein Speicher ein Bereich
-// im Speicher der Engine ist (siehe docs/architektur.md, "WebAssembly").
+// WebAssembly of the pages: rewrites a module so its memory is a region of the
+// engine memory (see docs/architecture.md, "WebAssembly").
 //
-// Das Modul laeuft dann in der echten WASM-Engine des Browsers, JavaScript der
-// Seite (in JSC) sieht den Speicher trotzdem direkt als ArrayBuffer. Dafuer:
-// - alle Speicher fallen weg, einziger Speicher ist der Import "__bl"."memory"
-//   (der Speicher der Engine)
-// - jeder Zugriff auf Speicher k bekommt eine Grenzpruefung gegen
-//   "__bl"."bytes<k>" und die Basis "__bl"."base<k>" dazugezaehlt
-// - memory.size liest "__bl"."pages<k>", memory.grow ruft "__bl"."grow<k>"
-// - memory64: Adressen sind i64, sie werden geprueft und dann auf i32 gekuerzt
-// - aktive Daten-Segmente werden passiv und von "__bl_init" geschrieben,
-//   die auch die Start-Funktion aufruft
-// Weil pro Speicher ein Funktions-Import und drei Globals dazukommen,
-// verschieben sich die Indizes der eigenen Funktionen (+n) und Globals (+3n)
-// bei n Speichern.
+// The module then runs in the real WASM engine of the browser, the page's
+// JavaScript (in JSC) still sees the memory directly as an ArrayBuffer. For that:
+// - all memories go away, the only memory is the import "__bl"."memory" (the
+//   engine memory)
+// - every access to memory k gets a bounds check against "__bl"."bytes<k>" and
+//   the base "__bl"."base<k>" added
+// - memory.size reads "__bl"."pages<k>", memory.grow calls "__bl"."grow<k>"
+// - memory64: addresses are i64, they are checked and then truncated to i32
+// - active data segments become passive and are written by "__bl_init", which
+//   also calls the start function
+// Because every memory adds a function import and three globals, the indices
+// of the own functions (+n) and globals (+3n) shift with n memories.
 //
-// Laeuft in der Engine (--pre-js) und zum Testen in node.
+// Runs in the engine (--pre-js) and for tests in node.
 
 var blWasmRewrite = (function () {
   'use strict';
   const SECTION = { custom: 0, type: 1, import: 2, func: 3, table: 4, memory: 5, global: 6, export: 7, start: 8, elem: 9, code: 10, data: 11, datacount: 12, tag: 13 };
-  // Reihenfolge der Sektionen im Modul (custom ausgenommen)
+  // Order of the sections in the module (custom excluded)
   const ORDER = [1, 2, 3, 4, 5, 13, 6, 7, 8, 9, 12, 10, 11];
 
   class CompileError extends Error {}
 
-  // ------------------------------------------------------------ Lesen
+  // ------------------------------------------------------------ Reading
 
   class Reader {
     constructor(bytes, pos = 0, end = bytes.length) {
@@ -36,10 +35,10 @@ var blWasmRewrite = (function () {
     eof() { return this.pos >= this.end; }
     byte() {
       if (this.pos >= this.end)
-        throw new CompileError('unerwartetes Ende');
+        throw new CompileError('unexpected end');
       return this.bytes[this.pos++];
     }
-    // Vorzeichenlos, auch u64 (ab 2^53 ungenau, reicht fuer Grenzen)
+    // Unsigned, also u64 (inexact from 2^53 on, enough for limits)
     u32() {
       let result = 0, shift = 0, b;
       do {
@@ -49,7 +48,7 @@ var blWasmRewrite = (function () {
       } while (b & 0x80);
       return result;
     }
-    // Vorzeichenbehaftet, nur ueberspringen (Wert wird nicht gebraucht)
+    // Signed, only skipped (the value is not needed)
     skipLeb() {
       while (this.byte() & 0x80) { }
     }
@@ -66,7 +65,7 @@ var blWasmRewrite = (function () {
     }
     bytesN(n) {
       if (this.pos + n > this.end)
-        throw new CompileError('unerwartetes Ende');
+        throw new CompileError('unexpected end');
       const out = this.bytes.subarray(this.pos, this.pos + n);
       this.pos += n;
       return out;
@@ -76,7 +75,7 @@ var blWasmRewrite = (function () {
     }
   }
 
-  // ------------------------------------------------------------ Schreiben
+  // ------------------------------------------------------------ Writing
 
   class Writer {
     constructor() {
@@ -113,7 +112,7 @@ var blWasmRewrite = (function () {
       } while (value);
     }
     s64(value) {
-      // Schneller Weg fuer kleine nicht-negative Zahlen (Grenzpruefungen)
+      // Fast path for small non-negative numbers (bounds checks)
       if (typeof value === 'number' && value >= 0 && value < 2 ** 52) {
         while (value >= 64) {
           this.byte((value % 128) | 0x80);
@@ -147,7 +146,7 @@ var blWasmRewrite = (function () {
     bytes() { return this.buffer.subarray(0, this.length); }
   }
 
-  // ------------------------------------------------------------ Typen
+  // ------------------------------------------------------------ Types
 
   const VALTYPE = { 0x7f: 'i32', 0x7e: 'i64', 0x7d: 'f32', 0x7c: 'f64', 0x7b: 'v128', 0x70: 'funcref', 0x6f: 'externref',
     0x6e: 'anyref', 0x6d: 'eqref', 0x6c: 'i31ref', 0x6b: 'structref', 0x6a: 'arrayref', 0x71: 'nullref', 0x72: 'nullexternref',
@@ -157,12 +156,12 @@ var blWasmRewrite = (function () {
     const b = r.byte();
     if (b === 0x63 || b === 0x64) {
       const heap = r.s33();
-      // Abstrakte Heap-Typen haben negative Werte, eigene Typen den Index
+      // Abstract heap types have negative values, own types the index
       const name = heap >= 0 ? 'ref' : (VALTYPE[heap & 0x7f] || 'ref');
       return (b === 0x63 ? 'null ' : '') + name;
     }
     if (VALTYPE[b] === undefined)
-      throw new CompileError('unbekannter Werttyp 0x' + b.toString(16));
+      throw new CompileError('unknown value type 0x' + b.toString(16));
     return VALTYPE[b];
   }
 
@@ -195,7 +194,7 @@ var blWasmRewrite = (function () {
       r.byte();
       types.push({ kind: 'array' });
     } else
-      throw new CompileError('unbekannter Typ 0x' + form.toString(16));
+      throw new CompileError('unknown type 0x' + form.toString(16));
   }
 
   function readSubType(r, types) {
@@ -221,11 +220,11 @@ var blWasmRewrite = (function () {
     return types;
   }
 
-  // Grenzen von Speicher und Tabelle, address i64 bei memory64 und table64
+  // Limits of memory and table, address i64 with memory64 and table64
   function readLimits(r) {
     const flags = r.byte();
     if (flags & ~7)
-      throw new CompileError('unbekannte Grenzen 0x' + flags.toString(16));
+      throw new CompileError('unknown limits 0x' + flags.toString(16));
     const limits = { min: r.u32(), shared: !!(flags & 2), address: flags & 4 ? 'i64' : 'i32' };
     if (flags & 1)
       limits.max = r.u32();
@@ -241,40 +240,40 @@ var blWasmRewrite = (function () {
     return { value: readValType(r), mutable: r.byte() === 1 };
   }
 
-  // ------------------------------------------------------------ Befehle
+  // ------------------------------------------------------------ Instructions
   //
-  // Die Befehle werden nur so weit gelesen, dass man ihre Laenge kennt. Was
-  // geaendert werden muss (Speicherzugriffe, Funktions- und Global-Indizes),
-  // wird neu geschrieben, alles andere 1:1 kopiert.
+  // Instructions are only read far enough to know their length. What has to
+  // change (memory accesses, function and global indices) is written anew,
+  // everything else copied 1:1.
 
-  // Laden: Opcode -> Breite in Bytes
+  // Loads: opcode -> width in bytes
   const LOAD = { 0x28: 4, 0x29: 8, 0x2a: 4, 0x2b: 8, 0x2c: 1, 0x2d: 1, 0x2e: 2, 0x2f: 2, 0x30: 1, 0x31: 1, 0x32: 2, 0x33: 2, 0x34: 4, 0x35: 4 };
-  // Speichern: Opcode -> [Breite, Werttyp]
+  // Stores: opcode -> [width, value type]
   const STORE = { 0x36: [4, 'i32'], 0x37: [8, 'i64'], 0x38: [4, 'f32'], 0x39: [8, 'f64'], 0x3a: [1, 'i32'], 0x3b: [2, 'i32'],
     0x3c: [1, 'i64'], 0x3d: [2, 'i64'], 0x3e: [4, 'i64'] };
-  // SIMD (0xFD): Laden/Speichern mit memarg -> [Breite, Wert-Operand, Lane-Byte]
+  // SIMD (0xFD): loads/stores with memarg -> [width, value operand, lane byte]
   const SIMD_MEM = { 0: [16], 1: [8], 2: [8], 3: [8], 4: [8], 5: [8], 6: [8], 7: [1], 8: [2], 9: [4], 10: [8], 11: [16, 'v128'],
     84: [1, 'v128', 1], 85: [2, 'v128', 1], 86: [4, 'v128', 1], 87: [8, 'v128', 1],
     88: [1, 'v128', 1], 89: [2, 'v128', 1], 90: [4, 'v128', 1], 91: [8, 'v128', 1], 92: [4], 93: [8] };
-  // Atomics (0xFE) Breiten und Typen der 7er-Gruppen
+  // Atomics (0xFE) widths and types of the groups of 7
   const ATOMIC_WIDTH = [4, 8, 1, 2, 1, 2, 4];
   const ATOMIC_TYPE = ['i32', 'i64', 'i32', 'i32', 'i64', 'i64', 'i64'];
 
-  // Temporaere Locals, die jede Funktion zusaetzlich bekommt. Danach kommen pro
-  // Speicher zwei (CACHE), die Basis und Groesse halten, damit nicht jeder
-  // Zugriff die importierten Globals lesen muss (neu geladen nach jedem Aufruf,
-  // nur dort kann der Speicher umziehen).
+  // Temporary locals every function gets in addition. After them come two per
+  // memory (CACHE) holding base and size, so not every access has to read the
+  // imported globals (reloaded after every call, only there the memory can
+  // move).
   const TEMPS = ['i32', 'i32', 'i32', 'i64', 'i64', 'f32', 'f64', 'v128', 'i64', 'i64', 'i64'];
   const CACHE = ['i32', 'i64'];
 
-  // Abbruch, wenn eine Funktion try_table hat: dort werden Basis/Groesse nicht
-  // zwischengespeichert (die Ziele der catch-Klauseln sind schwer zu finden)
+  // Abort if a function has try_table: base/size are not cached there (the
+  // targets of the catch clauses are hard to find)
   class NeedsGlobals extends Error {}
   const VALTYPE_CODE = { i32: 0x7f, i64: 0x7e, f32: 0x7d, f64: 0x7c, v128: 0x7b };
 
   function rewriteExpr(r, target, ctx, temps, cache = false) {
-    // Unveraenderte Befehle werden nicht einzeln kopiert, sondern als Lauf
-    // gesammelt und erst vor dem naechsten geaenderten Befehl am Stueck
+    // Unchanged instructions are not copied one by one but collected as a run
+    // and copied in one piece before the next changed instruction
     let runStart = -1, runEnd = -1;
     const flush = () => {
       if (runEnd > runStart)
@@ -288,7 +287,7 @@ var blWasmRewrite = (function () {
       s64(v) { flush(); target.s64(v); },
       raw(b) { flush(); target.raw(b); },
     };
-    // temps: Index des ersten Hilfs-Locals oder null (konstante Ausdruecke)
+    // temps: index of the first helper local or null (constant expressions)
     const tA = temps, tB = temps + 1, tC = temps + 2, tL = temps + 3, tL2 = temps + 4, tF = temps + 5, tD = temps + 6, tV = temps + 7;
     const tX = temps + 8, tY = temps + 9, tZ = temps + 10;
     const cBase = (k) => temps + TEMPS.length + CACHE.length * k;
@@ -332,7 +331,7 @@ var blWasmRewrite = (function () {
     const trapIf = () => {
       w.byte(0x04); w.byte(0x40); w.byte(0x00); w.byte(0x0b);
     };
-    // Adresse oben auf dem Stack -> geprueft und mit Basis; "extra" = Offset + Breite
+    // Address on top of the stack -> checked and with base; "extra" = offset + width
     const address = (k, extra) => {
       if (memories[k].address === 'i32') {
         w.byte(0x22); w.u32(tA);
@@ -344,8 +343,8 @@ var blWasmRewrite = (function () {
         trapIf();
         w.byte(0x20); w.u32(tA);
       } else {
-        // i64: erst Adresse <= Groesse, dann kann Adresse + extra nicht
-        // ueberlaufen (Groesse < 2^32, extra hoechstens 2^33)
+        // i64: first address <= size, then address + extra cannot overflow
+        // (size < 2^32, extra at most 2^33)
         w.byte(0x22); w.u32(tX);
         getBytes(k);
         w.byte(0x56);
@@ -362,13 +361,13 @@ var blWasmRewrite = (function () {
       getBase(k);
       w.byte(0x6a);
     };
-    // Operand oben auf dem Stack als i64 in ein Local (i32 vorzeichenlos)
+    // Operand on top of the stack as i64 into a local (i32 unsigned)
     const pop64 = (local, address) => {
       if (address === 'i32')
         w.byte(0xad);
       w.byte(0x21); w.u32(local);
     };
-    // Bereich [start, start + length) aus i64-Locals muss im Speicher k liegen
+    // Range [start, start + length) from i64 locals has to be in memory k
     const checkRange = (start, length, k) => {
       w.byte(0x20); w.u32(start);
       getBytes(k);
@@ -381,7 +380,7 @@ var blWasmRewrite = (function () {
       w.byte(0x72);
       trapIf();
     };
-    // Geprueftes i64-Local als i32, als Adresse mit der Basis von Speicher k
+    // Checked i64 local as i32, as address with the base of memory k
     const narrow = (local) => {
       w.byte(0x20); w.u32(local);
       w.byte(0xa7);
@@ -393,7 +392,7 @@ var blWasmRewrite = (function () {
     };
     const memoryIndex = (index) => {
       if (temps === null || index >= memories.length)
-        throw new CompileError('Speicherzugriff ohne Speicher');
+        throw new CompileError('memory access without memory');
       return index;
     };
     const memarg = () => {
@@ -402,8 +401,8 @@ var blWasmRewrite = (function () {
       const offset = r.u32();
       return { k, align: align & ~0x40, offset };
     };
-    // Im Speicher der Engine (i32). Ein Offset ueber 4 GB (memory64) faengt
-    // schon bei der Pruefung
+    // In the engine memory (i32). An offset above 4 GB (memory64) traps
+    // already at the check
     const writeMemarg = (arg) => {
       w.u32(arg.align);
       w.u32(arg.offset > 0xffffffff ? 0 : arg.offset);
@@ -454,12 +453,12 @@ var blWasmRewrite = (function () {
         depth--;
         copyFrom(start);
         break;
-      case 0x18: // delegate beendet einen try-Block
+      case 0x18: // delegate ends a try block
         r.u32();
         depth--;
         copyFrom(start);
         break;
-      case 0x07: // catch: der Handler beginnt hier
+      case 0x07: // catch: the handler starts here
         r.u32();
         copyFrom(start);
         reload();
@@ -520,7 +519,7 @@ var blWasmRewrite = (function () {
         if (memory.address === 'i32') {
           w.byte(0x10); w.u32(memory.growFunc);
         } else {
-          // Mehr als 2^31 Seiten geht nie, sonst als i32 an grow
+          // More than 2^31 pages never works, otherwise as i32 to grow
           w.byte(0x22); w.u32(tX);
           w.byte(0x42); w.s64(0x7fffffff);
           w.byte(0x56);
@@ -582,7 +581,7 @@ var blWasmRewrite = (function () {
           || op === 0x1a || op === 0x1b || op === 0xd1 || op === 0xd3 || op === 0xd4)
           copyFrom(start);
         else
-          throw new CompileError('unbekannter Befehl 0x' + op.toString(16));
+          throw new CompileError('unknown instruction 0x' + op.toString(16));
       }
     }
     flush();
@@ -594,8 +593,8 @@ var blWasmRewrite = (function () {
         return;
       }
       switch (sub) {
-      // Operanden als i64 in tX, tY, tZ, im Speicher der Engine wieder als i32
-      case 8: { // memory.init seg mem [d s n], s und n immer i32
+      // Operands as i64 in tX, tY, tZ, in the engine memory as i32 again
+      case 8: { // memory.init seg mem [d s n], s and n always i32
         const segment = r.u32();
         const k = memoryIndex(r.u32());
         pop64(tZ, 'i32');
@@ -608,7 +607,7 @@ var blWasmRewrite = (function () {
         w.byte(0xfc); w.u32(8); w.u32(segment); w.byte(0);
         return;
       }
-      case 10: { // memory.copy dst src [d s n], n ist i64 nur zwischen zwei i64
+      case 10: { // memory.copy dst src [d s n], n is i64 only between two i64
         const dst = memoryIndex(r.u32()), src = memoryIndex(r.u32());
         const dstAddress = memories[dst].address, srcAddress = memories[src].address;
         pop64(tZ, dstAddress === 'i64' && srcAddress === 'i64' ? 'i64' : 'i32');
@@ -642,7 +641,7 @@ var blWasmRewrite = (function () {
         r.u32();
         break;
       default:
-        throw new CompileError('unbekannter Befehl 0xfc ' + sub);
+        throw new CompileError('unknown instruction 0xfc ' + sub);
       }
       copyFrom(start);
     }
@@ -679,8 +678,8 @@ var blWasmRewrite = (function () {
         return;
       }
       const arg = memarg();
-      // wait32/64 faengt auf nicht geteiltem Speicher, und der Speicher der Seite
-      // ist nie geteilt. Im geteilten Speicher der Engine wuerde es wirklich warten
+      // wait32/64 traps on non-shared memory, and the page's memory is never
+      // shared. In the shared engine memory it would really wait
       if (sub === 1 || sub === 2) {
         w.byte(0x00);
         return;
@@ -695,7 +694,7 @@ var blWasmRewrite = (function () {
         w.byte(0x20); w.u32(tB);
       } else if (sub >= 0x10 && sub <= 0x16) { // load
         address(arg.k, arg.offset + ATOMIC_WIDTH[sub - 0x10]);
-      } else if (sub >= 0x17 && sub <= 0x47) { // store und rmw [addr value]
+      } else if (sub >= 0x17 && sub <= 0x47) { // store and rmw [addr value]
         const variant = (sub - 0x17) % 7;
         const value = ATOMIC_TYPE[variant] === 'i32' ? tB : tL;
         w.byte(0x21); w.u32(value);
@@ -710,7 +709,7 @@ var blWasmRewrite = (function () {
         w.byte(0x20); w.u32(first);
         w.byte(0x20); w.u32(second);
       } else
-        throw new CompileError('unbekannter Befehl 0xfe ' + sub);
+        throw new CompileError('unknown instruction 0xfe ' + sub);
       emit();
     }
   }
@@ -738,24 +737,24 @@ var blWasmRewrite = (function () {
       heapType();
       break;
     default:
-      throw new CompileError('unbekannter Befehl 0xfb ' + sub);
+      throw new CompileError('unknown instruction 0xfb ' + sub);
     }
   }
 
-  // Konstanter Ausdruck (Globals, Segmente): nur Indizes umschreiben
+  // Constant expression (globals, segments): only rewrite indices
   function rewriteConstExpr(r, ctx) {
     const w = new Writer();
     rewriteExpr(r, w, ctx, null);
     return w.bytes().slice();
   }
 
-  // ------------------------------------------------------------ Modul
+  // ------------------------------------------------------------ Module
 
   function parseModule(bytes) {
     if (bytes.length < 8 || bytes[0] !== 0 || bytes[1] !== 0x61 || bytes[2] !== 0x73 || bytes[3] !== 0x6d)
-      throw new CompileError('kein WebAssembly-Modul');
+      throw new CompileError('not a WebAssembly module');
     if (bytes[4] !== 1 || bytes[5] !== 0 || bytes[6] !== 0 || bytes[7] !== 0)
-      throw new CompileError('unbekannte Version');
+      throw new CompileError('unknown version');
     const sections = [];
     const r = new Reader(bytes, 8);
     while (!r.eof()) {
@@ -763,25 +762,25 @@ var blWasmRewrite = (function () {
       const size = r.u32();
       const start = r.pos;
       if (start + size > bytes.length)
-        throw new CompileError('Sektion zu lang');
+        throw new CompileError('section too long');
       sections.push({ id, body: bytes.subarray(start, start + size) });
       r.pos = start + size;
     }
     return sections;
   }
 
-  // Modul lesen (ohne den Code) und beschreiben. Wirft CompileError fuer alles,
-  // was sich nicht umschreiben laesst (auch fuer WebAssembly.validate)
+  // Reads (without the code) and describes the module. Throws CompileError for
+  // everything that cannot be rewritten (also for WebAssembly.validate)
   function analyze(input) {
     const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
     const sections = parseModule(bytes);
     const find = (id) => sections.find((s) => s.id === id);
 
-    // Typen, Importe und Speicher lesen
+    // Read types, imports and memories
     const types = find(SECTION.type) ? readTypeSection(new Reader(find(SECTION.type).body)) : [];
     const imports = [];
     let importedFuncs = 0, importedGlobals = 0, importedTables = 0, importedTags = 0;
-    // Speicher in der Reihenfolge ihrer Indizes: erst Importe, dann eigene
+    // Memories in the order of their indices: first imports, then own ones
     const memories = [];
     if (find(SECTION.import)) {
       const r = new Reader(find(SECTION.import).body);
@@ -804,7 +803,7 @@ var blWasmRewrite = (function () {
           entry.type = r.u32();
           importedTags++;
         } else
-          throw new CompileError('unbekannter Import');
+          throw new CompileError('unknown import');
         imports.push(entry);
       }
     }
@@ -819,13 +818,13 @@ var blWasmRewrite = (function () {
       for (let n = r.u32(); n; n--)
         funcTypes.push(r.u32());
     }
-    // Typen der eigenen Tabellen und Globals (fuer die Exporte)
+    // Types of the own tables and globals (for the exports)
     const tableTypes = imports.filter((i) => i.kind === 1).map((i) => i.table);
     if (find(SECTION.table)) {
       const r = new Reader(find(SECTION.table).body);
       for (let n = r.u32(); n; n--) {
         if (r.bytes[r.pos] === 0x40) {
-          // Tabelle mit Init-Ausdruck
+          // Table with an init expression
           r.pos += 2;
           tableTypes.push(readTableType(r));
           rewriteExpr(r, new Writer(), { importedFuncs: 0, importedGlobals: 0, funcShift: 0, globalShift: 0 }, null);
@@ -852,7 +851,7 @@ var blWasmRewrite = (function () {
       const typeIndex = index < importedFuncs ? imports.filter((i) => i.kind === 0)[index].type : funcTypes[index - importedFuncs];
       const type = types[typeIndex];
       if (!type || type.kind !== 'func')
-        throw new CompileError('Funktion ohne Funktionstyp');
+        throw new CompileError('function without function type');
       return type;
     };
     const signatureOf = (typeIndex) => {
@@ -860,7 +859,7 @@ var blWasmRewrite = (function () {
       return type && type.kind === 'func' ? { params: type.params, results: type.results } : null;
     };
 
-    // Beschreibung fuer die WebAssembly-API der Seite
+    // Description for the page's WebAssembly API
     const info = {
       imports: imports.map((entry) => {
         const out = { module: entry.module, name: entry.name, kind: ['function', 'table', 'memory', 'global', 'tag'][entry.kind] };
@@ -892,7 +891,7 @@ var blWasmRewrite = (function () {
       rewritten: false,
     };
     if (memories.some((memory) => memory.shared))
-      throw new CompileError('geteilter Speicher (Threads) wird nicht unterstuetzt');
+      throw new CompileError('shared memory (threads) is not supported');
     return { bytes, sections, find, types, imports, importedFuncs, importedGlobals, memories, funcTypes, exportsList, info };
   }
 
@@ -901,8 +900,8 @@ var blWasmRewrite = (function () {
     if (!memories.length)
       return { bytes, info };
 
-    // Neue Typen, Importe, Indizes: pro Speicher k grow (Funktion) und base,
-    // bytes, pages (Globals) hinter den importierten
+    // New types, imports, indices: per memory k grow (function) and base,
+    // bytes, pages (globals) after the imported ones
     const typeCount = types.length;
     const growType = typeCount, initType = typeCount + 1;
     const ctx = {
@@ -936,10 +935,10 @@ var blWasmRewrite = (function () {
     let dataCount = 0;
     let hasDataCount = !!find(SECTION.datacount);
 
-    // Neu geschriebene Sektionen nach id
+    // Rewritten sections by id
     const built = new Map();
 
-    // Typen: zwei Funktionstypen anhaengen
+    // Types: append two function types
     {
       const w = new Writer();
       const old = find(SECTION.type);
@@ -956,8 +955,8 @@ var blWasmRewrite = (function () {
       built.set(SECTION.type, w.bytes().slice());
     }
 
-    // Importe: ohne die Speicher, dazu der Speicher der Engine, grow und die
-    // drei Globals pro Speicher
+    // Imports: without the memories, plus the engine memory, grow and the
+    // three globals per memory
     {
       const w = new Writer();
       const entries = [];
@@ -993,7 +992,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.import, w.bytes().slice());
     }
 
-    // Funktionen: Init-Funktion dazu
+    // Functions: plus the init function
     {
       const w = new Writer();
       w.u32(definedFuncs + 1);
@@ -1003,7 +1002,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.func, w.bytes().slice());
     }
 
-    // Globals: Init-Ausdruecke umschreiben
+    // Globals: rewrite init expressions
     if (find(SECTION.global)) {
       const r = new Reader(find(SECTION.global).body);
       const w = new Writer();
@@ -1018,7 +1017,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.global, w.bytes().slice());
     }
 
-    // Tabellen: Init-Ausdruecke umschreiben
+    // Tables: rewrite init expressions
     if (find(SECTION.table)) {
       const r = new Reader(find(SECTION.table).body);
       const w = new Writer();
@@ -1037,7 +1036,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.table, w.bytes().slice());
     }
 
-    // Exporte: Speicher raus (kommt von der API), Indizes, __bl_init dazu
+    // Exports: memories out (they come from the API), indices, plus __bl_init
     {
       const w = new Writer();
       const kept = exportsList.filter((e) => e.kind !== 2);
@@ -1058,7 +1057,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.export, w.bytes().slice());
     }
 
-    // Elemente: Funktions-Indizes und Ausdruecke
+    // Elements: function indices and expressions
     if (find(SECTION.elem)) {
       const r = new Reader(find(SECTION.elem).body);
       const w = new Writer();
@@ -1093,7 +1092,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.elem, w.bytes().slice());
     }
 
-    // Daten: aktive Segmente werden passiv
+    // Data: active segments become passive
     if (find(SECTION.data)) {
       const r = new Reader(find(SECTION.data).body);
       const w = new Writer();
@@ -1102,11 +1101,11 @@ var blWasmRewrite = (function () {
       for (let i = 0; i < dataCount; i++) {
         const flags = r.u32();
         if (flags > 2)
-          throw new CompileError('unbekanntes Daten-Segment');
+          throw new CompileError('unknown data segment');
         if (flags !== 1) {
           const memory = flags === 2 ? r.u32() : 0;
           if (memory >= memories.length)
-            throw new CompileError('Daten-Segment ohne Speicher');
+            throw new CompileError('data segment without memory');
           activeData.push({ index: i, memory, offset: rewriteConstExpr(r, ctx) });
         }
         w.u32(1);
@@ -1125,14 +1124,14 @@ var blWasmRewrite = (function () {
       hasDataCount = true;
     }
 
-    // Code: Speicherzugriffe umschreiben, Hilfs-Locals dazu, Init-Funktion anhaengen
+    // Code: rewrite memory accesses, add helper locals, append the init function
     {
       const w = new Writer();
       const old = find(SECTION.code);
       const r = old ? new Reader(old.body) : null;
       const count = r ? r.u32() : 0;
       if (count !== definedFuncs)
-        throw new CompileError('Code und Funktionen passen nicht');
+        throw new CompileError('code and functions do not match');
       w.u32(count + 1);
       for (let i = 0; i < count; i++) {
         const size = r.u32();
@@ -1171,13 +1170,13 @@ var blWasmRewrite = (function () {
           rewriteExpr(body, f, ctx, params + locals, false);
         }
         if (body.pos !== end)
-          throw new CompileError('Funktion endet nicht richtig');
+          throw new CompileError('function does not end correctly');
         w.u32(f.length);
         w.raw(f.bytes());
         r.pos = end;
       }
-      // __bl_init: Daten schreiben, dann die Start-Funktion. Local 0 (i64) ist
-      // der Offset, geprueft wie checkRange
+      // __bl_init: write the data, then the start function. Local 0 (i64) is
+      // the offset, checked like checkRange
       const f = new Writer();
       f.u32(1);
       f.u32(1);
@@ -1216,7 +1215,7 @@ var blWasmRewrite = (function () {
       built.set(SECTION.code, w.bytes().slice());
     }
 
-    // Alles in der richtigen Reihenfolge zusammensetzen
+    // Put everything together in the right order
     const skip = new Set([SECTION.memory, SECTION.start]);
     const written = new Set();
     const writeKnown = (id) => {
@@ -1230,13 +1229,13 @@ var blWasmRewrite = (function () {
     };
     for (const section of sections) {
       if (section.id === SECTION.custom) {
-        // Namen passen nach dem Verschieben nicht mehr
+        // Names no longer match after shifting
         const r = new Reader(section.body);
         if (r.name() !== 'name')
           emitSection(SECTION.custom, section.body);
         continue;
       }
-      // Fehlende neue Sektionen vor dieser einfuegen
+      // Insert missing new sections before this one
       for (const id of ORDER) {
         if (id === section.id)
           break;

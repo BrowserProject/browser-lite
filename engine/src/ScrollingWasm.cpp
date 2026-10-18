@@ -25,14 +25,14 @@ struct Entry {
 
 Lock s_lock;
 
-// Scrolling-Baeume der Tabs, Zugriff von Engine- und Compositor-Thread
+// Scrolling trees of the views, accessed from engine and compositor thread
 HashMap<int, Entry>& entries() WTF_REQUIRES_LOCK(s_lock)
 {
     static NeverDestroyed<HashMap<int, Entry>> map;
     return map;
 }
 
-// Der naechste Takt kommt mit dem naechsten Bild des Compositors
+// The next tick comes with the next frame of the compositor
 void requestTick(int viewId)
 {
     if (RefPtr scene = CompositorScene::forView(viewId))
@@ -46,7 +46,7 @@ RefPtr<ThreadedScrollingTree> treeForView(int viewId)
     return it == entries().end() ? nullptr : it->value.tree;
 }
 
-// Ohne Scroll-Thread: DOM-Event und Scrollen im Engine-Thread
+// Without a scrolling thread: DOM event and scrolling on the engine thread
 void sendToEngine(int viewId, const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
 {
     runOnEngineThread([viewId, event, steps] {
@@ -70,7 +70,7 @@ ScrollingCoordinatorWasm::ScrollingCoordinatorWasm(Page& page, int viewId)
     setScrollingTree(tree.copyRef());
     Locker locker { s_lock };
     entries().set(viewId, Entry { WTF::move(tree), false });
-    debugLog("View %d: Scrollen im eigenen Thread", viewId);
+    debugLog("View %d: scrolling in its own thread", viewId);
 }
 
 ScrollingCoordinatorWasm::~ScrollingCoordinatorWasm() = default;
@@ -95,7 +95,7 @@ void ScrollingCoordinatorWasm::hasNodeWithAnimatedScrollChanged(bool hasAnimated
         if (it != entries().end())
             it->value.animatedScroll = hasAnimatedScroll;
     }
-    // Plant ein Rendering-Update ein, danach treibt der Compositor die Animation
+    // Schedules a rendering update, afterwards the compositor drives the animation
     ThreadedScrollingCoordinator::hasNodeWithAnimatedScrollChanged(hasAnimatedScroll);
 }
 
@@ -115,14 +115,14 @@ void wheelEvent(int viewId, const PlatformWheelEvent& event)
         return;
     }
 
-    // Wie EventDispatcher::internalWheelEvent() in WebKit2
+    // Like EventDispatcher::internalWheelEvent() in WebKit2
     auto steps = tree->determineWheelEventProcessing(event);
     bool useEngineThreadForScrolling = steps.contains(WheelEventProcessingSteps::SynchronousScrolling);
     tree->willProcessWheelEvent();
 
     ScrollingThread::dispatch([tree = WTF::move(tree), viewId, event, steps, useEngineThreadForScrolling] {
         if (useEngineThreadForScrolling) {
-            // Die Seite hat einen wheel-Listener, der scrollen verhindern kann
+            // The page has a wheel listener that can prevent scrolling
             tree->willSendEventToMainThread(event);
             sendToEngine(viewId, event, steps);
             tree->waitForEventToBeProcessedByMainThread(event);
@@ -130,9 +130,9 @@ void wheelEvent(int viewId, const PlatformWheelEvent& event)
         }
 
         auto result = tree->handleWheelEvent(event, steps);
-        // Der Scroll-Thread wendet die neue Position beim naechsten Takt an,
-        // wenn bis dahin kein Rendering-Update des Engine-Threads kommt (der
-        // ist vielleicht mit dem JS der Seite beschaeftigt)
+        // The scrolling thread applies the new position on the next tick if no
+        // rendering update of the engine thread comes until then (it may be
+        // busy with the page's JS)
         if (result.wasHandled) {
             tree->didScheduleRenderingUpdate();
             requestTick(viewId);
@@ -154,7 +154,7 @@ bool displayDidRefresh(int viewId)
         tree = it->value.tree;
         animatedScroll = it->value.animatedScroll;
     }
-    // Scroll-Animation: neue Positionen anwenden, auch ohne Rendering-Update
+    // Scroll animation: apply new positions, even without a rendering update
     if (animatedScroll)
         tree->didScheduleRenderingUpdate();
     tree->displayDidRefresh(tree->displayID());
@@ -175,7 +175,7 @@ bool mayCancelWheelEvent(int viewId, const PlatformWheelEvent& event)
 
 namespace BrowserLite::Scrolling {
 
-// Ohne Scroll-Thread scrollt der Engine-Thread
+// Without a scrolling thread the engine thread scrolls
 void stopForView(int) { }
 void wheelEvent(int viewId, const WebCore::PlatformWheelEvent& event)
 {

@@ -1,5 +1,5 @@
-// browser-lite: Kopie aus Source/WebKitLegacy/WebCoreSupport (WebKit wpewebkit-2.54.1),
-// angepasst fuer unseren curl-SocketStream (SocketStreamHandleCurl).
+// browser-lite: copy from Source/WebKitLegacy/WebCoreSupport (WebKit wpewebkit-2.54.1),
+// adapted to our curl SocketStream (SocketStreamHandleCurl).
 /*
  * Copyright (C) 2009, 2011, 2012 Google Inc. All rights reserved.
  *

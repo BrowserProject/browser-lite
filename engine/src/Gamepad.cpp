@@ -1,6 +1,6 @@
-// Gamepads ueber den Host-Browser: die Oberflaeche fragt navigator.getGamepads()
-// pro Bild ab, solange eine Seite Gamepads verwendet, und schickt den Zustand
-// (bl_gamepad). Vibration geht an den vibrationActuator des Hosts.
+// Gamepads through the host browser: the host polls navigator.getGamepads()
+// every frame while a page uses gamepads and sends the state (bl_gamepad).
+// Vibration goes to the host's vibrationActuator.
 #include "config.h"
 #include "Gamepad.h"
 
@@ -31,7 +31,7 @@ public:
             m_supportedEffectTypes.add(GamepadHapticEffectType::DualRumble);
     }
 
-    // true, wenn ein Knopf gedrueckt ist (macht Gamepads fuer die Seite sichtbar)
+    // true if a button is pressed (makes gamepads visible to the page)
     bool update(const Vector<double>& axes, const Vector<double>& buttons)
     {
         set(m_axes, axes);

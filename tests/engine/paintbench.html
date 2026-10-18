@@ -1,8 +1,8 @@
 <!doctype html><title>paintbench</title>
-<!-- Mal-Benchmark fuer Skia: Verlaeufe, Transparenz, Schatten, runde Ecken,
-     skalierte Bilder, Text. Laufen lassen mit
+<!-- Paint benchmark for Skia: gradients, transparency, shadows, rounded
+     corners, scaled images, text. Run with
        BL_DEBUG=1 node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/paintbench.html /tmp/p.ppm 1280 2000
-     Das Skript malt die Seite mehrmals neu und gibt "BENCH paint=ms" aus. -->
+     The script repaints the page several times and prints "BENCH paint=ms". -->
 <style>
 body { margin: 0; font: 14px sans-serif; background: linear-gradient(135deg, #fde, #def); }
 .grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px; }
@@ -15,7 +15,7 @@ img { width: 150px; height: 90px; border-radius: 8px; opacity: .9; }
 <div class="grid" id="grid"></div>
 <script>
 const grid = document.getElementById('grid');
-// Kleines Bild (64x64 Canvas) als data:-URL, wird auf 150x90 skaliert
+// Small image (64x64 canvas) as a data: URL, scaled to 150x90
 const c = document.createElement('canvas');
 c.width = c.height = 64;
 const g = c.getContext('2d');
@@ -34,11 +34,11 @@ for (let i = 0; i < 160; i++) {
   } else {
     const d = document.createElement('div');
     d.className = 'box';
-    d.textContent = 'Kasten ' + i + ' mit etwas Text, der umbricht';
+    d.textContent = 'Box ' + i + ' with some text that wraps';
     grid.appendChild(d);
   }
 }
-// Nach dem ersten Bild: mehrmals alles neu malen lassen (Farbe wechseln)
+// After the first frame: repaint everything several times (changing the color)
 setTimeout(() => {
   let n = 0, best = 1e9, start = 0;
   const step = () => {

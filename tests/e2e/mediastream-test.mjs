@@ -253,7 +253,7 @@ check('Aufnahme-Anzeige im Tab', await page.locator('#tab-list .tab.active .reco
 check('<video>.srcObject zeigt die Kamera', await result('videosize', 30000) === '320x240', results.get('videosize') || err());
 check('canvas.drawImage(video) hat das Bild', await result('pixels', 30000) === 'bild', results.get('pixels') || err());
 check('Mikrofon in Web Audio (MediaStreamSource)', await result('micpeak', 30000) === 'ton', results.get('micpeak') || err());
-check('enumerateDevices mit Namen nach Erlaubnis', await result('devices', 30000) === 'audioinput:Mikrofon,videoinput:Kamera', results.get('devices') || err());
+check('enumerateDevices mit Namen nach Erlaubnis', await result('devices', 30000) === 'audioinput:Microphone,videoinput:Camera', results.get('devices') || err());
 check('track.stop() beendet die Spur', await result('stopped', 30000) === 'ended', results.get('stopped') || err());
 await page.mouse.click(box.x + 360, box.y + 50);
 check('getDisplayMedia zeigt den Bildschirm', await result('screen', 30000) === 'bild:monitor', results.get('screen'));

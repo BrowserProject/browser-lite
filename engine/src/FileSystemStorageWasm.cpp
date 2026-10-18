@@ -27,13 +27,13 @@ using namespace WebCore;
 
 namespace {
 
-// Pro oberstem Ursprung und Ursprung ein Ordner (wie die Partitionierung von WebKit2)
+// One folder per top origin and origin (like the partitioning of WebKit2)
 String rootPath(const ClientOrigin& origin)
 {
     return FileSystem::pathByAppendingComponent(FileSystem::pathByAppendingComponent("/data/opfs"_s, FileSystem::encodeForFileName(origin.topOrigin.toString())), FileSystem::encodeForFileName(origin.clientOrigin.toString()));
 }
 
-// Wie FileSystemStorageError in WebKit2
+// Like FileSystemStorageError in WebKit2
 enum class Error : uint8_t {
     FileNotFound,
     InvalidDataType,
@@ -74,22 +74,22 @@ Exception toException(Error error)
     return Exception { ExceptionCode::UnknownError };
 }
 
-// Schreiben ging nicht: bei ENOSPC hat das OPFS des Host keinen Platz mehr
+// Writing failed: with ENOSPC the host's OPFS has no space left
 Error writeError()
 {
     return errno == ENOSPC ? Error::QuotaError : Error::Unknown;
 }
 
-// Nur umbenennen: FileSystem::moveFile kopiert, wenn das nicht geht. Die Kopie
-// ist nicht atomar (ohne Platz bleibt das Ziel halb geschrieben) und meldet
-// Erfolg, auch wenn die Quelle nicht geloescht wurde
+// Rename only: FileSystem::moveFile copies if that does not work. The copy is
+// not atomic (without space the target stays half written) and reports success
+// even if the source was not deleted
 bool renameFile(const String& from, const String& to)
 {
     return !rename(FileSystem::fileSystemRepresentation(from).data(), FileSystem::fileSystemRepresentation(to).data());
 }
 
-// Ordner kann WasmFS im OPFS des Host nicht umbenennen (EBUSY), sie gehen nur
-// als Kopie von moveFile
+// WasmFS cannot rename folders in the host's OPFS (EBUSY), they only move as a
+// copy through moveFile
 bool moveDirectory(const String& from, const String& to)
 {
     return FileSystem::moveFile(from, to) && (from == to || !FileSystem::fileExists(from));
@@ -131,8 +131,8 @@ struct FileLock {
 };
 
 constexpr uint64_t initialCapacity = 1024 * 1024;
-// Kopien fuer createWritable(): neben den Ordnern der Urspruenge, also im
-// selben Dateisystem wie die Dateien (close() benennt nur um)
+// Copies for createWritable(): next to the folders of the origins, so in the
+// same file system as the files (close() only renames)
 constexpr auto swapDirectory = "/data/opfs-swap"_s;
 
 class FileSystemStorageConnectionWasm final : public FileSystemStorageConnection {
@@ -145,7 +145,7 @@ public:
 
     FileSystemStorageConnectionWasm()
     {
-        // Reste von Schreibvorgaengen, die nicht fertig wurden (Tab geschlossen)
+        // Leftovers of writes that did not finish (view closed)
         FileSystem::deleteNonEmptyDirectory(swapDirectory);
     }
 
@@ -177,9 +177,9 @@ private:
                 return makeUnexpected(Error::TypeMismatch);
             kind = existingKind;
         }
-        // Eine vorhandene Datei nicht oeffnen: zum Schreiben offen haelt WasmFS
-        // sie im OPFS des Host gesperrt, solange sie noch jemand liest (move()
-        // und das Ersetzen bei close() gehen dort dann nicht)
+        // Do not open an existing file: WasmFS keeps it locked in the host's
+        // OPFS while open for writing as long as someone still reads it (move()
+        // and the replacement on close() do not work there then)
         bool canAccess = true;
         if (*kind == FileSystemHandleKind::Directory)
             canAccess = FileSystem::makeAllDirectories(path);
@@ -415,7 +415,7 @@ private:
         completionHandler(FileSystem::listDirectory(handle->path));
     }
 
-    // Nur in Workern: synchroner Zugriff ueber eine offene Datei
+    // Only in workers: synchronous access through an open file
     void createSyncAccessHandle(FileSystemHandleIdentifier identifier, GetAccessHandleCallback&& completionHandler) final
     {
         auto* handle = find(identifier);
@@ -448,7 +448,7 @@ private:
         auto* handle = find(identifier);
         if (!handle || handle->syncAccessHandle != accessHandleIdentifier)
             return completionHandler(std::nullopt);
-        // Wie WebKit2: in grossen Schritten wachsen, die Quote prueft estimate()
+        // Like WebKit2: grow in big steps, estimate() checks the quota
         if (newCapacity > handle->syncAccessCapacity)
             handle->syncAccessCapacity = std::max<uint64_t>(newCapacity, std::max<uint64_t>(initialCapacity, handle->syncAccessCapacity * 2));
         completionHandler(handle->syncAccessCapacity);
@@ -464,14 +464,14 @@ private:
             return;
         ScriptExecutionContext::postTaskTo(contextIdentifier, [identifier](auto& context) {
             if (RefPtr scope = dynamicDowncast<WorkerGlobalScope>(context)) {
-                // Ueber die Basisklasse: dort ist die Methode oeffentlich
+                // Through the base class: the method is public there
                 if (RefPtr<FileSystemStorageConnection> connection = scope->fileSystemStorageConnection())
                     connection->invalidateAccessHandle(identifier);
             }
         });
     }
 
-    // createWritable(): in eine Kopie schreiben, close() ersetzt die Datei damit
+    // createWritable(): write into a copy, close() replaces the file with it
     void createWritable(ScriptExecutionContextIdentifier, FileSystemHandleIdentifier identifier, bool keepExistingData, StreamCallback&& completionHandler) final
     {
         auto* handle = find(identifier);
@@ -548,7 +548,7 @@ private:
         completionHandler(toExceptionOr(error));
     }
 
-    // Fuer postMessage/IndexedDB: Handles ueber ihre globale Kennung wiederfinden
+    // For postMessage/IndexedDB: find handles again by their global identifier
     void addGlobalIdentifierReference(ClientOrigin&&, FileSystemHandleGlobalIdentifier globalIdentifier) final
     {
         auto it = m_globalEntries.find(globalIdentifier);
@@ -571,7 +571,7 @@ private:
         auto result = createHandle(entry.kind, WTF::move(entry.path), WTF::move(entry.name), false);
         if (!result)
             return completionHandler(toException(result.error()));
-        // Die neue Kennung durch die bestehende ersetzen
+        // Replace the new identifier with the existing one
         auto [newGlobalIdentifier, identifier] = *result;
         m_globalEntries.remove(newGlobalIdentifier);
         if (auto existing = m_globalEntries.find(globalIdentifier); existing != m_globalEntries.end())

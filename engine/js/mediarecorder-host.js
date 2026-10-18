@@ -1,10 +1,10 @@
-// MediaRecorder der Seiten (engine/src/media/MediaRecorderWasm.cpp), Host-Seite.
+// MediaRecorder of the pages (engine/src/media/MediaRecorderWasm.cpp), host side.
 //
-// Laeuft im Engine-Worker (--pre-js), aufgerufen nur im Engine-Thread. Bild und
-// Ton kommen roh aus der Engine, ein VideoEncoder/AudioEncoder des Host kodiert
-// sie (VP8, VP9, AV1, Opus) und wir schreiben daraus WebM wie Chrome: Segment
-// und Cluster mit unbekannter Laenge, SimpleBlocks, neuer Cluster bei jedem
-// Video-Schluesselbild. Die Engine holt die fertigen Bytes mit take().
+// Runs in the engine worker (--pre-js), only called on the engine thread.
+// Frames and sound come raw from the engine, a VideoEncoder/AudioEncoder of
+// the host encodes them (VP8, VP9, AV1, Opus) and we write WebM from it like
+// Chrome: segment and cluster with unknown length, SimpleBlocks, a new cluster
+// at every video key frame. The engine fetches the finished bytes with take().
 var blRecorder = (function () {
   'use strict';
   const VIDEO_FORMATS = ['I420', 'I420A', 'I422', 'I444', 'NV12', 'RGBA', 'RGBX', 'BGRA', 'BGRX'];
@@ -13,7 +13,7 @@ var blRecorder = (function () {
     vp9: { codec: 'vp09.00.10.08', id: 'V_VP9' },
     av1: { codec: 'av01.0.04M.08', id: 'V_AV1' },
   };
-  const KEYFRAME_INTERVAL = 2e6; // us, wie oft ein Schluesselbild (Springen im Video)
+  const KEYFRAME_INTERVAL = 2e6; // us, how often a key frame (seeking in the video)
 
   // ---------------------------------------------------------------- EBML
   const encoder = new TextEncoder();
@@ -48,7 +48,7 @@ var blRecorder = (function () {
         return bytes;
       }
     }
-    throw new Error('EBML: zu gross');
+    throw new Error('EBML: too big');
   }
   const UNKNOWN_SIZE = Uint8Array.from([0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
   const element = (id, payload) => concat([idBytes(id), sizeBytes(payload.length), payload]);
@@ -72,7 +72,7 @@ var blRecorder = (function () {
     const view = new DataView(head.buffer);
     view.setUint8(8, 1);
     view.setUint8(9, channels);
-    view.setUint16(10, 312, true); // pre-skip wie libopus bei 48 kHz
+    view.setUint16(10, 312, true); // pre-skip like libopus at 48 kHz
     view.setUint32(12, sampleRate, true);
     return head;
   }
@@ -123,7 +123,7 @@ var blRecorder = (function () {
     const span = state.pending.length ? state.pending[state.pending.length - 1].timestamp - state.pending[0].timestamp : 0;
     if (!ready && !force && span < 1e6)
       return false;
-    // Spuren ohne ein einziges Bild fallen weg (z.B. Canvas, das nie gemalt hat)
+    // Tracks without a single frame are dropped (e.g. a canvas that never painted)
     if (!ready) {
       state.tracks = state.tracks.filter((track) => track.ready);
       state.tracks.forEach((track, index) => {
@@ -228,7 +228,7 @@ var blRecorder = (function () {
     let frame = null;
     try {
       const encoder = videoEncoder(state, width, height);
-      // Zu viel in der Warteschlange: Bild auslassen (wie Chrome bei Last)
+      // Too much in the queue: skip the frame (like Chrome under load)
       if (encoder.encodeQueueSize > 8)
         return;
       const init = { format: VIDEO_FORMATS[format], codedWidth: width, codedHeight: height, timestamp };
@@ -287,8 +287,8 @@ var blRecorder = (function () {
     }
   }
 
-  // Fertige Bytes seit dem letzten Aufruf; Laenge nach lengthPtr, 0 = nichts.
-  // Ohne Speicher bleiben sie fuer den naechsten Aufruf liegen.
+  // Finished bytes since the last call; length to lengthPtr, 0 = nothing.
+  // Without memory they stay for the next call.
   function take(id, lengthPtr) {
     const state = recorders.get(id);
     HEAP32[lengthPtr >> 2] = 0;
@@ -308,7 +308,7 @@ var blRecorder = (function () {
     return ptr;
   }
 
-  // Alles kodieren, was noch in den Encodern steckt, dann bl_recorder_flushed
+  // Encode everything still in the encoders, then bl__recorder_flushed
   function flush(id) {
     const state = recorders.get(id);
     const encoders = state ? [state.video && state.video.encoder, state.audio && state.audio.encoder].filter(Boolean) : [];
@@ -322,7 +322,7 @@ var blRecorder = (function () {
           }
         }
       }
-      Module._bl_recorder_flushed(id);
+      Module._bl__recorder_flushed(id);
     });
   }
 

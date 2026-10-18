@@ -98,7 +98,7 @@ export function createBridgeSim() {
   }
   const CAP = 1024;
   const argsBuffer = malloc(CAP * SLOT), outBuffer = malloc(CAP * SLOT);
-  env.Module._bl_wasm_call_guest = (realmId, id, args, n, out, cap) => {
+  env.Module._bl__wasm_call_guest = (realmId, id, args, n, out, cap) => {
     const realm = realms.get(realmId);
     const fn = realm && realm.guests.get(id);
     if (!fn)
@@ -118,7 +118,7 @@ export function createBridgeSim() {
     }
     return writePairs(out, result, realm);
   };
-  env.Module._bl_wasm_release_guest = (realmId, id) => realms.get(realmId)?.released.push(id);
+  env.Module._bl__wasm_release_guest = (realmId, id) => realms.get(realmId)?.released.push(id);
 
   // ---- Speicher, wie in C++ pro Thread mit der Realm, der er gehoert
   const memories = new Map();
@@ -156,9 +156,9 @@ export function createBridgeSim() {
     if (m && --m.refs <= 0)
       dropMemory(id);
   }
-  env.Module._bl_wasm_memory_grow = memoryGrow;
-  env.Module._bl_wasm_memory_retain = (id) => { const m = memories.get(id); if (m) m.refs++; };
-  env.Module._bl_wasm_memory_release = memoryRelease;
+  env.Module._bl__wasm_memory_grow = memoryGrow;
+  env.Module._bl__wasm_memory_retain = (id) => { const m = memories.get(id); if (m) m.refs++; };
+  env.Module._bl__wasm_memory_release = memoryRelease;
 
   const guestSource = fs.readFileSync(new URL('../../engine/js/wasm-guest.js', import.meta.url), 'utf8');
 

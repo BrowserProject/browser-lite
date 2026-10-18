@@ -9,7 +9,7 @@ namespace BrowserLite {
 
 void installPlatformStrategies();
 
-// Gemeinsame Cookie-/Netzwerk-Session aller Seiten (CookieJarDB von curl)
+// Shared cookie/network session of all pages (curl's CookieJarDB)
 WebCore::NetworkStorageSession& networkStorageSession();
 
 } // namespace BrowserLite

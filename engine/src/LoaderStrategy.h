@@ -16,29 +16,29 @@ namespace BrowserLite {
 
 WebCore::LoaderStrategy& loaderStrategy();
 
-// Laedt die Datei herunter und gibt sie an die Oberflaeche (Events
-// download-start / download-done, Daten ueber Module.onEngineDownloadData).
-// data: und blob: kommen aus der Engine selber, sonst ein eigener Request.
+// Downloads the file and hands it to the host (events download-start /
+// download-done, data through Module.onEngineDownloadData). data: and blob:
+// come from the engine itself, otherwise an own request.
 void startDownload(int viewId, const WebCore::ResourceRequest&, const String& suggestedFilename);
-// Quelltext einer Adresse laden (wie ein Download, mit viewSource-Merker)
+// Loads the source of an address (like a download, flagged viewSource)
 void startViewSource(int viewId, const URL&);
 
-// Set-Cookie der Antwort speichern, wenn die Anfrage Cookies haben darf
+// Stores Set-Cookie of the response if the request may have cookies
 void storeCookies(const WebCore::ResourceRequest&, const WebCore::CurlResponse&);
 
-// Jeder CurlRequest der Engine: User-Agent, Sec-GPC (wenn eingeschaltet),
-// dazu Cookies, wenn die Anfrage welche haben darf (allowCookies)
+// Every CurlRequest of the engine: user agent, Sec-GPC (when enabled), plus
+// cookies if the request may have them (allowCookies)
 Ref<WebCore::CurlRequest> createCurlRequest(WebCore::ResourceRequest&&, WebCore::CurlRequestClient&);
-// Antwort von curl wie fuer einen ResourceLoader: ohne Content-Type den
-// MIME-Typ raten wie andere Browser (nach der Endung, sonst HTML)
+// Response from curl like for a ResourceLoader: without Content-Type guess the
+// MIME type like other browsers (by extension, otherwise HTML)
 WebCore::ResourceResponse networkResponse(WebCore::CurlResponse&);
-// curl folgt Redirects nicht selber: 3xx mit Location
+// curl does not follow redirects itself: 3xx with Location
 bool isRedirect(const WebCore::ResourceResponse&);
-// Fuer Lader ohne ResourceLoader: die laufende Anfrage endet, die naechste
-// startet (wie Chrome, hoechstens 20). Ein Fehler heisst, es geht nicht weiter.
+// For loaders without a ResourceLoader: the running request ends, the next one
+// starts (like Chrome, at most 20). An error means it does not continue.
 WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::CurlRequestClient&, const WebCore::ResourceResponse&, unsigned& redirectCount);
 
-// Laedt ein Favicon und gibt es an die Oberflaeche (Module.onEngineIcon)
+// Loads a favicon and hands it to the host (Module.onEngineIcon)
 void loadIcon(int viewId, const URL&);
 
 } // namespace BrowserLite

@@ -11,7 +11,7 @@ namespace BrowserLite {
 
 namespace {
 
-// Samples in einem trun ohne eigene Felder, mehr hat kein echtes Fragment
+// Samples in a trun without own fields, no real fragment has more
 constexpr uint32_t maxSamplesPerRun = 1 << 16;
 
 uint32_t be32(std::span<const uint8_t> data, size_t offset)
@@ -35,7 +35,7 @@ String fourccString(uint32_t value)
     return String { std::span<const char> { chars } }.trim([](char16_t c) { return c == ' ' || !c; });
 }
 
-// Daten sammeln und von vorne verbrauchen
+// Collect data and consume it from the front
 class InputBuffer {
 public:
     void append(std::span<const uint8_t> data) { m_data.append(data); }
@@ -60,7 +60,7 @@ private:
     size_t m_offset { 0 };
 };
 
-// ------------------------------------------------------------- fragmentiertes MP4
+// ------------------------------------------------------------- fragmented MP4
 
 class Mp4Parser final : public ContainerParser {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(Mp4Parser);
@@ -88,11 +88,11 @@ public:
                 size = be64(input, 8);
                 header = 16;
             } else if (!size)
-                size = std::numeric_limits<uint64_t>::max(); // bis zum Ende
+                size = std::numeric_limits<uint64_t>::max(); // to the end
             if (size < header)
                 return false;
             if (type != fourcc("moov") && type != fourcc("moof")) {
-                // mdat, ftyp, styp, sidx, emsg, ...: brauchen wir nicht
+                // mdat, ftyp, styp, sidx, emsg, ...: not needed
                 m_input.consume(header);
                 m_skip = size == std::numeric_limits<uint64_t>::max() ? size : size - header;
                 continue;
@@ -125,7 +125,7 @@ private:
         uint64_t nextDecodeTime { 0 };
     };
 
-    // Kinder einer Box aufzaehlen
+    // Enumerate the children of a box
     template<typename Callback>
     static bool forEachBox(std::span<const uint8_t> data, Callback&& callback)
     {
@@ -197,7 +197,7 @@ private:
         if (!ok)
             return false;
 
-        // Bei einem neuen Init-Segment (andere Qualitaet) die Zeiten behalten
+        // With a new init segment (other quality) keep the times
         for (auto& track : tracks) {
             if (auto* old = this->track(track.info.id))
                 track.nextDecodeTime = old->nextDecodeTime;
@@ -241,7 +241,7 @@ private:
                             if (type != fourcc("stbl"))
                                 return true;
                             return forEachBox(box, [&](uint32_t type, std::span<const uint8_t> box) {
-                                // Erster Eintrag in stsd: Codec (avc1, mp4a, vp09, ...)
+                                // First entry in stsd: codec (avc1, mp4a, vp09, ...)
                                 if (type == fourcc("stsd") && box.size() >= 16)
                                     track.info.codec = fourccString(be32(box, 12));
                                 return true;
@@ -304,12 +304,12 @@ private:
                         firstFlags = be32(box, offset);
                         offset += 4;
                     }
-                    // Die Anzahl muss zur Box passen (4 Bytes pro Feld und Sample)
+                    // The count has to fit the box (4 bytes per field and sample)
                     uint64_t entrySize = 4 * std::popcount(flags & 0xf00);
                     if (offset > box.size() || (entrySize ? count * entrySize > box.size() - offset : count > maxSamplesPerRun))
                         return false;
                     uint64_t decodeTime = baseDecodeTime.value_or(track.nextDecodeTime);
-                    baseDecodeTime = std::nullopt; // weitere trun machen weiter
+                    baseDecodeTime = std::nullopt; // further truns continue
                     for (uint32_t i = 0; i < count; ++i) {
                         uint32_t duration = hasDefaultDuration ? defaultDuration : track.defaultDuration;
                         uint32_t size = hasDefaultSize ? defaultSize : track.defaultSize;
@@ -342,7 +342,7 @@ private:
                         sample.presentationTime = MediaTime(static_cast<int64_t>(decodeTime) + compositionOffset, track.timescale);
                         sample.duration = MediaTime(duration, track.timescale);
                         sample.size = size;
-                        // sample_is_non_sync_sample (Bit 16); Ton ist immer sync
+                        // sample_is_non_sync_sample (bit 16); sound is always sync
                         sample.isSync = track.info.isAudio || !(sampleFlags & 0x10000);
                         if (track.info.isVideo || track.info.isAudio)
                             client.sample(WTF::move(sample));
@@ -390,7 +390,7 @@ public:
     {
         m_input.append(data);
         bool ok = parse(client);
-        // Am Ende jedes Stuecks: Init-Segment melden und gesammelte Samples abgeben
+        // At the end of every piece: report the init segment and hand over the collected samples
         emitInitIfNeeded(client);
         if (m_group.active && m_position >= m_group.end)
             finishGroup(client);
@@ -423,7 +423,7 @@ private:
         bool hasReference { false };
     };
 
-    // EBML-Zahl mit Laengen-Markierung. keepMarker: fuer IDs
+    // EBML number with length marker. keepMarker: for IDs
     static std::optional<std::pair<uint64_t, size_t>> readVint(std::span<const uint8_t> data, size_t offset, bool keepMarker, size_t maxLength)
     {
         if (offset >= data.size())
@@ -441,7 +441,7 @@ private:
             allOnes = allOnes && data[offset + i] == 0xff;
         }
         if (!keepMarker && allOnes)
-            value = std::numeric_limits<uint64_t>::max(); // unbekannte Groesse
+            value = std::numeric_limits<uint64_t>::max(); // unknown size
         return std::make_pair(value, length);
     }
 
@@ -659,11 +659,11 @@ private:
 
     void emitInitIfNeeded(Client& client)
     {
-        // Erst wenn alle Spuren da sind
+        // Only when all tracks are there
         if (!m_tracksDirty || m_newTracks.isEmpty() || m_position < m_tracksEnd)
             return;
         m_tracksDirty = false;
-        // Alte Zustaende (ausstehende Samples) zu gleicher Spur behalten
+        // Keep old state (pending samples) for the same track
         for (auto& track : m_tracks)
             flushPending(track, client, std::nullopt);
         m_tracks = m_newTracks;
@@ -714,8 +714,8 @@ private:
         track->pendingHasDuration = hasDuration;
     }
 
-    // Ausstehendes Sample abgeben. Dauer = Abstand zum naechsten Sample
-    // (WebM speichert sie meist nicht), sonst eine Schaetzung.
+    // Hand over the pending sample. Duration = distance to the next sample
+    // (WebM mostly does not store it), otherwise an estimate.
     void flushPending(Track& track, Client& client, std::optional<MediaTime> nextTime)
     {
         if (!track.pending)

@@ -1,18 +1,19 @@
-// Rendert eine HTML-Datei mit der Engine in node und speichert das Bild als PPM.
-// Benutzt genau die gleiche Schnittstelle wie die Browser-Oberflaeche (web/).
+// Renders an HTML file with the engine in node and stores the frame as PPM.
+// Uses exactly the same contract as a host (engine/abi.json).
 //
-//   node tests/engine/render-test.mjs <engine.js> <seite.html> <ausgabe.ppm> [breite] [hoehe]
+//   node tests/engine/render-test.mjs <engine.js> <page.html> <output.ppm> [width] [height]
 //
-// RENDER_WAIT_FOR=text: erst fertig, wenn die Seite eine Konsolen-Zeile mit
-// diesem Text ausgegeben hat (z.B. am Ende eines Tests).
-// RENDER_TIMEOUT=sekunden: Zeitlimit (Standard 120).
-// JSC_* und BL_* gehen an die Engine (engine-node.mjs).
+// RENDER_WAIT_FOR=text: only done when the page logged a console line with
+// this text (e.g. at the end of a test).
+// RENDER_TIMEOUT=seconds: time limit (default 120).
+// RENDER_URL=url: base URL of the page (default file:///test/).
+// JSC_* and BL_* go to the engine (engine-node.mjs).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { runEngine } from './engine-node.mjs';
 
 const [enginePath, htmlPath, outPath, widthArg, heightArg] = process.argv.slice(2);
 if (!enginePath || !htmlPath || !outPath) {
-  console.error('Aufruf: render-test.mjs <engine.js> <seite.html> <ausgabe.ppm> [breite] [hoehe]');
+  console.error('Usage: render-test.mjs <engine.js> <page.html> <output.ppm> [width] [height]');
   process.exit(2);
 }
 
@@ -22,7 +23,7 @@ let waited = !waitFor;
 let loaded = false;
 let pendingFrame = null;
 const timeout = setTimeout(() => {
-  console.error(waited ? `FEHLER: Timeout (${seconds}s), kein Bild bekommen` : `FEHLER: Timeout (${seconds}s), "${waitFor}" kam nicht`);
+  console.error(waited ? `ERROR: timeout (${seconds}s), no frame received` : `ERROR: timeout (${seconds}s), "${waitFor}" did not arrive`);
   process.exit(1);
 }, seconds * 1000);
 
@@ -35,13 +36,13 @@ function savePPM({ engine, ptr, width, height }) {
     rgb[j + 2] = rgba[i + 2];
   }
   writeFileSync(outPath, Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), rgb]));
-  console.log(`Bild gespeichert: ${outPath} (${width}x${height})`);
+  console.log(`Frame saved: ${outPath} (${width}x${height})`);
 }
 
 await runEngine({
   enginePath,
   html: readFileSync(htmlPath, 'utf8'),
-  url: 'file:///test/',
+  url: process.env.RENDER_URL || 'file:///test/',
   width: Number(widthArg || 800),
   height: Number(heightArg || 600),
   onConsole(message) {
@@ -50,9 +51,9 @@ await runEngine({
     waited = true;
     if (pendingFrame)
       pendingFrame();
-    // Hat sich nichts geaendert, kommt kein neues Bild: dann ohne Bild fertig
+    // If nothing changed no new frame comes: then done without a frame
     setTimeout(() => {
-      console.log('Fertig (kein neues Bild)');
+      console.log('Done (no new frame)');
       process.exit(0);
     }, 3000);
   },
@@ -63,7 +64,7 @@ await runEngine({
   onFrame(frame) {
     const { engine, viewId } = frame;
     if (!loaded || !waited) {
-      // Noch nicht fertig: Bild verwerfen, beim naechsten weitermachen
+      // Not done yet: drop the frame, continue with the next one
       if (loaded)
         pendingFrame = () => engine._bl_frame(viewId);
       engine._bl_frame_presented(viewId);

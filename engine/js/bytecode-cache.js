@@ -1,10 +1,9 @@
-// Bytecode-Cache der Engine (engine/src/BytecodeCache.cpp), Teil im Haupt-Thread.
+// Bytecode cache of the engine (engine/src/BytecodeCache.cpp), the part on the main thread.
 //
-// Ein Cache pro Engine-Build (Name mit Build-ID), Caches alter Builds werden
-// beim Oeffnen geloescht. Die Liste der URLs halten wir im Speicher, so kostet
-// ein Skript ohne Eintrag keinen Plattenzugriff.
+// One cache per engine build ("<namespace>-bytecode-<build id>"), caches of
+// old builds of the same namespace are deleted when opening. The list of URLs
+// is kept in memory, so a script without an entry costs no disk access.
 var blBytecodeCache = {
-  prefix: 'bl-bytecode-',
   maxEntries: 400,
   ready: null,
   cache: null,
@@ -14,10 +13,11 @@ var blBytecodeCache = {
   open: function (buildID) {
     if (blBytecodeCache.ready || typeof caches === 'undefined')
       return;
-    var name = blBytecodeCache.prefix + buildID;
+    var prefix = blBytecodeCache.prefix();
+    var name = prefix + buildID;
     blBytecodeCache.ready = caches.keys().then(function (names) {
       return Promise.all(names.filter(function (other) {
-        return other.indexOf(blBytecodeCache.prefix) === 0 && other !== name;
+        return other.indexOf(prefix) === 0 && other !== name;
       }).map(function (other) { return caches.delete(other); }));
     }).then(function () {
       return caches.open(name);
@@ -28,6 +28,10 @@ var blBytecodeCache = {
         return cache;
       });
     }).catch(function () { return null; });
+  },
+
+  prefix: function () {
+    return blStorageNamespace() + '-bytecode-';
   },
 
   key: function (url) {
@@ -63,7 +67,7 @@ var blBytecodeCache = {
       else
         length = 0;
     }
-    Module['_bl_bytecode_cache_result'](urlPointer, dataPointer, length);
+    Module['_bl__bytecode_cache_result'](urlPointer, dataPointer, length);
     Module['_free'](urlPointer);
   },
 
@@ -81,8 +85,8 @@ var blBytecodeCache = {
     }).catch(function () { });
   },
 
-  // Zu viele Eintraege: die aeltesten loeschen (Reihenfolge der Cache API =
-  // Reihenfolge des Speicherns, neu gespeicherte Eintraege kommen ans Ende)
+  // Too many entries: delete the oldest (order of the Cache API = order of
+  // storing, newly stored entries go to the end)
   trim: function () {
     var cache = blBytecodeCache.cache;
     cache.keys().then(function (keys) {
@@ -94,13 +98,15 @@ var blBytecodeCache = {
     }).catch(function () { });
   },
 };
+// Host: deletes the bytecode caches of this namespace (browser.storage.clearCaches)
 Module['blClearBytecodeCache'] = function () {
   blBytecodeCache.ready = null;
   if (typeof caches === 'undefined')
     return Promise.resolve();
+  var prefix = blBytecodeCache.prefix();
   return caches.keys().then(function (names) {
     return Promise.all(names.filter(function (name) {
-      return name.indexOf(blBytecodeCache.prefix) === 0;
+      return name.indexOf(prefix) === 0;
     }).map(function (name) { return caches.delete(name); }));
   });
 };

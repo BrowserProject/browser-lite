@@ -1,4 +1,4 @@
-// SQLite-Datenbanken unter /data im WASM-Speicher (siehe MemoryVFS.cpp).
+// SQLite databases under /data in WASM memory (see MemoryVFS.cpp).
 #pragma once
 
 #include <cstdint>
@@ -7,21 +7,21 @@
 
 namespace BrowserLite {
 
-// Vor dem ersten Oeffnen einer Datenbank aufrufen: wird das Standard-VFS
+// Call before the first database is opened: becomes the default VFS
 void registerMemoryVFS();
 
-// Geaenderte Datenbanken jetzt ins Dateisystem schreiben (alle, die gerade
-// nicht mitten in einer Schreib-Transaktion sind). Im Engine-Thread oder einem
-// anderen Worker-Thread.
+// Writes changed databases to the file system now (all that are not in the
+// middle of a write transaction). On the engine thread or another worker
+// thread.
 void flushMemoryVFS();
 
-// Haupt-Thread des Host (pagehide): den Engine-Thread schreiben lassen und
-// hoechstens timeout darauf warten. false: nicht rechtzeitig fertig
+// Main thread of the host (pagehide): let the engine thread write and wait at
+// most timeout for it. false: not finished in time
 bool flushMemoryVFSAndWait(Seconds timeout);
 
-// Belegter Platz der Dateien direkt in directory (ohne Unterordner): offene
-// Datenbanken, wie sie im Speicher sind (mit WAL), alles andere auf der Platte.
-// Von Datenbanken zaehlen nur die belegten Seiten, nicht die freien.
+// Space used by the files directly in directory (without subfolders): open
+// databases as they are in memory (with WAL), everything else on disk. For
+// databases only the used pages count, not the free ones.
 uint64_t memoryVFSDirectorySize(const String& directory);
 
 } // namespace BrowserLite

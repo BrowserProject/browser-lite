@@ -1,8 +1,8 @@
 <!doctype html><title>jsbench</title><body><script>
-// Kleiner JS-Benchmark fuer den Interpreter. Laufen lassen mit
+// Small JS benchmark for the interpreter. Run with
 //   node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/jsbench.html /tmp/x.ppm 800 600
-// Pro Test der beste von 5 Laeufen in ms (Zeile "BENCH name=ms"), mit
-// RENDER_WAIT_FOR="BENCH fertig" laeuft alles durch.
+// Per test the best of 5 runs in ms (line "BENCH name=ms"), with
+// RENDER_WAIT_FOR="BENCH done" everything runs through.
 function t(name, f) { let best = 1e9; for (let r = 0; r < 5; r++) { const s = performance.now(); f(); best = Math.min(best, performance.now() - s); } console.log('BENCH ' + name + '=' + best.toFixed(0)); }
 t('props', () => { let o = { a: 1, b: 2, c: 3 }, s = 0; for (let i = 0; i < 300000; i++) { s += o.a + o.b + o.c; o.a = i & 7; } return s; });
 t('calls', () => { function add(x, y) { return x + y; } let s = 0; for (let i = 0; i < 300000; i++) s = add(s, i) | 0; return s; });
@@ -12,11 +12,11 @@ t('strings', () => { let s = ''; for (let i = 0; i < 50000; i++) s += String.fro
 t('json', () => { const o = { list: Array.from({ length: 2000 }, (_, i) => ({ id: i, name: 'n' + i, tags: ['x', 'y'] })) }; let n = 0; for (let k = 0; k < 5; k++) n += JSON.parse(JSON.stringify(o)).list.length; return n; });
 t('classes', () => { class P { constructor(x, y) { this.x = x; this.y = y; } len() { return Math.sqrt(this.x * this.x + this.y * this.y); } } let s = 0; for (let i = 0; i < 100000; i++) s += new P(i, i + 1).len(); return s; });
 t('regexp', () => { const r = /(\d+)-(\w+)/; let n = 0; for (let i = 0; i < 20000; i++) if (r.exec('abc ' + i + '-foo')) n++; return n; });
-// Muster aus echten Seiten (Babel-Klassen, Optionen pruefen, String-Methoden, Getter)
+// Patterns from real pages (Babel classes, option checks, string methods, getters)
 t('instanceof', () => { function C(x) { if (!(this instanceof C)) throw new TypeError(); this.x = x; } let s = 0; for (let i = 0; i < 100000; i++) s += new C(i).x; return s; });
 t('unset', () => { const opts = [{ a: 1 }, { a: 2 }, { a: 3 }]; let s = 0; for (let i = 0; i < 300000; i++) { const o = opts[i % 3]; if (o.missing === undefined) s += o.a; } return s; });
 t('stringmethods', () => { const w = 'hello world foo bar'; let s = 0; for (let i = 0; i < 100000; i++) s += w.indexOf('o') + w.charCodeAt(i & 7) + (w.startsWith('he') ? 1 : 0); return s; });
 t('getters', () => { class G { constructor() { this._v = 1; } get v() { return this._v; } } const g = new G(); let s = 0; for (let i = 0; i < 100000; i++) s += g.v; return s; });
 t('polymorphic', () => { const os = [{ a: 1 }, { b: 1, a: 2 }, { c: 1, a: 3 }, { d: 1, a: 4 }]; let s = 0; for (let i = 0; i < 300000; i++) s += os[i & 3].a; return s; });
-console.log('BENCH fertig');
+console.log('BENCH done');
 </script>

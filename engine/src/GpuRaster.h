@@ -1,17 +1,18 @@
-// GPU-Rastern: Skia (Ganesh) malt ueber WebGL 2 des Browsers.
+// GPU rasterization: Skia (Ganesh) paints through the browser's WebGL 2.
 //
-// Je ein WebGL-2-Kontext pro Thread, jeder auf einem eigenen OffscreenCanvas:
-// der Engine-Thread malt Views ohne Ebenen, der Compositor-Thread (Compositor.h)
-// setzt die Ebenen zusammen. Jeder View hat eine Zielflaeche (Textur). Zum
-// Anzeigen kommt sie in den Framebuffer des Kontexts und von dort per
-// transferToImageBitmap ohne Kopie in das Canvas des Tabs (engine-pre.js).
+// One WebGL 2 context per thread, each on its own OffscreenCanvas: the engine
+// thread paints views without layers, the compositor thread (Compositor.h)
+// composites the layers. Every view has a target surface (texture). For
+// presentation it goes into the framebuffer of the context and from there via
+// transferToImageBitmap without a copy into the canvas of the view
+// (engine-pre.js).
 //
-// Unsere WebGL-Bruecke (platform/wasm/angle) wechselt selber GL-Kontexte. Skia
-// macht darum vor jedem GL-Aufruf seinen Kontext aktuell (Patch 0020), alles
-// andere, was GL braucht, laeuft innerhalb eines Gpu::Scope.
+// Our WebGL bridge (platform/wasm/angle) switches GL contexts itself. So Skia
+// makes its context current before every GL call (patch 0020), everything else
+// that needs GL runs inside a Gpu::Scope.
 //
-// Nach einem Kontextverlust malt der Thread auf der CPU, bis der Browser den
-// Kontext wiederherstellt. Dann bekommt Skia einen neuen.
+// After a context loss the thread paints on the CPU until the browser restores
+// the context. Then Skia gets a new one.
 #pragma once
 
 #include <skia/core/SkRefCnt.h>
@@ -21,11 +22,11 @@ class SkSurface;
 
 namespace BrowserLite::Gpu {
 
-// Der Kontext dieses Threads, beim ersten Aufruf angelegt. nullptr ohne WebGL 2,
-// nach einem Verlust oder wenn ausgeschaltet (BL_GPU=0, Oberflaeche ?gpu=0).
+// The context of this thread, created on the first call. nullptr without
+// WebGL 2, after a loss or when turned off (BL_GPU=0).
 GrDirectContext* context();
 
-// Macht den GL-Kontext von Skia aktuell und danach den vorherigen wieder
+// Makes Skia's GL context current and afterwards the previous one again
 class Scope {
 public:
     Scope();
@@ -37,16 +38,16 @@ private:
     bool m_active { false };
 };
 
-// Zielflaeche fuer einen View (Textur, Inhalt bleibt zwischen Bildern erhalten)
+// Target surface for a view (texture, the content stays between frames)
 sk_sp<SkSurface> createSurface(int width, int height);
 
-// Abschicken und anzeigen: surface in das Canvas des Views. Braucht einen Scope.
-// false, wenn der View (noch) kein Canvas im Engine-Worker hat.
+// Submit and present: surface into the canvas of the view. Needs a scope.
+// false if the view has no canvas in the engine worker (yet).
 bool present(int viewId, SkSurface&);
 
-// Direkt in den Framebuffer des Kontexts malen (Compositor): Flaeche in der
-// Groesse des Views, nullptr wenn der View hier kein Canvas hat. Danach
-// showFramebuffer() schickt das Bild ohne Kopie ins Canvas des Tabs.
+// Paint directly into the framebuffer of the context (compositor): surface in
+// the size of the view, nullptr if the view has no canvas here. Afterwards
+// showFramebuffer() sends the frame without a copy into the canvas of the view.
 sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height);
 bool showFramebuffer(int viewId);
 

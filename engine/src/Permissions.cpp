@@ -1,7 +1,8 @@
-// Antworten fuer navigator.permissions.query(): zuerst die gemerkte
-// Entscheidung (Abfrage in der Oberflaeche, DeviceClients.cpp), sonst wie
-// Chrome ohne bisherige Entscheidung: "prompt" fuer alles, was spaeter eine
-// Abfrage zeigt, "granted" fuer das, was Chrome ohne Abfrage erlaubt.
+// Answers for navigator.permissions.query(): first the remembered decision
+// (prompt in the host, DeviceClients.cpp), otherwise like Chrome without a
+// previous decision: "prompt" for everything that shows a prompt later,
+// "granted" for what Chrome allows without a prompt. A disabled feature
+// answers "denied" (DeviceClients.cpp).
 #include "config.h"
 #include "Engine.h"
 #include "DeviceClients.h"
@@ -16,7 +17,7 @@ using namespace WebCore;
 
 namespace BrowserLite {
 
-// Art und Ursprung, unter denen DeviceClients.cpp die Entscheidung merkt
+// Kind and origin under which DeviceClients.cpp remembers the decision
 static PermissionDecision storedDecision(PermissionName name, const ClientOrigin& clientOrigin)
 {
     auto top = clientOrigin.topOrigin.toString();

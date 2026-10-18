@@ -1,7 +1,7 @@
-// Speicher der Seiten: Cookies, localStorage und IndexedDB liegen unter /data.
-// /data ist ein Verzeichnis im OPFS des Host-Browsers (Storage.cpp), so bleibt
-// alles nach einem Neuladen erhalten. Ohne OPFS (node-Tests, zweiter Host-Tab)
-// ist /data nur im Speicher.
+// Storage of the pages: cookies, localStorage and IndexedDB live under /data.
+// /data is the namespace directory in the OPFS of the host browser
+// (BL_STORAGE_NAMESPACE, Storage.cpp), so everything survives a reload.
+// Without OPFS (node tests, BL_OPFS=0) /data is in memory only.
 #pragma once
 
 #include <cstdint>
@@ -24,17 +24,17 @@ String cookieDatabasePath();
 WebCore::StorageNamespaceProvider& storageNamespaceProvider();
 WebCore::DatabaseProvider& databaseProvider();
 
-// Grenze fuer IndexedDB pro Ursprung (BL_INDEXEDDB_QUOTA_MB, sonst 256 MB) und
-// der Platz, den die Datenbanken eines Ursprungs dafuer belegen
+// IndexedDB limit per origin (BL_INDEXEDDB_QUOTA_MB, otherwise 256 MB) and the
+// space the databases of an origin use for it
 uint64_t indexedDBQuota();
 uint64_t indexedDBUsage(const WebCore::ClientOrigin&);
-// Alle Dateien unter directory auf der Platte
+// All files under directory on disk
 uint64_t directorySize(const String& directory);
 
-// Ganze Dateien unter /data (Datenbanken, Cache API) ersetzen: erst eine Kopie
-// in /data/tmp schreiben, dann umbenennen. Bricht das Schreiben ab (Tab zu,
-// Platte voll), bleibt die alte Datei ganz (initializeStorage leert /data/tmp
-// beim naechsten Start).
+// Replace whole files under /data (databases, Cache API): first write a copy
+// to /data/tmp, then rename. If writing breaks off (view closed, disk full),
+// the old file stays complete (initializeStorage empties /data/tmp on the next
+// start).
 class FileReplacement {
 public:
     FileReplacement();
@@ -42,12 +42,12 @@ public:
     FileReplacement(const FileReplacement&) = delete;
     FileReplacement& operator=(const FileReplacement&) = delete;
 
-    // An eine Stelle der Kopie schreiben bzw. ihre Laenge setzen
+    // Write at a position of the copy or set its length
     void write(std::span<const uint8_t>, uint64_t offset);
     void truncate(uint64_t size);
-    // false: schon beim Schreiben ging etwas schief
+    // false: something already went wrong while writing
     bool ok() const { return m_fd >= 0 && m_ok; }
-    // Die Kopie ersetzt path. false: etwas ging schief, path ist wie vorher
+    // The copy replaces path. false: something went wrong, path is as before
     bool commit(const char* path);
 
 private:
@@ -58,12 +58,12 @@ private:
 
 bool replaceWholeFile(const char* path, std::span<const uint8_t>);
 
-// Nur "gibt es nicht" ist Missing. Jeder andere Fehler (z.B. ist das OPFS von
-// einem anderen Tab belegt) ist Failed, damit niemand eine leere Datei ueber
-// die echte schreibt.
+// Only "does not exist" is Missing. Every other error (e.g. the OPFS is taken
+// by another tab) is Failed, so nobody writes an empty file over the real
+// one.
 enum class ReadResult : uint8_t { Done, Missing, Failed };
 ReadResult readWholeFile(const char* path, std::vector<uint8_t>&);
-// In Stuecken, ohne alles an einem Stueck im Speicher. append false: Failed
+// In pieces, without everything in memory at once. append false: Failed
 ReadResult readWholeFile(const char* path, const ScopedLambda<bool(std::span<const uint8_t>)>& append);
 
 } // namespace BrowserLite

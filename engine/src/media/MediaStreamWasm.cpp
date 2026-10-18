@@ -3,6 +3,7 @@
 
 #include "DeviceClients.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Host.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "VideoFrameWasm.h"
@@ -55,23 +56,23 @@ using namespace WebCore;
 
 namespace {
 
-// ------------------------------------------------------------ Geraete
+// ------------------------------------------------------------ Devices
 
 const CaptureDevice& cameraDevice()
 {
-    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-camera"_s, CaptureDevice::DeviceType::Camera, "Kamera"_s, "bl-group-camera"_s, true, true } };
+    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-camera"_s, CaptureDevice::DeviceType::Camera, "Camera"_s, "bl-group-camera"_s, true, true } };
     return device;
 }
 
 const CaptureDevice& microphoneDevice()
 {
-    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-microphone"_s, CaptureDevice::DeviceType::Microphone, "Mikrofon"_s, "bl-group-microphone"_s, true, true } };
+    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-microphone"_s, CaptureDevice::DeviceType::Microphone, "Microphone"_s, "bl-group-microphone"_s, true, true } };
     return device;
 }
 
 const CaptureDevice& screenDevice()
 {
-    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-screen"_s, CaptureDevice::DeviceType::Screen, "Bildschirm"_s, emptyString(), true, true } };
+    static NeverDestroyed<CaptureDevice> device { CaptureDevice { "bl-screen"_s, CaptureDevice::DeviceType::Screen, "Screen"_s, emptyString(), true, true } };
     return device;
 }
 
@@ -89,7 +90,7 @@ private:
 
 class ScreenManager final : public DisplayCaptureManager {
 public:
-    // Sonst sucht WebCore fuer getDisplayMedia unter den Kameras
+    // Otherwise WebCore looks among the cameras for getDisplayMedia
     bool requiresCaptureDevicesEnumeration() const final { return true; }
     const Vector<CaptureDevice>& captureDevices() final
     {
@@ -98,7 +99,7 @@ public:
     }
 };
 
-// ------------------------------------------------------------ Quellen
+// ------------------------------------------------------------ Sources
 
 int nextSourceId()
 {
@@ -155,8 +156,8 @@ public:
         dispatchVideoFrameToObservers(frame, { });
     }
 
-    // Spur einer Gegenstelle (WebRTC): Bilder kommen vom Host wie bei der
-    // Kamera, aber ohne Geraet und ohne Aufnahme-Anzeige
+    // Track of a remote peer (WebRTC): frames come from the host like with the
+    // camera, but without a device and without a capture indicator
     static Ref<VideoCaptureSourceWasm> createRemote(const String& label)
     {
         CaptureDevice device { makeString("remote-video-"_s, nextSourceId()), CaptureDevice::DeviceType::Camera, label };
@@ -425,7 +426,7 @@ class DisplayFactory final : public DisplayCaptureFactory {
     }
 };
 
-// ------------------------------------------------------------ Mikrofon fuer Web Audio
+// ------------------------------------------------------------ Microphone for Web Audio
 
 class AudioSourceProviderWasm final
     : public WebAudioSourceProvider
@@ -480,7 +481,7 @@ private:
         m_source->addAudioSampleObserver(*this);
     }
 
-    // Audio-Thread: so viel nehmen wie da ist, der Rest bleibt still
+    // Audio thread: take as much as is there, the rest stays silent
     void provideInput(AudioBus& bus, size_t frames) final
     {
         if (!m_lock.tryLock()) {
@@ -538,7 +539,7 @@ private:
                 ring[(m_written + frame) % capacity] = samples[frame];
         }
         m_written += frames;
-        // Hoechstens 0.2 s Verzoegerung: aeltere Samples fallen weg
+        // At most 0.2 s delay: older samples are dropped
         size_t maximum = static_cast<size_t>(sampleRate / 5);
         if (m_written - m_read > maximum)
             m_read = m_written - maximum;
@@ -562,11 +563,11 @@ private:
     uint64_t m_read WTF_GUARDED_BY_LOCK(m_lock) { 0 };
 };
 
-// ------------------------------------------------------------ Berechtigung (wie Chrome)
+// ------------------------------------------------------------ Permission (like Chrome)
 
 MediaDeviceHashSalts saltsFor(const String& origin)
 {
-    // Pro Ursprung gleich, solange die Engine laeuft (stabile deviceId wie in Chrome)
+    // The same per origin while the engine runs (stable deviceId like in Chrome)
     static NeverDestroyed<HashMap<String, String>> salts;
     auto salt = salts->ensure(origin, [] {
         return makeString(cryptographicallyRandomNumber<uint64_t>(), '-', cryptographicallyRandomNumber<uint64_t>());
@@ -589,6 +590,12 @@ private:
 
     void requestUserMediaAccess(UserMediaRequest& request) final
     {
+        // Without the capture feature like a browser that blocks camera,
+        // microphone and screen: NotAllowedError
+        if (!featureEnabled(Feature::Capture)) {
+            request.deny(MediaAccessDenialReason::PermissionDenied);
+            return;
+        }
         RefPtr origin = request.topLevelDocumentOrigin();
         String originString = origin ? origin->toString() : String { };
         RealtimeMediaSourceCenter::singleton().validateRequestConstraints([viewId = m_viewId, request = Ref { request }, originString](Expected<RealtimeMediaSourceCenter::ValidDevices, MediaConstraintType>&& result) mutable {
@@ -609,12 +616,12 @@ private:
                 }
                 request->allow(WTF::move(audio), WTF::move(video), saltsFor(originString), [] { });
             };
-            // Bildschirm: Chrome zeigt seine eigene Auswahl, dort entscheidet man
+            // Screen: Chrome shows its own picker, the decision happens there
             if (request->request().type != MediaStreamRequest::Type::UserMedia) {
                 allow(true);
                 return;
             }
-            // "camera-microphone" gilt fuer beide einzeln (DeviceClients.cpp)
+            // "camera-microphone" applies to both separately (DeviceClients.cpp)
             String kind = audio && video ? "camera-microphone"_s : video ? "camera"_s : "microphone"_s;
             requestDevicePermission(viewId, kind, originString, WTF::move(allow));
         }, request.request(), saltsFor(originString));
@@ -631,7 +638,7 @@ private:
                 bool isCamera = device.type() == CaptureDevice::DeviceType::Camera;
                 if (!isCamera && device.type() != CaptureDevice::DeviceType::Microphone)
                     continue;
-                // Wie Chrome: Namen erst, wenn die Seite das Geraet benutzen darf
+                // Like Chrome: names only once the page may use the device
                 auto copy = device;
                 if (storedPermission(isCamera ? "camera"_s : "microphone"_s, origin) != PermissionDecision::Granted)
                     copy.setLabel(emptyString());
@@ -644,7 +651,7 @@ private:
     DeviceChangeObserverToken addDeviceChangeObserver(Function<void()>&&) final { return DeviceChangeObserverToken::generate(); }
     void removeDeviceChangeObserver(DeviceChangeObserverToken) final { }
 
-    // Die Anzeige im Tab kommt ueber ChromeClient::isPlayingMediaDidChange
+    // The indicator on the view comes through ChromeClient::isPlayingMediaDidChange
     void updateCaptureState(const Document&, bool, MediaProducerMediaCaptureKind, CompletionHandler<void(std::optional<Exception>&&)>&& completionHandler) final
     {
         completionHandler({ });
@@ -667,8 +674,8 @@ Ref<MediaStreamPlayback> MediaStreamPlayback::create(MediaPlayerPrivateWasm& pla
     return playback;
 }
 
-// Ton einer Stream-Spur ueber einen eigenen Ausgang wie Web Audio (der
-// Resampler passt die Rate an den Host an)
+// Sound of a stream track through its own output like Web Audio (the
+// resampler adapts the rate to the host)
 class StreamAudioOutput final
     : public ThreadSafeRefCounted<StreamAudioOutput>
     , public AudioSourceProviderClient
@@ -734,7 +741,7 @@ private:
         }
     }
 
-    // Audio-Thread
+    // Audio thread
     void render(AudioBus& bus, size_t frames, const AudioIOPosition&) final
     {
         m_provider->provideInput(bus, frames);
@@ -864,7 +871,7 @@ RefPtr<VideoFrame> MediaStreamPlayback::currentFrame() const
     return m_frame;
 }
 
-// ------------------------------------------------------------ WebRTC-Bruecke
+// ------------------------------------------------------------ WebRTC bridge
 
 EM_JS(void, blJsSinkVideo, (int id, const uint8_t* data, int size, int format, int width, int height, double timestamp), {
     blSinks.video(id, data, size, format, width, height, timestamp);
@@ -876,10 +883,10 @@ EM_JS(void, blJsSinkClose, (int id), {
     blSinks.close(id);
 });
 
-// Bilder/Ton einer Spur der Seite (Canvas, Web Audio, ...) an den Host: dort
-// schreibt engine/js/webcodecs-host.js sie in einen MediaStreamTrackGenerator,
-// den web/webrtc.js an RTCPeerConnection gibt. Endet die Quelle, geht die
-// Senke von selber weg (sonst mit "sink-stop" aus dem Polyfill).
+// Frames/sound of a page track (canvas, Web Audio, ...) to the host: there
+// engine/js/webcodecs-host.js writes them into a MediaStreamTrackGenerator the
+// host gives to RTCPeerConnection. When the source ends, the sink goes away by
+// itself (otherwise with "sink-stop" from the polyfill).
 class TrackSink final
     : public ThreadSafeRefCounted<TrackSink>
     , public RealtimeMediaSourceObserver
@@ -994,13 +1001,13 @@ int hostCaptureId(RealtimeMediaSource& source)
     return 0;
 }
 
-// __blMedia(op, ...) nur fuer das WebRTC-Polyfill:
-//   "capture", track  -> Id der Host-Kamera/-Mikrofon-Spur oder 0
-//   "sink", track     -> Id einer neuen Senke (Bilder/Ton an den Host)
+// media(op, ...) only for the WebRTC and picture-in-picture polyfill:
+//   "capture", track  -> id of the host camera/microphone track or 0
+//   "sink", track     -> id of a new sink (frames/sound to the host)
 //   "sink-stop", id
-//   "player", element -> Id des Host-Players eines <video> oder 0
+//   "player", element -> id of the host player of a <video> or 0
 //   "pip-shown", element
-//   "remote", kind, label -> [MediaStreamTrack, Id] einer neuen entfernten Spur
+//   "remote", kind, label -> [MediaStreamTrack, id] of a new remote track
 static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame)
 {
     auto& vm = globalObject->vm();
@@ -1032,16 +1039,16 @@ static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObj
             sink->stop();
         return JSC::JSValue::encode(JSC::jsUndefined());
     }
-    // Host-Player eines <video> (Picture-in-Picture ueber das <video> des Host)
+    // Host player of a <video> (picture-in-picture through the host <video>)
     if (op == "player"_s) {
         RefPtr element = JSHTMLMediaElement::toWrapped(vm, callFrame->argument(1));
         RefPtr player = element ? element->player() : nullptr;
         auto* wasmPlayer = player ? static_cast<MediaPlayerPrivateWasm*>(player->playerPrivate()) : nullptr;
         return JSC::JSValue::encode(JSC::jsNumber(wasmPlayer && wasmPlayer->hasHostElement() ? wasmPlayer->id() : 0));
     }
-    // Im PiP-Fenster ist das Video zu sehen wie in einem Canvas: dann haelt WebKit
-    // es auch auf versteckten Seiten nicht an (HTMLMediaElement::elementIsHidden).
-    // Bleibt danach so, wie nach drawImage.
+    // In the PiP window the video is visible like in a canvas: then WebKit does
+    // not pause it on hidden pages either (HTMLMediaElement::elementIsHidden).
+    // Stays like that afterwards, like after drawImage.
     if (op == "pip-shown"_s) {
         RefPtr element = JSHTMLMediaElement::toWrapped(vm, callFrame->argument(1));
         if (RefPtr player = element ? element->player() : nullptr)
@@ -1079,11 +1086,9 @@ static JSC::EncodedJSValue JSC_HOST_CALL_ATTRIBUTES mediaBridge(JSC::JSGlobalObj
 
 namespace MediaStreams {
 
-void installBridge(JSC::JSGlobalObject& globalObject)
+JSC::JSObject* createBridge(JSC::JSGlobalObject& globalObject)
 {
-    auto& vm = globalObject.vm();
-    auto* function = JSC::JSFunction::create(vm, &globalObject, 3, "__blMedia"_s, mediaBridge, JSC::ImplementationVisibility::Public);
-    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blMedia"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+    return JSC::JSFunction::create(globalObject.vm(), &globalObject, 3, "media"_s, mediaBridge, JSC::ImplementationVisibility::Public);
 }
 
 void enableIn(Settings& settings)
@@ -1103,7 +1108,7 @@ void attachTo(int viewId, Page& page)
 
 } // namespace BrowserLite
 
-// Teile von WebCore, die jede Plattform selber liefert (Patch 0027)
+// Parts of WebCore every platform provides itself (patch 0027)
 namespace WebCore {
 
 AudioCaptureFactory& RealtimeMediaSourceCenter::defaultAudioCaptureFactory()
@@ -1139,7 +1144,7 @@ RefPtr<WebAudioSourceProvider> createMediaStreamTrackAudioSourceProviderWasm(Med
     return BrowserLite::AudioSourceProviderWasm::create(track);
 }
 
-// Web Audio -> MediaStream (MediaStreamAudioDestinationNode), Audio-Thread
+// Web Audio -> MediaStream (MediaStreamAudioDestinationNode), audio thread
 using MediaStreamAudioDeliver = void (*)(void*, const MediaTime&, const PlatformAudioData&, const AudioStreamDescription&, size_t);
 void consumeMediaStreamAudioWasm(AudioBus& bus, size_t frames, double sampleRate, uint64_t& framesSoFar, MediaStreamAudioDeliver deliver, void* context)
 {
@@ -1161,10 +1166,10 @@ void consumeMediaStreamAudioWasm(AudioBus& bus, size_t frames, double sampleRate
 
 } // namespace WebCore
 
-// Bilder und Ton vom Host (engine/js/webcodecs-host.js, blCapture), Engine-Thread
+// Frames and sound from the host (engine/js/webcodecs-host.js, blCapture), engine thread
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE void bl_capture_video(int id, uint8_t* data, int size, int format, int width, int height, double timestamp)
+EMSCRIPTEN_KEEPALIVE void bl__capture_video(int id, uint8_t* data, int size, int format, int width, int height, double timestamp)
 {
     auto* source = BrowserLite::videoSources().get(id);
     if (!source || format < 0 || format > static_cast<int>(WebCore::VideoPixelFormat::BGRX)) {
@@ -1177,14 +1182,14 @@ EMSCRIPTEN_KEEPALIVE void bl_capture_video(int id, uint8_t* data, int size, int 
         Ref { *source }->deliver(frame.releaseNonNull());
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_capture_audio(int id, float* samples, int frames, int channels, double sampleRate, double timestamp)
+EMSCRIPTEN_KEEPALIVE void bl__capture_audio(int id, float* samples, int frames, int channels, double sampleRate, double timestamp)
 {
     if (auto* source = BrowserLite::audioSources().get(id))
         Ref { *source }->deliver(samples, frames, channels, sampleRate, timestamp);
 }
 
-// Von der Oberflaeche (Haupt-Thread): entfernte WebRTC-Spur stumm/wieder da
-// (wie Chrome: stumm, solange keine Pakete kommen)
+// From the host (main thread): remote WebRTC track muted/back (like Chrome:
+// muted while no packets arrive)
 EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
 {
     BrowserLite::runOnEngineThread([id, muted] {
@@ -1195,8 +1200,8 @@ EMSCRIPTEN_KEEPALIVE void bl_remote_muted(int id, int muted)
     });
 }
 
-// Von der Oberflaeche (Haupt-Thread): Host-Kamera verweigert oder beendet.
-// failed auch aus engine/js/webcodecs-host.js, wenn keine Bilder mehr ankommen.
+// From the host (main thread): host camera denied or ended. failed also from
+// engine/js/webcodecs-host.js when no frames arrive anymore.
 EMSCRIPTEN_KEEPALIVE void bl_capture_failed(int id)
 {
     BrowserLite::runOnEngineThread([id] {

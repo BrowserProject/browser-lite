@@ -21,7 +21,7 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/StdLibExtras.h>
 
-// Host-Seite: engine/js/webcodecs-host.js. Alle Aufrufe im Engine-Thread.
+// Host side: engine/js/webcodecs-host.js. All calls on the engine thread.
 EM_JS(char*, blJsCodecCreate, (int id, int kind, const char* config, const uint8_t* description, int descriptionLength), {
     return blCodecs.create(id, kind, UTF8ToString(config), descriptionLength >= 0 ? HEAPU8.slice(description, description + descriptionLength) : null);
 });
@@ -54,8 +54,8 @@ namespace {
 
 enum class Kind : int { VideoDecoder = 0, VideoEncoder, AudioDecoder, AudioEncoder };
 
-// Was der Engine-Thread zu einem Codec weiss. Das Codec-Objekt von WebCore
-// kann in jedem Thread sterben, der Kanal nur im Engine-Thread.
+// What the engine thread knows about a codec. WebCore's codec object can die
+// on any thread, the channel only on the engine thread.
 struct Channel : ThreadSafeRefCounted<Channel> {
     Channel(int id, Kind kind)
         : id(id)
@@ -143,8 +143,8 @@ void resetChannel(const Ref<Channel>& channel)
     });
 }
 
-// Farbraum als Zahl: Primaries | Transfer << 8 | Matrix << 16 | Bereich << 24,
-// 255 = nicht gesetzt, Bereich 0/1, 2 = nicht gesetzt (Reihenfolge wie die IDL)
+// Color space as a number: primaries | transfer << 8 | matrix << 16 | range << 24,
+// 255 = not set, range 0/1, 2 = not set (order like the IDL)
 unsigned packColorSpace(const PlatformVideoColorSpace& colorSpace)
 {
     unsigned primaries = colorSpace.primaries ? static_cast<unsigned>(*colorSpace.primaries) : 255;
@@ -179,8 +179,8 @@ std::optional<uint64_t> durationFromHost(double duration)
     return static_cast<uint64_t>(duration);
 }
 
-// Neuen Kanal im Engine-Thread anlegen und den Host-Codec starten.
-// created() kommt spaeter ueber bl_codec_created.
+// Creates a new channel on the engine thread and starts the host codec.
+// created() comes later through bl__codec_created.
 void startChannel(Kind kind, String&& config, Vector<uint8_t>&& description, bool hasDescription, Function<void(Channel&)>&& setup, Function<void(Ref<Channel>&&, String&&)>&& done)
 {
     int id = s_nextId++;
@@ -398,8 +398,8 @@ void createVideoEncoder(const String& codec, const VideoEncoder::Config& config,
 
 } // namespace
 
-// Ton im Speicher der Engine: interleaved in einem Block oder eine Ebene pro
-// Kanal hintereinander
+// Sound in the engine memory: interleaved in one block or one plane per
+// channel one after another
 class PlatformRawAudioDataWasm final : public PlatformRawAudioData {
 public:
     static Ref<PlatformRawAudioDataWasm> create(Vector<uint8_t>&& data, AudioSampleFormat format, float sampleRate, int64_t timestamp, size_t frames, size_t channels)
@@ -521,7 +521,7 @@ void enableIn(Settings& settings)
 
 } // namespace BrowserLite::WebCodecs
 
-// Teile von WebCore, die jede Plattform selber liefert (Patch 0026)
+// Parts of WebCore every platform provides itself (patch 0026)
 namespace WebCore {
 using BrowserLite::WebCodecs::PlatformRawAudioDataWasm;
 using BrowserLite::WebCodecs::Kind;
@@ -529,7 +529,7 @@ using BrowserLite::WebCodecs::Channel;
 
 bool AudioDecoder::isCodecSupported(const StringView& codec)
 {
-    // Ob der Host den Codec wirklich kann, zeigt erst create() (isConfigSupported des Host)
+    // Whether the host can really do the codec only shows create() (isConfigSupported of the host)
     return codec.startsWith("mp4a.40."_s) || codec == "mp3"_s || codec == "opus"_s || codec == "alaw"_s
         || codec == "ulaw"_s || codec == "flac"_s || codec == "vorbis"_s || codec.startsWith("pcm-"_s);
 }
@@ -605,7 +605,7 @@ void PlatformRawAudioData::copyTo(std::span<uint8_t> destination, AudioSampleFor
     if (!copyElementCount)
         return;
 
-    // computeCopyElementCount (WebCodecsAudioDataAlgorithms) hat die Werte schon geprueft
+    // computeCopyElementCount (WebCodecsAudioDataAlgorithms) already checked the values
     auto& audio = static_cast<PlatformRawAudioDataWasm&>(*this);
     auto sourceFormat = format();
     bool destinationIsInterleaved = isAudioSampleFormatInterleaved(destinationFormat);
@@ -649,12 +649,12 @@ void PlatformRawAudioData::copyTo(std::span<uint8_t> destination, AudioSampleFor
 
 } // namespace WebCore
 
-// Meldungen vom Host (engine/js/webcodecs-host.js), Engine-Thread
+// Messages from the host (engine/js/webcodecs-host.js), engine thread
 using BrowserLite::WebCodecs::Kind;
 
 extern "C" {
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_created(int id, char* errorText)
+EMSCRIPTEN_KEEPALIVE void bl__codec_created(int id, char* errorText)
 {
     auto error = BrowserLite::WebCodecs::takeString(errorText);
     auto* channel = BrowserLite::WebCodecs::find(id);
@@ -669,7 +669,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_created(int id, char* errorText)
         created(WTF::move(error));
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_error(int id, char* errorText)
+EMSCRIPTEN_KEEPALIVE void bl__codec_error(int id, char* errorText)
 {
     auto error = BrowserLite::WebCodecs::takeString(errorText);
     auto* channel = BrowserLite::WebCodecs::find(id);
@@ -682,7 +682,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_error(int id, char* errorText)
         channel->audioOutput(makeUnexpected(WTF::move(error)));
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_flushed(int id, int ok)
+EMSCRIPTEN_KEEPALIVE void bl__codec_flushed(int id, int ok)
 {
     auto* channel = BrowserLite::WebCodecs::find(id);
     if (!channel || channel->flushes.isEmpty())
@@ -694,7 +694,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_flushed(int id, int ok)
         producer.reject();
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_video_frame(int id, uint8_t* data, int size, int format, int width, int height, double timestamp, double duration, unsigned colorSpace)
+EMSCRIPTEN_KEEPALIVE void bl__codec_video_frame(int id, uint8_t* data, int size, int format, int width, int height, double timestamp, double duration, unsigned colorSpace)
 {
     auto* channel = BrowserLite::WebCodecs::find(id);
     if (!channel || !channel->videoOutput || format < 0 || format > static_cast<int>(WebCore::VideoPixelFormat::BGRX)) {
@@ -707,7 +707,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_video_frame(int id, uint8_t* data, int size, 
     channel->videoOutput(WebCore::VideoDecoder::DecodedFrame { frame.releaseNonNull(), static_cast<int64_t>(timestamp), BrowserLite::WebCodecs::durationFromHost(duration) });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_audio_data(int id, uint8_t* data, int size, int format, double sampleRate, int frames, int channels, double timestamp)
+EMSCRIPTEN_KEEPALIVE void bl__codec_audio_data(int id, uint8_t* data, int size, int format, double sampleRate, int frames, int channels, double timestamp)
 {
     auto* channel = BrowserLite::WebCodecs::find(id);
     if (!channel || !channel->audioOutput || format < 0 || format > static_cast<int>(WebCore::AudioSampleFormat::F32Planar) || channels <= 0 || frames < 0) {
@@ -722,7 +722,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_audio_data(int id, uint8_t* data, int size, i
     channel->audioOutput(WebCore::AudioDecoder::DecodedData { BrowserLite::WebCodecs::PlatformRawAudioDataWasm::create(WTF::move(bytes), audioFormat, sampleRate, static_cast<int64_t>(timestamp), frames, channels) });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_encoded(int id, uint8_t* data, int size, int key, double timestamp, double duration, int temporalIndex)
+EMSCRIPTEN_KEEPALIVE void bl__codec_encoded(int id, uint8_t* data, int size, int key, double timestamp, double duration, int temporalIndex)
 {
     auto* channel = BrowserLite::WebCodecs::find(id);
     Vector<uint8_t> bytes { std::span<const uint8_t> { data, static_cast<size_t>(std::max(size, 0)) } };
@@ -738,7 +738,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_encoded(int id, uint8_t* data, int size, int 
         channel->audioEncoded({ WTF::move(bytes), !!key, static_cast<int64_t>(timestamp), BrowserLite::WebCodecs::durationFromHost(duration) });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_video_config(int id, char* codec, uint8_t* description, int descriptionLength, int displayWidth, int displayHeight, unsigned colorSpace)
+EMSCRIPTEN_KEEPALIVE void bl__codec_video_config(int id, char* codec, uint8_t* description, int descriptionLength, int displayWidth, int displayHeight, unsigned colorSpace)
 {
     auto codecName = BrowserLite::WebCodecs::takeString(codec);
     std::optional<Vector<uint8_t>> bytes;
@@ -763,7 +763,7 @@ EMSCRIPTEN_KEEPALIVE void bl_codec_video_config(int id, char* codec, uint8_t* de
     channel->videoDescription(WTF::move(configuration));
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_codec_audio_config(int id, char* codec, uint8_t* description, int descriptionLength, int sampleRate, int channels)
+EMSCRIPTEN_KEEPALIVE void bl__codec_audio_config(int id, char* codec, uint8_t* description, int descriptionLength, int sampleRate, int channels)
 {
     auto codecName = BrowserLite::WebCodecs::takeString(codec);
     std::optional<Vector<uint8_t>> bytes;

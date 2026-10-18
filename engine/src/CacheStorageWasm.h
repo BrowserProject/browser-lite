@@ -1,4 +1,4 @@
-// Cache API der Seiten (caches.*), unter /data/cachestorage (CacheStorageWasm.cpp)
+// Cache API of the pages (caches.*), under /data/cachestorage (CacheStorageWasm.cpp)
 #pragma once
 
 #include <cstdint>
@@ -12,7 +12,7 @@ struct ClientOrigin;
 namespace BrowserLite {
 
 WTF::Ref<WebCore::CacheStorageProvider> createCacheStorageProvider();
-// Belegter Platz der Cache API eines Ursprungs auf der Platte
+// Disk space used by the Cache API of an origin
 uint64_t cacheStorageUsage(const WebCore::ClientOrigin&);
 
 }

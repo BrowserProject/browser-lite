@@ -330,9 +330,9 @@ for (const [path, name, expected] of [['/preload-fresh', 'preloadfresh', 'none:n
 
 // Cache API: grosse Inhalte liegen in Dateien, nicht im Speicher der Engine
 async function engineMallocMB() {
-  const line = page.waitForEvent('console', { predicate: (msg) => /malloc belegt \d+ MB/.test(msg.text()), timeout: 30000 });
+  const line = page.waitForEvent('console', { predicate: (msg) => /malloc used \d+ MB/.test(msg.text()), timeout: 30000 });
   await page.evaluate(() => window.__blMemory(3));
-  return Number(/malloc belegt (\d+) MB/.exec((await line).text())[1]);
+  return Number(/malloc used (\d+) MB/.exec((await line).text())[1]);
 }
 // Dateien mit Inhalten der Cache API im OPFS der Oberflaeche (/data/cachestorage/*.bodies)
 const bodyFiles = () => page.evaluate(async () => {

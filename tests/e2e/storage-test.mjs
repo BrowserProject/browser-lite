@@ -334,14 +334,14 @@ check('OPFS: Datei mit eigenem Namen angelegt', (await result('opfsname')) === '
 // Rest einer abgebrochenen Kopie (replaceWholeFile, /data/tmp im OPFS des Host)
 const leftoverExists = () => page.evaluate(async () => {
   try {
-    await (await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp')).getFileHandle('rest');
+    await (await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle('tmp')).getFileHandle('rest');
     return 'da';
   } catch (e) {
     return e.name;
   }
 });
 await page.evaluate(async () => {
-  const tmp = await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp', { create: true });
+  const tmp = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle('tmp', { create: true });
   const writer = await (await tmp.getFileHandle('rest', { create: true })).createWritable();
   await writer.write('abgebrochen');
   await writer.close();
@@ -441,7 +441,7 @@ const databaseFiles = () => fresh.evaluate(async () => {
         files.push((await handle.getFile()).size);
     }
   };
-  await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle('indexeddb'));
+  await walk(await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle('indexeddb'));
   return files;
 });
 const bigFiles = (files) => files.filter((size) => size > (1 << 20)).length;
@@ -454,9 +454,9 @@ check('Datenbank zu gross fuer den Speicher: nicht geladen, loeschbar, Datei weg
 
 // Uploads liegen im OPFS (/data/tmp/uploads), nicht im WASM-Speicher der Engine
 const engineMallocMB = async () => {
-  const line = fresh.waitForEvent('console', { predicate: (msg) => /malloc belegt \d+ MB/.test(msg.text()), timeout: 30000 });
+  const line = fresh.waitForEvent('console', { predicate: (msg) => /malloc used \d+ MB/.test(msg.text()), timeout: 30000 });
   await fresh.evaluate(() => window.__blMemory(3));
-  return Number(/malloc belegt (\d+) MB/.exec((await line).text())[1]);
+  return Number(/malloc used (\d+) MB/.exec((await line).text())[1]);
 };
 results.clear();
 await fresh.goto(stack.app({ url: siteURL + 'upload' }));
@@ -484,7 +484,7 @@ const uploaded = await fresh.evaluate(async () => {
         sizes.push(handle.name + ':' + (await handle.getFile()).size);
     }
   };
-  const tmp = await (await navigator.storage.getDirectory()).getDirectoryHandle('tmp');
+  const tmp = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle('tmp');
   await walk(await tmp.getDirectoryHandle('uploads'));
   return sizes.join(',');
 });

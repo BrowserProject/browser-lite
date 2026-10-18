@@ -1,12 +1,12 @@
-// Pinch-Zoom wie Chrome: Touchpad (Strg + Rad) und zwei Finger skalieren nur
-// die Ansicht (Page::setPageScaleFactor, visual viewport). Die Layout-Breite
-// bleibt, jede Uebernahme kostet einen Style- und Layout-Durchlauf.
+// Pinch zoom like Chrome: touchpad (Ctrl + wheel) and two fingers only scale
+// the view (Page::setPageScaleFactor, visual viewport). The layout width
+// stays, every takeover costs a style and layout pass.
 //
-// Mit Compositor-Thread zeigt der Compositor die Geste sofort mit den alten
-// Kacheln (LayerTreeHostWasm.cpp), der Engine-Thread uebernimmt das Ziel erst
-// am Ende der Geste und malt dann scharf. Bis dahin verschiebt das Rad das
-// Ziel (CompositorScene::scrollPinch). Ohne Compositor skaliert der
-// Engine-Thread bei jedem Schritt (WebView.cpp).
+// With the compositor thread the compositor shows the gesture right away with
+// the old tiles (LayerTreeHostWasm.cpp), the engine thread only takes over the
+// target at the end of the gesture and then paints sharp. Until then the wheel
+// moves the target (CompositorScene::scrollPinch). Without the compositor the
+// engine thread scales on every step (WebView.cpp).
 #pragma once
 
 #include <WebCore/FloatPoint.h>
@@ -15,12 +15,12 @@
 
 namespace BrowserLite {
 
-// Von der Oberflaeche (bl_pinch)
+// From the host (bl_pinch)
 enum class PinchPhase : uint8_t { Begin, Update, End, Cancel };
 
-// Ansicht des Hauptframes: Skalierung, Scroll-Position (in skalierten
-// Koordinaten wie ScrollView::scrollPosition), Dokument ohne Skalierung und
-// sichtbare Groesse ohne Scrollbalken (CSS-Pixel)
+// View of the main frame: scale, scroll position (in scaled coordinates like
+// ScrollView::scrollPosition), document without scaling and visible size
+// without scrollbars (CSS pixels)
 struct PinchViewport {
     float scale { 1 };
     WebCore::FloatPoint scrollPosition;
@@ -28,8 +28,8 @@ struct PinchViewport {
     WebCore::FloatSize visibleSize;
 };
 
-// Eine Geste: der Inhalt unter dem Mittelpunkt (Finger bzw. Mauszeiger) bleibt
-// darunter, Verschieben der Finger verschiebt die Ansicht
+// One gesture: the content under the focus point (fingers or mouse pointer)
+// stays under it, moving the fingers moves the view
 class PinchZoom {
 public:
     static constexpr float minimumScale = 1;
@@ -45,7 +45,7 @@ public:
     const PinchViewport& start() const { return m_start; }
     const PinchViewport& target() const { return m_target; }
 
-    // factor relativ zum letzten Schritt, focus in der View (CSS-Pixel)
+    // factor relative to the last step, focus in the view (CSS pixels)
     void update(float factor, WebCore::FloatPoint focus)
     {
         float oldScale = m_target.scale;
@@ -57,13 +57,13 @@ public:
         m_focus = focus;
     }
 
-    // Scrollen in skalierten Koordinaten
+    // Scrolling in scaled coordinates
     void scrollBy(WebCore::FloatSize delta)
     {
         m_target.scrollPosition = clampScrollPosition(m_target, m_target.scrollPosition + delta);
     }
 
-    // Abgebrochen (die Seite will die Finger selber): zurueck zum Anfang
+    // Cancelled (the page wants the fingers itself): back to the start
     void cancel() { m_target = m_start; }
 
 private:

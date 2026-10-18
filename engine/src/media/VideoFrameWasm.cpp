@@ -111,11 +111,11 @@ std::span<const uint8_t> VideoFrameWasm::data() const
 
 Ref<VideoFrame> VideoFrameWasm::clone()
 {
-    // Die Pixel aendern sich nie, die Kopie teilt sie
+    // The pixels never change, the copy shares them
     return adoptRef(*new VideoFrameWasm(m_format, m_width, m_height, m_buffer.copyRef(), presentationTime(), PlatformVideoColorSpace { colorSpace() }));
 }
 
-// YUV -> RGB in Festkomma (16.16), Koeffizienten nach Matrix und Wertebereich
+// YUV -> RGB in fixed point (16.16), coefficients by matrix and value range
 namespace {
 struct YuvToRgb {
     int y { 0 };
@@ -251,8 +251,8 @@ sk_sp<SkImage> VideoFrameWasm::image() const
 
 } // namespace BrowserLite
 
-// Die Teile von WebCore::VideoFrame, die jede Plattform selber liefert
-// (Patch 0026 nimmt die leeren Platzhalter in WebCore heraus)
+// The parts of WebCore::VideoFrame every platform provides itself (patch 0026
+// takes the empty placeholders out of WebCore)
 namespace WebCore {
 using BrowserLite::VideoFrameWasm;
 
@@ -322,7 +322,7 @@ RefPtr<VideoFrame> VideoFrame::createFromPixelBuffer(Ref<PixelBuffer>&& pixelBuf
     auto* data = static_cast<uint8_t*>(std::malloc(needed));
     if (!data)
         return nullptr;
-    // Wie Chromium: Bilder aus einem Canvas sind RGBA
+    // Like Chromium: images from a canvas are RGBA
     if (format.pixelFormat == PixelFormat::BGRA8) {
         for (size_t i = 0; i < needed; i += 4) {
             data[i] = bytes[i + 2];

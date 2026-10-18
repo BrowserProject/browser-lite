@@ -1,20 +1,21 @@
-// Startet die Engine in node mit einem View und einer HTML-Seite, ueber die
-// gleiche Schnittstelle wie die Oberflaeche (web/). Fuer render-test.mjs und gc-test.mjs.
+// Starts the engine in node with one view and an HTML page, through the same
+// contract as a host (engine/abi.json). For render-test.mjs and gc-test.mjs.
 //
-// Umgebung: JSC_* (JSC-Optionen, z.B. JSC_useLLIntICs=false) und BL_* (Schalter
-// der Engine, z.B. BL_DEBUG=1) gehen in die Umgebung der Engine.
+// Environment: JSC_* (JSC options, e.g. JSC_useLLIntICs=false) and BL_* (engine
+// switches, e.g. BL_DEBUG=1) go into the environment of the engine. Without
+// BL_FEATURES the engine enables all features.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-// onConsole(message): Konsole der Seite. onLoad({ engine, viewId }): Seite geladen.
-// onFrame({ engine, viewId, ptr, width, height }): fertiges Bild (RGBA im Speicher
-// der Engine); ohne onFrame wird jedes Bild gleich als gezeigt gemeldet.
+// onConsole(message): console of the page. onLoad({ engine, viewId }): page loaded.
+// onFrame({ engine, viewId, ptr, width, height }): finished frame (RGBA in engine
+// memory); without onFrame every frame is reported as presented right away.
 export async function runEngine({ enginePath, html, url, width, height, onConsole = () => {}, onLoad = () => {}, onFrame = null }) {
   const createEngine = createRequire(import.meta.url)(path.resolve(enginePath));
-  // Emscripten (MODULARIZE) benutzt genau dieses Objekt als Module, darum sind
-  // die Exports (_bl_...) schon in den Callbacks darauf verfuegbar.
+  // Emscripten (MODULARIZE) uses exactly this object as Module, so the exports
+  // (_bl_...) are available on it in the callbacks already.
   const engine = {
-    // engine.wasm und engine.data liegen neben engine.js
+    // engine.wasm and engine.data are next to engine.js
     locateFile: (file) => path.join(path.dirname(path.resolve(enginePath)), file),
     preRun: [(module) => {
       for (const [key, value] of Object.entries(process.env)) {
@@ -23,22 +24,22 @@ export async function runEngine({ enginePath, html, url, width, height, onConsol
       }
     }],
     onEngineReady() {
-      console.log('Engine bereit');
+      console.log('Engine ready');
       engine._bl_create_view(1, width, height, 1);
       engine._bl_load_html(1, engine.stringToNewUTF8(html), engine.stringToNewUTF8(url));
     },
     onEngineEvent(viewId, type, payload) {
       if (type === 'console') {
         const { message } = JSON.parse(payload);
-        console.log('[seite]', message);
+        console.log('[page]', message);
         onConsole(message);
       } else if (type === 'load') {
         onLoad({ engine, viewId });
       } else if (type === 'error') {
-        console.error('[fehler]', payload);
+        console.error('[error]', payload);
       }
     },
-    // In node gibt es kein requestAnimationFrame
+    // node has no requestAnimationFrame
     onEngineNeedsFrame(viewId) {
       setTimeout(() => engine._bl_frame(viewId), 16);
     },

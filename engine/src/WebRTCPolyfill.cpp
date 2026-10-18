@@ -3,19 +3,19 @@
 
 namespace BrowserLite {
 
-// WebRTC der Seiten ueber das RTCPeerConnection des Host-Browsers (web/webrtc.js).
+// WebRTC of the pages through the RTCPeerConnection of the host browser, and
+// picture-in-picture through the host <video>.
 //
-// Laeuft vor dem allgemeinen Polyfill (das loescht die Bruecke). Jede
-// Verbindung und jeder Kanal hat im Host ein echtes Gegenstueck; die Seite
-// bekommt Objekte mit der API von Chrome. Zustand (Beschreibungen, Status)
-// spiegeln wir hier, damit die Eigenschaften synchron lesbar sind. Ereignisse
-// holt eine Schleife mit "rtc-poll" (der Host antwortet, sobald etwas da ist).
-const char* const webrtcPolyfillSource = R"JS((() => {
-  const host = globalThis.__blHost;
-  // Spuren der Seite <-> Host (engine/src/media/MediaStreamWasm.cpp)
-  const media = globalThis.__blMedia;
-  delete globalThis.__blMedia;
-  if (typeof host !== 'function' || 'RTCPeerConnection' in globalThis)
+// Runs before the general polyfill, with the same bridge (installPageExtensions).
+// Every connection and every channel has a real counterpart in the host; the
+// page gets objects with Chrome's API. State (descriptions, status) is mirrored
+// here so the properties can be read synchronously. Events are fetched by a
+// loop with "rtc-poll" (the host answers as soon as something is there).
+const char* const webrtcPolyfillSource = R"JS((bridge) => {
+  // media: tracks of the page <-> host (engine/src/media/MediaStreamWasm.cpp)
+  const { host, media, extendPrototype, features } = bridge;
+  const enabled = new Set(features);
+  if (typeof host !== 'function')
     return;
   const define = (target, name, value) => Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
   const call = (name, payload) => new Promise((resolve, reject) => {
@@ -30,7 +30,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   const internal = new WeakMap();
   const state = (object) => internal.get(object);
 
-  // Deskriptor fuer on<name> (Ereignis-Handler als Property)
+  // Descriptor for on<name> (event handler as property)
   const eventHandler = (name) => {
     const key = Symbol(name);
     return {
@@ -51,8 +51,8 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     for (const name of names)
       Object.defineProperty(prototype, 'on' + name, eventHandler(name));
   };
-  // Getter auf globalThis: der erste Zugriff auf einen der Namen ruft build,
-  // das die Werte mit define anlegt
+  // Getter on globalThis: the first access to one of the names calls build,
+  // which creates the values with define
   const lazyGlobals = (names, build) => {
     let built = false;
     const run = () => {
@@ -80,16 +80,15 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   };
 
   // ---------------------------------------------------------------- Picture-in-Picture
-  // Das <video> der Seite hat im Host ein verstecktes <video> (web/media.js), das
-  // geht ins PiP-Fenster von Chrome (mit Ton und Bedienelementen). Die Eintraege
-  // kommen erst auf HTMLVideoElement, Document und ShadowRoot, wenn das Fenster
-  // diese Prototypen anlegt (__blExtendPrototype): sonst kostet jedes Frame die
-  // Klassen HTMLVideoElement und ShadowRoot samt Vorfahren, auch ohne Video.
-  const extendPrototype = globalThis.__blExtendPrototype;
-  if (typeof extendPrototype === 'function') {
+  // The page's <video> has a hidden <video> in the host, which goes into
+  // Chrome's PiP window (with sound and controls). The entries only go on
+  // HTMLVideoElement, Document and ShadowRoot when the window creates these
+  // prototypes (extendPrototype): otherwise every frame pays for the classes
+  // HTMLVideoElement and ShadowRoot with their ancestors, even without video.
+  if (enabled.has('pip') && typeof extendPrototype === 'function') {
     let pipElement = null;
     let pipWindow = null;
-    let pipSink = 0; // Engine-Senke eines Streams im PiP-Fenster
+    let pipSink = 0; // engine sink of a stream in the PiP window
     const value = (fn) => ({ __proto__: null, value: fn, writable: true, configurable: true, enumerable: false });
     const getter = (get, set) => ({ __proto__: null, get, set, configurable: true, enumerable: true });
     let classes;
@@ -163,7 +162,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       let sink = 0;
       const stream = this.srcObject;
       if (typeof MediaStream === 'function' && stream instanceof MediaStream) {
-        // Stream: der Host zeigt die Spur in einem eigenen <video>
+        // Stream: the host shows the track in its own <video>
         const track = stream.getVideoTracks().find((t) => t.readyState === 'live');
         if (!track || !media)
           throw unavailable();
@@ -222,13 +221,14 @@ const char* const webrtcPolyfillSource = R"JS((() => {
   }
 
   // ---------------------------------------------------------------- WebRTC
-  // Erst beim ersten Zugriff auf eine der Klassen (Getter auf globalThis): die
-  // vielen Klassen, Spuren-Haken und die Ereignis-Schleife kosten sonst in jedem
-  // Frame Zeit (iframes von Werbung), auch wenn die Seite kein WebRTC nutzt.
-  lazyGlobals(['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCSessionDescription', 'RTCIceCandidate', 'RTCDataChannel', 'RTCPeerConnectionIceEvent', 'RTCPeerConnectionIceErrorEvent', 'RTCDataChannelEvent', 'RTCError', 'RTCErrorEvent', 'RTCStatsReport', 'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCTrackEvent'], buildRTC);
+  // Only on the first access to one of the classes (getter on globalThis): the
+  // many classes, track hooks and the event loop cost time in every frame
+  // otherwise (ad iframes), even if the page uses no WebRTC.
+  if (enabled.has('webrtc') && !('RTCPeerConnection' in globalThis))
+    lazyGlobals(['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCSessionDescription', 'RTCIceCandidate', 'RTCDataChannel', 'RTCPeerConnectionIceEvent', 'RTCPeerConnectionIceErrorEvent', 'RTCDataChannelEvent', 'RTCError', 'RTCErrorEvent', 'RTCStatsReport', 'RTCRtpSender', 'RTCRtpReceiver', 'RTCRtpTransceiver', 'RTCTrackEvent'], buildRTC);
 
   function buildRTC() {
-    // randomUUID gibt es nur auf sicheren Seiten
+    // randomUUID only exists on secure pages
     const client = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
     let nextId = 0;
     const connections = new Map(); // id -> RTCPeerConnection
@@ -245,7 +245,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     };
     const fromBase64 = (text) => typeof Uint8Array.fromBase64 === 'function' ? Uint8Array.fromBase64(text) : Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 
-    // ---------------------------------------------------------------- Ereignisse
+    // ---------------------------------------------------------------- Events
     let polling = false;
     function poll() {
       if (polling)
@@ -287,7 +287,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         state(connection).hostEvent(event);
     }
 
-    // ---------------------------------------------------------------- Beschreibungen
+    // ---------------------------------------------------------------- Descriptions
     class RTCSessionDescription {
       constructor(init = {}) {
         this.type = init.type ?? '';
@@ -324,7 +324,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       toJSON() { return { candidate: this.candidate, sdpMid: this.sdpMid, sdpMLineIndex: this.sdpMLineIndex, usernameFragment: this.usernameFragment }; }
     }
 
-    // ---------------------------------------------------------------- Ereignis-Klassen
+    // ---------------------------------------------------------------- Event classes
     class RTCPeerConnectionIceEvent extends Event {
       constructor(type, init = {}) {
         super(type, init);
@@ -407,7 +407,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
           size = String(data).length;
         }
         channel.bufferedAmount += size;
-        // In der Reihenfolge der Aufrufe senden (Blobs werden erst gelesen)
+        // Send in the order of the calls (blobs are read first)
         channel.sending = channel.sending.then(() => payload).then((message) => call('rtc-send', { client, channel: channel.key, ...message })).then((result) => {
           channel.bufferedAmount = Math.max(0, channel.bufferedAmount - size);
           if (result && typeof result.bufferedAmount === 'number')
@@ -425,7 +425,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     eventHandlers(RTCDataChannel.prototype, ['open', 'message', 'bufferedamountlow', 'error', 'closing', 'close']);
 
     function makeChannel(connection, info) {
-      // EventTarget mit dem Prototyp von RTCDataChannel, ohne dessen Konstruktor
+      // EventTarget with the prototype of RTCDataChannel, without its constructor
       const channel = Reflect.construct(EventTarget, [], RTCDataChannel);
       const data = {
         key: info.key, label: info.label ?? '', ordered: info.ordered ?? true, maxPacketLifeTime: info.maxPacketLifeTime ?? null,
@@ -473,9 +473,9 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     }
 
 
-    // ---------------------------------------------------------------- Medien
-    // Spur der Seite fuer den Host: Kamera/Mikrofon als echte Host-Spur, alles
-    // andere (Canvas, Web Audio, entfernte Spuren) ueber eine Senke der Engine
+    // ---------------------------------------------------------------- Media
+    // A track of the page for the host: camera/microphone as a real host track,
+    // everything else (canvas, Web Audio, remote tracks) through an engine sink
     const trackSinks = new WeakMap();
     const sentTracks = new Map(); // id -> MediaStreamTrack
     function describeTrack(track) {
@@ -499,7 +499,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       return info;
     }
     if (typeof MediaStreamTrack === 'function') {
-      // enabled = false sendet wie in Chrome schwarze Bilder/Stille, stop() beendet
+      // enabled = false sends black frames/silence like in Chrome, stop() ends
       const enabled = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, 'enabled');
       if (enabled?.set) {
         Object.defineProperty(MediaStreamTrack.prototype, 'enabled', {
@@ -524,7 +524,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       });
     }
 
-    // Fallback, bis der Host seine Liste geschickt hat
+    // Fallback until the host has sent its list
     let capabilities = {
       sender: {
         audio: { codecs: [{ mimeType: 'audio/opus', clockRate: 48000, channels: 2, sdpFmtpLine: 'minptime=10;useinbandfec=1' }], headerExtensions: [] },
@@ -585,8 +585,8 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       static getCapabilities(kind) { return copy(capabilities.receiver[kind]) ?? null; }
     }
 
-    // Die Spur eines Empfaengers gibt es sofort (stumm, bis Daten kommen); die
-    // Bilder/den Ton holt die Engine erst, wenn die Seite die Spur anschaut
+    // A receiver's track exists right away (muted until data arrives); the
+    // engine only fetches frames/sound once the page looks at the track
     function receiverTrack(receiver) {
       const data = state(receiver);
       if (!data.track && media) {
@@ -660,7 +660,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
       }
     }
 
-    // Entfernte Streams mit der Id aus dem SDP (msid), wie in Chrome
+    // Remote streams with the id from the SDP (msid), like in Chrome
     const remoteStreams = new Map();
     function remoteStream(id, track) {
       let stream = remoteStreams.get(id);
@@ -773,7 +773,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         poll();
       }
 
-      // Operationen laufen wie in Chrome nacheinander
+      // Operations run one after another like in Chrome
       _operation(name, payload) {
         const data = state(this);
         if (data.closed)
@@ -880,7 +880,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
         if (data.order.some((t) => state(state(t).sender).track === track))
           throw new DOMException("Failed to execute 'addTrack' on 'RTCPeerConnection': A sender already exists for the track.", 'InvalidAccessError');
         const info = describeTrack(track);
-        // Wie Chrome: einen ungenutzten Transceiver aus einem Angebot wiederverwenden
+        // Like Chrome: reuse an unused transceiver from an offer
         let transceiver = data.order.find((t) => {
           const entry = state(t);
           return entry.remoteCreated && !entry.everSending && entry.kind === track.kind && entry.direction !== 'stopped' && !state(entry.sender).track;
@@ -976,7 +976,7 @@ const char* const webrtcPolyfillSource = R"JS((() => {
     define(globalThis, 'RTCRtpTransceiver', RTCRtpTransceiver);
     define(globalThis, 'RTCTrackEvent', RTCTrackEvent);
   }
-})();
+}
 )JS";
 
 } // namespace BrowserLite

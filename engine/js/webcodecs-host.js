@@ -1,13 +1,13 @@
-// WebCodecs der Seiten (engine/src/media/WebCodecsWasm.cpp), Host-Seite.
+// WebCodecs of the pages (engine/src/media/WebCodecsWasm.cpp), host side.
 //
-// Laeuft im Engine-Worker (--pre-js), aufgerufen nur im Engine-Thread. Jeder
-// Codec der Seite bekommt hier einen echten Codec des Host-Browsers.
-// Dekodierte Bilder und Ton kopieren wir in den Speicher der Engine und
-// melden sie ueber Module._bl_codec_* zurueck. Fehler, die sofort feststehen,
-// gehen als Text zurueck (Zeiger, die Engine gibt ihn frei), 0 = ok.
+// Runs in the engine worker (--pre-js), only called on the engine thread.
+// Every codec of the page gets a real codec of the host browser here. Decoded
+// frames and sound are copied into the engine memory and reported back
+// through Module._bl__codec_*. Errors known right away go back as text
+// (pointer, the engine frees it), 0 = ok.
 var blCodecs = (function () {
   'use strict';
-  // Reihenfolge wie die Enums von WebCore (VideoPixelFormat, AudioSampleFormat, Farbraum-IDL)
+  // Order like the WebCore enums (VideoPixelFormat, AudioSampleFormat, color space IDL)
   const VIDEO_FORMATS = ['I420', 'I420A', 'I422', 'I444', 'NV12', 'RGBA', 'RGBX', 'BGRA', 'BGRX'];
   const AUDIO_FORMATS = ['u8', 's16', 's32', 'f32', 'u8-planar', 's16-planar', 's32-planar', 'f32-planar'];
   const PRIMARIES = ['bt709', 'bt470bg', 'smpte170m', 'bt470m', 'smpte240m', 'film', 'bt2020', 'smpteSt4281', 'smpteRp431', 'smpte432', 'jedecP22Phosphors'];
@@ -44,7 +44,7 @@ var blCodecs = (function () {
     return space;
   }
 
-  // Ebenen dicht hintereinander, wie VideoFrameWasm::planes
+  // Planes tightly one after another, like VideoFrameWasm::planes
   function videoLayout(format, width, height) {
     const cw = (width + 1) >> 1, ch = (height + 1) >> 1;
     let planes;
@@ -69,7 +69,7 @@ var blCodecs = (function () {
     return new Uint8Array(HEAPU8.buffer, ptr, size);
   }
 
-  // Bild ohne bekanntes Format (z.B. von der GPU): ueber ein Canvas als RGBA
+  // Frame without a known format (e.g. from the GPU): through a canvas as RGBA
   let canvas = null;
   function readViaCanvas(frame, rect, ptr) {
     if (!canvas)
@@ -82,7 +82,7 @@ var blCodecs = (function () {
     HEAPU8.set(pixels, ptr);
   }
 
-  // Pixel eines VideoFrame in den Speicher der Engine (Ebenen wie VideoFrameWasm)
+  // Pixels of a VideoFrame into the engine memory (planes like VideoFrameWasm)
   async function copyVideoFrame(frame) {
     const visible = frame.visibleRect;
     const rect = { x: visible.x, y: visible.y, width: visible.width, height: visible.height };
@@ -90,7 +90,7 @@ var blCodecs = (function () {
       try {
         return await copyToHeap(frame.format, rect, (ptr, size, layout) => copyPlanes(frame, rect, layout, ptr, size));
       } catch (e) {
-        // Ebenen, die copyTo nicht kann (z.B. ungerader Ausschnitt): ueber das Canvas
+        // Planes copyTo cannot handle (e.g. odd crop): through the canvas
       }
     }
     return copyToHeap('RGBA', rect, (ptr) => readViaCanvas(frame, rect, ptr));
@@ -110,7 +110,7 @@ var blCodecs = (function () {
     try {
       await frame.copyTo(heapView(ptr, size), { rect, layout });
     } catch (e) {
-      // SharedArrayBuffer nicht erlaubt: ueber einen eigenen Puffer
+      // SharedArrayBuffer not allowed: through an own buffer
       const copy = new Uint8Array(size);
       await frame.copyTo(copy, { rect, layout });
       HEAPU8.set(copy, ptr);
@@ -127,11 +127,11 @@ var blCodecs = (function () {
       if (state.closed || generation !== state.generation)
         return;
       ptr = 0;
-      Module._bl_codec_video_frame(id, copy.ptr, copy.size, copy.format, copy.width, copy.height,
+      Module._bl__codec_video_frame(id, copy.ptr, copy.size, copy.format, copy.width, copy.height,
         frame.timestamp, frame.duration == null ? -1 : frame.duration, packColorSpace(frame.colorSpace));
     } catch (e) {
       if (!state.closed)
-        Module._bl_codec_error(id, errorText(e));
+        Module._bl__codec_error(id, errorText(e));
     } finally {
       if (ptr)
         Module._free(ptr);
@@ -139,9 +139,9 @@ var blCodecs = (function () {
     }
   }
 
-  // Kamera, Mikrofon, Bildschirm (engine/src/media/MediaStreamWasm.cpp): die
-  // Oberflaeche schickt den ReadableStream eines MediaStreamTrackProcessor.
-  // Einzelne kaputte Bilder fallen weg, bleibt es kaputt, endet die Spur.
+  // Camera, microphone, screen (engine/src/media/MediaStreamWasm.cpp): the
+  // host sends the ReadableStream of a MediaStreamTrackProcessor. Single
+  // broken frames are dropped, if it stays broken the track ends.
   const MAX_FAILED_FRAMES = 30;
   const captures = new Map(); // id -> reader
   function attachCapture(id, kind, readable) {
@@ -158,7 +158,7 @@ var blCodecs = (function () {
           if (kind === 'video') {
             const copy = await copyVideoFrame(value);
             if (captures.get(id) === reader)
-              Module._bl_capture_video(id, copy.ptr, copy.size, copy.format, copy.width, copy.height, value.timestamp);
+              Module._bl__capture_video(id, copy.ptr, copy.size, copy.format, copy.width, copy.height, value.timestamp);
             else
               Module._free(copy.ptr);
           } else
@@ -191,7 +191,7 @@ var blCodecs = (function () {
         data.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
         HEAPU8.set(new Uint8Array(plane.buffer), ptr + channel * frames * 4);
       }
-      Module._bl_capture_audio(id, ptr, frames, channels, data.sampleRate, data.timestamp);
+      Module._bl__capture_audio(id, ptr, frames, channels, data.sampleRate, data.timestamp);
     } finally {
       Module._free(ptr);
     }
@@ -243,10 +243,10 @@ var blCodecs = (function () {
       }
       const result = ptr;
       ptr = 0;
-      Module._bl_codec_audio_data(id, result, size, index, data.sampleRate, data.numberOfFrames, data.numberOfChannels, data.timestamp);
+      Module._bl__codec_audio_data(id, result, size, index, data.sampleRate, data.numberOfFrames, data.numberOfChannels, data.timestamp);
     } catch (e) {
       if (!state.closed)
-        Module._bl_codec_error(id, errorText(e));
+        Module._bl__codec_error(id, errorText(e));
     } finally {
       if (ptr)
         Module._free(ptr);
@@ -260,8 +260,8 @@ var blCodecs = (function () {
     return ptr;
   }
 
-  // Erst alles in den Speicher der Engine, dann melden: geht etwas schief,
-  // bekommt die Engine einen Fehler statt halber Daten
+  // Everything into the engine memory first, then report: if something goes
+  // wrong the engine gets an error instead of half the data
   function sendEncoded(id, state, chunk, metadata) {
     if (state.closed)
       return;
@@ -282,21 +282,21 @@ var blCodecs = (function () {
         const config = description;
         description = 0;
         if (state.kind === 1)
-          Module._bl_codec_video_config(id, text(decoderConfig.codec), config, length,
+          Module._bl__codec_video_config(id, text(decoderConfig.codec), config, length,
             decoderConfig.codedWidth || 0, decoderConfig.codedHeight || 0,
             packColorSpace(decoderConfig.colorSpace));
         else
-          Module._bl_codec_audio_config(id, text(decoderConfig.codec), config, length, decoderConfig.sampleRate || 0, decoderConfig.numberOfChannels || 0);
+          Module._bl__codec_audio_config(id, text(decoderConfig.codec), config, length, decoderConfig.sampleRate || 0, decoderConfig.numberOfChannels || 0);
       }
       const data = ptr;
       ptr = 0;
       const temporal = metadata && metadata.svc && metadata.svc.temporalLayerId != null ? metadata.svc.temporalLayerId : -1;
-      Module._bl_codec_encoded(id, data, chunk.byteLength, chunk.type === 'key' ? 1 : 0, chunk.timestamp, chunk.duration == null ? -1 : chunk.duration, temporal);
+      Module._bl__codec_encoded(id, data, chunk.byteLength, chunk.type === 'key' ? 1 : 0, chunk.timestamp, chunk.duration == null ? -1 : chunk.duration, temporal);
     } catch (e) {
       Module._free(description);
       Module._free(ptr);
       if (!state.closed)
-        Module._bl_codec_error(id, errorText(e));
+        Module._bl__codec_error(id, errorText(e));
     }
   }
 
@@ -335,15 +335,15 @@ var blCodecs = (function () {
           output,
           error: (e) => {
             if (!state.closed)
-              Module._bl_codec_error(id, errorText(e));
+              Module._bl__codec_error(id, errorText(e));
           },
         });
         state.codec.configure(config);
-        Module._bl_codec_created(id, 0);
+        Module._bl__codec_created(id, 0);
       }).catch((e) => {
         codecs.delete(id);
         if (!state.closed)
-          Module._bl_codec_created(id, errorText(e));
+          Module._bl__codec_created(id, errorText(e));
       });
       return 0;
     } catch (e) {
@@ -412,11 +412,11 @@ var blCodecs = (function () {
   function flush(id) {
     const state = codecs.get(id);
     if (!state || !state.codec) {
-      Module._bl_codec_flushed(id, 1);
+      Module._bl__codec_flushed(id, 1);
       return;
     }
     state.codec.flush().then(() => true, () => false).then((ok) => state.chain.then(() => ok)).then((ok) => {
-      Module._bl_codec_flushed(id, ok ? 1 : 0);
+      Module._bl__codec_flushed(id, ok ? 1 : 0);
     });
   }
 
@@ -464,9 +464,9 @@ var blCodecs = (function () {
   return { create, decode, encodeVideo, encodeAudio, flush, reset, close, setRates };
 })();
 
-// Spuren der Seite fuer WebRTC (engine/src/media/MediaStreamWasm.cpp, TrackSink):
-// web/webrtc.js schickt den WritableStream eines MediaStreamTrackGenerator, wir
-// schreiben Bilder und Ton der Engine hinein.
+// Tracks of the page for WebRTC (engine/src/media/MediaStreamWasm.cpp,
+// TrackSink): the host sends the WritableStream of a MediaStreamTrackGenerator,
+// we write frames and sound of the engine into it.
 var blSinks = (function () {
   'use strict';
   const VIDEO_FORMATS = ['I420', 'I420A', 'I422', 'I444', 'NV12', 'RGBA', 'RGBX', 'BGRA', 'BGRX'];
@@ -491,8 +491,8 @@ var blSinks = (function () {
       }
       const writer = data.writable.getWriter();
       writers.set(data.id, writer);
-      // Die Senke der Engine bleibt, solange die Spur der Seite lebt: ein
-      // spaeteres addTrack schliesst einen neuen Generator an
+      // The engine sink stays while the page's track lives: a later addTrack
+      // connects a new generator
       writer.closed.catch(() => {}).finally(() => {
         if (writers.get(data.id) === writer)
           writers.delete(data.id);
@@ -502,7 +502,7 @@ var blSinks = (function () {
 
   function video(id, ptr, size, format, width, height, timestamp) {
     const writer = writers.get(id);
-    // Generator kommt noch oder ist voll: Bild auslassen
+    // Generator still coming or full: skip the frame
     if (!writer || writer.desiredSize === null || writer.desiredSize <= 0)
       return;
     let frame;

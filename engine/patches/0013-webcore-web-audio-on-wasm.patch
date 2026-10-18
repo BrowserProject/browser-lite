@@ -372,19 +372,19 @@ index 0000000000..b03ade7f53
 +            if (debug)
 +                console.log('[audio] dekodiert: ' + (buffer ? buffer.length + ' Frames' : 'Fehler'));
 +            if (!buffer) {
-+                _bl_audio_decoded(request, 0, 0, 0, 0);
++                _bl__audio_decoded(request, 0, 0, 0, 0);
 +                return;
 +            }
 +            var channels = buffer.numberOfChannels;
 +            var length = buffer.length;
 +            var ptr = _malloc(channels * length * 4);
 +            if (!ptr) {
-+                _bl_audio_decoded(request, 0, 0, 0, 0);
++                _bl__audio_decoded(request, 0, 0, 0, 0);
 +                return;
 +            }
 +            for (var c = 0; c < channels; c++)
 +                HEAPF32.set(buffer.getChannelData(c), (ptr >> 2) + c * length);
-+            _bl_audio_decoded(request, ptr, channels, length, buffer.sampleRate);
++            _bl__audio_decoded(request, ptr, channels, length, buffer.sampleRate);
 +        };
 +        try {
 +            // decodeAudioData rechnet auf die Rate des Kontexts um
@@ -398,7 +398,7 @@ index 0000000000..b03ade7f53
 +
 +} // namespace
 +
-+extern "C" EMSCRIPTEN_KEEPALIVE void bl_audio_decoded(DecodeRequest* request, float* channelData, unsigned numberOfChannels, unsigned length, float sampleRate)
++extern "C" EMSCRIPTEN_KEEPALIVE void bl__audio_decoded(DecodeRequest* request, float* channelData, unsigned numberOfChannels, unsigned length, float sampleRate)
 +{
 +    request->channelData = channelData;
 +    request->numberOfChannels = numberOfChannels;

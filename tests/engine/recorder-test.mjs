@@ -1,7 +1,7 @@
-// WebM-Muxer des MediaRecorder (engine/js/mediarecorder-host.js) ohne Engine:
-// in node geladen, VideoEncoder/AudioEncoder und der Speicher der Engine sind
-// Attrappen. Die Ausgabe liest ein kleiner EBML-Leser wieder ein und prueft
-// Groessen, Spuren, Cluster-Grenzen und Block-Zeiten.
+// WebM muxer of MediaRecorder (engine/js/mediarecorder-host.js) without the
+// engine: loaded in node, VideoEncoder/AudioEncoder and the engine memory are
+// fakes. A small EBML reader reads the output back and checks sizes, tracks,
+// cluster boundaries and block times.
 //   node tests/engine/recorder-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -13,7 +13,7 @@ const check = (name, ok, info = '') => {
     failed++;
 };
 
-// ------------------------------------------------- Attrappen der Engine
+// ------------------------------------------------- Fakes of the engine
 
 const heap = new ArrayBuffer(64 * 1024 * 1024);
 globalThis.HEAPU8 = new Uint8Array(heap);
@@ -29,10 +29,10 @@ globalThis.Module = {
   blAlloc(size) {
     return this._malloc(size);
   },
-  _bl_recorder_flushed: (id) => flushed.push(id),
+  _bl__recorder_flushed: (id) => flushed.push(id),
 };
 globalThis.stringToNewUTF8 = (text) => {
-  console.log('    Fehler an die Engine:', text);
+  console.log('    error to the engine:', text);
   return 1;
 };
 
@@ -49,8 +49,8 @@ globalThis.AudioData = class {
   close() {}
 };
 
-// Encoder liefern pro Eingabe einen Chunk, asynchron wie die echten. Die Groesse
-// der Daten kommt aus chunkSizes (je Zeitstempel), sonst 10 Bytes.
+// Encoders deliver one chunk per input, asynchronously like the real ones. The
+// data size comes from chunkSizes (per timestamp), otherwise 10 bytes.
 const encoders = [];
 class FakeEncoder {
   constructor({ output, error }) {
@@ -98,10 +98,10 @@ globalThis.AudioEncoder = class extends FakeEncoder {
 vm.runInThisContext(readFileSync(new URL('../../engine/js/mediarecorder-host.js', import.meta.url), 'utf8'));
 const recorder = globalThis.blRecorder;
 
-// Datengroesse je Zeitstempel (us); um die Grenzen der EBML-Laengen herum
+// Data size per timestamp (us); around the boundaries of the EBML lengths
 const chunkSizes = new Map();
 
-// Eingaben in zeitlicher Reihenfolge: ['v', us, breite, hoehe] oder ['a', us]
+// Inputs in time order: ['v', us, width, height] or ['a', us]
 async function record(id, config, inputs) {
   if (recorder.create(id, JSON.stringify(config)) !== 0)
     return null;
@@ -121,7 +121,7 @@ async function record(id, config, inputs) {
   return bytes;
 }
 
-// ------------------------------------------------------------ EBML-Leser
+// ------------------------------------------------------------ EBML reader
 
 const ID = { EBML: 0x1A45DFA3, DocType: 0x4282, Segment: 0x18538067, Info: 0x1549A966, TimecodeScale: 0x2AD7B1, Tracks: 0x1654AE6B,
   TrackEntry: 0xAE, TrackNumber: 0xD7, TrackType: 0x83, CodecID: 0x86, CodecPrivate: 0x63A2, Video: 0xE0, PixelWidth: 0xB0,
@@ -134,7 +134,7 @@ function vint(bytes, pos, keepMarker) {
   while (length <= 8 && !(first & (0x80 >> (length - 1))))
     length++;
   if (length > 8 || pos + length > bytes.length)
-    throw new Error(`ungueltige Laenge bei ${pos}`);
+    throw new Error(`invalid length at ${pos}`);
   const mask = 0xFF >> length;
   let value = keepMarker ? first : first & mask;
   let allOnes = (first & mask) === mask;
@@ -145,14 +145,14 @@ function vint(bytes, pos, keepMarker) {
   return { value, length, unknown: !keepMarker && allOnes };
 }
 
-// Unbekannte Laenge (Segment, Cluster): bis zum Ende des Elternelements, ein
-// Cluster endet beim naechsten Cluster
+// Unknown length (segment, cluster): up to the end of the parent element, a
+// cluster ends at the next cluster
 function readElement(bytes, pos, end) {
   const id = vint(bytes, pos, true);
   const size = vint(bytes, pos + id.length, false);
   const dataStart = pos + id.length + size.length;
   if (!size.unknown && dataStart + size.value > end)
-    throw new Error(`Element ${id.value.toString(16)} bei ${pos} geht ueber sein Elternelement hinaus`);
+    throw new Error(`element ${id.value.toString(16)} at ${pos} goes beyond its parent element`);
   const dataEnd = size.unknown ? end : dataStart + size.value;
   const element = { id: id.value, unknown: size.unknown };
   if (!MASTERS.has(id.value)) {
@@ -181,11 +181,11 @@ const uint = (element) => element.data.reduce((value, byte) => value * 256 + byt
 const text = (element) => Buffer.from(element.data).toString();
 const float = (element) => new DataView(element.data.buffer, element.data.byteOffset, element.data.byteLength).getFloat64(0);
 
-// Ganze Datei: Kopf, Spuren und je Cluster die Zeit und die Bloecke
+// Whole file: header, tracks and per cluster the time and the blocks
 function readWebM(bytes) {
   const top = readChildren(bytes, 0, bytes.length, null);
   if (top.next !== bytes.length)
-    throw new Error('Datei nicht ganz gelesen');
+    throw new Error('file not read completely');
   const segment = one(top.list, ID.Segment);
   const tracks = all(one(segment.children, ID.Tracks).children, ID.TrackEntry).map((entry) => {
     const video = one(entry.children, ID.Video);
@@ -223,10 +223,10 @@ function readWebM(bytes) {
 }
 const blockTimes = (webm, track) => webm.clusters.flatMap((c) => c.blocks.filter((b) => b.track === track).map((b) => c.time + b.relative));
 
-// ------------------------------------------------------------------ Faelle
+// ------------------------------------------------------------------ Cases
 
-// Bild alle 100 ms und Ton alle 20 ms, 3 s lang: Schluesselbild alle 2 s
-// (KEYFRAME_INTERVAL), dort beginnt ein neuer Cluster
+// A frame every 100 ms and sound every 20 ms, 3 s long: key frame every 2 s
+// (KEYFRAME_INTERVAL), a new cluster starts there
 {
   const inputs = [];
   for (let ms = 0; ms < 3000; ms += 20) {
@@ -234,67 +234,67 @@ const blockTimes = (webm, track) => webm.clusters.flatMap((c) => c.blocks.filter
       inputs.push(['v', ms * 1000]);
     inputs.push(['a', ms * 1000 + 5000]);
   }
-  // Bloecke um die Grenzen der EBML-Laengen (126/127 und 16382/16383 Bytes Inhalt)
+  // Blocks around the boundaries of the EBML lengths (126/127 and 16382/16383 bytes of content)
   [122, 123, 16378, 16379].forEach((size, i) => chunkSizes.set((i + 1) * 100000, size));
   const webm = readWebM(await record(1, { video: { codec: 'vp8', bitrate: 1e6 }, audio: { bitrate: 64000 } }, inputs));
-  check('Kopf: DocType webm, Segment mit unbekannter Laenge, Zeit in ms', webm.docType === 'webm' && webm.segmentUnknown && webm.timecodeScale === 1e6);
+  check('header: DocType webm, segment with unknown length, time in ms', webm.docType === 'webm' && webm.segmentUnknown && webm.timecodeScale === 1e6);
   const [video, audio] = webm.tracks;
-  check('Spuren: VP8 und Opus', webm.tracks.length === 2 && video.codec === 'V_VP8' && video.number === 1 && video.type === 1
+  check('tracks: VP8 and Opus', webm.tracks.length === 2 && video.codec === 'V_VP8' && video.number === 1 && video.type === 1
     && audio.codec === 'A_OPUS' && audio.number === 2 && audio.type === 2, JSON.stringify(webm.tracks));
-  check('Video: Groesse in der Spur', video.width === 64 && video.height === 48);
-  check('Audio: OpusHead vom Encoder, 48 kHz, 1 Kanal', JSON.stringify(audio.codecPrivate) === JSON.stringify([...OPUS_HEAD]) && audio.rate === 48000 && audio.channels === 1);
-  check('Cluster bei jedem Schluesselbild (0 s, 2 s)', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,2000]' && webm.clusters.every((c) => c.unknown),
+  check('video: size in the track', video.width === 64 && video.height === 48);
+  check('audio: OpusHead from the encoder, 48 kHz, 1 channel', JSON.stringify(audio.codecPrivate) === JSON.stringify([...OPUS_HEAD]) && audio.rate === 48000 && audio.channels === 1);
+  check('cluster at every key frame (0 s, 2 s)', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,2000]' && webm.clusters.every((c) => c.unknown),
     JSON.stringify(webm.clusters.map((c) => c.time)));
-  check('Cluster beginnt mit dem Schluesselbild', webm.clusters.every((c) => c.blocks[0].track === 1 && c.blocks[0].key && c.blocks[0].relative === 0));
+  check('cluster starts with the key frame', webm.clusters.every((c) => c.blocks[0].track === 1 && c.blocks[0].key && c.blocks[0].relative === 0));
   const videoTimes = blockTimes(webm, 1);
   const audioTimes = blockTimes(webm, 2);
-  check('Alle Bilder, Zeiten relativ zum Cluster', videoTimes.length === 30 && videoTimes.every((t, i) => t === i * 100), videoTimes.slice(0, 5).join(','));
-  check('Aller Ton, Zeiten relativ zum Cluster', audioTimes.length === 150 && audioTimes.every((t, i) => t === i * 20 + 5), audioTimes.slice(0, 5).join(','));
+  check('all frames, times relative to the cluster', videoTimes.length === 30 && videoTimes.every((t, i) => t === i * 100), videoTimes.slice(0, 5).join(','));
+  check('all sound, times relative to the cluster', audioTimes.length === 150 && audioTimes.every((t, i) => t === i * 20 + 5), audioTimes.slice(0, 5).join(','));
   const keys = webm.clusters.flatMap((c) => c.blocks.filter((b) => b.track === 1 && b.key).map((b) => c.time + b.relative));
-  check('Schluesselbilder nur alle 2 s', JSON.stringify(keys) === '[0,2000]', JSON.stringify(keys));
+  check('key frames only every 2 s', JSON.stringify(keys) === '[0,2000]', JSON.stringify(keys));
   const sizes = webm.clusters.flatMap((c) => c.blocks.filter((b) => b.track === 1).map((b) => b.size));
-  check('Blockgroessen um die Laengengrenzen', JSON.stringify(sizes.slice(1, 5)) === '[122,123,16378,16379]' && webm.clusters.every((c) => c.blocks.every((b) => b.fill === (b.track === 1 ? 0x55 : 0xAA))),
+  check('block sizes around the length boundaries', JSON.stringify(sizes.slice(1, 5)) === '[122,123,16378,16379]' && webm.clusters.every((c) => c.blocks.every((b) => b.fill === (b.track === 1 ? 0x55 : 0xAA))),
     JSON.stringify(sizes.slice(0, 6)));
   chunkSizes.clear();
 }
 
-// Nur Ton, 12 s: alle 5 s ein neuer Cluster
+// Sound only, 12 s: a new cluster every 5 s
 {
   const inputs = [];
   for (let ms = 0; ms < 12000; ms += 20)
     inputs.push(['a', ms * 1000]);
   const webm = readWebM(await record(2, { audio: { bitrate: 64000 } }, inputs));
-  check('Nur Ton: eine Spur', webm.tracks.length === 1 && webm.tracks[0].codec === 'A_OPUS' && webm.tracks[0].number === 1);
-  check('Nur Ton: Cluster alle 5 s', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,5000,10000]', JSON.stringify(webm.clusters.map((c) => c.time)));
-  check('Nur Ton: alle Bloecke, relative Zeit unter 5 s', blockTimes(webm, 1).length === 600 && webm.clusters.every((c) => c.blocks.every((b) => b.relative >= 0 && b.relative < 5000)));
+  check('sound only: one track', webm.tracks.length === 1 && webm.tracks[0].codec === 'A_OPUS' && webm.tracks[0].number === 1);
+  check('sound only: cluster every 5 s', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,5000,10000]', JSON.stringify(webm.clusters.map((c) => c.time)));
+  check('sound only: all blocks, relative time below 5 s', blockTimes(webm, 1).length === 600 && webm.clusters.every((c) => c.blocks.every((b) => b.relative >= 0 && b.relative < 5000)));
 }
 
-// Video angemeldet, aber nie ein Bild: nach 1 s Ton faellt die Spur weg,
-// der Ton wird Spur 1
+// Video announced but never a frame: after 1 s of sound the track is dropped,
+// the sound becomes track 1
 {
   const inputs = [];
   for (let ms = 0; ms < 2000; ms += 20)
     inputs.push(['a', ms * 1000]);
   const webm = readWebM(await record(3, { video: { codec: 'vp9' }, audio: {} }, inputs));
-  check('Spur ohne Daten faellt weg, Ton wird Spur 1', webm.tracks.length === 1 && webm.tracks[0].codec === 'A_OPUS' && webm.tracks[0].number === 1, JSON.stringify(webm.tracks));
-  check('Ohne Spur ohne Daten: alle Bloecke auf Spur 1', blockTimes(webm, 1).length === 100 && webm.clusters.every((c) => c.blocks.every((b) => b.track === 1)));
+  check('track without data is dropped, sound becomes track 1', webm.tracks.length === 1 && webm.tracks[0].codec === 'A_OPUS' && webm.tracks[0].number === 1, JSON.stringify(webm.tracks));
+  check('without the empty track: all blocks on track 1', blockTimes(webm, 1).length === 100 && webm.clusters.every((c) => c.blocks.every((b) => b.track === 1)));
 }
 
-// Video angemeldet, aber nur ein Bild, danach 35 s nur Ton: kein 5-s-Schnitt
-// (es gibt Video), erst nach ueber 30 s ein neuer Cluster, damit die relative
-// Zeit in die int16 des Blocks passt
+// Video announced but only one frame, then 35 s of sound only: no 5 s cut
+// (there is video), a new cluster only after more than 30 s, so the relative
+// time fits into the int16 of the block
 {
   const inputs = [['v', 0]];
   for (let ms = 0; ms < 35000; ms += 20)
     inputs.push(['a', ms * 1000]);
   const webm = readWebM(await record(7, { video: { codec: 'vp8' }, audio: {} }, inputs));
-  check('Langer Ton nach einem Bild: Cluster bei 0 s und nach 30 s', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,30020]', JSON.stringify(webm.clusters.map((c) => c.time)));
-  check('Langer Ton: alle Bloecke, relative Zeit hoechstens 30 s', blockTimes(webm, 2).length === 1750
+  check('long sound after one frame: cluster at 0 s and after 30 s', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,30020]', JSON.stringify(webm.clusters.map((c) => c.time)));
+  check('long sound: all blocks, relative time at most 30 s', blockTimes(webm, 2).length === 1750
     && webm.clusters.every((c) => c.blocks.every((b) => b.relative >= 0 && b.relative <= 30000)));
 }
 
-// Neue Bildgroesse: Encoder neu eingestellt, gleich ein Schluesselbild und ein
-// neuer Cluster, die Spur behaelt die erste Groesse
+// New frame size: encoder reconfigured, a key frame and a new cluster right
+// away, the track keeps the first size
 {
   const before = encoders.length;
   const inputs = [];
@@ -302,15 +302,15 @@ const blockTimes = (webm, track) => webm.clusters.flatMap((c) => c.blocks.filter
     inputs.push(ms < 1000 ? ['v', ms * 1000, 64, 48] : ['v', ms * 1000, 32, 24]);
   const webm = readWebM(await record(4, { video: { codec: 'vp8' } }, inputs));
   const encoder = encoders[before];
-  check('Neue Groesse: Encoder neu eingestellt', encoder.configs.map((c) => c.width + 'x' + c.height).join(',') === '64x48,32x24');
-  check('Neue Groesse: Schluesselbild und Cluster', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,1000]', JSON.stringify(webm.clusters.map((c) => c.time)));
-  check('Neue Groesse: Spur mit der ersten Groesse', webm.tracks[0].width === 64 && webm.tracks[0].height === 48);
+  check('new size: encoder reconfigured', encoder.configs.map((c) => c.width + 'x' + c.height).join(',') === '64x48,32x24');
+  check('new size: key frame and cluster', JSON.stringify(webm.clusters.map((c) => c.time)) === '[0,1000]', JSON.stringify(webm.clusters.map((c) => c.time)));
+  check('new size: track with the first size', webm.tracks[0].width === 64 && webm.tracks[0].height === 48);
 }
 
-// Fehler und Leerlauf
-check('Unbekannter Codec: Fehler an die Engine', recorder.create(5, JSON.stringify({ video: { codec: 'h264' } })) !== 0);
+// Errors and idle
+check('unknown codec: error to the engine', recorder.create(5, JSON.stringify({ video: { codec: 'h264' } })) !== 0);
 HEAP32[4] = 99;
-check('take ohne Daten: 0 und Laenge 0', recorder.take(6, 16) === 0 && HEAP32[4] === 0);
+check('take without data: 0 and length 0', recorder.take(6, 16) === 0 && HEAP32[4] === 0);
 
-console.log(failed ? `${failed} Test(s) fehlgeschlagen` : 'Alle Tests ok');
+console.log(failed ? `${failed} test(s) failed` : 'All tests ok');
 process.exit(failed ? 1 : 0);

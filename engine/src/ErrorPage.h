@@ -1,4 +1,4 @@
-// Fehlerseite fuer eine Navigation, die nicht ankommt (siehe ErrorPage.cpp).
+// Error page for a navigation that does not arrive (see ErrorPage.cpp).
 #pragma once
 
 #include <cstdint>
@@ -15,15 +15,15 @@ class ResourceError;
 
 namespace BrowserLite::ErrorPage {
 
-// Certificate: das Zertifikat der Website ist nicht gueltig (Adressleiste "Nicht sicher")
+// Certificate: the certificate of the site is not valid (address bar "Not secure")
 enum class Kind : uint8_t { Network, Certificate };
 
-// Zeigt sie im Frame, wenn der Fehler vom Netz kommt (curl), sonst nullopt. Nur beim
-// Melden des Fehlers aufrufen (dispatchDidFailProvisionalLoad): dann nimmt WebCore sie an
-// die Stelle der Adresse im Verlauf, auch bei Zurueck/Vor.
+// Shows it in the frame if the error comes from the network (curl), otherwise
+// nullopt. Only call it when reporting the error (dispatchDidFailProvisionalLoad):
+// then WebCore puts it in place of the address in the history, also for back/forward.
 std::optional<Kind> show(WebCore::LocalFrame&, const WebCore::ResourceError&);
 
-// Neues window-Objekt: in einer Fehlerseite __blReload fuer ihren Knopf
-void installBridge(WebCore::LocalFrame&, JSC::JSGlobalObject&);
+// New window object: in an error page its [data-bl-retry] elements reload
+void installRetry(WebCore::LocalFrame&, JSC::JSGlobalObject&);
 
 }

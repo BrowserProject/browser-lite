@@ -3,12 +3,15 @@
 
 #include "CacheStorageWasm.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "FileSystemStorageWasm.h"
 #include "Host.h"
 #include "MediaStreamWasm.h"
 #include "Storage.h"
 
 #include <JavaScriptCore/CallData.h>
+#include <JavaScriptCore/Completion.h>
+#include <JavaScriptCore/JSArray.h>
 #include <JavaScriptCore/JSCInlines.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSNativeStdFunction.h>
@@ -44,9 +47,9 @@ using namespace WebCore;
 
 // ---------------------------------------------------------------- navigator.storage
 
-// Pro Ursprung wie OriginQuotaManager in WebKit2: Quote ist die Grenze von
-// IndexedDB (Storage.cpp), belegt ist, was der Ursprung in IndexedDB, Cache API
-// und OPFS hat. Die Uploads der Tabs in /data/tmp zaehlen nicht.
+// Per origin like OriginQuotaManager in WebKit2: the quota is the IndexedDB
+// limit (Storage.cpp), usage is what the origin has in IndexedDB, Cache API and
+// OPFS. The uploads of the views in /data/tmp do not count.
 static uint64_t storageUsage(const ClientOrigin& origin)
 {
     return indexedDBUsage(origin) + cacheStorageUsage(origin) + fileSystemUsage(origin);
@@ -60,7 +63,7 @@ public:
     void persist(const ClientOrigin&, PersistCallback&& completionHandler) final { completionHandler(false); }
     void fileSystemGetDirectory(ClientOrigin&& origin, GetDirectoryCallback&& completionHandler) final
     {
-        // Origin Private File System (FileSystemStorageWasm.cpp)
+        // Origin private file system (FileSystemStorageWasm.cpp)
         BrowserLite::fileSystemGetDirectory(origin, WTF::move(completionHandler));
     }
     void getEstimate(ClientOrigin&& origin, GetEstimateCallback&& completionHandler) final
@@ -87,8 +90,8 @@ UniqueRef<StorageProvider> createStorageProvider()
 
 // ---------------------------------------------------------------- screen.orientation
 
-// Wie Chrome auf dem Desktop: Ausrichtung aus der Bildschirmgroesse, sperren
-// geht nicht (lock() lehnt mit NotSupportedError ab).
+// Like Chrome on the desktop: orientation from the screen size, locking does
+// not work (lock() rejects with NotSupportedError).
 class ScreenOrientationManagerWasm final : public ScreenOrientationManager, public RefCounted<ScreenOrientationManagerWasm> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(ScreenOrientationManagerWasm);
 public:
@@ -146,17 +149,18 @@ void screenOrientationMayHaveChanged()
 
 // ---------------------------------------------------------------- Polyfills
 
-// Laeuft vor jedem Skript der Seite in jedem Frame (Haupt-Welt). Nur APIs mit
-// klarer Bedeutung, die sich mit vorhandenen Mitteln sauber nachbauen lassen.
-static constexpr auto polyfillSource = R"JS((() => {
+// Runs in every window before any script of the page (main world), called with
+// the bridge by installPageExtensions. Only APIs with a clear meaning that can
+// be rebuilt cleanly with existing means.
+static constexpr auto polyfillSource = R"JS((bridge) => {
   const define = (target, name, value) => {
     if (!(name in target))
       Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
   };
   const defineValue = (target, name, value) => Object.defineProperty(target, name, { value, writable: true, configurable: true, enumerable: false });
-  // Erst beim ersten Zugriff bauen (Getter auf globalThis): die Klassen kosten
-  // sonst in jedem Frame Zeit, auch wenn die Seite sie nie braucht. Wer nichts
-  // definiert, hinterlaesst keinen Getter.
+  // Built on the first access only (getter on globalThis): the classes cost
+  // time in every frame otherwise, even if the page never needs them. Nothing
+  // defined leaves no getter behind.
   const lazy = (names, build) => {
     if (names.some((name) => name in globalThis))
       return;
@@ -232,12 +236,12 @@ static constexpr auto polyfillSource = R"JS((() => {
     defineValue(globalThis, 'TaskSignal', TaskSignal);
   });
 
-  // navigator.vibrate: Chrome auf dem Desktop hat es, ohne Motor passiert nichts
+  // navigator.vibrate: Chrome on the desktop has it, without a motor nothing happens
   if (typeof Navigator === 'function')
     define(Navigator.prototype, 'vibrate', function vibrate() { return true; });
 
-  // WebSocketStream (Chrome): Streams ueber einem normalen WebSocket. Ein
-  // WebSocket kann nicht pausieren, darum ohne Gegendruck beim Lesen.
+  // WebSocketStream (Chrome): streams over a normal WebSocket. A WebSocket
+  // cannot pause, so reading has no backpressure.
   lazy(['WebSocketStream', 'WebSocketError'], () => {
     if (typeof WebSocket !== 'function' || typeof ReadableStream !== 'function')
       return;
@@ -312,12 +316,12 @@ static constexpr auto polyfillSource = R"JS((() => {
     defineValue(globalThis, 'WebSocketError', WebSocketError);
   });
 
-  // APIs des Host-Browsers ueber die Oberflaeche (installHostBridge, web/devices.js).
-  // Die Bruecke ist nur hier sichtbar, die Seite sieht sie nicht.
-  const host = globalThis.__blHost;
-  delete globalThis.__blHost;
-  delete globalThis.__blExtendPrototype;
-  if (typeof host !== 'function' || typeof Navigator !== 'function')
+  // APIs of the host browser through the host (installPageExtensions). Only
+  // this function sees the bridge, the page never does. A feature the host does
+  // not offer stays missing like in a browser without it.
+  const { host, features } = bridge;
+  const enabled = new Set(features);
+  if (typeof Navigator !== 'function')
     return;
   const call = (name, payload) => new Promise((resolve, reject) => {
     host(name, JSON.stringify(payload ?? null), (ok, result) => {
@@ -329,9 +333,9 @@ static constexpr auto polyfillSource = R"JS((() => {
     });
   });
 
-  // Network Information API und navigator.deviceMemory mit den Werten des Host
-  // (Seiten laden damit z.B. kleinere Bilder bei langsamer Verbindung)
-  if (!('connection' in Navigator.prototype)) {
+  // Network Information API and navigator.deviceMemory with the values of the
+  // host (pages load e.g. smaller images on a slow connection)
+  if (enabled.has('network-info') && !('connection' in Navigator.prototype)) {
     const info = { effectiveType: '4g', downlink: 10, rtt: 50, saveData: false, type: undefined, downlinkMax: undefined };
     class NetworkInformation extends EventTarget {
       constructor() {
@@ -359,7 +363,7 @@ static constexpr auto polyfillSource = R"JS((() => {
       enumerable: true,
     });
     const connection = Reflect.construct(EventTarget, [], NetworkInformation);
-    // Werte des Host erst beim ersten Lesen holen (nicht in jedem Frame beim Start)
+    // Fetch the host's values on the first read only (not in every frame at start)
     let asked = false;
     const ask = () => {
       if (asked)
@@ -382,34 +386,38 @@ static constexpr auto polyfillSource = R"JS((() => {
     Object.defineProperty(Navigator.prototype, 'deviceMemory', { get() { ask(); return memory; }, configurable: true, enumerable: true });
   }
 
-  // EyeDropper: Farbe vom Bildschirm (die Seite ist im Host ja ein Canvas)
-  lazy(['EyeDropper'], () => {
-    class EyeDropper {
-      open(options = {}) {
-        if (options.signal?.aborted)
-          return Promise.reject(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
-        return call('eyedropper');
+  // EyeDropper: color from the screen (in the host the page is just a canvas)
+  if (enabled.has('eyedropper')) {
+    lazy(['EyeDropper'], () => {
+      class EyeDropper {
+        open(options = {}) {
+          if (options.signal?.aborted)
+            return Promise.reject(options.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+          return call('eyedropper');
+        }
       }
-    }
-    defineValue(globalThis, 'EyeDropper', EyeDropper);
-  });
-
-  // Battery Status API (Chromebooks haben einen Akku)
-  let battery;
-  define(Navigator.prototype, 'getBattery', function getBattery() {
-    battery ??= call('battery').then((info) => {
-      const manager = new EventTarget();
-      for (const name of ['charging', 'chargingTime', 'dischargingTime', 'level'])
-        Object.defineProperty(manager, name, { get: () => info[name] ?? Infinity, enumerable: true });
-      for (const name of ['onchargingchange', 'onchargingtimechange', 'ondischargingtimechange', 'onlevelchange'])
-        manager[name] = null;
-      return manager;
+      defineValue(globalThis, 'EyeDropper', EyeDropper);
     });
-    return battery;
-  });
+  }
 
-  // Keyboard API: Tasten im Vollbild selber behandeln, Tastatur-Belegung
-  if (!('keyboard' in Navigator.prototype)) {
+  // Battery Status API (Chromebooks have a battery)
+  if (enabled.has('battery')) {
+    let battery;
+    define(Navigator.prototype, 'getBattery', function getBattery() {
+      battery ??= call('battery').then((info) => {
+        const manager = new EventTarget();
+        for (const name of ['charging', 'chargingTime', 'dischargingTime', 'level'])
+          Object.defineProperty(manager, name, { get: () => info[name] ?? Infinity, enumerable: true });
+        for (const name of ['onchargingchange', 'onchargingtimechange', 'ondischargingtimechange', 'onlevelchange'])
+          manager[name] = null;
+        return manager;
+      });
+      return battery;
+    });
+  }
+
+  // Keyboard API: handle keys in fullscreen, keyboard layout
+  if (enabled.has('keyboard') && !('keyboard' in Navigator.prototype)) {
     const keyboard = {
       lock(keyCodes) { return call('keyboard-lock', { keyCodes: keyCodes ? [...keyCodes] : null }).then(() => undefined); },
       unlock() { call('keyboard-unlock').catch(() => {}); },
@@ -418,221 +426,225 @@ static constexpr auto polyfillSource = R"JS((() => {
     Object.defineProperty(Navigator.prototype, 'keyboard', { get: () => keyboard, configurable: true, enumerable: true });
   }
 
-  // WebCodecs ImageDecoder: dekodiert wird mit dem ImageDecoder des Host, die
-  // Bilder kommen als RGBA zurueck und werden hier VideoFrames
-  lazy(['ImageDecoder', 'ImageTrack', 'ImageTrackList'], () => {
-    if (typeof VideoFrame !== 'function')
-      return;
-    const toBase64 = (bytes) => {
-      let binary = '';
-      for (let i = 0; i < bytes.length; i += 0x8000)
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      return btoa(binary);
-    };
-    const fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-    const readAll = async (data) => {
-      if (data instanceof ArrayBuffer)
-        return new Uint8Array(data.slice(0));
-      if (ArrayBuffer.isView(data))
-        return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
-      if (data && typeof data.getReader === 'function')
-        return new Uint8Array(await new Response(data).arrayBuffer());
-      throw new TypeError("Failed to construct 'ImageDecoder': The provided data is not a BufferSource or ReadableStream.");
-    };
-    const imageState = new WeakMap();
-    // Der Decoder im Host lebt bis close() oder bis der GC den der Seite einsammelt
-    const releaseDecoder = (decoder) => {
-      if (decoder.closed)
+  // WebCodecs ImageDecoder: decoding uses the host's ImageDecoder, the images
+  // come back as RGBA and become VideoFrames here
+  if (enabled.has('image-decoder')) {
+    lazy(['ImageDecoder', 'ImageTrack', 'ImageTrackList'], () => {
+      if (typeof VideoFrame !== 'function')
         return;
-      decoder.closed = true;
-      decoder.open.then(() => call('image-close', { id: decoder.id })).catch(() => {});
-    };
-    const decoders = new FinalizationRegistry(releaseDecoder);
-    class ImageTrack {
-      constructor() {
-        throw new TypeError('Illegal constructor');
-      }
-      get animated() { return imageState.get(this).animated; }
-      get frameCount() { return imageState.get(this).frameCount; }
-      get repetitionCount() { return imageState.get(this).repetitionCount; }
-      get selected() { return imageState.get(this).selected; }
-    }
-    class ImageTrackList {
-      constructor() {
-        throw new TypeError('Illegal constructor');
-      }
-      get length() { return imageState.get(this).tracks.length; }
-      get selectedIndex() { return imageState.get(this).tracks.findIndex((track) => track.selected); }
-      get selectedTrack() { return imageState.get(this).tracks.find((track) => track.selected) ?? null; }
-      get ready() { return imageState.get(this).ready; }
-    }
-    class ImageDecoder {
-      constructor(init = {}) {
-        if (typeof init.type !== 'string' || !init.type)
-          throw new TypeError("Failed to construct 'ImageDecoder': Required member type is undefined.");
-        this.type = init.type;
-        const list = Object.create(ImageTrackList.prototype);
-        const listState = { tracks: [] };
-        imageState.set(list, listState);
-        this.tracks = list;
-        const decoder = { id: null, closed: false, complete: false };
-        imageState.set(this, decoder);
-        decoders.register(this, decoder);
-        decoder.open = readAll(init.data).then((bytes) => call('image-open', { data: toBase64(bytes), type: init.type, preferAnimation: init.preferAnimation ?? null }));
-        listState.ready = decoder.open.then((info) => {
-          decoder.id = info.id;
-          info.tracks.forEach((entry, index) => {
-            const track = Object.create(ImageTrack.prototype);
-            imageState.set(track, entry);
-            listState.tracks.push(track);
-            Object.defineProperty(list, index, { get: () => listState.tracks[index], configurable: true, enumerable: true });
-          });
-        });
-        this.completed = listState.ready.then(() => {
-          decoder.complete = true;
-        });
-        listState.ready.catch(() => {});
-        this.completed.catch(() => {});
-      }
-      get complete() { return imageState.get(this).complete; }
-      async decode(options = {}) {
-        const decoder = imageState.get(this);
+      const toBase64 = (bytes) => {
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000)
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(binary);
+      };
+      const fromBase64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+      const readAll = async (data) => {
+        if (data instanceof ArrayBuffer)
+          return new Uint8Array(data.slice(0));
+        if (ArrayBuffer.isView(data))
+          return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+        if (data && typeof data.getReader === 'function')
+          return new Uint8Array(await new Response(data).arrayBuffer());
+        throw new TypeError("Failed to construct 'ImageDecoder': The provided data is not a BufferSource or ReadableStream.");
+      };
+      const imageState = new WeakMap();
+      // The decoder in the host lives until close() or until the GC collects the page's one
+      const releaseDecoder = (decoder) => {
         if (decoder.closed)
-          throw new DOMException('The decoder has been closed.', 'InvalidStateError');
-        await this.tracks.ready;
-        const frame = await call('image-decode', { id: decoder.id, frameIndex: options.frameIndex ?? 0 });
-        const image = new VideoFrame(fromBase64(frame.data), { format: 'RGBA', codedWidth: frame.width, codedHeight: frame.height, timestamp: frame.timestamp ?? 0, duration: frame.duration ?? undefined });
-        return { image, complete: true };
+          return;
+        decoder.closed = true;
+        decoder.open.then(() => call('image-close', { id: decoder.id })).catch(() => {});
+      };
+      const decoders = new FinalizationRegistry(releaseDecoder);
+      class ImageTrack {
+        constructor() {
+          throw new TypeError('Illegal constructor');
+        }
+        get animated() { return imageState.get(this).animated; }
+        get frameCount() { return imageState.get(this).frameCount; }
+        get repetitionCount() { return imageState.get(this).repetitionCount; }
+        get selected() { return imageState.get(this).selected; }
       }
-      reset() {}
-      close() {
-        releaseDecoder(imageState.get(this));
+      class ImageTrackList {
+        constructor() {
+          throw new TypeError('Illegal constructor');
+        }
+        get length() { return imageState.get(this).tracks.length; }
+        get selectedIndex() { return imageState.get(this).tracks.findIndex((track) => track.selected); }
+        get selectedTrack() { return imageState.get(this).tracks.find((track) => track.selected) ?? null; }
+        get ready() { return imageState.get(this).ready; }
       }
-      static isTypeSupported(type) {
-        return call('image-supported', { type: String(type) }).then((value) => !!value, () => false);
+      class ImageDecoder {
+        constructor(init = {}) {
+          if (typeof init.type !== 'string' || !init.type)
+            throw new TypeError("Failed to construct 'ImageDecoder': Required member type is undefined.");
+          this.type = init.type;
+          const list = Object.create(ImageTrackList.prototype);
+          const listState = { tracks: [] };
+          imageState.set(list, listState);
+          this.tracks = list;
+          const decoder = { id: null, closed: false, complete: false };
+          imageState.set(this, decoder);
+          decoders.register(this, decoder);
+          decoder.open = readAll(init.data).then((bytes) => call('image-open', { data: toBase64(bytes), type: init.type, preferAnimation: init.preferAnimation ?? null }));
+          listState.ready = decoder.open.then((info) => {
+            decoder.id = info.id;
+            info.tracks.forEach((entry, index) => {
+              const track = Object.create(ImageTrack.prototype);
+              imageState.set(track, entry);
+              listState.tracks.push(track);
+              Object.defineProperty(list, index, { get: () => listState.tracks[index], configurable: true, enumerable: true });
+            });
+          });
+          this.completed = listState.ready.then(() => {
+            decoder.complete = true;
+          });
+          listState.ready.catch(() => {});
+          this.completed.catch(() => {});
+        }
+        get complete() { return imageState.get(this).complete; }
+        async decode(options = {}) {
+          const decoder = imageState.get(this);
+          if (decoder.closed)
+            throw new DOMException('The decoder has been closed.', 'InvalidStateError');
+          await this.tracks.ready;
+          const frame = await call('image-decode', { id: decoder.id, frameIndex: options.frameIndex ?? 0 });
+          const image = new VideoFrame(fromBase64(frame.data), { format: 'RGBA', codedWidth: frame.width, codedHeight: frame.height, timestamp: frame.timestamp ?? 0, duration: frame.duration ?? undefined });
+          return { image, complete: true };
+        }
+        reset() {}
+        close() {
+          releaseDecoder(imageState.get(this));
+        }
+        static isTypeSupported(type) {
+          return call('image-supported', { type: String(type) }).then((value) => !!value, () => false);
+        }
       }
-    }
-    defineValue(globalThis, 'ImageDecoder', ImageDecoder);
-    defineValue(globalThis, 'ImageTrack', ImageTrack);
-    defineValue(globalThis, 'ImageTrackList', ImageTrackList);
-  });
-
-  // File System Access API: Dateien und Ordner des Host oeffnen und speichern.
-  // Die Handles des Host bleiben in der Oberflaeche, hier nur ihre id.
-  lazy(['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker'], () => {
-    if (typeof FileSystemFileHandle !== 'function' || typeof FileSystemDirectoryHandle !== 'function')
-      return;
-    const ids = new WeakMap();
-    const fromBase64 = typeof Uint8Array.fromBase64 === 'function'
-      ? (text) => Uint8Array.fromBase64(text)
-      : (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
-    const toBase64 = (bytes) => {
-      if (typeof bytes.toBase64 === 'function')
-        return bytes.toBase64();
-      let text = '';
-      for (let i = 0; i < bytes.length; i += 0x8000)
-        text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-      return btoa(text);
-    };
-    const toBytes = async (data) => {
-      if (typeof data === 'string')
-        return new TextEncoder().encode(data);
-      if (data instanceof Blob)
-        return new Uint8Array(await data.arrayBuffer());
-      if (ArrayBuffer.isView(data))
-        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-      if (data instanceof ArrayBuffer)
-        return new Uint8Array(data);
-      throw new TypeError('Unsupported data for FileSystemWritableFileStream.write()');
-    };
-    // Ein Writable, das die Seite nie schliesst, sperrt die Datei im Host:
-    // einsammeln wie abort()
-    const writables = new FinalizationRegistry((state) => {
-      if (!state.done)
-        call('fs-write', { id: state.id, op: 'abort' }).catch(() => {});
+      defineValue(globalThis, 'ImageDecoder', ImageDecoder);
+      defineValue(globalThis, 'ImageTrack', ImageTrack);
+      defineValue(globalThis, 'ImageTrackList', ImageTrackList);
     });
-    const makeWritable = (id) => {
-      const state = { id, done: false };
-      const send = (operation) => call('fs-write', Object.assign({ id }, operation)).then(() => undefined);
-      const finish = (operation) => {
-        state.done = true;
-        return send(operation);
+  }
+
+  // File System Access API: open and save files and folders of the host. The
+  // host's handles stay in the host, only their id is here.
+  if (enabled.has('fs-access')) {
+    lazy(['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker'], () => {
+      if (typeof FileSystemFileHandle !== 'function' || typeof FileSystemDirectoryHandle !== 'function')
+        return;
+      const ids = new WeakMap();
+      const fromBase64 = typeof Uint8Array.fromBase64 === 'function'
+        ? (text) => Uint8Array.fromBase64(text)
+        : (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+      const toBase64 = (bytes) => {
+        if (typeof bytes.toBase64 === 'function')
+          return bytes.toBase64();
+        let text = '';
+        for (let i = 0; i < bytes.length; i += 0x8000)
+          text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return btoa(text);
       };
-      const stream = new WritableStream({
-        async write(chunk) {
-          if (chunk && typeof chunk === 'object' && typeof chunk.type === 'string' && !(chunk instanceof Blob) && !ArrayBuffer.isView(chunk) && !(chunk instanceof ArrayBuffer)) {
-            if (chunk.type === 'seek')
-              return send({ op: 'seek', position: chunk.position });
-            if (chunk.type === 'truncate')
-              return send({ op: 'truncate', size: chunk.size });
-            return send({ op: 'write', position: chunk.position, data: toBase64(await toBytes(chunk.data)) });
-          }
-          return send({ op: 'write', data: toBase64(await toBytes(chunk)) });
-        },
-        close: () => finish({ op: 'close' }),
-        abort: () => finish({ op: 'abort' }),
-      });
-      writables.register(stream, state);
-      if (typeof FileSystemWritableFileStream === 'function')
-        Object.setPrototypeOf(stream, FileSystemWritableFileStream.prototype);
-      const write = (value) => {
-        const writer = WritableStream.prototype.getWriter.call(stream);
-        return writer.write(value).finally(() => writer.releaseLock());
+      const toBytes = async (data) => {
+        if (typeof data === 'string')
+          return new TextEncoder().encode(data);
+        if (data instanceof Blob)
+          return new Uint8Array(await data.arrayBuffer());
+        if (ArrayBuffer.isView(data))
+          return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        if (data instanceof ArrayBuffer)
+          return new Uint8Array(data);
+        throw new TypeError('Unsupported data for FileSystemWritableFileStream.write()');
       };
-      Object.defineProperties(stream, {
-        write: { value: write, configurable: true },
-        seek: { value: (position) => write({ type: 'seek', position }), configurable: true },
-        truncate: { value: (size) => write({ type: 'truncate', size }), configurable: true },
+      // A writable the page never closes locks the file in the host: collect it
+      // like abort()
+      const writables = new FinalizationRegistry((state) => {
+        if (!state.done)
+          call('fs-write', { id: state.id, op: 'abort' }).catch(() => {});
       });
-      return stream;
-    };
-    const makeHandle = (info) => {
-      const directory = info.kind === 'directory';
-      const handle = Object.create(directory ? FileSystemDirectoryHandle.prototype : FileSystemFileHandle.prototype);
-      ids.set(handle, info.id);
-      const own = (name, value) => Object.defineProperty(handle, name, { value, configurable: true });
-      own('kind', info.kind);
-      own('name', info.name);
-      own('isSameEntry', (other) => call('fs-same', { id: info.id, other: ids.get(other) ?? null }));
-      own('queryPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: false }));
-      own('requestPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: true }));
-      if (!directory) {
-        own('getFile', async () => {
-          const file = await call('fs-file', { id: info.id });
-          return new File([fromBase64(file.data)], file.name, { type: file.type, lastModified: file.lastModified });
+      const makeWritable = (id) => {
+        const state = { id, done: false };
+        const send = (operation) => call('fs-write', Object.assign({ id }, operation)).then(() => undefined);
+        const finish = (operation) => {
+          state.done = true;
+          return send(operation);
+        };
+        const stream = new WritableStream({
+          async write(chunk) {
+            if (chunk && typeof chunk === 'object' && typeof chunk.type === 'string' && !(chunk instanceof Blob) && !ArrayBuffer.isView(chunk) && !(chunk instanceof ArrayBuffer)) {
+              if (chunk.type === 'seek')
+                return send({ op: 'seek', position: chunk.position });
+              if (chunk.type === 'truncate')
+                return send({ op: 'truncate', size: chunk.size });
+              return send({ op: 'write', position: chunk.position, data: toBase64(await toBytes(chunk.data)) });
+            }
+            return send({ op: 'write', data: toBase64(await toBytes(chunk)) });
+          },
+          close: () => finish({ op: 'close' }),
+          abort: () => finish({ op: 'abort' }),
         });
-        own('createWritable', async (options) => makeWritable((await call('fs-writable', { id: info.id, keepExistingData: !!options?.keepExistingData })).id));
+        writables.register(stream, state);
+        if (typeof FileSystemWritableFileStream === 'function')
+          Object.setPrototypeOf(stream, FileSystemWritableFileStream.prototype);
+        const write = (value) => {
+          const writer = WritableStream.prototype.getWriter.call(stream);
+          return writer.write(value).finally(() => writer.releaseLock());
+        };
+        Object.defineProperties(stream, {
+          write: { value: write, configurable: true },
+          seek: { value: (position) => write({ type: 'seek', position }), configurable: true },
+          truncate: { value: (size) => write({ type: 'truncate', size }), configurable: true },
+        });
+        return stream;
+      };
+      const makeHandle = (info) => {
+        const directory = info.kind === 'directory';
+        const handle = Object.create(directory ? FileSystemDirectoryHandle.prototype : FileSystemFileHandle.prototype);
+        ids.set(handle, info.id);
+        const own = (name, value) => Object.defineProperty(handle, name, { value, configurable: true });
+        own('kind', info.kind);
+        own('name', info.name);
+        own('isSameEntry', (other) => call('fs-same', { id: info.id, other: ids.get(other) ?? null }));
+        own('queryPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: false }));
+        own('requestPermission', (descriptor) => call('fs-permission', { id: info.id, mode: descriptor?.mode || 'read', request: true }));
+        if (!directory) {
+          own('getFile', async () => {
+            const file = await call('fs-file', { id: info.id });
+            return new File([fromBase64(file.data)], file.name, { type: file.type, lastModified: file.lastModified });
+          });
+          own('createWritable', async (options) => makeWritable((await call('fs-writable', { id: info.id, keepExistingData: !!options?.keepExistingData })).id));
+          return handle;
+        }
+        const child = (kind) => async (name, options) => makeHandle(await call('fs-child', { id: info.id, name: String(name), kind, create: !!options?.create }));
+        own('getFileHandle', child('file'));
+        own('getDirectoryHandle', child('directory'));
+        own('removeEntry', (name, options) => call('fs-remove', { id: info.id, name: String(name), recursive: !!options?.recursive }).then(() => undefined));
+        own('resolve', (possibleDescendant) => call('fs-resolve', { id: info.id, other: ids.get(possibleDescendant) ?? null }));
+        const list = () => call('fs-list', { id: info.id });
+        own('entries', async function* entries() { for (const entry of await list()) yield [entry.name, makeHandle(entry)]; });
+        own('keys', async function* keys() { for (const entry of await list()) yield entry.name; });
+        own('values', async function* values() { for (const entry of await list()) yield makeHandle(entry); });
+        own(Symbol.asyncIterator, handle.entries);
         return handle;
-      }
-      const child = (kind) => async (name, options) => makeHandle(await call('fs-child', { id: info.id, name: String(name), kind, create: !!options?.create }));
-      own('getFileHandle', child('file'));
-      own('getDirectoryHandle', child('directory'));
-      own('removeEntry', (name, options) => call('fs-remove', { id: info.id, name: String(name), recursive: !!options?.recursive }).then(() => undefined));
-      own('resolve', (possibleDescendant) => call('fs-resolve', { id: info.id, other: ids.get(possibleDescendant) ?? null }));
-      const list = () => call('fs-list', { id: info.id });
-      own('entries', async function* entries() { for (const entry of await list()) yield [entry.name, makeHandle(entry)]; });
-      own('keys', async function* keys() { for (const entry of await list()) yield entry.name; });
-      own('values', async function* values() { for (const entry of await list()) yield makeHandle(entry); });
-      own(Symbol.asyncIterator, handle.entries);
-      return handle;
-    };
-    // Nur was der Host verstehen kann: Typen, Mehrfachauswahl, Name, Startordner als Text
-    const pickerOptions = (options = {}) => ({
-      types: Array.isArray(options.types) ? options.types.map((type) => ({ description: type?.description ? String(type.description) : undefined, accept: type?.accept })) : undefined,
-      excludeAcceptAllOption: !!options.excludeAcceptAllOption,
-      multiple: !!options.multiple,
-      suggestedName: options.suggestedName ? String(options.suggestedName) : undefined,
-      id: options.id ? String(options.id) : undefined,
-      startIn: typeof options.startIn === 'string' ? options.startIn : undefined,
-      mode: options.mode === 'readwrite' ? 'readwrite' : undefined,
+      };
+      // Only what the host can understand: types, multiple, name, start folder as text
+      const pickerOptions = (options = {}) => ({
+        types: Array.isArray(options.types) ? options.types.map((type) => ({ description: type?.description ? String(type.description) : undefined, accept: type?.accept })) : undefined,
+        excludeAcceptAllOption: !!options.excludeAcceptAllOption,
+        multiple: !!options.multiple,
+        suggestedName: options.suggestedName ? String(options.suggestedName) : undefined,
+        id: options.id ? String(options.id) : undefined,
+        startIn: typeof options.startIn === 'string' ? options.startIn : undefined,
+        mode: options.mode === 'readwrite' ? 'readwrite' : undefined,
+      });
+      defineValue(globalThis, 'showOpenFilePicker', async (options) => (await call('fs-open', pickerOptions(options))).map(makeHandle));
+      defineValue(globalThis, 'showSaveFilePicker', async (options) => makeHandle(await call('fs-save', pickerOptions(options))));
+      defineValue(globalThis, 'showDirectoryPicker', async (options) => makeHandle(await call('fs-directory', pickerOptions(options))));
     });
-    defineValue(globalThis, 'showOpenFilePicker', async (options) => (await call('fs-open', pickerOptions(options))).map(makeHandle));
-    defineValue(globalThis, 'showSaveFilePicker', async (options) => makeHandle(await call('fs-save', pickerOptions(options))));
-    defineValue(globalThis, 'showDirectoryPicker', async (options) => makeHandle(await call('fs-directory', pickerOptions(options))));
-  });
-})();)JS";
+  }
+})JS";
 
-// ---------------------------------------------------------------- Host-Bruecke
+// ---------------------------------------------------------------- Host bridge
 
 namespace {
 
@@ -647,40 +659,47 @@ HashMap<uint64_t, PendingHostCall>& pendingHostCalls()
     return calls;
 }
 
-// Nur diese APIs des Host darf eine Seite ueber die Polyfills erreichen
+// Only these host APIs can be reached by a page through the polyfills, each
+// only with its feature
 bool isAllowedHostCall(const String& name)
 {
-    static constexpr ASCIILiteral allowed[] = {
-        "eyedropper"_s, "battery"_s, "keyboard-lock"_s, "keyboard-unlock"_s, "keyboard-layout"_s,
-        "fs-open"_s, "fs-save"_s, "fs-directory"_s, "fs-file"_s, "fs-writable"_s, "fs-write"_s, "fs-child"_s,
-        "fs-list"_s, "fs-remove"_s, "fs-resolve"_s, "fs-same"_s, "fs-permission"_s,
-        "rtc-create"_s, "rtc-op"_s, "rtc-poll"_s, "rtc-send"_s, "rtc-channel"_s, "rtc-channel-close"_s, "rtc-close"_s, "rtc-close-all"_s, "rtc-receive"_s, "rtc-track"_s,
-        "pip-enter"_s, "pip-exit"_s, "pip-wait"_s,
-        "image-open"_s, "image-decode"_s, "image-close"_s, "image-supported"_s, "network-info"_s,
+    static constexpr std::pair<ASCIILiteral, Feature> allowed[] = {
+        { "eyedropper"_s, Feature::EyeDropper }, { "battery"_s, Feature::Battery },
+        { "keyboard-lock"_s, Feature::Keyboard }, { "keyboard-unlock"_s, Feature::Keyboard }, { "keyboard-layout"_s, Feature::Keyboard },
+        { "fs-open"_s, Feature::FileSystemAccess }, { "fs-save"_s, Feature::FileSystemAccess }, { "fs-directory"_s, Feature::FileSystemAccess },
+        { "fs-file"_s, Feature::FileSystemAccess }, { "fs-writable"_s, Feature::FileSystemAccess }, { "fs-write"_s, Feature::FileSystemAccess },
+        { "fs-child"_s, Feature::FileSystemAccess }, { "fs-list"_s, Feature::FileSystemAccess }, { "fs-remove"_s, Feature::FileSystemAccess },
+        { "fs-resolve"_s, Feature::FileSystemAccess }, { "fs-same"_s, Feature::FileSystemAccess }, { "fs-permission"_s, Feature::FileSystemAccess },
+        { "rtc-create"_s, Feature::WebRTC }, { "rtc-op"_s, Feature::WebRTC }, { "rtc-poll"_s, Feature::WebRTC }, { "rtc-send"_s, Feature::WebRTC },
+        { "rtc-channel"_s, Feature::WebRTC }, { "rtc-channel-close"_s, Feature::WebRTC }, { "rtc-close"_s, Feature::WebRTC },
+        { "rtc-close-all"_s, Feature::WebRTC }, { "rtc-receive"_s, Feature::WebRTC }, { "rtc-track"_s, Feature::WebRTC },
+        { "pip-enter"_s, Feature::PictureInPicture }, { "pip-exit"_s, Feature::PictureInPicture }, { "pip-wait"_s, Feature::PictureInPicture },
+        { "image-open"_s, Feature::ImageDecoder }, { "image-decode"_s, Feature::ImageDecoder }, { "image-close"_s, Feature::ImageDecoder },
+        { "image-supported"_s, Feature::ImageDecoder }, { "network-info"_s, Feature::NetworkInfo },
     };
-    for (auto entry : allowed) {
+    for (auto& [entry, feature] : allowed) {
         if (name == entry)
-            return true;
+            return featureEnabled(feature);
     }
     return false;
 }
 
 }
 
-// ---------------------------------------------------------------- Prototypen bei Bedarf
+// ---------------------------------------------------------------- Prototypes on demand
 
-// Eintraege der Polyfills fuer DOM-Prototypen, die das Fenster noch nicht
-// angelegt hat (Klassenname -> Properties). Liegt unter einem privaten Namen
-// am globalen Objekt, die Seite sieht es nicht.
+// Entries of the polyfills for DOM prototypes the window has not created yet
+// (class name -> properties). Stored under a private name on the global object,
+// the page does not see it.
 static const JSC::Identifier& pendingPrototypeExtensionsName()
 {
     static NeverDestroyed<JSC::Identifier> name = JSC::Identifier::fromUid(JSC::PrivateName(JSC::PrivateName::PrivateSymbol, "blPendingPrototypeExtensions"_s));
     return name;
 }
 
-// Wie Object.defineProperties liest es die Deskriptoren (dabei kann Code der
-// Seite laufen) und legt sie als Objekte ohne Prototyp an, die nur die Engine
-// kennt: Name -> Deskriptor, Felder wie bei Object.defineProperty
+// Like Object.defineProperties it reads the descriptors (page code may run
+// meanwhile) and stores them as objects without prototype only the engine
+// knows: name -> descriptor, fields like in Object.defineProperty
 static JSC::JSObject* readDescriptors(JSC::JSGlobalObject& globalObject, JSC::JSObject& descriptors)
 {
     auto& vm = globalObject.vm();
@@ -691,7 +710,7 @@ static JSC::JSObject* readDescriptors(JSC::JSGlobalObject& globalObject, JSC::JS
     RETURN_IF_EXCEPTION(scope, nullptr);
     auto* entries = JSC::constructEmptyObject(vm, globalObject.nullPrototypeObjectStructure());
     for (auto& name : propertyNames) {
-        // Zahlen als Namen braucht kein Polyfill
+        // Polyfills need no numbers as names
         if (JSC::parseIndex(name))
             continue;
         auto value = descriptors.get(&globalObject, name);
@@ -719,8 +738,8 @@ static JSC::JSObject* readDescriptors(JSC::JSGlobalObject& globalObject, JSC::JS
     return entries;
 }
 
-// Die Eintraege von readDescriptors auf den Prototyp. Hier laeuft kein Code der
-// Seite: die Objekte hat die Engine angelegt, es wird nur direkt gelesen.
+// Puts the entries of readDescriptors on the prototype. No page code runs here:
+// the engine created the objects, they are only read directly.
 static void defineProperties(JSC::JSGlobalObject& globalObject, JSC::JSObject& target, JSC::JSObject& entries)
 {
     auto& vm = globalObject.vm();
@@ -749,11 +768,11 @@ static void defineProperties(JSC::JSGlobalObject& globalObject, JSC::JSObject& t
     }
 }
 
-// WebCore legt die Structure einer DOM-Klasse an (domStructureCreatedHook,
-// Patch 0037). Hier laeuft nie Code der Seite, auch kein Fehler-Ereignis.
+// WebCore creates the structure of a DOM class (domStructureCreatedHook, patch
+// 0037). Page code never runs here, not even an error event.
 static void domStructureCreated(JSDOMGlobalObject& globalObject, JSC::Structure& structure, const JSC::ClassInfo* classInfo)
 {
-    // Eintraege gibt es nur in Fenstern (Haupt-Thread)
+    // Entries only exist in windows (main thread)
     if (!isMainThread())
         return;
     auto& vm = globalObject.vm();
@@ -764,27 +783,27 @@ static void domStructureCreated(JSDOMGlobalObject& globalObject, JSC::Structure&
     if (!entries)
         return;
     auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
-    // Eine Ausnahme von vorher gehoert dem Aufrufer
+    // An exception from before belongs to the caller
     if (scope.exception())
         return;
     defineProperties(globalObject, *structure.storedPrototypeObject(), *asObject(entries));
     if (auto* exception = scope.exception(); exception && !vm.isTerminationException(exception)) {
-        log("Polyfill: Prototyp %s nicht erweitert", classInfo->className.characters());
+        log("Polyfill: prototype %s not extended", classInfo->className.characters());
         scope.clearException();
     }
 }
 
-// __blExtendPrototype(klasse, deskriptoren) fuer die Polyfills: die Properties
-// kommen auf den Prototyp der DOM-Klasse, sobald das Fenster ihn anlegt (oder
-// gleich, wenn es ihn schon gibt). Neue Klassen und Prototypen kosten in jedem
-// Frame Zeit, auch wenn die Seite sie nie braucht.
-static void installPrototypeExtensions(JSC::JSGlobalObject& globalObject)
+// extendPrototype(className, descriptors) for the polyfills: the properties go
+// on the prototype of the DOM class as soon as the window creates it (or right
+// away if it exists). New classes and prototypes cost time in every frame, even
+// if the page never needs them.
+static JSC::JSObject* createPrototypeExtender(JSC::JSGlobalObject& globalObject)
 {
     static bool hookInstalled;
     if (!std::exchange(hookInstalled, true))
         domStructureCreatedHook = domStructureCreated;
     auto& vm = globalObject.vm();
-    auto* function = JSC::JSNativeStdFunction::create(vm, &globalObject, 2, "__blExtendPrototype"_s, [](JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
+    return JSC::JSNativeStdFunction::create(vm, &globalObject, 2, "extendPrototype"_s, [](JSC::JSGlobalObject* lexicalGlobalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
         auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(lexicalGlobalObject);
         auto& vm = lexicalGlobalObject->vm();
         auto scope = DECLARE_THROW_SCOPE(vm);
@@ -820,13 +839,14 @@ static void installPrototypeExtensions(JSC::JSGlobalObject& globalObject)
         asObject(pending)->putDirect(vm, classIdentifier, entries);
         return JSC::JSValue::encode(JSC::jsUndefined());
     });
-    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blExtendPrototype"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
 }
 
-void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
+// host(name, payload, callback) for the polyfills: the host runs the call and
+// answers with bl_host_call_result (hostCallFinished)
+static JSC::JSObject* createHostCaller(JSC::JSGlobalObject& globalObject, int viewId)
 {
     auto& vm = globalObject.vm();
-    auto* function = JSC::JSNativeStdFunction::create(vm, &globalObject, 3, "__blHost"_s, [viewId](JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
+    return JSC::JSNativeStdFunction::create(vm, &globalObject, 3, "host"_s, [viewId](JSC::JSGlobalObject* globalObject, JSC::CallFrame* callFrame) -> JSC::EncodedJSValue {
         auto& vm = globalObject->vm();
         auto scope = DECLARE_THROW_SCOPE(vm);
         auto name = callFrame->argument(0).toWTFString(globalObject);
@@ -839,7 +859,7 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
         static uint64_t nextIdentifier;
         auto identifier = ++nextIdentifier;
         pendingHostCalls().add(identifier, PendingHostCall { { vm, globalObject }, { vm, callback } });
-        // Der Ursprung der Seite: die Oberflaeche gibt Handles (Dateien) nur ihm wieder heraus
+        // The origin of the page: the host hands out handles (files) only to it again
         String origin;
         if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
             if (RefPtr context = domGlobalObject->scriptExecutionContext())
@@ -848,15 +868,60 @@ void installHostBridge(JSC::JSGlobalObject& globalObject, int viewId)
         notifyHost(viewId, "host-call", makeString("{\"id\":"_s, identifier, ",\"name\":\""_s, jsonEscape(name), "\",\"origin\":\""_s, jsonEscape(origin), "\",\"payload\":\""_s, jsonEscape(payload), "\"}"_s));
         return JSC::JSValue::encode(JSC::jsUndefined());
     });
-    globalObject.putDirect(vm, JSC::Identifier::fromString(vm, "__blHost"_s), function, static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
-    MediaStreams::installBridge(globalObject);
-    installPrototypeExtensions(globalObject);
 }
 
-// Die Antwort kommt als Aufgabe in den Event-Loop des Dokuments: ist es weg,
-// verfaellt sie, im Back/Forward-Cache wartet sie, bis die Seite wieder da ist.
-// Aufruf wie bei den Callbacks von WebCore: danach laufen die Microtasks (das
-// Promise der Seite), Fehler kommen in die Konsole der Seite.
+void callEngineFunction(JSC::JSGlobalObject& globalObject, const String& source, const JSC::ArgList& arguments)
+{
+    JSC::JSLockHolder lock(globalObject.vm());
+    NakedPtr<JSC::Exception> exception;
+    auto function = JSC::evaluate(&globalObject, JSC::makeSource(source, { }, JSC::SourceTaintedOrigin::Untainted, "browser-lite"_s), JSC::JSValue(), exception);
+    if (!exception) {
+        auto callData = JSC::getCallData(function);
+        if (callData.type != JSC::CallData::Type::None)
+            JSC::call(&globalObject, function, callData, JSC::jsUndefined(), arguments, exception);
+    }
+    if (exception)
+        reportException(&globalObject, exception);
+}
+
+// Marks a window whose extensions are installed: the window object can be
+// announced as cleared more than once
+static const JSC::Identifier& extensionsInstalledName()
+{
+    static NeverDestroyed<JSC::Identifier> name = JSC::Identifier::fromUid(JSC::PrivateName(JSC::PrivateName::PrivateSymbol, "blExtensionsInstalled"_s));
+    return name;
+}
+
+void installPageExtensions(JSC::JSGlobalObject& globalObject, int viewId)
+{
+    auto& vm = globalObject.vm();
+    JSC::JSLockHolder lock(vm);
+    if (globalObject.getDirect(vm, extensionsInstalledName()))
+        return;
+    globalObject.putDirect(vm, extensionsInstalledName(), JSC::jsBoolean(true), static_cast<unsigned>(JSC::PropertyAttribute::DontEnum));
+
+    auto* features = JSC::constructEmptyArray(&globalObject, nullptr);
+    if (!features)
+        return;
+    for (auto& name : enabledFeatureNames())
+        features->push(&globalObject, JSC::jsString(vm, name));
+    auto* bridge = JSC::constructEmptyObject(vm, globalObject.nullPrototypeObjectStructure());
+    bridge->putDirect(vm, JSC::Identifier::fromString(vm, "host"_s), createHostCaller(globalObject, viewId));
+    bridge->putDirect(vm, JSC::Identifier::fromString(vm, "extendPrototype"_s), createPrototypeExtender(globalObject));
+    bridge->putDirect(vm, JSC::Identifier::fromString(vm, "features"_s), features);
+    if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))
+        bridge->putDirect(vm, JSC::Identifier::fromString(vm, "media"_s), MediaStreams::createBridge(globalObject));
+    JSC::MarkedArgumentBuffer arguments;
+    arguments.append(bridge);
+    if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))
+        callEngineFunction(globalObject, String::fromUTF8(webrtcPolyfillSource), arguments);
+    callEngineFunction(globalObject, String::fromUTF8(polyfillSource), arguments);
+}
+
+// The answer arrives as a task in the event loop of the document: if it is gone,
+// the answer expires, in the back/forward cache it waits until the page is back.
+// Called like WebCore's callbacks: the microtasks (the page's promise) run
+// afterwards, errors go to the page's console.
 void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)
 {
     auto call = pendingHostCalls().take(identifier);
@@ -879,14 +944,11 @@ void hostCallFinished(uint64_t identifier, bool ok, const String& resultJSON)
     });
 }
 
+// Polyfills are installed by installPageExtensions, not as user scripts: those
+// would need the bridge as a global the page could see
 Ref<UserContentProvider> userContentProvider()
 {
-    static NeverDestroyed<Ref<UserContentController>> controller = [] {
-        auto controller = UserContentController::create();
-        controller->addUserScript(mainThreadNormalWorldSingleton(), makeUnique<UserScript>(String::fromUTF8(webrtcPolyfillSource)));
-        controller->addUserScript(mainThreadNormalWorldSingleton(), makeUnique<UserScript>(String::fromUTF8(polyfillSource)));
-        return controller;
-    }();
+    static NeverDestroyed<Ref<UserContentController>> controller = UserContentController::create();
     return controller.get();
 }
 

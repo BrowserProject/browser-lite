@@ -1,4 +1,4 @@
-// Verlauf (Zurueck/Vor) eines Tabs. Der leere Standard-Client speichert nichts.
+// Back/forward list of a view. The empty default client stores nothing.
 #pragma once
 
 #include <WebCore/BackForwardClient.h>
@@ -11,8 +11,8 @@ class BackForwardList final : public WebCore::BackForwardClient {
 public:
     static Ref<BackForwardList> create() { return adoptRef(*new BackForwardList); }
 
-    // Fuer die Sitzung der Oberflaeche: Eintraege und aktueller Index, und
-    // wieder einsetzen (beim Wiederherstellen und nach dem Verwerfen eines Tabs)
+    // For the host's session: entries and current index, and putting them back
+    // (when restoring and after discarding a view)
     const Vector<Ref<WebCore::HistoryItem>>& entries() const { return m_entries; }
     std::optional<size_t> currentIndex() const { return m_current; }
     void restore(Vector<Ref<WebCore::HistoryItem>>&& entries, size_t current)
@@ -21,7 +21,7 @@ public:
         m_current = current;
     }
 
-    // Fuer pushState aus Iframes (FrameLoaderClient::dispatchDidPushStateWithinPage)
+    // For pushState from iframes (FrameLoaderClient::dispatchDidPushStateWithinPage)
     WebCore::HistoryItem* currentItem() const { return m_current ? m_entries[*m_current].ptr() : nullptr; }
     void replaceCurrentItem(Ref<WebCore::HistoryItem>&& item) { m_entries[*m_current] = WTF::move(item); }
 

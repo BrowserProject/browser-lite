@@ -34,7 +34,7 @@
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
 
-// Laeuft auf dem Haupt-Thread (prefetchHostAnswers)
+// Runs on the main thread (prefetchHostAnswers)
 EM_JS(void, blJsPrefetchHostAnswers, (), {
     if (typeof document === 'undefined')
         return;
@@ -67,7 +67,7 @@ EM_JS(void, blJsPrefetchHostAnswers, (), {
         lines.push('mse:' + type + '\t' + (supported ? 1 : 0));
     });
     var text = stringToNewUTF8(lines.join('\n'));
-    Module['_bl_media_host_answers'](text);
+    Module['_bl__media_host_answers'](text);
     Module['_free'](text);
 });
 
@@ -98,9 +98,9 @@ static ASCIILiteral preloadName(MediaPlayer::Preload preload)
     return "auto"_s;
 }
 
-// Antworten des Host merken: jede Frage geht synchron ueber den Haupt-Thread und
-// wartet, bis die Oberflaeche Zeit hat (auf CNN fragten Werbe-Skripte so oft,
-// dass die Engine fast 1 s nur wartete). Die Antworten aendern sich nie.
+// Remembers the host's answers: every question goes synchronously through the
+// main thread and waits until the host has time (on CNN ad scripts asked so
+// often that the engine waited almost 1 s). The answers never change.
 static Lock hostAnswersLock;
 
 static HashMap<String, int>& hostAnswers() WTF_REQUIRES_LOCK(hostAnswersLock)
@@ -118,16 +118,17 @@ static int cachedHostAnswer(const String& key, Ask&& ask)
         if (it != hostAnswers().end())
             return it->value;
     }
-    debugLog("Medien: frage Host synchron (%s)", key.utf8().data());
+    debugLog("Media: asking the host synchronously (%s)", key.utf8().data());
     int answer = ask();
     Locker locker { hostAnswersLock };
     hostAnswers().set(key.isolatedCopy(), answer);
     return answer;
 }
 
-// Haeufige Fragen schon beim Start beantworten lassen, asynchron: die erste
-// synchrone Frage wartete sonst mitten im Laden, bis der Haupt-Thread frei
-// ist (CNN: 0.5 s bei canPlayType). Typen wie in Modernizr und gaengigen Playern.
+// Has frequent questions answered at start, asynchronously: the first
+// synchronous question otherwise waited in the middle of loading until the
+// main thread was free (CNN: 0.5 s at canPlayType). Types like in Modernizr
+// and common players.
 static void prefetchHostAnswers()
 {
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void*) {
@@ -135,7 +136,7 @@ static void prefetchHostAnswers()
     }, nullptr);
 }
 
-// MSE: kann das MediaSource des Host-Browsers das? (synchron)
+// MSE: can the MediaSource of the host browser do that? (synchronous)
 static bool hostMediaSourceSupports(const String& type)
 {
     return cachedHostAnswer(makeString("mse:"_s, type), [&] {
@@ -158,7 +159,7 @@ bool MediaPlayerPrivateWasm::supportsMediaSourceType(const ContentType& type)
     return hostMediaSourceSupports(type.raw());
 }
 
-// Kann der Host-Browser das abspielen? (synchron ueber den Haupt-Thread)
+// Can the host browser play that? (synchronous through the main thread)
 static MediaPlayer::SupportsType hostCanPlayType(const String& type)
 {
     int result = cachedHostAnswer(makeString("play:"_s, type), [&] {
@@ -175,7 +176,7 @@ static MediaPlayer::SupportsType hostCanPlayType(const String& type)
     return result == 2 ? MediaPlayer::SupportsType::IsSupported : result == 1 ? MediaPlayer::SupportsType::MayBeSupported : MediaPlayer::SupportsType::IsNotSupported;
 }
 
-// srcObject = MediaStream: dann gibt es kein Host-<video>
+// srcObject = MediaStream: then there is no host <video>
 #if ENABLE(MEDIA_STREAM)
 #define BL_IF_STREAM(...) if (m_stream) { __VA_ARGS__; }
 #else
@@ -218,8 +219,8 @@ private:
         if (parameters.type.isEmpty())
             return MediaPlayer::SupportsType::MayBeSupported;
         auto answer = hostCanPlayType(parameters.type.raw());
-        // Nur aus der Endung geraten (z.B. .mov): der Host-Browser erkennt das
-        // Format beim Laden selber
+        // Only guessed from the extension (e.g. .mov): the host browser
+        // detects the format itself when loading
         if (answer == MediaPlayer::SupportsType::IsNotSupported && parameters.type.typeWasInferredFromExtension())
             return MediaPlayer::SupportsType::MayBeSupported;
         return answer;
@@ -275,7 +276,7 @@ void MediaPlayerPrivateWasm::setNetworkState(MediaPlayer::NetworkState state)
 void MediaPlayerPrivateWasm::load(const String& urlString)
 {
     m_url = URL { urlString };
-    // blob: und data: liefert MediaFetch aus diesen Bytes, auch nach revokeObjectURL
+    // MediaFetch delivers blob: and data: from these bytes, even after revokeObjectURL
     m_blob = nullptr;
     if (m_url.protocolIsBlob())
         m_blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(m_url);
@@ -302,22 +303,22 @@ void MediaPlayerPrivateWasm::setPreload(MediaPlayer::Preload preload)
     if (preload == m_preload)
         return;
     m_preload = preload;
-    // Vor load() nur merken; MSE und MediaStream kennen kein preload
+    // Only remember before load(); MSE and MediaStream know no preload
     BL_IF_STREAM(return)
     if (m_url.isEmpty() || m_isMediaSource)
         return;
     send("preload"_s, makeString("{\"preload\":\""_s, preloadName(preload), "\"}"_s));
 }
 
-// play() oder autoplay: wie AVFoundation alles laden
+// play() or autoplay: load everything like AVFoundation
 void MediaPlayerPrivateWasm::prepareToPlay()
 {
     setPreload(MediaPlayer::Preload::Auto);
 }
 
 #if ENABLE(MEDIA_SOURCE)
-// MSE: das Host-<video> bekommt ein eigenes MediaSource, die Daten kommen
-// ueber MediaSourcePrivateWasm/SourceBufferPrivateWasm
+// MSE: the host <video> gets its own MediaSource, the data comes through
+// MediaSourcePrivateWasm/SourceBufferPrivateWasm
 void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourcePrivateClient& client)
 {
     m_url = url;
@@ -325,12 +326,12 @@ void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourc
     RefPtr player = m_player.get();
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
-    // Zuerst den Host-Player anlegen, gleich danach kommen schon die SourceBuffer
+    // Create the host player first, the SourceBuffers come right after
     send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate,
         ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
     if (RefPtr existing = client.mediaSourcePrivate(); existing && existing->platformType() == MediaPlatformType::Wasm) {
-        // Wiederverwenden (z.B. nach einem Wechsel des Players): der Host faengt neu an
+        // Reuse (e.g. after a player change): the host starts over
         m_mediaSource = static_cast<MediaSourcePrivateWasm*>(existing.get());
         m_mediaSource->setPlayer(this);
         client.reOpen();
@@ -357,8 +358,8 @@ void MediaPlayerPrivateWasm::mediaSourceHasRetrievedAllData()
 #endif
 
 #if ENABLE(MEDIA_STREAM)
-// srcObject = MediaStream: Bilder kommen von WebCore (Kamera, Bildschirm,
-// Canvas), es gibt kein Host-<video>
+// srcObject = MediaStream: frames come from WebCore (camera, screen, canvas),
+// there is no host <video>
 void MediaPlayerPrivateWasm::load(MediaStreamPrivate& stream)
 {
     m_stream = MediaStreamPlayback::create(*this, stream);
@@ -377,7 +378,7 @@ void MediaPlayerPrivateWasm::streamChanged()
     auto& stream = m_stream->stream();
     m_hasVideo = stream.hasVideo();
     m_hasAudio = stream.hasAudio();
-    // Nur Ton: sofort bereit, mit Video erst mit dem ersten Bild
+    // Sound only: ready right away, with video only with the first frame
     auto state = !m_hasVideo || m_stream->currentFrame() ? MediaPlayer::ReadyState::HaveEnoughData : MediaPlayer::ReadyState::HaveMetadata;
     RefPtr player = m_player.get();
     if (state != m_readyState) {
@@ -458,7 +459,7 @@ MediaTime MediaPlayerPrivateWasm::duration() const
 MediaPlayer::ReadyState MediaPlayerPrivateWasm::readyState() const
 {
 #if ENABLE(MEDIA_SOURCE)
-    // Was WebCore aus den Daten weiss, aber nicht mehr als der Host schon kann
+    // What WebCore knows from the data, but not more than the host can already do
     if (m_mediaSource)
         return std::min(m_mediaSource->mediaPlayerReadyState(), std::max(m_readyState, MediaPlayer::ReadyState::HaveMetadata));
 #endif
@@ -500,7 +501,7 @@ MediaTime MediaPlayerPrivateWasm::currentTime() const
 {
     BL_IF_STREAM(return MediaTime::createWithDouble((MonotonicTime::now() - m_streamStart).seconds()))
     double time = m_hostTime;
-    // Zwischen zwei Meldungen vom Host selber weiterzaehlen
+    // Count on ourselves between two messages from the host
     if (!m_paused && !m_seeking && !m_ended && m_readyState >= MediaPlayer::ReadyState::HaveFutureData)
         time += (MonotonicTime::now() - m_hostTimeStamp).seconds() * m_rate;
     if (m_duration.isValid() && m_duration.isFinite())
@@ -520,7 +521,7 @@ Ref<MediaTimePromise> MediaPlayerPrivateWasm::seekToTarget(const SeekTarget& tar
     Ref promise = m_seekPromise->promise();
 #if ENABLE(MEDIA_SOURCE)
     if (m_mediaSource) {
-        // Erst warten, bis WebCore die Daten fuer die Zielzeit hat
+        // First wait until WebCore has the data for the target time
         m_mediaSource->waitForTarget(target)->whenSettled(RunLoop::currentSingleton(), [weakThis = WeakPtr { *this }](auto&& result) {
             RefPtr protectedThis = weakThis.get();
             if (!protectedThis)
@@ -557,7 +558,7 @@ void MediaPlayerPrivateWasm::setRate(float rate)
 
 void MediaPlayerPrivateWasm::setVolume(float volume)
 {
-    // Auch vor dem Laden merken (WebCore setzt es beim Erzeugen des Players)
+    // Remember also before loading (WebCore sets it when creating the player)
     m_streamVolume = volume;
     BL_IF_STREAM(m_stream->setAudioState(!m_paused, volume, m_streamMuted); return)
     send("volume"_s, makeString("{\"volume\":"_s, volume, '}'));
@@ -593,7 +594,7 @@ void MediaPlayerPrivateWasm::setPresentationSize(const IntSize& size)
     send("size"_s, makeString("{\"width\":"_s, size.width(), ",\"height\":"_s, size.height(), '}'));
 }
 
-// Versteckte Seite: der Host schickt keine Bilder, der Ton laeuft weiter
+// Hidden page: the host sends no frames, the sound keeps playing
 void MediaPlayerPrivateWasm::setPageIsVisible(bool visible)
 {
     if (visible == m_pageIsVisible)
@@ -642,9 +643,10 @@ DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
     return DestinationColorSpace::SRGB();
 }
 
-// Der Puffer (malloc) gehoert ab jetzt dem Bild, web/media.js schreibt nie wieder hinein.
-// Frei wird er erst, wenn auch die letzte Aufzeichnung der Kacheln das Bild loslaesst.
-// Das naechste Bild schickt der Host erst nach "frame": nie mehr als eins unterwegs.
+// The buffer (malloc) belongs to the frame from now on, the host never writes
+// into it again. It is freed only when the last recording of the tiles lets go
+// of the frame. The host sends the next frame only after "frame": never more
+// than one on its way.
 void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 {
     size_t rowBytes = static_cast<size_t>(width) * 4;
@@ -664,7 +666,7 @@ std::optional<VideoFrameMetadata> MediaPlayerPrivateWasm::videoFrameMetadata()
         return std::nullopt;
     m_lastMetadataFrame = m_presentedFrames;
     VideoFrameMetadata metadata;
-    // Rohe MonotonicTime-Sekunden, HTMLVideoElement rechnet sie in die Zeit der Seite um
+    // Raw MonotonicTime seconds, HTMLVideoElement converts them to the page's time
     metadata.presentationTime = m_frameArrival.secondsSinceEpoch().seconds();
     metadata.expectedDisplayTime = (m_frameArrival + 16_ms).secondsSinceEpoch().seconds();
     metadata.width = m_frame->size().width();
@@ -685,7 +687,7 @@ static MediaPlayer::ReadyState readyStateFromHost(int value)
     }
 }
 
-// Zustand des Host-<video> (web/media.js schickt bei jeder Aenderung alles)
+// State of the host <video> (the host sends everything on every change)
 void MediaPlayerPrivateWasm::hostEvent(const String& json)
 {
     RefPtr value = JSON::Value::parseJSON(json);
@@ -705,7 +707,7 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     }
 
     auto time = object->getDouble("time"_s).value_or(m_hostTime);
-    // Sprung (nicht nur normales Weiterlaufen): WebCore muss es wissen
+    // Seek (not just normal progress): WebCore has to know
     bool jumped = std::abs(time - currentTime().toDouble()) > 0.5;
     m_hostTime = time;
     m_hostTimeStamp = MonotonicTime::now();
@@ -718,7 +720,7 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     }
 
     if (auto duration = object->getDouble("duration"_s); duration && !m_isMediaSource) {
-        // -1: unendlich (Live-Stream)
+        // -1: infinite (live stream)
         auto newDuration = *duration < 0 || std::isinf(*duration) ? MediaTime::positiveInfiniteTime() : std::isnan(*duration) ? MediaTime::invalidTime() : MediaTime::createWithDouble(*duration);
         if (newDuration != m_duration) {
             m_duration = newDuration;
@@ -751,7 +753,7 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
         m_buffered = WTF::move(buffered);
     }
 
-    // Der Host hat selber pausiert (Ende, Autoplay verboten, ...)
+    // The host paused itself (end, autoplay not allowed, ...)
     bool paused = object->getBoolean("paused"_s).value_or(m_paused);
     bool ended = object->getBoolean("ended"_s).value_or(false);
     bool endedNow = ended && !m_ended;
@@ -780,8 +782,8 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
 
 using namespace BrowserLite;
 
-// Vom Haupt-Thread (prefetchHostAnswers): Zeilen "frage<TAB>antwort"
-extern "C" EMSCRIPTEN_KEEPALIVE void bl_media_host_answers(const char* text)
+// From the main thread (prefetchHostAnswers): lines "question<TAB>answer"
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__media_host_answers(const char* text)
 {
     auto lines = String::fromUTF8(text);
     Locker locker { hostAnswersLock };

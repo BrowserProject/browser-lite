@@ -1,10 +1,9 @@
-// Kleine Teile der Web-Plattform, fuer die WebKit nur Schnittstellen hat und
-// der Browser (sonst WebKit2) die Umsetzung liefert:
-// - navigator.storage (estimate/persist) ueber einen eigenen StorageProvider
-// - screen.orientation ueber einen ScreenOrientationManager
-// - Polyfills fuer APIs, die Chromium hat und WebKit (noch) nicht
-//   (scheduler.postTask/yield, navigator.vibrate, EyeDropper, getBattery,
-//   navigator.keyboard), als User-Script in jedem Frame
+// Small parts of the web platform for which WebKit only has interfaces and the
+// browser (otherwise WebKit2) provides the implementation:
+// - navigator.storage (estimate/persist) through an own StorageProvider
+// - screen.orientation through a ScreenOrientationManager
+// - polyfills for APIs Chromium has and WebKit does not (yet), installed in
+//   every window before the page's scripts (installPageExtensions)
 #pragma once
 
 #include <wtf/Ref.h>
@@ -12,6 +11,7 @@
 #include <wtf/text/WTFString.h>
 
 namespace JSC {
+class ArgList;
 class JSGlobalObject;
 }
 
@@ -25,19 +25,26 @@ namespace BrowserLite {
 
 WTF::UniqueRef<WebCore::StorageProvider> createStorageProvider();
 WebCore::ScreenOrientationManager& screenOrientationManager();
+// Without user scripts (the polyfills come from installPageExtensions)
 WTF::Ref<WebCore::UserContentProvider> userContentProvider();
-// WebRTC ueber den Host (WebRTCPolyfill.cpp), laeuft vor dem allgemeinen Polyfill
+// WebRTC and picture-in-picture through the host (WebRTCPolyfill.cpp), runs
+// before the general polyfill
 extern const char* const webrtcPolyfillSource;
 
-// Bildschirm hat gedreht (bl_set_screen): Beobachter benachrichtigen
+// The screen rotated (bl_set_screen): notify observers
 void screenOrientationMayHaveChanged();
 
-// Bruecke fuer die Polyfills zu APIs des Host-Browsers (EyeDropper, Akku,
-// Tastatur): __blHost(name, payload, callback) im window. Die Oberflaeche
-// (web/devices.js) fuehrt den Aufruf aus und antwortet mit hostCallFinished.
-// Dazu __blExtendPrototype(klasse, deskriptoren): Properties, die erst auf den
-// Prototyp einer DOM-Klasse kommen, wenn das Fenster ihn anlegt.
-void installHostBridge(JSC::JSGlobalObject&, int viewId);
+// New window object: runs the polyfills with a bridge to the host browser
+// APIs, only for the enabled features (EngineConfig.h). The bridge is an
+// argument of the polyfill functions, never a global: host(name, payload,
+// callback) calls the host (answered by hostCallFinished), media(...) connects
+// tracks (MediaStreamWasm.cpp) and extendPrototype(className, descriptors)
+// adds properties to a DOM prototype once the window creates it.
+void installPageExtensions(JSC::JSGlobalObject&, int viewId);
 void hostCallFinished(uint64_t identifier, bool ok, const WTF::String& resultJSON);
+
+// Calls the function expression source in the window with the arguments. Runs
+// outside of the page's CSP, exceptions go to the page's console.
+void callEngineFunction(JSC::JSGlobalObject&, const WTF::String& source, const JSC::ArgList&);
 
 } // namespace BrowserLite

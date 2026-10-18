@@ -32,7 +32,7 @@ void EditorClient::respondToChangedSelection(LocalFrame* frame)
 {
     if (!frame || !frame->view() || !frame->selection().selection().isContentEditable())
         return;
-    // Ende der Markierung bzw. Cursor, in Koordinaten der Ansicht (CSS-Pixel)
+    // End of the selection or caret, in view coordinates (CSS pixels)
     auto caret = frame->view()->contentsToRootView(frame->selection().absoluteCaretBounds());
     if (caret.isEmpty() || caret == m_caret)
         return;
@@ -66,7 +66,7 @@ void EditorClient::undo()
         return;
     Ref step = m_undoStack.takeLast();
     SetForScope scope { m_inUndoRedo, true };
-    step->unapply(); // registriert sich selber als Redo-Schritt
+    step->unapply(); // registers itself as a redo step
 }
 
 void EditorClient::redo()
@@ -75,15 +75,15 @@ void EditorClient::redo()
         return;
     Ref step = m_redoStack.takeLast();
     SetForScope scope { m_inUndoRedo, true };
-    step->reapply(); // registriert sich selber als Undo-Schritt
+    step->reapply(); // registers itself as an undo step
 }
 
-// Befehle fuer KeyDown (Bewegen, Loeschen, Kurzbefehle)
+// Commands for KeyDown (movement, deletion, shortcuts)
 static ASCIILiteral commandForKeyDown(const PlatformKeyboardEvent& event)
 {
     const String& key = event.key();
     bool shift = event.shiftKey();
-    bool command = event.controlKey() || event.metaKey(); // Ctrl (Linux/Windows) oder Cmd (Mac)
+    bool command = event.controlKey() || event.metaKey(); // Ctrl (Linux/Windows) or Cmd (Mac)
 
     if (command && key.length() == 1) {
         switch (toASCIILower(key[0])) {
@@ -134,7 +134,7 @@ static ASCIILiteral commandForKeyDown(const PlatformKeyboardEvent& event)
     return ""_s;
 }
 
-// Befehle fuer das Zeichen-Event (Enter)
+// Commands for the character event (Enter)
 static ASCIILiteral commandForChar(const PlatformKeyboardEvent& event)
 {
     if (event.text() == "\r"_s)
@@ -161,7 +161,7 @@ void EditorClient::handleKeyboardEvent(KeyboardEvent& event)
         if (name.isEmpty())
             return;
         auto command = frame->editor().command(String { name });
-        // Text einfuegende Befehle macht das Zeichen-Event
+        // Commands that insert text are handled by the character event
         if (!command.isTextInsertion() && command.execute(&event))
             event.setDefaultHandled();
         return;
@@ -174,7 +174,7 @@ void EditorClient::handleKeyboardEvent(KeyboardEvent& event)
         event.setDefaultHandled();
         return;
     }
-    // Steuerzeichen nie einfuegen, und Ctrl/Cmd-Kombinationen sind Befehle, kein Text
+    // Never insert control characters, and Ctrl/Cmd combinations are commands, not text
     if (event.charCode() < ' ' || platformEvent->controlKey() || platformEvent->metaKey())
         return;
     if (frame->editor().insertText(platformEvent->text(), &event))

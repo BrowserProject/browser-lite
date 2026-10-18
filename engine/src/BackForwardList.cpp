@@ -9,7 +9,7 @@ static constexpr size_t capacity = 100;
 
 void BackForwardList::addItem(Ref<HistoryItem>&& item)
 {
-    // Alles nach dem aktuellen Eintrag faellt weg (neue Navigation)
+    // Everything after the current entry goes away (new navigation)
     if (m_current)
         m_entries.shrink(*m_current + 1);
     else
@@ -33,7 +33,7 @@ static HistoryItem* findItem(HistoryItem& item, BackForwardFrameItemIdentifier f
 
 void BackForwardList::setChildItem(BackForwardFrameItemIdentifier frameItemID, Ref<HistoryItem>&& item)
 {
-    // Unter-Frame hat navigiert: den passenden Teil des aktuellen Eintrags ersetzen
+    // A subframe navigated: replace the matching part of the current entry
     if (!m_current)
         return;
     if (auto* parent = findItem(m_entries[*m_current].get(), frameItemID))

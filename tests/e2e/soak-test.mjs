@@ -93,7 +93,7 @@ page.on('console', (msg) => {
   const match = /RESULT done=(\S+)/.exec(text);
   if (match)
     finished.add(match[1]);
-  if (text.includes('[speicher]'))
+  if (text.includes('[memory]'))
     reportLines.push(text);
 });
 async function waitDone(key, ms = 30000) {
@@ -113,13 +113,13 @@ async function go(address) {
 async function measure() {
   await page.waitForTimeout(500);
   reportLines.length = 0;
-  const line = page.waitForEvent('console', { predicate: (msg) => /malloc belegt \d+ MB/.test(msg.text()), timeout: 60000 });
+  const line = page.waitForEvent('console', { predicate: (msg) => /malloc used \d+ MB/.test(msg.text()), timeout: 60000 });
   await page.evaluate(() => window.__blMemory(4));
   const text = (await line).text();
   await page.waitForTimeout(500);
   return {
-    malloc: Number(/malloc belegt (\d+) MB/.exec(text)[1]),
-    documents: Number(/Dokumente (\d+)/.exec(text)[1]),
+    malloc: Number(/malloc used (\d+) MB/.exec(text)[1]),
+    documents: Number(/documents (\d+)/.exec(text)[1]),
     wasm: Math.round(await page.evaluate(() => window.__blMemory()) / 2 ** 20),
     players: await page.evaluate(() => window.__blMediaState().length),
     documentList: reportLines.filter((l) => l.includes('doc refs=')),

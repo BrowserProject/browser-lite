@@ -1,9 +1,9 @@
-// MediaRecorder: nimmt Bild und Ton eines MediaStream auf (Kamera, Canvas,
-// Web Audio) und gibt WebM zurueck wie Chrome. Kodieren und Verpacken macht
-// engine/js/mediarecorder-host.js mit den Encodern des Host-Browsers.
+// MediaRecorder: records frames and sound of a MediaStream (camera, canvas,
+// Web Audio) and returns WebM like Chrome. engine/js/mediarecorder-host.js
+// encodes and muxes with the encoders of the host browser.
 //
-// Bilder und Ton kommen von beliebigen Threads (Audio-Thread bei Web Audio),
-// sie gehen kopiert an den Engine-Thread und von dort an das JS.
+// Frames and sound come from any thread (audio thread with Web Audio), they go
+// copied to the engine thread and from there to the JS.
 #include "config.h"
 
 #include "MediaStreamWasm.h"
@@ -50,7 +50,7 @@ EM_JS(void, blJsRecorderClose, (int id), {
     blRecorder.close(id);
 });
 
-// Was der Recorder kann: WebM mit VP8/VP9/AV1 und Opus (wie Chrome)
+// What the recorder can do: WebM with VP8/VP9/AV1 and Opus (like Chrome)
 struct Format {
     bool valid { false };
     bool audioOnly { false };
@@ -85,7 +85,7 @@ Format parse(const ContentType& type)
     return format;
 }
 
-// Gemeinsamer Teil fuer alle Threads: Zeit seit Aufnahmebeginn ohne Pausen
+// Shared part for all threads: time since the recording started without pauses
 class RecorderClock : public ThreadSafeRefCounted<RecorderClock> {
 public:
     double videoTimestamp()
@@ -118,7 +118,7 @@ public:
             m_paused += MonotonicTime::now() - m_pauseStart;
             m_pauseStart = { };
         }
-        // Ton nach der Pause wieder an der Uhr ausrichten
+        // Align the sound to the clock again after the pause
         m_audioStarted = false;
     }
 
@@ -176,7 +176,7 @@ public:
         m_audioBitRate = hasAudio ? bitRates.audio : 0;
         m_videoBitRate = hasVideo ? bitRates.video : 0;
 
-        // Typ wie Chrome: was die Seite angegeben hat, sonst mit den Codecs
+        // Type like Chrome: what the page specified, otherwise with the codecs
         if (!options.mimeType.isEmpty() && !ContentType(options.mimeType).codecs().isEmpty())
             m_mimeType = options.mimeType;
         else {
@@ -214,8 +214,8 @@ public:
             callback(SharedBuffer::create(), mimeType, 0);
     }
 
-    // Achtung: der letzte Aufruf kann diesen Recorder loeschen (MediaRecorder
-    // gibt ihn beim Stoppen an den Rueckruf ab), danach nichts mehr anfassen
+    // Careful: the last call can delete this recorder (MediaRecorder hands it
+    // to the callback when stopping), touch nothing afterwards
     void flushed()
     {
         m_flushing = false;
@@ -375,8 +375,8 @@ std::unique_ptr<MediaRecorderPrivate> createMediaRecorderPrivateWasm(MediaStream
 
 } // namespace WebCore
 
-// Aus engine/js/mediarecorder-host.js (Engine-Thread): Encoder sind leer
-extern "C" EMSCRIPTEN_KEEPALIVE void bl_recorder_flushed(int id)
+// From engine/js/mediarecorder-host.js (engine thread): the encoders are empty
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__recorder_flushed(int id)
 {
     if (auto* recorder = BrowserLite::recorders().get(id))
         recorder->flushed();

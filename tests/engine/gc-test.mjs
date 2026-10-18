@@ -1,13 +1,13 @@
-// Fuehrt tests/engine/gc-stress.html in der Engine (node) aus und wartet auf das Ergebnis.
+// Runs tests/engine/gc-stress.html in the engine (node) and waits for the result.
 //   JSC_slowPathAllocsBetweenGCs=10 node tests/engine/gc-test.mjs <engine.js>
 //
-// Mit der JSC-Option laeuft der GC sehr oft. Ohne die GC-Verschiebung der Engine
-// (EngineLoop.cpp, Patch 0012) und ohne --spill-pointers stuerzt dieser Test ab.
+// With the JSC option the GC runs very often. Without the engine's GC deferral
+// (EngineLoop.cpp, patch 0012) and without --spill-pointers this test crashes.
 import { readFileSync } from 'node:fs';
 import { runEngine } from './engine-node.mjs';
 
 setTimeout(() => {
-  console.error('FEHLER: Zeitlimit (180 s)');
+  console.error('ERROR: time limit (180 s)');
   process.exit(1);
 }, 180000);
 

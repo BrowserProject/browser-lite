@@ -1,4 +1,4 @@
-// speechSynthesis ueber den Host-Browser (Speech.cpp)
+// speechSynthesis through the host browser (Speech.cpp)
 #pragma once
 
 #include <wtf/Forward.h>
@@ -6,9 +6,9 @@
 namespace BrowserLite {
 
 void installSpeech();
-// Stimmen des Hosts als JSON-Liste [{uri, name, lang, local, default}]
+// Voices of the host as a JSON list [{uri, name, lang, local, default}]
 void setSpeechVoices(const String& json);
-// type wie WasmPlatform::SpeechEvent: 0 Start, 1 Ende, 2 Pause, 3 Weiter, 4 Fehler, 5 Wort, 6 Satz
+// type like WasmPlatform::SpeechEvent: 0 start, 1 end, 2 pause, 3 resume, 4 error, 5 word, 6 sentence
 void speechEvent(uint64_t id, int type, unsigned charIndex, unsigned charLength);
 
 } // namespace BrowserLite

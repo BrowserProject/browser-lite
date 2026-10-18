@@ -19,7 +19,7 @@ namespace BrowserLite {
 
 using namespace WebCore;
 
-// ------------------------------------------------------------ Hilfsklassen
+// ------------------------------------------------------------ Helper classes
 
 namespace {
 
@@ -267,7 +267,7 @@ Ref<MediaPromise> SourceBufferPrivateWasm::appendInternal(Ref<SharedBuffer>&& da
     if (!m_parser || !source)
         return MediaPromise::createAndReject(PlatformMediaError::ParsingError);
 
-    // Gleiche Daten an das MediaSource im Host-Browser (mit timestampOffset und Fenster)
+    // The same data to the MediaSource in the host browser (with timestampOffset and window)
     auto [windowStart, windowEnd] = appendWindow();
     auto contiguous = data->makeContiguous();
     source->send("sb-append"_s, makeString("{\"sb\":"_s, m_id, ",\"offset\":"_s, jsonTime(timestampOffset()),
@@ -290,8 +290,8 @@ void SourceBufferPrivateWasm::resetParserStateInternal()
         source->send("sb-abort"_s, makeString("{\"sb\":"_s, m_id, '}'));
 }
 
-// remove() der Seite und das Aufraeumen vor einem Append: der Host muss die
-// gleichen Frames wegwerfen, sonst spielt er Daten, die es in WebCore nicht mehr gibt
+// remove() of the page and the cleanup before an append: the host has to throw
+// away the same frames, otherwise it plays data that no longer exists in WebCore
 void SourceBufferPrivateWasm::didRemoveCodedFrames(const MediaTime& start, const MediaTime& end)
 {
     if (RefPtr source = this->source())

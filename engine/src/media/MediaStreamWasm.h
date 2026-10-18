@@ -1,12 +1,12 @@
-// Kamera, Mikrofon und Bildschirm des Host-Browsers fuer getUserMedia und
+// Camera, microphone and screen of the host browser for getUserMedia and
 // getDisplayMedia.
 //
-// WebCore macht die ganze MediaStream-Logik (Tracks, Constraints, Klone).
-// Wir liefern die Geraete und Quellen: startet eine Quelle, oeffnet die
-// Oberflaeche die Kamera/das Mikrofon des Host (web/capture.js) und schickt
-// die Bilder und den Ton als Stream an den Engine-Worker (engine/js/
-// webcodecs-host.js, blCapture). Die kommen ueber bl_capture_* hier an.
-// Wie in Chrome fragt die Oberflaeche pro Ursprung nach Kamera/Mikrofon.
+// WebCore does all the MediaStream logic (tracks, constraints, clones). We
+// provide the devices and sources: when a source starts, the host opens the
+// host camera/microphone and sends the frames and the sound as a stream to
+// the engine worker (engine/js/webcodecs-host.js, blCapture). They arrive here
+// through bl__capture_*. Like in Chrome the host asks per origin for
+// camera/microphone.
 #pragma once
 
 #include <WebCore/AudioStreamDescription.h>
@@ -19,6 +19,7 @@
 
 namespace JSC {
 class JSGlobalObject;
+class JSObject;
 }
 
 namespace WebCore {
@@ -35,11 +36,12 @@ class StreamAudioOutput;
 namespace MediaStreams {
 void enableIn(WebCore::Settings&);
 void attachTo(int viewId, WebCore::Page&);
-// __blMedia fuer das WebRTC-Polyfill (Spuren der Seite <-> Host)
-void installBridge(JSC::JSGlobalObject&);
+// media(op, ...) of the polyfill bridge for WebRTC and picture-in-picture
+// (tracks and players of the page <-> host), see WebPlatformExtras.h
+JSC::JSObject* createBridge(JSC::JSGlobalObject&);
 }
 
-// Ton im Speicher der Engine: Float32, ein Block pro Kanal
+// Sound in the engine memory: Float32, one block per channel
 class WasmAudioData final : public WebCore::PlatformAudioData {
 public:
     WasmAudioData(const float* samples, size_t frames, unsigned channels)
@@ -83,7 +85,7 @@ private:
     unsigned m_channels;
 };
 
-// <video>.srcObject = stream: haelt das neuste Bild der Video-Spur
+// <video>.srcObject = stream: holds the newest frame of the video track
 class MediaStreamPlayback final
     : public RefCounted<MediaStreamPlayback>
     , public WebCore::MediaStreamPrivateObserver
@@ -97,7 +99,7 @@ public:
 
     void stop();
     RefPtr<WebCore::VideoFrame> currentFrame() const;
-    // Ton der Spur abspielen (nur wenn das Element spielt und nicht stumm ist)
+    // Play the sound of the track (only when the element plays and is not muted)
     void setAudioState(bool playing, float volume, bool muted);
     WebCore::MediaStreamPrivate& stream() const { return m_stream; }
 
@@ -114,7 +116,7 @@ private:
     void didAddTrack(WebCore::MediaStreamTrackPrivate&) final { updateTracks(); }
     void didRemoveTrack(WebCore::MediaStreamTrackPrivate&) final { updateTracks(); }
 
-    // VideoFrameObserver (kann von jedem Thread kommen)
+    // VideoFrameObserver (may come from any thread)
     void videoFrameAvailable(WebCore::VideoFrame&, WebCore::VideoFrameTimeMetadata) final;
 
     WeakPtr<MediaPlayerPrivateWasm> m_player;

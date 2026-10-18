@@ -31,7 +31,7 @@ class PopupMenuWasm;
 class ColorChooserWasm;
 class DateTimeChooserWasm;
 
-// Pro View hoechstens eine offene Auswahl jeder Art
+// At most one open chooser of each kind per view
 template<typename T> static HashMap<int, RefPtr<T>>& openChoosers()
 {
     static NeverDestroyed<HashMap<int, RefPtr<T>>> choosers;
@@ -46,7 +46,7 @@ template<typename T> static void forgetChooser(int viewId, T& chooser)
         map.remove(it);
 }
 
-// Liste eines <select> (auch <input list>, <input type=search>)
+// List of a <select> (also <input list>, <input type=search>)
 class PopupMenuWasm final : public PopupMenu {
 public:
     static Ref<PopupMenuWasm> create(WebView& view, PopupMenuClient& client) { return adoptRef(*new PopupMenuWasm(view, client)); }
@@ -165,7 +165,7 @@ void choosePopupItem(int viewId, int index)
         popup->choose(index);
 }
 
-// Farbe: <input type=color>
+// Color: <input type=color>
 class ColorChooserWasm final : public ColorChooser, public RefCounted<ColorChooserWasm> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(ColorChooserWasm);
 public:
@@ -247,7 +247,7 @@ void chooseColor(int viewId, const String& color, bool done)
         chooser->choose(parseHexColor(color), done);
 }
 
-// Datum und Zeit: <input type=date|time|datetime-local|month|week>
+// Date and time: <input type=date|time|datetime-local|month|week>
 class DateTimeChooserWasm final : public DateTimeChooser, public RefCounted<DateTimeChooserWasm> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(DateTimeChooserWasm);
 public:
@@ -278,7 +278,7 @@ private:
 
     void showChooser(const DateTimeChooserParameters& parameters) final
     {
-        // min/max/step als Zahl wie valueAsNumber; die Oberflaeche rechnet sie um
+        // min/max/step as numbers like valueAsNumber; the host converts them
         notifyHost(m_viewId, "datetimepicker", makeString('{', rectJSON(parameters.anchorRectInRootView),
             ",\"type\":\""_s, jsonEscape(parameters.type), "\",\"value\":\""_s, jsonEscape(parameters.currentValue),
             "\",\"min\":"_s, std::isfinite(parameters.minimum) ? parameters.minimum : 0, ",\"max\":"_s, std::isfinite(parameters.maximum) ? parameters.maximum : 0,

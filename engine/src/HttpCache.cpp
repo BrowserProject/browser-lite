@@ -1,20 +1,23 @@
-// Dauerhafter HTTP-Cache der Engine.
+// Persistent HTTP cache of the engine.
 //
-// Ohne Network-Prozess hat WebKit hier nur den Speicher-Cache (MemoryCache),
-// der mit der Engine verschwindet. Damit nicht jeder Besuch einer Seite alles
-// wieder ueber das Relay holt, liegen cachebare Antworten in der
-// Cache API des Host-Browsers (auf der Platte, wird nur bei Bedarf gelesen),
-// Zugriff ueber engine/js/http-cache.js auf dem Haupt-Thread.
+// Without a network process WebKit only has the memory cache (MemoryCache)
+// here, which disappears with the engine. So that not every visit of a page
+// fetches everything through the transport again, cacheable responses are kept
+// in the Cache API of the host browser (on disk, only read when needed),
+// accessed through engine/js/http-cache.js on the main thread. BL_HTTP_CACHE=0
+// turns it off.
 //
-// Ablauf (lookupForLoad, fuer alle Lader): vor dem Netz nachsehen. Frisch:
-// direkt aus dem Cache. Alt, aber mit ETag/Last-Modified: bedingte Anfrage,
-// bei 304 aus dem Cache. Cachebare 200-Antworten (bis 10 MB) werden gespeichert. Frische und
-// Alter rechnet WebCore (CacheValidation.h) wie im Network-Prozess.
+// Flow (lookupForLoad, for all loaders): look before the network. Fresh:
+// straight from the cache. Stale but with ETag/Last-Modified: conditional
+// request, on 304 from the cache. Cacheable 200 responses (up to 10 MB) are
+// stored. WebCore computes freshness and age (CacheValidation.h) like in the
+// network process.
 
 #include "config.h"
 #include "HttpCache.h"
 
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Strategies.h"
 
 #include <WebCore/CacheValidation.h>
@@ -30,7 +33,7 @@
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
-// Laufen auf dem Haupt-Thread (engine/js/http-cache.js)
+// Run on the main thread (engine/js/http-cache.js)
 EM_JS(void, blJsHttpCacheLookup, (int id, const char* url), {
     blHttpCache.lookup(id, UTF8ToString(url));
 });
@@ -42,7 +45,7 @@ namespace BrowserLite::HttpCache {
 
 using namespace WebCore;
 
-// Eigene Header im gespeicherten Eintrag
+// Own headers in the stored entry
 static constexpr auto timeHeader = "x-bl-time"_s;
 static constexpr auto varyHeader = "x-bl-vary"_s;
 static constexpr auto statusTextHeader = "x-bl-status-text"_s;
@@ -67,11 +70,11 @@ static String cacheKey(const URL& url)
 
 bool canUse(const ResourceRequest& request)
 {
-    if (request.httpMethod() != "GET"_s || !request.url().protocolIsInHTTPFamily())
+    if (!engineConfig().httpCache || request.httpMethod() != "GET"_s || !request.url().protocolIsInHTTPFamily())
         return false;
     if (request.cachePolicy() == ResourceRequestCachePolicy::DoNotUseAnyCache)
         return false;
-    // Bereichsanfragen (Video) und eigene bedingte Anfragen von WebCore gehen direkt ans Netz
+    // Range requests (video) and WebCore's own conditional requests go straight to the network
     for (auto name : { HTTPHeaderName::Range, HTTPHeaderName::IfNoneMatch, HTTPHeaderName::IfModifiedSince, HTTPHeaderName::IfMatch, HTTPHeaderName::IfUnmodifiedSince, HTTPHeaderName::IfRange, HTTPHeaderName::Authorization }) {
         if (request.hasHTTPHeaderField(name))
             return false;
@@ -131,16 +134,16 @@ bool isStorable(const ResourceRequest& request, const ResourceResponse& response
         return false;
     if (response.expectedContentLength() > static_cast<long long>(maximumEntrySize))
         return false;
-    // Endet nur mit der Verbindung (HTTP/1 ohne Laenge, nicht chunked): ein
-    // Abbruch sieht dann wie das Ende aus (CurlRequest::didCompleteTransfer
-    // nimmt auch einen Lesefehler als Ende), die Antwort kann abgeschnitten sein
+    // Ends only with the connection (HTTP/1 without length, not chunked): an
+    // abort then looks like the end (CurlRequest::didCompleteTransfer also
+    // takes a read error as the end), the response may be truncated
     if (response.httpVersion().startsWith("HTTP/1"_s) && response.httpHeaderField(HTTPHeaderName::ContentLength).isEmpty()
         && !response.httpHeaderField(HTTPHeaderName::TransferEncoding).containsIgnoringASCIICase("chunked"_s))
         return false;
     return hasValidators(response) || computeFreshnessLifetimeForHTTPFamily(response, WallTime::now()) > 0_s;
 }
 
-// Wert fuer x-bl-vary: Name=Wert-Paare, Prozent-kodiert, mit & getrennt
+// Value for x-bl-vary: name=value pairs, percent-encoded, separated by &
 static String encodeVary(const Vector<std::pair<String, String>>& headers)
 {
     StringBuilder builder;
@@ -202,7 +205,7 @@ void lookup(const ResourceRequest& request, Completion&& completion)
     }, job);
 }
 
-// Antwort des Haupt-Threads auf dem Engine-Thread auswerten
+// Evaluates the main thread's answer on the engine thread
 static void didLookup(int id, int status, char* headers, int headersLength, uint8_t* body, int bodyLength)
 {
     auto pending = pendingLookups().take(id);
@@ -212,7 +215,7 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
         WallTime time;
         String statusText;
         Vector<std::pair<String, String>> varying;
-        // UTF-8 wie beim Speichern (store, UTF8ToString in http-cache.js)
+        // UTF-8 like when storing (store, UTF8ToString in http-cache.js)
         auto text = String::fromUTF8(std::span(byteCast<char8_t>(headers), headersLength));
         for (auto line : StringView(text).split('\n')) {
             auto colon = line.find(':');
@@ -250,7 +253,7 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
 
 void store(const ResourceRequest& request, const ResourceResponse& response, WallTime responseTime, const FragmentedSharedBuffer& body)
 {
-    // Header ohne die, die nicht mehr stimmen (curl hat den Inhalt schon entpackt)
+    // Headers without those that are no longer right (curl already decoded the body)
     StringBuilder headers;
     for (auto& field : response.httpHeaderFields()) {
         if (field.keyAsHTTPHeaderName) {
@@ -308,7 +311,7 @@ void lookupForLoad(ResourceRequest&& request, bool alwaysRevalidate, CompletionH
     lookup(key, [request = WTF::move(request), alwaysRevalidate, completion = WTF::move(completion)](std::unique_ptr<Entry>&& entry) mutable {
         auto use = entry ? decide(*entry, request) : Use::None;
         if (entry)
-            debugLog("Cache %s: %s", use == Use::Fresh ? "frisch" : use == Use::Revalidate ? "nachpruefen" : "nicht nutzbar", request.url().string().utf8().data());
+            debugLog("Cache %s: %s", use == Use::Fresh ? "fresh" : use == Use::Revalidate ? "revalidate" : "not usable", request.url().string().utf8().data());
         if (use == Use::Fresh && !alwaysRevalidate)
             return completion({ WTF::move(request), WTF::move(entry), true });
         if (use == Use::None)
@@ -331,9 +334,9 @@ using namespace BrowserLite;
 
 extern "C" {
 
-// Vom Haupt-Thread (engine/js/http-cache.js): status 0 = nicht im Cache.
-// headers und body gehoeren danach uns (malloc).
-EMSCRIPTEN_KEEPALIVE void bl_http_cache_result(int id, int status, char* headers, int headersLength, uint8_t* body, int bodyLength)
+// From the main thread (engine/js/http-cache.js): status 0 = not in the cache.
+// headers and body belong to us afterwards (malloc).
+EMSCRIPTEN_KEEPALIVE void bl__http_cache_result(int id, int status, char* headers, int headersLength, uint8_t* body, int bodyLength)
 {
     runOnEngineThread([=] {
         HttpCache::didLookup(id, status, headers, headersLength, body, bodyLength);

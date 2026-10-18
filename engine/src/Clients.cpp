@@ -1,7 +1,7 @@
-// WebCore-Clients der Engine. Das Muster fuer FrameLoaderClient (welche
-// Empty-Methoden einen echten Browser stillschweigend kaputt machen) stammt
-// aus github.com/theogbob/WebkitWasm (BSD-2-Clause, Copyright (c) 2026 theogbob)
-// und dem WebKit2 WebLocalFrameLoaderClient.
+// WebCore clients of the engine. The pattern for FrameLoaderClient (which
+// Empty methods silently break a real browser) comes from
+// github.com/theogbob/WebkitWasm (BSD-2-Clause, Copyright (c) 2026 theogbob)
+// and the WebKit2 WebLocalFrameLoaderClient.
 
 #include "config.h"
 #include "Clients.h"
@@ -110,13 +110,13 @@ void ChromeClient::invalidateContentsAndRootView(const IntRect& rect)
 
 void ChromeClient::invalidateContentsForSlowScroll(const IntRect& rect)
 {
-    debugLog("Scrollen langsam (neu malen) %dx%d", rect.width(), rect.height());
+    debugLog("Slow scroll (repaint) %dx%d", rect.width(), rect.height());
     m_view->addDamage(rect);
 }
 
 void ChromeClient::scroll(const IntSize& delta, const IntRect& rectToScroll, const IntRect& clipRect)
 {
-    debugLog("Scrollen schnell (verschieben) %d,%d", delta.width(), delta.height());
+    debugLog("Fast scroll (move) %d,%d", delta.width(), delta.height());
     m_view->scrollDamage(delta, rectToScroll, clipRect);
 }
 
@@ -200,11 +200,11 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
     m_view->didReceiveConsoleMessage(static_cast<int>(level), message, sourceID, lineNumber);
 }
 
-// Dialoge: der Engine-Thread wartet, bis der Haupt-Thread den Dialog gezeigt hat.
-// Module.engineDialog(viewId, type, origin, message, default) im Haupt-Thread liefert:
-//   alert (0) -> 0, confirm (1) -> 0/1, prompt (2) -> Pointer auf UTF-8 (malloc) oder 0,
-//   beforeunload beim Verlassen (3) oder Neuladen (4) -> 0/1
-// origin ist der Ursprung des Frames, der fragt (wie "<host> meldet" in Chrome).
+// Dialogs: the engine thread waits until the main thread showed the dialog.
+// Module.engineDialog(viewId, type, origin, message, default) on the main thread returns:
+//   alert (0) -> 0, confirm (1) -> 0/1, prompt (2) -> pointer to UTF-8 (malloc) or 0,
+//   beforeunload when leaving (3) or reloading (4) -> 0/1
+// origin is the origin of the asking frame (like "<host> says" in Chrome).
 static intptr_t runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue)
 {
     RefPtr document = frame.document();
@@ -222,7 +222,7 @@ static intptr_t runDialog(int viewId, LocalFrame& frame, int type, const String&
 
 void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
 {
-    // window.print(): PDF bauen, die Oberflaeche zeigt den Druckdialog
+    // window.print(): build a PDF, the host shows the print dialog
     BrowserLite::printFrame(m_view->id(), frame);
 }
 
@@ -234,7 +234,7 @@ void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
         m_view->setAudible(audible);
         notifyHost(m_view->id(), "media-state", audible ? "{\"audio\":true}"_s : "{\"audio\":false}"_s);
     }
-    // Kamera, Mikrofon oder Bildschirm in Gebrauch: roter Punkt im Tab
+    // Camera, microphone or screen in use: red dot on the view
     bool capturing = state.containsAny({ MediaProducerMediaState::HasActiveAudioCaptureDevice, MediaProducerMediaState::HasActiveVideoCaptureDevice,
         MediaProducerMediaState::HasActiveScreenCaptureDevice, MediaProducerMediaState::HasActiveWindowCaptureDevice });
     if (capturing != m_capturing) {
@@ -263,9 +263,9 @@ bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message,
     return true;
 }
 
-// beforeunload (Navigation, Neu laden, Tab schliessen ueber bl_try_close): wie
-// Chrome ohne den Text der Seite. Die Oberflaeche fragt "Verlassen" (3) oder
-// "Neu laden" (4), 1 heisst weiter. Nach einer Benutzer-Aktion fragt WebCore nur.
+// beforeunload (navigation, reload, closing the view through bl_try_close):
+// like Chrome without the page's text. The host asks "leave" (3) or "reload"
+// (4), 1 means continue. WebCore only asks after a user action.
 bool ChromeClient::runBeforeUnloadConfirmPanel(String&&, LocalFrame& frame)
 {
     RefPtr mainFrame = dynamicDowncast<LocalFrame>(frame.mainFrame());
@@ -273,8 +273,8 @@ bool ChromeClient::runBeforeUnloadConfirmPanel(String&&, LocalFrame& frame)
     return runDialog(m_view->id(), frame, reload ? 4 : 3, { }, { });
 }
 
-// Erst im naechsten Schritt: beim Melden ist der Listener noch nicht
-// eingetragen bzw. entfernt, und Seiten aus dem Back/Forward-Cache melden nichts
+// Only in the next step: when reported, the listener is not yet added or
+// removed, and pages from the back/forward cache report nothing
 void ChromeClient::reportBeforeUnload(WebView& view)
 {
     runOnEngineThread([weakView = WeakPtr { view }] {
@@ -293,8 +293,8 @@ void ChromeClient::focus()
     notifyHost(m_view->id(), "focus");
 }
 
-// Neuer Tab fuer window.open / target=_blank. Wie WebChromeClient in
-// WebKitLegacy: Opener (ausser noopener), Name und Sandbox des Fensters
+// New view for window.open / target=_blank. Like WebChromeClient in
+// WebKitLegacy: opener (except noopener), name and sandbox of the window
 RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedMainFrameName, const WindowFeatures& features, const NavigationAction&)
 {
     auto& popup = WebView::openFromEngine(m_view->id(), m_view->size(), m_view->deviceScaleFactor());
@@ -314,7 +314,7 @@ void ChromeClient::runOpenPanel(LocalFrame&, FileChooser& chooser)
     m_view->openFileChooser(chooser);
 }
 
-// Tab ueber das letzte Element hinaus: Fokus zurueck an die Oberflaeche
+// Tab past the last element: focus back to the host
 void ChromeClient::takeFocus(FocusDirection direction)
 {
     notifyHost(m_view->id(), "takefocus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
@@ -353,7 +353,7 @@ void ChromeClient::requestPointerUnlock(CompletionHandler<void(bool)>&& completi
 }
 #endif
 
-// Link-Adresse unten links und Tooltips (title-Attribut) wie in Chrome
+// Link address at the bottom left and tooltips (title attribute) like in Chrome
 void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& toolTip, TextDirection)
 {
     String link = result.absoluteLinkURL().string();
@@ -396,16 +396,16 @@ void ChromeClient::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)
 
 bool ChromeClient::scheduleRenderingUpdate()
 {
-    // Wir haben keinen DisplayRefreshMonitor. Das naechste Bild vom Host
-    // (requestAnimationFrame) fuehrt das Rendering-Update aus.
+    // We have no DisplayRefreshMonitor. The next frame of the host
+    // (requestAnimationFrame) runs the rendering update.
     m_view->scheduleRenderingUpdate();
     return true;
 }
 
 #if ENABLE(FULLSCREEN_API)
-// Vollbild (element.requestFullscreen()): WebCore-Zustand sofort umstellen,
-// die Oberflaeche macht den Seitenbereich im Host-Browser gross. Die neue
-// Groesse kommt dann wie sonst ueber bl_resize.
+// Fullscreen (element.requestFullscreen()): switch the WebCore state right
+// away, the host makes the view big in the host browser. The new size then
+// arrives as usual through bl_resize.
 void ChromeClient::enterFullScreenForElement(Element& element, HTMLMediaElementEnums::VideoFullscreenMode mode, CompletionHandler<void(ExceptionOr<void>)>&& willEnterFullscreen, CompletionHandler<bool(bool)>&& didEnterFullscreen)
 {
     auto result = protect(protect(element.document())->fullscreen())->willEnterFullscreen(element, mode);
@@ -437,8 +437,8 @@ FrameLoaderClient::FrameLoaderClient(FrameLoader& frameLoader, WebView& view)
 {
 }
 
-// Ein Prozess wie WebKitLegacy: der Eintrag beginnt immer beim Hauptframe, auch
-// wenn ein Iframe navigiert (WebKit2 setzt den Baum im UI-Prozess zusammen)
+// One process like WebKitLegacy: the entry always starts at the main frame,
+// even when an iframe navigates (WebKit2 assembles the tree in the UI process)
 RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, BackForwardItemIdentifier itemID) const
 {
     Ref frame = m_frameLoader->frame();
@@ -446,8 +446,9 @@ RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, 
     return rootFrame->loader().history().createItemTree(frame, clipAtTarget, itemID);
 }
 
-// Neues window-Objekt: WebAssembly anlegen (JSC kann es selber nicht, siehe wasm/WasmBridge.h),
-// dazu die Bruecken zum Host und, in einer Fehlerseite, ihr Knopf (ErrorPage.cpp)
+// New window object: create WebAssembly (JSC cannot do it itself, see
+// wasm/WasmBridge.h), then the page extensions with their host bridges and, in
+// an error page, its retry button (ErrorPage.cpp)
 void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& world)
 {
     if (!world.isNormal())
@@ -455,8 +456,8 @@ void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& wor
     Ref frame = m_frameLoader->frame();
     if (auto* globalObject = frame->script().globalObject(world)) {
         installWebAssembly(*globalObject);
-        installHostBridge(*globalObject, m_view->id());
-        ErrorPage::installBridge(frame, *globalObject);
+        installPageExtensions(*globalObject, m_view->id());
+        ErrorPage::installRetry(frame, *globalObject);
     }
 }
 
@@ -465,21 +466,21 @@ bool FrameLoaderClient::isMainFrame() const
     return m_frameLoader->frame().isMainFrame();
 }
 
-// Adressen, die die Engine selber laedt (view-source: zeigt die Oberflaeche,
-// showSource in web/app.js), und filesystem:, das im Host-Browser der Speicher
-// der Oberflaeche waere. Alles andere (mailto:, tel:, zoommtg:, ...) kann nur
-// der Host-Browser an das System weitergeben.
+// Addresses the engine loads itself (view-source: is shown by the host), and
+// filesystem:, which in the host browser would be the host's storage.
+// Everything else (mailto:, tel:, zoommtg:, ...) can only be passed on to the
+// system by the host browser.
 static bool isExternalURL(const URL& url)
 {
     return url.isValid() && !(url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsAbout() || url.protocolIsData()
         || url.protocolIsBlob() || url.protocolIsJavaScript() || url.protocolIs("view-source"_s) || url.protocolIs("filesystem"_s));
 }
 
-// Wie Chrome nur nach einem Klick oder aus der Adressleiste, sonst still
-// verworfen. Ein Iframe mit sandbox braucht dazu allow-popups,
-// allow-top-navigation(-to-custom-protocols) oder einen Klick mit
+// Like Chrome only after a click or from the address bar, otherwise silently
+// dropped. A sandboxed iframe needs allow-popups,
+// allow-top-navigation(-to-custom-protocols) or a click with
 // allow-top-navigation-by-user-activation (HTML "hand-off to external
-// software", wie frameSandboxAllowsOpeningExternalCustomProtocols in WebKit2).
+// software", like frameSandboxAllowsOpeningExternalCustomProtocols in WebKit2).
 static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxFlags, const NavigationAction& action, const URL& url)
 {
     bool userGesture = action.processingUserGesture();
@@ -501,14 +502,14 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
         function(PolicyAction::Ignore);
         return;
     }
-    // <a download>: gleich herunterladen, ohne die Adresse erst als Seite zu
-    // laden (WebCore prueft sandbox, ruft dann startDownload)
+    // <a download>: download right away without loading the address as a page
+    // first (WebCore checks sandbox, then calls startDownload)
     if (!action.downloadAttribute().isNull()) {
         function(PolicyAction::Download);
         return;
     }
-    // Strg/Cmd+Klick oder Mittelklick auf einen Link: wie Chrome in einem neuen
-    // Tab im Hintergrund, die Seite bleibt
+    // Ctrl/Cmd+click or middle click on a link: like Chrome in a new
+    // background view, the page stays
     if (action.type() == NavigationType::LinkClicked && request.url().protocolIsInHTTPFamily()) {
         auto& mouse = action.mouseEventData();
         if (mouse && (mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle)) {
@@ -522,8 +523,8 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
 
 void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest&, const String&, FramePolicyFunction&& function)
 {
-    // Download (Content-Disposition: attachment, unbekannter Typ): WebCore
-    // prueft sandbox und data:, dann convertMainResourceLoadToDownload
+    // Download (Content-Disposition: attachment, unknown type): WebCore checks
+    // sandbox and data:, then convertMainResourceLoadToDownload
     bool download = response.isAttachment() || !canShowMIMEType(response.mimeType());
     function(download ? PolicyAction::Download : PolicyAction::Use);
 }
@@ -533,8 +534,8 @@ void FrameLoaderClient::startDownload(const ResourceRequest& request, const Stri
     BrowserLite::startDownload(m_view->id(), request, suggestedName);
 }
 
-// Die Datei nochmal mit eigenem Request laden (entscheidungen.md #33). Die URL
-// der Antwort ist schon das Ziel nach allen Redirects.
+// Loads the file again with its own request (docs/decisions.md #33). The URL
+// of the response is already the target after all redirects.
 void FrameLoaderClient::convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest& request, const ResourceResponse& response)
 {
     auto downloadRequest = request;
@@ -542,8 +543,8 @@ void FrameLoaderClient::convertMainResourceLoadToDownload(DocumentLoader*, const
     BrowserLite::startDownload(m_view->id(), downloadRequest, { });
 }
 
-// target=_blank und Links mit neuem Fenster (window.open geht ueber denselben
-// ChromeClient::createWindow). Wie WebFrameLoaderClient in WebKitLegacy.
+// target=_blank and links with a new window (window.open goes through the same
+// ChromeClient::createWindow). Like WebFrameLoaderClient in WebKitLegacy.
 LocalFrame* FrameLoaderClient::dispatchCreatePage(const NavigationAction& action, NewFrameOpenerPolicy openerPolicy, const String& openedMainFrameName)
 {
     Ref opener = m_frameLoader->frame();
@@ -560,14 +561,14 @@ LocalFrame* FrameLoaderClient::dispatchCreatePage(const NavigationAction& action
 
 void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationAction& action, const ResourceRequest& request, FormState*, const String&, std::optional<HitTestResult>&&, FramePolicyFunction&& function)
 {
-    // mailto: mit target=_blank: kein leerer Tab
+    // mailto: with target=_blank: no empty view
     if (isExternalURL(request.url())) {
         Ref frame = m_frameLoader->frame();
         openExternalURL(m_view->id(), frame, frame->effectiveSandboxFlags(), action, request.url());
         function(PolicyAction::Ignore);
         return;
     }
-    // Neue Fenster (target=_blank, window.open) werden neue Tabs, siehe ChromeClient::createWindow
+    // New windows (target=_blank, window.open) become new views, see ChromeClient::createWindow
     function(PolicyAction::Use);
 }
 
@@ -576,8 +577,8 @@ bool FrameLoaderClient::canShowMIMEType(const String& mimeType) const
     return MIMETypeRegistry::canShowMIMEType(mimeType);
 }
 
-// Wie WebLocalFrameLoaderClient in WebKit2, ohne Plugins: None zeigt den
-// Ersatzinhalt des <object>
+// Like WebLocalFrameLoaderClient in WebKit2, without plugins: None shows the
+// fallback content of the <object>
 ObjectContentType FrameLoaderClient::objectContentType(const URL& url, const String& mimeTypeIn)
 {
     String mimeType = mimeTypeIn.convertToASCIILowercase();
@@ -628,7 +629,7 @@ RefPtr<LocalFrame> FrameLoaderClient::createFrame(const AtomString& name, HTMLFr
     subframe->tree().setSpecifiedName(name);
     subframe->init();
 
-    // init() kann Script ausfuehren, das den Frame gleich wieder entfernt
+    // init() may run script that removes the frame right away
     if (!subframe->page())
         return nullptr;
     return subframe;
@@ -636,7 +637,7 @@ RefPtr<LocalFrame> FrameLoaderClient::createFrame(const AtomString& name, HTMLFr
 
 void FrameLoaderClient::transitionToCommittedForNewPage(InitializingIframe)
 {
-    // Wie WebKit2: bei jeder neuen Seite eine neue FrameView
+    // Like WebKit2: a new FrameView for every new page
     Ref frame = m_frameLoader->frame();
     RefPtr oldView = frame->view();
     IntSize size = oldView ? oldView->size() : IntSize { };
@@ -669,15 +670,15 @@ void FrameLoaderClient::dispatchDidReceiveTitle(const StringWithDirection& title
         m_view->didChangeTitle(title.string);
 }
 
-// Auch aus Iframes: deren Eintraege zaehlen fuer Zurueck/Vor mit
+// Also from iframes: their entries count for back/forward
 void FrameLoaderClient::dispatchDidNavigateWithinPage()
 {
     m_view->didNavigateWithinPage();
 }
 
-// pushState legt den Eintrag nur mit dem Baum des Iframes an (WebKit2 ergaenzt ihn
-// im UI-Prozess): wie bei createHistoryItemTree ab dem Hauptframe, mit dem
-// Eintrag von pushState an der Stelle des Iframes
+// pushState creates the entry only with the iframe's tree (WebKit2 completes it
+// in the UI process): like createHistoryItemTree from the main frame, with the
+// pushState entry in place of the iframe
 void FrameLoaderClient::dispatchDidPushStateWithinPage()
 {
     Ref frame = m_frameLoader->frame();
@@ -688,7 +689,7 @@ void FrameLoaderClient::dispatchDidPushStateWithinPage()
     auto& list = static_cast<BackForwardList&>(m_view->page().backForward().client());
     RefPtr root = parent && item && previous && item == list.currentItem() ? createHistoryItemTree(true, item->itemID()) : nullptr;
     if (root) {
-        // createItemTree gibt auch dem Iframe einen neuen aktuellen Eintrag
+        // createItemTree also gives the iframe a new current entry
         history->setCurrentItem(previous.releaseNonNull());
         history->setCurrentItem(*item);
         protect(parent->loader().history().currentItem())->setChildItem(*item);
@@ -722,8 +723,8 @@ void FrameLoaderClient::dispatchDidFailLoad(const ResourceError& error)
         didEndLoadWithError(error);
 }
 
-// WillContinueLoading::Yes kommt auch bei jedem Zurueck/Vor, das scheitert.
-// Weiter geht es nur, wenn WebCore selber einspringt (HTTPS zuerst, dann HTTP).
+// WillContinueLoading::Yes also comes with every back/forward that fails. It
+// only continues if WebCore steps in itself (HTTPS first, then HTTP).
 void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& error, WillContinueLoading, WillInternallyHandleFailure willInternallyHandleFailure)
 {
     if (willInternallyHandleFailure == WillInternallyHandleFailure::Yes)
@@ -731,13 +732,13 @@ void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& erro
     ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), false);
     if (isMainFrame()) {
         didEndLoadWithError(error);
-        // Wie Chrome eine Fehlerseite, gleich hier: so nimmt WebCore sie fuer die Adresse
+        // An error page like Chrome, right here: that way WebCore takes it for the address
         if (auto kind = ErrorPage::show(m_frameLoader->frame(), error))
             m_view->willCommitErrorPage(*kind == ErrorPage::Kind::Certificate);
     }
 }
 
-// Abbruch (Stopp, neue Navigation, Download) ist kein Fehler, das Laden ist nur zu Ende
+// Cancelling (stop, new navigation, download) is no error, loading just ended
 void FrameLoaderClient::didEndLoadWithError(const ResourceError& error)
 {
     if (error.isCancellation())
@@ -776,7 +777,7 @@ DragClient::DragClient(WebView& view)
 
 void DragClient::startDrag(DragItem, DataTransfer& dataTransfer, Frame&, const std::optional<NodeIdentifier>&)
 {
-    // Das Pasteboard des Ziehens schreibt in einen DragContent (DragWasm.cpp)
+    // The drag pasteboard writes into a DragContent (DragWasm.cpp)
     RefPtr content = WasmPlatform::dragContent(dataTransfer.pasteboard());
     m_view->startPageDrag(content ? content.releaseNonNull() : WasmPlatform::DragContent::create(), dataTransfer.sourceOperationMask());
 }
