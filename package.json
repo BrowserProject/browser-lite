@@ -1,0 +1,16 @@
+{
+  "name": "browser-lite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebKit compiled to WebAssembly: a full browser engine inside a web page",
+  "license": "BSD-2-Clause",
+  "workspaces": ["relay", "tests/e2e"],
+  "scripts": {
+    "check": "tools/check-style.sh && git ls-files -z '*.sh' | xargs -0 shellcheck -x"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "typescript": "7.0.2"
+  }
+}

@@ -42,7 +42,7 @@ Testseiten mit `RENDER_WAIT_FOR` melden am Ende `<NAME> fertig=ok`: `crypto.html
 ## e2e/
 
 ```bash
-cd tests/e2e && npm ci && npx playwright install chromium
+npm ci && npx playwright install chromium
 node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
 ```
 

@@ -2,7 +2,7 @@
 
 Unser Embedding von WebCore: das Programm `engine.js`/`engine.wasm`, das die Oberflaeche
 (`web/`) startet. Was zwingend in WebKit selber muss (Port `PORT=Wasm`, Plattform-Code unter
-`Source/WebCore/platform/wasm/`), kommt als Patch aus `patches/webkit/`.
+`Source/WebCore/platform/wasm/`), kommt als Patch aus `engine/patches/`.
 
 - `engine.cmake`: wird vom WebKit-Build eingebunden (Patch 0006, `PlatformWasm.cmake`). Quellen,
   Link-Optionen, Datenpaket `engine.data`, Build-ID (`tools/wasm-build-id.py`). `BL_PRE_JS` ist

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Setzt den WebKit-Checkout auf den gepinnten Commit zurueck und wendet alle
-# Patches aus patches/webkit/ der Reihe nach an (Sortierung nach Dateiname).
+# Patches aus engine/patches/ der Reihe nach an (Sortierung nach Dateiname).
 #
 #   tools/apply-patches.sh          # zuruecksetzen + anwenden
 #   tools/apply-patches.sh --check  # nur pruefen, ob alles sauber anwendbar ist
@@ -18,7 +18,7 @@ git -C "$BL_WEBKIT_DIR" reset -q --hard "$WEBKIT_COMMIT"
 git -C "$BL_WEBKIT_DIR" clean -q -fd
 
 shopt -s nullglob
-patches=("$BL_ROOT"/patches/webkit/*.patch)
+patches=("$BL_ROOT"/engine/patches/*.patch)
 if [ "${#patches[@]}" -eq 0 ]; then
     bl_log "Keine Patches vorhanden, nichts zu tun"
     exit 0

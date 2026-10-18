@@ -10,7 +10,7 @@ Skripte fuer Build und Auslieferung. Die Shell-Skripte laden `env.sh` (Pfade, `v
 | `check-toolchain.sh` | prueft das Toolchain-Image (emcc mit pthreads, Meson-Version) |
 | `check-style.sh` | prueft die mechanischen Regeln aus `AGENTS.md` (Lint der CI), Ausnahmen in `check-style.allow` |
 | `fetch-webkit.sh` | holt den gepinnten WebKit-Commit nach `third_party/WebKit` (shallow, sparse) |
-| `apply-patches.sh` | setzt WebKit zurueck und wendet `patches/webkit/` an, `--check` prueft nur |
+| `apply-patches.sh` | setzt WebKit zurueck und wendet `engine/patches/` an, `--check` prueft nur |
 | `export-patch.sh` | speichert neue Aenderungen in `third_party/WebKit` als Patch |
 | `gen-angle-shim.py` | erzeugt den ANGLE-Ersatz fuer WebGL (Ausgabe kommt in Patch 0016) |
 | `build-jsc.sh` | JavaScriptCore und die `jsc`-Shell nach `build/jsc/bin/` |

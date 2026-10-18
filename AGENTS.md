@@ -1,61 +1,69 @@
 # AGENTS.md
 
-browser-lite: WebKit nach WebAssembly, ein ganzer Browser in einem Browser-Tab. Ueberblick in
-[README.md](README.md), Hintergrund in [docs/](docs/), jeder Ordner hat eine kurze README.
+browser-lite: WebKit compiled to WebAssembly, a full browser engine inside a web page. The repo
+is a core for integrations into other websites; `apps/demo` is a full browser built on it for
+testing. Overview in [README.md](README.md), background in [docs/](docs/), every folder has a
+short README.
 
-## main und Deploy
+## main and deploy
 
-Das Projekt ist ein Test und noch nicht produktiv. Gearbeitet wird direkt auf `main`: jederzeit
-committen und pushen, ohne zu fragen, auch nur um etwas zu testen. Das ist der normale Weg und
-soll so gemacht werden. Nie force-pushen.
+The project is a test and not in production yet. Work happens directly on `main`: commit and
+push at any time without asking, also just to try something. That is the normal way and should
+be done. Never force-push.
 
-Jeder Push auf `main` laeuft durch die CI und danach durch *Deploy*, der den Server auf genau
-diesen Stand bringt ([deploy/README.md](deploy/README.md)). Nach einem Push beide Laeufe
-abwarten (`gh run watch`), bei Rot reparieren und wieder pushen. Gruen heisst nur, dass es
-baut und startet: aendert sich Verhalten, im echten Browser pruefen.
+Every push to `main` runs through CI and then through *Deploy*, which brings the demo server to
+exactly that state ([deploy/README.md](deploy/README.md)). After a push wait
+for both runs (`gh run watch`), fix and push again if red. Do not push again while a deploy is
+pending. Green only means it builds and starts: if behaviour changes, check in a real browser.
 
-## Code und Doku
+Changes to `toolchain/`, `deps/` or `engine/patches/` rebuild large parts of WebKit (hours).
+Keep the paths of `build/`, `sysroot/`, `third_party/`, `toolchain/` and `deps/` stable, they
+are part of cache keys.
 
-Einfacher, verstaendlicher, dauerhafter Code. Features sauber in die Architektur einbauen statt
-anhaengen, auch wenn das mehr Arbeit ist. Was an mehreren Stellen gebraucht wird, gibt es einmal
-als wiederverwendbares Modul (z.B. `relay/static.mjs` fuer beide Server).
+## Code and docs
 
-Das Projekt ist ein Test und nicht produktiv, darum keine Rueckwaertskompatibilitaet: keine
-Uebernahme alter gespeicherter Daten, keine alten Build-Varianten, keine alten Namen oder
-Formate behalten, immer sauber umstellen. Bevor ein Feature entfernt wird, das nicht klar
-verlangt wurde: fragen.
+Simple, understandable, durable code. Build features cleanly into the architecture instead of
+bolting them on, even if that is more work. Anything needed in several places exists once as a
+reusable module. Respect the layering in [docs/architektur.md](docs/architektur.md): only
+`packages/core` talks to the engine (`_bl_*`, `Module`), apps and examples use the public
+package APIs only (checked by `tests/contract`).
 
-Doku kurz, nur was noetig ist, und aktuell halten (README des Ordners, passendes Kapitel in
-`docs/`, `docs/stand.md`). Kommentare sparsam, nur fuer Nicht-Offensichtliches, nie fuer
-Zwischenstaende oder Umstellungen. Deutsch. Code, Kommentare und Doku schreiben Umlaute als
-ae/oe/ue, kein Eszett, keine Gedankenstriche. Texte, die Benutzer in der Oberflaeche sehen,
-behalten echte Umlaute.
+The project is a test and not in production, so no backwards compatibility: no migration of old
+stored data, no old build variants, no old names or formats, always switch over cleanly. Before
+removing a feature that was not clearly asked to be removed: ask.
 
-Versionen stehen nur in `versions.env`, die der Dependencies mit SHA256 in `deps/sources.txt`,
-npm-Pakete in `package-lock.json`. Dockerfiles und Downloads sind gepinnt, Downloads mit
-Checksumme. Shell-Skripte: `set -euo pipefail`, shellcheck-sauber. Aenderungen an WebKit nur
-als Patch ([docs/build.md](docs/build.md)).
+Docs short, only what is needed, and kept current (README of the folder, matching chapter in
+`docs/`, `docs/status.md`). Comments sparse, only for the non-obvious, never for intermediate
+states or migrations. Everything in English: code, comments, docs, commit messages and texts
+users see. Comments and docs are ASCII only, no dash punctuation (` - `, en/em dashes). User
+facing texts are English defaults that integrators can override.
 
-## Secrets und Sicherheit
+Versions live in `versions.env` (toolchain, images, Node), dependencies with SHA256 in
+`deps/sources.txt`, npm packages exact in the root `package-lock.json`. Dockerfiles and downloads
+are pinned, downloads with checksum. Shell scripts: `set -euo pipefail`, shellcheck clean.
+Changes to WebKit only as patches ([docs/build.md](docs/build.md)).
 
-Das Repo ist oeffentlich: keine Secrets, Tokens, Server-IPs oder Namen aus dem Heimnetz
-committen. Nie Tokens loggen. Der Server laeuft intern ohne Relay-Token, nie oeffentlich machen
-(z.B. Tailscale Funnel), ohne vorher `RELAY_TOKEN` zu setzen.
+The public API of the packages is semver. Changing it means updating the API snapshot
+(`npm run api:update`) on purpose. The internal engine contract is `engine/abi.json`.
 
-Der Self-hosted Runner (Label `browser-lite-deploy`) steht im LAN. Nur der Job `deploy` in
-`deploy.yml` darf ihn nutzen, nie ein Job, der fuer Pull Requests oder Forks laeuft.
+## Secrets and security
 
-## Pruefen
+The repo is public: never commit secrets, tokens, server IPs or names from the home network.
+Never log tokens. The demo server runs internally without a relay token; never expose it
+publicly (for example Tailscale Funnel) without setting `RELAY_TOKEN` first.
 
-Vor dem Push, je nach Aenderung:
+The self-hosted runner (label `browser-lite-deploy`) is in the LAN. Only the job `deploy` in
+`deploy.yml` may use it, never a job that runs for pull requests or forks.
+
+## Checks
+
+Before pushing, depending on the change:
 
 ```bash
-git ls-files -z '*.sh' | xargs -0 shellcheck -x
-tools/check-style.sh
-node tests/relay/relay-test.mjs
-node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
-node tests/engine/recorder-test.mjs && node tests/engine/http-cache-test.mjs
+npm ci
+npm run check        # style, shellcheck, biome, types, contract tests
+npm test             # unit tests without engine build
 ```
 
-Engine, JSC und End-to-End-Tests brauchen den WebKit-Build und laufen in der CI
-([docs/build.md](docs/build.md)).
+Engine, JSC and end-to-end suites need the WebKit build and run in CI; locally see
+[tests/README.md](tests/README.md).

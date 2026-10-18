@@ -67,7 +67,7 @@ einen eigenen kleinen Port:
   Cache API, OPFS, Downloads), baut `engine/src/` direkt im Engine-Thread nach.
 - Ein neuer Port braucht in WebKit: Eintrag in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake`,
   und pro Projekt `PlatformWasm.cmake` (Patch 0006). Alle Aenderungen an WebKit liegen als
-  Patches in `patches/webkit/`, unser Embedding (WebView, Clients, Exporte) in `engine/`.
+  Patches in `engine/patches/`, unser Embedding (WebView, Clients, Exporte) in `engine/`.
 
 ### JavaScript
 JavaScriptCore mit dem **CLoop**-Interpreter (`ENABLE_JIT=OFF`, `ENABLE_C_LOOP=ON`).

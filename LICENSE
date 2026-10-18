@@ -27,5 +27,5 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Hinweis: WebKit selber ist nicht in diesem Repo enthalten, es wird per
 tools/fetch-webkit.sh geholt. WebKit steht unter LGPL-2.1 und BSD-Lizenzen.
-Die Patches in patches/webkit/ sind Aenderungen an WebKit und stehen darum
+Die Patches in engine/patches/ sind Aenderungen an WebKit und stehen darum
 unter den gleichen Lizenzen wie die jeweils geaenderten WebKit-Dateien.

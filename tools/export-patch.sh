@@ -14,7 +14,7 @@ source "$(dirname "$0")/env.sh"
 name="${1:-}"
 [ -n "$name" ] || bl_die "Name fehlt, z.B. tools/export-patch.sh 0001-cmake-port-wasm"
 shift
-out="$BL_ROOT/patches/webkit/$name.patch"
+out="$BL_ROOT/engine/patches/$name.patch"
 [ -e "$out" ] && bl_die "$out gibt es schon"
 
 paths=("$@")

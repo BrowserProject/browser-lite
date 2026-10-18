@@ -30,7 +30,7 @@ nicht neu gebaut.
 
 ```bash
 tools/fetch-webkit.sh      # holt den gepinnten Commit nach third_party/WebKit
-tools/apply-patches.sh     # setzt zurueck und wendet patches/webkit/*.patch an
+tools/apply-patches.sh     # setzt zurueck und wendet engine/patches/*.patch an
 ```
 
 `fetch-webkit.sh` laedt nur einen Commit (shallow), ohne die riesigen Test-Ordner
@@ -42,7 +42,7 @@ Netzfehler beim Holen und Auschecken werden wiederholt.
 1. `tools/apply-patches.sh` (legt den gepatchten Stand ins Git-Index von third_party/WebKit)
 2. Dateien in `third_party/WebKit` aendern
 3. `tools/export-patch.sh 0005-kurze-beschreibung` speichert die neuen Aenderungen als
-   `patches/webkit/0005-kurze-beschreibung.patch`
+   `engine/patches/0005-kurze-beschreibung.patch`
 4. `tools/apply-patches.sh --check` pruefen ob alle Patches sauber hintereinander passen
 
 Regeln:

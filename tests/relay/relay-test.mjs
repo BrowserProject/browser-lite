@@ -489,7 +489,7 @@ try {
 // neu. Beantwortet es die Nachfrage (wie ein Long-Poll, der lange keine Daten hat), bleibt
 // der Stream offen.
 {
-  const { WebSocketServer } = await import(path.join(root, 'relay', 'node_modules', 'ws', 'wrapper.mjs'));
+  const { WebSocketServer } = await import('ws');
   let answerProbes = true;
   let connections = 0;
   const silent = new WebSocketServer({ port: 0, host: '127.0.0.1' });

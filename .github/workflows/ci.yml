@@ -6,8 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Ein laufender Lauf wird nicht abgebrochen (ein voller WebKit-Build dauert
-# Stunden). Neue Pushes warten, und nur der neueste wartende Lauf startet danach.
+# A running run is never cancelled (a full WebKit build takes hours). New pushes wait,
+# and only the newest waiting run starts afterwards.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: false
@@ -18,56 +18,48 @@ permissions:
 
 jobs:
   lint:
-    name: Lint (Shell-Skripte, Pins, Regeln aus AGENTS.md)
+    name: Lint (shell scripts, pins, rules from AGENTS.md)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Node version from versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - name: shellcheck
         run: git ls-files -z '*.sh' | xargs -0 shellcheck -x
-      - name: Umlaute, Gedankenstriche, set -euo pipefail, versions.env, Actions
+      - name: Style rules (ASCII, dashes, English, links, pins, actions)
         run: tools/check-style.sh
 
-  relay:
-    name: Relay + Wisp-Client Test
+  js:
+    name: JavaScript (relay, Wisp client, engine JS parts in node)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Node-Version aus versions.env
+      - name: Node version from versions.env
         run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Relay installieren
-        working-directory: relay
-        run: npm ci --no-audit --no-fund
-      - name: Test (Token, Echo, Reconnect, SSRF-Sperre, statische Dateien)
+      - name: Install
+        run: npm ci
+      - name: Relay and Wisp client (token, echo, reconnect, SSRF, static files)
         run: node tests/relay/relay-test.mjs
-      - name: Test Profil (open, Pfade, Grenzen, Uebernahme, reset, Neustart)
+      - name: Profile server
         run: node tests/relay/profile-test.mjs
-
-  wasm-js:
-    name: JS-Teile der Engine in node (WebAssembly der Seiten, MediaRecorder)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Node-Version aus versions.env
-        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Umgeschriebenes Modul gegen das Original
+      - name: Rewritten module against the original
         run: node tests/wasm/rewrite-test.mjs
-      - name: WebAssembly-API ueber die nachgebaute Bruecke
+      - name: WebAssembly API over the simulated bridge
         run: node tests/wasm/api-test.mjs
-      - name: WebM-Muxer von MediaRecorder
+      - name: WebM muxer of MediaRecorder
         run: node tests/engine/recorder-test.mjs
-      - name: Aufraeumen des HTTP-Cache
+      - name: HTTP cache cleanup
         run: node tests/engine/http-cache-test.mjs
 
   toolchain:
-    name: Toolchain-Image
+    name: Toolchain image
     runs-on: ubuntu-24.04
     outputs:
       image: ${{ steps.tag.outputs.image }}
@@ -75,11 +67,11 @@ jobs:
       image_emsdk: ${{ steps.tag.outputs.image_emsdk }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Image-Tag berechnen
+      - name: Compute image tag
         id: tag
         run: |
           source versions.env
-          # Dateien des Images und seine Pins aus versions.env
+          # Files of the image and its pins from versions.env
           pins="$(grep -E '^(TOOLCHAIN_BASE_IMAGE|EMSDK_|MESON_)' versions.env)"
           hash="$( { find toolchain -type f ! -name README.md | sort | xargs sha256sum; echo "$pins"; } | sha256sum | cut -c1-12)"
           echo "image=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}-${hash}" >> "$GITHUB_OUTPUT"
@@ -91,13 +83,13 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "image_emsdk=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
           echo "emsdk=${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
-      - name: Bei ghcr.io anmelden
+      - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Gibt es das Image schon?
+      - name: Does the image exist?
         id: exists
         run: |
           if docker manifest inspect "${{ steps.tag.outputs.image }}" >/dev/null 2>&1; then
@@ -105,7 +97,7 @@ jobs:
           else
             echo "found=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Image bauen und pushen
+      - name: Build and push image
         if: steps.exists.outputs.found != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
@@ -116,7 +108,7 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
   toolchain-check:
-    name: Toolchain-Test (emcc + pthreads)
+    name: Toolchain test (emcc + pthreads)
     needs: toolchain
     runs-on: ubuntu-24.04
     container:
@@ -129,17 +121,17 @@ jobs:
       - run: tools/check-toolchain.sh
 
   webkit-source:
-    name: WebKit holen + Patches pruefen
+    name: Fetch WebKit + check patches
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: WebKit (gepinnt, sparse)
+      - name: WebKit (pinned, sparse)
         run: tools/fetch-webkit.sh
-      - name: Patches anwendbar?
+      - name: Patches apply?
         run: tools/apply-patches.sh --check
 
   deps:
-    name: Dependencies nach WASM
+    name: Dependencies to WASM
     needs: toolchain
     runs-on: ubuntu-24.04
     timeout-minutes: 300
@@ -152,25 +144,25 @@ jobs:
       BL_JOBS: 4
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Downloads aus dem Cache
+      - name: Downloads from cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: third_party/downloads
           key: downloads-${{ hashFiles('deps/sources.txt') }}
           restore-keys: downloads-
-      - name: sysroot aus dem Cache
+      - name: sysroot from cache
         id: sysroot-cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: sysroot
           key: sysroot-${{ needs.toolchain.outputs.image }}-${{ hashFiles('deps/**') }}
-          # Aelteren Stand nehmen, build-all.sh baut per Stamp nur was sich geaendert hat
+          # Take an older state, build-all.sh rebuilds only what changed (stamps)
           restore-keys: sysroot-${{ needs.toolchain.outputs.image }}-
-      - name: Dependencies bauen
+      - name: Build dependencies
         run: deps/build-all.sh
-      - name: Smoke-Test (alle Libs gelinkt, laeuft in node)
+      - name: Smoke test (all libs linked, runs in node)
         run: deps/test.sh
-      - name: sysroot fuer spaetere Jobs
+      - name: sysroot for later jobs
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: sysroot
@@ -191,34 +183,41 @@ jobs:
       BL_JOBS: 4
       CCACHE_DIR: ${{ github.workspace }}/build/ccache
       CCACHE_MAXSIZE: 3G
-      # Compiler ist emcc aus diesem emsdk. Ohne das vergleicht ccache das mtime von emcc,
-      # und jedes neue Toolchain-Image (gleiches emsdk) macht den ganzen Cache ungueltig.
+      # The compiler is emcc from this emsdk. Without this ccache compares the mtime of emcc,
+      # and every new toolchain image (same emsdk) would invalidate the whole cache.
       CCACHE_COMPILERCHECK: string:emsdk-${{ needs.toolchain.outputs.emsdk }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: sysroot holen
+      - name: Get sysroot
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sysroot
           path: sysroot
-      - name: WebKit holen + Patches anwenden
+      - name: Fetch WebKit + apply patches
         run: |
           git config --global --add safe.directory '*'
           tools/fetch-webkit.sh
           tools/apply-patches.sh
-      - name: ccache
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: build/ccache
-          key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
+          key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}-${{ github.run_attempt }}
           restore-keys: |
             ccache-jsc-${{ needs.toolchain.outputs.image }}-
             ccache-jsc-${{ needs.toolchain.outputs.image_emsdk }}-
-      - name: jsc bauen
-        run: tools/build-jsc.sh
-      - name: Tests (inkl. GC-Stresstest)
+      - name: Build jsc
+        # Stop before the job limit so ccache is still saved; a rerun continues from it
+        run: timeout 320m tools/build-jsc.sh
+      - name: Save ccache (also after a timeout)
+        if: always()
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: build/ccache
+          key: ccache-jsc-${{ needs.toolchain.outputs.image }}-${{ github.sha }}-${{ github.run_attempt }}
+      - name: Tests (including GC stress test)
         run: tests/jsc/run.sh
-      - name: jsc als Artefakt
+      - name: jsc as artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: jsc-wasm
@@ -226,87 +225,104 @@ jobs:
           retention-days: 7
 
   engine:
-    name: WebCore + Engine (PORT=Wasm) + Render-Test
+    name: WebCore + engine (PORT=Wasm) + engine tests
     needs: [toolchain, deps]
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     env:
       IMAGE: ${{ needs.toolchain.outputs.image }}
-      # Wie im Job jsc: ccache bleibt gueltig, solange das emsdk gleich bleibt
+      # Like in job jsc: ccache stays valid as long as the emsdk stays the same
       CCACHE_COMPILERCHECK: string:emsdk-${{ needs.toolchain.outputs.emsdk }}
     steps:
-      - name: Platz schaffen (WebCore-Build braucht viel)
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # Pushes that do not touch the engine sources reuse the last built engine
+      - name: Engine from cache
+        id: engine-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: build/webcore/bin/engine.*
+          key: engine-${{ needs.toolchain.outputs.image }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/patches/**', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/wasm-build-id.py', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'tools/gen-angle-shim.py', 'versions.env', 'deps/**') }}
+      - name: Make room (the WebCore build needs a lot)
+        if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
           docker image prune -af >/dev/null
           df -h / | tail -1
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Bei ghcr.io anmelden
+      - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Toolchain-Image holen
+      - name: Pull toolchain image
         run: docker pull "$IMAGE"
-      - name: sysroot holen
+      - name: Get sysroot
+        if: steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: sysroot
           path: sysroot
-      - name: WebKit holen + Patches anwenden
+      - name: Fetch WebKit + apply patches
+        if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
           tools/fetch-webkit.sh
           tools/apply-patches.sh
-      - name: ccache holen
+      - name: Restore ccache
+        if: steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: build/ccache
-          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
+          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}-${{ github.run_attempt }}
           restore-keys: |
             ccache-engine-${{ needs.toolchain.outputs.image }}-
             ccache-engine-${{ needs.toolchain.outputs.image_emsdk }}-
-      - name: WebCore + Engine bauen
-        # Vor dem 6h-Limit selber abbrechen, damit ccache noch gespeichert wird.
-        # Der naechste Lauf macht dann mit dem Cache weiter.
+      - name: Build WebCore + engine
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        # Stop before the 6h limit so ccache is still saved; a rerun continues from it
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 -e CCACHE_DIR=/src/build/ccache -e CCACHE_MAXSIZE=5G -e CCACHE_COMPILERCHECK \
             "$IMAGE" timeout 320m tools/build-webcore.sh
-      - name: ccache speichern (auch bei Abbruch)
-        if: always()
+      - name: Save ccache (also after a timeout)
+        if: always() && steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: build/ccache
-          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}
-      - name: Render-Test (node)
+          key: ccache-engine-${{ needs.toolchain.outputs.image }}-${{ github.sha }}-${{ github.run_attempt }}
+      - name: Save engine to cache
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: build/webcore/bin/engine.*
+          key: ${{ steps.engine-cache.outputs.cache-primary-key }}
+      - name: Render test (node)
         run: |
           docker run --rm -v "$PWD:/src" -w /src "$IMAGE" bash -c \
             'node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600 && node tests/engine/check-basic.mjs build/basic.ppm'
-      - name: WebCrypto-Test (OpenSSL im WASM)
+      - name: WebCrypto test (OpenSSL in WASM)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="CRYPTO fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200 | tee build/crypto.log
           grep -q "CRYPTO fertig=ok" build/crypto.log
-      - name: Stack-Grenze nach VM-Trap (Rekursion nach GC-Anforderung)
+      - name: Stack limit after VM trap (recursion after GC request)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="STACK fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/stack.html build/stack.ppm 200 200 | tee build/stack.log
           grep -q "STACK fertig=ok" build/stack.log
-      - name: Grenzen (tiefes DOM, lange Strings, Speicher bis zum Ende)
+      - name: Limits (deep DOM, long strings, memory until the end)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="LIMITS fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html build/limits.ppm 200 200 | tee build/limits.log
           grep -q "LIMITS fertig=ok" build/limits.log
-      - name: Watchdog (Endlosschleife wird abgebrochen, die Engine laeuft weiter)
+      - name: Watchdog (endless loop is stopped, the engine keeps running)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e BL_SCRIPT_TIMEOUT=2 -e RENDER_WAIT_FOR="HANG fertig" "$IMAGE" \
             node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200 | tee build/hang.log
           grep -q "HANG fertig=ok" build/hang.log
-      - name: GC-Stresstest in der Engine (GC sehr oft, nur auf leerem Stack)
+      - name: GC stress test in the engine (GC very often, only on an empty stack)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \
             node tests/engine/gc-test.mjs build/webcore/bin/engine.js
-      - name: Engine als Artefakt
+      - name: Engine as artifact
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -316,7 +332,7 @@ jobs:
             build/webcore/bin/engine.wasm
             build/webcore/bin/engine.data
           retention-days: 14
-      - name: Render-Bild als Artefakt
+      - name: Render image as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -325,101 +341,101 @@ jobs:
           if-no-files-found: ignore
 
   e2e:
-    name: End-to-End (Chromium + Relay + Engine)
+    name: End-to-end (Chromium + relay + engine)
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Node-Version aus versions.env
+      - name: Node version from versions.env
         run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Engine holen
+      - name: Get engine
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: engine
           path: build/webcore/bin
-      - name: Relay + Playwright installieren
+      - name: Install (packages + Playwright Chromium)
         id: setup
         run: |
-          (cd relay && npm ci)
-          (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
-      # Jeder Test laeuft, auch wenn ein frueherer rot war (der Job bleibt dann rot)
-      - name: Netzwerk-Test
+          npm ci
+          npx playwright install --with-deps chromium
+      # Every test runs even if an earlier one failed (the job stays red then)
+      - name: Network
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node network-test.mjs
-      - name: Eingabe-Test (Tippen, Klick, Download, Upload, Popup, select, Farbe, Datum, Scrollen)
+      - name: Input (typing, click, download, upload, popup, select, color, date, scrolling)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node input-test.mjs
-      - name: Speicher-Test (Cookie, localStorage, IndexedDB, OPFS nach Neuladen)
+      - name: Storage (cookie, localStorage, IndexedDB, OPFS after reload)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node storage-test.mjs
-      - name: Profil-Test (zweites Geraet, Uebernahme, Zuruecksetzen, Nachholen beim Start, ohne Server)
+      - name: Profile (second device, takeover, reset, catch up at start, without server)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node profile-test.mjs
-      - name: Einstellungen-Test (Dialog, Geraet, JavaScript und Bilder aus, Sitzung nach Neustart)
+      - name: Settings (dialog, device, JavaScript and images off, session after restart)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node settings-test.mjs
-      - name: Audio-Test (Web Audio, decodeAudioData, Ton im AudioWorklet)
+      - name: Audio (Web Audio, decodeAudioData, sound in the AudioWorklet)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node audio-test.mjs
-      - name: Media-Test (<video>/<audio> ueber Service Worker und Engine)
+      - name: Media (<video>/<audio> through service worker and engine)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node media-test.mjs
-      - name: WebGL-Test (WebGL 1 und 2 ueber WebGL des Host-Browsers)
+      - name: WebGL (WebGL 1 and 2 through the WebGL of the host browser)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webgl-test.mjs
-      - name: Compositing-Test (Ebenen auf der GPU, Animation, Filter, Scrollen)
+      - name: Compositing (layers on the GPU, animation, filters, scrolling)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node compositing-test.mjs
-      - name: Paint-Worklet-Test (CSS.paintWorklet, paint() in CSS, Modul laden)
+      - name: Paint worklet (CSS.paintWorklet, paint() in CSS, module loading)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node paintworklet-test.mjs
-      - name: Pinch-Test (Pinch-Zoom im Compositor-Thread, visualViewport)
+      - name: Pinch (pinch zoom in the compositor thread, visualViewport)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node pinch-test.mjs
-      - name: Service-Worker-Test (Registrieren, Fetch abfangen, SharedWorker)
+      - name: Service worker (register, intercept fetch, SharedWorker)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node serviceworker-test.mjs
-      - name: WebCodecs-Test (VideoFrame, VP8 und Opus kodieren/dekodieren, Worker)
+      - name: WebCodecs (VideoFrame, VP8 and Opus encode/decode, worker)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webcodecs-test.mjs
-      - name: MediaStream-Test (Kamera, Mikrofon, Bildschirm ueber den Host)
+      - name: MediaStream (camera, microphone, screen through the host)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node mediastream-test.mjs
-      - name: WebRTC-Test (RTCPeerConnection, DataChannel, Verbindung zu Chromium)
+      - name: WebRTC (RTCPeerConnection, DataChannel, connection to Chromium)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node webrtc-test.mjs
-      - name: Drag-&-Drop-Test (in der Seite, Dateien und Text aus dem Host)
+      - name: Drag and drop (in the page, files and text from the host)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node dragdrop-test.mjs
-      - name: Zwischenablage-Test (Einfuegen mit HTML und Bild, Kopieren mit HTML, Doppelklick)
+      - name: Clipboard (paste with HTML and image, copy with HTML, double click)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node clipboard-test.mjs
-      - name: WebAssembly-Test (Module der Seiten in der WASM-Engine des Browsers)
+      - name: WebAssembly (page modules in the WASM engine of the browser)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node wasm-test.mjs
-      - name: HTTP-Cache-Test (max-age, ETag/304, no-store nach Neuladen)
+      - name: HTTP cache (max-age, ETag/304, no-store after reload)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node cache-test.mjs
-      - name: Geraete-Test (Markieren, Touch, Farbschema, Standort, Benachrichtigungen)
+      - name: Devices (selection, touch, color scheme, geolocation, notifications)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node devices-test.mjs
-      - name: Oberflaeche-Test (Verlauf, Lesezeichen, Vorschlaege, Sitzung)
+      - name: UI (history, bookmarks, suggestions, session)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node ui-test.mjs
-      - name: Hintergrund-Tabs (versteckt, Timer, Ton, Speicherdruck, Haengen nach Eingabe)
+      - name: Background tabs (hidden, timers, sound, memory pressure, hang after input)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node background-test.mjs
-      - name: Langer Lauf (viele Seiten und Tabs, danach kein Speicher mehr belegt)
+      - name: Soak (many pages and tabs, no memory held afterwards)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node soak-test.mjs
-      - name: Messlatte gegen Chromium (Web-APIs, JS, CSS; rot nur bei Rueckschritt)
+      - name: Parity with Chromium (web APIs, JS, CSS; red only on regression)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && PARITY_REPORT="$GITHUB_STEP_SUMMARY" node parity-test.mjs
-      - name: Screenshots als Artefakt
+      - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -427,35 +443,35 @@ jobs:
           path: build/e2e-*.png
           if-no-files-found: ignore
 
-  kompatibilitaet:
-    name: Kompatibilitaet (echte Seiten, nur zur Info)
+  compat:
+    name: Compatibility (real sites, informational)
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # Haengt von fremden Servern ab, darum blockiert ein Fehler hier nicht.
+    # Depends on foreign servers, so a failure here does not block
     continue-on-error: true
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - name: Node-Version aus versions.env
+      - name: Node version from versions.env
         run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Engine holen
+      - name: Get engine
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: engine
           path: build/webcore/bin
-      - name: Relay + Playwright installieren
+      - name: Install (packages + Playwright Chromium)
         run: |
-          (cd relay && npm ci)
-          (cd tests/e2e && npm ci && npx playwright install --with-deps chromium)
-      - name: Seiten aus tests/e2e/sites.txt laden
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Load the sites from tests/e2e/sites.txt
         run: cd tests/e2e && SITE_WAIT=5000 SITE_DEBUG=1 SITE_TIMEOUT=180000 node site-test.mjs $(grep -v "^#" sites.txt)
-      - name: Screenshots als Artefakt
+      - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: kompatibilitaet
+          name: compat
           path: build/sites/
           if-no-files-found: ignore

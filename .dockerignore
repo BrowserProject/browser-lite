@@ -1,6 +1,8 @@
-# Nur was das Dockerfile braucht
+# Only what the Dockerfile needs
 *
+!package.json
+!package-lock.json
+!.npmrc
 !relay/package.json
-!relay/package-lock.json
 !relay/*.mjs
 !build/site/

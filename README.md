@@ -83,7 +83,7 @@ was sie macht (Zeiten, GC, Netzwerk). Alle URL-Parameter: [web/README.md](web/RE
 versions.env   Versions-Pins (WebKit, Emscripten, Node, ...), Dependencies in deps/sources.txt
 toolchain/     Docker-Image mit Emscripten und allen Build-Tools
 tools/         Skripte (WebKit holen, Patches, Builds, Seite fuer den Server packen)
-patches/webkit unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dateien
+engine/patches unsere Aenderungen an WebKit (PORT=Wasm und Fixes) als .patch Dateien
 deps/          Dependencies nach WASM bauen (zlib, ICU, OpenSSL, curl, Fonts, ...)
 engine/        Embedding: WebView, Clients, Netzwerk, Speicher, WebSockets, Event-Loop
 web/           Browser-Oberflaeche (HTML/CSS/JS ohne Build-Schritt) + Wisp-Client

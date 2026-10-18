@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Prueft die mechanischen Regeln aus AGENTS.md (Lint-Job der CI):
-#   umlaut  keine echten Umlaute und kein Eszett
-#   dash    keine Gedankenstriche (U+2013, U+2014, " - " zwischen Woertern in Kommentaren und Doku)
-#   ausfuehrbare Shell-Skripte mit set -euo pipefail
-#   versions.env nur KEY=VALUE, Images mit Tag auch per Digest, Commits und SHA256 vollstaendig
-#   Actions per Commit-SHA, das Label des Runners im LAN steht nur im Job deploy, ohne Actions
-# In patches/webkit/ gilt das nur fuer die hinzugefuegten Zeilen. Ausnahmen fuer umlaut und
-# dash stehen in tools/check-style.allow.
+# Checks the mechanical rules from AGENTS.md (lint job in CI):
+#   ascii   comments and docs are ASCII only (string literals in code may use Unicode)
+#   dash    no dash punctuation (U+2013, U+2014, " - " between words in comments and docs)
+#   german  no German in comments and docs (word heuristic)
+#   links   relative links in Markdown files resolve
+#   executable shell scripts use set -euo pipefail
+#   versions.env only KEY=VALUE, images with tag also by digest, full commits and SHA256
+#   npm dependencies pinned exactly, all workspace packages share one version
+#   actions pinned by commit SHA, the LAN runner label only in job deploy, without actions
+# In engine/patches/ only added lines are checked. Exceptions: tools/check-style.allow.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LC_ALL=C
@@ -25,87 +27,115 @@ while read -r rule pattern _; do
     allow_patterns+=("$pattern")
 done < tools/check-style.allow
 
-allowed() { # <regel> <datei>
+allowed() { # <rule> <file>
     local i
     for i in "${!allow_rules[@]}"; do
-        # shellcheck disable=SC2053 # rechts steht ein Muster
+        # shellcheck disable=SC2053 # the right side is a pattern
         [[ "${allow_rules[i]}" == "$1" && "$2" == ${allow_patterns[i]} ]] && return 0
     done
     return 1
 }
 
-check() { # <regel> <datei> <muster>
+check() { # <rule> <file> <pattern>
     local hits line
     if hits="$(grep -I -n -E -- "$3" "$2")"; then
         while IFS= read -r line; do error "$2:$line  [$1]"; done <<< "$hits"
     fi
 }
 
-# Zeichen als Bytes, damit dieses Skript selber keine enthaelt
-umlaut=$'\xc3\xa4|\xc3\xb6|\xc3\xbc|\xc3\x84|\xc3\x96|\xc3\x9c|\xc3\x9f'
+nonascii=$'[\x80-\xff]'
 dash=$'\xe2\x80\x93|\xe2\x80\x94'
 spaced='[[:alpha:],.)] - [[:alpha:](]'
 comment='(^[[:space:]]*\*|(^|[[:space:]])(//|#|/\*|<!--))'
+# Frequent German words that are no English words; two of them in one line count
+german_words='und|nicht|oder|wird|werden|fuer|ueber|keine|wenn|dann|beim|zum|zur|sind|auch|noch|bereits|einen|einer|eine|das|ist|mit|auf|aus|nach|bei|wie|nur'
+german="(^|[^[:alnum:]_])($german_words)[^[:alnum:]_]+(.*[^[:alnum:]_])?($german_words)([^[:alnum:]_]|$)"
 
-mapfile -d '' files < <(git ls-files -z -- ':!:patches/' ':!:third_party/')
+docs_file() { [[ "$1" == *.md || "$1" == *.txt ]]; }
+
+mapfile -d '' files < <(git ls-files -z -- ':!:engine/patches/' ':!:third_party/')
 for file in "${files[@]}"; do
     [ -f "$file" ] || continue
-    for rule in umlaut dash; do
-        if [ "$rule" = umlaut ]; then chars="$umlaut"; else chars="$dash"; fi
-        if allowed "$rule" "$file"; then
-            check "$rule" "$file" "$comment.*($chars)"
+    if ! allowed ascii "$file"; then
+        if docs_file "$file"; then
+            check ascii "$file" "$nonascii"
         else
-            check "$rule" "$file" "$chars"
+            check ascii "$file" "$comment.*$nonascii"
         fi
-    done
-    case "$file" in
-        *.md) check dash "$file" "$spaced" ;;
-        *) check dash "$file" "$comment.*$spaced" ;;
-    esac
+    fi
+    allowed dash "$file" || check dash "$file" "$dash"
+    if docs_file "$file"; then
+        check dash "$file" "$spaced"
+    else
+        check dash "$file" "$comment.*$spaced"
+    fi
+    if ! allowed german "$file"; then
+        if docs_file "$file"; then
+            check german "$file" "$german"
+        else
+            check german "$file" "$comment.*$german"
+        fi
+    fi
 done
 
-# In den WebKit-Patches sind nur die hinzugefuegten Zeilen unser Text, der Rest ist WebKit
-for patch in patches/webkit/*.patch; do
-    only_comments=0
-    allowed umlaut "$patch" && only_comments=1
+# In the WebKit patches only the added lines are our text, the rest is WebKit
+for patch in engine/patches/*.patch; do
+    check_german=1
+    allowed german "$patch" && check_german=0
     while IFS= read -r message; do error "$message"; done < <(
-        UMLAUT="$umlaut" DASH="$dash" SPACED="$spaced" COMMENT="$comment" awk -v file="$patch" -v only_comments="$only_comments" '
+        NONASCII="$nonascii" DASH="$dash" SPACED="$spaced" COMMENT="$comment" GERMAN="$german" \
+        awk -v file="$patch" -v check_german="$check_german" '
         /^\+\+\+ / || !/^\+/ { next }
         {
             text = substr($0, 2)
-            comment = text ~ ENVIRON["COMMENT"]
-            if ((comment || !only_comments) && text ~ ENVIRON["UMLAUT"])
-                print file ":" FNR ":" text "  [umlaut]"
+            if (text ~ ENVIRON["COMMENT"] ".*" ENVIRON["NONASCII"]) print file ":" FNR ":" text "  [ascii]"
             if (text ~ ENVIRON["DASH"] || text ~ (ENVIRON["COMMENT"] ".*" ENVIRON["SPACED"]))
                 print file ":" FNR ":" text "  [dash]"
+            if (check_german && text ~ (ENVIRON["COMMENT"] ".*" ENVIRON["GERMAN"]))
+                print file ":" FNR ":" text "  [german]"
         }' "$patch")
+done
+
+# Relative links in Markdown: [text](path) must exist
+for file in "${files[@]}"; do
+    [[ "$file" == *.md && -f "$file" ]] || continue
+    dir="$(dirname "$file")"
+    while IFS= read -r target; do
+        target="${target%%#*}"
+        [ -z "$target" ] && continue
+        [ -e "$dir/$target" ] || error "$file: broken link $target  [links]"
+    done < <(grep -o -E '\]\([^)[:space:]]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//' |
+        grep -v -E '^(https?:|mailto:|#)' || true)
 done
 
 for file in "${files[@]}"; do
     [[ "$file" == *.sh && -x "$file" ]] || continue
-    grep -q '^set -euo pipefail$' "$file" || error "$file: ausfuehrbar, aber ohne 'set -euo pipefail'"
+    grep -q '^set -euo pipefail$' "$file" || error "$file: executable but without 'set -euo pipefail'"
 done
 
 declare -A pins
 while IFS= read -r line; do
     [[ "$line" =~ ^(#.*)?$ ]] && continue
     if [[ ! "$line" =~ ^([A-Z0-9_]+)=([^[:space:]]+)$ ]]; then
-        error "versions.env: ungueltige Zeile: $line"
+        error "versions.env: invalid line: $line"
         continue
     fi
     key="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
     pins[$key]="$value"
     case "$key" in
-        *_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || error "versions.env: $key ist kein voller Commit" ;;
-        *_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || error "versions.env: $key ist kein SHA256" ;;
-        *_IMAGE) [[ "${value##*/}" != *:* || "$value" =~ @sha256:[0-9a-f]{64}$ ]] || error "versions.env: $key hat einen Tag, aber keinen Digest" ;;
+        *_COMMIT) [[ "$value" =~ ^[0-9a-f]{40}$ ]] || error "versions.env: $key is not a full commit" ;;
+        *_SHA256) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || error "versions.env: $key is not a SHA256" ;;
+        *_IMAGE) [[ "${value##*/}" != *:* || "$value" =~ @sha256:[0-9a-f]{64}$ ]] || error "versions.env: $key has a tag but no digest" ;;
     esac
 done < versions.env
-[[ "${pins[NODE_IMAGE]-}" == "node:${pins[NODE_VERSION]-}-"* ]] || error "versions.env: NODE_IMAGE passt nicht zu NODE_VERSION"
+[[ "${pins[NODE_IMAGE]-}" == "node:${pins[NODE_VERSION]-}-"* ]] || error "versions.env: NODE_IMAGE does not match NODE_VERSION"
+
+# npm: exact versions everywhere, one product version for all workspace packages
+while IFS= read -r message; do error "$message"; done < <(node tools/check-packages.mjs)
 
 while IFS=: read -r file line text; do
     [[ "$text" =~ uses:[[:space:]]*(\./|[^@[:space:]]+@[0-9a-f]{40}[[:space:]]+#[[:space:]]*v[0-9]) ]] ||
-        error "$file:$line: Action nicht gepinnt (uses: <action>@<commit> # <version>)"
+        error "$file:$line: action not pinned (uses: <action>@<commit> # <version>)"
 done < <(grep -H -n -E '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows/*.yml)
 
 for workflow in .github/workflows/*.yml; do
@@ -116,17 +146,17 @@ for workflow in .github/workflows/*.yml; do
         injobs && /browser-lite-deploy/ {
             lan[job] = 1; count++
             if (file != ".github/workflows/deploy.yml" || job != "deploy")
-                print file ":" FNR ": nur der Job deploy in deploy.yml darf den Runner im LAN nutzen"
+                print file ":" FNR ": only the job deploy in deploy.yml may use the LAN runner"
         }
         injobs && /^[[:space:]]*(-[[:space:]]+)?uses:/ && !(job in uses) { uses[job] = FNR }
         END {
-            for (j in lan) if (j in uses) print file ":" uses[j] ": Job " j " laeuft im LAN und darf keine Action nutzen"
-            if (count && pr) print file ": Workflow mit dem Runner im LAN darf nicht bei pull_request laufen"
+            for (j in lan) if (j in uses) print file ":" uses[j] ": job " j " runs in the LAN and must not use an action"
+            if (count && pr) print file ": a workflow with the LAN runner must not run on pull_request"
         }' "$workflow")
 done
 
 if [ "$errors" -gt 0 ]; then
-    echo "$errors Verstoesse gegen AGENTS.md (Ausnahmen: tools/check-style.allow)" >&2
+    echo "$errors violations of AGENTS.md (exceptions: tools/check-style.allow)" >&2
     exit 1
 fi
-echo "Stil ok"
+echo "Style ok"

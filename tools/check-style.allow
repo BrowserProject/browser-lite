@@ -1,8 +1,24 @@
-# Ausnahmen fuer tools/check-style.sh, eine pro Zeile: <Regel> <Pfad-Muster> <Grund>
-# Regeln: umlaut (echte Umlaute, Eszett), dash (Gedankenstriche). In einer Datei mit
-# Ausnahme gilt die Regel nur noch fuer Kommentare. Das Muster ist ein Shell-Muster,
-# * passt auch ueber / hinweg.
-umlaut web/*                    Texte der Oberflaeche
-umlaut tests/*                  Testdaten und erwartete Texte der Oberflaeche
-umlaut deps/tests/*             Testdaten
-umlaut engine/src/ErrorPage.cpp Texte der Fehlerseite
+# Exceptions for tools/check-style.sh, one per line: <rule> <path pattern> <reason>
+# Rules: ascii, dash, german. The pattern is a shell pattern, * also matches across /.
+
+# Still German, translated during the restructuring (remove the line when done)
+german README.md            translation pending
+german versions.env         translation pending
+german LICENSE              translation pending
+german .github/*            translation pending
+german deploy/*             translation pending
+german docs/*               translation pending
+german engine/*             translation pending
+german relay/*              translation pending
+german tests/*              translation pending
+german tools/*              translation pending
+german web/*                translation pending
+ascii docs/*                translation pending
+
+# Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
+german deps/*               comments change cache keys and stamps
+german toolchain/*          comments change the toolchain image tag
+german engine/patches/*     comments change WebKit sources
+
+# Test data with Unicode text
+ascii tests/*               test data
