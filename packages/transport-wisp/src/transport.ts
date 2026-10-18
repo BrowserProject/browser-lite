@@ -24,17 +24,36 @@ export interface WispTransportOptions {
   token?: string | (() => string | Promise<string>);
 }
 
+/** Why a {@link WispTransport} dispatched `error`. */
+export type WispErrorReason = 'unauthorized';
+
+/**
+ * Event `error` of a {@link WispTransport}: 'unauthorized' when the relay refused the token
+ * (WebSocket close code 4401 or 4403). The transport keeps retrying with growing delays and
+ * asks the token function again for every attempt.
+ */
+export class WispErrorEvent extends Event {
+  constructor(readonly reason: WispErrorReason) {
+    super('error');
+  }
+}
+
 const OPEN = 1;
 const HANDSHAKE_TIMEOUT_MS = 15000;
 const RECONNECT_DELAY_MS = 2000;
+const MAX_RECONNECT_DELAY_MS = 60000;
+/** Close codes of a relay that refuses the token after the upgrade. */
+const UNAUTHORIZED = new Set([4401, 4403]);
 const SILENCE_MS = 10000;
 const PROBE_TIMEOUT_MS = 5000;
 
 /**
  * Transport of the engine over a Wisp v1 relay (TCP over one WebSocket): flow control,
- * reconnect, dead connection probe. Dispatches `connectedchange` when {@link connected} changes.
- * The WebSocket is opened with the first stream; after that the transport keeps reconnecting
- * until {@link close}. Uses the `WebSocket` of `globalThis` at construction time.
+ * reconnect, dead connection probe. Dispatches `connectedchange` when {@link connected} changes
+ * and a {@link WispErrorEvent} `error` when the relay refuses the token. The WebSocket is opened
+ * with the first stream; after that the transport keeps reconnecting until {@link close}, also
+ * after the browser was destroyed: close it when it is no longer used. Uses the `WebSocket` of
+ * `globalThis` at construction time.
  */
 export class WispTransport extends EventTarget implements Transport {
   private readonly url: URL;
@@ -49,6 +68,8 @@ export class WispTransport extends EventTarget implements Transport {
   private isClosed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastDrop = 0;
+  /** Refused tokens in a row: the retries slow down. */
+  private authFailures = 0;
   // Is the connection still alive? (expectAnswer)
   private received = 0;
   private sent = 0;
@@ -215,6 +236,7 @@ export class WispTransport extends EventTarget implements Transport {
         const view = new DataView(event.data);
         if (packet.length >= 9 && packet[0] === CONTINUE && view.getUint32(1, true) === 0) {
           handshake = true;
+          this.authFailures = 0;
           clearTimeout(timeout);
           this.bufferSize = view.getUint32(5, true);
           this.drop = drop;
@@ -222,19 +244,37 @@ export class WispTransport extends EventTarget implements Transport {
           this.setConnected(true);
         }
       };
-      ws.onclose = onClosed;
+      ws.onclose = (event?: CloseEvent) => {
+        if (!handshake && UNAUTHORIZED.has(event?.code ?? 0)) this.unauthorized();
+        onClosed();
+      };
       // Node (undici) only reports error, no close, for a refused handshake
       ws.onerror = onClosed;
     });
   }
 
-  private setConnected(connected: boolean): void {
-    if (!connected && !this.isClosed && !this.reconnectTimer) {
-      this.reconnectTimer = setTimeout(() => {
-        this.reconnectTimer = null;
-        this.connect().catch(() => {});
-      }, RECONNECT_DELAY_MS);
+  private unauthorized(): void {
+    this.authFailures++;
+    // The error event of the browser may have scheduled the retry already: use the new delay
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.scheduleReconnect();
     }
+    this.dispatchEvent(new WispErrorEvent('unauthorized'));
+  }
+
+  private scheduleReconnect(): void {
+    if (this.isClosed || this.reconnectTimer) return;
+    const delay = Math.min(RECONNECT_DELAY_MS * 2 ** this.authFailures, MAX_RECONNECT_DELAY_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch(() => {});
+    }, delay);
+  }
+
+  private setConnected(connected: boolean): void {
+    if (!connected) this.scheduleReconnect();
     if (connected === this.isConnected) return;
     this.isConnected = connected;
     this.dispatchEvent(new Event('connectedchange'));

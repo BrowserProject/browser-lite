@@ -316,7 +316,7 @@ async function downloadByClick(x, y) {
     () =>
       host(
         (i) =>
-          window.blHost.downloads[i].text !== null || window.blHost.downloads[i].state === 'failed',
+          window.blHost.downloads[i].text !== null || window.blHost.downloads[i].state === 'error',
         before,
       ),
     30000,
@@ -351,7 +351,7 @@ const missingDownload = await downloadByClick(610, 118);
 check(
   'download 404 becomes an error',
   missingDownload?.filename === 'missing.txt' &&
-    missingDownload.state === 'failed' &&
+    missingDownload.state === 'error' &&
     /404/.test(missingDownload.error ?? ''),
   JSON.stringify(missingDownload),
 );

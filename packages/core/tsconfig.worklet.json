@@ -8,7 +8,7 @@
     "checkJs": true,
     "rootDir": "src/worklet",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/worklet.tsbuildinfo",
+    "tsBuildInfoFile": "tsconfig.worklet.tsbuildinfo",
     "lib": ["ES2023"],
     "types": []
   },

@@ -8,11 +8,11 @@ const decisions = () => profile.prefs<Record<string, Decision>>('permissions') ?
 
 /** Permission decisions kept in the profile, so they follow to other devices. */
 export const profilePermissions: PermissionStore = {
-  get(origin, kind) {
-    return decisions()[`${kind} ${origin}`];
-  },
   set(origin, kind, value) {
-    profile.savePrefs('permissions', { ...decisions(), [`${kind} ${origin}`]: value });
+    const next = { ...decisions() };
+    if (value === null) delete next[`${kind} ${origin}`];
+    else next[`${kind} ${origin}`] = value;
+    profile.savePrefs('permissions', next);
   },
   *entries() {
     for (const [key, value] of Object.entries(decisions())) {

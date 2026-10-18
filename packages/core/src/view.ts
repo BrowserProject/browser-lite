@@ -1,6 +1,7 @@
 import type { Config } from './config.js';
 import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
+import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
 import { createImeField } from './keyboard.js';
 import type { Requests } from './requests.js';
@@ -13,6 +14,7 @@ import type {
   ViewEvents,
   ViewOptions,
 } from './types.js';
+import { type Uploads, uploadDirectory } from './uploads.js';
 import type { Watchdog } from './watchdog.js';
 
 /** What a view needs from its browser. */
@@ -28,12 +30,11 @@ export interface ViewHost {
   presenter(): Worker | null;
   pageHidden(): boolean;
   defaultSize(): { width: number; height: number };
-  writeUploads(view: ViewImpl, files: File[]): Promise<string[]>;
+  readonly uploads: Uploads;
+  readonly fullscreen: Fullscreen;
   gesture(): void;
   focusView(view: ViewImpl): void;
   removeView(view: ViewImpl): void;
-  setFullscreen(view: ViewImpl, on: boolean): void;
-  setPointerLock(view: ViewImpl, on: boolean): void;
 }
 
 interface Caret {
@@ -41,9 +42,6 @@ interface Caret {
   y: number;
   height: number;
 }
-
-/** Upload directory of a view in the engine (under /data/tmp, emptied at engine start). */
-export const uploadDirectory = (view: number) => `/data/tmp/uploads/${view}`;
 
 /** One page (tab or popup) of the engine with its canvas, keyboard field and input. */
 export class ViewImpl implements View {
@@ -325,7 +323,7 @@ export class ViewImpl implements View {
   }
 
   exitFullscreen(): void {
-    this.host.setFullscreen(this, false);
+    this.host.fullscreen.setFullscreen(this, false);
     this.call((m) => m._bl_exit_fullscreen(this.id));
   }
 
@@ -351,7 +349,7 @@ export class ViewImpl implements View {
     this.closed = true;
     this.lifetime.abort();
     this.host.requests.closeView(this);
-    this.host.setFullscreen(this, false);
+    this.host.fullscreen.setFullscreen(this, false);
     if (alive) {
       const { module } = this.host;
       module._bl_destroy_view(this.id);
@@ -489,11 +487,11 @@ export class ViewImpl implements View {
         this.emit('find', { matches: Number(data.matches) || 0, index: Number(data.index) || 0 });
         return;
       case 'fullscreen':
-        this.host.setFullscreen(this, !!data.on);
+        this.host.fullscreen.setFullscreen(this, !!data.on);
         this.emit('fullscreen', { active: !!data.on });
         return;
-      case 'pointerlock':
-        this.host.setPointerLock(this, !!data.on);
+      case 'pointer-lock':
+        this.host.fullscreen.setPointerLock(this, !!data.on);
         return;
       case 'media-state':
         this.audible = !!data.audio;
@@ -513,10 +511,10 @@ export class ViewImpl implements View {
       case 'focus':
         this.emit('focus-request', {});
         return;
-      case 'takefocus':
+      case 'take-focus':
         this.emit('take-focus', { forward: data.forward !== false });
         return;
-      case 'contextmenu':
+      case 'context-menu':
         this.emit('context-menu', {
           x: Number(data.x) || 0,
           y: Number(data.y) || 0,

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserLiteError, checkSupport, createBrowser, defaultServices } from '../dist/index.js';
 import { zoomStep } from '../dist/input.js';
-import { MemoryPermissionStore } from '../dist/permissions.js';
+import { MemoryPermissionStore, storePermission } from '../dist/permissions.js';
 
 test('checkSupport outside a browser', () => {
   const report = checkSupport();
@@ -34,11 +34,11 @@ test('default services', () => {
 
 test('memory permission store', () => {
   const store = new MemoryPermissionStore();
-  assert.equal(store.get('https://a.example', 'geolocation'), undefined);
   store.set('https://a.example', 'geolocation', 'grant');
   store.set('https://b.example', 'camera', 'deny');
   store.set('https://a.example', 'geolocation', 'deny');
-  assert.equal(store.get('https://a.example', 'geolocation'), 'deny');
+  store.set('https://c.example', 'notifications', 'grant');
+  store.set('https://c.example', 'notifications', null);
   assert.deepEqual(
     [...store.entries()],
     [
@@ -46,6 +46,38 @@ test('memory permission store', () => {
       ['https://b.example', 'camera', 'deny'],
     ],
   );
+});
+
+test('camera and microphone together are stored per kind', () => {
+  const store = new MemoryPermissionStore();
+  storePermission(store, 'https://a.example', 'camera-microphone', 'grant');
+  assert.deepEqual(
+    [...store.entries()],
+    [
+      ['https://a.example', 'camera', 'grant'],
+      ['https://a.example', 'microphone', 'grant'],
+    ],
+  );
+  storePermission(store, 'https://a.example', 'camera-microphone', null);
+  assert.deepEqual([...store.entries()], []);
+  // A failing store only warns
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    storePermission(
+      {
+        set() {
+          throw new Error('full');
+        },
+        entries: () => [],
+      },
+      'https://a.example',
+      'camera',
+      'deny',
+    );
+  } finally {
+    console.warn = warn;
+  }
 });
 
 test('zoom steps like Chrome', () => {

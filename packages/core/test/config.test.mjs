@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { CORE_ENV, engineEnv, preferenceFlags, resolveConfig } from '../dist/config.js';
+import {
+  CORE_ENV,
+  engineEnv,
+  permissionChange,
+  preferenceFlags,
+  resolveConfig,
+} from '../dist/config.js';
 import { audio, BrowserLiteError, devices, media, webrtc } from '../dist/index.js';
 
 const abi = JSON.parse(readFileSync(new URL('../../../engine/abi.json', import.meta.url), 'utf8'));
@@ -82,6 +88,39 @@ test('invalid options', () => {
     code(() => devices({ wifi: true })),
     'invalid-options',
   );
+  assert.equal(
+    code(() => devices({ notifications: 'host' })),
+    'invalid-options',
+  );
+  assert.equal(
+    code(() => devices({ geolocation: { show() {} } })),
+    'invalid-options',
+  );
+  assert.equal(
+    code(() => resolveConfig({ ...base, handlers: { clipboardWrite: 'no' } }, PAGE)),
+    'invalid-options',
+  );
+  // A permission store needs only set and entries
+  assert.ok(resolveConfig({ ...base, permissions: { set() {}, entries: () => [] } }, PAGE));
+});
+
+test('setPermission arguments', () => {
+  assert.deepEqual(permissionChange('https://a.example', 'camera-microphone', null), [
+    'https://a.example',
+    'camera-microphone',
+    null,
+  ]);
+  for (const args of [
+    ['', 'camera', 'grant'],
+    ['https://a.example', 'midi', 'grant'],
+    ['https://a.example', 'camera', 'ask'],
+    ['https://a.example', 'camera', undefined],
+  ])
+    assert.equal(
+      code(() => permissionChange(...args)),
+      'invalid-options',
+      JSON.stringify(args),
+    );
 });
 
 test('engine environment', () => {
@@ -210,6 +249,8 @@ test('features of the services', () => {
     'network-info',
     'image-decoder',
   ]);
+  assert.ok(devices({ notifications: { show() {} } }).features.includes('notifications'));
+  assert.ok(!devices({ notifications: false }).features.includes('notifications'));
   assert.deepEqual(devices({ geolocation: false, clipboard: false, touch: false }).features, [
     'sensors',
     'gamepad',

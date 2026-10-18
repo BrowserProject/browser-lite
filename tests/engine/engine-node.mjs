@@ -71,9 +71,9 @@ export async function runEngine({
       if (onFrame) onFrame({ engine, viewId, ptr, width: frameWidth, height: frameHeight });
       else engine._bl_frame_presented(viewId);
     },
-    engineDialog(viewId, type, origin, message) {
+    engineDialog(dialogId, viewId, type, origin, message) {
       console.log('[dialog]', type, origin, message);
-      return 0;
+      engine._bl_dialog_answer(dialogId, 0, 0);
     },
     print: (text) => {
       console.log(text);

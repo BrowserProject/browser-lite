@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Embed the browser-lite engine: browsers, views, input, storage, host services",
   "license": "BSD-2-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrowserProject/browser-lite.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/BrowserProject/browser-lite/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/BrowserProject/browser-lite/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -16,6 +25,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/**/*.tsbuildinfo",
+    "src",
     "README.md"
   ],
   "sideEffects": false,

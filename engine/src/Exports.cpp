@@ -161,6 +161,11 @@ EMSCRIPTEN_KEEPALIVE void bl_view_source(int id)
     });
 }
 
+EMSCRIPTEN_KEEPALIVE void bl_download_cancel(int id)
+{
+    runOnEngineThread([id] { cancelDownload(id); });
+}
+
 // Debugging: runs JS in the page (even if the page's CSP forbids javascript:
 // URLs), the result is printed as text to the console. Only with BL_TEST_HOOKS=1.
 EMSCRIPTEN_KEEPALIVE void bl_eval_script(int id, char* source)

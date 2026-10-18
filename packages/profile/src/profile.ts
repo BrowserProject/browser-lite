@@ -83,6 +83,12 @@ export interface ProfileOptions {
   fetch?: typeof fetch;
 }
 
+/** Payload of the `status` event of {@link Profile.on}. */
+export interface ProfileStatusEvent {
+  status: ProfileStatus;
+  problem: string;
+}
+
 /** Browser client of the profile on the server. */
 export interface Profile {
   readonly status: ProfileStatus;
@@ -109,7 +115,7 @@ export interface Profile {
    */
   reset(all: boolean): Promise<void>;
   /** `status` fires when status, statusText or problem change. */
-  on(type: 'status', listener: () => void): () => void;
+  on(type: 'status', listener: (event: ProfileStatusEvent) => void): () => void;
 }
 
 const VISIBLE_INTERVAL = 2000;
@@ -145,7 +151,7 @@ class ProfileClient implements Profile {
   #store: KeyValueStore;
   #status: ProfileStatus = 'off';
   #problem = '';
-  #listeners = new Set<() => void>();
+  #listeners = new Set<(event: ProfileStatusEvent) => void>();
   #top: FileSystemDirectoryHandle | null = null;
   #browser: Browser | null = null;
   #record: SyncRecord = { files: {} };
@@ -195,16 +201,17 @@ class ProfileClient implements Profile {
     return this.#problem;
   }
 
-  on(type: 'status', listener: () => void): () => void {
+  on(type: 'status', listener: (event: ProfileStatusEvent) => void): () => void {
     if (type !== 'status') return () => {};
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
   }
 
   #emit() {
+    const event = { status: this.#status, problem: this.#problem };
     for (const listener of [...this.#listeners]) {
       try {
-        listener();
+        listener(event);
       } catch (error) {
         console.warn('profile: status listener failed', error);
       }

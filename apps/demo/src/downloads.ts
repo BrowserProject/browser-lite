@@ -56,7 +56,7 @@ export function addDownload(download: Download): void {
 export function downloadState(entry: DownloadEntry): string {
   const download = entry.download;
   if (!download) return formatSize(entry.size);
-  if (download.state === 'failed') return `Error: ${download.error ?? ''}`;
+  if (download.state === 'error') return `Error: ${download.error ?? ''}`;
   if (download.state === 'done') return formatSize(download.blob?.size ?? download.size);
   return `${formatSize(download.received)} of ${download.size ? formatSize(download.size) : '?'}`;
 }

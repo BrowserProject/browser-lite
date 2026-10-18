@@ -556,14 +556,28 @@ public:
             return;
         }
         download->m_self = download.ptr();
+        running().add(download->m_id, download.ptr());
         download->m_request = createCurlRequest(WTF::move(request), download.get());
         download->m_request->resume();
+    }
+
+    static void cancel(int id)
+    {
+        if (RefPtr download = running().get(id))
+            download->finish("Cancelled"_s);
     }
 
     void ref() const final { RefCounted::ref(); }
     void deref() const final { RefCounted::deref(); }
 
 private:
+    // Downloads with a request of their own (bl_download_cancel)
+    static HashMap<int, Download*>& running()
+    {
+        static NeverDestroyed<HashMap<int, Download*>> downloads;
+        return downloads;
+    }
+
     Download(int id, int viewId, const String& suggestedFilename, bool viewSource)
         : m_id(id)
         , m_viewId(viewId)
@@ -622,6 +636,7 @@ private:
 
     void finish(const String& error)
     {
+        running().remove(m_id);
         notifyHost(m_viewId, "download-done", makeString("{\"id\":"_s, m_id, ",\"error\":\""_s, jsonEscape(error), "\"}"_s));
         if (auto request = std::exchange(m_request, nullptr)) {
             request->cancel();
@@ -680,6 +695,11 @@ void startDownload(int viewId, const ResourceRequest& request, const String& sug
 {
     auto copy = request;
     Download::start(viewId, WTF::move(copy), suggestedFilename);
+}
+
+void cancelDownload(int id)
+{
+    Download::cancel(id);
 }
 
 void startViewSource(int viewId, const URL& url)

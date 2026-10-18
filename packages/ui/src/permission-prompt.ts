@@ -1,18 +1,19 @@
-import type { PermissionRequest, RequestHandlers } from '@browser-lite/core';
+import type { PermissionAnswer, PermissionRequest, RequestHandlers } from '@browser-lite/core';
 import { context, element, type UiOptions } from './options.js';
 import { format, hostOf } from './texts.js';
 
 interface Pending {
   request: PermissionRequest;
-  resolve(answer: 'grant' | 'deny'): void;
+  resolve(answer: PermissionAnswer): void;
   onAbort(): void;
 }
 
 /**
  * Asks like Chrome: "<host> wants to know your location" with Block and Allow. One question at
- * a time, the others wait in order; an aborted request leaves the queue. Remembering decisions
- * is the job of the PermissionStore of the browser. Allowing notifications also asks the host
- * browser (needs the click as user activation). Element: `.bl-permission-prompt` with `p` and
+ * a time, the others wait in order; an aborted request leaves the queue. Block and Allow are
+ * remembered by the PermissionStore of the browser. Allowing notifications also asks the host
+ * browser (needs the click as user activation); when the host refuses, the answer is 'dismiss'
+ * (nothing remembered, the page may ask again). Element: `.bl-permission-prompt` with `p` and
  * `button[data-bl-answer=block|allow]`.
  */
 export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'permission'> {
@@ -62,9 +63,10 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
     const { pending } = shown;
     remove(pending);
     pending.request.signal.removeEventListener('abort', pending.onAbort);
-    let granted = allow;
-    if (granted && pending.request.kind === 'notifications') granted = await hostNotifications();
-    pending.resolve(granted ? 'grant' : 'deny');
+    let answer: PermissionAnswer = allow ? 'grant' : 'deny';
+    if (allow && pending.request.kind === 'notifications' && !(await hostNotifications()))
+      answer = 'dismiss';
+    pending.resolve(answer);
     showNext();
   };
 
@@ -72,7 +74,7 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
     permission(request) {
       return new Promise((resolve) => {
         if (request.signal.aborted) {
-          resolve('deny');
+          resolve('dismiss');
           return;
         }
         const pending: Pending = {
@@ -80,7 +82,7 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
           resolve,
           onAbort: () => {
             remove(pending);
-            resolve('deny');
+            resolve('dismiss');
             showNext();
           },
         };

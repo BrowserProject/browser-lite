@@ -4,7 +4,9 @@
 // <select> popup through a request handler, Web Audio through the audio worklet, a media file
 // through the service worker, the English error page, option errors, crash detection, destroy()
 // and new browsers in the same page (without services: no features for the pages, copy still
-// reaches the host clipboard), storage namespaces and device emulation.
+// reaches the host clipboard; without a new-view listener a popup loads in its opener), dialogs
+// answered later by a promise, permissions dismissed and set by setPermission, cancelling a
+// download, storage namespaces and device emulation.
 //
 //   node tests/core/smoke-test.mjs [engine-dir]      (default build/webcore/bin)
 // Environment: E2E_TIMEOUT (ms per wait, default 60000), E2E_VERBOSE=1, CHROMIUM_PATH.
@@ -69,6 +71,7 @@ p { position: absolute; left: 400px; top: 20px }
 <button id="popup" style="top: 200px">popup</button>
 <button id="hang" style="top: 260px">hang</button>
 <input id="text" style="top: 320px">
+<a id="slow" href="/slow.bin" download style="position: absolute; left: 150px; top: 380px; display: block; width: 200px; height: 30px; background: #ccc">slow</a>
 <p title="find tip">findme findme findme</p>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -94,8 +97,29 @@ $('hang').addEventListener('click', () => {
 });
 $('text').addEventListener('input', () => { document.title = 'text:' + $('text').value; });
 </script>`;
+// The slow download sends a chunk every 100 ms for 30 s; slowClosed: the engine hung up early
+let slowClosed = false;
 const pages = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/slow.bin') {
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': 300 * 1024,
+    });
+    let sent = 0;
+    const timer = setInterval(() => {
+      res.write(Buffer.alloc(1024, 1));
+      if (++sent === 300) {
+        clearInterval(timer);
+        res.end();
+      }
+    }, 100);
+    res.on('close', () => {
+      clearInterval(timer);
+      if (sent < 300) slowClosed = true;
+    });
+    return;
+  }
   if (url.pathname === '/') return res.writeHead(200, { 'Content-Type': 'text/html' }).end(PAGE);
   if (url.pathname === '/device')
     return res
@@ -110,6 +134,12 @@ const pages = http.createServer((req, res) => {
       .writeHead(200, { 'Content-Type': 'text/html' })
       .end(
         "<title>features</title><script>document.title = 'features:' + [typeof AudioContext, typeof navigator.getBattery, 'clipboard' in navigator, typeof EyeDropper, 'geolocation:' + typeof navigator.geolocation].join(':');</script>",
+      );
+  if (url.pathname === '/notify')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html' })
+      .end(
+        "<title>notify</title><p>copy me</p><script>const n = new Notification('hello', { body: 'b', icon: 'https://tracker.invalid/i.png' }); n.onshow = () => { document.title = 'shown'; n.close(); }; n.onclose = () => { document.title = 'closed'; };</script>",
       );
   if (url.pathname === '/store')
     return res
@@ -364,11 +394,42 @@ try {
     ),
   );
 
-  // Permission handler + geolocation of the devices service
+  // The dialog handler answers later (a promise): the host page keeps running meanwhile
+  await page.evaluate(() => {
+    window.blHost.dialogMode = 'async';
+    window.blHost.dialogDelay = 1500;
+    window.blHost.events.length = 0;
+    window.blTest.eval("document.title = 'More'");
+  });
+  await waitFor(() => window.blTest.view()?.title === 'More');
+  await page.mouse.click(250, 95);
+  check(
+    'async dialog: the request arrives',
+    await waitFor(() => window.blHost.events.includes('dialog:alert:a')),
+  );
+  const startedAt = Date.now();
+  await page.evaluate(() => 1);
+  const hostDelay = Date.now() - startedAt;
+  check('async dialog: the host page is not blocked', hostDelay < 500, `${hostDelay} ms`);
+  check(
+    'async dialog: answers reach the page',
+    await waitFor(() => window.blTest.view()?.title === 'dialogs:true:answer'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+  check(
+    'async dialog: no unresponsive event',
+    !(await page.evaluate(() => window.blHost.events.includes('unresponsive'))),
+  );
+  await page.evaluate(() => {
+    window.blHost.dialogMode = 'answer';
+  });
+
+  // Permission handler + geolocation of the devices service: 'dismiss' is not remembered, so
+  // the page asks again; setPermission decides without asking
   await context.grantPermissions(['geolocation'], { origin: ORIGIN });
   await context.setGeolocation({ latitude: 47.25, longitude: 8.5 });
   await page.evaluate(() => {
-    window.blHost.permissionAnswer = 'grant';
+    window.blHost.permissionAnswer = 'dismiss';
   });
   await page.mouse.click(250, 155);
   check(
@@ -376,10 +437,67 @@ try {
     await waitFor(() => window.blHost.events.includes('permission:geolocation')),
   );
   check(
-    'geolocation through the host',
+    'dismissed permission: denied for now',
+    await waitFor(() => window.blTest.view()?.title === 'geoerror:1'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+  // A document keeps the answer of its first geolocation request: new documents from here on
+  await page.evaluate((origin) => {
+    window.blHost.permissionAnswer = 'deny';
+    window.blTest.browser.setPermission(origin, 'geolocation', 'grant');
+    window.blTest.view().reload();
+  }, new URL(PAGE_URL).origin);
+  await waitFor(() => window.blTest.view()?.title === 'More');
+  await page.mouse.click(250, 155);
+  check(
+    'setPermission grant: geolocation through the host without asking',
     await waitFor(() => window.blTest.view()?.title === 'geo:47.25'),
     await page.evaluate(() => window.blTest.view()?.title),
   );
+  check(
+    'setPermission grant: asked only once',
+    (await page.evaluate(
+      () => window.blHost.events.filter((e) => e === 'permission:geolocation').length,
+    )) === 1,
+  );
+  await page.evaluate((origin) => {
+    window.blTest.browser.setPermission(origin, 'geolocation', null);
+    window.blTest.view().reload();
+  }, new URL(PAGE_URL).origin);
+  await waitFor(() => window.blTest.view()?.title === 'More');
+  await page.mouse.click(250, 155);
+  check(
+    'setPermission null: the page is asked again',
+    await waitFor(
+      () => window.blHost.events.filter((e) => e === 'permission:geolocation').length === 2,
+    ),
+  );
+  check(
+    'and the denial applies',
+    await waitFor(() => window.blTest.view()?.title === 'geoerror:1'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+
+  // Cancelling a running download stops the engine request
+  const downloadsBefore = await page.evaluate(() => window.blHost.downloadObjects.length);
+  await page.mouse.click(250, 395);
+  check(
+    'slow download starts',
+    await waitFor((count) => window.blHost.downloadObjects.length > count, downloadsBefore),
+  );
+  await page.waitForTimeout(500);
+  const cancelled = await page.evaluate(() => {
+    const download = window.blHost.downloadObjects.at(-1);
+    download.cancel();
+    return { state: download.state, error: download.error, view: download.view?.id };
+  });
+  check(
+    'cancel(): state error Cancelled',
+    cancelled.state === 'error' && cancelled.error === 'Cancelled' && cancelled.view > 0,
+    JSON.stringify(cancelled),
+  );
+  for (let i = 0; i < 50 && !slowClosed; i++) await page.waitForTimeout(100);
+  check('cancel(): the engine closes the request', slowClosed);
 
   // Tooltip of the element under the mouse on the canvas
   await page.mouse.move(420, 40);
@@ -653,14 +771,33 @@ try {
   check('createView after destroy: destroyed', destroyed.code === 'destroyed');
   // The second browser runs without services: no features for the pages, but copy in a page
   // still reaches the host clipboard
-  const second = await page.evaluate(() =>
-    window.blHost.start({ services: [] }).then(
+  const second = await page.evaluate(() => {
+    window.blHost.listenNewView = false;
+    return window.blHost.start({ services: [] }).then(
       () => 'ready',
       () => window.blHost.error?.code,
-    ),
-  );
+    );
+  });
   check('second createBrowser after destroy', second === 'ready', second);
   if (second !== 'ready') throw new Error('no second browser');
+  // Without a new-view listener a popup loads its address in the opener
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}more`);
+  check(
+    'second browser: page with a popup button',
+    await waitFor(() => window.blTest.view()?.title === 'More'),
+  );
+  await page.mouse.click(250, 215);
+  check(
+    'no new-view listener: the popup address loads in the opener',
+    await waitFor(
+      (url) =>
+        window.blTest.view()?.url === url &&
+        window.blTest.view()?.title === 'Core smoke' &&
+        window.blTest.browser.views.size === 1,
+      PAGE_URL,
+    ),
+    await page.evaluate(() => `${window.blTest.view()?.url} ${window.blTest.browser.views.size}`),
+  );
   await page.evaluate((url) => window.blTest.load(url), PAGE_URL);
   check(
     'second browser renders',
@@ -705,13 +842,42 @@ try {
       window.blHost.events.filter((e) => e.startsWith('crash:')).join(' | '),
     ),
   );
-  // A crashed browser is destroyed and replaced in the same page
+  // A crashed browser is destroyed and replaced in the same page, this time with handlers of
+  // the integrator for notifications and copy
   const third = await page.evaluate(async () => {
     await window.blHost.stop();
-    return window.blHost.start().then(
-      () => 'ready',
-      () => window.blHost.error?.code,
-    );
+    window.blHost.listenNewView = true;
+    const { defaultServices, devices } = await import('@browser-lite/core');
+    const shown = [];
+    window.blHost.notifications = shown;
+    window.blHost.copied = [];
+    const notifications = {
+      show(notification) {
+        const { title, body, icon, view } = notification;
+        shown.push(`${title}:${body}:${icon}:${view?.id ?? 0}`);
+        notification.signal.addEventListener('abort', () => {
+          shown.push('closed');
+          notification.closed();
+        });
+        notification.shown();
+      },
+    };
+    return window.blHost
+      .start({
+        services: [
+          ...defaultServices().filter((service) => service.name !== 'devices'),
+          devices({ notifications }),
+        ],
+        handlers: {
+          clipboardWrite: ({ text }) => {
+            window.blHost.copied.push(text);
+          },
+        },
+      })
+      .then(
+        () => 'ready',
+        () => window.blHost.error?.code,
+      );
   });
   check('new browser after a crash', third === 'ready', third);
   check(
@@ -720,6 +886,33 @@ try {
       const [r, g, b] = window.blTest.pagePixel(50, 50);
       return r > 200 && g < 60 && b < 60;
     }),
+  );
+  await page.evaluate((origin) => {
+    window.blTest.browser.setPermission(origin, 'notifications', 'grant');
+  }, new URL(PAGE_URL).origin);
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}notify`);
+  check(
+    'notification handler: shown, closed by the page',
+    await waitFor(() => window.blTest.view()?.title === 'closed'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+  const shown = await page.evaluate(() => ({
+    list: window.blHost.notifications,
+    view: window.blTest.view().id,
+  }));
+  check(
+    'notification handler: data, view and no remote icon',
+    shown.list.join('|') === `hello:b::${shown.view}|closed`,
+    JSON.stringify(shown),
+  );
+  await page.evaluate(() => {
+    window.blTest.view().command('SelectAll');
+    window.blTest.view().command('Copy');
+  });
+  check(
+    'clipboardWrite handler gets the copied text',
+    await waitFor(() => window.blHost.copied.some((text) => text.includes('copy me'))),
+    await page.evaluate(() => JSON.stringify(window.blHost.copied)),
   );
   await page.evaluate(() => window.blHost.stop());
   await page.close();

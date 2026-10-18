@@ -17,12 +17,23 @@ export type ErrorCode =
   | 'destroyed'
   | 'crashed';
 
+/** Host browser features the engine needs; {@link checkSupport} reports the missing ones. */
+export type SupportFeature =
+  | 'document'
+  | 'crossOriginIsolated'
+  | 'SharedArrayBuffer'
+  | 'Atomics'
+  | 'Worker'
+  | 'WebAssembly'
+  | 'WebAssembly threads'
+  | 'ResizeObserver';
+
 /** Result of {@link checkSupport}. */
 export interface SupportReport {
   /** True when every required host browser feature is present. */
   supported: boolean;
-  /** Names of missing features, for example `crossOriginIsolated` or `OffscreenCanvas`. */
-  missing: string[];
+  /** The missing features. */
+  missing: SupportFeature[];
 }
 
 /** Why a TCP stream of a {@link Transport} closed. */
@@ -52,10 +63,14 @@ export interface TransportStream {
 
 /**
  * Network of the engine: TCP connections to host:port (TLS happens inside the engine).
- * Dispatches the event `connectedchange` when `connected` changes.
+ * Dispatches the event `connectedchange` when `connected` changes. Unlike the `on()` events of
+ * browsers and views this is a plain EventTarget, so a transport needs no code of the core.
+ * The integrator owns it: the browser never closes it, `destroy()` leaves it open.
  */
 export interface Transport extends EventTarget {
+  /** False while the network of the transport is down (pages see `navigator.onLine` false). */
   readonly connected: boolean;
+  /** Opens a TCP connection to host:port. */
   openTCP(host: string, port: number): TransportStream;
 }
 
@@ -66,6 +81,7 @@ export interface HostService {
 
 /** Back/forward list of a view. */
 export interface SessionHistory {
+  /** Position of the current entry in `entries` (from 0). */
   index: number;
   entries: { url: string; title: string }[];
 }
@@ -154,7 +170,13 @@ export interface BrowserOptions {
   handlers?: Partial<RequestHandlers>;
   /** Remembered permission decisions; default in memory. */
   permissions?: PermissionStore;
-  /** HTML template of the error page (placeholders documented in engine/README.md). */
+  /**
+   * HTML template of the error page shown for a failed main frame navigation. Placeholders, all
+   * HTML-escaped: `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host),
+   * `{{heading}}`, `{{message}}`, `{{code}}` (for example `ERR_NAME_NOT_RESOLVED`), `{{url}}`
+   * and `{{retryLabel}}`. A click on a `[data-bl-retry]` element retries. The page runs without
+   * scripts and external resources (inline styles and `data:` images only).
+   */
   errorPage?: string;
   userAgent?: string;
   /** navigator.platform */
@@ -175,29 +197,47 @@ export interface BrowserOptions {
   debug?: boolean;
 }
 
+/** Color scheme of the pages; 'system' follows the host. */
 export type ColorScheme = 'light' | 'dark' | 'system';
 
 /** The running engine. One per page at a time. */
 export interface Browser {
+  /** 'crashed' after the event `crash`, 'destroyed' after `destroy()`. */
   readonly state: 'ready' | 'crashed' | 'destroyed';
+  /** Network of the pages: host online and transport connected (event `network`). */
+  readonly online: boolean;
   /** Open views by id. */
   readonly views: ReadonlyMap<number, View>;
+  /** Opens a view (tab); without `container` it stays hidden until {@link View.attach}. */
   createView(options?: ViewOptions): View;
   on<K extends keyof BrowserEvents>(
     type: K,
     listener: (event: BrowserEvents[K]) => void,
   ): Unsubscribe;
   setColorScheme(scheme: ColorScheme): void;
+  /** navigator.languages and Accept-Language of the pages. */
   setLanguages(languages: string[]): void;
+  /** navigator.userAgent and navigator.platform; empty strings mean the engine default. */
   setUserAgent(userAgent: string, platform?: string): void;
+  /** Changes some preferences; the others keep their value. */
   setPreferences(preferences: Preferences): void;
+  /**
+   * Changes or forgets (null) a remembered permission decision, for example from a settings
+   * page. Writes the {@link PermissionStore} and applies at once; null means the page asks again.
+   */
+  setPermission(origin: string, kind: PermissionKind, decision: PermissionDecision | null): void;
   readonly storage: BrowserStorage;
   /** Only with `debug: true`. */
   readonly debug?: DebugApi;
-  /** Stops the engine and frees its workers, memory, canvases and lock. */
+  /**
+   * Stops the engine and frees its workers, memory, canvases and lock. Running downloads end
+   * with an error. The transport stays open: close it too (`transport.close()` of a
+   * `WispTransport`) unless the next browser reuses it.
+   */
   destroy(): Promise<void>;
 }
 
+/** Storage of a running browser. */
 export interface BrowserStorage {
   readonly persistent: boolean;
   /** OPFS namespace directory, null when memory only. Read only while running. */
@@ -208,28 +248,41 @@ export interface BrowserStorage {
   clearCaches(): Promise<void>;
 }
 
+/** Events of {@link Browser.on}. */
 export interface BrowserEvents {
-  /** window.open or target=_blank: the engine already created the view. */
+  /**
+   * window.open or target=_blank: the engine already created the view, hidden until it is
+   * attached. Without any listener the popup never shows: its first address loads in the opener
+   * instead and the popup closes (a popup that stays on about:blank closes after 10 s).
+   */
   'new-view': { view: View; opener: View | null };
   /** A download started; without any listener the file is saved automatically when done. */
   download: { download: Download };
   /** The engine's memory grows: close or discard background views. */
   'memory-pressure': Record<string, never>;
-  /** No answer from the engine for 10 s after input. */
+  /** No answer from the engine for 10 s after input (an open page dialog does not count). */
   unresponsive: Record<string, never>;
+  /** The engine answers again after `unresponsive`. */
   responsive: Record<string, never>;
-  /** The engine stopped; create a new browser (or reload the page). */
+  /** The engine stopped; call `destroy()`, then `createBrowser()` for a new one. */
   crash: { reason: string };
-  /** Network of the pages (host online and transport connected). */
+  /** Network of the pages changed (host online and transport connected), see {@link Browser.online}. */
   network: { connected: boolean };
+  /** Something works in a reduced way; also logged to the console. */
   warning: { code: WarningCode; message: string };
 }
 
+/**
+ * Codes of the `warning` event: 'storage-locked' another tab uses the storage namespace (data
+ * stays in memory), 'media-sw-missing' media files cannot play without the service worker.
+ */
 export type WarningCode = 'storage-locked' | 'media-sw-missing';
 
 /** Options of {@link Browser.createView}. */
 export interface ViewOptions {
+  /** First address (like typed into an address bar: without a scheme https:// is added). */
   url?: string;
+  /** First page as an HTML string under a base URL (instead of `url`). */
   html?: { html: string; baseURL: string };
   /** Restores back/forward and loads the current entry. */
   history?: SessionHistory;
@@ -243,52 +296,89 @@ export interface ViewOptions {
 
 /** One page (tab or popup). */
 export interface View {
+  /** Unique per browser; views the pages open get ids from 2^20. */
   readonly id: number;
+  /** Address of the main frame ('' before the first navigation). */
   readonly url: string;
   readonly title: string;
+  /** True from the start of a navigation until `load` or `error`. */
   readonly loading: boolean;
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
+  /** Back/forward list, null before the first navigation. */
   readonly history: SessionHistory | null;
+  /** Page zoom factor, 1 = 100 %. */
   readonly zoom: number;
   readonly muted: boolean;
+  /** The page plays sound right now (event `media-state`). */
   readonly audible: boolean;
+  /** True after `close`; every method is a no-op then. */
   readonly closed: boolean;
+  /** The canvas the page is painted into (inside the container while attached). */
   readonly canvas: HTMLCanvasElement;
   on<K extends keyof ViewEvents>(type: K, listener: (event: ViewEvents[K]) => void): Unsubscribe;
+  /** Shows the view in `container` (moves it from an earlier one); it follows its size. */
   attach(container: HTMLElement): void;
+  /** Removes the canvas from the page; the view keeps running hidden. */
   detach(): void;
+  /** Loads an address like typed into an address bar (https:// added without a scheme). */
   load(url: string): void;
+  /** Loads an HTML string under a base URL. */
   loadHTML(html: string, baseURL: string): void;
+  /** Reloads; the page may ask beforeunload (dialog with `reload: true`). */
   reload(): void;
+  /** Stops loading. */
   stop(): void;
   back(): void;
   forward(): void;
+  /** Puts back a back/forward list (from {@link View.history}) and loads its current entry. */
   restoreHistory(history: SessionHistory): void;
+  /** Hidden views paint nothing and throttle their timers. */
   setVisible(visible: boolean): void;
   /** Keyboard focus into the page. */
   focus(): void;
   /** Moves focus to the first (forward) or last element, like Tab from outside. */
   focusFirstElement(forward: boolean): void;
+  /** Page zoom factor (> 0), emits `zoom` when it changes. */
   setZoom(zoom: number): void;
   setMuted(muted: boolean): void;
+  /**
+   * Find in page (case insensitive, wraps around); `again` goes to the next match. The result
+   * comes with the event `find`; matches stay marked until {@link View.stopFind}.
+   */
   find(text: string, options?: { backwards?: boolean; again?: boolean }): void;
+  /** Ends find and removes the marks. */
   stopFind(): void;
   /** Builds a PDF; delivered with the event `print`. */
   print(): void;
   /** Loads the page source; delivered with the event `source`. */
   viewSource(): void;
+  /** Editor command on the focused element or selection of the page. */
   command(name: EditCommand): void;
   /** Puts text on the engine clipboard and pastes it. */
   paste(text: string): void;
+  /** Ends fullscreen of the page (also ends host fullscreen). */
   exitFullscreen(): void;
   /** Runs beforeunload unless `force`; resolves true when the view closed. */
   close(options?: { force?: boolean }): Promise<boolean>;
 }
 
+/** Commands of {@link View.command}. */
 export type EditCommand = 'Copy' | 'Cut' | 'Paste' | 'SelectAll' | 'Undo' | 'Redo';
 
+/** A file of an upload, drop or paste the page did not get. */
+export interface SkippedFile {
+  name: string;
+  /** 'too-large': over 512 MB; 'unreadable': the host could not read it. */
+  reason: 'too-large' | 'unreadable';
+}
+
+/** Events of {@link View.on}. */
 export interface ViewEvents {
+  /**
+   * The address or back/forward state changed: at the start of a navigation (`loading` true),
+   * same-document navigations, and when loading ends.
+   */
   navigation: {
     url: string;
     canGoBack: boolean;
@@ -296,30 +386,50 @@ export interface ViewEvents {
     loading: boolean;
     history: SessionHistory | null;
   };
+  /** The title of the page changed; `url` is the page it belongs to. */
   title: { title: string; url: string };
+  /** Load progress from 0 to 1 (1 when done). */
   progress: { value: number };
   /** The zoom changed (setZoom or Ctrl + mouse wheel over the page). */
   zoom: { zoom: number };
   /** A new document; `errorPage` is the kind of error page (for example 'certificate') or null. */
   commit: { errorPage: string | null };
+  /** The main frame finished loading (window load event); `loading` is false from here on. */
   load: Record<string, never>;
+  /**
+   * The main frame navigation failed; `description` is the error of the network layer in
+   * English (for example a host that cannot be resolved). An error page follows (`commit`).
+   */
   error: { description: string };
+  /** First layout of a new document. */
   'first-layout': Record<string, never>;
+  /** First paint of a new document. */
   'first-paint': Record<string, never>;
+  /** A console message of the page. */
   console: {
     level: 'log' | 'warn' | 'error' | 'debug' | 'info';
     message: string;
     source: string;
     line: number;
   };
+  /** Favicon of the page, null when it has none. */
   icon: { blob: Blob | null };
+  /** The pointer is over a link (its address) or left it (null). */
   hover: { url: string | null };
+  /**
+   * Result of {@link View.find}: `matches` (at most 1000) and the position of the current one
+   * from 1, 0 when nothing was found.
+   */
   find: { matches: number; index: number };
+  /** The page entered or left fullscreen (its container is fullscreen in the host). */
   fullscreen: { active: boolean };
+  /** The page started or stopped playing sound. */
   'media-state': { audible: boolean };
+  /** The page started or stopped using the camera, microphone or screen capture. */
   'capture-state': { active: boolean };
   /** A video of this view went into the host's picture-in-picture window or left it. */
   'picture-in-picture': { active: boolean };
+  /** The page added or removed its last beforeunload listener (close may ask). */
   'beforeunload-state': { hasListener: boolean };
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
@@ -331,37 +441,55 @@ export interface ViewEvents {
   'focus-request': Record<string, never>;
   /** Tab moved focus past the first or last element of the page. */
   'take-focus': { forward: boolean };
+  /** Right click the page did not handle itself: show a context menu. */
   'context-menu': ContextMenuInfo;
+  /** A PDF of the page from {@link View.print} or window.print(). */
   print: { pdf: Blob; title: string };
+  /** Source of the page from {@link View.viewSource}. */
   source: { url: string; text: string };
+  /** Files of an upload, drop or paste the page did not get. */
+  'files-skipped': { files: SkippedFile[] };
+  /** The view closed (close(), window.close() or the end of the browser). */
   close: Record<string, never>;
 }
 
+/** Where the user right clicked; empty strings when there is no link, image or selection. */
 export interface ContextMenuInfo {
   /** Position in CSS pixels relative to the view canvas. */
   x: number;
   y: number;
+  /** Address of the link under the pointer. */
   link: string;
+  /** Address of the image under the pointer. */
   image: string;
+  /** Selected text. */
   selection: string;
+  /** Over an editable element (text field, contenteditable). */
   editable: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
 }
 
+/** Answer of a dialog handler: confirm boolean, prompt string or null, beforeunload true to leave. */
+export type DialogAnswer = boolean | string | null | undefined;
+
 /** Requests the engine waits for. Each has exactly one handler. */
 export interface RequestHandlers {
   /**
-   * alert, confirm, prompt and beforeunload. SYNCHRONOUS: the engine waits. Return value:
-   * confirm -> boolean, prompt -> string or null, beforeunload -> true to leave.
+   * alert, confirm, prompt and beforeunload, answered directly or with a promise (an in-page
+   * dialog). Answer: confirm true for OK, prompt the text or null, beforeunload false to stay.
+   * While a dialog is open the engine waits: all views stop until the answer (the host page
+   * stays responsive). The signal aborts when the view closes or the engine ends.
    * Default: alert ignored, confirm false, prompt null, beforeunload true.
    */
-  dialog(request: DialogRequest): boolean | string | null | undefined;
+  dialog(request: DialogRequest): DialogAnswer | Promise<DialogAnswer>;
   /**
-   * Default 'deny'. Pages only see notifications the host browser shows: grant 'notifications'
-   * after the host allowed them (Notification.requestPermission), as the ui permission prompt does.
+   * Default 'dismiss'. 'grant' and 'deny' are remembered in the {@link PermissionStore};
+   * 'dismiss' (also a thrown error) answers no for now and the page may ask again. Pages only
+   * see notifications the host browser shows: grant 'notifications' after the host allowed them
+   * (Notification.requestPermission), as the ui permission prompt does.
    */
-  permission(request: PermissionRequest): Promise<'grant' | 'deny'>;
+  permission(request: PermissionRequest): Promise<PermissionAnswer>;
   /** Default: the native file dialog of the host browser. */
   fileChooser(request: FileChooserRequest): Promise<File[] | null>;
   /** `<select>` popup; resolves the chosen index or -1. Default -1. */
@@ -370,26 +498,60 @@ export interface RequestHandlers {
   colorPicker(request: ColorRequest): Promise<string | null>;
   /** Date and time inputs; resolves the value string or null. Default null. */
   dateTimePicker(request: DateTimeRequest): Promise<string | null>;
+  /**
+   * Copy and cut in a page: puts the text (and HTML) on a clipboard. Default: the clipboard of
+   * the host (`navigator.clipboard`, with HTML when ClipboardItem exists).
+   */
+  clipboardWrite(request: ClipboardWriteRequest): void | Promise<void>;
 }
 
+/** A page dialog (handler `dialog`). */
 export interface DialogRequest {
   view: View;
   type: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+  /** Origin of the asking frame (for "<host> says"). */
   origin: string;
+  /** Text of the page; empty for beforeunload (like Chrome, never shown). */
   message: string;
+  /** Default text of a prompt. */
   defaultValue: string;
   /** beforeunload of a reload. */
   reload: boolean;
-}
-
-export interface PermissionRequest {
-  view: View;
-  /** For example 'geolocation', 'notifications', 'camera', 'microphone'. */
-  kind: string;
-  origin: string;
+  /** Aborted when the view closes or the engine ends; the answer is ignored then. */
   signal: AbortSignal;
 }
 
+/** Permissions the pages ask for. 'camera-microphone' is one question for both. */
+export type PermissionKind =
+  | 'geolocation'
+  | 'notifications'
+  | 'camera'
+  | 'microphone'
+  | 'camera-microphone';
+
+/** A decision remembered in the {@link PermissionStore}. */
+export type PermissionDecision = 'grant' | 'deny';
+
+/** Answer of the permission handler; 'dismiss' is not remembered. */
+export type PermissionAnswer = PermissionDecision | 'dismiss';
+
+/** A permission question of a page (handler `permission`). */
+export interface PermissionRequest {
+  view: View;
+  kind: PermissionKind;
+  origin: string;
+  /** Aborted when the view closes or the engine ends. */
+  signal: AbortSignal;
+}
+
+/** Text a page copied or cut (handler `clipboardWrite`). */
+export interface ClipboardWriteRequest {
+  text: string;
+  /** HTML of the selection, '' for plain text. */
+  html: string;
+}
+
+/** A file input of a page (handler `fileChooser`). */
 export interface FileChooserRequest {
   view: View;
   multiple: boolean;
@@ -398,6 +560,7 @@ export interface FileChooserRequest {
   signal: AbortSignal;
 }
 
+/** An entry of a `<select>` popup. */
 export interface SelectItem {
   text: string;
   tooltip: string;
@@ -408,6 +571,7 @@ export interface SelectItem {
   separator: boolean;
 }
 
+/** A `<select>` popup of a page (handler `selectPopup`). */
 export interface SelectRequest {
   view: View;
   rect: Rect;
@@ -417,6 +581,7 @@ export interface SelectRequest {
   signal: AbortSignal;
 }
 
+/** An `<input type=color>` of a page (handler `colorPicker`). */
 export interface ColorRequest {
   view: View;
   rect: Rect;
@@ -426,6 +591,7 @@ export interface ColorRequest {
   preview(value: string): void;
 }
 
+/** A date or time input of a page (handler `dateTimePicker`). */
 export interface DateTimeRequest {
   view: View;
   rect: Rect;
@@ -441,28 +607,43 @@ export interface DateTimeRequest {
   preview(value: string): void;
 }
 
-/** Remembered permission decisions per origin. */
+/**
+ * Remembered permission decisions per origin, for example kept in the profile of the user.
+ * Read once at the start (`entries`); written for every remembered answer and by
+ * {@link Browser.setPermission}.
+ */
 export interface PermissionStore {
-  get(origin: string, kind: string): 'grant' | 'deny' | undefined;
-  set(origin: string, kind: string, value: 'grant' | 'deny'): void;
-  entries(): Iterable<[origin: string, kind: string, value: 'grant' | 'deny']>;
+  /** Remembers a decision; null forgets it. */
+  set(origin: string, kind: PermissionKind, value: PermissionDecision | null): void;
+  /** Entries of unknown kinds are ignored. */
+  entries(): Iterable<[origin: string, kind: string, value: PermissionDecision]>;
 }
 
-/** A download of the pages. */
+/** A download of the pages. The file is collected in memory and becomes a Blob when done. */
 export interface Download {
   readonly id: number;
+  /** View that started it, null when it is gone or unknown. */
+  readonly view: View | null;
   readonly filename: string;
   readonly mime: string;
-  /** Address the file came from. */
+  /** Address the file came from ('data:' for data URLs). */
   readonly url: string;
-  /** Expected size in bytes, 0 when unknown. */
+  /** Expected size in bytes, 0 when unknown; the real size once done. */
   readonly size: number;
+  /** Bytes received so far. */
   readonly received: number;
-  readonly state: 'progress' | 'done' | 'failed';
+  readonly state: 'progress' | 'done' | 'error';
+  /** Why it failed: the network error, 'HTTP <status>', 'Cancelled' or 'Aborted' (browser ended). */
   readonly error?: string;
   /** The file once done. */
   readonly blob: Blob | null;
-  on(type: 'progress' | 'done' | 'error', listener: () => void): Unsubscribe;
+  /** `progress` for every chunk, then exactly one `done` or `error`. */
+  on(
+    type: 'progress' | 'done' | 'error',
+    listener: (event: { download: Download }) => void,
+  ): Unsubscribe;
+  /** Stops a running download; it ends with `error` 'Cancelled'. */
+  cancel(): void;
   /** Saves the file with the download of the host browser. */
   save(): void;
 }

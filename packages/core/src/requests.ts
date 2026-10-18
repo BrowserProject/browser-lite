@@ -1,8 +1,12 @@
 import type { Config } from './config.js';
 import type { EngineModule } from './engine.js';
+import { storePermission } from './permissions.js';
 import type {
+  DialogAnswer,
   DialogRequest,
   FileChooserRequest,
+  PermissionAnswer,
+  PermissionKind,
   Rect,
   RequestHandlers,
   SelectItem,
@@ -32,8 +36,22 @@ interface RequestsHost {
   readonly watchdog: Watchdog;
   readonly ready: boolean;
   text(value: string | null | undefined): number;
-  writeUploads(view: ViewImpl, files: File[]): Promise<string[]>;
+  readonly uploads: { write(view: ViewImpl, files: File[]): Promise<string[]> };
 }
+
+interface OpenDialog {
+  view: ViewImpl;
+  type: DialogRequest['type'];
+  controller: AbortController;
+}
+
+const isThenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof (value as PromiseLike<unknown> | null)?.then === 'function';
+
+const report = (error: unknown) =>
+  queueMicrotask(() => {
+    throw error;
+  });
 
 type Picker = 'select' | 'color' | 'datetime';
 
@@ -53,6 +71,7 @@ export class Requests {
   private readonly pending = new Map<number, Set<AbortController>>();
   private readonly pickers = new Map<string, AbortController>();
   private readonly permissions = new Map<number, { view: number; controller: AbortController }>();
+  private readonly dialogs = new Map<number, OpenDialog>();
 
   constructor(private readonly host: RequestsHost) {}
 
@@ -76,79 +95,117 @@ export class Requests {
     this.pending.get(view.id)?.delete(controller);
   }
 
-  /** alert/confirm/prompt/beforeunload; the engine thread waits for the answer. */
+  /**
+   * alert/confirm/prompt/beforeunload (Module.engineDialog). The engine thread waits until
+   * bl_dialog_answer; the handler may answer later (a promise). Meanwhile the watchdog pauses.
+   */
   dialog(
+    id: number,
     view: ViewImpl | undefined,
     type: number,
     origin: string,
     message: string,
     defaultValue: string,
-  ): number {
+  ): void {
     const kind = DIALOG_TYPES[type] ?? 'alert';
-    let result: ReturnType<RequestHandlers['dialog']>;
     const handler = this.handlers.dialog;
-    if (view && handler) {
-      const request: DialogRequest = {
+    if (!view?.alive || !handler) {
+      this.answerDialog(id, kind, undefined);
+      return;
+    }
+    const controller = this.track(view);
+    this.dialogs.set(id, { view, type: kind, controller });
+    this.host.watchdog.pause();
+    let result: DialogAnswer | Promise<DialogAnswer>;
+    try {
+      result = handler({
         view,
         type: kind,
         origin,
         message,
         defaultValue,
         reload: type === 4,
-      };
-      try {
-        result = handler(request);
-      } catch (error) {
-        queueMicrotask(() => {
-          throw error;
-        });
-      } finally {
-        this.host.watchdog.restartWait();
-      }
+        signal: controller.signal,
+      });
+    } catch (error) {
+      report(error);
+      result = undefined;
     }
-    switch (kind) {
-      case 'confirm':
-        return result === true ? 1 : 0;
-      case 'prompt':
-        return typeof result === 'string' ? this.host.module.stringToNewUTF8(result) : 0;
-      case 'beforeunload':
-        return result === false ? 0 : 1;
-      default:
-        return 0;
+    if (isThenable(result))
+      result.then(
+        (answer) => this.finishDialog(id, answer as DialogAnswer),
+        (error: unknown) => {
+          report(error);
+          this.finishDialog(id, undefined);
+        },
+      );
+    else this.finishDialog(id, result);
+  }
+
+  private finishDialog(id: number, answer: DialogAnswer): void {
+    const dialog = this.dialogs.get(id);
+    if (!dialog) return;
+    this.dialogs.delete(id);
+    this.done(dialog.view, dialog.controller);
+    this.host.watchdog.resume();
+    this.answerDialog(id, dialog.type, answer);
+  }
+
+  // Missing or unexpected answers count like the defaults: confirm false, prompt null, leave
+  private answerDialog(id: number, type: DialogRequest['type'], answer: DialogAnswer): void {
+    const { module, ready } = this.host;
+    if (!ready) return;
+    if (type === 'prompt' && typeof answer === 'string')
+      module._bl_dialog_answer(id, 1, this.host.text(answer));
+    else
+      module._bl_dialog_answer(
+        id,
+        (type === 'confirm' && answer === true) || (type === 'beforeunload' && answer !== false)
+          ? 1
+          : 0,
+        0,
+      );
+  }
+
+  /** Answers every open dialog with the default (the engine must run, for example to stop). */
+  closeDialogs(): void {
+    for (const [id, dialog] of [...this.dialogs]) {
+      this.dialogs.delete(id);
+      dialog.controller.abort();
+      this.host.watchdog.resume();
+      this.answerDialog(id, dialog.type, undefined);
     }
   }
 
   async permission(
     view: ViewImpl,
-    data: { id: number; kind: string; origin: string },
+    data: { id: number; kind: PermissionKind; origin: string },
   ): Promise<void> {
     const { module, config } = this.host;
     const handler = this.handlers.permission;
-    // Without a handler: denied for now, nothing remembered
+    // Without a handler: no for now, nothing remembered
     if (!handler) {
       module._bl_permission_answer(data.id, 0);
       return;
     }
     const controller = this.track(view);
     this.permissions.set(data.id, { view: view.id, controller });
-    let decision: 'grant' | 'deny' = 'deny';
+    let answer: PermissionAnswer = 'dismiss';
     try {
-      decision =
-        (await handler({
-          view,
-          kind: data.kind,
-          origin: data.origin,
-          signal: controller.signal,
-        })) === 'grant'
-          ? 'grant'
-          : 'deny';
+      const result = await handler({
+        view,
+        kind: data.kind,
+        origin: data.origin,
+        signal: controller.signal,
+      });
+      if (result === 'grant' || result === 'deny') answer = result;
     } catch {}
     if (controller.signal.aborted || !this.permissions.has(data.id)) return;
     this.permissions.delete(data.id);
     this.done(view, controller);
     if (!this.host.ready) return;
-    config.permissions.set(data.origin, data.kind, decision);
-    module._bl_permission_answer(data.id, decision === 'grant' ? 1 : 2);
+    if (answer !== 'dismiss') storePermission(config.permissions, data.origin, data.kind, answer);
+    module._bl_permission_answer(data.id, answer === 'grant' ? 1 : answer === 'deny' ? 2 : 0);
   }
 
   async fileChooser(view: ViewImpl, data: { multiple?: boolean; accept?: string }): Promise<void> {
@@ -164,7 +221,7 @@ export class Requests {
       });
     } catch {}
     if (controller.signal.aborted) return;
-    const paths = files?.length ? await this.host.writeUploads(view, files) : [];
+    const paths = files?.length ? await this.host.uploads.write(view, files) : [];
     this.done(view, controller);
     if (view.alive) this.host.module._bl_choose_files(view.id, this.host.text(paths.join('\n')));
   }
@@ -277,8 +334,14 @@ export class Requests {
       module._bl_datetime_chosen(view.id, typeof value === 'string' ? this.host.text(value) : 0, 1);
   }
 
-  /** The view closes: abort its requests; open permission questions count as dismissed. */
+  /** The view closes: abort its requests; open dialogs and permission questions count as dismissed. */
   closeView(view: ViewImpl): void {
+    for (const [id, dialog] of [...this.dialogs]) {
+      if (dialog.view !== view) continue;
+      this.dialogs.delete(id);
+      this.host.watchdog.resume();
+      this.answerDialog(id, dialog.type, undefined);
+    }
     for (const [id, entry] of this.permissions) {
       if (entry.view !== view.id) continue;
       this.permissions.delete(id);
@@ -293,6 +356,7 @@ export class Requests {
   /** The engine ended: abort everything without answers. */
   abortAll(): void {
     this.permissions.clear();
+    this.dialogs.clear();
     for (const set of this.pending.values()) for (const controller of [...set]) controller.abort();
     this.pending.clear();
     this.pickers.clear();

@@ -156,7 +156,7 @@ WebView& WebView::openFromEngine(int openerId, IntSize size, float deviceScaleFa
     static int nextID = 1 << 20;
     int id = nextID++;
     auto& view = open(id, size, deviceScaleFactor);
-    notifyHost(id, "newview", makeString("{\"opener\":"_s, openerId, '}'));
+    notifyHost(id, "new-view", makeString("{\"opener\":"_s, openerId, '}'));
     return view;
 }
 
@@ -1171,7 +1171,7 @@ void WebView::requestPointerLock(CompletionHandler<void(PointerLockRequestResult
 {
     if (auto previous = std::exchange(m_pointerLockHandler, WTF::move(completionHandler)))
         previous(PointerLockRequestResult::Failure);
-    notifyHost(m_id, "pointerlock", "{\"on\":true}"_s);
+    notifyHost(m_id, "pointer-lock", "{\"on\":true}"_s);
 }
 
 void WebView::pointerLockResult(bool locked)
@@ -1184,7 +1184,7 @@ void WebView::pointerLockResult(bool locked)
 
 void WebView::requestPointerUnlock()
 {
-    notifyHost(m_id, "pointerlock", "{\"on\":false}"_s);
+    notifyHost(m_id, "pointer-lock", "{\"on\":false}"_s);
 }
 #endif
 
@@ -1254,7 +1254,7 @@ void WebView::contextMenu(double x, double y)
     if (RefPtr focused = m_page->focusController().focusedOrMainFrame())
         selection = focused->editor().selectedText();
     auto& backForward = m_page->backForward();
-    notifyHost(m_id, "contextmenu", makeString("{\"x\":"_s, x, ",\"y\":"_s, y,
+    notifyHost(m_id, "context-menu", makeString("{\"x\":"_s, x, ",\"y\":"_s, y,
         ",\"link\":\""_s, jsonEscape(result.absoluteLinkURL().string()),
         "\",\"image\":\""_s, jsonEscape(result.absoluteImageURL().string()),
         "\",\"selection\":\""_s, jsonEscape(selection.left(200)),
@@ -1319,7 +1319,7 @@ void WebView::openFileChooser(FileChooser& chooser)
         accept.append(accept.isEmpty() ? ""_s : ","_s, type);
     for (auto& extension : settings.acceptFileExtensions)
         accept.append(accept.isEmpty() ? ""_s : ","_s, extension);
-    notifyHost(m_id, "filechooser", makeString("{\"multiple\":"_s, settings.allowsMultipleFiles ? "true"_s : "false"_s,
+    notifyHost(m_id, "file-chooser", makeString("{\"multiple\":"_s, settings.allowsMultipleFiles ? "true"_s : "false"_s,
         ",\"accept\":\""_s, jsonEscape(accept.toString()), "\"}"_s));
 }
 

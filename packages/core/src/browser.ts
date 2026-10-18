@@ -1,20 +1,27 @@
+import { writeHostClipboard } from './clipboard.js';
 import {
   type Config,
   colorScheme,
   engineEnv,
   languages,
+  PERMISSION_KINDS,
+  permissionChange,
   preferenceFlags,
   preferences,
   resolveConfig,
 } from './config.js';
 import { Debug } from './debug.js';
-import { DownloadImpl, decodeSource } from './downloads.js';
+import { Downloads } from './downloads.js';
 import { Emitter } from './emitter.js';
-import { type EngineModule, loadEngineFactory } from './engine.js';
+import { checkEngine, type EngineModule, loadEngineFactory } from './engine.js';
 import { BrowserLiteError } from './errors.js';
+import { Fullscreen } from './fullscreen.js';
+import { Online } from './online.js';
+import { storePermission } from './permissions.js';
+import { redirectPopup } from './popups.js';
 import { Requests } from './requests.js';
 import { Screen } from './screen.js';
-import type { HostCall, ServiceContext } from './services/service.js';
+import { ServiceRegistry } from './service-context.js';
 import { holdStorageLock, namespaceDirectory } from './storage.js';
 import { checkSupport } from './support.js';
 import type {
@@ -23,15 +30,18 @@ import type {
   BrowserOptions,
   BrowserStorage,
   ColorScheme,
+  Download,
+  PermissionDecision,
+  PermissionKind,
   Preferences,
   Unsubscribe,
   ViewOptions,
   WarningCode,
 } from './types.js';
-import { uploadDirectory, type ViewHost, ViewImpl } from './view.js';
+import { Uploads } from './uploads.js';
+import { type ViewHost, ViewImpl } from './view.js';
 import { Watchdog } from './watchdog.js';
 
-const MAX_UPLOAD = 512 * 1024 * 1024;
 const CONSOLE_LEVELS = ['log', 'warn', 'error', 'debug', 'info'] as const;
 
 type EventHandler = (
@@ -114,27 +124,18 @@ class BrowserImpl implements Browser, ViewHost {
   readonly module: EngineModule;
   readonly watchdog: Watchdog;
   readonly requests: Requests;
+  readonly uploads: Uploads;
+  readonly fullscreen: Fullscreen;
   private readonly events = new Emitter<BrowserEvents>();
   private readonly lifetime = new AbortController();
   private readonly screen: Screen;
   private readonly handlers = new Map<string, EventHandler>();
-  private readonly hostCalls = new Map<string, HostCall<unknown>>();
-  private readonly viewSetups: ((view: ViewImpl, signal: AbortSignal) => void)[] = [];
-  private readonly gestureListeners: (() => void)[] = [];
-  private readonly provided = new Map<string, unknown>();
-  private readonly debugStates = new Map<string, () => unknown>();
-  private readonly downloads = new Map<
-    number,
-    { download: DownloadImpl; view: number; source: boolean }
-  >();
+  private readonly services: ServiceRegistry;
+  private readonly downloads: Downloads;
+  private readonly network: Online;
   private readonly warnings: [WarningCode, string][] = [];
-  private readonly context: ServiceContext;
   private nextViewId = 1;
-  private uploadCounter = 0;
   private focused: ViewImpl | null = null;
-  private fullscreenView: ViewImpl | null = null;
-  private pointerLockView: ViewImpl | null = null;
-  private online = true;
   private releaseLock: (() => void) | null = null;
   private failStart: ((error: Error) => void) | null = null;
 
@@ -145,11 +146,17 @@ class BrowserImpl implements Browser, ViewHost {
       this.events.emit(hung ? 'unresponsive' : 'responsive', {}),
     );
     this.requests = new Requests(this);
+    this.uploads = new Uploads(this);
+    this.fullscreen = new Fullscreen(this.module, () => this.views.values());
+    this.network = new Online(this.module, config.transport, (connected) =>
+      this.events.emit('network', { connected }),
+    );
+    this.downloads = new Downloads(this);
     this.screen = new Screen(this.module, config, () => {
       for (const view of this.views.values()) view.measure(true);
     });
     if (config.debug) this.debug = new Debug(this);
-    this.context = this.serviceContext();
+    this.services = new ServiceRegistry(this, this.lifetime.signal);
     this.registerCoreEvents();
   }
 
@@ -161,7 +168,15 @@ class BrowserImpl implements Browser, ViewHost {
     return this.phase === 'ready';
   }
 
-  // ------------------------------------------------------------------ start
+  get online(): boolean {
+    return this.network.value;
+  }
+
+  /** Emits `download`; false when nobody listens. */
+  announceDownload(download: Download): boolean {
+    this.events.emit('download', { download });
+    return this.events.has('download');
+  }
 
   async start(): Promise<void> {
     const { config } = this;
@@ -192,7 +207,8 @@ class BrowserImpl implements Browser, ViewHost {
 
     // The synchronous part of setup (module hooks, handlers) runs now, async preparation
     // (service worker) while the engine loads
-    const prepared = Promise.all(config.services.map((service) => service.setup(this.context)));
+    const context = this.services.context;
+    const prepared = Promise.all(config.services.map((service) => service.setup(context)));
     prepared.catch(() => {});
     const features = [...new Set(config.services.flatMap((service) => service.features))];
     const env = engineEnv(config, features, persistent);
@@ -235,7 +251,10 @@ class BrowserImpl implements Browser, ViewHost {
     ]);
     await Promise.race([
       factory(this.module).then(
-        () => ready,
+        () => {
+          checkEngine(this.module);
+          return ready;
+        },
         (error: unknown) => {
           throw new BrowserLiteError('engine-load-failed', `Engine start failed: ${error}`, {
             cause: error,
@@ -259,9 +278,13 @@ class BrowserImpl implements Browser, ViewHost {
     module._bl_set_languages(this.text(config.languages.join(',')));
     module._bl_set_preferences(preferenceFlags(config.preferences));
     for (const [origin, kind, value] of config.permissions.entries())
-      module._bl_set_permission(this.text(kind), this.text(origin), value === 'grant' ? 1 : 2);
+      if (
+        PERMISSION_KINDS.includes(kind as PermissionKind) &&
+        (value === 'grant' || value === 'deny')
+      )
+        module._bl_set_permission(this.text(kind), this.text(origin), value === 'grant' ? 1 : 2);
     this.screen.start(signal);
-    for (const service of config.services) service.start(this.context);
+    for (const service of config.services) service.start(this.services.context);
     this.watchdog.start();
 
     document.addEventListener(
@@ -273,32 +296,8 @@ class BrowserImpl implements Browser, ViewHost {
       { signal },
     );
     addEventListener('pagehide', () => this.storage.flush(500), { signal });
-    document.addEventListener(
-      'fullscreenchange',
-      () => {
-        const view = this.fullscreenView;
-        if (document.fullscreenElement || !view) return;
-        this.fullscreenView = null;
-        if (view.alive) module._bl_exit_fullscreen(view.id);
-      },
-      { signal },
-    );
-    document.addEventListener(
-      'pointerlockchange',
-      () => {
-        const view = [...this.views.values()].find((v) => v.canvas === document.pointerLockElement);
-        const previous = this.pointerLockView;
-        if (previous && previous !== view && previous.alive)
-          module._bl_pointer_lock(previous.id, 0);
-        this.pointerLockView = view ?? null;
-      },
-      { signal },
-    );
-    const updateOnline = () => this.updateOnline();
-    config.transport.addEventListener('connectedchange', updateOnline, { signal });
-    addEventListener('online', updateOnline, { signal });
-    addEventListener('offline', updateOnline, { signal });
-    this.updateOnline();
+    this.fullscreen.start(signal);
+    this.network.start(signal);
 
     // Warnings of the start go out once the caller could subscribe
     const warnings = this.warnings.splice(0);
@@ -328,7 +327,7 @@ class BrowserImpl implements Browser, ViewHost {
         this.watchdog.answered();
         this.views.get(view)?.needsFrame();
       },
-      onEngineDownloadData: (id, bytes) => this.downloads.get(id)?.download.add(bytes),
+      onEngineDownloadData: (id, bytes) => this.downloads.data(id, bytes),
       onEnginePrint: (view, bytes, title) =>
         this.views
           .get(view)
@@ -337,15 +336,13 @@ class BrowserImpl implements Browser, ViewHost {
         this.views.get(view)?.emit('icon', {
           blob: bytes.length ? new Blob([bytes], { type: mime || 'image/x-icon' }) : null,
         }),
-      engineDialog: (view, type, origin, message, defaultValue) => {
+      engineDialog: (dialog, view, type, origin, message, defaultValue) => {
         this.watchdog.answered();
-        return this.requests.dialog(this.views.get(view), type, origin, message, defaultValue);
+        this.requests.dialog(dialog, this.views.get(view), type, origin, message, defaultValue);
       },
     };
     return module as EngineModule;
   }
-
-  // ----------------------------------------------------------------- events
 
   private onEngineEvent(viewId: number, type: string, payload: string, fromEngineThread: boolean) {
     if (fromEngineThread) this.watchdog.answered();
@@ -360,9 +357,10 @@ class BrowserImpl implements Browser, ViewHost {
     else view?.engineEvent(type, data);
   }
 
-  private handle(type: string, handler: EventHandler): void {
+  /** Takes an engine event away from the views; one handler per type. */
+  handle<T>(type: string, handler: (data: T, view: ViewImpl | undefined, viewId: number) => void) {
     if (this.handlers.has(type)) throw new Error(`Engine event ${type} is handled twice`);
-    this.handlers.set(type, handler);
+    this.handlers.set(type, handler as unknown as EventHandler);
   }
 
   private registerCoreEvents(): void {
@@ -372,21 +370,18 @@ class BrowserImpl implements Browser, ViewHost {
         if (view && !view.closed) fn(view, data);
       };
     this.handle('memory-pressure', () => this.events.emit('memory-pressure', {}));
-    // Copy and cut in a page go to the clipboard of the host (with HTML like Chrome)
-    this.handle('clipboard', (data) => {
-      const clipboard = navigator.clipboard;
-      if (!clipboard) return;
-      const text = String(data.text ?? '');
-      const writeText = () => clipboard.writeText(text).catch(() => {});
-      if (data.html && typeof ClipboardItem === 'function') {
-        const item = new ClipboardItem({
-          'text/plain': new Blob([text], { type: 'text/plain' }),
-          'text/html': new Blob([String(data.html)], { type: 'text/html' }),
-        });
-        clipboard.write([item]).catch(writeText);
-      } else writeText();
+    this.handle<Record<string, unknown>>('clipboard', (data) => {
+      const write = this.config.handlers.clipboardWrite ?? writeHostClipboard;
+      const request = { text: String(data.text ?? ''), html: String(data.html ?? '') };
+      try {
+        Promise.resolve(write(request)).catch((error: unknown) =>
+          console.warn('[browser-lite] clipboardWrite failed:', error),
+        );
+      } catch (error) {
+        console.warn('[browser-lite] clipboardWrite failed:', error);
+      }
     });
-    this.handle('console', (data, view) => {
+    this.handle<Record<string, unknown>>('console', (data, view) => {
       const level = CONSOLE_LEVELS[Number(data.level)] ?? 'log';
       const message = String(data.message ?? '');
       const source = String(data.source ?? '');
@@ -395,10 +390,13 @@ class BrowserImpl implements Browser, ViewHost {
       if (this.config.debug)
         console[level](`[page ${view?.id ?? 0}] ${message}`, source ? `(${source}:${line})` : '');
     });
-    this.handle('newview', (data, _view, viewId) => this.openEngineView(viewId, data));
-    this.handle('download-start', (data, view) => this.downloadStart(data, view));
-    this.handle('download-done', (data) => this.downloadDone(data));
-    this.handle('host-call', (data, view) => this.hostCall(data, view));
+    this.handle<{ opener?: number }>('new-view', (data, _view, viewId) =>
+      this.openEngineView(viewId, Number(data.opener)),
+    );
+    this.handle<Record<string, unknown>>('download-start', (data, view) =>
+      this.downloads.start(data, view),
+    );
+    this.handle<Record<string, unknown>>('download-done', (data) => this.downloads.done(data));
     this.handle(
       'permission',
       withView((view, data) => {
@@ -406,7 +404,7 @@ class BrowserImpl implements Browser, ViewHost {
       }),
     );
     this.handle(
-      'filechooser',
+      'file-chooser',
       withView((view, data) => {
         this.requests.fileChooser(view, data);
       }),
@@ -422,13 +420,13 @@ class BrowserImpl implements Browser, ViewHost {
       withView((view) => this.requests.hidePicker(view, 'select')),
     );
     this.handle(
-      'colorpicker',
+      'color-picker',
       withView((view, data) => {
         this.requests.colorPicker(view, data);
       }),
     );
     this.handle(
-      'datetimepicker',
+      'date-time-picker',
       withView((view, data) => {
         this.requests.dateTimePicker(view, data);
       }),
@@ -443,76 +441,17 @@ class BrowserImpl implements Browser, ViewHost {
   }
 
   // window.open or target=_blank: the engine opened the view already (with its own id)
-  private openEngineView(id: number, data: Record<string, unknown>): void {
-    const opener = this.views.get(Number(data.opener)) ?? null;
+  private openEngineView(id: number, openerId: number): void {
+    const opener = this.views.get(openerId) ?? null;
     const view = this.addView(id, {}, true);
-    this.events.emit('new-view', { view, opener });
+    if (this.events.has('new-view')) this.events.emit('new-view', { view, opener });
+    else redirectPopup(view, opener);
   }
-
-  private async hostCall(data: Record<string, unknown>, view: ViewImpl | undefined) {
-    const id = Number(data.id);
-    const send = (ok: boolean, value: unknown) => {
-      if (this.ready)
-        this.module._bl_host_call_result(id, ok ? 1 : 0, this.text(JSON.stringify(value ?? null)));
-    };
-    const handler = this.hostCalls.get(String(data.name));
-    if (!handler) {
-      send(false, { name: 'NotSupportedError', message: 'Not supported' });
-      return;
-    }
-    try {
-      const payload = JSON.parse(String(data.payload || 'null'));
-      send(true, await handler(payload, String(data.origin || ''), view));
-    } catch (error) {
-      const e = error as { name?: string; message?: string } | null;
-      send(false, { name: e?.name || 'NotSupportedError', message: e?.message || String(error) });
-    }
-  }
-
-  private downloadStart(data: Record<string, unknown>, view: ViewImpl | undefined): void {
-    const download = new DownloadImpl(
-      Number(data.id),
-      String(data.filename ?? 'download'),
-      String(data.mime ?? ''),
-      String(data.url ?? ''),
-      Number(data.size) || 0,
-    );
-    const source = !!data.viewSource;
-    this.downloads.set(download.id, { download, view: view?.id ?? 0, source });
-    if (!source) this.events.emit('download', { download });
-  }
-
-  private downloadDone(data: Record<string, unknown>): void {
-    const entry = this.downloads.get(Number(data.id));
-    if (!entry) return;
-    this.downloads.delete(entry.download.id);
-    const { download } = entry;
-    download.finish(String(data.error ?? ''));
-    if (entry.source) {
-      // Page source (viewSource): the engine loaded the address like a download
-      const view = this.views.get(entry.view);
-      if (!download.blob || !view) return;
-      download.blob.arrayBuffer().then((bytes) => {
-        if (!view.closed)
-          view.emit('source', { url: download.url, text: decodeSource(bytes, download.mime) });
-      });
-      return;
-    }
-    if (download.state === 'done' && !this.events.has('download')) download.save();
-  }
-
-  // ------------------------------------------------------------------ views
 
   private addView(id: number, options: ViewOptions, fromEngine: boolean): ViewImpl {
     const view = new ViewImpl(this, id, options, fromEngine);
     this.views.set(id, view);
-    for (const setup of this.viewSetups) {
-      try {
-        setup(view, view.signal);
-      } catch (error) {
-        console.warn('[browser-lite] service view setup failed:', error);
-      }
-    }
+    this.services.setupView(view);
     return view;
   }
 
@@ -529,7 +468,7 @@ class BrowserImpl implements Browser, ViewHost {
   removeView(view: ViewImpl): void {
     this.views.delete(view.id);
     if (this.focused === view) this.focused = null;
-    if (this.pointerLockView === view) this.pointerLockView = null;
+    this.fullscreen.forget(view);
   }
 
   focusView(view: ViewImpl): void {
@@ -558,150 +497,26 @@ class BrowserImpl implements Browser, ViewHost {
   }
 
   gesture(): void {
-    for (const listener of this.gestureListeners) listener();
+    this.services.gesture();
   }
 
   text(value: string | null | undefined): number {
     return this.module.stringToNewUTF8(value ?? '');
   }
 
-  // Files (upload, drop, paste) into the engine file system under /data/tmp (OPFS, not WASM
-  // memory). The page reads them as long as it has its File objects (also after navigating),
-  // so they are deleted only when the view closes. The engine thread reads the files itself.
-  async writeUploads(view: ViewImpl, files: File[]): Promise<string[]> {
-    const uploads: { name: string; file: File; path: string }[] = [];
-    const skipped: string[] = [];
-    for (const file of files) {
-      // A pasted image is called "image.png" in Chrome
-      const name = (file.name || 'image.png').replace(/[/\n]/g, '_');
-      if (file.size > MAX_UPLOAD) skipped.push(`${name} (larger than 512 MB)`);
-      else
-        uploads.push({
-          name,
-          file,
-          path: `${uploadDirectory(view.id)}/${++this.uploadCounter}/${name}`,
-        });
-    }
-    const write = this.module.blWriteFiles;
-    const written =
-      uploads.length && write && this.ready
-        ? await write(uploads.map(({ file, path }) => ({ file, path })))
-        : [];
-    if (!view.alive) {
-      // Closed meanwhile: its directory is gone, remove what came after
-      if (this.ready) this.module._bl_remove_path(this.text(uploadDirectory(view.id)));
-      return [];
-    }
-    const paths: string[] = [];
-    uploads.forEach((upload, i) => {
-      if (written[i]) paths.push(upload.path);
-      else skipped.push(upload.name);
-    });
-    if (skipped.length) console.warn('[browser-lite] files not taken:', skipped.join(', '));
-    return paths;
-  }
-
-  // Fullscreen of a page: the container of its view goes fullscreen in the host
-  setFullscreen(view: ViewImpl, on: boolean): void {
-    if (!on) {
-      if (this.fullscreenView !== view) return;
-      this.fullscreenView = null;
-      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-      return;
-    }
-    const element = view.element;
-    const fail = () => {
-      if (this.fullscreenView === view) this.fullscreenView = null;
-      if (view.alive) this.module._bl_exit_fullscreen(view.id);
-    };
-    if (!element) {
-      fail();
-      return;
-    }
-    this.fullscreenView = view;
-    // Without user activation the host refuses
-    if (document.fullscreenElement !== element) element.requestFullscreen?.().catch(fail);
-  }
-
-  // Pointer lock (games, 3D): the mouse stays in the canvas, Esc of the host ends it
-  setPointerLock(view: ViewImpl, on: boolean): void {
-    const canvas = view.canvas;
-    if (!on) {
-      if (document.pointerLockElement === canvas) document.exitPointerLock();
-      return;
-    }
-    const request = canvas.requestPointerLock as (options?: {
-      unadjustedMovement?: boolean;
-    }) => Promise<void> | undefined;
-    Promise.resolve(request.call(canvas, { unadjustedMovement: true }))
-      .catch(() => request.call(canvas))
-      .then(
-        () => {
-          if (view.alive)
-            this.module._bl_pointer_lock(view.id, document.pointerLockElement === canvas ? 1 : 0);
-        },
-        () => {
-          if (view.alive) this.module._bl_pointer_lock(view.id, 0);
-        },
-      );
-  }
-
-  // navigator.onLine of the pages: network of the host and connection of the transport
-  private updateOnline(): void {
-    const now = navigator.onLine && this.config.transport.connected;
-    if (now === this.online || !this.ready) return;
-    this.online = now;
-    this.module._bl_set_online(now ? 1 : 0);
-    this.events.emit('network', { connected: now });
-  }
-
-  // --------------------------------------------------------------- services
-
-  private serviceContext(): ServiceContext {
-    return {
-      module: this.module,
-      config: this.config,
-      signal: this.lifetime.signal,
-      text: (value) => this.text(value),
-      engineWorker: () => this.module.blEngineWorker?.() ?? null,
-      on: <T>(type: string, handler: (data: T, view: ViewImpl | undefined) => void) =>
-        this.handle(type, handler as unknown as EventHandler),
-      hostCall: <P>(name: string, handler: HostCall<P>) => {
-        if (this.hostCalls.has(name)) throw new Error(`Host call ${name} is handled twice`);
-        this.hostCalls.set(name, handler as HostCall<unknown>);
-      },
-      onView: (setup) => {
-        this.viewSetups.push(setup);
-      },
-      onUserGesture: (listener) => {
-        this.gestureListeners.push(listener);
-      },
-      provide: (key, value) => {
-        this.provided.set(key, value);
-      },
-      use: <T>(key: string) => this.provided.get(key) as T | undefined,
-      debugState: (name, state) => {
-        this.debugStates.set(name, state);
-      },
-      warn: (code, message) => this.warn(code, message),
-    };
-  }
-
   debugState(name: 'audio' | 'media' | 'rtc'): unknown {
-    return this.debugStates.get(name)?.() ?? null;
+    return this.services.debugState(name);
   }
 
   memoryPressure(): void {
     if (this.ready) this.events.emit('memory-pressure', {});
   }
 
-  private warn(code: WarningCode, message: string): void {
+  warn(code: WarningCode, message: string): void {
     console.warn(`[browser-lite] ${message}`);
     if (this.phase === 'starting') this.warnings.push([code, message]);
     else this.events.emit('warning', { code, message });
   }
-
-  // ----------------------------------------------------------------- public
 
   on<K extends keyof BrowserEvents>(
     type: K,
@@ -742,7 +557,16 @@ class BrowserImpl implements Browser, ViewHost {
     if (this.ready) this.module._bl_set_preferences(preferenceFlags(merged));
   }
 
-  // ---------------------------------------------------------------- the end
+  setPermission(origin: string, kind: PermissionKind, decision: PermissionDecision | null): void {
+    const [checkedOrigin, checkedKind] = permissionChange(origin, kind, decision);
+    storePermission(this.config.permissions, checkedOrigin, checkedKind, decision);
+    if (this.ready)
+      this.module._bl_set_permission(
+        this.text(checkedKind),
+        this.text(checkedOrigin),
+        decision === 'grant' ? 1 : decision === 'deny' ? 2 : 0,
+      );
+  }
 
   private crashed(reason: string): void {
     if (this.phase === 'starting') {
@@ -754,16 +578,19 @@ class BrowserImpl implements Browser, ViewHost {
     console.error('[browser-lite] engine crashed:', reason);
     this.watchdog.stop();
     this.requests.abortAll();
+    this.downloads.abortAll();
     this.lifetime.abort();
     this.events.emit('crash', { reason });
   }
 
   async destroy(): Promise<void> {
     if (this.phase === 'destroyed') return;
-    const wasReady = this.ready;
-    if (wasReady) this.storage.flush(500);
+    // An open dialog holds the engine thread: answer it so the engine can flush and close
+    this.requests.closeDialogs();
+    if (this.ready) this.storage.flush(500);
     this.watchdog.stop();
     this.requests.abortAll();
+    this.downloads.abortAll();
     // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
     this.phase = 'destroyed';

@@ -69,6 +69,7 @@
 #include <WebCore/UserAgent.h>
 #include <WebCore/WindowFeatures.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #if ENABLE(FULLSCREEN_API)
 #include <WebCore/DocumentFullscreen.h>
@@ -76,6 +77,9 @@
 #endif
 #include <wtf/RunLoop.h>
 #include <wtf/text/MakeString.h>
+#include <unordered_map>
+
+extern "C" void bl_dialog_answer(int id, int accepted, char* text);
 
 namespace BrowserLite {
 
@@ -200,24 +204,67 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
     m_view->didReceiveConsoleMessage(static_cast<int>(level), message, sourceID, lineNumber);
 }
 
-// Dialogs: the engine thread waits until the main thread showed the dialog.
-// Module.engineDialog(viewId, type, origin, message, default) on the main thread returns:
-//   alert (0) -> 0, confirm (1) -> 0/1, prompt (2) -> pointer to UTF-8 (malloc) or 0,
-//   beforeunload when leaving (3) or reloading (4) -> 0/1
-// origin is the origin of the asking frame (like "<host> says" in Chrome).
-static intptr_t runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue)
+// Dialogs: the engine thread waits until the host answered. The main thread is
+// not blocked: Module.engineDialog(dialogId, viewId, type, origin, message,
+// default) shows the dialog and the host answers later with bl_dialog_answer.
+// type: alert (0), confirm (1), prompt (2), beforeunload when leaving (3) or
+// reloading (4). origin is the origin of the asking frame (like "<host> says"
+// in Chrome).
+namespace {
+struct PendingDialog {
+    int viewId;
+    int type;
+    CString origin;
+    CString message;
+    CString defaultValue;
+    em_proxying_ctx* context { nullptr };
+    bool accepted { false };
+    char* text { nullptr };
+};
+}
+
+// Open dialogs by id, only used on the main thread
+static std::unordered_map<int, PendingDialog*>& pendingDialogs()
 {
-    RefPtr document = frame.document();
-    auto originUTF8 = (document ? document->securityOrigin().toString() : String { }).utf8();
-    auto messageUTF8 = message.utf8();
-    auto defaultUTF8 = defaultValue.utf8();
-    intptr_t answer = MAIN_THREAD_EM_ASM_INT({
+    static std::unordered_map<int, PendingDialog*> dialogs;
+    return dialogs;
+}
+
+static void showDialogOnMainThread(em_proxying_ctx* context, void* argument)
+{
+    static int nextID = 1;
+    auto* dialog = static_cast<PendingDialog*>(argument);
+    dialog->context = context;
+    int id = nextID++;
+    pendingDialogs().emplace(id, dialog);
+    int shown = EM_ASM_INT({
         if (!Module.engineDialog)
             return 0;
-        return Module.engineDialog($0, $1, UTF8ToString($2), UTF8ToString($3), UTF8ToString($4)) | 0;
-    }, viewId, type, originUTF8.data(), messageUTF8.data(), defaultUTF8.data());
+        try {
+            Module.engineDialog($0, $1, $2, UTF8ToString($3), UTF8ToString($4), UTF8ToString($5));
+            return 1;
+        } catch (error) {
+            console.error(error);
+            return 0;
+        }
+    }, id, dialog->viewId, dialog->type, dialog->origin.data(), dialog->message.data(), dialog->defaultValue.data());
+    if (!shown)
+        bl_dialog_answer(id, 0, nullptr);
+}
+
+// Returns whether the user accepted; text gets the answer of a prompt
+static bool runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue, String* text = nullptr)
+{
+    RefPtr document = frame.document();
+    PendingDialog dialog { viewId, type, (document ? document->securityOrigin().toString() : String { }).utf8(), message.utf8(), defaultValue.utf8() };
+    bool answered = emscripten_proxy_sync_with_ctx(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), showDialogOnMainThread, &dialog);
     restartScriptWatchdog();
-    return answer;
+    if (dialog.text) {
+        if (text)
+            *text = String::fromUTF8(dialog.text);
+        free(dialog.text);
+    }
+    return answered && dialog.accepted;
 }
 
 void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
@@ -255,12 +302,7 @@ bool ChromeClient::runJavaScriptConfirm(LocalFrame& frame, const String& message
 
 bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message, const String& defaultValue, String& result)
 {
-    auto* answer = reinterpret_cast<char*>(runDialog(m_view->id(), frame, 2, message, defaultValue));
-    if (!answer)
-        return false;
-    result = String::fromUTF8(answer);
-    free(answer);
-    return true;
+    return runDialog(m_view->id(), frame, 2, message, defaultValue, &result);
 }
 
 // beforeunload (navigation, reload, closing the view through bl_try_close):
@@ -317,7 +359,7 @@ void ChromeClient::runOpenPanel(LocalFrame&, FileChooser& chooser)
 // Tab past the last element: focus back to the host
 void ChromeClient::takeFocus(FocusDirection direction)
 {
-    notifyHost(m_view->id(), "takefocus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
+    notifyHost(m_view->id(), "take-focus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
 }
 
 RefPtr<PopupMenu> ChromeClient::createPopupMenu(PopupMenuClient& client) const
@@ -783,3 +825,20 @@ void DragClient::startDrag(DragItem, DataTransfer& dataTransfer, Frame&, const s
 }
 
 } // namespace BrowserLite
+
+// Answer of the host to Module.engineDialog (main thread only): the waiting
+// engine thread continues. text is the answer of a prompt (the engine frees it).
+extern "C" EMSCRIPTEN_KEEPALIVE void bl_dialog_answer(int id, int accepted, char* text)
+{
+    auto& dialogs = BrowserLite::pendingDialogs();
+    auto entry = dialogs.find(id);
+    if (entry == dialogs.end()) {
+        free(text);
+        return;
+    }
+    auto* dialog = entry->second;
+    dialogs.erase(entry);
+    dialog->accepted = accepted;
+    dialog->text = text;
+    emscripten_proxy_finish(dialog->context);
+}

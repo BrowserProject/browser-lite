@@ -145,6 +145,9 @@ function track(view, prefix) {
   view.on('capture-state', ({ active: on }) => record(`capture-state:${on}`));
   view.on('picture-in-picture', ({ active: on }) => record(`picture-in-picture:${on}`));
   view.on('beforeunload-state', ({ hasListener }) => record(`beforeunload-state:${hasListener}`));
+  view.on('files-skipped', ({ files }) =>
+    record(`files-skipped:${files.map(({ name, reason }) => `${name}:${reason}`).join()}`),
+  );
   view.on('source', ({ text }) => {
     host.source = text;
   });
@@ -207,7 +210,7 @@ async function askPermission(request) {
     return new Promise((resolve) => {
       request.signal.addEventListener('abort', () => {
         host.events.push(`permission-aborted:${request.kind}`);
-        resolve('deny');
+        resolve('dismiss');
       });
     });
   // The core leaves the host notification permission to the handler
@@ -233,15 +236,26 @@ const host = {
   permissionRequests: [],
   /** Index of the <select> item, -1 cancels. */
   selectAnswer: -1,
-  /** 'grant', 'deny' or 'wait' (until the request is aborted); per kind in permissionAnswers. */
+  /**
+   * 'grant', 'deny', 'dismiss' or 'wait' (until the request is aborted); per kind in
+   * permissionAnswers.
+   */
   permissionAnswer: 'deny',
   permissionAnswers: {},
   /** [[name, text, type?], ...] or null (cancel). */
   fileAnswer: null,
   colorAnswer: null,
   dateAnswer: null,
-  /** 'answer': confirm true, prompt 'answer'; 'native': the dialogs of the host page. */
+  /**
+   * 'answer': confirm true, prompt 'answer'; 'async': the same after dialogDelay ms (a promise);
+   * 'native': the dialogs of the host page.
+   */
   dialogMode: 'answer',
+  dialogDelay: 1000,
+  /** Download objects of the 'download' event (for cancel()). */
+  downloadObjects: [],
+  /** False: start without a 'new-view' listener (popups load in their opener). */
+  listenNewView: true,
   /** Makes the view at index (in opening order) the active one. */
   select(index) {
     activate(views[index]);
@@ -310,7 +324,10 @@ const host = {
             view: request.view.id,
           });
           if (host.dialogMode === 'native') return nativeDialog(request);
-          return request.type === 'prompt' ? 'answer' : true;
+          const answer = request.type === 'prompt' ? 'answer' : true;
+          if (host.dialogMode === 'async')
+            return new Promise((resolve) => setTimeout(() => resolve(answer), host.dialogDelay));
+          return answer;
         },
       },
     };
@@ -333,6 +350,7 @@ const host = {
         error: null,
       };
       host.downloads.push(entry);
+      host.downloadObjects.push(download);
       download.on('done', async () => {
         entry.state = download.state;
         entry.size = download.blob.size;
@@ -348,12 +366,13 @@ const host = {
     for (const type of ['unresponsive', 'responsive', 'memory-pressure'])
       browser.on(type, () => host.events.push(type));
     // Views the pages open (window.open, target=_blank) become the active view
-    browser.on('new-view', ({ view, opener }) => {
-      host.events.push(`new-view:${opener?.id ?? 0}`);
-      view.attach(container);
-      track(view, 'popup-');
-      activate(view);
-    });
+    if (host.listenNewView)
+      browser.on('new-view', ({ view, opener }) => {
+        host.events.push(`new-view:${opener?.id ?? 0}`);
+        view.attach(container);
+        track(view, 'popup-');
+        activate(view);
+      });
     blTest.open(params.get('url'));
     return true;
   },

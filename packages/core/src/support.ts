@@ -1,9 +1,9 @@
-import type { SupportReport } from './types.js';
+import type { SupportFeature, SupportReport } from './types.js';
 
 /** Checks the host browser for everything the engine needs. */
 export function checkSupport(): SupportReport {
   const scope = globalThis as Record<string, unknown>;
-  const missing: string[] = [];
+  const missing: SupportFeature[] = [];
   if (typeof document === 'undefined') missing.push('document');
   if (!scope.crossOriginIsolated) missing.push('crossOriginIsolated');
   if (typeof SharedArrayBuffer === 'undefined') missing.push('SharedArrayBuffer');

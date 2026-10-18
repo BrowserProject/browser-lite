@@ -4,6 +4,9 @@
 if (typeof Module === 'undefined')
   var Module = {};
 
+// abiVersion of engine/abi.json: the host refuses an engine of another contract
+Module.blAbiVersion = 2;
+
 // malloc for the JS hosts: without ABORTING_MALLOC _malloc returns 0 when
 // memory is full, the write would then go to the start of the WASM memory
 Module.blAlloc = (size) => {

@@ -45,7 +45,7 @@ public:
     static WebView& open(int id, WebCore::IntSize, float deviceScaleFactor);
     // New view the engine opens itself (window.open, target=_blank,
     // clients.openWindow): ID from 2^20 on (the host counts from 1), the host
-    // gets "newview". openerId 0 = without a view behind it
+    // gets "new-view". openerId 0 = without a view behind it
     static WebView& openFromEngine(int openerId, WebCore::IntSize, float deviceScaleFactor);
     static void close(int id);
     ~WebView();

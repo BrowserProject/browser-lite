@@ -191,7 +191,7 @@ public:
     {
         if (!m_client)
             return;
-        notifyHost(m_viewId, "colorpicker", makeString('{', rectJSON(m_client->elementRectRelativeToRootView()),
+        notifyHost(m_viewId, "color-picker", makeString('{', rectJSON(m_client->elementRectRelativeToRootView()),
             ",\"value\":\""_s, serializationForHTML(color), "\"}"_s));
     }
 
@@ -279,7 +279,7 @@ private:
     void showChooser(const DateTimeChooserParameters& parameters) final
     {
         // min/max/step as numbers like valueAsNumber; the host converts them
-        notifyHost(m_viewId, "datetimepicker", makeString('{', rectJSON(parameters.anchorRectInRootView),
+        notifyHost(m_viewId, "date-time-picker", makeString('{', rectJSON(parameters.anchorRectInRootView),
             ",\"type\":\""_s, jsonEscape(parameters.type), "\",\"value\":\""_s, jsonEscape(parameters.currentValue),
             "\",\"min\":"_s, std::isfinite(parameters.minimum) ? parameters.minimum : 0, ",\"max\":"_s, std::isfinite(parameters.maximum) ? parameters.maximum : 0,
             ",\"step\":"_s, std::isfinite(parameters.step) ? parameters.step : 0, '}'));

@@ -13,6 +13,7 @@ export class Watchdog {
   private inputMark = 0;
   private markAddress = 0;
   private hung = false;
+  private paused = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -51,8 +52,14 @@ export class Watchdog {
     }
   }
 
-  /** After a synchronous page dialog: the time it was open does not count. */
-  restartWait(): void {
+  /** A page dialog opened: the engine thread waits for its answer, that is no hang. */
+  pause(): void {
+    this.paused++;
+  }
+
+  /** The dialog was answered: the time it was open does not count. */
+  resume(): void {
+    this.paused = Math.max(0, this.paused - 1);
     if (this.waitingSince) this.waitingSince = Date.now();
     if (this.inputSince) this.inputSince = Date.now();
   }
@@ -72,6 +79,7 @@ export class Watchdog {
   }
 
   private check(): void {
+    if (this.paused) return;
     if (this.inputSince && this.handledMark() === this.inputMark) {
       this.inputSince = 0;
       if (!this.waitingSince) this.answered();

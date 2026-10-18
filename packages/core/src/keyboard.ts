@@ -51,6 +51,9 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
   ime.setAttribute('data-bl-ime', '');
   ime.setAttribute('aria-hidden', 'true');
   ime.autocomplete = 'off';
+  // Safari and on-screen keyboards would change the text before the page gets it
+  ime.setAttribute('autocorrect', 'off');
+  ime.setAttribute('autocapitalize', 'off');
   ime.spellcheck = false;
   ime.tabIndex = -1;
   ime.style.cssText =
@@ -118,7 +121,7 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     if (html) data.html = html;
     // After an await the data of the event is gone
     const files = [...(clipboardData?.files ?? [])];
-    data.files = await host.writeUploads(view, files);
+    data.files = await host.uploads.write(view, files);
     if (!view.alive) return;
     host.module._bl_set_clipboard(host.text(JSON.stringify(data)));
     const shortcut: KeyLike = {

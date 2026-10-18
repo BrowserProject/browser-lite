@@ -1,7 +1,7 @@
 import type { HostService } from '../types.js';
 import { AudioService } from './audio.js';
 import { CaptureService } from './capture.js';
-import { type DeviceSwitches, DevicesService } from './devices.js';
+import { type DevicesOptions, DevicesService } from './devices.js';
 import { MediaService } from './media.js';
 import { WebRTCService } from './webrtc.js';
 
@@ -34,10 +34,10 @@ export function webrtc(): HostService {
 /**
  * Devices and platform APIs (geolocation, sensors, gamepads, speech, notifications, file system
  * access, navigator.clipboard, eyedropper, battery, keyboard, network information, image decoder,
- * touch input). Every switch defaults to true.
+ * touch input). Every part is on unless set to false; `notifications` also takes a handler.
  */
-export function devices(switches?: DeviceSwitches): HostService {
-  return new DevicesService(switches);
+export function devices(options?: DevicesOptions): HostService {
+  return new DevicesService(options);
 }
 
 /** The services of a browser without options: audio(), media(), capture(), devices(). */

@@ -9,7 +9,10 @@ clients and the client works with other Wisp v1 servers (without the extras).
 
 One WebSocket per client, binary messages only. Each message is exactly one packet. The client
 passes its token as `?token=<token>` in the URL. A refused upgrade is an HTTP status: 403 (token
-or origin), 429 (too many connections from one client address), 503 (relay shutting down).
+or origin), 429 (too many connections from one client address), 503 (relay shutting down). A
+page cannot read that status, so a server should refuse a missing, wrong or expired token by
+completing the upgrade and closing at once with WebSocket close code 4401 (4403 for a forbidden
+origin); the client then reports `unauthorized` (extra).
 
 ## Packets
 
@@ -80,7 +83,9 @@ ends before `onopen` was never sent to a relay (no connection).
 - **Reason 0x4a** (see above).
 - **Reconnect**: a dropped WebSocket is replaced at once once; if that fails the client is offline
   (`connected` false) and retries every 2 s until it succeeds or is closed. The token is fetched
-  again for every connect.
+  again for every connect. After close code 4401 or 4403 before the first CONTINUE the client
+  dispatches an `error` event (reason `unauthorized`) and doubles the delay per refusal in a row
+  (4 s, 8 s, ... at most 60 s).
 
 ## Server rules
 

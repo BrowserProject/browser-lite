@@ -1,7 +1,10 @@
 // WispTransport against the real relay of @browser-lite/server: token, echo with flow control,
 // backpressure (onsent), close reasons, limits per target, dual stack, closing semantics,
-// reconnect after a relay restart and after a dropped WebSocket, connection state, close().
+// reconnect after a relay restart and after a dropped WebSocket, connection state, close(),
+// a token refused after the upgrade.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import http from 'node:http';
 import net from 'node:net';
 import { after, before, describe, test } from 'node:test';
 import { WispTransport } from '../dist/index.js';
@@ -83,6 +86,50 @@ test('a throwing WebSocket constructor goes offline and reconnects', async () =>
   } finally {
     transport.close();
     await relay.stop();
+  }
+});
+
+test('a relay refusing the token after the upgrade: error event, slower retries, new token', async () => {
+  // Completes the WebSocket upgrade and closes at once with 4401, like a relay that checks the
+  // token after the upgrade
+  const server = http.createServer();
+  const sockets = new Set();
+  server.on('upgrade', (req, socket) => {
+    sockets.add(socket);
+    const accept = createHash('sha1')
+      .update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.end(Buffer.from([0x88, 0x02, 0x11, 0x31]));
+    socket.on('error', () => {});
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const tokens = [];
+  const transport = new WispTransport({
+    url: `ws://127.0.0.1:${server.address().port}/wisp/`,
+    token: () => {
+      tokens.push(Date.now());
+      return `token-${tokens.length}`;
+    },
+  });
+  const errors = [];
+  transport.addEventListener('error', (event) => errors.push(event.reason));
+  try {
+    const result = await closeReason(transport, '127.0.0.1', echo.port);
+    assert.deepEqual(result, { reason: 'transport-down', opened: false });
+    assert.ok(await waitUntil(() => errors.length === 1, 2000), 'error event');
+    assert.deepEqual(errors, ['unauthorized']);
+    assert.equal(transport.connected, false);
+    // The first retry waits 4 s instead of 2 s and fetches the token again
+    assert.ok(await waitUntil(() => tokens.length === 2, 7000), 'retried');
+    assert.ok(tokens[1] - tokens[0] >= 3500, `retry after ${tokens[1] - tokens[0]} ms`);
+    assert.ok(await waitUntil(() => errors.length === 2, 2000), 'second error event');
+  } finally {
+    transport.close();
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 

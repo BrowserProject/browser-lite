@@ -6,8 +6,9 @@
 // - every Module field the engine reads or sets is a listed module hook (or engine internal)
 // - features, host calls and close reasons match EngineConfig.cpp, WebPlatformExtras.cpp,
 //   Sockets.cpp and sockets.js
-// - packages/core/src only calls public exports, EngineExports of packages/core/src/engine.ts
+// - packages/core/src only calls public exports, ENGINE_EXPORTS of packages/core/src/engine.ts
 //   lists exactly the public exports (minus NOT_USED_BY_CORE) and exactly the calls of the core
+// - abiVersion is the same in abi.json, engine/js/engine-pre.js and packages/core/src/engine.ts
 //   node tests/contract/abi-test.mjs
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -334,15 +335,15 @@ check(
 );
 const engineTS = read(path.join(root, 'packages', 'core', 'src', 'engine.ts'));
 const declared = [
-  ...(engineTS.match(/export interface EngineExports \{([\s\S]*?)\n\}/)?.[1] ?? '').matchAll(
-    /\b_(bl_\w+):/g,
+  ...(engineTS.match(/const ENGINE_EXPORTS = \[([\s\S]*?)\n\] as const;/)?.[1] ?? '').matchAll(
+    /'_(bl_\w+)'/g,
   ),
 ].map((m) => m[1]);
 const sameSet = (a, b) =>
   JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
 const expected = [...exports.keys()].filter((name) => !NOT_USED_BY_CORE.includes(name));
 check(
-  'EngineExports lists the public exports minus NOT_USED_BY_CORE',
+  'ENGINE_EXPORTS lists the public exports minus NOT_USED_BY_CORE',
   sameSet(declared, expected),
   `missing: ${missing(expected, new Set(declared)).join(', ')}; extra: ${missing(declared, new Set(expected)).join(', ')}`,
 );
@@ -350,7 +351,7 @@ const called = new Set(
   core.flatMap((file) => [...read(file).matchAll(/\._(bl_\w+)\b/g)].map((m) => m[1])),
 );
 check(
-  'every export in EngineExports is called by the core',
+  'every export in ENGINE_EXPORTS is called by the core',
   missing(declared, called).length === 0,
   missing(declared, called).join(', '),
 );
@@ -361,6 +362,23 @@ check(
 check(
   'bl_crash_for_testing stays a public export used by the core',
   exports.has('bl_crash_for_testing') && declared.includes('bl_crash_for_testing'),
+);
+
+// ------------------------------------------------------------ ABI version
+
+const preJS = read(path.join(root, 'engine', 'js', 'engine-pre.js'));
+const engineVersion = Number(preJS.match(/Module\.blAbiVersion = (\d+);/)?.[1]);
+const coreVersion = Number(engineTS.match(/export const ENGINE_ABI_VERSION = (\d+);/)?.[1]);
+check('abi.json has an integer abiVersion', Number.isInteger(abi.abiVersion) && abi.abiVersion > 0);
+check(
+  'engine-pre.js announces the abiVersion of abi.json',
+  engineVersion === abi.abiVersion,
+  String(engineVersion),
+);
+check(
+  'the core expects the abiVersion of abi.json',
+  coreVersion === abi.abiVersion,
+  String(coreVersion),
 );
 
 if (failed) {

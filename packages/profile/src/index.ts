@@ -7,6 +7,7 @@ export {
   type ProfileInfo,
   type ProfileOptions,
   type ProfileStatus,
+  type ProfileStatusEvent,
   statusTexts,
 } from './profile.js';
 export { siteOfPath } from './scan.js';

@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Server-side browser profile for browser-lite: browser client",
   "license": "BSD-2-Clause",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrowserProject/browser-lite.git",
+    "directory": "packages/profile"
+  },
+  "homepage": "https://github.com/BrowserProject/browser-lite/tree/main/packages/profile#readme",
+  "bugs": {
+    "url": "https://github.com/BrowserProject/browser-lite/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -13,6 +22,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/**/*.tsbuildinfo",
+    "src",
     "README.md"
   ],
   "sideEffects": false,
@@ -23,6 +34,7 @@
     "@browser-lite/core": "0.1.0"
   },
   "devDependencies": {
-    "@browser-lite/core": "0.1.0"
+    "@browser-lite/core": "0.1.0",
+    "playwright": "1.56.1"
   }
 }

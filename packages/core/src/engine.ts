@@ -3,87 +3,95 @@ import type { Transport } from './types.js';
 
 type Export = (...args: number[]) => number;
 
-/** Public exports of the engine (engine/abi.json). Strings are UTF-8 pointers the engine frees. */
-export interface EngineExports {
-  _bl_create_view: Export;
-  _bl_destroy_view: Export;
-  _bl_load_url: Export;
-  _bl_load_html: Export;
-  _bl_restore_history: Export;
-  _bl_go_back: Export;
-  _bl_go_forward: Export;
-  _bl_reload: Export;
-  _bl_stop: Export;
-  _bl_try_close: Export;
-  _bl_resize: Export;
-  _bl_set_visible: Export;
-  _bl_focus: Export;
-  _bl_focus_initial: Export;
-  _bl_set_zoom: Export;
-  _bl_set_muted: Export;
-  _bl_frame: Export;
-  _bl_frame_presented: Export;
-  _bl_mouse: Export;
-  _bl_mouse_move: Export;
-  _bl_wheel: Export;
-  _bl_zoom_wheel: Export;
-  _bl_pinch: Export;
-  _bl_touch: Export;
-  _bl_context_menu: Export;
-  _bl_key: Export;
-  _bl_insert_text: Export;
-  _bl_set_composition: Export;
-  _bl_confirm_composition: Export;
-  _bl_set_clipboard: Export;
-  _bl_set_clipboard_text: Export;
-  _bl_command: Export;
-  _bl_drag: Export;
-  _bl_pointer_lock: Export;
-  _bl_exit_fullscreen: Export;
-  _bl_find: Export;
-  _bl_find_done: Export;
-  _bl_print: Export;
-  _bl_view_source: Export;
-  _bl_choose_files: Export;
-  _bl_remove_path: Export;
-  _bl_popup_choose: Export;
-  _bl_color_chosen: Export;
-  _bl_datetime_chosen: Export;
-  _bl_permission_answer: Export;
-  _bl_set_permission: Export;
-  _bl_set_user_agent: Export;
-  _bl_set_languages: Export;
-  _bl_set_preferences: Export;
-  _bl_set_screen: Export;
-  _bl_set_online: Export;
-  _bl_storage_flush: Export;
-  _bl_input_mark: Export;
-  _bl_input_mark_address: Export;
-  _bl_eval_script: Export;
-  _bl_memory_report: Export;
-  _bl_memory_used: Export;
-  _bl_crash_for_testing: Export;
-  _bl_gpu_lose_context_for_testing: Export;
-  _bl_gpu_restore_context_for_testing: Export;
-  _bl_webgl_lose_context_for_testing: Export;
-  _bl_host_call_result: Export;
-  _bl_media_event: Export;
-  _bl_media_frame: Export;
-  _bl_media_fetch: Export;
-  _bl_media_fetch_cancel: Export;
-  _bl_capture_ended: Export;
-  _bl_capture_failed: Export;
-  _bl_remote_muted: Export;
-  _bl_geolocation_position: Export;
-  _bl_geolocation_error: Export;
-  _bl_device_orientation: Export;
-  _bl_device_motion: Export;
-  _bl_gamepad: Export;
-  _bl_speech_voices: Export;
-  _bl_speech_event: Export;
-  _bl_speech_recognition_event: Export;
-  _bl_notification_event: Export;
-}
+/** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
+export const ENGINE_ABI_VERSION = 2;
+
+/** Public exports of the engine the core calls (engine/abi.json). */
+const ENGINE_EXPORTS = [
+  '_bl_create_view',
+  '_bl_destroy_view',
+  '_bl_load_url',
+  '_bl_load_html',
+  '_bl_restore_history',
+  '_bl_go_back',
+  '_bl_go_forward',
+  '_bl_reload',
+  '_bl_stop',
+  '_bl_try_close',
+  '_bl_resize',
+  '_bl_set_visible',
+  '_bl_focus',
+  '_bl_focus_initial',
+  '_bl_set_zoom',
+  '_bl_set_muted',
+  '_bl_frame',
+  '_bl_frame_presented',
+  '_bl_mouse',
+  '_bl_mouse_move',
+  '_bl_wheel',
+  '_bl_zoom_wheel',
+  '_bl_pinch',
+  '_bl_touch',
+  '_bl_context_menu',
+  '_bl_key',
+  '_bl_insert_text',
+  '_bl_set_composition',
+  '_bl_confirm_composition',
+  '_bl_set_clipboard',
+  '_bl_set_clipboard_text',
+  '_bl_command',
+  '_bl_drag',
+  '_bl_pointer_lock',
+  '_bl_exit_fullscreen',
+  '_bl_find',
+  '_bl_find_done',
+  '_bl_print',
+  '_bl_view_source',
+  '_bl_choose_files',
+  '_bl_remove_path',
+  '_bl_popup_choose',
+  '_bl_color_chosen',
+  '_bl_datetime_chosen',
+  '_bl_permission_answer',
+  '_bl_set_permission',
+  '_bl_set_user_agent',
+  '_bl_set_languages',
+  '_bl_set_preferences',
+  '_bl_set_screen',
+  '_bl_set_online',
+  '_bl_storage_flush',
+  '_bl_input_mark',
+  '_bl_input_mark_address',
+  '_bl_eval_script',
+  '_bl_memory_report',
+  '_bl_memory_used',
+  '_bl_crash_for_testing',
+  '_bl_gpu_lose_context_for_testing',
+  '_bl_gpu_restore_context_for_testing',
+  '_bl_webgl_lose_context_for_testing',
+  '_bl_host_call_result',
+  '_bl_media_event',
+  '_bl_media_frame',
+  '_bl_media_fetch',
+  '_bl_media_fetch_cancel',
+  '_bl_capture_ended',
+  '_bl_capture_failed',
+  '_bl_remote_muted',
+  '_bl_geolocation_position',
+  '_bl_geolocation_error',
+  '_bl_device_orientation',
+  '_bl_device_motion',
+  '_bl_gamepad',
+  '_bl_speech_voices',
+  '_bl_speech_event',
+  '_bl_speech_recognition_event',
+  '_bl_notification_event',
+  '_bl_dialog_answer',
+  '_bl_download_cancel',
+] as const;
+
+/** Public exports of the engine. Strings are UTF-8 pointers the engine frees. */
+export type EngineExports = Record<(typeof ENGINE_EXPORTS)[number], Export>;
 
 /** Callbacks the engine calls on the main thread (Module hooks). */
 export interface EngineHooks {
@@ -124,12 +132,13 @@ export interface EngineHooks {
     bytes: Uint8Array<ArrayBuffer> | null,
   ) => void;
   engineDialog?: (
+    dialog: number,
     view: number,
     type: number,
     origin: string,
     message: string,
     defaultValue: string,
-  ) => number;
+  ) => void;
   onAbort?: (what: unknown) => void;
 }
 
@@ -152,9 +161,27 @@ export interface EngineModule extends EngineExports, EngineHooks {
   blClearHttpCache?: () => Promise<void>;
   blClearBytecodeCache?: () => Promise<void>;
   blShutdown?: () => void;
+  blAbiVersion?: number;
 }
 
 type Factory = (module: Partial<EngineModule>) => Promise<EngineModule>;
+
+/**
+ * Refuses an engine of another contract (an engine release of another version) before the
+ * first call into it.
+ * @throws BrowserLiteError with code `engine-load-failed`
+ */
+export function checkEngine(module: EngineModule): void {
+  const version = module.blAbiVersion;
+  if (version !== ENGINE_ABI_VERSION)
+    throw new BrowserLiteError(
+      'engine-load-failed',
+      `The engine has ABI version ${version ?? 'unknown'}, this core needs ${ENGINE_ABI_VERSION}: use the engine release of the same version as @browser-lite/core`,
+    );
+  const missing = ENGINE_EXPORTS.filter((name) => typeof module[name] !== 'function');
+  if (missing.length)
+    throw new BrowserLiteError('engine-load-failed', `The engine lacks ${missing.join(', ')}`);
+}
 
 const factories = new Map<string, Promise<Factory>>();
 

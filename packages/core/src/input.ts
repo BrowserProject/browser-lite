@@ -254,7 +254,7 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
       const files = [...(dataTransfer?.files ?? [])];
       const point = view.position(e);
       const modifiers = modifierBits(e);
-      const paths = await view.host.writeUploads(view, files);
+      const paths = await view.host.uploads.write(view, files);
       data.files = paths;
       data.fileCount = paths.length;
       if (view.alive) sendDrag(2, point, modifiers, data);

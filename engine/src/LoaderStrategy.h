@@ -20,6 +20,8 @@ WebCore::LoaderStrategy& loaderStrategy();
 // download-done, data through Module.onEngineDownloadData). data: and blob:
 // come from the engine itself, otherwise an own request.
 void startDownload(int viewId, const WebCore::ResourceRequest&, const String& suggestedFilename);
+// Stops a running download, which ends with download-done (error "Cancelled")
+void cancelDownload(int id);
 // Loads the source of an address (like a download, flagged viewSource)
 void startViewSource(int viewId, const URL&);
 

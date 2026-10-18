@@ -6,6 +6,8 @@ import type {
   BrowserOptions,
   ColorScheme,
   DeviceOptions,
+  PermissionDecision,
+  PermissionKind,
   PermissionStore,
   Preferences,
   RequestHandlers,
@@ -226,6 +228,7 @@ const HANDLERS = [
   'selectPopup',
   'colorPicker',
   'dateTimePicker',
+  'clipboardWrite',
 ] as const;
 
 function handlers(value: unknown): Partial<RequestHandlers> {
@@ -241,14 +244,32 @@ function handlers(value: unknown): Partial<RequestHandlers> {
 
 function permissionStore(value: unknown): PermissionStore {
   if (value === undefined) return new MemoryPermissionStore();
-  if (
-    !isObject(value) ||
-    typeof value.get !== 'function' ||
-    typeof value.set !== 'function' ||
-    typeof value.entries !== 'function'
-  )
-    invalid('permissions must have get, set and entries');
+  if (!isObject(value) || typeof value.set !== 'function' || typeof value.entries !== 'function')
+    invalid('permissions must have set and entries');
   return value as unknown as PermissionStore;
+}
+
+/** Kinds of {@link Browser.setPermission} and of permission requests. */
+export const PERMISSION_KINDS: readonly PermissionKind[] = [
+  'geolocation',
+  'notifications',
+  'camera',
+  'microphone',
+  'camera-microphone',
+];
+
+/** Checks the arguments of setPermission. */
+export function permissionChange(
+  origin: unknown,
+  kind: unknown,
+  decision: unknown,
+): [string, PermissionKind, PermissionDecision | null] {
+  if (typeof origin !== 'string' || !origin) invalid('origin must be a non-empty string');
+  if (!PERMISSION_KINDS.includes(kind as PermissionKind))
+    invalid(`kind must be one of ${PERMISSION_KINDS.join(', ')}`);
+  if (decision !== 'grant' && decision !== 'deny' && decision !== null)
+    invalid("decision must be 'grant', 'deny' or null");
+  return [origin, kind as PermissionKind, decision];
 }
 
 /** Validates the options of createBrowser and applies the defaults. */
