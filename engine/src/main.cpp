@@ -151,24 +151,22 @@ int main(int, char**)
     // Own thread for compositing and presentation (needs WebGL 2)
     Compositor::start();
 
-    // Copy in the page -> real clipboard (the host writes it). Without the
-    // feature the clipboard stays inside the engine.
-    if (featureEnabled(Feature::Clipboard)) {
-        WebCore::WasmPlatform::setClipboardChangedCallback([](const WebCore::WasmPlatform::ClipboardItems& items) {
-            // With HTML, so formatted text arrives formatted (like in Chrome)
-            String text;
-            String html;
-            for (auto& [type, value] : items) {
-                if (type.startsWith("text/plain"_s))
-                    text = value;
-                else if (type == "text/html"_s)
-                    html = value;
-            }
-            if (text.isNull() && html.isNull())
-                return;
-            notifyHost(0, "clipboard", makeString("{\"text\":\""_s, jsonEscape(text), "\",\"html\":\""_s, jsonEscape(html), "\"}"_s));
-        });
-    }
+    // Copy in the page -> real clipboard (the host writes it). Always on: the
+    // clipboard feature only gates navigator.clipboard of the pages (WebView.cpp).
+    WebCore::WasmPlatform::setClipboardChangedCallback([](const WebCore::WasmPlatform::ClipboardItems& items) {
+        // With HTML, so formatted text arrives formatted (like in Chrome)
+        String text;
+        String html;
+        for (auto& [type, value] : items) {
+            if (type.startsWith("text/plain"_s))
+                text = value;
+            else if (type == "text/html"_s)
+                html = value;
+        }
+        if (text.isNull() && html.isNull())
+            return;
+        notifyHost(0, "clipboard", makeString("{\"text\":\""_s, jsonEscape(text), "\",\"html\":\""_s, jsonEscape(html), "\"}"_s));
+    });
 
     // The WebCore default is 8 MB, a modern page evicts everything with that
     WebCore::MemoryCache::singleton().setCapacities(0, 16 * 1024 * 1024, 64 * 1024 * 1024);

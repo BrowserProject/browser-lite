@@ -18,20 +18,26 @@ import { hostLanguages, hostTimeZone } from './util.js';
 const NAMESPACE = /^[a-z0-9_]{1,32}$/;
 const EXPERT_ENV = /^(BL|JSC|FC)_[A-Za-z0-9_]+$/;
 
-/** Engine switches the core sets from typed options; `engine.env` must not set them. */
+/**
+ * Engine switches the core sets from typed options; `engine.env` must not set them. Equal to the
+ * core-owned and debug-only entries of engine/abi.json "env" (checked by test/config.test.mjs).
+ */
 export const CORE_ENV = [
   'BL_FEATURES',
   'BL_STORAGE_NAMESPACE',
-  'BL_ERROR_PAGE',
-  'BL_TEST_HOOKS',
   'BL_OPFS',
+  'BL_ERROR_PAGE',
   'BL_EXTRA_CA',
   'BL_KEEP_SESSION_COOKIES',
+  'TZ',
   'BL_DEBUG',
   'BL_GPU',
   'BL_COMPOSITING',
-  'BL_SAFEPOINT_GC',
+  'BL_HTTP_CACHE',
+  'BL_BYTECODE_CACHE',
   'BL_SCRIPT_TIMEOUT',
+  'BL_SAFEPOINT_GC',
+  'BL_TEST_HOOKS',
 ] as const;
 
 /** Options after validation and defaults; the only input of everything else. */
@@ -187,9 +193,9 @@ function env(value: unknown): Record<string, string> {
   if (!isObject(value)) return invalid('engine.env must be an object');
   const result: Record<string, string> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (!EXPERT_ENV.test(key)) invalid(`engine.env: ${key} is no BL_, JSC_ or FC_ switch`);
     if ((CORE_ENV as readonly string[]).includes(key))
       invalid(`engine.env: ${key} is set by the core from a typed option`);
+    if (!EXPERT_ENV.test(key)) invalid(`engine.env: ${key} is no BL_, JSC_ or FC_ switch`);
     if (typeof entry !== 'string') invalid(`engine.env: ${key} must be a string`);
     result[key] = entry;
   }
@@ -304,7 +310,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
 
 /**
  * Environment of the engine (read once at start, engine/abi.json). The only place that maps
- * options to engine switches.
+ * options to engine switches. `persistent` false keeps nothing: no OPFS, no Cache API caches.
  */
 export function engineEnv(
   config: Config,
@@ -317,7 +323,11 @@ export function engineEnv(
     BL_STORAGE_NAMESPACE: config.namespace,
     TZ: config.timeZone,
   };
-  if (!persistent) result.BL_OPFS = '0';
+  if (!persistent) {
+    result.BL_OPFS = '0';
+    result.BL_BYTECODE_CACHE = '0';
+  }
+  if (!persistent || !config.httpCache) result.BL_HTTP_CACHE = '0';
   if (config.errorPage !== undefined) result.BL_ERROR_PAGE = config.errorPage;
   if (config.debug) result.BL_TEST_HOOKS = '1';
   if (config.log) result.BL_DEBUG = '1';

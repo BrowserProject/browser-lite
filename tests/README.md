@@ -4,7 +4,8 @@
 |---|---|---|---|
 | `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
-| `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) | node | ja |
+| `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) and the exports the core uses; `deps-test.mjs`: dependency direction of the packages, no engine access outside `packages/core/src` | node | ja |
+| `core/` | `smoke-test.mjs`: `@browser-lite/core` in Chromium through the test host page `host/` (`window.blTest`, `window.blHost`), relay of `@browser-lite/server` | engine build, `npm ci && npm run build`, Playwright Chromium | ja |
 | `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, error page, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
 | `e2e/` | Whole chain in a real Chromium (Playwright): demo (`apps/demo`), engine, relay, local test servers | Engine-Build, `npm ci && npm run build` | ja |
 
@@ -13,12 +14,22 @@
 ```bash
 tools/check-style.sh
 npm run build
-npm test -w @browser-lite/server -w @browser-lite/transport-wisp
+npm test -w @browser-lite/core -w @browser-lite/server -w @browser-lite/transport-wisp
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 node tests/engine/recorder-test.mjs
 node tests/engine/http-cache-test.mjs
-node tests/contract/abi-test.mjs
+node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs
 ```
+
+## core/
+
+```bash
+node tests/core/smoke-test.mjs [engine-dir]     # default build/webcore/bin
+```
+
+The host page exposes `window.blTest` (the same test hooks as the demo with `?debug=1`) and
+`window.blHost` (recorded events, request answers, `start(options)`, `stop()`).
+`window.blTestOptions`, set before the start, is merged into the `BrowserOptions`.
 
 ## engine/
 

@@ -188,7 +188,7 @@
     { "type": "notification-close", "scope": "view", "payload": "{id}", "feature": "notifications" },
     { "type": "speech-recognition", "scope": "view", "payload": "{id, action: 'start' | 'stop' | 'abort', lang?, continuous?, interimResults?, maxAlternatives?}", "feature": "speech" },
     { "type": "memory-pressure", "scope": "global", "payload": "{footprint}" },
-    { "type": "clipboard", "scope": "global", "payload": "{text, html} (the page copied)", "feature": "clipboard" },
+    { "type": "clipboard", "scope": "global", "payload": "{text, html} (the page copied; sent with any features)" },
     { "type": "gamepad-monitor", "scope": "global", "payload": "{on}", "feature": "gamepad" },
     { "type": "gamepad-effect", "scope": "global", "payload": "{index, type, duration, startDelay, strongMagnitude, weakMagnitude}", "feature": "gamepad" },
     { "type": "speak", "scope": "global", "payload": "{id, text, lang, voice, volume, rate, pitch}", "feature": "speech" },
@@ -213,7 +213,7 @@
     { "name": "gamepad", "doc": "Gamepads through the host. Off: getGamepads() stays empty." },
     { "name": "speech", "doc": "speechSynthesis and speech recognition through the host. Off: both APIs missing." },
     { "name": "notifications", "doc": "Notifications through the host. Off: permission denied." },
-    { "name": "clipboard", "doc": "Copy in the page reaches the host clipboard ('clipboard' event). Off: the clipboard stays inside the engine." }
+    { "name": "clipboard", "doc": "navigator.clipboard and ClipboardItem for the pages. Off: both missing. Copy and cut in the page reach the host ('clipboard' event) either way." }
   ],
   "hostCalls": {
     "eyedropper": ["eyedropper"],

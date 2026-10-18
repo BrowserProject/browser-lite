@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo",
+    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo && node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs",
     "test": "npm test --workspaces --if-present"
   },
   "devDependencies": {

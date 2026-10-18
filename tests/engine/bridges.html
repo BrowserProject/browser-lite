@@ -40,6 +40,7 @@ const bridgeGlobals = (win) => Object.getOwnPropertyNames(win).filter((name) => 
   expect('showOpenFilePicker ' + (all ? 'present' : 'missing'), (typeof showOpenFilePicker === 'function') === all);
   expect('speechSynthesis ' + (all ? 'present' : 'missing'), ('speechSynthesis' in window) === all);
   expect('navigator.connection ' + (all ? 'present' : 'missing'), ('connection' in navigator) === all);
+  expect('navigator.clipboard ' + (all ? 'present' : 'missing'), ('clipboard' in navigator) === all);
   expect('requestPictureInPicture ' + (all ? 'present' : 'missing'), (typeof document.createElement('video').requestPictureInPicture === 'function') === all);
   // srcObject streams play without the media feature (they need no host <video>)
   const canvas = document.createElement('canvas');

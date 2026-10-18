@@ -6,7 +6,8 @@
 // - every Module field the engine reads or sets is a listed module hook (or engine internal)
 // - features, host calls and close reasons match EngineConfig.cpp, WebPlatformExtras.cpp,
 //   Sockets.cpp and sockets.js
-// - packages/core/src only calls public exports
+// - packages/core/src only calls public exports, EngineExports of packages/core/src/engine.ts
+//   lists exactly the public exports (minus NOT_USED_BY_CORE) and exactly the calls of the core
 //   node tests/contract/abi-test.mjs
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -169,10 +170,22 @@ check('closeReasons match the enum of Sockets.cpp', JSON.stringify(enumValues) =
 
 // ------------------------------------------------------------ Host side
 
+// Public exports the core does not call (none today; each entry needs a reason)
+const NOT_USED_BY_CORE = [];
 const core = walk(path.join(root, 'packages', 'core', 'src'), (f) => /\.(ts|js|mjs)$/.test(f));
 const coreCalls = unique(core.flatMap((file) => [...read(file).matchAll(/\b_(bl_\w+)/g)].map((m) => m[1])));
 check('packages/core/src only calls public exports', coreCalls.filter((name) => !exports.has(name)).length === 0,
   coreCalls.filter((name) => !exports.has(name)).join(', '));
+const engineTS = read(path.join(root, 'packages', 'core', 'src', 'engine.ts'));
+const declared = [...(engineTS.match(/export interface EngineExports \{([\s\S]*?)\n\}/)?.[1] ?? '').matchAll(/\b_(bl_\w+):/g)].map((m) => m[1]);
+const sameSet = (a, b) => JSON.stringify([...new Set(a)].sort()) === JSON.stringify([...new Set(b)].sort());
+const expected = [...exports.keys()].filter((name) => !NOT_USED_BY_CORE.includes(name));
+check('EngineExports lists the public exports minus NOT_USED_BY_CORE', sameSet(declared, expected),
+  `missing: ${missing(expected, new Set(declared)).join(', ')}; extra: ${missing(declared, new Set(expected)).join(', ')}`);
+const called = new Set(core.flatMap((file) => [...read(file).matchAll(/\._(bl_\w+)\b/g)].map((m) => m[1])));
+check('every export in EngineExports is called by the core', missing(declared, called).length === 0, missing(declared, called).join(', '));
+check('NOT_USED_BY_CORE only names public exports', NOT_USED_BY_CORE.every((name) => exports.has(name)));
+check('bl_crash_for_testing stays a public export used by the core', exports.has('bl_crash_for_testing') && declared.includes('bl_crash_for_testing'));
 
 if (failed) {
   console.log(`${failed} check(s) failed`);
