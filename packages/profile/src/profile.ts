@@ -81,6 +81,8 @@ export interface ProfileOptions {
   dbLimitKB?: number | (() => number);
   /** Fetch for all requests, for example to add an Authorization header. */
   fetch?: typeof fetch;
+  /** Prefs that hold site data: reset(false) clears them too. Default `['permissions']`. */
+  sitePrefs?: string[];
 }
 
 /** Payload of the `status` event of {@link Profile.on}. */
@@ -99,9 +101,15 @@ export interface Profile {
   beforeStart(dir: FileSystemDirectoryHandle): Promise<void>;
   /** Starts the periodic sync (visible 2 s, hidden 30 s) using browser.storage. */
   attach(browser: Browser): void;
-  /** Value of a pref (settings, bookmarks, permissions), undefined when not set. */
+  /**
+   * Value of a pref, undefined when not set. Names match `^[a-z][a-z0-9-]{0,31}$` (the server
+   * keeps at most 32 prefs of 4 MB together).
+   */
   prefs<T = unknown>(name: string): T | undefined;
-  /** Saves locally at once and on the server when connected (else at the next start). */
+  /**
+   * Saves locally at once and on the server when connected (else at the next start). A pref the
+   * server refuses (name, size, limits) stays local and sets `problem`.
+   */
   savePrefs(name: string, value: unknown): void;
   /** Resolves when the prefs are on the server, at most after timeoutMs (default 5000). */
   prefsSaved(timeoutMs?: number): Promise<void>;
@@ -109,7 +117,7 @@ export interface Profile {
   info(): Promise<ProfileInfo | null>;
   localStats(): Promise<LocalStats>;
   /**
-   * Deletes site data (all = false: cookies, site storage, permissions) or the whole profile
+   * Deletes site data (all = false: cookies, site storage, the `sitePrefs`) or the whole profile
    * (also all other prefs) on the server and here. The storage directory is cleared at the next
    * start, so destroy the browser or reload the page afterwards. Only while connected or local.
    */
@@ -126,8 +134,6 @@ const OPEN_TIMEOUT = 10000;
 const DOWNLOAD_TIMEOUT = 120000;
 /** File in the storage directory with the id of the profile inside. */
 const MARKER = 'profile-id';
-/** Prefs cleared by reset(false); the server clears the same. */
-const SITE_PREFS = ['permissions'];
 
 /** What is uploaded: files with [size, lastModified]; prefs not yet on the server. */
 interface SyncRecord {
@@ -148,6 +154,7 @@ class ProfileClient implements Profile {
   #base: URL;
   #fetch: typeof fetch;
   #dbLimitKB: number | (() => number);
+  #sitePrefs: string[];
   #store: KeyValueStore;
   #status: ProfileStatus = 'off';
   #problem = '';
@@ -172,6 +179,7 @@ class ProfileClient implements Profile {
     this.#base = base;
     this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.#dbLimitKB = options.dbLimitKB ?? DEFAULT_DB_LIMIT_KB;
+    this.#sitePrefs = [...(options.sitePrefs ?? ['permissions'])];
     this.#store = createStore(`bl-profile ${base.href}`);
     this.#prefs = this.#store.readJSON<Record<string, unknown>>('prefs') ?? {};
     // Methods work unbound, for example `storage: { beforeStart: profile.beforeStart }`
@@ -598,9 +606,14 @@ class ProfileClient implements Profile {
         try {
           await this.#write(`prefs/${encodeURIComponent(name)}`, 'PUT', { json: value });
         } catch (error) {
-          const reason = (error as ProfileError).reason;
+          const { reason, status } = error as ProfileError;
           if (reason) this.#stop(reason);
-          return; // else again at the next sync
+          // Else again at the next sync, unless refused for good: then it stays local
+          if (reason || !(status === 400 || status === 413 || status === 507)) return;
+          this.#unsentPrefs.delete(name);
+          this.#saveRecord();
+          this.#setProblem(`The server refused the pref ${name} (HTTP ${status})`);
+          continue;
         }
         // Changed again during the request: send again
         if (JSON.stringify(this.#prefs[name] ?? null) === sent) {
@@ -616,7 +629,7 @@ class ProfileClient implements Profile {
     return Promise.race([this.#prefsQueue, sleep(timeoutMs)]);
   }
 
-  // ------------------------------------------------------------ settings page
+  // ------------------------------------------------------------ info and maintenance
 
   async info(): Promise<ProfileInfo | null> {
     if (this.#status === 'off') return null;
@@ -664,7 +677,10 @@ class ProfileClient implements Profile {
     await this.#prefsQueue;
     if (connected) {
       try {
-        await this.#write('reset', 'POST', { json: { all }, timeout: 10000 });
+        await this.#write('reset', 'POST', {
+          json: { all, prefs: this.#sitePrefs },
+          timeout: 10000,
+        });
       } catch (error) {
         const reason = (error as ProfileError).reason;
         if (reason) this.#status = reason;
@@ -674,8 +690,9 @@ class ProfileClient implements Profile {
         throw error;
       }
     }
-    for (const name of all ? Object.keys(this.#prefs) : SITE_PREFS) delete this.#prefs[name];
-    for (const name of all ? [...this.#unsentPrefs] : SITE_PREFS) this.#unsentPrefs.delete(name);
+    const cleared = all ? Object.keys(this.#prefs) : this.#sitePrefs;
+    for (const name of cleared) delete this.#prefs[name];
+    for (const name of all ? [...this.#unsentPrefs] : cleared) this.#unsentPrefs.delete(name);
     this.#savePrefsCache();
     this.#record = { files: {} };
     this.#saveRecord();

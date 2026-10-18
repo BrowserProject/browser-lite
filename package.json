@@ -16,7 +16,7 @@
     "test": "npm test --workspaces --if-present && node tests/run.mjs engine-js",
     "test:core": "node tests/run.mjs core",
     "test:demo": "node tests/run.mjs demo",
-    "test:examples": "node examples/test.mjs"
+    "test:examples": "node tests/run.mjs examples"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

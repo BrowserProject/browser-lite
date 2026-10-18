@@ -1,6 +1,6 @@
 // In-memory profile server speaking the HTTP protocol of the profile store, as a fetch function.
 
-const PREFS = ['settings', 'bookmarks', 'permissions'];
+const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const json = (status, body) =>
   new Response(body === undefined ? null : JSON.stringify(body), {
     status,
@@ -52,7 +52,7 @@ export class FakeServer {
       this.device = device;
       this.profile.session = `${this.profile.id}.${crypto.randomUUID()}`;
       const files = [...this.files].map(([path, data]) => ({ path, size: data.length }));
-      const prefs = Object.fromEntries(PREFS.map((name) => [name, this.prefs[name] ?? null]));
+      const prefs = { ...this.prefs };
       const head = new TextEncoder().encode(
         JSON.stringify({
           id: this.profile.id,
@@ -101,9 +101,9 @@ export class FakeServer {
     if (route === 'reset' && request.method === 'POST') {
       const rejected = this.checkSession(request);
       if (rejected) return rejected;
-      const { all } = await request.json();
+      const { all, prefs = [] } = await request.json();
       this.files.clear();
-      for (const name of all ? PREFS : ['permissions']) delete this.prefs[name];
+      for (const name of all ? Object.keys(this.prefs) : prefs) delete this.prefs[name];
       Object.assign(this.profile, { id: crypto.randomUUID(), resetBy: this.profile.session });
       return json(204);
     }
@@ -126,7 +126,7 @@ export class FakeServer {
       const rejected = this.checkSession(request);
       if (rejected) return rejected;
       const name = route.slice('prefs/'.length);
-      if (!PREFS.includes(name)) return json(400);
+      if (!PREF_NAME.test(name)) return json(400);
       this.prefs[name] = await request.json();
       return json(204);
     }

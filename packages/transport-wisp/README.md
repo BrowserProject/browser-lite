@@ -31,6 +31,8 @@ const browser = await createBrowser({ engineUrl: '/engine/', transport });
 
 `new WispTransport({ url, token? })` implements `Transport` of `@browser-lite/core`. `url` may be
 relative (resolved against `location`) and `ws:`, `wss:`, `http:` or `https:`, else TypeError.
+The token goes as the WebSocket subprotocol `bl-token.<base64url>` next to `wisp`, never in the
+URL ([PROTOCOL.md](PROTOCOL.md)).
 
 | Member | |
 | --- | --- |

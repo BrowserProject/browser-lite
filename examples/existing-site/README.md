@@ -26,7 +26,7 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 | URL | |
 | --- | --- |
 | `/` | the site's own pages, no special headers |
-| `POST /login`, `/session`, `/token` | session cookie (`Secure` behind an https `PUBLIC_ORIGIN`); `/session` answers 204 or 401; `/token` gives signed-in users a relay token valid for 60 s (`signToken`), else 401 |
+| `POST /login`, `/session`, `/token` | session cookie (`Secure` behind an https `PUBLIC_ORIGIN`); `/session` answers 204 or 401; `/token` gives signed-in users a relay token valid for 60 s (`signToken` with audience `relay`), else 401; `WispTransport` sends it as a WebSocket subprotocol, never in the URL |
 | `/app/` | the browser in a section of an ordinary page |
 | `/app/iframe.html` | the browser page `frame.html` in an iframe of an isolated parent |
 | `/app/csp.html` | the browser under a strict Content Security Policy |
@@ -55,7 +55,7 @@ uses its own storage namespace.
   gyroscope; magnetometer; keyboard-map`. A frame from the same origin has most of them by
   default; a frame from another origin needs all of them and its responses need
   `Cross-Origin-Resource-Policy: cross-origin` (or `same-site`).
-- Content Security Policy (`/app/csp.html`, verified by `examples/test.mjs`):
+- Content Security Policy (`/app/csp.html`, verified by `tests/examples/existing-site-test.mjs`):
   `default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-<import map>';
   worker-src 'self'; connect-src 'self'; media-src 'self' blob:; style-src 'self';
   base-uri 'none'; form-action 'self'; frame-ancestors 'self'`.

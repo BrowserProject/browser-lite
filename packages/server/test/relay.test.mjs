@@ -1,6 +1,7 @@
-// Relay at the protocol level with a raw Wisp client: upgrade checks (authorize, origins, limits
-// per client address), framing errors, close reasons, SSRF rules, stream limits, keepalive,
-// shutdown and two relays with different policies in one process.
+// Relay at the protocol level with a raw Wisp client: upgrade checks (authorize, origins, host
+// names, subprotocols, limits per client address), framing errors, close reasons, SSRF rules,
+// stream limits, queued client data, keepalive, shutdown and two relays with different policies
+// in one process.
 import assert from 'node:assert/strict';
 import dgram from 'node:dgram';
 import { after, before, describe, test } from 'node:test';
@@ -13,7 +14,7 @@ import {
   tcpServer,
   waitUntil,
 } from './helpers.mjs';
-import { CLOSE, CONTINUE, DATA, open } from './wisp-client.mjs';
+import { CLOSE, CONTINUE, DATA, open, withToken } from './wisp-client.mjs';
 
 const INVALID = 0x41;
 const UNREACHABLE_HOST = 0x42;
@@ -26,8 +27,7 @@ const VOLUNTARY = 0x02;
 const NETWORK_ERROR = 0x03;
 
 /** Ports of local test servers are random: allow them all. */
-const allPorts = Array.from({ length: 65535 }, (_, i) => i + 1);
-const local = { authorize: () => true, policy: { allowPrivateAddresses: true, ports: allPorts } };
+const local = { authorize: () => true, policy: { allowPrivateAddresses: true, ports: 'any' } };
 
 let echo;
 before(async () => {
@@ -45,6 +45,7 @@ describe('options', () => {
   test('invalid policy values are rejected', () => {
     const authorize = () => true;
     assert.throws(() => createRelay({ authorize, policy: { ports: [0] } }), TypeError);
+    assert.throws(() => createRelay({ authorize, policy: { ports: 'all' } }), TypeError);
     assert.throws(() => createRelay({ authorize, policy: { maxPayload: -1 } }), TypeError);
     assert.throws(() => createRelay({ authorize, policy: { streamsPerHost: 1.5 } }), TypeError);
   });
@@ -138,6 +139,50 @@ describe('upgrade', () => {
       assert.equal(await status('/any/', { Origin: 'https://whatever.example' }), 101);
       assert.equal(await status('/fn/', { Origin: 'https://a.good.example' }), 101);
       assert.equal(await status('/fn/', { Origin: 'https://bad.example' }), 403);
+    } finally {
+      await stack.close();
+    }
+  });
+
+  test('hosts: IP addresses, localhost and listed names only', async () => {
+    const stack = await startRelays([
+      { path: '/any/', authorize: () => true },
+      { path: '/listed/', authorize: () => true, hosts: ['browser.example', '.ts.net'] },
+    ]);
+    const status = async (urlPath, host) => {
+      const result = await open(stack.url(urlPath), {
+        headers: { Host: host },
+        origin: `http://${host}`,
+      });
+      if (result.ws) await result.close();
+      return result.ws ? 101 : result.status;
+    };
+    try {
+      assert.equal(await status('/any/', 'rebound.evil.example'), 101, 'default: every host');
+      for (const [host, expected] of [
+        [`127.0.0.1:${stack.port}`, 101],
+        ['localhost', 101],
+        ['[::1]:8080', 101],
+        ['browser.example', 101],
+        ['Box.Tail1234.TS.NET', 101],
+        ['rebound.evil.example', 403],
+        ['ts.net', 403],
+      ])
+        assert.equal(await status('/listed/', host), expected, host);
+    } finally {
+      await stack.close();
+    }
+  });
+
+  test('subprotocols: answers wisp, never the token entry', async () => {
+    const stack = await startRelays([{ authorize: () => true }]);
+    try {
+      const both = await open(stack.url(), { protocols: withToken('some-token') });
+      assert.equal(both.ws.protocol, 'wisp');
+      await both.close();
+      const none = await open(stack.url());
+      assert.equal(none.ws.protocol, '');
+      await none.close();
     } finally {
       await stack.close();
     }
@@ -257,6 +302,49 @@ describe('framing', () => {
   });
 });
 
+describe('queued client data', () => {
+  let stack;
+  let target;
+  before(async () => {
+    stack = await startRelays([{ ...local, policy: { ...local.policy, streamsPerConnection: 2 } }]);
+    target = await tcpServer((socket) => socket.pause());
+  });
+  after(async () => {
+    target.server.close();
+    await stack.close();
+  });
+
+  test('a target that never reads: the stream fails long before 512 large packets', async () => {
+    const client = await open(stack.url());
+    client.connectTCP(1, '127.0.0.1', target.port);
+    await sleep(100);
+    const chunk = Buffer.alloc(64 * 1024);
+    let sent = 0;
+    while (sent < 1024 && !client.packets.some((p) => p.type === CLOSE && p.streamId === 1)) {
+      client.send(DATA, 1, chunk);
+      if (++sent % 16 === 0) await sleep(2);
+    }
+    assert.equal(await client.closeReason(1), NETWORK_ERROR);
+    // 16 MiB (2 * 128 packets) in the relay plus the socket buffers of the kernel
+    assert.ok(sent < 448, `${sent} packets of 64 KiB sent before CLOSE`);
+    await client.close();
+  });
+
+  test('a stream closed by the client counts until its socket is gone', async () => {
+    const client = await open(stack.url());
+    client.connectTCP(1, '127.0.0.1', target.port);
+    await sleep(100);
+    for (let i = 0; i < 100; i++) client.send(DATA, 1, Buffer.alloc(64 * 1024));
+    client.send(CLOSE, 1, Buffer.from([VOLUNTARY]));
+    client.connectTCP(2, '127.0.0.1', echo.port);
+    client.connectTCP(3, '127.0.0.1', echo.port);
+    assert.equal(await client.closeReason(3), THROTTLED, 'draining stream 1 and stream 2');
+    client.send(DATA, 2, Buffer.from('ok'));
+    assert.ok(await waitUntil(() => client.data(2).toString() === 'ok', 2000));
+    await client.close();
+  });
+});
+
 describe('streams', () => {
   let stack;
   let client;
@@ -354,6 +442,8 @@ describe('streams', () => {
     client.connectTCP(68, '127.2', echo.port);
     assert.equal(await client.closeReason(68), THROTTLED, 'streams per connection');
     client.send(CLOSE, 60, Buffer.from([VOLUNTARY]));
+    // The place is free once the echo server has closed its side too
+    await sleep(200);
     client.connectTCP(69, '127.0.0.1', echo.port);
     client.send(DATA, 69, Buffer.from('y'));
     assert.ok(await client.waitFor((p) => p.type === DATA && p.streamId === 69), 'place freed');

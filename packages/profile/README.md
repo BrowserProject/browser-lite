@@ -1,7 +1,7 @@
 # @browser-lite/profile
 
 Browser client of the server-side profile: cookies, localStorage and small IndexedDBs of the
-pages, plus prefs of the app (settings, bookmarks, permissions), so users stay signed in to
+pages, plus prefs of the app (JSON values by name), so users stay signed in to
 websites, also on another device. The server side is `createProfileStore` of
 `@browser-lite/server`.
 
@@ -48,16 +48,16 @@ larger ones stay on the device. When another device opens the profile, the statu
 
 | Member | Purpose |
 | --- | --- |
-| `createProfile({ url, dbLimitKB?, fetch? })` | `url`: base URL of the profile endpoint. `dbLimitKB`: number or function read at every sync. |
+| `createProfile({ url, dbLimitKB?, fetch?, sitePrefs? })` | `url`: base URL of the profile endpoint. `dbLimitKB`: number or function read at every sync. `sitePrefs`: prefs that `reset(false)` clears with the site data, default `['permissions']`. |
 | `status`, `statusText`, `problem` | `off` (not started, memory only, other tab), `local` (server not reachable), `connected`, `taken`, `reset`; English text; problem of the last sync. |
 | `on('status', listener)` | Status, text or problem changed. Returns an unsubscribe function. |
 | `beforeStart(dir)` | Pass as `BrowserOptions.storage.beforeStart`. Never throws; failures give `local`. |
 | `attach(browser)` | Starts the periodic sync; stops when the browser is destroyed. |
-| `prefs(name)`, `savePrefs(name, value)` | Prefs `settings`, `bookmarks`, `permissions` (the names the server accepts). Saved locally at once, on the server when connected, otherwise at the next start (then the local value wins). |
+| `prefs(name)`, `savePrefs(name, value)` | Prefs by name (`^[a-z][a-z0-9-]{0,31}$`; the server keeps at most 32, each at most 1 MB, 4 MB together). Saved locally at once, on the server when connected, otherwise at the next start (then the local value wins). A pref the server refuses stays local and sets `problem`. |
 | `prefsSaved(timeoutMs = 5000)` | Resolves when the prefs reached the server or after the timeout. |
 | `info()` | Server information (size, files, cookies per domain), null without connection. |
 | `localStats()` | What only this device holds: databases above the limit, cache storage, service workers, page files, HTTP cache. |
-| `reset(all)` | Deletes site data (`all = false`: cookies, site storage, permissions) or the whole profile on the server and here. The directory is cleared at the next start: destroy the browser and start again, or reload. |
+| `reset(all)` | Deletes site data (`all = false`: cookies, site storage, the `sitePrefs`) or the whole profile on the server and here. The directory is cleared at the next start: destroy the browser and start again, or reload. |
 | `siteOfPath(path)` | Site (`https://example.com`) of a profile file path. |
 
 Local state (prefs cache, upload record, pending clear) lives in `localStorage` under keys

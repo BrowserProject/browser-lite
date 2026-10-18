@@ -26,9 +26,15 @@ export function connectPayload(host, port, type = 0x01) {
   return payload;
 }
 
+/** Subprotocols that carry a token, as WispTransport sends them. */
+export const withToken = (token) => [
+  'wisp',
+  `bl-token.${Buffer.from(token).toString('base64url')}`,
+];
+
 /** Upgrade result: { status } for a refused upgrade, or a connected RawWisp. */
-export async function open(url, options = {}) {
-  const ws = new WebSocket(url, options);
+export async function open(url, { protocols = [], ...options } = {}) {
+  const ws = new WebSocket(url, protocols, options);
   const result = await new Promise((resolve) => {
     ws.once('unexpected-response', (_req, res) => {
       resolve({ status: res.statusCode });

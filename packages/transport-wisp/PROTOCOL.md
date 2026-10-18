@@ -7,12 +7,14 @@ clients and the client works with other Wisp v1 servers (without the extras).
 
 ## Transport
 
-One WebSocket per client, binary messages only. Each message is exactly one packet. The client
-passes its token as `?token=<token>` in the URL. A refused upgrade is an HTTP status: 403 (token
-or origin), 429 (too many connections from one client address), 503 (relay shutting down). A
-page cannot read that status, so a server should refuse a missing, wrong or expired token by
-completing the upgrade and closing at once with WebSocket close code 4401 (4403 for a forbidden
-origin); the client then reports `unauthorized` (extra).
+One WebSocket per client, binary messages only. Each message is exactly one packet. A client with
+a token offers the subprotocols `wisp` and `bl-token.<token as base64url without padding>`
+(extra: never in the URL, which ends up in proxy logs); the server answers with `wisp` and never
+echoes the token. Non-browser clients may send `Authorization: Bearer <token>` instead. A refused
+upgrade is an HTTP status: 403 (token, origin or host name), 429 (too many connections from one
+client address), 503 (relay shutting down). A page cannot read that status: a server may
+instead complete the upgrade and close at once with WebSocket close code 4401 (token) or 4403
+(origin), which the client reports as `unauthorized` (extra).
 
 ## Packets
 
@@ -95,11 +97,15 @@ ends before `onopen` was never sent to a relay (no connection).
   itself and connects only to the addresses it checked, IPv6 and IPv4 interleaved, so DNS
   rebinding cannot slip a private address in between.
 - At most 256 streams per WebSocket, 64 of them to the same target (host name lower case without
-  trailing dot, and port). Beyond that: 0x49.
+  trailing dot, and port). Beyond that: 0x49. A stream the client closed counts until the server
+  has written what the client sent and closed the socket (at most 10 s).
+- Client data the target has not taken yet: at most 512 packets and 2 * 128 packets of the size
+  limit per stream, at least 32 MiB per WebSocket (closed streams included). Beyond that the
+  stream is closed with 0x03.
 - A stream closed by the client while its name is still being resolved is never connected.
 - Protocol errors close the WebSocket: text messages (1003), packets shorter than 5 bytes or a
   CONNECT on stream 0 or on an open stream id (1002), messages above the size limit (1009,
-  default 1 MiB). DATA and CLOSE for unknown streams, CONTINUE from the client and unknown packet
+  default 64 KiB plus the 5 byte header, the largest packet of `WispTransport`). DATA and CLOSE for unknown streams, CONTINUE from the client and unknown packet
   types are ignored.
 - The server pings the WebSocket every 30 s and drops a client that missed a pong.
 - Stream contents are never logged.

@@ -7,8 +7,8 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     environment:
-      # Names the profile answers under (default: tailscale serve)
-      PROFILE_HOSTS: ${PROFILE_HOSTS:-.ts.net}
+      # Names relay and profile answer under (default: tailscale serve)
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-.ts.net}
     read_only: true
     volumes:
       - profile:/data

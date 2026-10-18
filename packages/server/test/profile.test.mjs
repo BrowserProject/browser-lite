@@ -1,7 +1,8 @@
 // Profile store through the CLI: open (format, gzip), writing and deleting files and prefs, path
 // rules, limits, token, Host (DNS rebinding), Content-Type of open, foreign files in files/,
 // takeover by another device (409 taken), reset (409 reset, new id), server restart, directory
-// not writable (503), cookies in /profile/info (WAL without -shm/-wal, a view as Cookie).
+// not writable (503), cookies in /profile/info (WAL without -shm/-wal, a view as Cookie). Options
+// of createProfileStore: authorize required, own path.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -9,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import zlib from 'node:zlib';
+import { createProfileStore } from '../dist/index.js';
 import { request as httpRequest, startCli, stopCli } from './helpers.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
@@ -19,7 +21,7 @@ const env = {
   RELAY_TOKEN: TOKEN,
   PROFILE_DIR: dir,
   PROFILE_MAX_MB: '1',
-  PROFILE_HOSTS: ' .ts.net, Profil.LAN ',
+  ALLOWED_HOSTS: ' .ts.net, Profil.LAN ',
 };
 let server = await startCli(env);
 after(async () => {
@@ -186,7 +188,7 @@ test('open and write', async () => {
   assert.equal(first.status, 200);
   assert.equal(first.header.files.length, 0);
   assert.equal(first.rest, 0);
-  assert.deepEqual(prefs, { settings: null, bookmarks: null, permissions: null });
+  assert.deepEqual(prefs, {});
   assert.ok(first.header.id);
   assert.equal(first.headers['content-type'], 'application/octet-stream');
   sessionA = first.header.session;
@@ -209,7 +211,9 @@ test('open and write', async () => {
   }
   const prefsPut = (name, body) =>
     request(`/profile/prefs/${name}`, { method: 'PUT', headers: as(sessionA), body });
-  assert.equal((await prefsPut('history', '{}')).status, 400);
+  assert.equal((await prefsPut('history', '{}')).status, 204, 'any well-formed name');
+  for (const bad of ['History', '1st', 'a.b', 'a_b', 'x'.repeat(33), 'a%2Fb'])
+    assert.equal((await prefsPut(bad, '{}')).status, 400, bad);
   assert.equal((await prefsPut('settings', '{x')).status, 400);
   assert.equal((await prefsPut('settings', json('x'.repeat(MB)))).status, 413);
 
@@ -354,11 +358,11 @@ test('restart', async () => {
 });
 
 test('reset', async () => {
-  const res = await request('/profile/reset', {
-    method: 'POST',
-    headers: as(sessionB),
-    body: json({ all: false }),
-  });
+  const reset = (session, body) =>
+    request('/profile/reset', { method: 'POST', headers: as(session), body: json(body) });
+  for (const prefs of ['permissions', ['../x'], [1]])
+    assert.equal((await reset(sessionB, { all: false, prefs })).status, 400, String(prefs));
+  const res = await reset(sessionB, { all: false, prefs: ['permissions', 'missing'] });
   assert.equal(res.status, 204);
   const state = await info();
   assert.notEqual(state.id, first.header.id);
@@ -371,7 +375,8 @@ test('reset', async () => {
   const c = await open('Chrome on Linux');
   assert.equal(c.header.prefs.settings?.name, 'settings');
   assert.equal(c.header.prefs.bookmarks?.name, 'bookmarks');
-  assert.equal(c.header.prefs.permissions, null);
+  assert.equal(c.header.prefs.permissions, undefined);
+  assert.deepEqual(c.header.prefs.history, {});
   assert.equal(c.header.id, state.id);
   const taken = await put(sessionB, 'cookies.db', 'y');
   assert.equal(taken.status, 409);
@@ -390,9 +395,21 @@ test('reset', async () => {
   assert.equal(all.status, 204);
   const d = await open('Chrome on Linux');
   assert.equal(d.header.files.length, 0);
-  assert.ok(Object.values(d.header.prefs).every((value) => value === null));
+  assert.deepEqual(d.header.prefs, {});
+  // Prefs have their own limits: 32 names, 4 MB together
+  const prefsPut = (name, body) =>
+    request(`/profile/prefs/${name}`, { method: 'PUT', headers: as(d.header.session), body });
+  for (let i = 0; i < 32; i++) assert.equal((await prefsPut(`p${i}`, '1')).status, 204);
+  assert.equal((await prefsPut('p32', '1')).status, 507, 'too many prefs');
+  const big = json('x'.repeat(MB - 100));
+  for (let i = 0; i < 4; i++) assert.equal((await prefsPut(`p${i}`, big)).status, 204);
+  assert.equal((await prefsPut('p4', big)).status, 507, 'prefs too large together');
+  assert.equal((await prefsPut('p0', '2')).status, 204, 'replacing frees its size');
+  assert.equal((await reset(d.header.session, { all: true })).status, 204);
+  assert.deepEqual((await open('Chrome on Linux')).header.prefs, {});
+  const e = await open('Chrome on Linux');
   if (evilCookies) {
-    assert.equal((await put(d.header.session, 'cookies.db', evilCookies)).status, 204);
+    assert.equal((await put(e.header.session, 'cookies.db', evilCookies)).status, 204);
     const start = Date.now();
     const evil = await request('/profile/info', { headers: auth });
     assert.equal(evil.status, 200);
@@ -418,5 +435,28 @@ test('not writable, and without profile', async () => {
     assert.equal((await httpRequest(plain.port, '/profile/info')).status, 404);
   } finally {
     await stopCli(plain);
+  }
+});
+
+test('createProfileStore: authorize required, own path', async () => {
+  const own = path.join(temp, 'own');
+  assert.throws(() => createProfileStore({ dir: own }), TypeError);
+  assert.throws(() => createProfileStore({ dir: own, authorize: true }), TypeError);
+  assert.throws(
+    () => createProfileStore({ dir: own, authorize: () => true, path: 'p/' }),
+    TypeError,
+  );
+  const store = createProfileStore({ dir: own, path: '/user/profile/', authorize: () => true });
+  const server = http.createServer(async (req, res) => {
+    if (!(await store.handle(req, res))) res.writeHead(404).end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    assert.equal((await httpRequest(port, '/user/profile/info')).status, 200);
+    assert.equal((await httpRequest(port, '/profile/info')).status, 404);
+  } finally {
+    server.close();
+    await store.close();
   }
 });

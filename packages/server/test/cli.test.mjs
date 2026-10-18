@@ -9,7 +9,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { signToken } from '../dist/token.js';
 import { rawRequest, request, sleep, startCli, stopCli, tcpServer } from './helpers.mjs';
-import { DATA, open } from './wisp-client.mjs';
+import { DATA, open, withToken } from './wisp-client.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const SECRET = 'test-secret-0123456789abcdef0123456789';
@@ -43,12 +43,18 @@ describe('tokens', () => {
     const cli = await startCli({ RELAY_TOKEN: TOKEN });
     try {
       const url = `ws://127.0.0.1:${cli.port}/wisp/`;
-      assert.equal((await open(`${url}?token=wrong`)).status, 403);
+      assert.equal((await open(url, { protocols: withToken('wrong') })).status, 403);
       assert.equal((await open(url)).status, 403);
-      const client = await open(`${url}?token=${TOKEN}`);
+      assert.equal((await open(`${url}?token=${TOKEN}`)).status, 403, 'never in the URL');
+      const client = await open(url, { protocols: withToken(TOKEN) });
       assert.ok(client.ws);
+      assert.equal(client.ws.protocol, 'wisp', 'the token is never echoed');
       await client.close();
-      assert.equal((await open(`ws://127.0.0.1:${cli.port}/other/?token=${TOKEN}`)).status, 404);
+      const bearer = await open(url, { headers: { authorization: `Bearer ${TOKEN}` } });
+      assert.ok(bearer.ws, 'Authorization header for non-browser clients');
+      await bearer.close();
+      const other = `ws://127.0.0.1:${cli.port}/other/`;
+      assert.equal((await open(other, { protocols: withToken(TOKEN) })).status, 404);
     } finally {
       assert.equal((await stopCli(cli)).code, 0);
     }
@@ -70,19 +76,52 @@ describe('tokens', () => {
     }
   });
 
-  test('signed tokens with RELAY_SECRET', async () => {
-    const cli = await startCli({ RELAY_SECRET: SECRET });
+  test('signed tokens with RELAY_SECRET open only their audience', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-lite-profile-'));
+    const cli = await startCli({ RELAY_SECRET: SECRET, PROFILE_DIR: dir });
     try {
       const url = `ws://127.0.0.1:${cli.port}/wisp/`;
-      const token = signToken({ secret: SECRET, ttlSeconds: 60 });
-      const client = await open(`${url}?token=${token}`);
+      const sign = (audience, secret = SECRET) => signToken({ secret, ttlSeconds: 60, audience });
+      const client = await open(url, { protocols: withToken(sign('relay')) });
       assert.ok(client.ws);
       await client.close();
-      const foreign = signToken({ secret: `${SECRET}x`, ttlSeconds: 60 });
-      assert.equal((await open(`${url}?token=${foreign}`)).status, 403);
+      assert.equal((await open(url, { protocols: withToken(sign('profile')) })).status, 403);
+      const foreign = sign('relay', `${SECRET}x`);
+      assert.equal((await open(url, { protocols: withToken(foreign) })).status, 403);
       assert.equal((await open(url)).status, 403);
+      const info = (token) =>
+        request(cli.port, '/profile/info', { headers: { authorization: `Bearer ${token}` } });
+      assert.equal((await info(sign('profile'))).status, 200);
+      assert.equal(
+        (await info(sign('relay'))).status,
+        403,
+        'a relay token never opens the profile',
+      );
     } finally {
       await stopCli(cli);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('ALLOWED_HOSTS: relay and profile only under IP addresses, localhost and listed names', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-lite-profile-'));
+    const cli = await startCli({ PROFILE_DIR: dir, ALLOWED_HOSTS: 'browser.example' });
+    try {
+      const url = `ws://127.0.0.1:${cli.port}/wisp/`;
+      const status = async (host) => {
+        const result = await open(url, { headers: { host }, origin: `http://${host}` });
+        if (result.ws) await result.close();
+        return result.ws ? 101 : result.status;
+      };
+      assert.equal(await status(`127.0.0.1:${cli.port}`), 101);
+      assert.equal(await status('browser.example'), 101);
+      assert.equal(await status('rebound.evil.example'), 403, 'DNS rebinding');
+      const info = (host) => request(cli.port, '/profile/info', { headers: { host } });
+      assert.equal((await info('browser.example')).status, 200);
+      assert.equal((await info('rebound.evil.example')).status, 403);
+    } finally {
+      await stopCli(cli);
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import http from 'node:http';
 import net from 'node:net';
 import { after, before, describe, test } from 'node:test';
+import { authorizeToken } from '@browser-lite/server/token';
 import { WispTransport } from '../dist/index.js';
 import {
   closedPort,
@@ -155,6 +156,24 @@ describe('with token', () => {
       assert.deepEqual(states, [false]);
       bad.close();
     }
+  });
+
+  test('token as subprotocol, never in the URL, any characters', async () => {
+    const special = 'static/token+with=chars ä';
+    const seen = [];
+    const own = await startRelay({
+      authorize: (req) => {
+        seen.push({ url: req.url, protocol: req.headers['sec-websocket-protocol'] });
+        return authorizeToken({ token: special })(req);
+      },
+    });
+    const client = new WispTransport({ url: own.url, token: special });
+    const result = await echoOver(client, echo.port, 1000);
+    assert.equal(result.received, 1000);
+    assert.equal(seen[0].url, '/wisp/');
+    assert.match(seen[0].protocol, /^wisp, bl-token\.[\w-]+$/);
+    client.close();
+    await own.stop();
   });
 
   test('token getter, also async, called per connect', async () => {

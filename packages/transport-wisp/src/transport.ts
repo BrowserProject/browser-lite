@@ -18,8 +18,9 @@ export interface WispTransportOptions {
    */
   url: string | URL;
   /**
-   * Token for the relay, appended as `?token=` on every (re)connect. A function is called for
-   * each connect, so it can fetch a fresh signed token.
+   * Token for the relay, sent on every (re)connect as the WebSocket subprotocol
+   * `bl-token.<base64url of the token>` next to `wisp` (never in the URL, which ends up in proxy
+   * logs). A function is called for each connect, so it can fetch a fresh signed token.
    */
   token?: string | (() => string | Promise<string>);
 }
@@ -39,6 +40,8 @@ export class WispErrorEvent extends Event {
 }
 
 const OPEN = 1;
+const SUBPROTOCOL = 'wisp';
+const TOKEN_SUBPROTOCOL = 'bl-token.';
 const HANDSHAKE_TIMEOUT_MS = 15000;
 const RECONNECT_DELAY_MS = 2000;
 const MAX_RECONNECT_DELAY_MS = 60000;
@@ -142,13 +145,15 @@ export class WispTransport extends EventTarget implements Transport {
     this.setConnected(false);
   }
 
-  private async socketURL(): Promise<string> {
-    const url = new URL(this.url);
-    if (this.token !== undefined) {
-      const token = typeof this.token === 'function' ? await this.token() : this.token;
-      url.searchParams.set('token', token);
-    }
-    return url.href;
+  // Subprotocol values allow only a few characters, hence base64url. Without a token none: a
+  // server that answers without one fails the handshake in browsers otherwise
+  private async protocols(): Promise<string[]> {
+    if (this.token === undefined) return [];
+    const token = typeof this.token === 'function' ? await this.token() : this.token;
+    let binary = '';
+    for (const byte of new TextEncoder().encode(token)) binary += String.fromCharCode(byte);
+    const encoded = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return [SUBPROTOCOL, TOKEN_SUBPROTOCOL + encoded];
   }
 
   private closeStreams(): void {
@@ -161,8 +166,8 @@ export class WispTransport extends EventTarget implements Transport {
   // (for example after a restart of the relay or a proxy closing it when idle).
   private connect(): Promise<void> {
     if (this.ready) return this.ready;
-    const ready = this.socketURL().then(
-      (url) => this.openSocket(url),
+    const ready = this.protocols().then(
+      (protocols) => this.openSocket(protocols),
       (error: unknown) => {
         this.ready = null;
         this.setConnected(false);
@@ -173,14 +178,14 @@ export class WispTransport extends EventTarget implements Transport {
     return ready;
   }
 
-  private openSocket(url: string): Promise<void> {
+  private openSocket(protocols: string[]): Promise<void> {
     if (this.isClosed) {
       this.ready = null;
       return Promise.reject(new Error('transport closed'));
     }
     let ws: WebSocket;
     try {
-      ws = new this.WebSocketClass(url);
+      ws = new this.WebSocketClass(this.url.href, protocols);
     } catch (error) {
       this.ready = null;
       this.setConnected(false);

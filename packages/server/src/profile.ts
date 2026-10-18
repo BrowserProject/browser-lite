@@ -1,17 +1,18 @@
 // The browser profile on the server: cookies, localStorage, small IndexedDBs and the prefs of the
-// UI, so a user stays signed in to websites, also on another device. Protocol: README.md.
+// page (JSON values by name), so a user stays signed in to websites, also on another device.
+// Protocol: README.md.
 //
 // Under dir: profile.json (id, active session), files/<path> (paths as in /data of the engine),
 // prefs/<name>.json and tmp/ for atomic writes (write file, fsync, rename).
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import net from 'node:net';
 import path from 'node:path';
 import { pipeline, Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import zlib from 'node:zlib';
 import { securityHeaders } from './headers.js';
+import { hostCheck } from './hosts.js';
 
 /** Options of {@link createProfileStore}. */
 export interface ProfileStoreOptions {
@@ -19,20 +20,26 @@ export interface ProfileStoreOptions {
   dir: string;
   /** Limit of all profile files together. Default 64 MiB. */
   maxBytes?: number;
+  /** URL path prefix of the endpoint, ending with `/`. Default `'/profile/'`. */
+  path?: string;
   /**
    * Host names the store answers under besides IP addresses and `localhost` (DNS rebinding
    * protection). An entry starting with `.` matches every name ending with it.
    */
   hosts?: string[];
-  /** Decides whether a request may use the profile, e.g. `authorizeToken`. Default: all. */
-  authorize?(req: IncomingMessage, url: URL): boolean | Promise<boolean>;
+  /**
+   * Decides whether a request may use the profile (required), for example `authorizeToken` of
+   * `@browser-lite/server/token` with audience `'profile'`. The profile holds the user's
+   * sign-ins: pass `() => true` only for a store reachable by its user alone.
+   */
+  authorize(req: IncomingMessage, url: URL): boolean | Promise<boolean>;
   /** Where warnings and unexpected errors go. Default `console`. */
   logger?: Pick<Console, 'warn' | 'error'>;
 }
 
-/** The server side of `@browser-lite/profile`, answering under `/profile/`. */
+/** The server side of `@browser-lite/profile`, answering under its `path`. */
 export interface ProfileStore {
-  /** Answers requests under `/profile/` and resolves true when done; false for other paths. */
+  /** Answers requests under `path` and resolves true when done; false for other paths. */
   handle(req: IncomingMessage, res: ServerResponse): Promise<boolean>;
   /** Waits for pending writes. */
   close(): Promise<void>;
@@ -57,7 +64,10 @@ interface FileEntry {
 const MB = 1024 * 1024;
 const FILE_LIMIT = 32 * MB;
 const JSON_LIMIT = MB;
-const PREFS = ['settings', 'bookmarks', 'permissions'];
+/** Names of prefs: the file prefs/<name>.json. */
+const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
+const PREF_COUNT = 32;
+const PREFS_LIMIT = 4 * MB;
 // Errors that are not server errors (file system, aborted upload)
 const ERROR_STATUS: Record<string, number> = {
   ENOTDIR: 400,
@@ -96,19 +106,6 @@ function validPath(rel: string): boolean {
     return parts.length === 2 && (parts[1] as string).endsWith('.localstorage');
   return (
     parts[0] === 'indexeddb' && parts[1] === 'v1' && (parts.length === 5 || parts.length === 6)
-  );
-}
-
-// Against DNS rebinding: only IP addresses, localhost and the configured names
-function hostAllowed(header: string | undefined, hosts: string[]): boolean {
-  const host = (header ?? '').toLowerCase();
-  const ipv6 = /^\[(.*)\](?::\d*)?$/.exec(host);
-  if (ipv6) return net.isIPv6(ipv6[1] as string);
-  const name = host.replace(/:\d*$/, '');
-  return (
-    net.isIPv4(name) ||
-    name === 'localhost' ||
-    hosts.some((entry) => (entry.startsWith('.') ? name.endsWith(entry) : name === entry))
   );
 }
 
@@ -181,15 +178,19 @@ const field = (value: unknown, key: string) =>
   value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
 
 /**
- * Creates the store of exactly one browser profile in `dir` (port of the former relay profile,
- * same HTTP protocol). Every file is written atomically.
+ * Creates the store of exactly one browser profile in `dir`, the server side of
+ * `@browser-lite/profile`. Every file is written atomically.
  */
 export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
-  const { dir } = o;
+  if (typeof o?.authorize !== 'function')
+    throw new TypeError('createProfileStore: options.authorize is required');
+  const { dir, authorize } = o;
+  const base = o.path ?? '/profile/';
+  if (!base.startsWith('/') || !base.endsWith('/'))
+    throw new TypeError('createProfileStore: path must start and end with /');
   const maxBytes = o.maxBytes ?? 64 * MB;
   const logger = o.logger ?? console;
-  const authorize = o.authorize ?? (() => true);
-  const allowedHosts = (o.hosts ?? []).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+  const hostAllowed = hostCheck(o.hosts ?? []);
   const filesDir = path.join(dir, 'files');
   const prefsDir = path.join(dir, 'prefs');
   const tmpDir = path.join(dir, 'tmp');
@@ -266,7 +267,7 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
   const ready = init().then(
     () => true,
     (error: Error) => {
-      logger.warn(`profile in ${dir} not writable, /profile/ answers 503: ${error.message}`);
+      logger.warn(`profile in ${dir} not writable, ${base} answers 503: ${error.message}`);
       return false;
     },
   );
@@ -290,7 +291,7 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
         contents.push(data);
       }
       const prefs: Record<string, unknown> = {};
-      for (const name of PREFS) prefs[name] = await readJSON(prefFile(name));
+      for (const name of await prefNames()) prefs[name] = await readJSON(prefFile(name));
       return {
         header: {
           id: profile.id,
@@ -372,27 +373,47 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
     send(res, 204);
   }
 
+  async function prefNames(): Promise<string[]> {
+    return (await fs.readdir(prefsDir))
+      .filter((file) => file.endsWith('.json') && PREF_NAME.test(file.slice(0, -5)))
+      .map((file) => file.slice(0, -5))
+      .sort();
+  }
+
+  // Prefs share their own limits (count and total size), apart from maxBytes of the files
   async function putPrefs(req: IncomingMessage, res: ServerResponse, name: string): Promise<void> {
     checkSession(req);
-    const value = await receiveJSON(req);
+    const data = JSON.stringify(await receiveJSON(req));
     await serial(async () => {
       checkSession(req);
-      await writeAtomic(prefFile(name), JSON.stringify(value));
+      const names = await prefNames();
+      if (!names.includes(name) && names.length >= PREF_COUNT) throw new HttpError(507);
+      let total = Buffer.byteLength(data);
+      for (const other of names) if (other !== name) total += await fileSize(prefFile(other));
+      if (total > PREFS_LIMIT) throw new HttpError(507);
+      await writeAtomic(prefFile(name), data);
       await changed();
     });
     send(res, 204);
   }
 
-  // New id, the session of the caller stays active
+  // New id, the session of the caller stays active. all: every pref, else the listed ones
   async function reset(req: IncomingMessage, res: ServerResponse): Promise<void> {
     checkSession(req);
-    const all = field(await receiveJSON(req), 'all') === true;
+    const body = await receiveJSON(req);
+    const all = field(body, 'all') === true;
+    const listed = field(body, 'prefs') ?? [];
+    if (
+      !Array.isArray(listed) ||
+      !listed.every((name) => typeof name === 'string' && PREF_NAME.test(name))
+    )
+      throw new HttpError(400);
     await serial(async () => {
       checkSession(req);
       const old = tmpFile();
       await fs.rename(filesDir, old);
       await fs.mkdir(filesDir);
-      for (const name of all ? PREFS : ['permissions'])
+      for (const name of all ? await prefNames() : (listed as string[]))
         await fs.rm(prefFile(name), { force: true });
       bytes = 0;
       Object.assign(profile, fresh(), { resetBy: profile.session ?? undefined });
@@ -453,8 +474,7 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
     url: URL,
     route: string,
   ): Promise<void> {
-    if (!hostAllowed(req.headers.host, allowedHosts) || !(await authorize(req, url)))
-      throw new HttpError(403);
+    if (!hostAllowed(req.headers.host) || !(await authorize(req, url))) throw new HttpError(403);
     if (!(await ready)) throw new HttpError(503);
     const method = req.method;
     if (route === 'open' && method === 'POST') return open(req, res);
@@ -467,7 +487,7 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
     }
     if (route.startsWith('prefs/') && method === 'PUT') {
       const name = route.slice('prefs/'.length);
-      if (!PREFS.includes(name)) throw new HttpError(400);
+      if (!PREF_NAME.test(name)) throw new HttpError(400);
       return putPrefs(req, res, name);
     }
     throw new HttpError(404);
@@ -483,9 +503,9 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
       } catch {
         return false;
       }
-      if (!route.startsWith('/profile/')) return false;
+      if (!route.startsWith(base)) return false;
       try {
-        await respond(req, res, url, route.slice('/profile/'.length));
+        await respond(req, res, url, route.slice(base.length));
       } catch (caught) {
         let error = caught;
         if (!(error instanceof HttpError)) {

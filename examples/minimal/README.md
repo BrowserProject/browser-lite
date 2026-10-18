@@ -26,6 +26,7 @@ dev and preview proxy for `/wisp/` to another relay (default `http://127.0.0.1:5
 | `src/main.ts` | `createBrowser`, one view, address form, context menu and link status |
 | `vite.config.ts` | COOP/COEP/CORP for dev and preview, `/wisp/` proxy, plugin that serves and emits `sw.js` and `media-sw.js` of the core (resolved through its package exports) at the root |
 | `scripts/copy-engine.mjs` | copies `ENGINE_DIR` into `public/engine/` (Vite serves it and copies it into the build) |
+| `scripts/relay.mjs` | `npm run relay`: starts `browser-lite-server` through the package (no `node_modules/.bin` link needed) |
 | `src/style.css` | layout and a few styles for the unstyled ui elements |
 
 ## Hosting the build

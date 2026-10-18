@@ -6,8 +6,6 @@ import { serveStatic } from '../static.js';
 import { authorizeToken } from '../token.js';
 import type { CliConfig } from './config.js';
 
-const ALL_PORTS = Array.from({ length: 65535 }, (_, i) => i + 1);
-
 /** The HTTP server of the command: relay, profile, site and /healthz. */
 export interface App {
   server: http.Server;
@@ -42,24 +40,25 @@ function refuse(socket: Duplex, status: string): void {
 
 /** Builds the server from the configuration; the caller listens and handles signals. */
 export function createApp(config: CliConfig, logger: Pick<Console, 'warn' | 'error'>): App {
-  const authorize =
+  // Signed tokens open only what their audience names; the static token opens both
+  const authorizeFor = (audience: 'relay' | 'profile') =>
     config.token || config.secret
-      ? authorizeToken({ token: config.token, secret: config.secret })
+      ? authorizeToken({ token: config.token, secret: config.secret, audience })
       : () => true;
   const relay = createRelay({
-    authorize,
+    authorize: authorizeFor('relay'),
     allowedOrigins: config.allowedOrigins,
+    hosts: config.hosts,
     clientAddress: clientAddressFor(config.trustProxy),
-    policy: config.allowLocal ? { allowPrivateAddresses: true, ports: ALL_PORTS } : {},
+    policy: config.allowLocal ? { allowPrivateAddresses: true, ports: 'any' } : {},
     logger,
   });
   const profile = config.profileDir
     ? createProfileStore({
         dir: config.profileDir,
         maxBytes: config.profileMaxBytes,
-        hosts: config.profileHosts,
-        // Only the Authorization header: tokens in profile URLs would end up in proxy logs
-        authorize: (req) => authorize(req, new URL('http://localhost/')),
+        hosts: config.hosts,
+        authorize: authorizeFor('profile'),
         logger,
       })
     : null;

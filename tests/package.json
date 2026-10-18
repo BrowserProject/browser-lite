@@ -10,6 +10,7 @@
     "test:engine": "node run.mjs engine",
     "test:core": "node run.mjs core",
     "test:demo": "node run.mjs demo",
+    "test:examples": "node run.mjs examples",
     "test:compat": "node run.mjs compat"
   },
   "dependencies": {
