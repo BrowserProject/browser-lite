@@ -6,7 +6,6 @@
   "license": "BSD-2-Clause",
   "workspaces": [
     "packages/*",
-    "relay",
     "tests/e2e"
   ],
   "scripts": {

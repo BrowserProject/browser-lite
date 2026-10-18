@@ -95,6 +95,7 @@ node tests/engine/check-basic.mjs build/basic.ppm
 ## Oberflaeche lokal starten
 
 ```bash
+npm ci && npm run build                 # packages, serve.mjs uses @browser-lite/server
 node web/serve.mjs 8080                 # liefert web/ und /engine/ aus build/webcore/bin
 ```
 
@@ -102,7 +103,8 @@ Dann `http://localhost:8080/?url=https://example.com` oeffnen. Fuer echte Seiten
 das Relay, lokal z.B.:
 
 ```bash
-cd relay && npm ci && node server.mjs
+npm ci && npm run build
+RELAY_ALLOWED_ORIGINS=http://localhost:8080 node packages/server/dist/bin/browser-lite-server.js
 # und die Seite mit ?relay=ws://localhost:5001/wisp/ oeffnen
 ```
 
@@ -114,7 +116,8 @@ Wie im Container (fertige Seite und Relay auf einem Port):
 
 ```bash
 tools/package-site.sh build/webcore/bin build/site
-PORT=8080 SITE_DIR=build/site node relay/server.mjs
+npm ci && npm run build
+PORT=8080 SITE_DIR=build/site node packages/server/dist/bin/browser-lite-server.js
 # http://localhost:8080/
 ```
 
@@ -129,8 +132,7 @@ Siehe [deploy/README.md](../deploy/README.md).
 | Job | Was |
 |---|---|
 | lint | shellcheck fuer alle `*.sh` im Repo, `tools/check-style.sh` (Umlaute und Gedankenstriche, in Patches nur die hinzugefuegten Zeilen, `set -euo pipefail`, `versions.env` mit Digests, Actions per Commit, Runner im LAN nur fuer `deploy`) |
-| relay | Relay + Wisp-Client zusammen (`tests/relay/relay-test.mjs`) |
-| wasm-js | JS-Teile der Engine in node: `tests/wasm/rewrite-test.mjs`, `api-test.mjs`, `tests/engine/recorder-test.mjs`, `http-cache-test.mjs` |
+| js | `npm run build`, package tests (`npm test -w @browser-lite/server`, `-w @browser-lite/transport-wisp`), JS parts of the engine in node: `tests/wasm/rewrite-test.mjs`, `api-test.mjs`, `tests/engine/recorder-test.mjs`, `http-cache-test.mjs` |
 | toolchain | Toolchain-Image bauen + nach ghcr.io pushen (nur wenn noch nicht vorhanden) |
 | toolchain-check | `tools/check-toolchain.sh` im Image |
 | webkit-source | WebKit holen + Patches pruefen |

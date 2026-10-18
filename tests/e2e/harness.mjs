@@ -69,7 +69,7 @@ export function finish() {
 
 // Node-Skript als Kindprozess, fertig wenn stdout `ready` zeigt. Scheitert, wenn
 // es vorher endet (z.B. Port belegt) oder nach `ms` noch nicht bereit ist.
-export function start(script, args, env, { ready = /laeuft|browser-lite auf/, ms = 30000 } = {}) {
+export function start(script, args, env, { ready = /listening on/, ms = 30000 } = {}) {
   const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
   children.add(child);
   child.on('exit', () => children.delete(child));
@@ -124,8 +124,9 @@ async function startOnFreePort(launch) {
   }
 }
 
-function relayEnv(token, allowLocal, port) {
-  return { RELAY_TOKEN: token, PORT: String(port), HOST: '127.0.0.1', ...(allowLocal ? { RELAY_ALLOW_LOCAL: '1' } : {}) };
+// The pages come from the UI server, another origin than the relay
+function relayEnv(token, allowLocal, port, origin) {
+  return { RELAY_TOKEN: token, PORT: String(port), HOST: '127.0.0.1', RELAY_ALLOWED_ORIGINS: origin, ...(allowLocal ? { RELAY_ALLOW_LOCAL: '1' } : {}) };
 }
 
 async function stop(child) {
@@ -143,9 +144,10 @@ async function stop(child) {
 export async function startStack({ token, allowLocal = true, engine = engineDir } = {}) {
   const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-e2e-server-profile-'));
   tempDirs.add(profileDir);
-  const relayScript = path.join(root, 'relay', 'server.mjs');
-  const relay = await startOnFreePort((port) => start(relayScript, [], relayEnv(token, allowLocal, port)));
+  const relayScript = path.join(root, 'packages', 'server', 'dist', 'bin', 'browser-lite-server.js');
   const ui = await startOnFreePort((port) => start(path.join(root, 'web', 'serve.mjs'), [String(port), engine], { PROFILE_DIR: profileDir }));
+  const origin = `http://localhost:${ui.port}`;
+  const relay = await startOnFreePort((port) => start(relayScript, [], relayEnv(token, allowLocal, port, origin)));
   const stack = {
     token,
     profileDir,
@@ -165,7 +167,7 @@ export async function startStack({ token, allowLocal = true, engine = engineDir 
     // Relay faellt aus und kommt auf demselben Port wieder
     async restartRelay() {
       await stop(stack.relay);
-      stack.relay = await start(relayScript, [], relayEnv(token, allowLocal, stack.relayPort));
+      stack.relay = await start(relayScript, [], relayEnv(token, allowLocal, stack.relayPort, origin));
     },
   };
   return stack;

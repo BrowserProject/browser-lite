@@ -20,7 +20,7 @@ Die Browser-Oberflaeche: schlichtes HTML, CSS und JavaScript (ES-Module), ohne B
 | `util.js` | gemeinsame Helfer (Speicher, Token, Base64, Fehler, Groessen, Neuladen der Oberflaeche ohne beforeunload) |
 | `serve.mjs` | Entwicklungs-Server mit COOP/COEP, mit `PROFILE_DIR` auch das Profil |
 
-Lokal: `node web/serve.mjs 8080`, dann `http://localhost:8080/?relay=ws://localhost:5001/wisp/`
+Lokal: `npm run build && node web/serve.mjs 8080`, dann `http://localhost:8080/?relay=ws://localhost:5001/wisp/`
 ([docs/build.md](../docs/build.md)). Fuer den Server packt `tools/package-site.sh` alles mit
 Versionsnummer zusammen.
 
@@ -28,7 +28,7 @@ Versionsnummer zusammen.
 
 Cookies, localStorage und IndexedDB der Seiten liegen im OPFS des Host (`/data` der Engine).
 Vor dem Start der Engine holt `profile.js` das Profil vom Server (`POST /profile/open`,
-relay/README.md) und legt es ins OPFS, danach laedt es Geaendertes hoch: alle 2 s, nach dem
+packages/server/README.md) und legt es ins OPFS, danach laedt es Geaendertes hoch: alle 2 s, nach dem
 Verstecken, versteckt alle 30 s. Im Profil sind `cookies.db`, die `.localstorage`-Dateien und
 die Ordner der IndexedDBs, ausser `cookies.db` nur bis zur Grenze pro Datenbank (Standard 256 KB,
 in den Einstellungen). Groessere, Cache API, Service Worker und die Dateien der Seiten bleiben

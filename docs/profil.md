@@ -2,8 +2,8 @@
 
 Der Container hostet genau ein Browser-Profil: Cookies, localStorage und kleine IndexedDBs der
 Seiten, dazu Einstellungen, Lesezeichen und Berechtigungen der Oberflaeche. So bleibt man auf
-Websites angemeldet, auch nach dem Wechsel auf ein anderes Geraet. Server: `relay/profile.mjs`
-(API in [relay/README.md](../relay/README.md)), Oberflaeche: `web/profile.js` und
+Websites angemeldet, auch nach dem Wechsel auf ein anderes Geraet. Server: `createProfileStore`
+(API in [packages/server/README.md](../packages/server/README.md)), Oberflaeche: `web/profile.js` und
 `web/settings.js` ([web/README.md](../web/README.md)).
 
 ## Was im Profil ist

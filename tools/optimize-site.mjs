@@ -2,7 +2,7 @@
 //  1. Entfernt die "name"-Section aus den .wasm-Dateien (Funktionsnamen,
 //     nur fuer Stacktraces, ca. 10% der Groesse)
 //  2. Legt .br und .gz neben grosse Dateien, der Server liefert die direkt aus
-//     (relay/static.mjs)
+//     (packages/server/src/static.ts)
 //
 //   node tools/optimize-site.mjs <ordner>
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
