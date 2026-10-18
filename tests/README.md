@@ -36,7 +36,8 @@ and the servers, engine log), `CHROMIUM_PATH`. Chromium tests start several proc
 few GB of memory: run one browser test at a time and switch off core dumps (`ulimit -c 0`), a
 crashed headless Chromium can write a huge one. In a container without Chromium run them on a
 host that has it. `PARITY_UPDATE=1` writes `core/parity-baseline.txt` again, `SITE_*` switches of
-`compat/site-test.mjs` are in its head, `SOAK_ROUNDS`/`SOAK_TABS` shorten the soak test.
+`compat/site-test.mjs` are in its head, `SOAK_ROUNDS`/`SOAK_TABS` shorten the two soak tests
+(`core/` and `demo/`, shared pages and procedure in `fixtures/soak.mjs`).
 
 ## Harness
 

@@ -38,6 +38,7 @@ console.log('RESULT loaded=dialog')</script>`,
   pip: `<!doctype html><title>pip</title><body style="margin:0"><video src="/clip.webm" muted loop autoplay playsinline style="display:block;width:400px;height:300px"></video>
 <script>const video = document.querySelector('video');
 video.onplaying = () => console.log('RESULT playing=' + document.visibilityState);
+video.onpause = () => console.log('RESULT pause=' + document.visibilityState);
 document.onclick = () => video.requestPictureInPicture().then(() => console.log('RESULT pip=ok'), (e) => console.log('RESULT pip=' + e.name));
 console.log('RESULT loaded=pip')</script>`,
   // For memory pressure: reports when the tab is discarded
@@ -242,6 +243,8 @@ check(
   (await pip.wait('pip'))?.[2] === 'ok' &&
     (await pip.page.evaluate(() => !!document.pictureInPictureElement)),
 );
+// Only what comes from here on (autoplay also reports pause at the start)
+pip.results.length = 0;
 await pip.newTab(`${siteURL}empty`);
 await pip.wait('loaded', 'empty');
 await pip.newTab(`${siteURL}memory?new`);

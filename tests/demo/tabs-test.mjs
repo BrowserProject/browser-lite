@@ -1,8 +1,9 @@
 // The tab strip and the toolbar of the demo (the engine side is in tests/core): the speaker in the
-// tab appears with sound and mutes the tab on a click, the recording indicator follows the camera,
-// the favicon of the page in the tab, the address bar keeps an address that failed, the security
-// indicator ("Not secure" for a certificate error, nothing on other error pages) and the back
-// button.
+// tab appears with sound and mutes the tab on a click, one prompt for camera and microphone, the
+// recording indicator follows the camera, the favicon of the page in the tab, the address bar
+// keeps an address that failed, the security indicator ("Not secure" for a certificate error,
+// nothing on other error pages) and the back button. A click on a notification of a service
+// worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -47,13 +48,37 @@ document.addEventListener('click', async () => {
     console.log('RESULT camera=stopped');
     return;
   }
-  stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
   console.log('RESULT camera=on');
 });
 console.log('RESULT ready=camera');
 </script>`,
   '/icon': `<!doctype html><title>Icon</title><link rel="icon" href="/icon.svg"><p>Icon<script>console.log('RESULT ready=icon')</script>`,
+  // Controlled by /sw.js; a click allows notifications and shows two
+  '/notify': `<!doctype html><title>Notification</title><body style="margin:0;height:100vh">Notification<script>
+const log = (text) => console.log('RESULT ' + text);
+navigator.serviceWorker.addEventListener('message', (e) => log('focus=' + e.data));
+navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => {
+  if (navigator.serviceWorker.controller) log('ready=notify');
+  else navigator.serviceWorker.addEventListener('controllerchange', () => log('ready=notify'));
+});
+document.addEventListener('click', async () => {
+  log('notifypermission=' + await Notification.requestPermission());
+  const reg = await navigator.serviceWorker.ready;
+  await reg.showNotification('Open', { tag: 'open' });
+  await reg.showNotification('Focus', { tag: 'focus' });
+});
+</script>`,
+  '/opened': `<!doctype html><title>Opened</title><p>Opened`,
 };
+const SW = `self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  if (e.notification.tag === 'open') return e.waitUntil(self.clients.openWindow('/opened'));
+  e.waitUntil(self.clients.matchAll().then((clients) => clients.find((c) => new URL(c.url).pathname === '/notify').focus())
+    .then((client) => client.postMessage(new URL(client.url).pathname)));
+});`;
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/icon.svg')
     return res
@@ -61,6 +86,8 @@ const { url: siteURL } = await serve((req, res) => {
       .end(
         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#0a0"/></svg>',
       );
+  if (req.url === '/sw.js')
+    return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SW);
   const page = PAGES[req.url];
   if (!page) return res.writeHead(404).end();
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page);
@@ -80,6 +107,24 @@ const browser = await launch({
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
   permissions: ['camera', 'microphone'],
+});
+// Host notifications: headless has none, a stand-in records them so the test can click them
+await context.addInitScript(() => {
+  window.__blNotifications = [];
+  window.Notification = class extends EventTarget {
+    static permission = 'granted';
+    static requestPermission() {
+      return Promise.resolve('granted');
+    }
+    constructor(title, options = {}) {
+      super();
+      Object.assign(this, options, { title });
+      window.__blNotifications.push(this);
+    }
+    close() {
+      this.dispatchEvent(new Event('close'));
+    }
+  };
 });
 const page = await context.newPage();
 const results = collect(page);
@@ -124,19 +169,21 @@ await audioButton.click();
 const unmutedPeak = await peakUntil((peak) => peak > 0.3);
 check('sound on again', unmutedPeak > 0.3, String(unmutedPeak));
 
-// 2) Recording indicator in the tab while the camera runs
+// 2) One prompt for camera and microphone, the recording indicator in the tab while they run
 results.delete('ready');
 await go(`${siteURL}camera`);
 await result('ready');
 await clickPage();
 const prompt = page.locator('.bl-permission-prompt:not([hidden])');
-if (
-  await prompt.waitFor({ timeout: 15000 }).then(
+const promptShown = (timeout) =>
+  prompt.waitFor({ timeout }).then(
     () => true,
     () => false,
-  )
-)
-  await prompt.locator('button', { hasText: 'Allow' }).click();
+  );
+const cameraPrompt = await promptShown(15000);
+const cameraText = cameraPrompt ? await prompt.textContent() : '';
+check('one prompt for camera and microphone', /camera and microphone/.test(cameraText), cameraText);
+if (cameraPrompt) await prompt.locator('button', { hasText: 'Allow' }).click();
 check('camera on', (await result('camera')) === 'on', results.get('camera'));
 check(
   'recording indicator in the tab',
@@ -237,6 +284,64 @@ check(
   'error page: address bar without indicator',
   (await security()).hidden,
   JSON.stringify(await security()),
+);
+
+// 5) A click on a notification of a service worker: clients.openWindow opens a tab in front,
+// WindowClient.focus activates the tab of the page again
+const tabCount = () => page.locator('#tab-list .tab').count();
+const activeTitle = () =>
+  page.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent);
+const activeIs = (title) =>
+  page
+    .waitForFunction(
+      (title) => document.querySelector('#tab-list .tab.active .title')?.textContent === title,
+      title,
+      { timeout: 15000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+results.delete('ready');
+await go(`${siteURL}notify`);
+check(
+  'notification page controlled by its service worker',
+  (await result('ready')) === 'notify',
+  results.get('ready'),
+);
+await clickPage();
+if (await promptShown(10000)) await prompt.locator('button', { hasText: 'Allow' }).click();
+check(
+  'notifications allowed',
+  (await result('notifypermission', 15000)) === 'granted',
+  results.get('notifypermission'),
+);
+const shown = await page
+  .waitForFunction(() => window.__blNotifications.some((n) => n.title === 'Focus'), null, {
+    timeout: 15000,
+  })
+  .then(
+    () => true,
+    () => false,
+  );
+check('notifications shown in the host', shown);
+const tabsBefore = await tabCount();
+await page.evaluate(() =>
+  window.__blNotifications.find((n) => n.title === 'Open').dispatchEvent(new Event('click')),
+);
+check(
+  'notificationclick: clients.openWindow opens a tab in front',
+  (await activeIs('Opened')) && (await tabCount()) === tabsBefore + 1,
+  `${await activeTitle()}, ${tabsBefore} -> ${await tabCount()} tabs`,
+);
+await page.evaluate(() =>
+  window.__blNotifications.find((n) => n.title === 'Focus').dispatchEvent(new Event('click')),
+);
+const focused = await result('focus');
+check(
+  'notificationclick: WindowClient.focus activates the tab of the page',
+  focused === '/notify' && (await activeIs('Notification')),
+  `${focused}, ${await activeTitle()}`,
 );
 
 selfSigned.close();

@@ -279,8 +279,8 @@ const kinds = await page.evaluate(() =>
   window.blHost.permissionRequests.map((r) => r.kind).join(','),
 );
 check(
-  'permission request for camera and microphone',
-  !!asked && /camera/.test(kinds) && /microphone/.test(kinds),
+  'one permission request for camera and microphone',
+  !!asked && kinds === 'camera-microphone',
   kinds,
 );
 const err = () => results.get('error') || '';

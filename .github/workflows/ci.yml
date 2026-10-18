@@ -385,12 +385,6 @@ jobs:
         run: tools/package-demo.sh build/webcore/bin build/demo
       - name: Demo suites (tests/demo against the packaged demo)
         run: E2E_SITE_DIR=build/demo node tests/run.mjs demo
-      - name: Tested demo as artifact (for deploy)
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
-        with:
-          name: demo-site
-          path: build/demo
-          retention-days: 14
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

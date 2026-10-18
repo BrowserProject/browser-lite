@@ -2,7 +2,8 @@
 // Esc), what lives only on this device, a second tab without the profile, what the pages see of
 // the device (default like the host, then as an iPhone with its own language, time zone, dark and
 // GPC), JavaScript and images off, session and session cookies after "Restart now" and after a
-// normal start without "Restore tabs on start", clearing the site data.
+// normal start without "Restore tabs on start", clearing the site data (cookies, OPFS,
+// IndexedDB, localStorage).
 //
 //   node tests/demo/settings-test.mjs [engine-dir]
 import {
@@ -35,15 +36,38 @@ addEventListener('touchstart', () => console.log('RESULT touch=1'));
 </script>`;
 let imageRequests = 0;
 const PAGES = {
-  // A cookie with expiry, a session cookie, a large IndexedDB
+  // A cookie with expiry, a session cookie, a large IndexedDB, a file in the OPFS
   write: () => `<title>Write</title><script>
-const open = indexedDB.open('large', 1);
-open.onupgradeneeded = () => open.result.createObjectStore('w');
-open.onsuccess = () => {
-  const tx = open.result.transaction('w', 'readwrite');
-  tx.objectStore('w').put(new Uint8Array(600000).fill(7), 'x');
-  tx.oncomplete = () => console.log('RESULT written=1');
-};
+const idb = new Promise((resolve) => {
+  const open = indexedDB.open('large', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('w');
+  open.onsuccess = () => {
+    const tx = open.result.transaction('w', 'readwrite');
+    tx.objectStore('w').put(new Uint8Array(600000).fill(7), 'x');
+    tx.oncomplete = resolve;
+  };
+});
+const opfs = navigator.storage.getDirectory().then(async (root) => {
+  const writable = await (await root.getFileHandle('kept.txt', { create: true })).createWritable();
+  await writable.write('kept');
+  await writable.close();
+});
+Promise.all([idb, opfs]).then(() => console.log('RESULT written=1'), (e) => console.log('RESULT written=' + e.name));
+</script>`,
+  // What the site keeps: OPFS file, IndexedDB "large", localStorage "large"
+  stored: () => `<title>Stored</title><script>
+(async () => {
+  const root = await navigator.storage.getDirectory();
+  const file = await root.getFileHandle('kept.txt').then(async (h) => (await h.getFile()).text(), () => 'none');
+  const idb = await new Promise((resolve) => {
+    const open = indexedDB.open('large');
+    open.onupgradeneeded = () => { open.transaction.abort(); resolve('none'); };
+    open.onsuccess = () => { open.result.close(); resolve('large'); };
+    open.onerror = () => resolve('none');
+  });
+  const local = localStorage.getItem('large') ? 'large' : 'none';
+  console.log('RESULT stored=' + [file, idb, local].join(','));
+})().catch((e) => console.log('RESULT stored=error:' + e.name));
 </script>`,
   large: () =>
     `<title>Large</title><script>localStorage.setItem('large', 'x'.repeat(200000)); console.log('RESULT largewritten=1');</script>`,
@@ -69,7 +93,9 @@ const { url: siteA } = await serve((req, res) => {
   res.writeHead(PAGES[name] ? 200 : 404, headers).end(html(PAGES[name]?.(req) || ''));
 });
 const { url: siteB } = await serve((req, res) =>
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html(PAGES.large())),
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(html(req.url === '/stored' ? PAGES.stored() : PAGES.large())),
 );
 
 const stack = await startStack({ app: 'demo', token: 'settings-token-0123456789abcdef' });
@@ -357,7 +383,23 @@ check(
 );
 
 // 9) "Clear site data" in the settings: the demo reloads and empties /data before the engine
-// starts, the lasting cookie is gone too
+// starts, the OPFS file, the databases and the lasting cookie are gone. JavaScript on again for
+// the pages that read the storage
+async function stored(site) {
+  results.delete('stored');
+  await go(`${site}stored`);
+  return results.wait('stored', 30000);
+}
+await openSettings('device');
+await page.check('#setting-javascript');
+await restart();
+const keptA = await stored(siteA);
+const keptB = await stored(siteB);
+check(
+  'before clearing: OPFS file, IndexedDB and localStorage kept',
+  keptA === 'kept,large,none' && keptB === 'none,none,large',
+  `${keptA} / ${keptB}`,
+);
 await page.click('#clear-data');
 const clearReload = page.waitForEvent('load', { timeout: 30000 }).then(
   () => true,
@@ -367,7 +409,18 @@ await page.click('#settings-clear-site-data');
 check('clear site data reloads the demo', await clearReload);
 await booted(page);
 await go(siteA + 'cookies');
-check('clear site data: no cookies afterwards', await titleStarts('Cookies none'), await page.title());
+check(
+  'clear site data: no cookies afterwards',
+  await titleStarts('Cookies none'),
+  await page.title(),
+);
+const clearedA = await stored(siteA);
+const clearedB = await stored(siteB);
+check(
+  'clear site data: OPFS file, IndexedDB and localStorage gone',
+  clearedA === 'none,none,none' && clearedB === 'none,none,none',
+  `${clearedA} / ${clearedB}`,
+);
 
 await context.close();
 finish();

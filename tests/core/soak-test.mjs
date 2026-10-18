@@ -1,216 +1,40 @@
-// Long run: many navigations through different pages (DOM with an iframe, images, worker,
-// WebAssembly, audio) in one view, then open and close views. Afterwards (everything releasable
-// released, full GC) the documents must be back at the state after the warm up and malloc and
-// the WASM memory may only have grown a little, else something lives on per page.
+// Long run through the core API (fixtures/soak.mjs): many navigations in one view, then views
+// opened with createView and closed with close({ force: true }); documents and memory stay
+// bounded. The same through the demo UI: demo/soak-test.mjs.
 //
 //   node tests/core/soak-test.mjs [engine-dir]
 //   SOAK_ROUNDS (default 40) rounds through all pages, SOAK_TABS (default 30) views
-import fs from 'node:fs';
-import path from 'node:path';
+import { serveSoakPages, soak } from '../fixtures/soak.mjs';
 import {
   TIMEOUT,
-  VERBOSE,
-  check,
   finish,
   launch,
   load,
   openHost,
   openView,
-  root,
-  serve,
-  serveBytes,
   startStack,
   timeLimit,
   watchErrors,
-  wav,
 } from '../lib/index.mjs';
 
 timeLimit(TIMEOUT + 420000);
-const ROUNDS = Number(process.env.SOAK_ROUNDS || 40);
-const TABS = Number(process.env.SOAK_TABS || 30);
-const WARMUP = 2;
 
-// Uncompressed BMP (24 bit), every image with its own colors
-function bmp(size, seed) {
-  const row = size * 3;
-  const buffer = Buffer.alloc(54 + row * size);
-  buffer.write('BM', 0);
-  buffer.writeUInt32LE(buffer.length, 2);
-  buffer.writeUInt32LE(54, 10);
-  buffer.writeUInt32LE(40, 14);
-  buffer.writeInt32LE(size, 18);
-  buffer.writeInt32LE(size, 22);
-  buffer.writeUInt16LE(1, 26);
-  buffer.writeUInt16LE(24, 28);
-  buffer.writeUInt32LE(row * size, 34);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++)
-      buffer.set([(x * seed) & 255, (y * 3) & 255, (seed * 40) & 255], 54 + y * row + x * 3);
-  }
-  return buffer;
-}
-const IMAGES = [1, 2, 3, 4].map((seed) => bmp(512, seed));
-
-const TONE = wav(5, { frequency: 0 });
-
-const done = (name) =>
-  `const round = new URLSearchParams(location.search).get('r'); console.log('RESULT done=${name}-' + round)`;
-const PAGES = {
-  empty: `<!doctype html><title>empty</title><p>empty<script>${done('empty')}</script>`,
-  dom: `<!doctype html><title>dom</title><style>.c{display:inline-block;padding:2px;margin:1px;border:1px solid #ccc;border-radius:3px}</style>
-<div id="list"></div><iframe srcdoc="<p>in the iframe</p><script>parent.postMessage('frame', '*')</script>"></iframe>
-<script>const list = document.getElementById('list');
-for (let i = 0; i < 3000; i++) { const div = document.createElement('div'); div.className = 'c'; div.textContent = 'Element ' + i; div.onclick = () => div.remove(); list.append(div); }
-const objects = []; for (let i = 0; i < 20000; i++) objects.push({ i, text: 'x' + i, next: objects[i - 1] });
-window.keep = objects;
-addEventListener('message', () => { document.body.offsetHeight; ${done('dom')} });</script>`,
-  images: `<!doctype html><title>images</title>${[0, 1, 2, 3].map((i) => `<img src="/image${i}.bmp" width="256" height="256">`).join('')}
-<script>Promise.all([...document.images].map((img) => img.decode())).then(() => { ${done('images')} }, (e) => console.log('RESULT done=error-' + e))</script>`,
-  worker: `<!doctype html><title>worker</title><script>
-const source = 'onmessage = (e) => { let sum = 0; const data = new Float64Array(e.data); for (let i = 0; i < data.length; i++) sum += i; postMessage(sum); }';
-const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
-worker.onmessage = (e) => { if (e.data === 1048575 * 1048576 / 2) { ${done('worker')} } };
-worker.postMessage(1 << 20);</script>`,
-  wasm: `<!doctype html><title>wasm</title><script>
-fetch('/small.wasm').then((r) => r.arrayBuffer()).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => {
-  instance.exports.grow(4);
-  if (typeof instance.exports.sum() === 'number') { ${done('wasm')} }
-});</script>`,
-  audio: `<!doctype html><title>audio</title><audio src="/tone.wav" preload="auto"></audio><script>
-document.querySelector('audio').addEventListener('loadedmetadata', () => { ${done('audio')} });</script>`,
-};
-const SEQUENCE = ['dom', 'images', 'worker', 'wasm', 'audio'];
-
-const smallWasm = fs.readFileSync(path.join(root, 'tests', 'fixtures', 'wasm', 'small.wasm'));
-const { url: siteURL } = await serve((req, res) => {
-  const name = new URL(req.url, 'http://x').pathname.slice(1);
-  if (PAGES[name])
-    return res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGES[name]);
-  const image = /^image(\d)\.bmp$/.exec(name);
-  if (image)
-    return res
-      .writeHead(200, { 'Content-Type': 'image/bmp', 'Cache-Control': 'max-age=3600' })
-      .end(IMAGES[image[1]]);
-  if (name === 'small.wasm')
-    return res.writeHead(200, { 'Content-Type': 'application/wasm' }).end(smallWasm);
-  if (name === 'tone.wav') return serveBytes(req, res, TONE, 'audio/wav');
-  res.writeHead(404).end();
-});
-
+const siteURL = await serveSoakPages();
 const stack = await startStack({ token: 'soak-token-0123456789abcdef' });
 const browser = await launch();
 const page = await (await browser.newContext({ viewport: { width: 1000, height: 700 } })).newPage();
 watchErrors(page);
-const finished = new Set();
-const reportLines = [];
-page.on('console', (msg) => {
-  const text = msg.text();
-  if (VERBOSE) console.log('   ', text);
-  const match = /RESULT done=(\S+)/.exec(text);
-  if (match) finished.add(match[1]);
-  if (text.includes('[memory]')) reportLines.push(text);
+
+await soak({
+  page,
+  siteURL,
+  start: (url) => openHost(page, stack.app({ url })),
+  go: (url) => load(page, url),
+  openTab: (url) => openView(page, url),
+  closeTab: () => page.evaluate(() => window.blTest.view().close({ force: true })),
+  tabCount: () => page.evaluate(() => window.blTest.views().length),
+  unit: 'views',
 });
-async function waitDone(key, ms = 30000) {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) {
-    if (finished.has(key)) return true;
-  }
-  return false;
-}
-const go = (address) => load(page, address);
-
-// Everything releasable released, full GC (bl_memory_report 3), then the report of the engine
-async function measure() {
-  await page.waitForTimeout(500);
-  reportLines.length = 0;
-  const line = page.waitForEvent('console', {
-    predicate: (msg) => /malloc used \d+ MB/.test(msg.text()),
-    timeout: 60000,
-  });
-  await page.evaluate(() => window.blTest.memory(3));
-  const text = (await line).text();
-  await page.waitForTimeout(500);
-  return {
-    malloc: Number(/malloc used (\d+) MB/.exec(text)[1]),
-    documents: Number(/documents (\d+)/.exec(text)[1]),
-    wasm: Math.round((await page.evaluate(() => window.blTest.memory())) / 2 ** 20),
-    players: await page.evaluate(() => window.blTest.mediaState().length),
-    documentList: reportLines.filter((l) => l.includes('doc refs=')),
-  };
-}
-
-// Work still running (decoding sound, compiling WebAssembly) holds the documents of the last
-// pages for a moment: measure until the number no longer drops
-async function measureSettled() {
-  let best = await measure();
-  for (let i = 0; i < 4; i++) {
-    await page.waitForTimeout(2000);
-    const next = await measure();
-    if (next.documents >= best.documents) return best;
-    best = next;
-  }
-  return best;
-}
-
-await openHost(page, stack.app({ url: `${siteURL}empty?r=start` }));
-check('first page', await waitDone('empty-start', TIMEOUT));
-
-let navigations = 0;
-let failedAt = null;
-async function rounds(from, to) {
-  for (let round = from; round < to && !failedAt; round++) {
-    for (const name of SEQUENCE) {
-      await go(`${siteURL}${name}?r=${round}`);
-      navigations++;
-      if (!(await waitDone(`${name}-${round}`))) {
-        failedAt = `${name}-${round}`;
-        return;
-      }
-    }
-  }
-}
-
-const started = Date.now();
-await rounds(0, WARMUP);
-await go(`${siteURL}empty?r=base`);
-await waitDone('empty-base');
-const base = await measureSettled();
-console.log(
-  `     after the warm up: ${JSON.stringify({ ...base, documentList: base.documentList.length })}`,
-);
-
-await rounds(WARMUP, ROUNDS);
-check(
-  `${navigations} navigations through ${SEQUENCE.join(', ')}`,
-  !failedAt,
-  failedAt ? `hangs at ${failedAt}` : `${Math.round((Date.now() - started) / 1000)} s`,
-);
-
-// Open views (load the DOM page with an iframe) and close them again
-let tabsOk = true;
-for (let i = 0; i < TABS && tabsOk; i++) {
-  await openView(page, `${siteURL}dom?r=tab${i}`);
-  tabsOk = await waitDone(`dom-tab${i}`);
-  await page.evaluate(() => window.blTest.view().close({ force: true }));
-}
-const tabCount = await page.evaluate(() => window.blTest.views().length);
-check(`${TABS} views opened and closed`, tabsOk && tabCount === 1, `${tabCount} views open`);
-
-await go(`${siteURL}empty?r=end`);
-await waitDone('empty-end');
-const end = await measureSettled();
-console.log(
-  `     at the end: ${JSON.stringify({ ...end, documentList: end.documentList.length })}`,
-);
-const leaked = end.documents > base.documents + 2;
-check('documents back as after the warm up', !leaked, `${base.documents} -> ${end.documents}`);
-if (leaked) console.log(end.documentList.join('\n'));
-check(
-  'malloc uses hardly more',
-  end.malloc - base.malloc < 48,
-  `${base.malloc} -> ${end.malloc} MB`,
-);
-check('WASM memory hardly grows', end.wasm - base.wasm < 128, `${base.wasm} -> ${end.wasm} MB`);
-check('no media players of the host left', end.players === 0, `${end.players} players`);
 
 await browser.close();
 finish();
