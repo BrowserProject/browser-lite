@@ -5,6 +5,8 @@ name: Release
 # and creates the GitHub release with browser-lite-engine-<version>.tar.gz (engine, manifest,
 # third party notices), the package tarballs and SHA256SUMS. Pushes the server image
 # (Dockerfile target server) as SERVER_IMAGE:<version>.
+# Tag only a commit of main whose CI push run is green and at most 14 days old (artifact
+# engine-dist is kept 14 days; a CI run cancelled by a newer push leaves none).
 
 on:
   push:
@@ -26,6 +28,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Node version from versions.env
         run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -70,6 +74,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p build/release
+          for p in core transport-wisp ui profile server; do cp LICENSE "packages/$p/LICENSE"; done
           npm pack --pack-destination build/release -w @browser-lite/core -w @browser-lite/transport-wisp \
             -w @browser-lite/ui -w @browser-lite/profile -w @browser-lite/server
           engines=(build/engine-dist/engine/*/)
@@ -92,15 +97,6 @@ jobs:
           } > build/release-notes.md
       - name: Build and test the server image
         run: tools/build-images.sh - "$GITHUB_SHA"
-      - name: Create the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          prerelease=()
-          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" build/release/* -R "$GITHUB_REPOSITORY" --verify-tag \
-            --title "browser-lite $VERSION" --notes-file build/release-notes.md "${prerelease[@]}"
       - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
@@ -114,3 +110,12 @@ jobs:
           source versions.env
           docker tag "$SERVER_IMAGE:$GITHUB_SHA" "$SERVER_IMAGE:$VERSION"
           docker push "$SERVER_IMAGE:$VERSION"
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" build/release/* -R "$GITHUB_REPOSITORY" --verify-tag \
+            --title "browser-lite $VERSION" --notes-file build/release-notes.md "${prerelease[@]}"

@@ -26,7 +26,6 @@ build() { # <target> <tag> [docker build args...]
     docker build --target "$target" -t "$tag" --build-arg NODE_IMAGE="$NODE_IMAGE" \
         --label org.opencontainers.image.source="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-BrowserProject/browser-lite}" \
         --label org.opencontainers.image.revision="$revision" \
-        --label org.opencontainers.image.licenses=BSD-2-Clause \
         "$@" "$BL_ROOT"
 }
 
@@ -62,7 +61,7 @@ smoke() { # <tag> <with-site>
     docker rm "$name" >/dev/null
 }
 
-build server "$SERVER_IMAGE:$revision"
+build server "$SERVER_IMAGE:$revision" --label org.opencontainers.image.licenses=BSD-2-Clause
 smoke "$SERVER_IMAGE:$revision" 0
 if [ "$site" != - ]; then
     build demo "$DEMO_IMAGE:$revision" --build-context site="$(realpath "$site")"

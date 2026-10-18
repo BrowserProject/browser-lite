@@ -11,6 +11,7 @@ COPY package.json package-lock.json .npmrc ./
 COPY packages/server/package.json packages/server/
 RUN npm ci --omit=dev -w @browser-lite/server --no-audit --no-fund
 COPY packages/server/dist packages/server/dist
+COPY LICENSE ./
 ENV PORT=8080 NODE_ENV=production
 USER node
 EXPOSE 8080

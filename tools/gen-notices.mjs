@@ -79,9 +79,18 @@ async function download(url, file, sha256) {
   const sha = (data) => createHash('sha256').update(data).digest('hex');
   if (existsSync(file) && sha(readFileSync(file)) === sha256) return;
   console.error(`gen-notices: downloading ${url}`);
-  const response = await fetch(url);
-  if (!response.ok) fail(`${url}: HTTP ${response.status}`);
-  const data = Buffer.from(await response.arrayBuffer());
+  let data;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(120_000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      data = Buffer.from(await response.arrayBuffer());
+      break;
+    } catch (error) {
+      if (attempt === 4) fail(`${url}: ${error.message ?? error}`);
+      await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1000));
+    }
+  }
   if (sha(data) !== sha256) fail(`${url}: SHA256 mismatch`);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, data);
