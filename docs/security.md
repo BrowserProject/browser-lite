@@ -8,7 +8,8 @@ what that means and what to do before going to production. Setup details: [embed
 
 | Risk | Why | Mitigation |
 |---|---|---|
-| Scripts on the browser page reach everything | The engine's memory (`SharedArrayBuffer`), the Emscripten module and all its workers live in the host realm. Any script there can read cookies, passwords and page contents of every site the user visits inside browser-lite | No third-party scripts (analytics, ads, tag managers) on the page that runs the browser. Use a dedicated route or subdomain and a strict CSP |
+| Scripts on the browser page reach everything | The engine's memory (`SharedArrayBuffer`), the Emscripten module and all its workers live in the host realm. Any script there can read cookies, passwords and page contents of every site the user visits inside browser-lite | No third-party scripts (analytics, ads, tag managers) on the page that runs the browser. Use a dedicated subdomain and a strict CSP |
+| Storage is origin-wide | The namespace directory in OPFS (cookies, localStorage, IndexedDB of all sites), the HTTP cache and the locks belong to the origin, not the route: any script on any page of that origin can read them | In production use a dedicated subdomain; with a route the whole origin must be free of untrusted scripts |
 | Debug hooks | `debug: true` exposes `browser.debug` (eval in pages, memory reports, crash, raw module) and enables the engine test hooks (`BL_TEST_HOOKS`) | Only in development. The demo enables it only with `?debug=1` |
 | Extra CA certificates | A trusted extra CA lets whoever holds its key read all TLS inside the engine | `engine.extraCA` only from code you control; never from URL parameters or stored settings. `engine.env` rejects `BL_EXTRA_CA` |
 | Relay as an open proxy | Anyone who can reach the relay can make TCP connections from your server | `authorize` is required (signed tokens with a short TTL), `allowedOrigins` against cross-site WebSocket hijacking, per-address limits (`connectionsPerIp`, `clientAddress` behind proxies), stream limits and timeouts in `policy` |
@@ -23,7 +24,8 @@ names and ports, and timing.
 
 ## Production checklist
 
-- The browser runs on its own route or subdomain, served with COOP, COEP and CORP.
+- The browser runs on its own subdomain (a route only if no page of the origin runs untrusted
+  scripts), served with COOP, COEP and CORP.
 - No third-party scripts on that page; a CSP like the one in [embedding.md](embedding.md).
 - `debug` is false; no `engine.env` from user input; `engine.extraCA` unset or from code.
 - Engine files same-origin, versioned folder, matching the core version.

@@ -16,7 +16,7 @@ page (`crossOriginIsolated === true`).
 
 | Mode | When | Notes |
 |---|---|---|
-| Own route or subdomain | Recommended | Serve one route (for example `/browser/`) or a subdomain with the headers below; the rest of the site stays unchanged. A subdomain also gives the browser its own storage origin |
+| Own route or subdomain | Recommended (a subdomain in production, [security.md](security.md)) | Serve one route (for example `/browser/`) or a subdomain with the headers below; the rest of the site stays unchanged. A subdomain also gives the browser its own storage origin; with a route, the browser's stored data (OPFS, caches) is readable by every page of the origin |
 | Inside an existing page | The page is cross-origin isolated already, or can become so | Every subresource must be same-origin or allow embedding (CORP or CORS). `Cross-Origin-Embedder-Policy: credentialless` instead of `require-corp` relaxes this for third-party resources in Chromium and Firefox |
 | In an iframe | Only inside a cross-origin isolated top-level page | The top-level page and the frame both send COOP/COEP, a cross-origin frame also `Cross-Origin-Resource-Policy: cross-origin`, and the iframe delegates the features: `allow="cross-origin-isolated; fullscreen; clipboard-read; clipboard-write; autoplay; picture-in-picture; camera; microphone; display-capture; geolocation"` (only what you enable) |
 | `Document-Isolation-Policy` | To evaluate | Chromium-only header that isolates a single document without COOP/COEP on the top-level page; not tested with browser-lite yet |
@@ -55,7 +55,7 @@ isolation.
 | File | Raw | Brotli |
 |---|---|---|
 | `engine.wasm` | about 89 MB | about 19 MB |
-| `engine.data` (fonts, ICU, CA bundle, fontconfig) | about 5 MB | about 1.7 MB |
+| `engine.data` (fonts, CA bundle, fontconfig, HRTF data) | about 5 MB | about 1.7 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
 
 A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache. The host
@@ -81,6 +81,7 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'self'
   MediaSource object URLs.
 - `style-src 'self'`: the core and `@browser-lite/ui` set only CSSOM styles, no inline style
   attributes. Your own UI may need more.
+- `frame-ancestors 'self'`: in the iframe mode list the embedding origin instead.
 - If your server sends a CSP header also with `engine.js`, that policy applies to the engine
   workers and needs `'wasm-unsafe-eval'` too (pages' WebAssembly is compiled there).
 
@@ -106,7 +107,8 @@ The engine opens TCP connections through a `Transport`; `WispTransport` talks to
 
 - Run `createRelay` in your Node server (`server.on('upgrade', ...)`, see the
   [server README](../packages/server/README.md)), or the `browser-lite-server` command, or the
-  container image (`Dockerfile`) without `SITE_DIR` as a relay only.
+  demo's container image (`Dockerfile`, built with `tools/package-demo.sh`) with `SITE_DIR=` and
+  `PROFILE_DIR=` set empty and `RELAY_SECRET` or `RELAY_TOKEN` set, as a relay only.
 - `authorize(req, url)` is required. Use signed short-lived tokens: your backend signs with
   `signToken({ secret, ttlSeconds, subject })` after its own login, the page passes
   `token: () => fetch('/relay-token').then((r) => r.text())` so every reconnect gets a fresh one,

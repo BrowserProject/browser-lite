@@ -67,28 +67,39 @@ performance with several runs and inclusive times from profiles, not only load t
 
 ## Open: features
 
-- Settings for device, language, time zone, JavaScript and images apply after an engine restart;
-  emulated mobile devices do not rotate.
+- `device` and `timeZone` apply only at `createBrowser` (the demo restarts the engine for all its
+  settings); emulated mobile devices do not rotate.
 - Pinch zoom: `visualViewport` events only at the end of the gesture; two fingers wait for the
   page's touchstart answer even without blocking listeners.
-- Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; silent
-  video pauses when hidden like Safari (except after PiP); discarding under memory pressure does
-  not spare tabs with beforeunload listeners and input.
+- Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; video
+  without an audio track pauses when hidden like Chrome (not after PiP, #170); discarding under
+  memory pressure does not spare tabs with beforeunload listeners and input.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.
-- WebAssembly: shared memory (threads) and JSPI (#153); cycles between page and module are freed
-  only with the page or worker.
+- WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take
+  their variant without); cycles between page and module are freed only with the page or worker.
 - CSS: `url(#...)` and SVG filters on the CPU; filtered layers with children, masks or video
-  recompute every frame; `interpolate-size`; Paint Worklet scripts are classic.
+  recompute every frame; `interpolate-size`; Paint Worklet scripts are classic (no
+  `import`/`export`) and runtime errors reject differently than in Chromium.
 - Graphics: WebGL frames through `readPixels` instead of a texture, timer queries, queries and
-  transform feedback across context switches, WebGPU.
+  transform feedback across context switches, WebGPU. Views that lost the GPU while compositing
+  stay without layers (new views get them again); a WebGL page that does not draw notices a loss
+  only at its next draw.
 - Media: EME (DRM), MSE in workers (#121), WebCodecs frames as textures, WebRTC traffic through
-  the relay (TURN), insertable streams.
+  the relay (TURN), insertable streams. A sent track's engine sink stays until `stop()` or until
+  its source ends; MediaRecorder errors while fetching data do not reach the page as an event. A
+  muted autoplay video briefly reports `pause` and `playing` again right after loading (Chrome
+  does not).
 - Service workers: Push, Background Sync, Background Fetch.
-- Network: HTTP authentication (401) has no login dialog, WebTransport, streams as request body,
+- Network: HTTP authentication (401 with Basic/Digest) has no login dialog, the page shows the
+  body of the 401 response; WebTransport, streams as request body, Storage Buckets,
   WebSocketStream without read backpressure (#120).
 - Storage: localStorage reaches SQLite 1 s after a change and can miss the last change on close;
   with `/data` in memory (second tab) uploads sit in WASM memory.
+- Measurement: layout shift and long animation frame entries, IdleDetector,
+  `document.featurePolicy`.
+- UI: drag and drop outside a drop target opens nothing (#125; Chrome loads the link or file in
+  the same tab, deliberately not here because an accidental drop would replace the page).
 - Devices and identity: WebAuthn, Credential Management, Payment Request, Web MIDI/USB/HID/Serial,
   WebXR.
 - Core API: no event for console messages without a view (service workers), no warning for
