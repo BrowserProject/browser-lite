@@ -28,8 +28,9 @@ view.on('title', ({ title }) => console.log(title));
 ```
 
 The container needs a size (for example `height: 100vh`); the view fills it and follows its size.
-For the service worker copy `dist/sw/sw.js` and `dist/sw/media-sw.js` into the same folder
-(`sw.js` loads `media-sw.js` next to itself).
+For the service worker serve `sw.js` and `media-sw.js` from the same folder (`sw.js` loads
+`media-sw.js` next to itself); both are package exports (`@browser-lite/core/sw/sw.js`,
+`@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them.
 
 ## Options of createBrowser
 
@@ -74,11 +75,11 @@ the engine ends or the page opens the same popup again (the old answer is then i
 
 `defaultServices()` is `[audio(), media(), capture(), devices()]`.
 
-- `audio()`: Web Audio through an AudioWorklet (`dist/audio-worklet.js`).
+- `audio()`: Web Audio through an AudioWorklet (`dist/audio-worklet.js`, export
+  `@browser-lite/core/audio-worklet.js`).
 - `media({ pictureInPicture })`: `<video>`/`<audio>` through hidden media elements of the host;
-  media files need the service worker: the standalone `dist/sw/sw.js` together with
-  `dist/sw/media-sw.js` in the same folder, or `importScripts('media-sw.js')` in a worker of
-  the site.
+  media files need the service worker: the standalone `sw.js` together with `media-sw.js` in the
+  same folder, or `importScripts('media-sw.js')` in a worker of the site.
   Without it a `warning` event with code `media-sw-missing` follows.
   A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
 - `capture()`: camera, microphone and screen.

@@ -6,7 +6,8 @@
 // - outside packages/core/src and engine/ no source touches the engine directly: no _bl_
 //   exports, no Emscripten Module, no createBrowserLiteEngine, no __bl* globals
 // - apps, examples and the core test host import packages only through their entry points
-// Only source folders count (src/, the test host page); tests and dist are not checked.
+// Only sources count: src/ of packages, apps and examples, the scripts of the examples (top-level
+// *.mjs, app/**/*.js) and the test host page; package tests and dist are not checked.
 //   node tests/contract/deps-test.mjs
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -137,9 +138,19 @@ const hostSources = [
     .filter((name) => name !== '@browser-lite/core')
     .flatMap((name) => sources(name)),
   ...subdirs(path.join(root, 'apps')).flatMap((dir) => walk(path.join(root, 'apps', dir, 'src'))),
-  ...subdirs(path.join(root, 'examples')).flatMap((dir) =>
-    walk(path.join(root, 'examples', dir, 'src')),
-  ),
+  ...subdirs(path.join(root, 'examples')).flatMap((dir) => {
+    const example = path.join(root, 'examples', dir);
+    return [
+      ...walk(path.join(example, 'src')),
+      ...walk(path.join(example, 'app')).filter((file) => file.endsWith('.js')),
+      ...readdirSync(example)
+        .filter((name) => name.endsWith('.mjs'))
+        .map((name) => path.join(example, name)),
+    ];
+  }),
+  ...readdirSync(path.join(root, 'examples'))
+    .filter((name) => name.endsWith('.mjs'))
+    .map((name) => path.join(root, 'examples', name)),
   ...walk(path.join(root, 'tests', 'core', 'host')),
 ];
 const FORBIDDEN = [

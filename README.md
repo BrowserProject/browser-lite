@@ -31,18 +31,21 @@ Details: [docs/architecture.md](docs/architecture.md).
 - A Chromium based browser (Chrome, Edge, Chromebooks). Firefox and Safari are best effort.
 - A cross-origin isolated page (`Cross-Origin-Opener-Policy: same-origin`,
   `Cross-Origin-Embedder-Policy: require-corp`) over HTTPS, with the engine on the same origin.
-- A relay: Node 22 or newer with `@browser-lite/server`, or the container image.
+- A relay: Node 22 or newer with `@browser-lite/server`, or the server image of the release.
 
 ## Install
 
-Until the packages are on npm, every GitHub release carries the package tarballs and the engine:
+Until the packages are on npm, every GitHub release carries the package tarballs
+(`browser-lite-<package>-<version>.tgz` for core, transport-wisp, ui, profile and server), the
+engine (`browser-lite-engine-<version>.tar.gz`) and `SHA256SUMS`:
 
 ```bash
 npm install ./browser-lite-core-0.1.0.tgz ./browser-lite-transport-wisp-0.1.0.tgz
 npm install ./browser-lite-server-0.1.0.tgz      # on the server
 ```
 
-Unpack the engine archive of the same release into a folder of your site, for example
+Unpack the engine archive of the same release (`engine.js`, `engine.wasm`, `engine.data` with
+`.br`/`.gz`, `manifest.json`, `THIRD_PARTY_NOTICES.txt`) into a folder of your site, for example
 `public/engine/`. Engine and core versions must match.
 
 ## Quick start
@@ -54,7 +57,7 @@ import { WispTransport } from '@browser-lite/transport-wisp';
 const browser = await createBrowser({
   engineUrl: '/engine/',
   transport: new WispTransport({ url: '/wisp/', token: () => fetch('/relay-token').then((r) => r.text()) }),
-  serviceWorker: { url: '/sw.js' }, // dist/sw/sw.js and media-sw.js of the core, for <video>/<audio>
+  serviceWorker: { url: '/sw.js' }, // @browser-lite/core/sw/sw.js and media-sw.js, for <video>/<audio>
 });
 const view = browser.createView({ container: document.querySelector('#browser'), url: 'https://example.com/' });
 view.on('title', ({ title }) => (document.title = title));
@@ -71,6 +74,7 @@ httpServer.on('upgrade', (req, socket, head) => relay.handleUpgrade(req, socket,
 ```
 
 Headers, service worker, CSP, storage and lifecycle: [docs/embedding.md](docs/embedding.md).
+Complete, tested setups: [examples/](examples/README.md).
 Before production: [docs/security.md](docs/security.md).
 
 ## Limitations
@@ -105,6 +109,7 @@ time): [docs/build.md](docs/build.md).
 engine/        WebKit embedder (C++ and JS), patches/ for WebKit, abi.json (contract with the core)
 packages/      npm packages: core, transport-wisp, ui, profile, server
 apps/demo/     the demo browser (Vite) and deploy/ for the home server
+examples/      copyable embedding templates: minimal (own route) and existing-site
 tests/         contract, engine, JSC and browser suites (tests/README.md)
 tools/         build, patch, packaging and style scripts
 toolchain/     Docker image with Emscripten and the build tools
@@ -118,6 +123,7 @@ versions.env   version pins
 | File | |
 |---|---|
 | [docs/embedding.md](docs/embedding.md) | Embedding in a site: modes, headers, engine files, CSP, service worker, relay, storage, lifecycle |
+| [examples/README.md](examples/README.md) | Tested templates: own route with Vite, part of an existing site with its own service worker and CSP |
 | [docs/security.md](docs/security.md) | Threat model and production checklist |
 | [docs/architecture.md](docs/architecture.md) | Layers, threads, frames, network, storage, media, GC |
 | [docs/build.md](docs/build.md) | Building the packages and the engine, CI |

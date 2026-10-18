@@ -43,7 +43,7 @@ export function withTestOptions(options: BrowserOptions): BrowserOptions {
 }
 
 /**
- * window.blTest for the e2e tests (spec of tests/e2e): the browser, its views and the debug API,
+ * window.blTest for the e2e tests (tests/core and tests/demo): the browser, its views and the debug API,
  * plus hooks of the demo (checkMemory, memoryUsed, gpu, profile, settings, addressToURL, transport, relay,
  * options).
  */

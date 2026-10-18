@@ -8,7 +8,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./sw/sw.js": "./dist/sw/sw.js",
+    "./sw/media-sw.js": "./dist/sw/media-sw.js",
+    "./audio-worklet.js": "./dist/audio-worklet.js"
   },
   "types": "./dist/index.d.ts",
   "files": [

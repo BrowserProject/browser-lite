@@ -106,7 +106,7 @@ with `CCACHE_DIR` inside the repository the cache survives the container, and
 [decisions.md](decisions.md)). Same for `tools/build-jsc.sh`. Quick check in node:
 
 ```bash
-node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm
+node tests/engine/render.mjs build/webcore/bin tests/engine/pages/basic.html build/basic.ppm
 node tests/engine/check-basic.mjs build/basic.ppm
 ```
 
@@ -114,7 +114,15 @@ More suites: [tests/README.md](../tests/README.md).
 
 ## Packaging
 
-- `tools/package-engine.sh` packs an engine folder as a release asset.
+- `tools/package-engine.sh [--no-notices] <engine-dir> <out>` packs an engine folder for
+  delivery: `<out>/engine/<hash>/` with `.br`/`.gz`, `manifest.json` and
+  `THIRD_PARTY_NOTICES.txt` (`tools/gen-notices.mjs`, inside the toolchain image). CI uploads it
+  as the artifact `engine-dist`.
+- `tools/build-images.sh <demo-site-dir|-> <revision>` builds and tests the images of the
+  `Dockerfile` (targets `server` and `demo`).
+- A tag `v<version>` runs `.github/workflows/release.yml`: it takes `engine-dist` of the green CI
+  run of that commit and publishes `browser-lite-engine-<version>.tar.gz`, the package tarballs
+  (`npm pack`), `SHA256SUMS` and the server image `SERVER_IMAGE:<version>`.
 - `tools/package-demo.sh <engine-dir> <out>` builds the demo with Vite, puts the engine into
   `engine/<hash>/` and precompresses everything (`tools/optimize-assets.mjs`); the result is
   `SITE_DIR` of `browser-lite-server` and of the container image (`Dockerfile`). Deploy:

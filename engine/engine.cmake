@@ -130,7 +130,7 @@ target_link_options(BrowserLiteEngine PRIVATE
     # WebKit builds with -fno-exceptions, but some deps (C++) can throw. Allow
     # throwing (without catching a throw leads to abort).
     "SHELL:-sDISABLE_EXCEPTION_THROWING=0"
-    # Keep function names (profiles, stack traces; tools/optimize-site.mjs
+    # Keep function names (profiles, stack traces; tools/package-engine.sh
     # removes them for delivery)
     "SHELL:--profiling-funcs"
     # Sockets in WASM instead of SOCKFS (engine/src/Sockets.cpp): intercept the

@@ -7,7 +7,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 
 - **Structure**: reusable packages (`@browser-lite/core`, `transport-wisp`, `ui`, `profile`,
   `server`), the engine contract `engine/abi.json` with contract tests, and the demo `apps/demo`
-  on the public APIs only (#198 to #206).
+  on the public APIs only (#198 to #206), plus tested embedding templates in
+  [examples/](../examples/README.md) (own route, existing site with its own service worker and CSP).
 - **Engine**: WebKit (WebCore + JavaScriptCore C loop) as WebAssembly, TLS inside, network through
   our own Wisp relay that connects only to public addresses and web ports (#159, #178, #201).
 - **Browsing**: views with popups (opener, name, sandbox), history incl. back/forward cache,
@@ -36,7 +37,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 
 ## Measurements (local, first visit)
 
-From `tests/e2e/site-test.mjs`, time from the start of the UI, 3 runs each on 2026-10-16:
+From `tests/compat/site-test.mjs`, time from the start of the UI, 3 runs each on 2026-10-16:
 
 | Site | First layout | First paint | Loaded |
 |---|---|---|---|

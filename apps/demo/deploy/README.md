@@ -19,8 +19,7 @@ Against DNS rebinding `/profile/` answers only under IP addresses, `localhost` a
 
 1. *CI* builds and tests the engine and packages it (artifact `engine-dist`).
 2. *Deploy* (`.github/workflows/deploy.yml`, only after a green CI):
-   - takes the demo site the CI tested (artifact `demo-site`) or packages it from
-     `engine-dist` (`tools/package-demo.sh`)
+   - packages the demo site from `engine-dist` (`tools/package-demo.sh`)
    - builds the images and tests them read-only (`tools/build-images.sh`: headers, Brotli,
      relay, profile, clean exit on SIGTERM)
    - pushes the demo image to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)

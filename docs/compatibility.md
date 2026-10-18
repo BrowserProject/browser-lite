@@ -1,6 +1,6 @@
 # Compatibility with real sites
 
-The site list is `tests/e2e/sites.txt`. CI loads it in the job `compat` (informational, foreign
+The site list is `tests/compat/sites.txt`. CI loads it in the job `compat` (informational, foreign
 servers fail now and then) and writes a table into the run summary. Screenshots are in the
 artifact `compat`, named by host and path (`build/sites/<host>_<path>.png`).
 
@@ -35,7 +35,7 @@ starts without stored data.
 
 ## Yardstick against Chromium
 
-`tests/e2e/parity-test.mjs` loads `tests/engine/features.html` (280 checks) in the host Chromium
+`tests/core/parity-test.mjs` loads `tests/fixtures/features.html` (280 checks) in the host Chromium
 and in browser-lite. State 2026-10-16: **257 of 280 like Chromium (91.8 %)**. Missing:
 
 - Not in WebKit: layout shift and long animation frame entries, `interpolate-size`, streams as

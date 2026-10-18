@@ -8,6 +8,7 @@
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
 | `core/` | `@browser-lite/core` in Chromium through the test host page `core/host/`: every engine feature | engine build, packages, Playwright | e2e-core |
 | `demo/` | the demo UI (`apps/demo`) in Chromium: tabs, prompts, dialogs, settings, profile | engine build, packages, Playwright | e2e-demo |
+| [`examples/test.mjs`](../examples/test.mjs) | both [examples](../examples/README.md) in Chromium: rendering, relay tokens, own service worker, iframe, strict CSP, Vite build | engine build, packages, Playwright | e2e-core |
 | `compat/` | real sites of `sites.txt`, informational | engine build, internet | compat |
 | `bench/` | benchmarks to run by hand with `engine/render.mjs` | engine build | none |
 
@@ -24,6 +25,7 @@ node tests/run.mjs engine  [filter] [--engine=<dir>]
 node tests/run.mjs core    [filter] [--engine=<dir>]
 node tests/run.mjs demo    [filter] [--engine=<dir>]
 node tests/core/input-test.mjs [engine-dir]   # a single test
+node examples/test.mjs [engine-dir]            # the examples
 ```
 
 `tests/run.mjs` runs every `*-test.mjs` of the suite one after the other and prints a summary

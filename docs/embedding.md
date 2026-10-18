@@ -1,12 +1,13 @@
 # Embedding browser-lite
 
 What a site needs to run browser-lite: a cross-origin isolated page, the engine files on the same
-origin, a relay, and optionally a service worker for media. Complete setups are in
-`examples/minimal/` (own route, Vite, one view) and `examples/existing-site/` (existing site with
-`node:http`, the server package and its own service worker). API details are in the package
-READMEs ([core](../packages/core/README.md), [transport-wisp](../packages/transport-wisp/README.md),
-[ui](../packages/ui/README.md), [profile](../packages/profile/README.md),
-[server](../packages/server/README.md)); threats and a production checklist in
+origin, a relay, and optionally a service worker for media. Complete, tested setups are in
+[examples/](../examples/README.md): [examples/minimal/](../examples/minimal/README.md) (own route,
+Vite, one view) and [examples/existing-site/](../examples/existing-site/README.md) (existing site
+with `node:http`, the server package, its own service worker and a strict CSP). API details are
+in the package READMEs ([core](../packages/core/README.md),
+[transport-wisp](../packages/transport-wisp/README.md), [ui](../packages/ui/README.md),
+[profile](../packages/profile/README.md), [server](../packages/server/README.md)); threats and a production checklist in
 [security.md](security.md).
 
 ## Embedding modes
@@ -18,8 +19,23 @@ page (`crossOriginIsolated === true`).
 |---|---|---|
 | Own route or subdomain | Recommended (a subdomain in production, [security.md](security.md)) | Serve one route (for example `/browser/`) or a subdomain with the headers below; the rest of the site stays unchanged. A subdomain also gives the browser its own storage origin; with a route, the browser's stored data (OPFS, caches) is readable by every page of the origin |
 | Inside an existing page | The page is cross-origin isolated already, or can become so | Every subresource must be same-origin or allow embedding (CORP or CORS). `Cross-Origin-Embedder-Policy: credentialless` instead of `require-corp` relaxes this for third-party resources in Chromium and Firefox |
-| In an iframe | Only inside a cross-origin isolated top-level page | The top-level page and the frame both send COOP/COEP, a cross-origin frame also `Cross-Origin-Resource-Policy: cross-origin`, and the iframe delegates the features: `allow="cross-origin-isolated; fullscreen; clipboard-read; clipboard-write; autoplay; picture-in-picture; camera; microphone; display-capture; geolocation"` (only what you enable) |
+| In an iframe | Only inside a cross-origin isolated top-level page | A frame is isolated only if its parent is: the top-level page and the frame both send COOP/COEP. The iframe delegates the features the services use (see below) |
 | `Document-Isolation-Policy` | To evaluate | Chromium-only header that isolates a single document without COOP/COEP on the top-level page; not tested with browser-lite yet |
+
+The `allow` list of the iframe, as tested in [examples/existing-site/](../examples/existing-site/README.md)
+(drop what you do not enable):
+
+```
+cross-origin-isolated; fullscreen; autoplay; picture-in-picture; clipboard-read; clipboard-write;
+camera; microphone; display-capture; geolocation; gamepad; accelerometer; gyroscope; magnetometer;
+keyboard-map
+```
+
+A same-origin frame has most of these by default. A cross-origin frame (for example on a
+subdomain) needs all of them, and its documents and resources need
+`Cross-Origin-Resource-Policy: cross-origin` or `same-site`. In Chromium a cross-origin frame
+also cannot show File System Access pickers or ask for notification permission (platform rule,
+not tested).
 
 COOP `same-origin` puts the page into its own browsing context group: `window.opener` between the
 browser page and other pages of the site is cut. `checkSupport()` reports what is missing, and
@@ -45,8 +61,8 @@ isolation.
   page: the engine starts its workers from `engine.js`. `createBrowser` rejects a cross-origin
   `engineUrl`. A CDN works only behind the same origin (reverse proxy).
 - Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
-  it is. `audio-worklet.js` must stay a file next to the core's `dist/` code (Vite: keep `.js`
-  assets out of `assetsInlineLimit`).
+  it is. `audio-worklet.js` (export `@browser-lite/core/audio-worklet.js`) must stay a file next
+  to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`).
 - Put each engine version in its own folder (for example `engine/<hash>/`, as
   `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
 - `engine.wasm` as `application/wasm` (streaming compilation), precompressed. Sizes of a
@@ -64,23 +80,29 @@ not help in measurements, #132 in [decisions.md](decisions.md)).
 
 ## Content Security Policy
 
-A policy for the browser page with the relay on the same origin:
+A policy for the browser page with the relay on the same origin, verified in Chromium with no
+violations (page rendering, the ui context menu, a video through the service worker, Media Source
+Extensions, Web Audio) by [examples/existing-site/](../examples/existing-site/README.md):
 
 ```
-default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self';
-connect-src 'self'; media-src 'self' blob:; img-src 'self' blob: data:; style-src 'self';
-object-src 'none'; base-uri 'none'; frame-ancestors 'self'
+default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-<inline import map>';
+worker-src 'self'; connect-src 'self'; media-src 'self' blob:; style-src 'self';
+base-uri 'none'; form-action 'self'; frame-ancestors 'self'
 ```
 
 - `'wasm-unsafe-eval'`: compiling `engine.wasm`. The engine does not use `eval`.
-- `worker-src 'self'`: engine threads and the service worker; `script-src 'self'`: `engine.js`
-  and the audio worklet.
-- `connect-src`: fetching the engine files and the Wisp WebSocket; add the relay origin
-  (`wss://relay.example.com`) when it runs elsewhere.
-- `media-src 'self' blob:`: hidden media elements play `bl-media/` URLs of the service worker and
-  MediaSource object URLs.
-- `style-src 'self'`: the core and `@browser-lite/ui` set only CSSOM styles, no inline style
-  attributes. Your own UI may need more.
+- `'sha256-...'`: the hash of an inline import map, if the page has one (the example computes it
+  at server start); without an import map leave it out.
+- `worker-src 'self'`: engine threads and the service worker (redundant with `script-src 'self'`,
+  but clearer); `script-src 'self'`: `engine.js` and the audio worklet.
+- `connect-src 'self'`: fetching the engine files and the Wisp WebSocket (same-origin `ws:` is
+  covered in Chromium); add the relay origin (`wss://relay.example.com`) when it runs elsewhere.
+- `media-src 'self' blob:`: required. Hidden media elements play `bl-media/` URLs of the service
+  worker (`'self'`) and MediaSource object URLs (`blob:`); without it Chromium refuses both.
+- `style-src 'self'`: the core and `@browser-lite/ui` set styles only through the CSSOM (no style
+  attributes, `innerHTML` or style elements), so no `'unsafe-inline'`. Your own UI may need more.
+- Neither the core nor the ui needs `img-src` or `frame-src`; add `img-src 'self' blob: data:`
+  if your UI shows favicons or other images.
 - `frame-ancestors 'self'`: in the iframe mode list the embedding origin instead.
 - If your server sends a CSP header also with `engine.js`, that policy applies to the engine
   workers and needs `'wasm-unsafe-eval'` too (pages' WebAssembly is compiled there).
@@ -91,15 +113,19 @@ Pages inside the engine are not affected by this policy; the engine enforces the
 
 Needed only for `<video>` and `<audio>` with media files; the core never registers one.
 
-- No own service worker: copy `dist/sw/sw.js` and `dist/sw/media-sw.js` of `@browser-lite/core`
-  into one folder and pass `serviceWorker: { url: '/sw.js' }` (scope default: the folder of the
-  URL).
-- Own service worker: `importScripts('media-sw.js')` in it and pass
-  `serviceWorker: { registration }`. `media-sw.js` adds its own `fetch` and `message` listeners,
-  answers only URLs below `bl-media/` relative to the scope and messages with a `bl` field, and
-  touches no lifecycle.
-- The scope must cover the browser page. Without a worker media files do not play and the browser
-  emits the warning `media-sw-missing`.
+- No own service worker: serve `@browser-lite/core/sw/sw.js` and `@browser-lite/core/sw/media-sw.js`
+  (package exports, files in `dist/sw/`) from one folder and pass `serviceWorker: { url: '/sw.js' }`
+  (scope default: the folder of the URL).
+- Own service worker: call `importScripts('media-sw.js')` before adding your own `fetch` listener,
+  register the worker yourself and pass `serviceWorker: { registration }`. `media-sw.js` adds its
+  own `fetch` and `message` listeners, answers only URLs below `bl-media/` relative to the scope
+  and messages with a `bl` field, and touches no lifecycle. Your own fetch logic must leave
+  `bl-media/` URLs alone and keep COOP/COEP/CORP on the responses it produces.
+- Call `skipWaiting()` and `clients.claim()` in the worker. Otherwise the page is not controlled
+  on the first visit: the core waits 3 s for `controllerchange` and emits `media-sw-missing`.
+- The scope must cover the browser page: media URLs are `<scope>bl-media/...` (with `/app/sw.js`
+  the scope is `/app/`). Without a worker media files do not play and the browser emits the
+  warning `media-sw-missing`.
 
 ## Relay
 
@@ -107,14 +133,17 @@ The engine opens TCP connections through a `Transport`; `WispTransport` talks to
 
 - Run `createRelay` in your Node server (`server.on('upgrade', ...)`, see the
   [server README](../packages/server/README.md)), or the `browser-lite-server` command, or the
-  demo's container image (`Dockerfile`, built with `tools/package-demo.sh`) with `SITE_DIR=` and
-  `PROFILE_DIR=` set empty and `RELAY_SECRET` or `RELAY_TOKEN` set, as a relay only.
+  server image (`SERVER_IMAGE:<version>` of `versions.env`, pushed with every release; `Dockerfile`
+  target `server`, built locally with `tools/build-images.sh - <tag>`) with `RELAY_SECRET` or
+  `RELAY_TOKEN` set.
 - `authorize(req, url)` is required. Use signed short-lived tokens: your backend signs with
   `signToken({ secret, ttlSeconds, subject })` after its own login, the page passes
   `token: () => fetch('/relay-token').then((r) => r.text())` so every reconnect gets a fresh one,
   and the relay checks with `authorizeToken({ secret })`.
 - `allowedOrigins`: by default only pages whose `Origin` host equals the relay's `Host`. Set it
-  when the relay runs on another host.
+  to exactly the origin users open when the relay runs on another host or behind a proxy (opening
+  `127.0.0.1` against a `localhost` origin fails). The relay answers 403 without a valid token or
+  with a wrong `Origin`.
 - `clientAddress(req)`: behind a reverse proxy return the client address from the proxy's header
   (the command: `RELAY_TRUST_PROXY`), otherwise all clients share the limit `connectionsPerIp`.
 - The relay connects only to public addresses and the ports 80, 443, 8080 and 8443 by default

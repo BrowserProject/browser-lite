@@ -57,9 +57,6 @@ jobs:
           fi
           echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          # The demo site the CI tested (job e2e-demo), if the run has it
-          site="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?name=demo-site" --jq '[.artifacts[] | select(.expired | not)] | length')"
-          echo "site=$([ "$site" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ steps.run.outputs.sha }}
@@ -72,24 +69,14 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: Get the tested demo site
-        if: steps.run.outputs.site == 'true'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: demo-site
-          path: build/demo
-          run-id: ${{ steps.run.outputs.id }}
-          github-token: ${{ github.token }}
       - name: Get the packaged engine
-        if: steps.run.outputs.site != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: engine-dist
           path: build/engine-dist
           run-id: ${{ steps.run.outputs.id }}
           github-token: ${{ github.token }}
-      - name: Package the demo (runs without the demo-site artifact)
-        if: steps.run.outputs.site != 'true'
+      - name: Package the demo
         run: tools/package-demo.sh build/engine-dist build/demo
       - name: Build and test the images (headers, compression, relay, profile, SIGTERM)
         run: tools/build-images.sh build/demo "${{ steps.run.outputs.sha }}"

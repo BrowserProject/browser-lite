@@ -212,7 +212,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     m_page = Page::create(WTF::move(configuration));
     debugLog("View %d: page created", id);
-    // Report the first visible layout (host, measurements in tests/e2e)
+    // Report the first visible layout (host, measurements in tests/core)
     m_page->addLayoutMilestones({ LayoutMilestone::DidFirstVisuallyNonEmptyLayout });
     attachDeviceClients(*this, *m_page);
 #if ENABLE(MEDIA_STREAM)
@@ -261,7 +261,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setCompressionStreamEnabled(true);
     settings.setNavigationAPIEnabled(true);
     // Done in WebKit, only the defaults for WebCore alone are off (yardstick
-    // tests/engine/features.html)
+    // tests/fixtures/features.html)
     settings.setCanvasFiltersEnabled(true);
     settings.setMoveBeforeEnabled(true);
     settings.setSelectShowPickerEnabled(true);
