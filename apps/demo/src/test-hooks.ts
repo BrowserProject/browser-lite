@@ -35,11 +35,30 @@ function view(): View {
   return current;
 }
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * Like the core test host page: plain objects (object literals) merge key by key, everything
+ * else (arrays, functions, class instances such as a transport) replaces.
+ */
+function merge(base: Record<string, unknown>, extra: Record<string, unknown>) {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(extra)) {
+    const old = base[key];
+    result[key] = isPlainObject(value) && isPlainObject(old) ? merge(old, value) : value;
+  }
+  return result;
+}
+
 /** Options a test set with page.addInitScript (window.blTestOptions), merged into options. */
 export function withTestOptions(options: BrowserOptions): BrowserOptions {
   const extra = window.blTestOptions;
-  if (!extra) return options;
-  return { ...options, ...extra, engine: { ...options.engine, ...extra.engine } };
+  if (!isPlainObject(extra)) return options;
+  return merge(options as unknown as Record<string, unknown>, extra) as unknown as BrowserOptions;
 }
 
 /**

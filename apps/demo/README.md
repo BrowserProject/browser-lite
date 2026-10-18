@@ -29,14 +29,14 @@ the engine in `engine/<hash>/`. The engine is never bundled; the core loads it a
 | `url` | opens this address instead of the last session |
 | `token` | access token, stored per relay host in localStorage (relay and profile of that host) |
 | `log=1` | engine log in the console |
-| `gpu=0`, `compositing=0`, `safepointgc=0\|debug`, `httpcache=0`, `fcdebug=<level>` | engine switches for debugging |
+| `gpu=0`, `compositing=0`, `safepointgc=0\|debug`, `httpcache=0`, `scripttimeout=<s>`, `fcdebug=<level>` | engine switches for debugging |
 | `debug=1` | `browser.debug`, the engine test hooks and `window.blTest` |
 | `relay` | only with `debug=1`: another relay for this load, never stored |
-| `env` | only with `debug=1`: `KEY=value,...` expert switches (`BL_*`, `JSC_*`, `FC_*`); switches the core owns map to typed options or are ignored, `BL_EXTRA_CA` never comes from a link |
+| `env` | only with `debug=1`: `KEY=value,...` unchanged as `engine.env` (`BL_*`, `JSC_*`, `FC_*`); `createBrowser` refuses switches the core owns (so `BL_EXTRA_CA` never comes from a link) and the demo shows the error |
 
 An extra CA certificate only comes through code: with `debug=1` a test sets
-`window.blTestOptions = { engine: { extraCA } }` before the start (merged into the options of
-`createBrowser`).
+`window.blTestOptions = { engine: { extraCA } }` before the start, merged into the options of
+`createBrowser` like on the core test host page (plain objects key by key, other values replace).
 
 `window.blTest` (with `debug=1`): `browser`, `view()`, `views()`, `open(url)`, `load(url)`,
 `eval(source)`, `pagePixel(x, y)`, `pageRow(y)`, `memory(report?)`, `memoryPressure()`,
@@ -50,6 +50,11 @@ new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addr
 Settings, bookmarks and permission decisions are prefs of the profile on the server
 (`@browser-lite/profile`, so they follow to other devices); history, the session and the access
 tokens stay in localStorage of this device. Pages store in the OPFS namespace `browserlite`.
+
+The prefs of the server only arrive in `storage.beforeStart`, after the engine options are fixed:
+the engine starts with the settings of the last start on this device, takes changed user agent,
+languages, color scheme and page settings right away and starts once more when the time zone,
+the emulated device or "Restore tabs at start" changed on another device.
 
 ## Modules (src/)
 

@@ -160,7 +160,7 @@ check('memory pressure: a discarded tab loads when clicked', !!(await app.wait('
 await app.context.close();
 
 // A hang after an input: the engine thread finishes no task any more
-const hang = await openApp({ url: `${siteURL}stuck`, env: 'BL_SCRIPT_TIMEOUT=20' });
+const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '20' });
 await hang.wait('loaded', 'stuck');
 const origin = await canvasOrigin(hang.page);
 const boot = () =>
