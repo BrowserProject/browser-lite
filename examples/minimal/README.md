@@ -35,4 +35,8 @@ dev and preview proxy for `/wisp/` to another relay (default `http://127.0.0.1:5
 `Cross-Origin-Embedder-Policy: require-corp` and `Cross-Origin-Resource-Policy: same-origin` with
 every file (`serveStatic` of `@browser-lite/server/static` does), serve `.wasm` as
 `application/wasm`, and forward `/wisp/` (WebSocket) to the relay. `sw.js` must stay at the root
-of the site, so its scope covers the page.
+of the site, so its scope covers the page. The engine is in the unversioned `engine/`, so it must
+not be cached as immutable: `browser-lite-server` with `SITE_DIR` does that for `/engine/`, and
+returning visitors would keep an old engine next to a new core. Move it to a folder per version
+and change `engineUrl` in `src/main.ts`, or serve it with revalidation
+([Serving the engine](../../docs/embedding.md#serving-the-engine)).

@@ -7,9 +7,8 @@ Node 22 or newer, no framework.
 
 ## Install
 
-```bash
-npm install @browser-lite/server
-```
+Not on npm yet: install the tarball of a GitHub release
+([README, Install](../../README.md#install)), or run the server image of the release.
 
 ## Example
 
@@ -95,7 +94,7 @@ image (`SERVER_IMAGE:<version>` of `versions.env`, `Dockerfile` target `server`)
 | Variable | |
 | --- | --- |
 | `PORT`, `HOST` | default `5001`, `0.0.0.0` |
-| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable |
+| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable, so every engine version needs its own folder below it |
 | `PROFILE_DIR` | directory of the profile; without it `/profile/` answers 404 |
 | `PROFILE_MAX_MB` | limit of the profile, default 64 |
 | `ALLOWED_HOSTS` | host names of relay and profile besides IP addresses and `localhost`, comma separated (`.ts.net` matches all names ending so); other `Host` headers get 403 (DNS rebinding) |

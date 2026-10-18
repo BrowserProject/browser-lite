@@ -1,8 +1,6 @@
 # Exceptions for tools/check-style.sh, one per line: <rule> <path pattern> <reason>
 # Rules: ascii, dash, german. The pattern is a shell pattern, * also matches across /.
 
-# Still German, translated during the restructuring (remove the line when done)
-
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
 german toolchain/Dockerfile comments change the toolchain image tag
 german toolchain/*.cpp      comments change the toolchain image tag

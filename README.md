@@ -45,8 +45,16 @@ npm install ./browser-lite-server-0.1.0.tgz      # on the server
 ```
 
 Unpack the engine archive of the same release (`engine.js`, `engine.wasm`, `engine.data` with
-`.br`/`.gz`, `manifest.json`, `THIRD_PARTY_NOTICES.txt`) into a folder of your site, for example
-`public/engine/`. Engine and core versions must match.
+`.br`/`.gz`, `manifest.json`, `THIRD_PARTY_NOTICES.txt`) into a folder of your site named after
+the version; engine and core versions must match:
+
+```bash
+mkdir -p public/engine/0.1.0
+tar -xzf browser-lite-engine-0.1.0.tar.gz --strip-components=1 -C public/engine/0.1.0
+```
+
+Every engine version gets a new folder, so its files can be cached as immutable
+([Serving the engine](docs/embedding.md#serving-the-engine)).
 
 ## Quick start
 
@@ -55,7 +63,7 @@ import { createBrowser } from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
 
 const browser = await createBrowser({
-  engineUrl: '/engine/',
+  engineUrl: '/engine/0.1.0/',
   transport: new WispTransport({ url: '/wisp/', token: () => fetch('/relay-token').then((r) => r.text()) }),
   serviceWorker: { url: '/sw.js' }, // @browser-lite/core/sw/sw.js and media-sw.js, for <video>/<audio>
 });
@@ -87,15 +95,8 @@ the pages do runs in your origin: no third-party scripts on the browser page. Mo
 
 ## Try the demo
 
-`apps/demo` is a full browser (tabs, history, bookmarks, settings, profile) on the packages. With
-an engine from CI (artifact `engine` of a green run) in `build/webcore/bin/`:
-
-```bash
-npm ci && npm run build
-PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &
-npm run dev -w @browser-lite/demo      # http://localhost:5173/
-```
-
+`apps/demo` is a full browser (tabs, history, bookmarks, settings, profile) on the packages. It
+runs with an engine from CI (artifact `engine` of a green run) in `build/webcore/bin/`; commands,
 URL parameters and modules: [apps/demo/README.md](apps/demo/README.md); deployment on the home
 server: [apps/demo/deploy/README.md](apps/demo/deploy/README.md).
 

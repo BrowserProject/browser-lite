@@ -11,15 +11,9 @@ npm run check                           # style, Biome, types, contract tests
 npm test                                # unit tests of all workspaces
 ```
 
-Run the demo against an engine folder (from CI or built below):
-
-```bash
-PROFILE_DIR=build/profile node packages/server/dist/bin/browser-lite-server.js &   # relay and profile on :5001
-npm run dev -w @browser-lite/demo       # Vite on :5173, engine from build/webcore/bin (BL_ENGINE_DIR)
-```
-
-Open `http://localhost:5173/?url=https://example.com`. Like in the container (packaged demo and
-relay on one port):
+The demo runs against an engine folder from CI or built below
+([apps/demo/README.md](../apps/demo/README.md)). Like in the container (packaged demo and relay
+on one port):
 
 ```bash
 tools/package-demo.sh build/webcore/bin build/demo
@@ -70,9 +64,8 @@ dropped, `canHandleRequest()` false), so the engine has a full client; `ENABLE_F
 curl without FTP support (every protocol list fails); `Thread::suspend` cannot work without
 signals (one thread per VM, no sampling profiler).
 
-Changes to `toolchain/`, `deps/` or `engine/patches/` rebuild large parts of WebKit. Keep the
-paths of `build/`, `sysroot/`, `third_party/`, `toolchain/` and `deps/` stable: they are part of
-cache keys.
+Changes to `toolchain/`, `deps/` or `engine/patches/` rebuild large parts of WebKit; the rules
+for them are in [AGENTS.md](../AGENTS.md#expensive-changes).
 
 ## Dependencies
 
@@ -131,19 +124,21 @@ More suites: [tests/README.md](../tests/README.md).
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes to `main` and on pull requests; the job list with
-names is in the file. In short: lint and style, the JavaScript job (`npm run check` parts, unit
+names is in the file. In short: lint and style, the JavaScript job (`npm run check`, unit
 tests, engine JS parts in node, demo build), the toolchain image, WebKit fetch and patch check,
-dependencies, JSC with its tests, the engine with node tests, browser suites in Chromium, and the
+dependencies, JSC with its tests, the engine with node tests, browser suites in Chromium (the
+core suites, the DOM tests of the packages, the examples, the demo suites), and the
 informational compatibility job with real sites ([compatibility.md](compatibility.md)). After a
 green run on `main`, `.github/workflows/deploy.yml` builds the container and deploys the demo.
 
 Costs and caches:
 
-- The engine is cached by a hash of everything that goes into it; an unchanged engine skips the
-  build. The sysroot is cached by `deps/` and the toolchain image.
+- The engine and the jsc shell are cached by a hash of everything that goes into them; an
+  unchanged engine or jsc skips its build. The sysroot is cached by `deps/` and the toolchain
+  image.
 - A cold WebKit build takes longer than GitHub's 6 hour job limit. The jsc and engine jobs stop
   themselves before it (`timeout 320m`) and save ccache under a key with `github.run_attempt`, so
-  **re-running the failed job** continues from the saved cache. Older engine ccache entries are
-  deleted (10 GB cache limit per repository).
+  **re-running the failed job** continues from the saved cache. The job `ccache-prune` keeps only
+  the newest jsc and engine ccache entry (10 GB cache limit per repository).
 - Node comes from `NODE_VERSION` in `versions.env`; jobs inside the toolchain image use the Node
   of emsdk.

@@ -2,10 +2,12 @@
 //
 //   node tests/run.mjs <suite> [filter] [--engine=<dir>]
 //
-// suite: contract, engine-js, engine, core, demo, examples, compat. filter: only files whose name
-// contains it. The suites engine, core, demo, examples and compat get the engine folder as first
-// argument (--engine, BL_ENGINE_DIR or build/webcore/bin). For demo the demo is built once into a
-// temporary folder unless E2E_SITE_DIR names one (for example the output of tools/package-demo.sh).
+// suite: contract, engine-js, engine, packages, core, demo, examples, compat. filter: only files
+// whose name contains it. packages runs packages/<name>/test/browser.mjs instead (DOM tests in
+// Chromium without the engine), the filter matches the package name. The suites engine, core,
+// demo, examples and compat get the engine folder as first argument (--engine, BL_ENGINE_DIR or
+// build/webcore/bin). For demo the demo is built once into a temporary folder unless E2E_SITE_DIR
+// names one (for example the output of tools/package-demo.sh).
 // In GitHub Actions every test is a collapsible group. Exit code 1 when a test failed.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -15,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const SUITES = ['contract', 'engine-js', 'engine', 'core', 'demo', 'examples', 'compat'];
+const SUITES = ['contract', 'engine-js', 'engine', 'packages', 'core', 'demo', 'examples', 'compat'];
 const WITH_ENGINE = new Set(['engine', 'core', 'demo', 'examples', 'compat']);
 
 const args = process.argv.slice(2);
@@ -32,10 +34,14 @@ const engineDir = path.resolve(
 );
 const ci = !!process.env.GITHUB_ACTIONS;
 
-const folder = path.join(here, suite);
+const folder = suite === 'packages' ? path.join(root, 'packages') : path.join(here, suite);
 const tests = fs
   .readdirSync(folder)
-  .filter((name) => name.endsWith('-test.mjs') && name.includes(filter))
+  .filter((name) => name.includes(filter))
+  .map((name) => (suite === 'packages' ? path.join(name, 'test', 'browser.mjs') : name))
+  .filter((name) =>
+    suite === 'packages' ? fs.existsSync(path.join(folder, name)) : name.endsWith('-test.mjs'),
+  )
   .sort();
 if (!tests.length) {
   console.error(`No tests in ${path.relative(root, folder)} match "${filter}"`);

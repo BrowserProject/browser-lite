@@ -31,9 +31,13 @@ ENGINE_DIR=build/webcore/bin node examples/existing-site/server.mjs   # http://l
 
 ## Copy
 
-Copy the folder of the example into your project and run `npm install` there. Everything an
-example needs is inside its folder (the `minimal` tsconfig does not extend the repository's);
-the package versions in its `package.json` are the ones of this repository.
+Copy the folder of the example into your project. Everything an example needs is inside its
+folder (the `minimal` tsconfig does not extend the repository's); the package versions in its
+`package.json` are the ones of this repository. The packages are not on npm yet: put the tarballs
+of the matching release next to `package.json`, point the dependencies at them
+(`"@browser-lite/core": "file:./browser-lite-core-0.1.0.tgz"`, the same for the others), then
+run `npm install` ([README, Install](../README.md#install)). Inside this repository the examples
+use the workspace packages instead.
 
 ## Test
 

@@ -8,6 +8,7 @@
       "examples/**",
       "tests/**/*.mjs",
       "tests/**/*.js",
+      "tools/**/*.mjs",
       "!tests/jsc",
       "!tests/fixtures/wasm/program.js",
       "!tests/fixtures/wasm/program64.js",

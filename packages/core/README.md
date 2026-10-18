@@ -6,11 +6,9 @@ handlers (unstyled defaults in `@browser-lite/ui`).
 
 ## Install
 
-```bash
-npm install @browser-lite/core @browser-lite/transport-wisp
-```
-
-Host the engine files (`engine.js`, `engine.wasm`, `engine.data`) on the same origin as the page.
+Not on npm yet: install the tarballs of a GitHub release, usually together with
+`@browser-lite/transport-wisp` ([README, Install](../../README.md#install)). Host the engine
+files of the same release on the same origin as the page.
 
 ## Minimal example
 
@@ -19,7 +17,7 @@ import { createBrowser } from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
 
 const browser = await createBrowser({
-  engineUrl: '/engine/',
+  engineUrl: '/engine/0.1.0/', // one folder per engine version
   transport: new WispTransport({ url: 'wss://example.com/wisp/' }),
   serviceWorker: { url: '/sw.js' }, // needed for <video>/<audio>, see below
 });
@@ -28,9 +26,10 @@ view.on('title', ({ title }) => console.log(title));
 ```
 
 The container needs a size (for example `height: 100vh`); the view fills it and follows its size.
-For the service worker serve `sw.js` and `media-sw.js` from the same folder (`sw.js` loads
-`media-sw.js` next to itself); both are package exports (`@browser-lite/core/sw/sw.js`,
-`@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them.
+`sw.js` and `media-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
+`@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them; how to serve
+them or load `media-sw.js` into the site's own worker:
+[Service worker](../../docs/embedding.md#service-worker).
 
 ## Options of createBrowser
 
@@ -69,7 +68,24 @@ an event (`browser.on`, `view.on`, `download.on`), with any number of listeners.
 | `selectPopup`, `colorPicker`, `dateTimePicker` | cancel |
 
 Every request carries an `AbortSignal` that aborts when the page hides the popup, the view closes,
-the engine ends or the page opens the same popup again (the old answer is then ignored). Without a `download` listener finished downloads are saved automatically.
+the engine ends or the page opens the same popup again (the old answer is then ignored).
+
+The events are listed with their payloads in `BrowserEvents` and `ViewEvents` of
+[src/types.ts](src/types.ts) (a `Download` has `progress`, `done` and `error`). Some only report
+what a browser UI has to do, and nothing happens without a listener:
+
+| Event | What the host does |
+|---|---|
+| `new-view` (browser) | `window.open` or `target=_blank`: the view runs but has no container, so it cannot be seen. `view.attach(element)` it (for example in a new tab), or `view.close()` it |
+| `open-tab` | Ctrl or middle click on a link: open `url` in a new view, or ignore it |
+| `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
+| `context-menu` | Show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
+| `print` | `window.print()` or `view.print()`: show or save the PDF |
+| `source` | `view.viewSource()`: show the text |
+| `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
+| `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)) |
+
+Without a `download` listener finished downloads are saved automatically.
 
 ## Services
 
@@ -78,8 +94,7 @@ the engine ends or the page opens the same popup again (the old answer is then i
 - `audio()`: Web Audio through an AudioWorklet (`dist/audio-worklet.js`, export
   `@browser-lite/core/audio-worklet.js`).
 - `media({ pictureInPicture })`: `<video>`/`<audio>` through hidden media elements of the host;
-  media files need the service worker: the standalone `sw.js` together with `media-sw.js` in the
-  same folder, or `importScripts('media-sw.js')` in a worker of the site.
+  media files need the service worker ([Service worker](../../docs/embedding.md#service-worker)).
   Without it a `warning` event with code `media-sw-missing` follows.
   A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
 - `capture()`: camera, microphone and screen.
@@ -95,18 +110,11 @@ A feature without its service is missing for the pages, like in a browser withou
 
 `createBrowser` and friends throw `BrowserLiteError` with `code`:
 `unsupported` (`missing` lists the host features), `not-cross-origin-isolated`,
-`engine-load-failed`, `already-running` (one browser per page; destroy it before creating the next), `invalid-options`, `storage-locked`
-(`clearStorage` while in use), `destroyed`, `crashed`.
+`engine-load-failed`, `already-running` (one browser per page; destroy it before creating the
+next), `invalid-options`, `storage-locked` (`clearStorage` while in use), `destroyed`, `crashed`.
 
-## Hosting requirements
+## Hosting
 
-- The page is cross-origin isolated: `Cross-Origin-Opener-Policy: same-origin` and
-  `Cross-Origin-Embedder-Policy: require-corp` (`checkSupport()` tells what is missing).
-- Engine files and `audio-worklet.js` on the same origin; never bundle `engine.js`.
-- For media files a service worker whose scope covers the page and which loads `media-sw.js`.
-- One running browser per storage namespace across the tabs of the origin (Web Lock); a second
-  tab keeps its data in memory (the HTTP and bytecode caches stay shared) and gets the warning
-  `storage-locked`.
-
-Embedding modes, headers, CSP, relay, storage and lifecycle in detail:
-[docs/embedding.md](../../docs/embedding.md); before production: [docs/security.md](../../docs/security.md).
+Cross-origin isolation (`checkSupport()` tells what is missing), engine files, service worker,
+CSP, relay, storage and lifecycle: [docs/embedding.md](../../docs/embedding.md); before
+production: [docs/security.md](../../docs/security.md).
