@@ -17,7 +17,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "peerDependencies": {
     "@browser-lite/core": "0.1.0"
