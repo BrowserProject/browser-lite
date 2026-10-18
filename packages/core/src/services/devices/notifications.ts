@@ -46,7 +46,6 @@ export function installNotifications(ctx: ServiceContext): void {
     notification.addEventListener('error', () => send(3));
   });
   ctx.on<{ id: string }>('notification-close', (data) => notifications.get(data.id)?.close());
-  ctx.provide('notifications', true);
   ctx.signal.addEventListener('abort', () => {
     for (const notification of notifications.values()) notification.close();
     notifications.clear();

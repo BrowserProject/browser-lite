@@ -46,6 +46,10 @@ export class Debug implements DebugApi {
     return module.HEAPU8?.length ?? 0;
   }
 
+  memoryUsed(): number {
+    return this.host.ready ? this.host.module._bl_memory_used() : 0;
+  }
+
   pagePixel(view: View, x: number, y: number): [number, number, number] {
     const image = snapshot(view);
     if (!image) return [0, 0, 0];
@@ -79,6 +83,14 @@ export class Debug implements DebugApi {
 
   crash(kind: 'abort' | 'trap'): void {
     if (this.host.ready) this.host.module._bl_crash_for_testing(kind === 'trap' ? 1 : 0);
+  }
+
+  gpu(action: 'lose' | 'restore' | 'lose-webgl'): void {
+    const { module, ready } = this.host;
+    if (!ready) return;
+    if (action === 'lose') module._bl_gpu_lose_context_for_testing();
+    else if (action === 'restore') module._bl_gpu_restore_context_for_testing();
+    else module._bl_webgl_lose_context_for_testing();
   }
 
   memoryPressure(): void {

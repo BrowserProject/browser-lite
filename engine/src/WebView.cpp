@@ -292,7 +292,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setVisualViewportAPIEnabled(true);
     settings.setBeaconAPIEnabled(true);
     settings.setDataListElementEnabled(true);
-    settings.setAsyncClipboardAPIEnabled(true);
+    settings.setAsyncClipboardAPIEnabled(featureEnabled(Feature::Clipboard));
     settings.setGenericCueAPIEnabled(true);
     settings.setInputTypeColorEnabled(true);
     settings.setInputTypeDateEnabled(true);

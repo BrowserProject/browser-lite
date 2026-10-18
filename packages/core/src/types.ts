@@ -357,7 +357,10 @@ export interface RequestHandlers {
    * Default: alert ignored, confirm false, prompt null, beforeunload true.
    */
   dialog(request: DialogRequest): boolean | string | null | undefined;
-  /** Default 'deny'. */
+  /**
+   * Default 'deny'. Pages only see notifications the host browser shows: grant 'notifications'
+   * after the host allowed them (Notification.requestPermission), as the ui permission prompt does.
+   */
   permission(request: PermissionRequest): Promise<'grant' | 'deny'>;
   /** Default: the native file dialog of the host browser. */
   fileChooser(request: FileChooserRequest): Promise<File[] | null>;
@@ -472,6 +475,8 @@ export interface DebugApi {
   eval(view: View, source: string): void;
   /** Size of the engine memory; a report level writes a report to the console. */
   memory(report?: 0 | 1 | 2 | 3): number;
+  /** Bytes allocated with malloc in the engine memory (walks the heap, slow). */
+  memoryUsed(): number;
   /** Color at a CSS pixel of the visible page. */
   pagePixel(view: View, x: number, y: number): [number, number, number];
   pageRow(view: View, y: number): [number, number, number][];
@@ -480,6 +485,11 @@ export interface DebugApi {
   rtcState(): unknown;
   /** Crashes the engine thread for real: abort() or a WebAssembly trap. */
   crash(kind: 'abort' | 'trap'): void;
+  /**
+   * Simulates a lost GPU: 'lose' and 'restore' the WebGL context the engine paints with,
+   * 'lose-webgl' loses the host contexts of the WebGL canvases of the pages.
+   */
+  gpu(action: 'lose' | 'restore' | 'lose-webgl'): void;
   /** Behaves like a memory-pressure message of the engine. */
   memoryPressure(): void;
 }

@@ -47,6 +47,8 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: Core (options, engine environment against engine/abi.json, media service worker)
+        run: npm test -w @browser-lite/core
       - name: Server (relay, SSRF, limits, static files, tokens, profile store, CLI)
         run: npm test -w @browser-lite/server
       - name: Wisp transport against the server (token, echo, reconnect, dead connection probe)
@@ -61,6 +63,8 @@ jobs:
         run: node tests/engine/http-cache-test.mjs
       - name: Engine contract (engine/abi.json against the sources)
         run: node tests/contract/abi-test.mjs
+      - name: Dependency direction of the packages
+        run: node tests/contract/deps-test.mjs
 
   toolchain:
     name: Toolchain image
@@ -393,6 +397,9 @@ jobs:
           npm run build
           npx playwright install --with-deps chromium
       # Every test runs even if an earlier one failed (the job stays red then)
+      - name: Core embedding (public API, test host page, restart in the page, storage namespaces)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: node tests/core/smoke-test.mjs build/webcore/bin
       - name: Network
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: cd tests/e2e && node network-test.mjs

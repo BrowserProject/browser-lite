@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { CORE_ENV, engineEnv, preferenceFlags, resolveConfig } from '../dist/config.js';
 import { audio, BrowserLiteError, devices, media, webrtc } from '../dist/index.js';
 
+const abi = JSON.parse(readFileSync(new URL('../../../engine/abi.json', import.meta.url), 'utf8'));
 const PAGE = 'https://site.example/app/index.html';
 const transport = Object.assign(new EventTarget(), { connected: true, openTCP() {} });
 const base = { engineUrl: '/engine', transport };
@@ -120,13 +122,64 @@ test('engine environment', () => {
     BL_EXTRA_CA: '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n',
     BL_KEEP_SESSION_COOKIES: '1',
   });
-  const plain = engineEnv(resolveConfig(base, PAGE), [], false);
-  assert.equal(plain.BL_FEATURES, '');
-  assert.equal(plain.BL_OPFS, '0');
-  assert.equal(plain.BL_TEST_HOOKS, undefined);
+  const plain = engineEnv(resolveConfig(base, PAGE), [], true);
+  assert.deepEqual(plain, {
+    BL_FEATURES: '',
+    BL_STORAGE_NAMESPACE: 'browserlite',
+    TZ: plain.TZ,
+  });
   for (const key of Object.keys(env))
     if (key.startsWith('BL_') && !key.startsWith('BL_MEMORY'))
       assert.ok(CORE_ENV.includes(key), key);
+});
+
+test('storage and HTTP cache switches', () => {
+  const memory = engineEnv(resolveConfig(base, PAGE), ['audio'], false);
+  assert.equal(memory.BL_OPFS, '0');
+  assert.equal(memory.BL_HTTP_CACHE, '0');
+  assert.equal(memory.BL_BYTECODE_CACHE, '0');
+  const noCache = engineEnv(
+    resolveConfig({ ...base, engine: { httpCache: false } }, PAGE),
+    [],
+    true,
+  );
+  assert.equal(noCache.BL_HTTP_CACHE, '0');
+  assert.equal(noCache.BL_OPFS, undefined);
+  assert.equal(noCache.BL_BYTECODE_CACHE, undefined);
+});
+
+test('core-owned switches match engine/abi.json', () => {
+  const owned = abi.env
+    .filter((entry) => entry.class === 'core-owned' || entry.class === 'debug-only')
+    .map((entry) => entry.name);
+  assert.deepEqual([...CORE_ENV].sort(), owned.sort());
+  for (const key of CORE_ENV)
+    assert.equal(
+      code(() => resolveConfig({ ...base, engine: { env: { [key]: '1' } } }, PAGE)),
+      'invalid-options',
+      key,
+    );
+  const names = new Set(abi.env.map((entry) => entry.name));
+  const config = resolveConfig(
+    {
+      ...base,
+      errorPage: '<p></p>',
+      keepSessionCookies: true,
+      debug: true,
+      engine: {
+        gpu: true,
+        compositing: true,
+        safepointGC: true,
+        httpCache: false,
+        scriptTimeoutSeconds: 1,
+        extraCA: '-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n',
+        log: true,
+      },
+    },
+    PAGE,
+  );
+  for (const key of Object.keys(engineEnv(config, ['audio'], false)))
+    assert.ok(names.has(key), `${key} is not in engine/abi.json`);
 });
 
 test('features of the services', () => {

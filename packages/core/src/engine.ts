@@ -61,7 +61,11 @@ export interface EngineExports {
   _bl_input_mark_address: Export;
   _bl_eval_script: Export;
   _bl_memory_report: Export;
+  _bl_memory_used: Export;
   _bl_crash_for_testing: Export;
+  _bl_gpu_lose_context_for_testing: Export;
+  _bl_gpu_restore_context_for_testing: Export;
+  _bl_webgl_lose_context_for_testing: Export;
   _bl_host_call_result: Export;
   _bl_media_event: Export;
   _bl_media_frame: Export;
@@ -142,7 +146,6 @@ export interface EngineModule extends EngineExports, EngineHooks {
   printErr?: (text: string) => void;
   preRun?: ((module: EngineModule) => void)[];
   blTransport?: Transport;
-  blHttpCacheDisabled?: boolean;
   blEngineWorker?: () => Worker | null;
   blPresenterWorker?: () => Worker | null;
   blWriteFiles?: (files: { file: Blob; path: string }[]) => Promise<boolean[]>;

@@ -42,7 +42,7 @@ type EventHandler = (
 
 /** The live browser of this page (one at a time). */
 let live: BrowserImpl | null = null;
-/** An earlier engine could not be stopped (engine without blShutdown): it still runs. */
+/** An earlier engine could not be stopped (blShutdown failed): its threads may still run. */
 let leaked = false;
 
 /**
@@ -72,7 +72,7 @@ export async function createBrowser(options: BrowserOptions): Promise<Browser> {
   if (leaked)
     throw new BrowserLiteError(
       'already-running',
-      'The previous engine could not be stopped (engine without blShutdown); reload the page',
+      'The previous engine could not be stopped; reload the page',
     );
   const browser = new BrowserImpl(config);
   live = browser;
@@ -312,7 +312,6 @@ class BrowserImpl implements Browser, ViewHost {
     const base = this.config.engineBase;
     const module: Partial<EngineModule> = {
       blTransport: this.config.transport,
-      blHttpCacheDisabled: !this.config.httpCache,
       locateFile: (path) => new URL(path, base).href,
       mainScriptUrlOrBlob: `${base}engine.js`,
       print: (text) => console.log('[engine]', text),
@@ -566,10 +565,6 @@ class BrowserImpl implements Browser, ViewHost {
     return this.module.stringToNewUTF8(value ?? '');
   }
 
-  notifications(): boolean {
-    return !!this.provided.get('notifications');
-  }
-
   // Files (upload, drop, paste) into the engine file system under /data/tmp (OPFS, not WASM
   // memory). The page reads them as long as it has its File objects (also after navigating),
   // so they are deleted only when the view closes. The engine thread reads the files itself.
@@ -775,15 +770,10 @@ class BrowserImpl implements Browser, ViewHost {
     this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.lifetime.abort();
     const module = this.module;
-    if (typeof module.blShutdown === 'function') {
-      try {
-        module.blShutdown();
-      } catch (error) {
-        console.warn('[browser-lite] engine shutdown failed:', error);
-        leaked = true;
-      }
-    } else if (module.HEAPU8) {
-      // An engine without blShutdown keeps its threads: no second engine on this page
+    try {
+      module.blShutdown?.();
+    } catch (error) {
+      console.warn('[browser-lite] engine shutdown failed:', error);
       leaked = true;
     }
     for (const key of Object.keys(module) as (keyof EngineModule)[])

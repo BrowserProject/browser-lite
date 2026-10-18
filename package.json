@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "check": "tools/check-style.sh && biome ci && tsc -b",
+    "check": "tools/check-style.sh && biome ci && tsc -b && node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs",
     "test": "npm test --workspaces --if-present"
   },
   "devDependencies": {

@@ -298,8 +298,9 @@ void pumpOnMainThread(void*)
 }
 
 // Error for the reason a stream ended. The transport may not confirm the
-// connection (Wisp does not), the stream then counts as open right away: a
-// connection that fails at the relay only ends afterwards. CurlRequest turns
+// connection (Wisp does not, see packages/transport-wisp/PROTOCOL.md), the
+// stream then counts as open right away: a connection that fails at the relay
+// only ends afterwards. CurlRequest turns
 // these errors back into curl's codes (patch 0039), which pick the error page.
 int errorForCloseReason(CloseReason reason, bool opened)
 {

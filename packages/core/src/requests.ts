@@ -33,7 +33,6 @@ interface RequestsHost {
   readonly ready: boolean;
   text(value: string | null | undefined): number;
   writeUploads(view: ViewImpl, files: File[]): Promise<string[]>;
-  notifications(): boolean;
 }
 
 type Picker = 'select' | 'color' | 'datetime';
@@ -147,18 +146,6 @@ export class Requests {
     if (controller.signal.aborted || !this.permissions.has(data.id)) return;
     this.permissions.delete(data.id);
     this.done(view, controller);
-    // The host browser asks once itself for notifications
-    if (
-      decision === 'grant' &&
-      data.kind === 'notifications' &&
-      this.host.notifications() &&
-      typeof Notification !== 'undefined' &&
-      Notification.permission !== 'granted'
-    )
-      decision =
-        (await Notification.requestPermission().catch(() => 'denied')) === 'granted'
-          ? 'grant'
-          : 'deny';
     if (!this.host.ready) return;
     config.permissions.set(data.origin, data.kind, decision);
     module._bl_permission_answer(data.id, decision === 'grant' ? 1 : 2);

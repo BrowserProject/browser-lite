@@ -1,51 +1,36 @@
-// Test host of @browser-lite/core: one view filling the page, everything reachable through
-// window.blTest for tests/core/smoke-test.mjs. Uses only the public package entry points.
+// Test host of @browser-lite/core: the views fill the page, only the public package entry points
+// are used. window.blTest is the shared test hook object (same as the demo with ?debug=1);
+// window.blHost holds what only this page offers to tests/core/smoke-test.mjs (recorded events,
+// request answers, start/stop). Before the start a test may set window.blTestOptions (merged
+// into the BrowserOptions).
 //   ?relay=ws://host/wisp/  relay URL (default: /wisp/ of this server)
 //   ?engine=/engine/        engine folder
-//   ?transport=legacy       the old client web/transport.js instead of @browser-lite/transport-wisp
-//   ?legacyCloseCodes=1     pass its numeric close codes through (engines before the string contract)
 //   ?url=...                first page
 //   ?persistent=1           storage in OPFS (beforeStart records the directory name)
+//   ?namespace=name         storage namespace (with persistent=1)
 //   ?device=400x300x2       emulated device (width x height x pixel ratio)
+//   ?manual=1               no start on load
 import { checkSupport, createBrowser } from '@browser-lite/core';
+import { WispTransport } from '@browser-lite/transport-wisp';
 
 const params = new URLSearchParams(location.search);
 const relay = params.get('relay') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
 const engineUrl = params.get('engine') || '/engine/';
+const container = document.getElementById('view');
 
-// Wisp close codes of web/transport.js -> CloseReason of the core contract
-const CLOSE_REASONS = { 2: 'closed', 0x41: 'invalid', 0x42: 'name-not-resolved', 0x43: 'timeout', 0x44: 'refused', 0x47: 'timeout', 0x48: 'blocked', 0x49: 'throttled', 0x4a: 'unreachable' };
+let browser = null;
+let transport = null;
+let active = null;
+const views = [];
+const flags = { firstLayout: false, firstPaint: false, loaded: false };
 
-class LegacyTransport extends EventTarget {
-  constructor(Transport, url, passCodes) {
-    super();
-    this.inner = new Transport(url);
-    this.passCodes = passCodes;
-    this.inner.onconnectedchange = () => this.dispatchEvent(new Event('connectedchange'));
-  }
+const isPlainObject = (value) => Object.prototype.toString.call(value) === '[object Object]';
 
-  get connected() {
-    return this.inner.connected;
-  }
-
-  openTCP(host, port) {
-    const stream = this.inner.openTCP(host, port);
-    if (this.passCodes)
-      return stream;
-    const wrapper = {
-      send: (data) => stream.send(data),
-      close: () => stream.close(),
-      onopen: null,
-      ondata: null,
-      onsent: null,
-      onclose: null,
-    };
-    stream.onopen = () => wrapper.onopen?.();
-    stream.ondata = (data) => wrapper.ondata?.(data);
-    stream.onsent = (bytes) => wrapper.onsent?.(bytes);
-    stream.onclose = (code) => wrapper.onclose?.(typeof code === 'number' ? CLOSE_REASONS[code] || (code === 0x03 ? 'transport-down' : 'reset') : code);
-    return wrapper;
-  }
+function merge(base, extra) {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(extra ?? {}))
+    result[key] = isPlainObject(value) && isPlainObject(base[key]) ? merge(base[key], value) : value;
+  return result;
 }
 
 function deviceOption(text) {
@@ -53,77 +38,140 @@ function deviceOption(text) {
   return { width, height, pixelRatio };
 }
 
-async function makeTransport() {
-  if (params.get('transport') !== 'legacy') {
-    try {
-      const { WispTransport } = await import('@browser-lite/transport-wisp');
-      return { transport: new WispTransport({ url: relay }), kind: 'wisp' };
-    } catch (error) {
-      console.warn('transport-wisp not available, using web/transport.js:', error.message);
-    }
-  }
-  const { WispTransport } = await import('/web/transport.js');
-  return { transport: new LegacyTransport(WispTransport, relay, params.get('legacyCloseCodes') === '1'), kind: 'legacy' };
+function activate(view) {
+  if (active && active !== view && !active.closed) active.setVisible(false);
+  active = view;
+  view.setVisible(true);
+  view.focus();
 }
 
-const test = {
-  browser: null,
-  view: null,
-  transportKind: '',
+// Every view of the browser: recorded events, flags, and the active one is visible
+function track(view, prefix) {
+  views.push(view);
+  const record = (text) => host.events.push(prefix + text);
+  view.on('navigation', ({ url }) => record(`navigation:${url}`));
+  view.on('title', ({ title }) => record(`title:${title}`));
+  view.on('commit', ({ errorPage }) => record(`commit:${errorPage ?? ''}`));
+  view.on('first-layout', () => {
+    flags.firstLayout = true;
+  });
+  view.on('first-paint', () => {
+    flags.firstPaint = true;
+    record('first-paint');
+  });
+  view.on('load', () => {
+    flags.loaded = true;
+    record('load');
+  });
+  for (const type of ['user-activation', 'close']) view.on(type, () => record(type));
+  view.on('console', ({ level, message }) => record(`console:${level}:${message}`));
+  view.on('find', ({ matches }) => record(`find:${matches}`));
+  view.on('zoom', ({ zoom }) => record(`zoom:${zoom}`));
+  view.on('hover', ({ url }) => record(`hover:${url ?? ''}`));
+  view.on('context-menu', ({ x, y, editable }) => record(`context-menu:${x},${y},${editable}`));
+  view.on('print', ({ pdf }) => record(`print:${pdf.type}:${pdf.size > 1000}`));
+  view.on('source', ({ text }) => {
+    host.source = text;
+  });
+  view.on('close', () => {
+    views.splice(views.indexOf(view), 1);
+    if (active === view) {
+      active = null;
+      if (views.length) activate(views[views.length - 1]);
+    }
+  });
+}
+
+const blTest = {
+  get browser() {
+    return browser;
+  },
+  view: () => active,
+  views: () => [...views],
+  open(url) {
+    const view = browser.createView({ container, url: url || undefined });
+    track(view, '');
+    activate(view);
+    return view;
+  },
+  load(url) {
+    active.load(url);
+  },
+  eval: (source) => browser.debug.eval(active, source),
+  pagePixel: (x, y) => browser.debug.pagePixel(active, x, y),
+  pageRow: (y) => browser.debug.pageRow(active, y),
+  memory: (report) => browser.debug.memory(report),
+  memoryPressure: () => browser.debug.memoryPressure(),
+  crash: (kind) => browser.debug.crash(kind),
+  audioState: () => browser.debug.audioState(),
+  mediaState: () => browser.debug.mediaState(),
+  rtcState: () => browser.debug.rtcState(),
+  flags,
+};
+
+const host = {
   support: checkSupport(),
+  ready: null,
+  error: null,
+  beforeStart: null,
+  source: null,
   events: [],
+  warnings: [],
   downloads: [],
   selectRequests: [],
   selectAnswer: -1,
   permissionAnswer: 'deny',
   fileAnswer: null,
-  views: [],
-  warnings: [],
-  error: null,
-  /** Starts a browser with one view (again after destroy). */
+  /** Starts a browser with one view (again after stop); options are merged in last. */
   async start(options = {}) {
-    test.error = null;
-    const { transport, kind } = await makeTransport();
-    test.transportKind = kind;
-    try {
-      test.browser = await createBrowser({
-        engineUrl,
-        transport,
-        debug: true,
-        serviceWorker: { url: new URL('sw.js', location.href), scope: './' },
-        storage: params.get('persistent')
-          ? { persistent: true, beforeStart: async (directory) => { test.beforeStart = directory.name; } }
-          : { persistent: false },
-        ...(params.get('device') ? { device: deviceOption(params.get('device')) } : {}),
-        handlers: {
-          selectPopup(request) {
-            test.selectRequests.push({ items: request.items.map((item) => item.text), selectedIndex: request.selectedIndex, rect: request.rect });
-            return Promise.resolve(test.selectAnswer);
+    host.error = null;
+    transport = new WispTransport({ url: relay });
+    const storage = params.get('persistent')
+      ? {
+          persistent: true,
+          namespace: params.get('namespace') || undefined,
+          beforeStart: async (directory) => {
+            host.beforeStart = directory.name;
           },
-          permission(request) {
-            test.events.push(`permission:${request.kind}`);
-            return Promise.resolve(test.permissionAnswer);
-          },
-          fileChooser(request) {
-            test.events.push(`filechooser:${request.multiple}`);
-            return Promise.resolve(test.fileAnswer ? test.fileAnswer.map(([name, text]) => new File([text], name)) : null);
-          },
-          dialog(request) {
-            test.events.push(`dialog:${request.type}:${request.message}`);
-            return request.type === 'prompt' ? 'answer' : true;
-          },
+        }
+      : { persistent: false };
+    const base = {
+      engineUrl,
+      transport,
+      debug: true,
+      serviceWorker: { url: new URL('sw.js', location.href), scope: './' },
+      storage,
+      ...(params.get('device') ? { device: deviceOption(params.get('device')) } : {}),
+      handlers: {
+        selectPopup(request) {
+          host.selectRequests.push({ items: request.items.map((item) => item.text), selectedIndex: request.selectedIndex, rect: request.rect });
+          return Promise.resolve(host.selectAnswer);
         },
-        ...options,
-      });
+        permission(request) {
+          host.events.push(`permission:${request.kind}`);
+          return Promise.resolve(host.permissionAnswer);
+        },
+        fileChooser(request) {
+          host.events.push(`filechooser:${request.multiple}`);
+          return Promise.resolve(host.fileAnswer ? host.fileAnswer.map(([name, text]) => new File([text], name)) : null);
+        },
+        dialog(request) {
+          host.events.push(`dialog:${request.type}:${request.message}`);
+          return request.type === 'prompt' ? 'answer' : true;
+        },
+      },
+    };
+    try {
+      browser = await createBrowser(merge(merge(base, window.blTestOptions), options));
     } catch (error) {
-      test.error = { code: error.code, message: error.message };
+      host.error = { code: error.code, message: error.message };
+      transport.close();
       throw error;
     }
-    const browser = test.browser;
-    browser.on('warning', (event) => test.warnings.push(event.code));
+    browser.on('warning', (event) => host.warnings.push(event.code));
     browser.on('download', ({ download }) => {
       const entry = { filename: download.filename, state: download.state, size: 0, text: null };
-      test.downloads.push(entry);
+      host.downloads.push(entry);
       download.on('done', async () => {
         entry.state = download.state;
         entry.size = download.blob.size;
@@ -133,45 +181,29 @@ const test = {
         entry.state = download.state;
       });
     });
-    browser.on('crash', ({ reason }) => test.events.push(`crash:${reason}`));
+    browser.on('crash', ({ reason }) => host.events.push(`crash:${reason}`));
     for (const type of ['unresponsive', 'responsive', 'memory-pressure'])
-      browser.on(type, () => test.events.push(type));
+      browser.on(type, () => host.events.push(type));
+    // Views the pages open (window.open, target=_blank) become the active view
     browser.on('new-view', ({ view, opener }) => {
-      test.views.push(view);
-      test.events.push(`new-view:${opener?.id ?? 0}`);
-      view.on('navigation', ({ url }) => test.events.push(`popup-navigation:${url}`));
-      view.on('close', () => test.events.push('popup-close'));
+      host.events.push(`new-view:${opener?.id ?? 0}`);
+      view.attach(container);
+      track(view, 'popup-');
+      activate(view);
     });
-    const view = browser.createView({ container: document.getElementById('view'), url: params.get('url') || undefined });
-    test.view = view;
-    view.on('navigation', ({ url }) => test.events.push(`navigation:${url}`));
-    view.on('title', ({ title }) => {
-      test.title = title;
-      test.events.push(`title:${title}`);
-    });
-    for (const type of ['load', 'commit', 'first-paint', 'user-activation', 'close'])
-      view.on(type, () => test.events.push(type));
-    view.on('console', ({ level, message }) => test.events.push(`console:${level}:${message}`));
-    view.on('find', ({ matches }) => test.events.push(`find:${matches}`));
-    view.on('zoom', ({ zoom }) => test.events.push(`zoom:${zoom}`));
-    view.on('context-menu', ({ x, y, editable }) => test.events.push(`context-menu:${x},${y},${editable}`));
-    view.on('print', ({ pdf }) => test.events.push(`print:${pdf.type}:${pdf.size > 1000}`));
-    view.on('source', ({ text }) => {
-      test.source = text;
-    });
-    view.focus();
+    blTest.open(params.get('url'));
     return true;
   },
-  open(url) {
-    test.view.load(url);
-    test.view.focus();
-  },
   async stop() {
-    await test.browser?.destroy();
-    test.browser = null;
-    test.view = null;
+    await browser?.destroy();
+    transport?.close();
+    browser = null;
+    transport = null;
+    active = null;
+    views.length = 0;
   },
-  pagePixel: (x, y) => test.browser.debug.pagePixel(test.view, x, y),
 };
-window.blTest = test;
-test.ready = params.get('manual') ? Promise.resolve(false) : test.start().catch(() => false);
+
+window.blTest = blTest;
+window.blHost = host;
+host.ready = params.get('manual') ? Promise.resolve(false) : host.start().catch(() => false);
