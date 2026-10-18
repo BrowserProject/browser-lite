@@ -2,14 +2,11 @@
 # Rules: ascii, dash, german. The pattern is a shell pattern, * also matches across /.
 
 # Still German, translated during the restructuring (remove the line when done)
-german README.md            translation pending
 german versions.env         translation pending
 german LICENSE              translation pending
 german .github/*            translation pending
-german docs/*               translation pending
 german tests/*              translation pending
 german tools/*              translation pending
-ascii docs/*                translation pending
 
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
 german toolchain/*          comments change the toolchain image tag

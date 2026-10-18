@@ -82,4 +82,5 @@ The full list is `abi.json`; the rules behind it:
 - Shutdown: `Module.blShutdown()` closes all transport streams and terminates all engine
   threads, so the host can drop the module.
 
-Building: `tools/build-webcore.sh` ([docs/build.md](../docs/build.md)).
+Building: `tools/build-webcore.sh` ([docs/build.md](../docs/build.md)). Threads, storage, media
+and GC in context: [docs/architecture.md](../docs/architecture.md).

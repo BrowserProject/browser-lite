@@ -1,6 +1,6 @@
-# Kompatibilitaetsliste: echte Seiten, die CI im Job "kompatibilitaet" laedt.
+# Kompatibilitaetsliste: echte Seiten, die CI im Job "compat" laedt.
 # Eine URL pro Zeile. Ergebnis steht in der Zusammenfassung des CI-Laufs,
-# Screenshots im Artefakt "kompatibilitaet". Stand: docs/kompatibilitaet.md
+# Screenshots im Artefakt "compat". Stand: docs/compatibility.md
 https://example.com/
 https://www.google.com/search?q=wetter+bern
 https://www.google.com/maps

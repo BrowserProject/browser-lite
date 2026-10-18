@@ -330,7 +330,7 @@ await dialog.context.close();
 // (angehalten wird nur Video ohne Tonspur)
 const muted = await openApp({ url: siteURL + 'strom' });
 check('Stumm: Stream und Ton spielen', (await muted.wait('playing'))?.[2] === 'strom');
-// Nur, was ab hier kommt (am Anfang meldet stumme Wiedergabe kurz pause, siehe docs/stand.md)
+// Nur, was ab hier kommt (am Anfang meldet stumme Wiedergabe kurz pause, siehe docs/status.md)
 await muted.page.waitForTimeout(1000);
 muted.results.length = 0;
 await muted.newTab(siteURL + 'leer');

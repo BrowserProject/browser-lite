@@ -24,7 +24,7 @@ link_flags+=" -sINITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4G
 link_flags+=" -sNODERAWFS=1 -sENVIRONMENT=node,worker"
 # GC-Wurzeln: JSC sucht lebende Objekte konservativ auf dem Stack. Pointer in
 # WASM-Locals sieht er nicht. --spill-pointers schreibt sie vor jedem Call auf
-# den Shadow-Stack im Linear Memory, den der GC scannt (siehe docs/architektur.md).
+# den Shadow-Stack im Linear Memory, den der GC scannt (siehe docs/architecture.md).
 if [ "${BL_SPILL_POINTERS:-1}" = 1 ]; then
     # --profiling-funcs: behaelt die Namen im Binary, sonst findet der Pass nach
     # der Optimierung den Stack-Pointer nicht ("failed to find the stack pointer").

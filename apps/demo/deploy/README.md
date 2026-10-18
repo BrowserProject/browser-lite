@@ -5,7 +5,7 @@ One container (`Dockerfile` in the repository root): `browser-lite-server`
 profile in `/data` (named volume `profile` in `compose.yml`, kept across deploys). Port 8080,
 without HTTPS and without a relay token: the server is for internal testing only. The profile
 (cookies, so sign-ins) lies unencrypted on the server and without a token anyone who reaches the
-server can read it ([docs/profil.md](../../../docs/profil.md)). For a public server always set
+server can read it ([docs/security.md](../../../docs/security.md)). For a public server always set
 `RELAY_TOKEN` (at least 16 characters) and open the demo once with `?token=...`. Browsers grant
 SharedArrayBuffer only in a secure context, so an HTTPS proxy belongs in front (here
 `tailscale serve`, otherwise for example Caddy). `RELAY_TRUST_PROXY` stays unset: port 8080 is
