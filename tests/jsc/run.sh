@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Fuehrt die JSC-Tests mit der WASM-jsc-Shell in node aus.
-#   tests/jsc/run.sh [pfad/zu/jsc.js]
+# Runs the JSC tests with the WASM jsc shell in node.
+#   tests/jsc/run.sh [path/to/jsc.js]
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 jsc="${1:-$here/../../build/jsc/bin/jsc.js}"
-[ -f "$jsc" ] || { echo "jsc.js nicht gefunden: $jsc" >&2; exit 1; }
+[ -f "$jsc" ] || { echo "jsc.js not found: $jsc" >&2; exit 1; }
 
 fail=0
 run() {
@@ -27,7 +27,7 @@ run calls-gc --slowPathAllocsBetweenGCs=10 "$here/calls.js"
 run llint-caches "$here/llint-caches.js"
 run llint-caches-no-ics --useLLIntICs=false "$here/llint-caches.js"
 run gc-stress "$here/gc-stress.js"
-# GC sehr oft ausloesen (alle paar Allokationen)
+# Trigger the GC very often (every few allocations)
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"
 run gc-stress-collect-continuously --collectContinuously=1 "$here/gc-stress.js"
 

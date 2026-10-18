@@ -18,22 +18,20 @@ const SCOPE = '@browser-lite/';
 
 let failed = 0;
 const check = (name, problems) => {
-  console.log(`${problems.length ? 'FAIL' : 'ok  '} ${name}${problems.length ? `: ${problems.join('; ')}` : ''}`);
-  if (problems.length)
-    failed++;
+  console.log(
+    `${problems.length ? 'FAIL' : 'ok  '} ${name}${problems.length ? `: ${problems.join('; ')}` : ''}`,
+  );
+  if (problems.length) failed++;
 };
 
 function walk(dir) {
-  if (!existsSync(dir))
-    return [];
+  if (!existsSync(dir)) return [];
   const result = [];
   for (const name of readdirSync(dir)) {
     const full = path.join(dir, name);
     if (statSync(full).isDirectory()) {
-      if (name !== 'node_modules' && name !== 'dist')
-        result.push(...walk(full));
-    } else if (CODE.test(name))
-      result.push(full);
+      if (name !== 'node_modules' && name !== 'dist') result.push(...walk(full));
+    } else if (CODE.test(name)) result.push(full);
   }
   return result;
 }
@@ -41,15 +39,21 @@ function walk(dir) {
 const rel = (file) => path.relative(root, file).split(path.sep).join('/');
 const read = (file) => readFileSync(file, 'utf8');
 const json = (file) => JSON.parse(read(file));
-const subdirs = (dir) => (existsSync(dir) ? readdirSync(dir).filter((name) => statSync(path.join(dir, name)).isDirectory()) : []);
+const subdirs = (dir) =>
+  existsSync(dir)
+    ? readdirSync(dir).filter((name) => statSync(path.join(dir, name)).isDirectory())
+    : [];
 // Comments do not count
-const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'\\])\/\/.*$/gm, '$1');
+const stripComments = (text) =>
+  text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:"'\\])\/\/.*$/gm, '$1');
 
 // Every module specifier with the kind of import: 'type' (import type / export type), 'value'
 function imports(text) {
   const result = [];
   const code = stripComments(text);
-  for (const match of code.matchAll(/\b(import|export)\s+(type\s+)?(?:[\w*{},\s$]*?\s+from\s+)?['"]([^'"]+)['"]/g))
+  for (const match of code.matchAll(
+    /\b(import|export)\s+(type\s+)?(?:[\w*{},\s$]*?\s+from\s+)?['"]([^'"]+)['"]/g,
+  ))
     result.push({ specifier: match[3], type: !!match[2] });
   for (const match of code.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g))
     result.push({ specifier: match[1], type: false });
@@ -93,7 +97,10 @@ for (const name of ['@browser-lite/transport-wisp', '@browser-lite/ui', '@browse
   const problems = [];
   for (const file of sources(name)) {
     for (const { specifier, type } of imports(read(file))) {
-      if (packageName(specifier) === '@browser-lite/core' && (!type || specifier !== '@browser-lite/core'))
+      if (
+        packageName(specifier) === '@browser-lite/core' &&
+        (!type || specifier !== '@browser-lite/core')
+      )
         problems.push(`${rel(file)}: ${specifier} without import type`);
       else if (specifier.startsWith(SCOPE) && packageName(specifier) !== '@browser-lite/core')
         problems.push(`${rel(file)} imports ${specifier}`);
@@ -101,7 +108,9 @@ for (const name of ['@browser-lite/transport-wisp', '@browser-lite/ui', '@browse
   }
   const peer = entry.manifest.peerDependencies?.['@browser-lite/core'];
   if (peer !== core?.manifest.version)
-    problems.push(`peerDependencies @browser-lite/core is ${peer}, not exactly ${core?.manifest.version}`);
+    problems.push(
+      `peerDependencies @browser-lite/core is ${peer}, not exactly ${core?.manifest.version}`,
+    );
   if (entry.manifest.dependencies?.['@browser-lite/core'])
     problems.push('@browser-lite/core is a dependency, not only a peer');
   check(`${name} uses @browser-lite/core only as import type and exact peer`, problems);
@@ -114,8 +123,7 @@ const serverDeps = new Set(Object.keys(server?.manifest.dependencies ?? {}));
 const serverProblems = [];
 for (const file of sources('@browser-lite/server')) {
   for (const { specifier } of imports(read(file))) {
-    if (specifier.startsWith('node:') || specifier.startsWith('.'))
-      continue;
+    if (specifier.startsWith('node:') || specifier.startsWith('.')) continue;
     if (!serverDeps.has(packageName(specifier)))
       serverProblems.push(`${rel(file)} imports ${specifier}`);
   }
@@ -125,9 +133,13 @@ check('packages/server/src imports only node:, its dependencies and own files', 
 // ------------------------------------------------------------ engine access
 
 const hostSources = [
-  ...[...packages.keys()].filter((name) => name !== '@browser-lite/core').flatMap((name) => sources(name)),
+  ...[...packages.keys()]
+    .filter((name) => name !== '@browser-lite/core')
+    .flatMap((name) => sources(name)),
   ...subdirs(path.join(root, 'apps')).flatMap((dir) => walk(path.join(root, 'apps', dir, 'src'))),
-  ...subdirs(path.join(root, 'examples')).flatMap((dir) => walk(path.join(root, 'examples', dir, 'src'))),
+  ...subdirs(path.join(root, 'examples')).flatMap((dir) =>
+    walk(path.join(root, 'examples', dir, 'src')),
+  ),
   ...walk(path.join(root, 'tests', 'core', 'host')),
 ];
 const FORBIDDEN = [
@@ -141,8 +153,7 @@ for (const file of hostSources) {
   const text = stripComments(read(file));
   for (const [pattern, what] of FORBIDDEN) {
     const match = text.match(pattern);
-    if (match)
-      accessProblems.push(`${rel(file)}: ${what} (${match[0]})`);
+    if (match) accessProblems.push(`${rel(file)}: ${what} (${match[0]})`);
   }
 }
 check('no engine access outside packages/core/src and engine/', accessProblems);
@@ -153,7 +164,10 @@ const entryPoints = new Map();
 for (const [name, { manifest }] of packages) {
   for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
     const file = typeof target === 'string' ? target : target.default;
-    entryPoints.set(name + subpath.slice(1), path.posix.join('/packages', path.basename(packages.get(name).dir), file));
+    entryPoints.set(
+      name + subpath.slice(1),
+      path.posix.join('/packages', path.basename(packages.get(name).dir), file),
+    );
   }
 }
 const entryProblems = [];
@@ -170,7 +184,9 @@ for (const file of appSources) {
   for (const map of text.matchAll(/<script type="importmap">([\s\S]*?)<\/script>/g)) {
     for (const [specifier, target] of Object.entries(JSON.parse(map[1]).imports ?? {})) {
       if (specifier.startsWith(SCOPE) && entryPoints.get(specifier) !== target)
-        entryProblems.push(`${rel(file)} maps ${specifier} to ${target}, not ${entryPoints.get(specifier)}`);
+        entryProblems.push(
+          `${rel(file)} maps ${specifier} to ${target}, not ${entryPoints.get(specifier)}`,
+        );
     }
   }
 }

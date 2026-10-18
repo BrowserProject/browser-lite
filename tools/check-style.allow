@@ -7,7 +7,6 @@ german versions.env         translation pending
 german LICENSE              translation pending
 german .github/*            translation pending
 german docs/*               translation pending
-german tests/*              translation pending
 german tools/*              translation pending
 ascii docs/*                translation pending
 
@@ -15,5 +14,3 @@ ascii docs/*                translation pending
 german toolchain/*          comments change the toolchain image tag
 german engine/patches/*     comments change WebKit sources
 
-# Test data with Unicode text
-ascii tests/*               test data

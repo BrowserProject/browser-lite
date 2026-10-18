@@ -1,90 +1,90 @@
-// Caches des Interpreters (LLInt) fuer fehlende Properties und instanceof
-// (Patch 0031): nach Aenderungen an Objekt oder Prototyp-Kette muss das
-// Ergebnis stimmen, nicht der alte Cache-Wert.
+// Caches of the interpreter (LLInt) for missing properties and instanceof (patch 0031): after
+// changes of the object or the prototype chain the result must be right, not the old cached
+// value.
 function check(name, actual, expected) {
     if (actual !== expected)
-        throw new Error(name + ": " + actual + " statt " + expected);
+        throw new Error(name + ": " + actual + " instead of " + expected);
 }
 
-// Fehlende Property, spaeter am Prototyp ergaenzt
+// Missing property, added to the prototype later
 function Base() {}
 function readMissing(o) { return o.later; }
 const b = new Base();
 for (let i = 0; i < 100; i++)
-    check("fehlt", readMissing(b), undefined);
+    check("missing", readMissing(b), undefined);
 Base.prototype.later = 42;
-check("am Prototyp ergaenzt", readMissing(b), 42);
+check("added to the prototype", readMissing(b), 42);
 delete Base.prototype.later;
-check("wieder geloescht", readMissing(b), undefined);
+check("deleted again", readMissing(b), undefined);
 Object.prototype.later = "obj";
-check("an Object.prototype", readMissing(b), "obj");
+check("on Object.prototype", readMissing(b), "obj");
 delete Object.prototype.later;
-check("Object.prototype geloescht", readMissing(b), undefined);
+check("Object.prototype deleted", readMissing(b), undefined);
 
-// Fehlende Property, spaeter am Objekt selber
+// Missing property, later on the object itself
 const own = new Base();
 for (let i = 0; i < 100; i++)
-    check("fehlt eigen", readMissing(own), undefined);
+    check("missing own", readMissing(own), undefined);
 own.later = 7;
-check("am Objekt ergaenzt", readMissing(own), 7);
+check("added to the object", readMissing(own), 7);
 
-// Prototyp ausgetauscht
+// Prototype replaced
 const swapped = new Base();
 for (let i = 0; i < 100; i++)
-    check("vor Austausch", readMissing(swapped), undefined);
-Object.setPrototypeOf(swapped, { later: "neu" });
-check("Prototyp ausgetauscht", readMissing(swapped), "neu");
+    check("before the swap", readMissing(swapped), undefined);
+Object.setPrototypeOf(swapped, { later: "new" });
+check("prototype swapped", readMissing(swapped), "new");
 
-// Getter auf dem Prototyp nach Cache fuer "fehlt"
+// Getter on the prototype after a cache for "missing"
 function Other() {}
 const other = new Other();
 for (let i = 0; i < 100; i++)
-    check("fehlt (Getter)", readMissing(other), undefined);
+    check("missing (getter)", readMissing(other), undefined);
 Object.defineProperty(Other.prototype, "later", { get() { return "getter"; }, configurable: true });
-check("Getter ergaenzt", readMissing(other), "getter");
+check("getter added", readMissing(other), "getter");
 
-// Strings: fehlende Methode, dann an String.prototype ergaenzt
+// Strings: missing method, then added to String.prototype
 function readStringMissing(s) { return s.blMissing; }
 for (let i = 0; i < 100; i++)
-    check("String fehlt", readStringMissing("abc"), undefined);
+    check("string missing", readStringMissing("abc"), undefined);
 String.prototype.blMissing = 1;
-check("String.prototype ergaenzt", readStringMissing("abc"), 1);
+check("String.prototype added", readStringMissing("abc"), 1);
 delete String.prototype.blMissing;
 
-// instanceof: prototype ersetzt
+// instanceof: prototype replaced
 function K() {}
 function isK(o) { return o instanceof K; }
 const k = new K();
 for (let i = 0; i < 100; i++) {
     check("instanceof", isK(k), true);
-    check("instanceof nein", isK({}), false);
+    check("instanceof no", isK({}), false);
 }
 K.prototype = {};
-check("prototype ersetzt", isK(k), false);
-check("neues Objekt", isK(new K()), true);
+check("prototype replaced", isK(k), false);
+check("new object", isK(new K()), true);
 
-// instanceof: Symbol.hasInstance an der Funktion
+// instanceof: Symbol.hasInstance on the function
 function H() {}
 function isH(o) { return o instanceof H; }
 for (let i = 0; i < 100; i++)
-    check("vor hasInstance", isH({}), false);
+    check("before hasInstance", isH({}), false);
 Object.defineProperty(H, Symbol.hasInstance, { value: () => true });
-check("eigenes hasInstance", isH({}), true);
+check("own hasInstance", isH({}), true);
 
-// instanceof: Symbol.hasInstance spaeter in der Prototyp-Kette der Funktion
-// (Function.prototype[Symbol.hasInstance] selber ist nicht aenderbar)
+// instanceof: Symbol.hasInstance later in the prototype chain of the function
+// (Function.prototype[Symbol.hasInstance] itself cannot be changed)
 function F() {}
 const between = Object.create(Function.prototype);
 Object.setPrototypeOf(F, between);
 function isF(o) { return o instanceof F; }
 for (let i = 0; i < 100; i++)
-    check("vor hasInstance in der Kette", isF({}), false);
+    check("before hasInstance in the chain", isF({}), false);
 Object.defineProperty(between, Symbol.hasInstance, { value: () => true, configurable: true });
-check("hasInstance in der Kette", isF({}), true);
+check("hasInstance in the chain", isF({}), true);
 delete between[Symbol.hasInstance];
-check("wieder weg", isF({}), false);
+check("gone again", isF({}), false);
 
-// Viele Konstruktoren an derselben Stelle (Cache wird ueberschrieben)
+// Many constructors at the same place (the cache is overwritten)
 const ctors = [];
 for (let i = 0; i < 8; i++)
     ctors.push(function () {});
@@ -96,6 +96,6 @@ for (let r = 0; r < 50; r++) {
             hits += (o instanceof ctors[j]) ? 1 : 0;
     }
 }
-check("viele Konstruktoren", hits, 50 * 8);
+check("many constructors", hits, 50 * 8);
 
 print("OK llint-caches");

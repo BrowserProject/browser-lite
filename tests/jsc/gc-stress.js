@@ -1,6 +1,6 @@
-// GC-Stresstest. Zusammen mit --slowPathAllocsBetweenGCs=N laeuft der GC sehr
-// oft, mitten in normaler Arbeit. Wenn der GC lebende Objekte nicht findet
-// (z.B. Pointer nur in WASM-Locals), gibt es falsche Werte oder Abstuerze.
+// GC stress test. Together with --slowPathAllocsBetweenGCs=N the GC runs very often, in the middle
+// of normal work. When the GC does not find live objects (for example pointers only in WASM
+// locals), there are wrong values or crashes.
 function assert(cond, msg) {
     if (!cond)
         throw new Error("assert: " + msg);
@@ -21,7 +21,7 @@ function checkTree(t, depth) {
 let checksum = 0;
 for (let round = 0; round < 30; round++) {
     const keep = makeTree(10);
-    // Viel Muell erzeugen waehrend "keep" nur in einem Local lebt
+    // Create a lot of garbage while "keep" only lives in a local
     const parts = [];
     for (let i = 0; i < 2000; i++) {
         const o = { i, str: "x".repeat(i % 50), arr: [i, i + 1, i + 2] };
@@ -38,7 +38,7 @@ for (let round = 0; round < 30; round++) {
     for (let i = 0; i < 300; i++)
         strs.push(("abc" + i).split("").reverse().join(""));
     assert(strs[299] === "992cba", "string ops");
-    // Objekte mit vielen geloeschten Properties (Structure-Transitions)
+    // Objects with many deleted properties (structure transitions)
     const o = {};
     for (let i = 0; i < 64; i++)
         o["p" + i] = i;

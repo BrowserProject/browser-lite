@@ -47,24 +47,10 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: Core (options, engine environment against engine/abi.json, media service worker)
-        run: npm test -w @browser-lite/core
-      - name: Server (relay, SSRF, limits, static files, tokens, profile store, CLI)
-        run: npm test -w @browser-lite/server
-      - name: Wisp transport against the server (token, echo, reconnect, dead connection probe)
-        run: npm test -w @browser-lite/transport-wisp
-      - name: Rewritten module against the original
-        run: node tests/wasm/rewrite-test.mjs
-      - name: WebAssembly API over the simulated bridge
-        run: node tests/wasm/api-test.mjs
-      - name: WebM muxer of MediaRecorder
-        run: node tests/engine/recorder-test.mjs
-      - name: HTTP cache cleanup
-        run: node tests/engine/http-cache-test.mjs
-      - name: Engine contract (engine/abi.json against the sources)
-        run: node tests/contract/abi-test.mjs
-      - name: Dependency direction of the packages
-        run: node tests/contract/deps-test.mjs
+      - name: Unit tests of the packages and the engine JS parts in node (npm test)
+        run: npm test
+      - name: Contract tests (engine/abi.json against the sources, dependency direction)
+        run: node tests/run.mjs contract
       - name: Demo (type check and Vite build)
         run: |
           npx tsc --noEmit -p apps/demo
@@ -319,46 +305,9 @@ jobs:
         with:
           path: build/webcore/bin/engine.*
           key: ${{ steps.engine-cache.outputs.cache-primary-key }}
-      - name: Render test (node)
+      - name: Engine tests in node (pages, error page, GC stress)
         run: |
-          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" bash -c \
-            'node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600 && node tests/engine/check-basic.mjs build/basic.ppm'
-      - name: WebCrypto test (OpenSSL in WASM)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="CRYPTO done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200 | tee build/crypto.log
-          grep -q "CRYPTO done=ok" build/crypto.log
-      - name: Stack limit after VM trap (recursion after GC request)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="STACK done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/stack.html build/stack.ppm 200 200 | tee build/stack.log
-          grep -q "STACK done=ok" build/stack.log
-      - name: Limits (deep DOM, long strings, memory until the end)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e RENDER_WAIT_FOR="LIMITS done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html build/limits.ppm 200 200 | tee build/limits.log
-          grep -q "LIMITS done=ok" build/limits.log
-      - name: Watchdog (endless loop is stopped, the engine keeps running)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e BL_SCRIPT_TIMEOUT=2 -e RENDER_WAIT_FOR="HANG done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200 | tee build/hang.log
-          grep -q "HANG done=ok" build/hang.log
-      - name: Features and host bridges (no __bl globals, disabled features missing)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e BL_FEATURES= -e RENDER_URL="file:///test/?features=none" -e RENDER_WAIT_FOR="BRIDGES done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges-none.ppm 200 200 | tee build/bridges-none.log
-          grep -q "BRIDGES done=ok" build/bridges-none.log
-          docker run --rm -v "$PWD:/src" -w /src -e RENDER_URL="file:///test/?features=all" -e RENDER_WAIT_FOR="BRIDGES done" "$IMAGE" \
-            node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges-all.ppm 200 200 | tee build/bridges-all.log
-          grep -q "BRIDGES done=ok" build/bridges-all.log
-      - name: Error page (custom template, escaping, CSP, retry, close reasons)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src "$IMAGE" \
-            node tests/engine/error-page-test.mjs build/webcore/bin/engine.js
-      - name: GC stress test in the engine (GC very often, only on an empty stack)
-        run: |
-          docker run --rm -v "$PWD:/src" -w /src -e JSC_slowPathAllocsBetweenGCs=10 "$IMAGE" \
-            node tests/engine/gc-test.mjs build/webcore/bin/engine.js
+          docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS "$IMAGE" node tests/run.mjs engine
       - name: Engine as artifact
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -374,14 +323,14 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: render-test
-          path: build/basic.ppm
+          path: build/engine-pages/basic.ppm
           if-no-files-found: ignore
 
-  e2e:
-    name: End-to-end (Chromium + relay + engine)
+  e2e-core:
+    name: End-to-end core (Chromium + core test host page + relay + engine)
     needs: [engine]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Node version from versions.env
@@ -395,92 +344,58 @@ jobs:
           name: engine
           path: build/webcore/bin
       - name: Install (packages + Playwright Chromium)
-        id: setup
         run: |
           npm ci
           npm run build
           npx playwright install --with-deps chromium
       # Every test runs even if an earlier one failed (the job stays red then)
-      - name: Core embedding (public API, test host page, restart in the page, storage namespaces)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: node tests/core/smoke-test.mjs build/webcore/bin
-      - name: Network
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node network-test.mjs
-      - name: Input (typing, click, download, upload, popup, select, color, date, scrolling)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node input-test.mjs
-      - name: Storage (cookie, localStorage, IndexedDB, OPFS after reload)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node storage-test.mjs
-      - name: Profile (second device, takeover, reset, catch up at start, without server)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node profile-test.mjs
-      - name: Settings (dialog, device, JavaScript and images off, session after restart)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node settings-test.mjs
-      - name: Audio (Web Audio, decodeAudioData, sound in the AudioWorklet)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node audio-test.mjs
-      - name: Media (<video>/<audio> through service worker and engine)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node media-test.mjs
-      - name: WebGL (WebGL 1 and 2 through the WebGL of the host browser)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node webgl-test.mjs
-      - name: Compositing (layers on the GPU, animation, filters, scrolling)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node compositing-test.mjs
-      - name: Paint worklet (CSS.paintWorklet, paint() in CSS, module loading)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node paintworklet-test.mjs
-      - name: Pinch (pinch zoom in the compositor thread, visualViewport)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node pinch-test.mjs
-      - name: Service worker (register, intercept fetch, SharedWorker)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node serviceworker-test.mjs
-      - name: WebCodecs (VideoFrame, VP8 and Opus encode/decode, worker)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node webcodecs-test.mjs
-      - name: MediaStream (camera, microphone, screen through the host)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node mediastream-test.mjs
-      - name: WebRTC (RTCPeerConnection, DataChannel, connection to Chromium)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node webrtc-test.mjs
-      - name: Drag and drop (in the page, files and text from the host)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node dragdrop-test.mjs
-      - name: Clipboard (paste with HTML and image, copy with HTML, double click)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node clipboard-test.mjs
-      - name: WebAssembly (page modules in the WASM engine of the browser)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node wasm-test.mjs
-      - name: HTTP cache (max-age, ETag/304, no-store after reload)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node cache-test.mjs
-      - name: Devices (selection, touch, color scheme, geolocation, notifications)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node devices-test.mjs
-      - name: UI (history, bookmarks, suggestions, session)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node ui-test.mjs
-      - name: Background tabs (hidden, timers, sound, memory pressure, hang after input)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node background-test.mjs
-      - name: Soak (many pages and tabs, no memory held afterwards)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && node soak-test.mjs
-      - name: Parity with Chromium (web APIs, JS, CSS; red only on regression)
-        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: cd tests/e2e && PARITY_REPORT="$GITHUB_STEP_SUMMARY" node parity-test.mjs
+      - name: Core suites (tests/core, one after the other)
+        run: PARITY_REPORT="$GITHUB_STEP_SUMMARY" node tests/run.mjs core
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: e2e-screenshots
+          name: e2e-core-screenshots
+          path: build/e2e-*.png
+          if-no-files-found: ignore
+
+  e2e-demo:
+    name: End-to-end demo (Chromium + packaged demo + relay + engine)
+    needs: [engine]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Node version from versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Get engine
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: engine
+          path: build/webcore/bin
+      - name: Install (packages + Playwright Chromium)
+        run: |
+          npm ci
+          npm run build
+          npx playwright install --with-deps chromium
+      - name: Package the demo once (tools/package-demo.sh)
+        run: tools/package-demo.sh build/webcore/bin build/demo
+      - name: Demo suites (tests/demo against the packaged demo)
+        run: E2E_SITE_DIR=build/demo node tests/run.mjs demo
+      - name: Tested demo as artifact (for deploy)
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: demo-site
+          path: build/demo
+          retention-days: 14
+      - name: Screenshots as artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: e2e-demo-screenshots
           path: build/e2e-*.png
           if-no-files-found: ignore
 
@@ -508,8 +423,8 @@ jobs:
           npm ci
           npm run build
           npx playwright install --with-deps chromium
-      - name: Load the sites from tests/e2e/sites.txt
-        run: cd tests/e2e && SITE_WAIT=5000 SITE_DEBUG=1 SITE_TIMEOUT=180000 node site-test.mjs $(grep -v "^#" sites.txt)
+      - name: Load the sites of tests/compat/sites.txt
+        run: SITE_WAIT=5000 SITE_DEBUG=1 SITE_TIMEOUT=180000 node tests/run.mjs compat
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

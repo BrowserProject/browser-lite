@@ -1,0 +1,30 @@
+<!doctype html><title>framebench</title><body><script>
+// Base cost per frame (window object, installed polyfills): 40 iframes with a
+// small script each, time until all reported. Run with
+//   RENDER_WAIT_FOR="FRAMES done" node tests/engine/render.mjs build/webcore/bin tests/bench/framebench.html /tmp/x.ppm 800 600
+const count = 40;
+let round = 0;
+const times = [];
+function run() {
+  const start = performance.now();
+  let done = 0;
+  const frames = [];
+  onmessage = () => {
+    if (++done < count)
+      return;
+    times.push(performance.now() - start);
+    frames.forEach((f) => f.remove());
+    if (++round < 5)
+      setTimeout(run, 50);
+    else
+      console.log('FRAMES done best=' + Math.min(...times).toFixed(0) + ' ms per ' + count + ' frames');
+  };
+  for (let i = 0; i < count; i++) {
+    const frame = document.createElement('iframe');
+    frame.srcdoc = '<script>parent.postMessage(1, "*")<\/script>';
+    frames.push(frame);
+    document.body.appendChild(frame);
+  }
+}
+run();
+</script>

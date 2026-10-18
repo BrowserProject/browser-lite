@@ -8,87 +8,23 @@
 //
 //   node tests/core/smoke-test.mjs [engine-dir]      (default build/webcore/bin)
 // Environment: E2E_TIMEOUT (ms per wait, default 60000), E2E_VERBOSE=1, CHROMIUM_PATH.
-import { spawn } from 'node:child_process';
 import http from 'node:http';
-import net from 'node:net';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
-import { serveStatic } from '@browser-lite/server/static';
+import { check, finish, launch, startStack, wav } from '../lib/index.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const engineDir = path.resolve(process.argv[2] || path.join(root, 'build', 'webcore', 'bin'));
 const WAIT = Number(process.env.E2E_TIMEOUT || 60000);
 const VERBOSE = !!process.env.E2E_VERBOSE;
-const children = new Set();
-process.on('exit', () => {
-  for (const child of children) child.kill();
-});
 setTimeout(() => {
   console.log('FAIL time limit for the whole test');
   process.exit(1);
 }, WAIT * 8).unref();
 
-let failed = 0;
-function check(name, ok, info = '') {
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name} ${info}`);
-  if (!ok) failed++;
-}
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer().on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
-
 function listen(server) {
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
+  return new Promise((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port)),
+  );
 }
-
-// ------------------------------------------------------------- servers
-
-// Test host: the repository with COOP/COEP, /engine/ from the engine build and the service
-// worker of the core next to the host page (its scope covers the page)
-const DIST = path.join(root, 'packages', 'core', 'dist');
-async function serveHost(req, res) {
-  const file = new URL(req.url, 'http://x').pathname;
-  let found;
-  if (file.startsWith('/engine/'))
-    found = await serveStatic(req, res, engineDir, { urlPath: file.slice('/engine'.length) });
-  else if (file === '/tests/core/host/sw.js' || file === '/tests/core/host/media-sw.js')
-    found = await serveStatic(req, res, path.join(DIST, 'sw'), { urlPath: `/${path.basename(file)}` });
-  else found = await serveStatic(req, res, root);
-  if (!found) res.writeHead(404).end('not found');
-}
-const host = http.createServer((req, res) => {
-  serveHost(req, res).catch(() => res.destroy());
-});
-const hostPort = await listen(host);
 
 // Pages for the engine (reached through the relay)
-function wav(seconds, rate = 22050, frequency = 440) {
-  const frames = Math.round(seconds * rate);
-  const buffer = Buffer.alloc(44 + frames * 2);
-  buffer.write('RIFF', 0);
-  buffer.writeUInt32LE(36 + frames * 2, 4);
-  buffer.write('WAVEfmt ', 8);
-  buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(1, 22);
-  buffer.writeUInt32LE(rate, 24);
-  buffer.writeUInt32LE(rate * 2, 28);
-  buffer.writeUInt16LE(2, 32);
-  buffer.writeUInt16LE(16, 34);
-  buffer.write('data', 36);
-  buffer.writeUInt32LE(frames * 2, 40);
-  for (let i = 0; i < frames; i++)
-    buffer.writeInt16LE(Math.round(Math.sin((2 * Math.PI * frequency * i) / rate) * 8000), 44 + i * 2);
-  return buffer;
-}
 const TONE = wav(20);
 const PAGE = `<!doctype html><title>Core smoke</title>
 <style>
@@ -164,23 +100,34 @@ const pages = http.createServer((req, res) => {
   if (url.pathname === '/device')
     return res
       .writeHead(200, { 'Content-Type': 'text/html' })
-      .end("<title>device</title><script>document.title = [screen.width, screen.height, devicePixelRatio, matchMedia('(pointer: coarse)').matches, innerWidth, innerHeight, navigator.maxTouchPoints > 0].join(':');</script>");
-  if (url.pathname === '/more') return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
+      .end(
+        "<title>device</title><script>document.title = [screen.width, screen.height, devicePixelRatio, matchMedia('(pointer: coarse)').matches, innerWidth, innerHeight, navigator.maxTouchPoints > 0].join(':');</script>",
+      );
+  if (url.pathname === '/more')
+    return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
   if (url.pathname === '/features')
     return res
       .writeHead(200, { 'Content-Type': 'text/html' })
-      .end("<title>features</title><script>document.title = 'features:' + [typeof AudioContext, typeof navigator.getBattery, 'clipboard' in navigator, typeof EyeDropper, 'geolocation:' + typeof navigator.geolocation].join(':');</script>");
+      .end(
+        "<title>features</title><script>document.title = 'features:' + [typeof AudioContext, typeof navigator.getBattery, 'clipboard' in navigator, typeof EyeDropper, 'geolocation:' + typeof navigator.geolocation].join(':');</script>",
+      );
   if (url.pathname === '/store')
     return res
       .writeHead(200, { 'Content-Type': 'text/html' })
-      .end("<title>store</title><script>localStorage.setItem('kept', 'yes'); document.title = 'stored';</script>");
+      .end(
+        "<title>store</title><script>localStorage.setItem('kept', 'yes'); document.title = 'stored';</script>",
+      );
   if (url.pathname === '/file.txt')
     return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('hello from the download');
   if (url.pathname === '/tone.wav') {
     const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range || '');
     if (!range)
       return res
-        .writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': TONE.length, 'Accept-Ranges': 'bytes' })
+        .writeHead(200, {
+          'Content-Type': 'audio/wav',
+          'Content-Length': TONE.length,
+          'Accept-Ranges': 'bytes',
+        })
         .end(TONE);
     const start = Number(range[1]);
     const end = Math.min(range[2] ? Number(range[2]) : TONE.length - 1, TONE.length - 1);
@@ -198,34 +145,13 @@ const pages = http.createServer((req, res) => {
 const pagesPort = await listen(pages);
 const PAGE_URL = `http://127.0.0.1:${pagesPort}/`;
 
-// Relay of the server package (its command) without token, local addresses allowed (only for
-// tests), on another port than the host page
-const relayPort = await freePort();
-await new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [path.join(root, 'packages', 'server', 'dist', 'bin', 'browser-lite-server.js')], {
-    env: {
-      ...process.env,
-      PORT: String(relayPort),
-      HOST: '127.0.0.1',
-      RELAY_ALLOW_LOCAL: '1',
-      RELAY_TOKEN: '',
-      RELAY_SECRET: '',
-      RELAY_ALLOWED_ORIGINS: `http://localhost:${hostPort}`,
-    },
-    stdio: ['ignore', 'pipe', VERBOSE ? 'inherit' : 'ignore'],
-  });
-  children.add(child);
-  child.stdout.on('data', (data) => {
-    if (VERBOSE) process.stdout.write(`[relay] ${data}`);
-    if (/listening/i.test(String(data))) resolve();
-  });
-  child.on('exit', (code) => reject(new Error(`relay exited (${code})`)));
-});
+// Test host page and relay of the server package (local addresses allowed, only for tests)
+const stack = await startStack({ app: 'core' });
+const ORIGIN = stack.origin;
 
 // ------------------------------------------------------------- browser
 
-const query = new URLSearchParams({ relay: `ws://127.0.0.1:${relayPort}/wisp/`, url: PAGE_URL });
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
 const page = await context.newPage();
 const consoleLines = [];
@@ -236,7 +162,11 @@ page.on('console', (message) => {
 page.on('pageerror', (error) => console.log('   page error:', error.message));
 
 async function waitForConsole(text, ms = WAIT) {
-  for (const end = Date.now() + ms; Date.now() < end; await new Promise((resolve) => setTimeout(resolve, 100)))
+  for (
+    const end = Date.now() + ms;
+    Date.now() < end;
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  )
     if (consoleLines.some((line) => line.includes(text))) return true;
   return false;
 }
@@ -248,7 +178,7 @@ const waitFor = (fn, arg, ms = WAIT) =>
   );
 
 try {
-  await page.goto(`http://localhost:${hostPort}/tests/core/host/?${query}`);
+  await page.goto(stack.app({ url: PAGE_URL }));
   const started = await page.evaluate(() => window.blHost.ready);
   const startError = await page.evaluate(() => window.blHost.error);
   check('createBrowser resolves', started === true, startError ? JSON.stringify(startError) : '');
@@ -256,9 +186,24 @@ try {
   check('state ready', (await page.evaluate(() => window.blTest.browser.state)) === 'ready');
   check(
     'blTest hook object',
-    await page.evaluate(() =>
-      ['view', 'views', 'open', 'load', 'eval', 'pagePixel', 'pageRow', 'memory', 'memoryPressure', 'crash', 'audioState', 'mediaState', 'rtcState']
-        .every((name) => typeof window.blTest[name] === 'function') && window.blTest.views().length === 1,
+    await page.evaluate(
+      () =>
+        [
+          'view',
+          'views',
+          'open',
+          'load',
+          'eval',
+          'pagePixel',
+          'pageRow',
+          'memory',
+          'memoryPressure',
+          'crash',
+          'audioState',
+          'mediaState',
+          'rtcState',
+        ].every((name) => typeof window.blTest[name] === 'function') &&
+        window.blTest.views().length === 1,
     ),
   );
 
@@ -290,17 +235,30 @@ try {
   await page.waitForTimeout(300);
   await page.keyboard.type('hello');
   check('typing into an input', await waitFor(() => window.blTest.view()?.title === 'typed:hello'));
-  check('user-activation event', await page.evaluate(() => window.blHost.events.includes('user-activation')));
+  check(
+    'user-activation event',
+    await page.evaluate(() => window.blHost.events.includes('user-activation')),
+  );
 
   // <select> popup through the selectPopup handler
   await page.evaluate(() => {
     window.blHost.selectAnswer = 2;
   });
   await page.mouse.click(250, 95);
-  check('select popup handler called', await waitFor(() => window.blHost.selectRequests.length > 0));
+  check(
+    'select popup handler called',
+    await waitFor(() => window.blHost.selectRequests.length > 0),
+  );
   const request = await page.evaluate(() => window.blHost.selectRequests[0]);
-  check('select request data', request?.items?.join() === 'zero,one,two' && request.selectedIndex === 0, JSON.stringify(request));
-  check('select answer reaches the page', await waitFor(() => window.blTest.view()?.title === 'select:two'));
+  check(
+    'select request data',
+    request?.items?.join() === 'zero,one,two' && request.selectedIndex === 0,
+    JSON.stringify(request),
+  );
+  check(
+    'select answer reaches the page',
+    await waitFor(() => window.blTest.view()?.title === 'select:two'),
+  );
 
   // Download through the download event
   await page.mouse.click(250, 155);
@@ -316,42 +274,65 @@ try {
   check('audio click', await waitFor(() => window.blTest.view()?.title === 'beep'));
   check(
     'audio worklet runs',
-    await waitFor(() => {
-      const state = window.blTest.audioState();
-      return state.outputs > 0 && state.state === 'running' && state.peak > 0.01;
-    }, undefined, 20000),
+    await waitFor(
+      () => {
+        const state = window.blTest.audioState();
+        return state.outputs > 0 && state.state === 'running' && state.peak > 0.01;
+      },
+      undefined,
+      20000,
+    ),
     JSON.stringify(await page.evaluate(() => window.blTest.audioState())),
   );
 
   // Media file through the service worker of the core (prefix from its scope)
   check(
     'media plays through the service worker',
-    await waitFor(() => {
-      const players = window.blTest.mediaState();
-      return players.length > 0 && players.some((player) => player.time > 0.5);
-    }, undefined, 30000),
+    await waitFor(
+      () => {
+        const players = window.blTest.mediaState();
+        return players.length > 0 && players.some((player) => player.time > 0.5);
+      },
+      undefined,
+      30000,
+    ),
     JSON.stringify(await page.evaluate(() => window.blTest.mediaState())),
   );
-  check('no warnings', (await page.evaluate(() => window.blHost.warnings.join())) === '', await page.evaluate(() => window.blHost.warnings.join()));
+  check(
+    'no warnings',
+    (await page.evaluate(() => window.blHost.warnings.join())) === '',
+    await page.evaluate(() => window.blHost.warnings.join()),
+  );
 
   // ---------------------------------------------------------- second page
   const MORE_URL = `${PAGE_URL}more`;
   await page.evaluate((url) => window.blTest.load(url), MORE_URL);
   check('second page loads', await waitFor(() => window.blTest.view()?.title === 'More'));
-  check('console event', await waitFor(() => window.blHost.events.includes('console:log:more console')));
+  check(
+    'console event',
+    await waitFor(() => window.blHost.events.includes('console:log:more console')),
+  );
 
   await page.evaluate(() => window.blTest.view().find('findme'));
   check('find event', await waitFor(() => window.blHost.events.includes('find:3')));
   await page.evaluate(() => window.blTest.view().stopFind());
 
   await page.evaluate(() => window.blTest.view().print());
-  check('print event with a PDF', await waitFor(() => window.blHost.events.includes('print:application/pdf:true')));
+  check(
+    'print event with a PDF',
+    await waitFor(() => window.blHost.events.includes('print:application/pdf:true')),
+  );
 
   await page.evaluate(() => window.blTest.view().viewSource());
   check('source event', await waitFor(() => window.blHost.source?.includes('<title>More</title>')));
 
   await page.evaluate(() => window.blTest.view().setZoom(1.5));
-  check('zoom event', await page.evaluate(() => window.blHost.events.includes('zoom:1.5') && window.blTest.view().zoom === 1.5));
+  check(
+    'zoom event',
+    await page.evaluate(
+      () => window.blHost.events.includes('zoom:1.5') && window.blTest.view().zoom === 1.5,
+    ),
+  );
   await page.evaluate(() => window.blTest.view().setZoom(1));
 
   // File chooser handler -> upload into the engine file system -> File in the page
@@ -359,26 +340,46 @@ try {
     window.blHost.fileAnswer = [['a.txt', 'abc']];
   });
   await page.mouse.click(250, 35);
-  check('file chooser handler', await waitFor(() => window.blHost.events.includes('filechooser:false')));
-  check('uploaded file reaches the page', await waitFor(() => window.blTest.view()?.title === 'file:a.txt:abc'));
+  check(
+    'file chooser handler',
+    await waitFor(() => window.blHost.events.includes('filechooser:false')),
+  );
+  check(
+    'uploaded file reaches the page',
+    await waitFor(() => window.blTest.view()?.title === 'file:a.txt:abc'),
+  );
 
   // Dialog handler (synchronous)
   await page.mouse.click(250, 95);
-  check('dialogs answered by the handler', await waitFor(() => window.blTest.view()?.title === 'dialogs:true:answer'));
+  check(
+    'dialogs answered by the handler',
+    await waitFor(() => window.blTest.view()?.title === 'dialogs:true:answer'),
+  );
   check(
     'dialog requests',
-    await page.evaluate(() => ['dialog:alert:a', 'dialog:confirm:c', 'dialog:prompt:p'].every((e) => window.blHost.events.includes(e))),
+    await page.evaluate(() =>
+      ['dialog:alert:a', 'dialog:confirm:c', 'dialog:prompt:p'].every((e) =>
+        window.blHost.events.includes(e),
+      ),
+    ),
   );
 
   // Permission handler + geolocation of the devices service
-  await context.grantPermissions(['geolocation'], { origin: `http://localhost:${hostPort}` });
+  await context.grantPermissions(['geolocation'], { origin: ORIGIN });
   await context.setGeolocation({ latitude: 47.25, longitude: 8.5 });
   await page.evaluate(() => {
     window.blHost.permissionAnswer = 'grant';
   });
   await page.mouse.click(250, 155);
-  check('permission handler', await waitFor(() => window.blHost.events.includes('permission:geolocation')));
-  check('geolocation through the host', await waitFor(() => window.blTest.view()?.title === 'geo:47.25'), await page.evaluate(() => window.blTest.view()?.title));
+  check(
+    'permission handler',
+    await waitFor(() => window.blHost.events.includes('permission:geolocation')),
+  );
+  check(
+    'geolocation through the host',
+    await waitFor(() => window.blTest.view()?.title === 'geo:47.25'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
 
   // Tooltip of the element under the mouse on the canvas
   await page.mouse.move(420, 40);
@@ -386,31 +387,54 @@ try {
   check(
     'tooltip on the canvas',
     await waitFor(() => window.blTest.view().canvas.title === 'find tip'),
-    await page.evaluate(() => `"${window.blTest.view().canvas.title}" ${window.blHost.events.filter((e) => e.startsWith('hover')).join()}`),
+    await page.evaluate(
+      () =>
+        `"${window.blTest.view().canvas.title}" ${window.blHost.events.filter((e) => e.startsWith('hover')).join()}`,
+    ),
   );
 
   // Context menu request
   await page.mouse.click(500, 400, { button: 'right' });
-  check('context-menu event', await waitFor(() => window.blHost.events.some((e) => e.startsWith('context-menu:500,400'))));
+  check(
+    'context-menu event',
+    await waitFor(() => window.blHost.events.some((e) => e.startsWith('context-menu:500,400'))),
+  );
 
   // window.open: new-view, the host makes it the active view, close
   const openerId = await page.evaluate(() => window.blTest.view().id);
   await page.mouse.click(250, 215);
-  check('new-view event', await waitFor(() => window.blHost.events.some((e) => e.startsWith('new-view:'))));
+  check(
+    'new-view event',
+    await waitFor(() => window.blHost.events.some((e) => e.startsWith('new-view:'))),
+  );
   const popup = await page.evaluate(() => ({
     id: window.blTest.view().id,
     count: window.blTest.views().length,
     opener: window.blHost.events.find((e) => e.startsWith('new-view:')),
   }));
-  check('new view has its opener and is active', popup.opener === `new-view:${openerId}` && popup.id !== openerId && popup.count === 2, JSON.stringify(popup));
-  check('new view navigates', await waitFor((url) => window.blHost.events.includes(`popup-navigation:${url}`), PAGE_URL));
+  check(
+    'new view has its opener and is active',
+    popup.opener === `new-view:${openerId}` && popup.id !== openerId && popup.count === 2,
+    JSON.stringify(popup),
+  );
+  check(
+    'new view navigates',
+    await waitFor((url) => window.blHost.events.includes(`popup-navigation:${url}`), PAGE_URL),
+  );
   const closed = await page.evaluate(() => window.blTest.view().close());
-  const afterClose = await page.evaluate((id) => ({
-    closedEvent: window.blHost.events.includes('popup-close'),
-    gone: !window.blTest.browser.views.has(id),
-    active: window.blTest.view().id,
-  }), popup.id);
-  check('close() of the new view', closed === true && afterClose.closedEvent && afterClose.gone && afterClose.active === openerId, JSON.stringify(afterClose));
+  const afterClose = await page.evaluate(
+    (id) => ({
+      closedEvent: window.blHost.events.includes('popup-close'),
+      gone: !window.blTest.browser.views.has(id),
+      active: window.blTest.view().id,
+    }),
+    popup.id,
+  );
+  check(
+    'close() of the new view',
+    closed === true && afterClose.closedEvent && afterClose.gone && afterClose.active === openerId,
+    JSON.stringify(afterClose),
+  );
 
   // Paste through the API
   await page.mouse.click(250, 335);
@@ -419,39 +443,86 @@ try {
 
   // History
   await page.evaluate(() => window.blTest.view().back());
-  check('back()', await waitFor((url) => window.blTest.view().url === url && window.blTest.view().canGoForward, PAGE_URL));
+  check(
+    'back()',
+    await waitFor(
+      (url) => window.blTest.view().url === url && window.blTest.view().canGoForward,
+      PAGE_URL,
+    ),
+  );
   await page.evaluate(() => window.blTest.view().forward());
-  check('forward()', await waitFor((url) => window.blTest.view().url === url && !window.blTest.view().canGoForward, MORE_URL));
-  check('history', await page.evaluate(() => window.blTest.view().history?.entries?.length >= 2), JSON.stringify(await page.evaluate(() => window.blTest.view().history)));
+  check(
+    'forward()',
+    await waitFor(
+      (url) => window.blTest.view().url === url && !window.blTest.view().canGoForward,
+      MORE_URL,
+    ),
+  );
+  check(
+    'history',
+    await page.evaluate(() => window.blTest.view().history?.entries?.length >= 2),
+    JSON.stringify(await page.evaluate(() => window.blTest.view().history)),
+  );
 
   // Watchdog: a busy page does not answer input for more than 10 s
   await page.mouse.click(250, 275);
   await page.waitForTimeout(500);
   await page.keyboard.press('a');
-  check('unresponsive event', await waitFor(() => window.blHost.events.includes('unresponsive'), undefined, 15000));
-  check('responsive event', await waitFor(() => window.blHost.events.includes('responsive'), undefined, 15000));
-  check('page runs again after the hang', await waitFor(() => window.blTest.view()?.title === 'hang done'));
+  check(
+    'unresponsive event',
+    await waitFor(() => window.blHost.events.includes('unresponsive'), undefined, 15000),
+  );
+  check(
+    'responsive event',
+    await waitFor(() => window.blHost.events.includes('responsive'), undefined, 15000),
+  );
+  check(
+    'page runs again after the hang',
+    await waitFor(() => window.blTest.view()?.title === 'hang done'),
+  );
 
   await page.evaluate(() => window.blTest.memoryPressure());
-  check('memory-pressure event (debug)', await page.evaluate(() => window.blHost.events.includes('memory-pressure')));
+  check(
+    'memory-pressure event (debug)',
+    await page.evaluate(() => window.blHost.events.includes('memory-pressure')),
+  );
   check('debug memory', (await page.evaluate(() => window.blTest.memory())) > 1e8);
   const used = await page.evaluate(() => window.blTest.browser.debug.memoryUsed());
-  check('debug memoryUsed', used > 1e6 && used < (await page.evaluate(() => window.blTest.memory())), String(used));
+  check(
+    'debug memoryUsed',
+    used > 1e6 && used < (await page.evaluate(() => window.blTest.memory())),
+    String(used),
+  );
 
   // Features of the default services reach the pages (webrtc is opt-in)
   await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}features`);
   check(
     'default services: features present',
-    await waitFor(() => window.blTest.view()?.title === 'features:function:function:true:function:geolocation:object'),
+    await waitFor(
+      () =>
+        window.blTest.view()?.title ===
+        'features:function:function:true:function:geolocation:object',
+    ),
     await page.evaluate(() => window.blTest.view()?.title),
   );
 
   // Error page of the engine (English default template) for a host that does not exist
   const FAILING_URL = 'http://does-not-exist.invalid/';
   await page.evaluate((url) => window.blTest.load(url), FAILING_URL);
-  check('error page commit', await waitFor(() => window.blHost.events.includes('commit:network')), await page.evaluate(() => window.blHost.events.filter((e) => e.startsWith('commit')).join()));
-  check('error page keeps the address', await waitFor((url) => window.blTest.view().url === url, FAILING_URL));
-  await page.evaluate(() => window.blTest.eval("document.querySelector('h1').textContent + '|' + document.querySelector('.code').textContent"));
+  check(
+    'error page commit',
+    await waitFor(() => window.blHost.events.includes('commit:network')),
+    await page.evaluate(() => window.blHost.events.filter((e) => e.startsWith('commit')).join()),
+  );
+  check(
+    'error page keeps the address',
+    await waitFor((url) => window.blTest.view().url === url, FAILING_URL),
+  );
+  await page.evaluate(() =>
+    window.blTest.eval(
+      "document.querySelector('h1').textContent + '|' + document.querySelector('.code').textContent",
+    ),
+  );
   check(
     'error page in English',
     await waitForConsole("This site can't be reached|ERR_NAME_NOT_RESOLVED"),
@@ -464,7 +535,9 @@ try {
   await page.evaluate(() => window.blTest.browser.debug.gpu('lose'));
   await page.waitForTimeout(500);
   await page.evaluate(() => window.blTest.browser.debug.gpu('restore'));
-  await page.evaluate(() => window.blTest.eval("document.getElementById('red').style.background = '#0000ff'"));
+  await page.evaluate(() =>
+    window.blTest.eval("document.getElementById('red').style.background = '#0000ff'"),
+  );
   check(
     'renders after GPU context loss and restore',
     await waitFor(() => {
@@ -477,36 +550,67 @@ try {
   // API errors
   const errors = await page.evaluate(async () => {
     const { createBrowser, clearStorage } = await import('@browser-lite/core');
-    const codeOf = (promise) => promise.then(() => 'resolved', (error) => error.code);
+    const codeOf = (promise) =>
+      promise.then(
+        () => 'resolved',
+        (error) => error.code,
+      );
     const transport = new EventTarget();
     transport.openTCP = () => {};
     transport.connected = true;
     return {
       running: await codeOf(createBrowser({ engineUrl: '/engine/', transport })),
-      namespace: await codeOf(createBrowser({ engineUrl: '/engine/', transport, storage: { namespace: 'Bad!' } })),
-      env: await codeOf(createBrowser({ engineUrl: '/engine/', transport, engine: { env: { BL_FEATURES: '' } } })),
-      crossOrigin: await codeOf(createBrowser({ engineUrl: 'https://example.com/engine/', transport })),
+      namespace: await codeOf(
+        createBrowser({ engineUrl: '/engine/', transport, storage: { namespace: 'Bad!' } }),
+      ),
+      env: await codeOf(
+        createBrowser({ engineUrl: '/engine/', transport, engine: { env: { BL_FEATURES: '' } } }),
+      ),
+      crossOrigin: await codeOf(
+        createBrowser({ engineUrl: 'https://example.com/engine/', transport }),
+      ),
       clear: await codeOf(clearStorage('Bad!')),
     };
   });
-  check('second createBrowser while running: already-running', errors.running === 'already-running', errors.running);
+  check(
+    'second createBrowser while running: already-running',
+    errors.running === 'already-running',
+    errors.running,
+  );
   check('bad namespace: invalid-options', errors.namespace === 'invalid-options', errors.namespace);
   check('core-owned env key: invalid-options', errors.env === 'invalid-options', errors.env);
-  check('cross-origin engine: invalid-options', errors.crossOrigin === 'invalid-options', errors.crossOrigin);
-  check('clearStorage bad namespace: invalid-options', errors.clear === 'invalid-options', errors.clear);
+  check(
+    'cross-origin engine: invalid-options',
+    errors.crossOrigin === 'invalid-options',
+    errors.crossOrigin,
+  );
+  check(
+    'clearStorage bad namespace: invalid-options',
+    errors.clear === 'invalid-options',
+    errors.clear,
+  );
 
   // A trap in WebAssembly of the embedding page is no engine crash
   await page.evaluate(() => {
-    const bytes = [0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 7, 5, 1, 1, 0x66, 0, 0, 0x0a, 5, 1, 3, 0, 0, 0x0b];
+    const bytes = [
+      0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 7, 5, 1, 1, 0x66, 0, 0,
+      0x0a, 5, 1, 3, 0, 0, 0x0b,
+    ];
     const { f } = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array(bytes))).exports;
     setTimeout(f);
   });
   await page.waitForTimeout(500);
-  check('foreign WebAssembly trap is no crash', (await page.evaluate(() => window.blTest.browser.state)) === 'ready');
+  check(
+    'foreign WebAssembly trap is no crash',
+    (await page.evaluate(() => window.blTest.browser.state)) === 'ready',
+  );
 
   // Crash (engine test hook, needs debug): crash event, state crashed
   await page.evaluate(() => window.blTest.crash('abort'));
-  check('crash event', await waitFor(() => window.blHost.events.some((e) => e.startsWith('crash:'))));
+  check(
+    'crash event',
+    await waitFor(() => window.blHost.events.some((e) => e.startsWith('crash:'))),
+  );
   const crashed = await page.evaluate(() => {
     let code = '';
     try {
@@ -516,7 +620,11 @@ try {
     }
     return { state: window.blTest.browser.state, code };
   });
-  check('crashed state', crashed.state === 'crashed' && crashed.code === 'crashed', JSON.stringify(crashed));
+  check(
+    'crashed state',
+    crashed.state === 'crashed' && crashed.code === 'crashed',
+    JSON.stringify(crashed),
+  );
 
   // destroy() and a new browser on the same page
   const destroyed = await page.evaluate(async () => {
@@ -538,11 +646,19 @@ try {
     };
   });
   check('destroy: state destroyed', destroyed.state === 'destroyed', JSON.stringify(destroyed));
-  check('destroy: view closed and canvas removed', destroyed.closed && destroyed.canvases === 0 && destroyed.events);
+  check(
+    'destroy: view closed and canvas removed',
+    destroyed.closed && destroyed.canvases === 0 && destroyed.events,
+  );
   check('createView after destroy: destroyed', destroyed.code === 'destroyed');
   // The second browser runs without services: no features for the pages, but copy in a page
   // still reaches the host clipboard
-  const second = await page.evaluate(() => window.blHost.start({ services: [] }).then(() => 'ready', () => window.blHost.error?.code));
+  const second = await page.evaluate(() =>
+    window.blHost.start({ services: [] }).then(
+      () => 'ready',
+      () => window.blHost.error?.code,
+    ),
+  );
   check('second createBrowser after destroy', second === 'ready', second);
   if (second !== 'ready') throw new Error('no second browser');
   await page.evaluate((url) => window.blTest.load(url), PAGE_URL);
@@ -556,10 +672,14 @@ try {
   await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}features`);
   check(
     'services: [] gives the pages no features',
-    await waitFor(() => window.blTest.view()?.title === 'features:undefined:undefined:false:undefined:geolocation:object'),
+    await waitFor(
+      () =>
+        window.blTest.view()?.title ===
+        'features:undefined:undefined:false:undefined:geolocation:object',
+    ),
     await page.evaluate(() => window.blTest.view()?.title),
   );
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://localhost:${hostPort}` });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: ORIGIN });
   await page.evaluate(() => navigator.clipboard.writeText('before'));
   await page.evaluate((url) => window.blTest.load(url), MORE_URL);
   await waitFor(() => window.blTest.view()?.title === 'More');
@@ -569,7 +689,11 @@ try {
   });
   check(
     'copy reaches the host clipboard without devices()',
-    await waitFor(async () => (await navigator.clipboard.readText().catch(() => '')).includes('findme'), undefined, 10000),
+    await waitFor(
+      async () => (await navigator.clipboard.readText().catch(() => '')).includes('findme'),
+      undefined,
+      10000,
+    ),
     await page.evaluate(() => navigator.clipboard.readText().catch((error) => error.message)),
   );
   // A WebAssembly trap in the engine thread (worker error event) is a crash
@@ -577,12 +701,17 @@ try {
   check(
     'trap in the engine: crash event',
     await waitFor(() => window.blHost.events.filter((e) => e.startsWith('crash:')).length === 2),
-    await page.evaluate(() => window.blHost.events.filter((e) => e.startsWith('crash:')).join(' | ')),
+    await page.evaluate(() =>
+      window.blHost.events.filter((e) => e.startsWith('crash:')).join(' | '),
+    ),
   );
   // A crashed browser is destroyed and replaced in the same page
   const third = await page.evaluate(async () => {
     await window.blHost.stop();
-    return window.blHost.start().then(() => 'ready', () => window.blHost.error?.code);
+    return window.blHost.start().then(
+      () => 'ready',
+      () => window.blHost.error?.code,
+    );
   });
   check('new browser after a crash', third === 'ready', third);
   check(
@@ -596,20 +725,38 @@ try {
   await page.close();
 
   // Storage: OPFS namespace, Web Lock across tabs, beforeStart, clearStorage; device emulation
-  const storageQuery = (extra) =>
-    `http://localhost:${hostPort}/tests/core/host/?${new URLSearchParams({ ...Object.fromEntries(query), persistent: '1', ...extra })}`;
+  const storageQuery = (extra) => stack.app({ url: PAGE_URL, persistent: '1', ...extra });
   const first = await context.newPage();
   await first.goto(storageQuery({ url: `${PAGE_URL}device`, device: '400x300x2' }));
-  check('persistent browser starts', (await first.evaluate(() => window.blHost.ready)) === true, JSON.stringify(await first.evaluate(() => window.blHost.error)));
+  check(
+    'persistent browser starts',
+    (await first.evaluate(() => window.blHost.ready)) === true,
+    JSON.stringify(await first.evaluate(() => window.blHost.error)),
+  );
   const firstState = await first.evaluate(() => ({
     persistent: window.blTest.browser.storage.persistent,
     directory: window.blTest.browser.storage.directory?.name,
     beforeStart: window.blHost.beforeStart,
   }));
-  check('storage namespace directory and beforeStart', firstState.persistent && firstState.directory === 'browserlite' && firstState.beforeStart === 'browserlite', JSON.stringify(firstState));
+  check(
+    'storage namespace directory and beforeStart',
+    firstState.persistent &&
+      firstState.directory === 'browserlite' &&
+      firstState.beforeStart === 'browserlite',
+    JSON.stringify(firstState),
+  );
   check(
     'device emulation reaches the page',
-    await first.waitForFunction(() => window.blTest.view()?.title?.startsWith('400:300:2:true:400:300'), undefined, { timeout: WAIT }).then(() => true, () => false),
+    await first
+      .waitForFunction(
+        () => window.blTest.view()?.title?.startsWith('400:300:2:true:400:300'),
+        undefined,
+        { timeout: WAIT },
+      )
+      .then(
+        () => true,
+        () => false,
+      ),
     await first.evaluate(() => window.blTest.view()?.title),
   );
   const canvasSize = await first.evaluate(() => {
@@ -622,18 +769,35 @@ try {
   check('second tab starts', (await secondTab.evaluate(() => window.blHost.ready)) === true);
   check(
     'second tab: warning storage-locked, memory only',
-    await secondTab.waitForFunction(() => window.blHost.warnings.includes('storage-locked') && !window.blTest.browser.storage.persistent, undefined, { timeout: WAIT }).then(() => true, () => false),
+    await secondTab
+      .waitForFunction(
+        () =>
+          window.blHost.warnings.includes('storage-locked') &&
+          !window.blTest.browser.storage.persistent,
+        undefined,
+        { timeout: WAIT },
+      )
+      .then(
+        () => true,
+        () => false,
+      ),
   );
   const clearLocked = await secondTab.evaluate(async () => {
     const { clearStorage } = await import('@browser-lite/core');
-    return clearStorage().then(() => 'cleared', (error) => error.code);
+    return clearStorage().then(
+      () => 'cleared',
+      (error) => error.code,
+    );
   });
   check('clearStorage while in use: storage-locked', clearLocked === 'storage-locked', clearLocked);
   await first.close({ runBeforeUnload: false });
   const cleared = await secondTab.evaluate(async () => {
     const { clearStorage } = await import('@browser-lite/core');
     for (let i = 0; i < 50; i++) {
-      const result = await clearStorage().then(() => 'cleared', (error) => error.code);
+      const result = await clearStorage().then(
+        () => 'cleared',
+        (error) => error.code,
+      );
       if (result !== 'storage-locked') return result;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
@@ -646,13 +810,29 @@ try {
   const NS = 'smoke_ns';
   const own = await context.newPage();
   await own.goto(storageQuery({ url: `${PAGE_URL}store`, namespace: NS }));
-  check('browser with its own namespace starts', (await own.evaluate(() => window.blHost.ready)) === true, JSON.stringify(await own.evaluate(() => window.blHost.error)));
+  check(
+    'browser with its own namespace starts',
+    (await own.evaluate(() => window.blHost.ready)) === true,
+    JSON.stringify(await own.evaluate(() => window.blHost.error)),
+  );
   const ownState = await own.evaluate(() => ({
     directory: window.blTest.browser.storage.directory?.name,
     beforeStart: window.blHost.beforeStart,
   }));
-  check('own namespace directory and beforeStart', ownState.directory === NS && ownState.beforeStart === NS, JSON.stringify(ownState));
-  check('page stores in the own namespace', await own.waitForFunction(() => window.blTest.view()?.title === 'stored', undefined, { timeout: WAIT }).then(() => true, () => false));
+  check(
+    'own namespace directory and beforeStart',
+    ownState.directory === NS && ownState.beforeStart === NS,
+    JSON.stringify(ownState),
+  );
+  check(
+    'page stores in the own namespace',
+    await own
+      .waitForFunction(() => window.blTest.view()?.title === 'stored', undefined, { timeout: WAIT })
+      .then(
+        () => true,
+        () => false,
+      ),
+  );
   const ownFiles = await own.evaluate(async (ns) => {
     window.blTest.browser.storage.flush(2000);
     const root = await navigator.storage.getDirectory();
@@ -668,10 +848,15 @@ try {
     await walk(await root.getDirectoryHandle(ns), '');
     return { names, files, caches: await caches.keys() };
   }, NS);
-  check('OPFS root holds the namespace directory with files', ownFiles.names.includes(NS) && ownFiles.files.length > 0, JSON.stringify(ownFiles));
+  check(
+    'OPFS root holds the namespace directory with files',
+    ownFiles.names.includes(NS) && ownFiles.files.length > 0,
+    JSON.stringify(ownFiles),
+  );
   check(
     'own namespace caches exist',
-    ownFiles.caches.includes(`${NS}-http`) && ownFiles.caches.some((name) => name.startsWith(`${NS}-bytecode-`)),
+    ownFiles.caches.includes(`${NS}-http`) &&
+      ownFiles.caches.some((name) => name.startsWith(`${NS}-bytecode-`)),
     ownFiles.caches.join(),
   );
   check(
@@ -682,20 +867,31 @@ try {
   const ownCleared = await own.evaluate(async (ns) => {
     await window.blHost.stop();
     const { clearStorage } = await import('@browser-lite/core');
-    const result = await clearStorage(ns).then(() => 'cleared', (error) => error.code);
+    const result = await clearStorage(ns).then(
+      () => 'cleared',
+      (error) => error.code,
+    );
     const root = await navigator.storage.getDirectory();
     const names = [];
     for await (const name of root.keys()) names.push(name);
-    return { result, names, caches: (await caches.keys()).filter((name) => name.startsWith(`${ns}-`)) };
+    return {
+      result,
+      names,
+      caches: (await caches.keys()).filter((name) => name.startsWith(`${ns}-`)),
+    };
   }, NS);
-  check('clearStorage(namespace) removes directory and caches', ownCleared.result === 'cleared' && !ownCleared.names.includes(NS) && ownCleared.caches.length === 0, JSON.stringify(ownCleared));
+  check(
+    'clearStorage(namespace) removes directory and caches',
+    ownCleared.result === 'cleared' &&
+      !ownCleared.names.includes(NS) &&
+      ownCleared.caches.length === 0,
+    JSON.stringify(ownCleared),
+  );
   await own.close();
 } catch (error) {
   check('test ran through', false, error.message);
 } finally {
   await browser.close();
-  host.close();
   pages.close();
 }
-console.log(failed ? `${failed} check(s) failed` : 'All checks ok');
-process.exit(failed ? 1 : 0);
+finish();

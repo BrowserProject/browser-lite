@@ -1,4 +1,4 @@
-// Grundfunktionen von JavaScriptCore. Gibt am Ende "OK basics" aus.
+// Basic functions of JavaScriptCore. Prints "OK basics" at the end.
 function assert(cond, msg) {
     if (!cond)
         throw new Error("assert: " + msg);
@@ -10,7 +10,7 @@ assert(JSON.stringify({ a: [1, { b: 2 }] }) === '{"a":[1,{"b":2}]}', "json");
 assert("Grüezi".toUpperCase() === "GRÜEZI", "unicode upper");
 assert(/^1[\u2019']234[\u2019']567\.5$/.test(new Intl.NumberFormat("de-CH").format(1234567.5)), "intl number de-CH");
 assert(["z", "ä", "a"].sort(new Intl.Collator("de").compare).join("") === "aäz", "intl collator");
-// Nach dem ICU-Datenfilter (deps/recipes/icu.sh) muessen diese noch gehen
+// These must still work after the ICU data filter (deps/recipes/icu.sh)
 assert(new Intl.NumberFormat("fr-CH", { style: "currency", currency: "CHF" }).format(5).includes("CHF"), "intl currency fr-CH");
 assert(new Intl.DisplayNames("de", { type: "region" }).of("CH") === "Schweiz", "intl display names de");
 assert(new Intl.DisplayNames("ja", { type: "language" }).of("de") === "ドイツ語", "intl display names ja");
@@ -18,7 +18,7 @@ assert(new Intl.DateTimeFormat("de-CH", { timeZone: "Europe/Zurich", timeZoneNam
 assert(new Intl.NumberFormat("it-CH", { style: "unit", unit: "kilometer-per-hour" }).format(50).includes("km/h"), "intl unit");
 assert(["b", "a", "c"].sort(new Intl.Collator("zh").compare).join("") === "abc", "intl collator zh");
 assert(new Intl.Segmenter("ja", { granularity: "word" }).segment("日本語のテキスト")[Symbol.iterator]().next().value.segment.length > 0, "intl segmenter ja");
-// Sprache ausserhalb der Liste: faellt auf root zurueck, darf nicht abstuerzen
+// A language outside the list: falls back to root, must not crash
 assert(typeof new Intl.DisplayNames("yo", { type: "region" }).of("CH") === "string", "intl fallback");
 assert(/(\d+)-(\d+)/.exec("10-20")[2] === "20", "regexp");
 assert(new Map([[1, 2]]).get(1) === 2, "map");
@@ -32,7 +32,7 @@ class Animal {
     constructor(name) { this.#name = name; }
     get name() { return this.#name; }
 }
-assert(new Animal("Kuh").name === "Kuh", "private fields");
+assert(new Animal("Cow").name === "Cow", "private fields");
 
 function* gen() { yield 1; yield 2; }
 assert([...gen()].length === 2, "generator");

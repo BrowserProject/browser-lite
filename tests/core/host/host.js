@@ -1,20 +1,37 @@
 // Test host of @browser-lite/core: the views fill the page, only the public package entry points
 // are used. window.blTest is the shared test hook object (same as the demo with ?debug=1);
-// window.blHost holds what only this page offers to tests/core/smoke-test.mjs (recorded events,
-// request answers, start/stop). Before the start a test may set window.blTestOptions (merged
-// into the BrowserOptions).
+// window.blHost holds what only this page offers to the tests in tests/core (recorded events,
+// request answers, start/stop, switching views). Before the start a test may set
+// window.blTestOptions (merged into the BrowserOptions).
 //   ?relay=ws://host/wisp/  relay URL (default: /wisp/ of this server)
+//   ?token=...              token for the relay
 //   ?engine=/engine/        engine folder
 //   ?url=...                first page
 //   ?persistent=1           storage in OPFS (beforeStart records the directory name)
 //   ?namespace=name         storage namespace (with persistent=1)
-//   ?device=400x300x2       emulated device (width x height x pixel ratio)
+//   ?device=400x300x2       emulated device (width x height x pixel ratio, x1 at the end: touch)
+//   ?services=a,b           services by name (default, audio, media, capture, devices, webrtc,
+//                           none); default: defaultServices()
+//   ?log=1, ?gpu=0, ?compositing=0|1, ?safepointgc=0|1|debug, ?httpcache=0, ?scripttimeout=s
+//                           engine switches
+//   ?env=KEY=value,...      expert switches (engine.env)
 //   ?manual=1               no start on load
-import { checkSupport, createBrowser } from '@browser-lite/core';
+import {
+  audio,
+  capture,
+  checkSupport,
+  createBrowser,
+  defaultServices,
+  devices,
+  media,
+  webrtc,
+} from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
 
 const params = new URLSearchParams(location.search);
-const relay = params.get('relay') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
+const relay =
+  params.get('relay') ||
+  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/wisp/`;
 const engineUrl = params.get('engine') || '/engine/';
 const container = document.getElementById('view');
 
@@ -29,13 +46,47 @@ const isPlainObject = (value) => Object.prototype.toString.call(value) === '[obj
 function merge(base, extra) {
   const result = { ...base };
   for (const [key, value] of Object.entries(extra ?? {}))
-    result[key] = isPlainObject(value) && isPlainObject(base[key]) ? merge(base[key], value) : value;
+    result[key] =
+      isPlainObject(value) && isPlainObject(base[key]) ? merge(base[key], value) : value;
   return result;
 }
 
 function deviceOption(text) {
-  const [width, height, pixelRatio] = text.split('x').map(Number);
-  return { width, height, pixelRatio };
+  const [width, height, pixelRatio, touch] = text.split('x').map(Number);
+  return { width, height, pixelRatio, ...(touch ? { touch: true, mobile: true } : {}) };
+}
+
+const SERVICES = { audio, media, capture, devices, webrtc };
+function servicesOption(text) {
+  if (text === null) return undefined;
+  return text
+    .split(',')
+    .filter((name) => name && name !== 'none')
+    .flatMap((name) => (name === 'default' ? defaultServices() : [SERVICES[name]()]));
+}
+
+function engineOptions() {
+  const flag = (name) => (params.has(name) ? params.get(name) !== '0' : undefined);
+  const safepoint = params.get('safepointgc');
+  const env = Object.fromEntries(
+    (params.get('env') || '')
+      .split(',')
+      .filter((pair) => pair.includes('='))
+      .map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)]),
+  );
+  const options = {
+    log: params.get('log') === '1' || undefined,
+    gpu: flag('gpu'),
+    compositing: flag('compositing'),
+    httpCache: flag('httpcache'),
+    safepointGC:
+      safepoint === 'debug' ? 'debug' : safepoint === null ? undefined : safepoint !== '0',
+    scriptTimeoutSeconds: params.has('scripttimeout')
+      ? Number(params.get('scripttimeout'))
+      : undefined,
+    env: Object.keys(env).length ? env : undefined,
+  };
+  return Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined));
 }
 
 function activate(view) {
@@ -52,6 +103,7 @@ function track(view, prefix) {
   view.on('navigation', ({ url }) => record(`navigation:${url}`));
   view.on('title', ({ title }) => record(`title:${title}`));
   view.on('commit', ({ errorPage }) => record(`commit:${errorPage ?? ''}`));
+  view.on('error', ({ description }) => record(`error:${description}`));
   view.on('first-layout', () => {
     flags.firstLayout = true;
   });
@@ -63,16 +115,41 @@ function track(view, prefix) {
     flags.loaded = true;
     record('load');
   });
-  for (const type of ['user-activation', 'close']) view.on(type, () => record(type));
+  for (const type of ['user-activation', 'close', 'focus-request'])
+    view.on(type, () => record(type));
   view.on('console', ({ level, message }) => record(`console:${level}:${message}`));
   view.on('find', ({ matches }) => record(`find:${matches}`));
   view.on('zoom', ({ zoom }) => record(`zoom:${zoom}`));
   view.on('hover', ({ url }) => record(`hover:${url ?? ''}`));
-  view.on('context-menu', ({ x, y, editable }) => record(`context-menu:${x},${y},${editable}`));
+  view.on('context-menu', (info) => {
+    record(`context-menu:${info.x},${info.y},${info.editable}`);
+    host.contextMenus.push({ view: view.id, ...info });
+  });
   view.on('print', ({ pdf }) => record(`print:${pdf.type}:${pdf.size > 1000}`));
+  view.on('icon', ({ blob }) => {
+    record(`icon:${blob?.size ?? 0}`);
+    if (!blob) return;
+    // Like an <img> of a tab strip (createImageBitmap cannot decode SVG)
+    const image = new Image();
+    const url = URL.createObjectURL(blob);
+    image.onload = () => record(`icon-image:${image.naturalWidth}x${image.naturalHeight}`);
+    image.onerror = () => record('icon-image:invalid');
+    image.onloadend = () => URL.revokeObjectURL(url);
+    image.src = url;
+  });
+  view.on('external-url', ({ url }) => record(`external-url:${url}`));
+  view.on('open-tab', ({ url }) => record(`open-tab:${url}`));
+  view.on('take-focus', ({ forward }) => record(`take-focus:${forward}`));
+  view.on('fullscreen', ({ active: on }) => record(`fullscreen:${on}`));
+  view.on('media-state', ({ audible }) => record(`media-state:${audible}`));
+  view.on('capture-state', ({ active: on }) => record(`capture-state:${on}`));
+  view.on('picture-in-picture', ({ active: on }) => record(`picture-in-picture:${on}`));
+  view.on('beforeunload-state', ({ hasListener }) => record(`beforeunload-state:${hasListener}`));
   view.on('source', ({ text }) => {
     host.source = text;
   });
+  // window.focus() (for example WindowClient.focus() of a service worker) makes the view active
+  view.on('focus-request', () => activate(view));
   view.on('close', () => {
     views.splice(views.indexOf(view), 1);
     if (active === view) {
@@ -109,6 +186,36 @@ const blTest = {
   flags,
 };
 
+// Native dialogs of the host page block its main thread like a real embedding would
+function nativeDialog(request) {
+  if (request.type === 'confirm' || request.type === 'beforeunload')
+    return confirm(request.message);
+  if (request.type === 'prompt') return prompt(request.message, request.defaultValue);
+  alert(request.message);
+  return undefined;
+}
+
+async function askPermission(request) {
+  host.events.push(`permission:${request.kind}`);
+  host.permissionRequests.push({
+    kind: request.kind,
+    origin: request.origin,
+    view: request.view.id,
+  });
+  const answer = host.permissionAnswers[request.kind] ?? host.permissionAnswer;
+  if (answer === 'wait')
+    return new Promise((resolve) => {
+      request.signal.addEventListener('abort', () => {
+        host.events.push(`permission-aborted:${request.kind}`);
+        resolve('deny');
+      });
+    });
+  // The core leaves the host notification permission to the handler
+  if (request.kind === 'notifications' && answer === 'grant')
+    return (await Notification.requestPermission()) === 'granted' ? 'grant' : 'deny';
+  return answer;
+}
+
 const host = {
   support: checkSupport(),
   ready: null,
@@ -118,14 +225,34 @@ const host = {
   events: [],
   warnings: [],
   downloads: [],
+  contextMenus: [],
+  dialogs: [],
   selectRequests: [],
+  colorRequests: [],
+  dateRequests: [],
+  permissionRequests: [],
+  /** Index of the <select> item, -1 cancels. */
   selectAnswer: -1,
+  /** 'grant', 'deny' or 'wait' (until the request is aborted); per kind in permissionAnswers. */
   permissionAnswer: 'deny',
+  permissionAnswers: {},
+  /** [[name, text, type?], ...] or null (cancel). */
   fileAnswer: null,
+  colorAnswer: null,
+  dateAnswer: null,
+  /** 'answer': confirm true, prompt 'answer'; 'native': the dialogs of the host page. */
+  dialogMode: 'answer',
+  /** Makes the view at index (in opening order) the active one. */
+  select(index) {
+    activate(views[index]);
+  },
   /** Starts a browser with one view (again after stop); options are merged in last. */
   async start(options = {}) {
     host.error = null;
-    transport = new WispTransport({ url: relay });
+    transport = new WispTransport({
+      url: relay,
+      ...(params.get('token') ? { token: params.get('token') } : {}),
+    });
     const storage = params.get('persistent')
       ? {
           persistent: true,
@@ -135,28 +262,54 @@ const host = {
           },
         }
       : { persistent: false };
+    const services = servicesOption(params.get('services'));
     const base = {
       engineUrl,
       transport,
       debug: true,
       serviceWorker: { url: new URL('sw.js', location.href), scope: './' },
       storage,
+      engine: engineOptions(),
+      ...(services ? { services } : {}),
       ...(params.get('device') ? { device: deviceOption(params.get('device')) } : {}),
       handlers: {
         selectPopup(request) {
-          host.selectRequests.push({ items: request.items.map((item) => item.text), selectedIndex: request.selectedIndex, rect: request.rect });
+          host.selectRequests.push({
+            items: request.items.map((item) => item.text),
+            labels: request.items.map((item) => (item.label ? 'group' : 'option')),
+            selectedIndex: request.selectedIndex,
+            rect: request.rect,
+          });
           return Promise.resolve(host.selectAnswer);
         },
-        permission(request) {
-          host.events.push(`permission:${request.kind}`);
-          return Promise.resolve(host.permissionAnswer);
+        colorPicker(request) {
+          host.colorRequests.push({ value: request.value, rect: request.rect });
+          return Promise.resolve(host.colorAnswer);
         },
+        dateTimePicker(request) {
+          host.dateRequests.push({ type: request.type, value: request.value, rect: request.rect });
+          return Promise.resolve(host.dateAnswer);
+        },
+        permission: askPermission,
         fileChooser(request) {
           host.events.push(`filechooser:${request.multiple}`);
-          return Promise.resolve(host.fileAnswer ? host.fileAnswer.map(([name, text]) => new File([text], name)) : null);
+          return Promise.resolve(
+            host.fileAnswer
+              ? host.fileAnswer.map(
+                  ([name, text, type]) => new File([text], name, type ? { type } : {}),
+                )
+              : null,
+          );
         },
         dialog(request) {
           host.events.push(`dialog:${request.type}:${request.message}`);
+          host.dialogs.push({
+            type: request.type,
+            origin: request.origin,
+            message: request.message,
+            view: request.view.id,
+          });
+          if (host.dialogMode === 'native') return nativeDialog(request);
           return request.type === 'prompt' ? 'answer' : true;
         },
       },
@@ -170,7 +323,15 @@ const host = {
     }
     browser.on('warning', (event) => host.warnings.push(event.code));
     browser.on('download', ({ download }) => {
-      const entry = { filename: download.filename, state: download.state, size: 0, text: null };
+      const entry = {
+        filename: download.filename,
+        mime: download.mime,
+        url: download.url,
+        state: download.state,
+        size: 0,
+        text: null,
+        error: null,
+      };
       host.downloads.push(entry);
       download.on('done', async () => {
         entry.state = download.state;
@@ -179,9 +340,11 @@ const host = {
       });
       download.on('error', () => {
         entry.state = download.state;
+        entry.error = download.error ?? null;
       });
     });
     browser.on('crash', ({ reason }) => host.events.push(`crash:${reason}`));
+    browser.on('network', ({ connected }) => host.events.push(`network:${connected}`));
     for (const type of ['unresponsive', 'responsive', 'memory-pressure'])
       browser.on(type, () => host.events.push(type));
     // Views the pages open (window.open, target=_blank) become the active view

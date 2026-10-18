@@ -1,37 +1,36 @@
-// Resizable ArrayBuffer und growable SharedArrayBuffer (ES2024). JSC reserviert
-// dafuer "virtuellen" Speicher ueber bmalloc; unter Emscripten stuerzte das ab
-// (Patch 0023).
+// Resizable ArrayBuffer and growable SharedArrayBuffer (ES2024). JSC reserves "virtual" memory
+// for them through bmalloc; under Emscripten that crashed (patch 0023).
 function assert(cond, message) {
     if (!cond)
-        throw new Error("Fehler: " + message);
+        throw new Error("failure: " + message);
 }
 
 const buffer = new ArrayBuffer(4, { maxByteLength: 1024 });
-assert(buffer.resizable && buffer.byteLength === 4 && buffer.maxByteLength === 1024, "erzeugen");
+assert(buffer.resizable && buffer.byteLength === 4 && buffer.maxByteLength === 1024, "create");
 const tracking = new Uint8Array(buffer);
 const fixed = new Uint8Array(buffer, 0, 4);
 tracking[3] = 7;
 buffer.resize(100);
-assert(buffer.byteLength === 100 && tracking.length === 100 && fixed.length === 4, "wachsen");
-assert(tracking[3] === 7 && tracking[99] === 0, "Inhalt nach dem Wachsen");
+assert(buffer.byteLength === 100 && tracking.length === 100 && fixed.length === 4, "grow");
+assert(tracking[3] === 7 && tracking[99] === 0, "content after growing");
 tracking[99] = 9;
 buffer.resize(10);
-assert(tracking.length === 10, "schrumpfen");
+assert(tracking.length === 10, "shrink");
 buffer.resize(100);
-assert(tracking[99] === 0, "neuer Bereich ist genullt");
+assert(tracking[99] === 0, "new range is zeroed");
 let threw = false;
 try { buffer.resize(2000); } catch (e) { threw = e instanceof RangeError; }
-assert(threw, "ueber das Maximum");
+assert(threw, "over the maximum");
 
-// Viele kleine und ein paar grosse
+// Many small ones and a few large ones
 const many = [];
 for (let i = 0; i < 200; i++)
     many.push(new ArrayBuffer(i, { maxByteLength: 4096 + i }));
-assert(many[199].maxByteLength === 4295, "viele");
+assert(many[199].maxByteLength === 4295, "many");
 const large = new ArrayBuffer(0, { maxByteLength: 16 * 1024 * 1024 });
 large.resize(16 * 1024 * 1024);
 new Uint8Array(large).fill(1);
-assert(new Uint8Array(large)[16 * 1024 * 1024 - 1] === 1, "gross");
+assert(new Uint8Array(large)[16 * 1024 * 1024 - 1] === 1, "large");
 
 // transfer
 const moved = buffer.transfer(50);

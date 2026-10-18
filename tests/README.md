@@ -1,97 +1,62 @@
 # tests/
 
-| Ordner | Was | Braucht | CI |
+| Suite | What | Needs | CI job |
 |---|---|---|---|
-| `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
-| `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
-| `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) and the exports the core uses; `deps-test.mjs`: dependency direction of the packages, no engine access outside `packages/core/src` | node | ja |
-| `core/` | `smoke-test.mjs`: `@browser-lite/core` in Chromium through the test host page `host/` (`window.blTest`, `window.blHost`), relay of `@browser-lite/server` | engine build, `npm ci && npm run build`, Playwright Chromium | ja |
-| `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, error page, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
-| `e2e/` | Whole chain in a real Chromium (Playwright): demo (`apps/demo`), engine, relay, local test servers | Engine-Build, `npm ci && npm run build` | ja |
+| `contract/` | `engine/abi.json` against the engine sources, dependency direction of the packages | node | js |
+| `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache cleanup | node | js (`npm test`) |
+| `engine/` | the engine in node without a browser: test pages (`pages/`), error page, GC stress | engine build | engine |
+| `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
+| `core/` | `@browser-lite/core` in Chromium through the test host page `core/host/`: every engine feature | engine build, packages, Playwright | e2e-core |
+| `demo/` | the demo UI (`apps/demo`) in Chromium: tabs, prompts, dialogs, settings, profile | engine build, packages, Playwright | e2e-demo |
+| `compat/` | real sites of `sites.txt`, informational | engine build, internet | compat |
+| `bench/` | benchmarks to run by hand with `engine/render.mjs` | engine build | none |
 
-## Ohne Build
+`lib/` is the shared harness of the browser suites, `fixtures/` holds shared test data (WebAssembly
+modules with `wasm/build.sh`, `wasm-bytes.mjs`, `certs.mjs`, `features.html` for the parity test).
 
-```bash
-tools/check-style.sh
-npm run build
-npm test -w @browser-lite/core -w @browser-lite/server -w @browser-lite/transport-wisp
-node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
-node tests/engine/recorder-test.mjs
-node tests/engine/http-cache-test.mjs
-node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs
-```
-
-## core/
-
-```bash
-node tests/core/smoke-test.mjs [engine-dir]     # default build/webcore/bin
-```
-
-The host page exposes `window.blTest` (the same test hooks as the demo with `?debug=1`) and
-`window.blHost` (recorded events, request answers, `start(options)`, `stop()`).
-`window.blTestOptions`, set before the start, is merged into the `BrowserOptions`.
-
-## engine/
-
-`engine-node.mjs` starts the engine in node (one view, one page, the contract of
-`engine/abi.json`), `render-test.mjs` and `gc-test.mjs` (with `gc-stress.html`) use it.
-`check-basic.mjs` checks the frame of `basic.html`.
-
-```bash
-node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600
-node tests/engine/check-basic.mjs build/basic.ppm
-RENDER_WAIT_FOR="CRYPTO done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200
-BL_SCRIPT_TIMEOUT=2 RENDER_WAIT_FOR="HANG done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200
-BL_FEATURES= RENDER_URL="file:///test/?features=none" RENDER_WAIT_FOR="BRIDGES done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges.ppm 200 200
-JSC_slowPathAllocsBetweenGCs=10 node tests/engine/gc-test.mjs build/webcore/bin/engine.js
-node tests/engine/error-page-test.mjs build/webcore/bin/engine.js
-```
-
-Test pages with `RENDER_WAIT_FOR` report `<NAME> done=ok` at the end: `crypto.html`,
-`stack.html`, `limits.html`, `hang.html` (watchdog, needs `BL_SCRIPT_TIMEOUT=2`),
-`bridges.html` (`?features=none` with `BL_FEATURES=` or `?features=all`).
-`RENDER_TIMEOUT` (seconds, default 120) changes the time limit, `RENDER_URL` the page URL,
-`JSC_*` and `BL_*` (e.g. `BL_DEBUG=1`) go to the engine.
-`error-page-test.mjs` loads without a transport and checks a custom `BL_ERROR_PAGE`
-(placeholders, escaping, CSP, retry) and the close reason `name-not-resolved`.
-`features.html` is the list for `e2e/parity-test.mjs`. `jsbench.html`, `framebench.html`
-and `paintbench.html` are benchmarks to measure by hand, no tests.
-
-## e2e/
+## Run
 
 ```bash
 npm ci && npm run build && npx playwright install chromium
-node network-test.mjs [engine-ordner]     # Standard build/webcore/bin
+npm test                                  # package unit tests and engine-js
+node tests/run.mjs contract
+node tests/run.mjs engine  [filter] [--engine=<dir>]
+node tests/run.mjs core    [filter] [--engine=<dir>]
+node tests/run.mjs demo    [filter] [--engine=<dir>]
+node tests/core/input-test.mjs [engine-dir]   # a single test
 ```
 
-Jeder `*-test.mjs` ist ein eigener Test, CI ruft sie einzeln auf: `network`, `input`,
-`storage`, `audio`, `media`, `webgl`, `compositing`, `paintworklet`, `pinch`,
-`serviceworker`, `webcodecs`, `mediastream`, `webrtc`, `dragdrop`, `clipboard`, `wasm`,
-`cache`, `devices`, `ui`, `background`, `soak`, `parity` und (eigener Job) `site`. Was jeder prueft, steht oben in
-der Datei. All use `harness.mjs`: it builds the demo once per test with Vite (its `engine/`
-links to the engine folder), starts it with `browser-lite-server` (`SITE_DIR`, profile) and a
-second server as the relay on free ports, ends helper processes with the test, `check()`/
-`finish()`, RESULT lines of the pages.
+`tests/run.mjs` runs every `*-test.mjs` of the suite one after the other and prints a summary
+(GitHub groups in CI, exit code 1 on a failure). The engine folder is `--engine`, `BL_ENGINE_DIR`
+or `build/webcore/bin`. The demo suite builds the demo once (Vite, `engine/` links to the engine);
+`E2E_SITE_DIR` uses a folder of `tools/package-demo.sh` instead (CI tests the deployable demo).
 
-- `E2E_TIMEOUT` (ms, default 180000), `E2E_VERBOSE=1` (console of the pages and the servers,
-  engine log with `?log=1`), `E2E_SITE_DIR` (a packaged demo of `tools/package-demo.sh`
-  instead of the Vite build), `CHROMIUM_PATH` (own Chromium).
-- `storage-test.mjs` startet Chromium mit eigenem Profil auf der Platte (`launchProfile`):
-  in einem Kontext von `newContext()` (wie inkognito) liegt das OPFS im RAM, und Chromium
-  lehnt Schreiben ab, wenn der Rechner wenig freien Speicher hat.
-- `network-test.mjs` macht sich eine Test-CA und Zertifikate in `build/e2e-certs/`
-  (braucht `openssl`), auch die, die die Engine ablehnen muss.
-- `parity-test.mjs` vergleicht mit dem Host-Chromium. Fehler nur bei Rueckschritten
-  gegen `parity-baseline.txt`, `PARITY_UPDATE=1` schreibt die Liste neu.
-- `soak-test.mjs`: langer Lauf (viele Navigationen, Tabs auf und zu), Dokumente und Speicher
-  muessen begrenzt bleiben. `SOAK_ROUNDS` (Standard 40 Runden durch 5 Seiten), `SOAK_TABS`
-  (Standard 30).
-- `stack.app()` always adds `?debug=1`: `window.blTest` of the demo (`eval`, `pagePixel`,
-  `memory`, `crash`, ... through `browser.debug`, see [apps/demo/README.md](../apps/demo/README.md))
-  and the engine test hooks; `?relay=` and `?env=` work only with it. A test sets extra
-  options before the start with `window.blTestOptions` (for example `{ engine: { extraCA } }`).
-- `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,
-  Screenshots `build/sites/<host>_<pfad>.png`), Schalter `SITE_*` im Kopf des Skripts.
-- `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs` (auch memory64),
-  eingecheckt, neu bauen mit `fixtures/build.sh` im Toolchain-Image.
-- Bildschirmfotos der Tests landen in `build/e2e-*.png`.
+Environment: `E2E_TIMEOUT` (ms per wait, default 180000), `E2E_VERBOSE=1` (console of the pages
+and the servers, engine log), `CHROMIUM_PATH`. Chromium tests start several processes and need a
+few GB of memory: run one browser test at a time and switch off core dumps (`ulimit -c 0`), a
+crashed headless Chromium can write a huge one. In a container without Chromium run them on a
+host that has it. `PARITY_UPDATE=1` writes `core/parity-baseline.txt` again, `SITE_*` switches of
+`compat/site-test.mjs` are in its head, `SOAK_ROUNDS`/`SOAK_TABS` shorten the soak test.
+
+## Harness
+
+Every browser test starts its own servers with `startStack()` of `lib/`: the page under test
+(`app: 'core'` the host page, `app: 'demo'` the demo with the profile store) and a relay, both
+`browser-lite-server` on free ports (ready when `/healthz` answers), plus local test servers.
+`stack.app(params)` is the address of the page with relay, token and parameters.
+
+The host page and the demo (with `?debug=1`) expose `window.blTest` (browser, active view,
+`open`, `load`, `eval`, `pagePixel`, debug hooks). The host page also has `window.blHost`: recorded
+events (`navigation:`, `title:`, `commit:`, `icon-image:`, `permission:`, `external-url:`, ...),
+answers of the request handlers (`selectAnswer`, `permissionAnswer`, `fileAnswer`, `dialogMode`,
+...), `start(options)`, `stop()`, `select(index)`. `window.blTestOptions`, set before the start
+with `page.addInitScript`, is merged into the `BrowserOptions`. Parameters of the host page are
+listed at the top of `core/host/host.js` (`persistent`, `namespace`, `device`, `services`, `env`,
+engine switches).
+
+## Add a test
+
+Put a `<name>-test.mjs` into the suite folder: engine features into `core/` (only the public core
+API through the host page), UI behaviour into `demo/`. Use `check()` per check and `finish()` at
+the end, pages report with `console.log('RESULT key=value')` (`collect()`). Comments, labels and
+messages in English; a test needs no CI change, `tests/run.mjs` picks it up.
