@@ -1,11 +1,12 @@
 #include "config.h"
 #include "DeviceClients.h"
 
+#include "EngineConfig.h"
 #include "Host.h"
 #include "ServiceWorkerWasm.h"
 #include "WebView.h"
 #if ENABLE(DEVICE_ORIENTATION)
-// Nicht in den exportierten Headern von WebCore, aber im Include-Pfad (engine.cmake)
+// Not in the exported WebCore headers, but in the include path (engine.cmake)
 #include "DeviceMotionClient.h"
 #include "DeviceMotionController.h"
 #include "DeviceMotionData.h"
@@ -49,11 +50,23 @@ using namespace WebCore;
 
 namespace BrowserLite {
 
-// ------------------------------------------------------------ Berechtigungen
+// ------------------------------------------------------------ Permissions
 
-// Eine Abfrage fuer Kamera und Mikrofon zusammen (getUserMedia mit beidem)
-// gilt fuer beide Arten einzeln
+// One prompt for camera and microphone together (getUserMedia with both)
+// applies to both kinds separately
 static constexpr auto cameraAndMicrophone = "camera-microphone"_s;
+
+// Permissions of a disabled feature are denied, like in a browser that blocks them
+static bool permissionFeatureEnabled(const String& kind)
+{
+    if (kind == "geolocation"_s)
+        return featureEnabled(Feature::Geolocation);
+    if (kind == "notifications"_s)
+        return featureEnabled(Feature::Notifications);
+    if (kind == "camera"_s || kind == "microphone"_s)
+        return featureEnabled(Feature::Capture);
+    return true;
+}
 
 static HashMap<String, PermissionDecision>& decisions()
 {
@@ -68,6 +81,8 @@ static String decisionKey(const String& kind, const String& origin)
 
 PermissionDecision storedPermission(const String& kind, const String& origin)
 {
+    if (!permissionFeatureEnabled(kind))
+        return PermissionDecision::Denied;
     if (kind == cameraAndMicrophone) {
         auto camera = storedPermission("camera"_s, origin);
         auto microphone = storedPermission("microphone"_s, origin);
@@ -95,7 +110,7 @@ static HashMap<int, CompletionHandler<void(PermissionDecision)>>& pendingRequest
     return map;
 }
 
-// Erlaubt oder blockiert schon? Sonst die Oberflaeche fragen
+// Already granted or denied? Otherwise ask the host
 static void requestPermission(int viewId, const String& kind, const String& origin, CompletionHandler<void(bool)>&& completionHandler)
 {
     switch (storedPermission(kind, origin)) {
@@ -111,7 +126,7 @@ static void requestPermission(int viewId, const String& kind, const String& orig
     static int nextRequestID = 1;
     int id = nextRequestID++;
     pendingRequests().set(id, [kind, origin, completionHandler = WTF::move(completionHandler)](PermissionDecision answer) mutable {
-        // Ohne Entscheidung (Tab zu) gilt die Abfrage als abgelehnt, gemerkt wird nichts
+        // Without a decision (view closed) the request counts as denied, nothing is remembered
         if (answer != PermissionDecision::Ask)
             setStoredPermission(kind, origin, answer);
         completionHandler(answer == PermissionDecision::Granted);
@@ -130,7 +145,7 @@ void answerPermission(int requestId, PermissionDecision answer)
         completionHandler(answer);
 }
 
-// ------------------------------------------------------------ Standort
+// ------------------------------------------------------------ Geolocation
 
 class GeolocationClientWasm final : public GeolocationClient, public RefCounted<GeolocationClientWasm> {
     WTF_DEPRECATED_MAKE_FAST_ALLOCATED(GeolocationClientWasm);
@@ -179,7 +194,7 @@ private:
             geolocation.setIsAllowed(false, { });
             return;
         }
-        // Wie Chrome: die Entscheidung gilt fuer die Seite oben (topOrigin)
+        // Like Chrome: the decision applies to the top page (topOrigin)
         String origin = document->topOrigin().toString();
         BrowserLite::requestPermission(m_viewId, "geolocation"_s, origin, [geolocation = Ref { geolocation }](bool granted) {
             geolocation->setIsAllowed(granted, { });
@@ -223,18 +238,18 @@ void geolocationError(int viewId, int code, const String& message)
     RefPtr view = WebView::fromID(viewId);
     if (!view)
         return;
-    // Fehlercodes wie GeolocationPositionError: 1 = verweigert, sonst nicht verfuegbar
+    // Error codes like GeolocationPositionError: 1 = denied, otherwise unavailable
     auto error = GeolocationError::create(code == 1 ? GeolocationError::PermissionDenied : GeolocationError::PositionUnavailable, message);
     if (auto* controller = GeolocationController::from(&view->page()))
         controller->errorOccurred(error.get());
 }
 
-// ------------------------------------------------------------ Lage und Bewegung
+// ------------------------------------------------------------ Orientation and motion
 
 #if ENABLE(DEVICE_ORIENTATION)
-// Die Oberflaeche hoert auf deviceorientation/devicemotion des Host-Browsers,
-// solange die Seite Zuhoerer hat (Chromebooks mit Touchscreen haben Sensoren,
-// auf dem Desktop kommt wie bei Chrome nie ein Event).
+// The host listens to deviceorientation/devicemotion of the host browser while
+// the page has listeners (Chromebooks with a touch screen have sensors, on the
+// desktop no event ever arrives, like in Chrome).
 class DeviceOrientationClientWasm final : public DeviceOrientationClient, public CanMakeCheckedPtr<DeviceOrientationClientWasm> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(DeviceOrientationClientWasm);
     WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(DeviceOrientationClientWasm);
@@ -253,8 +268,16 @@ public:
 
 private:
     void setController(DeviceOrientationController* controller) final { m_controller = controller; }
-    void startUpdating() final { notifyHost(m_viewId, "sensor-start", "{\"kind\":\"orientation\"}"_s); }
-    void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"orientation\"}"_s); }
+    void startUpdating() final
+    {
+        if (featureEnabled(Feature::Sensors))
+            notifyHost(m_viewId, "sensor-start", "{\"kind\":\"orientation\"}"_s);
+    }
+    void stopUpdating() final
+    {
+        if (featureEnabled(Feature::Sensors))
+            notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"orientation\"}"_s);
+    }
     DeviceOrientationData* lastOrientation() const final { return m_last.get(); }
     void deviceOrientationControllerDestroyed() final { m_controller = nullptr; }
     uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
@@ -286,8 +309,16 @@ public:
 
 private:
     void setController(DeviceMotionController* controller) final { m_controller = controller; }
-    void startUpdating() final { notifyHost(m_viewId, "sensor-start", "{\"kind\":\"motion\"}"_s); }
-    void stopUpdating() final { notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"motion\"}"_s); }
+    void startUpdating() final
+    {
+        if (featureEnabled(Feature::Sensors))
+            notifyHost(m_viewId, "sensor-start", "{\"kind\":\"motion\"}"_s);
+    }
+    void stopUpdating() final
+    {
+        if (featureEnabled(Feature::Sensors))
+            notifyHost(m_viewId, "sensor-stop", "{\"kind\":\"motion\"}"_s);
+    }
     DeviceMotionData* lastMotion() const final { return m_last.get(); }
     void deviceMotionControllerDestroyed() final { m_controller = nullptr; }
     uint32_t checkedPtrCount() const final { return CanMakeCheckedPtr::checkedPtrCount(); }
@@ -301,8 +332,8 @@ private:
     RefPtr<DeviceMotionData> m_last;
 };
 
-// Die Controller der Page zeigen auf die Clients und werden nicht vor ihnen
-// abgebaut, darum bleiben die (kleinen) Clients bis zum Ende der Engine.
+// The page's controllers point to the clients and are not torn down before
+// them, so the (small) clients stay until the engine ends.
 struct SensorClients {
     std::unique_ptr<DeviceOrientationClientWasm> orientation;
     std::unique_ptr<DeviceMotionClientWasm> motion;
@@ -332,7 +363,7 @@ void deviceMotion(int viewId, const double* values, double interval)
     auto it = sensorClients().find(viewId);
     if (it == sensorClients().end())
         return;
-    // values: Beschleunigung x/y/z, mit Schwerkraft x/y/z, Drehung alpha/beta/gamma (NaN = fehlt)
+    // values: acceleration x/y/z, with gravity x/y/z, rotation alpha/beta/gamma (NaN = missing)
     auto acceleration = [&](int start) -> RefPtr<DeviceMotionData::Acceleration> {
         if (std::isnan(values[start]) && std::isnan(values[start + 1]) && std::isnan(values[start + 2]))
             return nullptr;
@@ -347,7 +378,7 @@ void deviceMotion(int viewId, const double* values, double interval)
 #endif
 }
 
-// ------------------------------------------------------------ Benachrichtigungen
+// ------------------------------------------------------------ Notifications
 
 static HashMap<String, std::unique_ptr<NotificationData>>& shownNotifications()
 {
@@ -370,8 +401,8 @@ private:
         return origin ? origin->toString() : String { };
     }
 
-    // Der Service Worker ruft in seinem Thread. Die Maps hier und die Strings
-    // darin gehoeren dem Engine-Thread (wie WebNotificationClient in WebKit2).
+    // The service worker calls on its thread. The maps here and the strings in
+    // them belong to the engine thread (like WebNotificationClient in WebKit2).
     static void onEngineThread(Function<void()>&& function)
     {
         if (isMainThread())
@@ -447,7 +478,7 @@ private:
     int m_viewId;
 };
 
-// Ohne Tab: die Oberflaeche zeigt sie trotzdem, ein Klick holt keinen Tab nach vorne
+// Without a view: the host shows them anyway, a click brings no view to the front
 std::unique_ptr<NotificationClient> createServiceWorkerNotificationClient()
 {
     return makeUnique<NotificationClientWasm>(0);
@@ -471,7 +502,7 @@ void notificationEvent(const String& notificationID, int type)
     NotificationData data = *it->value;
     if (type >= 2)
         shownNotifications().remove(it);
-    // Aus showNotification(): Klick und Schliessen gehen an den Service Worker
+    // From showNotification(): click and close go to the service worker
     if (data.isPersistent()) {
         if (type == 1 || type == 2)
             ServiceWorkers::notificationEvent(WTF::move(data), type == 1 ? NotificationEventType::Click : NotificationEventType::Close);
@@ -496,10 +527,10 @@ void notificationEvent(const String& notificationID, int type)
     });
 }
 
-// ------------------------------------------------------------ Spracherkennung
-// webkitSpeechRecognition: die Oberflaeche erkennt mit SpeechRecognition des
-// Host-Browsers und meldet die Ereignisse zurueck (bl_speech_recognition_event).
-// Wie Chrome fragen wir pro Ursprung nach dem Mikrofon.
+// ------------------------------------------------------------ Speech recognition
+// webkitSpeechRecognition: the host recognizes with SpeechRecognition of the
+// host browser and reports the events back (bl_speech_recognition_event).
+// Like Chrome we ask for the microphone per origin.
 
 static HashMap<uint64_t, WeakPtr<SpeechRecognitionConnectionClient>>& recognitionClients()
 {
@@ -533,6 +564,11 @@ private:
     {
         auto id = identifier.toUInt64();
         auto origin = clientOrigin.topOrigin.toString();
+        if (!featureEnabled(Feature::Speech)) {
+            if (RefPtr client = recognitionClients().get(id))
+                client->didError({ SpeechRecognitionErrorType::NotAllowed, "Permission is denied"_s });
+            return;
+        }
         requestPermission(m_viewId, "microphone"_s, origin, [viewId = m_viewId, id, lang = lang.isolatedCopy(), continuous, interimResults, maxAlternatives](bool granted) {
             RefPtr client = recognitionClients().get(id);
             if (!client)
@@ -608,7 +644,7 @@ void speechRecognitionEvent(uint64_t id, int type, const String& json)
         client->didStopCapturingAudio();
         break;
     case 7: {
-        // [{"final":true,"alternatives":[["Text",0.9],...]},...]
+        // [{"final":true,"alternatives":[["text",0.9],...]},...]
         auto value = JSON::Value::parseJSON(json);
         auto array = value ? value->asArray() : nullptr;
         if (!array)
@@ -637,7 +673,7 @@ void speechRecognitionEvent(uint64_t id, int type, const String& json)
         client->didFindNoMatch();
         break;
     case 9: {
-        // {"error":2,"message":"..."} mit error als Index in SpeechRecognitionErrorType
+        // {"error":2,"message":"..."} with error as index into SpeechRecognitionErrorType
         auto value = JSON::Value::parseJSON(json);
         auto object = value ? value->asObject() : nullptr;
         int error = object ? object->getInteger("error"_s).value_or(0) : 0;
@@ -661,7 +697,7 @@ void attachDeviceClients(WebView& view, Page& page)
     auto geolocationClient = GeolocationClientWasm::create(view.id());
     provideGeolocationTo(&page, geolocationClient.get());
     geolocationClients().set(view.id(), WTF::move(geolocationClient));
-    // Gehoert danach dem NotificationController (notificationControllerDestroyed)
+    // Belongs to the NotificationController afterwards (notificationControllerDestroyed)
     provideNotification(&page, new NotificationClientWasm(view.id()));
 #if ENABLE(DEVICE_ORIENTATION)
     auto& sensors = sensorClients().add(view.id(), SensorClients { }).iterator->value;
@@ -669,8 +705,8 @@ void attachDeviceClients(WebView& view, Page& page)
         sensors.orientation = makeUnique<DeviceOrientationClientWasm>(view.id());
         sensors.motion = makeUnique<DeviceMotionClientWasm>(view.id());
     }
-    // Namen wie DeviceOrientationController::supplementName() (privat). In
-    // WebKit stellt kein Port die Controller mehr bereit.
+    // Names like DeviceOrientationController::supplementName() (private). No
+    // port in WebKit provides the controllers anymore.
     Supplement<Page>::provideTo(&page, "DeviceOrientationController"_s, makeUnique<DeviceOrientationController>(*sensors.orientation));
     Supplement<Page>::provideTo(&page, "DeviceMotionController"_s, makeUnique<DeviceMotionController>(*sensors.motion));
 #endif

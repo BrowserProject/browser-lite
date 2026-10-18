@@ -1,5 +1,5 @@
-// WebView: eine Seite (Tab) mit eigener WebCore::Page, Rendering in einen
-// Pixel-Buffer und Eingabe-Events.
+// WebView: one page (view) with its own WebCore::Page, rendering into a pixel
+// buffer and input events.
 #pragma once
 
 #include "PinchZoom.h"
@@ -41,11 +41,11 @@ class LayerTreeHostWasm;
 class WebView : public RefCounted<WebView>, public CanMakeWeakPtr<WebView> {
 public:
     static Ref<WebView> create(int id, WebCore::IntSize, float deviceScaleFactor);
-    // Offene Views gehoeren der Engine, bis close() sie wieder freigibt
+    // Open views belong to the engine until close() releases them again
     static WebView& open(int id, WebCore::IntSize, float deviceScaleFactor);
-    // Neuer Tab, den die Engine selber oeffnet (window.open, target=_blank,
-    // clients.openWindow): ID ab 2^20 (die Oberflaeche zaehlt ab 1), die
-    // Oberflaeche bekommt "newview". openerId 0 = ohne Tab dahinter
+    // New view the engine opens itself (window.open, target=_blank,
+    // clients.openWindow): ID from 2^20 on (the host counts from 1), the host
+    // gets "newview". openerId 0 = without a view behind it
     static WebView& openFromEngine(int openerId, WebCore::IntSize, float deviceScaleFactor);
     static void close(int id);
     ~WebView();
@@ -54,7 +54,7 @@ public:
     static void forEach(const Function<void(WebView&)>&);
     void setDarkAppearance(bool);
 
-    // Einstellungen der Oberflaeche fuer alle Tabs (bl_set_preferences), nur im Engine-Thread
+    // Host settings for all views (bl_set_preferences), only on the engine thread
     enum class Preference : uint8_t {
         NoJavaScript = 1 << 0,
         NoImages = 1 << 1,
@@ -70,11 +70,11 @@ public:
     WebCore::LocalFrame* mainFrame() const;
     WebCore::LocalFrameView* mainFrameView() const;
 
-    // Laden
+    // Loading
     void loadURL(const String&);
     void loadHTML(const String& html, const String& baseURL);
     void goBack();
-    // Verlauf des Tabs wieder einsetzen und den aktuellen Eintrag laden:
+    // Puts the view's history back and loads the current entry:
     // {"entries":[{"url":..,"title":..}],"index":n}
     void restoreHistory(const String&);
     void goForward();
@@ -83,7 +83,7 @@ public:
     String currentURL() const;
     String title() const;
 
-    // Groesse in CSS-Pixeln, deviceScaleFactor fuer HiDPI
+    // Size in CSS pixels, deviceScaleFactor for HiDPI
     void resize(WebCore::IntSize, float deviceScaleFactor);
     WebCore::IntSize size() const { return m_size; }
     float deviceScaleFactor() const { return m_deviceScaleFactor; }
@@ -92,95 +92,95 @@ public:
     void addDamage(const WebCore::IntRect&);
     void scrollDamage(const WebCore::IntSize& delta, const WebCore::IntRect& rectToScroll, const WebCore::IntRect& clipRect);
     void scheduleRenderingUpdate();
-    // Rendering-Update (rAF, Style, Layout) und neu malen was kaputt ist.
-    // Gibt true zurueck, wenn sich Pixel geaendert haben.
+    // Rendering update (rAF, style, layout) and repaint what is damaged.
+    // Returns true if pixels changed.
     bool renderFrame(WebCore::IntRect* dirtyOut = nullptr);
     void framePresented() { m_frameInFlight = false; }
     bool frameInFlight() const { return m_frameInFlight; }
     void presentIfNeeded();
-    // Die Oberflaeche hat das Canvas an den Engine-Worker gegeben: alles neu zeigen
+    // The host gave the canvas to the engine worker: show everything again
     void canvasAttached();
 
-    // Compositing mit Ebenen (LayerTreeHostWasm.h), mit GPU, ausser BL_COMPOSITING=0
+    // Compositing with layers (LayerTreeHostWasm.h), with GPU, unless BL_COMPOSITING=0
     bool isCompositing() const { return m_compositing; }
     LayerTreeHostWasm* layerTreeHost() const { return m_compositing ? m_layerTreeHost.get() : nullptr; }
     WebCore::GraphicsLayerFactory* graphicsLayerFactory() const;
     void attachRootGraphicsLayer(WebCore::GraphicsLayer*);
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*);
-    // Ebenen neu zusammensetzen (ohne Rendering-Update)
+    // Composite the layers again (without a rendering update)
     void requestComposite();
-    // Vom Compositor-Thread: das letzte Rendering-Update ist gezeigt
+    // From the compositor thread: the last rendering update is shown
     void didComposite();
     void compositorLost();
-    // Von jedem Thread: das erste Bild nach dem ersten sichtbaren Layout ist zu sehen
+    // From any thread: the first frame after the first visible layout is shown
     static void firstPaintShown(int id);
-    // GPU des Engine-Workers verloren oder wieder da (GpuRaster.cpp)
+    // GPU of the engine worker lost or back (GpuRaster.cpp)
     void gpuLost() { dropGpuSurface(); }
-    // true, wenn der View wieder auf der GPU malt
+    // true if the view paints on the GPU again
     bool gpuRestored();
 
     const uint8_t* pixels() const { return m_pixels.span().data(); }
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
 
-    // Eingabe (Koordinaten in CSS-Pixeln relativ zur View)
+    // Input (coordinates in CSS pixels relative to the view)
     void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0);
     void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
-    // Drag & Drop: aus der Seite (DragClient) und aus dem Host (bl_drag,
-    // phase 0 = ueber der Seite, 1 = verlassen, 2 = ablegen; data als JSON)
+    // Drag and drop: from the page (DragClient) and from the host (bl_drag,
+    // phase 0 = over the page, 1 = left, 2 = drop; data as JSON)
     void startPageDrag(Ref<WebCore::WasmPlatform::DragContent>&&, OptionSet<WebCore::DragOperation> sourceOperations);
     void hostDrag(int phase, double x, double y, int modifiers, const String& data);
     void cancelDrag();
     static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
-    // Auch vom Scroll-Thread (ScrollingWasm.cpp), mit den Schritten, die noch fehlen
+    // Also from the scrolling thread (ScrollingWasm.cpp), with the steps still missing
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
-    // Strg + Rad: nur das DOM-Event, kein Scrollen. Mit cancelable meldet die
-    // Engine "wheel-result", ob die Seite preventDefault gerufen hat
+    // Ctrl + wheel: only the DOM event, no scrolling. With cancelable the
+    // engine reports "wheel-result", whether the page called preventDefault
     void zoomWheelEvent(const WebCore::PlatformWheelEvent&, bool cancelable);
-    // ChromeClient: Scrollen im eigenen Thread, wenn mit Ebenen
+    // ChromeClient: scrolling in its own thread when with layers
     RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const;
 #if ENABLE(POINTER_LOCK)
     void requestPointerLock(CompletionHandler<void(WebCore::PointerLockRequestResult)>&&);
     void requestPointerUnlock();
-    // Antwort/Ende vom Host: false = nicht bekommen oder verloren (Esc)
+    // Answer/end from the host: false = not granted or lost (Esc)
     void pointerLockResult(bool locked);
 #endif
     void touchEvent(int type, const String& pointsJSON, int modifiers);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
-    // Texteingabe mit Vorschau (IME, tote Tasten): unterstrichener Text in der Seite
+    // Text input with preview (IME, dead keys): underlined text in the page
     void setComposition(const String&, unsigned selectionStart, unsigned selectionEnd);
     void confirmComposition(const String&);
-    // Rechtsklick: zuerst das contextmenu-Event der Seite, dann (wenn die Seite
-    // es nicht abfaengt) Infos fuer das Menue der Oberflaeche
+    // Right click: first the page's contextmenu event, then (if the page does
+    // not handle it) information for the host's menu
     void contextMenu(double x, double y);
-    // Editor-Befehl wie "Copy", "Paste", "SelectAll"
+    // Editor command like "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);
-    // Hintergrund-Tab oder Tab des Host verdeckt: die Seite ist versteckt
-    // (visibilityState, kein rAF, Timer gedrosselt) und malt nicht
+    // Background view or host tab hidden: the page is hidden
+    // (visibilityState, no rAF, timers throttled) and does not paint
     void setVisible(bool);
-    // Seite spielt Ton: versteckt werden ihre Timer nicht gedrosselt (wie Chrome)
+    // The page plays sound: hidden, its timers are not throttled (like Chrome)
     void setAudible(bool);
     void focusInitial(bool forward);
     void setZoom(float);
-    // Pinch-Zoom (PinchZoom.h): nur die Ansicht skalieren, Layout bleibt.
-    // pinch() nur ohne Compositor, sonst macht die Geste der Compositor-Thread
-    // und uebergibt am Ende mit setPageScale() (commit fuer LayerTreeHostWasm)
+    // Pinch zoom (PinchZoom.h): only scale the view, the layout stays. pinch()
+    // only without the compositor, otherwise the compositor thread does the
+    // gesture and hands over at the end with setPageScale() (commit for LayerTreeHostWasm)
     void pinch(PinchPhase, float factor, WebCore::FloatPoint focus);
     void setPageScale(float scale, WebCore::FloatPoint scrollPosition, unsigned pinchCommit = 0);
     PinchViewport pinchViewport() const;
     void find(const String&, bool backwards, bool again);
     void stopFind();
 
-    // Fuer die Clients
+    // For the clients
     void didStartLoading();
-    // Die naechste Fehlerseite (ErrorPage.cpp) ist wegen eines ungueltigen Zertifikats
+    // The next error page (ErrorPage.cpp) is because of an invalid certificate
     void willCommitErrorPage(bool certificate) { m_errorPageCertificate = certificate; }
     void didCommitLoad();
-    // Anker, pushState/replaceState, popstate: neue Adresse ohne neues Dokument
+    // Anchor, pushState/replaceState, popstate: new address without a new document
     void didNavigateWithinPage();
     void didFinishLoading();
-    // Abgebrochen (Stopp, neue Navigation, Download): kein Fehler, nicht fertig
+    // Cancelled (stop, new navigation, download): no error, not finished
     void didStopLoading();
     void didReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>);
     void didFailLoading(const String& url, const String& description);
@@ -190,8 +190,8 @@ public:
     void didReceiveConsoleMessage(int level, const String& message, const String& source, unsigned line);
     bool isLoading() const { return m_isLoading; }
 
-    // <input type=file>: die Oberflaeche zeigt den Dateidialog, schreibt die
-    // Dateien ins virtuelle Dateisystem und ruft dann chooseFiles() auf
+    // <input type=file>: the host shows the file dialog, writes the files into
+    // the virtual file system and then calls chooseFiles()
     void openFileChooser(WebCore::FileChooser&);
     void chooseFiles(const Vector<String>& paths);
 
@@ -220,7 +220,7 @@ private:
 
     Vector<uint8_t> m_pixels;
     sk_sp<SkSurface> m_surface;
-    // GPU-Rastern (GpuRaster.h): Zielflaeche als Textur, sonst m_surface auf der CPU
+    // GPU rasterization (GpuRaster.h): target surface as texture, otherwise m_surface on the CPU
     sk_sp<SkSurface> m_gpuSurface;
     bool m_canvasAttached { false };
     void createGpuSurfaceIfPossible();
@@ -231,8 +231,8 @@ private:
     bool renderCompositedFrame(WebCore::IntRect* dirtyOut);
     void stopCompositing();
     WebCore::Region m_damage;
-    // Scrollen: Pixel verschieben statt neu malen. Wird erst beim naechsten
-    // Bild ausgefuehrt, weil die Oberflaeche vorher noch das alte Bild kopiert.
+    // Scrolling: move pixels instead of repainting. Only done with the next
+    // frame, because the host still copies the old frame before.
     struct PendingScroll {
         WebCore::IntSize delta;
         WebCore::IntRect area;
@@ -240,7 +240,7 @@ private:
     Vector<PendingScroll> m_pendingScrolls;
     void applyPendingScrolls(WebCore::IntRect& presented);
     bool m_renderingUpdateRequested { false };
-    // Ein Bild ist gewuenscht; versteckt fragt erst setVisible(true) den Host
+    // A frame is wanted; hidden, only setVisible(true) asks the host
     bool m_frameRequested { false };
     void requestFrame();
     bool m_visible { true };
@@ -249,9 +249,9 @@ private:
     bool m_frameInFlight { false };
     bool m_needsFullPresent { false };
     bool m_compositedFrameMissed { false };
-    // Erstes Bild nach dem ersten sichtbaren Layout einer Seite (Ereignis
-    // "first-paint"): das naechste Rendering-Update traegt es, mit Ebenen
-    // meldet es der Compositor-Thread mit dem Bild, das es zeigt
+    // First frame after the first visible layout of a page (event
+    // "first-paint"): the next rendering update carries it, with layers the
+    // compositor thread reports it with the frame that shows it
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
     bool m_errorPageCertificate { false };

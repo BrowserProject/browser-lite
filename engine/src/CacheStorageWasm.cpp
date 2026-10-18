@@ -1,18 +1,17 @@
-// Cache API (caches.open, cache.put/match ...) fuer Seiten und Worker.
+// Cache API (caches.open, cache.put/match ...) for pages and workers.
 //
-// In WebKit2 steckt die Umsetzung im Netzwerk-Prozess (CacheStorageManager).
-// Hier eine kleine eigene in der Engine, fuer alle Tabs gemeinsam, nach
-// Ursprung getrennt. Dauerhaft unter /data/cachestorage (wie alles unter /data
-// im OPFS des Host): pro Ursprung eine Datei mit den Eintraegen ohne Inhalt,
-// beim ersten Zugriff gelesen und nach Aenderungen gebuendelt als Ganzes
-// ersetzt, und pro Inhalt eine eigene Datei im Ordner "<Datei>.bodies". Die
-// Inhalte schreibt cache.put gleich, im Speicher bleiben sie nicht, match liest
-// sie wieder. Geht das Schreiben nicht, bleibt der Inhalt bis zum naechsten
-// Versuch im Speicher. Das Format der Eintraege ist das von WebKits
-// CacheStorageDiskStore.
+// In WebKit2 the implementation lives in the network process
+// (CacheStorageManager). Here a small one of our own in the engine, shared by
+// all views, separated by origin. Persistent under /data/cachestorage (like
+// everything under /data in the host's OPFS): per origin one file with the
+// entries without bodies, read on the first access and replaced as a whole,
+// batched, after changes, and one file per body in the folder "<file>.bodies".
+// cache.put writes the bodies right away, they do not stay in memory, match
+// reads them again. If writing fails, the body stays in memory until the next
+// attempt. The entry format is the one of WebKit's CacheStorageDiskStore.
 //
-// Jeder Ursprung hat eine feste Grenze (maximumOriginSize, das OPFS des Host
-// teilen sich alle), darueber lehnt cache.put mit QuotaExceededError ab.
+// Every origin has a fixed limit (maximumOriginSize, all share the host's
+// OPFS), above it cache.put rejects with QuotaExceededError.
 #include "config.h"
 #include "CacheStorageWasm.h"
 
@@ -21,8 +20,8 @@
 
 #include <WebCore/DOMCacheEngine.h>
 
-// NativePromise kopiert Werte fuer andere Threads; das Ergebnis von open() ist
-// nur eine Kennung und ein bool, eine flache Kopie reicht
+// NativePromise copies values for other threads; the result of open() is only
+// an identifier and a bool, a shallow copy is enough
 namespace WTF {
 template<> struct CrossThreadCopierBase<false, false, WebCore::DOMCacheEngine::CacheIdentifierOperationResult> {
     using Type = WebCore::DOMCacheEngine::CacheIdentifierOperationResult;
@@ -56,9 +55,9 @@ namespace BrowserLite {
 using namespace WebCore;
 using namespace WebCore::DOMCacheEngine;
 
-// Ein Eintrag. Der Inhalt steht in bodyFile (Name im Ordner des Ursprungs),
-// leer heisst: kein Inhalt, ein leerer, oder er ist noch nicht geschrieben
-// (dann in data.responseBody)
+// An entry. The body is in bodyFile (name in the origin's folder), empty
+// means: no body, an empty one, or it is not written yet (then in
+// data.responseBody)
 struct StoredRecord {
     CrossThreadRecord data;
     String bodyFile;
@@ -81,7 +80,7 @@ static bool isEmptyBody(const ResponseBody& body)
     });
 }
 
-// Inhalt im Speicher, der noch in eine Datei muss
+// Body in memory that still has to go into a file
 static bool hasUnstoredBody(const StoredRecord& record)
 {
     return record.bodyFile.isEmpty() && !isEmptyBody(record.data.responseBody);
@@ -108,7 +107,7 @@ static String bodyPath(const ClientOrigin& origin, const String& bodyFile)
     return FileSystem::pathByAppendingComponent(bodyDirectory(origin), bodyFile);
 }
 
-// Formulardaten mit Dateien/Blobs speichert auch WebKit nicht
+// Form data with files/blobs is not stored by WebKit either
 static bool writeBody(const String& path, const ResponseBody& body)
 {
     return WTF::switchOn(body, [&](const Ref<FormData>& formData) {
@@ -120,7 +119,7 @@ static bool writeBody(const String& path, const ResponseBody& body)
     });
 }
 
-// Erst nach storeBody: ein Inhalt im Speicher kommt nicht mit
+// Only after storeBody: a body in memory is not included
 static void encodeRecord(WTF::Persistence::Encoder& encoder, const StoredRecord& record)
 {
     auto& data = record.data;
@@ -181,9 +180,8 @@ private:
         Vector<StoredRecord> records;
     };
 
-    // Gespeicherte Caches des Ursprungs beim ersten Zugriff lesen. Geht das
-    // Lesen schief, wird der Ursprung in dieser Sitzung nicht geschrieben,
-    // damit die Dateien auf der Platte bleiben
+    // Reads the origin's stored caches on the first access. If reading fails,
+    // the origin is not written in this session, so the files on disk stay
     void ensureLoaded(const ClientOrigin& origin)
     {
         if (!m_loadedOrigins.add(origin).isNewEntry)
@@ -192,7 +190,7 @@ private:
         std::vector<uint8_t> data;
         auto result = readWholeFile(file.utf8().data(), data);
         if (result == ReadResult::Failed) {
-            debugLog("Cache API: %s nicht lesbar, Aenderungen bleiben nur im Speicher", file.utf8().data());
+            debugLog("Cache API: %s not readable, changes stay in memory only", file.utf8().data());
             m_unreadableOrigins.add(origin);
             return;
         }
@@ -229,13 +227,13 @@ private:
             auto identifier = DOMCacheIdentifier::generate();
             m_caches.add(identifier, WTF::move(cache));
             m_order.append(identifier);
-            // Die Seiten merken sich die Liste der Caches bis zur naechsten Aenderung
+            // The pages remember the list of caches until the next change
             ++m_updateCounter;
         }
     }
 
-    // Inhalte ohne Eintrag (Abbruch zwischen dem Schreiben des Inhalts und dem
-    // der Datei des Ursprungs)
+    // Bodies without an entry (aborted between writing the body and writing
+    // the origin's file)
     void deleteUnusedBodies(const ClientOrigin& origin)
     {
         HashSet<String> used;
@@ -254,7 +252,7 @@ private:
         }
     }
 
-    // Inhalt in eine eigene Datei, danach ist er nicht mehr im Speicher
+    // Body into its own file, afterwards it is no longer in memory
     bool storeBody(const ClientOrigin& origin, StoredRecord& record)
     {
         if (!hasUnstoredBody(record))
@@ -268,7 +266,7 @@ private:
         return true;
     }
 
-    // nullopt: die Datei ist nicht lesbar
+    // nullopt: the file is not readable
     static std::optional<ResponseBody> readBody(const ClientOrigin& origin, const StoredRecord& record)
     {
         if (record.bodyFile.isEmpty())
@@ -279,8 +277,8 @@ private:
         return ResponseBody { SharedBuffer::create(WTF::move(*data)) };
     }
 
-    // Der Eintrag ist weg; seine Datei erst loeschen, wenn die Datei des
-    // Ursprungs ohne ihn geschrieben ist
+    // The entry is gone; delete its file only once the origin's file is
+    // written without it
     void forget(const ClientOrigin& origin, const StoredRecord& record)
     {
         auto& size = originSize(origin);
@@ -289,7 +287,7 @@ private:
             m_unusedBodies.add(origin, Vector<String> { }).iterator->value.append(record.bodyFile);
     }
 
-    // Nach einer Aenderung: kurz sammeln, dann die Datei des Ursprungs schreiben
+    // After a change: collect briefly, then write the origin's file
     void markChanged(const ClientOrigin& origin)
     {
         m_changedOrigins.add(origin);
@@ -345,7 +343,7 @@ private:
             written = replaceWholeFile(file.utf8().data(), encoder.span());
         }
         if (!written) {
-            debugLog("Cache API: %s nicht geschrieben, neuer Versuch spaeter", file.utf8().data());
+            debugLog("Cache API: %s not written, retrying later", file.utf8().data());
             return false;
         }
         for (auto& name : m_unusedBodies.take(origin))
@@ -417,7 +415,7 @@ private:
             if (options.shouldProvideResponse) {
                 auto stored = readBody(it->value.origin, record);
                 if (!stored) {
-                    debugLog("Cache API: Inhalt %s nicht lesbar", record.bodyFile.utf8().data());
+                    debugLog("Cache API: body %s not readable", record.bodyFile.utf8().data());
                     return RetrieveRecordsPromise::createAndReject(Error::ReadDisk);
                 }
                 body = WTF::move(*stored);
@@ -455,7 +453,7 @@ private:
             return BatchPromise::createAndReject(Error::Internal);
         auto& stored = it->value.records;
         auto& origin = it->value.origin;
-        // Erst pruefen, dann aendern: put/addAll gelingt ganz oder gar nicht
+        // Check first, then change: put/addAll succeeds completely or not at all
         uint64_t newSize = originSize(origin);
         HashSet<uint64_t> replaced;
         for (auto& record : records) {
@@ -469,7 +467,7 @@ private:
             return BatchPromise::createAndReject(Error::QuotaExceeded);
         Vector<uint64_t> identifiers;
         for (auto& record : records) {
-            // Gleiche Anfrage ersetzt den alten Eintrag (Cache.put)
+            // The same request replaces the old entry (Cache.put)
             stored.removeAllMatching([&](auto& existing) {
                 if (!matches(record.request, existing, { }))
                     return false;

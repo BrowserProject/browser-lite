@@ -1,12 +1,11 @@
-// <video>/<audio> fuer browser-lite.
+// <video>/<audio> for browser-lite.
 //
-// Abgespielt wird in einem versteckten <video> des Host-Browsers (der kann
-// alle seine Formate). Die Daten holt der Host ueber einen Service Worker
-// (web/sw.js) bei der Engine, die sie mit curl ueber das Relay laedt
-// (Range-Requests, Stueck fuer Stueck), blob: und data: aus dem Speicher.
-// Die Bilder kopiert der Host in den WASM-Speicher, die Engine malt sie an
-// der richtigen Stelle der Seite.
-// Der Ton kommt direkt aus dem Host-<video>.
+// Playback happens in a hidden <video> of the host browser (it can play all of
+// its formats). The host fetches the data through a service worker from the
+// engine, which loads it with curl through the transport (range requests,
+// piece by piece), blob: and data: from memory. The host copies the frames
+// into WASM memory, the engine paints them at the right place of the page.
+// The sound comes directly from the host <video>.
 #pragma once
 
 #include <WebCore/BlobData.h>
@@ -39,15 +38,15 @@ public:
 
     static void registerMediaEngine(WebCore::MediaEngineRegistrar);
     static MediaPlayerPrivateWasm* fromId(int);
-    // MSE: Container, den unsere Parser kennen und den der Host-Browser abspielt
+    // MSE: container our parsers know and the host browser plays
     static bool supportsMediaSourceType(const WebCore::ContentType&);
 
-    // Meldungen vom Host (Exports.cpp)
+    // Messages from the host (Exports.cpp)
     void hostEvent(const String& json);
     void hostFrame(uint8_t* pixels, int width, int height);
 
     int id() const { return m_id; }
-    // false bei srcObject = MediaStream (dann gibt es kein <video> im Host)
+    // false with srcObject = MediaStream (then there is no <video> in the host)
     bool hasHostElement() const
     {
 #if ENABLE(MEDIA_STREAM)
@@ -57,15 +56,15 @@ public:
 #endif
     }
     const URL& url() const { return m_url; }
-    // Bytes von blob: und data:, sonst nullptr (laden mit curl)
+    // Bytes of blob: and data:, otherwise nullptr (loaded with curl)
     WebCore::BlobData* blob() const { return m_blob.get(); }
     String referrer() const;
 
-    // Von MediaSourcePrivateWasm
+    // From MediaSourcePrivateWasm
     void activeSourceBuffersChanged();
     void mediaSourceDurationChanged();
 
-    // Von MediaStreamPlayback (srcObject = MediaStream)
+    // From MediaStreamPlayback (srcObject = MediaStream)
     void streamChanged();
     void streamFrameAvailable();
 
@@ -120,7 +119,7 @@ private:
     RefPtr<WebCore::VideoFrame> videoFrameForCurrentTime() final;
     WebCore::DestinationColorSpace colorSpace() final;
     bool hasAvailableVideoFrame() const final;
-    // requestVideoFrameCallback: Angaben zum neusten Bild, nur einmal pro Bild
+    // requestVideoFrameCallback: data of the newest frame, only once per frame
     std::optional<WebCore::VideoFrameMetadata> videoFrameMetadata() final;
 
     bool didPassCORSAccessCheck() const final { return true; }
@@ -159,13 +158,13 @@ private:
     WebCore::PlatformTimeRanges m_seekable;
     mutable MediaTime m_lastBufferedEnd;
 
-    // Zeit vom Host und wann sie kam (dazwischen rechnen wir selber weiter)
+    // Time from the host and when it came (in between we compute ourselves)
     double m_hostTime { 0 };
     MonotonicTime m_hostTimeStamp;
     bool m_seeking { false };
     std::optional<WebCore::MediaTimePromise::AutoRejectProducer> m_seekPromise;
 
-    // Unveraenderlich: Aufzeichnungen fuer die Kachel-Threads halten das Bild selbst fest
+    // Immutable: recordings for the tile threads hold the image themselves
     RefPtr<WebCore::NativeImage> m_frame;
     unsigned m_presentedFrames { 0 };
     unsigned m_lastMetadataFrame { 0 };

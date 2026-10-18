@@ -1,8 +1,8 @@
 <!doctype html><title>features</title><body><script>
-// Messlatte gegen Chromium: prueft viele Web-APIs, JS- und CSS-Funktionen. Ausgabe pro
-// Pruefung "FEATURE name=1" oder "=0", am Ende "FEATURE fertig=<anzahl>".
-// tests/e2e/parity-test.mjs laedt die Seite im Host-Chromium und im browser-lite und
-// vergleicht. Die Namen sind nach Bereich gruppiert ("css:", "js:", "api:", ...).
+// Yardstick against Chromium: checks many web APIs, JS and CSS features. Output per
+// check "FEATURE name=1" or "=0", at the end "FEATURE done=<count>".
+// tests/e2e/parity-test.mjs loads the page in the host Chromium and in browser-lite and
+// compares. The names are grouped by area ("css:", "js:", "api:", ...).
 const has = (expr) => () => { try { return !!eval(expr); } catch (e) { return false; } };
 const css = (decl) => () => CSS.supports(decl);
 const sel = (selector) => () => CSS.supports('selector(' + selector + ')');
@@ -17,7 +17,7 @@ const rule = (text) => () => {
 };
 
 const checks = {
-  // JavaScript (Sprache und Builtins)
+  // JavaScript (language and built-ins)
   'js:optional-chaining': has('({a:{b:1}})?.a?.b === 1'),
   'js:bigint': has('typeof 1n === "bigint"'),
   'js:class-fields': has('new (class { #x = 1; get x() { return this.#x; } })().x === 1'),
@@ -64,7 +64,7 @@ const checks = {
   'js:intl-collator-de': has('["ä","z","a"].sort(new Intl.Collator("de").compare).join("") === "aäz"'),
   'js:intl-locale-info': has('typeof new Intl.Locale("de-CH").getWeekInfo === "function" || "weekInfo" in new Intl.Locale("de-CH")'),
   'js:string-localeCompare': has('"ä".localeCompare("z", "de") < 0'),
-  // Tausender-Trennzeichen fuer de-CH ist seit CLDR 48 "'" statt "’"
+  // Since CLDR 48 the thousands separator for de-CH is "'" instead of U+2019
   'js:toLocaleString-number': has('["1’234.5", "1\'234.5"].includes((1234.5).toLocaleString("de-CH"))'),
 
   // WebAssembly
@@ -80,7 +80,7 @@ const checks = {
   'wasm:compileStreaming': has('typeof WebAssembly.compileStreaming === "function"'),
   'wasm:js-string-builtins': () => { try { return WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0]), { builtins: ['js-string'] }); } catch (e) { return false; } },
 
-  // DOM und HTML
+  // DOM and HTML
   'dom:custom-elements': has('typeof customElements.define === "function"'),
   'dom:shadow-dom': has('typeof document.createElement("div").attachShadow === "function"'),
   'dom:declarative-shadow-dom': has('typeof Document.parseHTMLUnsafe === "function" || "shadowRootMode" in HTMLTemplateElement.prototype'),
@@ -130,7 +130,7 @@ const checks = {
   'dom:page-visibility': has('typeof document.visibilityState === "string"'),
   'dom:content-visibility-event': has('typeof ContentVisibilityAutoStateChangeEvent === "function"'),
 
-  // Grafik
+  // Graphics
   'gfx:canvas2d': has('!!document.createElement("canvas").getContext("2d")'),
   'gfx:canvas-toDataURL-png': () => document.createElement('canvas').toDataURL().startsWith('data:image/png'),
   'gfx:canvas-toDataURL-webp': () => document.createElement('canvas').toDataURL('image/webp').startsWith('data:image/webp'),
@@ -216,7 +216,7 @@ const checks = {
   'css:media-prefers-color-scheme': () => matchMedia('(prefers-color-scheme: dark)').media === '(prefers-color-scheme: dark)',
   'css:media-range-syntax': () => matchMedia('(width >= 1px)').matches,
 
-  // Netz und Speicher
+  // Network and storage
   'net:fetch': has('typeof fetch === "function"'),
   'net:fetch-keepalive': has('"keepalive" in new Request("/")'),
   'net:fetch-priority': has('"priority" in HTMLImageElement.prototype || "fetchPriority" in HTMLImageElement.prototype'),
@@ -245,7 +245,7 @@ const checks = {
   'net:network-information': has('typeof navigator.connection === "object"'),
   'net:online': has('typeof navigator.onLine === "boolean"'),
 
-  // Medien
+  // Media
   'media:video': has('typeof HTMLVideoElement === "function"'),
   'media:mp4-h264': () => document.createElement('video').canPlayType('video/mp4; codecs="avc1.42E01E"') !== '',
   'media:webm-vp9': () => document.createElement('video').canPlayType('video/webm; codecs="vp9"') !== '',
@@ -268,7 +268,7 @@ const checks = {
   'media:speech-recognition': has('typeof SpeechRecognition === "function" || typeof webkitSpeechRecognition === "function"'),
   'media:video-frame-callback': has('typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function"'),
 
-  // Geraete und Berechtigungen
+  // Devices and permissions
   'dev:pointer-events': has('typeof PointerEvent === "function"'),
   'dev:touch-events': has('typeof TouchEvent === "function"'),
   'dev:pointer-lock': has('typeof Element.prototype.requestPointerLock === "function"'),
@@ -302,7 +302,7 @@ const checks = {
   'dev:device-memory': has('typeof navigator.deviceMemory === "number"'),
   'dev:user-agent-data': has('typeof navigator.userAgentData === "object"'),
 
-  // Sicherheit und Krypto
+  // Security and crypto
   'sec:secure-context': has('isSecureContext'),
   'sec:crypto-randomUUID': has('typeof crypto.randomUUID === "function"'),
   'sec:subtle': has('typeof crypto.subtle === "object"'),
@@ -310,7 +310,7 @@ const checks = {
   'sec:csp-violation-event': has('typeof SecurityPolicyViolationEvent === "function"'),
   'sec:permissions-policy': has('typeof document.featurePolicy === "object" || typeof document.permissionsPolicy === "object"'),
 
-  // Leistung
+  // Performance
   'perf:navigation-timing': has('performance.getEntriesByType("navigation").length >= 0 && typeof PerformanceNavigationTiming === "function"'),
   'perf:resource-timing': has('typeof PerformanceResourceTiming === "function"'),
   'perf:paint-timing': has('typeof PerformancePaintTiming === "function"'),
@@ -321,7 +321,7 @@ const checks = {
   'perf:measure-user-agent-memory': has('typeof performance.measureUserAgentSpecificMemory === "function"'),
 };
 
-// Pruefungen, die erst nach etwas Arbeit eine Antwort geben
+// Checks that only answer after some work
 const asyncChecks = {
   'async:subtle-digest': async () => (await crypto.subtle.digest('SHA-256', new Uint8Array(1))).byteLength === 32,
   'async:image-bitmap-from-canvas': async () => (await createImageBitmap(document.createElement('canvas'))).width === 300,
@@ -343,8 +343,8 @@ const asyncChecks = {
     worker.postMessage(1);
   }),
   'async:compression-roundtrip': async () => {
-    const stream = new Blob(['hallo']).stream().pipeThrough(new CompressionStream('gzip')).pipeThrough(new DecompressionStream('gzip'));
-    return (await new Response(stream).text()) === 'hallo';
+    const stream = new Blob(['hello']).stream().pipeThrough(new CompressionStream('gzip')).pipeThrough(new DecompressionStream('gzip'));
+    return (await new Response(stream).text()) === 'hello';
   },
   'async:raf': () => new Promise((resolve) => requestAnimationFrame((t) => resolve(typeof t === 'number'))),
 };
@@ -362,6 +362,6 @@ const asyncChecks = {
     try { ok = !!(await Promise.race([check(), new Promise((resolve) => setTimeout(() => resolve(false), 5000))])); } catch (e) {}
     report(name, ok);
   }
-  console.log('FEATURE fertig=' + count);
+  console.log('FEATURE done=' + count);
 })();
 </script>

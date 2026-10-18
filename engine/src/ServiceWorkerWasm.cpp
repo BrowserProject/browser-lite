@@ -108,7 +108,7 @@ static RefPtr<SWServer>& server()
     return instance;
 }
 
-// Wie IPC: spaeter im Engine-Thread, nie mitten im Aufruf
+// Like IPC: later on the engine thread, never in the middle of the call
 static void post(Function<void()>&& function)
 {
     RunLoop::mainSingleton().dispatch(WTF::move(function));
@@ -119,13 +119,13 @@ static ExceptionData notSupported()
     return ExceptionData { ExceptionCode::NotSupportedError, "Not supported in browser-lite"_s };
 }
 
-// ------------------------------------------------------------ Seite (Client)
+// ------------------------------------------------------------ Page (client)
 
 class ClientConnection final : public SWClientConnection {
 public:
     static Ref<ClientConnection> create() { return adoptRef(*new ClientConnection); }
 
-    // Vom Server (protected in SWClientConnection)
+    // From the server (protected in SWClientConnection)
     using SWClientConnection::jobRejectedInServer;
     using SWClientConnection::registrationJobResolvedInServer;
     using SWClientConnection::startScriptFetchForServer;
@@ -138,7 +138,7 @@ public:
     using SWClientConnection::notifyClientsOfControllerChange;
     using SWClientConnection::updateBackgroundFetchRegistration;
 
-    // Registrierungen pro Ursprung (fuer mayHaveServiceWorkerRegisteredForOrigin)
+    // Registrations per origin (for mayHaveServiceWorkerRegisteredForOrigin)
     HashCountedSet<SecurityOriginData> origins;
 
 private:
@@ -159,12 +159,12 @@ private:
     void finishFetchingScriptInServer(const ServiceWorkerJobDataIdentifier&, ServiceWorkerRegistrationKey&&, WorkerFetchResult&&) final;
     void scheduleJobInServer(const ServiceWorkerJobData&) final;
 
-    // Push, Background Fetch und Cookie Store fuer Worker gibt es (noch) nicht
+    // Push, background fetch and cookie store for workers do not exist (yet)
     void subscribeToPushService(ServiceWorkerRegistrationIdentifier, const Vector<uint8_t>&, SubscribeToPushServiceCallback&& callback) final { callback(notSupported().toException()); }
     void unsubscribeFromPushService(ServiceWorkerRegistrationIdentifier, PushSubscriptionIdentifier, UnsubscribeFromPushServiceCallback&& callback) final { callback(false); }
     void getPushSubscription(ServiceWorkerRegistrationIdentifier, GetPushSubscriptionCallback&& callback) final { callback(std::optional<PushSubscriptionData> { }); }
     void getPushPermissionState(ServiceWorkerRegistrationIdentifier, GetPushPermissionStateCallback&& callback) final { callback(PushPermissionState::Denied); }
-    // Die noch angezeigten Benachrichtigungen der Registrierung
+    // The still shown notifications of the registration
     void getNotifications(const URL& registrationURL, const String& tag, GetNotificationsCallback&& callback) final { callback(shownPersistentNotifications(registrationURL, tag)); }
 
     void enableNavigationPreload(ServiceWorkerRegistrationIdentifier, ExceptionOrVoidCallback&&) final;
@@ -195,8 +195,8 @@ static RefPtr<ClientConnection>& clientConnection()
 
 // ------------------------------------------------------------ Server
 
-// Die Seite aus Sicht des Servers (WebSWServerConnection in WebKit2). Es gibt
-// nur einen Prozess, also nur diese eine Verbindung.
+// The page from the server's point of view (WebSWServerConnection in WebKit2).
+// There is only one process, so only this one connection.
 class ServerConnection final : public SWServer::Connection {
 public:
     static Ref<ServerConnection> create(SWServer& server) { return adoptRef(*new ServerConnection(server)); }
@@ -221,7 +221,7 @@ private:
 
     URL clientURL(ServiceWorkerOrClientIdentifier);
 
-    // SWServer::Connection (Antworten an die Seite)
+    // SWServer::Connection (answers to the page)
     void rejectJobInClient(ServiceWorkerJobIdentifier, const ExceptionData&) final;
     void resolveRegistrationJobInClient(ServiceWorkerJobIdentifier, const ServiceWorkerRegistrationData&, ShouldNotifyWhenResolved) final;
     void resolveUnregistrationJobInClient(ServiceWorkerJobIdentifier, const ServiceWorkerRegistrationKey&, bool) final;
@@ -247,10 +247,10 @@ static RefPtr<ServerConnection>& serverConnection()
     return instance;
 }
 
-// ------------------------------------------------------------ Worker (Kontext)
+// ------------------------------------------------------------ Worker (context)
 
-// Pro Seite (Site) eine Verbindung zum "Prozess" der Worker, wie
-// WebSWServerToContextConnection. Die Worker laufen alle hier.
+// One connection per site to the "process" of the workers, like
+// WebSWServerToContextConnection. All workers run here.
 class ContextConnection final : public SWServerToContextConnection {
 public:
     static Ref<ContextConnection> create(SWServer& server, const Site& site, std::optional<ScriptExecutionContextIdentifier> pageIdentifier)
@@ -288,7 +288,7 @@ private:
     HashSet<ServiceWorkerIdentifier> m_workers;
 };
 
-// Zu welcher Verbindung gehoert ein Worker (auch kurz nach seinem Ende noch)
+// Which connection a worker belongs to (also shortly after it ended)
 static HashMap<ServiceWorkerIdentifier, WeakPtr<SWServerToContextConnection>>& workerConnections()
 {
     static NeverDestroyed<HashMap<ServiceWorkerIdentifier, WeakPtr<SWServerToContextConnection>>> map;
@@ -301,8 +301,8 @@ static RefPtr<SWServerToContextConnection> contextConnectionFor(ServiceWorkerIde
 }
 
 // WindowClient.navigate() (WebPage::navigateServiceWorkerClient in WebKit2).
-// Fertig, wenn sich das neue Dokument im Frame als Client meldet (beim Commit)
-// oder das Laden des Frames endet (frameLoadEnded).
+// Done when the new document in the frame registers as a client (on commit)
+// or loading of the frame ends (frameLoadEnded).
 struct PendingNavigation {
     ClientOrigin workerOrigin;
     SWContextManager::Connection::NavigateCallback callback;
@@ -329,7 +329,7 @@ static Exception navigateFailed()
     return Exception { ExceptionCode::TypeError, "navigate failed"_s };
 }
 
-// Fremder Ursprung: null statt des Clients (Spezifikation)
+// Foreign origin: null instead of the client (specification)
 static std::optional<ServiceWorkerClientData> clientIfSameOrigin(ServiceWorkerClientData&& data, const ClientOrigin& clientOrigin, const ClientOrigin& workerOrigin)
 {
     if (clientOrigin != workerOrigin)
@@ -350,14 +350,14 @@ static void navigateClient(ScriptExecutionContextIdentifier client, ServiceWorke
         switch (result) {
         case ScheduleLocationChangeResult::Stopped:
             return callback(navigateFailed());
-        case ScheduleLocationChangeResult::Completed: // nur der Anker
+        case ScheduleLocationChangeResult::Completed: // only the anchor
             return callback(clientIfSameOrigin(ServiceWorkerClientData::from(*document), document->clientOrigin(), workerOrigin));
         case ScheduleLocationChangeResult::Started:
             break;
         }
         if (!frame->loader().provisionalDocumentLoader() && !frame->loader().policyDocumentLoader())
             return callback(navigateFailed());
-        // Nicht HTTP (data: usw.): sicher ein fremder Ursprung
+        // Not HTTP (data: etc.): certainly a foreign origin
         if (!url.protocolIsInHTTPFamily())
             return callback(std::optional<ServiceWorkerClientData> { });
         auto frameID = frame->frameID();
@@ -366,11 +366,11 @@ static void navigateClient(ScriptExecutionContextIdentifier client, ServiceWorke
     });
 }
 
-// clients.openWindow() (WebCore erlaubt es nur kurz nach notificationclick):
-// ein neuer Tab in der Oberflaeche. Fertig wie bei navigate(), wenn sich das
-// Dokument im neuen Tab als Client meldet oder sein Laden endet. Nur http(s)
-// und mit dem Worker als Anfragendem, nicht wie eine Eingabe in der
-// Adressleiste: sonst kaemen data: und file: (das Dateisystem unter /data) durch.
+// clients.openWindow() (WebCore only allows it shortly after
+// notificationclick): a new view in the host. Done like navigate() when the
+// document in the new view registers as a client or its loading ends. Only
+// http(s) and with the worker as requester, not like input in the address
+// bar: otherwise data: and file: (the file system under /data) would pass.
 static void openClientWindow(ServiceWorkerIdentifier worker, const URL& url, SWContextManager::Connection::OpenWindowCallback&& callback)
 {
     RefPtr serverWorker = SWServerWorker::existingWorkerForIdentifier(worker);
@@ -378,7 +378,7 @@ static void openClientWindow(ServiceWorkerIdentifier worker, const URL& url, SWC
         return callback(Exception { ExceptionCode::TypeError, "service worker is gone"_s });
     if (!url.protocolIsInHTTPFamily())
         return callback(Exception { ExceptionCode::TypeError, makeString("ServiceWorkerClients.openWindow() cannot be called with URL "_s, url.string()) });
-    // Gleich gross wie die anderen Tabs, die Oberflaeche passt ihn sonst an
+    // The same size as the other views, the host adjusts it otherwise
     IntSize size { 800, 600 };
     float deviceScaleFactor = 1;
     WebView::forEach([&](WebView& view) {
@@ -395,8 +395,8 @@ static void openClientWindow(ServiceWorkerIdentifier worker, const URL& url, SWC
     frame->loader().load(FrameLoadRequest { document.releaseNonNull(), requester, ResourceRequest { URL { url } }, { }, InitiatedByMainFrame::Unknown });
 }
 
-// WindowClient.focus() (WebCore erlaubt es nur kurz nach notificationclick):
-// der Tab des Dokuments kommt nach vorne wie bei window.focus()
+// WindowClient.focus() (WebCore only allows it shortly after
+// notificationclick): the view of the document comes to the front like with window.focus()
 static std::optional<ServiceWorkerClientData> focusClient(ScriptExecutionContextIdentifier identifier)
 {
     RefPtr document = Document::allDocumentsMap().get(identifier);
@@ -407,8 +407,8 @@ static std::optional<ServiceWorkerClientData> focusClient(ScriptExecutionContext
     return ServiceWorkerClientData::from(*document);
 }
 
-// Was die Worker an "ihren Prozess" melden (WebSWContextManagerConnection).
-// Kommt von WebCore immer im Engine-Thread an.
+// What the workers report to "their process" (WebSWContextManagerConnection).
+// Always arrives from WebCore on the engine thread.
 class ContextManagerConnection final : public SWContextManager::Connection, public RefCounted<ContextManagerConnection> {
 public:
     static Ref<ContextManagerConnection> create() { return adoptRef(*new ContextManagerConnection); }
@@ -530,9 +530,9 @@ private:
     PageIdentifier m_pageIdentifier { PageIdentifier::generate() };
 };
 
-// ------------------------------------------------------------ Server-Delegate
+// ------------------------------------------------------------ Server delegate
 
-// Leerer Speicher fuer Background Fetch (wird nicht unterstuetzt)
+// Empty storage for background fetch (not supported)
 class NoBackgroundFetchStore final : public BackgroundFetchStore {
 public:
     static Ref<NoBackgroundFetchStore> create() { return adoptRef(*new NoBackgroundFetchStore); }
@@ -567,10 +567,10 @@ private:
 };
 
 
-// Registrierungen und Skripte dauerhaft unter /data/serviceworkers (SQLite und
-// Dateien, WebCores SWRegistrationDatabase). In WebKit2 macht das der
-// Netzwerk-Prozess in einer eigenen Queue; hier direkt im Engine-Thread, die
-// Datenbank ist klein.
+// Registrations and scripts persistently under /data/serviceworkers (SQLite
+// and files, WebCore's SWRegistrationDatabase). In WebKit2 the network process
+// does that on its own queue; here directly on the engine thread, the database
+// is small.
 class RegistrationStore final : public SWRegistrationStore {
 public:
     static Ref<RegistrationStore> create(SWServer& server) { return adoptRef(*new RegistrationStore(server)); }
@@ -653,12 +653,12 @@ private:
     bool m_writeScheduled { false };
 };
 
-// ------------------------------------------------------------ Hintergrund-Aktualisierung
+// ------------------------------------------------------------ Background update
 
-// Laedt ein Worker-Skript ohne Seite (wie ServiceWorkerSoftUpdateLoader in
-// WebKit2): frisch aus dem HTTP-Cache, sonst vom Netz (mit ETag/Last-Modified
-// bedingt), keine Weiterleitungen. Der Server vergleicht das Ergebnis mit dem
-// gespeicherten Skript und installiert bei einer Aenderung den neuen Worker.
+// Loads a worker script without a page (like ServiceWorkerSoftUpdateLoader in
+// WebKit2): fresh from the HTTP cache, otherwise from the network (conditional
+// with ETag/Last-Modified), no redirects. The server compares the result with
+// the stored script and installs the new worker on a change.
 class SoftUpdateLoad final : public RefCounted<SoftUpdateLoad>, public CurlRequestClient {
 public:
     using Handler = CompletionHandler<void(WorkerFetchResult&&)>;
@@ -703,7 +703,7 @@ private:
         succeed();
     }
 
-    // https://w3c.github.io/ServiceWorker/#update-algorithm, Schritte 9.7 bis 9.17
+    // https://w3c.github.io/ServiceWorker/#update-algorithm, steps 9.7 to 9.17
     bool processResponse(const ResourceResponse& response)
     {
         auto source = m_job.workerType == WorkerType::Module ? WorkerScriptLoader::Source::ModuleScript : WorkerScriptLoader::Source::ClassicWorkerScript;
@@ -719,8 +719,8 @@ private:
         m_referrerPolicy = response.httpHeaderField(HTTPHeaderName::ReferrerPolicy);
         if (auto& certificateInfo = response.certificateInfo())
             m_certificateInfo = *certificateInfo;
-        // Immer UTF-8 wie WorkerScriptLoader, sonst saehe der Server bei einem
-        // anderen charset ein geaendertes Skript
+        // Always UTF-8 like WorkerScriptLoader, otherwise the server would see a
+        // changed script with another charset
         Ref decoder = TextResourceDecoder::create("text/javascript"_s, "UTF-8"_s);
         decoder->setAlwaysUseUTF8();
         m_decoder = WTF::move(decoder);
@@ -748,7 +748,7 @@ private:
         }
         if (auto handler = std::exchange(m_handler, nullptr))
             handler(WTF::move(result));
-        m_self = nullptr; // gibt uns frei
+        m_self = nullptr; // releases us
     }
 
     void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
@@ -805,8 +805,8 @@ public:
     void setDidBeginCheckedPtrDeletion() final { CanMakeCheckedPtr::setDidBeginCheckedPtrDeletion(); }
 
 private:
-    // Skripte einer Hintergrund-Aktualisierung (SWServer::startScriptFetch
-    // und refreshImportedScripts), in WebKit2 laedt sie der Netzwerk-Prozess
+    // Scripts of a background update (SWServer::startScriptFetch and
+    // refreshImportedScripts), in WebKit2 the network process loads them
     void softUpdate(ServiceWorkerJobData&& job, bool shouldRefreshCache, ResourceRequest&& request, CompletionHandler<void(WorkerFetchResult&&)>&& callback) final
     {
         SoftUpdateLoad::start(WTF::move(job), shouldRefreshCache, WTF::move(request), WTF::move(callback));
@@ -1070,7 +1070,7 @@ void ServerConnection::registerClient(ClientOrigin&& clientOrigin, ServiceWorker
             finishNavigation(*data.frameIdentifier, clientIfSameOrigin(ServiceWorkerClientData { data }, clientOrigin, it->value.workerOrigin));
     }
     auto& contextOrigin = clientOrigin.clientOrigin;
-    // Wie WebKit2: keine Sandbox-Dokumente
+    // Like WebKit2: no sandboxed documents
     if (data.url.protocolIsInHTTPFamily() && contextOrigin != SecurityOriginData::fromURLWithoutStrictOpaqueness(data.url))
         return;
     if (contextOrigin.isNull())
@@ -1213,7 +1213,7 @@ void ServerConnection::updateBackgroundFetchRegistration(const BackgroundFetchIn
 
 // ------------------------------------------------------------ ContextConnection
 
-// Eigene Page fuer den Worker, wie WebSWContextManagerConnection::installServiceWorker
+// Own page for the worker, like WebSWContextManagerConnection::installServiceWorker
 class SessionProvider final : public StorageSessionProvider {
 public:
     static Ref<SessionProvider> create() { return adoptRef(*new SessionProvider); }
@@ -1226,7 +1226,7 @@ static Ref<CacheStorageProvider>& cacheStorageProvider()
     return provider;
 }
 
-// Page, in der ein Service Worker oder SharedWorker laeuft (ohne Fenster)
+// Page in which a service worker or shared worker runs (without a window)
 static Ref<Page> createWorkerPage()
 {
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
@@ -1236,7 +1236,6 @@ static Ref<Page> createWorkerPage()
     configuration.socketProvider = createSocketProvider();
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = cacheStorageProvider().copyRef();
-    configuration.userContentProvider = userContentProvider();
     Ref page = Page::create(WTF::move(configuration));
     auto& settings = page->settings();
     settings.setScriptEnabled(true);
@@ -1254,7 +1253,7 @@ void ContextConnection::installServiceWorkerContext(const ServiceWorkerContextDa
     Ref page = createWorkerPage();
     page->setupForRemoteWorker(contextData.scriptURL, contextData.registration.key.topOrigin(), contextData.referrerPolicy, privacy);
 
-    debugLog("Service Worker %s: starten", contextData.scriptURL.string().utf8().data());
+    debugLog("Service worker %s: starting", contextData.scriptURL.string().utf8().data());
     auto proxy = ServiceWorkerThreadProxy::create(WTF::move(page), contextData.isolatedCopy(), workerData.isolatedCopy(), String { userAgent }, mode, cacheStorageProvider().get(), createServiceWorkerNotificationClient());
     SWContextManager::singleton().registerServiceWorkerThreadForInstall(WTF::move(proxy));
 }
@@ -1279,7 +1278,7 @@ void ContextConnection::terminateWorker(ServiceWorkerIdentifier identifier)
 
 void ContextConnection::connectionIsNoLongerNeeded()
 {
-    // WebKit2 beendet hier den Prozess der Worker
+    // WebKit2 terminates the workers' process here
     for (auto identifier : std::exchange(m_workers, { }))
         SWContextManager::singleton().terminateWorker(identifier, SWContextManager::workerTerminationTimeout, nullptr);
     Ref protectedThis { *this };
@@ -1303,7 +1302,7 @@ void ContextConnection::fireNotificationEvent(ServiceWorkerIdentifier identifier
 
 void notificationEvent(NotificationData&& data, NotificationEventType type)
 {
-    // Ohne JavaScript laeuft kein Service Worker (applyPreferences in WebView.cpp)
+    // Without JavaScript no service worker runs (applyPreferences in WebView.cpp)
     if (WebView::preferences().contains(WebView::Preference::NoJavaScript))
         return;
     if (RefPtr server = ServiceWorkers::server())
@@ -1312,15 +1311,16 @@ void notificationEvent(NotificationData&& data, NotificationEventType type)
 
 // ------------------------------------------------------------ Navigation Preload
 
-// Laedt eine Navigation, waehrend der Worker startet (wie
-// ServiceWorkerNavigationPreloader in WebKit2), mit dem Kopf
-// Service-Worker-Navigation-Preload. Die Antwort geht als preloadResponse an
-// den Worker. Den Inhalt liest genau einer: die Navigation selber
-// (respondWith(preloadResponse)) oder der Lader im Worker, der den Inhalt der
-// preloadResponse holt (navigationPreloadIdentifier). Bis dahin haelt curl an.
-// Redirects folgt er nicht, der Worker bekommt sie als opaqueredirect. Zuerst
-// fragt er wie WebKit2 den HTTP-Cache: frisch kommt die Antwort von dort,
-// sonst geht die Anfrage (bedingt) mit dem Kopf ans Netz.
+// Loads a navigation while the worker starts (like
+// ServiceWorkerNavigationPreloader in WebKit2), with the header
+// Service-Worker-Navigation-Preload. The response goes to the worker as
+// preloadResponse. Exactly one reads the body: the navigation itself
+// (respondWith(preloadResponse)) or the loader in the worker that fetches the
+// body of the preloadResponse (navigationPreloadIdentifier). Until then curl
+// pauses. It does not follow redirects, the worker gets them as
+// opaqueredirect. Like WebKit2 it asks the HTTP cache first: a fresh response
+// comes from there, otherwise the request goes (conditionally) with the header
+// to the network.
 class NavigationPreloader final : public RefCounted<NavigationPreloader>, public CurlRequestClient {
 public:
     class Reader {
@@ -1352,7 +1352,7 @@ public:
     void ref() const final { RefCounted::ref(); }
     void deref() const final { RefCounted::deref(); }
 
-    // Gleich, wenn die Antwort (oder der Fehler) schon da ist
+    // Right away if the response (or the error) is already there
     void whenResponse(Function<void()>&& callback)
     {
         if (m_hasResponse || !m_error.isNull())
@@ -1362,7 +1362,7 @@ public:
     const ResourceResponse& response() const { return m_response; }
     const ResourceError& error() const { return m_error; }
 
-    // Erst nach whenResponse: der Inhalt geht an reader
+    // Only after whenResponse: the body goes to reader
     void readBody(Reader& reader)
     {
         if (!m_error.isNull())
@@ -1390,7 +1390,7 @@ public:
 private:
     NavigationPreloader() = default;
 
-    // Antwort aus dem HTTP-Cache, der Inhalt liegt schon da
+    // Response from the HTTP cache, the body is already there
     void useCacheEntry(HttpCache::Entry& entry, ResourceResponse::Source source)
     {
         m_response = entry.response;
@@ -1465,19 +1465,19 @@ private:
     bool m_cancelled { false };
     Function<void()> m_responseCallback;
     Reader* m_reader { nullptr };
-    // HTTP-Cache: Eintrag, der nachgeprueft wird, bzw. Inhalt aus dem Cache
+    // HTTP cache: entry being revalidated, or body from the cache
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     RefPtr<SharedBuffer> m_cachedBody;
 };
 
-// Noch von niemandem gelesene Preloads, nach der Kennung des Worker-Fetch
+// Preloads nobody has read yet, by the identifier of the worker fetch
 static HashMap<FetchIdentifier, Ref<NavigationPreloader>>& unreadPreloaders()
 {
     static NeverDestroyed<HashMap<FetchIdentifier, Ref<NavigationPreloader>>> map;
     return map;
 }
 
-// Der Lader im Worker, der den Inhalt der preloadResponse holt
+// The loader in the worker that fetches the body of the preloadResponse
 class PreloadLoad final : public RefCounted<PreloadLoad>, public NavigationPreloader::Reader {
 public:
     static Ref<PreloadLoad> create(ResourceLoader& loader, NavigationPreloader& preloader) { return adoptRef(*new PreloadLoad(loader, preloader)); }
@@ -1546,12 +1546,12 @@ RefPtr<ResourceLoader> PreloadLoad::end()
     return loader;
 }
 
-// ------------------------------------------------------------ Fetch-Abfang
+// ------------------------------------------------------------ Fetch interception
 
-// Eine Anfrage, die der Service Worker beantwortet (ServiceWorkerFetchTask und
-// WebServiceWorkerFetchTaskClient in WebKit2 zusammen). Die Aufrufe des
-// Workers kommen in seinem Thread an und gehen in den Engine-Thread, dort an
-// den ResourceLoader der Seite.
+// A request the service worker answers (ServiceWorkerFetchTask and
+// WebServiceWorkerFetchTaskClient in WebKit2 together). The worker's calls
+// arrive on its thread and go to the engine thread, there to the page's
+// ResourceLoader.
 class FetchTask final : public ServiceWorkerFetch::Client, public NavigationPreloader::Reader {
 public:
     static Ref<FetchTask> create(ResourceLoader& loader, Function<void()>&& networkLoad, SWServerRegistration& registration, ServiceWorkerIdentifier worker)
@@ -1566,12 +1566,12 @@ public:
     ResourceRequest request() const { return m_request; }
     FetchOptions options() const { return m_options; }
 
-    // Engine-Thread
+    // Engine thread
     void notHandled();
     void cancelFromLoader();
     void startPreload(const NavigationPreloadState&);
     bool hasPreload() const { return !!m_preloader; }
-    // Der Worker hat den Fetch: jetzt darf die preloadResponse zu ihm
+    // The worker has the fetch: now the preloadResponse may go to it
     void fetchStarted();
 
 private:
@@ -1586,7 +1586,7 @@ private:
     {
     }
 
-    // ServiceWorkerFetch::Client (Worker-Thread)
+    // ServiceWorkerFetch::Client (worker thread)
     void didReceiveRedirection(const ResourceResponse&) final;
     void didReceiveResponse(ResourceResponse&&) final;
     void didReceiveData(const SharedBuffer&) final;
@@ -1603,12 +1603,12 @@ private:
             callback();
     }
 
-    // NavigationPreloader::Reader (Engine-Thread)
+    // NavigationPreloader::Reader (engine thread)
     void preloadData(const SharedBuffer&) final;
     void preloadFinished(const NetworkLoadMetrics&) final;
     void preloadFailed(const ResourceError&) final;
 
-    // Engine-Thread: der Reihe nach, Daten erst nach dem Ja zur Antwort
+    // Engine thread: in order, data only after the yes to the response
     void enqueue(Function<void(FetchTask&)>&&);
     void runQueue();
     void receiveRedirect(ResourceResponse&&);
@@ -1654,7 +1654,7 @@ static HashMap<const ResourceLoader*, Ref<FetchTask>>& fetchTasks()
 class FetchTask::BlobReader final : public FetchLoaderClient, public RefCounted<BlobReader> {
     WTF_MAKE_TZONE_ALLOCATED_INLINE(BlobReader);
 public:
-    // Gehoert dem FetchTask, lebt also nie laenger als er
+    // Belongs to the FetchTask, so never lives longer than it
     static Ref<BlobReader> create(FetchTask& task) { return adoptRef(*new BlobReader(task)); }
 
     void ref() const final { RefCounted::ref(); }
@@ -1703,7 +1703,7 @@ void FetchTask::receiveRedirect(ResourceResponse&& response)
 {
     RefPtr loader = m_loader;
     auto request = loader->request().redirectedRequest(response, false, ResourceRequest::ShouldSetHash::Yes);
-    // Das Ziel der Weiterleitung laedt normal (wie WebKit2)
+    // The redirect target loads normally (like WebKit2)
     m_waitingForResponseCompletion = true;
     loader->willSendRequest(WTF::move(request), response, [task = Ref { *this }](ResourceRequest&& newRequest) mutable {
         task->m_waitingForResponseCompletion = false;
@@ -1792,7 +1792,7 @@ void FetchTask::sendPreloadResponse()
         proxy->navigationPreloadIsReady(Process::identifier(), m_identifier, ResourceResponse { m_preloader->response() });
 }
 
-// respondWith(preloadResponse): die Navigation bekommt die Antwort aus dem Netz
+// respondWith(preloadResponse): the navigation gets the response from the network
 void FetchTask::usePreload()
 {
     m_usesPreload = true;
@@ -1842,7 +1842,7 @@ void FetchTask::preloadFailed(const ResourceError& error)
     });
 }
 
-// Mit dem Fetch endet sein Preload, ausser der Worker liest ihn gerade selber
+// With the fetch its preload ends, unless the worker is reading it itself
 void FetchTask::endPreload()
 {
     RefPtr preloader = std::exchange(m_preloader, nullptr);
@@ -1878,15 +1878,15 @@ void FetchTask::readBlob(const URL& url)
         failWith(ResourceError { ResourceError::Type::General });
 }
 
-// Der Worker ist fertig mit der Anfrage (wie cleanup() in
-// WebServiceWorkerFetchTaskClient). false: war schon fertig
+// The worker is done with the request (like cleanup() in
+// WebServiceWorkerFetchTaskClient). false: was already done
 bool FetchTask::markDone()
 {
     if (std::exchange(m_done, true))
         return false;
     SWContextManager::singleton().removeFetch(m_worker, Process::identifier(), m_identifier, false);
     endPreload();
-    // Nach Navigationen das Skript des Workers pruefen (wie ServiceWorkerFetchTask)
+    // After navigations check the worker's script (like ServiceWorkerFetchTask)
     if (m_shouldSoftUpdate) {
         if (RefPtr registration = registrationFor(m_registration))
             registration->scheduleSoftUpdate(IsAppInitiated::No);
@@ -1943,7 +1943,7 @@ void FetchTask::didNotHandle()
 
 void FetchTask::contextIsStopping()
 {
-    // Die Antwort kommt aus dem Netz, der Worker wird dafuer nicht gebraucht
+    // The response comes from the network, the worker is not needed for it
     if (m_usesPreload)
         return;
     if (!m_sentResponse) {
@@ -1996,7 +1996,7 @@ void ContextConnection::startFetch(FetchTask& task)
     task.fetchStarted();
 }
 
-// Navigation: die neue Seite wird vom Worker kontrolliert (controlClient in WebKit2)
+// Navigation: the new page is controlled by the worker (controlClient in WebKit2)
 static void controlClient(ResourceLoader& loader, SWServerRegistration& registration, ScriptExecutionContextIdentifier clientIdentifier)
 {
     auto& request = loader.request();
@@ -2019,7 +2019,7 @@ static void controlClient(ResourceLoader& loader, SWServerRegistration& registra
     serverConnection()->registerClient(ClientOrigin { registration.key().topOrigin(), SecurityOriginData::fromURLWithoutStrictOpaqueness(request.url()) }, WTF::move(data), registration.identifier(), request.httpUserAgent(), SWServer::IsBeingCreatedClient::Yes);
 }
 
-// Navigationen, die auf den Import ihrer Registrierungen warten
+// Navigations waiting for the import of their registrations
 static HashSet<const ResourceLoader*>& pendingImports()
 {
     static NeverDestroyed<HashSet<const ResourceLoader*>> set;
@@ -2029,12 +2029,12 @@ static HashSet<const ResourceLoader*>& pendingImports()
 bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 {
     auto& options = loader.options();
-    // Der Worker holt den Inhalt seiner preloadResponse
+    // The worker fetches the body of its preloadResponse
     if (auto identifier = options.navigationPreloadIdentifier) {
         if (auto preloader = unreadPreloaders().take(*identifier)) {
             Ref load = PreloadLoad::create(loader, *preloader);
             preloadLoads().set(&loader, load.copyRef());
-            // Erst nach dem Anlegen des Laders antworten, wie aus dem Netz
+            // Answer only after the loader was created, like from the network
             post([load] { load->start(); });
             return true;
         }
@@ -2055,7 +2055,7 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
         auto topOrigin = document ? document->topOrigin().data() : SecurityOriginData::fromURL(url);
         if (!clientConnection()->origins.contains(topOrigin))
             return false;
-        // Registrierungen des Ursprungs erst von der Platte holen (wie
+        // Fetch the origin's registrations from disk first (like
         // NetworkConnectionToWebProcess::scheduleResourceLoad)
         if (!server->isImportCompletedForOrigin(topOrigin)) {
             pendingImports().add(&loader);
@@ -2082,7 +2082,7 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
     RefPtr worker = registration ? registration->activeWorker() : nullptr;
     if (!worker)
         return false;
-    // Ohne fetch-Handler gleich ins Netz (wie WebKit2)
+    // Without a fetch handler straight to the network (like WebKit2)
     auto source = worker->defaultRouterSource();
     if (auto* value = std::get_if<RouterSourceEnum>(&source); value && *value == RouterSourceEnum::Network) {
         if (registration->shouldSoftUpdate(options))
@@ -2092,7 +2092,7 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
 
     Ref task = FetchTask::create(loader, WTF::move(networkLoad), *registration, worker->identifier());
     fetchTasks().set(&loader, task.copyRef());
-    // Navigation Preload: das Netz laedt schon, waehrend der Worker startet
+    // Navigation preload: the network already loads while the worker starts
     if (options.mode == FetchOptions::Mode::Navigate && loader.request().httpMethod() == "GET"_s && registration->navigationPreloadState().enabled)
         task->startPreload(registration->navigationPreloadState());
     worker->whenActivated([task, workerIdentifier = worker->identifier()](bool success) mutable {
@@ -2120,8 +2120,8 @@ void frameLoadEnded(LocalFrame& localFrame, bool committed)
     auto frame = localFrame.frameID();
     if (!pendingNavigations().contains(frame))
         return;
-    // Das neue Dokument meldet sich ueber den RunLoop als Client, also danach.
-    // Hat es das nicht getan, ist es keiner (Spezifikation: null)
+    // The new document registers as a client through the RunLoop, so afterwards.
+    // If it has not done that, it is none (specification: null)
     post([frame, committed] {
         if (committed)
             finishNavigation(frame, std::optional<ServiceWorkerClientData> { });
@@ -2153,15 +2153,15 @@ bool isFetching(const ResourceLoader& loader)
 
 // ------------------------------------------------------------ SharedWorker
 
-// Wie WebSharedWorkerServer in WebKit2: ein Worker pro Schluessel (Ursprung,
-// URL, Name), so lange ein SharedWorker-Objekt einer Seite ihn braucht.
+// Like WebSharedWorkerServer in WebKit2: one worker per key (origin, URL,
+// name), as long as a SharedWorker object of a page needs it.
 struct SharedWorkerEntry : RefCounted<SharedWorkerEntry> {
     static Ref<SharedWorkerEntry> create(const SharedWorkerKey& key, const WorkerOptions& options) { return adoptRef(*new SharedWorkerEntry(key, options)); }
 
     SharedWorkerKey key;
     WorkerOptions options;
     SharedWorkerIdentifier identifier { SharedWorkerIdentifier::generate() };
-    // Port bis zum connect-Event (danach leer)
+    // Port until the connect event (empty afterwards)
     HashMap<SharedWorkerObjectIdentifier, std::optional<TransferredMessagePort>> objects;
     bool fetched { false };
     bool running { false };
@@ -2265,7 +2265,7 @@ void SharedWorkerConnection::requestSharedWorker(const SharedWorkerKey& key, Sha
                 connect(entry, object);
             return;
         }
-        // Das Skript laedt die Seite, die den Worker zuerst will (wie WebKit2)
+        // The page that wants the worker first loads the script (like WebKit2)
         fetchScriptInClient(URL { key.url }, object, WorkerOptions { options }, [this, protectedThis = Ref { *this }, entry](WorkerFetchResult&& result, WorkerInitializationData&& data) mutable {
             didFetchScript(entry, WTF::move(result), WTF::move(data));
         });
@@ -2293,7 +2293,7 @@ void SharedWorkerConnection::didFetchScript(SharedWorkerEntry& entry, WorkerFetc
         data.clientIdentifier = ScriptExecutionContextIdentifier::generate();
     Ref page = createWorkerPage();
     page->setupForRemoteWorker(result.responseURL, entry.key.origin.topOrigin, result.referrerPolicy, data.advancedPrivacyProtections);
-    debugLog("SharedWorker %s: starten", entry.key.url.string().utf8().data());
+    debugLog("SharedWorker %s: starting", entry.key.url.string().utf8().data());
     auto proxy = SharedWorkerThreadProxy::create(WTF::move(page), entry.identifier, entry.key.origin, WTF::move(result), WorkerOptions { entry.options }, WTF::move(data), cacheStorageProvider().get());
     SharedWorkerContextManager::singleton().registerSharedWorkerThread(WTF::move(proxy));
     entry.running = true;

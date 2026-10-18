@@ -1,6 +1,6 @@
-// Aufraeumen des HTTP-Cache (engine/js/http-cache.js) ohne Engine: in node
-// geladen, die Cache API ist eine Attrappe mit derselben Reihenfolge wie im
-// Browser (Speichern haengt hinten an, Ersetzen auch).
+// Cleanup of the HTTP cache (engine/js/http-cache.js) without the engine:
+// loaded in node, the Cache API is a fake with the same order as in the browser
+// (storing appends at the end, replacing too).
 //   node tests/engine/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -22,7 +22,7 @@ class FakeCache {
   }
   async keys() {
     if (this.fail)
-      throw new Error('kaputt');
+      throw new Error('broken');
     return [...this.entries.keys()].map((url) => ({ url }));
   }
   async match(request) {
@@ -40,11 +40,24 @@ class FakeCache {
   }
 }
 
-function load() {
+function load(namespace = 'browserlite') {
   const cache = new FakeCache();
+  const opened = [];
+  const deleted = [];
   const context = {
     Module: {},
-    caches: { open: async () => cache, delete: async () => true },
+    caches: {
+      open: async (name) => {
+        opened.push(name);
+        return cache;
+      },
+      delete: async (name) => {
+        deleted.push(name);
+        return true;
+      },
+    },
+    // From engine-pre.js: the BL_STORAGE_NAMESPACE of the engine
+    blStorageNamespace: () => namespace,
     navigator: {},
     Headers,
     Response,
@@ -58,7 +71,7 @@ function load() {
   vm.createContext(context);
   vm.runInContext(readFileSync(new URL('../../engine/js/http-cache.js', import.meta.url), 'utf8'), context);
   const http = vm.runInContext('blHttpCache', context);
-  return { http, cache };
+  return { http, cache, opened, deleted, module: context.Module };
 }
 
 const entry = (size) => new Response(null, { headers: { 'x-bl-size': String(size) } });
@@ -69,30 +82,39 @@ async function fill(http, cache, count, size) {
     await cache.put(`https://example.test/${i}`, entry(size));
 }
 
-// Ueber der Grenze: die aeltesten fallen weg, bis 80 % belegt sind
+// The cache is named after the storage namespace, clearing only touches that one
+{
+  const { http, opened, deleted, module } = load('shop_1');
+  await http.open();
+  await module.blClearHttpCache();
+  check('cache name <namespace>-http', opened.join(',') === 'shop_1-http', opened.join(','));
+  check('clearing deletes only the own cache', deleted.join(',') === 'shop_1-http', deleted.join(','));
+}
+
+// Above the limit: the oldest go away until 80 % are used
 {
   const { http, cache } = load();
   await fill(http, cache, 10, 100);
   http.limit = 900;
   await http.trim(false);
   const left = [...cache.entries.keys()].map((url) => url.split('/').pop());
-  check('Aelteste Eintraege geloescht', left.join(',') === '3,4,5,6,7,8,9', left.join(','));
-  check('Belegung danach gezaehlt', http.total === 700, String(http.total));
+  check('oldest entries deleted', left.join(',') === '3,4,5,6,7,8,9', left.join(','));
+  check('usage counted afterwards', http.total === 700, String(http.total));
 }
 
-// Quote voll (force): auch unter der Grenze auf 80 % des Belegten
+// Quota full (force): down to 80 % of the usage even below the limit
 {
   const { http, cache } = load();
   await fill(http, cache, 10, 100);
   http.limit = 5000;
   await http.trim(true);
-  check('Quote voll: auf 80 % geraeumt', cache.entries.size === 8 && http.total === 800, `${cache.entries.size} Eintraege, ${http.total}`);
+  check('quota full: cleaned to 80 %', cache.entries.size === 8 && http.total === 800, `${cache.entries.size} entries, ${http.total}`);
   await http.trim(false);
-  check('Unter der Grenze: nichts geloescht', cache.entries.size === 8, String(cache.entries.size));
+  check('below the limit: nothing deleted', cache.entries.size === 8, String(cache.entries.size));
 }
 
-// Ein put waehrend des Zaehlens ersetzt einen Eintrag (wandert ans Ende):
-// die Groessen gehoeren trotzdem zu den richtigen Schluesseln
+// A put while counting replaces an entry (moves to the end): the sizes still
+// belong to the right keys
 {
   const { http, cache } = load();
   await http.open();
@@ -110,21 +132,21 @@ async function fill(http, cache, count, size) {
   };
   await http.trim(false);
   const left = [...cache.entries.keys()].map((url) => url.split('/').pop());
-  check('Grosser alter Eintrag geloescht, kleine bleiben', !left.includes('big') && left.length === 4, left.join(','));
+  check('big old entry deleted, small ones stay', !left.includes('big') && left.length === 4, left.join(','));
 }
 
-// Zaehlen schlaegt fehl: nicht bei jedem Speichern wieder alles zaehlen
+// Counting fails: do not count everything again on every store
 {
   const { http, cache } = load();
   await http.open();
   cache.fail = true;
   await http.trim(false);
-  check('Nach Fehler bekannte Belegung', http.total === 0, String(http.total));
-  check('Nach Fehler kein Aufraeumen mehr offen', http.trimming === null);
+  check('known usage after an error', http.total === 0, String(http.total));
+  check('no cleanup pending after an error', http.trimming === null);
 }
 
 if (failed) {
-  console.log(`${failed} Pruefungen fehlgeschlagen`);
+  console.log(`${failed} checks failed`);
   process.exit(1);
 }
-console.log('alle Pruefungen ok');
+console.log('all checks ok');

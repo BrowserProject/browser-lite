@@ -1,7 +1,7 @@
-// Socket fuer WebSockets der Seiten (ws:// und wss://) ueber libcurl.
-// Die Verbindung macht WebCores CurlStreamScheduler (eigener Thread, curl im
-// CONNECT_ONLY-Modus mit TLS). Die Sockets laufen wie alle anderen ueber das
-// Wisp-Relay. Aufbau angelehnt an den alten SocketStreamHandleImplCurl von WebKit.
+// Socket for the pages' WebSockets (ws:// and wss://) through libcurl. WebCore's
+// CurlStreamScheduler makes the connection (own thread, curl in CONNECT_ONLY
+// mode with TLS). The sockets go through the transport like all others.
+// Structure based on WebKit's old SocketStreamHandleImplCurl.
 #pragma once
 
 #include "SocketStreamHandle.h"
@@ -27,7 +27,7 @@ private:
 
     void sendBytes(std::span<const uint8_t>);
 
-    // CurlStream::Client, kommt auf dem Engine-Thread an
+    // CurlStream::Client, arrives on the engine thread
     void didOpen(WebCore::CurlStreamID) final;
     void didSendData(WebCore::CurlStreamID, size_t) final;
     void didReceiveData(WebCore::CurlStreamID, const WebCore::SharedBuffer&) final;

@@ -1,11 +1,11 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>GC-Stresstest</title>
+<title>GC stress test</title>
 <div id="root"></div>
 <script>
-// Viel Muell ueber viele Aufgaben verteilt, dazwischen laeuft der GC (in der
-// Engine nur zwischen zwei Aufgaben). Was behalten wird, muss heil bleiben:
-// JS-Objekte, Strings, Maps, Closures und DOM-Knoten mit Zusatz-Eigenschaften.
+// Lots of garbage spread over many tasks, the GC runs in between (in the
+// engine only between two tasks). What is kept has to stay intact: JS objects,
+// strings, maps, closures and DOM nodes with extra properties.
 const ROUNDS = 60;
 const kept = [];
 const root = document.getElementById('root');
@@ -16,42 +16,42 @@ function makeGraph(seed) {
   for (let i = 0; i < 300; i++) {
     const object = { id: seed * 1000 + i, name: 'obj-' + seed + '-' + i, list: [i, i * 2, i * 3] };
     object.self = object;
-    object.map = new Map([[i, 'wert-' + i]]);
+    object.map = new Map([[i, 'value-' + i]]);
     object.get = () => object.id * 2;
     objects.push(object);
   }
   const element = document.createElement('span');
   element.expando = { seed, objects };
-  element.textContent = 'runde ' + seed;
+  element.textContent = 'round ' + seed;
   root.appendChild(element);
   if (root.childNodes.length > 20)
-    root.removeChild(root.firstChild); // DOM-Knoten werden zu Muell
+    root.removeChild(root.firstChild); // DOM nodes become garbage
   return { seed, objects, element, text: JSON.stringify(objects.slice(0, 5).map((o) => o.name)) };
 }
 
 function check(entry) {
   const { seed, objects, element, text } = entry;
   if (objects.length !== 300)
-    return 'Laenge ' + objects.length;
+    return 'length ' + objects.length;
   for (let i = 0; i < objects.length; i++) {
     const object = objects[i];
     if (object.id !== seed * 1000 + i || object.self !== object || object.name !== 'obj-' + seed + '-' + i)
-      return 'Objekt ' + i;
-    if (object.list[2] !== i * 3 || object.map.get(i) !== 'wert-' + i || object.get() !== object.id * 2)
-      return 'Inhalt ' + i;
+      return 'object ' + i;
+    if (object.list[2] !== i * 3 || object.map.get(i) !== 'value-' + i || object.get() !== object.id * 2)
+      return 'content ' + i;
   }
-  if (element.expando.seed !== seed || element.expando.objects !== objects || element.textContent !== 'runde ' + seed)
-    return 'DOM-Knoten';
+  if (element.expando.seed !== seed || element.expando.objects !== objects || element.textContent !== 'round ' + seed)
+    return 'DOM node';
   if (JSON.stringify(objects.slice(0, 5).map((o) => o.name)) !== text)
     return 'String';
   return null;
 }
 
 function step() {
-  // Muell: ca. 5 MB pro Runde
+  // Garbage: about 5 MB per round
   let garbage = [];
   for (let i = 0; i < 20000; i++)
-    garbage.push({ a: i, b: 'muell' + i, c: [i] });
+    garbage.push({ a: i, b: 'garbage' + i, c: [i] });
   garbage = null;
 
   kept.push(makeGraph(round));
@@ -60,7 +60,7 @@ function step() {
   for (const entry of kept) {
     const error = check(entry);
     if (error) {
-      console.log('GC-TEST FEHLER Runde ' + round + ' Eintrag ' + entry.seed + ': ' + error);
+      console.log('GC-TEST ERROR round ' + round + ' entry ' + entry.seed + ': ' + error);
       return;
     }
   }
@@ -68,7 +68,7 @@ function step() {
   if (round < ROUNDS)
     setTimeout(step, 0);
   else
-    console.log('GC-TEST ok ' + ROUNDS + ' Runden');
+    console.log('GC-TEST ok ' + ROUNDS + ' rounds');
 }
 setTimeout(step, 0);
 </script>

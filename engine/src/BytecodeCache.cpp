@@ -1,23 +1,24 @@
-// Dauerhafter Bytecode-Cache fuer Skripte.
+// Persistent bytecode cache for scripts.
 //
-// Auf grossen Seiten geht ein guter Teil der JS-Zeit ins Parsen und ins
-// Erzeugen von Bytecode (CNN: ueber 6 s beim ersten Laden). JavaScriptCore
-// kann fertigen Bytecode speichern und wieder laden; WebCore haengt das fuer
-// Wasm an CachedScriptSourceProvider (Patch, platform/wasm/BytecodeCacheWasm.cpp).
-// Hier liegt der Speicher dazu: die Cache API des Host-Browsers
-// (engine/js/bytecode-cache.js), wie beim HTTP-Cache.
+// On big pages a good part of the JS time goes into parsing and generating
+// bytecode (CNN: over 6 s on the first load). JavaScriptCore can store finished
+// bytecode and load it again; WebCore hooks that up for Wasm in
+// CachedScriptSourceProvider (patch, platform/wasm/BytecodeCacheWasm.cpp). This
+// file provides the storage: the Cache API of the host browser
+// (engine/js/bytecode-cache.js), like the HTTP cache.
 //
-// Ablauf: Beim Start des Ladens eines Skripts holen wir den gespeicherten
-// Bytecode schon mal auf den Engine-Thread (prefetch), JSC nimmt ihn beim
-// ersten Ausfuehren (take). Neuer Bytecode (ganzes Skript und jede Funktion,
-// die laeuft) wird nach dem Laden der Seite im Leerlauf gespeichert, beim
-// naechsten Besuch kommt dazu, was noch fehlt. JSC prueft selbst Build-ID und
-// den ganzen Quelltext; hier kommt eine Pruefsumme gegen kaputte Eintraege dazu.
+// Flow: when a script starts loading, the stored bytecode is fetched to the
+// engine thread ahead of time (prefetch), JSC takes it on the first execution
+// (take). New bytecode (whole script and every function that runs) is stored
+// when idle after the page loaded, the next visit adds what is still missing.
+// JSC checks the build ID and the whole source itself; a checksum against
+// broken entries is added here.
 
 #include "config.h"
 #include "BytecodeCache.h"
 
 #include "Engine.h"
+#include "EngineConfig.h"
 
 #include <WebCore/WasmPlatform.h>
 #include <emscripten/emscripten.h>
@@ -29,8 +30,8 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 
-// Laufen auf dem Haupt-Thread (engine/js/bytecode-cache.js)
-// Build-ID aus der Custom Section von engine.wasm (tools/wasm-build-id.py)
+// Run on the main thread (engine/js/bytecode-cache.js)
+// Build ID from the custom section of engine.wasm (tools/wasm-build-id.py)
 EM_JS(char*, blJsBuildID, (), {
     try {
         var sections = WebAssembly.Module.customSections(wasmModule, 'bl_build_id');
@@ -54,7 +55,7 @@ namespace BrowserLite::BytecodeCache {
 static bool enabled;
 static bool commitScheduled;
 
-// Eintrag: Kopf + Bytecode von JSC
+// Entry: header + bytecode from JSC
 struct Header {
     char magic[4];
     uint32_t version;
@@ -64,7 +65,7 @@ struct Header {
 static constexpr char headerMagic[4] = { 'B', 'L', 'B', 'C' };
 static constexpr uint32_t headerVersion = 1;
 static constexpr size_t maximumEntrySize = 16 << 20;
-// Geholter Bytecode, den JSC nicht abgeholt hat (Skript nie ausgefuehrt)
+// Fetched bytecode JSC did not pick up (script never ran)
 static constexpr Seconds prefetchLifetime = 60_s;
 
 struct Prefetched {
@@ -102,7 +103,7 @@ static String cacheKey(const URL& url)
     return url.viewWithoutFragmentIdentifier().toString();
 }
 
-// Schnelle Pruefsumme (8 Bytes pro Schritt), nur gegen kaputte Daten
+// Fast checksum (8 bytes per step), only against broken data
 static uint64_t checksum(std::span<const uint8_t> data)
 {
     uint64_t hash = 0x9e3779b97f4a7c15ull ^ data.size();
@@ -136,12 +137,12 @@ static std::optional<Vector<uint8_t>> take(const String& url)
     auto entry = prefetched().take(key);
     if (!entry.bytes.isEmpty()) {
         stats().hits++;
-        debugLog("Bytecode-Cache: Treffer %s (%zu KB)", key.utf8().data(), entry.bytes.size() / 1024);
+        debugLog("Bytecode cache: hit %s (%zu KB)", key.utf8().data(), entry.bytes.size() / 1024);
         return WTF::move(entry.bytes);
     }
     if (pendingLookups().contains(key)) {
         stats().late++;
-        debugLog("Bytecode-Cache: zu spaet fuer %s", key.utf8().data());
+        debugLog("Bytecode cache: too late for %s", key.utf8().data());
     } else
         stats().misses++;
     return std::nullopt;
@@ -163,7 +164,7 @@ static void store(const String& url, Vector<uint8_t>&& bytecode)
     memcpy(data, &header, sizeof(Header));
     memcpy(data + sizeof(Header), bytecode.span().data(), bytecode.size());
     stats().stores++;
-    debugLog("Bytecode-Cache: speichere %s (%zu KB)", url.utf8().data(), bytecode.size() / 1024);
+    debugLog("Bytecode cache: storing %s (%zu KB)", url.utf8().data(), bytecode.size() / 1024);
     runOnMainThread([url = cacheKey(URL { url }).utf8(), data, size] {
         blJsBytecodeCacheStore(url.data(), data, size);
         free(data);
@@ -172,22 +173,23 @@ static void store(const String& url, Vector<uint8_t>&& bytecode)
 
 void initialize()
 {
-    const char* setting = getenv("BL_BYTECODE_CACHE");
-    if (setting && !strcmp(setting, "0"))
+    auto& config = engineConfig();
+    if (!config.bytecodeCache)
         return;
-    // JSC nimmt die ID als Version des Bytecode-Formats (Patch in
-    // JSCBytecodeCacheVersion.cpp), darum vor dem ersten Skript setzen
-    if (!getenv("BL_BUILD_ID")) {
+    // JSC takes the ID as the version of the bytecode format (patch 0029,
+    // JSCBytecodeCacheVersion.cpp), so it is set before the first script
+    CString buildID = config.buildID;
+    if (buildID.isNull()) {
         std::unique_ptr<char, decltype(&free)> id(blJsBuildID(), free);
         if (!id)
             return;
-        setenv("BL_BUILD_ID", id.get(), 1);
+        buildID = id.get();
+        setenv("BL_BUILD_ID", buildID.data(), 1);
     }
-    const char* buildID = getenv("BL_BUILD_ID");
-    if (!*buildID)
+    if (!buildID.length())
         return;
     enabled = true;
-    runOnMainThread([buildID = CString(buildID)] {
+    runOnMainThread([buildID] {
         blJsBytecodeCacheOpen(buildID.data());
     });
     WebCore::WasmPlatform::setBytecodeCacheHandlers(take, store);
@@ -219,7 +221,7 @@ static void didLookup(const String& url, uint8_t* data, size_t length)
     memcpy(&header, data, sizeof(Header));
     auto payload = std::span<const uint8_t>(data + sizeof(Header), length - sizeof(Header));
     if (memcmp(header.magic, headerMagic, 4) || header.version != headerVersion || header.length != payload.size() || header.checksum != checksum(payload)) {
-        debugLog("Bytecode-Cache: kaputter Eintrag %s", url.utf8().data());
+        debugLog("Bytecode cache: broken entry %s", url.utf8().data());
         return;
     }
     prefetched().set(url, Prefetched { Vector<uint8_t>(payload), MonotonicTime::now() });
@@ -230,12 +232,12 @@ void scheduleCommit()
     if (!enabled || commitScheduled)
         return;
     commitScheduled = true;
-    // Nach dem Laden laufen meist noch Skripte an; dann im Leerlauf speichern
+    // After loading, scripts usually still start up; store when idle afterwards
     RunLoop::mainSingleton().dispatchAfter(5_s, [] {
         commitScheduled = false;
         WebCore::WasmPlatform::commitPendingBytecode();
         auto& counts = stats();
-        debugLog("Bytecode-Cache: %u Treffer, %u zu spaet, %u nicht da, %u gespeichert", counts.hits, counts.late, counts.misses, counts.stores);
+        debugLog("Bytecode cache: %u hits, %u too late, %u missing, %u stored", counts.hits, counts.late, counts.misses, counts.stores);
     });
 }
 
@@ -245,9 +247,9 @@ using namespace BrowserLite;
 
 extern "C" {
 
-// Vom Haupt-Thread (engine/js/bytecode-cache.js): data 0 = nicht im Cache.
-// data gehoert danach uns (malloc).
-EMSCRIPTEN_KEEPALIVE void bl_bytecode_cache_result(const char* url, uint8_t* data, int length)
+// From the main thread (engine/js/bytecode-cache.js): data 0 = not in the cache.
+// data belongs to us afterwards (malloc).
+EMSCRIPTEN_KEEPALIVE void bl__bytecode_cache_result(const char* url, uint8_t* data, int length)
 {
     auto key = String::fromUTF8(url);
     runOnEngineThread([key = WTF::move(key).isolatedCopy(), data, length] {

@@ -57,7 +57,7 @@ void SocketStreamHandleCurl::platformSendHandshake(std::span<const uint8_t> data
     if (m_streamID == invalidCurlStreamID)
         return completionHandler(false, false);
 
-    // Cookies der Seite kommen in den Handshake (vor die Leerzeile am Ende)
+    // The page's cookies go into the handshake (before the empty line at the end)
     bool secureCookiesAccessed = false;
     Vector<uint8_t> handshake;
     if (cookieProxy) {
@@ -101,7 +101,7 @@ void SocketStreamHandleCurl::didReceiveData(CurlStreamID, const SharedBuffer& bu
 {
     if (m_state != Open && m_state != Closing)
         return;
-    // 0 Bytes: die Gegenseite hat die Verbindung geschlossen
+    // 0 bytes: the peer closed the connection
     if (!buffer.size()) {
         disconnect();
         return;

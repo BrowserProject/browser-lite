@@ -1,8 +1,8 @@
-// MSE fuer browser-lite.
+// MSE for browser-lite.
 //
-// WebCore fuehrt die MSE-Logik (buffered, Springen, Speicher) mit den
-// Zeitstempeln aus unseren Parsern (ContainerParser). Die rohen Daten gehen
-// zusaetzlich an ein MediaSource im Host-Browser, das dekodiert und abspielt.
+// WebCore runs the MSE logic (buffered, seeking, memory) with the timestamps
+// from our parsers (ContainerParser). The raw data also goes to a MediaSource
+// in the host browser, which decodes and plays.
 #pragma once
 
 #if ENABLE(MEDIA_SOURCE)

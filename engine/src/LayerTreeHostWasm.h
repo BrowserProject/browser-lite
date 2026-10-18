@@ -1,17 +1,16 @@
-// Compositing mit Ebenen (Coordinated Graphics), nach WebKit2 (LayerTreeHost,
+// Compositing with layers (Coordinated Graphics), after WebKit2 (LayerTreeHost,
 // CoordinatedSceneState, ThreadedCompositor).
 //
-// WebCore teilt die Seite in Ebenen (GraphicsLayerCoordinated). Jede Ebene
-// malt ihre Kacheln selber (SkiaPaintingEngine, CPU in Hintergrund-Threads).
-// Der Compositor-Thread (Compositor.h) setzt die Kacheln mit Skia auf der GPU
-// zusammen (SkiaCompositingLayer) und zeigt das Bild. Animationen von
-// transform/opacity laufen dort weiter, auch wenn der Engine-Thread mit dem JS
-// der Seite beschaeftigt ist.
+// WebCore splits the page into layers (GraphicsLayerCoordinated). Every layer
+// paints its tiles itself (SkiaPaintingEngine, CPU in background threads). The
+// compositor thread (Compositor.h) composites the tiles with Skia on the GPU
+// (SkiaCompositingLayer) and shows the frame. Animations of transform/opacity
+// keep running there even while the engine thread is busy with the page's JS.
 //
-// Ablauf pro Bild: Engine-Thread macht das Rendering-Update und flush(), der
-// Compositor uebernimmt den neuen Stand beim naechsten Bild (rAF in seinem
-// Worker), sobald alle Kacheln gemalt sind, und meldet "fertig" zurueck. Erst
-// dann kommt das naechste Rendering-Update.
+// Flow per frame: the engine thread does the rendering update and flush(), the
+// compositor takes the new state on the next frame (rAF in its worker) once
+// all tiles are painted, and reports "done" back. Only then the next rendering
+// update comes.
 #pragma once
 
 #include "PinchZoom.h"
@@ -41,18 +40,18 @@ namespace BrowserLite {
 
 class WebView;
 
-// Gemeinsamer Stand von Engine- und Compositor-Thread (wie CoordinatedSceneState)
+// Shared state of engine and compositor thread (like CoordinatedSceneState)
 class CompositorScene final : public ThreadSafeRefCounted<CompositorScene> {
 public:
     static Ref<CompositorScene> create(int viewId) { return adoptRef(*new CompositorScene(viewId)); }
-    // Von jedem Thread: Stand des Views, solange er mit Ebenen malt
+    // From any thread: state of the view while it paints with layers
     static RefPtr<CompositorScene> forView(int viewId);
 
     const int viewId;
     const Ref<WebCore::CoordinatedPlatformLayer> rootLayer;
 
-    // Stand der Ebenen uebernehmen (flushPendingState) und lesen
-    // (flushPositionChanges) nie gleichzeitig: Engine-, Scroll- und Compositor-Thread
+    // Taking the layer state (flushPendingState) and reading it
+    // (flushPositionChanges) never at the same time: engine, scrolling and compositor thread
     Lock stateLock;
 
     Lock lock;
@@ -63,33 +62,33 @@ public:
     float deviceScaleFactor WTF_GUARDED_BY_LOCK(lock) { 1 };
     OptionSet<WebCore::CompositionReason> reasons WTF_GUARDED_BY_LOCK(lock);
     bool frameScheduled WTF_GUARDED_BY_LOCK(lock) { false };
-    // Ein Rendering-Update wartet auf Kacheln (seit wann): die letzte fertige
-    // Kachel plant das naechste Bild ein
+    // A rendering update waits for tiles (since when): the last finished tile
+    // schedules the next frame
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
     MonotonicTime tilesWaitStart WTF_GUARDED_BY_LOCK(lock);
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
-    // Mit diesem Stand "erstes Bild" melden (WebView::firstPaintShown)
+    // Report "first paint" with this state (WebView::firstPaintShown)
     bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
-    // Versteckter Tab (WebView::setVisible): keine Bilder, was ansteht, kommt beim Zeigen
+    // Hidden view (WebView::setVisible): no frames, what is pending comes when shown
     bool hidden WTF_GUARDED_BY_LOCK(lock) { false };
-    // Naechstes Bild auch ohne neuen Inhalt (Takt fuer den Scroll-Thread)
+    // Next frame even without new content (tick for the scrolling thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
-    // Ansicht zum letzten Rendering-Update (Pinch-Zoom): die Ebene, die der
-    // Hauptframe zum Scrollen verschiebt, und die letzte uebernommene Geste
+    // View of the last rendering update (pinch zoom): the layer the main frame
+    // moves for scrolling, and the last gesture taken over
     PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);
     RefPtr<WebCore::CoordinatedPlatformLayer> pendingScrollLayer WTF_GUARDED_BY_LOCK(lock);
     unsigned pendingPinchCommit WTF_GUARDED_BY_LOCK(lock) { 0 };
 
-    // Was gerade zu sehen ist (die Scroll-Position kommt aus der Ebene)
+    // What is visible right now (the scroll position comes from the layer)
     PinchViewport viewport WTF_GUARDED_BY_LOCK(lock);
     RefPtr<WebCore::CoordinatedPlatformLayer> scrollLayer WTF_GUARDED_BY_LOCK(lock);
-    // Ziel der Geste, bis ein Rendering-Update es zeigt
+    // Target of the gesture until a rendering update shows it
     std::optional<PinchZoom> pinchZoom WTF_GUARDED_BY_LOCK(lock);
     bool pinchActive WTF_GUARDED_BY_LOCK(lock) { false };
     unsigned pinchCommit WTF_GUARDED_BY_LOCK(lock) { 0 };
-    // Ziel fuer den Engine-Thread, solange er es noch nicht abgeholt hat
+    // Target for the engine thread while it has not picked it up yet
     struct PinchRequest {
         float scale;
         WebCore::FloatPoint scrollPosition;
@@ -97,23 +96,23 @@ public:
     };
     std::optional<PinchRequest> pinchRequest WTF_GUARDED_BY_LOCK(lock);
 
-    // Nur auf dem Compositor-Thread
+    // Only on the compositor thread
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
 
-    // Von jedem Thread, die Oberflaeche ruft direkt auf: Pinch-Geste. Das Ziel
-    // geht von hier an den Engine-Thread, so kommen spaetere Eingaben der
-    // Oberflaeche (Klicks) erst nach der Uebernahme dort an.
+    // From any thread, the host calls directly: pinch gesture. The target goes
+    // from here to the engine thread, so later host input (clicks) only arrives
+    // there after the takeover.
     void pinch(PinchPhase, float factor, WebCore::FloatPoint focus);
-    // Von jedem Thread: das Rad (DOM-Deltas) verschiebt die skalierte Ansicht,
-    // solange eine Geste laeuft oder der Engine-Thread sie noch nicht zeigt.
-    // false = keine Geste, das Rad geht normal an den Scroll-Thread
+    // From any thread: the wheel (DOM deltas) moves the scaled view while a
+    // gesture runs or the engine thread does not show it yet.
+    // false = no gesture, the wheel goes to the scrolling thread as usual
     bool scrollPinch(WebCore::FloatSize delta);
 
-    // Von jedem Thread: beim naechsten Bild des Compositors zusammensetzen
+    // From any thread: composite on the next compositor frame
     void requestComposition(WebCore::CompositionReason);
     void scheduleFrameLocked() WTF_REQUIRES_LOCK(lock);
-    // Von jedem Thread: beim naechsten Bild den Scroll-Thread takten
-    // (ScrollingWasm.h), auch wenn nichts neu zusammenzusetzen ist
+    // From any thread: tick the scrolling thread on the next frame
+    // (ScrollingWasm.h), even if nothing new needs compositing
     void requestScrollingTick();
     void setHidden(bool);
 
@@ -128,28 +127,28 @@ public:
     explicit LayerTreeHostWasm(WebView&);
     ~LayerTreeHostWasm();
 
-    // Nur mit Compositor-Thread (Compositor.h)
+    // Only with the compositor thread (Compositor.h)
     static bool isAvailable();
 
     void setRootCompositingLayer(WebCore::GraphicsLayer*);
     void setViewOverlayRootLayer(WebCore::GraphicsLayer*);
     void sizeDidChange(WebCore::IntSize pixelSize, float deviceScaleFactor);
 
-    // Nach page->finalizeRenderingUpdate(): Stand der Ebenen an den Compositor.
-    // firstPaint: er meldet WebView::firstPaintShown mit dem Bild, das diesen
-    // Stand zeigt
+    // After page->finalizeRenderingUpdate(): layer state to the compositor.
+    // firstPaint: it reports WebView::firstPaintShown with the frame that shows
+    // this state
     void flush(bool firstPaint = false);
-    // Das letzte Rendering-Update ist noch nicht gezeigt
+    // The last rendering update is not shown yet
     bool isWaitingForCompositor() const { return m_waitingForCompositor; }
-    // Vom Compositor (Engine-Thread)
+    // From the compositor (engine thread)
     void didComposite() { m_waitingForCompositor = false; }
-    // Alles neu zeigen (z.B. neues Canvas)
+    // Show everything again (e.g. new canvas)
     void forceRepaint();
-    // Versteckt setzt der Compositor den View nicht zusammen (auch keine Animationen)
+    // Hidden, the compositor does not composite the view (no animations either)
     void setVisible(bool visible) { m_scene->setHidden(!visible); }
-    // Der View malt ohne Ebenen weiter: nichts mehr ueber den Compositor
+    // The view keeps painting without layers: nothing through the compositor anymore
     void detachScene();
-    // Der Engine-Thread hat das Ziel einer Pinch-Geste uebernommen
+    // The engine thread took over the target of a pinch gesture
     void didApplyPinch(unsigned commit);
 
 private:
@@ -175,7 +174,7 @@ private:
 
     WeakPtr<WebView> m_view;
     Ref<CompositorScene> m_scene;
-    // Auch vom Scroll-Thread gelesen (requestComposition)
+    // Also read by the scrolling thread (requestComposition)
     Lock m_layersLock;
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layers WTF_GUARDED_BY_LOCK(m_layersLock);
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layersToRemove;
@@ -187,7 +186,7 @@ private:
     bool m_layersChanged { false };
     bool m_waitingForCompositor { false };
     unsigned m_pinchCommit { 0 };
-    // Der Scroll-Thread hat Ebenen verschoben
+    // The scrolling thread moved layers
     std::atomic<bool> m_compositionRequiredInScrollingThread { false };
 };
 

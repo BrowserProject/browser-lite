@@ -107,12 +107,12 @@ let bytecodeHits = 0;
 let bytecodeLate = 0;
 let bytecodeCommits = 0;
 page.on('console', (msg) => {
-  if (msg.text().includes('Bytecode-Cache: Treffer') && msg.text().includes('/big.js'))
+  if (msg.text().includes('Bytecode cache: hit') && msg.text().includes('/big.js'))
     bytecodeHits++;
-  if (msg.text().includes('Bytecode-Cache: zu spaet') && msg.text().includes('/big.js'))
+  if (msg.text().includes('Bytecode cache: too late') && msg.text().includes('/big.js'))
     bytecodeLate++;
   // Statistik-Zeile nach jedem Speicher-Durchgang (engine/src/BytecodeCache.cpp)
-  if (/Bytecode-Cache: \d+ Treffer/.test(msg.text()))
+  if (/Bytecode cache: \d+ hits/.test(msg.text()))
     bytecodeCommits++;
 });
 
@@ -194,7 +194,7 @@ const smallResults = collect(smallPage);
 await smallPage.goto(stack.app({ url: siteURL + 'many' }));
 check('Viele grosse Antworten geladen', (await smallResults.wait('many')) === '1');
 const readCache = () => smallPage.evaluate(async () => {
-  const cache = await caches.open('bl-http-v2');
+  const cache = await caches.open('browserlite-http');
   const keys = (await cache.keys()).map((request) => new URL(request.url).pathname);
   const total = (await cache.matchAll()).reduce((sum, response) => sum + Number(response.headers.get('x-bl-size')), 0);
   return { keys, total };

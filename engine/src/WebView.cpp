@@ -8,6 +8,7 @@
 #include "Clients.h"
 #include "EditorClient.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "CacheStorageWasm.h"
 #include "Compositor.h"
 #include "GpuRaster.h"
@@ -107,8 +108,8 @@ WebView* WebView::fromID(int id)
     return viewsByID().get(id);
 }
 
-// Offene Views (Tabs). Die Oberflaeche oeffnet und schliesst sie, Popups
-// (window.open, target=_blank) oeffnet die Engine selber.
+// Open views. The host opens and closes them, popups (window.open,
+// target=_blank) are opened by the engine itself.
 static HashMap<int, Ref<WebView>>& openViews()
 {
     static NeverDestroyed<HashMap<int, Ref<WebView>>> views;
@@ -126,8 +127,8 @@ static void applyPreferences(Settings& settings)
 {
     bool script = !currentPreferences.contains(WebView::Preference::NoJavaScript);
     settings.setScriptEnabled(script);
-    // Sonst faengt ein registrierter Service Worker Navigationen ab und fuehrt sein Skript aus.
-    // Gilt ab der naechsten Navigation (DocumentLoader::startLoadingMainResource)
+    // Otherwise a registered service worker intercepts navigations and runs its script.
+    // Applies from the next navigation on (DocumentLoader::startLoadingMainResource)
     settings.setServiceWorkersEnabled(script);
     settings.setLoadsImagesAutomatically(!currentPreferences.contains(WebView::Preference::NoImages));
     settings.setGlobalPrivacyControlEnabled(currentPreferences.contains(WebView::Preference::GlobalPrivacyControl));
@@ -144,7 +145,7 @@ WebView& WebView::open(int id, IntSize size, float deviceScaleFactor)
     Ref view = create(id, size, deviceScaleFactor);
     auto& result = view.get();
     openViews().set(id, WTF::move(view));
-    // Die Oberflaeche schickt das Canvas oft, bevor der View hier existiert
+    // The host often sends the canvas before the view exists here
     if (hasWorkerCanvas(id))
         result.canvasAttached();
     return result;
@@ -183,7 +184,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     , m_deviceScaleFactor(deviceScaleFactor)
 {
     viewsByID().set(id, *this);
-    debugLog("View %d: erstellen", id);
+    debugLog("View %d: create", id);
 
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.chromeClient = makeUniqueRef<ChromeClient>(*this);
@@ -199,10 +200,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = createCacheStorageProvider();
     configuration.screenOrientationManager = screenOrientationManager();
-    configuration.userContentProvider = userContentProvider();
 
-    // Die Empty-Konfiguration ist fuer SVG-Bilder gedacht: alles gesandboxt,
-    // kein Script. Fuer echte Seiten: ohne Sandbox und mit unserem FrameLoaderClient.
+    // The empty configuration is meant for SVG images: everything sandboxed, no
+    // script. For real pages: without sandbox and with our FrameLoaderClient.
     if (auto* parameters = std::get_if<PageConfiguration::LocalMainFrameCreationParameters>(&configuration.mainFrameCreationParameters)) {
         parameters->effectiveSandboxFlags = { };
         parameters->clientCreator = [this](auto&, auto& frameLoader) -> UniqueRef<LocalFrameLoaderClient> {
@@ -211,21 +211,20 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     }
 
     m_page = Page::create(WTF::move(configuration));
-    debugLog("View %d: Page erstellt", id);
-    // Erstes sichtbares Layout melden (Oberflaeche, Messungen in tests/e2e)
+    debugLog("View %d: page created", id);
+    // Report the first visible layout (host, measurements in tests/e2e)
     m_page->addLayoutMilestones({ LayoutMilestone::DidFirstVisuallyNonEmptyLayout });
     attachDeviceClients(*this, *m_page);
 #if ENABLE(MEDIA_STREAM)
-    // getUserMedia/getDisplayMedia ueber Kamera und Bildschirm des Host
+    // getUserMedia/getDisplayMedia through camera and screen of the host
     MediaStreams::attachTo(m_id, *m_page);
 #endif
     m_page->setUseColorAppearance(WasmPlatform::screenInfo().prefersDarkMode, false);
 
     auto& settings = m_page->settings();
-    // Compositing mit Ebenen, wenn die GPU geht (BL_COMPOSITING=0 bzw.
-    // ?compositing=0 in der Oberflaeche schaltet ab)
-    const char* compositing = getenv("BL_COMPOSITING");
-    if ((!compositing || strcmp(compositing, "0")) && LayerTreeHostWasm::isAvailable()) {
+    auto& config = engineConfig();
+    // Compositing with layers when the GPU works (BL_COMPOSITING=0 turns it off)
+    if (config.compositing && LayerTreeHostWasm::isAvailable()) {
         m_layerTreeHost = makeUnique<LayerTreeHostWasm>(*this);
         m_compositing = true;
     }
@@ -233,21 +232,18 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setForceCompositingMode(m_compositing);
     settings.setAcceleratedCompositingForFixedPositionEnabled(m_compositing);
 #if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
-    // Scrollen im eigenen Thread (ScrollingWasm.h), braucht die Ebenen.
-    // BL_ASYNC_SCROLLING=0 schaltet ab.
-    const char* asyncScrolling = getenv("BL_ASYNC_SCROLLING");
-    bool useAsyncScrolling = m_compositing && (!asyncScrolling || strcmp(asyncScrolling, "0"));
+    // Scrolling in its own thread (ScrollingWasm.h), needs the layers.
+    // BL_ASYNC_SCROLLING=0 turns it off.
+    bool useAsyncScrolling = m_compositing && config.asyncScrolling;
     settings.setScrollingCoordinatorEnabled(useAsyncScrolling);
     settings.setAsyncFrameScrollingEnabled(useAsyncScrolling);
     settings.setAsyncOverflowScrollingEnabled(useAsyncScrolling);
 #endif
-    // Polyfills auch im leeren Anfangsdokument eines Frames, der noch laedt:
-    // sonst fehlen dort ihre APIs, und die Bruecken (__blHost, ...) bleiben offen
-    settings.setShouldInjectUserScriptsInInitialEmptyDocument(true);
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
-    settings.setWebAudioEnabled(true);
+    // Without the audio feature there is no AudioContext, like a browser without Web Audio
+    settings.setWebAudioEnabled(featureEnabled(Feature::Audio));
 #if ENABLE(WEBGL)
     settings.setWebGLEnabled(true);
 #endif
@@ -255,22 +251,22 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setFullScreenEnabled(true);
 #endif
 #if ENABLE(MEDIA_SOURCE)
-    settings.setMediaSourceEnabled(true);
-    // ManagedMediaSource braucht Hinweise vom System (startstreaming), die wir
-    // nicht haben. hls.js & Co. nehmen sonst MMS und warten ewig.
+    settings.setMediaSourceEnabled(featureEnabled(Feature::Media));
+    // ManagedMediaSource needs hints from the system (startstreaming) we do not
+    // have. hls.js and co. would take MMS and wait forever.
     settings.setManagedMediaSourceEnabled(false);
 #endif
-    // Funktionen, die WebKit-Browser (WPE/GTK/Safari) einschalten, die fuer
-    // WebCore allein aber aus sind (UnifiedWebPreferences.yaml, Standard "WebCore")
+    // Features WebKit browsers (WPE/GTK/Safari) turn on, but that are off for
+    // WebCore alone (UnifiedWebPreferences.yaml, default "WebCore")
     settings.setCompressionStreamEnabled(true);
     settings.setNavigationAPIEnabled(true);
-    // Fertig in WebKit, nur die Standardwerte fuer WebCore allein sind aus
-    // (Messlatte tests/engine/features.html)
+    // Done in WebKit, only the defaults for WebCore alone are off (yardstick
+    // tests/engine/features.html)
     settings.setCanvasFiltersEnabled(true);
     settings.setMoveBeforeEnabled(true);
     settings.setSelectShowPickerEnabled(true);
     settings.setCSSScrollbarColorEnabled(true);
-    // Paint Worklet: das Laden des Skripts kommt aus Patch 0034
+    // Paint worklet: loading the script comes from patch 0034
     settings.setCSSPaintingAPIEnabled(true);
     settings.setStorageAPIEnabled(true);
     settings.setCacheAPIEnabled(true);
@@ -279,8 +275,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 #if ENABLE(MEDIA_STREAM)
     MediaStreams::enableIn(settings);
 #endif
-    settings.setSpeechRecognitionEnabled(true);
-    // Origin Private File System (FileSystemStorageWasm.cpp)
+    settings.setSpeechRecognitionEnabled(featureEnabled(Feature::Speech));
+    settings.setSpeechSynthesisAPIEnabled(featureEnabled(Feature::Speech));
+    // Origin private file system (FileSystemStorageWasm.cpp)
     settings.setFileSystemEnabled(true);
     settings.setFileSystemWritableStreamEnabled(true);
     settings.setAccessHandleEnabled(true);
@@ -318,7 +315,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setRequestVideoFrameCallbackEnabled(true);
     settings.setHiddenPageDOMTimerThrottlingEnabled(true);
     settings.setHiddenPageCSSAnimationSuspensionEnabled(true);
-    // Brauchen die Funktions-Schalter in OptionsWasm.cmake
+    // Need the feature switches in OptionsWasm.cmake
 #if ENABLE(OFFSCREEN_CANVAS)
     settings.setOffscreenCanvasEnabled(true);
 #endif
@@ -339,17 +336,17 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setSansSerifFontFamily("Noto Sans"_s);
     settings.setSerifFontFamily("Noto Serif"_s);
     settings.setFixedFontFamily("Noto Sans Mono"_s);
-    // Zuletzt, ueberschreibt ServiceWorkers::enableIn
+    // Last, overrides ServiceWorkers::enableIn
     applyPreferences(settings);
 
     m_page->setDeviceScaleFactor(m_deviceScaleFactor);
-    debugLog("View %d: Einstellungen gesetzt", id);
+    debugLog("View %d: settings applied", id);
 
     RefPtr frame = m_page->localMainFrame();
     RELEASE_ASSERT(frame);
     frame->setView(LocalFrameView::create(*frame, m_size));
     frame->init();
-    debugLog("View %d: Frame bereit", id);
+    debugLog("View %d: frame ready", id);
     if (RefPtr view = frame->view()) {
         view->resize(m_size);
         view->setCanHaveScrollbars(true);
@@ -358,7 +355,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     createSurface();
     setFocused(true);
     addDamage(IntRect { { }, m_size });
-    debugLog("View %d: fertig", id);
+    debugLog("View %d: done", id);
 }
 
 WebView::~WebView()
@@ -369,7 +366,7 @@ WebView::~WebView()
         if (RefPtr frame = m_page->localMainFrame())
             frame->loader().detachFromParent();
     }
-    // Die Ebenen gehoeren der Page, darum den Compositor erst danach abbauen
+    // The layers belong to the page, so tear down the compositor only afterwards
     m_page = nullptr;
     m_layerTreeHost = nullptr;
 }
@@ -399,11 +396,11 @@ void WebView::createSurface()
         m_layerTreeHost->sizeDidChange(m_pixelSize, m_deviceScaleFactor);
 }
 
-// Mit Canvas im Engine-Worker und WebGL 2 malt Skia auf der GPU (GpuRaster.h).
-// Die Flaeche ist neu und leer, darum alles neu malen.
+// With a canvas in the engine worker and WebGL 2 Skia paints on the GPU
+// (GpuRaster.h). The surface is new and empty, so repaint everything.
 void WebView::createGpuSurfaceIfPossible()
 {
-    // Mit Compositor-Thread hat der Engine-Worker kein Canvas und keine GPU
+    // With the compositor thread the engine worker has no canvas and no GPU
     if (m_gpuSurface || !m_canvasAttached || m_pixelSize.isEmpty() || Compositor::isRunning())
         return;
     Gpu::Scope scope;
@@ -414,7 +411,7 @@ void WebView::createGpuSurfaceIfPossible()
         addDamage(IntRect { { }, m_size });
 }
 
-// Zurueck auf die CPU (GPU verloren): der Pixel-Buffer ist alt, alles neu malen
+// Back to the CPU (GPU lost): the pixel buffer is stale, repaint everything
 void WebView::dropGpuSurface()
 {
     if (!m_gpuSurface)
@@ -438,11 +435,11 @@ void WebView::loadURL(const String& urlString)
         return;
     URL url { urlString };
     if (!url.isValid()) {
-        // Ohne Schema: wie in jedem Browser https:// davor
+        // Without a scheme: https:// in front like in every browser
         url = URL { makeString("https://"_s, urlString) };
     }
-    // Eingabe in der Adressleiste: wie in anderen Browsern darf das auch eine
-    // data:-URL sein (Seiten selber duerfen nicht dorthin navigieren)
+    // Input in the address bar: like in other browsers this may also be a
+    // data: URL (pages themselves may not navigate there)
     FrameLoadRequest request { *frame, ResourceRequest { WTF::move(url) } };
     request.setIsRequestFromClientOrUserInput();
     frame->loader().load(WTF::move(request));
@@ -517,7 +514,7 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
 
 void WebView::addDamage(const IntRect& rect)
 {
-    // Mit Compositing malen die Ebenen selber (setNeedsDisplay)
+    // With compositing the layers paint themselves (setNeedsDisplay)
     if (m_compositing)
         return;
     IntRect clipped = intersection(rect, IntRect { { }, m_size });
@@ -534,7 +531,7 @@ void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, co
     IntRect area = intersection(intersection(rectToScroll, clipRect), IntRect { { }, m_size });
     if (area.isEmpty())
         return;
-    // Nur ganze Geraete-Pixel lassen sich verschieben, sonst neu malen
+    // Only whole device pixels can be moved, otherwise repaint
     float deviceX = delta.width() * m_deviceScaleFactor;
     float deviceY = delta.height() * m_deviceScaleFactor;
     if (deviceX != std::round(deviceX) || deviceY != std::round(deviceY) || std::abs(delta.width()) >= area.width() || std::abs(delta.height()) >= area.height()) {
@@ -542,7 +539,7 @@ void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, co
         return;
     }
 
-    // Was noch neu gemalt werden muss, wandert mit dem Inhalt mit
+    // What still needs repainting moves with the content
     Region moved = intersect(m_damage, Region { area });
     m_damage.subtract(area);
     moved.translate(delta);
@@ -551,7 +548,7 @@ void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, co
 
     m_pendingScrolls.append({ delta, area });
 
-    // Der frei gewordene Streifen muss neu gemalt werden
+    // The freed strip needs repainting
     IntRect kept = intersection(area, IntRect { area.location() + delta, area.size() });
     Region exposed { area };
     exposed.subtract(kept);
@@ -560,8 +557,8 @@ void WebView::scrollDamage(const IntSize& delta, const IntRect& rectToScroll, co
     requestFrame();
 }
 
-// Verschiebt die Pixel im Buffer (Geraete-Pixel). presented bekommt den
-// Bereich, den die Oberflaeche neu kopieren muss.
+// Moves the pixels in the buffer (device pixels). presented gets the area the
+// host has to copy again.
 void WebView::applyPendingScrolls(IntRect& presented)
 {
     const size_t stride = static_cast<size_t>(m_pixelSize.width()) * 4;
@@ -575,7 +572,7 @@ void WebView::applyPendingScrolls(IntRect& presented)
         if (target.isEmpty())
             continue;
         if (m_gpuSurface) {
-            // Auf der GPU: den Bereich als Bild nehmen und verschoben wieder hinein
+            // On the GPU: take the area as an image and put it back moved
             IntRect source = target;
             source.move(-dx, -dy);
             auto image = m_gpuSurface->makeImageSnapshot(SkIRect::MakeXYWH(source.x(), source.y(), source.width(), source.height()));
@@ -594,7 +591,7 @@ void WebView::applyPendingScrolls(IntRect& presented)
             size_t from = static_cast<size_t>(y - dy) * stride + static_cast<size_t>(target.x() - dx) * 4;
             memmove(pixels.data() + to, pixels.data() + from, rowBytes);
         };
-        // Bei Bewegung nach unten von unten her kopieren, sonst ueberschreiben wir die Quelle
+        // When moving down copy from the bottom, otherwise we overwrite the source
         if (dy > 0) {
             for (int y = target.maxY() - 1; y >= target.y(); --y)
                 copyRow(y);
@@ -641,13 +638,13 @@ void WebView::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)
         m_layerTreeHost->setViewOverlayRootLayer(layer);
 }
 
-// Zurueck zum Malen ohne Ebenen (GPU verloren). WebCore baut die Ebenen ab,
-// der Compositor bleibt bis zum Ende des Views (die Ebenen zeigen auf ihn).
+// Back to painting without layers (GPU lost). WebCore tears down the layers,
+// the compositor stays until the end of the view (the layers point to it).
 void WebView::stopCompositing()
 {
     if (!m_compositing)
         return;
-    debugLog("View %d: Compositing aus", m_id);
+    debugLog("View %d: compositing off", m_id);
     m_compositing = false;
     if (m_layerTreeHost)
         m_layerTreeHost->detachScene();
@@ -656,19 +653,19 @@ void WebView::stopCompositing()
     settings.setAcceleratedCompositingEnabled(false);
     settings.setAcceleratedCompositingForFixedPositionEnabled(false);
 #if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
-    // Ohne Ebenen scrollt wieder der Engine-Thread
+    // Without layers the engine thread scrolls again
     settings.setAsyncFrameScrollingEnabled(false);
     settings.setAsyncOverflowScrollingEnabled(false);
     Scrolling::stopForView(m_id);
 #endif
-    // Die Einstellung wirkt sonst erst bei der naechsten echten Aenderung an
-    // Style oder Layout: Compositing in allen Frames gleich beenden
+    // Otherwise the setting only takes effect with the next real change to
+    // style or layout: end compositing in all frames right away
     for (RefPtr<Frame> frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
         RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame);
         if (CheckedPtr renderView = localFrame ? localFrame->contentRenderer() : nullptr) {
             auto& compositor = renderView->compositor();
-            compositor.willRecalcStyle(); // liest die Einstellungen neu
-            // Backings der Ebenen abbauen, sonst malt WebCore ihren Inhalt nicht selber
+            compositor.willRecalcStyle(); // reads the settings again
+            // Tear down the layer backings, otherwise WebCore does not paint their content itself
             compositor.clearBackingForAllLayers();
             compositor.enableCompositingMode(false);
         }
@@ -679,9 +676,9 @@ void WebView::stopCompositing()
     scheduleRenderingUpdate();
 }
 
-// Wie WebKit2 (LayerTreeHost::updateRendering): Rendering-Update und den Stand
-// der Ebenen an den Compositor-Thread. Der zeigt das Bild selber und meldet
-// sich mit didComposite(); erst dann kommt das naechste Rendering-Update.
+// Like WebKit2 (LayerTreeHost::updateRendering): rendering update and the
+// layer state to the compositor thread. It shows the frame itself and reports
+// back with didComposite(); only then the next rendering update comes.
 bool WebView::renderCompositedFrame(IntRect*)
 {
     auto& host = *m_layerTreeHost;
@@ -690,8 +687,8 @@ bool WebView::renderCompositedFrame(IntRect*)
     if (!m_renderingUpdateRequested)
         return false;
     if (host.isWaitingForCompositor()) {
-        // Das Bild kommt, bevor der Compositor das letzte gezeigt hat (Engine
-        // beschaeftigt): didComposite holt es nach, statt auf ein neues zu warten
+        // The frame comes before the compositor showed the last one (engine
+        // busy): didComposite catches up instead of waiting for a new one
         m_compositedFrameMissed = true;
         return false;
     }
@@ -703,12 +700,12 @@ bool WebView::renderCompositedFrame(IntRect*)
     host.flush(firstPaint);
     if (firstPaint && host.isWaitingForCompositor())
         m_firstPaint = FirstPaint::None;
-    // Nichts zu zeigen: das Bild ist trotzdem "fertig"
+    // Nothing to show: the frame is "done" anyway
     if (!host.isWaitingForCompositor())
         didComposite();
     auto milliseconds = (MonotonicTime::now() - start).milliseconds();
     if (milliseconds > 30)
-        debugLog("View %d: Rendering-Update %.0f ms", m_id, milliseconds);
+        debugLog("View %d: rendering update %.0f ms", m_id, milliseconds);
     return false;
 }
 
@@ -724,7 +721,7 @@ void WebView::didComposite()
         requestComposite();
 }
 
-// Der Compositor-Thread hat seine GPU verloren: ohne Ebenen weitermalen
+// The compositor thread lost its GPU: keep painting without layers
 void WebView::compositorLost()
 {
     if (m_layerTreeHost)
@@ -741,11 +738,11 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     if (m_renderingUpdateRequested) {
         m_renderingUpdateRequested = false;
-        // requestAnimationFrame-Callbacks, Animationen, Style, Layout, ...
+        // requestAnimationFrame callbacks, animations, style, layout, ...
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ });
-        // Nach stopCompositing: solange WebCore noch Ebenen hat, malt es den
-        // Inhalt nicht selber. Sobald sie weg sind, alles neu malen.
+        // After stopCompositing: as long as WebCore still has layers it does
+        // not paint the content itself. Once they are gone, repaint everything.
         if (m_repaintAfterCompositingStopped) {
             RefPtr frameView = mainFrameView();
             CheckedPtr renderView = frameView ? frameView->renderView() : nullptr;
@@ -763,8 +760,8 @@ bool WebView::renderFrame(IntRect* dirtyOut)
     view->updateLayoutAndStyleIfNeededRecursive();
     auto layoutDone = MonotonicTime::now();
 
-    // Skia legt auf der GPU schon beim Malen Texturen an (Bilder): der eigene
-    // GL-Kontext muss die ganze Zeit aktuell sein
+    // On the GPU Skia creates textures (images) already while painting: the
+    // own GL context has to be current the whole time
     std::optional<Gpu::Scope> gpuScope;
     if (m_gpuSurface)
         gpuScope.emplace();
@@ -798,7 +795,7 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     auto end = MonotonicTime::now();
     if ((end - start).milliseconds() > 30)
-        debugLog("View %d: Bild %.0f ms (Layout %.0f ms, Malen %.0f ms)", m_id, (end - start).milliseconds(), (layoutDone - start).milliseconds(), (end - layoutDone).milliseconds());
+        debugLog("View %d: frame %.0f ms (layout %.0f ms, paint %.0f ms)", m_id, (end - start).milliseconds(), (layoutDone - start).milliseconds(), (end - layoutDone).milliseconds());
 
     if (dirtyOut) {
         IntRect bounds = damage.bounds();
@@ -814,15 +811,15 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
 void WebView::presentIfNeeded()
 {
-    // Versteckt malen wir nicht, auch nicht fuer ein Bild, das der Host noch
-    // von vorher schickt: setVisible(true) holt es nach
+    // Hidden we do not paint, not even for a frame the host still sends from
+    // before: setVisible(true) catches up
     if (!m_visible) {
         m_frameRequested = true;
         return;
     }
     if (m_frameInFlight) {
-        // Host malt noch das letzte Bild. Sobald er fertig ist, kommt bl_frame_presented
-        // und wir werden erneut aufgerufen.
+        // The host still paints the last frame. As soon as it is done,
+        // bl_frame_presented arrives and we are called again.
         m_frameRequested = true;
         return;
     }
@@ -837,16 +834,16 @@ void WebView::presentIfNeeded()
         if (scope && Gpu::present(m_id, *m_gpuSurface)) {
             auto milliseconds = (MonotonicTime::now() - start).milliseconds();
             if (milliseconds > 30)
-                debugLog("View %d: GPU-Abschicken %.0f ms", m_id, milliseconds);
+                debugLog("View %d: GPU submit %.0f ms", m_id, milliseconds);
             return;
         }
-        // Ging nicht (Kontext weg): ab jetzt auf der CPU, im naechsten Bild alles
-        log("View %d: Bild nicht auf die GPU gebracht, male auf der CPU", m_id);
+        // Did not work (context gone): from now on on the CPU, everything in the next frame
+        log("View %d: frame not brought to the GPU, painting on the CPU", m_id);
         dropGpuSurface();
         return;
     }
-    // Mit Compositor-Thread zeigt dessen Worker auch die Bilder ohne Ebenen;
-    // bis er fertig ist, darf der Pixel-Buffer nicht geaendert werden
+    // With the compositor thread its worker also shows the frames without
+    // layers; until it is done the pixel buffer must not change
     if (Compositor::isRunning()) {
         m_frameInFlight = true;
         presentFrameOnCompositor(m_id, pixels(), m_pixelSize.width(), m_pixelSize.height(), dirty.x(), dirty.y(), dirty.width(), dirty.height());
@@ -883,7 +880,7 @@ static OptionSet<PlatformEvent::Modifier> modifiersFromBits(int bits)
 }
 
 namespace {
-// movementX/Y kommen vom Host (bei Pointer Lock die einzige Bewegung)
+// movementX/Y come from the host (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
     MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement)
@@ -908,14 +905,14 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
     PlatformEvent::Type eventType = type == 0 ? PlatformEvent::Type::MousePressed : type == 1 ? PlatformEvent::Type::MouseReleased : PlatformEvent::Type::MouseMoved;
 
-    // Waehrend die Seite etwas zieht, gehoert die Maus dem Ziehen (wie beim
-    // System-Ziehen in Chrome: keine mousemove/mouseup an die Seite)
+    // While the page drags something the mouse belongs to the drag (like a
+    // system drag in Chrome: no mousemove/mouseup to the page)
     if (m_drag && m_drag->fromPage) {
         IntPoint point { static_cast<int>(x), static_cast<int>(y) };
         if (eventType == PlatformEvent::Type::MouseReleased)
             endDrag(point, true, modifiers);
         else if (eventType == PlatformEvent::Type::MouseMoved && mouseButton == MouseButton::None)
-            endDrag(point, false, modifiers); // Taste ausserhalb des Canvas losgelassen
+            endDrag(point, false, modifiers); // button released outside of the canvas
         else if (eventType == PlatformEvent::Type::MouseMoved)
             updateDrag(point, modifiers);
         return;
@@ -938,7 +935,7 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
 }
 
-// ------------------------------------------------------------ Drag & Drop
+// ------------------------------------------------------------ Drag and drop
 
 void WebView::startPageDrag(Ref<WasmPlatform::DragContent>&& content, OptionSet<DragOperation> sourceOperations)
 {
@@ -956,8 +953,8 @@ void WebView::updateDrag(IntPoint point, int modifiers)
         flags.add(DragApplicationFlags::IsSource);
     if (modifiers & 2)
         flags.add(DragApplicationFlags::IsCopyKeyDown);
-    // Ohne "Load": Dateien oder Links aus dem Host oeffnen nicht die Datei
-    // anstelle der Seite
+    // Without "Load": files or links from the host do not open the file
+    // instead of the page
     DragData dragData { m_drag->content.ptr(), point, point, m_drag->sourceOperations, flags, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
     m_drag->lastPoint = point;
     auto result = m_page->dragController().dragEnteredOrUpdated(*frame, WTF::move(dragData));
@@ -987,7 +984,7 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
         m_page->dragController().dragExited(*frame, WTF::move(dragData));
     m_page->dragController().dragEnded();
     if (session.fromPage) {
-        // dragend an die Quelle, mit dem Ergebnis (dropEffect)
+        // dragend to the source, with the result (dropEffect)
         MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
         frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
     }
@@ -999,9 +996,9 @@ void WebView::cancelDrag()
         endDrag({ }, false, 0);
 }
 
-// Ziehen aus dem Host: data = {"text":..,"html":..,"uriList":..,"files":[Pfade],"fileCount":n}.
-// Beim Ziehen ueber die Seite kennt der Host nur die Typen und die Anzahl
-// Dateien (wie Chrome sie der Seite auch nur zeigt), beim Ablegen alles.
+// Dragging from the host: data = {"text":..,"html":..,"uriList":..,"files":[paths],"fileCount":n}.
+// While dragging over the page the host only knows the types and the number of
+// files (as Chrome also shows them to the page), on drop everything.
 void WebView::hostDrag(int phase, double x, double y, int modifiers, const String& data)
 {
     IntPoint point { static_cast<int>(x), static_cast<int>(y) };
@@ -1039,7 +1036,7 @@ void WebView::hostDrag(int phase, double x, double y, int modifiers, const Strin
 PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)
 {
     IntPoint position { static_cast<int>(x), static_cast<int>(y) };
-    // DOM: deltaY > 0 heisst nach unten scrollen. WebCore: umgekehrtes Vorzeichen.
+    // DOM: deltaY > 0 means scroll down. WebCore: inverted sign.
     return { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), static_cast<float>(-deltaX / 40), static_cast<float>(-deltaY / 40),
         PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
 }
@@ -1081,7 +1078,7 @@ RefPtr<ScrollingCoordinator> WebView::createScrollingCoordinator(Page& page) con
 
 #if ENABLE(TOUCH_EVENTS)
 namespace {
-// PlatformTouchEvent/-Point haben nur geschuetzte Felder, die Ports fuellen sie selber
+// PlatformTouchEvent/-Point only have protected fields, the ports fill them themselves
 class TouchPointWasm final : public PlatformTouchPoint {
 public:
     TouchPointWasm(unsigned id, State state, DoublePoint position, DoubleSize radius, float force)
@@ -1108,7 +1105,7 @@ public:
     }
 };
 
-// CSS touch-action am Punkt: duerfen zwei Finger die Ansicht zoomen?
+// CSS touch-action at the point: may two fingers zoom the view?
 bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
 {
     RefPtr view = frame.view();
@@ -1128,11 +1125,11 @@ bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
 }
 #endif
 
-// Touch (Chromebooks): type 0 Start, 1 Bewegung, 2 Ende, 3 Abbruch. Punkte als
-// JSON [{id, x, y, state, rx, ry, force}], state wie PlatformTouchPoint::State.
-// Die Oberflaeche erfaehrt, ob die Seite das Event abgefangen hat (dann kein
-// Scrollen und kein Klick daraus) und beim Start, ob touch-action an den neuen
-// Punkten Pinch-Zoom erlaubt.
+// Touch (Chromebooks): type 0 start, 1 move, 2 end, 3 cancel. Points as JSON
+// [{id, x, y, state, rx, ry, force}], state like PlatformTouchPoint::State.
+// The host learns whether the page handled the event (then no scrolling and no
+// click from it) and on start whether touch-action at the new points allows
+// pinch zoom.
 void WebView::touchEvent(int type, const String& json, int modifiers)
 {
 #if ENABLE(TOUCH_EVENTS)
@@ -1169,7 +1166,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
 }
 
 #if ENABLE(POINTER_LOCK)
-// Pointer Lock (Spiele, 3D): die Oberflaeche ruft requestPointerLock() am Canvas auf
+// Pointer lock (games, 3D): the host calls requestPointerLock() on the canvas
 void WebView::requestPointerLock(CompletionHandler<void(PointerLockRequestResult)>&& completionHandler)
 {
     if (auto previous = std::exchange(m_pointerLockHandler, WTF::move(completionHandler)))
@@ -1214,12 +1211,12 @@ static String keyIdentifierForKey(const String& key)
         if (key == domKey)
             return identifier;
     }
-    return key; // Enter, Home, End, PageUp, PageDown, F1, ... heissen gleich
+    return key; // Enter, Home, End, PageUp, PageDown, F1, ... have the same names
 }
 
 bool WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
 {
-    // Escape bricht ein Ziehen aus der Seite ab (wie in Chrome, dragend mit dropEffect "none")
+    // Escape cancels a drag from the page (like in Chrome, dragend with dropEffect "none")
     if (m_drag && m_drag->fromPage && key == "Escape"_s) {
         if (!type)
             endDrag(m_drag->lastPoint, false, modifiers);
@@ -1242,13 +1239,13 @@ void WebView::contextMenu(double x, double y)
         return;
     DoublePoint position { x, y };
     PlatformMouseEvent event { position, position, MouseButton::Right, PlatformEvent::Type::MousePressed, 1, { }, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
-    // Wie in WebKit2: Faengt die Seite das contextmenu-Event nicht ab, baut der
-    // ContextMenuController von WebCore ein Menue. Nur dann zeigen wir unseres.
+    // Like in WebKit2: if the page does not handle the contextmenu event,
+    // WebCore's ContextMenuController builds a menu. Only then we show ours.
     auto& controller = m_page->contextMenuController();
     controller.clearContextMenu();
     frame->eventHandler().sendContextMenuEvent(event);
     bool show = controller.contextMenu();
-    debugLog("Kontextmenue bei %.0f,%.0f: %s", x, y, show ? "zeigen" : "die Seite hat ein eigenes");
+    debugLog("Context menu at %.0f,%.0f: %s", x, y, show ? "show" : "the page has its own");
     if (!show)
         return;
     auto result = controller.hitTestResult();
@@ -1272,7 +1269,7 @@ void WebView::executeCommand(const String& name)
         frame->editor().command(name).execute();
 }
 
-// Fertiger Text aus der Texteingabe des Hosts (IME, tote Tasten, Bildschirmtastatur)
+// Finished text from the host's text input (IME, dead keys, on-screen keyboard)
 void WebView::insertText(const String& text)
 {
     RefPtr frame = m_page->focusController().focusedOrMainFrame();
@@ -1343,10 +1340,10 @@ void WebView::setFocused(bool focused)
     m_page->focusController().setFocused(focused);
 }
 
-// Wie WebKit2 fuer eine versteckte Seite (DrawingArea::visibilityDidChange):
-// WebCore haelt rAF und CSS-Animationen an, drosselt Timer
-// (HiddenPageDOMTimerThrottling) und meldet visibilitychange; wir malen nicht
-// mehr, auch der Compositor nicht. Das letzte Bild bleibt im Canvas.
+// Like WebKit2 for a hidden page (DrawingArea::visibilityDidChange): WebCore
+// pauses rAF and CSS animations, throttles timers
+// (HiddenPageDOMTimerThrottling) and fires visibilitychange; we do not paint
+// anymore, the compositor neither. The last frame stays in the canvas.
 void WebView::setVisible(bool visible)
 {
     if (visible == m_visible)
@@ -1367,7 +1364,7 @@ void WebView::setAudible(bool audible)
 
 void WebView::updateActivityState()
 {
-    // Auch waehrend der Abbau der Page noch Medien meldet
+    // Also while tearing down the page still reports media
     if (!m_page)
         return;
     auto state = m_page->activityState();
@@ -1377,14 +1374,14 @@ void WebView::updateActivityState()
     m_page->setActivityState(state);
 }
 
-// Tab aus der Adressleiste in die Seite: erstes bzw. letztes Element fokussieren
+// Tab from the address bar into the page: focus the first or last element
 void WebView::focusInitial(bool forward)
 {
     setFocused(true);
     m_page->focusController().setInitialFocus(forward ? FocusDirection::Forward : FocusDirection::Backward, nullptr);
 }
 
-// Zoom wie Strg +/- in Chrome (Seite inkl. Bilder, Layout neu)
+// Zoom like Ctrl +/- in Chrome (page including images, new layout)
 void WebView::setZoom(float factor)
 {
     if (RefPtr frame = mainFrame())
@@ -1412,7 +1409,7 @@ void WebView::setPageScale(float scale, FloatPoint scrollPosition, unsigned pinc
     scheduleRenderingUpdate();
 }
 
-// Ohne Compositor skaliert jeder Schritt gleich die Seite
+// Without the compositor every step scales the page right away
 void WebView::pinch(PinchPhase phase, float factor, FloatPoint focus)
 {
     switch (phase) {
@@ -1438,8 +1435,8 @@ void WebView::pinch(PinchPhase phase, float factor, FloatPoint focus)
         m_pinch = std::nullopt;
 }
 
-// Suchen auf der Seite (Strg+F): alle Treffer markieren, zum naechsten springen,
-// der Oberflaeche "Treffer x von y" melden
+// Find on the page (Ctrl+F): mark all matches, jump to the next one, report
+// "match x of y" to the host
 void WebView::find(const String& text, bool backwards, bool again)
 {
     m_page->unmarkAllTextMatches();
@@ -1476,7 +1473,7 @@ void WebView::stopFind()
 void WebView::notifyNavigationState()
 {
     auto& backForward = m_page->backForward();
-    // Verlauf fuer die Sitzung (Zurueck/Vor nach Neustart oder Verwerfen)
+    // History for the session (back/forward after a restart or discard)
     auto& list = static_cast<BackForwardList&>(backForward.client());
     StringBuilder history;
     history.append("{\"index\":"_s, list.currentIndex().value_or(0), ",\"entries\":["_s);
@@ -1505,7 +1502,7 @@ void WebView::restoreHistory(const String& data)
         if (!item)
             continue;
         URL url { item->getString("url"_s) };
-        // Nur Adressen, die man auch eintippen koennte
+        // Only addresses one could also type
         if (!url.isValid() || !(url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsAbout()))
             continue;
         items.append(HistoryItem::create(m_page->historyItemClient(), url.string(), item->getString("title"_s)));
@@ -1515,26 +1512,26 @@ void WebView::restoreHistory(const String& data)
     size_t index = std::min<size_t>(std::max(object->getInteger("index"_s).value_or(0), 0), items.size() - 1);
     Ref current = items[index];
     static_cast<BackForwardList&>(m_page->backForward().client()).restore(WTF::move(items), index);
-    // Wie Zurueck/Vor: laedt den Eintrag, ohne einen neuen anzulegen
+    // Like back/forward: loads the entry without creating a new one
     m_page->goToItem(*frame, current, FrameLoadType::IndexedBackForward, ShouldTreatAsContinuingLoad::No);
 }
 
 void WebView::didStartLoading()
 {
-    debugLog("View %d: Laden beginnt", m_id);
+    debugLog("View %d: loading starts", m_id);
     m_isLoading = true;
     notifyNavigationState();
 }
 
 void WebView::didCommitLoad()
 {
-    debugLog("View %d: Commit", m_id);
+    debugLog("View %d: commit", m_id);
     m_firstPaint = FirstPaint::WaitingForLayout;
-    // Neue Seite ohne Pinch-Zoom (Zurueck/Vor setzt den gemerkten wieder)
+    // New page without pinch zoom (back/forward restores the remembered one)
     m_pinch = std::nullopt;
     if (m_page->pageScaleFactor() != 1)
         m_page->setPageScaleFactor(1, { });
-    // Fehlerseite: die Adressleiste zeigt kein Schloss, bei einem ungueltigen Zertifikat "Nicht sicher"
+    // Error page: the address bar shows no lock, with an invalid certificate "Not secure"
     RefPtr frame = mainFrame();
     RefPtr loader = frame ? frame->loader().documentLoader() : nullptr;
     if (loader && !loader->unreachableURL().isEmpty())
@@ -1546,20 +1543,20 @@ void WebView::didCommitLoad()
 
 void WebView::didNavigateWithinPage()
 {
-    debugLog("View %d: Adresse im Dokument", m_id);
+    debugLog("View %d: address within the document", m_id);
     notifyNavigationState();
 }
 
 void WebView::didStopLoading()
 {
-    debugLog("View %d: Laden abgebrochen", m_id);
+    debugLog("View %d: loading cancelled", m_id);
     m_isLoading = false;
     notifyNavigationState();
 }
 
 void WebView::didFinishLoading()
 {
-    debugLog("View %d: fertig geladen", m_id);
+    debugLog("View %d: finished loading", m_id);
     m_isLoading = false;
     notifyNavigationState();
     notifyHost(m_id, "load");
@@ -1571,7 +1568,7 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
 {
     if (!milestones.contains(LayoutMilestone::DidFirstVisuallyNonEmptyLayout))
         return;
-    debugLog("View %d: erstes sichtbares Layout", m_id);
+    debugLog("View %d: first visible layout", m_id);
     notifyHost(m_id, "first-layout");
     if (m_firstPaint == FirstPaint::WaitingForLayout)
         m_firstPaint = FirstPaint::WaitingForUpdate;
@@ -1579,7 +1576,7 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
 
 void WebView::firstPaintShown(int id)
 {
-    debugLog("View %d: erstes Bild", id);
+    debugLog("View %d: first paint", id);
     notifyHost(id, "first-paint");
 }
 
@@ -1592,8 +1589,8 @@ void WebView::exitFullscreen()
 #endif
 }
 
-// Bestes Icon aus <link rel=icon> (am naechsten an 32 px, SVG passt immer),
-// sonst /favicon.ico. Die Engine laedt es selber, die Oberflaeche hat kein Netz.
+// Best icon from <link rel=icon> (closest to 32 px, SVG always fits),
+// otherwise /favicon.ico. The engine loads it itself, the host has no network.
 void WebView::loadFavicon()
 {
     RefPtr frame = mainFrame();
@@ -1627,7 +1624,7 @@ void WebView::didFailLoading(const String& url, const String& description)
 
 void WebView::didChangeTitle(const String& title)
 {
-    // Mit Adresse: beim Zurueck/Vor kann der Titel vor der Navigationsmeldung kommen
+    // With an address: on back/forward the title can come before the navigation message
     notifyHost(m_id, "title", makeString("{\"title\":\""_s, jsonEscape(title), "\",\"url\":\""_s, jsonEscape(currentURL()), "\"}"_s));
 }
 

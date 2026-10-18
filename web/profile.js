@@ -200,6 +200,9 @@ async function writeFile(top, path, data) {
   await writable.close();
 }
 
+// /data of the engine: the directory of its storage namespace (BL_STORAGE_NAMESPACE)
+const dataDirectory = async () => (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite', { create: true });
+
 async function removePath(top, path) {
   const parts = path.split('/');
   await (await folder(top, parts.slice(0, -1)))?.removeEntry(parts.at(-1), { recursive: true }).catch((error) => {
@@ -330,7 +333,7 @@ async function scan(top, limit) {
 // und legt dann das Profil des Servers ins OPFS. Gibt einen Hinweis fuer den Tab zurueck,
 // '' wenn alles gut ging.
 export async function openProfile() {
-  const top = await navigator.storage.getDirectory();
+  const top = await dataDirectory();
   if (storage(CLEAR_KEY)) {
     await clearOPFS(top);
     storage(CLEAR_KEY, null);
@@ -448,7 +451,7 @@ async function runSync(beforeStart) {
   let units = null;
   let taken = false;
   try {
-    units = await scan(await navigator.storage.getDirectory(), dbLimit());
+    units = await scan(await dataDirectory(), dbLimit());
     const byKey = new Map(units.map((unit) => [unit.key, unit]));
     const present = new Set();
     for (const unit of units) {
@@ -626,7 +629,7 @@ export function siteOfPath(path) {
 // Was nur auf diesem Geraet liegt: Datenbanken ueber der Grenze, Cache, Service Worker und
 // die Dateien der Seiten (OPFS), dazu der HTTP-Cache der Engine (Cache API des Host)
 export async function localStats() {
-  const top = await navigator.storage.getDirectory();
+  const top = await dataDirectory();
   const limit = dbLimit();
   const databases = (await scan(top, Infinity)).filter((unit) => unit.key !== 'cookies.db' && unit.size > limit)
     .map((unit) => ({ path: unit.key, site: siteOfPath(unit.key), size: unit.size, kind: unit.key.startsWith('indexeddb/') ? 'IndexedDB' : 'localStorage' }));

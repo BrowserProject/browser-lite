@@ -1,6 +1,6 @@
-// EditorClient: Texteingabe, Tastatur-Befehle beim Bearbeiten und Undo/Redo.
-// Methodenliste nach WebCore EmptyEditorClient (WebKit, BSD), Tastatur-
-// Behandlung nach WinCairo WebPage::handleEditingKeyboardEvent.
+// EditorClient: text input, keyboard commands while editing and undo/redo.
+// Method list after WebCore EmptyEditorClient (WebKit, BSD), keyboard handling
+// after WinCairo WebPage::handleEditingKeyboardEvent.
 #pragma once
 
 #include <WebCore/DOMPasteAccess.h>
@@ -42,7 +42,7 @@ private:
 
     void didBeginEditing() final { }
     void respondToChangedContents() final { }
-    // Cursor-Position an den Host: dort steht das Eingabefeld fuer IME
+    // Caret position to the host: the input field for IME is placed there
     void respondToChangedSelection(WebCore::LocalFrame*) final;
     void updateEditorStateAfterLayoutIfEditabilityChanged() final { }
     void discardedComposition(const WebCore::Document&) final { }

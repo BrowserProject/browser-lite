@@ -1,6 +1,6 @@
-// speechSynthesis der Seiten: WebCore (platform/wasm/PlatformSpeechSynthesizerWasm.cpp)
-// gibt Aeusserungen hierher, die Oberflaeche spricht sie mit speechSynthesis des
-// Host-Browsers und meldet Start/Ende/Wortgrenzen zurueck (bl_speech_event).
+// speechSynthesis of the pages: WebCore (platform/wasm/PlatformSpeechSynthesizerWasm.cpp)
+// hands utterances here, the host speaks them with speechSynthesis of the host
+// browser and reports start/end/word boundaries back (bl_speech_event).
 #include "config.h"
 #include "Speech.h"
 

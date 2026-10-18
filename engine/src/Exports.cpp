@@ -1,7 +1,7 @@
-// C-Schnittstelle fuer die Browser-Oberflaeche (JS im Haupt-Thread der Seite).
-// Jede Funktion darf von jedem Thread aufgerufen werden; die Arbeit passiert
-// asynchron auf dem Engine-Thread. Strings uebergibt der Aufrufer als UTF-8
-// (z.B. mit stringToNewUTF8), die Engine gibt sie mit free() frei.
+// C interface for the host (JS on the main thread of the page). Every function
+// may be called from any thread; the work happens asynchronously on the engine
+// thread. The caller passes strings as UTF-8 (e.g. with stringToNewUTF8), the
+// engine frees them with free().
 
 #include "config.h"
 
@@ -10,6 +10,7 @@
 #include "DeviceClients.h"
 #include "Printing.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
 #include "LayerTreeHostWasm.h"
@@ -107,8 +108,8 @@ EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withView(id, [](WebView& view)
 EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withView(id, [](WebView& view) { view.reload(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_stop(int id) { withView(id, [](WebView& view) { view.stop(); }); }
 
-// Tab schliessen: erst beforeunload der Seite (mit Rueckfrage), die Antwort
-// kommt als Ereignis "try-close"
+// Close a view: first the page's beforeunload (with a prompt), the answer
+// arrives as the event "try-close"
 EMSCRIPTEN_KEEPALIVE void bl_try_close(int id)
 {
     runOnEngineThread([id] {
@@ -124,33 +125,33 @@ EMSCRIPTEN_KEEPALIVE void bl_resize(int id, int width, int height, float deviceS
     withView(id, [=](WebView& view) { view.resize({ width, height }, deviceScaleFactor); });
 }
 
-// Vom Host einmal pro requestAnimationFrame, wenn die Engine ein Bild wollte
+// From the host once per requestAnimationFrame when the engine wanted a frame
 EMSCRIPTEN_KEEPALIVE void bl_frame(int id)
 {
     withView(id, [](WebView& view) { view.presentIfNeeded(); });
 }
 
-// Kommt aus dem Worker, der die Canvas bekommt (bl_presenter_thread)
-EMSCRIPTEN_KEEPALIVE void bl_canvas_attached(int id)
+// Comes from the worker that receives the canvases (bl__presenter_thread)
+EMSCRIPTEN_KEEPALIVE void bl__canvas_attached(int id)
 {
     workerCanvasArrived(id);
     withView(id, [](WebView& view) { view.canvasAttached(); });
 }
 
-// pthread des Engine-Threads: die Oberflaeche sucht damit den Worker
-EMSCRIPTEN_KEEPALIVE int bl_engine_thread()
+// pthread of the engine thread: engine-pre.js finds its worker with it
+EMSCRIPTEN_KEEPALIVE int bl__engine_thread()
 {
     return static_cast<int>(reinterpret_cast<uintptr_t>(engineThread()));
 }
 
-// pthread, dessen Worker die Canvas der Tabs bekommt: der Compositor-Thread,
-// sonst der Engine-Thread
-EMSCRIPTEN_KEEPALIVE int bl_presenter_thread()
+// pthread whose worker receives the canvases of the views: the compositor
+// thread, otherwise the engine thread
+EMSCRIPTEN_KEEPALIVE int bl__presenter_thread()
 {
     return static_cast<int>(reinterpret_cast<uintptr_t>(Compositor::presenterThread()));
 }
 
-// Quelltext der aktuellen Seite (Strg+U): kommt wie ein Download mit viewSource-Merker
+// Source of the current page (Ctrl+U): arrives like a download flagged viewSource
 EMSCRIPTEN_KEEPALIVE void bl_view_source(int id)
 {
     withView(id, [id](WebView& view) {
@@ -160,25 +161,27 @@ EMSCRIPTEN_KEEPALIVE void bl_view_source(int id)
     });
 }
 
-// Fehlersuche: JS in der Seite ausfuehren (auch wenn die CSP der Seite
-// javascript:-URLs verbietet), Ergebnis als Text in der Konsole.
-// In der Oberflaeche: __blEval("document.title")
+// Debugging: runs JS in the page (even if the page's CSP forbids javascript:
+// URLs), the result is printed as text to the console. Only with BL_TEST_HOOKS=1.
 EMSCRIPTEN_KEEPALIVE void bl_eval_script(int id, char* source)
 {
-    withView(id, [source = takeString(source), id](WebView& view) {
+    auto script = takeString(source);
+    if (!engineConfig().testHooks)
+        return;
+    withView(id, [source = WTF::move(script), id](WebView& view) {
         RefPtr frame = view.mainFrame();
         if (!frame)
             return;
         auto result = frame->script().executeScriptIgnoringException(source, JSC::SourceTaintedOrigin::Untainted);
-        String text = result ? result.toWTFString(frame->script().globalObject(WebCore::mainThreadNormalWorldSingleton())) : "(Ausnahme)"_s;
+        String text = result ? result.toWTFString(frame->script().globalObject(WebCore::mainThreadNormalWorldSingleton())) : "(exception)"_s;
         RefPtr document = frame->document();
-        printf("[eval %d] %s (Malen erlaubt %d, Render-Blocking %d, View-Transition %d)\n", id, text.utf8().data(),
+        printf("[eval %d] %s (painting allowed %d, render blocking %d, view transition %d)\n", id, text.utf8().data(),
             document && document->visualUpdatesAllowed(), document && document->isRenderBlocked(),
             document && document->renderingIsSuppressedForViewTransition());
     });
 }
 
-// Host hat das letzte Bild kopiert, der Pixel-Buffer darf wieder bemalt werden
+// The host copied the last frame, the pixel buffer may be painted again
 EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
 {
     withView(id, [](WebView& view) {
@@ -192,15 +195,15 @@ EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, double x, doubl
     withView(id, [=](WebView& view) { view.mouseEvent(type, button, x, y, clickCount, modifiers); });
 }
 
-// Mausbewegung mit movementX/Y (auch bei Pointer Lock). button: gedrueckte
-// Taste wie bei bl_mouse (-1 = keine), sonst gibt es kein Ziehen/Markieren
+// Mouse move with movementX/Y (also with pointer lock). button: pressed
+// button like in bl_mouse (-1 = none), otherwise there is no dragging/selecting
 EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int button, int modifiers)
 {
     withView(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
 }
 
-// Ziehen aus dem Host ueber die Seite: phase 0 = darueber, 1 = verlassen,
-// 2 = abgelegt. data: JSON mit Text/HTML/URI-Liste und Dateipfaden (WebView::hostDrag)
+// Dragging from the host over the page: phase 0 = over, 1 = left, 2 = dropped.
+// data: JSON with text/HTML/URI list and file paths (WebView::hostDrag)
 EMSCRIPTEN_KEEPALIVE void bl_drag(int id, int phase, double x, double y, int modifiers, char* data)
 {
     withView(id, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
@@ -218,12 +221,12 @@ EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
 
 EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers)
 {
-    // Mit Compositor-Thread: ueber ihn zum Scroll-Thread (ScrollingWasm.h), so
-    // scrollt die Seite auch, wenn ihr JS den Engine-Thread blockiert
+    // With the compositor thread: through it to the scrolling thread (ScrollingWasm.h),
+    // so the page scrolls even when its JS blocks the engine thread
     if (Compositor::isRunning()) {
-        // Pinch-Zoom, den der Engine-Thread noch nicht zeigt: das Rad
-        // verschiebt die skalierte Ansicht, die Seite bekommt das Event nur
-        // zum Mitlesen (wie ein passiver wheel-Listener)
+        // Pinch zoom the engine thread does not show yet: the wheel moves the
+        // scaled view, the page only gets the event to observe (like a passive
+        // wheel listener)
         RefPtr scene = CompositorScene::forView(id);
         if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
             withView(id, [=](WebView& view) {
@@ -239,11 +242,11 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
     withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, modifiers); });
 }
 
-// Strg + Rad (Zoom) geht wie in Chrome zuerst an die Seite (Karten, Editoren
-// zoomen selber). Rueckgabe 1: die Seite kann preventDefault rufen, die
-// Antwort kommt als "wheel-result". 0: nur zum Mitlesen geschickt (kein
-// blockierender Listener an der Stelle oder nicht cancelable), die
-// Oberflaeche zoomt gleich, auch wenn das JS den Engine-Thread blockiert.
+// Ctrl + wheel (zoom) goes to the page first like in Chrome (maps, editors
+// zoom themselves). Return 1: the page may call preventDefault, the answer
+// arrives as "wheel-result". 0: only sent for observing (no blocking listener
+// at that point or not cancelable), the host zooms right away, even when JS
+// blocks the engine thread.
 EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers, int cancelable)
 {
     auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers);
@@ -259,7 +262,7 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
     });
 }
 
-// Vorschau waehrend der Texteingabe (compositionupdate) und Abschluss (compositionend)
+// Preview during text input (compositionupdate) and completion (compositionend)
 EMSCRIPTEN_KEEPALIVE void bl_set_composition(int id, char* text, int selectionStart, int selectionEnd)
 {
     withView(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
@@ -275,7 +278,7 @@ EMSCRIPTEN_KEEPALIVE void bl_insert_text(int id, char* text)
     withView(id, [text = takeString(text)](WebView& view) { view.insertText(text); });
 }
 
-// paths: Pfade im virtuellen Dateisystem, mit Zeilenumbruch getrennt. Leer = abgebrochen.
+// paths: paths in the virtual file system, separated by newlines. Empty = cancelled.
 EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
 {
     withView(id, [paths = takeString(paths)](WebView& view) {
@@ -283,8 +286,8 @@ EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
     });
 }
 
-// Antworten der Auswahlen (Choosers.h): Listeneintrag (-1 = abgebrochen),
-// Farbe "#rrggbb", Datum/Zeit als Wert des Eingabefelds. done = Auswahl zu
+// Answers of the choosers (Choosers.h): list item (-1 = cancelled), color
+// "#rrggbb", date/time as the value of the input field. done = chooser closed
 EMSCRIPTEN_KEEPALIVE void bl_popup_choose(int id, int index)
 {
     runOnEngineThread([=] { choosePopupItem(id, index); });
@@ -310,10 +313,10 @@ EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
     withView(id, [=](WebView& view) { view.setZoom(factor); });
 }
 
-// Pinch-Zoom (PinchZoom.h): phase 0 Anfang, 1 Schritt (factor relativ zum
-// letzten), 2 Ende, 3 Abbruch; x/y = Mittelpunkt in der View (CSS-Pixel).
-// Mit Ebenen skaliert der Compositor-Thread, auch wenn der Engine-Thread
-// blockiert ist.
+// Pinch zoom (PinchZoom.h): phase 0 begin, 1 step (factor relative to the last
+// one), 2 end, 3 cancel; x/y = focus point in the view (CSS pixels). With
+// layers the compositor thread scales, even when the engine thread is
+// blocked.
 EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, double y)
 {
     auto pinchPhase = static_cast<PinchPhase>(std::clamp(phase, 0, 3));
@@ -325,13 +328,13 @@ EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, d
     withView(id, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
 }
 
-// Suchen: again = Weitersuchen mit derselben Eingabe (Enter / Shift+Enter)
+// Find: again = find next with the same input (Enter / Shift+Enter)
 EMSCRIPTEN_KEEPALIVE void bl_find(int id, char* text, int backwards, int again)
 {
     withView(id, [text = takeString(text), backwards, again](WebView& view) { view.find(text, backwards, again); });
 }
 
-// Tab stummschalten (Lautsprecher im Tab)
+// Mute a view (speaker icon)
 EMSCRIPTEN_KEEPALIVE void bl_set_muted(int id, int muted)
 {
     withView(id, [muted](WebView& view) {
@@ -339,7 +342,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_muted(int id, int muted)
     });
 }
 
-// Drucken (Strg+P, Menue): Hauptframe als PDF
+// Print (Ctrl+P, menu): main frame as PDF
 EMSCRIPTEN_KEEPALIVE void bl_print(int id)
 {
     withView(id, [id](WebView& view) {
@@ -363,7 +366,7 @@ EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
     withView(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });
 }
 
-// Video/Audio: Zustand des Host-<video> (JSON), neues Bild, Daten fuer den Service Worker
+// Video/audio: state of the host <video> (JSON), new frame, data for the service worker
 EMSCRIPTEN_KEEPALIVE void bl_media_event(int playerId, char* json)
 {
     runOnEngineThread([playerId, json = takeString(json)] {
@@ -392,7 +395,7 @@ EMSCRIPTEN_KEEPALIVE void bl_media_fetch_cancel(int fetchId)
     runOnEngineThread([=] { cancelMediaFetch(fetchId); });
 }
 
-// Der Host-Browser hat das Vollbild beendet (Esc) oder konnte es nicht starten
+// The host browser left fullscreen (Esc) or could not enter it
 EMSCRIPTEN_KEEPALIVE void bl_exit_fullscreen(int id)
 {
     withView(id, [](WebView& view) { view.exitFullscreen(); });
@@ -403,14 +406,14 @@ EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
     withView(id, [=](WebView& view) { view.setFocused(focused); });
 }
 
-// Tab zu sehen (1) oder versteckt (0): im Hintergrund oder der Tab des Host verdeckt
+// View visible (1) or hidden (0): in the background or the host tab is hidden
 EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
 {
     withView(id, [=](WebView& view) { view.setVisible(visible); });
 }
 
-// flags: 1 = dunkles Farbschema (prefers-color-scheme), 2 = Touchscreen,
-// 4 = Mobilgeraet (Haupt-Zeiger grob ohne Hover)
+// flags: 1 = dark color scheme (prefers-color-scheme), 2 = touch screen,
+// 4 = mobile device (primary pointer coarse without hover)
 EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidth, int availableHeight, int flags)
 {
     runOnEngineThread([=] {
@@ -437,9 +440,9 @@ EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers
     withView(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
 }
 
-// Berechtigungen, Standort, Benachrichtigungen (DeviceClients.cpp).
-// answer und decision wie PermissionDecision: 1 = erlaubt, 2 = blockiert,
-// 0 = ohne Entscheidung (Abfrage weg, weil der Tab zugeht: nicht gemerkt)
+// Permissions, geolocation, notifications (DeviceClients.cpp).
+// answer and decision like PermissionDecision: 1 = granted, 2 = denied,
+// 0 = no decision (request gone because the view closes: not remembered)
 EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int answer)
 {
     runOnEngineThread([=] { answerPermission(requestId, static_cast<PermissionDecision>(std::clamp(answer, 0, 2))); });
@@ -462,7 +465,7 @@ EMSCRIPTEN_KEEPALIVE void bl_geolocation_error(int id, int code, char* message)
     runOnEngineThread([id, code, message = takeString(message)] { geolocationError(id, code, message); });
 }
 
-// Lage/Bewegung vom Host-Browser (NaN = Wert fehlt)
+// Orientation/motion from the host browser (NaN = value missing)
 EMSCRIPTEN_KEEPALIVE void bl_device_orientation(int id, double alpha, double beta, double gamma, int absolute)
 {
     runOnEngineThread([=] { deviceOrientation(id, alpha, beta, gamma, absolute); });
@@ -476,7 +479,7 @@ EMSCRIPTEN_KEEPALIVE void bl_device_motion(int id, double x, double y, double z,
     });
 }
 
-// Antwort der Oberflaeche auf einen Aufruf der Host-Bruecke (WebPlatformExtras.h)
+// The host's answer to a call of the host bridge (WebPlatformExtras.h)
 EMSCRIPTEN_KEEPALIVE void bl_host_call_result(double identifier, int ok, char* result)
 {
     runOnEngineThread([identifier = static_cast<uint64_t>(identifier), ok, result = takeString(result)] {
@@ -489,7 +492,7 @@ EMSCRIPTEN_KEEPALIVE void bl_notification_event(char* notificationID, int type)
     runOnEngineThread([notificationID = takeString(notificationID), type] { notificationEvent(notificationID, type); });
 }
 
-// Gamepads (Gamepad.cpp) und Sprachausgabe (Speech.cpp)
+// Gamepads (Gamepad.cpp) and speech (Speech.cpp)
 EMSCRIPTEN_KEEPALIVE void bl_gamepad(int index, char* json)
 {
     runOnEngineThread([index, json = takeString(json)] { updateGamepad(index, json); });
@@ -510,7 +513,7 @@ EMSCRIPTEN_KEEPALIVE void bl_speech_recognition_event(double id, int type, char*
     runOnEngineThread([id, type, json = takeString(json)] { speechRecognitionEvent(static_cast<uint64_t>(id), type, json); });
 }
 
-// User-Agent und navigator.platform, leer = Standard. Vor dem ersten View
+// User agent and navigator.platform, empty = default. Before the first view
 EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent, char* platform)
 {
     runOnEngineThread([userAgent = takeString(userAgent), platform = takeString(platform)] {
@@ -519,8 +522,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_user_agent(char* userAgent, char* platform)
     });
 }
 
-// Sprachen der Seiten (navigator.languages, Accept-Language, Intl) als
-// Komma-Liste wie "de-CH,de,en", leer = Standard (en-US)
+// Languages of the pages (navigator.languages, Accept-Language, Intl) as a
+// comma list like "de-CH,de,en", empty = default (en-US)
 EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
 {
     runOnEngineThread([languages = takeString(languages)] {
@@ -534,7 +537,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
     });
 }
 
-// Fuer alle Tabs (WebView::Preference): 1 = JavaScript aus, 2 = Bilder aus,
+// For all views (WebView::Preference): 1 = JavaScript off, 2 = images off,
 // 4 = Global Privacy Control
 EMSCRIPTEN_KEEPALIVE void bl_set_preferences(int flags)
 {
@@ -543,8 +546,8 @@ EMSCRIPTEN_KEEPALIVE void bl_set_preferences(int flags)
     });
 }
 
-// navigator.onLine und die Ereignisse online/offline: Netz des Host-Browsers
-// und Verbindung zum Relay (web/app.js)
+// navigator.onLine and the online/offline events: network of the host browser
+// and connection of the transport
 EMSCRIPTEN_KEEPALIVE void bl_set_online(int onLine)
 {
     runOnEngineThread([onLine] { WebCore::WasmPlatform::setOnLine(onLine); });
@@ -559,7 +562,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
     });
 }
 
-// Einfuegen aus dem Host: {"text":..,"html":..,"files":[Pfade im Dateisystem der Engine]}
+// Paste from the host: {"text":..,"html":..,"files":[paths in the engine file system]}
 EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
 {
     runOnEngineThread([json = takeString(data)] {
@@ -583,11 +586,11 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
 }
 
 
-// Ein Stueck einer Datei der Oberflaeche (Upload, Drag & Drop, Einfuegen) ins
-// Dateisystem der Engine schreiben, offset 0 legt sie neu an. Nur im
-// Engine-Thread: engine/js/engine-pre.js liest die Dateien des Host dort
-// selber in Stuecken. 1: geschrieben
-EMSCRIPTEN_KEEPALIVE int bl_write_file(const char* path, const uint8_t* data, int length, double offset)
+// Writes a chunk of a host file (upload, drag and drop, paste) into the engine
+// file system, offset 0 creates it. Only on the engine thread:
+// engine/js/engine-pre.js reads the host files there itself in chunks.
+// 1: written
+EMSCRIPTEN_KEEPALIVE int bl__write_file(const char* path, const uint8_t* data, int length, double offset)
 {
     ASSERT(isEngineThread());
     if (!offset) {
@@ -598,15 +601,15 @@ EMSCRIPTEN_KEEPALIVE int bl_write_file(const char* path, const uint8_t* data, in
     }
     FILE* file = fopen(path, offset ? "r+b" : "wb");
     if (!file) {
-        debugLog("bl_write_file: %s nicht schreibbar", path);
+        debugLog("bl__write_file: %s not writable", path);
         return 0;
     }
     bool ok = !fseeko(file, static_cast<off_t>(offset), SEEK_SET) && fwrite(data, 1, length, file) == static_cast<size_t>(length);
     return !fclose(file) && ok;
 }
 
-// Datei oder Ordner (mit Inhalt) wieder loeschen, z.B. die Uploads eines
-// geschlossenen Tabs. Im Engine-Thread nach allem, was vorher kam.
+// Deletes a file or folder (with contents), e.g. the uploads of a closed view.
+// On the engine thread after everything that came before.
 EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
 {
     runOnEngineThread([path = takeString(path)] {
@@ -617,9 +620,9 @@ EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
     });
 }
 
-// Datenbanken aus dem Speicher ins Dateisystem schreiben (MemoryVFS.cpp), im
-// Engine-Thread (Schreiben nach OPFS). Die Oberflaeche wartet hoechstens
-// waitMilliseconds darauf (beim Schliessen des Tabs).
+// Writes databases from memory into the file system (MemoryVFS.cpp), on the
+// engine thread (writing to OPFS). The host waits at most waitMilliseconds
+// for it (when the page is hidden).
 EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
 {
     if (waitMilliseconds > 0)
@@ -631,52 +634,54 @@ EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
     }
 }
 
-// Belegter Speicher (malloc) fuer Tests. mallinfo laeuft ueber den ganzen Heap
-// (auf CNN ca. 25 ms) und haelt dabei das Lock von malloc.
+// Allocated memory (malloc) for tests. mallinfo walks the whole heap (about
+// 25 ms on CNN) and holds the malloc lock meanwhile.
 EMSCRIPTEN_KEEPALIVE double bl_memory_used()
 {
     return static_cast<double>(mallinfo().uordblks);
 }
 
-// Speicher der Engine in der Konsole (fuer Tests und Fehlersuche).
-// full: vorher einen vollen GC machen.
+// Engine memory in the console (tests and debugging). Only with BL_TEST_HOOKS=1.
+// full: run a full GC first.
 EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
 {
+    if (!engineConfig().testHooks)
+        return;
     runOnEngineThread([full] {
         auto& vm = WebCore::commonVM();
         JSC::JSLockHolder lock(vm);
-        // 3: vorher wie bei Speicherdruck alles Freigebbare freigeben
+        // 3: first release everything releasable like under memory pressure
         if (full == 3)
             WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
         if (full)
             vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
         struct mallinfo info = mallinfo();
         auto& cache = WebCore::MemoryCache::singleton();
-        printf("[speicher] malloc belegt %zu MB, frei %zu MB, JS-Heap %zu MB (Kapazitaet %zu MB), Dokumente %u, Cache %u KB\n",
+        printf("[memory] malloc used %zu MB, free %zu MB, JS heap %zu MB (capacity %zu MB), documents %u, cache %u KB\n",
             static_cast<size_t>(info.uordblks) >> 20, static_cast<size_t>(info.fordblks) >> 20,
             vm.heap.size() >> 20, vm.heap.capacity() >> 20, WebCore::Document::allDocumentsMap().size(), cache.size() >> 10);
         auto statistics = cache.getStatistics();
-        printf("[speicher]   Cache Bilder %d (%d KB, dekodiert %d KB), Skripte %d KB, CSS %d KB, Schriften %d KB\n",
+        printf("[memory]   cache images %d (%d KB, decoded %d KB), scripts %d KB, CSS %d KB, fonts %d KB\n",
             statistics.images.count, statistics.images.size >> 10, statistics.images.decodedSize >> 10,
             statistics.scripts.size >> 10, statistics.cssStyleSheets.size >> 10, statistics.fonts.size >> 10);
         if (full > 1) {
-            // Lebende Dokumente: Referenzen, Frame, URL
+            // Live documents: references, frame, URL
             for (auto& document : WebCore::Document::allDocuments()) {
-                printf("[speicher]   doc refs=%u frame=%d %s\n", document->refCount(), document->frame() ? 1 : 0,
+                printf("[memory]   doc refs=%u frame=%d %s\n", document->refCount(), document->frame() ? 1 : 0,
                     document->url().string().left(100).utf8().data());
             }
         }
     });
 }
 
-// Fuer Tests, nur mit BL_TEST_HOOKS=1 (Oberflaeche: ?env=BL_TEST_HOOKS=1): ein
-// echter Absturz im Engine-Thread. kind 0 = abort(), 1 = WASM-Trap
+// For tests, only with BL_TEST_HOOKS=1: a real crash on the engine thread.
+// kind 0 = abort(), 1 = WASM trap
 EMSCRIPTEN_KEEPALIVE void bl_crash_for_testing(int kind)
 {
     runOnEngineThread([kind] {
-        if (!getenv("BL_TEST_HOOKS"))
+        if (!engineConfig().testHooks)
             return;
-        log("Absturz fuer Tests: %s", kind ? "Trap" : "abort");
+        log("Crash for tests: %s", kind ? "trap" : "abort");
         if (kind)
             __builtin_trap();
         abort();
@@ -684,8 +689,8 @@ EMSCRIPTEN_KEEPALIVE void bl_crash_for_testing(int kind)
 }
 
 #if ENABLE(WEBGL)
-// Fuer Tests: die WebGL-Kontexte des Host verlieren, auf denen die WebGL-Canvas
-// der Seiten zeichnen (ANGLEShimWasm.cpp)
+// For tests: lose the host WebGL contexts the WebGL canvases of the pages
+// draw on (ANGLEShimWasm.cpp)
 EMSCRIPTEN_KEEPALIVE void bl_webgl_lose_context_for_testing()
 {
     runOnEngineThread([] { WebCore::angleShimLoseHostContextsForTesting(); });

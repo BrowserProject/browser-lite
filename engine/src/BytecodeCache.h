@@ -1,17 +1,17 @@
-// Dauerhafter Bytecode-Cache fuer Skripte (siehe BytecodeCache.cpp).
+// Persistent bytecode cache for scripts (see BytecodeCache.cpp).
 #pragma once
 
 #include <wtf/URL.h>
 
 namespace BrowserLite::BytecodeCache {
 
-// Schaltet den Cache ein, wenn die Oberflaeche eine Build-ID gesetzt hat
+// Enables the cache when a build ID is known (BL_BYTECODE_CACHE, BL_BUILD_ID)
 void initialize();
 
-// Gespeicherten Bytecode fuer dieses Skript schon mal holen (beim Start des Ladens)
+// Fetch stored bytecode for this script ahead of time (when loading starts)
 void prefetch(const URL&);
 
-// Neuen Bytecode bald speichern (nach dem Laden einer Seite)
+// Store new bytecode soon (after a page loaded)
 void scheduleCommit();
 
 } // namespace BrowserLite::BytecodeCache

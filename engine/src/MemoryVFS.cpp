@@ -1,32 +1,32 @@
-// SQLite-Datenbanken unter /data im WASM-Speicher.
+// SQLite databases under /data in WASM memory.
 //
-// SQLite schreibt jede WAL-Seite einzeln, mit seek davor: beim Laden von CNN
-// waren das ca. 7000 Dateizugriffe nur fuer die Cookie-Datenbank. /data liegt im
-// OPFS, jeder Zugriff ist ein Umweg ueber den Worker von WasmFS.
+// SQLite writes every WAL page separately, with a seek before: loading CNN
+// caused about 7000 file accesses just for the cookie database. /data is in
+// the OPFS, every access is a detour through the WasmFS worker.
 //
-// Darum liegen Datenbank, -journal und -wal hier im Speicher (in Bloecken,
-// Content), ebenso der gemeinsame Speicher (shm) fuer den WAL-Modus. Auf die
-// Platte kommt nur die Datenbank, als Ganzes und mit allen bestaetigten Seiten
-// aus dem WAL wie nach einem Checkpoint (writeFamily), ueber eine Kopie und ein
-// rename (FileReplacement in Storage.h). Datenbank und WAL getrennt zu
-// ersetzen waere nicht atomar: bricht es dazwischen ab, spielt SQLite ein
-// altes WAL in eine neue Datenbank ein.
+// So database, -journal and -wal live here in memory (in blocks, Content), as
+// does the shared memory (shm) for WAL mode. Only the database goes to disk,
+// as a whole and with all committed pages from the WAL like after a checkpoint
+// (writeFamily), through a copy and a rename (FileReplacement in Storage.h).
+// Replacing database and WAL separately would not be atomic: if it breaks off
+// in between, SQLite replays an old WAL into a new database.
 //
-// Geschrieben wird, wenn gerade keine Schreib-Transaktion laeuft:
-// - kurz nach einer Aenderung (flushDelay, eine grosse Datenbank seltener),
-// - auf Anstoss der Oberflaeche (bl_storage_flush; beim Schliessen des Tabs
-//   wartet sie darauf),
-// - wenn die letzte Verbindung zu einer Datenbank schliesst. Danach wird alles
-//   wieder von der Platte gelesen, so stimmt es auch, wenn WebKit die Dateien
-//   selber loescht (z.B. indexedDB.deleteDatabase).
+// Writing happens when no write transaction is running:
+// - shortly after a change (flushDelay, a big database less often),
+// - when the host asks for it (bl_storage_flush; when the page is hidden it
+//   waits for it),
+// - when the last connection to a database closes. Afterwards everything is
+//   read from disk again, so it is right even when WebKit deletes the files
+//   itself (e.g. indexedDB.deleteDatabase).
 //
-// Regel gegen Deadlocks: Dateizugriffe unter dem Lock einer Datenbank nur mit
-// ioMutex.
+// Rule against deadlocks: file accesses under the lock of a database only
+// with ioMutex.
 
 #include "config.h"
 #include "MemoryVFS.h"
 
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Storage.h"
 
 #include <algorithm>
@@ -57,23 +57,19 @@ namespace {
 
 constexpr char rootPrefix[] = "/data/";
 
-// Groesste Datei im Speicher (BL_DATABASE_MAX_MB, Standard 512 MB). Groessere
-// oeffnet das VFS nicht, statt sie zu laden: der WASM-Speicher hat hoechstens
-// 4 GB fuer alles. IndexedDB hat eine kleinere Grenze pro Ursprung nur fuers
-// Schreiben (Storage.cpp), das hier gilt auch beim Oeffnen und fuer alle anderen.
+// Biggest file in memory (BL_DATABASE_MAX_MB, default 512 MB). The VFS does
+// not open bigger ones instead of loading them: WASM memory has at most 4 GB
+// for everything. IndexedDB has a smaller limit per origin only for writing
+// (Storage.cpp), this one applies when opening too and for all others.
 uint64_t maximumFileSize()
 {
-    static const uint64_t size = [] {
-        const char* value = getenv("BL_DATABASE_MAX_MB");
-        return (value && *value ? strtoull(value, nullptr, 10) : 512) << 20;
-    }();
-    return size;
+    return engineConfig().databaseMaxMB << 20;
 }
 
-// Inhalt einer Datei in Bloecken fester Groesse. Wachsen kopiert nichts um
-// (ein std::vector braucht dabei alten und neuen Platz, mit der Verdoppelung
-// bis zum Dreifachen der Datei), und fehlt Speicher, bekommt SQLite
-// SQLITE_FULL statt die Engine einen Absturz.
+// Content of a file in blocks of fixed size. Growing copies nothing (a
+// std::vector needs old and new space for that, with doubling up to three
+// times the file), and when memory is missing SQLite gets SQLITE_FULL instead
+// of the engine crashing.
 class Content {
 public:
     Content() = default;
@@ -93,7 +89,7 @@ public:
 
     uint64_t size() const { return m_size; }
 
-    // false: zu gross oder kein Speicher, dann bleibt alles wie es war
+    // false: too big or no memory, then everything stays as it was
     bool resize(uint64_t size)
     {
         if (size > maximumFileSize())
@@ -115,8 +111,8 @@ public:
             free(m_blocks.back());
             m_blocks.pop_back();
         }
-        // Hinter dem Ende stehen immer Nullen: waechst die Datei wieder, liest
-        // SQLite dort nichts Altes
+        // Behind the end there are always zeros: if the file grows again,
+        // SQLite reads nothing old there
         if (size < m_size && size % blockSize)
             memset(m_blocks.back() + size % blockSize, 0, blockSize - size % blockSize);
         m_size = size;
@@ -134,7 +130,7 @@ public:
         return true;
     }
 
-    // Liest hoechstens bis zum Ende, gibt die gelesene Laenge zurueck
+    // Reads at most up to the end, returns the length read
     size_t read(uint8_t* data, size_t length, uint64_t offset) const
     {
         if (offset >= m_size)
@@ -147,9 +143,8 @@ public:
         return length;
     }
 
-    // Die Stuecke von [offset, offset + length) der Reihe nach (innerhalb von
-    // size()). Sie beginnen und enden an Vielfachen von 8, wenn offset und
-    // length das tun
+    // The pieces of [offset, offset + length) in order (within size()). They
+    // start and end at multiples of 8 if offset and length do
     template<typename Function>
     void forEach(uint64_t offset, uint64_t length, Function&& function) const
     {
@@ -171,24 +166,24 @@ private:
 struct Node {
     std::string path;
     Content content;
-    bool loaded { false }; // Inhalt (bzw. "gibt es nicht") ist bekannt
+    bool loaded { false }; // content (or "does not exist") is known
     bool exists { false };
 };
 
 struct Family {
-    std::string name; // Pfad der Datenbank
+    std::string name; // path of the database
     std::mutex mutex;
-    std::vector<std::unique_ptr<Node>> nodes; // Datenbank, -journal, -wal
+    std::vector<std::unique_ptr<Node>> nodes; // database, -journal, -wal
     int openCount { 0 };
-    bool dirty { false }; // seit dem letzten Schreiben geaendert
-    // Eine grosse Datenbank nicht dauernd ganz neu schreiben (flushFamily)
+    bool dirty { false }; // changed since the last write
+    // Do not rewrite a big database completely all the time (flushFamily)
     MonotonicTime nextWrite;
-    // Locks auf der Datenbank (Rollback-Journal)
+    // Locks on the database (rollback journal)
     int sharedCount { 0 };
     bool reserved { false };
     bool pending { false };
     bool exclusive { false };
-    // Gemeinsamer Speicher fuer den WAL-Index
+    // Shared memory for the WAL index
     std::vector<uint8_t*> shmRegions;
     int shmRefs { 0 };
     uint16_t shmShared[SQLITE_SHM_NLOCK] { };
@@ -238,7 +233,7 @@ sqlite3_vfs* baseVFS;
 sqlite3_vfs memoryVFS;
 std::mutex registryMutex;
 std::unordered_map<std::string, std::shared_ptr<Family>>* families;
-// Nur einer schreibt gleichzeitig ins Dateisystem
+// Only one writes to the file system at a time
 std::mutex ioMutex;
 
 bool inMemoryDomain(const char* path)
@@ -252,7 +247,7 @@ bool endsWith(const std::string& text, const char* suffix)
     return text.size() > length && !text.compare(text.size() - length, length, suffix);
 }
 
-// "x-journal" und "x-wal" gehoeren zur Datenbank "x"
+// "x-journal" and "x-wal" belong to the database "x"
 std::string familyName(const std::string& path)
 {
     if (endsWith(path, "-journal"))
@@ -269,9 +264,9 @@ std::shared_ptr<Family> findFamily(const std::string& name)
     return it == families->end() ? nullptr : it->second;
 }
 
-// ---------------------------------------------------------------- Schreiben
+// ---------------------------------------------------------------- Writing
 
-// Format des WAL: https://www.sqlite.org/fileformat2.html#walformat
+// WAL format: https://www.sqlite.org/fileformat2.html#walformat
 constexpr uint64_t walHeaderSize = 32;
 constexpr uint64_t walFrameHeaderSize = 24;
 
@@ -280,7 +275,7 @@ uint32_t get32(const uint8_t* data)
     return static_cast<uint32_t>(data[0]) << 24 | data[1] << 16 | data[2] << 8 | data[3];
 }
 
-// walChecksumBytes in wal.c, length ist ein Vielfaches von 8
+// walChecksumBytes in wal.c, length is a multiple of 8
 void walChecksum(bool bigEndian, const uint8_t* data, size_t length, uint32_t sum[2])
 {
     for (size_t i = 0; i < length; i += 8) {
@@ -299,13 +294,13 @@ void walChecksum(bool bigEndian, const uint8_t* data, size_t length, uint32_t su
 
 struct WalFrames {
     uint32_t pageSize { 0 };
-    uint32_t count { 0 }; // Frames bis zum letzten Commit
-    uint32_t databasePages { 0 }; // Seiten der Datenbank nach diesem Commit
+    uint32_t count { 0 }; // frames up to the last commit
+    uint32_t databasePages { 0 }; // pages of the database after this commit
 };
 
-// Wie die Wiederherstellung in SQLite (walIndexRecover in wal.c): gueltig sind
-// Frames mit dem Salz aus dem Kopf und verketteter Pruefsumme, bestaetigt ist
-// alles bis zum letzten Frame mit Commit
+// Like the recovery in SQLite (walIndexRecover in wal.c): frames with the salt
+// from the header and a chained checksum are valid, everything up to the last
+// frame with a commit is committed
 WalFrames committedFrames(const Content& wal)
 {
     uint8_t header[walHeaderSize];
@@ -343,9 +338,9 @@ WalFrames committedFrames(const Content& wal)
     return result;
 }
 
-// Die Datenbank, wie SQLite sie nach einem vollen Checkpoint haette: erst der
-// Inhalt der Datei, darueber die bestaetigten Seiten aus dem WAL der Reihe nach
-// (eine spaetere Fassung einer Seite ueberschreibt die fruehere)
+// The database as SQLite would have it after a full checkpoint: first the
+// content of the file, on top the committed pages from the WAL in order (a
+// later version of a page overwrites the earlier one)
 void writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
 {
     auto frames = wal ? committedFrames(*wal) : WalFrames { };
@@ -371,8 +366,8 @@ void writeDatabase(FileReplacement& file, const Content& database, const Content
     file.truncate(size);
 }
 
-// Unter dem Lock der Familie und ioMutex. Die Kopie ersetzt die Datenbank in
-// einem Schritt
+// Under the lock of the family and ioMutex. The copy replaces the database in
+// one step
 bool writeFamily(Family& family)
 {
     Node* database = nullptr;
@@ -397,12 +392,12 @@ bool writeFamily(Family& family)
 
 enum class Flush : uint8_t { Scheduled, Now };
 
-// Eine Datenbank auf die Platte. false: noch nicht (Schreib-Transaktion,
-// ioMutex belegt, zu frueh oder Fehler)
+// One database to disk. false: not yet (write transaction, ioMutex taken, too
+// early or error)
 bool flushFamily(Family& family, Flush mode)
 {
     std::lock_guard ioLock(ioMutex);
-    // Unter dem Lock ohne Kopie: solange schreibt niemand in die Datenbank
+    // Under the lock without a copy: meanwhile nobody writes into the database
     std::lock_guard lock(family.mutex);
     if (!family.dirty)
         return true;
@@ -412,8 +407,8 @@ bool flushFamily(Family& family, Flush mode)
     if (mode == Flush::Scheduled && start < family.nextWrite)
         return false;
     bool written = writeFamily(family);
-    // Hoechstens ein Fuenftel der Zeit mit Schreiben verbringen, auch wenn es
-    // immer wieder fehlschlaegt (z.B. OPFS voll)
+    // Spend at most a fifth of the time writing, even if it keeps failing
+    // (e.g. OPFS full)
     auto end = MonotonicTime::now();
     family.nextWrite = end + (end - start) * 4;
     if (written)
@@ -431,7 +426,7 @@ std::vector<std::shared_ptr<Family>> listFamilies()
     return all;
 }
 
-// false: nicht alles geschrieben
+// false: not everything written
 bool flushAll(Flush mode)
 {
     if (!families)
@@ -442,7 +437,7 @@ bool flushAll(Flush mode)
     return complete;
 }
 
-// Kurz nach einer Aenderung schreiben, im Engine-Thread
+// Write shortly after a change, on the engine thread
 constexpr Seconds flushDelay = 1_s;
 std::atomic<bool> flushScheduled;
 
@@ -459,14 +454,14 @@ void scheduleFlush()
     });
 }
 
-// Unter dem Lock der Familie
+// Under the lock of the family
 void markDirty(Family& family)
 {
     if (!std::exchange(family.dirty, true))
         scheduleFlush();
 }
 
-// ---------------------------------------------------------------- Dateien
+// ---------------------------------------------------------------- Files
 
 std::shared_ptr<Family> familyFor(Family* family)
 {
@@ -478,8 +473,8 @@ std::shared_ptr<Family> familyFor(Family* family)
     return nullptr;
 }
 
-// Keine offene Verbindung mehr und alles geschrieben: vergessen, beim
-// naechsten Oeffnen wieder von der Platte lesen
+// No open connection anymore and everything written: forget it, read it from
+// disk again on the next open
 void dropIfUnused(Family* family)
 {
     std::lock_guard registryLock(registryMutex);
@@ -514,8 +509,8 @@ int memoryClose(sqlite3_file* file)
     }
     file->pMethods = nullptr;
     if (last) {
-        // Letzte Verbindung: jetzt schreiben (WebKit loescht die Dateien danach
-        // vielleicht selber, z.B. bei indexedDB.deleteDatabase)
+        // Last connection: write now (WebKit may delete the files itself
+        // afterwards, e.g. with indexedDB.deleteDatabase)
         flushFamily(*family, Flush::Now);
         dropIfUnused(family.get());
     }
@@ -570,7 +565,7 @@ int memoryFileSize(sqlite3_file* file, sqlite3_int64* size)
     return SQLITE_OK;
 }
 
-// Locks wie bei os_unix.c, aber nur innerhalb des Prozesses
+// Locks like os_unix.c, but only within the process
 int memoryLock(sqlite3_file* file, int level)
 {
     auto* memory = reinterpret_cast<MemoryFile*>(file);
@@ -593,7 +588,7 @@ int memoryLock(sqlite3_file* file, int level)
         if (level == SQLITE_LOCK_RESERVED)
             return SQLITE_OK;
     }
-    // EXCLUSIVE (ueber PENDING): warten, bis alle anderen Leser weg sind
+    // EXCLUSIVE (through PENDING): wait until all other readers are gone
     family.pending = true;
     memory->lockLevel = SQLITE_LOCK_PENDING;
     if (family.sharedCount > 1)
@@ -778,7 +773,7 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         }
         family = slot;
         std::lock_guard lock(family->mutex);
-        family->openCount++; // haelt die Familie in der Liste
+        family->openCount++; // keeps the family in the list
         family->findOrCreate(path);
     }
 
@@ -796,17 +791,17 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         loaded = family->find(path)->loaded;
     }
     if (!loaded && path != family->name) {
-        // -journal und -wal liegen nur im Speicher (writeFamily)
+        // -journal and -wal only live in memory (writeFamily)
         std::lock_guard lock(family->mutex);
         auto* node = family->find(path);
         node->loaded = true;
     } else if (!loaded) {
-        // Ohne Lock von der Platte lesen. Bei einem Lesefehler (auch zu wenig
-        // Speicher) nicht oeffnen: sonst wuerde eine leere Datenbank die echte
-        // ueberschreiben
+        // Read from disk without the lock. On a read error (also too little
+        // memory) do not open: otherwise an empty database would overwrite the
+        // real one
         struct stat info;
         if (!stat(path.c_str(), &info) && static_cast<uint64_t>(info.st_size) > maximumFileSize()) {
-            log("Speicher: %s hat %llu MB, zu gross fuer den Speicher, nicht geoeffnet", path.c_str(), static_cast<unsigned long long>(info.st_size >> 20));
+            log("Storage: %s has %llu MB, too big for memory, not opened", path.c_str(), static_cast<unsigned long long>(info.st_size >> 20));
             release();
             return SQLITE_CANTOPEN;
         }
@@ -837,7 +832,7 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
             } else {
                 node->exists = true;
                 node->content.resize(0);
-                // Ein leeres -journal oder -wal aendert nichts auf der Platte
+                // An empty -journal or -wal changes nothing on disk
                 if (path == family->name)
                     markDirty(*family);
             }
@@ -894,7 +889,7 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
             return SQLITE_OK;
         }
     }
-    // -journal und -wal liegen nur im Speicher (writeFamily)
+    // -journal and -wal only live in memory (writeFamily)
     if (path != databaseName) {
         *result = 0;
         return SQLITE_OK;
@@ -932,13 +927,13 @@ int memoryCurrentTimeInt64(sqlite3_vfs*, sqlite3_int64* time)
     return baseVFS->xCurrentTimeInt64(baseVFS, time);
 }
 
-// Kopf einer Datenbank: https://www.sqlite.org/fileformat2.html#database_header
+// Header of a database: https://www.sqlite.org/fileformat2.html#database_header
 constexpr size_t databaseHeaderSize = 100;
 
-// Belegte Seiten laut Kopf (Seite 1). Freie Seiten zaehlen nicht: SQLite gibt
-// sie nie an die Datei zurueck (IndexedDB macht kein VACUUM), Platz von
-// geloeschten Daten waere sonst nie wieder frei. pages 0: Zahl aus dem Kopf.
-// Kein Kopf von SQLite: fileSize
+// Used pages according to the header (page 1). Free pages do not count: SQLite
+// never gives them back to the file (IndexedDB does no VACUUM), space of
+// deleted data would never be free again otherwise. pages 0: number from the
+// header. No SQLite header: fileSize
 uint64_t usedDatabaseSize(const uint8_t* header, uint64_t fileSize, uint32_t pages)
 {
     if (memcmp(header, "SQLite format 3", 16))
@@ -955,8 +950,8 @@ uint64_t usedDatabaseSize(const uint8_t* header, uint64_t fileSize, uint32_t pag
     return static_cast<uint64_t>(pages - std::min(get32(header + 36), pages)) * pageSize;
 }
 
-// Eine offene Datenbank, wie sie nach einem Checkpoint waere: Seite 1 aus dem
-// letzten bestaetigten Frame des WAL, sonst aus der Datei
+// An open database as it would be after a checkpoint: page 1 from the last
+// committed frame of the WAL, otherwise from the file
 uint64_t usedDatabaseSize(const Content& database, const Content* wal)
 {
     uint8_t header[databaseHeaderSize] = { };
@@ -975,7 +970,7 @@ uint64_t usedDatabaseSize(const Content& database, const Content* wal)
     return usedDatabaseSize(header, size, frames.databasePages);
 }
 
-// Dateien direkt in directory auf der Platte, ohne die in skip
+// Files directly in directory on disk, without those in skip
 uint64_t diskSize(const String& directory, const std::vector<std::string>& skip)
 {
     uint64_t total = 0;
@@ -1078,8 +1073,8 @@ uint64_t memoryVFSDirectorySize(const String& directory)
         if (database)
             total += usedDatabaseSize(database->content, wal ? &wal->content : nullptr);
     }
-    // Der Rest liegt auf der Platte: Datenbanken, die gerade nicht offen sind,
-    // und andere Dateien (z.B. Blobs von IndexedDB)
+    // The rest is on disk: databases that are not open right now, and other
+    // files (e.g. IndexedDB blobs)
     return total + diskSize(directory, inMemory);
 }
 

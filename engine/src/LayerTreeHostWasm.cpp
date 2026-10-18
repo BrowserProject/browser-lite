@@ -29,11 +29,11 @@ namespace BrowserLite {
 
 using namespace WebCore;
 
-// ------------------------------------------------------------ Compositor-Thread
+// ------------------------------------------------------------ Compositor thread
 
-// Naechstes Bild im Worker des Compositors (rAF, sonst 16 ms)
+// Next frame in the compositor's worker (rAF, otherwise 16 ms)
 EM_JS(void, bl_compositor_request_frame, (void* scene), {
-    var run = function () { Module._bl_compositor_frame(scene); };
+    var run = function () { Module._bl__compositor_frame(scene); };
     if (typeof requestAnimationFrame === "function")
         requestAnimationFrame(run);
     else
@@ -43,9 +43,9 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
 static void compositeScene(CompositorScene& scene)
 {
     ASSERT(Compositor::isCompositorThread());
-    // Takt fuer den Scroll-Thread: er wendet neue Scroll-Positionen an, wenn
-    // der Engine-Thread nicht rechtzeitig ein Rendering-Update macht, und fuehrt
-    // Scroll-Animationen weiter. Laeuft eine, braucht es auch das naechste Bild.
+    // Tick for the scrolling thread: it applies new scroll positions when the
+    // engine thread does not do a rendering update in time, and continues
+    // scroll animations. If one runs, the next frame is needed too.
     bool keepTicking = Scrolling::displayDidRefresh(scene.viewId);
     auto tickAgain = makeScopeExit([&] {
         if (keepTicking)
@@ -67,29 +67,29 @@ static void compositeScene(CompositorScene& scene)
             keepTicking = false;
             return;
         }
-        // Das Rendering-Update erst zeigen, wenn alle Kacheln gemalt sind
-        // (die letzte fertige Kachel plant das naechste Bild ein). Aber nur
-        // kurz: Animationen und Scrollen sollen nicht stehen bleiben, wenn das
-        // Malen dauert (langsame Maschine), dann lieber mit den alten Kacheln.
+        // Only show the rendering update when all tiles are painted (the last
+        // finished tile schedules the next frame). But only briefly: animations
+        // and scrolling should not stop when painting takes time (slow
+        // machine), then rather with the old tiles.
         if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
             auto now = MonotonicTime::now();
             if (!scene.tilesWaitStart)
                 scene.tilesWaitStart = now;
             if (now - scene.tilesWaitStart < 100_ms) {
                 scene.waitingForTiles = true;
-                // Im naechsten Bild nochmal schauen
+                // Look again in the next frame
                 scene.scheduleFrameLocked();
                 return;
             }
-            debugLog("Compositor: Kacheln brauchen ueber 100 ms, Bild ohne sie");
+            debugLog("Compositor: tiles take over 100 ms, frame without them");
         }
         scene.waitingForTiles = false;
         scene.tilesWaitStart = { };
         reasons = std::exchange(scene.reasons, { });
         notify = std::exchange(scene.notifyEngine, false);
-        // Das erste Bild mit dem Rendering-Update melden, das es bringt: dessen
-        // Kacheln sind im Bild, auch nach den 100 ms (processPendingBackingStoreTileUpdates
-        // wartet, bis sie gemalt sind)
+        // Report the first paint with the rendering update that brings it: its
+        // tiles are in the frame, even after the 100 ms
+        // (processPendingBackingStoreTileUpdates waits until they are painted)
         if (reasons.contains(CompositionReason::RenderingUpdate))
             firstPaint = std::exchange(scene.firstPaint, false);
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
@@ -98,7 +98,7 @@ static void compositeScene(CompositorScene& scene)
         if (reasons.contains(CompositionReason::RenderingUpdate)) {
             scene.viewport = { scene.pendingViewport.scale, scene.viewport.scrollPosition, scene.pendingViewport.documentRect, scene.pendingViewport.visibleSize };
             scene.scrollLayer = scene.pendingScrollLayer;
-            // Der Engine-Thread zeigt das Ziel der Geste jetzt selber
+            // The engine thread shows the target of the gesture itself now
             if (scene.pinchZoom && !scene.pinchActive && scene.pendingPinchCommit >= scene.pinchCommit)
                 scene.pinchZoom = std::nullopt;
         }
@@ -107,7 +107,7 @@ static void compositeScene(CompositorScene& scene)
         pixelSize = scene.pixelSize;
         deviceScaleFactor = scene.deviceScaleFactor;
     }
-    // Waehrend einer Geste die Scroll-Position jedes Bild aus den Ebenen lesen
+    // During a gesture read the scroll position from the layers every frame
     if (pinching && !reasons.isEmpty())
         reasons.add(CompositionReason::AsyncScrolling);
 
@@ -137,15 +137,15 @@ static void compositeScene(CompositorScene& scene)
         scene.rootLayer->flushPositionChanges(reasons, true);
         for (auto& layer : scene.committedLayers)
             layer->flushPositionChanges(reasons, true);
-        // Positionen sind jetzt wie gezeigt (sonst gleich wie im letzten Bild)
+        // Positions are now as shown (otherwise the same as in the last frame)
         if (scrollLayer && reasons.containsAny({ CompositionReason::RenderingUpdate, CompositionReason::AsyncScrolling })) {
             Locker locker { scrollLayer->lock() };
             auto position = scrollLayer->position();
             shownScrollPosition = FloatPoint { -position.x(), -position.y() };
         }
     }
-    // Pinch-Geste: die gezeigten Kacheln skalieren und verschieben, bis der
-    // Engine-Thread das Ziel uebernommen hat
+    // Pinch gesture: scale and move the shown tiles until the engine thread
+    // took over the target
     std::optional<PinchViewport> shown;
     std::optional<PinchViewport> target;
     {
@@ -168,7 +168,7 @@ static void compositeScene(CompositorScene& scene)
     for (auto& layer : layersWithTileUpdates)
         layer->processPendingBackingStoreTileUpdates();
 
-    // Ohne Canvas (noch nicht da) nur den Stand uebernehmen
+    // Without a canvas (not there yet) only take the state
     auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
     if (!surface) {
         notifyEngine();
@@ -185,7 +185,7 @@ static void compositeScene(CompositorScene& scene)
     }
     rootLayer.setTransform(matrix);
 
-    // Ohne Schadens-Verfolgung: jedes Mal das ganze Bild (auf der GPU billig)
+    // Without damage tracking: the whole frame every time (cheap on the GPU)
     auto* canvas = surface->getCanvas();
     std::optional<Damage> frameDamage;
     canvas->save();
@@ -201,9 +201,9 @@ static void compositeScene(CompositorScene& scene)
     notifyEngine();
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void bl_compositor_frame(CompositorScene* scenePointer)
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__compositor_frame(CompositorScene* scenePointer)
 {
-    // Die Referenz aus scheduleFrameLocked()
+    // The reference from scheduleFrameLocked()
     Ref scene = adoptRef(*scenePointer);
     compositeScene(scene);
 }
@@ -215,7 +215,7 @@ void CompositorScene::pinch(PinchPhase phase, float factor, FloatPoint focus)
     case PinchPhase::Begin:
         if (!scrollLayer)
             return;
-        // Zeigt der Engine-Thread die letzte Geste noch nicht, ab deren Ziel weiter
+        // If the engine thread does not show the last gesture yet, continue from its target
         pinchZoom.emplace(pinchZoom ? pinchZoom->target() : viewport, focus);
         pinchActive = true;
         return;
@@ -251,9 +251,9 @@ bool CompositorScene::scrollPinch(FloatSize delta)
     return true;
 }
 
-// Nach der Geste uebernimmt der Engine-Thread das Ziel (Kacheln werden scharf
-// neu gemalt, die Seite bekommt die visualViewport-Events). Kommt vorher noch
-// ein neues Ziel, nimmt er nur das letzte.
+// After the gesture the engine thread takes over the target (tiles are
+// repainted sharp, the page gets the visualViewport events). If a new target
+// arrives before that, it only takes the last one.
 void CompositorScene::commitPinchLocked()
 {
     bool scheduled = pinchRequest.has_value();
@@ -326,11 +326,11 @@ void CompositorScene::scheduleFrameLocked()
     });
 }
 
-// ------------------------------------------------------------ Engine-Thread
+// ------------------------------------------------------------ Engine thread
 
-// WebCore fragt den Compositor-Kontext ueber PlatformDisplay::sharedDisplay()
-// ab. Einen echten EGL-Kontext gibt es nicht (skiaGLContext() ist auf PORT=Wasm
-// immer nullptr), das Display braucht nur Emscriptens EGL-Ersatz.
+// WebCore asks for the compositor context through PlatformDisplay::sharedDisplay().
+// There is no real EGL context (skiaGLContext() is always nullptr on PORT=Wasm),
+// the display only needs Emscripten's EGL replacement.
 class PlatformDisplayWasm final : public PlatformDisplay {
 public:
     explicit PlatformDisplayWasm(Ref<GLDisplay>&& display)
@@ -376,15 +376,15 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
         Locker locker { s_scenesLock };
         scenes().set(view.id(), m_scene.ptr());
     }
-    // Kacheln malt die CPU (PlatformDisplay hat keinen GL-Kontext fuer
-    // Hintergrund-Threads), den Proxy braucht nur DDL
+    // The CPU paints tiles (PlatformDisplay has no GL context for background
+    // threads), only DDL needs the proxy
     m_paintingEngine = SkiaPaintingEngine::create(nullptr);
 }
 
 LayerTreeHostWasm::~LayerTreeHostWasm()
 {
     detachScene();
-    // Malende Threads duerfen uns danach nicht mehr erreichen
+    // Painting threads must not reach us anymore afterwards
     HashSet<Ref<CoordinatedPlatformLayer>> layers;
     {
         Locker locker { m_layersLock };
@@ -403,7 +403,7 @@ LayerTreeHostWasm::~LayerTreeHostWasm()
         m_scene->pendingScrollLayer = nullptr;
         m_scene->scrollLayer = nullptr;
     }
-    // Die Ziele (Texturen) gehoeren dem Compositor-Thread
+    // The targets (textures) belong to the compositor thread
     Compositor::dispatch([scene = m_scene.copyRef(), layers = WTF::move(layers)]() mutable {
         Gpu::Scope scope;
         for (auto& layer : layers)
@@ -500,7 +500,7 @@ void LayerTreeHostWasm::flush(bool firstPaint)
         m_compositionRequired = true;
     }
 
-    // Bilder, die nur noch hier gehalten werden, freigeben
+    // Release images that are only held here
     m_imageBackingStores.removeIf([](auto& entry) {
         return entry.value->hasOneRef();
     });
@@ -568,8 +568,8 @@ void LayerTreeHostWasm::notifyCompositionRequired()
 void LayerTreeHostWasm::requestComposition(CompositionReason reason)
 {
 #if ENABLE(SCROLLING_THREAD)
-    // Wie WebKit2: der Scroll-Thread hat Ebenen verschoben, den neuen Stand
-    // gleich hier uebernehmen (der Engine-Thread ist vielleicht blockiert)
+    // Like WebKit2: the scrolling thread moved layers, take the new state right
+    // here (the engine thread may be blocked)
     if (ScrollingThread::isCurrentThread()) {
         flushLayerStates();
         if (!m_compositionRequiredInScrollingThread.exchange(false))
@@ -586,7 +586,7 @@ RunLoop* LayerTreeHostWasm::compositingRunLoop() const
 
 void LayerTreeHostWasm::didPaintTile()
 {
-    // Kommt aus den Mal-Threads. Die letzte fertige Kachel weckt den Compositor.
+    // Comes from the painting threads. The last finished tile wakes the compositor.
     if (--m_scene->pendingTiles)
         return;
     Locker locker { m_scene->lock };

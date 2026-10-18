@@ -1,14 +1,14 @@
-# browser-lite Engine (Embedder) als Teil des WebKit-Builds mit PORT=Wasm.
+# browser-lite engine (embedder) as part of the WebKit build with PORT=Wasm.
 #
-# Wird aus Source/WebCore/PlatformWasm.cmake per cmake_language(DEFER ...)
-# eingebunden, wenn BROWSER_LITE_ENGINE_DIR gesetzt ist. So laeuft diese Datei
-# NACH dem ganzen WebCore/CMakeLists.txt und sieht die fertigen Include-Listen.
-# (Gleiches Muster wie WebCoreTestSupport unten in WebCore/CMakeLists.txt.)
+# Included from Source/WebCore/PlatformWasm.cmake via cmake_language(DEFER ...)
+# when BROWSER_LITE_ENGINE_DIR is set. So this file runs AFTER the whole
+# WebCore/CMakeLists.txt and sees the finished include lists.
+# (Same pattern as WebCoreTestSupport at the bottom of WebCore/CMakeLists.txt.)
 
 set(BL_ENGINE_SRC "${BROWSER_LITE_ENGINE_DIR}/src")
 set(BL_LEGACY_STORAGE "${CMAKE_SOURCE_DIR}/Source/WebKitLegacy/Storage")
 
-# localStorage + IndexedDB aus WebKitLegacy (ohne den Rest von WebKitLegacy)
+# localStorage + IndexedDB from WebKitLegacy (without the rest of WebKitLegacy)
 set(BL_LEGACY_STORAGE_SOURCES
     ${BL_LEGACY_STORAGE}/InProcessIDBServer.cpp
     ${BL_LEGACY_STORAGE}/StorageAreaImpl.cpp
@@ -28,6 +28,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Compositor.cpp
     ${BL_ENGINE_SRC}/DeviceClients.cpp
     ${BL_ENGINE_SRC}/EditorClient.cpp
+    ${BL_ENGINE_SRC}/EngineConfig.cpp
     ${BL_ENGINE_SRC}/EngineLoop.cpp
     ${BL_ENGINE_SRC}/Exports.cpp
     ${BL_ENGINE_SRC}/FileAccessCache.cpp
@@ -72,8 +73,8 @@ add_executable(BrowserLiteEngine
 )
 set_target_properties(BrowserLiteEngine PROPERTIES OUTPUT_NAME engine)
 
-# Die WebKitLegacy-Dateien haben kein #include "config.h" (dort macht das ein
-# Prefix-Header), darum hier per -include
+# The WebKitLegacy files have no #include "config.h" (a prefix header does that
+# there), so it comes through -include
 set_source_files_properties(${BL_LEGACY_STORAGE_SOURCES}
     PROPERTIES COMPILE_OPTIONS "-includeconfig.h"
 )
@@ -90,21 +91,21 @@ target_include_directories(BrowserLiteEngine SYSTEM PRIVATE
     ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
 )
 
-# WebCore ist statisch, seine privaten Abhaengigkeiten (JSC, WTF, PAL, curl,
-# ICU, ...) kommen als LINK_ONLY mit. Skia direkt fuer die Include-Pfade.
+# WebCore is static, its private dependencies (JSC, WTF, PAL, curl, ICU, ...)
+# come along as LINK_ONLY. Skia directly for the include paths.
 target_link_libraries(BrowserLiteEngine PRIVATE WebCore Skia::Skia)
 
-# Private Abhaengigkeiten der statischen Libs, die CMake nicht kennt
-# (stehen nur als Requires.private in den .pc-Dateien).
+# Private dependencies of the static libs CMake does not know (they are only
+# listed as Requires.private in the .pc files).
 find_library(BL_WOFF2COMMON_LIBRARY woff2common REQUIRED)
 find_library(BL_EXPAT_LIBRARY expat REQUIRED)
-# libwebp (Encoder fuer toDataURL/toBlob) braucht libsharpyuv
+# libwebp (encoder for toDataURL/toBlob) needs libsharpyuv
 find_library(BL_SHARPYUV_LIBRARY sharpyuv REQUIRED)
 target_link_libraries(BrowserLiteEngine PRIVATE ${BL_WOFF2COMMON_LIBRARY} ${BL_EXPAT_LIBRARY} ${BL_SHARPYUV_LIBRARY})
 
 target_link_options(BrowserLiteEngine PRIVATE
-    # main() laeuft in einem eigenen Worker (pthread). Der Haupt-Thread der
-    # Seite bleibt frei fuer die UI.
+    # main() runs in its own worker (pthread). The main thread of the page
+    # stays free for the UI.
     "SHELL:-pthread"
     "SHELL:-sPROXY_TO_PTHREAD"
     "SHELL:-sPTHREAD_POOL_SIZE=8"
@@ -113,7 +114,7 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sINITIAL_MEMORY=256MB"
     "SHELL:-sALLOW_MEMORY_GROWTH=1"
     "SHELL:-sMAXIMUM_MEMORY=4GB"
-    # Die Engine laeuft "ewig", main() kehrt mit lebender Runtime zurueck
+    # The engine runs "forever", main() returns with a live runtime
     "SHELL:-sEXIT_RUNTIME=0"
     "SHELL:-sENVIRONMENT=web,worker,node"
     "SHELL:-sMODULARIZE=1"
@@ -121,42 +122,42 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sEXPORTED_RUNTIME_METHODS=FS,ENV,HEAPU8,HEAPF32,addRunDependency,removeRunDependency,ccall,cwrap,stringToUTF8,stringToNewUTF8,lengthBytesUTF8,UTF8ToString"
     "SHELL:-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
     "SHELL:-lEGL"
-    # WebGL der Seiten (platform/wasm/angle): WebGL 1 und 2. Ohne FULL_ES3, die
-    # Emulation von Client-Arrays braucht WebGL nicht und kostet bei jedem Draw.
+    # WebGL of the pages (platform/wasm/angle): WebGL 1 and 2. Without FULL_ES3,
+    # WebGL does not need the emulation of client arrays and it costs on every draw.
     "SHELL:-sMAX_WEBGL_VERSION=2"
     "SHELL:-lGL"
     "SHELL:-Wl,--error-limit=0"
-    # WebKit baut mit -fno-exceptions, einige Deps (C++) koennen aber werfen.
-    # Werfen erlauben (ohne Fangen fuehrt ein throw zu abort).
+    # WebKit builds with -fno-exceptions, but some deps (C++) can throw. Allow
+    # throwing (without catching a throw leads to abort).
     "SHELL:-sDISABLE_EXCEPTION_THROWING=0"
-    # Funktionsnamen behalten (Profile, Stacktraces; tools/optimize-site.mjs
-    # entfernt sie fuer die Auslieferung)
+    # Keep function names (profiles, stack traces; tools/optimize-site.mjs
+    # removes them for delivery)
     "SHELL:--profiling-funcs"
-    # Sockets im WASM statt SOCKFS (engine/src/Sockets.cpp): die Funktionen
-    # beim Linken abfangen
+    # Sockets in WASM instead of SOCKFS (engine/src/Sockets.cpp): intercept the
+    # functions at link time
     "SHELL:-Wl,--wrap=socket,--wrap=connect,--wrap=bind,--wrap=send,--wrap=recv,--wrap=read,--wrap=write,--wrap=close"
     "SHELL:-Wl,--wrap=poll,--wrap=select,--wrap=fcntl,--wrap=getsockopt,--wrap=setsockopt,--wrap=getpeername,--wrap=getsockname"
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
-    # access() auf feste Dateien gemerkt (engine/src/FileAccessCache.cpp)
+    # access() on fixed files remembered (engine/src/FileAccessCache.cpp)
     "SHELL:-Wl,--wrap=access"
 )
 
-# JS-Teile der Engine (--pre-js) in dieser Reihenfolge. Aendert sich eins,
-# wird neu gelinkt.
+# JS parts of the engine (--pre-js) in this order. If one changes, the engine
+# is linked again.
 set(BL_PRE_JS
     engine-pre.js
-    # WebAssembly der Seiten (engine/src/wasm/WasmBridge.cpp)
+    # WebAssembly of the pages (engine/src/wasm/WasmBridge.cpp)
     wasm-rewrite.js
     wasm-host.js
-    # Verbindungen ueber den Transport der Oberflaeche (engine/src/Sockets.cpp)
+    # Connections through the host's transport (engine/src/Sockets.cpp)
     sockets.js
-    # HTTP-Cache in der Cache API des Host (engine/src/HttpCache.cpp)
+    # HTTP cache in the host's Cache API (engine/src/HttpCache.cpp)
     http-cache.js
-    # Bytecode-Cache der Skripte, auch in der Cache API (engine/src/BytecodeCache.cpp)
+    # Bytecode cache of the scripts, also in the Cache API (engine/src/BytecodeCache.cpp)
     bytecode-cache.js
-    # WebCodecs der Seiten ueber die WebCodecs des Host (engine/src/media/WebCodecsWasm.cpp)
+    # WebCodecs of the pages through the WebCodecs of the host (engine/src/media/WebCodecsWasm.cpp)
     webcodecs-host.js
-    # MediaRecorder: Encoder des Host + WebM (engine/src/media/MediaRecorderWasm.cpp)
+    # MediaRecorder: encoders of the host + WebM (engine/src/media/MediaRecorderWasm.cpp)
     mediarecorder-host.js
 )
 foreach (pre_js IN LISTS BL_PRE_JS)
@@ -164,37 +165,37 @@ foreach (pre_js IN LISTS BL_PRE_JS)
     set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/${pre_js})
 endforeach ()
 
-# Dateisystem: WasmFS (im WASM, Datei-Syscalls ohne Umweg ueber den UI-Thread)
+# File system: WasmFS (in WASM, file syscalls without a detour through the UI thread)
 target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sWASMFS")
-# Fehler beim Schreiben ins OPFS des Host genauer (engine/js/wasmfs-opfs.js)
+# OPFS root of /data (storage namespace) and more precise errors when writing to the host's OPFS (engine/js/wasmfs-opfs.js)
 target_link_options(BrowserLiteEngine PRIVATE "SHELL:--js-library ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js")
 set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js)
 
-# GC-Wurzeln in WASM-Locals: Die Engine laesst den GC nur auf leerem Stack
-# laufen (engine/src/EngineLoop.cpp, Patch 0012), darum braucht es den Pass
-# nicht. Er macht alles etwa 10x langsamer, bleibt aber zum Vergleichen da
-# (braucht --profiling-funcs, siehe oben).
-option(BROWSER_LITE_SPILL_POINTERS "Binaryen --spill-pointers fuer den konservativen GC" OFF)
+# GC roots in WASM locals: the engine only runs the GC on an empty stack
+# (engine/src/EngineLoop.cpp, patch 0012), so the pass is not needed. It makes
+# everything about 10x slower, but stays for comparison (needs
+# --profiling-funcs, see above).
+option(BROWSER_LITE_SPILL_POINTERS "Binaryen --spill-pointers for the conservative GC" OFF)
 if (BROWSER_LITE_SPILL_POINTERS)
     target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sBINARYEN_EXTRA_PASSES=--spill-pointers")
 endif ()
 
-# Laufzeit-Dateien (fontconfig-Konfig, Fonts, CA-Zertifikate) als Datenpaket.
+# Runtime files (fontconfig configuration, fonts, CA certificates) as a data package.
 if (BROWSER_LITE_RUNTIME_DIR)
     target_link_options(BrowserLiteEngine PRIVATE
         "SHELL:--preload-file ${BROWSER_LITE_RUNTIME_DIR}@/"
-        # HRTF-Daten fuer PannerNode (AudioBus::loadPlatformResource)
+        # HRTF data for PannerNode (AudioBus::loadPlatformResource)
         "SHELL:--preload-file ${WEBCORE_DIR}/platform/audio/resources/Composite.wav@/usr/share/webkit/audio/Composite.wav"
-        # WebAssembly-API fuer die Seiten, wird in JSC ausgewertet
+        # WebAssembly API for the pages, evaluated in JSC
         "SHELL:--preload-file ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js@/usr/share/browser-lite/wasm-guest.js"
     )
 endif ()
 
-# Datenpaket: bei Aenderung der WebAssembly-API neu linken
+# Data package: link again when the WebAssembly API changes
 set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js)
 
-# Build-ID (Anfang des SHA-256 von engine.wasm) als Custom Section im Modul:
-# gespeicherter Bytecode gilt nur fuer genau diesen Build (BytecodeCache.cpp)
+# Build ID (start of the SHA-256 of engine.wasm) as a custom section in the
+# module: stored bytecode is only valid for exactly this build (BytecodeCache.cpp)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_command(TARGET BrowserLiteEngine POST_BUILD
     COMMAND ${Python3_EXECUTABLE} ${BROWSER_LITE_ENGINE_DIR}/../tools/wasm-build-id.py $<TARGET_FILE_DIR:BrowserLiteEngine>/engine.wasm

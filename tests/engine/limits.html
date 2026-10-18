@@ -1,28 +1,28 @@
 <!doctype html><title>limits</title><body><script>
-// Grenzen der Engine: sehr tief verschachteltes DOM, sehr lange Strings und
-// Speicher bis zum Ende (WASM-Speicher hat hoechstens 4 GB). Danach muss die
-// Engine weiterlaufen. Jede Phase ist eine eigene Aufgabe, weil der GC in der
-// Engine nur zwischen zwei Aufgaben laeuft. Der Speicher kommt zuletzt.
-//   RENDER_WAIT_FOR="LIMITS fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html /tmp/l.ppm 200 200
-// Am Ende "LIMITS fertig=ok", sonst "LIMITS fertig=<phase>:<grund>".
+// Limits of the engine: very deeply nested DOM, very long strings and memory
+// until the end (WASM memory has at most 4 GB). Afterwards the engine has to
+// keep running. Every phase is its own task, because the GC in the engine only
+// runs between two tasks. Memory comes last.
+//   RENDER_WAIT_FOR="LIMITS done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/limits.html /tmp/l.ppm 200 200
+// At the end "LIMITS done=ok", otherwise "LIMITS done=<phase>:<reason>".
 const MB = 1024 * 1024;
 const nextTask = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 const phases = {
-  // Der Parser begrenzt die Tiefe (WebKit: 512), genaue Zahl nicht pruefen
+  // The parser limits the depth (WebKit: 512), the exact number is not checked
   dom() {
     const host = document.createElement('div');
-    host.innerHTML = '<div>'.repeat(100000) + 'tief' + '</div>'.repeat(100000);
+    host.innerHTML = '<div>'.repeat(100000) + 'deep' + '</div>'.repeat(100000);
     document.body.append(host);
     let depth = 0;
     for (let node = host; node.firstElementChild; node = node.firstElementChild)
       depth++;
     const text = host.textContent;
     host.remove();
-    console.log('LIMITS dom tiefe=' + depth);
-    return depth > 0 && depth < 100000 && text === 'tief';
+    console.log('LIMITS dom depth=' + depth);
+    return depth > 0 && depth < 100000 && text === 'deep';
   },
-  // 64 MB als flacher String, dann verdoppeln bis zur Laengengrenze von JSC
+  // 64 MB as a flat string, then double up to the length limit of JSC
   string() {
     const flat = 'x'.repeat(64 * MB);
     const ok = flat.length === 64 * MB && flat.charCodeAt(flat.length - 1) === 120;
@@ -31,12 +31,12 @@ const phases = {
       for (let i = 0; i < 40; i++)
         rope += rope;
     } catch (e) {
-      console.log('LIMITS string laenge=' + rope.length + ' ' + e.name);
+      console.log('LIMITS string length=' + rope.length + ' ' + e.name);
       return ok && e instanceof RangeError;
     }
     return false;
   },
-  // 64 MB Puffer bis zum RangeError, dann wieder freigeben
+  // 64 MB buffers until the RangeError, then release them again
   memory() {
     let buffers = [];
     try {
@@ -46,22 +46,22 @@ const phases = {
         buffers.push(buffer);
       }
     } catch (e) {
-      console.log('LIMITS speicher puffer=' + buffers.length + ' ' + e.name);
+      console.log('LIMITS memory buffers=' + buffers.length + ' ' + e.name);
       const ok = buffers.length > 0 && e instanceof RangeError;
       buffers = null;
       return ok;
     }
     return false;
   },
-  // Nach dem Speicherende: neue Allokation, DOM und Timer gehen wieder
+  // After the end of memory: new allocation, DOM and timers work again
   async after() {
     const buffer = new Uint8Array(16 * MB);
     buffer[buffer.length - 1] = 7;
     const node = document.body.appendChild(document.createElement('p'));
-    node.textContent = 'danach';
+    node.textContent = 'after';
     await new Promise((resolve) => setTimeout(resolve, 10));
-    console.log('LIMITS danach=' + buffer[buffer.length - 1] + ',' + node.textContent);
-    return buffer[buffer.length - 1] === 7 && document.body.lastChild.textContent === 'danach';
+    console.log('LIMITS after=' + buffer[buffer.length - 1] + ',' + node.textContent);
+    return buffer[buffer.length - 1] === 7 && document.body.lastChild.textContent === 'after';
   },
 };
 
@@ -70,15 +70,15 @@ const phases = {
     await nextTask();
     let result;
     try {
-      result = await phase() ? 'ok' : 'falsch';
+      result = await phase() ? 'ok' : 'false';
     } catch (e) {
       result = e.name + ' ' + e.message;
     }
     if (result !== 'ok') {
-      console.log('LIMITS fertig=' + name + ':' + result);
+      console.log('LIMITS done=' + name + ':' + result);
       return;
     }
   }
-  console.log('LIMITS fertig=ok');
+  console.log('LIMITS done=ok');
 })();
 </script>

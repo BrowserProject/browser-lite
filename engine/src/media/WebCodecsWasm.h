@@ -1,12 +1,12 @@
-// WebCodecs der Seiten (VideoDecoder, VideoEncoder, AudioDecoder,
-// AudioEncoder) ueber die WebCodecs des Host-Browsers im Engine-Worker
+// WebCodecs of the pages (VideoDecoder, VideoEncoder, AudioDecoder,
+// AudioEncoder) through the WebCodecs of the host browser in the engine worker
 // (engine/js/webcodecs-host.js).
 //
-// WebCore ruft die Codecs aus dem Thread der Seite oder eines Workers auf.
-// Wir geben alles an den Engine-Thread weiter (dort laeuft der Host-Codec),
-// die Ergebnisse gehen ueber die Callbacks von WebCore zurueck, die selber in
-// den richtigen Thread wechseln. Dekodierte Bilder werden zu VideoFrameWasm,
-// Ton zu PlatformRawAudioData (beides im Speicher der Engine).
+// WebCore calls the codecs from the thread of the page or of a worker. We hand
+// everything to the engine thread (the host codec runs there), the results go
+// back through WebCore's callbacks, which switch to the right thread
+// themselves. Decoded frames become VideoFrameWasm, sound
+// PlatformRawAudioData (both in the engine memory).
 #pragma once
 
 namespace WebCore {

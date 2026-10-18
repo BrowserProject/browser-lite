@@ -304,11 +304,11 @@ check('rote Box gemalt', isRed(pixel), JSON.stringify(pixel));
 await page.evaluate(() => window.__blEngine()._bl_gpu_lose_context_for_testing());
 await page.waitForTimeout(1500);
 const pixelAfterLoss = await redBox();
-check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss) && consoleLines.some((line) => line.includes('GPU: WebGL-Kontext verloren')), JSON.stringify(pixelAfterLoss));
+check('nach GPU-Verlust weiter gemalt', isRed(pixelAfterLoss) && consoleLines.some((line) => line.includes('GPU: WebGL context lost')), JSON.stringify(pixelAfterLoss));
 
 // Der Browser stellt den Kontext wieder her: die Engine malt wieder auf der GPU
 await page.evaluate(() => window.__blEngine()._bl_gpu_restore_context_for_testing());
-const gpuBack = await waitFor(() => consoleLines.some((line) => line.includes('GPU: WebGL-Kontext wieder da')), 10000);
+const gpuBack = await waitFor(() => consoleLines.some((line) => line.includes('GPU: WebGL context is back')), 10000);
 await page.evaluate(() => window.__blEval('document.getElementById("box").style.background = "rgb(0, 0, 230)"'));
 let pixelAfterRestore = null;
 const isBlue = (pixel) => pixel && pixel.b > 200 && pixel.r < 40 && pixel.g < 40;
@@ -356,7 +356,7 @@ async function errorPage(code, ms = 60000) {
     await page.evaluate(() => window.__blEval('"FEHLERSEITE|" + [document.querySelector("h1")?.textContent, document.querySelector("main p")?.textContent, document.querySelector(".code")?.textContent].join("|")')).catch(() => {});
     await page.waitForTimeout(200);
     const line = consoleLines.slice(from).find((l) => l.includes('FEHLERSEITE|'));
-    const [, title, text, shownCode] = line ? line.slice(line.indexOf('FEHLERSEITE|')).split(' (Malen')[0].split('|') : [];
+    const [, title, text, shownCode] = line ? line.slice(line.indexOf('FEHLERSEITE|')).split(' (painting')[0].split('|') : [];
     if (shownCode === code)
       shown = { title, text, code: shownCode };
   }
@@ -366,13 +366,13 @@ const address = () => page.inputValue('#address');
 
 await go(closedURL);
 const refused = await errorPage('ERR_CONNECTION_REFUSED');
-check('Fehlerseite: Verbindung abgelehnt', refused.title === 'Die Website ist nicht erreichbar' && refused.text === '127.0.0.1 hat die Verbindung abgelehnt.', JSON.stringify(refused));
+check('Fehlerseite: Verbindung abgelehnt', refused.title === "This site can't be reached" && refused.text === '127.0.0.1 refused to connect.', JSON.stringify(refused));
 check('Fehlerseite: Adressleiste zeigt die Adresse, die nicht ging', await address() === closedURL, await address());
 // "Neu laden" auf der Fehlerseite laedt die Adresse, die nicht ging
 {
   const revived = http.createServer((req, res) => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>WIEDER|da</title>'));
   await new Promise((resolve) => revived.listen(Number(new URL(closedURL).port), '127.0.0.1', resolve));
-  await page.evaluate(() => window.__blEval('document.getElementById("reload").click()'));
+  await page.evaluate(() => window.__blEval('document.querySelector("[data-bl-retry]").click()'));
   const reloaded = await waitTitle('WIEDER|', 30000);
   check('Fehlerseite: Neu laden laedt die Adresse', reloaded.startsWith('WIEDER|') && await address() === closedURL, reloaded);
   revived.close();
@@ -381,11 +381,11 @@ check('Fehlerseite: Adressleiste zeigt die Adresse, die nicht ging', await addre
 
 await go('http://nonexistent.invalid/');
 const dns = await errorPage('ERR_NAME_NOT_RESOLVED');
-check('Fehlerseite: Name nicht gefunden', dns.text === 'Die Server-IP-Adresse von nonexistent.invalid wurde nicht gefunden.', JSON.stringify(dns));
+check('Fehlerseite: Name nicht gefunden', dns.text === 'The server IP address of nonexistent.invalid could not be found.', JSON.stringify(dns));
 
 await go(secureURLs.selfSigned + '/');
 const certificate = await errorPage('NET::ERR_CERT_INVALID');
-check('Fehlerseite: Zertifikat ungueltig (mit Umlaut)', certificate.title === 'Ihre Verbindung ist nicht privat' && certificate.text?.includes('nicht gültig'), JSON.stringify(certificate));
+check('Fehlerseite: Zertifikat ungueltig', certificate.title === 'Your connection is not private' && certificate.text?.includes('is not valid'), JSON.stringify(certificate));
 // Adressleiste: kein Schloss, sondern "Nicht sicher" (wie Chrome), andere Fehlerseiten ohne Anzeige
 const security = () => page.evaluate(() => ({ text: document.getElementById('security').textContent, hidden: document.getElementById('security').hidden }));
 const certificateSecurity = await security();
@@ -424,7 +424,7 @@ check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
   const loadsBefore = pageLoads();
   await go(`${siteURL}/page`);
   const noRelay = await errorPage('ERR_PROXY_CONNECTION_FAILED', 30000);
-  check('Fehlerseite: keine Verbindung zum Relay', noRelay.title === 'Keine Verbindung zum Relay', JSON.stringify(noRelay));
+  check('Fehlerseite: keine Verbindung zum Relay', noRelay.title === 'No connection', JSON.stringify(noRelay));
   await stack.restartRelay();
   const reloaded = await waitTitle('E2E|', 60000);
   check('Fehlerseite laedt neu, sobald das Relay wieder da ist', reloaded.startsWith('E2E|') && pageLoads() > loadsBefore, reloaded);
@@ -440,15 +440,15 @@ check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
   await exited;
   await page.evaluate(() => window.__blEval('document.forms[0].submit()'));
   await errorPage('ERR_PROXY_CONNECTION_FAILED', 30000);
-  const button = () => page.evaluate(() => window.__blEval('console.log("KNOPF|" + document.getElementById("reload")?.textContent)'));
+  const button = () => page.evaluate(() => window.__blEval('console.log("KNOPF|" + document.querySelector("[data-bl-retry]")?.textContent)'));
   const from = consoleLines.length;
   await button();
   await page.waitForTimeout(300);
-  check('Fehlerseite nach POST: Knopf "Erneut senden"', consoleLines.slice(from).some((line) => line.includes('KNOPF|Erneut senden')), consoleLines.slice(from).join(' | '));
+  check('Fehlerseite nach POST: Knopf "Erneut senden"', consoleLines.slice(from).some((line) => line.includes('KNOPF|Resend')), consoleLines.slice(from).join(' | '));
   await stack.restartRelay();
   await page.waitForTimeout(5000);
   check('Fehlerseite nach POST: kein Neuladen von selber', !requests.includes('/gesendet'), requests.slice(-5).join(' '));
-  await page.evaluate(() => window.__blEval('document.getElementById("reload").click()'));
+  await page.evaluate(() => window.__blEval('document.querySelector("[data-bl-retry]").click()'));
   const sent = await waitTitle('GESENDET|', 30000);
   check('Fehlerseite nach POST: Erneut senden schickt POST mit Daten', sent.startsWith('GESENDET|POST|feld=wert'), sent);
 }
@@ -468,13 +468,13 @@ check('Relay wieder da: Ereignis online, navigator.onLine true', cameBack);
   });
   await page.goto(stack.app({ url: 'http://zeitlimit.test/', relay: `ws://127.0.0.1:${standIn.address().port}/` }));
   const timedOut = await errorPage('ERR_CONNECTION_TIMED_OUT');
-  check('Fehlerseite: keine Antwort', timedOut.text === 'zeitlimit.test hat zu lange nicht geantwortet.', JSON.stringify(timedOut));
+  check('Fehlerseite: keine Antwort', timedOut.text === 'zeitlimit.test took too long to respond.', JSON.stringify(timedOut));
   await go('http://gesperrt.test/');
   const denied = await errorPage('ERR_ACCESS_DENIED');
-  check('Fehlerseite: Relay sperrt das Ziel', denied.text === 'Das Relay verbindet nicht mit gesperrt.test, es erlaubt nur öffentliche Adressen und Web-Ports.', JSON.stringify(denied));
+  check('Fehlerseite: Relay sperrt das Ziel', denied.text === 'gesperrt.test could not be reached through the network relay. It only connects to public addresses and web ports.', JSON.stringify(denied));
   await go('http://unerreichbar.test/');
   const unreachable = await errorPage('ERR_ADDRESS_UNREACHABLE');
-  check('Fehlerseite: Adresse nicht erreichbar', unreachable.text === 'unerreichbar.test ist nicht erreichbar.', JSON.stringify(unreachable));
+  check('Fehlerseite: Adresse nicht erreichbar', unreachable.text === 'unerreichbar.test is unreachable.', JSON.stringify(unreachable));
   standIn.close();
 }
 

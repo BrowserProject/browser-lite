@@ -1,21 +1,21 @@
-// WebAssembly der Seiten, Host-Seite (laeuft im Engine-Worker, --pre-js).
+// WebAssembly of the pages, host side (runs in the engine worker, --pre-js).
 //
-// Die WebAssembly-API der Seite (engine/js/wasm-guest.js, laeuft in JSC)
-// schickt ueber die C++-Bruecke (engine/src/wasm/WasmBridge.cpp) Befehle
-// hierher. Module werden mit blWasmRewrite umgeschrieben und laufen in der
-// echten WASM-Engine des Browsers, ihr Speicher liegt im Speicher der Engine.
+// The page's WebAssembly API (engine/js/wasm-guest.js, runs in JSC) sends
+// commands here through the C++ bridge (engine/src/wasm/WasmBridge.cpp).
+// Modules are rewritten with blWasmRewrite and run in the real WASM engine of
+// the browser, their memory lives in the engine memory.
 //
-// Werte gehen in "Slots" zu 16 Bytes ueber den Speicher der Engine:
-//   u32 tag, u32 a, 8 Bytes Wert
-// tag: 0 undefined, 1 null, 2 Zahl (f64), 3 BigInt (i64), 4 bool,
-//      5 Wert aus JSC (id, Realm a), 6 Objekt hier (id), 7 wie 5, danach
-//      freigeben, 8 Funktion hier (id),
-//      9 Bytes (Zeiger, Laenge a), 10 Text (Zeiger, Laenge a, wird freigegeben)
-// Das erste Ergebnis ist immer der Status: 0 ok, 1 Ausnahme aus JSC,
-// 2 Fehler (Name, Text), 3 WebAssembly.Exception.
+// Values go through "slots" of 16 bytes in the engine memory:
+//   u32 tag, u32 a, 8 bytes value
+// tag: 0 undefined, 1 null, 2 number (f64), 3 BigInt (i64), 4 bool,
+//      5 value from JSC (id, realm a), 6 object here (id), 7 like 5, released
+//      afterwards, 8 function here (id),
+//      9 bytes (pointer, length a), 10 text (pointer, length a, released)
+// The first result is always the status: 0 ok, 1 exception from JSC,
+// 2 error (name, text), 3 WebAssembly.Exception.
 //
-// Alles hier gehoert einer Realm (globales Objekt in JSC). Baut der GC dort das
-// globale Objekt ab, ruft C++ releaseRealm.
+// Everything here belongs to a realm (global object in JSC). When the GC tears
+// down the global object there, C++ calls releaseRealm.
 
 var blWasmHost = (function () {
   'use strict';
@@ -23,8 +23,8 @@ var blWasmHost = (function () {
   const PAGE = 65536;
   const CAP = 1024;
 
-  // Pro Realm: Objekte hier (Funktionen, Tabellen, Globals, Module, ...) mit
-  // ihrer id und die Platzhalter fuer Werte aus JSC
+  // Per realm: objects here (functions, tables, globals, modules, ...) with
+  // their id and the placeholders for values from JSC
   const realms = new Map();
   function realmState(realm) {
     let state = realms.get(realm);
@@ -61,14 +61,14 @@ var blWasmHost = (function () {
     }
   }
 
-  // Werte aus JSC: ein Platzhalter pro id, solange er lebt
+  // Values from JSC: one placeholder per id while it lives
   class GuestRef {
     constructor(realm, id) {
       this.realm = realm;
       this.id = id;
     }
   }
-  // Ausnahme aus JSC, die durch WebAssembly-Code laeuft
+  // Exception from JSC that passes through WebAssembly code
   class GuestThrow {
     constructor(token) { this.token = token; }
   }
@@ -78,7 +78,7 @@ var blWasmHost = (function () {
     if (!state || (live && live.deref()))
       return;
     state.tokens.delete(id);
-    Module._bl_wasm_release_guest(realm, id);
+    Module._bl__wasm_release_guest(realm, id);
   });
   function guestToken(state, id) {
     const ref = state.tokens.get(id);
@@ -111,7 +111,7 @@ var blWasmHost = (function () {
       case 6: case 8: values.push(state.refs.get(lo)); break;
       case 9: values.push(HEAPU8.slice(lo, lo + a)); break;
       case 10: values.push(UTF8ToString(lo, a)); break;
-      default: throw new Error('unbekannter Slot ' + tag);
+      default: throw new Error('unknown slot ' + tag);
       }
     }
     return values;
@@ -119,7 +119,7 @@ var blWasmHost = (function () {
 
   function write(ptr, values, state) {
     if (values.length > CAP)
-      throw new RangeError('zu viele Werte');
+      throw new RangeError('too many values');
     for (let i = 0; i < values.length; i++) {
       const p = ptr + i * SLOT;
       const value = values[i];
@@ -166,7 +166,7 @@ var blWasmHost = (function () {
     return values.length;
   }
 
-  // Nur fuer write(): Text bzw. Wert aus JSC, der danach freigegeben wird
+  // Only for write(): text or value from JSC that is released afterwards
   class Text {
     constructor(text) { this.text = String(text); }
   }
@@ -184,18 +184,18 @@ var blWasmHost = (function () {
     return [2, new Text(name), new Text(message)];
   }
 
-  // ------------------------------------------------------------ Aufrufe in JSC
+  // ------------------------------------------------------------ Calls into JSC
 
   let scratch = 0;
   function callGuest(token, args) {
     const state = realms.get(token.realm);
     if (!state)
-      throw new Error('Seite ist weg');
+      throw new Error('The page is gone');
     if (!scratch)
       scratch = Module._malloc(2 * CAP * SLOT);
     const count = write(scratch, args, state);
     const out = scratch + CAP * SLOT;
-    const n = Module._bl_wasm_call_guest(token.realm, token.id, scratch, count, out, CAP);
+    const n = Module._bl__wasm_call_guest(token.realm, token.id, scratch, count, out, CAP);
     const result = read(out, n, state);
     const status = result[0];
     if (status === 1)
@@ -203,14 +203,14 @@ var blWasmHost = (function () {
     if (status === 3)
       throw result[1];
     if (status !== 0)
-      throw new Error(result[2] || 'Fehler in der Engine');
+      throw new Error(result[2] || 'Error in the engine');
     const values = result.slice(1);
     return values.length === 0 ? undefined : values.length === 1 ? values[0] : values;
   }
 
-  // ------------------------------------------------------------ Speicher
+  // ------------------------------------------------------------ Memory
 
-  // id -> { realm, base, bytes, pages (Globals), grow }, verwaltet von C++
+  // id -> { realm, base, bytes, pages (globals), grow }, managed by C++
   const memories = new Map();
   function memoryCreate(id, realm, base, pages) {
     memories.set(id, {
@@ -218,7 +218,7 @@ var blWasmHost = (function () {
       base: new WebAssembly.Global({ value: 'i32', mutable: true }, base | 0),
       bytes: new WebAssembly.Global({ value: 'i64', mutable: true }, BigInt(pages) * BigInt(PAGE)),
       pages: new WebAssembly.Global({ value: 'i32', mutable: true }, pages),
-      grow: (delta) => Module._bl_wasm_memory_grow(id, delta),
+      grow: (delta) => Module._bl__wasm_memory_grow(id, delta),
     });
     return [0];
   }
@@ -230,21 +230,21 @@ var blWasmHost = (function () {
     memory.bytes.value = BigInt(pages) * BigInt(PAGE);
     memory.pages.value = pages;
     if (pages < 0) {
-      // Freigegeben: jeder Zugriff faengt jetzt
+      // Released: every access traps now
       memory.bytes.value = 0n;
       memories.delete(id);
     }
     return [0];
   }
 
-  // ------------------------------------------------------------ Module
+  // ------------------------------------------------------------ Modules
 
-  // Die Instanz haelt ihren Speicher, auch ueber ihre Funktionen und Tabellen,
-  // so lange wie die Host-Engine sie haelt
-  const memoryUsers = new FinalizationRegistry((id) => Module._bl_wasm_memory_release(id));
+  // The instance holds its memory, also through its functions and tables, as
+  // long as the host engine holds it
+  const memoryUsers = new FinalizationRegistry((id) => Module._bl__wasm_memory_release(id));
 
-  // Was blWasmRewrite nicht kann, meldet validate() auch als ungueltig, damit
-  // Seiten eine andere Variante laden (z.B. ohne Threads)
+  // What blWasmRewrite cannot handle validate() also reports as invalid, so
+  // pages load another variant (e.g. without threads)
   function supported(bytes) {
     try {
       blWasmRewrite.analyze(bytes);
@@ -259,7 +259,7 @@ var blWasmHost = (function () {
     try {
       result = blWasmRewrite(bytes);
     } catch (e) {
-      // Ungueltig? Dann die Meldung des Browsers
+      // Invalid? Then the browser's message
       if (!WebAssembly.validate(bytes)) {
         try {
           new WebAssembly.Module(bytes);
@@ -273,7 +273,7 @@ var blWasmHost = (function () {
     return [0, { module, info: result.info }, new Text(JSON.stringify(result.info))];
   }
 
-  // memoryIds: ein Speicher der Seite pro Speicher des Moduls
+  // memoryIds: one page memory per memory of the module
   function instantiate(state, compiled, memoryIds, imports) {
     const { module, info } = compiled;
     const object = {};
@@ -290,10 +290,10 @@ var blWasmHost = (function () {
     if (info.rewritten) {
       const bl = { memory: wasmMemory };
       memoryIds.forEach((id, k) => {
-        // Die ids kommen von der Seite: nur Speicher der eigenen Realm
+        // The ids come from the page: only memories of the own realm
         const memory = memories.get(id);
         if (!memory || memory.realm !== state.realm)
-          throw new Error('Speicher fehlt');
+          throw new Error('Memory is missing');
         Object.assign(bl, { ['grow' + k]: memory.grow, ['base' + k]: memory.base, ['bytes' + k]: memory.bytes, ['pages' + k]: memory.pages });
       });
       object.__bl = bl;
@@ -302,7 +302,7 @@ var blWasmHost = (function () {
     if (info.rewritten) {
       instance.exports.__bl_init();
       for (const id of memoryIds) {
-        Module._bl_wasm_memory_retain(id);
+        Module._bl__wasm_memory_retain(id);
         memoryUsers.register(instance, id, state);
       }
     }
@@ -322,7 +322,7 @@ var blWasmHost = (function () {
     return [results];
   }
 
-  // ------------------------------------------------------------ Befehle
+  // ------------------------------------------------------------ Commands
 
   const ops = {
     1: ([bytes]) => compile(bytes),
@@ -332,7 +332,7 @@ var blWasmHost = (function () {
     },
     3: ([fn, ...args]) => [0, ...valueOf(fn(...args))],
     6: ([element, address, initial, maximum, value]) => {
-      // table64: Grenzen als BigInt
+      // table64: limits as BigInt
       const limit = address === 'i64' ? BigInt : Number;
       const descriptor = { element, initial: limit(initial) };
       if (address === 'i64')
@@ -354,11 +354,11 @@ var blWasmHost = (function () {
     17: ([exception, tag, index]) => [0, exception.getArg(tag, index)],
     18: ([id], state) => (release(state, id), [0]),
     19: ([bytes]) => [0, WebAssembly.validate(bytes) && supported(bytes)],
-    // Typ eines Globals/einer Tabelle (fuer die API der Seite)
+    // Type of a global/table (for the page's API)
     20: ([object]) => [0, new Text(object instanceof WebAssembly.Table ? 'table' : object instanceof WebAssembly.Global ? 'global' : typeof object)],
   };
 
-  // Aufruf aus C++: Befehl ausfuehren, Ergebnis in out schreiben
+  // Call from C++: run the command, write the result to out
   function dispatch(realm, op, argsPtr, count, outPtr, cap) {
     const state = realmState(realm);
     let result;
@@ -368,7 +368,7 @@ var blWasmHost = (function () {
       result = error(e);
     }
     if (result.length > cap)
-      result = [2, new Text('RangeError'), new Text('zu viele Ergebnisse')];
+      result = [2, new Text('RangeError'), new Text('too many results')];
     return write(outPtr, result, state);
   }
 

@@ -40,6 +40,23 @@ function relayURL() {
   return token ? RELAY_BASE + (RELAY_BASE.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token) : RELAY_BASE;
 }
 
+// The engine expects CloseReason strings in onclose (engine/abi.json), WispTransport reports
+// Wisp close codes
+const CLOSE_REASONS = { 0x02: 'closed', 0x03: 'transport-down', 0x41: 'invalid', 0x42: 'name-not-resolved', 0x43: 'timeout', 0x44: 'refused', 0x47: 'timeout', 0x48: 'blocked', 0x49: 'throttled', 0x4a: 'unreachable' };
+function withCloseReasons(transport) {
+  const openTCP = transport.openTCP.bind(transport);
+  transport.openTCP = (host, port) => {
+    const stream = openTCP(host, port);
+    let onclose = null;
+    Object.defineProperty(stream, 'onclose', {
+      get: () => onclose && ((code) => onclose(CLOSE_REASONS[code] || 'reset')),
+      set: (handler) => { onclose = handler; },
+    });
+    return stream;
+  };
+  return transport;
+}
+
 let engine = null;
 // Erst nach onEngineReady und nur bis zu einem Absturz (watchdog.js)
 let engineReady = false;
@@ -78,9 +95,7 @@ async function startEngine() {
   await loadScript(ENGINE_BASE + 'engine.js');
   const module = {
     // Netzwerk der Engine (engine/js/sockets.js): TCP-Verbindungen ueber Wisp
-    blTransport: new WispTransport(relayURL()),
-    // ?httpcache=0 schaltet den dauerhaften HTTP-Cache aus (zum Testen)
-    blHttpCacheDisabled: params.get('httpcache') === '0',
+    blTransport: withCloseReasons(new WispTransport(relayURL())),
     locateFile: (path) => ENGINE_BASE + path,
     print: (text) => console.log('[engine]', text),
     printErr: (text) => console.warn('[engine]', text),
@@ -110,6 +125,9 @@ async function startEngine() {
       // GC an sicheren Punkten in JS: ?safepointgc=0 aus, =debug mit Ausgabe
       if (params.get('safepointgc'))
         (module || engine).ENV.BL_SAFEPOINT_GC = params.get('safepointgc');
+      // ?httpcache=0 turns the persistent HTTP cache off (for tests)
+      if (params.get('httpcache') === '0')
+        (module || engine).ENV.BL_HTTP_CACHE = '0';
       // Zum Testen: ?env=JSC_verifyGC=1,BL_DEBUG=1 setzt Umgebungsvariablen.
       // Nur Schalter der Engine: BL_EXTRA_CA (installExtraCA) oder Variablen
       // von curl/OpenSSL (Proxy, Zertifikate, Schluessel-Log) darf ein Link nie setzen.

@@ -1,7 +1,7 @@
-// Auswahlen, die der Browser selber zeigt: Liste von <select>, Farbe
-// (<input type=color>) und Datum/Zeit (<input type=date> usw.). Die Engine
-// schickt die Daten an die Oberflaeche, die eine eigene Auswahl zeigt und das
-// Ergebnis ueber bl_popup_choose / bl_color_chosen / bl_datetime_chosen zurueckgibt.
+// Choosers the browser shows itself: the list of a <select>, color
+// (<input type=color>) and date/time (<input type=date> etc.). The engine
+// sends the data to the host, which shows its own chooser and returns the
+// result through bl_popup_choose / bl_color_chosen / bl_datetime_chosen.
 #pragma once
 
 #include <WebCore/ColorChooser.h>
@@ -26,12 +26,12 @@ RefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebView&, WebCore::PopupM
 RefPtr<WebCore::ColorChooser> createColorChooser(WebView&, WebCore::ColorChooserClient&, const WebCore::Color&);
 RefPtr<WebCore::DateTimeChooser> createDateTimeChooser(WebView&, WebCore::DateTimeChooserClient&);
 
-// Antworten der Oberflaeche (Engine-Thread). index -1 / leerer Wert = abgebrochen
+// Answers of the host (engine thread). index -1 / empty value = cancelled
 void choosePopupItem(int viewId, int index);
 void chooseColor(int viewId, const String& color, bool done);
 void chooseDateTime(int viewId, const String& value, bool done);
 
-// Alles schliessen, z.B. wenn der View zugeht
+// Closes everything, e.g. when the view closes
 void closeChoosers(int viewId);
 
 } // namespace BrowserLite

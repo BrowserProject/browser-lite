@@ -13,22 +13,22 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/StringBuilder.h>
 
-// Im Engine-Worker: Module.blCanvases (engine-pre.js) haelt pro View das
-// OffscreenCanvas. ImageData darf nicht auf den SharedArrayBuffer zeigen, darum
-// die Zeilen kopieren. Chrome uebernimmt das Bild am Ende der Aufgabe.
+// In the engine worker: Module.blCanvases (engine-pre.js) holds the
+// OffscreenCanvas per view. ImageData must not point into the SharedArrayBuffer,
+// so the rows are copied. Chrome takes the frame at the end of the task.
 EM_JS(int, bl_js_present_in_worker, (int viewId, const uint8_t* pixels, int width, int height, int x, int y, int w, int h), {
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
     if (!target)
         return 0;
-    // Nach dem GPU-Weg (GpuRaster.cpp) hat das Canvas schon einen
-    // bitmaprenderer: dann ueber ein Zwischen-Canvas, immer das ganze Bild
+    // After the GPU path (GpuRaster.cpp) the canvas already has a
+    // bitmaprenderer: then go through a scratch canvas, always the whole frame
     if (!target.ctx && !target.bitmapContext)
         target.ctx = target.canvas.getContext("2d", { alpha: false });
     var canvas = target.ctx ? target.canvas : (target.scratch || (target.scratch = new OffscreenCanvas(width, height)));
     if (!target.ctx && !target.scratchCtx)
         target.scratchCtx = canvas.getContext("2d", { alpha: false });
     if (canvas.width != width || canvas.height != height || !target.ctx) {
-        // Neue Groesse leert das Canvas: alles kopieren
+        // A new size clears the canvas: copy everything
         canvas.width = width;
         canvas.height = height;
         x = 0;
@@ -70,8 +70,8 @@ bool presentFrameInWorker(int viewId, const uint8_t* pixels, int width, int heig
     return bl_js_present_in_worker(viewId, pixels, width, height, dirtyX, dirtyY, dirtyWidth, dirtyHeight);
 }
 
-// Welche Views ein Canvas im Worker haben. Der Worker ist der des Compositors
-// oder der des Engine-Threads (Compositor::presenterThread), darum hier in C++.
+// Which views have a canvas in the worker. The worker is the compositor's or
+// the engine thread's (Compositor::presenterThread), hence tracked in C++.
 static Lock s_canvasLock;
 static HashSet<int>& attachedCanvases() WTF_REQUIRES_LOCK(s_canvasLock)
 {
@@ -121,9 +121,9 @@ void presentFrameOnCompositor(int viewId, const uint8_t* pixels, int width, int 
 
 void notifyHost(int viewId, const char* type, const String& payload)
 {
-    // Kopien im gemeinsamen Speicher, der Haupt-Thread gibt sie wieder frei.
-    // Nur Meldungen aus dem Engine-Thread zeigen, dass er nicht haengt
-    // (der Compositor meldet z.B. first-paint auch waehrend einer Blockade).
+    // Copies in shared memory, the main thread frees them again.
+    // Only messages from the engine thread show that it is not hanging
+    // (the compositor reports e.g. first-paint even during a block).
     char* typeCopy = strdup(type);
     char* payloadCopy = strdup(payload.utf8().data());
     MAIN_THREAD_ASYNC_EM_ASM({

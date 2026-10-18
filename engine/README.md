@@ -1,46 +1,85 @@
 # engine/
 
-Unser Embedding von WebCore: das Programm `engine.js`/`engine.wasm`, das die Oberflaeche
-(`web/`) startet. Was zwingend in WebKit selber muss (Port `PORT=Wasm`, Plattform-Code unter
-`Source/WebCore/platform/wasm/`), kommt als Patch aus `engine/patches/`.
+The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
+`engine.wasm` and `engine.data`. A host (`@browser-lite/core`) loads it into a page, gives it a
+transport for TCP connections and drives it through the C exports. What has to change inside
+WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
+patches from `patches/`.
 
-- `engine.cmake`: wird vom WebKit-Build eingebunden (Patch 0006, `PlatformWasm.cmake`). Quellen,
-  Link-Optionen, Datenpaket `engine.data`, Build-ID (`tools/wasm-build-id.py`). `BL_PRE_JS` ist
-  die einzige Liste der `--pre-js`-Dateien.
-- `js/`: JS-Teile der Engine, laufen im Engine-Worker
-  - `engine-pre.js`: Anbindung an die Oberflaeche (`Module.onEngine*`), Canvas, Hilfen
-  - `wasm-rewrite.js`, `wasm-host.js`: WebAssembly der Seiten in der WASM-Engine des Browsers;
-    `wasm-guest.js` ist die API `WebAssembly` fuer die Seiten und laeuft in JSC (Datenpaket)
-  - `sockets.js`: TCP-Verbindungen ueber den Transport der Oberflaeche
-  - `http-cache.js`, `bytecode-cache.js`: HTTP- und Bytecode-Cache in der Cache API des Host
-  - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs und MediaRecorder mit den Codecs
-    des Host (WebM-Muxer)
-  - `wasmfs-opfs.js` (`--js-library`): ersetzt das Schreiben des OPFS-Backends von WasmFS,
-    "kein Platz" im Host kommt als `ENOSPC` an
-- `src/`: C++ der Engine
-  - Start und Ablauf: `main.cpp`, `Engine.h`, `EngineLoop.cpp` (Event-Loop, Watchdog),
-    `Exports.cpp` (C-Schnittstelle `bl_*` fuer die Oberflaeche), `Host.cpp` (Events an die
-    Oberflaeche)
-  - Tabs: `WebView.cpp` (Page, Eingabe, Rendern), `Clients.cpp`, `EditorClient.cpp`,
-    `BackForwardList.cpp`, `Choosers.cpp` (select, Farbe, Datum), `Printing.cpp`,
-    `PinchZoom.h`
-  - Grafik: `GpuRaster.cpp` (Skia ueber WebGL 2), `LayerTreeHostWasm.cpp` und `Compositor.cpp`
-    (Ebenen im Compositor-Thread), `ScrollingWasm.cpp` (Scrollen im eigenen Thread)
-  - Netz: `LoaderStrategy.cpp` (Laden mit curl, Downloads, Ping), `Sockets.cpp`, `HttpCache.cpp`,
-    `BytecodeCache.cpp`, `PlatformStrategies.cpp`, `Strategies.h` (Cookies), `ErrorPage.cpp`
-    (Fehlerseite wie Chrome, wenn eine Navigation nicht ankommt)
-  - Speicher: `Storage.cpp` (Cookies, localStorage, IndexedDB unter `/data`), `MemoryVFS.cpp`
-    (SQLite), `CacheStorageWasm.cpp`, `FileSystemStorageWasm.cpp` (OPFS), `FileAccessCache.cpp`
-  - Worker und Plattform: `ServiceWorkerWasm.cpp` (Service Worker, SharedWorker),
-    `WebPlatformExtras.cpp` (Polyfills ueber den Host), `WebRTCPolyfill.cpp`,
-    `DeviceClients.cpp` und `Permissions.cpp` (Berechtigungen, Standort, Benachrichtigungen,
-    Kamera), `Gamepad.cpp`, `Speech.cpp`
-  - `media/`: `<video>`/`<audio>` und MSE im Host-Video (`MediaPlayerPrivateWasm`,
-    `MediaSourceWasm`, `ContainerParser`, `MediaFetch`), `MediaStreamWasm`, `MediaRecorderWasm`,
-    `WebCodecsWasm`, `VideoFrameWasm`
-  - `wasm/WasmBridge.cpp`: Bruecke zwischen JSC und WebAssembly der Seiten
-  - `websocket/`: WebSockets der Seiten ueber curl (`WebSocketChannel` und `SocketStreamHandle`
-    aus WebKitLegacy, mit Lizenzkopf von WebKit)
+## Folders
 
-Bauen: `tools/build-webcore.sh` ([docs/build.md](../docs/build.md)). Aufbau und Threads:
-[docs/architektur.md](../docs/architektur.md).
+- `abi.json`: the contract with the host, machine readable (exports, module hooks, events,
+  features, host calls, environment). `tests/contract/abi-test.mjs` checks it against the
+  sources.
+- `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
+  package, build ID. `BL_PRE_JS` is the only list of the `--pre-js` files.
+- `js/`: JavaScript parts of the engine
+  - `engine-pre.js`: module hooks of the engine (canvases, file writes, shutdown)
+  - `sockets.js`: TCP streams over `Module.blTransport`
+  - `http-cache.js`, `bytecode-cache.js`: HTTP and bytecode cache in the host's Cache API
+  - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's
+    codecs (WebM muxer)
+  - `wasm-rewrite.js`, `wasm-host.js`: WebAssembly of the pages in the browser's WASM engine;
+    `wasm-guest.js` is the `WebAssembly` API for the pages and runs in JSC (data package)
+  - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
+- `src/`: C++ of the engine
+  - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
+    (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host)
+  - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
+    `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
+  - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
+    (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread)
+  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `BytecodeCache.cpp`,
+    `PlatformStrategies.cpp`, `ErrorPage.cpp`
+  - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
+    `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`
+  - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
+    `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`
+  - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame
+  - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly
+  - `websocket/`: WebSockets of the pages over curl (from WebKitLegacy, WebKit license)
+
+## Contract
+
+The full list is `abi.json`; the rules behind it:
+
+- Prefixes: `bl_*` exports are for the host. `bl__*` exports are internal, called only from
+  `engine/js` or `engine/src`. The host never calls them.
+- Strings into exports are UTF-8 allocated with `malloc` (`stringToNewUTF8`), the engine frees
+  them. Strings and buffers handed to hooks are copies the host owns, except where `abi.json`
+  says the host frees them (`_free`).
+- Threads: `main()` runs on its own pthread, the engine thread (`-sPROXY_TO_PTHREAD`). Exports
+  may be called from any thread and run asynchronously on the engine thread, unless
+  `abi.json` marks them synchronous. Hooks run on the main thread of the page.
+  `engineDialog` is synchronous: the engine thread waits for its answer.
+- Frames: the host transfers each view canvas with `transferControlToOffscreen` to
+  `Module.blPresenterWorker()` (`{ blCanvas, viewId }`); the engine paints into it, on the
+  compositor thread when compositing with WebGL 2. Without that canvas, `onEngineFrame` hands
+  RGBA pixels in shared memory and `bl_frame_presented` returns the buffer. `onEngineNeedsFrame`
+  asks for `bl_frame` at the next animation frame.
+- Audio: `onEngineAudio('start', id, ring, capacityFrames, channels, sampleRate)` hands a ring
+  buffer in shared memory: a 32 byte header (uint32 write frame, read frame, capacity, channels,
+  heartbeat counter of the reader) followed by interleaved float samples. The engine renders
+  ahead and advances the write frame, the host's AudioWorklet reads, advances the read frame
+  and the heartbeat. After `'close'` the host frees the ring with `_free`.
+- Network: every TCP connection is `Module.blTransport.openTCP(host, port)`, TLS happens inside
+  the engine. `onclose(reason)` gets a `CloseReason` string; `Sockets.cpp` maps it to the
+  socket error that picks the error page.
+- Configuration: the environment (`Module.ENV` in `preRun`) is read once at the start of
+  `main()` (`EngineConfig.cpp`). `BL_FEATURES` lists the host services a page may reach;
+  a disabled feature looks like a browser without it, and no `__bl*` global is ever visible to
+  page scripts. `BL_STORAGE_NAMESPACE` selects the OPFS directory of `/data` and the prefix of
+  the Cache API names. `BL_ERROR_PAGE` replaces the error page template (below).
+- Error page: shown under the failed address when a main frame navigation does not arrive.
+  A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
+  `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host), `{{heading}}`,
+  `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and `{{retryLabel}}`.
+  The engine inserts `<meta http-equiv="Content-Security-Policy" content="default-src 'none';
+  style-src 'unsafe-inline'; img-src data:">` at the start, after a leading doctype: no scripts
+  and no external resources, inline styles and `data:` images only. A click on any
+  `[data-bl-retry]` element retries (a listener the engine installs, the page needs no script).
+  The `commit` event reports `errorPage: '<kind>'`.
+- Shutdown: `Module.blShutdown()` closes all transport streams and terminates all engine
+  threads, so the host can drop the module.
+
+Building: `tools/build-webcore.sh` ([docs/build.md](../docs/build.md)).

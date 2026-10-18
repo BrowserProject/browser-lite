@@ -52,7 +52,7 @@ const printEvents = [];
 const loadedPattern = /RESULT loaded=(.*?)(\s+\(|$)/;
 const pageErrors = [];
 tab.on('console', (msg) => {
-  if (msg.text().includes('Skript abgebrochen'))
+  if (msg.text().includes('Script terminated'))
     pageErrors.push(msg.text());
   const printMatch = /RESULT print=(\w+)/.exec(msg.text());
   if (printMatch)
@@ -271,7 +271,7 @@ loaded = [];
 await tab.click('#reload');
 check('Haengen: Meldung nach 10 s ohne Antwort', await waitBoot('reagiert nicht', 14000), await bootText());
 check('Haengen: Meldung geht weg, sobald der Watchdog das Skript abbricht', await tab.waitForFunction(() => document.getElementById('boot').hidden, null, { timeout: 15000 }).then(() => true, () => false));
-const abortLogged = () => pageErrors.some((text) => /\[seite \d+\] Skript abgebrochen/.test(text));
+const abortLogged = () => pageErrors.some((text) => /\[seite \d+\] Script terminated/.test(text));
 for (const end = Date.now() + 20000; !abortLogged() && Date.now() < end;)
   await tab.waitForTimeout(200);
 check('Haengen: Meldung in der Konsole der Seite', abortLogged(), pageErrors.join(' | '));
@@ -377,8 +377,8 @@ await dialogTab.goto(stack.app({ url: siteURL + 'dialog', env: 'BL_SCRIPT_TIMEOU
 check('Dialog: Seite geladen', await dialogLine(/RESULT loaded=Seite dialog/, TIMEOUT) >= 0);
 await dialogTab.evaluate(() => window.__blEval('console.log("RESULT confirm=" + confirm("Weiter?")); for (;;);'));
 const answered = await dialogLine(/RESULT confirm=true/, 15000);
-const aborted = await dialogLine(/Skript abgebrochen/, 10000);
-check('Dialog: Skript laeuft nach 3,5 s im confirm() weiter', answered >= 0 && (aborted < 0 || aborted > answered), dialogLines.filter((line) => /confirm|abgebrochen/.test(line)).join(' | '));
+const aborted = await dialogLine(/Script terminated/, 10000);
+check('Dialog: Skript laeuft nach 3,5 s im confirm() weiter', answered >= 0 && (aborted < 0 || aborted > answered), dialogLines.filter((line) => /confirm|terminated/.test(line)).join(' | '));
 check('Dialog: Endlosschleife danach abgebrochen', aborted > answered && answered >= 0);
 
 

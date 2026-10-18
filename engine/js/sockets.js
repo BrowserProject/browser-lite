@@ -1,42 +1,50 @@
-// Sockets der Engine (engine/src/Sockets.cpp), Teil im Haupt-Thread.
+// Sockets of the engine (engine/src/Sockets.cpp), the part on the main thread.
 //
-// Die C++-Seite schickt asynchron: Verbindung oeffnen, Daten senden,
-// schliessen. Die Verbindungen gehen ueber den Transport der Oberflaeche
-// (Module.blTransport, z.B. Wisp aus web/transport.js). Ankommende Daten
-// schreiben wir direkt in den Speicher der Engine (_bl_socket_data), was der
-// Transport wirklich verschickt hat, melden wir zurueck (_bl_socket_sent).
+// The C++ side sends asynchronously: open a connection, send data, close. The
+// connections go through the host's transport (Module.blTransport, the public
+// Transport: openTCP(host, port) returns a stream with send, close, onopen,
+// ondata, onsent, onclose). Incoming data is written directly into the engine
+// memory (_bl__socket_data), what the transport really sent is reported back
+// (_bl__socket_sent).
+
+// CloseReason strings of the transport, the index is the enum of Sockets.cpp
+var blCloseReasons = ['closed', 'reset', 'refused', 'unreachable', 'name-not-resolved', 'timeout', 'blocked', 'throttled', 'invalid', 'transport-down'];
+var blCloseReset = 1;
+var blCloseTransportDown = 9;
+
 var blSockets = {
   streams: new Map(),
 
   open(id, host, port) {
     var transport = Module['blTransport'];
     if (!transport) {
-      Module['_bl_socket_closed'](id, 0x03);
+      Module['_bl__socket_closed'](id, blCloseTransportDown);
       return;
     }
     var stream = transport.openTCP(host, port);
     blSockets.streams.set(id, stream);
     stream.onopen = function () {
-      Module['_bl_socket_opened'](id);
+      Module['_bl__socket_opened'](id);
     };
     stream.ondata = function (data) {
       var pointer = Module['_malloc'](data.length);
-      // Kein Speicher mehr: Daten verwerfen hiesse einen kaputten Datenstrom,
-      // also die Verbindung mit Fehler beenden
+      // No memory left: dropping data would mean a broken stream, so end the
+      // connection with an error
       if (!pointer) {
         blSockets.close(id);
-        Module['_bl_socket_closed'](id, 0x03);
+        Module['_bl__socket_closed'](id, blCloseReset);
         return;
       }
       HEAPU8.set(data, pointer);
-      Module['_bl_socket_data'](id, pointer, data.length);
+      Module['_bl__socket_data'](id, pointer, data.length);
     };
     stream.onsent = function (length) {
-      Module['_bl_socket_sent'](id, length);
+      Module['_bl__socket_sent'](id, length);
     };
     stream.onclose = function (reason) {
       blSockets.streams.delete(id);
-      Module['_bl_socket_closed'](id, reason);
+      var code = blCloseReasons.indexOf(reason);
+      Module['_bl__socket_closed'](id, code < 0 ? blCloseReset : code);
     };
   },
 
@@ -51,9 +59,15 @@ var blSockets = {
     if (!stream)
       return;
     blSockets.streams.delete(id);
+    stream.onopen = null;
     stream.onclose = null;
     stream.ondata = null;
     stream.onsent = null;
     stream.close();
+  },
+
+  closeAll() {
+    for (var id of Array.from(blSockets.streams.keys()))
+      blSockets.close(id);
   },
 };

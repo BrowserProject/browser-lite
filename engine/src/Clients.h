@@ -1,6 +1,6 @@
-// WebCore-Clients der Engine. Sie leiten von den "Empty"-Clients ab (Patch
-// 0007 macht deren Methoden ueberschreibbar) und ueberschreiben nur, was ein
-// echter Browser braucht.
+// WebCore clients of the engine. They derive from the "Empty" clients (patch
+// 0007 makes their methods overridable) and only override what a real browser
+// needs.
 #pragma once
 
 #include <WebCore/DragClient.h>
@@ -17,13 +17,13 @@ class ChromeClient final : public WebCore::EmptyChromeClient {
 public:
     explicit ChromeClient(WebView&);
 
-    // Hat das Hauptdokument einen beforeunload-Listener? Geht als Ereignis
-    // "beforeunload" an die Oberflaeche, die beim Schliessen des Host-Tabs fragt.
+    // Does the main document have a beforeunload listener? Goes to the host as
+    // the event "beforeunload", the host asks when its tab closes.
     static void reportBeforeUnload(WebView&);
 
-    // Eine echte Seite, keine Hilfsseite wie ein SVG-Bild (das hiesse
-    // EmptyChromeClient): sonst gibt ~Page ihre Seiten im Back/Forward-Cache
-    // nicht frei, sie leben weiter und der Cache stuerzt beim Aufraeumen ab
+    // A real page, not a helper page like an SVG image (that would mean
+    // EmptyChromeClient): otherwise ~Page does not free its pages in the
+    // back/forward cache, they live on and the cache crashes when pruning
     bool isEmptyChromeClient() const final { return false; }
 
 private:
@@ -32,8 +32,8 @@ private:
     WebCore::FloatRect windowRect() const final;
     WebCore::FloatRect pageRect() const final;
 
-    // window.focus(), window.open() auf ein offenes Fenster, WindowClient.focus():
-    // Tab nach vorne (ob die Seite das darf, prueft WebCore vorher)
+    // window.focus(), window.open() on an open window, WindowClient.focus():
+    // view to the front (WebCore checks before whether the page may do that)
     void focus() final;
     void unfocus() final { }
     bool canTakeFocus(WebCore::FocusDirection) const final { return true; }
@@ -51,8 +51,8 @@ private:
     void contentsSizeChanged(WebCore::LocalFrame&, const WebCore::IntSize&) const final;
     void setCursor(const WebCore::Cursor&) final;
 
-    // CSS pointer/hover: Maus, mit Touchscreen dazu grob; Mobilgeraet nur Touch
-    // (WasmPlatform::ScreenInfo, bl_set_screen)
+    // CSS pointer/hover: mouse, with a touch screen also coarse; mobile device
+    // touch only (WasmPlatform::ScreenInfo, bl_set_screen)
     bool hoverSupportedByPrimaryPointingDevice() const final;
     bool hoverSupportedByAnyAvailablePointingDevice() const final;
     std::optional<WebCore::PointerCharacteristics> pointerCharacteristicsOfPrimaryPointingDevice() const final;
@@ -61,13 +61,13 @@ private:
     void addMessageToConsole(JSC::MessageSource, JSC::MessageLevel, const String& message, unsigned lineNumber, unsigned columnNumber, const String& sourceID) final;
     void runJavaScriptAlert(WebCore::LocalFrame&, const String&) final;
     void print(WebCore::LocalFrame&, const WebCore::StringWithDirection&) final;
-    // Spielt die Seite Ton? (Lautsprecher im Tab wie Chrome)
+    // Does the page play sound? (speaker icon like Chrome)
     void isPlayingMediaDidChange(WebCore::MediaProducerMediaStateFlags) final;
     bool runJavaScriptConfirm(WebCore::LocalFrame&, const String&) final;
     bool runJavaScriptPrompt(WebCore::LocalFrame&, const String& message, const String& defaultValue, String& result) final;
     bool canRunBeforeUnloadConfirmPanel() final { return true; }
     bool runBeforeUnloadConfirmPanel(String&& message, WebCore::LocalFrame&) final;
-    // So meldet WebCore unload- und beforeunload-Listener
+    // This is how WebCore reports unload and beforeunload listeners
     void enableSuddenTermination() final { reportBeforeUnload(m_view.get()); }
     void disableSuddenTermination() final { reportBeforeUnload(m_view.get()); }
 
@@ -115,11 +115,11 @@ private:
     void dispatchDecidePolicyForNewWindowAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, WebCore::FormState*, const String&, std::optional<WebCore::HitTestResult>&&, WebCore::FramePolicyFunction&&) final;
 
     bool canHandleRequest(const WebCore::ResourceRequest&) const final { return true; }
-    // Wie WebKit2: sonst schickt PingLoader <a ping> und CSP-Reports ohne Cookies
+    // Like WebKit2: otherwise PingLoader sends <a ping> and CSP reports without cookies
     bool shouldUseCredentialStorage(WebCore::DocumentLoader*, WebCore::ResourceLoaderIdentifier) final { return true; }
     bool canShowMIMEType(const String&) const final;
     bool canShowMIMETypeAsHTML(const String&) const final { return true; }
-    // <object>/<embed>: Bild oder Frame nach dem MIME-Typ (Plugins gibt es nicht)
+    // <object>/<embed>: image or frame by MIME type (there are no plugins)
     WebCore::ObjectContentType objectContentType(const URL&, const String& mimeType) final;
     void startDownload(const WebCore::ResourceRequest&, const String& suggestedName, WebCore::FromDownloadAttribute) final;
     void convertMainResourceLoadToDownload(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) final;
@@ -133,8 +133,8 @@ private:
     void dispatchDidStartProvisionalLoad() final;
     void dispatchDidCommitLoad(std::optional<WebCore::HasInsecureContent>, std::optional<WebCore::UsedLegacyTLS>, std::optional<WebCore::WasPrivateRelayed>) final;
     void dispatchDidReceiveTitle(const WebCore::StringWithDirection&) final;
-    // Im selben Dokument (Anker, history.pushState/replaceState, Zurueck/Vor
-    // dorthin): neue Adresse und Verlauf an die Oberflaeche
+    // Within the same document (anchor, history.pushState/replaceState,
+    // back/forward to it): new address and history to the host
     void dispatchDidNavigateWithinPage() final;
     void dispatchDidPushStateWithinPage() final;
     void dispatchDidReplaceStateWithinPage() final;
@@ -143,11 +143,11 @@ private:
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;
     void dispatchDidFailProvisionalLoad(const WebCore::ResourceError&, WebCore::WillContinueLoading, WebCore::WillInternallyHandleFailure) final;
     void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld&) final;
-    // Verlauf (Zurueck/Vor): die leeren Clients legen keine Eintraege an und
-    // lehnen jedes Zurueck ab
+    // History (back/forward): the empty clients create no entries and reject
+    // every back navigation
     RefPtr<WebCore::HistoryItem> createHistoryItemTree(bool clipAtTarget, WebCore::BackForwardItemIdentifier) const final;
     WebCore::ShouldGoToHistoryItem shouldGoToHistoryItem(WebCore::HistoryItem&, WebCore::IsSameDocumentNavigation) const final { return WebCore::ShouldGoToHistoryItem::Yes; }
-    // Back/Forward-Cache (main.cpp): Seiten duerfen angehalten im Speicher bleiben
+    // Back/forward cache (main.cpp): pages may stay suspended in memory
     bool canCachePage() const final { return true; }
 
     bool isMainFrame() const;
@@ -169,9 +169,9 @@ private:
     WeakRef<WebView> m_view;
 };
 
-// Drag & Drop aus der Seite (draggable, markierter Text, Links, Bilder). Ein
-// echtes System-Ziehen gibt es im Canvas nicht: die WebView spielt es selber
-// mit den folgenden Mausbewegungen durch (WebView::startPageDrag).
+// Drag and drop from the page (draggable, selected text, links, images). There
+// is no real system drag in a canvas: the WebView plays it through itself with
+// the following mouse moves (WebView::startPageDrag).
 class DragClient final : public WebCore::DragClient {
 public:
     explicit DragClient(WebView&);

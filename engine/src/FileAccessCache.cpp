@@ -1,10 +1,10 @@
-// access() fuer die festen Dateien der Engine merken (Schriften, fontconfig,
-// CA-Liste).
+// Remembers access() for the fixed files of the engine (fonts, fontconfig, CA
+// list).
 //
-// Skia prueft bei jeder Schriftsuche mit access(), ob die Schriftdatei lesbar
-// ist. Der Cache spart die vielen Pruefungen. Unter /usr/share und /etc liegt
-// nur, was beim Start aus engine.data kommt, das aendert sich nie. Eingebunden
-// mit -Wl,--wrap=access.
+// Skia checks with access() whether the font file is readable on every font
+// lookup. The cache saves the many checks. Under /usr/share and /etc there is
+// only what comes from engine.data at start, which never changes. Hooked in
+// with -Wl,--wrap=access.
 #include "config.h"
 
 #include <cstring>
@@ -33,7 +33,7 @@ int __wrap_access(const char* path, int mode)
 
     static Lock lock;
     static NeverDestroyed<HashMap<String, std::pair<int, int>>> answers;
-    // Schluessel: Pfad und Modus, Wert: Rueckgabe und errno
+    // Key: path and mode, value: return value and errno
     String key = makeString(String::fromUTF8(path), ':', mode);
     {
         Locker locker { lock };

@@ -1,35 +1,35 @@
-// Netzwerk-Sockets der Engine ohne Umweg ueber den Haupt-Thread.
+// Network sockets of the engine without a detour through the main thread.
 //
-// socket/connect/send/recv/poll fangen wir beim Linken ab (-Wl,--wrap=..., siehe
-// engine.cmake), statt Emscriptens SOCKFS zu nehmen: das lebt im JavaScript des
-// Haupt-Threads, jeder Aufruf von curl (eigener Thread) waere ein synchroner
-// Umweg dorthin (auf CNN ca. 0.5 s Wartezeit).
+// socket/connect/send/recv/poll are intercepted at link time
+// (-Wl,--wrap=..., see engine.cmake) instead of using Emscripten's SOCKFS: that
+// lives in the JavaScript of the main thread, every call from curl (its own
+// thread) would be a synchronous detour there (about 0.5 s of waiting on CNN).
 //
-// TCP-Sockets und Pipes (die Weck-Pipe von curl) leben hier im
-// WASM-Speicher, poll wartet auf eine Condition-Variable. Nur Verbindungen
-// oeffnen, Daten senden und schliessen gehen asynchron an den Haupt-Thread
-// (engine/js/sockets.js), der sie ueber den Transport der Oberflaeche (Wisp)
-// schickt. Ankommende Daten schreibt der Haupt-Thread direkt hier hinein
-// (bl_socket_data). Gesendet gilt erst, was der Transport wirklich verschickt
-// hat (bl_socket_sent): solange mehr als maxQueuedSend unterwegs ist, wartet
-// send() bzw. meldet poll kein POLLOUT.
+// TCP sockets and pipes (curl's wake-up pipe) live here in WASM memory, poll
+// waits on a condition variable. Only opening connections, sending data and
+// closing go asynchronously to the main thread (engine/js/sockets.js), which
+// sends them through the host's transport (Module.blTransport). The main
+// thread writes incoming data directly in here (bl__socket_data). Only what
+// the transport really sent counts as sent (bl__socket_sent): while more than
+// maxQueuedSend is on its way, send() waits or poll reports no POLLOUT.
 //
-// Auch die Namensaufloesung ist hier: getaddrinfo gibt fuer Hostnamen eine
-// Platzhalter-Adresse (172.29.x.y) zurueck, connect macht daraus wieder den
-// Namen. Aufloesen tut das Relay.
+// Name resolution is here too: getaddrinfo returns a placeholder address
+// (172.29.x.y) for host names, connect turns it back into the name. The
+// transport resolves it.
 //
-// Andere Dateideskriptoren (Dateien, UDP, ...) gehen unveraendert an die
-// Originale. Unsere Deskriptoren sind echte, reservierte Nummern im
-// Dateisystem (/dev/null), damit sie sich mit nichts ueberschneiden.
+// Other file descriptors (files, UDP, ...) go unchanged to the originals. Our
+// descriptors are real, reserved numbers in the file system (/dev/null), so
+// they overlap with nothing.
 //
-// Regeln fuer das Lock:
-// - kein Aufruf, der auf den Haupt-Thread warten koennte (der nimmt es auch),
-// - auf dem Haupt-Thread nichts, was warten kann (auch nicht malloc/free):
-//   waehrend er wartet, arbeitet Emscripten die Warteschlange ab, und
-//   pumpOnMainThread nimmt dasselbe Lock.
+// Rules for the lock:
+// - no call that could wait for the main thread (it takes the lock too),
+// - nothing on the main thread that can wait (not even malloc/free): while it
+//   waits, Emscripten processes the queue, and pumpOnMainThread takes the
+//   same lock.
 
 #include "config.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
@@ -73,7 +73,7 @@ int __real_getpeername(int, struct sockaddr*, socklen_t*);
 int __real_pipe2(int[2], int);
 }
 
-// Laufen auf dem Haupt-Thread (engine/js/sockets.js)
+// Run on the main thread (engine/js/sockets.js)
 EM_JS(void, blJsSocketOpen, (int id, const char* host, int port), {
     blSockets.open(id, UTF8ToString(host), port);
 });
@@ -86,15 +86,18 @@ EM_JS(void, blJsSocketClose, (int id), {
 
 namespace {
 
-constexpr int maxDescriptors = 4096; // FS.MAX_OPEN_FDS von Emscripten
+constexpr int maxDescriptors = 4096; // FS.MAX_OPEN_FDS of Emscripten
 constexpr size_t maxQueuedSend = 8 << 20;
-constexpr uint8_t wispCloseVoluntary = 0x02;
 
-// Empfangene Daten als Kette von Stuecken. Die Stuecke werden ausserhalb des
-// Locks angelegt: auf dem Haupt-Thread bearbeitet Emscripten waehrend jedem
-// Warten (auch auf das Lock von malloc) die Warteschlange, darunter
-// pumpOnMainThread, das dieses Lock auch nimmt. Haelt der Haupt-Thread das
-// Lock dabei schon, wartet er auf sich selber.
+// Why a transport stream ended: the transport's CloseReason strings in this
+// order, mapped by engine/js/sockets.js
+enum class CloseReason : int { Closed, Reset, Refused, Unreachable, NameNotResolved, Timeout, Blocked, Throttled, Invalid, TransportDown };
+
+// Received data as a chain of pieces. The pieces are created outside of the
+// lock: on the main thread Emscripten processes the queue during every wait
+// (also for the malloc lock), including pumpOnMainThread, which takes this
+// lock too. If the main thread already holds the lock then, it waits for
+// itself.
 struct Chunk {
     Chunk* next;
     size_t length;
@@ -115,7 +118,7 @@ struct Chunk {
 struct Buffer {
     Chunk* head { nullptr };
     Chunk* tail { nullptr };
-    size_t offset { 0 }; // im ersten Stueck
+    size_t offset { 0 }; // in the first piece
     size_t size { 0 };
 
     Buffer() = default;
@@ -130,7 +133,7 @@ struct Buffer {
         }
     }
 
-    // Unter dem Lock, legt nichts an
+    // Under the lock, allocates nothing
     void append(Chunk* chunk)
     {
         if (tail)
@@ -141,7 +144,7 @@ struct Buffer {
         size += chunk->length;
     }
 
-    // Gibt verbrauchte Stuecke frei: nur in Worker-Threads aufrufen
+    // Frees consumed pieces: only call in worker threads
     size_t read(uint8_t* out, size_t length, bool peek)
     {
         size_t copied = 0;
@@ -178,7 +181,7 @@ struct Socket {
     enum class State { Created, Connecting, Connected, Closed };
     int id { 0 };
     State state { State::Created };
-    int pendingError { 0 }; // fuer SO_ERROR
+    int pendingError { 0 }; // for SO_ERROR
     bool remoteClosed { false };
     Buffer received;
     size_t queuedSend { 0 };
@@ -192,8 +195,8 @@ struct Pipe {
     bool writerOpen { true };
 };
 
-// Wer einen Deskriptor benutzt, haelt eine Referenz: close() in einem anderen
-// Thread nimmt ihn nur aus der Tabelle
+// Whoever uses a descriptor holds a reference: close() on another thread only
+// removes it from the table
 struct Descriptor {
     enum class Kind { Socket, PipeRead, PipeWrite };
     Kind kind;
@@ -214,13 +217,13 @@ struct Operation {
 std::mutex mutex;
 std::condition_variable changed;
 std::shared_ptr<Descriptor> descriptors[maxDescriptors];
-// Ohne Lock lesbar: gehoert die Nummer uns? read/write/close aller anderen Dateien kommen auch hier vorbei
+// Readable without the lock: is the number ours? read/write/close of all other files pass here too
 std::atomic<bool> ours[maxDescriptors];
 std::unordered_map<int, std::shared_ptr<Socket>> socketsById;
 int nextSocketId = 1;
 std::vector<Operation> outbox;
 std::atomic<bool> pumpScheduled { false };
-// Platzhalter-Adressen fuer Hostnamen (172.29.0.0/16)
+// Placeholder addresses for host names (172.29.0.0/16)
 std::unordered_map<std::string, uint32_t> addressForHost;
 std::unordered_map<uint32_t, std::string> hostForAddress;
 uint32_t nextPlaceholder = 1;
@@ -238,13 +241,13 @@ std::shared_ptr<Descriptor> descriptorFor(int fd)
     return descriptors[fd];
 }
 
-// Unter dem Lock
+// Under the lock
 Descriptor* descriptorLocked(int fd)
 {
     return isOurs(fd) ? descriptors[fd].get() : nullptr;
 }
 
-// Unter dem Lock
+// Under the lock
 void storeDescriptor(int fd, std::shared_ptr<Descriptor>&& descriptor)
 {
     descriptors[fd] = std::move(descriptor);
@@ -259,7 +262,7 @@ std::shared_ptr<Descriptor> createDescriptor(Descriptor::Kind kind, bool nonBloc
     return descriptor;
 }
 
-// Eine echte Nummer im Dateisystem reservieren (selten, darf warten)
+// Reserve a real number in the file system (rare, may wait)
 int reserveDescriptor()
 {
     int fd = open("/dev/null", O_RDWR);
@@ -294,31 +297,31 @@ void pumpOnMainThread(void*)
     }
 }
 
-// Fehler fuer den Grund, mit dem ein Stream endet (Wisp). Wisp bestaetigt den Aufbau
-// nicht, der Stream gilt sofort als offen: ein Aufbau, der beim Relay scheitert, endet
-// erst danach. Aus diesen Fehlern macht CurlRequest wieder die Codes von curl (Patch 0039).
-int errorForCloseReason(int reason, bool opened)
+// Error for the reason a stream ended. The transport may not confirm the
+// connection (Wisp does not), the stream then counts as open right away: a
+// connection that fails at the relay only ends afterwards. CurlRequest turns
+// these errors back into curl's codes (patch 0039), which pick the error page.
+int errorForCloseReason(CloseReason reason, bool opened)
 {
     switch (reason) {
-    case 0x42: // Host nicht erreichbar: ein Name, den das Relay nicht aufloesen kann
+    case CloseReason::NameNotResolved:
         return EADDRNOTAVAIL;
-    case 0x4a: // Name aufgeloest, Adresse nicht erreichbar (relay/wisp.mjs, nicht in Wisp)
+    case CloseReason::Unreachable:
         return EHOSTUNREACH;
-    case 0x43: // keine Antwort
-    case 0x47: // Zeitlimit
+    case CloseReason::Timeout:
         return ETIMEDOUT;
-    case 0x44:
+    case CloseReason::Refused:
         return ECONNREFUSED;
-    case 0x41: // ungueltige Angaben
-    case 0x48: // Ziel gesperrt
+    case CloseReason::Invalid:
+    case CloseReason::Blocked:
         return EACCES;
     default:
-        // Vor dem Oeffnen schliesst nur der Transport selber: er erreicht das Relay nicht
+        // Before opening only the transport itself closes: it cannot reach its network
         return opened ? ECONNRESET : ENETUNREACH;
     }
 }
 
-// Unter dem Lock aufrufen
+// Call under the lock
 void queueOperation(Operation&& operation)
 {
     outbox.push_back(std::move(operation));
@@ -364,7 +367,7 @@ ssize_t receive(Descriptor& descriptor, void* buffer, size_t length, bool peek, 
             auto& socket = *descriptor.socket;
             if (socket.received.size)
                 return socket.received.read(static_cast<uint8_t*>(buffer), length, peek);
-            // Abbruch durch das Relay ist ein Fehler, kein normales Ende
+            // An abort by the transport is an error, not a normal end
             if (socket.remoteClosed && socket.pendingError) {
                 errno = std::exchange(socket.pendingError, 0);
                 return -1;
@@ -459,9 +462,9 @@ std::string hostForPeer(const sockaddr* address, int& port)
 
 extern "C" {
 
-// ---------------------------------------------------------------- Haupt-Thread
+// ---------------------------------------------------------------- Main thread
 
-EMSCRIPTEN_KEEPALIVE void bl_socket_opened(int id)
+EMSCRIPTEN_KEEPALIVE void bl__socket_opened(int id)
 {
     std::lock_guard lock(mutex);
     if (auto it = socketsById.find(id); it != socketsById.end()) {
@@ -471,9 +474,9 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_opened(int id)
     }
 }
 
-// Uebernimmt data (mit malloc angelegt). Haupt-Thread: unter dem Lock nichts
-// anlegen oder freigeben (siehe Chunk)
-EMSCRIPTEN_KEEPALIVE void bl_socket_data(int id, uint8_t* data, int length)
+// Takes over data (allocated with malloc). Main thread: allocate or free
+// nothing under the lock (see Chunk)
+EMSCRIPTEN_KEEPALIVE void bl__socket_data(int id, uint8_t* data, int length)
 {
     auto* chunk = Chunk::create(data, length);
     free(data);
@@ -490,8 +493,8 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_data(int id, uint8_t* data, int length)
     free(chunk);
 }
 
-// Der Transport hat length Bytes wirklich verschickt
-EMSCRIPTEN_KEEPALIVE void bl_socket_sent(int id, int length)
+// The transport really sent length bytes
+EMSCRIPTEN_KEEPALIVE void bl__socket_sent(int id, int length)
 {
     std::lock_guard lock(mutex);
     if (auto it = socketsById.find(id); it != socketsById.end()) {
@@ -501,7 +504,8 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_sent(int id, int length)
     }
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
+// reason: CloseReason (engine/js/sockets.js)
+EMSCRIPTEN_KEEPALIVE void bl__socket_closed(int id, int reason)
 {
     std::lock_guard lock(mutex);
     auto it = socketsById.find(id);
@@ -509,8 +513,9 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
         return;
     auto& socket = *it->second;
     bool connecting = socket.state == Socket::State::Connecting;
-    if (reason != wispCloseVoluntary)
-        socket.pendingError = errorForCloseReason(reason, !connecting);
+    auto closeReason = static_cast<CloseReason>(std::clamp(reason, 0, static_cast<int>(CloseReason::TransportDown)));
+    if (closeReason != CloseReason::Closed)
+        socket.pendingError = errorForCloseReason(closeReason, !connecting);
     else if (connecting)
         socket.pendingError = ECONNRESET;
     socket.remoteClosed = true;
@@ -518,7 +523,7 @@ EMSCRIPTEN_KEEPALIVE void bl_socket_closed(int id, int reason)
     changed.notify_all();
 }
 
-// ---------------------------------------------------------------- Namen
+// ---------------------------------------------------------------- Names
 
 int __wrap_getaddrinfo(const char* node, const char* service, const struct addrinfo* hints, struct addrinfo** result)
 {
@@ -545,7 +550,7 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
     } else {
         if ((hints && (hints->ai_flags & AI_NUMERICHOST)) || family == AF_INET6)
             return EAI_NONAME;
-        // Platzhalter, das Relay loest den Namen auf
+        // Placeholder, the transport resolves the name
         uint32_t placeholder;
         {
             std::lock_guard lock(mutex);
@@ -553,7 +558,7 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
             if (added) {
                 if (nextPlaceholder > 0xfffe)
                     nextPlaceholder = 1;
-                // Platz wird wieder frei: der alte Name bekommt beim naechsten Mal einen neuen
+                // The slot becomes free again: the old name gets a new one next time
                 if (auto old = hostForAddress.find(nextPlaceholder); old != hostForAddress.end()) {
                     addressForHost.erase(old->second);
                     hostForAddress.erase(old);
@@ -570,7 +575,7 @@ int __wrap_getaddrinfo(const char* node, const char* service, const struct addri
         length = sizeof(sockaddr_in);
     }
 
-    // Alles in einem Block, freeaddrinfo gibt ihn frei
+    // Everything in one block, freeaddrinfo frees it
     size_t nameLength = (hints && (hints->ai_flags & AI_CANONNAME)) ? strlen(node) + 1 : 0;
     auto* block = static_cast<uint8_t*>(calloc(1, sizeof(addrinfo) + sizeof(sockaddr_storage) + nameLength));
     if (!block)
@@ -817,7 +822,7 @@ int __wrap_getsockname(int fd, struct sockaddr* address, socklen_t* length)
     return 0;
 }
 
-// ---------------------------------------------------------------- Warten
+// ---------------------------------------------------------------- Waiting
 
 int __wrap_poll(struct pollfd* fds, nfds_t count, int timeout)
 {
@@ -849,7 +854,7 @@ int __wrap_poll(struct pollfd* fds, nfds_t count, int timeout)
             }
         }
         if (!foreign.empty()) {
-            // Andere Deskriptoren nur kurz nachsehen (ohne Lock, das geht an den Haupt-Thread)
+            // Only peek at other descriptors (without the lock, that goes to the main thread)
             lock.unlock();
             for (auto& entry : foreign)
                 entry.revents = 0;

@@ -5,7 +5,8 @@
 | `relay/` | `relay-test.mjs`: Relay und Wisp-Client zusammen (Token, Flusskontrolle, Reconnect, tote Verbindung, SSRF-Sperre, Gruende und Grenze pro Ziel, Auslieferung der Seite) | node | ja |
 | `wasm/` | WebAssembly der Seiten ohne Engine: Umschreiben der Module (`rewrite-test.mjs`), API ueber die nachgebaute Bruecke (`api-test.mjs`, `bridge-sim.mjs`), Module von Hand (`wasm-bytes.mjs`, auch fuer `e2e/wasm-test.mjs`) | node | ja |
 | `jsc/` | JS-Tests mit der `jsc`-Shell in node (`run.sh`): `basics.js`, `calls.js`, `gc-stress.js`, `llint-caches.js`, `resizable.js` | JSC-Build | ja |
-| `engine/` | Engine in node ohne Browser: Bild rendern, WebCrypto, Stack-Grenze, GC unter Stress, Grenzen (Speicher, DOM, Strings), Watchdog, WebM-Muxer, Aufraeumen des HTTP-Cache | Engine-Build, `recorder-test.mjs` und `http-cache-test.mjs` nur node | ja |
+| `contract/` | `abi-test.mjs`: `engine/abi.json` against the engine sources (exports, events, environment, module hooks, features) | node | ja |
+| `engine/` | Engine in node without a browser: rendering, WebCrypto, stack limit, GC under stress, limits (memory, DOM, strings), watchdog, features and host bridges, error page, WebM muxer, HTTP cache cleanup | engine build, `recorder-test.mjs` and `http-cache-test.mjs` node only | ja |
 | `e2e/` | Ganze Kette im echten Chromium (Playwright): Oberflaeche, Engine, Relay, lokale Testserver | Engine-Build, `npm ci` | ja |
 
 ## Ohne Build
@@ -16,28 +17,34 @@ node tests/relay/relay-test.mjs
 node tests/wasm/rewrite-test.mjs && node tests/wasm/api-test.mjs
 node tests/engine/recorder-test.mjs
 node tests/engine/http-cache-test.mjs
+node tests/contract/abi-test.mjs
 ```
 
 ## engine/
 
-`engine-node.mjs` startet die Engine in node (ein View, eine Seite, gleiche
-Schnittstelle wie `web/`), `render-test.mjs` und `gc-test.mjs` (mit `gc-stress.html`)
-benutzen es. `check-basic.mjs` prueft das Bild von `basic.html`.
+`engine-node.mjs` starts the engine in node (one view, one page, the contract of
+`engine/abi.json`), `render-test.mjs` and `gc-test.mjs` (with `gc-stress.html`) use it.
+`check-basic.mjs` checks the frame of `basic.html`.
 
 ```bash
 node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/basic.html build/basic.ppm 800 600
 node tests/engine/check-basic.mjs build/basic.ppm
-RENDER_WAIT_FOR="CRYPTO fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200
-BL_SCRIPT_TIMEOUT=2 RENDER_WAIT_FOR="HANG fertig" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200
+RENDER_WAIT_FOR="CRYPTO done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/crypto.html build/crypto.ppm 200 200
+BL_SCRIPT_TIMEOUT=2 RENDER_WAIT_FOR="HANG done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/hang.html build/hang.ppm 200 200
+BL_FEATURES= RENDER_URL="file:///test/?features=none" RENDER_WAIT_FOR="BRIDGES done" node tests/engine/render-test.mjs build/webcore/bin/engine.js tests/engine/bridges.html build/bridges.ppm 200 200
 JSC_slowPathAllocsBetweenGCs=10 node tests/engine/gc-test.mjs build/webcore/bin/engine.js
+node tests/engine/error-page-test.mjs build/webcore/bin/engine.js
 ```
 
-Testseiten mit `RENDER_WAIT_FOR` melden am Ende `<NAME> fertig=ok`: `crypto.html`,
-`stack.html`, `limits.html`, `hang.html` (Watchdog, braucht `BL_SCRIPT_TIMEOUT=2`).
-`RENDER_TIMEOUT` (Sekunden, Standard 120) aendert das Zeitlimit, `JSC_*` und `BL_*`
-(z.B. `BL_DEBUG=1`) gehen an die Engine.
-`features.html` ist die Liste fuer `e2e/parity-test.mjs`. `jsbench.html`,
-`framebench.html` und `paintbench.html` sind Benchmarks zum Messen von Hand, keine Tests.
+Test pages with `RENDER_WAIT_FOR` report `<NAME> done=ok` at the end: `crypto.html`,
+`stack.html`, `limits.html`, `hang.html` (watchdog, needs `BL_SCRIPT_TIMEOUT=2`),
+`bridges.html` (`?features=none` with `BL_FEATURES=` or `?features=all`).
+`RENDER_TIMEOUT` (seconds, default 120) changes the time limit, `RENDER_URL` the page URL,
+`JSC_*` and `BL_*` (e.g. `BL_DEBUG=1`) go to the engine.
+`error-page-test.mjs` loads without a transport and checks a custom `BL_ERROR_PAGE`
+(placeholders, escaping, CSP, retry) and the close reason `name-not-resolved`.
+`features.html` is the list for `e2e/parity-test.mjs`. `jsbench.html`, `framebench.html`
+and `paintbench.html` are benchmarks to measure by hand, no tests.
 
 ## e2e/
 
@@ -66,8 +73,9 @@ der Seite.
 - `soak-test.mjs`: langer Lauf (viele Navigationen, Tabs auf und zu), Dokumente und Speicher
   muessen begrenzt bleiben. `SOAK_ROUNDS` (Standard 40 Runden durch 5 Seiten), `SOAK_TABS`
   (Standard 30).
-- `ui-test.mjs` laesst die Engine mit `?env=BL_TEST_HOOKS=1` wirklich abstuerzen
-  (`bl_crash_for_testing`: abort und WASM-Trap), ohne den Schalter tut der Aufruf nichts.
+- `stack.app()` always adds `?env=BL_TEST_HOOKS=1`: without it `__blEval` (`bl_eval_script`),
+  `bl_memory_report` and `bl_crash_for_testing` do nothing. `ui-test.mjs` uses it to really
+  crash the engine (abort and WASM trap).
 - `site-test.mjs` laedt echte Seiten aus dem Internet (CI: Liste `sites.txt`,
   Screenshots `build/sites/<host>_<pfad>.png`), Schalter `SITE_*` im Kopf des Skripts.
 - `fixtures/` enthaelt die WebAssembly-Testdateien fuer `wasm-test.mjs` (auch memory64),

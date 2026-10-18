@@ -1,8 +1,8 @@
-// Geraete und Berechtigungen ueber den Host-Browser: Standort (Geolocation),
-// Benachrichtigungen, Kamera und Mikrofon. Fragt eine Seite zum ersten Mal,
-// zeigt die Oberflaeche eine Abfrage wie Chrome ("... moechte deinen Standort
-// verwenden"). Die Entscheidung gilt pro Art und Ursprung der Seite oben
-// (topOrigin), bei Benachrichtigungen pro Ursprung des Dokuments.
+// Devices and permissions through the host browser: geolocation,
+// notifications, camera and microphone. When a page asks for the first time,
+// the host shows a prompt like Chrome ("... wants to use your location"). The
+// decision applies per kind and origin of the top page (topOrigin), for
+// notifications per origin of the document.
 #pragma once
 
 #include <memory>
@@ -21,34 +21,34 @@ namespace BrowserLite {
 
 class WebView;
 
-// Beim Anlegen eines Views: Clients an die Page haengen, beim Schliessen aufraeumen
+// When a view is created: attach clients to the page, clean up when it closes
 void attachDeviceClients(WebView&, WebCore::Page&);
 void detachDeviceClients(int viewId);
 
-// Gespeicherte Entscheidung: 0 = noch nicht gefragt, 1 = erlaubt, 2 = blockiert
+// Stored decision: 0 = not asked yet, 1 = granted, 2 = denied
 enum class PermissionDecision : int { Ask = 0, Granted = 1, Denied = 2 };
 PermissionDecision storedPermission(const String& kind, const String& origin);
-// Gespeicherte Entscheidung oder Abfrage in der Oberflaeche (Engine-Thread)
+// Stored decision or prompt in the host (engine thread)
 void requestDevicePermission(int viewId, const String& kind, const String& origin, CompletionHandler<void(bool)>&&);
 
-// Antworten der Oberflaeche (Engine-Thread)
-// answer: Ask = ohne Entscheidung geschlossen (abgelehnt, nicht gemerkt)
+// Answers of the host (engine thread)
+// answer: Ask = closed without a decision (denied, not remembered)
 void answerPermission(int requestId, PermissionDecision answer);
 void setStoredPermission(const String& kind, const String& origin, PermissionDecision);
 void geolocationPosition(int viewId, double latitude, double longitude, double accuracy, double altitude, double altitudeAccuracy, double heading, double speed, double timestamp);
 void geolocationError(int viewId, int code, const String& message);
-// Lage/Bewegung vom Host (NaN = Wert fehlt); values hat 9 Eintraege (siehe DeviceClients.cpp)
+// Orientation/motion from the host (NaN = value missing); values has 9 entries (see DeviceClients.cpp)
 void deviceOrientation(int viewId, double alpha, double beta, double gamma, bool absolute);
 void deviceMotion(int viewId, const double* values, double interval);
-// type: 0 = gezeigt, 1 = angeklickt, 2 = geschlossen, 3 = Fehler
+// type: 0 = shown, 1 = clicked, 2 = closed, 3 = error
 void notificationEvent(const String& notificationID, int type);
-// Benachrichtigungen aus showNotification() im Service Worker und die noch
-// angezeigten einer Registrierung (getNotifications, tag leer = alle)
+// Notifications from showNotification() in the service worker and the still
+// shown ones of a registration (getNotifications, empty tag = all)
 std::unique_ptr<WebCore::NotificationClient> createServiceWorkerNotificationClient();
 Vector<WebCore::NotificationData> shownPersistentNotifications(const URL& registrationURL, const String& tag);
-// Spracherkennung: Provider fuer die PageConfiguration, Ereignisse vom Host
-// (type: 0 start, 1-6 Audio/Ton/Sprache an und aus, 7 Ergebnis, 8 nichts
-// erkannt, 9 Fehler, 10 Ende)
+// Speech recognition: provider for the PageConfiguration, events from the host
+// (type: 0 start, 1-6 audio/sound/speech start and end, 7 result, 8 no match,
+// 9 error, 10 end)
 UniqueRef<WebCore::SpeechRecognitionProvider> createSpeechRecognitionProvider(int viewId);
 void speechRecognitionEvent(uint64_t id, int type, const String& json);
 

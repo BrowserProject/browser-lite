@@ -1,7 +1,8 @@
-// PlatformStrategies fuer single-process WebCore: Netzwerk, Clipboard, Blobs,
-// Media. In WebKit2 machen das die anderen Prozesse ueber IPC, bei uns laeuft
-// alles direkt im Engine-Thread. Blob-Registry wie WebKitLegacy (WebBlobRegistry)
-// bzw. github.com/theogbob/WebkitWasm (BSD-2-Clause, Copyright (c) 2026 theogbob).
+// PlatformStrategies for single-process WebCore: network, clipboard, blobs,
+// media. In WebKit2 the other processes do that through IPC, here everything
+// runs directly on the engine thread. Blob registry like WebKitLegacy
+// (WebBlobRegistry) or github.com/theogbob/WebkitWasm (BSD-2-Clause,
+// Copyright (c) 2026 theogbob).
 
 #include "config.h"
 #include "Strategies.h"
@@ -37,7 +38,7 @@ using namespace WebCore;
 
 NetworkStorageSession& networkStorageSession()
 {
-    // Cookies in SQLite unter /data (siehe Storage.h)
+    // Cookies in SQLite under /data (see Storage.h)
     static NeverDestroyed<std::unique_ptr<NetworkStorageSession>> session = [] {
         auto session = makeUnique<NetworkStorageSession>(PAL::SessionID::defaultSessionID(), String { });
         session->setCookieDatabase(makeUniqueRef<CookieJarDB>(cookieDatabasePath()));
@@ -90,7 +91,7 @@ class WasmBlobRegistry final : public BlobRegistry {
     BlobRegistryImpl m_impl;
 };
 
-// Clipboard: direkt an PlatformPasteboard (platform/wasm/PlatformPasteboardWasm.cpp)
+// Clipboard: directly to PlatformPasteboard (platform/wasm/PlatformPasteboardWasm.cpp)
 class WasmPasteboardStrategy final : public PasteboardStrategy {
     String readStringFromPasteboard(size_t index, const String& type, const String& name, const PasteboardContext*) final
     {
@@ -126,7 +127,7 @@ class WasmPasteboardStrategy final : public PasteboardStrategy {
 
 class WasmMediaStrategy final : public MediaStrategy {
 #if ENABLE(WEB_AUDIO)
-    // Ton-Ausgabe: platform/audio/wasm/AudioDestinationWasm.cpp
+    // Sound output: platform/audio/wasm/AudioDestinationWasm.cpp
     Ref<AudioDestination> createAudioDestination(const AudioDestinationCreationOptions& options) final
     {
         return AudioDestination::create(options);

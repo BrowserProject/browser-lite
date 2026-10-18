@@ -1,16 +1,16 @@
-// WebAssembly der Seiten: die API "WebAssembly" fuer JavaScript in JSC.
+// WebAssembly of the pages: the "WebAssembly" API for JavaScript in JSC.
 //
-// JSC kann mit dem C-Loop-Interpreter kein WebAssembly. Diese Datei baut die
-// Standard-API nach und reicht die Arbeit ueber die C++-Bruecke
-// (engine/src/wasm/WasmBridge.cpp) an die WASM-Engine des Browsers weiter
-// (engine/js/wasm-host.js). Wird beim ersten Zugriff auf "WebAssembly"
-// ausgewertet und mit der Bruecke aufgerufen:
-//   bridge.host(op, paare) -> paare      Befehl an die Host-Seite
-//   bridge.memoryCreate(seiten, max)     Speicher im Engine-Speicher -> id
-//   bridge.memoryBuffer(id)              ArrayBuffer direkt auf den Speicher
-//   bridge.memoryGrow(id, seiten)        -> alte Groesse oder -1
-//   bridge.memoryRelease(id)             Memory-Objekt abgebaut
-// Werte gehen als Paare [tag, wert, ...], siehe wasm-host.js.
+// JSC cannot run WebAssembly with the C loop interpreter. This file rebuilds
+// the standard API and passes the work through the C++ bridge
+// (engine/src/wasm/WasmBridge.cpp) to the WASM engine of the browser
+// (engine/js/wasm-host.js). Evaluated on the first access to "WebAssembly"
+// and called with the bridge:
+//   bridge.host(op, pairs) -> pairs      command to the host side
+//   bridge.memoryCreate(pages, max)      memory in the engine memory -> id
+//   bridge.memoryBuffer(id)              ArrayBuffer directly on the memory
+//   bridge.memoryGrow(id, pages)         -> old size or -1
+//   bridge.memoryRelease(id)             Memory object torn down
+// Values go as pairs [tag, value, ...], see wasm-host.js.
 (function (bridge) {
   'use strict';
   const { host, memoryCreate, memoryBuffer, memoryGrow, memoryRelease } = bridge;
@@ -18,7 +18,7 @@
   const freeze = Object.freeze;
   const define = (object, name, value) => Object.defineProperty(object, name, { value, writable: true, configurable: true, enumerable: false });
 
-  // ------------------------------------------------------------ Fehler
+  // ------------------------------------------------------------ Errors
 
   function errorClass(name) {
     const Class = class extends Error {
@@ -35,9 +35,9 @@
   const RuntimeError = errorClass('RuntimeError');
   const errorClasses = { CompileError, LinkError, RuntimeError, TypeError, RangeError, Error, SyntaxError };
 
-  // ------------------------------------------------------------ Werte
+  // ------------------------------------------------------------ Values
 
-  // Wrapper fuer Objekte der Host-Seite, pro id genau einer
+  // Wrapper for objects of the host side, exactly one per id
   const wrappers = new Map();
   const signatures = new Map();
   const finalizer = new FinalizationRegistry((id) => {
@@ -111,7 +111,7 @@
     constructor(text) { this.text = text; }
   }
 
-  // Befehl ausfuehren, Fehler der Host-Seite als Fehler hier werfen
+  // Run a command, throw errors of the host side as errors here
   function run(op, values) {
     const result = decode(host(op, encode(values)));
     const status = result[0];
@@ -125,7 +125,7 @@
     throw new Class(result[2]);
   }
 
-  // Umwandlungen nach dem JS-API-Standard
+  // Conversions after the JS API standard
   function toBigInt(value) {
     if (typeof value === 'number')
       throw new TypeError('Cannot convert a Number to a BigInt');
@@ -166,12 +166,12 @@
     return values;
   }
 
-  // ------------------------------------------------------------ Funktionen
+  // ------------------------------------------------------------ Functions
 
   function exportedFunction(id, signature, index) {
     if (signature) {
       signatures.set(id, signature);
-      // Wrapper gibt es evtl. schon (ohne Signatur): Name und Laenge nachtragen
+      // A wrapper may exist already (without signature): add name and length
       const ref = wrappers.get(id);
       const existing = ref && ref.deref();
       if (existing) {
@@ -192,14 +192,14 @@
       return fn;
     });
   }
-  // Platzhalter fuer encode: eine Funktion der Host-Seite per id
+  // Placeholder for encode: a function of the host side by id
   function fnRef(id) {
     const ref = Object.create(null);
     internals.set(ref, { kind: 'function', id });
     return ref;
   }
 
-  // Funktion aus JS als Import: wird von C++ mit Paaren aufgerufen
+  // Function from JS as import: called by C++ with pairs
   function importThunk(fn, signature) {
     return (pairs) => {
       try {
@@ -227,18 +227,18 @@
     };
   }
 
-  // ------------------------------------------------------------ Speicher
+  // ------------------------------------------------------------ Memory
 
   const memoryFinalizer = new FinalizationRegistry((id) => memoryRelease(id));
   function toIndex(value, what) {
-    // Unaeres Plus ist ToNumber aus dem Standard: BigInt wirft TypeError
+    // Unary plus is ToNumber from the standard: BigInt throws TypeError
     const number = +value;
     if (!Number.isFinite(number) || number < 0 || number > 0xffffffff)
       throw new TypeError(what + ' must be convertible to a valid number');
     return Math.floor(number);
   }
-  // Index oder Groesse fuer Speicher und Tabellen: bei address i64 (memory64,
-  // table64) als BigInt, hier immer als Zahl (ueber 2^32 nie erfuellbar)
+  // Index or size for memories and tables: with address i64 (memory64,
+  // table64) as BigInt, here always as a number (above 2^32 never satisfiable)
   function toAddress(value, address, what) {
     if (address === 'i32')
       return toIndex(value, what);
@@ -267,7 +267,7 @@
         throw new RangeError('WebAssembly.Memory(): Property \'maximum\': value is below the lower bound');
       if (descriptor.shared)
         throw new TypeError('WebAssembly.Memory(): shared memory is not supported');
-      // Grenzen wie in Chromium, die Engine hat eine eigene kleinere (WasmBridge.cpp)
+      // Limits like in Chromium, the engine has its own smaller one (WasmBridge.cpp)
       const bound = address === 'i64' ? 262144 : 65536;
       if (initial > bound || (maximum !== undefined && maximum > bound))
         throw new RangeError('WebAssembly.Memory(): Property \'initial\': value is above the upper bound');
@@ -291,8 +291,8 @@
     return inner;
   }
   const memoryId = (memory) => memoryInner(memory).memoryId;
-  // Speicher im Engine-Speicher fuer ein neues Memory-Objekt. limits wie aus
-  // blWasmRewrite (min, max, address), max kann bei memory64 sehr gross sein
+  // Memory in the engine memory for a new Memory object. limits as from
+  // blWasmRewrite (min, max, address), max may be very big with memory64
   function createMemory(memory, limits) {
     const id = memoryCreate(limits.min, limits.max === undefined ? -1 : Math.min(limits.max, 65536));
     internals.set(memory, { kind: 'memory', memoryId: id, address: limits.address, maximum: limits.max });
@@ -300,9 +300,9 @@
     return memory;
   }
 
-  // ------------------------------------------------------------ Tabellen, Globals, Tags
+  // ------------------------------------------------------------ Tables, globals, tags
 
-  // Objekt der Host-Seite mit bekanntem Typ (ersetzt einen untypisierten Wrapper)
+  // Object of the host side with a known type (replaces an untyped wrapper)
   function hostObject(Class, kind, id, extra) {
     const ref = wrappers.get(id);
     const existing = ref && ref.deref();
@@ -313,7 +313,7 @@
     adopt(object, id);
     return object;
   }
-  // Ein mit "new" erzeugtes Objekt wird der Wrapper fuer seine id
+  // An object created with "new" becomes the wrapper for its id
   function adopt(object, id) {
     wrappers.set(id, new WeakRef(object));
     finalizer.register(object, id);
@@ -342,7 +342,7 @@
       internals.set(this, { kind: 'table', id, type, address });
       adopt(this, id);
     }
-    // Bei table64 gehen Index und Groesse als BigInt zur Host-Seite
+    // With table64 index and size go to the host side as BigInt
     get length() {
       return run(10, [ref(this, 'table', 'Table')])[0];
     }
@@ -430,7 +430,7 @@
     const id = internals.get(object).id;
     return hostObject(Exception, 'exception', id);
   }
-  // Platzhalter fuer encode mit der id eines Objekts
+  // Placeholder for encode with the id of an object
   function ref(object, kind, name) {
     const value = inner(object, kind, name);
     const placeholder = Object.create(null);
@@ -438,7 +438,7 @@
     return placeholder;
   }
 
-  // ------------------------------------------------------------ Module
+  // ------------------------------------------------------------ Modules
 
   function toBytes(source) {
     if (source instanceof ArrayBuffer)
@@ -499,7 +499,7 @@
       if (info.imports.length && (importObject === undefined || importObject === null || typeof importObject !== 'object'))
         throw new TypeError('WebAssembly.Instance(): Imports argument must be present and must be an object');
       const imports = [];
-      // Nach dem Index im Modul: erst importierte, dann eigene
+      // By the index in the module: first imported, then own
       const memories = [];
       for (const entry of info.imports) {
         const namespace = importObject[entry.module];
@@ -580,7 +580,7 @@
     }
   }
 
-  // ------------------------------------------------------------ Namensraum
+  // ------------------------------------------------------------ Namespace
 
   function later(work) {
     return new Promise((resolve) => resolve()).then(work);

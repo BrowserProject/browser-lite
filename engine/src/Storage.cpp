@@ -1,7 +1,7 @@
-// localStorage und IndexedDB kommen aus WebKitLegacy/Storage (wird mit der
-// Engine gebaut, siehe engine.cmake): StorageNamespaceImpl/StorageAreaSync
-// speichern localStorage in SQLite, InProcessIDBServer macht IndexedDB mit
-// dem SQLite-Backend von WebCore.
+// localStorage and IndexedDB come from WebKitLegacy/Storage (built with the
+// engine, see engine.cmake): StorageNamespaceImpl/StorageAreaSync store
+// localStorage in SQLite, InProcessIDBServer does IndexedDB with WebCore's
+// SQLite backend.
 
 #include "config.h"
 #include "Storage.h"
@@ -11,6 +11,7 @@
 #include "WebDatabaseProvider.h"
 #include "WebStorageNamespaceProvider.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include <WebCore/ClientOrigin.h>
 #include <WebCore/IDBDatabaseIdentifier.h>
 #include <cerrno>
@@ -32,23 +33,23 @@
 static constexpr auto dataDirectory = "/data"_s;
 static constexpr auto localStorageDirectory = "/data/localstorage"_s;
 static constexpr auto indexedDBDirectory = "/data/indexeddb"_s;
-// Kopien von FileReplacement und die Uploads der Tabs (web/app.js), ausserhalb
-// von /data/opfs, wo die Seiten die Namen waehlen. Wird beim Start geleert.
+// Copies of FileReplacement and the uploads of the views, outside of
+// /data/opfs where the pages choose the names. Emptied at start.
 static constexpr auto temporaryDirectory = "/data/tmp"_s;
 
-// In WebKitLegacy ist das pro Plattform (Mac: NSUserDefaults)
+// In WebKitLegacy this is per platform (Mac: NSUserDefaults)
 String WebDatabaseProvider::indexedDatabaseDirectoryPath()
 {
     return indexedDBDirectory;
 }
 
-// Grenze fuer IndexedDB pro Ursprung (Patch 0040), gerechnet wie
-// OriginQuotaManager in WebKit2: ein Vorrat bis zur Grenze, erst wenn er
-// aufgebraucht ist, wird neu gezaehlt (indexedDBUsage). Offene
-// Datenbanken liegen ganz im WASM-Speicher (MemoryVFS.cpp), der hoechstens
-// 4 GB hat und nie schrumpft. Oeffnen, Lesen und Loeschen brauchen keinen
-// Platz, eine Seite an der Grenze kommt also an ihre Daten; zu grosse Dateien
-// laedt das VFS nicht (BL_DATABASE_MAX_MB). Laeuft im Thread des IDBServer.
+// IndexedDB limit per origin (patch 0040), computed like OriginQuotaManager in
+// WebKit2: a reserve up to the limit, only when it is used up the usage is
+// counted again (indexedDBUsage). Open databases live entirely in WASM memory
+// (MemoryVFS.cpp), which has at most 4 GB and never shrinks. Opening, reading
+// and deleting need no space, so a page at the limit gets to its data; the VFS
+// does not load files that are too big (BL_DATABASE_MAX_MB). Runs on the
+// IDBServer thread.
 bool WebDatabaseProvider::requestIndexedDatabaseSpace(const WebCore::ClientOrigin& origin, uint64_t size)
 {
     uint64_t quota = BrowserLite::indexedDBQuota();
@@ -58,7 +59,7 @@ bool WebDatabaseProvider::requestIndexedDatabaseSpace(const WebCore::ClientOrigi
         uint64_t usage = BrowserLite::indexedDBUsage(origin);
         left = usage < quota ? quota - usage : 0;
         if (size > left)
-            BrowserLite::log("IndexedDB: Grenze von %llu MB erreicht (%llu MB belegt)", static_cast<unsigned long long>(quota >> 20), static_cast<unsigned long long>(usage >> 20));
+            BrowserLite::log("IndexedDB: limit of %llu MB reached (%llu MB used)", static_cast<unsigned long long>(quota >> 20), static_cast<unsigned long long>(usage >> 20));
     }
     if (size > left)
         return false;
@@ -70,16 +71,12 @@ namespace BrowserLite {
 
 uint64_t indexedDBQuota()
 {
-    static const uint64_t quota = [] {
-        const char* value = getenv("BL_INDEXEDDB_QUOTA_MB");
-        return (value && *value ? strtoull(value, nullptr, 10) : 256) << 20;
-    }();
-    return quota;
+    return engineConfig().indexedDBQuotaMB << 20;
 }
 
-// Wie SQLiteIDBBackingStore::databasesSizeForDirectory: ein Ordner pro
-// Datenbank (mit ihren Blobs) direkt unter dem des Ursprungs. Darunter liegen
-// beim obersten Ursprung auch die Partitionen seiner Frames, die zaehlen fuer sich.
+// Like SQLiteIDBBackingStore::databasesSizeForDirectory: one folder per
+// database (with its blobs) directly under the origin's. Under it, the top
+// origin also has the partitions of its frames, those count for themselves.
 uint64_t indexedDBUsage(const WebCore::ClientOrigin& origin)
 {
     uint64_t usage = 0;
@@ -188,34 +185,34 @@ ReadResult readWholeFile(const char* path, std::vector<uint8_t>& data)
     }));
 }
 
-// OPFS mit synchronen Zugriffen gibt es nur in Workern eines Browsers (nicht in
-// node). Laeuft im Engine-Thread.
+// OPFS with synchronous access only exists in workers of a browser (not in
+// node). Runs on the engine thread.
 EM_JS(int, blJsHasOPFS, (), {
     return typeof FileSystemSyncAccessHandle !== 'undefined' && !!(globalThis.navigator && navigator.storage && navigator.storage.getDirectory);
 });
 
-// /data dauerhaft ueber das OPFS-Backend von WasmFS. Zugriffe laufen ueber
-// einen eigenen Worker von WasmFS, nie ueber den UI-Thread. Ohne OPFS (node,
-// alte Browser) bleibt /data im Speicher. BL_OPFS=0 schaltet ab.
+// /data persistent through the WasmFS OPFS backend, in the namespace directory
+// of the OPFS root (engine/js/wasmfs-opfs.js). Accesses run through a WasmFS
+// worker of their own, never through the UI thread. Without OPFS (node, old
+// browsers) or with BL_OPFS=0 /data stays in memory.
 static void mountDataDirectory()
 {
-    const char* value = getenv("BL_OPFS");
-    if ((value && !strcmp(value, "0")) || !blJsHasOPFS()) {
-        debugLog("Speicher: /data nur im Speicher (kein OPFS)");
+    if (!engineConfig().opfs || !blJsHasOPFS()) {
+        debugLog("Storage: /data in memory only (no OPFS)");
         return;
     }
     backend_t backend = wasmfs_create_opfs_backend();
     if (!backend || wasmfs_create_directory("/data", 0777, backend))
-        debugLog("Speicher: OPFS nicht verfuegbar, /data nur im Speicher");
+        debugLog("Storage: OPFS not available, /data in memory only");
 }
 
 void initializeStorage()
 {
     mountDataDirectory();
-    // Kopien von replaceWholeFile, deren Schreiben abgebrochen ist
+    // Copies of replaceWholeFile whose writing was aborted
     FileSystem::deleteNonEmptyDirectory(temporaryDirectory);
     FileSystem::makeAllDirectories(temporaryDirectory);
-    // SQLite-Datenbanken unter /data im WASM-Speicher (MemoryVFS.cpp)
+    // SQLite databases under /data in WASM memory (MemoryVFS.cpp)
     registerMemoryVFS();
     FileSystem::makeAllDirectories(localStorageDirectory);
     FileSystem::makeAllDirectories(indexedDBDirectory);

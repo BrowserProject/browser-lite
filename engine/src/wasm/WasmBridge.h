@@ -1,10 +1,10 @@
-// WebAssembly der Seiten: Bruecke zwischen JSC und der WASM-Engine des Browsers.
+// WebAssembly of the pages: bridge between JSC and the WASM engine of the browser.
 //
-// JSC kann mit dem C-Loop-Interpreter kein WebAssembly. Die API
-// (engine/js/wasm-guest.js) laeuft in JSC und schickt die Arbeit ueber diese
-// Bruecke an engine/js/wasm-host.js, das die Module im Browser ausfuehrt.
-// Der Speicher der Module liegt im Speicher der Engine, darum kann JSC ihn
-// direkt als ArrayBuffer zeigen.
+// JSC cannot run WebAssembly with the C loop interpreter. The API
+// (engine/js/wasm-guest.js) runs in JSC and sends the work through this bridge
+// to engine/js/wasm-host.js, which runs the modules in the browser. The memory
+// of the modules lives in the engine memory, so JSC can show it directly as an
+// ArrayBuffer.
 #pragma once
 
 namespace JSC {
@@ -13,10 +13,10 @@ class JSGlobalObject;
 
 namespace BrowserLite {
 
-// Beim Start: Hook fuer Worker und Worklets setzen
+// At start: set the hook for workers and worklets
 void initializeWebAssembly();
 
-// Legt "WebAssembly" im globalen Objekt an (ausgewertet beim ersten Zugriff)
+// Creates "WebAssembly" in the global object (evaluated on the first access)
 void installWebAssembly(JSC::JSGlobalObject&);
 
 } // namespace BrowserLite

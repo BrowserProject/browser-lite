@@ -1,12 +1,12 @@
-// Compositor-Thread: setzt die Ebenen (LayerTreeHostWasm) mit Skia auf der
-// GPU zusammen und zeigt das Bild im Canvas des Tabs.
+// Compositor thread: composites the layers (LayerTreeHostWasm) with Skia on
+// the GPU and shows the frame in the canvas of the view.
 //
-// Ein eigener pthread mit eigenem WebGL-2-Kontext. Er kehrt wie der
-// Engine-Thread immer in den JS-Event-Loop zurueck (sonst zeigt Chrome kein
-// Bild) und bekommt Arbeit ueber Emscriptens Proxy-Queue. Die Canvas der Tabs
-// gehoeren seinem Worker (Oberflaeche: Module.blPresenterWorker). So laufen
-// Animationen und Scrollen (ScrollingWasm.h) weiter, auch wenn das JS der
-// Seite den Engine-Thread lange blockiert.
+// Its own pthread with its own WebGL 2 context. Like the engine thread it
+// always returns to the JS event loop (otherwise Chrome shows no frame) and
+// gets work through Emscripten's proxy queue. The canvases of the views belong
+// to its worker (engine-pre.js: Module.blPresenterWorker). That way animations
+// and scrolling (ScrollingWasm.h) keep running even when the page's JS blocks
+// the engine thread for a long time.
 #pragma once
 
 #include <pthread.h>
@@ -14,22 +14,22 @@
 
 namespace BrowserLite::Compositor {
 
-// Beim Start der Engine (Engine-Thread): Thread anlegen, WebGL 2 pruefen.
-// false = kein Compositor-Thread (dann zeigt der Engine-Worker die Bilder).
+// At engine start (engine thread): create the thread, check WebGL 2.
+// false = no compositor thread (then the engine worker shows the frames).
 bool start();
 
 bool isRunning();
 bool isCompositorThread();
 pthread_t thread();
 
-// Thread, dessen Worker die Canvas der Tabs hat
+// Thread whose worker has the canvases of the views
 pthread_t presenterThread();
 
-// Arbeit auf dem Compositor-Thread (von jedem Thread aus)
+// Work on the compositor thread (from any thread)
 void dispatch(Function<void()>&&);
 
-// Der WebGL-Kontext des Compositors ist verloren (neue Views malen ohne
-// Ebenen), bis der Browser ihn wiederherstellt (GpuRaster.cpp)
+// The compositor's WebGL context is lost (new views paint without layers)
+// until the browser restores it (GpuRaster.cpp)
 bool isLost();
 void setLost(bool);
 

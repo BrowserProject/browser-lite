@@ -20,7 +20,7 @@
 namespace BrowserLite {
 using namespace WebCore;
 
-// A4 in Punkten (1/72 Zoll), Rand 1 cm wie die Standard-Raender von Chrome
+// A4 in points (1/72 inch), 1 cm margin like Chrome's default margins
 static constexpr float paperWidth = 595.28f;
 static constexpr float paperHeight = 841.89f;
 static constexpr float margin = 28.35f;
@@ -34,7 +34,7 @@ void printFrame(int viewId, LocalFrame& frame)
 
     float contentWidth = paperWidth - 2 * margin;
     float contentHeight = paperHeight - 2 * margin;
-    // Layout in CSS-Pixeln (96 pro Zoll) wie Chrome, gemalt wird in Punkten
+    // Layout in CSS pixels (96 per inch) like Chrome, painting in points
     float widthInPixels = contentWidth * 96 / 72;
     float heightInPixels = contentHeight * 96 / 72;
 
@@ -44,8 +44,8 @@ void printFrame(int viewId, LocalFrame& frame)
     float fullPageHeight = 0;
     printContext->computePageRects(FloatRect(0, 0, widthInPixels, heightInPixels), 0, 0, 1, fullPageHeight);
 
-    // Wie Chrome keine leere Seite am Schluss: WebKit kuerzt den unteren Rand
-    // (z.B. von body) nach einem erzwungenen Seitenumbruch nicht weg
+    // Like Chrome no empty page at the end: WebKit does not cut off the bottom
+    // margin (e.g. of body) after a forced page break
     size_t pageCount = printContext->pageCount();
     if (CheckedPtr renderView = document->renderView(); renderView && pageCount > 1 && renderView->writingMode().isHorizontal()) {
         int rest = renderView->documentRect().maxY() - printContext->pageRect(pageCount - 1).y();
@@ -54,7 +54,7 @@ void printFrame(int viewId, LocalFrame& frame)
     }
 
     SkDynamicMemoryWStream stream;
-    // JPEG-Bilder gehen unveraendert ins PDF, andere werden komprimiert (Skia verlangt beide Funktionen)
+    // JPEG images go into the PDF unchanged, others are compressed (Skia requires both functions)
     auto metadata = SkPDF::JPEG::MetadataWithCallbacks();
     auto title = document->title().utf8();
     metadata.fTitle = SkString(title.data(), title.length());

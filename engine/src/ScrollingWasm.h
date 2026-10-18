@@ -1,13 +1,13 @@
-// Scrollen im eigenen Thread (wie WPE: ScrollingCoordinatorCoordinated +
+// Scrolling in its own thread (like WPE: ScrollingCoordinatorCoordinated +
 // EventDispatcher in WebKit2).
 //
-// WebCore baut einen Scrolling-Baum (ScrollingTreeCoordinated) mit den
-// scrollbaren Bereichen und ihren Ebenen. Mausrad-Events gehen von der
-// Oberflaeche ueber den Compositor-Thread direkt an WebCores Scroll-Thread.
-// Der verschiebt die Ebenen und weckt den Compositor. Der Engine-Thread
-// bekommt das Event nur, wenn die Seite es braucht (wheel-Listener, nicht
-// scrollbare Bereiche), und erfaehrt die neue Scroll-Position danach.
-// So scrollt die Seite fluessig, auch wenn ihr JS den Engine-Thread blockiert.
+// WebCore builds a scrolling tree (ScrollingTreeCoordinated) with the
+// scrollable areas and their layers. Wheel events go from the host through the
+// compositor thread directly to WebCore's scrolling thread. It moves the layers
+// and wakes the compositor. The engine thread only gets the event when the
+// page needs it (wheel listeners, non-scrollable areas) and learns the new
+// scroll position afterwards. That way the page scrolls smoothly even when
+// its JS blocks the engine thread.
 #pragma once
 
 #include <WebCore/PlatformWheelEvent.h>
@@ -37,19 +37,19 @@ private:
 
 namespace Scrolling {
 
-// Engine-Thread: Mausrad wieder ueber den Engine-Thread (z.B. nach GPU-Verlust)
+// Engine thread: wheel through the engine thread again (e.g. after a GPU loss)
 void stopForView(int viewId);
 
-// Compositor-Thread: Mausrad-Event an den Scroll-Thread, sonst an den
-// Engine-Thread
+// Compositor thread: wheel event to the scrolling thread, otherwise to the
+// engine thread
 void wheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
 
-// Jeder Thread: hat die Seite an der Stelle einen wheel-Listener, der
-// preventDefault rufen kann (Wheel-Event-Regions)? Ohne Scroll-Thread: ja
+// Any thread: does the page have a wheel listener at that point that can call
+// preventDefault (wheel event regions)? Without a scrolling thread: yes
 bool mayCancelWheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
 
-// Compositor-Thread, nach jedem Bild: Scroll-Animationen weiterfuehren.
-// true = es laeuft eine, also bald wieder ein Bild
+// Compositor thread, after every frame: continue scroll animations.
+// true = one is running, so a frame again soon
 bool displayDidRefresh(int viewId);
 
 } // namespace Scrolling

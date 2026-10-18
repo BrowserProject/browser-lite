@@ -1,9 +1,9 @@
-// Kleine Parser fuer fragmentiertes MP4 und WebM (fuer MSE).
+// Small parsers for fragmented MP4 and WebM (for MSE).
 //
-// Dekodiert wird im Host-Browser, darum brauchen wir nur Spuren und die Zeit
-// jedes Samples (PTS, DTS, Dauer, Keyframe). Damit kennt WebCore `buffered`,
-// kann richtig springen und alten Speicher freigeben. Die Daten kommen in
-// beliebigen Stuecken (appendBuffer), die Parser merken sich den Rest.
+// Decoding happens in the host browser, so we only need the tracks and the
+// time of every sample (PTS, DTS, duration, key frame). With that WebCore
+// knows `buffered`, can seek correctly and free old memory. The data comes in
+// arbitrary pieces (appendBuffer), the parsers remember the rest.
 #pragma once
 
 #include <span>
@@ -44,13 +44,13 @@ public:
         Function<void(ParsedSample&&)> sample;
     };
 
-    // "video/mp4", "audio/webm", ... -> passender Parser oder nullptr
+    // "video/mp4", "audio/webm", ... -> matching parser or nullptr
     static std::unique_ptr<ContainerParser> create(const String& mimeType);
     virtual ~ContainerParser() = default;
 
-    // false: kaputte Daten
+    // false: broken data
     virtual bool append(std::span<const uint8_t>, Client&) = 0;
-    // abort(): angefangene Teile wegwerfen
+    // abort(): throw away started parts
     virtual void reset() = 0;
 };
 

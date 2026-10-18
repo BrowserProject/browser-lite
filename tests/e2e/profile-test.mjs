@@ -134,7 +134,7 @@ const opfsFiles = (page, dir) => page.evaluate(async (name) => {
         files.push(prefix + entry + ':' + (await child.getFile()).size);
     }
   };
-  await walk(await (await navigator.storage.getDirectory()).getDirectoryHandle(name), name + '/');
+  await walk(await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle(name), name + '/');
   return files;
 }, dir).catch((error) => [String(error)]);
 const lesen = (text) => Object.fromEntries((text || '').split(',').map((pair) => pair.split(':')));
@@ -166,7 +166,7 @@ check('Server: cookies.db, kleines localStorage und kleine IndexedDB im Profil',
 if (profile.cookies)
   check('Server: zwei Cookies, eines fuer die Sitzung', JSON.stringify(profile.cookies) === JSON.stringify([{ domain: '127.0.0.1', count: 2, session: 1 }]), JSON.stringify(profile.cookies));
 const localBig = await one.page.evaluate(async (name) => {
-  const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('localstorage');
+  const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')).getDirectoryHandle('localstorage');
   return (await (await dir.getFileHandle(name)).getFile()).size;
 }, `${originB}.localstorage`).catch(() => 0);
 check('Server: grosse IndexedDB und grosses localStorage nicht im Profil, bleiben auf Geraet 1',

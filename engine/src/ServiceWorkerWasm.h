@@ -1,16 +1,16 @@
-// Service Worker und SharedWorker im selben Prozess.
+// Service workers and shared workers in the same process.
 //
-// In WebKit2 verteilt sich das auf drei Prozesse: die Seite (SWClientConnection),
-// den Netzwerk-Prozess (SWServer, Fetch-Abfang) und einen Prozess, in dem der
-// Worker laeuft (SWContextManager). Hier ist alles im Engine-Thread, nur das JS
-// des Workers laeuft wie bei Web Workern in einem eigenen pthread. Die Teile
-// reden direkt miteinander, aber immer ueber den RunLoop (wie bei IPC), damit
-// WebCore die gleiche Reihenfolge sieht wie in WebKit2.
+// In WebKit2 this is spread over three processes: the page
+// (SWClientConnection), the network process (SWServer, fetch interception)
+// and a process the worker runs in (SWContextManager). Here everything is on
+// the engine thread, only the worker's JS runs in its own pthread like web
+// workers. The parts talk to each other directly, but always through the
+// RunLoop (like IPC), so WebCore sees the same order as in WebKit2.
 //
-// Registrierungen und Skripte bleiben unter /data/serviceworkers (SQLite).
+// Registrations and scripts stay under /data/serviceworkers (SQLite).
 //
-// SharedWorker: ein Worker pro Ursprung/URL/Name fuer alle Tabs (wie
-// WebSharedWorkerServer), mit eigener Page wie die Service Worker.
+// SharedWorker: one worker per origin/URL/name for all views (like
+// WebSharedWorkerServer), with its own page like the service workers.
 #pragma once
 
 #include <WebCore/NotificationEventType.h>
@@ -25,26 +25,26 @@ struct NotificationData;
 
 namespace BrowserLite::ServiceWorkers {
 
-// Beim Start der Engine (Engine-Thread), vor der ersten Page
+// At engine start (engine thread), before the first page
 void initialize();
 
-// Einstellungen fuer Seiten und die Pages der Worker
+// Settings for pages and the pages of the workers
 void enableIn(WebCore::Settings&);
 
-// LoaderStrategy: Anfrage an einen Service Worker geben, wenn einer zustaendig
-// ist. false = normal laden. Sonst ruft der Worker (oder die Antwort "nicht
-// behandelt") spaeter networkLoad() auf, um doch normal zu laden.
+// LoaderStrategy: hand a request to a service worker if one is responsible.
+// false = load normally. Otherwise the worker (or the answer "not handled")
+// later calls networkLoad() to load normally after all.
 bool startFetch(WebCore::ResourceLoader&, Function<void()>&& networkLoad);
-// Der Loader ist weg (abgebrochen oder fertig): true = es war ein Worker-Fetch
+// The loader is gone (cancelled or finished): true = it was a worker fetch
 bool cancelFetch(WebCore::ResourceLoader&);
 bool isFetching(const WebCore::ResourceLoader&);
 
-// FrameLoaderClient: das Laden eines Frames ist zu Ende, committed = mit neuem
-// Dokument (fuer WindowClient.navigate())
+// FrameLoaderClient: loading of a frame ended, committed = with a new document
+// (for WindowClient.navigate())
 void frameLoadEnded(WebCore::LocalFrame&, bool committed);
 
-// Klick oder Schliessen einer Benachrichtigung aus showNotification():
-// notificationclick/notificationclose im Worker der Registrierung
+// Click or close of a notification from showNotification():
+// notificationclick/notificationclose in the worker of the registration
 void notificationEvent(WebCore::NotificationData&&, WebCore::NotificationEventType);
 
 } // namespace BrowserLite::ServiceWorkers

@@ -1,10 +1,10 @@
-// Netzwerk-Lader fuer single-process WebCore.
+// Network loader for single-process WebCore.
 //
-// In WebKit2 laufen Ladevorgaenge im Network-Prozess (NetworkDataTaskCurl).
-// Wir haben keinen eigenen Prozess: jeder WebCore ResourceLoader bekommt hier
-// direkt einen CurlRequest. Aufbau angelehnt an NetworkDataTaskCurl (WebKit)
-// und BibResourceLoad aus github.com/theogbob/WebkitWasm (BSD-2-Clause,
-// Copyright (c) 2026 theogbob).
+// In WebKit2 loads run in the network process (NetworkDataTaskCurl). We have
+// no own process: every WebCore ResourceLoader gets a CurlRequest directly
+// here. Structure based on NetworkDataTaskCurl (WebKit) and BibResourceLoad
+// from github.com/theogbob/WebkitWasm (BSD-2-Clause, Copyright (c) 2026
+// theogbob).
 
 #include "config.h"
 #include "LoaderStrategy.h"
@@ -70,7 +70,7 @@ static void addCookieHeader(ResourceRequest& request)
         request.setHTTPHeaderField(HTTPHeaderName::Cookie, cookies);
 }
 
-// allowCookies ist false bei credentials: 'omit' oder fremden CSP-Reports
+// allowCookies is false for credentials: 'omit' or foreign CSP reports
 Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient& client)
 {
     if (request.httpUserAgent().isEmpty())
@@ -124,15 +124,15 @@ static bool redirectAsGET(const ResourceRequest& request, const ResourceResponse
     return crossOrigin && request.httpMethod() == "DELETE"_s;
 }
 
-// Naechste Anfrage nach einem Redirect wie in Chrome (Methode, Fragment,
-// Zugangsdaten). redirectCount zaehlt diesen Redirect schon mit.
+// Next request after a redirect like in Chrome (method, fragment,
+// credentials). redirectCount already counts this redirect.
 static Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
 {
     if (redirectCount > 20)
         return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Too many redirects"_s));
 
     URL target { response.url(), response.httpHeaderField(HTTPHeaderName::Location) };
-    // Eine Webseite darf nie auf lokale Dateien im WASM-Dateisystem umleiten
+    // A web page may never redirect to local files in the WASM file system
     if (target.protocolIsFile())
         return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Redirect to file: blocked"_s));
 
@@ -152,7 +152,7 @@ static Expected<ResourceRequest, ResourceError> redirectedRequest(const Resource
         request.clearHTTPAuthorization();
         request.clearHTTPOrigin();
     }
-    // Die Cookies fuer das neue Ziel setzt createCurlRequest
+    // createCurlRequest sets the cookies for the new target
     request.removeHTTPHeaderField(HTTPHeaderName::Cookie);
     return request;
 }
@@ -173,7 +173,7 @@ ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient
     return { };
 }
 
-// Ein Ladevorgang: ein ResourceLoader, ein CurlRequest (bei Redirects nacheinander mehrere)
+// One load: one ResourceLoader, one CurlRequest (several in turn with redirects)
 class ResourceLoad final : public RefCounted<ResourceLoad>, public CurlRequestClient {
 public:
     static Ref<ResourceLoad> create(ResourceLoader& loader, Function<void(ResourceLoad&)>&& done)
@@ -188,8 +188,8 @@ public:
 
     void start()
     {
-        debugLog("lade %s", m_loader->request().url().string().utf8().data());
-        // Zuerst im HTTP-Cache nachsehen (HttpCache.cpp)
+        debugLog("loading %s", m_loader->request().url().string().utf8().data());
+        // Look in the HTTP cache first (HttpCache.cpp)
         HttpCache::lookupForLoad(ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) {
             if (!m_loader)
                 return;
@@ -224,7 +224,7 @@ private:
 
     void serveFromCache(std::unique_ptr<HttpCache::Entry>&& entry, ResourceResponse::Source source)
     {
-        debugLog("aus dem Cache %s", m_loader->request().url().string().utf8().data());
+        debugLog("from the cache %s", m_loader->request().url().string().utf8().data());
         m_response = entry->response;
         m_response.setSource(source);
         m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }, body = WTF::move(entry->body)] {
@@ -248,7 +248,7 @@ private:
             done(*this);
     }
 
-    // Der ResourceLoader entscheidet ueber das neue Ziel (CORS, CSP, Service Worker)
+    // The ResourceLoader decides about the new target (CORS, CSP, service worker)
     void redirect()
     {
         auto request = redirectedRequest(m_loader->request(), m_response, ++m_redirectCount);
@@ -279,7 +279,7 @@ private:
             loader->didFail(error);
     }
 
-    // CurlRequestClient (Aufrufe kommen auf dem Engine-Thread an)
+    // CurlRequestClient (calls arrive on the engine thread)
     void curlDidSendData(CurlRequest&, unsigned long long sent, unsigned long long total) final
     {
         Ref protectedThis { *this };
@@ -294,10 +294,10 @@ private:
             return;
 
         m_response = networkResponse(curlResponse);
-        debugLog("Antwort %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
+        debugLog("response %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
         storeCookies(request.resourceRequest(), curlResponse);
 
-        // Bedingte Anfrage aus dem Cache: 304 heisst, der gespeicherte Inhalt stimmt noch
+        // Conditional request from the cache: 304 means the stored content is still right
         if (auto entry = std::exchange(m_cachedEntry, nullptr); entry && m_response.httpStatusCode() == 304) {
             if (auto old = std::exchange(m_curlRequest, nullptr)) {
                 old->cancel();
@@ -313,7 +313,7 @@ private:
             return;
         }
 
-        // Cachebar? Dann den Inhalt mitschreiben (HttpCache.cpp)
+        // Cacheable? Then write the content along (HttpCache.cpp)
         m_storing = HttpCache::isStorable(m_loader->request(), m_response);
         m_responseTime = WallTime::now();
         m_cacheBody.reset();
@@ -346,7 +346,7 @@ private:
         if (!m_loader || m_curlRequest != &request)
             return;
         RefPtr loader = m_loader;
-        debugLog("fertig %s", loader->url().string().utf8().data());
+        debugLog("done %s", loader->url().string().utf8().data());
         if (std::exchange(m_storing, false))
             HttpCache::store(loader->request(), m_response, m_responseTime, m_cacheBody.takeBuffer().get());
         finish();
@@ -356,7 +356,7 @@ private:
     void curlDidFailWithError(CurlRequest& request, ResourceError&& error, CertificateInfo&&) final
     {
         Ref protectedThis { *this };
-        log("Laden fehlgeschlagen (%d): %s %s", error.errorCode(), error.failingURL().string().utf8().data(), error.localizedDescription().utf8().data());
+        log("Load failed (%d): %s %s", error.errorCode(), error.failingURL().string().utf8().data(), error.localizedDescription().utf8().data());
         if (!m_loader || m_curlRequest != &request)
             return;
         fail(error);
@@ -367,18 +367,18 @@ private:
     Function<void(ResourceLoad&)> m_done;
     ResourceResponse m_response;
     unsigned m_redirectCount { 0 };
-    // HTTP-Cache: Eintrag, der gerade nachgeprueft wird, und was gespeichert wird
+    // HTTP cache: entry being revalidated, and what is stored
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     bool m_storing { false };
     WallTime m_responseTime;
     SharedBufferBuilder m_cacheBody;
 };
 
-// Fire-and-forget fuer sendBeacon, <a ping> und Reports, die Seite sieht die
-// Antwort nicht. Prueft wie NetworkLoadChecker fuer PingLoad in WebKit2: Cookies
-// nach credentials, im Modus cors fuer fremde Ziele Origin und Preflight, bei
-// Redirects CORS und CSP (connect-src) fuer das neue Ziel. Die erste Anfrage
-// hat WebCore schon gegen die CSP geprueft. Reports folgen keinem Redirect.
+// Fire-and-forget for sendBeacon, <a ping> and reports, the page does not see
+// the response. Checks like NetworkLoadChecker for PingLoad in WebKit2: cookies
+// by credentials, in cors mode Origin and preflight for foreign targets, on
+// redirects CORS and CSP (connect-src) for the new target. WebCore already
+// checked the first request against the CSP. Reports follow no redirect.
 class PingLoad final : public RefCounted<PingLoad>, public CurlRequestClient {
 public:
     static void start(Document& document, const ResourceRequest& request, const HTTPHeaderMap& originalHeaders, const FetchOptions& options, ContentSecurityPolicyImposition policyCheck, LoaderStrategy::PingLoadCompletionHandler&& completion)
@@ -402,7 +402,7 @@ private:
         , m_credentials(options.credentials == FetchOptions::Credentials::Omit ? StoredCredentialsPolicy::DoNotUse : StoredCredentialsPolicy::Use)
         , m_completion(WTF::move(completion))
     {
-        // Eine Kopie: das Dokument kann weg sein, bevor der Redirect kommt
+        // A copy: the document may be gone before the redirect arrives
         if (auto* policy = document.contentSecurityPolicy(); policy && policyCheck == ContentSecurityPolicyImposition::DoPolicyCheck && !document.shouldBypassMainWorldContentSecurityPolicy()) {
             m_contentSecurityPolicy = makeUnique<ContentSecurityPolicy>(URL { m_origin->toRawString() }, nullptr, nullptr);
             m_contentSecurityPolicy->didReceiveHeaders(policy->responseHeaders(), String { request.httpReferrer() }, ContentSecurityPolicy::ReportParsingErrors::No);
@@ -411,8 +411,8 @@ private:
 
     bool canRequest(const URL& url) const { return m_origin->canRequest(url, OriginAccessPatternsForWebProcess::singleton()); }
 
-    // Fuer Preflight und Preflight-Cache zaehlen die Header der Seite, nicht
-    // die von WebCore dazugefuegten
+    // For preflight and the preflight cache the page's headers count, not
+    // those WebCore added
     ResourceRequest withOriginalHeaders(const ResourceRequest& request) const
     {
         ResourceRequest copy { request };
@@ -420,7 +420,7 @@ private:
         return copy;
     }
 
-    // NetworkLoadChecker::continueCheckingRequest und checkCORSRequest
+    // NetworkLoadChecker::continueCheckingRequest and checkCORSRequest
     void check(ResourceRequest&& request)
     {
         bool sameOrigin = canRequest(request.url());
@@ -464,7 +464,7 @@ private:
         }
         if (next->httpMethod() != previousMethod)
             m_originalHeaders.removeRequestBodyHeaders();
-        // Fetch, HTTP-redirect fetch Schritt 10: weiter mit undurchsichtigem Ursprung
+        // Fetch, HTTP-redirect fetch step 10: continue with an opaque origin
         if (m_options.mode == FetchOptions::Mode::Cors && !canRequest(previousURL) && !protocolHostAndPortAreEqual(previousURL, next->url()))
             m_origin = SecurityOrigin::createOpaque();
         check(WTF::move(*next));
@@ -495,7 +495,7 @@ private:
         if (auto completion = std::exchange(m_completion, nullptr))
             completion(error, m_response);
         stop();
-        m_self = nullptr; // gibt uns frei
+        m_self = nullptr; // releases us
     }
 
     void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
@@ -542,9 +542,9 @@ private:
     unsigned m_redirectCount { 0 };
 };
 
-// Download: eigener CurlRequest, die Daten gehen stueckweise an die Oberflaeche,
-// die daraus eine Datei (Blob) macht. data: und blob: hat die Engine schon
-// selber, die gehen ohne Netz.
+// Download: own CurlRequest, the data goes piece by piece to the host, which
+// makes a file (Blob) from it. The engine already has data: and blob: itself,
+// those need no network.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
     static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
@@ -598,8 +598,8 @@ private:
         finish({ });
     }
 
-    // download-start: Name wie in Chrome aus download=, Content-Disposition
-    // oder der Adresse. Eine data:-Adresse hat keinen Namen und ist oft riesig.
+    // download-start: name like in Chrome from download=, Content-Disposition
+    // or the address. A data: address has no name and is often huge.
     void announce(const ResourceResponse& response)
     {
         bool isData = response.url().protocolIsData();
@@ -617,7 +617,7 @@ private:
 
     static String errorText(const ResourceError& error)
     {
-        return error.localizedDescription().isEmpty() ? "Fehler"_s : error.localizedDescription();
+        return error.localizedDescription().isEmpty() ? "Error"_s : error.localizedDescription();
     }
 
     void finish(const String& error)
@@ -627,7 +627,7 @@ private:
             request->cancel();
             request->invalidateClient();
         }
-        m_self = nullptr; // gibt uns frei
+        m_self = nullptr; // releases us
     }
 
     void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
@@ -644,7 +644,7 @@ private:
             return;
         }
         announce(response);
-        // Wie Chrome: eine Fehlerseite ist keine Datei (Quelltext zeigt sie aber)
+        // Like Chrome: an error page is no file (view source shows it though)
         if (!m_viewSource && response.httpStatusCode() >= 400) {
             finish(makeString("HTTP "_s, response.httpStatusCode()));
             return;
@@ -669,7 +669,7 @@ private:
     int m_id;
     int m_viewId;
     String m_filename;
-    // Quelltext anzeigen: die Oberflaeche zeigt die Daten als Text statt zu speichern
+    // View source: the host shows the data as text instead of saving it
     bool m_viewSource { false };
     unsigned m_redirectCount { 0 };
     RefPtr<CurlRequest> m_request;
@@ -689,7 +689,7 @@ void startViewSource(int viewId, const URL& url)
     Download::start(viewId, WTF::move(request), { }, true);
 }
 
-// Favicon fuer den Tab: klein, ganz im Speicher, geht als Ganzes an die Oberflaeche
+// Favicon for the view: small, entirely in memory, goes to the host as a whole
 class IconLoad final : public RefCounted<IconLoad>, public CurlRequestClient {
 public:
     static void start(int viewId, const URL& url)
@@ -717,7 +717,7 @@ private:
 
     void done(bool success)
     {
-        // Auch ohne Icon melden, damit die Oberflaeche das alte Icon entfernt
+        // Report even without an icon, so the host removes the old icon
         if (!success)
             m_data.clear();
         sendIconData(m_viewId, m_url.string(), m_mimeType, m_data.span());
@@ -725,7 +725,7 @@ private:
             request->cancel();
             request->invalidateClient();
         }
-        m_self = nullptr; // gibt uns frei
+        m_self = nullptr; // releases us
     }
 
     void curlDidSendData(CurlRequest&, unsigned long long, unsigned long long) final { }
@@ -734,7 +734,7 @@ private:
         Ref protectedThis { *this };
         storeCookies(request.resourceRequest(), curlResponse);
         ResourceResponse response(curlResponse);
-        // /favicon.ico liegt oft hinter einem Redirect (http -> https, www, CDN)
+        // /favicon.ico is often behind a redirect (http -> https, www, CDN)
         if (isRedirect(response)) {
             if (!followRedirect(m_request, *this, response, m_redirectCount).isNull())
                 done(false);
@@ -782,12 +782,12 @@ class WasmLoaderStrategy final : public LoaderStrategy {
 private:
     void schedule(ResourceLoader& loader)
     {
-        // data: und blob: kann WebCore selber (ResourceLoader::start)
+        // WebCore handles data: and blob: itself (ResourceLoader::start)
         if (loader.request().url().protocolIsData() || loader.request().url().protocolIsBlob()) {
             loader.start();
             return;
         }
-        // Zuerst ein zustaendiger Service Worker; der kann es ans Netz zurueckgeben
+        // A responsible service worker first; it can hand it back to the network
         if (ServiceWorkers::startFetch(loader, [this, loader = Ref { loader }] { startNetworkLoad(loader); }))
             return;
         startNetworkLoad(loader);
@@ -805,7 +805,7 @@ private:
 
     void loadResource(LocalFrame& frame, CachedResource& resource, ResourceRequest&& request, const ResourceLoaderOptions& options, CompletionHandler<void(RefPtr<SubresourceLoader>&&)>&& completion) final
     {
-        // Gespeicherten Bytecode holen, waehrend das Skript laedt
+        // Fetch stored bytecode while the script loads
         if (resource.type() == CachedResource::Type::Script)
             BytecodeCache::prefetch(request.url());
         SubresourceLoader::create(frame, resource, WTF::move(request), options, [this, completion = WTF::move(completion)](RefPtr<SubresourceLoader>&& loader) mutable {
@@ -817,8 +817,8 @@ private:
 
     void loadResourceSynchronously(FrameLoader&, ResourceLoaderIdentifier, const ResourceRequest& request, ClientCredentialPolicy, const FetchOptions&, const HTTPHeaderMap&, ResourceError& error, ResourceResponse&, Vector<uint8_t>&) final
     {
-        // Synchrones XHR wuerde den einzigen Engine-Thread blockieren, waehrend
-        // die Antwort genau auf diesem Thread verarbeitet werden muesste.
+        // Synchronous XHR would block the only engine thread, while the response
+        // would have to be processed on exactly this thread.
         error = ResourceError(errorDomain, 0, request.url(), "Synchronous loads are not supported"_s);
     }
 
@@ -852,7 +852,7 @@ private:
 
     void preconnectTo(FrameLoader&, ResourceRequest&&, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&& completion) final
     {
-        // curl hat seinen eigenen Verbindungs-Pool, vorab verbinden lohnt sich nicht
+        // curl has its own connection pool, preconnecting is not worth it
         if (completion)
             completion({ });
     }

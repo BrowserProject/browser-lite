@@ -1,9 +1,8 @@
-// browser-lite Engine: gemeinsame Deklarationen.
+// browser-lite engine: shared declarations.
 //
-// Die Engine laeuft komplett in EINEM Thread (dem "Engine-Thread", ein Web
-// Worker via Emscripten pthreads). Alle WebCore-Objekte duerfen nur dort
-// angefasst werden. Aufrufe von der UI (Haupt-Thread der Seite) kommen ueber
-// runOnEngineThread() hierher.
+// The engine runs entirely on ONE thread (the "engine thread", a web worker
+// via Emscripten pthreads). WebCore objects may only be touched there. Calls
+// from the host (main thread of the page) get here via runOnEngineThread().
 #pragma once
 
 #include <pthread.h>
@@ -13,30 +12,30 @@
 
 namespace BrowserLite {
 
-// Engine-Thread (wird in main() gesetzt)
+// Engine thread (set in main())
 void setEngineThread();
 bool isEngineThread();
-// pthread des Engine-Threads, 0 solange er nicht laeuft
+// pthread of the engine thread, 0 while it is not running
 pthread_t engineThread();
 
-// Funktion auf dem Engine-Thread ausfuehren (von jedem Thread aus aufrufbar).
-// Laeuft asynchron, sobald der Engine-Thread wieder im Event-Loop ist.
+// Runs a function on the engine thread (callable from any thread).
+// Runs asynchronously as soon as the engine thread is back in the event loop.
 void runOnEngineThread(Function<void()>&&);
 
-// Event-Loop (EngineLoop.cpp)
+// Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
-// Nach einem synchronen Warten auf den Nutzer (alert, confirm, prompt): die
-// Zeit bis dahin zaehlt nicht fuer den Abbruch blockierender Skripte
+// After a synchronous wait for the user (alert, confirm, prompt): the time
+// until then does not count for aborting blocking scripts
 void restartScriptWatchdog();
 
 // navigator.permissions.query() (Permissions.cpp)
 void installPermissionController();
 
-// Log-Ausgabe, landet in der Konsole des Host-Browsers
+// Log output, ends up in the console of the host browser
 void log(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
 
-// Nur mit Umgebungsvariable BL_DEBUG (Oberflaeche: ?debug=1), mit Zeitstempel in ms
+// Only with BL_DEBUG, with a timestamp in ms
 bool debugEnabled();
 void debugLog(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
 

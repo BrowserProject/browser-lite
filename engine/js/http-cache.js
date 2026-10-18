@@ -1,29 +1,30 @@
-// HTTP-Cache der Engine (engine/src/HttpCache.cpp), Teil im Haupt-Thread.
+// HTTP cache of the engine (engine/src/HttpCache.cpp), the part on the main thread.
 //
-// Die Eintraege liegen in der Cache API des Host-Browsers (auf der Platte,
-// wird nur bei Bedarf gelesen). Die Liste der URLs halten wir im Speicher,
-// so kostet eine Anfrage, die nicht im Cache ist, keinen Plattenzugriff.
+// The entries live in the Cache API of the host browser (on disk, only read
+// when needed), in the cache "<namespace>-http". The list of URLs is kept in
+// memory, so a request that is not in the cache costs no disk access.
 //
-// Grenze: 400 MB, hoechstens ein Viertel der Quote des Host. Gezaehlt wird
-// nur der eigene Inhalt (Header x-bl-size), nicht was sonst im OPFS oder in
-// der Cache API des Host liegt. Darueber, oder wenn die Quote voll ist, fallen
-// die aeltesten Eintraege weg, bis noch 80 % belegt sind.
+// Limit: 400 MB, at most a quarter of the host's quota. Only the own content
+// counts (header x-bl-size), not what else is in the OPFS or in the host's
+// Cache API. Above it, or when the quota is full, the oldest entries go away
+// until 80 % are used.
 var blHttpCache = {
-  name: 'bl-http-v2',
+  name: null,
   sizeHeader: 'x-bl-size',
   limit: 400 * 1024 * 1024,
   ready: null,
   cache: null,
   urls: null,
-  // Belegte Bytes, null bis zum ersten Aufraeumen (dann einmal gezaehlt)
+  // Used bytes, null until the first cleanup (counted once then)
   total: null,
   trimming: null,
 
   open: function () {
     if (blHttpCache.ready)
       return blHttpCache.ready;
-    if (typeof caches === 'undefined' || Module['blHttpCacheDisabled'])
+    if (typeof caches === 'undefined')
       return blHttpCache.ready = Promise.resolve(null);
+    blHttpCache.name = blStorageNamespace() + '-http';
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (estimate) {
         if (estimate.quota)
@@ -62,7 +63,7 @@ var blHttpCache = {
     }).catch(function () { blHttpCache.reply(id, 0, '', null); });
   },
 
-  // Ohne Speicher in der Engine wird es ein Fehlschlag (status 0)
+  // Without memory in the engine it becomes a miss (status 0)
   reply: function (id, status, headers, body) {
     var headerBytes = new TextEncoder().encode(headers);
     var bodyLength = body ? body.length : 0;
@@ -71,14 +72,14 @@ var blHttpCache = {
     if (!headerPointer || (bodyLength && !bodyPointer)) {
       Module['_free'](headerPointer);
       Module['_free'](bodyPointer);
-      Module['_bl_http_cache_result'](id, 0, 0, 0, 0, 0);
+      Module['_bl__http_cache_result'](id, 0, 0, 0, 0, 0);
       return;
     }
     HEAPU8.set(headerBytes, headerPointer);
     HEAPU8[headerPointer + headerBytes.length] = 0;
     if (bodyLength)
       HEAPU8.set(body, bodyPointer);
-    Module['_bl_http_cache_result'](id, status, headerPointer, headerBytes.length, bodyPointer, bodyLength);
+    Module['_bl__http_cache_result'](id, status, headerPointer, headerBytes.length, bodyPointer, bodyLength);
   },
 
   store: function (url, status, headerText, body) {
@@ -90,7 +91,7 @@ var blHttpCache = {
         var colon = line.indexOf(':');
         if (colon <= 0)
           return;
-        // Werte ausserhalb von Latin-1 kann Headers nicht, nur dieses Feld fehlt dann
+        // Headers cannot hold values outside of Latin-1, only this field is missing then
         try {
           headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
         } catch (e) { }
@@ -114,10 +115,10 @@ var blHttpCache = {
     }).catch(function () { });
   },
 
-  // Die aeltesten Eintraege loeschen (Reihenfolge der Cache API = Reihenfolge
-  // des Speicherns). force: die Quote ist voll, auch unter der Grenze
-  // aufraeumen. Die Groesse kommt je Schluessel, damit ein put dazwischen die
-  // beiden Listen nicht gegeneinander verschiebt.
+  // Deletes the oldest entries (order of the Cache API = order of storing).
+  // force: the quota is full, clean up even below the limit. The size is read
+  // per key, so a put in between does not shift the two lists against each
+  // other.
   trim: function (force) {
     if (blHttpCache.trimming)
       return blHttpCache.trimming;
@@ -143,8 +144,8 @@ var blHttpCache = {
         }));
       });
     }).catch(function () {
-      // Nicht bei jedem Speichern neu zaehlen; ist die Quote voll, raeumt
-      // store trotzdem auf (force)
+      // Do not count again on every store; if the quota is full, store cleans
+      // up anyway (force)
       if (blHttpCache.total === null)
         blHttpCache.total = 0;
     }).then(function () {
@@ -153,7 +154,8 @@ var blHttpCache = {
     return blHttpCache.trimming;
   },
 };
+// Host: deletes the HTTP cache of this namespace (browser.storage.clearCaches)
 Module['blClearHttpCache'] = function () {
   blHttpCache.ready = null;
-  return typeof caches === 'undefined' ? Promise.resolve() : caches.delete(blHttpCache.name);
+  return typeof caches === 'undefined' ? Promise.resolve() : caches.delete(blStorageNamespace() + '-http');
 };

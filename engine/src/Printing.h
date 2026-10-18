@@ -1,6 +1,6 @@
-// Drucken wie in Chrome: die Seite wird mit @media print in Seiten umbrochen
-// und mit Skias PDF-Ausgabe zu einem PDF (A4, 1 cm Rand). Die Oberflaeche
-// zeigt das PDF an und oeffnet den Druckdialog des Host-Browsers.
+// Printing like in Chrome: the page is broken into pages with @media print and
+// becomes a PDF with Skia's PDF output (A4, 1 cm margin). The host shows the
+// PDF and opens the print dialog of the host browser.
 #pragma once
 
 namespace WebCore {
@@ -9,7 +9,7 @@ class LocalFrame;
 
 namespace BrowserLite {
 
-// window.print() oder Strg+P (Engine-Thread)
+// window.print() or Ctrl+P (engine thread)
 void printFrame(int viewId, WebCore::LocalFrame&);
 
 } // namespace BrowserLite

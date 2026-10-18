@@ -1,7 +1,7 @@
-// Daten fuer das Host-<video>: der Service Worker (web/sw.js) fragt ein Stueck
-// der Datei an (Range), die Engine laedt es und gibt Kopf und Daten an die
-// Oberflaeche weiter. HTTP mit curl ueber das Relay, mit Cookies und Referrer
-// der Seite; blob: und data: aus dem Speicher (BlobResourceHandle, kann Range).
+// Data for the host <video>: the service worker asks for a piece of the file
+// (Range), the engine loads it and hands head and data to the host. HTTP with
+// curl through the transport, with cookies and referrer of the page; blob: and
+// data: from memory (BlobResourceHandle, can do Range).
 #include "config.h"
 #include "MediaFetch.h"
 
@@ -56,7 +56,7 @@ protected:
             m_range = end >= 0 ? makeString("bytes="_s, static_cast<uint64_t>(start), '-', static_cast<uint64_t>(end)) : makeString("bytes="_s, static_cast<uint64_t>(start), '-');
     }
 
-    // Laden loslassen (und abbrechen), danach kommt kein Rueckruf mehr
+    // Let go of the load (and cancel it), no callback comes afterwards
     virtual void detach(bool cancelLoad) = 0;
 
     ResourceRequest request(const URL& url) const
@@ -118,7 +118,7 @@ public:
         request.setFirstPartyForCookies(url);
         if (!m_referrer.isEmpty())
             request.setHTTPReferrer(m_referrer);
-        // Kein gzip: die Byte-Positionen muessen zur Datei passen
+        // No gzip: the byte positions have to match the file
         request.setHTTPHeaderField(HTTPHeaderName::AcceptEncoding, "identity"_s);
         m_request = createCurlRequest(WTF::move(request), *this);
         m_request->resume();
@@ -245,7 +245,7 @@ void startMediaFetch(int playerId, int fetchId, double start, double end)
 {
     auto* player = MediaPlayerPrivateWasm::fromId(playerId);
     if (!player) {
-        sendMediaFetch(fetchId, "error"_s, "{\"message\":\"kein Player\"}"_s);
+        sendMediaFetch(fetchId, "error"_s, "{\"message\":\"no player\"}"_s);
         return;
     }
     if (RefPtr blob = player->blob()) {

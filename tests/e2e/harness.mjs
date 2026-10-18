@@ -156,8 +156,10 @@ export async function startStack({ token, allowLocal = true, engine = engineDir 
     relayURL: `ws://127.0.0.1:${relay.port}/wisp/`,
     uiURL: `http://localhost:${ui.port}/`,
     // Adresse der Oberflaeche mit diesem Relay und Token, dazu weitere Parameter (url, debug, ...)
+    // BL_TEST_HOOKS: the tests evaluate scripts through __blEval (engine/abi.json)
     app(params = {}) {
-      const query = new URLSearchParams({ relay: stack.relayURL, token, ...(VERBOSE ? { debug: '1' } : {}), ...params });
+      const env = ['BL_TEST_HOOKS=1', params.env].filter(Boolean).join(',');
+      const query = new URLSearchParams({ relay: stack.relayURL, token, ...(VERBOSE ? { debug: '1' } : {}), ...params, env });
       return `${stack.uiURL}?${query}`;
     },
     // Relay faellt aus und kommt auf demselben Port wieder
