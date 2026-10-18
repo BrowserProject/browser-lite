@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# Haengt an engine.wasm eine Custom Section "bl_build_id" an: Anfang des
-# SHA-256 des Moduls ohne diese Section. Die Engine liest sie zur Laufzeit
-# (engine/src/BytecodeCache.cpp), so passt die ID sicher zum laufenden Code.
+# Appends a custom section "bl_build_id" to engine.wasm: the start of the
+# SHA-256 of the module without this section. The engine reads it at runtime
+# (engine/src/BytecodeCache.cpp), so the ID always matches the running code.
+# tools/engine-manifest.mjs copies it into manifest.json.
 import hashlib
 import sys
 
@@ -34,7 +35,7 @@ def read_leb(data, pos):
 def main(path):
     data = open(path, 'rb').read()
     if data[:4] != b'\0asm':
-        sys.exit(f'{path}: kein WebAssembly')
+        sys.exit(f'{path}: not WebAssembly')
     out = bytearray(data[:8])
     pos = 8
     while pos < len(data):
@@ -53,7 +54,7 @@ def main(path):
     payload = leb(len(NAME)) + NAME + build_id
     out += b'\0' + leb(len(payload)) + payload
     open(path, 'wb').write(out)
-    print(f'Build-ID {build_id.decode()}')
+    print(f'Build ID {build_id.decode()}')
 
 
 if __name__ == '__main__':

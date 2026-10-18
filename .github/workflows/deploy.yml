@@ -1,8 +1,8 @@
 name: Deploy
 
-# Nach gruener CI auf main (oder von Hand): Image mit Relay + Seite bauen, testen, nach
-# ghcr.io pushen und auf dem Server neu starten. Der Server ist der Self-hosted Runner mit
-# Label browser-lite-deploy (apps/demo/deploy/setup-proxmox.sh).
+# After a green CI on main (or by hand): build and test the images (tools/build-images.sh), push
+# the demo image to ghcr.io and restart it on the server. The server is the self-hosted runner
+# with the label browser-lite-deploy (apps/demo/deploy/setup-proxmox.sh).
 
 on:
   workflow_run:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: "ID eines gruenen Push-Laufs der CI auf main (leer = letzter gruener)"
+        description: "ID of a green push run of the CI on main (empty = latest green one)"
         required: false
 
 permissions:
@@ -26,8 +26,8 @@ concurrency:
 
 jobs:
   image:
-    name: Image bauen + testen
-    # Nur Pushes aus diesem Repo (ein Fork-Branch "main" darf nie deployen)
+    name: Build and test the images
+    # Only pushes of this repository (a fork branch "main" must never deploy)
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
@@ -38,7 +38,7 @@ jobs:
       image: ${{ steps.push.outputs.image }}
       sha: ${{ steps.run.outputs.sha }}
     steps:
-      - name: CI-Lauf bestimmen
+      - name: Find the CI run
         id: run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,79 +47,71 @@ jobs:
           if [ -z "$RUN_ID" ]; then
             RUN_ID="$(gh run list -R "$GITHUB_REPOSITORY" -w CI -b main -e push -s success -L 1 --json databaseId --jq '.[0].databaseId')"
           fi
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Ungueltige Lauf-ID: $RUN_ID"; exit 1; }
-          # Auch fuer eine von Hand angegebene ID: nur ein gruener Push-Lauf der CI auf main
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid run ID: $RUN_ID"; exit 1; }
+          # Also for an ID given by hand: only a green push run of the CI on main
           IFS=$'\t' read -r workflow event branch conclusion sha < <(gh run view "$RUN_ID" -R "$GITHUB_REPOSITORY" \
             --json workflowName,event,headBranch,conclusion,headSha --jq '[.workflowName,.event,.headBranch,.conclusion,.headSha] | @tsv')
           if [ "$workflow/$event/$branch/$conclusion" != CI/push/main/success ] || [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Lauf $RUN_ID ist kein gruener Push-Lauf der CI auf main ($workflow, $event, $branch, $conclusion, $sha)"
+            echo "::error::Run $RUN_ID is no green push run of the CI on main ($workflow, $event, $branch, $conclusion, $sha)"
             exit 1
           fi
           echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          # The demo site the CI tested (job e2e-demo), if the run has it
+          site="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?name=demo-site" --jq '[.artifacts[] | select(.expired | not)] | length')"
+          echo "site=$([ "$site" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ steps.run.outputs.sha }}
-      - name: Node-Version aus versions.env
+      - name: Node version from versions.env
         run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Engine-Artefakt holen
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-        with:
-          name: engine
-          path: engine-build
-          run-id: ${{ steps.run.outputs.id }}
-          github-token: ${{ github.token }}
-      - name: Build the packages (the image copies packages/server/dist, the demo uses them)
+      - name: Build the packages (the images copy packages/server/dist)
         run: |
           npm ci
           npm run build
-      - name: Package the demo
-        run: tools/package-demo.sh engine-build build/demo
-      - name: Image bauen
-        id: build
-        run: |
-          source versions.env
-          tag="$DEMO_IMAGE:${{ steps.run.outputs.sha }}"
-          docker build -t "$tag" -t "$DEMO_IMAGE:main" --build-arg NODE_IMAGE="$NODE_IMAGE" \
-            --label org.opencontainers.image.source="https://github.com/$GITHUB_REPOSITORY" \
-            --label org.opencontainers.image.revision="${{ steps.run.outputs.sha }}" .
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Image testen (Seite, Header, Kompression, Relay, Profil)
-        env:
-          TAG: ${{ steps.build.outputs.tag }}
-        run: |
-          docker run -d --name smoke --read-only --tmpfs /data:uid=1000,gid=1000 --cap-drop ALL -p 8080:8080 "$TAG"
-          trap 'docker logs smoke; docker rm -f smoke >/dev/null' EXIT
-          timeout 30 sh -c 'until curl -fs http://127.0.0.1:8080/healthz; do sleep 1; done'
-          curl -fsI http://127.0.0.1:8080/ | tee /dev/stderr | grep -qi '^cross-origin-embedder-policy: require-corp'
-          wasm="$(cd build/demo && ls engine/*/engine.wasm)"
-          curl -fsI -H 'Accept-Encoding: br' "http://127.0.0.1:8080/$wasm" | tee /dev/stderr | grep -qi '^content-encoding: br'
-          code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-            'http://127.0.0.1:8080/wisp/' || true)"
-          [ "$code" = 101 ] || { echo "Relay nimmt keine WebSocket-Verbindung an: $code statt 101"; exit 1; }
-          curl -fsS http://127.0.0.1:8080/profile/info | tee /dev/stderr | grep -q '"maxBytes"'
-          docker stop -t 5 smoke >/dev/null
-          [ "$(docker inspect --format '{{.State.ExitCode}}' smoke)" = 0 ] || { echo "Container endet nicht sauber auf SIGTERM"; exit 1; }
-      - name: Bei ghcr.io anmelden
+      - name: Get the tested demo site
+        if: steps.run.outputs.site == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: demo-site
+          path: build/demo
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+      - name: Get the packaged engine
+        if: steps.run.outputs.site != 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: engine-dist
+          path: build/engine-dist
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+      - name: Package the demo (runs without the demo-site artifact)
+        if: steps.run.outputs.site != 'true'
+        run: tools/package-demo.sh build/engine-dist build/demo
+      - name: Build and test the images (headers, compression, relay, profile, SIGTERM)
+        run: tools/build-images.sh build/demo "${{ steps.run.outputs.sha }}"
+      - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Image pushen
+      - name: Push the demo image
         id: push
+        env:
+          SHA: ${{ steps.run.outputs.sha }}
         run: |
           source versions.env
-          docker push "${{ steps.build.outputs.tag }}"
+          docker tag "$DEMO_IMAGE:$SHA" "$DEMO_IMAGE:main"
+          docker push "$DEMO_IMAGE:$SHA"
           docker push "$DEMO_IMAGE:main"
-          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "${{ steps.build.outputs.tag }}")" >> "$GITHUB_OUTPUT"
+          echo "image=$(docker inspect --format '{{index .RepoDigests 0}}' "$DEMO_IMAGE:$SHA")" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Auf dem Server neu starten
+    name: Restart on the server
     needs: image
     runs-on: [browser-lite-deploy]
     permissions:
@@ -128,20 +120,20 @@ jobs:
     env:
       IMAGE: ${{ needs.image.outputs.image }}
       DIR: /opt/browser-lite
-    # Auf dem Runner im LAN laeuft keine fremde Action, compose.yml kommt direkt von der API
+    # No foreign action runs on the runner in the LAN, compose.yml comes directly from the API
     steps:
-      - name: compose.yml holen
+      - name: Get compose.yml
         env:
           TOKEN: ${{ github.token }}
           SHA: ${{ needs.image.outputs.sha }}
         run: |
           printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -fsSL --retry 3 --config - \
             -H 'Accept: application/vnd.github.raw' -o "$RUNNER_TEMP/compose.yml" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/apps/demo/deploy/compose.yml?ref=$SHA"
-      - name: Bei ghcr.io anmelden
+      - name: Log in to ghcr.io
         env:
           TOKEN: ${{ github.token }}
         run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Neu starten
+      - name: Restart
         run: |
           install -m 644 "$RUNNER_TEMP/compose.yml" "$DIR/compose.yml"
           printf 'IMAGE=%s\n' "$IMAGE" > "$DIR/image.env"
@@ -150,9 +142,9 @@ jobs:
           docker compose -p browser-lite --env-file image.env up -d --wait --wait-timeout 60
           curl -fsS http://127.0.0.1:8080/healthz
           running="$(docker inspect --format '{{.Image}}' browser-lite-browser-lite-1)"
-          [ "$running" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")" ] || { echo "Falsches Image laeuft"; exit 1; }
-      - name: Alte Images entfernen
+          [ "$running" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")" ] || { echo "Wrong image running"; exit 1; }
+      - name: Remove old images
         run: docker image prune -af
-      - name: Abmelden
+      - name: Log out
         if: always()
         run: docker logout ghcr.io

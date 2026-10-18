@@ -3,14 +3,11 @@
 
 # Still German, translated during the restructuring (remove the line when done)
 german README.md            translation pending
-german versions.env         translation pending
-german LICENSE              translation pending
-german .github/*            translation pending
 german docs/*               translation pending
-german tools/*              translation pending
 ascii docs/*                translation pending
 
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
-german toolchain/*          comments change the toolchain image tag
+german toolchain/Dockerfile comments change the toolchain image tag
+german toolchain/*.cpp      comments change the toolchain image tag
 german engine/patches/*     comments change WebKit sources
 

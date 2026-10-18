@@ -308,6 +308,17 @@ jobs:
       - name: Engine tests in node (pages, error page, GC stress)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS "$IMAGE" node tests/run.mjs engine
+      # The license texts come from the dependency archives (tools/licenses.txt)
+      - name: Downloads from cache (license texts)
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: third_party/downloads
+          key: downloads-${{ hashFiles('deps/sources.txt') }}
+          restore-keys: downloads-
+      - name: Package the engine (content hash, .br/.gz, manifest.json, THIRD_PARTY_NOTICES.txt)
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src -e GITHUB_SHA -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL "$IMAGE" \
+            tools/package-engine.sh build/webcore/bin build/engine-dist
       - name: Engine as artifact
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -317,6 +328,13 @@ jobs:
             build/webcore/bin/engine.js
             build/webcore/bin/engine.wasm
             build/webcore/bin/engine.data
+          retention-days: 14
+      - name: Packaged engine as artifact (deploy, release)
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: engine-dist
+          path: build/engine-dist
           retention-days: 14
       - name: Render image as artifact
         if: always()

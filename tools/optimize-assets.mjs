@@ -8,6 +8,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { wasmSections } from './wasm-sections.mjs';
 
 const args = process.argv.slice(2);
 const stripOnly = args[0] === '--strip-only';
@@ -17,38 +18,12 @@ if (!dir) {
   process.exit(2);
 }
 
-function readLEB(bytes, offset) {
-  let result = 0;
-  let shift = 0;
-  for (;;) {
-    const byte = bytes[offset++];
-    result += (byte & 0x7f) * 2 ** shift;
-    shift += 7;
-    if (byte < 0x80)
-      return [result, offset];
-  }
-}
-
 function stripNameSection(bytes) {
   const parts = [bytes.subarray(0, 8)];
-  let offset = 8;
   let removed = 0;
-  while (offset < bytes.length) {
-    const start = offset;
-    const id = bytes[offset++];
-    const [size, dataStart] = readLEB(bytes, offset);
-    const end = dataStart + size;
-    let keep = true;
-    if (id === 0) {
-      const [nameLength, nameStart] = readLEB(bytes, dataStart);
-      const name = Buffer.from(bytes.subarray(nameStart, nameStart + nameLength)).toString();
-      keep = name !== 'name';
-    }
-    if (keep)
-      parts.push(bytes.subarray(start, end));
-    else
-      removed += end - start;
-    offset = end;
+  for (const section of wasmSections(bytes)) {
+    if (section.name === 'name') removed += section.end - section.start;
+    else parts.push(bytes.subarray(section.start, section.end));
   }
   return [Buffer.concat(parts), removed];
 }

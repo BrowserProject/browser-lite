@@ -1,15 +1,15 @@
 # toolchain/
 
-Docker-Image mit Emscripten und allen Build-Tools (cmake, ninja, meson, autotools, ccache,
-Perl, Python, Ruby), lokal und in der CI das gleiche.
+Docker image with Emscripten and all build tools (cmake, ninja, meson, autotools, ccache, Perl,
+Python, Ruby), the same locally and in CI.
 
-- `Dockerfile`: alle Build-Args sind Pflicht und kommen aus `versions.env` (Basis-Image per
-  Digest, emsdk-Tag mit gepruefter Commit-Id, Meson-Wheel mit SHA256). Lokal bauen mit
-  `tools/build-toolchain.sh`. Die apt-Pakete kommen aus dem Ubuntu-Archiv beim Bauen; das
-  Image wird einmal gebaut und danach ueber seinen Tag wiederverwendet.
-- `warm.cpp`: kleines Programm, das beim Bauen des Images die System-Libs von Emscripten
-  (normal und mit pthreads) schon in den Cache bringt.
+- `Dockerfile`: all build args are required and come from `versions.env` (base image by digest,
+  emsdk tag with a checked commit ID, Meson wheel with SHA256). Build locally with
+  `tools/build-toolchain.sh`. The apt packages come from the Ubuntu archive at build time; the
+  image is built once and then reused by its tag.
+- `warm.cpp`: small program that puts the Emscripten system libraries (plain and with pthreads)
+  into the cache while the image is built.
 
-Die CI baut das Image nur, wenn es den Tag `TOOLCHAIN_IMAGE:emsdk-<version>-<hash>` noch nicht
-gibt (Hash ueber alle Dateien hier ausser dieser README und ueber die Pins in `versions.env`).
-Bauen und pruefen: [docs/build.md](../docs/build.md).
+The CI builds the image only when the tag `TOOLCHAIN_IMAGE:emsdk-<version>-<hash>` does not
+exist yet (hash over all files here except this README and over the pins in `versions.env`).
+Build and check: [docs/build.md](../docs/build.md).
