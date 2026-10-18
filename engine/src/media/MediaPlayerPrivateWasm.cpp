@@ -501,6 +501,7 @@ void MediaPlayerPrivateWasm::play()
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = false;
     m_ended = false;
+    m_loopRestart = false;
     send("play"_s);
 }
 
@@ -510,6 +511,7 @@ void MediaPlayerPrivateWasm::pause()
     m_hostTime = currentTime().toDouble();
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = true;
+    m_loopRestart = false;
     send("pause"_s);
 }
 
@@ -774,6 +776,19 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     bool ended = object->getBoolean("ended"_s).value_or(false);
     bool endedNow = ended && !m_ended;
     m_ended = ended;
+    // With loop the host <video> (which has no loop itself) pauses at the end, but WebCore only
+    // seeks back to the start (timeChanged) and expects the playback to go on, like
+    // MediaPlayerPrivateGStreamer::didEnd. Pause reports of the host until it plays again
+    // belong to that end.
+    if (ended && !m_paused && !m_loopRestart && player->isLooping()) {
+        m_loopRestart = true;
+        send("play"_s);
+    }
+    if (m_loopRestart) {
+        if (!paused && !ended)
+            m_loopRestart = false;
+        paused = false;
+    }
     if (paused != m_paused) {
         m_paused = paused;
         player->playbackStateChanged();

@@ -180,6 +180,10 @@ video.addEventListener('playing', () => {
     result('blobresized', '1');
   }, 1000);
 }, { once: true });
+// loop: at the end it seeks back to the start and plays on
+video.addEventListener('seeked', () => {
+  setTimeout(() => result('blobloop', video.paused ? 'paused' : video.currentTime > 0.3 ? 'plays' : 'stands at ' + video.currentTime), 1000);
+}, { once: true });
 fetch('/clip.webm').then((r) => r.blob()).then((blob) => {
   video.src = URL.createObjectURL(blob);
   video.play().catch((e) => result('blobplay', e.name));
@@ -420,6 +424,11 @@ check(
   'blob: frames keep coming (loop after revokeObjectURL)',
   framesAfter > framesBefore,
   `${framesBefore} -> ${framesAfter}`,
+);
+check(
+  'blob: loop plays on after the end',
+  (await result('blobloop')) === 'plays',
+  results.get('blobloop'),
 );
 check(
   'data: sound with a duration',

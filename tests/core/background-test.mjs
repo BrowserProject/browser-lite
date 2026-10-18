@@ -16,7 +16,10 @@ import {
   finish,
   hostEvents,
   launch,
+  load,
+  openView,
   recordClip,
+  selectView,
   serve,
   serveBytes,
   startStack,
@@ -142,10 +145,10 @@ async function openApp(params) {
     throw new Error(
       `no browser: ${JSON.stringify(await page.evaluate(() => window.blHost.error))}`,
     );
-  const go = (address) => page.evaluate((url) => window.blTest.load(url), address);
+  const go = (address) => load(page, address);
   // New view in front with an address; the previous one goes to the background
-  const newTab = (address) => page.evaluate((url) => window.blTest.open(url), address);
-  const selectTab = (index) => page.evaluate((i) => window.blHost.select(i - 1), index);
+  const newTab = (address) => openView(page, address);
+  const selectTab = (index) => selectView(page, index - 1);
   return { context, page, results, wait, go, newTab, selectTab };
 }
 

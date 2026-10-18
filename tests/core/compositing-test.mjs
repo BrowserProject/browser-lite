@@ -160,14 +160,34 @@ check(
   `${framesBefore} -> ${framesAfter}`,
 );
 
+// The JS of the page blocks the engine thread for ms. Resolves the time before which it surely
+// still blocks (the loop starts after the call).
+async function blockPage(ms) {
+  const until = Date.now() + ms;
+  await page.evaluate(
+    (source) => window.blTest.eval(source),
+    `(() => { const end = Date.now() + ${ms}; while (Date.now() < end); return 1; })()`,
+  );
+  return until;
+}
+
+// Until the pixel at x, y has the color, at most while the page still blocks. inTime: it came
+// before the end of the block; pixel: the last color seen.
+async function pixelWhileBlocked(x, y, rgb, until) {
+  let pixel = null;
+  let seen = 0;
+  const found = await waitFor(async () => {
+    pixel = await pixelAt(x, y);
+    seen = Date.now();
+    return near(pixel, rgb);
+  }, until - Date.now());
+  return { inTime: found && seen < until, pixel };
+}
+
 // The animation goes on in the compositor thread, even when the JS of the page blocks the
 // engine thread for 3 s
 async function positionsWhileBlocked() {
-  await page.evaluate(() =>
-    window.blTest.eval(
-      '(() => { const end = Date.now() + 3000; while (Date.now() < end); return 1; })()',
-    ),
-  );
+  await blockPage(3000);
   await page.waitForTimeout(400);
   const positions = new Set();
   const start = Date.now();
@@ -203,24 +223,11 @@ check('bar stays while scrolling', near(await pixelAt(500, 20), [255, 128, 0]));
 
 // Scrolling in the scroll thread: works even while the JS of the page blocks the engine thread
 // for 5 s
-await page.evaluate(() =>
-  window.blTest.eval(
-    '(() => { const end = Date.now() + 5000; while (Date.now() < end); return 1; })()',
-  ),
-);
+const busyUntil = await blockPage(5000);
 await page.waitForTimeout(500);
-const busyStart = Date.now();
 await page.mouse.wheel(0, -900);
-let busyScrolled = null;
-const scrolledWhileBusy = await waitFor(
-  async () => near((busyScrolled = await pixelAt(50, 90)), [255, 0, 0]),
-  3000,
-);
-check(
-  'scrolling while the JS blocks',
-  scrolledWhileBusy && Date.now() - busyStart < 4000,
-  JSON.stringify(busyScrolled),
-);
+const busyScrolled = await pixelWhileBlocked(50, 90, [255, 0, 0], busyUntil);
+check('scrolling while the JS blocks', busyScrolled.inTime, JSON.stringify(busyScrolled.pixel));
 // Afterwards the page knows the new position too
 await page.waitForTimeout(4000);
 results.delete('scrollY');
@@ -246,23 +253,15 @@ check(
   near(await pixelAt(500, 320), [255, 0, 255]),
   JSON.stringify(await pixelAt(500, 320)),
 );
-await page.evaluate(() =>
-  window.blTest.eval(
-    '(() => { const end = Date.now() + 4000; while (Date.now() < end); return 1; })()',
-  ),
-);
+const boxUntil = await blockPage(4000);
 await page.waitForTimeout(500);
 await page.mouse.move(500, 400);
 await page.mouse.wheel(0, 400);
-let boxScrolled = null;
-const boxOk = await waitFor(
-  async () => near((boxScrolled = await pixelAt(500, 320)), [0, 255, 255]),
-  2500,
-);
+const boxScrolled = await pixelWhileBlocked(500, 320, [0, 255, 255], boxUntil);
 check(
   'box scrolls while the JS blocks',
-  boxOk && near(await pixelAt(50, 130), [0, 128, 0]),
-  JSON.stringify(boxScrolled),
+  boxScrolled.inTime && near(await pixelAt(50, 130), [0, 128, 0]),
+  JSON.stringify(boxScrolled.pixel),
 );
 await page.waitForTimeout(3500);
 
