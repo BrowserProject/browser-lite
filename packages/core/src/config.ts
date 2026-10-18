@@ -310,7 +310,9 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
 
 /**
  * Environment of the engine (read once at start, engine/abi.json). The only place that maps
- * options to engine switches. `persistent` false keeps nothing: no OPFS, no Cache API caches.
+ * options to engine switches. `persistent` is the effective OPFS state (false when another tab
+ * holds the storage lock or OPFS is missing); only `storage.persistent: false` also turns off the
+ * Cache API caches.
  */
 export function engineEnv(
   config: Config,
@@ -323,11 +325,9 @@ export function engineEnv(
     BL_STORAGE_NAMESPACE: config.namespace,
     TZ: config.timeZone,
   };
-  if (!persistent) {
-    result.BL_OPFS = '0';
-    result.BL_BYTECODE_CACHE = '0';
-  }
-  if (!persistent || !config.httpCache) result.BL_HTTP_CACHE = '0';
+  if (!persistent) result.BL_OPFS = '0';
+  if (!config.persistent) result.BL_BYTECODE_CACHE = '0';
+  if (!config.persistent || !config.httpCache) result.BL_HTTP_CACHE = '0';
   if (config.errorPage !== undefined) result.BL_ERROR_PAGE = config.errorPage;
   if (config.debug) result.BL_TEST_HOOKS = '1';
   if (config.log) result.BL_DEBUG = '1';

@@ -134,10 +134,19 @@ test('engine environment', () => {
 });
 
 test('storage and HTTP cache switches', () => {
-  const memory = engineEnv(resolveConfig(base, PAGE), ['audio'], false);
+  const memory = engineEnv(
+    resolveConfig({ ...base, storage: { persistent: false } }, PAGE),
+    ['audio'],
+    false,
+  );
   assert.equal(memory.BL_OPFS, '0');
   assert.equal(memory.BL_HTTP_CACHE, '0');
   assert.equal(memory.BL_BYTECODE_CACHE, '0');
+  // Persistent requested, but the storage lock is taken or OPFS is missing: caches stay
+  const fallback = engineEnv(resolveConfig(base, PAGE), [], false);
+  assert.equal(fallback.BL_OPFS, '0');
+  assert.equal(fallback.BL_HTTP_CACHE, undefined);
+  assert.equal(fallback.BL_BYTECODE_CACHE, undefined);
   const noCache = engineEnv(
     resolveConfig({ ...base, engine: { httpCache: false } }, PAGE),
     [],

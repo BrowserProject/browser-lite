@@ -173,7 +173,7 @@ class BrowserImpl implements Browser, ViewHost {
         persistent = false;
         this.warn(
           'storage-locked',
-          `Storage "${config.namespace}" is used by another tab: nothing is kept in this one`,
+          `Storage "${config.namespace}" is used by another tab: data stays in memory here`,
         );
       } else {
         this.storage.directory = await namespaceDirectory(config.namespace);
