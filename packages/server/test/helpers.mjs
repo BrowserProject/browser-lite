@@ -126,7 +126,7 @@ export async function startCli(env = {}) {
       SITE_DIR: '',
       PROFILE_DIR: '',
       PROFILE_MAX_MB: '',
-      PROFILE_HOSTS: '',
+      ALLOWED_HOSTS: '',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -2,8 +2,10 @@ import type { IncomingMessage } from 'node:http';
 import net from 'node:net';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
+import { hostCheck } from './hosts.js';
 import { isPublicAddress, normalizeAddress, type RelayPolicy, resolvePolicy } from './policy.js';
 import { WispConnection } from './wisp/connection.js';
+import { SUBPROTOCOL } from './wisp/protocol.js';
 
 /** Options of {@link createRelay}. */
 export interface RelayOptions {
@@ -11,7 +13,8 @@ export interface RelayOptions {
   path?: string;
   /**
    * Decides whether a WebSocket upgrade may connect (required). Return `() => true` explicitly
-   * for an open relay. See `authorizeToken` in `@browser-lite/server/token`.
+   * for an open relay. See `authorizeToken` in `@browser-lite/server/token`; WispTransport
+   * sends its token as the WebSocket subprotocol `bl-token.<base64url>`, never in the URL.
    */
   authorize(req: IncomingMessage, url: URL): boolean | Promise<boolean>;
   /**
@@ -21,6 +24,13 @@ export interface RelayOptions {
    * hijacking, not against other clients.
    */
   allowedOrigins?: string[] | ((origin: string | undefined) => boolean);
+  /**
+   * Host names the relay answers under besides IP addresses and `localhost` (an entry starting
+   * with `.` matches every name ending with it); other `Host` headers get 403. The origin check
+   * does not stop DNS rebinding (the rebound page is same-origin), so set this for a relay
+   * without `authorize` checks. Default: every host.
+   */
+  hosts?: string[];
   /**
    * Address of the client for `connectionsPerIp`. Default: the socket's remote address. Behind a
    * reverse proxy, derive it from a header the proxy sets.
@@ -95,6 +105,7 @@ export function createRelay(options: RelayOptions): Relay {
   const path = options.path ?? '/wisp/';
   const logger = options.logger ?? console;
   const allowOrigin = originCheck(options.allowedOrigins);
+  const allowHost = options.hosts ? hostCheck(options.hosts) : () => true;
   const clientAddress = options.clientAddress ?? ((req) => req.socket.remoteAddress ?? '');
   const allowAddress = policy.allowPrivateAddresses
     ? (address: string) => net.isIP(address) !== 0
@@ -104,6 +115,8 @@ export function createRelay(options: RelayOptions): Relay {
     maxPayload: policy.maxPayload,
     perMessageDeflate: false,
     clientTracking: false,
+    // Never echo the token entry of the offered subprotocols
+    handleProtocols: (protocols) => (protocols.has(SUBPROTOCOL) ? SUBPROTOCOL : false),
   });
   const perAddress = new Map<string, number>();
   const connections = new Set<WispConnection>();
@@ -111,7 +124,7 @@ export function createRelay(options: RelayOptions): Relay {
 
   async function accept(req: IncomingMessage, socket: Duplex, head: Buffer, url: URL) {
     if (closed) return refuse(socket, '503 Service Unavailable');
-    if (!allowOrigin(req)) return refuse(socket, '403 Forbidden');
+    if (!allowHost(req.headers.host) || !allowOrigin(req)) return refuse(socket, '403 Forbidden');
     const address = normalizeAddress(clientAddress(req));
     const count = perAddress.get(address) ?? 0;
     if (count >= policy.connectionsPerIp) return refuse(socket, '429 Too Many Requests');

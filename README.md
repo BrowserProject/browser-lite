@@ -69,7 +69,8 @@ On the server:
 import { createRelay } from '@browser-lite/server';
 import { authorizeToken } from '@browser-lite/server/token';
 
-const relay = createRelay({ authorize: authorizeToken({ secret: process.env.RELAY_SECRET }) });
+const authorize = authorizeToken({ secret: process.env.RELAY_SECRET, audience: 'relay' });
+const relay = createRelay({ authorize });
 httpServer.on('upgrade', (req, socket, head) => relay.handleUpgrade(req, socket, head) || socket.destroy());
 ```
 

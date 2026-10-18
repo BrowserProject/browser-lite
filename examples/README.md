@@ -37,9 +37,10 @@ the package versions in its `package.json` are the ones of this repository.
 
 ## Test
 
-`node examples/test.mjs [engine-dir]` (Playwright Chromium, default engine
-`build/webcore/bin`) starts both examples with the engine and checks: rendering and title events,
-the token flow of the relay (403 without a token or from another origin), a video through the
-media part of the site's own service worker, the iframe page, the strict CSP page (video, Media
-Source Extensions, Web Audio, context menu, no violations), and for `minimal` the Vite build and
-its preview (COOP/COEP/CORP on the engine files) with a page through `browser-lite-server`.
+`node tests/run.mjs examples [--engine=<dir>]` ([tests/examples](../tests/README.md), Playwright
+Chromium) starts both examples with the engine and checks: rendering and title events, the token
+flow of the relay (403 without a token, with the token in the URL or from another origin), a
+video through the media part of the site's own service worker, the iframe page, the strict CSP
+page (video, Media Source Extensions, Web Audio, context menu, no violations), and for `minimal`
+the Vite build, `npm run relay` and the preview (COOP/COEP/CORP on the engine files) with a page
+through the relay.

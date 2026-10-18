@@ -11,9 +11,9 @@ SharedArrayBuffer only in a secure context, so an HTTPS proxy belongs in front (
 `tailscale serve`, otherwise for example Caddy). `RELAY_TRUST_PROXY` stays unset: port 8080 is
 reachable in the LAN without the proxy, so `X-Forwarded-For` could be forged there.
 
-Against DNS rebinding `/profile/` answers only under IP addresses, `localhost` and the names of
-`PROFILE_HOSTS` (in `compose.yml` `.ts.net` for `tailscale serve`, changeable with
-`PROFILE_HOSTS` in the environment of `docker compose`), otherwise 403.
+Against DNS rebinding relay and `/profile/` answer only under IP addresses, `localhost` and the
+names of `ALLOWED_HOSTS` (in `compose.yml` `.ts.net` for `tailscale serve`, changeable with
+`ALLOWED_HOSTS` in the environment of `docker compose`), otherwise 403.
 
 ## On every push to main
 

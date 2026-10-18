@@ -76,12 +76,10 @@ function sessionUser(req) {
 
 const relay = createRelay({
   path: '/app/wisp/',
-  authorize: authorizeToken({ secret: RELAY_SECRET }),
+  authorize: authorizeToken({ secret: RELAY_SECRET, audience: 'relay' }),
   allowedOrigins: [PUBLIC_ORIGIN],
   policy:
-    process.env.RELAY_ALLOW_LOCAL === '1'
-      ? { allowPrivateAddresses: true, ports: Array.from({ length: 65535 }, (_, i) => i + 1) }
-      : {},
+    process.env.RELAY_ALLOW_LOCAL === '1' ? { allowPrivateAddresses: true, ports: 'any' } : {},
 });
 
 function homePage(user) {
@@ -144,7 +142,12 @@ async function handle(req, res) {
       res.writeHead(401, { 'Content-Type': 'text/plain' }).end('Sign in first');
       return;
     }
-    const token = signToken({ secret: RELAY_SECRET, ttlSeconds: 60, subject: user });
+    const token = signToken({
+      secret: RELAY_SECRET,
+      ttlSeconds: 60,
+      audience: 'relay',
+      subject: user,
+    });
     res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end(token);
     return;
   }

@@ -370,9 +370,9 @@ jobs:
       # Every test runs even if an earlier one failed (the job stays red then)
       - name: Core suites (tests/core, one after the other)
         run: PARITY_REPORT="$GITHUB_STEP_SUMMARY" node tests/run.mjs core
-      - name: Examples (examples/test.mjs)
+      - name: Examples (tests/examples)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node examples/test.mjs build/webcore/bin
+        run: node tests/run.mjs examples --engine=build/webcore/bin
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

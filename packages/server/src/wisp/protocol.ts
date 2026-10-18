@@ -23,6 +23,11 @@ export const Reason = {
   addressUnreachable: 0x4a,
 } as const;
 
+/** WebSocket subprotocol of the relay; the only one it ever answers with. */
+export const SUBPROTOCOL = 'wisp';
+/** Prefix of the subprotocol entry that carries the token (`bl-token.<base64url of the token>`). */
+export const TOKEN_SUBPROTOCOL = 'bl-token.';
+
 /** Packets a client may send before it receives a CONTINUE on its stream. */
 export const BUFFER_SIZE = 128;
 

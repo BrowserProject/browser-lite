@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "copy-engine": "node scripts/copy-engine.mjs",
-    "relay": "browser-lite-server",
+    "relay": "node --disable-warning=ExperimentalWarning scripts/relay.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

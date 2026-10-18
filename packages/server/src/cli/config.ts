@@ -7,7 +7,8 @@ export interface CliConfig {
   siteDir: string | null;
   profileDir: string | null;
   profileMaxBytes: number;
-  profileHosts: string[];
+  /** Host names of relay and profile besides IP addresses and localhost. */
+  hosts: string[];
   token: string | undefined;
   secret: string | undefined;
   allowedOrigins: string[] | undefined;
@@ -45,7 +46,7 @@ export function readConfig(env: NodeJS.ProcessEnv): CliConfig {
     siteDir: env.SITE_DIR ? path.resolve(env.SITE_DIR) : null,
     profileDir: env.PROFILE_DIR ? path.resolve(env.PROFILE_DIR) : null,
     profileMaxBytes: integer('PROFILE_MAX_MB', env.PROFILE_MAX_MB, 64, 1) * 1024 * 1024,
-    profileHosts: list(env.PROFILE_HOSTS),
+    hosts: list(env.ALLOWED_HOSTS),
     token: env.RELAY_TOKEN || undefined,
     secret: env.RELAY_SECRET || undefined,
     allowedOrigins: origins.length ? origins : undefined,

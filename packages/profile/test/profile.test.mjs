@@ -346,6 +346,33 @@ test('reset(false) clears site data and permissions, the next start clears the d
   assert.deepEqual(next.prefs('settings'), { s: 1 });
 });
 
+test('reset(false) clears the sitePrefs of the options', async () => {
+  server.prefs.settings = { s: 1 };
+  server.prefs.permissions = { p: 1 };
+  server.prefs.grants = { g: 1 };
+  const profile = open({ sitePrefs: ['grants'] });
+  await profile.beforeStart(new FakeDir());
+  await profile.reset(false);
+  assert.equal(profile.prefs('grants'), undefined);
+  assert.deepEqual(profile.prefs('permissions'), { p: 1 });
+  assert.deepEqual(Object.keys(server.prefs).sort(), ['permissions', 'settings']);
+});
+
+test('a pref the server refuses stays local and never blocks the others', async () => {
+  const profile = open();
+  await profile.beforeStart(new FakeDir());
+  profile.savePrefs('Bad.Name', 1);
+  profile.savePrefs('good', 2);
+  await profile.prefsSaved();
+  assert.deepEqual(server.prefs, { good: 2 });
+  assert.equal(profile.prefs('Bad.Name'), 1);
+  assert.match(profile.problem, /Bad\.Name.*400/);
+  profile.savePrefs('later', 3);
+  await profile.prefsSaved();
+  assert.equal(server.prefs.later, 3);
+  assert.equal(server.log.filter((entry) => String(entry).includes('Bad.Name')).length, 1);
+});
+
 test('reset(true) clears all prefs; reset while local only clears here', async () => {
   server.prefs.settings = { s: 1 };
   server.prefs.bookmarks = [1];

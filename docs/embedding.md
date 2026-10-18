@@ -134,12 +134,15 @@ The engine opens TCP connections through a `Transport`; `WispTransport` talks to
 - Run `createRelay` in your Node server (`server.on('upgrade', ...)`, see the
   [server README](../packages/server/README.md)), or the `browser-lite-server` command, or the
   server image (`SERVER_IMAGE:<version>` of `versions.env`, pushed with every release; `Dockerfile`
-  target `server`, built locally with `tools/build-images.sh - <tag>`) with `RELAY_SECRET` or
-  `RELAY_TOKEN` set.
+  target `server`, built locally with `tools/build-images.sh - <tag>`; port 8080, usage in the
+  [server README](../packages/server/README.md#command)) with `RELAY_SECRET` or `RELAY_TOKEN` set.
 - `authorize(req, url)` is required. Use signed short-lived tokens: your backend signs with
-  `signToken({ secret, ttlSeconds, subject })` after its own login, the page passes
-  `token: () => fetch('/relay-token').then((r) => r.text())` so every reconnect gets a fresh one,
-  and the relay checks with `authorizeToken({ secret })`.
+  `signToken({ secret, ttlSeconds, audience: 'relay', subject })` after its own login, the page
+  passes `token: () => fetch('/relay-token').then((r) => r.text())` so every reconnect gets a
+  fresh one, and the relay checks with `authorizeToken({ secret, audience: 'relay' })`.
+  `WispTransport` sends the token as a WebSocket subprotocol, never in the URL.
+- `hosts`: the names users open. The origin check does not stop DNS rebinding, so set it for a
+  relay that is open (the command: `ALLOWED_HOSTS`).
 - `allowedOrigins`: by default only pages whose `Origin` host equals the relay's `Host`. Set it
   to exactly the origin users open when the relay runs on another host or behind a proxy (opening
   `127.0.0.1` against a `localhost` origin fails). The relay answers 403 without a valid token or

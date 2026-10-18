@@ -15,8 +15,6 @@ export async function waitUntil(condition, ms) {
   return condition();
 }
 
-const ALL_PORTS = Array.from({ length: 65535 }, (_, i) => i + 1);
-
 /**
  * The real relay of @browser-lite/server on 127.0.0.1, local targets allowed. `port` 0 picks a
  * free port; pass the previous port to restart on it.
@@ -24,7 +22,7 @@ const ALL_PORTS = Array.from({ length: 65535 }, (_, i) => i + 1);
 export async function startRelay({ port = 0, token, authorize } = {}) {
   const relay = createRelay({
     authorize: authorize ?? (token ? authorizeToken({ token }) : () => true),
-    policy: { allowPrivateAddresses: true, ports: ALL_PORTS },
+    policy: { allowPrivateAddresses: true, ports: 'any' },
   });
   const server = http.createServer((_req, res) => res.writeHead(404).end());
   server.on('upgrade', (req, socket, head) => {

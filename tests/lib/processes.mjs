@@ -8,9 +8,16 @@ import path from 'node:path';
 import { VERBOSE, root } from './env.mjs';
 
 const children = new Set();
+// Helper processes with their own process group (npm, sh and the real server below them)
+const groups = new Set();
 const tempDirs = new Set();
 process.on('exit', () => {
   for (const child of children) child.kill();
+  for (const pid of groups) {
+    try {
+      process.kill(-pid);
+    } catch {}
+  }
   for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 for (const [signal, code] of [
@@ -95,4 +102,47 @@ export async function stopProcess(child) {
     child.kill();
     await exited;
   }
+}
+
+/**
+ * Starts a long running helper process (a site server, a preview server, `npm run ...`) in its
+ * own process group and resolves the child once a chunk of its output matches ready; rejects when
+ * it ends first or after ms. The whole group ends with the test. The output is shown with
+ * E2E_VERBOSE=1.
+ */
+export function startProcess(name, command, args, { ready, ms = 60000, ...options } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+      ...options,
+    });
+    groups.add(child.pid);
+    child.on('exit', (code) => {
+      reject(new Error(`${name} ended (${code}) before it was ready`));
+    });
+    const timer = setTimeout(() => reject(new Error(`${name} not ready after ${ms / 1000} s`)), ms);
+    const onData = (data) => {
+      if (VERBOSE) process.stdout.write(`[${name}] ${data}`);
+      if (ready.test(String(data))) {
+        clearTimeout(timer);
+        resolve(child);
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+  });
+}
+
+/** Runs a command to its end; rejects on a non-zero exit code. */
+export function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: VERBOSE ? 'inherit' : 'ignore', ...options });
+    children.add(child);
+    child.on('exit', (code) => {
+      children.delete(child);
+      if (code === 0) resolve();
+      else reject(new Error(`${path.basename(command)} ${args.join(' ')}: exit ${code}`));
+    });
+  });
 }

@@ -2,10 +2,10 @@
 //
 //   node tests/run.mjs <suite> [filter] [--engine=<dir>]
 //
-// suite: contract, engine-js, engine, core, demo, compat. filter: only files whose name contains
-// it. The suites engine, core, demo and compat get the engine folder as first argument
-// (--engine, BL_ENGINE_DIR or build/webcore/bin). For demo the demo is built once into a temporary
-// folder unless E2E_SITE_DIR names one (for example the output of tools/package-demo.sh).
+// suite: contract, engine-js, engine, core, demo, examples, compat. filter: only files whose name
+// contains it. The suites engine, core, demo, examples and compat get the engine folder as first
+// argument (--engine, BL_ENGINE_DIR or build/webcore/bin). For demo the demo is built once into a
+// temporary folder unless E2E_SITE_DIR names one (for example the output of tools/package-demo.sh).
 // In GitHub Actions every test is a collapsible group. Exit code 1 when a test failed.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const SUITES = ['contract', 'engine-js', 'engine', 'core', 'demo', 'compat'];
-const WITH_ENGINE = new Set(['engine', 'core', 'demo', 'compat']);
+const SUITES = ['contract', 'engine-js', 'engine', 'core', 'demo', 'examples', 'compat'];
+const WITH_ENGINE = new Set(['engine', 'core', 'demo', 'examples', 'compat']);
 
 const args = process.argv.slice(2);
 const engineArg = args.find((arg) => arg.startsWith('--engine='));

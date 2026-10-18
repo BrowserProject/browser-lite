@@ -1,6 +1,6 @@
 import type net from 'node:net';
 import type { WebSocket } from 'ws';
-import type { RelayPolicy } from '../policy.js';
+import { portAllowed, type RelayPolicy } from '../policy.js';
 import {
   BUFFER_SIZE,
   CLOSE,
@@ -27,6 +27,8 @@ const SEND_BUFFER = 8 * 1024 * 1024;
 const CLOSE_TIMEOUT_MS = 10000;
 /** Packets a stream may have unwritten; more means the client ignores flow control. */
 const QUEUE_LIMIT = BUFFER_SIZE * 4;
+/** Unwritten client bytes of all streams of a connection (draining ones too), at least. */
+const CONNECTION_QUEUE_BYTES = 32 * 1024 * 1024;
 
 export interface ConnectionOptions {
   policy: RelayPolicy;
@@ -50,6 +52,8 @@ class Stream {
   failure: number = Reason.networkError;
   /** Client packets not yet handed to the operating system. */
   queued = 0;
+  /** Bytes of these packets. */
+  queuedBytes = 0;
   /** Client packets written since the last CONTINUE. */
   written = 0;
   /** Client packets that arrived before the socket existed. */
@@ -65,6 +69,11 @@ class Stream {
 /** One Wisp v1 session on an accepted WebSocket. */
 export class WispConnection {
   private readonly streams = new Map<number, Stream>();
+  /** Streams the client closed whose socket still writes what the client sent. */
+  private readonly draining = new Set<Stream>();
+  /** Per stream: what flow control allows, with room for packets in flight. */
+  private readonly streamQueueBytes: number;
+  private readonly connectionQueueBytes: number;
   private lastSend = 0;
   private alive = true;
   private paused = false;
@@ -77,6 +86,8 @@ export class WispConnection {
     private readonly ws: WebSocket,
     private readonly options: ConnectionOptions,
   ) {
+    this.streamQueueBytes = 2 * BUFFER_SIZE * options.policy.maxPayload;
+    this.connectionQueueBytes = Math.max(CONNECTION_QUEUE_BYTES, this.streamQueueBytes);
     this.closed = new Promise((resolve) => ws.once('close', () => resolve(this.cleanup())));
     ws.on('message', (data, isBinary) => this.receive(data as Buffer, isBinary));
     ws.on('pong', () => {
@@ -171,8 +182,9 @@ export class WispConnection {
     const { streamType, hostname, port } = request;
     if (streamType !== STREAM_TCP) return Reason.blocked;
     if (!validHostname(hostname)) return Reason.invalid;
-    if (!policy.ports.includes(port)) return Reason.blocked;
-    if (this.streams.size >= policy.streamsPerConnection) return Reason.throttled;
+    if (!portAllowed(policy, port)) return Reason.blocked;
+    if (this.streams.size + this.draining.size >= policy.streamsPerConnection)
+      return Reason.throttled;
     const key = targetKey(hostname, port);
     let sameTarget = 0;
     for (const other of this.streams.values()) if (other.key === key) sameTarget++;
@@ -235,6 +247,7 @@ export class WispConnection {
     // of stream, which responses delimited by the connection close rely on
     socket.on('close', () => {
       stream.socket = null;
+      this.draining.delete(stream);
       if (stream.closed) return;
       this.fail(stream, stream.connected ? Reason.voluntary : stream.failure);
     });
@@ -243,7 +256,12 @@ export class WispConnection {
   private write(stream: Stream, data: Buffer): void {
     if (stream.closed) return;
     this.touch(stream);
-    if (++stream.queued > QUEUE_LIMIT) {
+    stream.queuedBytes += data.length;
+    if (
+      ++stream.queued > QUEUE_LIMIT ||
+      stream.queuedBytes > this.streamQueueBytes ||
+      this.queuedBytes() > this.connectionQueueBytes
+    ) {
       this.fail(stream, Reason.networkError);
       return;
     }
@@ -256,10 +274,18 @@ export class WispConnection {
   private writeSocket(stream: Stream, data: Buffer): void {
     stream.socket?.write(data, () => {
       stream.queued--;
+      stream.queuedBytes -= data.length;
       if (stream.closed || ++stream.written < BUFFER_SIZE / 2) return;
       stream.written = 0;
       this.send(continuePacket(stream.id, Math.max(0, BUFFER_SIZE - stream.queued)));
     });
+  }
+
+  private queuedBytes(): number {
+    let bytes = 0;
+    for (const stream of this.streams.values()) bytes += stream.queuedBytes;
+    for (const stream of this.draining) bytes += stream.queuedBytes;
+    return bytes;
   }
 
   private touch(stream: Stream): void {
@@ -291,6 +317,8 @@ export class WispConnection {
       socket.destroy();
       return;
     }
+    // Counts against the limits until the socket is gone
+    this.draining.add(stream);
     socket.end(() => socket.destroy());
     setTimeout(() => socket.destroy(), CLOSE_TIMEOUT_MS).unref();
   }
