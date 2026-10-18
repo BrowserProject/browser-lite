@@ -1,0 +1,98 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  font:
+    14px system-ui,
+    sans-serif;
+}
+
+#address-form {
+  display: flex;
+  padding: 6px;
+  border-bottom: 1px solid #ccc;
+}
+
+#address {
+  flex: 1;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+#message {
+  margin: 8px;
+  color: #b00020;
+}
+
+/* The view fills this element and follows its size */
+#view {
+  flex: 1;
+  min-height: 0;
+}
+
+/* @browser-lite/ui only positions its elements: the rest is up to the page */
+.bl-context-menu,
+.bl-select-popup,
+.bl-permission-prompt {
+  z-index: 10;
+  border: 1px solid #aaa;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+}
+.bl-context-menu {
+  padding: 4px;
+}
+.bl-menu-item {
+  display: block;
+  width: 100%;
+  padding: 4px 12px;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.bl-menu-item:hover:not(:disabled),
+.bl-option.bl-highlighted {
+  background: #1a73e8;
+  color: #fff;
+}
+.bl-select-popup {
+  overflow-y: auto;
+}
+.bl-option,
+.bl-group {
+  padding: 2px 8px;
+  white-space: pre;
+}
+.bl-group {
+  font-weight: 600;
+}
+.bl-permission-prompt {
+  position: fixed;
+  top: 48px;
+  left: 16px;
+  padding: 12px;
+}
+.bl-host-picker {
+  position: fixed;
+  opacity: 0;
+  pointer-events: none;
+}
+.bl-link-status {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  padding: 2px 8px;
+  background: #eee;
+  font-size: 12px;
+  pointer-events: none;
+}
+.bl-link-status[hidden] {
+  display: none;
+}

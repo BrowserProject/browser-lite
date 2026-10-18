@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example Site: Browser under CSP</title>
+<link rel="stylesheet" href="app.css">
+<script type="importmap">
+{
+  "imports": {
+    "@browser-lite/core": "./lib/core/index.js",
+    "@browser-lite/transport-wisp": "./lib/transport-wisp/index.js",
+    "@browser-lite/ui": "./lib/ui/index.js"
+  }
+}
+</script>
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<header><a href="/">Example Site</a></header>
+<main>
+<h1>Strict Content Security Policy</h1>
+<p>This page is served with a Content-Security-Policy header without unsafe-inline or
+unsafe-eval for scripts. The engine compiles WebAssembly ('wasm-unsafe-eval'), starts workers from
+its own origin and talks to the relay of the same origin. The inline import map is allowed by its
+hash.</p>
+<section class="browser" data-browser>
+  <form class="address-form">
+    <input type="text" spellcheck="false" autocomplete="off" placeholder="Enter address" aria-label="Address">
+    <span class="page-title"></span>
+  </form>
+  <p class="notice" hidden></p>
+  <div class="view"></div>
+</section>
+</main>
+</body>
+</html>

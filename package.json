@@ -7,11 +7,12 @@
   "workspaces": [
     "packages/*",
     "apps/*",
+    "examples/*",
     "tests/e2e"
   ],
   "scripts": {
     "build": "tsc -b",
-    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo && node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs",
+    "check": "tools/check-style.sh && biome ci && tsc -b && tsc --noEmit -p apps/demo && tsc --noEmit -p examples/minimal && node tests/contract/abi-test.mjs && node tests/contract/deps-test.mjs",
     "test": "npm test --workspaces --if-present"
   },
   "devDependencies": {

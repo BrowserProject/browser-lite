@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example Site: Browser</title>
+<link rel="stylesheet" href="app.css">
+<script type="importmap">
+{
+  "imports": {
+    "@browser-lite/core": "./lib/core/index.js",
+    "@browser-lite/transport-wisp": "./lib/transport-wisp/index.js",
+    "@browser-lite/ui": "./lib/ui/index.js"
+  }
+}
+</script>
+<script type="module" src="main.js"></script>
+</head>
+<body>
+<header><a href="/">Example Site</a></header>
+<main>
+<h1>Research corner</h1>
+<p>An ordinary page of the site with a browser in one of its sections. Pages opened here run in
+a WebKit engine inside this tab; their network goes through the site's relay.</p>
+<section class="browser" data-browser>
+  <form class="address-form">
+    <input type="text" spellcheck="false" autocomplete="off" placeholder="Enter address" aria-label="Address">
+    <span class="page-title"></span>
+  </form>
+  <p class="notice" hidden></p>
+  <div class="view"></div>
+</section>
+<p>More text of the site below the browser.</p>
+</main>
+</body>
+</html>

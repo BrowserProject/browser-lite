@@ -1,0 +1,19 @@
+// The site's own service worker. The media part of browser-lite comes first: it answers only
+// requests below bl-media/ of this scope and messages with a field `bl`, and ignores the rest.
+importScripts('media-sw.js');
+
+self.addEventListener('install', () => self.skipWaiting());
+// Control the open pages right away, so videos play on the first visit too
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+// The site's own fetch logic. Responses for the pages and the engine must keep their
+// COOP/COEP/CORP headers, so this worker only answers its own URL and passes the rest through.
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (
+    url.origin !== location.origin ||
+    url.pathname !== new URL('sw-info.json', registration.scope).pathname
+  )
+    return;
+  event.respondWith(Response.json({ worker: 'example-site', scope: registration.scope }));
+});
