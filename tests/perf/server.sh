@@ -7,6 +7,7 @@
 #   tests/perf/server.sh live               server with internet and real DNS
 #   tests/perf/server.sh stop
 #
+# PERF_SITE: built site below the repository (default build/perf/site), to compare two builds.
 # PERF_TUNE=1: TCP of the server towards the device without slow start after idle and with an
 # initial window of 40 (experiment t3g).
 set -euo pipefail
@@ -20,9 +21,10 @@ if docker inspect perf-wpr >/dev/null 2>&1; then
 fi
 docker rm -f perf-server perf-wpr perf-dns >/dev/null 2>&1 || true
 [ "$mode" = stop ] && exit 0
-[ -d "$OUT/site/engine" ] || perf_die "no built demo in $OUT/site (tools/package-demo.sh)"
+site="${PERF_SITE:-build/perf/site}"
+[ -d "$ROOT/$site/engine" ] || perf_die "no built demo in $site (tools/package-demo.sh)"
 
-server_env=(-e PORT=8080 -e SITE_DIR=/w/build/perf/site)
+server_env=(-e PORT=8080 -e "SITE_DIR=/w/$site")
 server_dns=()
 if [ "$mode" = record ] || [ "$mode" = replay ]; then
     [ -n "$archive" ] || perf_die "archive missing"
