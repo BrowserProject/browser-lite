@@ -7,7 +7,9 @@
 // WindowClient.navigate() reloads a window, registration.update() of the page during a
 // background update, navigate() to a blocked target and showNotification() with
 // notificationclick, which opens a view with clients.openWindow() or brings one to the front
-// with WindowClient.focus(). Persistent storage, so the registration survives the restart.
+// with WindowClient.focus(). Last a restart with a stored registration of another origin that
+// does not cover the next navigation there: it loads without crashing the engine.
+// Persistent storage, so the registration survives the restart.
 //
 //   node tests/core/serviceworker-test.mjs [engine-dir]
 import {
@@ -653,6 +655,50 @@ check(
   focused === 'focus:/notify' && front,
   `${focused}, ${await activeTitle()}`,
 );
+
+// A stored registration of another origin that does not cover the next navigation (scope
+// /scoped/): after a restart the first navigation there waits for the import of the origin's
+// registrations, none matches and the page loads from the network (the engine used to crash
+// here, like on a site whose worker belongs to an iframe)
+const SCOPED_REGISTER = `<!doctype html><title>Register</title><body><script>
+navigator.serviceWorker.register('/scoped/sw.js', { scope: '/scoped/' })
+  .then(() => console.log('RESULT scopedregistered=1'), (e) => console.log('RESULT scopedregistered=' + e));
+</script>`;
+const { url: otherURL } = await serve((req, res) => {
+  if (req.url === '/scoped/sw.js')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/javascript' })
+      .end("self.addEventListener('fetch', (e) => e.respondWith(new Response('from-sw')));");
+  if (req.url === '/register')
+    return res.writeHead(200, { 'Content-Type': 'text/html' }).end(SCOPED_REGISTER);
+  res
+    .writeHead(200, { 'Content-Type': 'text/html' })
+    .end(
+      `<title>Outside the scope</title><script>console.log('RESULT outsidepage=loaded')</script>`,
+    );
+});
+await page.evaluate((url) => window.blTest.load(url), `${otherURL}register`);
+check(
+  'worker with a narrower scope registered',
+  (await result('scopedregistered', 30000)) === '1',
+  results.get('scopedregistered'),
+);
+await page.waitForTimeout(7000);
+results.clear();
+await openHost(page, stack.app({ url: 'about:blank', log: '1', persistent: '1' }));
+// The origins with registrations are known after the start, the registrations of an origin only
+// after its first navigation
+await page.waitForTimeout(2000);
+await page.evaluate((url) => window.blTest.load(url), `${otherURL}page`);
+check(
+  'after a restart: navigation outside the scope of a stored worker loads',
+  (await result('outsidepage', 30000)) === 'loaded',
+  results.get('outsidepage'),
+);
+const crashed = await page.evaluate(() =>
+  window.blHost.events.filter((e) => e.startsWith('crash:')),
+);
+check('after a restart: engine did not crash', crashed.length === 0, crashed.join(' '));
 
 await browser.close();
 finish();

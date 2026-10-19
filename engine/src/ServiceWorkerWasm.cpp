@@ -2062,7 +2062,7 @@ bool startFetch(ResourceLoader& loader, Function<void()>&& networkLoad)
             server->importRegistrationsForOrigin(topOrigin, [loader = Ref { loader }, networkLoad = WTF::move(networkLoad)]() mutable {
                 if (!pendingImports().remove(loader.ptr()))
                     return;
-                if (!startFetch(loader, [networkLoad = WTF::move(networkLoad)]() mutable { networkLoad(); }))
+                if (!startFetch(loader, WTF::move(networkLoad)))
                     networkLoad();
             });
             return true;

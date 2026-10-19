@@ -32,8 +32,9 @@ void initialize();
 void enableIn(WebCore::Settings&);
 
 // LoaderStrategy: hand a request to a service worker if one is responsible.
-// false = load normally. Otherwise the worker (or the answer "not handled")
-// later calls networkLoad() to load normally after all.
+// false = load normally, networkLoad is left untouched for the caller. Otherwise
+// it is taken and the worker (or the answer "not handled") later calls it to
+// load normally after all.
 bool startFetch(WebCore::ResourceLoader&, Function<void()>&& networkLoad);
 // The loader is gone (cancelled or finished): true = it was a worker fetch
 bool cancelFetch(WebCore::ResourceLoader&);
