@@ -1,0 +1,50 @@
+{
+  "description": "Cost of video playback (S23): CPU per second and frames per second of browser-lite against Chromium playing the same 720p VP9 video, live",
+  "groups": [
+    {
+      "name": "video-S",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "video-S",
+          "kind": "video",
+          "profile": "S",
+          "net": "lan",
+          "args": "--runs 4"
+        }
+      ]
+    },
+    {
+      "name": "video-L",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "video-L",
+          "kind": "video",
+          "profile": "L",
+          "net": "lan",
+          "args": "--runs 4"
+        }
+      ]
+    },
+    {
+      "name": "video-C",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "video-C",
+          "kind": "video",
+          "profile": "C",
+          "net": "lan",
+          "args": "--runs 4"
+        }
+      ]
+    }
+  ]
+}

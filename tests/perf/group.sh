@@ -6,7 +6,7 @@
 #
 #   tests/perf/group.sh <plan.json> <group>
 #
-# Section fields: id, kind (run, start or wpe), profile (device profile; cores for wpe), net,
+# Section fields: id, kind (run, start, wpe or video; video uses the live server), profile (device profile; cores for wpe), net,
 # args (arguments of the runner), tune (true: TCP tuning of the server, see server.sh).
 set -euo pipefail
 # shellcheck source=tests/perf/lib.sh
@@ -50,10 +50,15 @@ for i in $(seq 0 $((sections - 1))); do
     tune=$([ "$(field tune)" = true ] && echo 1 || echo 0)
     out="/w/build/perf/results/$id.jsonl"
     echo "== $id ($kind $profile $net)"
-    PERF_TUNE=$tune bash "$PERF/server.sh" replay "$archive"
+    if [ "$kind" = video ]; then
+        bash "$PERF/server.sh" live
+    else
+        PERF_TUNE=$tune bash "$PERF/server.sh" replay "$archive"
+    fi
     case "$kind" in
         run) bash "$PERF/device.sh" "$profile" "$net" node run.mjs --ca "$ca" --out "$out" --label "$id" "${args[@]}" ;;
         start) bash "$PERF/device.sh" "$profile" "$net" node start.mjs --ca "$ca" --out "$out" --label "$id" "${args[@]}" ;;
+        video) bash "$PERF/device.sh" "$profile" "$net" node video.mjs --out "$out" --label "$id" "${args[@]}" ;;
         wpe) bash "$PERF/wpe.sh" "$profile" --out "$out" --label "$id" "${args[@]}" ;;
         *) perf_die "unknown kind $kind" ;;
     esac
