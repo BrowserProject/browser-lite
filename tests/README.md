@@ -38,7 +38,9 @@ or `build/webcore/bin`. The demo suite builds the demo once (Vite, `engine/` lin
 Environment: `E2E_TIMEOUT` (ms per wait, default 180000), `E2E_VERBOSE=1` (console of the pages
 and the servers, engine log), `CHROMIUM_PATH`. Chromium tests start several processes and need a
 few GB of memory: run one browser test at a time and switch off core dumps (`ulimit -c 0`), a
-crashed headless Chromium can write a huge one. In a container without Chromium run them on a
+crashed headless Chromium can write a huge one. Chromium keeps its profile (with the OPFS of the
+pages) and, under Playwright, its shared memory in `TMPDIR`: with less than about 1 GB free there,
+uploads fail, pages stop loading and renderers crash. In a container without Chromium run them on a
 host that has it. `PARITY_UPDATE=1` writes `core/parity-baseline.txt` again, `SITE_*` switches of
 `compat/site-test.mjs` are in its head, `SOAK_ROUNDS`/`SOAK_TABS` shorten the two soak tests
 (`core/` and `demo/`, shared pages and procedure in `fixtures/soak.mjs`).
