@@ -68,6 +68,10 @@ const JSON_LIMIT = MB;
 const PREF_NAME = /^[a-z][a-z0-9-]{0,31}$/;
 const PREF_COUNT = 32;
 const PREFS_LIMIT = 4 * MB;
+// Of a refused body (413) this much is still read and dropped, so the client finishes sending and
+// gets the answer: closing with unread data resets the connection and the answer can get lost.
+// Larger bodies are cut off.
+const DRAIN_LIMIT = 4 * MB;
 // Errors that are not server errors (file system, aborted upload)
 const ERROR_STATUS: Record<string, number> = {
   ENOTDIR: 400,
@@ -111,7 +115,7 @@ function validPath(rel: string): boolean {
 
 function send(res: ServerResponse, status: number, body?: unknown): void {
   const headers: Record<string, string> = { ...securityHeaders(), 'Cache-Control': 'no-store' };
-  // The rest of the body is not read anymore
+  // A body larger than DRAIN_LIMIT is not read to its end
   if (status === 413) headers.Connection = 'close';
   if (body === undefined) {
     res.writeHead(status, headers).end();
@@ -137,6 +141,16 @@ async function receive(
     await write(chunk as Buffer);
   }
   return size;
+}
+
+// Reads and drops the rest of the request body, at most DRAIN_LIMIT
+async function drain(req: IncomingMessage): Promise<void> {
+  if (Number(req.headers['content-length']) > DRAIN_LIMIT) return;
+  let size = 0;
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    size += (chunk as Buffer).length;
+    if (size > DRAIN_LIMIT) return;
+  }
 }
 
 async function receiveJSON(req: IncomingMessage): Promise<unknown> {
@@ -514,8 +528,12 @@ export function createProfileStore(o: ProfileStoreOptions): ProfileStore {
           error = new HttpError(status ?? 500);
         }
         const { status, body } = error as HttpError;
-        if (res.headersSent) res.destroy();
-        else send(res, status, body);
+        if (res.headersSent) {
+          res.destroy();
+        } else {
+          if (status === 413) await drain(req);
+          send(res, status, body);
+        }
       }
       return true;
     },
