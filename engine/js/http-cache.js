@@ -18,6 +18,9 @@ var blHttpCache = {
   // Used bytes, null until the first cleanup (counted once then)
   total: null,
   trimming: null,
+  // A cleanup asked for while one counts runs again right after it: stores in between are
+  // not in its count ('force' or 'limit', false when none is pending)
+  again: false,
 
   open: function () {
     if (blHttpCache.ready)
@@ -120,8 +123,11 @@ var blHttpCache = {
   // per key, so a put in between does not shift the two lists against each
   // other.
   trim: function (force) {
-    if (blHttpCache.trimming)
+    if (blHttpCache.trimming) {
+      if (force || !blHttpCache.again)
+        blHttpCache.again = force ? 'force' : 'limit';
       return blHttpCache.trimming;
+    }
     var cache = blHttpCache.cache;
     var sizeOf = function (request) {
       return cache.match(request, { ignoreVary: true }).then(function (response) {
@@ -150,6 +156,10 @@ var blHttpCache = {
         blHttpCache.total = 0;
     }).then(function () {
       blHttpCache.trimming = null;
+      var again = blHttpCache.again;
+      blHttpCache.again = false;
+      if (again)
+        return blHttpCache.trim(again === 'force');
     });
     return blHttpCache.trimming;
   },

@@ -145,6 +145,29 @@ async function fill(http, cache, count, size) {
   );
 }
 
+// Stores while a cleanup counts: a cleanup follows, the cache ends below the limit and the
+// usage matches its content
+{
+  const { http, cache } = load();
+  await fill(http, cache, 6, 100);
+  http.total = 600;
+  http.limit = 500;
+  cache.onMatch = tick;
+  const running = http.trim(false);
+  for (let i = 6; i < 9; i++) http.store(`https://example.test/${i}`, 200, '', new Uint8Array(100));
+  await running;
+  for (let i = 0; i < 50 && http.trimming === null; i++) await tick();
+  while (http.trimming) await http.trimming;
+  let real = 0;
+  for (const response of cache.entries.values()) real += Number(response.headers.get('x-bl-size'));
+  check('stores during a cleanup: below the limit', real <= 500, `${real} bytes`);
+  check(
+    'stores during a cleanup: usage counted right',
+    http.total === real,
+    `${http.total} / ${real}`,
+  );
+}
+
 // Counting fails: do not count everything again on every store
 {
   const { http, cache } = load();
