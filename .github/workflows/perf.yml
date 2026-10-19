@@ -1,0 +1,109 @@
+name: Perf
+
+# Performance measurements with emulated weak devices (tests/perf/README.md). Only started by hand,
+# one job per group of the plan, each on its own runner.
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        description: "Plan in tests/perf/plans (file name without .json)"
+        required: true
+      engine_run:
+        description: "ID of a green CI run whose engine-dist is measured (empty = latest green one on main)"
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  groups:
+    name: Groups of the plan
+    runs-on: ubuntu-24.04
+    outputs:
+      groups: ${{ steps.groups.outputs.groups }}
+      engine_run: ${{ steps.engine.outputs.run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - id: groups
+        env:
+          PLAN: ${{ inputs.plan }}
+        run: |
+          [[ "$PLAN" =~ ^[a-z0-9-]+$ ]] || { echo "invalid plan name" >&2; exit 1; }
+          echo "groups=$(node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('tests/perf/plans/$PLAN.json', 'utf8')).groups.map((g) => g.name)))")" >> "$GITHUB_OUTPUT"
+      - id: engine
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ inputs.engine_run }}
+        run: |
+          if [ -z "$RUN" ]; then
+            RUN=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          fi
+          [[ "$RUN" =~ ^[0-9]+$ ]] || { echo "invalid run id" >&2; exit 1; }
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: Measure ${{ matrix.group }}
+    needs: groups
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.groups.outputs.groups) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Node version from versions.env
+        run: grep '^NODE_VERSION=' versions.env >> "$GITHUB_ENV"
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Packages and demo with the engine of CI run ${{ needs.groups.outputs.engine_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ needs.groups.outputs.engine_run }}
+        run: |
+          npm ci
+          npm run build
+          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n engine-dist -D build/perf/engine-dist
+          tools/package-demo.sh build/perf/engine-dist build/perf/site
+      - name: Host (netem, images)
+        run: |
+          sudo modprobe sch_netem
+          grep -E '^(PERF_PLAYWRIGHT_IMAGE|NODE_IMAGE)=' versions.env | cut -d= -f2 | xargs -n1 docker pull -q
+          nproc
+          free -m
+      - name: Measure
+        env:
+          PLAN: ${{ inputs.plan }}
+          GROUP: ${{ matrix.group }}
+        run: sudo -E env "PATH=$PATH" bash tests/perf/group.sh "tests/perf/plans/$PLAN.json" "$GROUP"
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: perf-${{ inputs.plan }}-${{ matrix.group }}
+          path: build/perf/results
+          retention-days: 30
+
+  summary:
+    name: Summary
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: perf-*
+          path: results
+      - name: Tables
+        run: |
+          for dir in results/*/; do
+            echo "### ${dir#results/}" >> "$GITHUB_STEP_SUMMARY"
+            mapfile -t files < <(find "$dir" -maxdepth 1 -name '*.jsonl' ! -name calib.jsonl ! -name record.jsonl | sort)
+            [ "${#files[@]}" -gt 0 ] || continue
+            for metric in firstLayout firstPaint loaded; do
+              node tests/perf/stats.mjs "${files[@]}" --metric "$metric" --group label --markdown >> "$GITHUB_STEP_SUMMARY" || true
+            done
+          done
