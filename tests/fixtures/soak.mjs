@@ -2,7 +2,8 @@
 // navigations through different pages (DOM with an iframe, images, worker, WebAssembly, audio) in
 // one view, then open and close views or tabs. Afterwards (everything releasable released, full
 // GC) the documents must be back at the state after the warm up and malloc and the WASM memory
-// may only have grown a little, else something lives on per page.
+// may only have grown a little, else something lives on per page. The host renderer and GPU
+// process must not keep anything per closed view either (canvas pixels).
 //
 // SOAK_ROUNDS (default 40) rounds through all pages, SOAK_TABS (default 30) views or tabs.
 import fs from 'node:fs';
@@ -60,6 +61,26 @@ fetch('/small.wasm').then((r) => r.arrayBuffer()).then((bytes) => WebAssembly.in
 document.querySelector('audio').addEventListener('loadedmetadata', () => { ${done('audio')} });</script>`,
 };
 const SEQUENCE = ['dom', 'images', 'worker', 'wasm', 'audio'];
+
+/**
+ * Resident memory in MB of the renderers and the GPU process of Chromium (triggers no garbage
+ * collection), null where it cannot be read (not Linux, no browser object).
+ */
+async function hostMemory(page) {
+  const browser = page.context().browser();
+  if (process.platform !== 'linux' || !browser) return null;
+  const session = await browser.newBrowserCDPSession();
+  const { processInfo } = await session.send('SystemInfo.getProcessInfo');
+  await session.detach();
+  let kB = 0;
+  for (const { id, type } of processInfo) {
+    if (type !== 'renderer' && type !== 'GPU') continue;
+    try {
+      kB += Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${id}/status`, 'utf8'))?.[1] ?? 0);
+    } catch {}
+  }
+  return Math.round(kB / 1024);
+}
 
 /** Serves the soak pages; resolves the site address (ends with /). */
 export async function serveSoakPages() {
@@ -183,6 +204,9 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
     failedAt ? `hangs at ${failedAt}` : `${Math.round((Date.now() - started) / 1000)} s`,
   );
 
+  // Host memory while closing: the highest value, a garbage collection may release a leak again
+  const hostBefore = await hostMemory(page);
+  let hostPeak = hostBefore;
   // Open views or tabs (load the DOM page with an iframe) and close them again
   // A host page that stops answering fails the check instead of ending the test with a timeout
   let tabsFailed = null;
@@ -191,6 +215,7 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
       await openTab(`${siteURL}dom?r=tab${i}`);
       if (!(await waitDone(`dom-tab${i}`))) tabsFailed = `page in ${unit} ${i} not loaded`;
       await closeTab();
+      if (hostPeak !== null) hostPeak = Math.max(hostPeak, (await hostMemory(page)) ?? 0);
     } catch (error) {
       tabsFailed = `${unit} ${i}: ${error.message.split('\n')[0]}`;
     }
@@ -201,6 +226,13 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
   }
   const count = await tabCount();
   check(`${TABS} ${unit} opened and closed`, count === 1, `${count} ${unit} open`);
+  // A canvas left to the garbage collector of the engine worker kept about 15 MB per view
+  if (hostBefore !== null)
+    check(
+      `host renderer and GPU process hardly grow with ${TABS} ${unit}`,
+      hostPeak - hostBefore < 64 + 4 * TABS,
+      `${hostBefore} -> at most ${hostPeak} MB`,
+    );
 
   await go(`${siteURL}empty?r=end`);
   await waitDone('empty-end');

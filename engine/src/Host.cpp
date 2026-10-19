@@ -58,9 +58,25 @@ EM_JS(int, bl_js_has_worker_canvas, (int viewId), {
     return Module.blCanvases && Module.blCanvases.has(viewId) ? 1 : 0;
 });
 
+// A closed view's canvas gets a last frame of 1x1 pixels: the frame shown
+// before stays in this worker and in the GPU process until the canvas is
+// garbage collected, and this mostly idle worker rarely collects (about 15 MB
+// per closed view of 1000x700 pixels).
 EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
-    if (Module.blCanvases)
-        Module.blCanvases.delete(viewId);
+    var target = Module.blCanvases && Module.blCanvases.get(viewId);
+    if (!target)
+        return;
+    Module.blCanvases.delete(viewId);
+    target.canvas.width = 1;
+    target.canvas.height = 1;
+    if (target.ctx)
+        target.ctx.fillRect(0, 0, 1, 1);
+    else if (target.bitmapContext)
+        target.bitmapContext.transferFromImageBitmap(null);
+    if (target.scratch) {
+        target.scratch.width = 0;
+        target.scratch.height = 0;
+    }
 });
 
 namespace BrowserLite {
