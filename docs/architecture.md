@@ -188,4 +188,9 @@ never shrinks, the engine calls `WebCore::releaseMemory` when malloc's footprint
 
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
-mode off (#122). A bytecode cache in the Cache API helps repeat visits (#135).
+mode off (#122). A bytecode cache in the Cache API helps repeat visits (#135): the key is the
+URL the page asked for, remembered per resource when it starts loading, so scripts behind a
+redirect or answered by a service worker hit too (#212). The build ID includes the `JSC_*`
+options. An entry is a header (magic, version, length, checksum; `engine/js/bytecode-cache.js`)
+and the bytecode, which goes into engine memory once and JSC takes over without a copy. JSC
+itself checks the build ID and the whole source.

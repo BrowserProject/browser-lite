@@ -1,5 +1,5 @@
 diff --git a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
-index b7d6bff329..17104bba06 100644
+index b7d6bff329..a8085e507c 100644
 --- a/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
 +++ b/Source/JavaScriptCore/runtime/JSCBytecodeCacheVersion.cpp
 @@ -31,6 +31,10 @@
@@ -13,14 +13,15 @@ index b7d6bff329..17104bba06 100644
  #if OS(UNIX)
  #include <dlfcn.h>
  #if OS(DARWIN)
-@@ -152,6 +156,13 @@ uint32_t computeJSCBytecodeCacheVersion()
+@@ -152,6 +156,14 @@ uint32_t computeJSCBytecodeCacheVersion()
          }
          cacheVersion.construct(0);
          dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
 +#elif OS(EMSCRIPTEN)
 +        // browser-lite: the timestamp of this file does not change when the
 +        // rest of the engine changes. The embedder sets BL_BUILD_ID (hash of
-+        // engine.wasm); without an ID 0, and then the embedder uses no bytecode cache.
++        // engine.wasm and of the JSC options); without an ID 0, and then the
++        // embedder uses no bytecode cache.
 +        UNUSED_VARIABLE(jsFunctionAddr);
 +        const char* buildID = getenv("BL_BUILD_ID");
 +        cacheVersion.construct(buildID && *buildID ? SuperFastHash::computeHash(buildID) : 0);
@@ -28,7 +29,7 @@ index b7d6bff329..17104bba06 100644
          UNUSED_VARIABLE(jsFunctionAddr);
          static constexpr uint32_t precomputedCacheVersion = SuperFastHash::computeHash(__TIMESTAMP__);
 diff --git a/Source/WebCore/bindings/js/CachedScriptSourceProvider.h b/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
-index df84a17d3d..e6ff8df2e7 100644
+index df84a17d3d..b62a079477 100644
 --- a/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
 +++ b/Source/WebCore/bindings/js/CachedScriptSourceProvider.h
 @@ -40,9 +40,20 @@ public:
@@ -52,7 +53,7 @@ index df84a17d3d..e6ff8df2e7 100644
      // CachedResourceClient.
      void ref() const final { JSC::SourceProvider::ref(); }
      void deref() const final { JSC::SourceProvider::deref(); }
-@@ -62,8 +73,21 @@ private:
+@@ -62,8 +73,22 @@ private:
          , m_cachedScript(cachedScript)
      {
          cachedScript->addClient(*this);
@@ -69,6 +70,7 @@ index df84a17d3d..e6ff8df2e7 100644
 +    mutable RefPtr<JSC::CachedBytecode> m_cachedBytecode;
 +    mutable bool m_bytecodeLoaded { false };
 +    mutable bool m_bytecodeCommitted { false };
++    mutable bool m_bytecodeNotCached { false };
 +#endif
 +
      const CachedResourceHandle<CachedScript> m_cachedScript;
@@ -76,10 +78,10 @@ index df84a17d3d..e6ff8df2e7 100644
  
 diff --git a/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
 new file mode 100644
-index 0000000000..62cb58ec8a
+index 0000000000..4374241e53
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/BytecodeCacheWasm.cpp
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,219 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -186,10 +188,13 @@ index 0000000000..62cb58ec8a
 +// Small scripts compile faster than a round trip through the cache costs
 +static constexpr unsigned minimumScriptSizeForBytecodeCache = 4096;
 +
++// The embedder hands over fastMalloc blocks (TakeBytecodeHandler), JSC takes them as they are
++static_assert(std::is_same_v<JSC::VMMalloc, FastMalloc>);
++
 +bool CachedScriptSourceProvider::shouldCacheBytecode() const
 +{
 +    return WasmPlatform::takeBytecodeHandler() && WasmPlatform::storeBytecodeHandler()
-+        && !sourceURL().isEmpty() && m_cachedScript->encodedSize() >= minimumScriptSizeForBytecodeCache;
++        && !m_bytecodeNotCached && m_cachedScript->encodedSize() >= minimumScriptSizeForBytecodeCache;
 +}
 +
 +void CachedScriptSourceProvider::startBytecodeCache()
@@ -210,11 +215,13 @@ index 0000000000..62cb58ec8a
 +    if (!m_bytecodeLoaded) {
 +        m_bytecodeLoaded = true;
 +        if (shouldCacheBytecode()) {
-+            if (auto bytes = WasmPlatform::takeBytecodeHandler()(sourceURL()); bytes && !bytes->isEmpty()) {
-+                auto buffer = MallocSpan<uint8_t, JSC::VMMalloc>::malloc(bytes->size());
-+                memcpySpan(buffer.mutableSpan(), bytes->span());
-+                m_cachedBytecode = JSC::CachedBytecode::create(WTF::move(buffer), { });
-+            }
++            auto bytes = WasmPlatform::takeBytecodeHandler()(*m_cachedScript);
++            if (!bytes) {
++                // Not cached by the embedder: nothing is encoded for it either
++                m_bytecodeNotCached = true;
++                WasmPlatform::providersWithBytecode().remove(this);
++            } else if (!bytes->span().empty())
++                m_cachedBytecode = JSC::CachedBytecode::create(WTF::move(*bytes), { });
 +        }
 +    }
 +    return m_cachedBytecode;
@@ -290,7 +297,7 @@ index 0000000000..62cb58ec8a
 +        memcpySpan(blob.mutableSpan().subspan(offset, data.size()), data);
 +    });
 +    if (valid)
-+        WasmPlatform::storeBytecodeHandler()(sourceURL(), WTF::move(blob));
++        WasmPlatform::storeBytecodeHandler()(*m_cachedScript, WTF::move(blob));
 +}
 +
 +} // namespace WebCore

@@ -50,7 +50,10 @@ A plan has `groups`, a group has `record` (sites) and `sections` with `kind` (`r
 `start.mjs`, `video.mjs` or `wpe-run.mjs`), `profile`, `net`, `args` and optionally `tune`
 and `configs`. `configs` (of the section or the plan) are the arms, taken in ABBA order:
 `{"name": "E1", "site": 1, "params": {...}, "engine": {...}}` with the site, parameters of the demo
-URL and engine options (`window.blTestOptions`, for example `{"env": {...}}`).
+URL and engine options (`window.blTestOptions`, for example `{"env": {...}}`). The demo takes
+them only with `?debug=1` (#205), so they are for measuring only. The arm without bytecode cache
+(`plans/bytecode.json`) sets the expert switch `BL_BUILD_ID` empty (`BL_BYTECODE_CACHE` is
+core-owned); like everything here it goes away with this folder.
 
 ## Evaluation
 

@@ -1,10 +1,17 @@
 // Bytecode cache of the engine (engine/src/BytecodeCache.cpp), the part on the main thread.
 //
 // One cache per engine build ("<namespace>-bytecode-<build id>"), caches of
-// old builds of the same namespace are deleted when opening. The list of URLs
+// old builds of the same namespace are deleted when opening. The list of keys
 // is kept in memory, so a script without an entry costs no disk access.
+//
+// Entry: header of 24 bytes (magic "BLBC", format version, length of the
+// bytecode, checksum of the engine; little endian, 32 and 64 bit) and the
+// bytecode. The format lives here, the engine checks length and checksum.
 var blBytecodeCache = {
   maxEntries: 400,
+  magic: 0x43424c42,
+  version: 1,
+  headerSize: 24,
   ready: null,
   cache: null,
   urls: null,
@@ -34,51 +41,84 @@ var blBytecodeCache = {
     return blStorageNamespace() + '-bytecode-';
   },
 
-  key: function (url) {
-    return 'https://bytecode.invalid/?' + encodeURIComponent(url);
+  // Request URL of the entry for a key of the engine
+  url: function (key) {
+    return 'https://bytecode.invalid/?' + encodeURIComponent(key);
   },
 
-  lookup: function (url) {
+  // A new entry (not in shared memory, the bytecode may be a view on it): one copy
+  entry: function (bytecode, checksum) {
+    var size = blBytecodeCache.headerSize;
+    var entry = new Uint8Array(size + bytecode.length);
+    var view = new DataView(entry.buffer);
+    view.setUint32(0, blBytecodeCache.magic, true);
+    view.setUint32(4, blBytecodeCache.version, true);
+    view.setBigUint64(8, BigInt(bytecode.length), true);
+    view.setBigUint64(16, checksum, true);
+    entry.set(bytecode, size);
+    return entry;
+  },
+
+  // Header fields and bytecode of a stored entry, null if it is none of this format
+  parse: function (buffer) {
+    var size = blBytecodeCache.headerSize;
+    if (buffer.byteLength < size)
+      return null;
+    var view = new DataView(buffer);
+    if (view.getUint32(0, true) !== blBytecodeCache.magic || view.getUint32(4, true) !== blBytecodeCache.version)
+      return null;
+    return {
+      length: view.getBigUint64(8, true),
+      checksum: view.getBigUint64(16, true),
+      bytecode: new Uint8Array(buffer, size),
+    };
+  },
+
+  lookup: function (key) {
     var ready = blBytecodeCache.ready || Promise.resolve(null);
     ready.then(function (cache) {
-      var key = blBytecodeCache.key(url);
-      if (!cache || !blBytecodeCache.urls.has(key))
-        return blBytecodeCache.reply(url, null);
-      return cache.match(key).then(function (response) {
+      var url = blBytecodeCache.url(key);
+      if (!cache || !blBytecodeCache.urls.has(url))
+        return blBytecodeCache.reply(key, null);
+      return cache.match(url).then(function (response) {
         if (!response) {
-          blBytecodeCache.urls.delete(key);
-          return blBytecodeCache.reply(url, null);
+          blBytecodeCache.urls.delete(url);
+          return blBytecodeCache.reply(key, null);
         }
         return response.arrayBuffer().then(function (buffer) {
-          blBytecodeCache.reply(url, new Uint8Array(buffer));
+          blBytecodeCache.reply(key, blBytecodeCache.parse(buffer));
         });
       });
-    }).catch(function () { blBytecodeCache.reply(url, null); });
+    }).catch(function () { blBytecodeCache.reply(key, null); });
   },
 
-  reply: function (url, data) {
-    var urlPointer = stringToNewUTF8(url);
-    var dataPointer = 0;
-    var length = data ? data.length : 0;
-    if (length) {
-      dataPointer = Module['_malloc'](length);
-      if (dataPointer)
-        HEAPU8.set(data, dataPointer);
-      else
-        length = 0;
+  // Only the bytecode goes into engine memory (malloc, the engine takes it over)
+  reply: function (key, entry) {
+    var keyPointer = stringToNewUTF8(key);
+    var pointer = 0;
+    var size = entry ? entry.bytecode.length : 0;
+    if (size) {
+      pointer = Module['_malloc'](size);
+      if (pointer)
+        HEAPU8.set(entry.bytecode, pointer);
     }
-    Module['_bl__bytecode_cache_result'](urlPointer, dataPointer, length);
-    Module['_free'](urlPointer);
+    if (pointer)
+      Module['_bl__bytecode_cache_result'](keyPointer, pointer, size, entry.length, entry.checksum);
+    else
+      Module['_bl__bytecode_cache_result'](keyPointer, 0, 0, BigInt(0), BigInt(0));
+    Module['_free'](keyPointer);
   },
 
-  store: function (url, data) {
+  // bytecode: view on the engine memory, valid only during this call
+  store: function (key, bytecode, checksum) {
+    var entry = blBytecodeCache.entry(bytecode, checksum);
     var ready = blBytecodeCache.ready || Promise.resolve(null);
     ready.then(function (cache) {
       if (!cache)
         return;
-      var key = blBytecodeCache.key(url);
-      return cache.put(key, new Response(data)).then(function () {
-        blBytecodeCache.urls.add(key);
+      var url = blBytecodeCache.url(key);
+      return cache.put(url, new Response(entry)).then(function () {
+        blBytecodeCache.urls.add(url);
         if (blBytecodeCache.urls.size > blBytecodeCache.maxEntries)
           blBytecodeCache.trim();
       });

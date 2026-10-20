@@ -3,7 +3,7 @@
   "configs": [
     { "name": "E0", "site": 0 },
     { "name": "E1", "site": 1 },
-    { "name": "E1-nocache", "site": 1, "engine": { "env": { "BL_BYTECODE_CACHE": "0" } } }
+    { "name": "E1-nocache", "site": 1, "engine": { "env": { "BL_BUILD_ID": "" } } }
   ],
   "compare": [
     {

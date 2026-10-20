@@ -3,12 +3,15 @@
 
 #include "Engine.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <sys/stat.h>
 #include <wtf/NeverDestroyed.h>
+
+extern char** environ;
 
 namespace BrowserLite {
 
@@ -159,6 +162,13 @@ void loadEngineConfig()
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
     if (const char* buildID = getenv("BL_BUILD_ID"))
         config.buildID = buildID;
+    for (char** variable = environ; *variable; ++variable) {
+        if (!strncmp(*variable, "JSC_", 4))
+            config.jscOptions.append(*variable);
+    }
+    std::sort(config.jscOptions.begin(), config.jscOptions.end(), [](const CString& a, const CString& b) {
+        return strcmp(a.data(), b.data()) < 0;
+    });
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));

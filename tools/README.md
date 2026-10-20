@@ -12,7 +12,7 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `check-style.sh` | mechanical rules of `AGENTS.md` (CI lint), exceptions in `check-style.allow` |
 | `check-packages.mjs` | part of `check-style.sh`: exact npm pins, one version for all packages |
 | `fetch-webkit.sh` | fetches the pinned WebKit commit into `third_party/WebKit` (shallow, sparse) |
-| `apply-patches.sh` | resets WebKit and applies `engine/patches/`, `--check` only checks |
+| `apply-patches.sh` | resets WebKit and applies `engine/patches/`, `--check` only checks and leaves WebKit unpatched |
 | `export-patch.sh` | saves new changes in `third_party/WebKit` as a patch |
 | `gen-angle-shim.py` | generates the ANGLE replacement for WebGL (output goes into patch 0016) |
 | `build-jsc.sh` | JavaScriptCore and the `jsc` shell into `build/jsc/bin/` |

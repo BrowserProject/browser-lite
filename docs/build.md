@@ -55,7 +55,8 @@ tools/apply-patches.sh     # reset, then apply engine/patches/*.patch
 2. Edit files in `third_party/WebKit`.
 3. `tools/export-patch.sh 0045-short-description` saves the new changes as
    `engine/patches/0045-short-description.patch`.
-4. `tools/apply-patches.sh --check` verifies that all patches apply in order.
+4. `tools/apply-patches.sh --check` verifies that all patches apply in order and leaves WebKit
+   unpatched; run step 1 again before the next build.
 
 Rules: small patches, one topic each, the number gives the order. What does not have to be in
 WebKit belongs in `engine/`. Mark changes in WebKit with `PLATFORM(WASM)` or `__EMSCRIPTEN__`.

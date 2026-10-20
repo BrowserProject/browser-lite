@@ -121,10 +121,10 @@ index 7660c42e7f..b6ee29389e 100644
  {
      static NeverDestroyed<ClipboardItems> items;
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
-index 2004a8263d..e44c8d2af6 100644
+index 9a5edd0d43..09c98e0072 100644
 --- a/Source/WebCore/platform/wasm/WasmPlatform.h
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -68,13 +68,19 @@ struct ScreenInfo {
+@@ -70,13 +70,19 @@ struct ScreenInfo {
      bool prefersDarkMode { false };
      // Does the device have a touchscreen (navigator.maxTouchPoints in the host)?
      bool hasTouch { false };

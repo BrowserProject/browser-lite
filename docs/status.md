@@ -23,7 +23,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
-  HTTP and bytecode cache in the host Cache API (#70, #135).
+  HTTP and bytecode cache in the host Cache API (#70, #135), bytecode also behind redirects and
+  for service worker answers (#212).
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure (#171), error pages with the
   relay's reason and auto reload (#174, #175), dead relay detection (#177).
@@ -60,7 +61,8 @@ performance with several runs and inclusive times from profiles, not only load t
    (#186). To check: with any `?env=` the first paint on YouTube came under 3.5 s in 32 of 36
    runs, without in 10 of 24.
 2. Compiling on first call (weather.com about 11 s parser and bytecode); the bytecode cache only
-   helps repeat visits (#135).
+   helps repeat visits (#135); its benefit on a slow device after #212 is still to be measured
+   (`tests/perf/plans/bytecode.json`).
 3. Interpreter time (15 to 21 % on JS-heavy sites): only a big rework (tail-call interpreter or a
    JIT to WASM) would help; small caches are done (#143).
 4. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.

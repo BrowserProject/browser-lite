@@ -827,7 +827,7 @@ private:
     {
         // Fetch stored bytecode while the script loads
         if (resource.type() == CachedResource::Type::Script)
-            BytecodeCache::prefetch(request.url());
+            BytecodeCache::prefetch(resource, request.url());
         SubresourceLoader::create(frame, resource, WTF::move(request), options, [this, completion = WTF::move(completion)](RefPtr<SubresourceLoader>&& loader) mutable {
             if (loader)
                 schedule(*loader);

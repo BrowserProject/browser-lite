@@ -1854,10 +1854,10 @@ index 0000000000..7660c42e7f
 +} // namespace WebCore::WasmPlatform
 diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
 new file mode 100644
-index 0000000000..2004a8263d
+index 0000000000..9a5edd0d43
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,132 @@
 +/*
 + * Copyright (C) 2026 browser-lite contributors
 + *
@@ -1888,6 +1888,7 @@ index 0000000000..2004a8263d
 +#include <WebCore/FloatRect.h>
 +#include <optional>
 +#include <wtf/Function.h>
++#include <wtf/MallocSpan.h>
 +#include <wtf/RefCounted.h>
 +#include <wtf/Vector.h>
 +#include <wtf/text/WTFString.h>
@@ -1897,6 +1898,7 @@ index 0000000000..2004a8263d
 +// it gets from the host browser (screen, clipboard, user agent, ...).
 +
 +namespace WebCore {
++class CachedResource;
 +class Pasteboard;
 +}
 +
@@ -1972,11 +1974,13 @@ index 0000000000..2004a8263d
 +enum class SpeechCommand : uint8_t { Pause, Resume, Cancel };
 +enum class SpeechEvent : uint8_t { Start, End, Pause, Resume, Error, WordBoundary, SentenceBoundary };
 +// Persistent bytecode cache of page scripts (BytecodeCacheWasm.cpp). The
-+// embedder returns stored bytecode for a script URL (if there is any
-+// yet) and stores new bytecode. commitPendingBytecode writes what the live
-+// scripts have compiled since they were loaded.
-+using TakeBytecodeHandler = Function<std::optional<Vector<uint8_t>>(const String& url)>;
-+using StoreBytecodeHandler = Function<void(const String& url, Vector<uint8_t>&&)>;
++// embedder returns stored bytecode for a script resource (empty if there is
++// none yet, nullopt if it does not cache this script) and stores new
++// bytecode for it. The block is fastMalloc memory that JSC takes over.
++// commitPendingBytecode writes what the live scripts have compiled since
++// they were loaded.
++using TakeBytecodeHandler = Function<std::optional<MallocSpan<uint8_t>>(const CachedResource&)>;
++using StoreBytecodeHandler = Function<void(const CachedResource&, Vector<uint8_t>&&)>;
 +WEBCORE_EXPORT void setBytecodeCacheHandlers(TakeBytecodeHandler&&, StoreBytecodeHandler&&);
 +WEBCORE_EXPORT void commitPendingBytecode();
 +

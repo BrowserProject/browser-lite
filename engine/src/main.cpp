@@ -99,6 +99,8 @@ int main(int, char**)
 
     JSC::initialize();
     WTF::initializeMainThread();
+    // Sets BL_BUILD_ID: setenv is not thread safe, so before the first thread starts
+    BytecodeCache::initialize();
 
     // Set up fontconfig in the background right away: it reads its configuration
     // with many file accesses. Otherwise that happens in the middle of loading the
@@ -145,7 +147,6 @@ int main(int, char**)
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
     // WebCodecs of the pages through the WebCodecs of the host (media/WebCodecsWasm.cpp)
     WebCodecs::initialize();
-    BytecodeCache::initialize();
     BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
     // Own thread for compositing and presentation (needs WebGL 2)

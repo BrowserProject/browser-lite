@@ -3,7 +3,8 @@
 # engine/patches/ in order (sorted by file name).
 #
 #   tools/apply-patches.sh          # reset + apply
-#   tools/apply-patches.sh --check  # only check that everything applies cleanly
+#   tools/apply-patches.sh --check  # only check that everything applies cleanly, then
+#                                   # reset again: run without --check before a build
 set -euo pipefail
 # shellcheck source=tools/env.sh
 source "$(dirname "$0")/env.sh"

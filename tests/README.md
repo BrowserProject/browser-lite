@@ -3,7 +3,7 @@
 | Suite | What | Needs | CI job |
 |---|---|---|---|
 | `contract/` | `engine/abi.json` against the engine sources, dependency direction of the packages | node | js |
-| `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache cleanup | node | js (`npm test`) |
+| `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache cleanup, bytecode cache entries | node | js (`npm test`) |
 | `engine/` | the engine in node without a browser: test pages (`pages/`), error page, GC stress | engine build | engine |
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
 | `packages` | DOM tests of the packages in Chromium (`packages/*/test/browser.mjs`: ui popups, prompts and dialogs, profile sync with the real OPFS) | packages, Playwright | e2e-core |
