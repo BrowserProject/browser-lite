@@ -155,16 +155,17 @@ The engine opens TCP connections through a `Transport`; `WispTransport` talks to
 ## Storage
 
 - `storage.namespace` (default `browserlite`) is the OPFS directory, the prefix of the Cache API
-  names (`<ns>-http-v<format>`, `<ns>-bytecode-<build>`) and the Web Lock `<ns>-data`. Use one
+  names (`<ns>-http-v<format>`) and the Web Lock `<ns>-data`. Use one
   namespace per independent browser on an origin.
 - One running browser per namespace across all tabs of the origin. A second tab gets the warning
   `storage-locked` and keeps its data in memory (the caches stay shared). One browser per page:
   a second `createBrowser` before `destroy()` throws `already-running`.
-- `storage.persistent: false` keeps everything in memory (no OPFS, no HTTP or bytecode cache).
+- `storage.persistent: false` keeps everything in memory (no OPFS, no HTTP cache).
 - The core does not call `navigator.storage.persist()`; call it yourself if the browser data must
   not be evicted under storage pressure.
-- `clearStorage(namespace)` deletes the OPFS directory and caches of a namespace; it throws
-  `storage-locked` while a browser uses it. `browser.storage.clearCaches()` empties only the caches.
+- `clearStorage(namespace)` deletes the OPFS directory and all Cache API caches of a namespace;
+  it throws `storage-locked` while a browser uses it. `browser.storage.clearCaches()` empties
+  only the HTTP cache.
 - `storage.beforeStart(dir)` runs before the engine starts (for example `@browser-lite/profile`).
 
 ## Permissions and services
@@ -203,8 +204,7 @@ Call `checkSupport()` before showing the browser and fall back gracefully.
 
 The engine and `@browser-lite/core` share a contract ([engine/abi.json](../engine/abi.json)):
 always deploy the engine release with the same version as the core. Serve the new engine in a new
-folder; the bytecode cache is keyed by build and old entries are removed automatically. Stored
-data in OPFS stays.
+folder. Stored data in OPFS and the HTTP cache stay.
 
 ## Resource use
 
@@ -213,6 +213,5 @@ data in OPFS stays.
 - Threads: at least 12 Web Workers (a pool of 8 plus 4 spare), more when pages start workers.
 - CPU: JavaScript runs in an interpreter; large news sites take 10 to 60 s to load
   ([status.md](status.md)).
-- Disk: the OPFS namespace plus the HTTP cache (at most 400 MB or a quarter of the quota) and the
-  bytecode cache.
+- Disk: the OPFS namespace plus the HTTP cache (at most 400 MB or a quarter of the quota).
 - Network: everything of the pages goes through the relay as TLS.

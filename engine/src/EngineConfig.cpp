@@ -3,15 +3,12 @@
 
 #include "Engine.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <emscripten/emscripten.h>
 #include <sys/stat.h>
 #include <wtf/NeverDestroyed.h>
-
-extern char** environ;
 
 namespace BrowserLite {
 
@@ -142,7 +139,6 @@ void loadEngineConfig()
     config.features = parseFeatures(getenv("BL_FEATURES"));
     config.opfs = flag("BL_OPFS", true);
     config.httpCache = flag("BL_HTTP_CACHE", true);
-    config.bytecodeCache = flag("BL_BYTECODE_CACHE", true);
     config.storageNamespace = defaultStorageNamespace;
     if (const char* name = value("BL_STORAGE_NAMESPACE")) {
         if (isValidNamespace(name))
@@ -152,7 +148,6 @@ void loadEngineConfig()
             log("BL_STORAGE_NAMESPACE: invalid name, storage stays in memory");
             config.opfs = false;
             config.httpCache = false;
-            config.bytecodeCache = false;
         }
     }
     if (const char* page = value("BL_ERROR_PAGE"))
@@ -160,15 +155,6 @@ void loadEngineConfig()
     config.gpu = flag("BL_GPU", true);
     config.compositing = flag("BL_COMPOSITING", true);
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
-    if (const char* buildID = getenv("BL_BUILD_ID"))
-        config.buildID = buildID;
-    for (char** variable = environ; *variable; ++variable) {
-        if (!strncmp(*variable, "JSC_", 4))
-            config.jscOptions.append(*variable);
-    }
-    std::sort(config.jscOptions.begin(), config.jscOptions.end(), [](const CString& a, const CString& b) {
-        return strcmp(a.data(), b.data()) < 0;
-    });
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));

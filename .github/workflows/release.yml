@@ -90,8 +90,7 @@ jobs:
           (cd build/release && sha256sum -- * > SHA256SUMS)
           cat build/release/SHA256SUMS
           {
-            echo "Engine build ID \`$(node -p "require('./$engine/manifest.json').buildId")\`,"
-            echo "WebKit $(grep '^WEBKIT_TAG=' versions.env | cut -d= -f2), served from \`engine/$(basename "$engine")/\`."
+            echo "WebKit $(grep '^WEBKIT_TAG=' versions.env | cut -d= -f2), engine served from \`engine/$(basename "$engine")/\`."
             echo
             echo "Server image: \`$(grep '^SERVER_IMAGE=' versions.env | cut -d= -f2):$VERSION\`"
           } > build/release-notes.md

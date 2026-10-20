@@ -8,7 +8,6 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { wasmSections } from './wasm-sections.mjs';
 
 const args = process.argv.slice(2);
 const stripOnly = args[0] === '--strip-only';
@@ -16,6 +15,37 @@ const dir = stripOnly ? args[1] : args[0];
 if (!dir) {
   console.error('Usage: optimize-assets.mjs [--strip-only] <folder>');
   process.exit(2);
+}
+
+function readLEB(bytes, offset) {
+  let result = 0;
+  let shift = 0;
+  for (;;) {
+    if (offset >= bytes.length) throw new Error('WebAssembly module is truncated');
+    const byte = bytes[offset++];
+    result += (byte & 0x7f) * 2 ** shift;
+    shift += 7;
+    if (byte < 0x80) return [result, offset];
+  }
+}
+
+// Every section of the module: name (custom sections only), start and end
+function* wasmSections(bytes) {
+  let offset = 8;
+  while (offset < bytes.length) {
+    const start = offset;
+    const id = bytes[offset++];
+    const [size, dataStart] = readLEB(bytes, offset);
+    const end = dataStart + size;
+    if (end > bytes.length) throw new Error('WebAssembly module is truncated');
+    let name;
+    if (id === 0) {
+      const [nameLength, nameStart] = readLEB(bytes, dataStart);
+      name = bytes.subarray(nameStart, nameStart + nameLength).toString();
+    }
+    yield { name, start, end };
+    offset = end;
+  }
 }
 
 function stripNameSection(bytes) {

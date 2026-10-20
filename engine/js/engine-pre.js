@@ -5,7 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 4;
+Module.blAbiVersion = 5;
 
 // malloc for the JS hosts: without ABORTING_MALLOC _malloc returns 0 when
 // memory is full, the write would then go to the start of the WASM memory
@@ -109,7 +109,7 @@ if (ENVIRONMENT_IS_PTHREAD) {
 }
 
 // Storage namespace of this engine (BL_STORAGE_NAMESPACE): prefix of the Cache
-// API names of the HTTP and bytecode caches. Read from the engine once main()
+// API names of the HTTP cache. Read from the engine once main()
 // loaded the configuration. The export is a dependency of wasmfs-opfs.js and as
 // such only a local of the module, not a Module field.
 function blStorageNamespace() {

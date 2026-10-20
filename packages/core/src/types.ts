@@ -244,7 +244,7 @@ export interface BrowserStorage {
   readonly directory: FileSystemDirectoryHandle | null;
   /** Writes pending databases now; waitMs > 0 blocks up to that long (page hide). */
   flush(waitMs?: number): void;
-  /** Clears the HTTP cache and the bytecode cache of this namespace. */
+  /** Clears the HTTP cache of this namespace. */
   clearCaches(): Promise<void>;
 }
 

@@ -1,7 +1,6 @@
 // Persistent HTTP cache of the engine (see HttpCache.cpp).
 #pragma once
 
-#include <WebCore/FetchOptions.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/SharedBuffer.h>
@@ -9,10 +8,8 @@
 #include <wtf/WallTime.h>
 
 namespace WebCore {
-class LocalFrame;
 class Page;
 class ResourceLoader;
-class SecurityOrigin;
 struct SecurityOriginData;
 }
 
@@ -32,11 +29,10 @@ enum class Use { Fresh, Revalidate, None };
 // frame, site of the frame, and whether the load is the document of a subframe.
 // Format "<top site> <frame site>", with "s_" in front for the document of a
 // subframe; a site is scheme://registrable domain. Null for an opaque origin or
-// one without a site (file:): such loads are not cached. Also part of the
-// bytecode cache key.
+// one without a site (file:): such loads are not cached.
 String partition(const WebCore::SecurityOriginData& topOrigin, const WebCore::SecurityOriginData& frameOrigin, bool isSubframeDocument);
 
-// Partition of a load of this frame. Top site from the origin of
+// Partition of a running load (its current request). Top site from the origin of
 // request.firstPartyForCookies() (a blob: URL: its creator), frame site from the
 // origin of the context that loads (requester, the CachedResource's origin:
 // document or worker), for a navigation from its target URL. If the requester is
@@ -46,13 +42,11 @@ String partition(const WebCore::SecurityOriginData& topOrigin, const WebCore::Se
 // a service worker or shared worker through the placeholder document of its own
 // page (top origin of the registration or creator), a dedicated worker through
 // its creator's document.
-String partition(const WebCore::LocalFrame&, const WebCore::ResourceRequest&, const WebCore::FetchOptions&, const WebCore::SecurityOrigin* requester);
+String partition(const WebCore::ResourceLoader&);
 
 // Origin of the service worker or shared worker that runs in this page (its
 // placeholder document has an opaque origin)
 void setWorkerOrigin(WebCore::Page&, const WebCore::SecurityOriginData&);
-// The same for a running load (its current request)
-String partition(const WebCore::ResourceLoader&);
 
 // May this request come from the cache or go into it?
 bool canUse(const WebCore::ResourceRequest&);

@@ -37,7 +37,7 @@ them or load `media-sw.js` into the site's own worker:
 |---|---|---|
 | `engineUrl` | required | Folder with the engine files, same origin |
 | `transport` | required | Network of the engine (`Transport`, for example `WispTransport`) |
-| `storage.persistent` | `true` | `false` keeps everything in memory (no OPFS, no HTTP or bytecode cache) |
+| `storage.persistent` | `true` | `false` keeps everything in memory (no OPFS, no HTTP cache) |
 | `storage.namespace` | `browserlite` | OPFS directory and prefix of caches and the Web Lock, `^[a-z0-9_]{1,32}$` |
 | `storage.beforeStart` | none | Runs with the namespace directory before the engine starts |
 | `serviceWorker` | none | `{ registration }` or `{ url, scope? }` of a worker that loads `media-sw.js`; never registered implicitly |

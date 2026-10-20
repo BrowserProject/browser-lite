@@ -49,7 +49,6 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
-    ${BL_ENGINE_SRC}/BytecodeCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/Speech.cpp
@@ -154,12 +153,8 @@ set(BL_PRE_JS
     wasm-host.js
     # Connections through the host's transport (engine/src/Sockets.cpp)
     sockets.js
-    # Shared helpers of the two caches in the host's Cache API
-    cache-storage.js
     # HTTP cache in the host's Cache API (engine/src/HttpCache.cpp)
     http-cache.js
-    # Bytecode cache of the scripts, also in the Cache API (engine/src/BytecodeCache.cpp)
-    bytecode-cache.js
     # WebCodecs of the pages through the WebCodecs of the host (engine/src/media/WebCodecsWasm.cpp)
     webcodecs-host.js
     # MediaRecorder: encoders of the host + WebM (engine/src/media/MediaRecorderWasm.cpp)
@@ -198,10 +193,3 @@ endif ()
 
 # Data package: link again when the WebAssembly API changes
 set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js)
-
-# Build ID (start of the SHA-256 of engine.wasm) as a custom section in the
-# module: stored bytecode is only valid for exactly this build (BytecodeCache.cpp)
-find_program(NODE_EXECUTABLE node REQUIRED)
-add_custom_command(TARGET BrowserLiteEngine POST_BUILD
-    COMMAND ${NODE_EXECUTABLE} ${BROWSER_LITE_ENGINE_DIR}/../tools/wasm-build-id.mjs $<TARGET_FILE_DIR:BrowserLiteEngine>/engine.wasm
-    VERBATIM)

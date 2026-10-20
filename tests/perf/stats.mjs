@@ -8,8 +8,8 @@
 // row, foreign.log next to each file). Comparison per group (default: per section and visit):
 // ratio of the medians arm/base per site with a bootstrap interval (95 %), and G, the geometric
 // mean of these ratios over the sites, with a bootstrap interval that resamples the runs of every
-// site and arm. G < 1 always means the arm is better: for metrics where more is better (hits,
-// fps) the ratio is base/arm. Primary metrics (low noise first) get a verdict and a suggested n per
+// site and arm. G < 1 always means the arm is better: for metrics where more is better (fps)
+// the ratio is base/arm. Primary metrics (low noise first) get a verdict and a suggested n per
 // arm, secondary ones are only shown.
 //
 // The comparisons come from "compare" of the plan, a list of {base, arms, rule, where, metrics,
@@ -47,10 +47,10 @@ const maxPsi = Number(option('psi', 5));
 const groupKeys = option('group', 'label,visit,start').split(',');
 const markdown = flag('markdown');
 
-const PRIMARY = ['cpu', 'rx', 'hits', 'firstLayout'];
+const PRIMARY = ['cpu', 'rx', 'firstLayout'];
 const SECONDARY = ['loaded'];
 // Metrics where more is better: their ratio is base/arm, so G < 1 means better for every metric
-const MORE_IS_BETTER = new Set(['hits', 'fps']);
+const MORE_IS_BETTER = new Set(['fps']);
 const WEAK = 'C';
 const MEMORY_VETO = 1.1;
 // Half width of the interval of G that the suggested n aims at, and the most runs per arm

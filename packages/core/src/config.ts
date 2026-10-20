@@ -36,7 +36,6 @@ export const CORE_ENV = [
   'BL_GPU',
   'BL_COMPOSITING',
   'BL_HTTP_CACHE',
-  'BL_BYTECODE_CACHE',
   'BL_SCRIPT_TIMEOUT',
   'BL_SAFEPOINT_GC',
   'BL_TEST_HOOKS',
@@ -333,7 +332,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
  * Environment of the engine (read once at start, engine/abi.json). The only place that maps
  * options to engine switches. `persistent` is the effective OPFS state (false when another tab
  * holds the storage lock or OPFS is missing); only `storage.persistent: false` also turns off the
- * Cache API caches.
+ * HTTP cache.
  */
 export function engineEnv(
   config: Config,
@@ -347,7 +346,6 @@ export function engineEnv(
     TZ: config.timeZone,
   };
   if (!persistent) result.BL_OPFS = '0';
-  if (!config.persistent) result.BL_BYTECODE_CACHE = '0';
   if (!config.persistent || !config.httpCache) result.BL_HTTP_CACHE = '0';
   if (config.errorPage !== undefined) result.BL_ERROR_PAGE = config.errorPage;
   if (config.debug) result.BL_TEST_HOOKS = '1';

@@ -10,7 +10,7 @@
 // params go into the URL of the demo, engine into the engine options.
 // cold: a new browser profile from the template (engines of the sites of the arms in the HTTP and
 // code cache of Chromium, browser-lite itself empty). warm: then the browser restarts and loads the same
-// site again (HTTP cache, bytecode cache, service workers). Times are milliseconds after the
+// site again (HTTP cache, service workers). Times are milliseconds after the
 // browser of the demo is ready. --mem-high: memory.high of the device in MB (set by device.sh).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -130,7 +130,7 @@ async function measure(dir, site, config, stay) {
       { timeout: 20000, polling: 100 },
     )
     .catch(() => {});
-  // Before the second visit stay like a user: the engine stores the bytecode cache 5 s after load
+  // Before the second visit stay like a user (the HTTP cache stores asynchronously)
   if (linger || stay) await page.waitForTimeout(Math.max(linger, stay));
   const cpu = cpuSeconds() - cpu0;
   const net1 = netBytes();

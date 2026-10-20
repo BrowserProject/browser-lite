@@ -4,7 +4,7 @@ import type { Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 4;
+export const ENGINE_ABI_VERSION = 5;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -161,7 +161,6 @@ export interface EngineModule extends EngineExports, EngineHooks {
   blPresenterWorker?: () => Worker | null;
   blWriteFiles?: (files: { file: Blob; path: string }[]) => Promise<boolean[]>;
   blClearHttpCache?: () => Promise<void>;
-  blClearBytecodeCache?: () => Promise<void>;
   blShutdown?: () => void;
   blAbiVersion?: number;
 }

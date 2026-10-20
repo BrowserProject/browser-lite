@@ -118,16 +118,15 @@ the error page (#174, #175).
 TLS happens inside the engine with ChaCha20-Poly1305 preferred (#65), so the relay only sees
 encrypted bytes. All loaders share one request path (`LoaderStrategy.cpp`: cookies, at most 20
 redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). The HTTP cache
-stores responses in the host's Cache API (`<namespace>-http-v<format>`, #70, #182), the bytecode
-cache in `<namespace>-bytecode-<build>` (#135). Both are partitioned like Chrome's HTTP cache
-(#213): every entry belongs to the top site, the frame site and whether it is the document of a
-subframe (`HttpCache::partition`). The top site comes from the origin of `firstPartyForCookies`
-(a `blob:` top: its creator), the frame site from the origin that loads (the resource's origin:
-document or worker) or, for a navigation, its target. So workers use their storage key: service
-and shared workers load through the placeholder document of their own page, whose
-`firstPartyForCookies` is the top origin of the registration or creator, dedicated workers through
-their creator's document. A load WebCore made opaque (CORS after a cross-origin redirect) takes
-the frame's context instead: the worker of a worker page or the document. Opaque contexts
+stores responses in the host's Cache API (`<namespace>-http-v<format>`, #70, #182), partitioned
+like Chrome's HTTP cache (#213): every entry belongs to the top site, the frame site and whether
+it is the document of a subframe (`HttpCache::partition`). The top site comes from the origin of
+`firstPartyForCookies` (a `blob:` top: its creator), the frame site from the origin that loads
+(the resource's origin: document or worker) or, for a navigation, its target. So workers use their
+storage key: service and shared workers load through the placeholder document of their own page,
+whose `firstPartyForCookies` is the top origin of the registration or creator, dedicated workers
+through their creator's document. A load WebCore made opaque (CORS after a cross-origin redirect)
+takes the frame's context instead: the worker of a worker page or the document. Opaque contexts
 (sandboxed frames, `data:` tops) and origins without a site (`file:`) are not cached. WebKit's
 memory cache stays shared by all views of the engine.
 
@@ -198,9 +197,5 @@ never shrinks, the engine calls `WebCore::releaseMemory` when malloc's footprint
 
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
-mode off (#122). A bytecode cache in the Cache API helps repeat visits (#135): the key is the
-HTTP cache partition and the URL the page asked for (#213), remembered per resource when it starts
-loading, so scripts behind a redirect or answered by a service worker hit too (#212). The build ID includes the `JSC_*`
-options. An entry is a header (magic, version, length, checksum; `engine/js/bytecode-cache.js`)
-and the bytecode, which goes into engine memory once and JSC takes over without a copy. JSC
-itself checks the build ID and the whole source.
+mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
+brought no measurable gain and was removed (#215).

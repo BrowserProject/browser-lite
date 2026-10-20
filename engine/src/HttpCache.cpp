@@ -28,6 +28,7 @@
 #include <WebCore/CachedResource.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentPage.h>
+#include <WebCore/FetchOptions.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/HTTPParsers.h>
 #include <WebCore/LocalFrame.h>
@@ -124,7 +125,7 @@ static SecurityOriginData contextOrigin(const LocalFrame& frame)
     return document ? document->securityOrigin().data() : SecurityOriginData { };
 }
 
-String partition(const LocalFrame& frame, const ResourceRequest& request, const FetchOptions& options, const SecurityOrigin* requester)
+static String partition(const LocalFrame& frame, const ResourceRequest& request, const FetchOptions& options, const SecurityOrigin* requester)
 {
     auto topOrigin = originOf(request.firstPartyForCookies());
     if (options.mode == FetchOptions::Mode::Navigate) {

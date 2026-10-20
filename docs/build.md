@@ -94,11 +94,10 @@ docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 \
   browser-lite-toolchain tools/build-webcore.sh
 ```
 
-Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`. After linking,
-`tools/wasm-build-id.mjs` appends the build ID (start of the SHA-256 of the module) as the custom
-section `bl_build_id`; stored bytecode and `manifest.json` depend on it. The same sources at the
-same paths give the same build ID, so no step may embed a date (OpenSSL gets a fixed
-`SOURCE_DATE_EPOCH`).
+Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`. The same sources at the
+same paths give the same files and so the same content hash of the packaged engine
+(`engine/<hash>/`), which keeps the host browser's HTTP and code cache valid; no step may embed a
+date (OpenSSL gets a fixed `SOURCE_DATE_EPOCH`).
 
 `ccache` is in the image; with `CCACHE_DIR` inside the repository the cache survives the
 container, and `CCACHE_COMPILERCHECK` keeps it valid for a new toolchain image with the same

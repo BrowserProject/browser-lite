@@ -64,10 +64,10 @@ index 0000000000..2eb4471e0d
 +list(APPEND PAL_LIBRARIES OpenSSL::Crypto)
 diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
 new file mode 100644
-index 0000000000..77c3ea64c3
+index 0000000000..5ab728a8d3
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
-@@ -0,0 +1,92 @@
+@@ -0,0 +1,91 @@
 +# WebCore for PORT=Wasm (browser-lite).
 +# Network: curl, graphics: Skia, theme: Adwaita. Platform glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
@@ -126,7 +126,6 @@ index 0000000000..77c3ea64c3
 +    platform/unix/SharedMemoryUnix.cpp
 +
 +    page/glib/DragControllerGLib.cpp
-+    platform/wasm/BytecodeCacheWasm.cpp
 +    platform/wasm/CurlSSLHandleWasm.cpp
 +    platform/skia/DragImageSkia.cpp
 +    platform/wasm/DragWasm.cpp

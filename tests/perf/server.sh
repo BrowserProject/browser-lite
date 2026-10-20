@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Server side of a perf measurement: one browser-lite-server per built site ($OUT/site-<n>, one per
-# engine) on port SITE_PORT + n, so every engine has its own origin (storage lock, OPFS, HTTP and
-# bytecode cache and service worker would be shared otherwise), and, for record and replay, Web
-# Page Replay with a DNS that points every name at it.
+# engine) on port SITE_PORT + n, so every engine has its own origin (storage lock, OPFS, HTTP cache
+# and service worker would be shared otherwise), and, for record and replay, Web Page Replay with
+# a DNS that points every name at it.
 #
 #   tests/perf/server.sh record <archive>   replay server records from the internet
 #   tests/perf/server.sh replay <archive>   replay server plays back, 10 ms away

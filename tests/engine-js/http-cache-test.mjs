@@ -1,7 +1,6 @@
-// HTTP cache (engine/js/http-cache.js with engine/js/cache-storage.js) without the engine:
-// loaded in node, the Cache API is a fake with the same order as in the browser (storing appends
-// at the end, replacing too). Key format with the partition, cache names by format version
-// (others deleted by family), cleanup.
+// HTTP cache (engine/js/http-cache.js) without the engine: loaded in node, the Cache API is a
+// fake with the same order as in the browser (storing appends at the end, replacing too). Key
+// format with the partition, cache names by format version (other formats deleted), cleanup.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -86,11 +85,10 @@ function load(namespace = 'browserlite', names = []) {
     Math,
   };
   vm.createContext(context);
-  for (const file of ['cache-storage.js', 'http-cache.js'])
-    vm.runInContext(
-      readFileSync(new URL(`../../engine/js/${file}`, import.meta.url), 'utf8'),
-      context,
-    );
+  vm.runInContext(
+    readFileSync(new URL('../../engine/js/http-cache.js', import.meta.url), 'utf8'),
+    context,
+  );
   const http = vm.runInContext('blHttpCache', context);
   return { http, cache, opened, deleted, replies, module: context.Module };
 }
@@ -112,7 +110,7 @@ async function fill(http, cache, count, size) {
     'shop_1-http-v2',
     'shop_12-http',
     'other-http-v2',
-    'shop_1-bytecode-x',
+    'shop_1-httpx',
   ];
   const { http, opened, deleted, module } = load('shop_1', names);
   await http.open();

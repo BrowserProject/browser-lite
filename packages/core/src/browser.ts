@@ -112,7 +112,6 @@ class StorageImpl implements BrowserStorage {
   async clearCaches(): Promise<void> {
     const { module } = this.browser;
     await module.blClearHttpCache?.().catch(() => {});
-    await module.blClearBytecodeCache?.().catch(() => {});
   }
 }
 

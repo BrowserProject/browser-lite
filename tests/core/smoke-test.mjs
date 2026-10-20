@@ -1065,8 +1065,7 @@ try {
   );
   check(
     'own namespace caches exist',
-    ownFiles.caches.includes(`${NS}-http-v2`) &&
-      ownFiles.caches.some((name) => name.startsWith(`${NS}-bytecode-`)),
+    ownFiles.caches.includes(`${NS}-http-v2`),
     ownFiles.caches.join(),
   );
   check(

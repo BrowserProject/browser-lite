@@ -12,12 +12,11 @@ patches from `patches/`.
   features, host calls, environment). `tests/contract/abi-test.mjs` checks it against the
   sources.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
-  package, build ID. `BL_PRE_JS` is the only list of the `--pre-js` files.
+  package. `BL_PRE_JS` is the only list of the `--pre-js` files.
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, shutdown)
   - `sockets.js`: TCP streams over `Module.blTransport`
-  - `http-cache.js`, `bytecode-cache.js`: HTTP and bytecode cache in the host's Cache API, with
-    the shared helpers of `cache-storage.js` (entry URLs, deleting other cache names)
+  - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's
     codecs (WebM muxer)
   - `wasm-rewrite.js`, `wasm-host.js`: WebAssembly of the pages in the browser's WASM engine;
@@ -31,8 +30,8 @@ patches from `patches/`.
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread)
-  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `BytecodeCache.cpp`,
-    `PlatformStrategies.cpp`, `ErrorPage.cpp`
+  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `PlatformStrategies.cpp`,
+    `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),

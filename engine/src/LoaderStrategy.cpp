@@ -10,7 +10,6 @@
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
 
-#include "BytecodeCache.h"
 #include "Engine.h"
 #include "Host.h"
 #include "HttpCache.h"
@@ -829,9 +828,6 @@ private:
 
     void loadResource(LocalFrame& frame, CachedResource& resource, ResourceRequest&& request, const ResourceLoaderOptions& options, CompletionHandler<void(RefPtr<SubresourceLoader>&&)>&& completion) final
     {
-        // Fetch stored bytecode while the script loads
-        if (resource.type() == CachedResource::Type::Script)
-            BytecodeCache::prefetch(resource, HttpCache::partition(frame, request, options, resource.origin()), request.url());
         SubresourceLoader::create(frame, resource, WTF::move(request), options, [this, completion = WTF::move(completion)](RefPtr<SubresourceLoader>&& loader) mutable {
             if (loader)
                 schedule(*loader);

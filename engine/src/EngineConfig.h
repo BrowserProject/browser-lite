@@ -43,9 +43,6 @@ struct EngineConfig {
     bool compositing { true }; // BL_COMPOSITING
     bool asyncScrolling { true }; // BL_ASYNC_SCROLLING
     bool httpCache { true }; // BL_HTTP_CACHE
-    bool bytecodeCache { true }; // BL_BYTECODE_CACHE
-    CString buildID; // BL_BUILD_ID, null = custom section of engine.wasm
-    Vector<CString> jscOptions; // JSC_*=value, sorted (they change the bytecode JSC generates)
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB
     size_t memoryPressureMB { 3072 }; // BL_MEMORY_PRESSURE_MB

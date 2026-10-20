@@ -2,10 +2,12 @@
 //
 // The entries live in the Cache API of the host browser (on disk, only read
 // when needed), in the cache "<namespace>-http-v<format>"; caches of other
-// formats are deleted when opening (no migration). The request URL of an entry
-// is https://http.invalid/?p=<partition>&u=<url> (form encoded; partition: top
-// site, frame site, subframe document; HttpCache::partition). The list of keys
-// is kept in memory, so a request that is not in the cache costs no disk access.
+// formats are deleted when opening (no migration). The namespace has no "-"
+// (BL_STORAGE_NAMESPACE), so caches of different namespaces never mix. The
+// request URL of an entry is https://http.invalid/?p=<partition>&u=<url> (form
+// encoded; partition: top site, frame site, subframe document;
+// HttpCache::partition). The list of keys is kept in memory, so a request that
+// is not in the cache costs no disk access.
 //
 // Limit: 400 MB, at most a quarter of the host's quota. Only the own content
 // counts (header x-bl-size), not what else is in the OPFS or in the host's
@@ -40,7 +42,7 @@ var blHttpCache = {
           blHttpCache.limit = Math.min(blHttpCache.limit, estimate.quota / 4);
       }).catch(function () { });
     }
-    blHttpCache.ready = blCacheStorage.deleteFamily(base, blHttpCache.name).then(function () {
+    blHttpCache.ready = blHttpCache.deleteCaches(blHttpCache.name).then(function () {
       return caches.open(blHttpCache.name);
     }).then(function (cache) {
       return cache.keys().then(function (keys) {
@@ -53,14 +55,27 @@ var blHttpCache = {
     return blHttpCache.ready;
   },
 
-  // Family of the cache names of this namespace (cache-storage.js)
+  // Every HTTP cache of this namespace is "<base>" or "<base>-<format>"
   base: function () {
     return blStorageNamespace() + '-http';
   },
 
-  // Request URL of the entry of url in partition
+  // Deletes every HTTP cache of this namespace except keep (undefined: all of them)
+  deleteCaches: function (keep) {
+    if (typeof caches === 'undefined')
+      return Promise.resolve();
+    var base = blHttpCache.base();
+    return caches.keys().then(function (names) {
+      return Promise.all(names.filter(function (name) {
+        return name !== keep && (name === base || name.indexOf(base + '-') === 0);
+      }).map(function (name) { return caches.delete(name); }));
+    });
+  },
+
+  // Request URL of the entry of url in partition: already in the form
+  // cache.keys() gives back, so it can be compared with those
   key: function (partition, url) {
-    return blCacheStorage.entryURL('http.invalid', { p: partition, u: url });
+    return 'https://http.invalid/?' + new URLSearchParams({ p: partition, u: url });
   },
 
   lookup: function (id, partition, url) {
@@ -187,5 +202,5 @@ var blHttpCache = {
 // Host: deletes the HTTP caches of this namespace, all formats (browser.storage.clearCaches)
 Module['blClearHttpCache'] = function () {
   blHttpCache.ready = null;
-  return blCacheStorage.deleteFamily(blHttpCache.base());
+  return blHttpCache.deleteCaches();
 };

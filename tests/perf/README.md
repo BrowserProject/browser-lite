@@ -19,8 +19,8 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   archive, then every section loads them from the replay. Archives never leave the runner.
 - **Engines**: one job measures several engines. Site n (`build/perf/site-<n>`, one per engine) is
   served on port 8080 + n and opens as `localhost:<port>` inside the device: a secure context
-  (else no OPFS and no caches) and its own origin per engine (storage lock, OPFS, HTTP and bytecode
-  cache and service worker are never shared).
+  (else no OPFS and no caches) and its own origin per engine (storage lock, OPFS, HTTP cache and
+  service worker are never shared).
 - **Memory**: `run.mjs`, `start.mjs` and `frames.mjs` record `memMB` (`memory.current` of the
   device, with page cache), `anonMB` (`anon` of `memory.stat`, without page cache), `run.mjs` and
   `frames.mjs` also `wasmMB` (size of the WebAssembly memory, `blTest.measurements()`).
@@ -49,8 +49,8 @@ green CI runs whose engines become site 0, 1, ... (empty: the latest green run o
 site). Each site is packaged with the demo of its own commit, because engine and core go together.
 
 ```bash
-gh workflow run perf.yml -f plan=probe                          # same engine twice
-gh workflow run perf.yml -f plan=bytecode -f engine_runs=<E0 run>,<E1 run>
+gh workflow run perf.yml -f plan=probe                                   # same engine twice
+gh workflow run perf.yml -f plan=probe -f engine_runs=<E0 run>,<E1 run>  # one run per site
 ```
 
 Locally (Docker, root for netem): build the packages, package one site per engine, then
@@ -66,17 +66,16 @@ A plan has `groups`, a group has `record` (sites) and `sections` with `kind` (`r
 and `configs`. `configs` (of the section or the plan) are the arms, taken in ABBA order:
 `{"name": "E1", "site": 1, "params": {...}, "engine": {...}}` with the site, parameters of the demo
 URL and engine options (`window.blTestOptions`, for example `{"env": {...}}`). The demo takes
-them only with `?debug=1` (#205), so they are for measuring only. The arm without bytecode cache
-(`plans/bytecode.json`) sets the expert switch `BL_BUILD_ID` empty (`BL_BYTECODE_CACHE` is
-core-owned); like everything here it goes away with this folder.
+them only with `?debug=1` (#205), so they are for measuring only; like everything here they go
+away with this folder.
 
 ## Evaluation
 
 `stats.mjs` drops disturbed runs (foreign load while `t0` to `t0 + wall`), compares every arm
 with a base per site (ratio of the medians) and over the sites (G, geometric mean) with bootstrap
 intervals (95 %), and suggests the runs per arm for a half width of 3 % of G (at most 30; start
-with a pilot of 5). G < 1 means the arm is better (for `hits` and `fps` the ratio is base/arm). Primary
-metrics have little noise (`cpu`, `rx`, `hits` once recorded, `firstLayout`), `loaded` is
+with a pilot of 5). G < 1 means the arm is better (for `fps` the ratio is base/arm). Primary
+metrics have little noise (`cpu`, `rx`, `firstLayout`), `loaded` is
 secondary (wiki and weather vary a lot). `compare` of the plan names base, arms and rule:
 `lever` (rule R: on C a clear win, G <= 0.95 with the upper bound below 1, nowhere an upper bound
 above 1.03), `correction` (nowhere above 1.03), both with a veto at +10 % `anonMB` and at crashes

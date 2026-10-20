@@ -1,5 +1,5 @@
 {
-  "abiVersion": 4,
+  "abiVersion": 5,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -96,7 +96,6 @@
     { "name": "bl__socket_sent", "caller": "engine/js/sockets.js", "doc": "Bytes the transport really sent (backpressure)." },
     { "name": "bl__socket_closed", "caller": "engine/js/sockets.js", "doc": "Stream ended, reason = index in closeReasons." },
     { "name": "bl__http_cache_result", "caller": "engine/js/http-cache.js", "doc": "Answer of an HTTP cache lookup." },
-    { "name": "bl__bytecode_cache_result", "caller": "engine/js/bytecode-cache.js", "doc": "Answer of a bytecode cache lookup: key, bytecode (malloc, taken over; 0 = no entry), its size, length and checksum from the header of the entry." },
     { "name": "bl__codec_created", "caller": "engine/js/webcodecs-host.js", "doc": "WebCodecs codec created or failed." },
     { "name": "bl__codec_error", "caller": "engine/js/webcodecs-host.js", "doc": "WebCodecs codec error." },
     { "name": "bl__codec_flushed", "caller": "engine/js/webcodecs-host.js", "doc": "WebCodecs flush done." },
@@ -143,7 +142,6 @@
     { "name": "blPresenterWorker", "setBy": "engine", "type": "() => Worker | null", "doc": "Worker the view canvases go to: postMessage({ blCanvas: offscreenCanvas, viewId }, [offscreenCanvas])." },
     { "name": "blWriteFiles", "setBy": "engine", "type": "(files: {file, path}[]) => Promise<boolean[]>", "doc": "Writes host files into the engine file system in chunks." },
     { "name": "blClearHttpCache", "setBy": "engine", "type": "() => Promise", "doc": "Deletes the HTTP cache of the namespace." },
-    { "name": "blClearBytecodeCache", "setBy": "engine", "type": "() => Promise", "doc": "Deletes the bytecode caches of the namespace." },
     { "name": "blShutdown", "setBy": "engine", "type": "() => void", "doc": "Closes all transport streams and terminates all engine threads; the module is unusable afterwards." }
   ],
   "events": [
@@ -232,8 +230,8 @@
   },
   "env": [
     { "name": "BL_FEATURES", "type": "list", "default": "all", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "Comma list of features (see features); unset = all, empty = none." },
-    { "name": "BL_STORAGE_NAMESPACE", "type": "string", "default": "browserlite", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "^[a-z0-9_]{1,32}$: OPFS directory of /data and prefix of the cache names <ns>-http-v<format>, <ns>-bytecode-<build id>. Invalid: memory only, no HTTP and no bytecode cache." },
-    { "name": "BL_OPFS", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: /data in memory only. The Cache API caches (BL_HTTP_CACHE, BL_BYTECODE_CACHE) are separate." },
+    { "name": "BL_STORAGE_NAMESPACE", "type": "string", "default": "browserlite", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "^[a-z0-9_]{1,32}$: OPFS directory of /data and prefix of the cache names <ns>-http-v<format>. Invalid: memory only, no HTTP cache." },
+    { "name": "BL_OPFS", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: /data in memory only. The HTTP cache in the Cache API (BL_HTTP_CACHE) is separate." },
     { "name": "BL_ERROR_PAGE", "type": "string", "default": "built-in English template", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "HTML template of the error page with {{lang}} {{kind}} {{title}} {{heading}} {{message}} {{code}} {{url}} {{retryLabel}}; [data-bl-retry] elements retry." },
     { "name": "BL_EXTRA_CA", "type": "string", "default": "", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "Extra CA certificates (PEM) for TLS; written to a file and removed from the environment." },
     { "name": "BL_KEEP_SESSION_COOKIES", "type": "bool", "default": "0", "class": "core-owned", "readBy": "engine/patches/0044-webcore-keep-session-cookies-on-wasm.patch", "doc": "1: session cookies survive a restart." },
@@ -242,12 +240,10 @@
     { "name": "BL_GPU", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: Skia paints on the CPU." },
     { "name": "BL_COMPOSITING", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: no layers and no compositor thread." },
     { "name": "BL_HTTP_CACHE", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: no persistent HTTP cache." },
-    { "name": "BL_BYTECODE_CACHE", "type": "bool", "default": "1", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: no persistent bytecode cache." },
     { "name": "BL_SCRIPT_TIMEOUT", "type": "number", "default": "30", "class": "core-owned", "readBy": "engine/src/EngineConfig.cpp", "doc": "Seconds an entry into JS may block the engine before the watchdog terminates it, 0 = off." },
     { "name": "BL_SAFEPOINT_GC", "type": "string", "default": "1", "class": "core-owned", "readBy": "engine/patches/0012-gc-only-at-top-level-on-wasm.patch", "doc": "GC at safe points in JS: 0 off, debug with output." },
     { "name": "BL_TEST_HOOKS", "type": "bool", "default": "0", "class": "debug-only", "readBy": "engine/src/EngineConfig.cpp", "doc": "1: bl_eval_script, bl_memory_report, bl_crash_for_testing and bl_measurements work. Never with foreign pages in production." },
     { "name": "BL_ASYNC_SCROLLING", "type": "bool", "default": "1", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: scrolling on the engine thread." },
-    { "name": "BL_BUILD_ID", "type": "string", "default": "custom section bl_build_id of engine.wasm", "class": "expert", "readBy": "engine/src/EngineConfig.cpp, engine/patches/0029-webcore-bytecode-cache-on-wasm.patch", "doc": "Version of stored bytecode, the JSC_* options are mixed in; empty disables the bytecode cache." },
     { "name": "BL_MEMORY_RELEASE_MB", "type": "number", "default": "192", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "malloc footprint from which caches are released at every 32 MB of growth, 0 = off." },
     { "name": "BL_MEMORY_PRESSURE_MB", "type": "number", "default": "3072", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "malloc footprint from which 'memory-pressure' is reported." },
     { "name": "BL_INDEXEDDB_QUOTA_MB", "type": "number", "default": "256", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "IndexedDB limit per origin." },
@@ -256,7 +252,7 @@
     { "name": "BL_SPARE_WORKERS", "type": "number", "default": "4", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Extra pthread workers loaded right after start." },
     { "name": "BL_MALLOC_CACHE", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0015-wtf-fastmalloc-on-emscripten.patch", "doc": "Size of the FastMalloc cache." },
     { "name": "BL_LLINT_TUNING", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0031-jsc-llint-slow-paths-on-wasm.patch", "doc": "Tuning of the LLInt slow paths." },
-    { "name": "JSC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "JavaScriptCore", "doc": "JSC options, e.g. JSC_useLLIntICs=false. Part of the bytecode build ID (BL_BUILD_ID)." },
+    { "name": "JSC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "JavaScriptCore", "doc": "JSC options, e.g. JSC_useLLIntICs=false." },
     { "name": "FC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "fontconfig", "doc": "fontconfig switches, e.g. FC_DEBUG." }
   ]
 }

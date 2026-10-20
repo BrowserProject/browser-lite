@@ -5,7 +5,6 @@
 
 #include "config.h"
 
-#include "BytecodeCache.h"
 #include "Compositor.h"
 #include "Engine.h"
 #include "EngineConfig.h"
@@ -101,8 +100,6 @@ int main(int, char**)
 
     JSC::initialize();
     WTF::initializeMainThread();
-    // Sets BL_BUILD_ID: setenv is not thread safe, so before the first thread starts
-    BytecodeCache::initialize();
 
     // Set up fontconfig in the background right away: it reads its configuration
     // with many file accesses. Otherwise that happens in the middle of loading the
