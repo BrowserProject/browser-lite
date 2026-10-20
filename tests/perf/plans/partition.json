@@ -1,0 +1,173 @@
+{
+  "description": "U2 and the removed bytecode cache: engine before (site 0, f770fe5) against the engine with the HTTP cache partitioned by site and without bytecode cache (site 1), first and second visit, cheap (C) and fast (S) device, LAN",
+  "configs": [
+    {
+      "name": "E1",
+      "site": 0
+    },
+    {
+      "name": "E2",
+      "site": 1
+    }
+  ],
+  "compare": [
+    {
+      "base": "E1",
+      "arms": [
+        "E2"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "warm"
+      },
+      "metrics": [
+        "cpu",
+        "firstLayout",
+        "rx"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    },
+    {
+      "base": "E1",
+      "arms": [
+        "E2"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [
+        "cpu",
+        "firstLayout",
+        "rx"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "partition-C-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "partition-C-cnn",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites cnn"
+        }
+      ]
+    },
+    {
+      "name": "partition-C-github",
+      "record": [
+        "github"
+      ],
+      "sections": [
+        {
+          "id": "partition-C-github",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites github"
+        }
+      ]
+    },
+    {
+      "name": "partition-C-youtube",
+      "record": [
+        "youtube"
+      ],
+      "sections": [
+        {
+          "id": "partition-C-youtube",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites youtube"
+        }
+      ]
+    },
+    {
+      "name": "partition-C-wiki",
+      "record": [
+        "wiki"
+      ],
+      "sections": [
+        {
+          "id": "partition-C-wiki",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites wiki"
+        }
+      ]
+    },
+    {
+      "name": "partition-S-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "partition-S-cnn",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites cnn"
+        }
+      ]
+    },
+    {
+      "name": "partition-S-github",
+      "record": [
+        "github"
+      ],
+      "sections": [
+        {
+          "id": "partition-S-github",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites github"
+        }
+      ]
+    },
+    {
+      "name": "partition-S-youtube",
+      "record": [
+        "youtube"
+      ],
+      "sections": [
+        {
+          "id": "partition-S-youtube",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites youtube"
+        }
+      ]
+    },
+    {
+      "name": "partition-S-wiki",
+      "record": [
+        "wiki"
+      ],
+      "sections": [
+        {
+          "id": "partition-S-wiki",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites wiki"
+        }
+      ]
+    }
+  ]
+}
