@@ -386,7 +386,12 @@ class BrowserImpl implements Browser, ViewHost {
       (data, view) => {
         if (view && !view.closed) fn(view, data);
       };
-    this.handle('memory-pressure', () => this.events.emit('memory-pressure', {}));
+    this.handle<Record<string, unknown>>('memory-pressure', (data) =>
+      this.events.emit('memory-pressure', {
+        footprint: Number(data.footprint) || 0,
+        limit: Number(data.limit) || 0,
+      }),
+    );
     this.handle<Record<string, unknown>>('clipboard', (data) => {
       const write = this.config.handlers.clipboardWrite ?? writeHostClipboard;
       const request = { text: String(data.text ?? ''), html: String(data.html ?? '') };
@@ -526,7 +531,9 @@ class BrowserImpl implements Browser, ViewHost {
   }
 
   memoryPressure(): void {
-    if (this.ready) this.events.emit('memory-pressure', {});
+    if (!this.ready) return;
+    const size = this.module.HEAPU8.length;
+    this.events.emit('memory-pressure', { footprint: size, limit: size });
   }
 
   warn(code: WarningCode, message: string): void {

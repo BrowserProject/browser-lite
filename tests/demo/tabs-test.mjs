@@ -4,6 +4,8 @@
 // keeps an address that failed, the security indicator ("Not secure" for a certificate error,
 // nothing on other error pages) and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
+// Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
+// the status line says that memory is full.
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -343,6 +345,53 @@ check(
   focused === '/notify' && (await activeIs('Notification')),
   `${focused}, ${await activeTitle()}`,
 );
+
+// 6) Memory pressure with a limit like a 32 bit browser (debug memoryLimit): the background tab
+// is discarded, then with no background tab left the status line says that memory is full, and
+// the engine does not crash
+const viewIds = () => page.evaluate(() => window.blTest.views().map((view) => view.id));
+const idsBefore = await viewIds();
+const memoryMB = Math.round((await page.evaluate(() => window.blTest.memory())) / 2 ** 20);
+// At least the smallest limit measured in i386 Chromium, malloc fails there
+await page.evaluate((mb) => window.blTest.memoryLimit(mb), Math.max(640, memoryMB + 256));
+let allocated = 0;
+const allocate = async () => {
+  allocated++;
+  await page.evaluate(() =>
+    window.blTest.eval(
+      '(window.big ||= []).push(new Uint8Array(16 << 20).fill(1)); console.log("RESULT allocated=" + big.length)',
+    ),
+  );
+  for (let i = 0; i < 100 && results.get('allocated') !== String(allocated); i++)
+    await page.waitForTimeout(100);
+};
+const statusText = () => page.evaluate(() => document.getElementById('status').textContent);
+let discarded = false;
+for (let i = 0; i < 60 && !/Memory is almost full/.test(await statusText()); i++) {
+  await allocate();
+  const ids = await viewIds();
+  discarded ||= ids.length === idsBefore.length && ids.some((id) => !idsBefore.includes(id));
+}
+check(
+  'memory pressure: the background tab is discarded',
+  discarded,
+  `${JSON.stringify(idsBefore)} -> ${JSON.stringify(await viewIds())}`,
+);
+check(
+  'memory pressure: the active tab stays',
+  (await activeTitle()) === 'Notification' && (await tabCount()) === idsBefore.length,
+  `${await activeTitle()}, ${await tabCount()} tabs`,
+);
+check(
+  'memory pressure without a background tab: message in the status line',
+  /Memory is almost full/.test(await statusText()),
+  `${await statusText()} (after ${allocated * 16} MB)`,
+);
+check(
+  'memory pressure: no crash',
+  await page.evaluate(() => document.getElementById('boot').hidden && !!window.blTest.view()),
+);
+await page.evaluate(() => window.blTest.memoryLimit(0));
 
 selfSigned.close();
 await browser.close();

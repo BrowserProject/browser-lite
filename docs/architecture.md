@@ -188,10 +188,16 @@ JSC's GC is conservative and scans the stack, but WASM locals are invisible to i
 spilling all pointers (#17, 14x slower) the engine runs the GC only on an empty stack: every
 engine task runs under `DeferGC`, and explicit requests wait for the outermost one (patch 0012,
 #36). During long scripts the heap sets a VM trap that the interpreter serves at instruction
-boundaries where all values are in memory (#60, #72, `engine.safepointGC`). Since WASM memory
-never shrinks, the engine calls `WebCore::releaseMemory` when malloc's footprint grows past
-192 MB (#61, #64) and reports `memory-pressure` above 3 GB (#171). Proof:
+boundaries where all values are in memory (#60, #72, `engine.safepointGC`). Proof:
 `tests/engine/gc-test.mjs` with `JSC_slowPathAllocsBetweenGCs=10`.
+
+WASM memory never shrinks and grows up to 4 GB, in a 32 bit browser only to about 1 GB. One build
+serves both: `engine/src/MemoryWatch.cpp` runs after every engine task and acts when malloc's
+footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64). Once the
+malloc area ends above 384 MB it grows the memory ahead so that 128 MB stay free above it; when
+that fails, the current size is the limit. From then on, or above 3 GB, it reports
+`memory-pressure` `{footprint, limit}` at every growth, and the host discards background views
+(#128, #171, #216).
 
 ## JavaScript
 

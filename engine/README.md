@@ -25,6 +25,7 @@ patches from `patches/`.
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
     (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
+    `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure),
     `Measurements.cpp` (readings for `tests/perf`, goes away with it)
   - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`

@@ -14,7 +14,7 @@
 #include "config.h"
 #include "Engine.h"
 #include "EngineConfig.h"
-#include "Host.h"
+#include "MemoryWatch.h"
 
 #include <atomic>
 #include <cstdarg>
@@ -31,9 +31,7 @@
 #include <JavaScriptCore/Watchdog.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/JSDOMGlobalObject.h>
-#include <WebCore/MemoryRelease.h>
 #include <WebCore/ScriptExecutionContext.h>
-#include <malloc.h>
 #include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
@@ -59,50 +57,6 @@ pthread_t engineThread()
 bool isEngineThread()
 {
     return s_engineThreadSet.load(std::memory_order_acquire) && pthread_equal(pthread_self(), s_engineThread);
-}
-
-// WASM memory never shrinks. So we release what WebKit otherwise only releases
-// under memory pressure (caches, decoded images, back/forward cache, compiled
-// code) as soon as malloc had to get more memory from the system: above the
-// threshold at every growth by 32 MB. That way free space is reused first.
-// malloc_footprint() costs nothing (mallinfo() walks the whole heap and cost
-// about 25 ms per call on CNN).
-// BL_MEMORY_RELEASE_MB: threshold in MB, 0 turns it off.
-// From Emscripten's dlmalloc, not declared in any header
-extern "C" size_t malloc_footprint(void);
-
-static size_t memoryReleaseThreshold()
-{
-    return engineConfig().memoryReleaseMB << 20;
-}
-
-// If malloc keeps growing above this limit, WASM memory (at most 4 GB) gets
-// scarce even when little is in use (fragmentation, big blocks): at every
-// growth by 32 MB the engine reports "memory-pressure", the host discards a
-// background view. BL_MEMORY_PRESSURE_MB: limit in MB.
-static size_t memoryPressureThreshold()
-{
-    return engineConfig().memoryPressureMB << 20;
-}
-
-static void releaseMemoryIfNeeded()
-{
-    static size_t footprintAtRelease;
-    if (!memoryReleaseThreshold())
-        return;
-    size_t footprint = malloc_footprint();
-    if (footprint < memoryReleaseThreshold() || footprint < footprintAtRelease + (32 << 20))
-        return;
-    footprintAtRelease = footprint;
-    auto start = WTF::MonotonicTime::now();
-    size_t usedBefore = debugEnabled() ? mallinfo().uordblks : 0;
-    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
-    if (debugEnabled()) {
-        debugLog("Memory released (malloc area %zu MB): used %zu -> %zu MB in %.0f ms", footprint >> 20,
-            usedBefore >> 20, static_cast<size_t>(mallinfo().uordblks) >> 20, (WTF::MonotonicTime::now() - start).milliseconds());
-    }
-    if (footprint >= memoryPressureThreshold())
-        notifyHost(0, "memory-pressure", makeString("{\"footprint\":"_s, footprint, '}'));
 }
 
 // Detects input without an answer: after an input the host sends a mark, the
@@ -156,7 +110,7 @@ static void runWithGCAfterwards(Work&& work)
         if (duration > 5)
             debugLog("GC %.0f ms, Heap %zu -> %zu kB", duration, sizeBefore / 1024, vm->heap.size() / 1024);
     }
-    releaseMemoryIfNeeded();
+    checkMemory();
 }
 
 // Emscripten drains the queue of a thread until it is empty, including what

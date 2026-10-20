@@ -182,6 +182,7 @@ const blTest = {
   pageRow: (y) => browser.debug.pageRow(active, y),
   memory: (report) => browser.debug.memory(report),
   memoryPressure: () => browser.debug.memoryPressure(),
+  memoryLimit: (megabytes) => browser.debug.memoryLimit(megabytes),
   crash: (kind) => browser.debug.crash(kind),
   audioState: () => browser.debug.audioState(),
   mediaState: () => browser.debug.mediaState(),
@@ -253,6 +254,8 @@ const host = {
    */
   dialogMode: 'answer',
   dialogDelay: 1000,
+  /** Payloads of the 'memory-pressure' events ({footprint, limit}). */
+  memoryPressure: [],
   /** Download objects of the 'download' event (for cancel()). */
   downloadObjects: [],
   /** False: start without a 'new-view' listener (popups load in their opener). */
@@ -364,8 +367,12 @@ const host = {
     });
     browser.on('crash', ({ reason }) => host.events.push(`crash:${reason}`));
     browser.on('network', ({ connected }) => host.events.push(`network:${connected}`));
-    for (const type of ['unresponsive', 'responsive', 'memory-pressure'])
+    for (const type of ['unresponsive', 'responsive'])
       browser.on(type, () => host.events.push(type));
+    browser.on('memory-pressure', (event) => {
+      host.events.push('memory-pressure');
+      host.memoryPressure.push(event);
+    });
     // Views the pages open (window.open, target=_blank) become the active view
     if (host.listenNewView)
       browser.on('new-view', ({ view, opener }) => {

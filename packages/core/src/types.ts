@@ -258,8 +258,12 @@ export interface BrowserEvents {
   'new-view': { view: View; opener: View | null };
   /** A download started; without any listener the file is saved automatically when done. */
   download: { download: Download };
-  /** The engine's memory grows: close or discard background views. */
-  'memory-pressure': Record<string, never>;
+  /**
+   * The engine's memory runs short: close or discard background views. Reported at every further
+   * growth of malloc by 32 MB while less than a reserve is left below `limit` (or above the
+   * expert switch `BL_MEMORY_PRESSURE_MB`).
+   */
+  'memory-pressure': MemoryPressureEvent;
   /** No answer from the engine for 10 s after input (an open page dialog does not count). */
   unresponsive: Record<string, never>;
   /** The engine answers again after `unresponsive`. */
@@ -270,6 +274,17 @@ export interface BrowserEvents {
   network: { connected: boolean };
   /** Something works in a reduced way; also logged to the console. */
   warning: { code: WarningCode; message: string };
+}
+
+/** Payload of the `memory-pressure` event of {@link Browser.on}, in bytes. */
+export interface MemoryPressureEvent {
+  /** Memory malloc of the engine took from its WebAssembly memory. */
+  footprint: number;
+  /**
+   * Size the WebAssembly memory cannot grow beyond: found at runtime (about 1 GB in a 32 bit
+   * browser), else the maximum of the engine build (4 GB).
+   */
+  limit: number;
 }
 
 /**
@@ -671,8 +686,18 @@ export interface DebugApi {
    * 'lose-webgl' loses the host contexts of the WebGL canvases of the pages.
    */
   gpu(action: 'lose' | 'restore' | 'lose-webgl'): void;
-  /** Behaves like a memory-pressure message of the engine. */
+  /**
+   * Behaves like a memory-pressure message of the engine at its limit (footprint and limit are the
+   * current size of the engine memory).
+   */
   memoryPressure(): void;
+  /**
+   * The engine memory cannot grow beyond megabytes, malloc fails there (0: the real limit), so
+   * memory-pressure comes as on a 32 bit browser. The engine looks for a limit only once malloc
+   * uses 384 MB, so limits below about 600 MB come too late. Takes effect at the next task of
+   * the engine.
+   */
+  memoryLimit(megabytes: number): void;
   /** Readings for tests/perf, null before the engine is ready. They go away with tests/perf. */
   measurements(): EngineMeasurements | null;
 }

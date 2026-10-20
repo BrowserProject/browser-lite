@@ -50,6 +50,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
+    ${BL_ENGINE_SRC}/MemoryWatch.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
     ${BL_ENGINE_SRC}/Speech.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
@@ -142,6 +143,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-Wl,--wrap=access"
     # Start times of the threads for tests/perf (engine/src/Measurements.cpp)
     "SHELL:-Wl,--wrap=pthread_create"
+    # Growth of the memory under one lock (engine/src/MemoryWatch.cpp)
+    "SHELL:-Wl,--wrap=sbrk"
 )
 
 # JS parts of the engine (--pre-js) in this order. If one changes, the engine

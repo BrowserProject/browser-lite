@@ -53,7 +53,7 @@ them or load `media-sw.js` into the site's own worker:
 | `preferences` | all on, GPC off | `{ javascript, images, globalPrivacyControl }` |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |
 | `engine` | | `gpu`, `compositing`, `safepointGC`, `httpCache`, `scriptTimeoutSeconds`, `extraCA` (PEM), `log`, `env` (experimental `BL_*`, `JSC_*`, `FC_*` switches; keys the core sets are rejected) |
-| `debug` | `false` | Enables `browser.debug` (with `measurements()`, readings for `tests/perf` that go away with it) and the engine test hooks; never with foreign scripts on the page |
+| `debug` | `false` | Enables `browser.debug` (with `measurements()`, readings for `tests/perf` that go away with it, and `memoryLimit(megabytes)`, a limit of the engine memory like in a 32 bit browser) and the engine test hooks; never with foreign scripts on the page |
 
 ## Handlers and events
 
@@ -83,6 +83,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `source` | `view.viewSource()`: show the text |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
+| `memory-pressure` (browser) | The engine memory runs short (`footprint` and `limit` in bytes; the limit is about 1 GB in a 32 bit browser, found at runtime): close or discard background views, tell the user when none is left |
 | `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)) |
 
 Without a `download` listener finished downloads are saved automatically.

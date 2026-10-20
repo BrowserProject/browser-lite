@@ -191,7 +191,8 @@ delegate the matching `allow=` features.
   `createView({ history })`.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart.
-- `memory-pressure`: close or discard background views.
+- `memory-pressure` (`{footprint, limit}` in bytes): the engine memory runs short. Close or
+  discard background views; when none is left, tell the user (the demo shows a message).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 
 ## Browser support
@@ -208,8 +209,10 @@ folder. Stored data in OPFS and the HTTP cache stay.
 
 ## Resource use
 
-- Memory: one WebAssembly memory of 256 MB that grows up to 4 GB and never shrinks; the engine
-  releases caches above 192 MB and reports `memory-pressure` above 3 GB.
+- Memory: one WebAssembly memory of 256 MB that grows up to 4 GB (about 1 GB in a 32 bit browser)
+  and never shrinks; the engine releases caches above 192 MB, from 384 MB keeps 128 MB free ahead
+  and reports `memory-pressure` when less is left below the limit it found at runtime, or above
+  3 GB.
 - Threads: at least 12 Web Workers (a pool of 8 plus 4 spare), more when pages start workers.
 - CPU: JavaScript runs in an interpreter; large news sites take 10 to 60 s to load
   ([status.md](status.md)).

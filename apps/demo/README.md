@@ -1,11 +1,12 @@
 # apps/demo/
 
 The full demo browser on browser-lite: tabs (with popups, restored tabs that load on the first
-click, discarding under memory pressure), address bar with suggestions, history, bookmarks,
-downloads panel, settings page with profile and device emulation, find bar, zoom, print preview,
-keyboard shortcuts, security indicator, crash and hang handling. Built with Vite and only the
-public APIs of `@browser-lite/core`, `@browser-lite/ui`, `@browser-lite/profile` and
-`@browser-lite/transport-wisp`. Deployment on the home server: [deploy/](deploy/README.md).
+click, discarding under memory pressure and a message when none is left), address bar with
+suggestions, history, bookmarks, downloads panel, settings page with profile and device
+emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
+handling. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
+`@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the home server:
+[deploy/](deploy/README.md).
 
 ## Run
 
@@ -40,8 +41,8 @@ An extra CA certificate only comes through code: with `debug=1` a test sets
 
 `window.blTest` (with `debug=1`): `browser`, `view()`, `views()`, `open(url)`, `load(url)`,
 `eval(source)`, `pagePixel(x, y)`, `pageRow(y)`, `memory(report?)`, `memoryPressure()`,
-`crash(kind)`, `audioState()`, `mediaState()`, `rtcState()`, `measurements()` (readings for
-`tests/perf`), `flags` (`firstLayout`,
+`memoryLimit(megabytes)` (a limit like in a 32 bit browser), `crash(kind)`, `audioState()`,
+`mediaState()`, `rtcState()`, `measurements()` (readings for `tests/perf`), `flags` (`firstLayout`,
 `firstPaint`, `loaded`), and for the demo `checkMemory()` (discards a background tab, returns the
 new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`,
 `transport`, `relay`, `options`.

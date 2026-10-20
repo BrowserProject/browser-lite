@@ -25,7 +25,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213).
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
-  (#147, #172), hidden background views (#170), memory pressure (#171), error pages with the
+  (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
+  runtime, also in 32 bit browsers with about 1 GB (#171, #216), error pages with the
   relay's reason and auto reload (#174, #175), dead relay detection (#177).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
@@ -75,6 +76,8 @@ performance with several runs and inclusive times from profiles, not only load t
 - Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; video
   without an audio track pauses when hidden like Chrome (not after PiP, #170); discarding under
   memory pressure does not spare tabs with beforeunload listeners and input.
+- Memory: a single page that needs more than the limit (about 1 GB in a 32 bit browser) or one
+  allocation bigger than the 128 MB reserve can still crash the engine (#147, #216).
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.
 - WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take

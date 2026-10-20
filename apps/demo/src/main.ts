@@ -47,6 +47,8 @@ const DEFAULT_URL = 'https://example.com/';
 const REPEAT_WINDOW = 60000;
 const CRASH_KEY = 'bl-crash-time';
 const SAFE_START_KEY = 'bl-safe-start';
+// Memory pressure and no background tab left to discard
+const MEMORY_FULL = 'Memory is almost full: close tabs, or the browser may crash and restart';
 // After "Wait" the hang message comes back while the engine still does not answer
 const HANG_REPEAT = 10000;
 
@@ -256,7 +258,9 @@ async function start(restarted: boolean): Promise<void> {
   profile.attach(browser);
   browser.on('new-view', ({ view }) => adoptView(view));
   browser.on('download', ({ download }) => addDownload(download));
-  browser.on('memory-pressure', () => discardForMemory());
+  browser.on('memory-pressure', () => {
+    if (!discardForMemory()) showNotice(MEMORY_FULL);
+  });
   browser.on('crash', ({ reason }) => crashed(reason));
   browser.on('unresponsive', () => {
     hung = true;

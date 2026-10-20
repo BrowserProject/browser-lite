@@ -101,6 +101,11 @@ export class Debug implements DebugApi {
     this.host.memoryPressure();
   }
 
+  memoryLimit(megabytes: number): void {
+    if (this.host.ready)
+      this.host.module._bl_memory_limit_for_testing(Math.max(0, Math.round(megabytes)));
+  }
+
   measurements(): EngineMeasurements | null {
     const { module } = this.host;
     const ptr = this.host.ready ? module._bl_measurements() : 0;

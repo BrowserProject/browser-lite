@@ -91,6 +91,7 @@ export function installTestHooks(state: TestState): void {
     pageRow: (y: number) => debugApi().pageRow(view(), y),
     memory: (report?: 0 | 1 | 2 | 3) => debugApi().memory(report),
     memoryPressure: () => debugApi().memoryPressure(),
+    memoryLimit: (megabytes: number) => debugApi().memoryLimit(megabytes),
     crash: (kind: 'abort' | 'trap') => debugApi().crash(kind),
     audioState: () => debugApi().audioState(),
     mediaState: () => debugApi().mediaState(),
