@@ -6,8 +6,8 @@ index ef46145d6c..9361c74a35 100644
  #define ENABLE_MOUSE_CURSOR_SCALE 0
  #endif
  
-+// browser-lite: wie GTK/WPE (PlatformEnableGlib.h), showNotification und
-+// notificationclick im Service Worker
++// browser-lite: like GTK/WPE (PlatformEnableGlib.h), showNotification and
++// notificationclick in the service worker
 +#if PLATFORM(WASM) && ENABLE(NOTIFICATIONS) && !defined(ENABLE_NOTIFICATION_EVENT)
 +#define ENABLE_NOTIFICATION_EVENT 1
 +#endif

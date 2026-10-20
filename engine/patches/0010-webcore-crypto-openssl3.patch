@@ -119,7 +119,7 @@ index 0000000000..3437a9ea3a
 +
 +namespace WebCore {
 +
-+// Ed25519 (RFC 8032) ohne Vorab-Hash: EVP_DigestSign mit leerem Digest
++// Ed25519 (RFC 8032) without prehash: EVP_DigestSign with an empty digest
 +
 +ExceptionOr<Vector<uint8_t>> CryptoAlgorithmEd25519::platformSign(const CryptoKeyOKP& key, const Vector<uint8_t>& data)
 +{
@@ -282,7 +282,7 @@ index 0000000000..a3f092021e
 +
 +namespace WebCore {
 +
-+// X25519 (RFC 7748). OpenSSL lehnt ein Ergebnis aus lauter Nullen selber ab.
++// X25519 (RFC 7748). OpenSSL itself rejects an all zero result.
 +std::optional<Vector<uint8_t>> CryptoAlgorithmX25519::platformDeriveBits(const CryptoKeyOKP& baseKey, const CryptoKeyOKP& publicKey)
 +{
 +    auto baseKeyData = baseKey.platformKey().span();
@@ -349,8 +349,8 @@ index 0000000000..3ca2fe7f00
 +
 +namespace WebCore {
 +
-+// Ed25519 und X25519 ueber die EVP_PKEY-Schnittstelle von OpenSSL. Die Schluessel
-+// liegen wie bei den anderen Ports roh in m_data: 32 Bytes privat bzw. oeffentlich.
++// Ed25519 and X25519 through the EVP_PKEY interface of OpenSSL. The keys are
++// stored raw in m_data as in the other ports: 32 bytes private or public.
 +
 +static constexpr size_t okpKeySize = 32;
 +
@@ -429,7 +429,7 @@ index 0000000000..3ca2fe7f00
 +
 +RefPtr<CryptoKeyOKP> CryptoKeyOKP::importSpki(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
 +{
-+    // SubjectPublicKeyInfo nach RFC 8410: OID id-Ed25519 bzw. id-X25519, ohne Parameter
++    // SubjectPublicKeyInfo per RFC 8410: OID id-Ed25519 or id-X25519, without parameters
 +    auto span = keyData.span();
 +    const uint8_t* pointer = span.data();
 +    EvpPKeyPtr key(d2i_PUBKEY(nullptr, &pointer, span.size()));
@@ -465,7 +465,7 @@ index 0000000000..3ca2fe7f00
 +
 +RefPtr<CryptoKeyOKP> CryptoKeyOKP::importPkcs8(CryptoAlgorithmIdentifier identifier, NamedCurve curve, Vector<uint8_t>&& keyData, bool extractable, CryptoKeyUsageBitmap usages)
 +{
-+    // PrivateKeyInfo nach RFC 8410: der private Schluessel steckt als OCTET STRING drin
++    // PrivateKeyInfo per RFC 8410: the private key is inside as an OCTET STRING
 +    auto span = keyData.span();
 +    const uint8_t* pointer = span.data();
 +    PKCS8PrivKeyInfoPtr info(d2i_PKCS8_PRIV_KEY_INFO(nullptr, &pointer, span.size()));
@@ -550,7 +550,7 @@ index cfc7adfc97..e111fb6b4c 100644
  size_t CryptoKeyRSA::keySizeInBits() const
  {
 -    RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
-+    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    // OpenSSL 3 returns const here (BoringSSL does not), const works for both
 +    const RSA* rsa = EVP_PKEY_get0_RSA(m_platformKey.get());
      if (!rsa)
          return 0;
@@ -560,7 +560,7 @@ index cfc7adfc97..e111fb6b4c 100644
  auto CryptoKeyRSA::algorithm() const -> KeyAlgorithm
  {
 -    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
-+    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    // OpenSSL 3 returns const here (BoringSSL does not), const works for both
 +    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
  
      // FIXME: `CryptoRsaKeyAlgorithm` stores `modulusLength` as an `unsigned` requiring us to cast below. We should find a way to remove the need for a cast / ensure the cast is safe and doesn't overflow.
@@ -570,7 +570,7 @@ index cfc7adfc97..e111fb6b4c 100644
  std::unique_ptr<CryptoKeyRSAComponents> CryptoKeyRSA::exportData() const
  {
 -    RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
-+    // OpenSSL 3 liefert hier const (BoringSSL nicht), const passt fuer beide
++    // OpenSSL 3 returns const here (BoringSSL does not), const works for both
 +    const RSA* rsa = EVP_PKEY_get0_RSA(platformKey());
      if (!rsa)
          return nullptr;

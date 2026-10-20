@@ -18,9 +18,9 @@ index b7d6bff329..17104bba06 100644
          cacheVersion.construct(0);
          dataLogLnIf(JSCBytecodeCacheVersionInternal::verbose, "Failed to get UUID for JavaScriptCore framework");
 +#elif OS(EMSCRIPTEN)
-+        // browser-lite: der Zeitstempel dieser Datei aendert sich nicht, wenn sich
-+        // der Rest der Engine aendert. Der Einbetter setzt BL_BUILD_ID (Hash von
-+        // engine.wasm); ohne ID 0, dann nimmt der Einbetter keinen Bytecode-Cache.
++        // browser-lite: the timestamp of this file does not change when the
++        // rest of the engine changes. The embedder sets BL_BUILD_ID (hash of
++        // engine.wasm); without an ID 0, and then the embedder uses no bytecode cache.
 +        UNUSED_VARIABLE(jsFunctionAddr);
 +        const char* buildID = getenv("BL_BUILD_ID");
 +        cacheVersion.construct(buildID && *buildID ? SuperFastHash::computeHash(buildID) : 0);
@@ -42,7 +42,7 @@ index df84a17d3d..e6ff8df2e7 100644
      }
  
 +#if PLATFORM(WASM)
-+    // browser-lite: dauerhafter Bytecode-Cache der Skripte (platform/wasm/BytecodeCacheWasm.cpp)
++    // browser-lite: persistent bytecode cache of the scripts (platform/wasm/BytecodeCacheWasm.cpp)
 +    RefPtr<JSC::CachedBytecode> cachedBytecode() const final;
 +    void cacheBytecode(const JSC::BytecodeCacheGenerator&) const final;
 +    void updateCache(const JSC::UnlinkedFunctionExecutable*, const JSC::SourceCode&, JSC::CodeSpecializationKind, const JSC::UnlinkedFunctionCodeBlock*) const final;
@@ -105,16 +105,16 @@ index 0000000000..62cb58ec8a
 + * THE POSSIBILITY OF SUCH DAMAGE.
 + */
 +
-+// browser-lite: dauerhafter Bytecode-Cache fuer Skripte aus dem Netz.
++// browser-lite: persistent bytecode cache for scripts from the network.
 +//
-+// JavaScriptCore kann kompilierten Bytecode speichern und wieder laden (wie
-+// die jsc-Shell mit --diskCachePath): beim ersten Ausfuehren fragt der
-+// CodeCache den SourceProvider nach gespeichertem Bytecode, neu erzeugter
-+// Code (das ganze Skript und spaeter jede Funktion beim ersten Aufruf) kommt
-+// als Update dazu. Hier haengt das an CachedScriptSourceProvider; wo der
-+// Bytecode liegt, entscheidet der Einbetter (setBytecodeCacheHandlers).
-+// JSC prueft beim Laden selbst Version (JSCBytecodeCacheVersion, Build-ID)
-+// und Schluessel (Hash, Laenge, Modus und den ganzen Quelltext).
++// JavaScriptCore can store compiled bytecode and load it again (like
++// the jsc shell with --diskCachePath): on the first run the
++// CodeCache asks the SourceProvider for stored bytecode, newly generated
++// code (the whole script and later each function on its first call) is added
++// as an update. Here this is attached to CachedScriptSourceProvider; where the
++// bytecode is kept is decided by the embedder (setBytecodeCacheHandlers).
++// On load JSC itself checks the version (JSCBytecodeCacheVersion, build ID)
++// and the key (hash, length, mode and the whole source text).
 +
 +#include "config.h"
 +#include "CachedScriptSourceProvider.h"
@@ -147,7 +147,7 @@ index 0000000000..62cb58ec8a
 +    return handler;
 +}
 +
-+// Skripte, deren neuer Bytecode noch nicht gespeichert ist (nur Haupt-Thread)
++// Scripts whose new bytecode is not stored yet (main thread only)
 +static HashSet<const CachedScriptSourceProvider*>& providersWithBytecode()
 +{
 +    static NeverDestroyed<HashSet<const CachedScriptSourceProvider*>> providers;
@@ -166,9 +166,9 @@ index 0000000000..62cb58ec8a
 +        provider->commitCachedBytecode();
 +}
 +
-+// Neu kompilierte Funktionen, noch nicht kodiert (nur Haupt-Thread). Das
-+// Kodieren kostete beim ersten Besuch mitten im Laden Zeit (weather.com 1.35 s),
-+// darum erst beim Speichern im Leerlauf.
++// Newly compiled functions, not encoded yet (main thread only). Encoding
++// cost time in the middle of loading on the first visit (weather.com 1.35 s),
++// so it only happens when storing while idle.
 +struct PendingFunction {
 +    JSC::Strong<JSC::UnlinkedFunctionExecutable> executable;
 +    JSC::CodeSpecializationKind kind;
@@ -183,7 +183,7 @@ index 0000000000..62cb58ec8a
 +
 +} // namespace WasmPlatform
 +
-+// Kleine Skripte kompilieren schneller, als der Weg ueber den Cache kostet
++// Small scripts compile faster than a round trip through the cache costs
 +static constexpr unsigned minimumScriptSizeForBytecodeCache = 4096;
 +
 +bool CachedScriptSourceProvider::shouldCacheBytecode() const
@@ -227,8 +227,8 @@ index 0000000000..62cb58ec8a
 +    m_bytecodeLoaded = true;
 +    if (m_bytecodeCommitted || (m_cachedBytecode && m_cachedBytecode->hasUpdates()))
 +        return;
-+    // Gespeicherter Bytecode passte nicht (Skript geaendert): ganz neu anfangen,
-+    // ein Update haengt sonst nur hinten an den alten Inhalt an
++    // Stored bytecode did not match (script changed): start from scratch,
++    // otherwise an update is only appended to the old content
 +    auto update = generator();
 +    if (!update)
 +        return;
@@ -240,8 +240,8 @@ index 0000000000..62cb58ec8a
 +{
 +    if (!m_cachedBytecode || m_bytecodeCommitted)
 +        return;
-+    // Nur Funktionen aus genau diesem Bytecode (bei einem Treffer im
-+    // Speicher-Cache koennen sie aus einem anderen Skript gleichen Inhalts sein)
++    // Only functions from exactly this bytecode (on a hit in the memory
++    // cache they can come from another script with the same content)
 +    if (!m_cachedBytecode->leafExecutables().contains(executable))
 +        return;
 +    auto& vm = commonVM();
@@ -256,8 +256,8 @@ index 0000000000..62cb58ec8a
 +{
 +    if (m_bytecodeCommitted || !m_cachedBytecode)
 +        return;
-+    // Gemerkte Funktionen jetzt kodieren (nicht waehrend einer GC, falls der
-+    // Provider beim Aufraeumen stirbt: dann fallen sie weg)
++    // Encode the remembered functions now (not during a GC, in case the
++    // provider dies during cleanup: then they are dropped)
 +    auto pending = WasmPlatform::pendingFunctions().take(this);
 +    auto& vm = commonVM();
 +    if (vm.heap.mutatorState() == JSC::MutatorState::Running) {
@@ -276,8 +276,8 @@ index 0000000000..62cb58ec8a
 +    WasmPlatform::providersWithBytecode().remove(this);
 +    if (!WasmPlatform::storeBytecodeHandler())
 +        return;
-+    // Wie die jsc-Shell eine Datei schreibt, nur im Speicher: bisheriger
-+    // Bytecode, auf die neue Groesse gebracht, darueber die Updates
++    // Like the jsc shell writes a file, only in memory: the previous
++    // bytecode, resized to the new size, with the updates on top
 +    auto original = m_cachedBytecode->span();
 +    Vector<uint8_t> blob(m_cachedBytecode->sizeForUpdate(), [](size_t) -> uint8_t { return 0; });
 +    memcpySpan(blob.mutableSpan().first(std::min(original.size(), blob.size())), original.first(std::min(original.size(), blob.size())));

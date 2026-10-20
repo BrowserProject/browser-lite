@@ -7,8 +7,8 @@ index 0793c78950..7942b46255 100644
  
  if (COMPILER_IS_GCC_OR_CLANG)
 -    if (NOT APPLE AND (COMPILER_IS_CLANG OR (DEVELOPER_MODE AND NOT ARM)))
-+    # Emscripten: emcc wertet jedes -g... Flag als "Debug-Info gewuenscht" und
-+    # schaltet dann die Binaryen-Optimierungen ab. Darum diese Flags weglassen.
++    # Emscripten: emcc treats any -g... flag as "debug info wanted" and
++    # then turns off the Binaryen optimizations. So leave these flags out.
 +    if (NOT EMSCRIPTEN AND NOT APPLE AND (COMPILER_IS_CLANG OR (DEVELOPER_MODE AND NOT ARM)))
          # Split debug information in ".debug_types" / ".debug_info" sections - this leads
          # to a smaller overall size of the debug information, and avoids linker relocation

@@ -1,10 +1,11 @@
-// Reads the sections of a WebAssembly module (used by optimize-assets.mjs and
-// engine-manifest.mjs).
+// Reads the sections of a WebAssembly module (used by optimize-assets.mjs,
+// engine-manifest.mjs and wasm-build-id.mjs).
 
 function readLEB(bytes, offset) {
   let result = 0;
   let shift = 0;
   for (;;) {
+    if (offset >= bytes.length) throw new Error('WebAssembly module is truncated');
     const byte = bytes[offset++];
     result += (byte & 0x7f) * 2 ** shift;
     shift += 7;
@@ -23,6 +24,7 @@ export function* wasmSections(bytes) {
     const id = bytes[offset++];
     const [size, dataStart] = readLEB(bytes, offset);
     const end = dataStart + size;
+    if (end > bytes.length) throw new Error('WebAssembly module is truncated');
     let name;
     let payload = dataStart;
     if (id === 0) {

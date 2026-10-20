@@ -196,7 +196,7 @@ set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LIT
 
 # Build ID (start of the SHA-256 of engine.wasm) as a custom section in the
 # module: stored bytecode is only valid for exactly this build (BytecodeCache.cpp)
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_program(NODE_EXECUTABLE node REQUIRED)
 add_custom_command(TARGET BrowserLiteEngine POST_BUILD
-    COMMAND ${Python3_EXECUTABLE} ${BROWSER_LITE_ENGINE_DIR}/../tools/wasm-build-id.py $<TARGET_FILE_DIR:BrowserLiteEngine>/engine.wasm
+    COMMAND ${NODE_EXECUTABLE} ${BROWSER_LITE_ENGINE_DIR}/../tools/wasm-build-id.mjs $<TARGET_FILE_DIR:BrowserLiteEngine>/engine.wasm
     VERBATIM)

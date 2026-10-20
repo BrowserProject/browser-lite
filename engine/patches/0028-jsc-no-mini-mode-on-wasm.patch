@@ -7,7 +7,7 @@ index 27cb0c2ff5..f347d84760 100644
      static bool isInMiniMode()
      {
 +#if OS(EMSCRIPTEN)
-+        // CLoop hat keinen JIT. Im Mini-Modus (nur volle GCs, Heap waechst kaum, Bytecode wird verworfen) verbringen grosse Seiten ein Viertel der Zeit im GC.
++        // CLoop has no JIT. In mini mode (only full GCs, heap barely grows, bytecode is discarded) large pages spend a quarter of their time in GC.
 +        return Options::forceMiniVMMode();
 +#else
          return !Options::useJIT() || Options::forceMiniVMMode();

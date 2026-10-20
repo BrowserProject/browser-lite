@@ -114,8 +114,8 @@ index 103ffadd0..5c07e6f60 100644
  
      HashMap<SWServerConnectionIdentifier, Ref<Connection>> m_connections;
 +#if PLATFORM(WASM)
-+    // Seite und Server teilen sich die Prozess-Kennung, darum merkt sich der
-+    // Server seine Hintergrund-Aktualisierungen
++    // Page and server share the process identifier, so the
++    // server remembers its own background updates
 +    HashSet<ServiceWorkerJobIdentifier> m_softUpdateJobs;
 +#endif
      HashMap<ServiceWorkerRegistrationKey, WeakRef<SWServerRegistration>> m_scopeToRegistrationMap;

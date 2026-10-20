@@ -7,14 +7,14 @@ index 4a2eb2ab45..98665e4fcf 100644
  static void overrideDefaults()
  {
 +#if OS(EMSCRIPTEN)
-+    // Auf 32 Bit sind die ICs standardmaessig aus (forceICFailure). In
-+    // WebAssembly gibt es nur den C-Loop-Interpreter, und dessen Aufruf-Caches
-+    // funktionieren auch auf 32 Bit. Ohne sie geht jeder JS-Aufruf durch
-+    // llint_default_call (C++), das kostet bis zu 40 %.
++    // On 32 bit the ICs are off by default (forceICFailure). In
++    // WebAssembly there is only the C loop interpreter, and its call caches
++    // also work on 32 bit. Without them every JS call goes through
++    // llint_default_call (C++), which costs up to 40 %.
 +    Options::forceICFailure() = false;
-+    // Ohne JIT waere die VM im Mini-Modus (VM::isInMiniMode, bei uns aus). Von
-+    // dort behalten wir nur das Verwerfen von ungenutztem Bytecode beim GC:
-+    // spart auf grossen Seiten 10 MB und mehr JS-Heap, kostet kaum Zeit.
++    // Without JIT the VM would be in mini mode (VM::isInMiniMode, off for us). Of
++    // that mode we keep only discarding unused bytecode during GC:
++    // saves 10 MB and more of JS heap on large pages, costs hardly any time.
 +    Options::useUnlinkedCodeBlockJettisoning() = true;
 +#endif
 +

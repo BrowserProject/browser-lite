@@ -21,7 +21,7 @@ index 61a2ae4d1f..b414fd0941 100644
 +#if PLATFORM(COCOA) || USE(GSTREAMER) || PLATFORM(WASM)
      Ref document = this->document();
 -#if ENABLE(WEBGL)
-+    // browser-lite: WebGL-Bilder kommen wie 2D ueber makeRenderingResultsAvailable
++    // browser-lite: WebGL images come through makeRenderingResultsAvailable like 2D
 +#if ENABLE(WEBGL) && !PLATFORM(WASM)
      if (RefPtr context = dynamicDowncast<WebGLRenderingContextBase>(m_context.get())) {
          if (document->settings().webAPIStatisticsEnabled())
@@ -34,7 +34,7 @@ index 681e921599..154f27b1ae 100644
  
  namespace WebCore {
  
-+// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++// browser-lite: own implementation in engine/src/media/WebCodecsWasm.cpp
 +#if !PLATFORM(WASM)
  bool AudioDecoder::isCodecSupported(const StringView& codec)
  {
@@ -55,7 +55,7 @@ index d53a42e0d8..bfbae13ca4 100644
  
  namespace WebCore {
  
-+// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++// browser-lite: own implementation in engine/src/media/WebCodecsWasm.cpp
 +#if !PLATFORM(WASM)
  Ref<AudioEncoder::CreatePromise> AudioEncoder::create(const String& codecName, const Config& config, DescriptionCallback&& descriptionCallback, OutputCallback&& outputCallback)
  {
@@ -77,7 +77,7 @@ index 423db07dd4..6999b8451c 100644
  }
  
 -#if !PLATFORM(COCOA) && !USE(GSTREAMER)
-+// browser-lite: eigene Umsetzung in engine/src/media/VideoFrameWasm.cpp
++// browser-lite: own implementation in engine/src/media/VideoFrameWasm.cpp
 +#if !PLATFORM(COCOA) && !USE(GSTREAMER) && !PLATFORM(WASM)
  RefPtr<VideoFrame> VideoFrame::fromNativeImage(NativeImage&)
  {
@@ -91,7 +91,7 @@ index db5cd94470..3c9ce86346 100644
          break;
      }
 +#elif PLATFORM(WASM)
-+    // browser-lite: VideoFrameWasm meldet VideoPixelFormat + 1 (0 = unbekannt)
++    // browser-lite: VideoFrameWasm reports VideoPixelFormat + 1 (0 = unknown)
 +    if (format && format <= static_cast<uint32_t>(VideoPixelFormat::BGRX) + 1) {
 +        auto pixelFormat = static_cast<VideoPixelFormat>(format - 1);
 +        if (shouldDiscardAlpha && pixelFormat == VideoPixelFormat::RGBA)
@@ -112,7 +112,7 @@ index 9e1a471626..ea8fdd4f74 100644
  namespace WebCore {
  
 -#if !USE(GSTREAMER) && !USE(AVFOUNDATION)
-+// browser-lite: eigene Umsetzung in engine/src/media/WebCodecsWasm.cpp
++// browser-lite: own implementation in engine/src/media/WebCodecsWasm.cpp
 +#if !USE(GSTREAMER) && !USE(AVFOUNDATION) && !PLATFORM(WASM)
  RefPtr<PlatformRawAudioData> PlatformRawAudioData::create(std::span<const uint8_t>, AudioSampleFormat, float, int64_t, size_t, size_t)
  {

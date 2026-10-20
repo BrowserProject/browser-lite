@@ -93,10 +93,16 @@ docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 \
   browser-lite-toolchain tools/build-webcore.sh
 ```
 
-Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`. `ccache` is in the image;
-with `CCACHE_DIR` inside the repository the cache survives the container, and
-`CCACHE_COMPILERCHECK` keeps it valid for a new toolchain image with the same Emscripten (#161 in
-[decisions.md](decisions.md)). Same for `tools/build-jsc.sh`. Quick check in node:
+Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.data`. After linking,
+`tools/wasm-build-id.mjs` appends the build ID (start of the SHA-256 of the module) as the custom
+section `bl_build_id`; stored bytecode and `manifest.json` depend on it. The same sources at the
+same paths give the same build ID, so no step may embed a date (OpenSSL gets a fixed
+`SOURCE_DATE_EPOCH`).
+
+`ccache` is in the image; with `CCACHE_DIR` inside the repository the cache survives the
+container, and `CCACHE_COMPILERCHECK` keeps it valid for a new toolchain image with the same
+Emscripten (#161 in [decisions.md](decisions.md)). Same for `tools/build-jsc.sh`. Quick check in
+node:
 
 ```bash
 node tests/engine/render.mjs build/webcore/bin tests/engine/pages/basic.html build/basic.ppm
@@ -133,9 +139,10 @@ green run on `main`, `.github/workflows/deploy.yml` builds the container and dep
 
 Costs and caches:
 
-- The engine and the jsc shell are cached by a hash of everything that goes into them; an
-  unchanged engine or jsc skips its build. The sysroot is cached by `deps/` and the toolchain
-  image.
+- The engine and the jsc shell are cached by a hash of everything that goes into them: their
+  files, the `WEBKIT_*` pins of `versions.env` and the toolchain image tag (Emscripten); an
+  unchanged engine or jsc skips its build, other pins do not rebuild them. The sysroot is
+  cached by `deps/` and the toolchain image.
 - A cold WebKit build takes longer than GitHub's 6 hour job limit. The jsc and engine jobs stop
   themselves before it (`timeout 320m`) and save ccache under a key with `github.run_attempt`, so
   **re-running the failed job** continues from the saved cache. The job `ccache-prune` keeps only

@@ -17,7 +17,7 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `gen-angle-shim.py` | generates the ANGLE replacement for WebGL (output goes into patch 0016) |
 | `build-jsc.sh` | JavaScriptCore and the `jsc` shell into `build/jsc/bin/` |
 | `build-webcore.sh` | WebCore and the engine into `build/webcore/bin/` |
-| `wasm-build-id.py` | appends the build ID to `engine.wasm` (called by the engine build) |
+| `wasm-build-id.mjs` | appends the build ID to `engine.wasm` (called by the engine build) |
 | `package-engine.sh` | engine for delivery: `engine/<hash>/` with .br/.gz, `manifest.json`, notices |
 | `engine-manifest.mjs` | writes `manifest.json` (version, build ID, pins, SHA256 of the files) |
 | `gen-notices.mjs` | writes `THIRD_PARTY_NOTICES.txt` (runs in the toolchain image) |

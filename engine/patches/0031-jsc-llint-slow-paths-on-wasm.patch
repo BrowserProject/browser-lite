@@ -7,10 +7,10 @@ index 43da80a76e..98712d8550 100644
      }
  
 +#if OS(EMSCRIPTEN)
-+    // Ein Trap setzt die Stack-Grenze so, dass der naechste Funktionseintritt
-+    // hier landet (meist vor dem naechsten op_check_traps). Auch hier liegen
-+    // alle Werte im JS-Stack: der Rahmen des Aufrufers ist fertig, der neue hat
-+    // Kopf und Argumente, seine Locals sind noch nicht benutzt.
++    // A trap sets the stack limit so that the next function entry
++    // lands here (usually before the next op_check_traps). Here too
++    // all values are in the JS stack: the caller's frame is complete, the new one has
++    // header and arguments, its locals are not used yet.
 +    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
 +        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
 +        vm.heap.collectAtSafepoint();
@@ -24,8 +24,8 @@ index 43da80a76e..98712d8550 100644
  }
  
 +#if OS(EMSCRIPTEN)
-+// Nur der Interpreter (CLoop), kein JIT: die Caches des LLInt sind der einzige
-+// schnelle Weg. BL_LLINT_TUNING=0 schaltet die Ergaenzungen hier ab (zum Vergleichen).
++// Interpreter only (CLoop), no JIT: the LLInt caches are the only
++// fast path. BL_LLINT_TUNING=0 turns off the additions here (for comparison).
 +static bool llintTuningEnabled()
 +{
 +    static const bool enabled = [] {
@@ -35,8 +35,8 @@ index 43da80a76e..98712d8550 100644
 +    return enabled;
 +}
 +
-+// Gleiche Pruefung wie performGetByIDHelper im .asm, fuer Stellen, die auf 32 Bit
-+// keinen schnellen Weg im Interpreter haben (op_instanceof)
++// Same check as performGetByIDHelper in the .asm, for places that have no fast path
++// in the interpreter on 32 bit (op_instanceof)
 +static ALWAYS_INLINE bool tryCachedGetByID(const GetByIdModeMetadata& metadata, JSCell* cell, JSValue& result)
 +{
 +    StructureID structureID = cell->structureID();
@@ -71,8 +71,8 @@ index 43da80a76e..98712d8550 100644
      RETURN_IF_EXCEPTION(throwScope, { });
  
 +#if OS(EMSCRIPTEN)
-+    // Fehlende Properties (Unset) cachen wie Prototyp-Treffer: der Code dafuer
-+    // ist da (setupGetByIdPrototypeCache), war aber hier ausgeschlossen
++    // Cache missing properties (Unset) like prototype hits: the code for it
++    // exists (setupGetByIdPrototypeCache), but was excluded here
 +    bool cacheUnset = llintTuningEnabled();
 +#else
 +    bool cacheUnset = false;
@@ -102,8 +102,8 @@ index 43da80a76e..98712d8550 100644
 -    LLINT_CHECK_EXCEPTION();
 +    JSValue hasInstance;
 +#if OS(EMSCRIPTEN)
-+    // Auf 32 Bit gibt es fuer op_instanceof keinen schnellen Weg im .asm (auf
-+    // 64 Bit schon): die Caches der beiden Zugriffe hier zuerst pruefen
++    // On 32 bit there is no fast path for op_instanceof in the .asm (on
++    // 64 bit there is): check the caches of both accesses here first
 +    bool tuning = llintTuningEnabled();
 +    if (!tuning || !tryCachedGetByID(metadata.m_hasInstanceModeMetadata, constructor.asCell(), hasInstance))
 +#endif
@@ -134,7 +134,7 @@ index 43da80a76e..98712d8550 100644
      LLINT_BEGIN_NO_SET_PC();
      ASSERT(vm.traps().needHandling(VMTraps::AsyncEvents));
 +#if OS(EMSCRIPTEN)
-+    // Befehlsgrenze im Interpreter: alle Werte liegen im JS-Stack von JSC
++    // Instruction boundary in the interpreter: all values are in the JSC JS stack
 +    if (vm.traps().hasTrapBit(VMTraps::NeedSafepointGC)) {
 +        vm.traps().clearTrap(VMTraps::NeedSafepointGC);
 +        vm.heap.collectAtSafepoint();

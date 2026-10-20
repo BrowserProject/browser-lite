@@ -15,26 +15,26 @@ index dba3460cfb..62bb437956 100644
  WTF_MAKE_TZONE_ALLOCATED_IMPL(CurlRequest);
  
 +#if PLATFORM(WASM)
-+// Die Sockets der Engine gehen ueber ein Relay (Wisp), das einen neuen Stream nicht
-+// bestaetigt: er gilt sofort als offen, ein Aufbau, der beim Relay scheitert, zeigt sich
-+// erst beim Lesen oder Schreiben. Der Fehler des Sockets sagt, was war (Sockets.cpp im
-+// Embedding), daraus der Code, den curl beim Verbinden gaebe. Das Relay ist der Proxy.
++// The engine's sockets go through a relay (Wisp) that does not confirm a new stream:
++// it counts as open at once, and a connect that fails at the relay only shows up when
++// reading or writing. The socket error tells what happened (Sockets.cpp in the
++// embedding); map it to the code curl would give while connecting. The relay is the proxy.
 +static CURLcode connectionErrorOnWasm(CURLcode result, long socketError)
 +{
 +    switch (socketError) {
-+    case EADDRNOTAVAIL: // ein Name, den das Relay nicht aufloesen kann
++    case EADDRNOTAVAIL: // a name the relay cannot resolve
 +        return CURLE_COULDNT_RESOLVE_HOST;
 +    case ECONNREFUSED:
 +        return CURLE_COULDNT_CONNECT;
 +    case EHOSTUNREACH:
-+        // Fuer curl ist das auch CURLE_COULDNT_CONNECT. CURLE_INTERFACE_FAILED gibt es
-+        // sonst nie (kein CURLOPT_INTERFACE), so bleibt es von "abgewiesen" getrennt.
++        // For curl this is also CURLE_COULDNT_CONNECT. CURLE_INTERFACE_FAILED never occurs
++        // otherwise (no CURLOPT_INTERFACE), so it stays distinct from "refused".
 +        return CURLE_INTERFACE_FAILED;
 +    case ETIMEDOUT:
 +        return CURLE_OPERATION_TIMEDOUT;
-+    case ENETUNREACH: // kein Relay
++    case ENETUNREACH: // no relay
 +        return CURLE_COULDNT_RESOLVE_PROXY;
-+    case EACCES: // das Relay sperrt das Ziel
++    case EACCES: // the relay blocks the target
 +        return CURLE_REMOTE_ACCESS_DENIED;
 +    default:
 +        return result;

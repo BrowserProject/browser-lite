@@ -16,7 +16,7 @@ index e5885cc55b..f6c2ce5689 100644
  }
  
 +#if PLATFORM(WASM)
-+// browser-lite: Schluessel fuer den Typeface-Cache in createFontPlatformData
++// browser-lite: key for the typeface cache in createFontPlatformData
 +struct TypefaceKey {
 +    String family;
 +    int weight;
@@ -43,11 +43,11 @@ index e5885cc55b..f6c2ce5689 100644
      auto familyName = getFamilyNameStringFromFamily(family);
      auto skFontStyle = skiaFontStyle(fontDescription);
 +#if PLATFORM(WASM)
-+    // browser-lite: WebCores eigener Cache (cachedFontPlatformData) unterscheidet
-+    // auch Groesse und Sprache (lang); die Suche bei fontconfig haengt aber nur
-+    // von Familie und Stil ab und kostet ohne JIT spuerbar (Wikipedia mit vielen
-+    // lang-Attributen: 1.4 s). Die Schriften des Systems aendern sich nie, darum
-+    // die Ergebnisse (auch "nicht gefunden") hier merken, pro Thread wie der FontCache.
++    // browser-lite: WebCore's own cache (cachedFontPlatformData) also distinguishes
++    // size and language (lang); the fontconfig lookup only depends on family and
++    // style but is noticeably slow without JIT (Wikipedia with many lang
++    // attributes: 1.4 s). The system fonts never change, so remember the
++    // results (including "not found") here, per thread like the FontCache.
 +    static thread_local NeverDestroyed<HashMap<TypefaceKey, sk_sp<SkTypeface>, TypefaceKeyHash, TypefaceKeyTraits>> typefaces;
 +    TypefaceKey typefaceKey { familyName, skFontStyle.weight(), skFontStyle.width(), static_cast<int>(skFontStyle.slant()) };
 +    auto typeface = typefaces->ensure(typefaceKey, [&] {

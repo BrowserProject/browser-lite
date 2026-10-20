@@ -7,9 +7,9 @@ index b9c680d990..be2ad78e06 100644
  
      setSslCipherList(sslHandle.cipherList().data());
 +#if PLATFORM(WASM)
-+    // Die Liste oben gilt nur bis TLS 1.2. Fuer TLS 1.3 nimmt OpenSSL sonst
-+    // AES-256-GCM zuerst. In WebAssembly gibt es keine AES-Hardware, ChaCha20
-+    // ist in Software ein Mehrfaches schneller (wie bei Handys ohne AES).
++    // The list above only applies up to TLS 1.2. For TLS 1.3 OpenSSL would
++    // otherwise pick AES-256-GCM first. WebAssembly has no AES hardware, ChaCha20
++    // is several times faster in software (as on phones without AES).
 +    curl_easy_setopt(m_handle, CURLOPT_TLS13_CIPHERS, "TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384");
 +#endif
  

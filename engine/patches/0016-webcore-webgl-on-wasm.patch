@@ -8,7 +8,7 @@ index f00f452204..a1d7e66d20 100644
  if (ENABLE_WEBGL OR USE_ANGLE_EGL)
 -    add_subdirectory(ThirdParty/ANGLE)
 +    if (PORT STREQUAL "Wasm")
-+        # Kein ANGLE: WebGL geht ueber platform/wasm/angle an das WebGL des Host-Browsers
++        # No ANGLE: WebGL goes through platform/wasm/angle to the WebGL of the host browser
 +        add_library(ANGLE::GLES INTERFACE IMPORTED GLOBAL)
 +        set_target_properties(ANGLE::GLES PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
 +            "${CMAKE_SOURCE_DIR}/Source/WebCore/platform/wasm/angle;${CMAKE_SOURCE_DIR}/Source/ThirdParty/ANGLE/include")
@@ -71,18 +71,18 @@ index 0000000000..cf5f007346
 +
 +namespace WebCore {
 +
-+// Kennung des Kontexts im ANGLE-Ersatz
++// Identifier of the context in the ANGLE replacement
 +static int shimHandle(GCGLContext context)
 +{
 +    return static_cast<int>(reinterpret_cast<intptr_t>(context));
 +}
 +
-+// Diese GraphicsContextGLANGLE-Methoden definiert jede Plattform selber
++// Each platform defines these GraphicsContextGLANGLE methods itself
 +
 +GraphicsContextGLANGLE::~GraphicsContextGLANGLE()
 +{
-+    // Nach einem Verlust gibt es die GL-Objekte nicht mehr, den Kontext im
-+    // ANGLE-Ersatz aber schon
++    // After a loss the GL objects are gone, but the context in the ANGLE
++    // replacement still exists
 +    if (makeContextCurrent()) {
 +        if (m_texture)
 +            GL_DeleteTextures(1, &m_texture);
@@ -111,8 +111,8 @@ index 0000000000..cf5f007346
 +    return m_contextObj && angleShimMakeCurrent(shimHandle(m_contextObj));
 +}
 +
-+// Nach Zeichenaufrufen: ist der Host-Kontext verloren, erfaehrt es die Seite
-+// (webglcontextlost) und kann ihn wiederherstellen lassen
++// After draw calls: if the host context is lost, the page learns about it
++// (webglcontextlost) and can have it restored
 +void GraphicsContextGLANGLE::checkGPUStatus()
 +{
 +    if (!isContextLost() && m_contextObj && angleShimIsContextLost(shimHandle(m_contextObj)))
@@ -148,7 +148,7 @@ index 0000000000..cf5f007346
 +bool GraphicsContextGLWasm::platformInitializeContext()
 +{
 +    m_isForWebGL2 = contextAttributes().isWebGL2;
-+    // WebGL 1 hat keine Multisample-Renderbuffer, darum dort ohne Antialiasing
++    // WebGL 1 has no multisample renderbuffers, so no antialiasing there
 +    if (!m_isForWebGL2 && contextAttributes().antialias) {
 +        auto attributes = contextAttributes();
 +        attributes.antialias = false;
@@ -175,7 +175,7 @@ index 0000000000..cf5f007346
 +    return true;
 +}
 +
-+// Fertiges Bild: jetzt lesen, bevor WebGL den Zeichenpuffer wieder loescht
++// Finished frame: read it now, before WebGL clears the drawing buffer again
 +void GraphicsContextGLWasm::prepareForDisplay()
 +{
 +    if (!makeContextCurrent())
@@ -183,7 +183,7 @@ index 0000000000..cf5f007346
 +    m_displayBuffer = readRenderingResultsForPainting();
 +#if USE(COORDINATED_GRAPHICS)
 +    if (m_layerContentsDisplayDelegate && m_displayBuffer) {
-+        // Das GL-Bild steht auf dem Kopf (unten links beginnt es), die Ebene will es aufrecht
++        // The GL image is upside down (it starts at the bottom left), the layer wants it upright
 +        auto image = createNativeImageFromPixelBuffer(contextAttributes(), Ref { *m_displayBuffer });
 +        if (!image)
 +            return;
@@ -267,10 +267,10 @@ index 0000000000..e90ebc7526
 +class GraphicsLayerContentsDisplayDelegateCoordinated;
 +class PixelBuffer;
 +
-+// WebGL fuer PORT=Wasm: die GL-Aufrufe gehen ueber den ANGLE-Ersatz
-+// (platform/wasm/angle) an einen WebGL-Kontext des Host-Browsers. Das Bild wird
-+// mit readPixels gelesen und in die Seite gemalt oder als Inhalt einer Ebene
-+// uebergeben (Coordinated Graphics).
++// WebGL for PORT=Wasm: the GL calls go through the ANGLE replacement
++// (platform/wasm/angle) to a WebGL context of the host browser. The image is
++// read with readPixels and painted into the page or handed over as the contents
++// of a layer (Coordinated Graphics).
 +class GraphicsContextGLWasm final : public GraphicsContextGLANGLE {
 +    WTF_MAKE_TZONE_ALLOCATED(GraphicsContextGLWasm);
 +public:
@@ -286,7 +286,7 @@ index 0000000000..e90ebc7526
 +    bool reshapeDrawingBuffer() final;
 +    void prepareForDisplay() final;
 +    RefPtr<PixelBuffer> readCompositedResults() final;
-+    // Mit Compositing (Coordinated Graphics) wird das Bild Inhalt einer Ebene
++    // With compositing (Coordinated Graphics) the image becomes the contents of a layer
 +    RefPtr<GraphicsLayerContentsDisplayDelegate> layerContentsDisplayDelegate() final;
 +#if ENABLE(VIDEO)
 +    bool copyTextureFromVideoFrame(VideoFrame&, PlatformGLObject, GCGLenum, GCGLint, GCGLenum, GCGLenum, GCGLenum, bool, bool) final { return false; }
@@ -311,7 +311,7 @@ index 0000000000..8cf39103e6
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_autogen.h
 @@ -0,0 +1,3 @@
-+// browser-lite: siehe tools/gen-angle-shim.py
++// browser-lite: see tools/gen-angle-shim.py
 +#pragma once
 +#include "../ANGLEShimEntryPoints.h"
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h
@@ -320,7 +320,7 @@ index 0000000000..8cf39103e6
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_egl_ext_autogen.h
 @@ -0,0 +1,3 @@
-+// browser-lite: siehe tools/gen-angle-shim.py
++// browser-lite: see tools/gen-angle-shim.py
 +#pragma once
 +#include "../ANGLEShimEntryPoints.h"
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h
@@ -329,7 +329,7 @@ index 0000000000..8cf39103e6
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_2_0_autogen.h
 @@ -0,0 +1,3 @@
-+// browser-lite: siehe tools/gen-angle-shim.py
++// browser-lite: see tools/gen-angle-shim.py
 +#pragma once
 +#include "../ANGLEShimEntryPoints.h"
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h
@@ -338,7 +338,7 @@ index 0000000000..8cf39103e6
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_3_0_autogen.h
 @@ -0,0 +1,3 @@
-+// browser-lite: siehe tools/gen-angle-shim.py
++// browser-lite: see tools/gen-angle-shim.py
 +#pragma once
 +#include "../ANGLEShimEntryPoints.h"
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h
@@ -347,7 +347,7 @@ index 0000000000..8cf39103e6
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLE/entry_points_gles_ext_autogen.h
 @@ -0,0 +1,3 @@
-+// browser-lite: siehe tools/gen-angle-shim.py
++// browser-lite: see tools/gen-angle-shim.py
 +#pragma once
 +#include "../ANGLEShimEntryPoints.h"
 diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h b/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h
@@ -356,7 +356,7 @@ index 0000000000..36d35e1941
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimEntryPoints.h
 @@ -0,0 +1,309 @@
-+// Generiert von tools/gen-angle-shim.py, nicht von Hand aendern.
++// Generated by tools/gen-angle-shim.py, do not edit by hand.
 +#pragma once
 +
 +#include <EGL/egl.h>
@@ -671,8 +671,8 @@ index 0000000000..4fdf42a51d
 --- /dev/null
 +++ b/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
 @@ -0,0 +1,496 @@
-+// Generiert von tools/gen-angle-shim.py, nicht von Hand aendern.
-+// GL_Xxx -> glXxx von Emscripten (WebGL des Host-Browsers).
++// Generated by tools/gen-angle-shim.py, do not edit by hand.
++// GL_Xxx -> glXxx of Emscripten (WebGL of the host browser).
 +#include "config.h"
 +
 +#if ENABLE(WEBGL)
@@ -1198,21 +1198,21 @@ index 0000000000..7dd00c1142
 + * THE POSSIBILITY OF SUCH DAMAGE.
 + */
 +
-+// ANGLE-Ersatz fuer PORT=Wasm, der Teil von Hand (der Rest ist generiert,
-+// siehe ANGLEShimForwardWasm.cpp und tools/gen-angle-shim.py im browser-lite Repo).
++// ANGLE replacement for PORT=Wasm, the hand written part (the rest is generated,
++// see ANGLEShimForwardWasm.cpp and tools/gen-angle-shim.py in the browser-lite repo).
 +//
-+// WebGL der Seite laeuft auf einem WebGL-Kontext des Host-Browsers, den wir
-+// im Engine-Worker auf einem OffscreenCanvas anlegen. WebGL 1 bekommt ein
-+// WebGL 1, WebGL 2 ein WebGL 2, so stimmen Shader und Formate genau.
-+// ANGLE arbeitet mit GLES-Namen fuer Erweiterungen, der Browser mit WebGL-
-+// Namen. Hier wird zwischen beiden uebersetzt.
++// WebGL of the page runs on a WebGL context of the host browser, which we
++// create in the engine worker on an OffscreenCanvas. WebGL 1 gets a
++// WebGL 1, WebGL 2 a WebGL 2, so shaders and formats match exactly.
++// ANGLE uses GLES names for extensions, the browser uses WebGL names.
++// This file translates between the two.
 +//
-+// Chrome erlaubt in einem Worker nur 4 aktive WebGL-Kontexte, danach geht der
-+// aelteste verloren. Darum teilen sich alle Kontexte eines Threads einen
-+// Host-Kontext pro WebGL-Version (wie die virtualisierten Kontexte von ANGLE):
-+// beim Wechsel wird der GL-Zustand gespeichert und der des anderen Kontexts
-+// wiederhergestellt. Jeder Kontext hat ein eigenes "Standard"-VAO und
-+// Transform-Feedback-Objekt, weil die des Host-Kontexts sonst geteilt waeren.
++// Chrome allows only 4 active WebGL contexts in a worker, after that the
++// oldest one is lost. So all contexts of a thread share one host context
++// per WebGL version (like the virtualized contexts of ANGLE):
++// on a switch the GL state is saved and that of the other context is
++// restored. Each context has its own "default" VAO and transform feedback
++// object, because those of the host context would otherwise be shared.
 +
 +#include "config.h"
 +#include "ANGLEShimWasm.h"
@@ -1250,41 +1250,41 @@ index 0000000000..7dd00c1142
 +
 +namespace {
 +
-+// Ein echter WebGL-Kontext des Browsers
++// A real WebGL context of the browser
 +struct HostContext {
 +    int handle { 0 };
-+    // ShimContexts darauf
++    // ShimContexts on it
 +    int users { 0 };
-+    // Kontext, dessen Zustand gerade im Host-Kontext steckt
++    // Context whose state is currently in the host context
 +    int stateOwner { 0 };
-+    // Hoechste Textur-Einheit, die irgendein Kontext benutzt hat
++    // Highest texture unit any context has used
 +    int maxTextureUnit { 0 };
 +};
 +
-+// Ein Kontext von WebKit (virtuell, teilt sich den Host-Kontext)
++// A context of WebKit (virtual, shares the host context)
 +struct ShimContext {
 +    int id { 0 };
 +    bool webgl2 { false };
-+    // Bleibt nach einem Verlust, auch wenn hosts[] schon einen neuen hat: so
-+    // erfaehrt der Kontext beim naechsten Zeichnen vom Verlust (checkGPUStatus)
++    // Kept after a loss, even when hosts[] already has a new one: this way
++    // the context learns about the loss on the next draw (checkGPUStatus)
 +    HostContext* host { nullptr };
 +    std::unordered_set<std::string> requestable;
 +    std::unordered_set<std::string> enabled;
 +    std::string enabledString;
 +    std::string requestableString;
-+    // Fehler, die beim Wechsel noch im Host-Kontext lagen
++    // Errors that were still pending in the host context at a switch
 +    std::vector<GLenum> pendingErrors;
-+    // Eigenes "Standard"-VAO/Transform-Feedback und was gerade gebunden ist
++    // Own "default" VAO/transform feedback and what is currently bound
 +    GLuint defaultVertexArray { 0 };
 +    GLuint boundVertexArray { 0 };
 +    GLuint defaultTransformFeedback { 0 };
 +    GLuint boundTransformFeedback { 0 };
-+    // Hoechste benutzte Textur-Einheit (nur so viele werden gespeichert)
++    // Highest texture unit used (only that many are saved)
 +    int maxTextureUnit { 0 };
 +};
 +
 +thread_local std::unordered_map<int, ShimContext>* contextMap;
-+// Host-Kontext je Version (WebGL 1, WebGL 2) fuer neue Kontexte
++// Host context per version (WebGL 1, WebGL 2) for new contexts
 +thread_local HostContext* hosts[2];
 +thread_local ShimContext* current = nullptr;
 +thread_local int nextId = 1;
@@ -1299,10 +1299,10 @@ index 0000000000..7dd00c1142
 +struct Mapping {
 +    const char* webgl;
 +    std::vector<const char*> gles;
-+    int versions; // 1 = WebGL 1, 2 = WebGL 2, 3 = beide
++    int versions; // 1 = WebGL 1, 2 = WebGL 2, 3 = both
 +};
 +
-+// Welche WebGL-Erweiterung des Browsers welche GLES-Erweiterung fuer WebKit ergibt
++// Which WebGL extension of the browser yields which GLES extension for WebKit
 +const std::vector<Mapping>& mappings()
 +{
 +    static const std::vector<Mapping> list {
@@ -1378,8 +1378,8 @@ index 0000000000..7dd00c1142
 +
 +} // namespace
 +
-+// Host-Kontext im Engine-Worker auf einem eigenen OffscreenCanvas. Gezeichnet
-+// wird nur in Framebuffer von WebKit, darum ohne Tiefe/Stencil/Antialiasing.
++// Host context in the engine worker on its own OffscreenCanvas. Drawing only
++// goes into framebuffers of WebKit, so no depth/stencil/antialiasing.
 +EM_JS(int, blCreateGLContext, (int webgl2), {
 +    if (typeof OffscreenCanvas === "undefined")
 +        return 0;
@@ -1391,15 +1391,15 @@ index 0000000000..7dd00c1142
 +    };
 +    try {
 +        var handle = GL.createContext(canvas, attributes) || 0;
-+        // Ohne Vertex Arrays geht das Teilen nicht (in Chrome immer da)
++        // Sharing does not work without vertex arrays (always there in Chrome)
 +        if (handle && !GL.getContext(handle).GLctx.createVertexArray) {
 +            GL.deleteContext(handle);
 +            return 0;
 +        }
-+        // Beim Wechsel muss der Zustand gesichert werden, und jede Abfrage ist
-+        // ein synchroner Aufruf an den GPU-Prozess. Darum merken wir uns, ob
-+        // seit dem letzten Wiederherstellen Uniform-Buffer oder Vertex-Attribute
-+        // ueberhaupt gesetzt wurden; sonst gilt der wiederhergestellte Stand.
++        // On a switch the state must be saved, and every query is a
++        // synchronous call to the GPU process. So we remember whether uniform
++        // buffers or vertex attributes were set at all since the last restore;
++        // otherwise the restored values still apply.
 +        if (handle) {
 +            var gl = GL.getContext(handle).GLctx;
 +            gl.blTouched = {};
@@ -1417,7 +1417,7 @@ index 0000000000..7dd00c1142
 +            track(["bindBufferBase", "bindBufferRange"], "ubo");
 +            track(["vertexAttrib1f", "vertexAttrib1fv", "vertexAttrib2f", "vertexAttrib2fv", "vertexAttrib3f", "vertexAttrib3fv",
 +                "vertexAttrib4f", "vertexAttrib4fv", "vertexAttribI4i", "vertexAttribI4iv", "vertexAttribI4ui", "vertexAttribI4uiv"], "attrib");
-+            // Erweiterungen und Grenzen aendern sich nicht: nur einmal fragen
++            // Extensions and limits do not change: query them only once
 +            gl.blExtensions = {};
 +            gl.blExtension = function (name) {
 +                if (!(name in gl.blExtensions))
@@ -1442,17 +1442,17 @@ index 0000000000..7dd00c1142
 +    return !context || context.GLctx.isContextLost() ? 1 : 0;
 +});
 +
-+// Zustand des aktuellen Host-Kontexts unter "key" speichern. Gespeichert wird
-+// alles, was in WebGL zum Kontext gehoert und nicht in einem Objekt steckt
-+// (VAO, Framebuffer, Programm, Transform Feedback haben ihren Zustand selber).
-+// Dazu die Werte, die sich Emscriptens GL-Schicht selber merkt.
++// Saves the state of the current host context under "key". It saves
++// everything that belongs to the context in WebGL and is not held in an object
++// (VAO, framebuffer, program, transform feedback hold their own state).
++// Plus the values that the GL layer of Emscripten keeps itself.
 +EM_JS(void, blSaveState, (int key, int webgl2, int units), {
 +    var gl = GLctx;
 +    var s = { caps: [], params: {}, units: [], attribs: [] };
 +    var caps = [0x0BE2, 0x0B44, 0x0B71, 0x0BD0, 0x8037, 0x809E, 0x80A0, 0x0C11, 0x0B90];
 +    if (webgl2)
 +        caps.push(0x8C89);
-+    // Schalter und Werte aus Erweiterungen, nur wenn der Browser sie hat
++    // Switches and values from extensions, only if the browser has them
 +    var extensionNames = [];
 +    if (gl.blExtension("EXT_depth_clamp"))
 +        caps.push(0x864F);
@@ -1470,7 +1470,7 @@ index 0000000000..7dd00c1142
 +        for (var d = 0; d < gl.blLimit(0x0D32); d++)
 +            caps.push(0x3000 + d);
 +    }
-+    // Was seit dem Wiederherstellen niemand gesetzt hat, gilt wie wiederhergestellt
++    // What nobody has set since the restore is still as restored
 +    var restored = gl.blRestored;
 +    var touched = gl.blTouched;
 +    s.capList = caps;
@@ -1517,10 +1517,10 @@ index 0000000000..7dd00c1142
 +    (GL.blStates || (GL.blStates = {}))[key] = s;
 +});
 +
-+// Zustand "key" in den aktuellen Host-Kontext laden. Ein neuer Kontext bekommt
-+// den Grundzustand des Host-Kontexts (defaultKey) mit seinem eigenen VAO/TF.
-+// "units" Textur-Einheiten werden gesetzt, auch die, die dieser Kontext nie
-+// benutzt hat, damit keine Texturen eines anderen Kontexts sichtbar bleiben.
++// Loads state "key" into the current host context. A new context gets the
++// initial state of the host context (defaultKey) with its own VAO/TF.
++// "units" texture units are set, also those this context has never used,
++// so that no textures of another context remain visible.
 +EM_JS(void, blRestoreState, (int key, int defaultKey, int vertexArray, int transformFeedback, int webgl2, int units), {
 +    var gl = GLctx;
 +    var saved = GL.blStates[key];
@@ -1591,7 +1591,7 @@ index 0000000000..7dd00c1142
 +            else
 +                gl.bindBufferBase(0x8A11, b, binding[0]);
 +        }
-+        // bindBufferBase/Range setzen auch die allgemeine Bindung
++        // bindBufferBase/Range also set the generic binding
 +        gl.bindBuffer(0x8A11, p[0x8A28]);
 +        gl.bindBuffer(0x8C8E, p[0x8C8F]);
 +    } else
@@ -1625,7 +1625,7 @@ index 0000000000..7dd00c1142
 +    gl.currentProgram = cache[4];
 +    GL.unpackAlignment = cache[5];
 +    GL.unpackRowLength = cache[6];
-+    // Ab hier zaehlt, was der Kontext selber setzt
++    // From here on, only what the context sets itself counts
 +    gl.blRestored = s;
 +    gl.blTouched = {};
 +});
@@ -1637,7 +1637,7 @@ index 0000000000..7dd00c1142
 +
 +namespace {
 +
-+// Schluessel fuer den Grundzustand eines Host-Kontexts (Kontext-IDs sind positiv)
++// Key for the initial state of a host context (context IDs are positive)
 +int defaultStateKey(bool webgl2)
 +{
 +    return webgl2 ? -2 : -1;
@@ -1652,7 +1652,7 @@ index 0000000000..7dd00c1142
 +    }, host.handle);
 +}
 +
-+// Ein ersetzter Host-Kontext lebt, bis der letzte Kontext darauf weg ist
++// A replaced host context lives until the last context on it is gone
 +void deleteHostIfUnused(HostContext* host)
 +{
 +    if (host->users || host == hosts[0] || host == hosts[1])
@@ -1661,7 +1661,7 @@ index 0000000000..7dd00c1142
 +    delete host;
 +}
 +
-+// Host-Kontext fuer die Version, beim ersten Mal (oder nach Verlust) neu
++// Host context for the version, created on first use (or after a loss)
 +HostContext* ensureHost(bool webgl2)
 +{
 +    auto*& host = hosts[webgl2 ? 1 : 0];
@@ -1684,7 +1684,7 @@ index 0000000000..7dd00c1142
 +
 +void drainErrors(std::vector<GLenum>* into)
 +{
-+    // Nicht endlos, falls der Kontext verloren ist
++    // Bounded, in case the context is lost
 +    for (int i = 0; i < 16; i++) {
 +        GLenum error = glGetError();
 +        if (error == GL_NO_ERROR)
@@ -1700,10 +1700,10 @@ index 0000000000..7dd00c1142
 +
 +void angleShimPrewarm()
 +{
-+    // Das erste Anlegen fragt Erweiterungen und Zustand synchron beim
-+    // GPU-Prozess ab. Mitten im Laden einer Seite (Fingerprint-Skripte legen
-+    // fast immer einen WebGL-Kontext an) wartete das auf weather.com
-+    // Sekunden, weil die GPU mit Malen beschaeftigt war.
++    // The first creation queries extensions and state synchronously from the
++    // GPU process. In the middle of a page load (fingerprinting scripts nearly
++    // always create a WebGL context) this waited on weather.com for
++    // seconds, because the GPU was busy painting.
 +    ensureHost(false);
 +    ensureHost(true);
 +    current = nullptr;
@@ -1714,14 +1714,14 @@ index 0000000000..7dd00c1142
 +    auto* host = ensureHost(webgl2);
 +    if (!host || !makeHostCurrent(*host))
 +        return 0;
-+    // Der aktuelle Kontext ist jetzt evtl. nicht mehr der im Host
++    // The current context may no longer be the one in the host
 +    current = nullptr;
 +
 +    ShimContext context;
 +    context.id = nextId++;
 +    context.webgl2 = webgl2;
 +    context.host = host;
-+    // Eigene Objekte statt der geteilten Standard-Objekte des Host-Kontexts
++    // Own objects instead of the shared default objects of the host context
 +    glGenVertexArrays(1, &context.defaultVertexArray);
 +    if (webgl2)
 +        glGenTransformFeedbacks(1, &context.defaultTransformFeedback);
@@ -1745,13 +1745,13 @@ index 0000000000..7dd00c1142
 +        for (auto* name : mapping.gles)
 +            context.requestable.insert(name);
 +    }
-+    // In WebGL 2 eingebaut, WebKit fragt trotzdem danach
++    // Built into WebGL 2, WebKit asks for them anyway
 +    if (webgl2) {
 +        for (auto* name : { "GL_EXT_occlusion_query_boolean", "GL_ANGLE_framebuffer_multisample", "GL_ANGLE_framebuffer_blit",
 +            "GL_OES_packed_depth_stencil", "GL_OES_depth24", "GL_OES_rgb8_rgba8", "GL_EXT_blend_minmax", "GL_OES_texture_half_float" })
 +            context.requestable.insert(name);
 +    } else {
-+        // WebGL 1 hat DEPTH_STENCIL-Renderbuffer (GL_RenderbufferStorage passt das Format an)
++        // WebGL 1 has DEPTH_STENCIL renderbuffers (GL_RenderbufferStorage adapts the format)
 +        context.requestable.insert("GL_OES_packed_depth_stencil");
 +    }
 +    context.requestable.insert("GL_ANGLE_translated_shader_source");
@@ -1768,9 +1768,9 @@ index 0000000000..7dd00c1142
 +        current = nullptr;
 +        return true;
 +    }
-+    // Der GPU-Rasterer der Engine (engine/src/GpuRaster.cpp) wechselt auch den
-+    // GL-Kontext von Emscripten. Darum auch hier pruefen, ob der Host-Kontext
-+    // noch aktuell ist (kostet nur einen Vergleich in JS).
++    // The GPU rasterizer of the engine (engine/src/GpuRaster.cpp) also switches the
++    // GL context of Emscripten. So check here too whether the host context is
++    // still current (costs only a comparison in JS).
 +    if (current && current->id == id)
 +        return makeHostCurrent(*current->host);
 +    auto it = contexts().find(id);
@@ -1780,7 +1780,7 @@ index 0000000000..7dd00c1142
 +    auto& host = *context.host;
 +    if (!makeHostCurrent(host))
 +        return false;
-+    // Ein verlorener Host-Kontext hat keinen Zustand mehr
++    // A lost host context has no state anymore
 +    if (host.stateOwner != id && !blIsContextLost(host.handle)) {
 +        auto owner = contexts().find(host.stateOwner);
 +        if (owner != contexts().end()) {
@@ -1789,7 +1789,7 @@ index 0000000000..7dd00c1142
 +        } else
 +            drainErrors(nullptr);
 +        blRestoreState(id, defaultStateKey(context.webgl2), context.defaultVertexArray, context.defaultTransformFeedback, context.webgl2, host.maxTextureUnit);
-+        // Fehler hier kaemen vom Wiederherstellen, nicht von der Seite
++        // Errors here would come from the restore, not from the page
 +        drainErrors(nullptr);
 +        host.stateOwner = id;
 +    }
@@ -1858,18 +1858,18 @@ index 0000000000..7dd00c1142
 +{
 +    if (!current || !name || !current->requestable.count(name))
 +        return;
-+    // Im Browser sind alle Erweiterungen schon an (enableExtensionsByDefault)
++    // In the browser all extensions are already enabled (enableExtensionsByDefault)
 +    current->enabled.insert(name);
 +    updateStrings(*current);
 +}
 +
 +void GL_APIENTRY GL_GetTranslatedShaderSourceANGLE(GLuint shader, GLsizei bufSize, GLsizei* length, GLchar* source)
 +{
-+    // Uebersetzt wird im Browser, wir kennen nur die Quelle
++    // The browser translates the shader, we only know the source
 +    glGetShaderSource(shader, bufSize, length, source);
 +}
 +
-+// ------------------------------------------------------------------ geteilter Host-Kontext
++// ------------------------------------------------------------------ shared host context
 +
 +GLenum GL_APIENTRY GL_GetError()
 +{
@@ -1891,7 +1891,7 @@ index 0000000000..7dd00c1142
 +    glActiveTexture(texture);
 +}
 +
-+// VAO 0 ist das eigene Standard-VAO des Kontexts
++// VAO 0 is the context's own default VAO
 +void GL_APIENTRY GL_BindVertexArray(GLuint array)
 +{
 +    if (current) {
@@ -1913,7 +1913,7 @@ index 0000000000..7dd00c1142
 +    if (!current)
 +        return;
 +    for (GLsizei i = 0; i < n; i++) {
-+        // Gebundenes VAO geloescht: zurueck auf "0", also das eigene
++        // Bound VAO deleted: back to "0", which is the context's own one
 +        if (arrays[i] && arrays[i] == current->boundVertexArray)
 +            GL_BindVertexArray(0);
 +    }
@@ -1924,7 +1924,7 @@ index 0000000000..7dd00c1142
 +    GL_DeleteVertexArrays(n, arrays);
 +}
 +
-+// Transform Feedback 0 ist das eigene Standard-Objekt des Kontexts
++// Transform feedback 0 is the context's own default object
 +void GL_APIENTRY GL_BindTransformFeedback(GLenum target, GLuint id)
 +{
 +    if (current && current->webgl2) {
@@ -1946,8 +1946,8 @@ index 0000000000..7dd00c1142
 +    }
 +}
 +
-+// WebKit liest Puffer (getBufferSubData) ueber MapBufferRange. Emscriptens
-+// Version kann nicht lesen, darum hier ueber getBufferSubData des Browsers.
++// WebKit reads buffers (getBufferSubData) through MapBufferRange. The version
++// of Emscripten cannot read, so this uses getBufferSubData of the browser.
 +struct MappedBuffer {
 +    GLintptr offset { 0 };
 +    GLsizeiptr length { 0 };
@@ -1992,7 +1992,7 @@ index 0000000000..7dd00c1142
 +void GL_APIENTRY GL_RenderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height)
 +{
 +    if (current && !current->webgl2) {
-+        // WebGL 1 kennt nur die unsized Formate
++        // WebGL 1 only knows the unsized formats
 +        switch (internalformat) {
 +        case GL_DEPTH24_STENCIL8_OES:
 +            internalformat = GL_DEPTH_STENCIL_OES;
@@ -2032,14 +2032,14 @@ index 0000000000..7dd00c1142
 +
 +void GL_APIENTRY GL_DiscardFramebufferEXT(GLenum target, GLsizei numAttachments, const GLenum* attachments)
 +{
-+    // Nur ein Hinweis fuer den Treiber
++    // Only a hint for the driver
 +    if (current && current->webgl2)
 +        glInvalidateFramebuffer(target, numAttachments, attachments);
 +}
 +
-+// Schalter, die es in WebGL nicht gibt: Primitive Restart ist in WebGL 2 immer an,
-+// Debug-Ausgabe und Rechteck-Texturen (schaltet WebKit beim Shader-Kompilieren)
-+// gibt es nicht. Weiterleiten gaebe INVALID_ENUM, das die Seite dann sieht.
++// Switches that WebGL does not have: primitive restart is always on in WebGL 2,
++// debug output and rectangle textures (WebKit toggles them when compiling shaders)
++// do not exist. Forwarding would give INVALID_ENUM, which the page would then see.
 +static bool isFixedCapability(GLenum cap)
 +{
 +    return cap == GL_PRIMITIVE_RESTART_FIXED_INDEX || cap == GL_DEBUG_OUTPUT_KHR || cap == GL_DEBUG_OUTPUT_SYNCHRONOUS_KHR
@@ -2075,11 +2075,11 @@ index 0000000000..7dd00c1142
 +    EM_ASM({ var e = GLctx.getExtension('WEBGL_provoking_vertex'); if (e) e.provokingVertexWEBGL($0); }, mode);
 +}
 +
-+// Debug-Ausgabe gibt es in WebGL nicht
++// WebGL has no debug output
 +void GL_APIENTRY GL_DebugMessageCallbackKHR(GLDEBUGPROCKHR, const void*) { }
 +void GL_APIENTRY GL_DebugMessageControlKHR(GLenum, GLenum, GLenum, GLsizei, const GLuint*, GLboolean) { }
 +
-+// OES_draw_buffers_indexed: in Emscripten nicht da, direkt an die Erweiterung
++// OES_draw_buffers_indexed: missing in Emscripten, calls go to the extension directly
 +void GL_APIENTRY GL_EnableiOES(GLenum target, GLuint index)
 +{
 +    EM_ASM({ var e = GLctx.getExtension('OES_draw_buffers_indexed'); if (e) e.enableiOES($0, $1); }, target, index);
@@ -2116,7 +2116,7 @@ index 0000000000..7dd00c1142
 +}
 +
 +// ------------------------------------------------------------------ EGL
-+// Nur so viel, wie WebKit ausserhalb von GraphicsContextGLWasm braucht.
++// Only as much as WebKit needs outside of GraphicsContextGLWasm.
 +
 +static EGLDisplay const shimDisplay = reinterpret_cast<EGLDisplay>(1);
 +
@@ -2203,18 +2203,18 @@ index 0000000000..61a892ff24
 +
 +namespace WebCore {
 +
-+// WebGL-Kontext des Host-Browsers im Engine-Worker (siehe ANGLEShimWasm.cpp).
-+// Rueckgabe 0: kein WebGL moeglich.
++// WebGL context of the host browser in the engine worker (see ANGLEShimWasm.cpp).
++// Returns 0 if WebGL is not possible.
 +int angleShimCreateContext(bool webgl2);
 +bool angleShimMakeCurrent(int handle);
 +void angleShimDestroyContext(int handle);
-+// Ist der Host-Kontext verloren (GPU-Reset, Grenze an Kontexten pro Worker)?
-+// Der Kontext bleibt dann verloren, WebKit legt beim Wiederherstellen einen
-+// neuen an, der einen neuen Host-Kontext bekommt.
++// Is the host context lost (GPU reset, limit of contexts per worker)?
++// The context then stays lost; on restore WebKit creates a new one,
++// which gets a new host context.
 +bool angleShimIsContextLost(int handle);
-+// Host-Kontexte vorab anlegen (beim Start der Engine, solange die GPU frei ist)
++// Creates the host contexts in advance (at engine start, while the GPU is idle)
 +void angleShimPrewarm();
-+// Fuer Tests: die Host-Kontexte verlieren (WEBGL_lose_context)
++// For tests: loses the host contexts (WEBGL_lose_context)
 +void angleShimLoseHostContextsForTesting();
 +
 +} // namespace WebCore

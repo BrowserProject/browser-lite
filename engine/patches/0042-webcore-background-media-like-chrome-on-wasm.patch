@@ -7,8 +7,8 @@ index d01dc3abc9..9e67938734 100644
      bool isPlayingAudio = element->isPlaying() && element->hasAudio() && !element->muted() && element->volume();
      if (!isPlayingAudio) {
 +#if PLATFORM(WASM)
-+        // browser-lite: wie Chrome haelt im Hintergrund nur Video ohne Tonspur an,
-+        // MediaStreams (Videokonferenz, Kamera) und Stummes mit Tonspur laufen weiter
++        // browser-lite: like Chrome, only video without an audio track pauses in the background;
++        // MediaStreams (video calls, camera) and muted media with an audio track keep playing
 +        bool keepsPlaying = element->hasAudio();
 +#if ENABLE(MEDIA_STREAM)
 +        keepsPlaying = keepsPlaying || element->hasMediaStreamSrcObject();

@@ -7,7 +7,7 @@ index d49c4431f7..1630f3cf25 100644
  static constexpr int schemaVersion = 1;
  
 +#if PLATFORM(WASM)
-+// browser-lite: mit "Tabs beim Start wiederherstellen" bleiben Sitzungs-Cookies (wie Chrome)
++// browser-lite: with "restore tabs on startup" session cookies are kept (like Chrome)
 +static bool keepSessionCookies()
 +{
 +    const char* value = getenv("BL_KEEP_SESSION_COOKIES");

@@ -7,8 +7,8 @@ index e29c37ed27..0f24f9f0ce 100644
  #if USE(GENERIC_EVENT_LOOP) || USE(WINDOWS_EVENT_LOOP)
      WTF_EXPORT_PRIVATE static void setWakeUpCallback(WTF::Function<void()>&&);
 +#if OS(EMSCRIPTEN)
-+    // browser-lite: Der Embedder treibt den Loop selber an (RunLoop::cycle()) und
-+    // muss wissen, wann der naechste Timer faellig ist, um so lange zu warten.
++    // browser-lite: The embedder drives the loop itself (RunLoop::cycle()) and
++    // needs to know when the next timer is due, to wait that long.
 +    WTF_EXPORT_PRIVATE static std::optional<MonotonicTime> nextTimerFireTime();
 +#endif
  #endif

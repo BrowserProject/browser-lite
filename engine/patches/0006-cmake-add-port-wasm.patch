@@ -4,8 +4,8 @@ index 0000000000..df4aa275f2
 --- /dev/null
 +++ b/Source/JavaScriptCore/PlatformWasm.cmake
 @@ -0,0 +1,5 @@
-+# JavaScriptCore fuer PORT=Wasm (browser-lite). Remote Inspector ist aus;
-+# falls er mal an geht, die Socket-Variante wie JSCOnly/PlayStation.
++# JavaScriptCore for PORT=Wasm (browser-lite). The remote inspector is off;
++# if it is ever turned on, use the socket variant like JSCOnly/PlayStation.
 +if (ENABLE_REMOTE_INSPECTOR)
 +    include(inspector/remote/Socket.cmake)
 +endif ()
@@ -15,8 +15,8 @@ index 0000000000..26d1c04e91
 --- /dev/null
 +++ b/Source/WTF/wtf/PlatformWasm.cmake
 @@ -0,0 +1,30 @@
-+# WTF fuer PORT=Wasm (browser-lite): generischer RunLoop + POSIX/Unix-Teile,
-+# die Emscripten (musl) anbietet.
++# WTF for PORT=Wasm (browser-lite): generic RunLoop + the POSIX/Unix parts
++# that Emscripten (musl) provides.
 +list(APPEND WTF_SOURCES
 +    generic/MainThreadGeneric.cpp
 +    generic/MemoryFootprintGeneric.cpp
@@ -51,7 +51,7 @@ index 0000000000..2eb4471e0d
 --- /dev/null
 +++ b/Source/WebCore/PAL/pal/PlatformWasm.cmake
 @@ -0,0 +1,11 @@
-+# PAL fuer PORT=Wasm (browser-lite): wie PlayStation (OpenSSL fuer Hashes).
++# PAL for PORT=Wasm (browser-lite): like PlayStation (OpenSSL for hashes).
 +list(APPEND PAL_SOURCES
 +    crypto/openssl/CryptoDigestOpenSSL.cpp
 +
@@ -68,8 +68,8 @@ index 0000000000..77c3ea64c3
 --- /dev/null
 +++ b/Source/WebCore/PlatformWasm.cmake
 @@ -0,0 +1,92 @@
-+# WebCore fuer PORT=Wasm (browser-lite).
-+# Netzwerk: curl, Grafik: Skia, Theme: Adwaita. Plattform-Glue in platform/wasm/.
++# WebCore for PORT=Wasm (browser-lite).
++# Network: curl, graphics: Skia, theme: Adwaita. Platform glue in platform/wasm/.
 +include(platform/Adwaita.cmake)
 +include(platform/Curl.cmake)
 +include(platform/ImageDecoders.cmake)
@@ -77,7 +77,7 @@ index 0000000000..77c3ea64c3
 +include(platform/Skia.cmake)
 +include(platform/TextureMapper.cmake)
 +
-+# WebGL hat eine eigene Bruecke (platform/wasm/GraphicsContextGLWasm.cpp)
++# WebGL has its own bridge (platform/wasm/GraphicsContextGLWasm.cpp)
 +list(REMOVE_ITEM WebCore_SOURCES
 +    platform/graphics/texmap/GraphicsContextGLTextureMapperANGLE.cpp
 +    platform/graphics/texmap/coordinated/GraphicsContextGLTextureMapperANGLECoordinated.cpp
@@ -96,11 +96,11 @@ index 0000000000..77c3ea64c3
 +)
 +
 +list(APPEND WebCore_SOURCES
-+    # Accessibility: wie PlayStation/Haiku (Benachrichtigungen ueber den ChromeClient)
++    # Accessibility: like PlayStation/Haiku (notifications through the ChromeClient)
 +    accessibility/playstation/AXObjectCachePlayStation.cpp
 +    accessibility/playstation/AccessibilityObjectPlayStation.cpp
 +
-+    # Diese libwpe-Dateien brauchen libwpe gar nicht, sie sind fuer uns freigeschaltet
++    # These libwpe files do not need libwpe at all, they are enabled for us
 +    editing/libwpe/EditorLibWPE.cpp
 +    platform/libwpe/PasteboardLibWPE.cpp
 +
@@ -155,8 +155,8 @@ index 0000000000..77c3ea64c3
 +    Freetype::Freetype
 +)
 +
-+# browser-lite: den Embedder (engine/ im browser-lite Repo) mitbauen, nachdem
-+# WebCore/CMakeLists.txt fertig ist (dann sind alle Include-Listen komplett).
++# browser-lite: also build the embedder (engine/ in the browser-lite repo) once
++# WebCore/CMakeLists.txt is done (then all include lists are complete).
 +if (BROWSER_LITE_ENGINE_DIR)
 +    cmake_language(DEFER CALL include "${BROWSER_LITE_ENGINE_DIR}/engine.cmake")
 +endif ()
@@ -166,18 +166,18 @@ index 0000000000..7449ec4a3b
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
 @@ -0,0 +1,171 @@
-+# PORT=Wasm (browser-lite): WebCore + JavaScriptCore nach WebAssembly mit Emscripten.
++# PORT=Wasm (browser-lite): WebCore + JavaScriptCore to WebAssembly with Emscripten.
 +#
-+# - Single-process: kein WebKit2/IPC, kein WebKitLegacy. Der Embedder (browser-lite
-+#   engine/) haengt WebCore::Page direkt an.
-+# - Aufbau wie der PlayStation-Port (curl, generischer RunLoop, statisch),
-+#   Grafik wie WPE (Skia), Theme wie Win (Adwaita).
-+# - JavaScriptCore mit CLoop, kein JIT (WASM kann nicht selber Code erzeugen).
++# - Single process: no WebKit2/IPC, no WebKitLegacy. The embedder (browser-lite
++#   engine/) attaches WebCore::Page directly.
++# - Structured like the PlayStation port (curl, generic RunLoop, static),
++#   graphics like WPE (Skia), theme like Win (Adwaita).
++# - JavaScriptCore with CLoop, no JIT (WASM cannot generate code by itself).
 +#
-+# Gebaut wird mit tools/build-webcore.sh aus dem browser-lite Repo.
++# Built with tools/build-webcore.sh from the browser-lite repo.
 +
 +if (NOT EMSCRIPTEN)
-+    message(FATAL_ERROR "PORT=Wasm geht nur mit Emscripten (emcmake cmake ...)")
++    message(FATAL_ERROR "PORT=Wasm only works with Emscripten (emcmake cmake ...)")
 +endif ()
 +
 +find_package(Threads REQUIRED)
@@ -205,20 +205,20 @@ index 0000000000..7449ec4a3b
 +
 +WEBKIT_OPTION_DEFINE(ENABLE_STATIC_JSC "Whether to build JavaScriptCore as a static library." PUBLIC ON)
 +
-+# JavaScriptCore: nur der CLoop-Interpreter
++# JavaScriptCore: only the CLoop interpreter
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_JIT PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DFG_JIT PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FTL_JIT PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_C_LOOP PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBASSEMBLY PRIVATE OFF)
-+# Thread::suspend geht in WASM nicht, darum nie den Sampling-Profiler
++# Thread::suspend does not work in WASM, so never the sampling profiler
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SAMPLING_PROFILER PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_REMOTE_INSPECTOR PRIVATE OFF)
-+# bmalloc/libpas passen nicht zum Linear Memory von WASM
++# bmalloc/libpas do not fit the linear memory of WASM
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SYSTEM_MALLOC PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_ISO_MALLOC PRIVATE OFF)
 +
-+# Grafik
++# Graphics
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA_ENCODERS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE ON)
@@ -226,20 +226,20 @@ index 0000000000..7449ec4a3b
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
 +
-+# <video>/<audio>: abgespielt wird im Host-Browser (engine/src/media)
++# <video>/<audio>: played back in the host browser (engine/src/media)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_VIDEO PRIVATE ON)
-+# Web Audio: Ausgabe ueber ein AudioWorklet des Host-Browsers (platform/audio/wasm)
++# Web Audio: output through an AudioWorklet of the host browser (platform/audio/wasm)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_AUDIO PRIVATE ON)
-+# WebGL ohne ANGLE, direkt auf das WebGL des Host-Browsers (platform/wasm/angle)
++# WebGL without ANGLE, directly on the WebGL of the host browser (platform/wasm/angle)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBGL PRIVATE ON)
-+# MSE: WebCore mit eigenen Parsern, abgespielt wird ueber das MediaSource des Host-Browsers (engine/src/media)
++# MSE: WebCore with its own parsers, played back through the MediaSource of the host browser (engine/src/media)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SOURCE PRIVATE ON)
-+# Kamera, Mikrofon und Bildschirm des Host-Browsers (engine/src/media/MediaStreamWasm.cpp)
++# Camera, microphone and screen of the host browser (engine/src/media/MediaStreamWasm.cpp)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_STREAM PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_RECORDER PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_RTC PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ENCRYPTED_MEDIA PRIVATE OFF)
-+# Geraete und Dienste des Host-Browsers (engine/src, Daten kommen von der Oberflaeche)
++# Devices and services of the host browser (engine/src, data comes from the UI)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_GAMEPAD PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SPEECH_SYNTHESIS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_NOTIFICATIONS PRIVATE ON)
@@ -247,23 +247,23 @@ index 0000000000..7449ec4a3b
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_TOUCH_EVENTS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_POINTER_LOCK PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MEDIA_SESSION PRIVATE ON)
-+# Markieren mit der Maus haengt in WebCore am Drag-Support
++# Selecting with the mouse depends on drag support in WebCore
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DRAG_SUPPORT PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_OFFSCREEN_CANVAS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_OFFSCREEN_CANVAS_IN_WORKERS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_VARIATION_FONTS PRIVATE ON)
-+# Fullscreen: die Oberflaeche macht den Seitenbereich im Host-Browser gross
++# Fullscreen: the UI enlarges the page area in the host browser
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_FULLSCREEN_API PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEBXR PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_XSLT PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_MATHML PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DARK_MODE_CSS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_SMOOTH_SCROLLING PRIVATE ON)
-+# Scrollen im eigenen Thread (ScrollingTreeCoordinated), auch wenn das JS blockiert
++# Scrolling on its own thread (ScrollingTreeCoordinated), even while JS is blocking
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_ASYNC_SCROLLING PRIVATE ON)
-+# Lage- und Bewegungssensoren des Host (engine/src/DeviceClients.cpp)
++# Orientation and motion sensors of the host (engine/src/DeviceClients.cpp)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_DEVICE_ORIENTATION PRIVATE ON)
-+# WebCodecs ueber die WebCodecs des Host-Browsers (engine/src/media/WebCodecsWasm.cpp)
++# WebCodecs through the WebCodecs of the host browser (engine/src/media/WebCodecsWasm.cpp)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_WEB_CODECS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_RESOURCE_USAGE PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(ENABLE_PERIODIC_MEMORY_MONITOR PRIVATE OFF)
@@ -276,10 +276,10 @@ index 0000000000..7449ec4a3b
 +WEBKIT_OPTION_END()
 +
 +if (NOT ENABLE_STATIC_JSC)
-+    message(FATAL_ERROR "PORT=Wasm braucht ENABLE_STATIC_JSC=ON (WASM wird komplett statisch gelinkt)")
++    message(FATAL_ERROR "PORT=Wasm needs ENABLE_STATIC_JSC=ON (WASM is linked fully statically)")
 +endif ()
 +
-+# Event-Loop: WTF RunLoopGeneric, angetrieben vom Embedder (kein GLib)
++# Event loop: WTF RunLoopGeneric, driven by the embedder (no GLib)
 +SET_AND_EXPOSE_TO_BUILD(USE_GENERIC_EVENT_LOOP 1)
 +SET_AND_EXPOSE_TO_BUILD(WTF_DEFAULT_EVENT_LOOP 0)
 +
@@ -291,14 +291,14 @@ index 0000000000..7449ec4a3b
 +SET_AND_EXPOSE_TO_BUILD(USE_THEME_ADWAITA ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_UNIX_DOMAIN_SOCKETS ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_INSPECTOR_SOCKET_SERVER ${ENABLE_REMOTE_INSPECTOR})
-+# Ebenen (Compositing) wie WPE: GraphicsLayerCoordinated, gemalt von Skia,
-+# zusammengesetzt im Engine-Worker (engine/src/LayerTreeHostWasm.cpp). Ob eine Seite
-+# Ebenen benutzt, entscheidet die Engine zur Laufzeit.
++# Layers (compositing) like WPE: GraphicsLayerCoordinated, painted by Skia,
++# composited in the engine worker (engine/src/LayerTreeHostWasm.cpp). Whether a page
++# uses layers is decided by the engine at runtime.
 +SET_AND_EXPOSE_TO_BUILD(USE_TEXTURE_MAPPER ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_COORDINATED_GRAPHICS ON)
 +SET_AND_EXPOSE_TO_BUILD(ENABLE_DEVELOPER_MODE ${DEVELOPER_MODE})
 +
-+# Alle Libs kommen aus dem browser-lite sysroot (CMAKE_FIND_ROOT_PATH)
++# All libraries come from the browser-lite sysroot (CMAKE_FIND_ROOT_PATH)
 +find_package(Brotli REQUIRED COMPONENTS dec)
 +find_package(CURL 7.85.0 REQUIRED)
 +find_package(Fontconfig 2.13.0 REQUIRED)
@@ -323,13 +323,13 @@ index 0000000000..7449ec4a3b
 +if (USE_WOFF2)
 +    find_package(WOFF2 1.0.2 COMPONENTS dec)
 +    if (NOT WOFF2_FOUND)
-+        message(FATAL_ERROR "libwoff2dec fehlt im sysroot")
++        message(FATAL_ERROR "libwoff2dec is missing from the sysroot")
 +    endif ()
 +endif ()
 +
-+# EGL und GLES2 kommen von Emscripten selber (Header im Emscripten-sysroot,
-+# die Implementierung ist eine JS-Library auf WebGL, -lEGL -lGL beim Linken).
-+# Es gibt keine .a Dateien, darum leere INTERFACE-Targets.
++# EGL and GLES2 come from Emscripten itself (headers in the Emscripten sysroot,
++# the implementation is a JS library on top of WebGL, -lEGL -lGL at link time).
++# There are no .a files, hence empty INTERFACE targets.
 +set(EGL_LIBRARIES "")
 +if (NOT TARGET EGL::EGL)
 +    add_library(EGL::EGL INTERFACE IMPORTED)

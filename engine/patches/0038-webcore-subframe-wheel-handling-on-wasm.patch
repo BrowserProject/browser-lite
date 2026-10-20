@@ -7,8 +7,8 @@ index 6b75aeaace..b9484e8c15 100644
                      return *wheelEventDataForRemoteFrame;
              } else if (RefPtr widget = widgetForElement(*element)) {
 +#if PLATFORM(WASM)
-+                // browser-lite: was der Subframe mit dem Ereignis gemacht hat (z.B. preventDefault),
-+                // gilt fuer das ganze Ereignis, sonst sieht der Aufrufer im Hauptframe es nicht.
++                // browser-lite: what the subframe did with the event (e.g. preventDefault)
++                // applies to the whole event, otherwise the caller in the main frame does not see it.
 +                if (RefPtr frameView = dynamicDowncast<LocalFrameView>(*widget)) {
 +                    auto [subframeResult, subframeHandling] = frameView->frame().eventHandler().handleWheelEvent(event, processingSteps);
 +                    handling.add(subframeHandling);

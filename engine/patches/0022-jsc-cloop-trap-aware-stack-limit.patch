@@ -8,10 +8,10 @@ index 0ed68aee81..c8a9f73b50 100644
      Locker lock { m_mirrorLock };
 -    m_trapAwareSoftStackLimit.storeRelaxed(m_softStackLimit);
 +#if ENABLE(C_LOOP)
-+    // Im C-Loop prueft der Interpreter die Grenze seines eigenen JS-Stacks
-+    // (setCLoopStackLimit), nicht die des nativen Stacks. Sonst stimmt die
-+    // Grenze nach dem ersten Trap nicht mehr und tiefe Rekursion schreibt
-+    // ueber das Ende des JS-Stacks hinaus.
++    // In the C loop the interpreter checks the limit of its own JS stack
++    // (setCLoopStackLimit), not that of the native stack. Otherwise the
++    // limit is wrong after the first trap and deep recursion writes
++    // past the end of the JS stack.
 +    void* limit = m_cloopStackLimit;
 +#else
 +    void* limit = m_softStackLimit;

@@ -59,8 +59,8 @@ index ab23ed5932..e412ec581e 100644
  }
  
 +#if PLATFORM(WASM)
-+// browser-lite: Frames ohne Bewegung, nach denen ein verschobener Layer wieder auf die Geraetepixel
-+// kommt. Scrollen und Animationen haben einzelne Frames ohne Bewegung dazwischen.
++// browser-lite: Frames without movement after which a moved layer returns to device pixels.
++// Scrolling and animations have single frames without movement in between.
 +static constexpr unsigned s_filterResultSettleFrames = 3;
 +
 +static bool nearlyEqual(const SkMatrix& a, const SkMatrix& b)
@@ -79,7 +79,7 @@ index ab23ed5932..e412ec581e 100644
 +
 +std::optional<SkiaCompositingLayer::FilterResult::Input> SkiaCompositingLayer::filterResultInput(const PaintContext& context) const
 +{
-+    // Nur Layer ohne Kinder, deren Inhalt sich nur mit neuem Stand aendert (nicht Video, Canvas, WebGL)
++    // Only layers without children whose content changes only with a new state (not video, canvas, WebGL)
 +    if (!m_children.isEmpty() || m_contentsBuffer || m_mask || m_replica || isReplica() || m_backdrop.filter || m_preserves3D)
 +        return std::nullopt;
 +    if (!context.accumulatedReplicaTransform.isIdentity() || context.paintingBackdropForLayer)
@@ -124,7 +124,7 @@ index ab23ed5932..e412ec581e 100644
 +    if (!resultInput || (m_filterResult && (m_filterResult->input != *resultInput || !hasSameLinearPart(m_filterResult->layerTransform, layerTransform))))
 +        m_filterResult = std::nullopt;
 +
-+    // Ein Layer, der sich nur verschiebt, filtert in seiner Ebene: dort bleibt das Bild gleich.
++    // A layer that only moves filters in its own plane: there the image stays the same.
 +    bool moved = false;
 +    bool keepsLayerPlane = false;
 +    if (m_filterResult && alignment == FilterSurfaceAlignment::DevicePixels) {
@@ -282,7 +282,7 @@ index 18ab7030d1..742112a20e 100644
          bool skipAfterBackdrop { false };
          SkiaCompositingLayerImageSetBatch imageSetBatch;
 +#if PLATFORM(WASM)
-+        // browser-lite: ein gefiltertes Bild wartet in der Ebene seines Layers auf den Stillstand
++        // browser-lite: a filtered image waits in the plane of its layer until it stops moving
 +        bool needsFrameForFilterResult { false };
 +#endif
      };
@@ -306,10 +306,10 @@ index 18ab7030d1..742112a20e 100644
  
      std::optional<Filter> m_filter;
 +#if PLATFORM(WASM)
-+    // browser-lite: Das gefilterte Bild eines Layers ohne Kinder vom letzten Frame. Bleiben Inhalt,
-+    // Filter und Lage in der Ebene gleich, zeichnet der Compositor es wieder, statt den Filter (Blur,
-+    // Schatten) auf der GPU neu zu rechnen. Verschiebt sich der Layer nur (Animation, Scrollen),
-+    // liegt die Flaeche in der Ebene des Layers statt auf den Geraetepixeln, bis er stillsteht.
++    // browser-lite: The filtered image of a childless layer from the last frame. If content,
++    // filter and position in the plane stay the same, the compositor draws it again instead of
++    // recomputing the filter (blur, shadow) on the GPU. If the layer only moves (animation,
++    // scrolling), the surface lies in the layer plane instead of on device pixels until it stops.
 +    struct FilterResult {
 +        struct Input {
 +            sk_sp<SkImageFilter> filter;

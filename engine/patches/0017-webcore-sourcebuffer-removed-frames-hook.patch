@@ -19,7 +19,7 @@ index 03bddbbc92..556dbf09ab 100644
      virtual void flush(TrackID) { }
      virtual void enqueueSample(Ref<MediaSample>&&, TrackID) { }
      virtual void allSamplesInTrackEnqueued(TrackID) { }
-+    // Nach remove() oder dem Aufraeumen vor einem Append (Coded Frame Removal)
++    // After remove() or the cleanup before an append (coded frame removal)
 +    virtual void didRemoveCodedFrames(const MediaTime&, const MediaTime&) { }
      virtual bool isReadyForMoreSamples(TrackID) { return false; }
      virtual void notifyClientWhenReadyForMoreSamples(TrackID) { }

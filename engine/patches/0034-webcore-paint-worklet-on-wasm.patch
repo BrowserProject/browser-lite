@@ -25,9 +25,9 @@ index 0ed2852357..bc260d9710 100644
  
 +#if PLATFORM(WASM)
 +
-+// Laedt das Skript eines Paint Worklets wie ein Modul (CORS, MIME-Typ) und gibt es
-+// dem Worklet zum Auswerten. Die Worklet-Umgebung laeuft im Haupt-Thread, sie hat
-+// keine Ereignis-Schleife: das Skript wird darum klassisch ausgewertet.
++// Loads the script of a paint worklet like a module (CORS, MIME type) and hands it
++// to the worklet for evaluation. The worklet environment runs on the main thread, it has
++// no event loop: so the script is evaluated as a classic script.
 +class PaintWorkletModuleLoader final : public RefCounted<PaintWorkletModuleLoader>, private WorkerScriptLoaderClient {
 +public:
 +    static Ref<PaintWorkletModuleLoader> create(PaintWorklet& worklet, URL&& url)
@@ -98,13 +98,13 @@ index 0ed2852357..bc260d9710 100644
 +        return;
 +    }
 +
-+    // Umleitungen prueft der Loader (EnforceScriptSrcDirective)
++    // The loader checks redirects (EnforceScriptSrcDirective)
 +    if (!protect(document->contentSecurityPolicy())->allowScriptFromSource(url, document->currentParserSourcePosition())) {
 +        promise.reject(Exception { ExceptionCode::SecurityError, "Not allowed by CSP"_s });
 +        return;
 +    }
 +
-+    // Wie die Module Map der Spezifikation: jede URL nur einmal laden und auswerten
++    // Like the module map of the specification: load and evaluate each URL only once
 +    if (m_loadedModules.contains(url)) {
 +        promise.resolve();
 +        return;
@@ -142,11 +142,11 @@ index 0ed2852357..bc260d9710 100644
 +    if (!document || !document->hasBrowsingContext())
 +        return Exception { ExceptionCode::InvalidStateError, "This frame is detached"_s };
 +
-+    // Wie bei Modulen: nur mit JavaScript-MIME-Typ
++    // As with modules: only with a JavaScript MIME type
 +    if (scriptLoader.failed() || !MIMETypeRegistry::isSupportedJavaScriptMIMEType(scriptLoader.responseMIMEType()))
 +        return Exception { ExceptionCode::AbortError, "Unable to load a worklet's module"_s };
 +
-+    // Paint Worklets haben keine heiklen APIs, die Herkunft des Quelltexts zaehlt nicht
++    // Paint worklets have no sensitive APIs, the origin of the source does not matter
 +    auto maybeContext = PaintWorkletGlobalScope::tryCreate(*document, ScriptSourceCode(scriptLoader.script().toString(), JSC::SourceTaintedOrigin::Untainted, URL { scriptLoader.responseURL() }));
 +    if (!maybeContext) [[unlikely]]
 +        return Exception { ExceptionCode::OutOfMemoryError };
@@ -154,8 +154,8 @@ index 0ed2852357..bc260d9710 100644
 +    String exceptionMessage;
 +    context->evaluate(&exceptionMessage);
 +
-+    // Jedes Modul hat eine eigene Umgebung. Wie in der gemeinsamen Umgebung der
-+    // Spezifikation gilt ein Name nur einmal, die erste Registrierung bleibt.
++    // Each module has its own environment. As in the shared environment of the
++    // specification, a name is registered only once, the first registration stays.
 +    bool registered = false;
 +    if (exceptionMessage.isNull()) {
 +        Locker locker { context->paintDefinitionLock() };

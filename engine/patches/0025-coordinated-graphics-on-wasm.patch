@@ -6,7 +6,7 @@ index 08d8ea5a09..ef46145d6c 100644
  #define ENABLE_INSPECTOR_TELEMETRY 0
  #endif
  
-+// browser-lite: wie WPE (PlatformEnableGlib.h), Scrollen im eigenen Thread
++// browser-lite: like WPE (PlatformEnableGlib.h), scrolling in its own thread
 +#if PLATFORM(WASM) && USE(COORDINATED_GRAPHICS)
 +#if !defined(ENABLE_SCROLLING_THREAD)
 +#define ENABLE_SCROLLING_THREAD 1
@@ -14,7 +14,7 @@ index 08d8ea5a09..ef46145d6c 100644
 +#if !defined(ENABLE_WHEEL_EVENT_REGIONS)
 +#define ENABLE_WHEEL_EVENT_REGIONS 1
 +#endif
-+// Der Scrolling-Baum braucht die Gesten-Phasen der Rad-Events
++// The scrolling tree needs the gesture phases of wheel events
 +#if !defined(ENABLE_KINETIC_SCROLLING)
 +#define ENABLE_KINETIC_SCROLLING 1
 +#endif
@@ -32,9 +32,9 @@ index 776466ea87..b463c05d25 100644
  }
  
 +#if PLATFORM(WASM)
-+// browser-lite: Die Engine legt den GPU-Kontext selber an (WebGL 2 im Engine-Worker,
-+// engine/src/GpuRaster.cpp) und gibt ihn hier fuer den Skia-Compositor weiter. Einen
-+// EGL-Kontext (skiaGLContext) gibt es nicht, Kacheln malt Skia darum auf der CPU.
++// browser-lite: The engine creates the GPU context itself (WebGL 2 in the engine worker,
++// engine/src/GpuRaster.cpp) and passes it on here for the Skia compositor. There is no
++// EGL context (skiaGLContext), so Skia paints tiles on the CPU.
 +static GrDirectContext* s_wasmGrContext;
 +
 +WEBCORE_EXPORT void setSkiaGrContextForWasm(GrDirectContext*);
@@ -62,13 +62,13 @@ index 9fee5e03f2..f060106844 100644
  #endif
  
 +#if PLATFORM(WASM)
-+// browser-lite: Texturen leben im WebGL-Kontext von Skia (engine/src/GpuRaster.cpp).
-+// Sie werden auch ausserhalb des Compositors angelegt oder freigegeben (Timer im
-+// BitmapTexturePool), darum stellt jeder GL-Aufruf hier zuerst diesen Kontext ein.
++// browser-lite: Textures live in the WebGL context of Skia (engine/src/GpuRaster.cpp).
++// They are also created or released outside the compositor (timer in
++// BitmapTexturePool), so every GL call here first makes this context current.
 +extern "C" void bl_skia_ensure_gl_context() __attribute__((weak));
-+// WebGL-Kennungen gelten nur im Worker, der sie angelegt hat. Freigeben darum
-+// immer ueber die Engine, die es an den richtigen Thread weitergibt
-+// (kind: 0 = Textur, 1 = Framebuffer, 2 = Renderbuffer).
++// WebGL names are only valid in the worker that created them. So always release
++// them through the engine, which forwards it to the right thread
++// (kind: 0 = texture, 1 = framebuffer, 2 = renderbuffer).
 +extern "C" void bl_texmap_gl_delete(int kind, int count, const unsigned* ids) __attribute__((weak));
 +static void deleteGLObjects(int kind, GLsizei count, const GLuint* ids)
 +{
@@ -121,7 +121,7 @@ index 9fee5e03f2..f060106844 100644
  GLenum depthBufferFormat()
  {
 +#if PLATFORM(WASM)
-+    // WebGL 2 (GLES 3), ohne eigenen GLContext
++    // WebGL 2 (GLES 3), without its own GLContext
 +    return GL_DEPTH24_STENCIL8;
 +#else
      auto* glContext = GLContext::current();
@@ -138,7 +138,7 @@ index 9fee5e03f2..f060106844 100644
  
      // Texture upload requires subimage buffer if driver doesn't support subimage and we don't have full image upload.
 +#if PLATFORM(WASM)
-+    // WebGL 2 kann UNPACK_ROW_LENGTH/SKIP_ROWS/SKIP_PIXELS
++    // WebGL 2 supports UNPACK_ROW_LENGTH/SKIP_ROWS/SKIP_PIXELS
 +    bool supportsUnpackSubimage = true;
 +#else
      bool supportsUnpackSubimage = GLContext::current()->glExtensions().EXT_unpack_subimage;
@@ -177,7 +177,7 @@ index f25e1a3a05..cdc797d9dd 100644
  #endif
  
 +#if PLATFORM(WASM)
-+// WebGL 2 (GLES 3) kann diese Formate, die GLES-2-Header kennen sie aber nicht
++// WebGL 2 (GLES 3) supports these formats, but the GLES 2 headers do not know them
 +#ifndef GL_RGBA8
 +#define GL_RGBA8 0x8058
 +#endif
@@ -216,8 +216,8 @@ index 752b082f88..fc81ef20dc 100644
          return false;
  
 +#if PLATFORM(WASM)
-+    // WebGL kennt kein BGRA und es gibt keinen GLContext: als RGBA hochladen,
-+    // BitmapTexture stellt den GL-Kontext von Skia selber ein
++    // WebGL has no BGRA and there is no GLContext: upload as RGBA,
++    // BitmapTexture makes the Skia GL context current itself
 +    UNUSED_PARAM(useSkiaForCompositing);
 +    Vector<uint8_t> rgbaPixels;
 +    if (pixmap.colorType() != kRGBA_8888_SkColorType) {
@@ -265,7 +265,7 @@ index 7fd1ee8fe4..bb3ab53dd0 100644
      bool isBackedByOpenGL() const final { return false; }
      IntSize size() const final { return m_size; }
 +#if PLATFORM(WASM)
-+    // WebGL kennt kein BGRA, die Kacheln landen direkt als RGBA in der Textur
++    // WebGL has no BGRA, the tiles go directly into the texture as RGBA
 +    PixelFormat pixelFormat() const final { return PixelFormat::RGBA8; }
 +#else
      PixelFormat pixelFormat() const final { return PixelFormat::BGRA8; }

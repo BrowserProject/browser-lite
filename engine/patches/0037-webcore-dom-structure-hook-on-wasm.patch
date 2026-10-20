@@ -42,9 +42,9 @@ index 947c25460a..56161ed3c6 100644
  WEBCORE_EXPORT JSC::Structure* cacheDOMStructure(JSDOMGlobalObject&, JSC::Structure*, const JSC::ClassInfo*);
  
 +#if PLATFORM(WASM)
-+// Fuer die Einbettung: wird gerufen, wenn ein globales Objekt die Structure
-+// (und damit den Prototyp) einer DOM-Klasse zum ersten Mal anlegt. browser-lite
-+// traegt dort die Polyfills fuer diese Klasse ein.
++// For the embedding: called when a global object creates the structure
++// (and so the prototype) of a DOM class for the first time. browser-lite
++// installs the polyfills for that class there.
 +WEBCORE_EXPORT extern void (*domStructureCreatedHook)(JSDOMGlobalObject&, JSC::Structure&, const JSC::ClassInfo*);
 +#endif
 +

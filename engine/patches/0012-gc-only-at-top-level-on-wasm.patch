@@ -7,9 +7,9 @@ index e72c3a6470..0dc5e1219b 100644
      ASSERT(vm.currentThreadIsHoldingAPILock());
      JSC::Heap& heap = vm.heap;
 +#if OS(EMSCRIPTEN)
-+    // Der Embedder haelt bei jeder Arbeit ein DeferGC offen (Heap.cpp). Neu
-+    // planen wuerde den Timer endlos feuern lassen. Die Anforderung wartet
-+    // stattdessen bis zum Ende des aeussersten DeferGC.
++    // The embedder keeps a DeferGC open during all work (Heap.cpp). Rescheduling
++    // would make the timer fire endlessly. Instead the request waits
++    // until the end of the outermost DeferGC.
 +    UNUSED_VARIABLE(heap);
 +#else
      if (heap.isDeferred()) {
@@ -44,11 +44,11 @@ index 67e317d5bb..e3ecf77d4b 100644
  }
  
 +#if OS(EMSCRIPTEN)
-+// In WebAssembly sind lokale Variablen fuer den konservativen GC unsichtbar
-+// (sie liegen nicht im linearen Speicher). Der Embedder haelt darum waehrend
-+// jeder Arbeit ein DeferGC offen. Auch explizite Anforderungen (collectAsync,
-+// collectSync) warten dann, bis das aeusserste DeferGC endet. Dort liegt nichts
-+// von JSC auf dem Stack und der GC findet alle Wurzeln im Speicher.
++// In WebAssembly, local variables are invisible to the conservative GC
++// (they do not live in linear memory). So the embedder keeps a DeferGC open
++// during all work. Explicit requests (collectAsync, collectSync) then also
++// wait until the outermost DeferGC ends. At that point nothing of JSC is on
++// the stack and the GC finds all roots in memory.
 +static thread_local std::optional<GCRequest> s_requestDeferredUntilTopLevel;
 +
 +static void deferUntilTopLevel(GCRequest request)
@@ -58,13 +58,13 @@ index 67e317d5bb..e3ecf77d4b 100644
 +        deferred = request;
 +}
 +
-+// Lange JS-Aufgaben sammelten sonst bis zum Ende Muell an (hunderte MB, der
-+// WASM-Speicher schrumpft danach nicht mehr). Darum: GC auch mitten in JS,
-+// aber nur an Befehlsgrenzen im Interpreter (op_check_traps und beim
-+// Funktionseintritt, LLIntSlowPaths.cpp) und nur wenn
-+// - JS nicht ueber C++ verschachtelt aufgerufen wurde (genau ein VM-Einstieg),
-+// - ausser dem DeferGC des Embedders nichts den GC aufschiebt.
-+// Abschalten mit BL_SAFEPOINT_GC=0.
++// Otherwise long JS tasks would pile up garbage until they end (hundreds of MB, the
++// WASM memory never shrinks afterwards). Hence: GC also in the middle of JS,
++// but only at instruction boundaries in the interpreter (op_check_traps and on
++// function entry, LLIntSlowPaths.cpp) and only if
++// - JS was not called nested through C++ (exactly one VM entry),
++// - nothing but the DeferGC of the embedder defers the GC.
++// Turn off with BL_SAFEPOINT_GC=0.
 +static bool safepointGCEnabled()
 +{
 +    static bool enabled = [] {
@@ -74,7 +74,7 @@ index 67e317d5bb..e3ecf77d4b 100644
 +    return enabled;
 +}
 +
-+// BL_SAFEPOINT_GC=debug: jeden Versuch ausgeben, beim Sammeln mit C-Stack
++// BL_SAFEPOINT_GC=debug: log every attempt, with the C stack when collecting
 +static bool safepointGCDebug()
 +{
 +    static bool debug = [] {
@@ -108,8 +108,8 @@ index 67e317d5bb..e3ecf77d4b 100644
 +    if (!entryFrame || vmEntryRecord(entryFrame)->prevTopEntryFrame())
 +        return;
 +    if (safepointGCDebug())
-+        emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "[safepoint-gc] sammelt");
-+    // Wie am Ende des aeussersten DeferGC, danach wieder aufschieben
++        emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "[safepoint-gc] collecting");
++    // Like at the end of the outermost DeferGC, then defer again
 +    m_deferralDepth = 0;
 +    decrementDeferralDepthAndGCIfNeededSlow();
 +    m_deferralDepth = 1;
@@ -184,7 +184,7 @@ index eaa7a00f76..cf2552ebbe 100644
      // will happen.
      JS_EXPORT_PRIVATE void collectAsync(GCRequest = GCRequest());
 +#if OS(EMSCRIPTEN)
-+    // Sammeln an einem sicheren Punkt im Interpreter (siehe Heap.cpp)
++    // Collect at a safe point in the interpreter (see Heap.cpp)
 +    void requestSafepointGC();
 +    void collectAtSafepoint();
 +#endif
@@ -201,8 +201,8 @@ index 54e789b7c7..8d95a99def 100644
  
 +#if OS(EMSCRIPTEN)
 +        case NeedSafepointGC:
-+            // Nur im Interpreter sicher (LLIntSlowPaths.cpp), hier verwerfen.
-+            // Die naechste Allokation meldet sich wieder.
++            // Only safe in the interpreter (LLIntSlowPaths.cpp), drop it here.
++            // The next allocation requests it again.
 +            didHandleTrap = true;
 +            break;
 +#endif
@@ -219,9 +219,9 @@ index 1d7720b04c..f9795dfb63 100644
  
  // WARNING: Do NOT sort this list. Read comment above for the reason.
 +#if OS(EMSCRIPTEN)
-+    // NeedSafepointGC: der Heap will sammeln, waehrend der Embedder den GC
-+    // aufschiebt. Wird nur im Interpreter bedient (op_check_traps und beim
-+    // Funktionseintritt, siehe Heap.cpp).
++    // NeedSafepointGC: the heap wants to collect while the embedder defers
++    // the GC. Only served in the interpreter (op_check_traps and on
++    // function entry, see Heap.cpp).
  #define FOR_EACH_VMTRAPS_EVENTS(v) \
      v(NeedShellTimeoutCheck) \
      v(NeedTermination) \
@@ -259,7 +259,7 @@ index 9038ef805d..49f773da00 100644
              while (auto function = queue->waitForMessage()) {
                  AutodrainedPool pool;
 +#if OS(EMSCRIPTEN)
-+                // WASM: GC erst nach der Aufgabe, auf leerem Stack (siehe Heap::collectAsync)
++                // WASM: GC only after the task, on an empty stack (see Heap::collectAsync)
 +                auto& globalObject = serializationContext.globalObject();
 +                JSC::JSLockHolder lock(globalObject.vm());
 +                JSC::DeferGC deferGC(globalObject.vm());
@@ -289,8 +289,8 @@ index e59b7654e9..a7f8478095 100644
      String exceptionMessage;
 +#if OS(EMSCRIPTEN)
 +    {
-+        // WASM: GC erst nach dem Skript, wenn nichts von JSC mehr auf dem Stack
-+        // liegt (siehe Heap::collectAsync und WorkerDedicatedRunLoop::runInMode)
++        // WASM: GC only after the script, when nothing of JSC is left on the stack
++        // (see Heap::collectAsync and WorkerDedicatedRunLoop::runInMode)
 +        JSC::JSLockHolder lock(scriptController->vm());
 +        JSC::DeferGC deferGC(scriptController->vm());
 +        evaluateScriptIfNecessary(exceptionMessage);
@@ -319,8 +319,8 @@ index 2b85941f2f..570e870d9c 100644
      runInModeResult.messageQueueResult = result;
  
 +#if OS(EMSCRIPTEN)
-+    // WASM: Lokale Variablen sieht der GC nicht. Er laeuft darum erst am Ende
-+    // dieses Blocks (Ende des aeussersten DeferGC), nicht mitten in der Aufgabe.
++    // WASM: the GC does not see local variables. So it runs only at the end
++    // of this block (end of the outermost DeferGC), not in the middle of the task.
 +    std::optional<JSC::JSLockHolder> gcLock;
 +    if (script)
 +        gcLock.emplace(script->vm());

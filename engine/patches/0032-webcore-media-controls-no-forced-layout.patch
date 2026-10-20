@@ -6,11 +6,11 @@ index be0c3f9fca..1aaadea7e1 100644
  
          this.container = shadowRoot.appendChild(document.createElement("div"));
  
-+        // browser-lite: die Groesse beim Erstellen nicht sofort lesen. offsetWidth
-+        // erzwingt sonst mitten im Parsen ein Layout der ganzen Seite (Wikipedia:
-+        // 1.1 s pro Seite mit <audio controls>). Nach dem ersten Layout des
-+        // Elements kommt ohnehin ein "resize" (HTMLMediaElement::layoutSizeChanged),
-+        // fuer schon ausgelegte Elemente holt der naechste Frame die Groesse.
++        // browser-lite: do not read the size right away on creation. offsetWidth
++        // would otherwise force a layout of the whole page while parsing (Wikipedia:
++        // 1.1 s per page with <audio controls>). After the element's first layout a
++        // "resize" comes anyway (HTMLMediaElement::layoutSizeChanged); for elements
++        // already laid out the next frame fetches the size.
 +        this._deferControlsSize = true;
          this._updateControlsIfNeeded();
 +        this._deferControlsSize = false;

@@ -1,6 +1,6 @@
 // Writes manifest.json next to the engine files of a packaged engine (tools/package-engine.sh):
 // product version, build ID (custom section bl_build_id of engine.wasm, see
-// tools/wasm-build-id.py), WebKit and Emscripten pins, SHA256 and size of every engine file and
+// tools/wasm-build-id.mjs), WebKit and Emscripten pins, SHA256 and size of every engine file and
 // what an embedding page needs.
 //
 //   node tools/engine-manifest.mjs <engine-folder>
@@ -25,7 +25,7 @@ const wasm = readFileSync(path.join(dir, 'engine.wasm'));
 const section = wasmSections(wasm).find((s) => s.name === 'bl_build_id');
 const buildId = section && wasm.subarray(section.payload, section.end).toString();
 if (!buildId) {
-  console.error('engine.wasm has no bl_build_id section (built without tools/wasm-build-id.py?)');
+  console.error('engine.wasm has no bl_build_id section (built without tools/wasm-build-id.mjs?)');
   process.exit(1);
 }
 

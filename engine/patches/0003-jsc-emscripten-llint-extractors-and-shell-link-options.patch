@@ -6,8 +6,8 @@ index 0cd2c74897..547ba02da3 100644
      COMMAND ${Ruby_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_settings_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${OFFLINE_ASM_INCLUDE_DIRS} ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredSettings.h ${OFFLINE_ASM_BACKEND} ${OFFLINE_ASM_ARGS}
      VERBATIM)
  
-+# offlineasm sucht magische Werte direkt im Binary der Extractor-Programme.
-+# Unter Emscripten ist $<TARGET_FILE> nur der .js-Loader, die Daten stehen in der .wasm.
++# offlineasm looks for magic values directly in the binary of the extractor programs.
++# Under Emscripten $<TARGET_FILE> is only the .js loader, the data is in the .wasm.
 +if (EMSCRIPTEN)
 +    set(LLINT_SETTINGS_EXTRACTOR_BINARY $<TARGET_FILE_DIR:LLIntSettingsExtractor>/LLIntSettingsExtractor.wasm)
 +    set(LLINT_OFFSETS_EXTRACTOR_BINARY $<TARGET_FILE_DIR:LLIntOffsetsExtractor>/LLIntOffsetsExtractor.wasm)
@@ -30,8 +30,8 @@ index 0cd2c74897..547ba02da3 100644
  set_property(TARGET LLIntSettingsExtractor PROPERTY SKIP_CODESIGN YES)
  WEBKIT_EXECUTABLE(LLIntSettingsExtractor)
 +if (EMSCRIPTEN)
-+    # wasm-opt (ab -O1) teilt Datensegmente an Null-Bereichen auf. Dann findet
-+    # offlineasm die magischen Werte nicht mehr. Darum ohne Optimierung linken.
++    # wasm-opt (from -O1 on) splits data segments at zero ranges. Then
++    # offlineasm no longer finds the magic values. So link without optimization.
 +    target_link_options(LLIntSettingsExtractor PRIVATE "-O0")
 +endif ()
  
@@ -42,8 +42,8 @@ index 0cd2c74897..547ba02da3 100644
  set_property(TARGET LLIntOffsetsExtractor PROPERTY SKIP_CODESIGN YES)
  WEBKIT_EXECUTABLE(LLIntOffsetsExtractor)
 +if (EMSCRIPTEN)
-+    # wasm-opt (ab -O1) teilt Datensegmente an Null-Bereichen auf. Dann findet
-+    # offlineasm die magischen Werte nicht mehr. Darum ohne Optimierung linken.
++    # wasm-opt (from -O1 on) splits data segments at zero ranges. Then
++    # offlineasm no longer finds the magic values. So link without optimization.
 +    target_link_options(LLIntOffsetsExtractor PRIVATE "-O0")
 +endif ()
  
@@ -67,9 +67,9 @@ index 368d4380a7..940d1633ca 100644
  WEBKIT_EXECUTABLE(jsc)
  
 +if (EMSCRIPTEN AND JSC_SHELL_LINK_OPTIONS)
-+    # browser-lite: Link-Flags nur fuer die jsc-Shell (Stack, Speicher, --spill-pointers).
-+    # Nicht global setzen: die LLInt-Extractors werden mit -O0 gelinkt und
-+    # vertragen z.B. --spill-pointers nicht.
++    # browser-lite: link flags only for the jsc shell (stack, memory, --spill-pointers).
++    # Do not set them globally: the LLInt extractors are linked with -O0 and
++    # do not tolerate --spill-pointers, for example.
 +    target_link_options(jsc PRIVATE "SHELL:${JSC_SHELL_LINK_OPTIONS}")
 +endif ()
 +

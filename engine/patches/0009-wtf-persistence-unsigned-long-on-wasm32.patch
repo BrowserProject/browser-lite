@@ -7,7 +7,7 @@ index 7d1d351839..b1128d4c1c 100644
      WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<float>&);
      WTF_EXPORT_PRIVATE Decoder& operator>>(std::optional<double>&);
 +#if OS(EMSCRIPTEN)
-+    // wasm32: size_t ist "unsigned long" (siehe PersistentEncoder.h)
++    // wasm32: size_t is "unsigned long" (see PersistentEncoder.h)
 +    Decoder& operator>>(std::optional<unsigned long>& result)
 +    {
 +        std::optional<uint64_t> value;
@@ -29,7 +29,7 @@ index de339625f9..8cb5d49667 100644
      WTF_EXPORT_PRIVATE Encoder& operator<<(float);
      WTF_EXPORT_PRIVATE Encoder& operator<<(double);
 +#if OS(EMSCRIPTEN)
-+    // wasm32: size_t ist "unsigned long", weder uint32_t noch uint64_t. Als 64 Bit speichern.
++    // wasm32: size_t is "unsigned long", neither uint32_t nor uint64_t. Store it as 64 bit.
 +    Encoder& operator<<(unsigned long value) { return *this << static_cast<uint64_t>(value); }
 +#endif
  

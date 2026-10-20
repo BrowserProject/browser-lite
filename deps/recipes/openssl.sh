@@ -5,6 +5,8 @@ build() {
     mkdir -p "$out"
     (
         cd "$out" || exit 1
+        # Fixed "built on" date in buildinf.h, otherwise every build differs
+        export SOURCE_DATE_EPOCH=0
         # linux-generic32 = 32-bit without assembly, fits wasm32
         # shellcheck disable=SC2086
         CC=emcc CXX=em++ AR=emar RANLIB=emranlib \

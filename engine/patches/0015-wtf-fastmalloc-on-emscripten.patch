@@ -20,8 +20,8 @@ index 7dea132dd7..e227231f94 100644
  namespace WTF {
  
 +#if OS(EMSCRIPTEN)
-+// Emscriptens aligned_alloc gibt nullptr zurueck, wenn die Groesse kein
-+// Vielfaches der Ausrichtung ist (C11-Regel). WebKit verlangt das nicht.
++// Emscripten's aligned_alloc returns nullptr if the size is not a
++// multiple of the alignment (C11 rule). WebKit does not require that.
 +static inline size_t alignedAllocationSize(size_t alignment, size_t size)
 +{
 +    return alignment ? (size + alignment - 1) / alignment * alignment : size;
@@ -42,17 +42,17 @@ index 7dea132dd7..e227231f94 100644
  #endif
  
 +#if OS(EMSCRIPTEN)
-+// browser-lite: kleiner Cache pro Thread vor dlmalloc. Emscriptens malloc nimmt
-+// in einem Build mit Threads bei jedem Aufruf einen Lock und sucht in den Bins;
-+// WebCore/JSC rufen fastMalloc/fastFree fuer kleine Bloecke sehr oft auf (CNN:
-+// ca. 7 % der Zeit im Engine-Thread). Freigegebene kleine Bloecke kommen in
-+// eine Liste pro Groessenklasse dieses Threads und werden ohne Lock wieder
-+// ausgegeben. Jeder Block bleibt ein normaler dlmalloc-Block (free(), realloc()
-+// und malloc_usable_size() gehen weiter). BL_MALLOC_CACHE=0 schaltet ab.
++// browser-lite: small per thread cache in front of dlmalloc. Emscripten's malloc takes
++// a lock on every call in a build with threads and searches its bins;
++// WebCore/JSC call fastMalloc/fastFree for small blocks very often (CNN:
++// about 7 % of the time in the engine thread). Freed small blocks go into
++// a list per size class of this thread and are handed out again without a lock.
++// Every block stays a normal dlmalloc block (free(), realloc()
++// and malloc_usable_size() keep working). BL_MALLOC_CACHE=0 turns it off.
 +namespace {
 +
 +constexpr size_t smallBlockStep = 16;
-+constexpr unsigned smallBlockClasses = 33; // Klasse k: nutzbar mindestens k * 16 Byte, bis 512
++constexpr unsigned smallBlockClasses = 33; // Class k: usable at least k * 16 bytes, up to 512
 +constexpr size_t smallBlockMax = smallBlockStep * (smallBlockClasses - 1);
 +constexpr uint16_t maxCachedBlocksPerClass = 64;
 +
@@ -63,7 +63,7 @@ index 7dea132dd7..e227231f94 100644
 +struct SmallBlockCache {
 +    CachedBlock* heads[smallBlockClasses];
 +    uint16_t counts[smallBlockClasses];
-+    uint8_t state; // 0 noch nicht eingerichtet, 1 aktiv, 2 aus (Thread endet oder abgeschaltet)
++    uint8_t state; // 0 not set up yet, 1 active, 2 off (thread ends or disabled)
 +};
 +
 +thread_local SmallBlockCache smallBlockCache;
@@ -111,12 +111,12 @@ index 7dea132dd7..e227231f94 100644
 +        return nullptr;
 +    }
 +    cache.state = 1;
-+    // Beim Ende des Threads zurueck an dlmalloc
++    // When the thread ends, give back to dlmalloc
 +    pthread_setspecific(smallBlockCacheKey, &cache);
 +    return &cache;
 +}
 +
-+// Kleine Anfrage: zuerst aus dem Cache, sonst die ganze Klassengroesse bei dlmalloc
++// Small request: first from the cache, otherwise the full class size from dlmalloc
 +ALWAYS_INLINE void* allocateSmallBlock(size_t size, bool zeroed)
 +{
 +    unsigned k = (size + smallBlockStep - 1) / smallBlockStep;

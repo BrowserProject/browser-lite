@@ -7,8 +7,8 @@ index 7f441950b2..f6349bfddf 100644
  void RunLoop::setWakeUpCallback(WTF::Function<void()>&& function)
  {
 +#if OS(EMSCRIPTEN)
-+    // browser-lite: wakeUp() ruft den Callback von anderen Threads unter m_loopLock,
-+    // die Worker setzen ihn zur Laufzeit neu (WorkerDedicatedRunLoop::runFromHost)
++    // browser-lite: wakeUp() calls the callback from other threads under m_loopLock,
++    // workers set it anew at run time (WorkerDedicatedRunLoop::runFromHost)
 +    auto& runLoop = RunLoop::currentSingleton();
 +    Locker locker { runLoop.m_loopLock };
 +    runLoop.m_wakeUpCallback = WTF::move(function);
@@ -27,8 +27,8 @@ index a7f8478095..b6f59af8d4 100644
      });
  
 +#if OS(EMSCRIPTEN)
-+    // browser-lite: Der Thread geht zurueck in den Event-Loop des Host, der Loop
-+    // laeuft von dort weiter (WorkerDedicatedRunLoop::runFromHost)
++    // browser-lite: The thread returns to the host event loop, the loop
++    // continues from there (WorkerDedicatedRunLoop::runFromHost)
 +    downcast<WorkerDedicatedRunLoop>(m_runLoop.get()).runFromHost(*globalScope(), [this, protectedThis = WTF::move(protectedThis)]() mutable {
 +        if (!m_childThreads.isEmptyIgnoringNullReferences()) {
 +            m_runWhenLastChildThreadIsGone = [this, protectedThis = WTF::move(protectedThis)]() mutable {
@@ -72,13 +72,13 @@ index 570e870d9c..0983a097d8 100644
  };
  
 +#if OS(EMSCRIPTEN)
-+// browser-lite: Jeder Thread ist ein Web Worker des Browsers. Blockiert er in
-+// run(), kommt sein JS-Event-Loop nie mehr dran: die FinalizationRegistry der
-+// Host-Seite feuert nie, WeakRefs halten ihr Ziel fuer immer (WebAssembly der
-+// Seiten). Darum laeuft der Loop wie im Engine-Thread aus dem Event-Loop: neue
-+// Aufgaben, das Ende und die Timer (von WebCore und vom RunLoop des Threads,
-+// darin die Timer von JSC) planen einen Durchgang ein, danach geht der Thread
-+// zurueck in den Event-Loop.
++// browser-lite: Each thread is a Web Worker of the browser. If it blocks in
++// run(), its JS event loop never gets a turn again: the FinalizationRegistry of
++// the host page never fires, WeakRefs keep their target forever (WebAssembly of
++// pages). So, as in the engine thread, the loop runs from the event loop: new
++// tasks, the end and the timers (of WebCore and of the thread's RunLoop,
++// including the JSC timers) schedule a pass, after which the thread returns
++// to the event loop.
 +class RunLoopSetup;
 +
 +struct WorkerDedicatedRunLoop::HostLoop {
@@ -119,19 +119,19 @@ index 570e870d9c..0983a097d8 100644
 +    m_hostLoop = makeUnique<HostLoop>(*this, context, WTF::move(done));
 +    hostDrivenRunLoop = this;
 +    m_hostThread = pthread_self();
-+    // Der Thread endet mit stopFromHost, nicht mit seiner Startfunktion
++    // The thread ends with stopFromHost, not with its start function
 +    emscripten_runtime_keepalive_push();
 +    RunLoop::setWakeUpCallback([this] {
 +        scheduleHostPump();
 +    });
-+    // Wie beim Warten in runInMode: ohne Zugriff auf den Heap, solange nichts laeuft
++    // As when waiting in runInMode: no heap access while nothing runs
 +    if (CheckedPtr script = context.script())
 +        script->releaseHeapAccess();
 +    m_hostDriven = true;
 +    pumpFromHost();
 +}
 +
-+// Von jedem Thread
++// From any thread
 +void WorkerDedicatedRunLoop::scheduleHostPump()
 +{
 +    if (!m_hostDriven || m_hostPumpScheduled.exchange(true))
@@ -140,7 +140,7 @@ index 570e870d9c..0983a097d8 100644
 +        m_hostPumpScheduled = false;
 +}
 +
-+// Ueber den Thread, nicht ueber "this": ein Aufruf kann nach dem Ende ankommen
++// Through the thread, not through "this": a call can arrive after the end
 +void WorkerDedicatedRunLoop::hostPump(void*)
 +{
 +    if (auto* runLoop = hostDrivenRunLoop)
@@ -179,7 +179,7 @@ index 570e870d9c..0983a097d8 100644
 +                terminated = true;
 +                break;
 +            }
-+            // Auch bei Dauerarbeit kommt der Event-Loop regelmaessig dran
++            // The event loop gets regular turns even under continuous work
 +            if (MonotonicTime::now() - start > 50_ms) {
 +                scheduleHostPump();
 +                break;
@@ -223,7 +223,7 @@ index 570e870d9c..0983a097d8 100644
 +    runCleanupTasks(host->context.get());
 +    auto done = WTF::move(host->done);
 +    host = nullptr;
-+    // Danach kann "this" schon abgebaut sein
++    // "this" may already be destroyed after this
 +    done();
 +    emscripten_runtime_keepalive_pop();
 +}
@@ -281,8 +281,8 @@ index babe8f93db..ef0f8a2440 100644
      void run(WorkerOrWorkletGlobalScope*);
  
 +#if OS(EMSCRIPTEN)
-+    // browser-lite: wie run(), kehrt aber sofort zurueck. Der Loop laeuft danach
-+    // aus dem Event-Loop des Host weiter, done kommt nach seinem Ende.
++    // browser-lite: like run(), but returns immediately. The loop then keeps running
++    // from the host event loop, done is called after it ends.
 +    void runFromHost(WorkerOrWorkletGlobalScope&, Function<void()>&& done);
 +#endif
 +

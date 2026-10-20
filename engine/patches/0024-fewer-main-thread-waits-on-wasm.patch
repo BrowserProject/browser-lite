@@ -20,9 +20,9 @@ index 451c9c8c41..af84c016ab 100644
      }
  
 +#if defined(__EMSCRIPTEN__)
-+    // WebAssembly (browser-lite): die Pruefung unten liest und durchsucht fuer jeden Kandidaten
-+    // jedes Treffers die ganze Schriftdatei. Die installierten Schriften aendern sich nie, darum
-+    // das Ergebnis pro Datei merken.
++    // WebAssembly (browser-lite): the check below reads and scans the whole font file for every
++    // candidate of every match. The installed fonts never change, so remember
++    // the result per file.
      bool FontAccessible(FcPattern* font) const {
 +        const char* filename = get_string(font, FC_FILE, nullptr);
 +        if (nullptr == filename) {
@@ -65,9 +65,9 @@ index 738678daef..540bdcd9dd 100644
  using namespace JSC;
  
 +#if OS(EMSCRIPTEN)
-+// WebAssembly: ein neuer Thread wird ueber den Haupt-Thread der Seite gestartet
-+// und blockiert so lange. Pro Fenster (jedes iframe fragt window.crypto) kostete
-+// das beim Seitenladen bis zu 1 s. Alle SubtleCrypto teilen sich eine Queue.
++// WebAssembly: a new thread is started through the main thread of the page
++// and blocks it for that long. Per window (every iframe asks for window.crypto) this
++// cost up to 1 s during page load. All SubtleCrypto instances share one queue.
 +static Ref<WorkQueue> sharedCryptoWorkQueue()
 +{
 +    static NeverDestroyed<Ref<WorkQueue>> queue = WorkQueue::create("com.apple.WebKit.CryptoQueue"_s);
@@ -102,10 +102,10 @@ index a000bb9b22..d6ca44c8a3 100644
      ASSERT(isMainThread());
  
 +#if PLATFORM(WASM)
-+    // browser-lite: ein gemeinsamer Thread fuer alle Bilder. Sonst haelt jedes
-+    // Bild mit asynchronem Dekodieren einen eigenen Thread offen (die Schleife
-+    // in start() wartet blockierend auf Auftraege), und jeder neue Thread
-+    // braucht im Browser einen neuen Web Worker vom Haupt-Thread.
++    // browser-lite: one shared thread for all images. Otherwise every
++    // image with asynchronous decoding keeps its own thread open (the loop
++    // in start() waits blocking for work), and every new thread
++    // needs a new Web Worker from the main thread in the browser.
 +    RefPtr decoder = m_source.get()->decoder();
 +    decodeQueue().append(request);
 +    if (!decoder)
@@ -122,7 +122,7 @@ index a000bb9b22..d6ca44c8a3 100644
 +        }
 +        decodeRequest.options = { decodeRequest.options.decodingMode(), decodingDestination, decodeRequest.options.sizeForDrawing() };
 +
-+        // Alle Referenzen gehen in den Haupt-Thread und werden dort abgebaut
++        // All references go to the main thread and are destroyed there
 +        callOnMainThread([protectedThis = WTF::move(protectedThis), protectedWorkQueue = WTF::move(protectedWorkQueue), protectedSource = WTF::move(protectedSource), decodeRequest, nativeImage = WTF::move(nativeImage)] () mutable {
 +            if (protectedWorkQueue.ptr() != protectedThis->m_workQueue || protectedSource.ptr() != protectedThis->m_source.get().ptr())
 +                return;

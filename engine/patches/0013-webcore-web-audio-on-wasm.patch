@@ -7,7 +7,7 @@ index 0c16afbd6f..75ad10747d 100644
  #endif
  
 -#if USE(COORDINATED_GRAPHICS) && USE(THEME_ADWAITA) && USE(SKIA)
-+// browser-lite (PORT=Wasm): ohne asynchrones Scrollen malt WebCore die Scrollbars selber
++// browser-lite (PORT=Wasm): without async scrolling WebCore paints the scrollbars itself
 +#if USE(COORDINATED_GRAPHICS) && USE(THEME_ADWAITA) && USE(SKIA) && !PLATFORM(WASM)
  #define USE_COORDINATED_GRAPHICS_ASYNC_SCROLLBAR 1
  #endif
@@ -84,25 +84,25 @@ index 0000000000..13ec0f2bb2
 +#include <wtf/MonotonicTime.h>
 +#include <wtf/Threading.h>
 +
-+// Audio-Ausgabe fuer browser-lite.
++// Audio output for browser-lite.
 +//
-+// Ein eigener Thread rendert den Web-Audio-Graphen in einen Ringpuffer im
-+// gemeinsamen WASM-Speicher. Die Oberflaeche liest ihn mit einem AudioWorklet
-+// im Web Audio des Host-Browsers (web/audio-worklet.js) und spielt ihn ab.
++// A dedicated thread renders the Web Audio graph into a ring buffer in
++// the shared WASM memory. The UI reads it with an AudioWorklet
++// in the Web Audio of the host browser (web/audio-worklet.js) and plays it.
 +//
-+// Ringpuffer: Kopf mit laufenden Zaehlern (geschrieben/gelesen, in Frames),
-+// einem Herzschlag des Worklets und danach die Samples (float, Kanaele verschachtelt).
-+// Wenn niemand liest (Host-AudioContext noch gesperrt bis zum ersten Klick),
-+// rendern wir trotzdem im Takt der Uhr weiter und werfen das Ergebnis weg.
-+// So laeuft currentTime weiter, wie in einem normalen Browser.
++// Ring buffer: a header with running counters (written/read, in frames),
++// a heartbeat of the worklet, followed by the samples (float, channels interleaved).
++// When nobody reads (host AudioContext still locked until the first click),
++// we still keep rendering at the pace of the clock and discard the result.
++// That way currentTime keeps advancing, as in a normal browser.
 +
 +namespace WebCore {
 +
 +namespace {
 +
 +constexpr float outputSampleRate = 48000;
-+constexpr uint32_t ringCapacityFrames = 8192; // Zweierpotenz
-+// So viel wird im Voraus gerendert (ca. 64 ms bei 48 kHz)
++constexpr uint32_t ringCapacityFrames = 8192; // Power of two
++// How much is rendered ahead (about 64 ms at 48 kHz)
 +constexpr uint32_t targetBufferedFrames = 24 * AudioUtilities::renderQuantumSize;
 +constexpr Seconds readerTimeout = 250_ms;
 +
@@ -111,7 +111,7 @@ index 0000000000..13ec0f2bb2
 +    std::atomic<uint32_t> readFrame;
 +    uint32_t capacityFrames;
 +    uint32_t channels;
-+    // Zaehlt bei jedem process() des Worklets, auch wenn nichts im Ring ist
++    // Counts on every process() of the worklet, even when the ring is empty
 +    std::atomic<uint32_t> heartbeat;
 +    uint32_t reserved[3];
 +};
@@ -143,8 +143,8 @@ index 0000000000..13ec0f2bb2
 +    ~AudioDestinationWasm()
 +    {
 +        stopThread();
-+        // Der Speicher gehoert ab jetzt der Oberflaeche: das Worklet liest
-+        // vielleicht noch, darum gibt sie ihn erst nach dem Abbauen frei.
++        // From now on the memory belongs to the UI: the worklet may still
++        // be reading, so the UI frees it only after tearing it down.
 +        MAIN_THREAD_ASYNC_EM_ASM({
 +            if (Module.onEngineAudio)
 +                Module.onEngineAudio('close', $0, $1, 0, 0, 0);
@@ -202,13 +202,13 @@ index 0000000000..13ec0f2bb2
 +    RingHeader& header() { return *reinterpret_cast<RingHeader*>(m_ring); }
 +    float* samples() { return reinterpret_cast<float*>(m_ring + sizeof(RingHeader)); }
 +
-+    // Ein Render-Quantum (128 Frames) rendern, optional in den Ring schreiben
++    // Render one render quantum (128 frames), optionally write it to the ring
 +    void renderQuantum(bool writeToRing)
 +    {
 +        constexpr size_t frames = AudioUtilities::renderQuantumSize;
 +        for (unsigned i = 0; i < m_channels; ++i)
 +            m_outputBus->setChannelMemory(i, m_planar[i].mutableSpan());
-+        // Wie bei Cocoa: zuerst Fertiges aus dem FIFO holen, dann nachrendern
++        // Like Cocoa: first take finished frames from the FIFO, then render more
 +        auto framesToRender = pullRendered(frames);
 +        AudioDestinationResampler::render(m_framesRendered / static_cast<double>(outputSampleRate), MonotonicTime::now(), framesToRender);
 +        m_framesRendered += frames;
@@ -243,7 +243,7 @@ index 0000000000..13ec0f2bb2
 +            }
 +
 +            if (now - lastReadProgress < readerTimeout) {
-+                // Die Oberflaeche spielt ab: Ring bis zum Ziel auffuellen
++                // The UI is playing: fill the ring up to the target
 +                while (!m_stop) {
 +                    uint32_t buffered = ring.writeFrame.load(std::memory_order_relaxed) - ring.readFrame.load(std::memory_order_acquire);
 +                    if (buffered + AudioUtilities::renderQuantumSize > targetBufferedFrames)
@@ -253,7 +253,7 @@ index 0000000000..13ec0f2bb2
 +                pacedSince = now;
 +                pacedFrames = 0;
 +            } else {
-+                // Niemand liest: im Takt der Uhr rendern und wegwerfen
++                // Nobody reads: render at the pace of the clock and discard
 +                pacedFrames += (now - pacedSince).seconds() * outputSampleRate;
 +                pacedSince = now;
 +                pacedFrames = std::min<double>(pacedFrames, outputSampleRate / 5);
@@ -340,9 +340,9 @@ index 0000000000..b03ade7f53
 +#include <wtf/FileSystem.h>
 +#include <wtf/text/MakeString.h>
 +
-+// decodeAudioData ueber den Dekoder des Host-Browsers (kann MP3, AAC, Opus,
-+// Vorbis, FLAC, WAV, ...). Der Aufruf kommt auf einem Hintergrund-Thread der
-+// Engine (AsyncAudioDecoder) und wartet, bis der Haupt-Thread fertig ist.
++// decodeAudioData through the decoder of the host browser (handles MP3, AAC, Opus,
++// Vorbis, FLAC, WAV, ...). The call arrives on a background thread of the
++// engine (AsyncAudioDecoder) and waits until the main thread is done.
 +
 +namespace WebCore {
 +
@@ -366,11 +366,11 @@ index 0000000000..b03ade7f53
 +        var request = $0;
 +        var debug = Module.ENV && Module.ENV.BL_DEBUG && Module.ENV.BL_DEBUG !== '0';
 +        if (debug)
-+            console.log('[audio] dekodieren: ' + $2 + ' Bytes, Rate ' + $3);
++            console.log('[audio] decoding: ' + $2 + ' bytes, rate ' + $3);
 +        var bytes = HEAPU8.slice($1, $1 + $2);
 +        var done = function(buffer) {
 +            if (debug)
-+                console.log('[audio] dekodiert: ' + (buffer ? buffer.length + ' Frames' : 'Fehler'));
++                console.log('[audio] decoded: ' + (buffer ? buffer.length + ' frames' : 'error'));
 +            if (!buffer) {
 +                _bl__audio_decoded(request, 0, 0, 0, 0);
 +                return;
@@ -387,7 +387,7 @@ index 0000000000..b03ade7f53
 +            _bl__audio_decoded(request, ptr, channels, length, buffer.sampleRate);
 +        };
 +        try {
-+            // decodeAudioData rechnet auf die Rate des Kontexts um
++            // decodeAudioData resamples to the rate of the context
 +            var context = new OfflineAudioContext(1, 1, $3 || 48000);
 +            context.decodeAudioData(bytes.buffer).then(done, function() { done(null); });
 +        } catch (e) {
@@ -431,7 +431,7 @@ index 0000000000..b03ade7f53
 +    return bus;
 +}
 +
-+// HRTF-Daten fuer PannerNode (panningModel "HRTF"), liegen in engine.data
++// HRTF data for PannerNode (panningModel "HRTF"), stored in engine.data
 +RefPtr<AudioBus> AudioBus::loadPlatformResource(const char* name, float sampleRate)
 +{
 +    auto data = FileSystem::readEntireFile(makeString("/usr/share/webkit/audio/"_s, String::fromUTF8(name), ".wav"_s));
@@ -487,10 +487,10 @@ index 0000000000..30ce471886
 +#include <wtf/NeverDestroyed.h>
 +#include <wtf/Vector.h>
 +
-+// FFT fuer Web Audio (OscillatorNode, AnalyserNode, ConvolverNode, ...).
-+// Einfache Radix-2-FFT ueber komplexe Zahlen. Das Format der Daten ist wie bei
-+// der Cocoa-Variante: realData/imagData haben fftSize/2 Werte, Index 0 hat in
-+// realData den Gleichanteil und in imagData den Nyquist-Wert ("packed").
++// FFT for Web Audio (OscillatorNode, AnalyserNode, ConvolverNode, ...).
++// Simple radix-2 FFT over complex numbers. The data layout is the same as in
++// the Cocoa variant: realData/imagData have fftSize/2 values, index 0 holds in
++// realData the DC component and in imagData the Nyquist value ("packed").
 +
 +namespace WebCore {
 +
@@ -501,7 +501,7 @@ index 0000000000..30ce471886
 +
 +using Complex = std::complex<float>;
 +
-+// Drehfaktoren e^(-2*pi*i*k/n) fuer k < n/2, pro Groesse einmal berechnet
++// Twiddle factors e^(-2*pi*i*k/n) for k < n/2, computed once per size
 +const Vector<Complex>& twiddles(unsigned log2Size)
 +{
 +    static Lock lock;
@@ -519,11 +519,11 @@ index 0000000000..30ce471886
 +    return table;
 +}
 +
-+// Vorwaerts-FFT in place (fuer die inverse vorher und nachher konjugieren)
++// Forward FFT in place (for the inverse, conjugate before and after)
 +void transform(std::span<Complex> data, unsigned log2Size)
 +{
 +    size_t size = data.size();
-+    // Bit-Umkehr
++    // Bit reversal
 +    for (size_t i = 1, j = 0; i < size; ++i) {
 +        size_t bit = size >> 1;
 +        for (; j & bit; bit >>= 1)
@@ -547,7 +547,7 @@ index 0000000000..30ce471886
 +    }
 +}
 +
-+// Arbeitsspeicher pro Thread, damit nicht jede FFT neu Speicher holt
++// Scratch buffer per thread, so that not every FFT allocates memory
 +std::span<Complex> scratch(size_t size)
 +{
 +    static thread_local Vector<Complex> buffer;
@@ -599,7 +599,7 @@ index 0000000000..30ce471886
 +    auto real = m_realData.span();
 +    auto imag = m_imagData.span();
 +    real[0] = buffer[0].real();
-+    imag[0] = buffer[half].real(); // Nyquist, wie bei Cocoa gepackt
++    imag[0] = buffer[half].real(); // Nyquist, packed like Cocoa
 +    for (unsigned k = 1; k < half; ++k) {
 +        real[k] = buffer[k].real();
 +        imag[k] = buffer[k].imag();
@@ -611,7 +611,7 @@ index 0000000000..30ce471886
 +    unsigned half = m_FFTSize / 2;
 +    auto real = m_realData.span();
 +    auto imag = m_imagData.span();
-+    // Ganzes Spektrum aufbauen (reelles Signal: X[n-k] = conj(X[k])), konjugiert
++    // Build the full spectrum (real signal: X[n-k] = conj(X[k])), conjugated
 +    auto buffer = scratch(m_FFTSize);
 +    buffer[0] = Complex(real[0], 0);
 +    buffer[half] = Complex(imag[0], 0);
@@ -620,7 +620,7 @@ index 0000000000..30ce471886
 +        buffer[m_FFTSize - k] = Complex(real[k], imag[k]);
 +    }
 +    transform(buffer, m_log2FFTSize);
-+    // So dass x == IFFT(FFT(x))
++    // So that x == IFFT(FFT(x))
 +    float scale = 1.0f / m_FFTSize;
 +    for (unsigned i = 0; i < m_FFTSize && i < data.size(); ++i)
 +        data[i] = buffer[i].real() * scale;

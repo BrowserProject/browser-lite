@@ -29,8 +29,8 @@ index c76bbee98b..983d05d3f4 100644
      WTF_OVERRIDE_DELETE_FOR_CHECKED_PTR(WorkerOrWorkletScriptController);
  public:
 +#if PLATFORM(WASM)
-+    // Fuer die Einbettung: wird nach dem Anlegen des globalen Objekts eines
-+    // Workers/Worklets aufgerufen (browser-lite legt dort WebAssembly an)
++    // For the embedding: called after the global object of a worker or worklet
++    // is created (browser-lite creates WebAssembly there)
 +    WEBCORE_EXPORT static void (*workerGlobalObjectCreatedHook)(JSC::JSGlobalObject&);
 +#endif
 +

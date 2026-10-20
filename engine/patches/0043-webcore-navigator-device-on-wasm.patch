@@ -73,13 +73,13 @@ index 7660c42e7f..b6ee29389e 100644
      return screenStorage();
  }
  
-+// WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
++// WebKit pages most likely expect a Safari-like user agent.
 +static constexpr auto defaultUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s;
 +static constexpr auto defaultPlatform = "Linux x86_64"_s;
 +
  static String& userAgentStorage()
  {
--    // WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
+-    // Sites tuned for WebKit most likely expect a Safari-like user agent.
 -    static NeverDestroyed<String> userAgent { "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s };
 +    static NeverDestroyed<String> userAgent { defaultUserAgent };
      return userAgent;
@@ -96,7 +96,7 @@ index 7660c42e7f..b6ee29389e 100644
      return userAgentStorage();
  }
  
-+// Worker lesen navigator.platform in ihrem eigenen Thread
++// Workers read navigator.platform on their own thread
 +static Lock platformLock;
 +
 +static String& platformStorage() WTF_REQUIRES_LOCK(platformLock)
@@ -126,21 +126,21 @@ index 2004a8263d..e44c8d2af6 100644
 +++ b/Source/WebCore/platform/wasm/WasmPlatform.h
 @@ -68,13 +68,19 @@ struct ScreenInfo {
      bool prefersDarkMode { false };
-     // Hat das Geraet einen Touchscreen (navigator.maxTouchPoints im Host)?
+     // Does the device have a touchscreen (navigator.maxTouchPoints in the host)?
      bool hasTouch { false };
-+    // Mobilgeraet: Haupt-Zeiger grob ohne Hover
++    // Mobile device: coarse primary pointer without hover
 +    bool mobile { false };
  };
  
  WEBCORE_EXPORT void setScreenInfo(const ScreenInfo&);
  WEBCORE_EXPORT const ScreenInfo& screenInfo();
  
-+// Leer = Standard (Safari-artig unter Linux)
++// Empty = default (Safari-like on Linux)
  WEBCORE_EXPORT void setUserAgent(const String&);
  WEBCORE_EXPORT String userAgent();
-+// navigator.platform in Fenstern und Workern, leer = Standard passend zum User-Agent
++// navigator.platform in windows and workers, empty = default matching the user agent
 +WEBCORE_EXPORT void setPlatform(const String&);
 +WEBCORE_EXPORT String platform();
  
- // Online-Zustand der Seiten (navigator.onLine, online/offline): Netz des
- // Host-Browsers und Verbindung zum Relay. Am Anfang online.
+ // Online state of the pages (navigator.onLine, online/offline): network of the
+ // host browser and connection to the relay. Online at the start.

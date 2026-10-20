@@ -8,7 +8,7 @@ index 49b926228c..14d9422798 100644
  
 -if (USE_LIBEPOXY)
 +if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-+    # WebAssembly: GL ist WebGL 2 des Browsers (ueber Emscripten), wie bei CanvasKit
++    # WebAssembly: GL is the browser's WebGL 2 (through Emscripten), as in CanvasKit
 +    target_sources(Skia PRIVATE
 +        src/gpu/ganesh/gl/GrGLAssembleWebGLInterfaceAutogen.cpp
 +        src/gpu/ganesh/gl/webgl/GrGLMakeNativeInterface_webgl.cpp
@@ -55,13 +55,13 @@ index 49b926228c..14d9422798 100644
      )
  endif ()
  
-+# WebAssembly: ohne x86-Makros nimmt Skia die skalare Raster-Pipeline (ein
-+# Pixel pro Schritt, keine lowp-Stufen). Emscripten bildet SSE bis 4.1 auf
-+# WASM-SIMD ab, so laeuft der SSE4.1-Pfad mit 4 bzw. 8 Pixeln pro Schritt.
++# WebAssembly: without x86 macros Skia uses the scalar raster pipeline (one
++# pixel per step, no lowp stages). Emscripten maps SSE up to 4.1 onto
++# WASM SIMD, so the SSE4.1 path runs with 4 or 8 pixels per step.
 +if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
 +    target_compile_options(Skia PRIVATE -msimd128 -msse4.1)
-+    # skcms wuerde mit __SSE__ auch die AVX-Header einbinden; dort reicht der
-+    # eigene Vektor-Code von skcms
++    # With __SSE__ skcms would also include the AVX headers; skcms's own
++    # vector code is enough there
 +    set_source_files_properties(
 +        modules/skcms/skcms.cc
 +        modules/skcms/src/skcms_TransformBaseline.cc
@@ -83,9 +83,9 @@ index a46b65f545..85ce802d37 100644
  
 -#define GET_PROC(F) functions->f##F = emscripten_gl##F
 -#define GET_PROC_SUFFIX(F, S) functions->f##F = emscripten_gl##F##S
-+// browser-lite: In der Engine wechseln auch andere den WebGL-Kontext (WebGL der
-+// Seiten). Vor jedem GL-Aufruf von Skia darum den eigenen Kontext aktuell
-+// machen; die Engine stellt die Funktion bereit (engine/src/GpuRaster.cpp).
++// browser-lite: Others in the engine also switch the WebGL context (WebGL of
++// web pages). So make Skia's own context current before every GL call of Skia;
++// the engine provides the function (engine/src/GpuRaster.cpp).
 +extern "C" void bl_skia_ensure_gl_context() __attribute__((weak));
 +
 +template<auto F> struct SkiaGLCall;

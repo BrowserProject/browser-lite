@@ -30,7 +30,7 @@ index 2cc4626d71..150bfabf59 100644
  {
 -#if PLATFORM(COCOA)
 +#if PLATFORM(COCOA) || PLATFORM(WASM)
-+    // browser-lite: abgelegte Dateien sind Kopien im Dateisystem der Engine
++    // browser-lite: dropped files are copies in the engine file system
      return !forDrag() || forFileDrag();
  #elif PLATFORM(GTK) || PLATFORM(WPE)
      // File drag access is disabled until https://webkit.org/b/271957 is resolved for GTK/WPE ports.
@@ -52,7 +52,7 @@ index d0a3d5c048..ba474625a1 100644
          return nullptr;
  
 -    if (types.contains("text/plain;charset=utf-8"_s)) {
-+    // Drag & Drop (Pasteboard mit DragContent) meldet "text/plain"
++    // Drag and drop (Pasteboard with DragContent) reports "text/plain"
 +    if (types.contains("text/plain;charset=utf-8"_s) || types.contains("text/plain"_s)) {
          chosePlainText = true;
          return createFragmentFromText(range, pasteboard.readString("text/plain;charset=utf-8"_s));
@@ -65,7 +65,7 @@ index d0a3d5c048..ba474625a1 100644
 +void Editor::writeImageToPasteboard(Pasteboard& pasteboard, Element&, const URL& url, const String& title)
  {
 -    notImplemented();
-+    // Nur die URL (Bild ziehen); die Zwischenablage nimmt keine Bilder
++    // Only the URL (image drag); the clipboard does not take images
 +    PasteboardImage image;
 +    image.url.url = url;
 +    image.url.title = title;
@@ -204,7 +204,7 @@ index be45b4c096..a039e97cdc 100644
      int64_t m_changeCount { 0 };
  #endif
 +#if PLATFORM(WASM)
-+    // browser-lite: Clipboard im Speicher, der Embedder gleicht es mit dem Host ab
++    // browser-lite: in-memory clipboard, the embedder syncs it with the host
 +    int64_t m_changeCount { 0 };
 +#endif
  };
@@ -274,7 +274,7 @@ index 19c4683b7f..9682f212f2 100644
  namespace WebCore {
  
 +#if PLATFORM(WASM)
-+// Drag & Drop: eigener Inhalt statt Zwischenablage (platform/wasm/DragWasm.cpp)
++// Drag and drop: own content instead of the clipboard (platform/wasm/DragWasm.cpp)
 +#define DRAG_CONTENT(name) auto* name = WasmPlatform::dragContent(*this)
 +#else
 +#define DRAG_CONTENT(name) WasmPlatform::DragContent* name = nullptr
@@ -305,7 +305,7 @@ index 19c4683b7f..9682f212f2 100644
      Vector<String> types;
      platformStrategies()->pasteboardStrategy()->getTypes(types);
 +#if PLATFORM(WASM)
-+    // Wie in Chrome: "text/plain" (gespeichert wird mit charset), Dateien als "Files" (DataTransfer)
++    // As in Chrome: "text/plain" (stored with charset), files as "Files" (DataTransfer)
 +    Vector<String> normalized;
 +    for (auto& type : types) {
 +        auto name = type.startsWith("text/plain"_s) ? "text/plain"_s : type;
@@ -324,17 +324,17 @@ index 19c4683b7f..9682f212f2 100644
  String Pasteboard::readString(const String& type)
  {
 +    if (DRAG_CONTENT(drag)) {
-+        // getData("text") und getData("url") wie in Chrome
++        // getData("text") and getData("url") as in Chrome
 +        if (equalLettersIgnoringASCIICase(type, "text"_s))
 +            return drag->string("text/plain"_s);
 +        if (equalLettersIgnoringASCIICase(type, "url"_s))
 +            return drag->string("text/uri-list"_s).left(drag->string("text/uri-list"_s).find('\n'));
-+        // EditorLibWPE fragt nach "text/plain;charset=utf-8"
++        // EditorLibWPE asks for "text/plain;charset=utf-8"
 +        auto separator = type.find(';');
 +        return drag->string(separator == notFound ? type : type.left(separator));
 +    }
 +#if PLATFORM(WASM)
-+    // getData("text/plain") der Seite: gespeichert ist "text/plain;charset=utf-8"
++    // getData("text/plain") of the page: stored is "text/plain;charset=utf-8"
 +    if (type.startsWith("text/plain"_s) || equalLettersIgnoringASCIICase(type, "text"_s)) {
 +        auto text = platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain;charset=utf-8"_s, name(), context());
 +        return text.isNull() ? platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain"_s, name(), context()) : text;
@@ -395,7 +395,7 @@ index 19c4683b7f..9682f212f2 100644
 +        return;
 +    }
 +#if PLATFORM(WASM)
-+    // Eingefuegte Dateien und Bilder (z.B. ein Screenshot) aus dem Host
++    // Pasted files and images (for example a screenshot) from the host
 +    for (auto& path : WasmPlatform::clipboardFiles())
 +        reader.readFilename(path);
 +#endif
@@ -421,7 +421,7 @@ index 19c4683b7f..9682f212f2 100644
 +void Pasteboard::write(const PasteboardImage& image)
  {
 +    if (DRAG_CONTENT(drag)) {
-+        // Bild ziehen: URL wie in Chrome (die Pixel bleiben in der Seite)
++        // Image drag: URL as in Chrome (the pixels stay in the page)
 +        if (!image.url.url.isEmpty()) {
 +            drag->setString("text/uri-list"_s, image.url.url.string());
 +            drag->setString("text/html"_s, makeString("<img src=\""_s, image.url.url.string(), "\">"_s));
@@ -531,9 +531,9 @@ index 0000000000..b26fac25b3
 +    return true;
 +}
 +
-+// Das CA-Bundle (Mozilla) liegt im virtuellen Dateisystem des Embedders. Der
-+// Embedder kann zusaetzliche CAs nach extra-ca.crt legen (z.B. Firmen-CA oder
-+// Test-CA), dann wird ein gemeinsames Bundle gebaut.
++// The CA bundle (Mozilla) is in the virtual file system of the embedder. The
++// embedder can put additional CAs into extra-ca.crt (for example a company CA or
++// a test CA), then a combined bundle is built.
 +static String caBundlePath()
 +{
 +    FILE* probe = fopen(extraCertificates, "rb");
@@ -554,8 +554,8 @@ index 0000000000..b26fac25b3
 +{
 +    setCACertPath(caBundlePath());
 +
-+    // Wie der Win-Port, aber ChaCha20 zuerst: ohne AES-Hardware (WebAssembly)
-+    // ist es in Software ein Mehrfaches schneller als AES-GCM. TLS 1.3 siehe
++    // Like the Win port, but ChaCha20 first: without AES hardware (WebAssembly)
++    // it is several times faster than AES-GCM in software. For TLS 1.3 see
 +    // CurlContext.cpp.
 +    constexpr auto cipherList =
 +        "ECDHE-ECDSA-CHACHA20-POLY1305:"
@@ -626,11 +626,11 @@ index 0000000000..2382b6551d
 +#include <wtf/NeverDestroyed.h>
 +#include <wtf/URL.h>
 +
-+// browser-lite: Drag & Drop. Ein Pasteboard fuer Drag & Drop schreibt und
-+// liest einen WasmPlatform::DragContent statt der Zwischenablage
-+// (PasteboardLibWPE.cpp). Der Inhalt haengt an einem eigenen
-+// PasteboardContext: der gehoert dem Pasteboard und meldet sich beim Abbau ab.
-+// Den Ziehvorgang selber steuert die Engine (DragClient, Host-Ereignisse).
++// browser-lite: drag and drop. A Pasteboard for drag and drop writes and
++// reads a WasmPlatform::DragContent instead of the clipboard
++// (PasteboardLibWPE.cpp). The content is attached to its own
++// PasteboardContext: it belongs to the Pasteboard and unregisters on teardown.
++// The engine itself drives the drag operation (DragClient, host events).
 +
 +namespace WebCore {
 +
@@ -697,13 +697,13 @@ index 0000000000..2382b6551d
 +
 +} // namespace WasmPlatform
 +
-+// Pasteboard der Quelle (dragstart): neuer, leerer Inhalt
++// Pasteboard of the source (dragstart): new, empty content
 +std::unique_ptr<Pasteboard> Pasteboard::createForDragAndDrop(std::unique_ptr<PasteboardContext>&&)
 +{
 +    return makeUnique<Pasteboard>(makeUnique<DragPasteboardContext>(WasmPlatform::DragContent::create()));
 +}
 +
-+// Pasteboard des Ziels (dragenter/dragover/drop): Inhalt aus den DragData
++// Pasteboard of the target (dragenter/dragover/drop): content from the DragData
 +std::unique_ptr<Pasteboard> Pasteboard::create(const DragData& dragData)
 +{
 +    RefPtr content = contentOf(dragData);
@@ -781,7 +781,7 @@ index 0000000000..2382b6551d
 +    auto* content = contentOf(*this);
 +    if (!content)
 +        return { };
-+    // Erste Zeile der URI-Liste ohne Kommentare
++    // First line of the URI list that is not a comment
 +    for (auto line : content->string("text/uri-list"_s).split('\n')) {
 +        line = line.trim(deprecatedIsSpaceOrNewline);
 +        if (line.isEmpty() || line[0] == '#')
@@ -844,9 +844,9 @@ index 0000000000..21f20a994d
 +
 +namespace WebCore {
 +
-+// Ohne Accelerated Compositing malt WebCore alles direkt in den Pixel-Buffer.
-+// GraphicsLayer::create wird trotzdem gelinkt (Page-Overlays, Compositor),
-+// darum gibt es hier eine Ebene, die nichts tut.
++// Without accelerated compositing WebCore paints everything into the pixel buffer.
++// GraphicsLayer::create is still linked (page overlays, compositor),
++// so here is a layer that does nothing.
 +class GraphicsLayerWasm final : public GraphicsLayer {
 +public:
 +    GraphicsLayerWasm(Type layerType, GraphicsLayerClient& client)
@@ -904,8 +904,8 @@ index 0000000000..52a8f422c9
 +
 +namespace WebCore {
 +
-+// Endung <-> Typ wie in Chromium und Firefox. Fuer eine Endung gilt der erste
-+// Eintrag, fuer einen Typ die erste Endung (Dateinamen von Downloads).
++// Extension <-> type as in Chromium and Firefox. For an extension the first
++// entry wins, for a type the first extension (file names of downloads).
 +static const std::initializer_list<TypeExtensionPair>& platformMediaTypes()
 +{
 +    static std::initializer_list<TypeExtensionPair> platformMediaTypes = {
@@ -937,7 +937,7 @@ index 0000000000..52a8f422c9
 +        { "text/vcard"_s, "vcf"_s },
 +        { "text/vtt"_s, "vtt"_s },
 +        { "application/rtf"_s, "rtf"_s },
-+        // Bilder
++        // Images
 +        { "image/png"_s, "png"_s },
 +        { "image/jpeg"_s, "jpg"_s },
 +        { "image/jpeg"_s, "jpeg"_s },
@@ -967,7 +967,7 @@ index 0000000000..52a8f422c9
 +        { "video/mpeg"_s, "mpg"_s },
 +        { "video/3gpp"_s, "3gp"_s },
 +        { "video/x-msvideo"_s, "avi"_s },
-+        // Ton
++        // Audio
 +        { "audio/mpeg"_s, "mp3"_s },
 +        { "audio/mp4"_s, "m4a"_s },
 +        { "audio/aac"_s, "aac"_s },
@@ -979,12 +979,12 @@ index 0000000000..52a8f422c9
 +        { "audio/flac"_s, "flac"_s },
 +        { "audio/midi"_s, "mid"_s },
 +        { "audio/midi"_s, "midi"_s },
-+        // Schriften
++        // Fonts
 +        { "font/woff2"_s, "woff2"_s },
 +        { "font/woff"_s, "woff"_s },
 +        { "font/ttf"_s, "ttf"_s },
 +        { "font/otf"_s, "otf"_s },
-+        // Dokumente
++        // Documents
 +        { "application/pdf"_s, "pdf"_s },
 +        { "application/msword"_s, "doc"_s },
 +        { "application/vnd.openxmlformats-officedocument.wordprocessingml.document"_s, "docx"_s },
@@ -996,7 +996,7 @@ index 0000000000..52a8f422c9
 +        { "application/vnd.oasis.opendocument.spreadsheet"_s, "ods"_s },
 +        { "application/vnd.oasis.opendocument.presentation"_s, "odp"_s },
 +        { "application/epub+zip"_s, "epub"_s },
-+        // Archive
++        // Archives
 +        { "application/zip"_s, "zip"_s },
 +        { "application/gzip"_s, "gz"_s },
 +        { "application/gzip"_s, "tgz"_s },
@@ -1082,7 +1082,7 @@ index 0000000000..7eb45474b2
 +
 +namespace WebCore {
 +
-+// Den Zustand meldet der Embedder (WasmPlatform::setOnLine)
++// The embedder reports the state (WasmPlatform::setOnLine)
 +static bool hostOnLine = true;
 +
 +static Function<void()>& onLineChanged()
@@ -1147,9 +1147,9 @@ index 0000000000..01b44c5401
 +
 +namespace WebCore {
 +
-+// Der Embedder baut PlatformKeyboardEvents direkt aus den DOM KeyboardEvents
-+// des Host-Browsers (key, code, keyCode). Hier braucht es nur noch die
-+// Aufteilung von KeyDown in RawKeyDown/Char, wie bei GTK/WPE.
++// The embedder builds PlatformKeyboardEvents directly from the DOM KeyboardEvents
++// of the host browser (key, code, keyCode). Here only the split of KeyDown
++// into RawKeyDown/Char is left to do, as in GTK/WPE.
 +void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type type, bool backwardsCompatibility)
 +{
 +    ASSERT(m_type == PlatformEvent::Type::KeyDown);
@@ -1207,8 +1207,8 @@ index 0000000000..ef98545c58
 +
 +namespace WebCore {
 +
-+// Ein globales Clipboard im Speicher (WasmPlatform). Der Embedder spiegelt es
-+// in die Zwischenablage des Host-Browsers.
++// One global in-memory clipboard (WasmPlatform). The embedder mirrors it
++// into the clipboard of the host browser.
 +
 +PlatformPasteboard::PlatformPasteboard(const String&)
 +{
@@ -1376,7 +1376,7 @@ index 0000000000..a201215d91
 +}
 +
 +#if ENABLE(TOUCH_EVENTS)
-+// ontouchstart & Co. nur wie im Host-Browser: viele Seiten schalten sonst auf die Mobil-Ansicht
++// ontouchstart and friends only as in the host browser: otherwise many sites switch to the mobile view
 +bool screenHasTouchDevice()
 +{
 +    return WasmPlatform::screenInfo().hasTouch;
@@ -1425,9 +1425,9 @@ index 0000000000..f7a9d3a3c6
 +#include <wtf/HashMap.h>
 +#include <wtf/NeverDestroyed.h>
 +
-+// browser-lite: speechSynthesis ueber den Host-Browser (WasmPlatform.h). Pro
-+// Synthesizer spricht hoechstens eine Aeusserung, die Ereignisse des Hosts
-+// kommen mit deren ID zurueck.
++// browser-lite: speechSynthesis through the host browser (WasmPlatform.h). Each
++// synthesizer speaks at most one utterance, the events of the host
++// come back with its ID.
 +
 +namespace WebCore {
 +
@@ -1541,7 +1541,7 @@ index 0000000000..f7a9d3a3c6
 +    auto id = currentID(*this);
 +    if (!id)
 +        return;
-+    // WebCore erwartet danach kein Ereignis mehr fuer diese Aeusserung
++    // WebCore expects no further event for this utterance after this
 +    speakingByID().remove(*id);
 +    if (commandCallback())
 +        commandCallback()(WasmPlatform::SpeechCommand::Cancel);
@@ -1669,7 +1669,7 @@ index 0000000000..ba4b11cc12
 +
 +auto SystemFontDatabase::platformSystemFontShorthandInfo(FontShorthand) -> SystemFontShorthandInfo
 +{
-+    // system-ui & Co: die Standard-Schrift (fontconfig waehlt die passende Noto-Schrift)
++    // system-ui and friends: the standard font (fontconfig picks the matching Noto font)
 +    return { WebKitFontFamilyNames::standardFamily, 16, normalWeightValue() };
 +}
 +
@@ -1717,8 +1717,8 @@ index 0000000000..d32c0e60ad
 +
 +namespace WebCore {
 +
-+// Der User-Agent kommt vom Embedder (Standard: Safari-artig, siehe WasmPlatform.cpp).
-+// Seiten erkennen WebKit am zuverlaessigsten, wenn "Safari" und "Version/X" drin sind.
++// The user agent comes from the embedder (default: Safari-like, see WasmPlatform.cpp).
++// Sites detect WebKit most reliably when "Safari" and "Version/X" are in it.
 +
 +String standardUserAgent(const String& applicationName, const String& applicationVersion)
 +{
@@ -1789,7 +1789,7 @@ index 0000000000..7660c42e7f
 +
 +static String& userAgentStorage()
 +{
-+    // WebKit-Seiten erwarten am ehesten einen Safari-artigen User-Agent.
++    // Sites tuned for WebKit most likely expect a Safari-like user agent.
 +    static NeverDestroyed<String> userAgent { "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"_s };
 +    return userAgent;
 +}
@@ -1892,9 +1892,9 @@ index 0000000000..2004a8263d
 +#include <wtf/Vector.h>
 +#include <wtf/text/WTFString.h>
 +
-+// browser-lite: Schnittstelle zwischen dem WebCore-Port (PORT=Wasm) und dem
-+// Embedder (engine/ im browser-lite Repo). Der Embedder setzt hier Werte, die
-+// er vom Host-Browser bekommt (Bildschirm, Clipboard, User-Agent, ...).
++// browser-lite: interface between the WebCore port (PORT=Wasm) and the
++// embedder (engine/ in the browser-lite repo). The embedder sets values here that
++// it gets from the host browser (screen, clipboard, user agent, ...).
 +
 +namespace WebCore {
 +class Pasteboard;
@@ -1902,14 +1902,14 @@ index 0000000000..2004a8263d
 +
 +namespace WebCore::WasmPlatform {
 +
-+// Drag & Drop (DragWasm.cpp): Inhalt eines Ziehvorgangs, aus der Seite
-+// (dragstart, setData, markierter Text, Links) oder aus dem Host (Dateien,
-+// Text). DragData::platformData() zeigt beim Ablegen darauf.
++// Drag and drop (DragWasm.cpp): content of a drag operation, from the page
++// (dragstart, setData, selected text, links) or from the host (files,
++// text). DragData::platformData() points to it on drop.
 +struct DragContent : RefCounted<DragContent> {
 +    static Ref<DragContent> create() { return adoptRef(*new DragContent); }
-+    // Typ -> Text in der Reihenfolge von setData (text/plain, text/html, text/uri-list, eigene Typen)
++    // Type -> text in the order of setData (text/plain, text/html, text/uri-list, custom types)
 +    Vector<std::pair<String, String>> strings;
-+    // Dateien: Pfade im Dateisystem der Engine (erst beim Ablegen, vorher nur die Anzahl)
++    // Files: paths in the engine file system (only on drop, before that only the count)
 +    Vector<String> files;
 +    unsigned fileCount { 0 };
 +
@@ -1918,7 +1918,7 @@ index 0000000000..2004a8263d
 +    bool hasFiles() const { return fileCount || !files.isEmpty(); }
 +    bool isEmpty() const { return strings.isEmpty() && !hasFiles(); }
 +};
-+// Inhalt eines Pasteboards fuer Drag & Drop, nullptr bei der Zwischenablage
++// Content of a Pasteboard for drag and drop, nullptr for the clipboard
 +WEBCORE_EXPORT DragContent* dragContent(const Pasteboard&);
 +
 +struct ScreenInfo {
@@ -1926,7 +1926,7 @@ index 0000000000..2004a8263d
 +    FloatRect availableRect { 0, 0, 1280, 800 };
 +    int depth { 24 };
 +    bool prefersDarkMode { false };
-+    // Hat das Geraet einen Touchscreen (navigator.maxTouchPoints im Host)?
++    // Does the device have a touchscreen (navigator.maxTouchPoints in the host)?
 +    bool hasTouch { false };
 +};
 +
@@ -1936,23 +1936,23 @@ index 0000000000..2004a8263d
 +WEBCORE_EXPORT void setUserAgent(const String&);
 +WEBCORE_EXPORT String userAgent();
 +
-+// Online-Zustand der Seiten (navigator.onLine, online/offline): Netz des
-+// Host-Browsers und Verbindung zum Relay. Am Anfang online.
++// Online state of the pages (navigator.onLine, online/offline): network of the
++// host browser and connection to the relay. Online at the start.
 +WEBCORE_EXPORT void setOnLine(bool);
 +
-+// Clipboard: Inhalt als Paare (MIME-Typ, Text). Der Embedder wird bei jedem
-+// Schreiben informiert und kann den Inhalt an den Host weitergeben.
++// Clipboard: content as pairs (MIME type, text). The embedder is notified on every
++// write and can pass the content on to the host.
 +using ClipboardItems = Vector<std::pair<String, String>>;
 +WEBCORE_EXPORT void setClipboardContents(ClipboardItems&&);
 +WEBCORE_EXPORT const ClipboardItems& clipboardContents();
 +WEBCORE_EXPORT void setClipboardChangedCallback(Function<void(const ClipboardItems&)>&&);
-+// Einfuegen aus dem Host: ohne Rueckmeldung an den Host (sonst ueberschriebe
-+// die Engine dort z.B. ein kopiertes Bild). files: Pfade im Dateisystem der Engine
++// Paste from the host: without notifying the host (otherwise the engine would
++// overwrite for example a copied image there). files: paths in the engine file system
 +WEBCORE_EXPORT void setClipboardFromHost(ClipboardItems&&, Vector<String>&& files);
 +WEBCORE_EXPORT const Vector<String>& clipboardFiles();
 +
-+// Sprachausgabe (speechSynthesis): gesprochen wird vom Host-Browser. Der
-+// Embedder setzt die Stimmen und leitet die Ereignisse des Hosts weiter.
++// Speech output (speechSynthesis): the host browser does the speaking. The
++// embedder sets the voices and forwards the events of the host.
 +struct SpeechVoice {
 +    String uri;
 +    String name;
@@ -1971,10 +1971,10 @@ index 0000000000..2004a8263d
 +};
 +enum class SpeechCommand : uint8_t { Pause, Resume, Cancel };
 +enum class SpeechEvent : uint8_t { Start, End, Pause, Resume, Error, WordBoundary, SentenceBoundary };
-+// Dauerhafter Bytecode-Cache der Seiten-Skripte (BytecodeCacheWasm.cpp). Der
-+// Einbetter liefert gespeicherten Bytecode zu einer Skript-URL (falls schon
-+// da) und speichert neuen. commitPendingBytecode schreibt, was die lebenden
-+// Skripte seit dem Laden kompiliert haben.
++// Persistent bytecode cache of page scripts (BytecodeCacheWasm.cpp). The
++// embedder returns stored bytecode for a script URL (if there is any
++// yet) and stores new bytecode. commitPendingBytecode writes what the live
++// scripts have compiled since they were loaded.
 +using TakeBytecodeHandler = Function<std::optional<Vector<uint8_t>>(const String& url)>;
 +using StoreBytecodeHandler = Function<void(const String& url, Vector<uint8_t>&&)>;
 +WEBCORE_EXPORT void setBytecodeCacheHandlers(TakeBytecodeHandler&&, StoreBytecodeHandler&&);

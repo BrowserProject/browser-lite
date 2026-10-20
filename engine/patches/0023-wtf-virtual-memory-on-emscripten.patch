@@ -16,7 +16,7 @@ index ca44751e7d..04b2ec9d4b 100644
  
 -#if OS(LINUX)
 +#if OS(EMSCRIPTEN)
-+    // Kein echtes mmap (MAP_FIXED geht nicht), der Speicher liegt im WASM-Speicher
++    // No real mmap (MAP_FIXED does not work), the memory lives in WASM memory
 +    memset(base, 0, size);
 +#elif OS(LINUX)
      int result = madvise(base, size, MADV_DONTNEED);
@@ -39,9 +39,9 @@ index 6b5f3b6ed4..a8cda715ba 100644
      RELEASE_BASSERT(size >= requestedSize);
  
 +#if defined(__EMSCRIPTEN__)
-+    // Emscripten hat kein echtes mmap: Teile einer Abbildung freigeben (wie
-+    // tryVMAllocate beim Ausrichten) und MAP_FIXED (vmZeroAndPurge) gehen nicht.
-+    // Der Speicher liegt sowieso im WASM-Speicher, also normal reservieren.
++    // Emscripten has no real mmap: releasing parts of a mapping (as
++    // tryVMAllocate does when aligning) and MAP_FIXED (vmZeroAndPurge) fail.
++    // The memory lives in WASM memory anyway, so allocate it normally.
 +    BUNUSED(mode);
 +    BUNUSED(kind);
 +    size = roundUpToMultipleOf(alignment, size);

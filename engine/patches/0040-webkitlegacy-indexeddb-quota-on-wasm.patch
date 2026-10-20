@@ -7,8 +7,8 @@ index 897f5e5100..cc3e3be3f8 100644
  
  static const uint64_t defaultWriteOperationCost = 4;
 +#if PLATFORM(WASM)
-+// Oeffnen braucht keinen Platz: an der Grenze kann eine Seite ihre Daten noch
-+// lesen und loeschen (wie Chrome), nur Schreiben schlaegt fehl
++// Opening needs no space: at the limit a page can still read and delete its
++// data (like Chrome), only writing fails
 +static const uint64_t openOperationCost = 0;
 +#else
 +static const uint64_t openOperationCost = defaultWriteOperationCost;
@@ -82,7 +82,7 @@ index ba503c9881..ffc4ecf20d 100644
      static Ref<InProcessIDBServer> create(PAL::SessionID);
      static Ref<InProcessIDBServer> create(PAL::SessionID, const String& databaseDirectoryPath);
 +#if PLATFORM(WASM)
-+    // Mit Grenze pro Ursprung (in WebKit2 OriginQuotaManager)
++    // With a limit per origin (in WebKit2 OriginQuotaManager)
 +    static Ref<InProcessIDBServer> create(PAL::SessionID, const String& databaseDirectoryPath, WebCore::IDBServer::IDBServer::SpaceRequester&&);
 +#endif
  
@@ -122,7 +122,7 @@ index fa2c2795b9..607f32d062 100644
  
      static String indexedDatabaseDirectoryPath();
 +#if PLATFORM(WASM)
-+    // Grenze fuer IndexedDB pro Ursprung, gibt der Port vor
++    // IndexedDB limit per origin, set by the port
 +    static bool requestIndexedDatabaseSpace(const WebCore::ClientOrigin&, uint64_t spaceRequested);
 +#endif
  

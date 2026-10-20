@@ -4,5 +4,4 @@
 # Rebuilding these costs hours (toolchain image, deps, WebKit); translated with the next real update
 german toolchain/Dockerfile comments change the toolchain image tag
 german toolchain/*.cpp      comments change the toolchain image tag
-german engine/patches/*     comments change WebKit sources
 
