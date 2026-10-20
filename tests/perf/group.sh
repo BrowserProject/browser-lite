@@ -6,14 +6,17 @@
 #
 #   tests/perf/group.sh <plan.json> <group>
 #
-# Section fields: id, kind (run, start, wpe or video; video uses the live server), profile (device profile; cores for wpe), net,
-# args (arguments of the runner), tune (true: TCP tuning of the server, see server.sh).
+# Section fields: id, kind (run, start, wpe or video; video uses the live server), profile (device
+# profile; cores for wpe), net, args (arguments of the runner, split at spaces), configs (arms of
+# run and start, default the configs of the plan; see measure.mjs readConfigs, site n is the
+# engine in build/perf/site-<n>), tune (true: TCP tuning of the server, see server.sh).
 set -euo pipefail
 # shellcheck source=tests/perf/lib.sh
 source "$(dirname "$0")/lib.sh"
 plan="${1:?plan}"
 group="${2:?group}"
-json() { node -e "const g = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).groups.find((g) => g.name === process.argv[2]); if (!g) process.exit(3); console.log($1)" "$plan" "$group"; }
+# Evaluates an expression over the plan (p) and the group (g)
+json() { node -e "const p = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const g = p.groups.find((g) => g.name === process.argv[2]); if (!g) process.exit(3); console.log($1)" "$plan" "$group"; }
 
 sections=$(json "g.sections.length")
 if [ "$(json "g.sections.some((s) => s.kind === 'wpe')")" = true ]; then
@@ -47,6 +50,7 @@ for i in $(seq 0 $((sections - 1))); do
     profile=$(field profile)
     net=$(field net)
     read -r -a args <<<"$(field args)"
+    configs=$(json "JSON.stringify(g.sections[$i].configs ?? p.configs ?? [{ name: 'A' }])")
     tune=$([ "$(field tune)" = true ] && echo 1 || echo 0)
     out="/w/build/perf/results/$id.jsonl"
     echo "== $id ($kind $profile $net)"
@@ -56,8 +60,8 @@ for i in $(seq 0 $((sections - 1))); do
         PERF_TUNE=$tune bash "$PERF/server.sh" replay "$archive"
     fi
     case "$kind" in
-        run) bash "$PERF/device.sh" "$profile" "$net" node run.mjs --ca "$ca" --out "$out" --label "$id" "${args[@]}" ;;
-        start) bash "$PERF/device.sh" "$profile" "$net" node start.mjs --ca "$ca" --out "$out" --label "$id" "${args[@]}" ;;
+        run) bash "$PERF/device.sh" "$profile" "$net" node run.mjs --ca "$ca" --out "$out" --label "$id" --configs "$configs" "${args[@]}" ;;
+        start) bash "$PERF/device.sh" "$profile" "$net" node start.mjs --ca "$ca" --out "$out" --label "$id" --configs "$configs" "${args[@]}" ;;
         video) bash "$PERF/device.sh" "$profile" "$net" node video.mjs --out "$out" --label "$id" "${args[@]}" ;;
         wpe) bash "$PERF/wpe.sh" "$profile" --out "$out" --label "$id" "${args[@]}" ;;
         *) perf_die "unknown kind $kind" ;;

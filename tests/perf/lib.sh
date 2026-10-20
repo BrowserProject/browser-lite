@@ -28,6 +28,27 @@ perf_die() {
     exit 1
 }
 
+# Built sites to measure: $OUT/site-0, site-1, ... (tools/package-demo.sh, one per engine). The
+# server delivers site n on port SITE_PORT + n, each under its own origin.
+SITE_PORT=8080
+perf_sites() {
+    local n=0
+    while [ -d "$OUT/site-$n/engine" ]; do
+        echo "site-$n"
+        n=$((n + 1))
+    done
+}
+
+# cgroup folder of a running container on the host (cgroup v2, systemd or cgroupfs driver)
+container_cgroup() {
+    local id dir
+    id=$(docker inspect -f '{{.Id}}' "$1" 2>/dev/null) || return 1
+    for dir in "/sys/fs/cgroup/system.slice/docker-$id.scope" "/sys/fs/cgroup/docker/$id"; do
+        [ -d "$dir" ] && { echo "$dir"; return 0; }
+    done
+    return 1
+}
+
 # Device profile: number of cores and slowdown factor of each core (stealer.mjs)
 #   S fast 2 cores, L older laptop, C cheap Chromebook, S4 fast 4 cores, A old Android (6 cores)
 profile_cores() {

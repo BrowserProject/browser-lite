@@ -8,8 +8,8 @@ on:
       plan:
         description: "Plan in tests/perf/plans (file name without .json)"
         required: true
-      engine_run:
-        description: "ID of a green CI run whose engine-dist is measured (empty = latest green one on main)"
+      engine_runs:
+        description: "Comma separated IDs of green CI runs, engine n becomes site n of the plan (empty = latest green one on main for every site)"
         required: false
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       groups: ${{ steps.groups.outputs.groups }}
-      engine_run: ${{ steps.engine.outputs.run }}
+      engine_runs: ${{ steps.engines.outputs.runs }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - id: groups
@@ -30,17 +30,24 @@ jobs:
           PLAN: ${{ inputs.plan }}
         run: |
           [[ "$PLAN" =~ ^[a-z0-9-]+$ ]] || { echo "invalid plan name" >&2; exit 1; }
-          echo "groups=$(node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync('tests/perf/plans/$PLAN.json', 'utf8')).groups.map((g) => g.name)))")" >> "$GITHUB_OUTPUT"
-      - id: engine
+          echo "groups=$(node -e "console.log(JSON.stringify(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).groups.map((g) => g.name)))" "tests/perf/plans/$PLAN.json")" >> "$GITHUB_OUTPUT"
+      # Sites the plan needs: highest "site" of its configurations plus one
+      - id: engines
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN: ${{ inputs.engine_run }}
+          PLAN: ${{ inputs.plan }}
+          ENGINE_RUNS: ${{ inputs.engine_runs }}
         run: |
-          if [ -z "$RUN" ]; then
-            RUN=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          need=$(node -e "const p = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const c = [p.configs ?? [], ...p.groups.flatMap((g) => g.sections.map((s) => s.configs ?? []))].flat(); console.log(Math.max(0, ...c.map((x) => x.site ?? 0)) + 1)" "tests/perf/plans/$PLAN.json")
+          [[ "$need" =~ ^[1-9][0-9]?$ ]] || { echo "invalid sites in plan $PLAN" >&2; exit 1; }
+          IFS=, read -r -a runs <<< "${ENGINE_RUNS// /}"
+          if [ "${#runs[@]}" -eq 0 ]; then
+            latest=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+            for _ in $(seq "$need"); do runs+=("$latest"); done
           fi
-          [[ "$RUN" =~ ^[0-9]+$ ]] || { echo "invalid run id" >&2; exit 1; }
-          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          for run in "${runs[@]}"; do [[ "$run" =~ ^[0-9]+$ ]] || { echo "invalid run id $run" >&2; exit 1; }; done
+          [ "${#runs[@]}" -eq "$need" ] || { echo "plan $PLAN needs $need engine runs, got ${#runs[@]}" >&2; exit 1; }
+          echo "runs=${runs[*]}" >> "$GITHUB_OUTPUT"
 
   measure:
     name: Measure ${{ matrix.group }}
@@ -58,15 +65,33 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Packages and demo with the engine of CI run ${{ needs.groups.outputs.engine_run }}
+      # Site n: the engine of CI run n with the demo and packages of the same commit (engine and core
+      # are released together, abiVersion), each in its own worktree unless it is this commit
+      - name: Packages and one site per engine (CI runs ${{ needs.groups.outputs.engine_runs }})
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN: ${{ needs.groups.outputs.engine_run }}
+          ENGINE_RUNS: ${{ needs.groups.outputs.engine_runs }}
         run: |
           npm ci
           npm run build
-          gh run download "$RUN" -R "$GITHUB_REPOSITORY" -n engine-dist -D build/perf/engine-dist
-          tools/package-demo.sh build/perf/engine-dist build/perf/site
+          mkdir -p build/perf/results
+          n=0
+          for run in $ENGINE_RUNS; do
+            sha=$(gh run view "$run" -R "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+            gh run download "$run" -R "$GITHUB_REPOSITORY" -n engine-dist -D "build/perf/engine-$n"
+            src=.
+            if [ "$sha" != "$(git rev-parse HEAD)" ]; then
+              src="$RUNNER_TEMP/src-$sha"
+              if [ ! -d "$src" ]; then
+                git fetch -q --depth 1 origin "$sha"
+                git worktree add -q --detach "$src" "$sha"
+                (cd "$src" && npm ci && npm run build)
+              fi
+            fi
+            "$src/tools/package-demo.sh" "$PWD/build/perf/engine-$n" "$PWD/build/perf/site-$n"
+            echo "site-$n: CI run $run, $sha" | tee -a build/perf/results/engines.txt
+            n=$((n + 1))
+          done
       - name: Host (netem, images)
         run: |
           sudo modprobe sch_netem
@@ -88,7 +113,7 @@ jobs:
 
   summary:
     name: Summary
-    needs: measure
+    needs: [groups, measure]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -97,13 +122,14 @@ jobs:
         with:
           pattern: perf-*
           path: results
-      - name: Tables
+      # Tables, G per section and the verdict of the plan (stats.mjs, "compare" of the plan)
+      - name: Tables and verdict
+        env:
+          PLAN: ${{ inputs.plan }}
+          ENGINE_RUNS: ${{ needs.groups.outputs.engine_runs }}
         run: |
-          for dir in results/*/; do
-            echo "### ${dir#results/}" >> "$GITHUB_STEP_SUMMARY"
-            mapfile -t files < <(find "$dir" -maxdepth 1 -name '*.jsonl' ! -name calib.jsonl ! -name record.jsonl | sort)
-            [ "${#files[@]}" -gt 0 ] || continue
-            for metric in firstLayout firstPaint loaded; do
-              node tests/perf/stats.mjs "${files[@]}" --metric "$metric" --group label --markdown >> "$GITHUB_STEP_SUMMARY" || true
-            done
-          done
+          [[ "$PLAN" =~ ^[a-z0-9-]+$ ]] || { echo "invalid plan name" >&2; exit 1; }
+          echo "Engines (site n = CI run n): $ENGINE_RUNS" >> "$GITHUB_STEP_SUMMARY"
+          mapfile -t files < <(find results -name '*.jsonl' ! -name calib.jsonl ! -name record.jsonl | sort)
+          [ "${#files[@]}" -gt 0 ] || exit 0
+          node tests/perf/stats.mjs "${files[@]}" --plan "tests/perf/plans/$PLAN.json" --markdown >> "$GITHUB_STEP_SUMMARY"

@@ -5,15 +5,14 @@
 #
 #   tests/perf/foreign.sh "<cores>" <log>
 set -euo pipefail
+# shellcheck source=tests/perf/lib.sh
+source "$(dirname "$0")/lib.sh"
 cpus="$1"
 log="$2"
 usage() {
-    local id
-    id=$(docker inspect -f '{{.Id}}' "$1" 2>/dev/null) || { echo 0; return; }
-    for file in "/sys/fs/cgroup/system.slice/docker-$id.scope/cpu.stat" "/sys/fs/cgroup/docker/$id/cpu.stat"; do
-        [ -f "$file" ] && { awk '/usage_usec/ {print $2}' "$file"; return; }
-    done
-    echo 0
+    local dir
+    dir=$(container_cgroup "$1") || { echo 0; return; }
+    awk '/usage_usec/ {print $2}' "$dir/cpu.stat" 2>/dev/null || echo 0
 }
 busy() { awk -v list=" $cpus " '$1 ~ /^cpu[0-9]+$/ { n = substr($1, 4); if (index(list, " " n " ")) s += $2 + $3 + $4 + $7 + $8 + $9 } END { printf "%d", s * 10000 }' /proc/stat; }
 psi() { awk '/^some/ { split($2, a, "="); print a[2] }' /proc/pressure/memory 2>/dev/null || echo 0; }

@@ -1,0 +1,122 @@
+// Shared parts of the runners in the device container (run.mjs, start.mjs): arguments, the
+// forwarders to the sites of the server, configurations and readings of the device cgroup.
+import fs from 'node:fs';
+import { connect, createServer } from 'node:net';
+
+/** Value of `--<name>` on the command line or the fallback. */
+export const arg = (name, fallback) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 ? process.argv[i + 1] : fallback;
+};
+
+/**
+ * One forwarder per site of the server (site n on port 8080 + n, see server.sh): the demo needs a
+ * secure context (OPFS, Cache API), so it opens as localhost in the device and the forwarder sends
+ * everything over the shaped link. A flag that treats the server address as secure is not enough
+ * (navigator.storage stays missing). Each site has its own origin, so storage lock, OPFS, caches
+ * and service workers of two engines never mix. Returns the origins, index = site.
+ */
+export async function forwardSites() {
+  const upstream = new URL(process.env.SERVER);
+  const count = Number(process.env.PERF_SITES || 1);
+  const origins = [];
+  for (let site = 0; site < count; site++) {
+    const port = Number(upstream.port) + site;
+    const forwarder = createServer((client) => {
+      const server = connect(port, upstream.hostname);
+      client.pipe(server).pipe(client);
+      client.on('error', () => server.destroy());
+      server.on('error', () => client.destroy());
+    });
+    await new Promise((resolve) => forwarder.listen(port, '127.0.0.1', resolve));
+    origins.push(`http://localhost:${port}`);
+  }
+  return origins;
+}
+
+/**
+ * Configurations of `--configs` (arms): name, site (index into the engines of the job, default 0),
+ * params (into the URL of the demo) and engine (merged into the engine options of createBrowser,
+ * for example {"env": {...}}). Unknown sites stop the run.
+ */
+export function readConfigs(origins) {
+  const configs = JSON.parse(arg('configs', '[{"name":"A"}]'));
+  for (const config of configs) {
+    config.site ??= 0;
+    config.params ??= {};
+    config.engine ??= {};
+    if (!origins[config.site]) throw new Error(`config ${config.name}: no site ${config.site}`);
+  }
+  return configs;
+}
+
+/** ABBA: every second run takes the arms in reverse order. */
+export const armOrder = (configs, run) => (run % 2 === 0 ? configs : [...configs].reverse());
+
+/** Sets window.blTestOptions (merged into the options of createBrowser by the demo). */
+export async function testOptions(context, ca, engine) {
+  const options = { engine: { ...(ca ? { extraCA: ca } : {}), ...engine } };
+  await context.addInitScript((value) => {
+    window.blTestOptions = value;
+  }, options);
+}
+
+/**
+ * Rejects when the demo reports an error at start (for example invalid options of a
+ * configuration): such an arm can never be measured, so the run stops instead of waiting.
+ */
+export function startError(page) {
+  const failed = new Promise((_, reject) =>
+    page.on('console', (m) => {
+      if (m.type() === 'error' && /BrowserLiteError|invalid-options/.test(m.text()))
+        reject(new Error(`error at start: ${m.text()}`));
+    }),
+  );
+  failed.catch(() => {});
+  return failed;
+}
+
+const readText = (file) => {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+/** CPU seconds of the device cgroup. */
+export const cpuSeconds = () =>
+  Number(/usage_usec (\d+)/.exec(readText('/sys/fs/cgroup/cpu.stat'))[1]) / 1e6;
+
+/** Bytes received and sent by the device. */
+export const netBytes = () => ({
+  rx: Number(readText('/sys/class/net/eth0/statistics/rx_bytes')),
+  tx: Number(readText('/sys/class/net/eth0/statistics/tx_bytes')),
+});
+
+/**
+ * Memory of the device cgroup in MB: memMB is memory.current (with page cache), anonMB the
+ * anonymous memory of memory.stat (without page cache, the part that counts for a device).
+ */
+export function memory() {
+  const current = Number(readText('/sys/fs/cgroup/memory.current'));
+  const anon = /^anon (\d+)$/m.exec(readText('/sys/fs/cgroup/memory.stat') ?? '');
+  return {
+    memMB: current ? Math.round(current / 1048576) : null,
+    anonMB: anon ? Math.round(Number(anon[1]) / 1048576) : null,
+  };
+}
+
+/**
+ * memory.high of the device cgroup in MB, or null without a limit. device.sh sets it from the host
+ * (`--mem-high <MB>` on the command line), the cgroup is read-only inside the container; with
+ * `--mem-high` the runner checks that the limit is in place.
+ */
+export function memoryHigh() {
+  const value = readText('/sys/fs/cgroup/memory.high')?.trim();
+  const high = value && value !== 'max' ? Math.round(Number(value) / 1048576) : null;
+  const wanted = arg('mem-high');
+  if (wanted != null && high !== Number(wanted))
+    throw new Error(`memory.high is ${high ?? 'max'} MB, --mem-high wants ${wanted} MB`);
+  return high;
+}

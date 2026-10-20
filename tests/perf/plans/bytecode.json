@@ -1,0 +1,54 @@
+{
+  "description": "U1 bytecode cache: old engine (site 0) against new engine (site 1) and the new engine without bytecode cache, second visit of CNN and Wikipedia (first visit with 8 s dwell), cheap (C) and fast (S) device, LAN",
+  "configs": [
+    { "name": "E0", "site": 0 },
+    { "name": "E1", "site": 1 },
+    { "name": "E1-nocache", "site": 1, "engine": { "env": { "BL_BYTECODE_CACHE": "0" } } }
+  ],
+  "compare": [
+    {
+      "base": "E0",
+      "arms": ["E1"],
+      "rule": "correction",
+      "where": { "visit": "warm" },
+      "metrics": ["cpu", "firstLayout"],
+      "secondary": ["rx", "loaded"]
+    },
+    {
+      "base": "E1-nocache",
+      "arms": ["E1"],
+      "rule": "lever",
+      "where": { "visit": "warm" },
+      "metrics": ["cpu", "firstLayout"],
+      "secondary": ["rx", "loaded"]
+    }
+  ],
+  "groups": [
+    {
+      "name": "bytecode-C",
+      "record": ["cnn", "wiki"],
+      "sections": [
+        {
+          "id": "bytecode-C-lan",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit warm --runs 5 --timeout 400 --sites cnn,wiki"
+        }
+      ]
+    },
+    {
+      "name": "bytecode-S",
+      "record": ["cnn", "wiki"],
+      "sections": [
+        {
+          "id": "bytecode-S-lan",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 5 --timeout 400 --sites cnn,wiki"
+        }
+      ]
+    }
+  ]
+}

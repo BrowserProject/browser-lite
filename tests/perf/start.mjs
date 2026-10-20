@@ -1,30 +1,31 @@
-// Start of the engine: per run a new Chromium profile with three starts in a row (1: nothing
-// cached, 2 and 3: engine in the HTTP cache and the code cache of V8). Measured: when the browser
-// of the demo is ready, the first layout of example.com, the download of engine.wasm and the size
-// of the WebAssembly code cache of Chromium in the profile.
-//   node start.mjs --out <jsonl> --runs n --ca <pem> [--label x]
+// Start of the engine: per run and arm a new Chromium profile with three starts in a row (1:
+// nothing cached, 2 and 3: engine in the HTTP cache and the code cache of V8). Measured: when the
+// browser of the demo is ready, the first layout of example.com, the download of engine.wasm and
+// the size of the WebAssembly code cache of Chromium in the profile. Arms take turns per run
+// (ABBA), configurations as in run.mjs (measure.mjs readConfigs).
+//   node start.mjs --out <jsonl> --runs n --ca <pem> [--label x] [--configs '<json>']
 import fs from 'node:fs';
-import { createServer, connect } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import {
+  arg,
+  armOrder,
+  cpuSeconds,
+  forwardSites,
+  memory,
+  netBytes,
+  readConfigs,
+  startError,
+  testOptions,
+} from './measure.mjs';
 
-const arg = (name, fallback) => {
-  const i = process.argv.indexOf(`--${name}`);
-  return i > 0 ? process.argv[i + 1] : fallback;
-};
 const out = arg('out');
 const runs = Number(arg('runs', 3));
 const label = arg('label', '');
 const ca = fs.readFileSync(arg('ca'), 'utf8');
-const upstream = new URL(process.env.SERVER);
-const forwarder = createServer((client) => {
-  const server = connect(Number(upstream.port), upstream.hostname);
-  client.pipe(server).pipe(client);
-  client.on('error', () => server.destroy());
-  server.on('error', () => client.destroy());
-});
-await new Promise((resolve) => forwarder.listen(8080, '127.0.0.1', resolve));
+const origins = await forwardSites();
+const configs = readConfigs(origins);
 
 const HOOKS = () => {
   const t = (window.__perf = {});
@@ -50,69 +51,87 @@ const dirSize = (dir) =>
           0,
         )
     : 0;
-const rxBytes = () => Number(fs.readFileSync('/sys/class/net/eth0/statistics/rx_bytes', 'utf8'));
+
+async function start(dir, config) {
+  const context = await chromium.launchPersistentContext(dir, {
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+    viewport: { width: 1280, height: 800 },
+  });
+  await context.addInitScript(HOOKS);
+  await testOptions(context, ca, config.engine);
+  const page = context.pages()[0] || (await context.newPage());
+  const failed = startError(page);
+  const cpu0 = cpuSeconds();
+  const rx0 = netBytes().rx;
+  const t0 = Date.now();
+  const query = new URLSearchParams({ url: 'https://example.com/', debug: '1', ...config.params });
+  await page.goto(`${origins[config.site]}/?${query}`);
+  let status = 'ok';
+  const layout = page.waitForFunction(() => window.__perf?.firstLayout != null, null, {
+    timeout: 300000,
+    polling: 100,
+  });
+  await Promise.race([layout, failed]).catch((error) => {
+    if (/error at start/.test(error.message)) throw new Error(`${config.name}: ${error.message}`);
+    status = 'timeout';
+  });
+  const wall = Date.now() - t0;
+  const cpu = cpuSeconds() - cpu0;
+  const rx = netBytes().rx - rx0;
+  const info = await page.evaluate(() => ({
+    perf: window.__perf,
+    wasm: performance
+      .getEntriesByType('resource')
+      .filter((r) => /engine\.wasm/.test(r.name))
+      .map((r) => ({ duration: Math.round(r.duration), size: r.transferSize }))[0],
+  }));
+  const mem = memory();
+  // Chromium writes the code cache with a delay
+  await page.waitForTimeout(5000);
+  await context.close();
+  const p = info.perf || {};
+  const round = (value) => (value != null ? Math.round(value) : null);
+  return {
+    status,
+    t0,
+    wall,
+    cpu: +cpu.toFixed(2),
+    ready: round(p.ready),
+    firstLayout: round(p.firstLayout),
+    layoutAfterReady: p.firstLayout != null ? round(p.firstLayout - p.ready) : null,
+    wasmDuration: info.wasm?.duration,
+    wasmSize: info.wasm?.size,
+    rx,
+    ...mem,
+  };
+}
 
 for (let run = 0; run < runs; run++) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-perf-start-'));
-  for (let start = 1; start <= 3; start++) {
-    const context = await chromium.launchPersistentContext(dir, {
-      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-      viewport: { width: 1280, height: 800 },
-    });
-    await context.addInitScript(HOOKS);
-    await context.addInitScript((pem) => {
-      window.blTestOptions = { engine: { extraCA: pem } };
-    }, ca);
-    const page = context.pages()[0] || (await context.newPage());
-    const rx0 = rxBytes();
-    await page.goto(
-      `http://localhost:8080/?debug=1&url=${encodeURIComponent('https://example.com/')}`,
-    );
-    let status = 'ok';
-    await page
-      .waitForFunction(() => window.__perf?.firstLayout != null, null, {
-        timeout: 300000,
-        polling: 100,
-      })
-      .catch(() => {
-        status = 'timeout';
-      });
-    const info = await page.evaluate(() => ({
-      perf: window.__perf,
-      wasm: performance
-        .getEntriesByType('resource')
-        .filter((r) => /engine\.wasm/.test(r.name))
-        .map((r) => ({ duration: Math.round(r.duration), size: r.transferSize }))[0],
-    }));
-    const rx = rxBytes() - rx0;
-    // Chromium writes the code cache with a delay
-    await page.waitForTimeout(5000);
-    await context.close();
-    const p = info.perf || {};
-    const row = {
-      kind: 'start',
-      label,
-      profile: process.env.PERF_PROFILE,
-      net: process.env.PERF_NET,
-      run,
-      start,
-      status,
-      ready: Math.round(p.ready),
-      firstLayout: Math.round(p.firstLayout),
-      layoutAfterReady: Math.round(p.firstLayout - p.ready),
-      wasmDuration: info.wasm?.duration,
-      wasmSize: info.wasm?.size,
-      rx,
-      wasmCodeCacheMB: +(
-        dirSize(path.join(dir, 'Default', 'Code Cache', 'wasm')) / 1048576
-      ).toFixed(1),
-    };
-    fs.appendFileSync(out, `${JSON.stringify(row)}\n`);
-    console.log(
-      `${row.profile} ${row.net} #${run} start ${start}: ready ${row.ready} ms, layout ${row.firstLayout} ms, wasm ${row.wasmDuration} ms ${row.wasmSize} B, code cache ${row.wasmCodeCacheMB} MB`,
-    );
+  for (const config of armOrder(configs, run)) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-perf-start-'));
+    for (let n = 1; n <= 3; n++) {
+      const r = await start(dir, config);
+      const row = {
+        kind: 'start',
+        label,
+        profile: process.env.PERF_PROFILE,
+        net: process.env.PERF_NET,
+        site: 'example',
+        config: config.name,
+        engineSite: config.site,
+        run,
+        start: n,
+        ...r,
+        wasmCodeCacheMB: +(
+          dirSize(path.join(dir, 'Default', 'Code Cache', 'wasm')) / 1048576
+        ).toFixed(1),
+      };
+      fs.appendFileSync(out, `${JSON.stringify(row)}\n`);
+      console.log(
+        `${row.profile} ${row.net} ${config.name} #${run} start ${n}: ${r.status} ready ${r.ready} ms, layout ${r.firstLayout} ms, wasm ${r.wasmDuration} ms ${r.wasmSize} B, code cache ${row.wasmCodeCacheMB} MB`,
+      );
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  fs.rmSync(dir, { recursive: true, force: true });
 }
-forwarder.close();
 process.exit(0);

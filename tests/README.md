@@ -12,7 +12,7 @@
 | `examples/` | both [examples](../examples/README.md) in Chromium: rendering, relay tokens, own service worker, iframe, strict CSP, Vite build, `npm run relay` | engine build, packages, Playwright | e2e-core |
 | `compat/` | real sites of `sites.txt`, informational | engine build, internet | compat |
 | `bench/` | benchmarks to run by hand with `engine/render.mjs` | engine build | none |
-| `perf/` | load times with emulated weak devices and networks against replayed sites, only while that work runs ([perf/README.md](perf/README.md)) | engine build, packages, Docker | Perf (by hand) |
+| `perf/` | load times with emulated weak devices and networks against replayed sites, several engines per job, only while that work runs ([perf/README.md](perf/README.md)) | engine build, packages, Docker | Perf (by hand) |
 
 `lib/` is the shared harness of the browser suites, `fixtures/` holds shared test data (WebAssembly
 modules with `wasm/build.sh`, `wasm-bytes.mjs`, `certs.mjs`, `features.html` for the parity test).
