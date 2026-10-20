@@ -1,0 +1,22 @@
+{
+  "description": "Debug log of the bytecode cache (hits, too late, stored) for the old (site 0) and the new engine (site 1), second visit",
+  "configs": [
+    { "name": "E0", "site": 0, "params": { "log": "1" } },
+    { "name": "E1", "site": 1, "params": { "log": "1" } }
+  ],
+  "groups": [
+    {
+      "name": "bytecode-log",
+      "record": ["cnn", "wiki"],
+      "sections": [
+        {
+          "id": "bytecode-log-S",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 2 --timeout 400 --sites cnn,wiki --logs /w/build/perf/results/logs"
+        }
+      ]
+    }
+  ]
+}
