@@ -186,6 +186,7 @@ const blTest = {
   audioState: () => browser.debug.audioState(),
   mediaState: () => browser.debug.mediaState(),
   rtcState: () => browser.debug.rtcState(),
+  measurements: () => browser.debug.measurements(),
   flags,
 };
 

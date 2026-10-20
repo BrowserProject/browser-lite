@@ -14,8 +14,9 @@ namespace BrowserLite::BytecodeCache {
 void initialize();
 
 // A script resource starts loading from the network with this request: remembers
-// its key and fetches stored bytecode for it ahead of time
-void prefetch(const WebCore::CachedResource&, const URL& requestURL);
+// its key and fetches stored bytecode for it ahead of time. partition: that of
+// the HTTP cache (HttpCache::partition), null: not cached
+void prefetch(const WebCore::CachedResource&, const String& partition, const URL& requestURL);
 
 // Store new bytecode soon (after a page loaded)
 void scheduleCommit();

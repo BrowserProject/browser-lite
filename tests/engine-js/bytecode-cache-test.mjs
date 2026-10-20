@@ -1,7 +1,9 @@
 // Entry format of the bytecode cache (engine/js/bytecode-cache.js) without the engine: loaded in
 // node with a fake Cache API and a fake engine (malloc into shared memory like the real one,
 // bl__bytecode_cache_result records its arguments). Length and checksum are checked by the
-// engine (engine/src/BytecodeCache.cpp), here only that they arrive.
+// engine (engine/src/BytecodeCache.cpp), here only that they arrive. Also the request URL of an
+// entry and the cache names (engine/js/cache-storage.js): other builds deleted when opening, all
+// of the namespace when clearing.
 //   node tests/engine-js/bytecode-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -39,7 +41,12 @@ function load() {
   const cache = new FakeCache();
   const opened = [];
   const deleted = [];
-  const names = ['browserlite-bytecode-old', 'browserlite-http', 'other-bytecode-x'];
+  const names = [
+    'browserlite-bytecode-old',
+    'browserlite-bytecode-build1',
+    'browserlite-http-v2',
+    'other-bytecode-x',
+  ];
   const heap = new Uint8Array(new SharedArrayBuffer(1 << 16));
   let top = 8;
   const results = [];
@@ -84,14 +91,16 @@ function load() {
     // From engine-pre.js: the BL_STORAGE_NAMESPACE of the engine
     blStorageNamespace: () => 'browserlite',
     Response,
+    URLSearchParams,
   };
   vm.createContext(context);
-  vm.runInContext(
-    readFileSync(new URL('../../engine/js/bytecode-cache.js', import.meta.url), 'utf8'),
-    context,
-  );
+  for (const file of ['cache-storage.js', 'bytecode-cache.js'])
+    vm.runInContext(
+      readFileSync(new URL(`../../engine/js/${file}`, import.meta.url), 'utf8'),
+      context,
+    );
   const bytecode = vm.runInContext('blBytecodeCache', context);
-  return { bytecode, cache, opened, deleted, heap, results, mallocs };
+  return { bytecode, cache, opened, deleted, heap, results, mallocs, module: context.Module };
 }
 
 const payload = Uint8Array.from({ length: 100 }, (_, i) => (i * 7) & 255);
@@ -145,7 +154,7 @@ const checksum = 0x1234_5678_9abc_def0n;
 
 // Store: one copy out of shared memory, the view may change right after the call
 {
-  const { bytecode, cache, opened, deleted, heap } = load();
+  const { bytecode, cache, opened, deleted, heap, module } = load();
   bytecode.open('build1');
   heap.set(payload, 4096);
   bytecode.store('https://site.test/app.js', heap.subarray(4096, 4096 + 100), checksum);
@@ -159,7 +168,19 @@ const checksum = 0x1234_5678_9abc_def0n;
     'open: only other builds of the namespace deleted',
     deleted.join() === 'browserlite-bytecode-old',
   );
+  deleted.length = 0;
+  await module.blClearBytecodeCache();
+  check(
+    'clear: all builds of the namespace deleted',
+    deleted.join() === 'browserlite-bytecode-old,browserlite-bytecode-build1',
+    deleted.join(),
+  );
   const url = bytecode.url('https://site.test/app.js');
+  check(
+    'store: request URL https://bytecode.invalid/?k=<key>',
+    url === 'https://bytecode.invalid/?k=https%3A%2F%2Fsite.test%2Fapp.js',
+    url,
+  );
   const response = cache.entries.get(url);
   check('store: entry under the key', !!response, [...cache.entries.keys()].join());
   const stored = new Uint8Array(await response.clone().arrayBuffer());

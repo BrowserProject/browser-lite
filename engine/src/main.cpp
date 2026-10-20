@@ -11,6 +11,7 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "Measurements.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "Speech.h"
@@ -80,6 +81,7 @@ static void addSpareWorkers(int count)
 int main(int, char**)
 {
     using namespace BrowserLite;
+    Measurements::mark(Measurements::Mark::Main);
 
     // Before any other thread starts; the file system (WasmFS for BL_EXTRA_CA)
     // only exists from main() on
@@ -185,6 +187,7 @@ int main(int, char**)
 #endif
 
     log("Engine ready");
+    Measurements::mark(Measurements::Mark::Ready);
     MAIN_THREAD_ASYNC_EM_ASM({
         if (Module.onEngineReady)
             Module.onEngineReady();

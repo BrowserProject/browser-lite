@@ -1,4 +1,4 @@
-# Status (2026-10-18)
+# Status (2026-10-20)
 
 Where the project stands, what was measured, what is open. Numbers like #142 refer to
 [decisions.md](decisions.md); real sites are in [compatibility.md](compatibility.md).
@@ -23,8 +23,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
-  HTTP and bytecode cache in the host Cache API (#70, #135), bytecode also behind redirects and
-  for service worker answers (#212).
+  HTTP and bytecode cache in the host Cache API (#70, #135), partitioned by site like Chrome
+  (#213), bytecode also behind redirects and for service worker answers (#212).
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure (#171), error pages with the
   relay's reason and auto reload (#174, #175), dead relay detection (#177).
@@ -98,7 +98,8 @@ performance with several runs and inclusive times from profiles, not only load t
   body of the 401 response; WebTransport, streams as request body, Storage Buckets,
   WebSocketStream without read backpressure (#120).
 - Storage: localStorage reaches SQLite 1 s after a change and can miss the last change on close;
-  with `/data` in memory (second tab) uploads sit in WASM memory.
+  with `/data` in memory (second tab) uploads sit in WASM memory. WebKit's memory cache is shared
+  by all views of a running engine, only the HTTP and bytecode caches are partitioned (#213).
 - Measurement: layout shift and long animation frame entries, IdleDetector,
   `document.featurePolicy`.
 - UI: drag and drop outside a drop target opens nothing (#125; Chrome loads the link or file in

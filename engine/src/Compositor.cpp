@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "GpuRaster.h"
+#include "Measurements.h"
 #include <atomic>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
@@ -36,6 +37,7 @@ static void* compositorMain(void*)
     s_startState.store(context ? 1 : 2, std::memory_order_release);
     if (!context)
         return nullptr;
+    Measurements::mark(Measurements::Mark::CompositorReady);
     // Back to the JS event loop, the thread lives on; work arrives through the
     // proxy queue (like the engine thread in main.cpp)
     emscripten_exit_with_live_runtime();

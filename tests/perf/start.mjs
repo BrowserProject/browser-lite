@@ -1,7 +1,10 @@
 // Start of the engine: per run and arm a new Chromium profile with three starts in a row (1:
 // nothing cached, 2 and 3: engine in the HTTP cache and the code cache of V8). Measured: when the
-// browser of the demo is ready, the first layout of example.com, the download of engine.wasm and
-// the size of the WebAssembly code cache of Chromium in the profile. Arms take turns per run
+// browser of the demo is ready, the first layout of example.com, the download of engine.wasm, the
+// size of the WebAssembly code cache of Chromium in the profile, the steps of the start (marks
+// bl:<step> of the core: lock, beforeStart, engine.js, instantiate, main, ready, prepared) and the
+// times of the engine (main(), every pthread_create before ready, compositor ready, ready; from
+// debug.measurements()), all in ms of performance.now() of the page. Arms take turns per run
 // (ABBA), configurations as in run.mjs (measure.mjs readConfigs).
 //   node start.mjs --out <jsonl> --runs n --ca <pem> [--label x] [--configs '<json>']
 import fs from 'node:fs';
@@ -83,7 +86,25 @@ async function start(dir, config) {
     wasm: performance
       .getEntriesByType('resource')
       .filter((r) => /engine\.wasm/.test(r.name))
-      .map((r) => ({ duration: Math.round(r.duration), size: r.transferSize }))[0],
+      .map((r) => ({
+        start: r.startTime,
+        end: r.responseEnd,
+        duration: Math.round(r.duration),
+        size: r.transferSize,
+      }))[0],
+    marks: Object.fromEntries(
+      performance
+        .getEntriesByType('mark')
+        .filter((mark) => mark.name.startsWith('bl:'))
+        .map((mark) => [mark.name.slice(3), mark.startTime]),
+    ),
+    engine: (() => {
+      try {
+        return window.blTest.measurements();
+      } catch {
+        return null;
+      }
+    })(),
   }));
   const mem = memory();
   // Chromium writes the code cache with a delay
@@ -91,6 +112,8 @@ async function start(dir, config) {
   await context.close();
   const p = info.perf || {};
   const round = (value) => (value != null ? Math.round(value) : null);
+  const marks = info.marks || {};
+  const engine = info.engine || {};
   return {
     status,
     t0,
@@ -101,6 +124,20 @@ async function start(dir, config) {
     layoutAfterReady: p.firstLayout != null ? round(p.firstLayout - p.ready) : null,
     wasmDuration: info.wasm?.duration,
     wasmSize: info.wasm?.size,
+    wasmStart: round(info.wasm?.start),
+    wasmEnd: round(info.wasm?.end),
+    markLock: round(marks.lock),
+    markBeforeStart: round(marks.beforeStart),
+    markEngineJs: round(marks['engine.js']),
+    markInstantiate: round(marks.instantiate),
+    markMain: round(marks.main),
+    markReady: round(marks.ready),
+    markPrepared: round(marks.prepared),
+    engineMain: round(engine.main),
+    engineCompositorReady: round(engine.compositorReady),
+    engineReady: round(engine.ready),
+    engineThreads: engine.threadsBeforeReady ?? null,
+    engineThreadTimes: engine.threadTimes?.map(round) ?? null,
     rx,
     ...mem,
   };

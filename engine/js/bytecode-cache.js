@@ -1,7 +1,9 @@
 // Bytecode cache of the engine (engine/src/BytecodeCache.cpp), the part on the main thread.
 //
 // One cache per engine build ("<namespace>-bytecode-<build id>"), caches of
-// old builds of the same namespace are deleted when opening. The list of keys
+// old builds of the same namespace are deleted when opening. The key of the
+// engine is "<partition> <url>" (engine/src/BytecodeCache.cpp), the request URL
+// of an entry https://bytecode.invalid/?k=<key> (form encoded). The list of keys
 // is kept in memory, so a script without an entry costs no disk access.
 //
 // Entry: header of 24 bytes (magic "BLBC", format version, length of the
@@ -20,13 +22,9 @@ var blBytecodeCache = {
   open: function (buildID) {
     if (blBytecodeCache.ready || typeof caches === 'undefined')
       return;
-    var prefix = blBytecodeCache.prefix();
-    var name = prefix + buildID;
-    blBytecodeCache.ready = caches.keys().then(function (names) {
-      return Promise.all(names.filter(function (other) {
-        return other.indexOf(prefix) === 0 && other !== name;
-      }).map(function (other) { return caches.delete(other); }));
-    }).then(function () {
+    var base = blBytecodeCache.base();
+    var name = base + '-' + buildID;
+    blBytecodeCache.ready = blCacheStorage.deleteFamily(base, name).then(function () {
       return caches.open(name);
     }).then(function (cache) {
       return cache.keys().then(function (keys) {
@@ -37,13 +35,14 @@ var blBytecodeCache = {
     }).catch(function () { return null; });
   },
 
-  prefix: function () {
-    return blStorageNamespace() + '-bytecode-';
+  // Family of the cache names of this namespace (cache-storage.js)
+  base: function () {
+    return blStorageNamespace() + '-bytecode';
   },
 
   // Request URL of the entry for a key of the engine
   url: function (key) {
-    return 'https://bytecode.invalid/?' + encodeURIComponent(key);
+    return blCacheStorage.entryURL('bytecode.invalid', { k: key });
   },
 
   // A new entry (not in shared memory, the bytecode may be a view on it): one copy
@@ -141,12 +140,5 @@ var blBytecodeCache = {
 // Host: deletes the bytecode caches of this namespace (browser.storage.clearCaches)
 Module['blClearBytecodeCache'] = function () {
   blBytecodeCache.ready = null;
-  if (typeof caches === 'undefined')
-    return Promise.resolve();
-  var prefix = blBytecodeCache.prefix();
-  return caches.keys().then(function (names) {
-    return Promise.all(names.filter(function (name) {
-      return name.indexOf(prefix) === 0;
-    }).map(function (name) { return caches.delete(name); }));
-  });
+  return blCacheStorage.deleteFamily(blBytecodeCache.base());
 };

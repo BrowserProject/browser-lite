@@ -1,6 +1,7 @@
-// Cleanup of the HTTP cache (engine/js/http-cache.js) without the engine:
-// loaded in node, the Cache API is a fake with the same order as in the browser
-// (storing appends at the end, replacing too).
+// HTTP cache (engine/js/http-cache.js with engine/js/cache-storage.js) without the engine:
+// loaded in node, the Cache API is a fake with the same order as in the browser (storing appends
+// at the end, replacing too). Key format with the partition, cache names by format version
+// (others deleted by family), cleanup.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -37,13 +38,31 @@ class FakeCache {
   }
 }
 
-function load(namespace = 'browserlite') {
+function load(namespace = 'browserlite', names = []) {
   const cache = new FakeCache();
   const opened = [];
   const deleted = [];
+  const replies = [];
+  const heap = new Uint8Array(1 << 16);
+  let top = 8;
   const context = {
-    Module: {},
+    HEAPU8: heap,
+    Module: {
+      _malloc: (size) => {
+        const pointer = top;
+        top += size;
+        return pointer;
+      },
+      _free: () => {},
+      _bl__http_cache_result: (id, status, headers, headersLength, body, bodyLength) =>
+        replies.push({
+          id,
+          status,
+          body: new TextDecoder().decode(heap.slice(body, body + bodyLength)),
+        }),
+    },
     caches: {
+      keys: async () => names,
       open: async (name) => {
         opened.push(name);
         return cache;
@@ -59,6 +78,7 @@ function load(namespace = 'browserlite') {
     Headers,
     Response,
     TextEncoder,
+    URLSearchParams,
     Promise,
     Number,
     String,
@@ -66,12 +86,13 @@ function load(namespace = 'browserlite') {
     Math,
   };
   vm.createContext(context);
-  vm.runInContext(
-    readFileSync(new URL('../../engine/js/http-cache.js', import.meta.url), 'utf8'),
-    context,
-  );
+  for (const file of ['cache-storage.js', 'http-cache.js'])
+    vm.runInContext(
+      readFileSync(new URL(`../../engine/js/${file}`, import.meta.url), 'utf8'),
+      context,
+    );
   const http = vm.runInContext('blHttpCache', context);
-  return { http, cache, opened, deleted, module: context.Module };
+  return { http, cache, opened, deleted, replies, module: context.Module };
 }
 
 const entry = (size) => new Response(null, { headers: { 'x-bl-size': String(size) } });
@@ -81,17 +102,79 @@ async function fill(http, cache, count, size) {
   for (let i = 0; i < count; i++) await cache.put(`https://example.test/${i}`, entry(size));
 }
 
-// The cache is named after the storage namespace, clearing only touches that one
+// The cache is named after the storage namespace and the format version. Opening deletes the
+// other formats of the namespace (no migration), clearing deletes all of them, both only touch
+// the own namespace
 {
-  const { http, opened, deleted, module } = load('shop_1');
+  const names = [
+    'shop_1-http',
+    'shop_1-http-v1',
+    'shop_1-http-v2',
+    'shop_12-http',
+    'other-http-v2',
+    'shop_1-bytecode-x',
+  ];
+  const { http, opened, deleted, module } = load('shop_1', names);
   await http.open();
-  await module.blClearHttpCache();
-  check('cache name <namespace>-http', opened.join(',') === 'shop_1-http', opened.join(','));
+  check('cache name <namespace>-http-v2', opened.join() === 'shop_1-http-v2', opened.join());
   check(
-    'clearing deletes only the own cache',
-    deleted.join(',') === 'shop_1-http',
-    deleted.join(','),
+    'opening deletes the other formats of the namespace',
+    deleted.join() === 'shop_1-http,shop_1-http-v1',
+    deleted.join(),
   );
+  deleted.length = 0;
+  await module.blClearHttpCache();
+  check(
+    'clearing deletes all formats of the own namespace',
+    deleted.join() === 'shop_1-http,shop_1-http-v1,shop_1-http-v2',
+    deleted.join(),
+  );
+}
+
+// Key: https://http.invalid/?p=<partition>&u=<url>, form encoded, already in the form the Cache
+// API gives back (also for characters the URL parser would encode, like ')
+{
+  const { http } = load();
+  const partition = 's_https://a.test https://b.test';
+  const url = "https://c.test/x?y=1&z=it's#no";
+  const key = http.key(partition, url);
+  const parsed = new URL(key);
+  check(
+    'key: host and fields',
+    parsed.origin === 'https://http.invalid' &&
+      parsed.searchParams.get('p') === partition &&
+      parsed.searchParams.get('u') === url &&
+      [...parsed.searchParams.keys()].join() === 'p,u',
+    key,
+  );
+  check('key: as the Cache API gives it back', parsed.href === key, parsed.href);
+}
+
+// Lookup only finds an entry in its own partition
+{
+  const { http, replies } = load();
+  await http.open();
+  const url = 'https://cdn.test/lib.js';
+  http.store(
+    'http://a.test http://a.test',
+    url,
+    200,
+    'Content-Type: text/javascript\n',
+    new TextEncoder().encode('lib'),
+  );
+  for (let i = 0; i < 20 && !http.urls.size; i++) await tick();
+  http.lookup(1, 'http://a.test http://a.test', url);
+  http.lookup(2, 'http://b.test http://b.test', url);
+  http.lookup(3, 'http://b.test http://a.test', url);
+  for (let i = 0; i < 20 && replies.length < 3; i++) await tick();
+  const status = (id) => replies.find((reply) => reply.id === id)?.status;
+  check(
+    'lookup: hit in the same partition',
+    status(1) === 200 && replies.find((reply) => reply.id === 1).body === 'lib',
+    JSON.stringify(replies),
+  );
+  check('lookup: miss from another top site', status(2) === 0, String(status(2)));
+  check('lookup: miss in a frame of another top site', status(3) === 0, String(status(3)));
 }
 
 // Above the limit: the oldest go away until 80 % are used
@@ -154,7 +237,14 @@ async function fill(http, cache, count, size) {
   http.limit = 500;
   cache.onMatch = tick;
   const running = http.trim(false);
-  for (let i = 6; i < 9; i++) http.store(`https://example.test/${i}`, 200, '', new Uint8Array(100));
+  for (let i = 6; i < 9; i++)
+    http.store(
+      'https://a.test https://a.test',
+      `https://example.test/${i}`,
+      200,
+      '',
+      new Uint8Array(100),
+    );
   await running;
   for (let i = 0; i < 50 && http.trimming === null; i++) await tick();
   while (http.trimming) await http.trimming;

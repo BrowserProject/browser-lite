@@ -1,5 +1,9 @@
 import type { EngineModule } from './engine.js';
-import type { DebugApi, View } from './types.js';
+import type { DebugApi, EngineMeasurements, View } from './types.js';
+
+// Doubles of bl_measurements (engine/abi.json): 7 readings, then 32 thread times
+const MEASUREMENTS = 7;
+const THREAD_TIMES = 32;
 
 interface DebugHost {
   readonly module: EngineModule;
@@ -95,5 +99,37 @@ export class Debug implements DebugApi {
 
   memoryPressure(): void {
     this.host.memoryPressure();
+  }
+
+  measurements(): EngineMeasurements | null {
+    const { module } = this.host;
+    const ptr = this.host.ready ? module._bl_measurements() : 0;
+    if (!ptr) return null;
+    const values = Array.from(
+      new Float64Array(module.HEAPU8.buffer, ptr, MEASUREMENTS + THREAD_TIMES),
+    );
+    // Engine times are milliseconds since the epoch (emscripten_get_now)
+    const time = (value: number) => (value ? value - performance.timeOrigin : null);
+    const [
+      memoryBytes = 0,
+      framesShown = 0,
+      contentFramesShown = 0,
+      main = 0,
+      compositor = 0,
+      ready = 0,
+      threadsBeforeReady = 0,
+    ] = values;
+    return {
+      memoryBytes,
+      framesShown,
+      contentFramesShown,
+      main: time(main),
+      compositorReady: time(compositor),
+      ready: time(ready),
+      threadsBeforeReady,
+      threadTimes: values
+        .slice(MEASUREMENTS, MEASUREMENTS + Math.min(threadsBeforeReady, THREAD_TIMES))
+        .map((value) => time(value) ?? 0),
+    };
   }
 }

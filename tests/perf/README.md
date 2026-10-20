@@ -21,9 +21,24 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   served on port 8080 + n and opens as `localhost:<port>` inside the device: a secure context
   (else no OPFS and no caches) and its own origin per engine (storage lock, OPFS, HTTP and bytecode
   cache and service worker are never shared).
-- **Memory**: `run.mjs` and `start.mjs` record `memMB` (`memory.current` of the device, with page cache),
-  `anonMB` (`anon` of `memory.stat`, without page cache), `run.mjs` also `wasmMB` (engine memory).
+- **Memory**: `run.mjs`, `start.mjs` and `frames.mjs` record `memMB` (`memory.current` of the
+  device, with page cache), `anonMB` (`anon` of `memory.stat`, without page cache), `run.mjs` and
+  `frames.mjs` also `wasmMB` (size of the WebAssembly memory, `blTest.measurements()`).
   `run.mjs --mem-high <MB>` limits the device with `memory.high`.
+- **Start** (`start.mjs`): besides ready and first layout the steps of the core
+  (`performance.mark('bl:<step>')`: `lock`, `beforeStart`, `engine.js`, `instantiate` for compile
+  and instantiate together, `main`, `ready`, `prepared`) as `mark<Step>`, the times of the engine
+  (`engineMain`, `engineThreadTimes` of every `pthread_create` before ready, `engineCompositorReady`,
+  `engineReady`) and the download of `engine.wasm` (`wasmStart`, `wasmEnd`), all in ms of
+  `performance.now()` of the page, without a log.
+- **Frames** (`frames.mjs --page video|video360|webgl|anim`): over 20 s, from 8 s after the first
+  shown frame on (every run starts cold), `cpuPerSecond` (CPU seconds per second of the device), `fps` (frames shown per second),
+  `cpuPerFrame` and memory, for every arm and Chromium itself (arm `chromium`). browser-lite counts
+  in the compositor: frames with a new video or WebGL image, all frames for `anim`. Chromium counts
+  `totalVideoFrames` minus `droppedVideoFrames` and the frames the WebGL page drew (none for
+  `anim`).
+  `video360` (`PERF_VIDEO360_URL`) stays below saturation, where CPU per frame is a quantity of its
+  own. Video pages need the live server.
 - `foreign.sh` logs foreign load on the device cores and memory pressure every second;
   `stats.mjs` drops runs with either.
 
@@ -47,7 +62,7 @@ node tests/perf/stats.mjs build/perf/results/*.jsonl --plan tests/perf/plans/<pl
 ```
 
 A plan has `groups`, a group has `record` (sites) and `sections` with `kind` (`run.mjs`,
-`start.mjs`, `video.mjs` or `wpe-run.mjs`), `profile`, `net`, `args` and optionally `tune`
+`start.mjs`, `frames.mjs` or `wpe-run.mjs`), `profile`, `net`, `args` and optionally `tune`
 and `configs`. `configs` (of the section or the plan) are the arms, taken in ABBA order:
 `{"name": "E1", "site": 1, "params": {...}, "engine": {...}}` with the site, parameters of the demo
 URL and engine options (`window.blTestOptions`, for example `{"env": {...}}`). The demo takes
@@ -60,7 +75,7 @@ core-owned); like everything here it goes away with this folder.
 `stats.mjs` drops disturbed runs (foreign load while `t0` to `t0 + wall`), compares every arm
 with a base per site (ratio of the medians) and over the sites (G, geometric mean) with bootstrap
 intervals (95 %), and suggests the runs per arm for a half width of 3 % of G (at most 30; start
-with a pilot of 5). G < 1 means the arm is better (for `hits` the ratio is base/arm). Primary
+with a pilot of 5). G < 1 means the arm is better (for `hits` and `fps` the ratio is base/arm). Primary
 metrics have little noise (`cpu`, `rx`, `hits` once recorded, `firstLayout`), `loaded` is
 secondary (wiki and weather vary a lot). `compare` of the plan names base, arms and rule:
 `lever` (rule R: on C a clear win, G <= 0.95 with the upper bound below 1, nowhere an upper bound
@@ -68,3 +83,21 @@ above 1.03), `correction` (nowhere above 1.03), both with a veto at +10 % `anonM
 (a section where only the arm crashes, or more crashes with p < 0.05), and `probe` (1.00 inside
 the intervals; about 5 % of them miss by chance, so it allows the misses of Binomial(k, 0.05) at
 95 %). The workflow writes tables and verdict into the job summary.
+
+## Remove together with this folder
+
+Hooks outside the folder that exist only for these measurements (#214):
+
+- Engine: `engine/src/Measurements.cpp` and `.h`, the export `bl_measurements` (`engine/abi.json`
+  with a new `abiVersion`, `BL_TEST_HOOKS` doc), `--wrap=pthread_create` in `engine/engine.cmake`,
+  the calls in `main.cpp`, `Compositor.cpp`, `LayerTreeHostWasm.cpp` and `.h` (`newVideoFrame`,
+  contents buffer check, `frameShown`) and `media/MediaPlayerPrivateWasm.cpp` and `.h`
+  (`m_lastPaintedFrame`), the line in `engine/README.md`.
+- Core: `debug.measurements()` and `EngineMeasurements` (`packages/core/src/debug.ts`,
+  `types.ts`, `_bl_measurements` and `onRuntimeInitialized` in `engine.ts`), the `bl:<step>`
+  marks and `onRuntimeInitialized` in `browser.ts`, the note in `packages/core/README.md`.
+- Tests and demo: `measurements` of `blTest` (`apps/demo/src/test-hooks.ts`, `apps/demo/README.md`,
+  `tests/core/host/host.js`) and its checks in `tests/core/smoke-test.mjs`,
+  `tests/core/media-test.mjs` and `tests/core/webgl-test.mjs`.
+- Pins: the `PERF_*` lines of `versions.env`.
+- `--mem-high` of `run.mjs` and `device.sh` goes with the folder itself.

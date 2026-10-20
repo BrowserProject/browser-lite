@@ -181,9 +181,14 @@ class BrowserImpl implements Browser, ViewHost {
   async start(): Promise<void> {
     const { config } = this;
     const signal = this.lifetime.signal;
+    // Steps of the start on the timeline of the page (tests/perf, only with debug)
+    const mark = (step: string) => {
+      if (config.debug) performance.mark(`bl:${step}`);
+    };
     let persistent = config.persistent;
     if (persistent) {
       this.releaseLock = await holdStorageLock(config.namespace);
+      mark('lock');
       if (!this.releaseLock) {
         persistent = false;
         this.warn(
@@ -200,6 +205,7 @@ class BrowserImpl implements Browser, ViewHost {
           } catch (error) {
             console.warn('[browser-lite] storage.beforeStart failed:', error);
           }
+          mark('beforeStart');
         }
       }
     }
@@ -209,10 +215,18 @@ class BrowserImpl implements Browser, ViewHost {
     // (service worker) while the engine loads
     const context = this.services.context;
     const prepared = Promise.all(config.services.map((service) => service.setup(context)));
-    prepared.catch(() => {});
+    prepared.then(() => mark('prepared')).catch(() => {});
     const features = [...new Set(config.services.flatMap((service) => service.features))];
     const env = engineEnv(config, features, persistent);
-    this.module.preRun = [(module) => Object.assign(module.ENV, env)];
+    // Emscripten calls preRun once the WebAssembly instance exists, onRuntimeInitialized right
+    // before main()
+    this.module.preRun = [
+      (module) => {
+        mark('instantiate');
+        Object.assign(module.ENV, env);
+      },
+    ];
+    this.module.onRuntimeInitialized = () => mark('main');
 
     // Engine errors (traps, aborts in threads) reach the page as error events. Only errors
     // of the engine scripts count: the embedding page may run WebAssembly of its own.
@@ -243,12 +257,16 @@ class BrowserImpl implements Browser, ViewHost {
       this.failStart = reject;
     });
     const ready = new Promise<void>((resolve) => {
-      this.module.onEngineReady = resolve;
+      this.module.onEngineReady = () => {
+        mark('ready');
+        resolve();
+      };
     });
     const factory = await Promise.race([
       loadEngineFactory(`${config.engineBase}engine.js`),
       failed,
     ]);
+    mark('engine.js');
     await Promise.race([
       factory(this.module).then(
         () => {

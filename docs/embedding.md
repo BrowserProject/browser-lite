@@ -155,8 +155,8 @@ The engine opens TCP connections through a `Transport`; `WispTransport` talks to
 ## Storage
 
 - `storage.namespace` (default `browserlite`) is the OPFS directory, the prefix of the Cache API
-  names (`<ns>-http`, `<ns>-bytecode-<build>`) and the Web Lock `<ns>-data`. Use one namespace per
-  independent browser on an origin.
+  names (`<ns>-http-v<format>`, `<ns>-bytecode-<build>`) and the Web Lock `<ns>-data`. Use one
+  namespace per independent browser on an origin.
 - One running browser per namespace across all tabs of the origin. A second tab gets the warning
   `storage-locked` and keeps its data in memory (the caches stay shared). One browser per page:
   a second `createBrowser` before `destroy()` throws `already-running`.

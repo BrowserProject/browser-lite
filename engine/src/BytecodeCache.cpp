@@ -14,7 +14,9 @@
 // adds what is still missing. JSC checks the build ID and the whole source
 // itself; a checksum against broken entries is added here.
 //
-// The key is the URL the page requested (without fragment), so a script behind
+// The key is the HTTP cache partition of the load (HttpCache::partition) and the
+// URL the page requested (without fragment): "<partition> <url>". So bytecode
+// is only shared within one partition, like the HTTP cache, and a script behind
 // a redirect or answered by a service worker with another URL still hits.
 
 #include "config.h"
@@ -111,9 +113,9 @@ static Stats& stats()
     return stats;
 }
 
-static String cacheKey(const URL& url)
+static String cacheKey(const String& partition, const URL& url)
 {
-    return url.viewWithoutFragmentIdentifier().toString();
+    return makeString(partition, ' ', url.viewWithoutFragmentIdentifier());
 }
 
 // Fast checksum (8 bytes per step), only against broken data
@@ -219,11 +221,11 @@ void initialize()
     WebCore::WasmPlatform::setBytecodeCacheHandlers(take, store);
 }
 
-void prefetch(const WebCore::CachedResource& resource, const URL& requestURL)
+void prefetch(const WebCore::CachedResource& resource, const String& partition, const URL& requestURL)
 {
-    if (!enabled || !requestURL.protocolIsInHTTPFamily())
+    if (!enabled || partition.isNull() || !requestURL.protocolIsInHTTPFamily())
         return;
-    auto key = cacheKey(requestURL);
+    auto key = cacheKey(partition, requestURL);
     resourceKeys().set(resource, key);
     if (prefetched().contains(key) || !pendingLookups().add(key).isNewEntry)
         return;

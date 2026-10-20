@@ -6,9 +6,9 @@
 #
 #   tests/perf/group.sh <plan.json> <group>
 #
-# Section fields: id, kind (run, start, wpe or video; video uses the live server), profile (device
+# Section fields: id, kind (run, start, frames or wpe; frames uses the live server), profile (device
 # profile; cores for wpe), net, args (arguments of the runner, split at spaces), configs (arms of
-# run and start, default the configs of the plan; see measure.mjs readConfigs, site n is the
+# run, start and frames, default the configs of the plan; see measure.mjs readConfigs, site n is the
 # engine in build/perf/site-<n>), tune (true: TCP tuning of the server, see server.sh).
 set -euo pipefail
 # shellcheck source=tests/perf/lib.sh
@@ -54,7 +54,7 @@ for i in $(seq 0 $((sections - 1))); do
     tune=$([ "$(field tune)" = true ] && echo 1 || echo 0)
     out="/w/build/perf/results/$id.jsonl"
     echo "== $id ($kind $profile $net)"
-    if [ "$kind" = video ]; then
+    if [ "$kind" = frames ]; then
         bash "$PERF/server.sh" live
     else
         PERF_TUNE=$tune bash "$PERF/server.sh" replay "$archive"
@@ -62,7 +62,7 @@ for i in $(seq 0 $((sections - 1))); do
     case "$kind" in
         run) bash "$PERF/device.sh" "$profile" "$net" node run.mjs --ca "$ca" --out "$out" --label "$id" --configs "$configs" "${args[@]}" ;;
         start) bash "$PERF/device.sh" "$profile" "$net" node start.mjs --ca "$ca" --out "$out" --label "$id" --configs "$configs" "${args[@]}" ;;
-        video) bash "$PERF/device.sh" "$profile" "$net" node video.mjs --out "$out" --label "$id" "${args[@]}" ;;
+        frames) bash "$PERF/device.sh" "$profile" "$net" node frames.mjs --out "$out" --label "$id" --configs "$configs" "${args[@]}" ;;
         wpe) bash "$PERF/wpe.sh" "$profile" --out "$out" --label "$id" "${args[@]}" ;;
         *) perf_die "unknown kind $kind" ;;
     esac

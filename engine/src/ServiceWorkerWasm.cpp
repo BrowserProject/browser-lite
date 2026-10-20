@@ -669,7 +669,7 @@ public:
         load->m_self = load.ptr();
         if (request.httpUserAgent().isEmpty())
             request.setHTTPUserAgent(standardUserAgent());
-        HttpCache::lookupForLoad(WTF::move(request), shouldRefreshCache, [load](HttpCache::Lookup&& lookup) {
+        HttpCache::lookupForLoad(load->m_partition, WTF::move(request), shouldRefreshCache, [load](HttpCache::Lookup&& lookup) {
             if (lookup.fresh)
                 return load->loadFromCache(*lookup.entry);
             load->m_cachedEntry = WTF::move(lookup.entry);
@@ -682,7 +682,8 @@ public:
 
 private:
     SoftUpdateLoad(ServiceWorkerJobData&& job, Handler&& handler)
-        : m_job(WTF::move(job))
+        : m_partition(HttpCache::partition(job.topOrigin, SecurityOriginData::fromURL(job.scriptURL), false))
+        , m_job(WTF::move(job))
         , m_handler(WTF::move(handler))
     {
     }
@@ -759,7 +760,7 @@ private:
         ResourceResponse response(curlResponse);
         if (response.httpStatusCode() == 304) {
             if (auto entry = std::exchange(m_cachedEntry, nullptr)) {
-                HttpCache::didRevalidate(request.resourceRequest(), *entry, response);
+                HttpCache::didRevalidate(m_partition, request.resourceRequest(), *entry, response);
                 return loadFromCache(*entry);
             }
         }
@@ -781,6 +782,8 @@ private:
         done(workerFetchError(error));
     }
 
+    // HTTP cache partition of the registration: its top site and the site of the worker
+    String m_partition;
     ServiceWorkerJobData m_job;
     Handler m_handler;
     RefPtr<CurlRequest> m_request;
@@ -1227,7 +1230,7 @@ static Ref<CacheStorageProvider>& cacheStorageProvider()
 }
 
 // Page in which a service worker or shared worker runs (without a window)
-static Ref<Page> createWorkerPage()
+static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> privacy)
 {
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
     configuration.cookieJar = CookieJar::create(SessionProvider::create());
@@ -1241,6 +1244,8 @@ static Ref<Page> createWorkerPage()
     settings.setScriptEnabled(true);
     settings.setGlobalPrivacyControlEnabled(WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl));
     enableIn(settings);
+    page->setupForRemoteWorker(scriptURL, topOrigin, referrerPolicy, privacy);
+    HttpCache::setWorkerOrigin(page, SecurityOrigin::create(scriptURL)->data());
     return page;
 }
 
@@ -1250,8 +1255,7 @@ void ContextConnection::installServiceWorkerContext(const ServiceWorkerContextDa
     m_workers.add(identifier);
     workerConnections().set(identifier, WeakPtr<SWServerToContextConnection> { *this });
 
-    Ref page = createWorkerPage();
-    page->setupForRemoteWorker(contextData.scriptURL, contextData.registration.key.topOrigin(), contextData.referrerPolicy, privacy);
+    Ref page = createWorkerPage(contextData.scriptURL, contextData.registration.key.topOrigin(), contextData.referrerPolicy, privacy);
 
     debugLog("Service worker %s: starting", contextData.scriptURL.string().utf8().data());
     auto proxy = ServiceWorkerThreadProxy::create(WTF::move(page), contextData.isolatedCopy(), workerData.isolatedCopy(), String { userAgent }, mode, cacheStorageProvider().get(), createServiceWorkerNotificationClient());
@@ -1331,10 +1335,11 @@ public:
         virtual void preloadFailed(const ResourceError&) = 0;
     };
 
-    static Ref<NavigationPreloader> create(ResourceRequest request, const NavigationPreloadState& state)
+    // partition: that of the navigation
+    static Ref<NavigationPreloader> create(const String& partition, ResourceRequest request, const NavigationPreloadState& state)
     {
-        Ref preloader = adoptRef(*new NavigationPreloader);
-        HttpCache::lookupForLoad(WTF::move(request), false, [preloader, headerValue = state.headerValue](HttpCache::Lookup&& lookup) {
+        Ref preloader = adoptRef(*new NavigationPreloader(partition));
+        HttpCache::lookupForLoad(partition, WTF::move(request), false, [preloader, headerValue = state.headerValue](HttpCache::Lookup&& lookup) {
             if (preloader->m_cancelled)
                 return;
             if (lookup.fresh)
@@ -1388,7 +1393,10 @@ public:
     }
 
 private:
-    NavigationPreloader() = default;
+    explicit NavigationPreloader(const String& partition)
+        : m_partition(partition)
+    {
+    }
 
     // Response from the HTTP cache, the body is already there
     void useCacheEntry(HttpCache::Entry& entry, ResourceResponse::Source source)
@@ -1422,7 +1430,7 @@ private:
         storeCookies(request.resourceRequest(), curlResponse);
         m_response = networkResponse(curlResponse);
         if (auto entry = std::exchange(m_cachedEntry, nullptr); entry && m_response.httpStatusCode() == 304) {
-            HttpCache::didRevalidate(request.resourceRequest(), *entry, m_response);
+            HttpCache::didRevalidate(m_partition, request.resourceRequest(), *entry, m_response);
             stop();
             return useCacheEntry(*entry, ResourceResponse::Source::DiskCacheAfterValidation);
         }
@@ -1457,6 +1465,7 @@ private:
             callback();
     }
 
+    String m_partition;
     RefPtr<CurlRequest> m_request;
     ResourceResponse m_response;
     ResourceError m_error;
@@ -1768,7 +1777,7 @@ void FetchTask::didReceiveData(const SharedBuffer& buffer)
 
 void FetchTask::startPreload(const NavigationPreloadState& state)
 {
-    m_preloader = NavigationPreloader::create(m_request, state);
+    m_preloader = NavigationPreloader::create(m_loader ? HttpCache::partition(*m_loader) : String { }, m_request, state);
     unreadPreloaders().set(m_identifier, Ref { *m_preloader });
 }
 
@@ -2291,8 +2300,7 @@ void SharedWorkerConnection::didFetchScript(SharedWorkerEntry& entry, WorkerFetc
         data.userAgent = standardUserAgent();
     if (!data.clientIdentifier)
         data.clientIdentifier = ScriptExecutionContextIdentifier::generate();
-    Ref page = createWorkerPage();
-    page->setupForRemoteWorker(result.responseURL, entry.key.origin.topOrigin, result.referrerPolicy, data.advancedPrivacyProtections);
+    Ref page = createWorkerPage(result.responseURL, entry.key.origin.topOrigin, result.referrerPolicy, data.advancedPrivacyProtections);
     debugLog("SharedWorker %s: starting", entry.key.url.string().utf8().data());
     auto proxy = SharedWorkerThreadProxy::create(WTF::move(page), entry.identifier, entry.key.origin, WTF::move(result), WorkerOptions { entry.options }, WTF::move(data), cacheStorageProvider().get());
     SharedWorkerContextManager::singleton().registerSharedWorkerThread(WTF::move(proxy));

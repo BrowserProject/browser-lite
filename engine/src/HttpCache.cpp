@@ -12,6 +12,10 @@
 // request, on 304 from the cache. Cacheable 200 responses (up to 10 MB) are
 // stored. WebCore computes freshness and age (CacheValidation.h) like in the
 // network process.
+//
+// Every entry belongs to a partition (top site, frame site, subframe document;
+// partition()) like in Chrome, so a page cannot tell from cache hits which
+// other sites were visited. WebCore's MemoryCache stays shared inside the engine.
 
 #include "config.h"
 #include "HttpCache.h"
@@ -21,24 +25,35 @@
 #include "Strategies.h"
 
 #include <WebCore/CacheValidation.h>
+#include <WebCore/CachedResource.h>
+#include <WebCore/DocumentInlines.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/HTTPParsers.h>
+#include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
+#include <WebCore/Page.h>
+#include <WebCore/ResourceLoader.h>
 #include <WebCore/ResourceRequest.h>
+#include <WebCore/SecurityOrigin.h>
+#include <WebCore/SecurityOriginData.h>
+#include <WebCore/Site.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
 #include <emscripten/threading.h>
 #include <wtf/HashMap.h>
 #include <wtf/HexNumber.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/WeakHashMap.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
 // Run on the main thread (engine/js/http-cache.js)
-EM_JS(void, blJsHttpCacheLookup, (int id, const char* url), {
-    blHttpCache.lookup(id, UTF8ToString(url));
+EM_JS(void, blJsHttpCacheLookup, (int id, const char* partition, const char* url), {
+    blHttpCache.lookup(id, UTF8ToString(partition), UTF8ToString(url));
 });
-EM_JS(void, blJsHttpCacheStore, (const char* url, int status, const char* headers, const uint8_t* body, int length), {
-    blHttpCache.store(UTF8ToString(url), status, UTF8ToString(headers), HEAPU8.slice(body, body + length));
+EM_JS(void, blJsHttpCacheStore, (const char* partition, const char* url, int status, const char* headers, const uint8_t* body, int length), {
+    blHttpCache.store(UTF8ToString(partition), UTF8ToString(url), status, UTF8ToString(headers), HEAPU8.slice(body, body + length));
 });
 
 namespace BrowserLite::HttpCache {
@@ -66,6 +81,72 @@ static HashMap<int, PendingLookup>& pendingLookups()
 static String cacheKey(const URL& url)
 {
     return url.viewWithoutFragmentIdentifier().toString();
+}
+
+String partition(const SecurityOriginData& topOrigin, const SecurityOriginData& frameOrigin, bool isSubframeDocument)
+{
+    if (topOrigin.isNull() || topOrigin.isOpaque() || frameOrigin.isNull() || frameOrigin.isOpaque())
+        return { };
+    // Without a registrable domain (file:) there is no site to keep apart
+    Site topSite { topOrigin };
+    Site frameSite { frameOrigin };
+    if (topSite.isEmpty() || frameSite.isEmpty())
+        return { };
+    return makeString(isSubframeDocument ? "s_"_s : ""_s, topSite.toString(), ' ', frameSite.toString());
+}
+
+// Origin of a document at this URL: a blob: URL has the origin of its creator
+static SecurityOriginData originOf(const URL& url)
+{
+    return SecurityOrigin::create(url)->data();
+}
+
+static WeakHashMap<Page, SecurityOriginData>& workerOrigins()
+{
+    static NeverDestroyed<WeakHashMap<Page, SecurityOriginData>> origins;
+    return origins;
+}
+
+void setWorkerOrigin(Page& page, const SecurityOriginData& origin)
+{
+    workerOrigins().set(page, SecurityOriginData { origin });
+}
+
+// Origin of the context the frame loads for: the worker of a worker page, else the document
+static SecurityOriginData contextOrigin(const LocalFrame& frame)
+{
+    if (RefPtr page = frame.page()) {
+        auto worker = workerOrigins().find(*page);
+        if (worker != workerOrigins().end())
+            return worker->value;
+    }
+    RefPtr document = frame.document();
+    return document ? document->securityOrigin().data() : SecurityOriginData { };
+}
+
+String partition(const LocalFrame& frame, const ResourceRequest& request, const FetchOptions& options, const SecurityOrigin* requester)
+{
+    auto topOrigin = originOf(request.firstPartyForCookies());
+    if (options.mode == FetchOptions::Mode::Navigate) {
+        // A frame sandboxed without allow-same-origin gets an opaque origin
+        if (frame.effectiveSandboxFlags().contains(SandboxFlag::Origin))
+            return { };
+        return partition(topOrigin, originOf(request.url()), !frame.isMainFrame());
+    }
+    // WebCore makes the requester opaque for a CORS load after a cross-origin redirect (a data:
+    // worker is opaque too): then the context decides, which is opaque in a sandboxed document
+    if (requester && !requester->isOpaque())
+        return partition(topOrigin, requester->data(), false);
+    return partition(topOrigin, contextOrigin(frame), false);
+}
+
+String partition(const ResourceLoader& loader)
+{
+    RefPtr frame = loader.frame();
+    if (!frame)
+        return { };
+    RefPtr resource = loader.cachedResource();
+    return partition(*frame, loader.request(), loader.options(), resource ? resource->origin() : nullptr);
 }
 
 bool canUse(const ResourceRequest& request)
@@ -122,9 +203,9 @@ void addValidationHeaders(ResourceRequest& request, const Entry& entry)
         request.setHTTPHeaderField(HTTPHeaderName::IfModifiedSince, lastModified);
 }
 
-bool isStorable(const ResourceRequest& request, const ResourceResponse& response)
+bool isStorable(const String& partition, const ResourceRequest& request, const ResourceResponse& response)
 {
-    if (!canUse(request) || (response.httpStatusCode() != 200 && response.httpStatusCode() != 203))
+    if (partition.isNull() || !canUse(request) || (response.httpStatusCode() != 200 && response.httpStatusCode() != 203))
         return false;
     if (cacheKey(response.url()) != cacheKey(request.url()))
         return false;
@@ -189,19 +270,22 @@ static Vector<std::pair<String, String>> decodeVary(StringView text)
     return headers;
 }
 
-void lookup(const ResourceRequest& request, Completion&& completion)
+void lookup(const String& partition, const ResourceRequest& request, Completion&& completion)
 {
+    if (partition.isNull())
+        return completion(nullptr);
     static int nextId;
     int id = ++nextId;
     pendingLookups().add(id, PendingLookup { request.url(), WTF::move(completion) });
     struct Job {
         int id;
+        CString partition;
         CString url;
     };
-    auto* job = new Job { id, cacheKey(request.url()).utf8() };
+    auto* job = new Job { id, partition.utf8(), cacheKey(request.url()).utf8() };
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
         std::unique_ptr<Job> job(static_cast<Job*>(argument));
-        blJsHttpCacheLookup(job->id, job->url.data());
+        blJsHttpCacheLookup(job->id, job->partition.data(), job->url.data());
     }, job);
 }
 
@@ -251,8 +335,10 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
         pending.completion(WTF::move(entry));
 }
 
-void store(const ResourceRequest& request, const ResourceResponse& response, WallTime responseTime, const FragmentedSharedBuffer& body)
+void store(const String& partition, const ResourceRequest& request, const ResourceResponse& response, WallTime responseTime, const FragmentedSharedBuffer& body)
 {
+    if (partition.isNull())
+        return;
     // Headers without those that are no longer right (curl already decoded the body)
     StringBuilder headers;
     for (auto& field : response.httpHeaderFields()) {
@@ -284,6 +370,7 @@ void store(const ResourceRequest& request, const ResourceResponse& response, Wal
         headers.append(varyHeader, ": "_s, encodeVary(varying), '\n');
 
     struct Job {
+        CString partition;
         CString url;
         int status;
         CString headers;
@@ -295,20 +382,20 @@ void store(const ResourceRequest& request, const ResourceResponse& response, Wal
     if (!data)
         return;
     memcpySpan(std::span(data, contiguous->size()), contiguous->span());
-    auto* job = new Job { cacheKey(request.url()).utf8(), response.httpStatusCode(), headers.toString().utf8(), data, contiguous->size() };
+    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), response.httpStatusCode(), headers.toString().utf8(), data, contiguous->size() };
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
         std::unique_ptr<Job> job(static_cast<Job*>(argument));
-        blJsHttpCacheStore(job->url.data(), job->status, job->headers.data(), job->body, job->length);
+        blJsHttpCacheStore(job->partition.data(), job->url.data(), job->status, job->headers.data(), job->body, job->length);
         free(job->body);
     }, job);
 }
 
-void lookupForLoad(ResourceRequest&& request, bool alwaysRevalidate, CompletionHandler<void(Lookup&&)>&& completion)
+void lookupForLoad(const String& partition, ResourceRequest&& request, bool alwaysRevalidate, CompletionHandler<void(Lookup&&)>&& completion)
 {
-    if (!canUse(request) || request.cachePolicy() == ResourceRequestCachePolicy::ReloadIgnoringCacheData)
+    if (partition.isNull() || !canUse(request) || request.cachePolicy() == ResourceRequestCachePolicy::ReloadIgnoringCacheData)
         return completion({ WTF::move(request) });
     ResourceRequest key { request };
-    lookup(key, [request = WTF::move(request), alwaysRevalidate, completion = WTF::move(completion)](std::unique_ptr<Entry>&& entry) mutable {
+    lookup(partition, key, [request = WTF::move(request), alwaysRevalidate, completion = WTF::move(completion)](std::unique_ptr<Entry>&& entry) mutable {
         auto use = entry ? decide(*entry, request) : Use::None;
         if (entry)
             debugLog("Cache %s: %s", use == Use::Fresh ? "fresh" : use == Use::Revalidate ? "revalidate" : "not usable", request.url().string().utf8().data());
@@ -321,11 +408,11 @@ void lookupForLoad(ResourceRequest&& request, bool alwaysRevalidate, CompletionH
     });
 }
 
-void didRevalidate(const ResourceRequest& request, Entry& entry, const ResourceResponse& notModified)
+void didRevalidate(const String& partition, const ResourceRequest& request, Entry& entry, const ResourceResponse& notModified)
 {
     updateResponseHeadersAfterRevalidation(entry.response, notModified);
     entry.responseTime = WallTime::now();
-    store(request, entry.response, entry.responseTime, entry.body.get());
+    store(partition, request, entry.response, entry.responseTime, entry.body.get());
 }
 
 } // namespace BrowserLite::HttpCache

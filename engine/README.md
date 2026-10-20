@@ -16,7 +16,8 @@ patches from `patches/`.
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, shutdown)
   - `sockets.js`: TCP streams over `Module.blTransport`
-  - `http-cache.js`, `bytecode-cache.js`: HTTP and bytecode cache in the host's Cache API
+  - `http-cache.js`, `bytecode-cache.js`: HTTP and bytecode cache in the host's Cache API, with
+    the shared helpers of `cache-storage.js` (entry URLs, deleting other cache names)
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's
     codecs (WebM muxer)
   - `wasm-rewrite.js`, `wasm-host.js`: WebAssembly of the pages in the browser's WASM engine;
@@ -24,7 +25,8 @@ patches from `patches/`.
   - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
-    (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host)
+    (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
+    `Measurements.cpp` (readings for `tests/perf`, goes away with it)
   - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`

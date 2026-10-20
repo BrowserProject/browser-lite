@@ -1,14 +1,19 @@
 // HTTP cache of the engine (engine/src/HttpCache.cpp), the part on the main thread.
 //
 // The entries live in the Cache API of the host browser (on disk, only read
-// when needed), in the cache "<namespace>-http". The list of URLs is kept in
-// memory, so a request that is not in the cache costs no disk access.
+// when needed), in the cache "<namespace>-http-v<format>"; caches of other
+// formats are deleted when opening (no migration). The request URL of an entry
+// is https://http.invalid/?p=<partition>&u=<url> (form encoded; partition: top
+// site, frame site, subframe document; HttpCache::partition). The list of keys
+// is kept in memory, so a request that is not in the cache costs no disk access.
 //
 // Limit: 400 MB, at most a quarter of the host's quota. Only the own content
 // counts (header x-bl-size), not what else is in the OPFS or in the host's
 // Cache API. Above it, or when the quota is full, the oldest entries go away
 // until 80 % are used.
 var blHttpCache = {
+  // Version of the entry format, part of the cache name
+  format: 2,
   name: null,
   sizeHeader: 'x-bl-size',
   limit: 400 * 1024 * 1024,
@@ -27,14 +32,17 @@ var blHttpCache = {
       return blHttpCache.ready;
     if (typeof caches === 'undefined')
       return blHttpCache.ready = Promise.resolve(null);
-    blHttpCache.name = blStorageNamespace() + '-http';
+    var base = blHttpCache.base();
+    blHttpCache.name = base + '-v' + blHttpCache.format;
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (estimate) {
         if (estimate.quota)
           blHttpCache.limit = Math.min(blHttpCache.limit, estimate.quota / 4);
       }).catch(function () { });
     }
-    blHttpCache.ready = caches.open(blHttpCache.name).then(function (cache) {
+    blHttpCache.ready = blCacheStorage.deleteFamily(base, blHttpCache.name).then(function () {
+      return caches.open(blHttpCache.name);
+    }).then(function (cache) {
       return cache.keys().then(function (keys) {
         blHttpCache.cache = cache;
         blHttpCache.urls = new Set(keys.map(function (request) { return request.url; }));
@@ -45,13 +53,24 @@ var blHttpCache = {
     return blHttpCache.ready;
   },
 
-  lookup: function (id, url) {
+  // Family of the cache names of this namespace (cache-storage.js)
+  base: function () {
+    return blStorageNamespace() + '-http';
+  },
+
+  // Request URL of the entry of url in partition
+  key: function (partition, url) {
+    return blCacheStorage.entryURL('http.invalid', { p: partition, u: url });
+  },
+
+  lookup: function (id, partition, url) {
+    var key = blHttpCache.key(partition, url);
     blHttpCache.open().then(function (cache) {
-      if (!cache || !blHttpCache.urls.has(url))
+      if (!cache || !blHttpCache.urls.has(key))
         return blHttpCache.reply(id, 0, '', null);
-      return cache.match(url, { ignoreVary: true }).then(function (response) {
+      return cache.match(key, { ignoreVary: true }).then(function (response) {
         if (!response) {
-          blHttpCache.urls.delete(url);
+          blHttpCache.urls.delete(key);
           return blHttpCache.reply(id, 0, '', null);
         }
         return response.arrayBuffer().then(function (buffer) {
@@ -85,7 +104,8 @@ var blHttpCache = {
     Module['_bl__http_cache_result'](id, status, headerPointer, headerBytes.length, bodyPointer, bodyLength);
   },
 
-  store: function (url, status, headerText, body) {
+  store: function (partition, url, status, headerText, body) {
+    var key = blHttpCache.key(partition, url);
     blHttpCache.open().then(function (cache) {
       if (!cache)
         return;
@@ -101,10 +121,10 @@ var blHttpCache = {
       });
       headers.set(blHttpCache.sizeHeader, String(body.length));
       var put = function () {
-        return cache.put(url, new Response(body, { status: status, headers: headers }));
+        return cache.put(key, new Response(body, { status: status, headers: headers }));
       };
       var stored = function () {
-        blHttpCache.urls.add(url);
+        blHttpCache.urls.add(key);
         if (blHttpCache.total !== null)
           blHttpCache.total += body.length;
         if (blHttpCache.total === null || blHttpCache.total > blHttpCache.limit)
@@ -164,8 +184,8 @@ var blHttpCache = {
     return blHttpCache.trimming;
   },
 };
-// Host: deletes the HTTP cache of this namespace (browser.storage.clearCaches)
+// Host: deletes the HTTP caches of this namespace, all formats (browser.storage.clearCaches)
 Module['blClearHttpCache'] = function () {
   blHttpCache.ready = null;
-  return typeof caches === 'undefined' ? Promise.resolve() : caches.delete(blStorageNamespace() + '-http');
+  return blCacheStorage.deleteFamily(blHttpCache.base());
 };

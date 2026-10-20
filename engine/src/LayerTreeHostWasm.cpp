@@ -4,6 +4,7 @@
 #include "Compositor.h"
 #include "Engine.h"
 #include "GpuRaster.h"
+#include "Measurements.h"
 #include "ScrollingWasm.h"
 #include "WebView.h"
 #include <EGL/egl.h>
@@ -54,6 +55,7 @@ static void compositeScene(CompositorScene& scene)
     OptionSet<CompositionReason> reasons;
     bool notify = false;
     bool firstPaint = false;
+    bool newContent = false;
     IntSize pixelSize;
     float deviceScaleFactor = 1;
     HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
@@ -90,8 +92,10 @@ static void compositeScene(CompositorScene& scene)
         // Report the first paint with the rendering update that brings it: its
         // tiles are in the frame, even after the 100 ms
         // (processPendingBackingStoreTileUpdates waits until they are painted)
-        if (reasons.contains(CompositionReason::RenderingUpdate))
+        if (reasons.contains(CompositionReason::RenderingUpdate)) {
             firstPaint = std::exchange(scene.firstPaint, false);
+            newContent = std::exchange(scene.newVideoFrame, false);
+        }
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
         if (std::exchange(scene.hasPendingLayers, false))
             scene.committedLayers = std::exchange(scene.pendingLayers, { });
@@ -161,7 +165,11 @@ static void compositeScene(CompositorScene& scene)
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     scene.rootLayer->flushCompositingState(reasons, true);
     for (auto& layer : scene.committedLayers) {
+        // A new contents buffer (WebGL, a video layer) is new content (tests/perf)
+        auto* contents = layer->ensureSkiaTarget().contentsBuffer();
         layer->flushCompositingState(reasons, true);
+        if (auto* shown = layer->ensureSkiaTarget().contentsBuffer(); shown && shown != contents)
+            newContent = true;
         if (layer->hasPendingBackingStoreTileUpdates())
             layersWithTileUpdates.append(layer);
     }
@@ -193,6 +201,7 @@ static void compositeScene(CompositorScene& scene)
     canvas->restore();
     grContext->flushAndSubmit(surface.get());
     Gpu::showFramebuffer(scene.viewId);
+    Measurements::frameShown(newContent);
     if (firstPaint)
         WebView::firstPaintShown(scene.viewId);
 
@@ -523,6 +532,7 @@ void LayerTreeHostWasm::flush(bool firstPaint)
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;
     m_scene->firstPaint |= firstPaint;
+    m_scene->newVideoFrame |= Measurements::takeVideoPainted();
     m_scene->scheduleFrameLocked();
 }
 

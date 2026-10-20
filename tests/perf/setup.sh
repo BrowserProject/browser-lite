@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepares a host for perf measurements (repeatable, keeps what exists): Docker networks, the image
 # of the core stealer, Web Page Replay built at PERF_WPR_COMMIT, a test CA for the replay server, the
-# test video and, with "wpe", the image with native WPE WebKit.
+# test videos and, with "wpe", the image with native WPE WebKit.
 #
 #   tests/perf/setup.sh [wpe]
 set -euo pipefail
@@ -44,12 +44,16 @@ if [ ! -f "$OUT/wpr/ca.pem" ]; then
     )
 fi
 
-# The video of video.mjs, for the device's own Chromium (the device has no internet)
-if [ ! -f "$OUT/video.webm" ]; then
-    curl -fsSL "$PERF_VIDEO_URL" -o "$OUT/video.webm.part"
-    echo "$PERF_VIDEO_SHA256  $OUT/video.webm.part" | sha256sum -c --quiet
-    mv "$OUT/video.webm.part" "$OUT/video.webm"
-fi
+# The videos of frames.mjs, for the device's own Chromium (the device has no internet)
+fetch_video() {
+    local url="$1" sha256="$2" file="$OUT/$3"
+    [ -f "$file" ] && return
+    curl -fsSL "$url" -o "$file.part"
+    echo "$sha256  $file.part" | sha256sum -c --quiet
+    mv "$file.part" "$file"
+}
+fetch_video "$PERF_VIDEO_URL" "$PERF_VIDEO_SHA256" video.webm
+fetch_video "$PERF_VIDEO360_URL" "$PERF_VIDEO360_SHA256" video360.webm
 
 if [ "${1:-}" = wpe ] && ! docker image inspect bl-perf-wpe >/dev/null 2>&1; then
     cp "$OUT/wpr/ca.pem" "$PERF/docker/wpe/perf-ca.crt"

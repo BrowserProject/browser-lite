@@ -1,5 +1,5 @@
-// Shared parts of the runners in the device container (run.mjs, start.mjs): arguments, the
-// forwarders to the sites of the server, configurations and readings of the device cgroup.
+// Shared parts of the runners in the device container (run.mjs, start.mjs, frames.mjs): arguments,
+// the forwarders to the sites of the server, configurations and readings of the device cgroup.
 import fs from 'node:fs';
 import { connect, createServer } from 'node:net';
 

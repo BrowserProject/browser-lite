@@ -392,6 +392,12 @@ async function pagePicture() {
 const picture = await pagePicture();
 check('WebGL 1: picture in the page (red on blue)', isPicture1(picture), JSON.stringify(picture));
 check('WebGL 2: picture in the page (yellow)', isPicture2(picture), JSON.stringify(picture));
+const shown = await page.evaluate(() => window.blTest.measurements());
+check(
+  'frames with a new WebGL image are counted (tests/perf)',
+  shown?.contentFramesShown > 0 && shown.framesShown >= shown.contentFramesShown,
+  JSON.stringify(shown),
+);
 
 // The host contexts get lost (like on a GPU reset)
 await page.evaluate(() => window.blTest.eval('startLossTest()'));

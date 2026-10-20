@@ -141,9 +141,10 @@ async function measure(dir, site, config, stay) {
       perf: window.__perf,
       title: document.title,
       crashed: window.blTest?.browser?.state === 'crashed',
+      // Size of the WebAssembly memory (the engine reads it, a view of the page may be stale)
       wasm: (() => {
         try {
-          return window.blTest.memory();
+          return window.blTest.measurements()?.memoryBytes;
         } catch {
           return null;
         }

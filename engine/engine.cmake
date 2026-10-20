@@ -44,6 +44,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
+    ${BL_ENGINE_SRC}/Measurements.cpp
     ${BL_ENGINE_SRC}/Permissions.cpp
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
@@ -140,6 +141,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
     # access() on fixed files remembered (engine/src/FileAccessCache.cpp)
     "SHELL:-Wl,--wrap=access"
+    # Start times of the threads for tests/perf (engine/src/Measurements.cpp)
+    "SHELL:-Wl,--wrap=pthread_create"
 )
 
 # JS parts of the engine (--pre-js) in this order. If one changes, the engine
@@ -151,6 +154,8 @@ set(BL_PRE_JS
     wasm-host.js
     # Connections through the host's transport (engine/src/Sockets.cpp)
     sockets.js
+    # Shared helpers of the two caches in the host's Cache API
+    cache-storage.js
     # HTTP cache in the host's Cache API (engine/src/HttpCache.cpp)
     http-cache.js
     # Bytecode cache of the scripts, also in the Cache API (engine/src/BytecodeCache.cpp)

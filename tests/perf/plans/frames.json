@@ -1,48 +1,117 @@
 {
-  "description": "Cost of video playback (S23): CPU per second and frames per second of browser-lite against Chromium playing the same 720p VP9 video, live",
+  "description": "Cost of moving pictures (S23): CPU per second, shown frames per second, CPU per shown frame and memory of browser-lite against Chromium showing the same page (frames.mjs: 720p and 360p VP9 video live, WebGL and CSS animation)",
+  "metrics": [
+    "fps",
+    "cpuPerFrame",
+    "cpuPerSecond"
+  ],
+  "secondary": [],
   "groups": [
     {
-      "name": "video-S",
+      "name": "frames-S",
       "record": [
         "example"
       ],
       "sections": [
         {
-          "id": "video-S",
-          "kind": "video",
+          "id": "frames-S-video",
+          "kind": "frames",
           "profile": "S",
           "net": "lan",
-          "args": "--runs 4"
+          "args": "--page video --runs 4"
+        },
+        {
+          "id": "frames-S-video360",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page video360 --runs 4"
+        },
+        {
+          "id": "frames-S-webgl",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page webgl --runs 4"
+        },
+        {
+          "id": "frames-S-anim",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page anim --runs 4"
         }
       ]
     },
     {
-      "name": "video-L",
+      "name": "frames-L",
       "record": [
         "example"
       ],
       "sections": [
         {
-          "id": "video-L",
-          "kind": "video",
+          "id": "frames-L-video",
+          "kind": "frames",
           "profile": "L",
           "net": "lan",
-          "args": "--runs 4"
+          "args": "--page video --runs 4"
+        },
+        {
+          "id": "frames-L-video360",
+          "kind": "frames",
+          "profile": "L",
+          "net": "lan",
+          "args": "--page video360 --runs 4"
+        },
+        {
+          "id": "frames-L-webgl",
+          "kind": "frames",
+          "profile": "L",
+          "net": "lan",
+          "args": "--page webgl --runs 4"
+        },
+        {
+          "id": "frames-L-anim",
+          "kind": "frames",
+          "profile": "L",
+          "net": "lan",
+          "args": "--page anim --runs 4"
         }
       ]
     },
     {
-      "name": "video-C",
+      "name": "frames-C",
       "record": [
         "example"
       ],
       "sections": [
         {
-          "id": "video-C",
-          "kind": "video",
+          "id": "frames-C-video",
+          "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--runs 4"
+          "args": "--page video --runs 4"
+        },
+        {
+          "id": "frames-C-video360",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page video360 --runs 4"
+        },
+        {
+          "id": "frames-C-webgl",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page webgl --runs 4"
+        },
+        {
+          "id": "frames-C-anim",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page anim --runs 4"
         }
       ]
     }

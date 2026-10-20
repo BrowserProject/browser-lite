@@ -1,4 +1,4 @@
-// Evaluation of perf runs (JSON lines of run.mjs, start.mjs and wpe-run.mjs).
+// Evaluation of perf runs (JSON lines of run.mjs, start.mjs, frames.mjs and wpe-run.mjs).
 //   node stats.mjs <file.jsonl>... [--plan <plan.json>] [--metric cpu,rx,firstLayout]
 //                  [--secondary loaded] [--base A] [--rule lever|correction|probe]
 //                  [--where visit=warm] [--group label,visit,start] [--foreign 0.3] [--psi 5]
@@ -8,9 +8,9 @@
 // row, foreign.log next to each file). Comparison per group (default: per section and visit):
 // ratio of the medians arm/base per site with a bootstrap interval (95 %), and G, the geometric
 // mean of these ratios over the sites, with a bootstrap interval that resamples the runs of every
-// site and arm. G < 1 always means the arm is better: for metrics where more is better (hits) the
-// ratio is base/arm. Primary metrics (low noise first) get a verdict and a suggested n per arm,
-// secondary ones are only shown.
+// site and arm. G < 1 always means the arm is better: for metrics where more is better (hits,
+// fps) the ratio is base/arm. Primary metrics (low noise first) get a verdict and a suggested n per
+// arm, secondary ones are only shown.
 //
 // The comparisons come from "compare" of the plan, a list of {base, arms, rule, where, metrics,
 // secondary} (metrics and secondary also on the plan level), or from --base and --rule (all other
@@ -50,7 +50,7 @@ const markdown = flag('markdown');
 const PRIMARY = ['cpu', 'rx', 'hits', 'firstLayout'];
 const SECONDARY = ['loaded'];
 // Metrics where more is better: their ratio is base/arm, so G < 1 means better for every metric
-const MORE_IS_BETTER = new Set(['hits']);
+const MORE_IS_BETTER = new Set(['hits', 'fps']);
 const WEAK = 'C';
 const MEMORY_VETO = 1.1;
 // Half width of the interval of G that the suggested n aims at, and the most runs per arm
@@ -194,7 +194,11 @@ function table(comparison, metric, primary) {
     for (const site of sites) {
       const cells = configs.map((c) => {
         const v = values(site, c);
-        return v.length ? `${median(v).toFixed(metric === 'cpu' ? 2 : 0)} (${v.length})` : '-';
+        if (!v.length) return '-';
+        const m = median(v);
+        // Small values (CPU per frame, CPU per second) keep three significant digits
+        const shown = m !== 0 && Math.abs(m) < 10 ? m.toPrecision(3) : m.toFixed(0);
+        return `${metric === 'cpu' ? m.toFixed(2) : shown} (${v.length})`;
       });
       const ratios = arms.map((c) => {
         const pair = MORE_IS_BETTER.has(metric)

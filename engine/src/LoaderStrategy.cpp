@@ -190,7 +190,8 @@ public:
     {
         debugLog("loading %s", m_loader->request().url().string().utf8().data());
         // Look in the HTTP cache first (HttpCache.cpp)
-        HttpCache::lookupForLoad(ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) {
+        m_partition = HttpCache::partition(*m_loader);
+        HttpCache::lookupForLoad(m_partition, ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) {
             if (!m_loader)
                 return;
             if (lookup.fresh)
@@ -303,7 +304,7 @@ private:
                 old->cancel();
                 old->invalidateClient();
             }
-            HttpCache::didRevalidate(m_loader->request(), *entry, m_response);
+            HttpCache::didRevalidate(m_partition, m_loader->request(), *entry, m_response);
             serveFromCache(WTF::move(entry), ResourceResponse::Source::DiskCacheAfterValidation);
             return;
         }
@@ -314,7 +315,9 @@ private:
         }
 
         // Cacheable? Then write the content along (HttpCache.cpp)
-        m_storing = HttpCache::isStorable(m_loader->request(), m_response);
+        // Of the current request: after a redirect its target decides (navigations)
+        m_partition = HttpCache::partition(*m_loader);
+        m_storing = HttpCache::isStorable(m_partition, m_loader->request(), m_response);
         m_responseTime = WallTime::now();
         m_cacheBody.reset();
 
@@ -348,7 +351,7 @@ private:
         RefPtr loader = m_loader;
         debugLog("done %s", loader->url().string().utf8().data());
         if (std::exchange(m_storing, false))
-            HttpCache::store(loader->request(), m_response, m_responseTime, m_cacheBody.takeBuffer().get());
+            HttpCache::store(m_partition, loader->request(), m_response, m_responseTime, m_cacheBody.takeBuffer().get());
         finish();
         loader->didFinishLoading(metrics);
     }
@@ -367,7 +370,8 @@ private:
     Function<void(ResourceLoad&)> m_done;
     ResourceResponse m_response;
     unsigned m_redirectCount { 0 };
-    // HTTP cache: entry being revalidated, and what is stored
+    // HTTP cache: partition of the current request, entry being revalidated, and what is stored
+    String m_partition;
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     bool m_storing { false };
     WallTime m_responseTime;
@@ -827,7 +831,7 @@ private:
     {
         // Fetch stored bytecode while the script loads
         if (resource.type() == CachedResource::Type::Script)
-            BytecodeCache::prefetch(resource, request.url());
+            BytecodeCache::prefetch(resource, HttpCache::partition(frame, request, options, resource.origin()), request.url());
         SubresourceLoader::create(frame, resource, WTF::move(request), options, [this, completion = WTF::move(completion)](RefPtr<SubresourceLoader>&& loader) mutable {
             if (loader)
                 schedule(*loader);
