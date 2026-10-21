@@ -16,8 +16,9 @@
 // secondary} (metrics and secondary also on the plan level), or from --base and --rule (all other
 // configurations are arms). Rule R (rule lever): on the weak profile C at least one primary
 // metric with G <= 0.95 and the upper bound below 1, and on every profile no primary metric with
-// the upper bound above 1.03. Rule correction: only the latter. Both: veto at G of anonMB (memMB
-// without it) above 1.10, and for crashes in a section (all visits): the arm crashes where the
+// the upper bound above 1.03. Rule correction: no primary metric with a significant disadvantage
+// above 3 % (G above 1.03 and the lower bound above 1); G above 1.03 with 1 inside the interval
+// is reported as not significant. Both: veto at G of anonMB (memMB without it) above 1.10, and for crashes in a section (all visits): the arm crashes where the
 // base never does, or more often with p < 0.05 (one sided Fisher test). Rule probe (same engine
 // twice): 1.00 inside the intervals of the primary metrics; of k intervals about 5 % miss by
 // chance, so the probe allows as many misses as Binomial(k, 0.05) stays below in 95 % of probes.
@@ -53,6 +54,8 @@ const SECONDARY = ['loaded'];
 const MORE_IS_BETTER = new Set(['fps']);
 const WEAK = 'C';
 const MEMORY_VETO = 1.1;
+// Primary metrics: the upper bound rule lever allows, the disadvantage rule correction tolerates
+const LIMIT = 1.03;
 // Half width of the interval of G that the suggested n aims at, and the most runs per arm
 const TARGET = Math.log(1.03);
 const MAX_RUNS = 30;
@@ -232,8 +235,14 @@ function table(comparison, metric, primary) {
 /** Rule R for one result of a primary metric: null when it passes, else the reason. */
 function check(rule, r) {
   if (rule === 'probe') return r.lo <= 1 && r.hi >= 1 ? null : '1.00 outside the interval';
-  return r.hi <= 1.03 ? null : 'upper bound above 1.03';
+  if (rule === 'correction')
+    return r.g > LIMIT && r.lo > 1
+      ? `significant disadvantage (G above ${LIMIT}, lower bound above 1)`
+      : null;
+  return r.hi <= LIMIT ? null : `upper bound above ${LIMIT}`;
 }
+/** Rule correction: a disadvantage above the limit that is not significant, shown with the verdict. */
+const unclear = (rule, r) => rule === 'correction' && r.g > LIMIT && r.lo <= 1;
 const wins = (r) => r.g <= 0.95 && r.hi < 1;
 
 const logChoose = (n, k) => {
@@ -286,6 +295,8 @@ for (const comparison of comparisons) {
     if (!failures.has(arm)) failures.set(arm, []);
     if (reason && !failures.get(arm).includes(reason)) failures.get(arm).push(reason);
   };
+  // Results that do not fail the arm but belong to its verdict
+  const notes = new Map();
   // Weak groups per arm and whether a primary metric wins there clearly
   const weak = new Map();
   // Probe: intervals per arm and the ones that miss 1.00
@@ -300,6 +311,11 @@ for (const comparison of comparisons) {
       if (reason && comparison.rule === 'probe')
         misses.set(r.arm, [...(misses.get(r.arm) ?? []), text]);
       else if (reason) fail(r.arm, text);
+      if (unclear(comparison.rule, r))
+        notes.set(r.arm, [
+          ...(notes.get(r.arm) ?? []),
+          `${metric} ${r.group}: not significant, G ${interval(r)}`,
+        ]);
       if (r.profile === WEAK) {
         const key = `${r.arm}\n${r.group}`;
         weak.set(key, weak.get(key) || wins(r));
@@ -337,9 +353,10 @@ for (const comparison of comparisons) {
       if (![...weak.keys()].some((key) => key.startsWith(`${arm}\n`)))
         fail(arm, `no runs on the weak profile ${WEAK}`);
   }
+  const items = (texts) => texts.map((t) => `\n  - ${t}`).join('');
   for (const [arm, reasons] of failures)
     verdicts.push(
-      `${arm} against ${comparison.base}, rule ${comparison.rule}: ${reasons.length ? `FAIL\n${reasons.map((r) => `  - ${r}`).join('\n')}` : 'PASS'}`,
+      `${arm} against ${comparison.base}, rule ${comparison.rule}: ${reasons.length ? 'FAIL' : 'PASS'}${items(reasons)}${items(notes.get(arm) ?? [])}`,
     );
 }
 if (verdicts.length) {

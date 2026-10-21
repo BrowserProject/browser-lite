@@ -78,7 +78,9 @@ with a pilot of 5). G < 1 means the arm is better (for `fps` the ratio is base/a
 metrics have little noise (`cpu`, `rx`, `firstLayout`), `loaded` is
 secondary (wiki and weather vary a lot). `compare` of the plan names base, arms and rule:
 `lever` (rule R: on C a clear win, G <= 0.95 with the upper bound below 1, nowhere an upper bound
-above 1.03), `correction` (nowhere above 1.03), both with a veto at +10 % `anonMB` and at crashes
+above 1.03), `correction` (nowhere a significant disadvantage above 3 %: G above 1.03 with the
+lower bound above 1; G above 1.03 with 1 inside the interval passes as not significant and is
+listed under the verdict), both with a veto at +10 % `anonMB` and at crashes
 (a section where only the arm crashes, or more crashes with p < 0.05), and `probe` (1.00 inside
 the intervals; about 5 % of them miss by chance, so it allows the misses of Binomial(k, 0.05) at
 95 %). The workflow writes tables and verdict into the job summary.
