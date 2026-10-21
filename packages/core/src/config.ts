@@ -70,6 +70,8 @@ export interface Config {
   log: boolean;
   env: Record<string, string>;
   debug: boolean;
+  /** Workers prepared before main() (`BL_POOL_WORKERS`, only with debug, for tests/perf). */
+  poolWorkers: number | undefined;
 }
 
 function invalid(message: string): never {
@@ -203,6 +205,16 @@ function env(value: unknown): Record<string, string> {
   return result;
 }
 
+/** `BL_POOL_WORKERS` of engine.env with debug: tests/perf measures the start with it. */
+function poolWorkers(env: Record<string, string>, debug: boolean): number | undefined {
+  const value = env.BL_POOL_WORKERS;
+  if (!debug || value === undefined) return undefined;
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 1 || count > 64)
+    invalid('engine.env: BL_POOL_WORKERS must be a whole number from 1 to 64');
+  return count;
+}
+
 function serviceWorker(value: unknown): ServiceWorkerOption | undefined {
   if (value === undefined) return undefined;
   if (isObject(value) && 'registration' in value) {
@@ -297,6 +309,8 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
   const extraCA = optionalString(engine.extraCA, 'engine.extraCA');
   if (extraCA !== undefined && !extraCA.includes('-----BEGIN CERTIFICATE-----'))
     invalid('engine.extraCA must hold PEM certificates');
+  const checkedEnv = env(engine.env);
+  const debug = optionalBoolean(options.debug, 'debug') ?? false;
   return {
     engineBase: engineBase(options.engineUrl, pageUrl),
     transport: options.transport,
@@ -323,8 +337,9 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     scriptTimeoutSeconds: timeout as number | undefined,
     extraCA,
     log: optionalBoolean(engine.log, 'engine.log') ?? false,
-    env: env(engine.env),
-    debug: optionalBoolean(options.debug, 'debug') ?? false,
+    env: checkedEnv,
+    debug,
+    poolWorkers: poolWorkers(checkedEnv, debug),
   };
 }
 

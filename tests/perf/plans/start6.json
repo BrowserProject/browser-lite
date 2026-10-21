@@ -1,0 +1,198 @@
+{
+  "description": "U6 start: three starts per new Chromium profile (start 1 cold: first start after an engine update, 2 and 3 warm), first layout of example.com. Sites (engine_runs in this order): 0 bc4b179 before U6, 1 main with U6 (crash stack, early loading), 2 link with -Oz, 3 the giant functions with less inlining (the LLInt interpreter loop with -Os, wasm-opt limits the growth of a function by inlining to 16384 of its size units instead of 409600), 4 WebCore with -Os, 5 PTHREAD_POOL_DELAY_LOAD. U6 is also pool A (8 Workers before main(), 4 spare at start); PoolB and PoolD have 3 before main() and 9 spare at ready or at the first paint. Rule correction for U6 against E0, rule lever for sites 2 to 5 and the pool against U6, on the warm first layout; ready and the cold start only as tables. DelayLoad, PoolB and PoolD also have to pass pool6.json (CNN). Runs per group: about 49 (C LAN), 66 (C mobile) and 33 s (S LAN) per arm and run from GH 39319116414, 8 arms, so 30, 24 and 30 runs take about 3.7, 3.9 and 2.6 h with the setup of six sites",
+  "configs": [
+    {
+      "name": "E0",
+      "site": 0
+    },
+    {
+      "name": "U6",
+      "site": 1
+    },
+    {
+      "name": "Oz",
+      "site": 2
+    },
+    {
+      "name": "OsGiant",
+      "site": 3
+    },
+    {
+      "name": "OsWebCore",
+      "site": 4
+    },
+    {
+      "name": "DelayLoad",
+      "site": 5
+    },
+    {
+      "name": "PoolB",
+      "site": 1,
+      "engine": {
+        "env": {
+          "BL_POOL_WORKERS": "3",
+          "BL_SPARE_WORKERS": "9",
+          "BL_SPARE_WORKERS_AT": "ready"
+        }
+      }
+    },
+    {
+      "name": "PoolD",
+      "site": 1,
+      "engine": {
+        "env": {
+          "BL_POOL_WORKERS": "3",
+          "BL_SPARE_WORKERS": "9",
+          "BL_SPARE_WORKERS_AT": "paint"
+        }
+      }
+    }
+  ],
+  "compare": [
+    {
+      "base": "E0",
+      "arms": [
+        "U6"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "warm"
+      },
+      "metrics": [
+        "firstLayout"
+      ],
+      "secondary": [
+        "ready"
+      ]
+    },
+    {
+      "base": "E0",
+      "arms": [
+        "U6"
+      ],
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [],
+      "secondary": [
+        "firstLayout",
+        "ready"
+      ]
+    },
+    {
+      "base": "U6",
+      "arms": [
+        "Oz",
+        "OsGiant",
+        "OsWebCore",
+        "DelayLoad"
+      ],
+      "rule": "lever",
+      "where": {
+        "visit": "warm"
+      },
+      "metrics": [
+        "firstLayout"
+      ],
+      "secondary": [
+        "ready"
+      ]
+    },
+    {
+      "base": "U6",
+      "arms": [
+        "Oz",
+        "OsGiant",
+        "OsWebCore",
+        "DelayLoad"
+      ],
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [],
+      "secondary": [
+        "firstLayout",
+        "ready"
+      ]
+    },
+    {
+      "base": "U6",
+      "arms": [
+        "PoolB",
+        "PoolD"
+      ],
+      "rule": "lever",
+      "where": {
+        "visit": "warm"
+      },
+      "metrics": [
+        "firstLayout"
+      ],
+      "secondary": [
+        "ready"
+      ]
+    },
+    {
+      "base": "U6",
+      "arms": [
+        "PoolB",
+        "PoolD"
+      ],
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [],
+      "secondary": [
+        "firstLayout",
+        "ready"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "start6-C-lan",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "start6-C-lan",
+          "kind": "start",
+          "profile": "C",
+          "net": "lan",
+          "args": "--runs 30"
+        }
+      ]
+    },
+    {
+      "name": "start6-C-mobile",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "start6-C-mobile",
+          "kind": "start",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--runs 24"
+        }
+      ]
+    },
+    {
+      "name": "start6-S-lan",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "start6-S-lan",
+          "kind": "start",
+          "profile": "S",
+          "net": "lan",
+          "args": "--runs 30"
+        }
+      ]
+    }
+  ]
+}

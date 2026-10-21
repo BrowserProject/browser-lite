@@ -1,11 +1,12 @@
-// Start of the engine: per run and arm a new Chromium profile with three starts in a row (1:
-// nothing cached, 2 and 3: engine in the HTTP cache and the code cache of V8). Measured: when the
-// browser of the demo is ready, the first layout of example.com, the download of engine.wasm, the
-// size of the WebAssembly code cache of Chromium in the profile, the steps of the start (marks
-// bl:<step> of the core: lock, beforeStart, engine.js, instantiate, main, ready, prepared) and the
-// times of the engine (main(), every pthread_create before ready, compositor ready, ready; from
-// debug.measurements()), all in ms of performance.now() of the page. Arms take turns per run
-// (ABBA), configurations as in run.mjs (measure.mjs readConfigs).
+// Start of the engine: per run and arm a new Chromium profile with three starts in a row (1, visit
+// cold: nothing cached, 2 and 3, visit warm: engine in the HTTP cache and the code cache of V8).
+// Measured: when the browser of the demo is ready, the first layout of example.com, the download
+// of engine.wasm, the size of the WebAssembly code cache of Chromium in the profile, the steps of
+// the start (marks bl:<step> of the core: lock, beforeStart, engine.js, engine.data, compile,
+// instantiate, main, ready, prepared) and the times of the engine (main(), every pthread_create
+// before ready, compositor ready, ready; from debug.measurements()), all in ms of
+// performance.now() of the page. Arms take turns per run (ABBA), configurations as in run.mjs
+// (measure.mjs readConfigs).
 //   node start.mjs --out <jsonl> --runs n --ca <pem> [--label x] [--configs '<json>']
 import fs from 'node:fs';
 import os from 'node:os';
@@ -129,6 +130,8 @@ async function start(dir, config) {
     markLock: round(marks.lock),
     markBeforeStart: round(marks.beforeStart),
     markEngineJs: round(marks['engine.js']),
+    markEngineData: round(marks['engine.data']),
+    markCompile: round(marks.compile),
     markInstantiate: round(marks.instantiate),
     markMain: round(marks.main),
     markReady: round(marks.ready),
@@ -158,6 +161,7 @@ for (let run = 0; run < runs; run++) {
         engineSite: config.site,
         run,
         start: n,
+        visit: n === 1 ? 'cold' : 'warm',
         ...r,
         wasmCodeCacheMB: +(
           dirSize(path.join(dir, 'Default', 'Code Cache', 'wasm')) / 1048576

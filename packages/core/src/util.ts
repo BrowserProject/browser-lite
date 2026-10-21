@@ -3,6 +3,14 @@ export function domError(name: string, message: string): Error {
   return Object.assign(new Error(message), { name });
 }
 
+/** Name and message of an error, then its stack (only V8 starts the stack with both). */
+export function errorText(error: Error): string {
+  const head = String(error);
+  const stack = error.stack ?? '';
+  if (stack.startsWith(head)) return stack;
+  return stack ? `${head}\n${stack}` : head;
+}
+
 export function bytesToBase64(bytes: Uint8Array): string {
   const native = (bytes as Uint8Array & { toBase64?: () => string }).toBase64;
   if (typeof native === 'function') return native.call(bytes);

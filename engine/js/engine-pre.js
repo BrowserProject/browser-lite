@@ -5,7 +5,45 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 6;
+Module.blAbiVersion = 7;
+
+// Web Workers prepared before main() (-sPTHREAD_POOL_SIZE in engine/engine.cmake
+// reads it); tests/perf lets the host set it, goes away with it
+Module.blPoolWorkers ??= 8;
+
+// A thread that traps or aborts ends the engine. The error event the main
+// thread gets from a worker has only the message, so the worker writes the
+// error with its stack (WebAssembly frames with function names when the name
+// section is there, else wasm-function[index]:offset) into engine memory
+// before the error leaves it. The host reads it with Module.blCrashReason()
+// once the error arrives (bl__crash_reason in engine/src/Exports.cpp: capacity
+// in bytes, then UTF-8 text).
+if (ENVIRONMENT_IS_PTHREAD) {
+  if (typeof self !== 'undefined') {
+    Error.stackTraceLimit = 32;
+    self.addEventListener('error', (event) => {
+      const error = event.error;
+      // Name and message, then the stack: only V8 starts the stack with both
+      const head = String(error ?? event.message);
+      const stack = (error && error.stack) || '';
+      const text = stack.startsWith(head) ? stack : stack ? `${head}\n${stack}` : head;
+      try {
+        const reason = Module._bl__crash_reason() >>> 0;
+        stringToUTF8(text, reason + 4, new DataView(wasmMemory.buffer).getUint32(reason, true));
+      } catch {
+        // Not loaded yet: the host keeps the message of the error
+      }
+    });
+  }
+} else {
+  Module.blCrashReason = () => {
+    try {
+      return UTF8ToString((Module._bl__crash_reason() >>> 0) + 4);
+    } catch {
+      return '';
+    }
+  };
+}
 
 // malloc for the JS hosts: without ABORTING_MALLOC _malloc returns 0 when
 // memory is full, the write would then go to the start of the WASM memory

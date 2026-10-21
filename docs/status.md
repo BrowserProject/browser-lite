@@ -111,8 +111,7 @@ performance with several runs and inclusive times from profiles, not only load t
 - Devices and identity: WebAuthn, Credential Management, Payment Request, Web MIDI/USB/HID/Serial,
   WebXR.
 - Core API: no event for console messages without a view (service workers), no warning for
-  skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait". The crash
-  reason of an `abort()` is empty.
+  skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait".
 - The test hooks `gpu()` are not gated by `BL_TEST_HOOKS` in the engine (only the host can call
   them).
 

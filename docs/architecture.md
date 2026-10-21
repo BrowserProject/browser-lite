@@ -65,6 +65,10 @@ Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
 Rule for main thread code: while waiting for a lock (also malloc's) Emscripten runs the main
 thread's queue, so never hold a lock that a queued task could take (#69).
 
+A thread that traps or aborts ends the engine. Its worker writes the error with the stack into
+static engine memory (`bl__crash_reason`) before the error reaches the main thread, where the
+core reports it as the reason of `crash` (#218).
+
 All views share one engine thread. A JS entry may run at most 30 s (`scriptTimeoutSeconds`,
 #146). The core watchdog emits `unresponsive` when input or an expected answer gets no reply
 within 10 s (#147, #172).

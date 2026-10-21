@@ -25,12 +25,16 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   device, with page cache), `anonMB` (`anon` of `memory.stat`, without page cache), `run.mjs` and
   `frames.mjs` also `wasmMB` (size of the WebAssembly memory, `blTest.measurements()`).
   `run.mjs --mem-high <MB>` limits the device with `memory.high`.
-- **Start** (`start.mjs`): besides ready and first layout the steps of the core
-  (`performance.mark('bl:<step>')`: `lock`, `beforeStart`, `engine.js`, `instantiate` for compile
-  and instantiate together, `main`, `ready`, `prepared`) as `mark<Step>`, the times of the engine
-  (`engineMain`, `engineThreadTimes` of every `pthread_create` before ready, `engineCompositorReady`,
-  `engineReady`) and the download of `engine.wasm` (`wasmStart`, `wasmEnd`), all in ms of
-  `performance.now()` of the page, without a log.
+- **Start** (`start.mjs`, visit `cold` for the first of three starts per profile, `warm` for the
+  others): besides ready and first layout the steps of the core
+  (`performance.mark('bl:<step>')`: `lock`, `beforeStart`, `engine.js`, `engine.data`, `compile`
+  of `engine.wasm`, `instantiate`, `main`, `ready`, `prepared`) as `mark<Step>`, the times of the
+  engine (`engineMain`, `engineThreadTimes` of every `pthread_create` before ready,
+  `engineCompositorReady`, `engineReady`) and the download of `engine.wasm` (`wasmStart`,
+  `wasmEnd`), all in ms of `performance.now()` of the page, without a log. The Web Workers before
+  `main()` and the moment of the spare ones are measurement options (`engine.env` of a
+  configuration, only with `debug`): `BL_POOL_WORKERS` (default 8), `BL_SPARE_WORKERS` and
+  `BL_SPARE_WORKERS_AT` (`start`, `ready` or `paint`).
 - **Frames** (`frames.mjs --page video|video360|webgl|anim`): over 20 s, from 8 s after the first
   shown frame on (every run starts cold), `cpuPerSecond` (CPU seconds per second of the device), `fps` (frames shown per second),
   `cpuPerFrame` and memory, for every arm and Chromium itself (arm `chromium`). browser-lite counts
@@ -100,5 +104,12 @@ Hooks outside the folder that exist only for these measurements (#214):
 - Tests and demo: `measurements` of `blTest` (`apps/demo/src/test-hooks.ts`, `apps/demo/README.md`,
   `tests/core/host/host.js`) and its checks in `tests/core/smoke-test.mjs`,
   `tests/core/media-test.mjs` and `tests/core/webgl-test.mjs`.
+- Pool timing (U6, until the fixed value is decided): `-sPTHREAD_POOL_SIZE=Module.blPoolWorkers` in
+  `engine/engine.cmake` (back to a number), its default in `engine/js/engine-pre.js`,
+  `blPoolWorkers` and the env entries `BL_POOL_WORKERS` and `BL_SPARE_WORKERS_AT` in
+  `engine/abi.json`, `poolWorkers` in `packages/core/src/config.ts`, `browser.ts` and
+  `test/config.test.mjs`, `blPoolWorkers` of `EngineModule` in `packages/core/src/engine.ts`,
+  `SpareWorkersAt` in `engine/src/EngineConfig.h`, `.cpp`, `Engine.h`, `main.cpp` and `WebView.cpp`
+  (`firstPaintShown`), the pool part of `tests/core/start-test.mjs`.
 - Pins: the `PERF_*` lines of `versions.env`.
 - `--mem-high` of `run.mjs` and `device.sh` goes with the folder itself.

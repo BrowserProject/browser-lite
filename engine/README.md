@@ -14,7 +14,7 @@ patches from `patches/`.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
   package. `BL_PRE_JS` is the only list of the `--pre-js` files.
 - `js/`: JavaScript parts of the engine
-  - `engine-pre.js`: module hooks of the engine (canvases, file writes, shutdown)
+  - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
   - `sockets.js`: TCP streams over `Module.blTransport`
   - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's
@@ -81,6 +81,8 @@ The full list is `abi.json`; the rules behind it:
   and no external resources, inline styles and `data:` images only. A click on any
   `[data-bl-retry]` element retries (a listener the engine installs, the page needs no script).
   The `commit` event reports `errorPage: '<kind>'`.
+- Crashes: a thread that traps or aborts writes its error with the stack into engine memory
+  before the error event reaches the main thread; `Module.blCrashReason()` returns it.
 - Shutdown: `Module.blShutdown()` closes all transport streams and terminates all engine
   threads, so the host can drop the module.
 

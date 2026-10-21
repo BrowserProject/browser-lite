@@ -13,7 +13,7 @@ import {
 import { Debug } from './debug.js';
 import { Downloads } from './downloads.js';
 import { Emitter } from './emitter.js';
-import { checkEngine, type EngineModule, loadEngineFactory } from './engine.js';
+import { checkEngine, type EngineModule, loadEngineFiles, provideEngineFiles } from './engine.js';
 import { BrowserLiteError } from './errors.js';
 import { Fullscreen } from './fullscreen.js';
 import { Online } from './online.js';
@@ -39,10 +39,14 @@ import type {
   WarningCode,
 } from './types.js';
 import { Uploads } from './uploads.js';
+import { errorText } from './util.js';
 import { type ViewHost, ViewImpl } from './view.js';
 import { Watchdog } from './watchdog.js';
 
 const CONSOLE_LEVELS = ['log', 'warn', 'error', 'debug', 'info'] as const;
+
+/** Longest crash reason in characters (message and stack). */
+const MAX_CRASH_REASON = 4096;
 
 type EventHandler = (
   data: Record<string, unknown>,
@@ -184,6 +188,12 @@ class BrowserImpl implements Browser, ViewHost {
     const mark = (step: string) => {
       if (config.debug) performance.mark(`bl:${step}`);
     };
+    // The engine files load from now on, while the storage lock and beforeStart run
+    const files = loadEngineFiles(config.engineBase);
+    const ignore = () => {};
+    files.factory.then(() => mark('engine.js'), ignore);
+    files.data.then(() => mark('engine.data'), ignore);
+    files.wasm.then(() => mark('compile'), ignore);
     let persistent = config.persistent;
     if (persistent) {
       this.releaseLock = await holdStorageLock(config.namespace);
@@ -227,8 +237,10 @@ class BrowserImpl implements Browser, ViewHost {
     ];
     this.module.onRuntimeInitialized = () => mark('main');
 
-    // Engine errors (traps, aborts in threads) reach the page as error events. Only errors
-    // of the engine scripts count: the embedding page may run WebAssembly of its own.
+    // Engine errors (traps, aborts) reach the page as error events: from a thread as the
+    // ErrorEvent of its worker, whose error and stack the worker left in engine memory
+    // (blCrashReason), from the main thread as the error itself. Only errors of the engine
+    // scripts count: the embedding page may run WebAssembly of its own.
     const fromEngine = (error: unknown, filename = '') => {
       if (!(error instanceof WebAssembly.RuntimeError || error instanceof ErrorEvent)) return false;
       const base = config.engineBase;
@@ -236,18 +248,24 @@ class BrowserImpl implements Browser, ViewHost {
       if (error instanceof ErrorEvent) return error.filename.startsWith(base);
       return (error.stack ?? '').includes(base);
     };
+    const reason = (error: WebAssembly.RuntimeError | ErrorEvent, fallback: string) =>
+      (
+        (error instanceof ErrorEvent
+          ? this.module.blCrashReason?.() || error.message
+          : errorText(error)) || fallback
+      ).slice(0, MAX_CRASH_REASON);
     addEventListener(
       'error',
       (event) => {
         if (fromEngine(event.error, event.filename))
-          this.crashed(event.error.message || event.message);
+          this.crashed(reason(event.error, event.message));
       },
       { signal },
     );
     addEventListener(
       'unhandledrejection',
       (event) => {
-        if (fromEngine(event.reason)) this.crashed(event.reason.message);
+        if (fromEngine(event.reason)) this.crashed(reason(event.reason, ''));
       },
       { signal },
     );
@@ -261,11 +279,15 @@ class BrowserImpl implements Browser, ViewHost {
         resolve();
       };
     });
-    const factory = await Promise.race([
-      loadEngineFactory(`${config.engineBase}engine.js`),
-      failed,
-    ]);
-    mark('engine.js');
+    // engine.data has to be there when the module starts, engine.wasm compiles on meanwhile
+    const [factory, data] = await Promise.race([Promise.all([files.factory, files.data]), failed]);
+    provideEngineFiles(this.module, files.wasm, data, (error) =>
+      this.failStart?.(
+        new BrowserLiteError('engine-load-failed', `Engine start failed: ${error}`, {
+          cause: error,
+        }),
+      ),
+    );
     await Promise.race([
       factory(this.module).then(
         () => {
@@ -330,9 +352,9 @@ class BrowserImpl implements Browser, ViewHost {
       blTransport: this.config.transport,
       locateFile: (path) => new URL(path, base).href,
       mainScriptUrlOrBlob: `${base}engine.js`,
+      ...(this.config.poolWorkers !== undefined ? { blPoolWorkers: this.config.poolWorkers } : {}),
       print: (text) => console.log('[engine]', text),
       printErr: (text) => console.warn('[engine]', text),
-      onAbort: (what) => this.crashed(String(what)),
       onEngineEvent: (view, type, payload, fromEngineThread) =>
         this.onEngineEvent(view, type, payload, fromEngineThread),
       onEngineFrame: (view, ptr, width, height, x, y, w, h) => {

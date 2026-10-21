@@ -249,7 +249,14 @@ check(
   missing([...used], hooks).length === 0,
   missing([...used], hooks).join(', '),
 );
-const emscriptenHooks = new Set(['locateFile', 'preRun', 'print', 'printErr']);
+const emscriptenHooks = new Set([
+  'locateFile',
+  'preRun',
+  'print',
+  'printErr',
+  'instantiateWasm',
+  'getPreloadedPackage',
+]);
 const unusedHooks = [...hooks.keys()].filter(
   (name) => !used.has(name) && !emscriptenHooks.has(name),
 );

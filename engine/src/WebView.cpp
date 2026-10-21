@@ -1576,6 +1576,7 @@ void WebView::firstPaintShown(int id)
 {
     debugLog("View %d: first paint", id);
     notifyHost(id, "first-paint");
+    addSpareWorkers(SpareWorkersAt::FirstPaint);
 }
 
 void WebView::exitFullscreen()

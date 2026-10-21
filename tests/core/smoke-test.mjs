@@ -740,11 +740,24 @@ try {
     (await page.evaluate(() => window.blTest.browser.state)) === 'ready',
   );
 
-  // Crash (engine test hook, needs debug): crash event, state crashed
+  // Crash (engine test hook, needs debug): crash event with the WebAssembly stack in the reason,
+  // state crashed
   await page.evaluate(() => window.blTest.crash('abort'));
   check(
     'crash event',
     await waitFor(() => window.blHost.events.some((e) => e.startsWith('crash:'))),
+  );
+  const crashReasons = () =>
+    page.evaluate(() =>
+      window.blHost.events.filter((e) => e.startsWith('crash:')).map((e) => e.slice(6)),
+    );
+  const [abortReason = ''] = await crashReasons();
+  check(
+    'crash reason of abort(): error and WebAssembly stack, bounded',
+    abortReason.includes('Aborted(') &&
+      /wasm-function\[\d+\]/.test(abortReason) &&
+      abortReason.length <= 4096,
+    abortReason.slice(0, 600),
   );
   const crashed = await page.evaluate(() => {
     let code = '';
@@ -858,6 +871,12 @@ try {
     await page.evaluate(() =>
       window.blHost.events.filter((e) => e.startsWith('crash:')).join(' | '),
     ),
+  );
+  const trapReason = (await crashReasons())[1] ?? '';
+  check(
+    'crash reason of a trap: error and WebAssembly stack',
+    trapReason.includes('unreachable') && /wasm-function\[\d+\]/.test(trapReason),
+    trapReason.slice(0, 600),
   );
   // A crashed browser is destroyed and replaced in the same page, this time with handlers of
   // the integrator for notifications and copy

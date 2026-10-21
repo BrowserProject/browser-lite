@@ -1,0 +1,89 @@
+{
+  "description": "U6 pool on a heavy page: CNN first visit (new profile, the cold visit of baseline.json) on the cheap (C) and fast (S) device, LAN, so a pool variant cannot pass on example.com (start6.json) while the engine thread waits for late threads on a real page (#136: data: URLs, IndexedDB, images, blobs). Sites as in start6.json (engine_runs: all six of it): 1 main with U6 (pool A: 8 Workers before main(), 4 spare at start), 5 PTHREAD_POOL_DELAY_LOAD; PoolB and PoolD have 3 before main() and 9 spare at ready or at the first paint. Rule correction against U6 on first layout: a pool variant is taken only when it wins under rule lever in start6.json and passes here. 30 runs: about 78 s (C) and 24 s (S) per arm and run for the first visit alone (GH 39436335414: 127 and 44 s with both visits), 4 arms, so about 3 h (C) and 1.2 h (S) with the setup of six sites",
+  "configs": [
+    {
+      "name": "U6",
+      "site": 1
+    },
+    {
+      "name": "DelayLoad",
+      "site": 5
+    },
+    {
+      "name": "PoolB",
+      "site": 1,
+      "engine": {
+        "env": {
+          "BL_POOL_WORKERS": "3",
+          "BL_SPARE_WORKERS": "9",
+          "BL_SPARE_WORKERS_AT": "ready"
+        }
+      }
+    },
+    {
+      "name": "PoolD",
+      "site": 1,
+      "engine": {
+        "env": {
+          "BL_POOL_WORKERS": "3",
+          "BL_SPARE_WORKERS": "9",
+          "BL_SPARE_WORKERS_AT": "paint"
+        }
+      }
+    }
+  ],
+  "compare": [
+    {
+      "base": "U6",
+      "arms": [
+        "DelayLoad",
+        "PoolB",
+        "PoolD"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [
+        "firstLayout"
+      ],
+      "secondary": [
+        "ready",
+        "loaded",
+        "cpu"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "pool6-C-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "pool6-C-cnn",
+          "kind": "run",
+          "profile": "C",
+          "net": "lan",
+          "args": "--visit cold --runs 30 --timeout 400 --sites cnn"
+        }
+      ]
+    },
+    {
+      "name": "pool6-S-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "pool6-S-cnn",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit cold --runs 30 --timeout 400 --sites cnn"
+        }
+      ]
+    }
+  ]
+}

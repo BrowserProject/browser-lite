@@ -1,5 +1,5 @@
 {
-  "abiVersion": 6,
+  "abiVersion": 7,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -91,6 +91,7 @@
     { "name": "bl__engine_thread", "caller": "engine/js/engine-pre.js", "doc": "pthread of the engine thread (Module.blEngineWorker)." },
     { "name": "bl__presenter_thread", "caller": "engine/js/engine-pre.js", "doc": "pthread whose worker gets the canvases (Module.blPresenterWorker)." },
     { "name": "bl__write_file", "caller": "engine/js/engine-pre.js", "doc": "Writes a chunk of a host file (Module.blWriteFiles)." },
+    { "name": "bl__crash_reason", "caller": "engine/js/engine-pre.js", "doc": "Static memory for the error of a crashed thread: uint32 capacity in bytes, then UTF-8 text (Module.blCrashReason)." },
     { "name": "bl__storage_namespace", "caller": "engine/js/engine-pre.js, engine/js/wasmfs-opfs.js", "doc": "BL_STORAGE_NAMESPACE for the OPFS root and the cache names." },
     { "name": "bl__socket_opened", "caller": "engine/js/sockets.js", "doc": "Transport stream open." },
     { "name": "bl__socket_data", "caller": "engine/js/sockets.js", "doc": "Received bytes (malloc, taken over)." },
@@ -123,6 +124,9 @@
   "moduleHooks": [
     { "name": "blTransport", "setBy": "host", "type": "Transport", "doc": "openTCP(host, port) -> stream {send, close, onopen, ondata, onsent, onclose(reason)}; reason is one of closeReasons." },
     { "name": "locateFile", "setBy": "host", "type": "(path) => string", "doc": "Emscripten: URL of engine.wasm, engine.data and the worker script." },
+    { "name": "instantiateWasm", "setBy": "host", "type": "(imports, receive(instance, module)) => {}", "doc": "Emscripten: the host instantiates engine.wasm, compiled while it downloaded, so it is requested once. receive needs the WebAssembly.Module too (the workers get it)." },
+    { "name": "getPreloadedPackage", "setBy": "host", "type": "(url, size) => ArrayBuffer", "doc": "Emscripten: engine.data, downloaded by the host before the module starts, so it is requested once." },
+    { "name": "blPoolWorkers", "setBy": "host", "type": "number", "doc": "For tests/perf, goes away with it: Web Workers prepared before main() (-sPTHREAD_POOL_SIZE reads it at the start of the module), default 8." },
     { "name": "preRun", "setBy": "host", "type": "function[]", "doc": "Emscripten: sets Module.ENV (see env) and adds run dependencies before main()." },
     { "name": "print", "setBy": "host", "type": "(text) => void", "doc": "Emscripten stdout (console messages of the engine, [eval], [memory])." },
     { "name": "printErr", "setBy": "host", "type": "(text) => void", "doc": "Emscripten stderr ('[engine] ...' logs)." },
@@ -138,6 +142,7 @@
     { "name": "onEngineMediaFetch", "setBy": "host", "type": "(fetchId, type, data, bytes) => void", "doc": "Results of bl_media_fetch: head, data, end or error." },
     { "name": "onEngineAudio", "setBy": "host", "type": "(type, id, ring, capacityFrames, channels, sampleRate) => void", "doc": "Web Audio output (audio feature): 'start' with a ring buffer in shared memory, 'stop', 'close' (the host frees ring with _free)." },
     { "name": "blAbiVersion", "setBy": "engine", "type": "number", "doc": "abiVersion of this file the engine was built with." },
+    { "name": "blCrashReason", "setBy": "engine", "type": "() => string", "doc": "Error of the thread that crashed last, with its WebAssembly stack, written by its worker before the error reaches the main thread; empty when none was written." },
     { "name": "blAlloc", "setBy": "engine", "type": "(size) => pointer", "doc": "malloc that throws RangeError when memory is full." },
     { "name": "blEngineWorker", "setBy": "engine", "type": "() => Worker | null", "doc": "Worker of the engine thread." },
     { "name": "blPresenterWorker", "setBy": "engine", "type": "() => Worker | null", "doc": "Worker the view canvases go to: postMessage({ blCanvas: offscreenCanvas, viewId }, [offscreenCanvas])." },
@@ -250,7 +255,9 @@
     { "name": "BL_INDEXEDDB_QUOTA_MB", "type": "number", "default": "256", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "IndexedDB limit per origin." },
     { "name": "BL_DATABASE_MAX_MB", "type": "number", "default": "512", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Biggest SQLite file loaded into memory." },
     { "name": "BL_FONTCONFIG_EARLY", "type": "bool", "default": "1", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: fontconfig is set up on first use instead of in the background at start." },
-    { "name": "BL_SPARE_WORKERS", "type": "number", "default": "4", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Extra pthread workers loaded right after start." },
+    { "name": "BL_SPARE_WORKERS", "type": "number", "default": "4", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Spare pthread workers loaded right after start: workers are added until the pool and this many exist." },
+    { "name": "BL_SPARE_WORKERS_AT", "type": "string", "default": "start", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "For tests/perf, goes away with it: when the spare workers load, start (main()), ready or paint (the first paint of a view)." },
+    { "name": "BL_POOL_WORKERS", "type": "number", "default": "8", "class": "expert", "readBy": "packages/core/src/config.ts", "doc": "For tests/perf, goes away with it: Web Workers prepared before main(); the core hands it to Module.blPoolWorkers, only with debug." },
     { "name": "BL_MALLOC_CACHE", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0015-wtf-fastmalloc-on-emscripten.patch", "doc": "Size of the FastMalloc cache." },
     { "name": "BL_LLINT_TUNING", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0031-jsc-llint-slow-paths-on-wasm.patch", "doc": "Tuning of the LLInt slow paths." },
     { "name": "JSC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "JavaScriptCore", "doc": "JSC options, e.g. JSC_useLLIntICs=false." },

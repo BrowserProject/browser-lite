@@ -268,7 +268,12 @@ export interface BrowserEvents {
   unresponsive: Record<string, never>;
   /** The engine answers again after `unresponsive`. */
   responsive: Record<string, never>;
-  /** The engine stopped; call `destroy()`, then `createBrowser()` for a new one. */
+  /**
+   * The engine stopped; call `destroy()`, then `createBrowser()` for a new one. `reason` is the
+   * error of the thread that crashed (a trap or `abort()`) with its stack, WebAssembly frames by
+   * function name when the engine keeps its name section, else as `wasm-function[index]:offset`;
+   * at most 4096 characters.
+   */
   crash: { reason: string };
   /** Network of the pages changed (host online and transport connected), see {@link Browser.online}. */
   network: { connected: boolean };

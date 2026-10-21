@@ -109,7 +109,9 @@ target_link_options(BrowserLiteEngine PRIVATE
     # stays free for the UI.
     "SHELL:-pthread"
     "SHELL:-sPROXY_TO_PTHREAD"
-    "SHELL:-sPTHREAD_POOL_SIZE=8"
+    # Workers prepared before main(): Module.blPoolWorkers, 8 unless tests/perf
+    # sets it (engine/js/engine-pre.js), goes away with tests/perf
+    "SHELL:-sPTHREAD_POOL_SIZE=Module.blPoolWorkers"
     "SHELL:-sSTACK_SIZE=8MB"
     "SHELL:-sDEFAULT_PTHREAD_STACK_SIZE=4MB"
     "SHELL:-sINITIAL_MEMORY=256MB"

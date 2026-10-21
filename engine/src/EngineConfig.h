@@ -32,6 +32,11 @@ enum class Feature : uint32_t {
     Clipboard = 1 << 16,
 };
 
+// When the spare Web Workers load (BL_SPARE_WORKERS_AT, for tests/perf, goes
+// away with it): at the start of main(), when the engine is ready, at the
+// first paint of a view
+enum class SpareWorkersAt : uint8_t { Start, Ready, FirstPaint };
+
 struct EngineConfig {
     bool debug { false }; // BL_DEBUG
     bool testHooks { false }; // BL_TEST_HOOKS
@@ -50,6 +55,7 @@ struct EngineConfig {
     uint64_t databaseMaxMB { 512 }; // BL_DATABASE_MAX_MB
     bool fontconfigEarly { true }; // BL_FONTCONFIG_EARLY
     int spareWorkers { 4 }; // BL_SPARE_WORKERS
+    SpareWorkersAt spareWorkersAt { SpareWorkersAt::Start }; // BL_SPARE_WORKERS_AT
 };
 
 // Reads the environment and writes BL_EXTRA_CA to a file (then removes it from

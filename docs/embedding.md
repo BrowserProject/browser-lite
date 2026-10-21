@@ -74,9 +74,11 @@ isolation.
 | `engine.data` (fonts, CA bundle, fontconfig, HRTF data) | about 5 MB | about 1.7 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
 
-A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache. The host
-browser compiles the module on every start, which takes a few seconds (Chrome's code cache did
-not help in measurements, #132 in [decisions.md](decisions.md)).
+A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache and
+Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`
+requests the three files at once, one request each, while the storage lock and
+`storage.beforeStart` run; `engine.wasm` compiles while it downloads (#218 in
+[decisions.md](decisions.md)).
 
 ## Content Security Policy
 
@@ -187,7 +189,9 @@ delegate the matching `allow=` features.
   afterwards `createBrowser` can start a new one in the same page. If the old engine could not be
   stopped, `createBrowser` throws `already-running` and only a page reload helps.
 - `crash` (with `reason`) means the engine is gone (`state === 'crashed'`): destroy it and create a
-  new browser. Keep each view's `history` (from `navigation` events) to restore the session with
+  new browser. `reason` holds the error (a trap or `abort()`) with the stack of the thread, at most
+  4096 characters; WebAssembly frames show function names only with an engine that keeps its name
+  section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` events) to restore the session with
   `createView({ history })`.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart.

@@ -679,6 +679,20 @@ EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
     });
 }
 
+// Why a thread crashed, for the host (Module.blCrashReason): the worker of the
+// thread writes its error with the stack there (engine/js/engine-pre.js), in
+// static memory because malloc may be locked by the crashed thread
+struct CrashReason {
+    uint32_t capacity { sizeof(text) };
+    char text[4092] { };
+};
+static CrashReason s_crashReason;
+
+EMSCRIPTEN_KEEPALIVE CrashReason* bl__crash_reason()
+{
+    return &s_crashReason;
+}
+
 // For tests, only with BL_TEST_HOOKS=1: a real crash on the engine thread.
 // kind 0 = abort(), 1 = WASM trap
 EMSCRIPTEN_KEEPALIVE void bl_crash_for_testing(int kind)

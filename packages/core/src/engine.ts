@@ -4,7 +4,7 @@ import type { Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 6;
+export const ENGINE_ABI_VERSION = 7;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -141,7 +141,6 @@ export interface EngineHooks {
     message: string,
     defaultValue: string,
   ) => void;
-  onAbort?: (what: unknown) => void;
 }
 
 /** The Emscripten module of engine.js as far as the core uses it. */
@@ -157,6 +156,13 @@ export interface EngineModule extends EngineExports, EngineHooks {
   printErr?: (text: string) => void;
   preRun?: ((module: EngineModule) => void)[];
   onRuntimeInitialized?: () => void;
+  instantiateWasm?: (
+    imports: WebAssembly.Imports,
+    receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
+  ) => object;
+  getPreloadedPackage?: (url: string, size: number) => ArrayBuffer | null;
+  blPoolWorkers?: number;
+  blCrashReason?: () => string;
   blTransport?: Transport;
   blEngineWorker?: () => Worker | null;
   blPresenterWorker?: () => Worker | null;
@@ -186,6 +192,71 @@ export function checkEngine(module: EngineModule): void {
 }
 
 const factories = new Map<string, Promise<Factory>>();
+
+/** Requests of the engine files, started before anything else of the start. */
+export interface EngineFiles {
+  /** engine.js loaded (createBrowserLiteEngine). */
+  readonly factory: Promise<Factory>;
+  /** engine.wasm, compiled while it downloads. */
+  readonly wasm: Promise<WebAssembly.Module>;
+  /** engine.data (fonts, certificates, fontconfig). */
+  readonly data: Promise<ArrayBuffer>;
+}
+
+async function fetchEngineFile(url: string): Promise<Response> {
+  const response = await fetch(url, { credentials: 'same-origin' });
+  if (!response.ok)
+    throw new BrowserLiteError(
+      'engine-load-failed',
+      `Could not load ${url}: HTTP ${response.status}`,
+    );
+  return response;
+}
+
+/**
+ * Requests engine.js, engine.wasm and engine.data at once, one request each: the start then runs
+ * the storage lock and beforeStart while they load. engine.wasm compiles while it streams (the
+ * host's code cache applies); without the type application/wasm it compiles after the download.
+ */
+export function loadEngineFiles(base: string): EngineFiles {
+  const files: EngineFiles = {
+    factory: loadEngineFactory(`${base}engine.js`),
+    wasm: fetchEngineFile(`${base}engine.wasm`).then(async (response) =>
+      response.headers.get('Content-Type')?.startsWith('application/wasm')
+        ? WebAssembly.compileStreaming(response)
+        : WebAssembly.compile(await response.arrayBuffer()),
+    ),
+    data: fetchEngineFile(`${base}engine.data`).then((response) => response.arrayBuffer()),
+  };
+  // A failure counts where the start waits for the file
+  for (const file of Object.values(files)) file.catch(() => {});
+  return files;
+}
+
+/**
+ * Hands the files to Emscripten so it requests none of them again: engine.data through
+ * getPreloadedPackage (needed when the module starts), engine.wasm through instantiateWasm (it
+ * waits for the compilation). Errors of the instantiation go to fail.
+ */
+export function provideEngineFiles(
+  module: EngineModule,
+  wasm: Promise<WebAssembly.Module>,
+  data: ArrayBuffer,
+  fail: (error: unknown) => void,
+): void {
+  let pending: ArrayBuffer | null = data;
+  module.getPreloadedPackage = () => {
+    const result = pending;
+    pending = null;
+    return result;
+  };
+  module.instantiateWasm = (imports, receive) => {
+    wasm
+      .then(async (compiled) => receive(await WebAssembly.instantiate(compiled, imports), compiled))
+      .catch(fail);
+    return {};
+  };
+}
 
 /** Loads engine.js once per URL (a classic script, it defines createBrowserLiteEngine). */
 export function loadEngineFactory(scriptUrl: string): Promise<Factory> {

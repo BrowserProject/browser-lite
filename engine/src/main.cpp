@@ -27,6 +27,7 @@
 #include <WebCore/MediaPlayer.h>
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
+#include <atomic>
 #include <cstdlib>
 #include <cstdio>
 #include <sys/stat.h>
@@ -65,16 +66,20 @@ static void prepareFontCache(const char* path)
 // first load. Every further thread (data: URLs, IndexedDB, images, blobs) then
 // starts a new worker and the engine thread waits until it runs (CNN: about
 // 1 s). So right after the start load a few more workers, asynchronously on
-// the main thread, without waiting for them. A bigger pool (#133) delays the
-// engine start instead.
-static void addSpareWorkers(int count)
+// the main thread, without waiting for them, until the pool and the spare
+// workers exist (workers started for threads meanwhile count). A bigger pool
+// (#133) delays the engine start instead.
+void BrowserLite::addSpareWorkers(SpareWorkersAt moment)
 {
-    if (count <= 0)
+    static std::atomic<bool> added { false };
+    auto& config = engineConfig();
+    if (moment != config.spareWorkersAt || config.spareWorkers <= 0 || added.exchange(true))
         return;
     MAIN_THREAD_ASYNC_EM_ASM({
-        for (var i = 0; i < $0; i++)
+        var workers = PThread.unusedWorkers.length + Object.keys(PThread.pthreads).length;
+        for (; workers < Module.blPoolWorkers + $0; workers++)
             PThread.loadWasmModuleToWorker(PThread.allocateUnusedWorker());
-    }, count);
+    }, config.spareWorkers);
 }
 
 int main(int, char**)
@@ -127,7 +132,7 @@ int main(int, char**)
             }
         })->detach();
     // Spare web workers (see addSpareWorkers)
-    addSpareWorkers(config.spareWorkers);
+    addSpareWorkers(SpareWorkersAt::Start);
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
     // Create the VM right away: from now on all work runs with DeferGC (EngineLoop.cpp)
@@ -185,6 +190,7 @@ int main(int, char**)
 
     log("Engine ready");
     Measurements::mark(Measurements::Mark::Ready);
+    addSpareWorkers(SpareWorkersAt::Ready);
     MAIN_THREAD_ASYNC_EM_ASM({
         if (Module.onEngineReady)
             Module.onEngineReady();

@@ -8,6 +8,7 @@ import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
 import { Requests } from '../dist/requests.js';
 import { MAX_UPLOAD, Uploads } from '../dist/uploads.js';
+import { errorText } from '../dist/util.js';
 
 /** Engine module that records the calls of the exports the tests need. */
 function fakeModule() {
@@ -299,4 +300,16 @@ test('engine check: ABI version and exports', () => {
     () => checkEngine({ blAbiVersion: ENGINE_ABI_VERSION }),
     (error) => error.code === 'engine-load-failed' && /lacks _bl_create_view/.test(error.message),
   );
+});
+
+test('crash reason: name and message before the stack, also where the stack lacks them', () => {
+  const v8 = new Error('Aborted(OOM)');
+  v8.stack = 'Error: Aborted(OOM)\n    at f (engine.wasm:1:2)';
+  assert.equal(errorText(v8), v8.stack);
+  const firefox = Object.assign(new Error('unreachable'), { name: 'RuntimeError' });
+  firefox.stack = 'f@engine.wasm:1:2\n';
+  assert.equal(errorText(firefox), 'RuntimeError: unreachable\nf@engine.wasm:1:2\n');
+  const bare = new Error('gone');
+  bare.stack = undefined;
+  assert.equal(errorText(bare), 'Error: gone');
 });

@@ -84,7 +84,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `source` | `view.viewSource()`: show the text |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
 | `memory-pressure` (browser) | The engine memory runs short (`footprint` and `limit` in bytes; the limit is about 1 GB in a 32 bit browser, found at runtime): close or discard background views, tell the user when none is left |
-| `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)) |
+| `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)); `reason` is the error with its WebAssembly stack, for a bug report |
 
 Without a `download` listener finished downloads are saved automatically.
 
