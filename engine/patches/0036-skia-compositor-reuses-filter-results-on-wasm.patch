@@ -1,5 +1,5 @@
 diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
-index ab23ed5932..e412ec581e 100644
+index ab23ed5932..57441a3275 100644
 --- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
 +++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
 @@ -78,6 +78,9 @@ void SkiaCompositingLayer::invalidate()
@@ -261,7 +261,23 @@ index ab23ed5932..e412ec581e 100644
          sk_sp<SkColorFilter> colorFilter(colorFilterPtr);
          SetForScope scopedColorFilter(context.colorFilter, colorFilter);
          paintSelfAndChildren(canvas, context);
-@@ -1552,7 +1673,11 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+@@ -1492,7 +1613,14 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+         // the whole overlap region has changed, not only the part that has been changed. If nothing has
+         // changed, the region still matches the last frame and no damage is needed. Changes to this
+         // layer's own group properties are left to collectGroupDamage().
+-        if (!hasGroupPropertyDamage() && hasDamageInSubtree()) {
++        bool damaged = hasDamageInSubtree();
++#if PLATFORM(WASM)
++        // browser-lite: a filtered image that waits in the plane of its layer is drawn on device
++        // pixels again a few frames after the layer stopped (paintWithFilter). Nothing else damages
++        // the layer then, so it damages itself until it is back.
++        damaged |= m_filterResult && !m_filterResult->deviceAligned && m_filterResult->stillFrames <= s_filterResultSettleFrames;
++#endif
++        if (!hasGroupPropertyDamage() && damaged) {
+             auto mode = m_mask ? ComputeOverlapRegionMode::Mask : ComputeOverlapRegionMode::Union;
+             addGroupDamage(canvas, context, computeConsolidatedOverlapRegionRects(canvas, context, mode));
+         }
+@@ -1552,7 +1680,11 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
      auto paintFilteredSubtree = [&](SkCanvas& canvas, PaintContext& context) {
          paintWithFilter(canvas, context, layerTransform, *inverseTransform, localBounds, layerPaint, FilterSurfaceAlignment::DevicePixels, [&](SkCanvas& canvas, PaintContext& context) {
              paintSelfAndChildren(canvas, context);
@@ -274,7 +290,7 @@ index ab23ed5932..e412ec581e 100644
  
      if (!m_mask) {
 diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
-index 18ab7030d1..742112a20e 100644
+index 18ab7030d1..4175023a6b 100644
 --- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
 +++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
 @@ -206,6 +206,10 @@ private:

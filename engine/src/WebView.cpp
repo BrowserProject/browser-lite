@@ -224,6 +224,11 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     auto& config = engineConfig();
     // Compositing with layers when the GPU works (BL_COMPOSITING=0 turns it off)
     if (config.compositing && LayerTreeHostWasm::isAvailable()) {
+        // Damage tracking like WPE (LayerTreeHostWasm reads it). The damage stays
+        // in rectangles: unified into one box (WPE) it serves the platform, here
+        // nothing but the compositor reads it.
+        settings.setPropagateDamagingInformation(true);
+        settings.setUseDamagingInformationForCompositing(true);
         m_layerTreeHost = makeUnique<LayerTreeHostWasm>(*this);
         m_compositing = true;
     }

@@ -17,7 +17,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch, pointer lock, ctrl + wheel to the page first (#167).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
-  GPU blur and shadow, CSS Paint Worklet, WebGL 1 and 2, recovery after GPU loss.
+  no frame without a visible change (damage tracking, #220), GPU blur and shadow, CSS Paint
+  Worklet, WebGL 1 and 2, recovery after GPU loss.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
@@ -67,9 +68,12 @@ performance with several runs and inclusive times from profiles, not only load t
    JIT to WASM) would help; small caches are done (#143).
 4. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 5. GC 5 to 7 % on JS-heavy sites (#60, #122).
-6. Video: frames are painted into the tiles of the view, locally under SwiftShader 1.8 to 9.7
-   frames per second against 25 to 30 in Chromium. A compositor layer for video did not help there
-   (#217); the full redraw of the view on every frame is the suspected cost, not yet measured.
+6. Video and animations: frames are painted into the tiles of the view, locally under SwiftShader
+   1.8 to 9.7 video frames per second against 25 to 30 in Chromium. A compositor layer for video
+   did not help there (#217). A frame without a change costs about as much as one with a change
+   (S: 0.17 to 0.20 CPU seconds per unchanged frame, 0.17 to 0.19 for an animation, 88 to 95 % in
+   the GPU process); compositing only the damage did not lower it, skipping unchanged frames
+   saves it where nothing visible changes (#220).
 
 ## Open: features
 

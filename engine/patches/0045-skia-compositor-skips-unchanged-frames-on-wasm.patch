@@ -1,0 +1,87 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+index aa939ae7b7..75dcc488b7 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+@@ -1263,6 +1263,18 @@ void CoordinatedPlatformLayer::flushCompositingStateOnTarget(const OptionSet<Com
+ void CoordinatedPlatformLayer::flushCompositingStateOnSkiaTarget(const OptionSet<CompositionReason>& reasons, SkiaCompositingLayer& layer)
+ {
+     assertIsHeld(m_lock);
++#if PLATFORM(WASM) && ENABLE(DAMAGE_TRACKING)
++    // browser-lite: the damage recorded here describes mostly state that only a rendering update hands
++    // over (tiles, layer state), so it goes with the rendering update. A frame that only scrolls would
++    // use it up while still showing the old state, and the rendering update after it would bring the
++    // new state without damage: a compositor that skips frames without damage would never show it.
++    // Contents such a frame does take (the scrollbars of the scrolling thread) damage the whole layer.
++    const bool takesDamage = reasons.contains(CompositionReason::RenderingUpdate);
++    const bool contentsWithoutDamage = !takesDamage && reasons.containsAny({ CompositionReason::VideoFrame, CompositionReason::AsyncScrolling })
++        && m_pendingChanges.containsAny({ Change::ContentsRect, Change::ContentsClippingRect, Change::ContentsImage, Change::ContentsBuffer });
++    if (contentsWithoutDamage && m_damagePropagationEnabled && !m_size.isEmpty())
++        layer.addDamage(Damage { m_size, Damage::Mode::Full });
++#endif
+     if (reasons.containsAny({ CompositionReason::RenderingUpdate, CompositionReason::AsyncScrolling })) {
+         if (m_pendingChanges.contains(Change::ContentsRect)) {
+             layer.setContentsRect(m_contentsRect);
+@@ -1434,7 +1446,11 @@ void CoordinatedPlatformLayer::flushCompositingStateOnSkiaTarget(const OptionSet
+ 
+     if (reasons.containsAny({ CompositionReason::RenderingUpdate, CompositionReason::VideoFrame, CompositionReason::AsyncScrolling })) {
+ #if ENABLE(DAMAGE_TRACKING)
++#if PLATFORM(WASM)
++        if (takesDamage && m_pendingChanges.contains(Change::Damage)) {
++#else
+         if (m_pendingChanges.contains(Change::Damage)) {
++#endif
+             ASSERT(m_damage.has_value());
+             layer.addDamage(*std::exchange(m_damage, std::nullopt));
+             m_pendingChanges.remove(Change::Damage);
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index 57441a3275..9519cc6466 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -574,7 +574,11 @@ bool SkiaCompositingLayer::computeTransformsAndAnimations(const TransformationMa
+     return hasRunningAnimations;
+ }
+ 
++#if PLATFORM(WASM)
++bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage, std::optional<SkColor> clearColor, DrawsWholeTarget drawsWholeTarget)
++#else
+ bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage, std::optional<SkColor> clearColor)
++#endif
+ {
+     // Both walks below assume the animations have been applied and the transforms computed.
+     bool hasRunningAnimations = computeTransformsAndAnimations({ }, { }, MonotonicTime::now());
+@@ -627,7 +631,15 @@ bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameD
+ #endif
+ 
+     // An empty region means the target already holds the frame, so draw nothing and skip the clear.
++#if PLATFORM(WASM)
++    bool skipDraw = damageRegion && damageRegion->isEmpty();
++    if (drawsWholeTarget == DrawsWholeTarget::Yes) {
++        skipDraw = frameDamage && frameDamage->isEmpty();
++        damageRegion = std::nullopt;
++    }
++#else
+     const bool skipDraw = damageRegion && damageRegion->isEmpty();
++#endif
+     if (!skipDraw) {
+         // Clear what will be redrawn - only the damage rects when compositing from the damage, which keeps
+         // undamaged content and composites translucent content once, or the whole target otherwise.
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+index 4175023a6b..528994730e 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+@@ -122,7 +122,15 @@ public:
+     // it is collected first in a walk that draws nothing, before the walk that draws. The draw is limited
+     // to the region the target must redraw - the target's prior owed damage combined with this frame's - and
+     // no prior damage repaints the whole target. Returns whether any animation is still running.
++#if PLATFORM(WASM)
++    // browser-lite: DrawsWholeTarget::Yes for a target that is new every frame while its last frame
++    // stays visible (a framebuffer): the frame damage only decides whether to draw, nothing when
++    // nothing changed, otherwise the whole target.
++    enum class DrawsWholeTarget : bool { No, Yes };
++    bool paint(SkCanvas&, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage = std::nullopt, std::optional<SkColor> clearColor = std::nullopt, DrawsWholeTarget = DrawsWholeTarget::No);
++#else
+     bool paint(SkCanvas&, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage = std::nullopt, std::optional<SkColor> clearColor = std::nullopt);
++#endif
+ 
+ private:
+     using ScopedFlush = SkiaCompositingLayerImageSetBatch::ScopedFlush;

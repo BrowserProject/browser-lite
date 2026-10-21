@@ -11,15 +11,20 @@
 // compositor takes the new state on the next frame (rAF in its worker) once
 // all tiles are painted, and reports "done" back. Only then the next rendering
 // update comes.
+//
+// Damage tracking like WPE (#220): the layers report what changed, a frame
+// without a change is neither composited nor shown.
 #pragma once
 
 #include "PinchZoom.h"
 #include <WebCore/CoordinatedCompositionReason.h>
 #include <WebCore/CoordinatedPlatformLayer.h>
+#include <WebCore/Damage.h>
 #include <WebCore/GraphicsLayerFactory.h>
 #include <WebCore/IntSize.h>
 #include <atomic>
 #include <optional>
+#include <skia/core/SkRefCnt.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
@@ -28,6 +33,8 @@
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WeakPtr.h>
+
+class SkSurface;
 
 namespace WebCore {
 class CoordinatedImageBackingStore;
@@ -43,12 +50,15 @@ class WebView;
 // Shared state of engine and compositor thread (like CoordinatedSceneState)
 class CompositorScene final : public ThreadSafeRefCounted<CompositorScene> {
 public:
-    static Ref<CompositorScene> create(int viewId) { return adoptRef(*new CompositorScene(viewId)); }
+    // damageMode: how frames collect their damage, nullopt = composite the whole view every frame
+    static Ref<CompositorScene> create(int viewId, std::optional<WebCore::Damage::Mode> damageMode) { return adoptRef(*new CompositorScene(viewId, damageMode)); }
+    ~CompositorScene();
     // From any thread: state of the view while it paints with layers
     static RefPtr<CompositorScene> forView(int viewId);
 
     const int viewId;
     const Ref<WebCore::CoordinatedPlatformLayer> rootLayer;
+    const std::optional<WebCore::Damage::Mode> damageMode;
 
     // Taking the layer state (flushPendingState) and reading it
     // (flushPositionChanges) never at the same time: engine, scrolling and compositor thread
@@ -74,6 +84,8 @@ public:
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
     // Hidden view (WebView::setVisible): no frames, what is pending comes when shown
     bool hidden WTF_GUARDED_BY_LOCK(lock) { false };
+    // Composite and show the whole view on the next frame (new canvas)
+    bool repaintAll WTF_GUARDED_BY_LOCK(lock) { false };
     // Next frame even without new content (tick for the scrolling thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
@@ -100,6 +112,14 @@ public:
 
     // Only on the compositor thread
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
+    // The size of the last frame shown
+    WebCore::IntSize shownSize;
+    // BL_DAMAGE=target (tests/perf until #220 is confirmed): the view as last
+    // composited (holdsFrame), and whether the last frame changed the whole
+    // view, so the next one is composited straight into the framebuffer
+    sk_sp<SkSurface> target;
+    bool targetHoldsFrame { false };
+    bool composeInFramebuffer { true };
 
     // From any thread, the host calls directly: pinch gesture. The target goes
     // from here to the engine thread, so later host input (clicks) only arrives
@@ -119,7 +139,7 @@ public:
     void setHidden(bool);
 
 private:
-    explicit CompositorScene(int viewId);
+    CompositorScene(int viewId, std::optional<WebCore::Damage::Mode>);
     void commitPinchLocked() WTF_REQUIRES_LOCK(lock);
 };
 
@@ -187,6 +207,8 @@ private:
     bool m_compositionRequired { false };
     bool m_layersChanged { false };
     bool m_waitingForCompositor { false };
+    // Layers report what changed (Settings::propagateDamagingInformation)
+    bool m_damagePropagation { false };
     unsigned m_pinchCommit { 0 };
     // The scrolling thread moved layers
     std::atomic<bool> m_compositionRequiredInScrollingThread { false };

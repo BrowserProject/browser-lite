@@ -81,10 +81,13 @@ Skia rasterizes with Ganesh on WebGL 2 in the engine worker (#86); without WebGL
 Compositing follows WPE's Coordinated Graphics (`LayerTreeHostWasm.cpp`): the engine thread
 updates and flushes, tile threads paint, the compositor thread composites, so `transform` and
 `opacity` animations and scrolling continue while JS blocks (#94, #98). Blur and shadow run on
-the GPU with cached filtered layers (#156); `url()` and SVG filters on the CPU. Pinch zoom scales
-the shown tiles on the compositor and commits once at the end (#150). After GPU loss the engine
-paints on the CPU and returns to the GPU on restore (#157). Without a transferable canvas the
-engine hands pixels in shared memory (`onEngineFrame`).
+the GPU with cached filtered layers (#156); `url()` and SVG filters on the CPU. Damage tracking
+like WPE (`ENABLE_DAMAGE_TRACKING`, #220): the layers report what changed, a frame without a
+visible change is neither composited nor shown, otherwise the compositor composites the whole view
+(compositing only the damage would need a copy of the view per frame, which costs more under
+SwiftShader). Pinch zoom scales the shown tiles on the compositor and commits once at the end
+(#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
+Without a transferable canvas the engine hands pixels in shared memory (`onEngineFrame`).
 
 ## WebGL
 

@@ -155,6 +155,9 @@ void loadEngineConfig()
     config.gpu = flag("BL_GPU", true);
     config.compositing = flag("BL_COMPOSITING", true);
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
+    // Only for measurements (tests/perf, tests/core/damage-test.mjs)
+    if (const char* damage = config.testHooks ? value("BL_DAMAGE") : nullptr)
+        config.damage = !strcmp(damage, "0") ? DamageUse::None : !strcmp(damage, "target") ? DamageUse::Target : DamageUse::Skip;
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));

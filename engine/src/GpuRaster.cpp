@@ -209,13 +209,23 @@ Scope::~Scope()
         bl_gpu_make_current(m_previous);
 }
 
-sk_sp<SkSurface> createSurface(int width, int height)
+static sk_sp<SkSurface> createSurface(int width, int height, GrSurfaceOrigin origin)
 {
     auto* gr = context();
     if (!gr)
         return nullptr;
     auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
-    return SkSurfaces::RenderTarget(gr, skgpu::Budgeted::kNo, info, 0, kTopLeft_GrSurfaceOrigin, nullptr);
+    return SkSurfaces::RenderTarget(gr, skgpu::Budgeted::kNo, info, 0, origin, nullptr);
+}
+
+sk_sp<SkSurface> createSurface(int width, int height)
+{
+    return createSurface(width, height, kTopLeft_GrSurfaceOrigin);
+}
+
+sk_sp<SkSurface> createFramebufferLikeSurface(int width, int height)
+{
+    return createSurface(width, height, kBottomLeft_GrSurfaceOrigin);
 }
 
 bool present(int viewId, SkSurface& surface)

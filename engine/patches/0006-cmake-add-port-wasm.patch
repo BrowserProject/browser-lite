@@ -161,10 +161,10 @@ index 0000000000..5ab728a8d3
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..7449ec4a3b
+index 0000000000..0cb9cc98e1
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,173 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore to WebAssembly with Emscripten.
 +#
 +# - Single process: no WebKit2/IPC, no WebKitLegacy. The embedder (browser-lite
@@ -295,6 +295,8 @@ index 0000000000..7449ec4a3b
 +# uses layers is decided by the engine at runtime.
 +SET_AND_EXPOSE_TO_BUILD(USE_TEXTURE_MAPPER ON)
 +SET_AND_EXPOSE_TO_BUILD(USE_COORDINATED_GRAPHICS ON)
++# Damage tracking like WPE: frames without a visible change are skipped (#220)
++SET_AND_EXPOSE_TO_BUILD(ENABLE_DAMAGE_TRACKING ON)
 +SET_AND_EXPOSE_TO_BUILD(ENABLE_DEVELOPER_MODE ${DEVELOPER_MODE})
 +
 +# All libraries come from the browser-lite sysroot (CMAKE_FIND_ROOT_PATH)

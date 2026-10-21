@@ -3,6 +3,7 @@
 
 #include "Compositor.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "GpuRaster.h"
 #include "Measurements.h"
 #include "ScrollingWasm.h"
@@ -14,8 +15,10 @@
 #include <WebCore/GraphicsLayerCoordinated.h>
 #include <WebCore/LocalFrameView.h>
 #include <WebCore/NativeImage.h>
+#include <WebCore/Page.h>
 #include <WebCore/PlatformDisplay.h>
 #include <WebCore/ScrollingThread.h>
+#include <WebCore/Settings.h>
 #include <WebCore/SkiaCompositingLayer.h>
 #include <WebCore/SkiaPaintingEngine.h>
 #include <emscripten/emscripten.h>
@@ -41,6 +44,18 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
         setTimeout(run, 16);
 });
 
+// BL_DAMAGE=target: the target surface of the view, new when the size or the
+// context changed (it holds no frame then)
+static SkSurface* damageTarget(CompositorScene& scene, GrDirectContext& grContext, IntSize size)
+{
+    auto& target = scene.target;
+    if (!target || target->width() != size.width() || target->height() != size.height() || target->recordingContext() != &grContext) {
+        target = Gpu::createFramebufferLikeSurface(size.width(), size.height());
+        scene.targetHoldsFrame = false;
+    }
+    return target.get();
+}
+
 static void compositeScene(CompositorScene& scene)
 {
     ASSERT(Compositor::isCompositorThread());
@@ -56,6 +71,7 @@ static void compositeScene(CompositorScene& scene)
     bool notify = false;
     bool firstPaint = false;
     bool newContent = false;
+    bool repaintAll = false;
     IntSize pixelSize;
     float deviceScaleFactor = 1;
     HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
@@ -96,6 +112,7 @@ static void compositeScene(CompositorScene& scene)
             firstPaint = std::exchange(scene.firstPaint, false);
             newContent = std::exchange(scene.newVideoFrame, false);
         }
+        repaintAll = std::exchange(scene.repaintAll, false);
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
         if (std::exchange(scene.hasPendingLayers, false))
             scene.committedLayers = std::exchange(scene.pendingLayers, { });
@@ -193,15 +210,55 @@ static void compositeScene(CompositorScene& scene)
     }
     rootLayer.setTransform(matrix);
 
-    // Without damage tracking: the whole frame every time (cheap on the GPU)
-    auto* canvas = surface->getCanvas();
+    // Damage tracking (#220): paint() collects what changed first. A frame
+    // without a change is neither composited nor shown, the canvas keeps the
+    // last one; a change composites the whole view into the framebuffer, which
+    // is new every frame.
+    repaintAll |= pixelSize != scene.shownSize;
     std::optional<Damage> frameDamage;
+    if (scene.damageMode)
+        frameDamage.emplace(pixelSize, *scene.damageMode);
+    // BL_DAMAGE=0 (for tests/perf until #220 is confirmed): every frame is
+    // composited whole and shown, but counted only with a change, like the
+    // other arms count
+    bool skipUnchanged = engineConfig().damage != DamageUse::None;
+    // BL_DAMAGE=target (for tests/perf until #220 is confirmed): only the
+    // damage into a target that keeps the view, copied into the framebuffer.
+    // Frames that changed the whole view before (scrolling, pinch zoom) go
+    // straight into the framebuffer.
+    bool useTarget = frameDamage && engineConfig().damage == DamageUse::Target;
+    std::optional<Damage> priorDamage;
+    SkSurface* viewTarget = nullptr;
+    if (useTarget) {
+        if (repaintAll)
+            scene.targetHoldsFrame = false;
+        if (!scene.composeInFramebuffer)
+            viewTarget = damageTarget(scene, *grContext, pixelSize);
+        if (viewTarget && scene.targetHoldsFrame)
+            priorDamage.emplace(pixelSize);
+    }
+    auto* canvas = (viewTarget ? viewTarget : surface.get())->getCanvas();
     canvas->save();
-    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE);
+    auto drawsWholeTarget = frameDamage && skipUnchanged && !viewTarget && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
+    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, priorDamage, SK_ColorWHITE, drawsWholeTarget);
     canvas->restore();
+    bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty() || (viewTarget && !priorDamage);
+    if (useTarget) {
+        scene.targetHoldsFrame = !!viewTarget;
+        if (viewTarget && changed) {
+            SkPaint paint;
+            paint.setBlendMode(SkBlendMode::kSrc);
+            viewTarget->draw(surface->getCanvas(), 0, 0, SkSamplingOptions(), &paint);
+        }
+        scene.composeInFramebuffer = frameDamage->mode() == Damage::Mode::Full;
+    }
     grContext->flushAndSubmit(surface.get());
-    Gpu::showFramebuffer(scene.viewId);
-    Measurements::frameShown(newContent);
+    if (changed || !skipUnchanged) {
+        Gpu::showFramebuffer(scene.viewId);
+        scene.shownSize = pixelSize;
+    }
+    if (changed)
+        Measurements::frameShown(newContent);
     if (firstPaint)
         WebView::firstPaintShown(scene.viewId);
 
@@ -297,11 +354,14 @@ RefPtr<CompositorScene> CompositorScene::forView(int viewId)
     return scenes().get(viewId);
 }
 
-CompositorScene::CompositorScene(int viewId)
+CompositorScene::CompositorScene(int viewId, std::optional<Damage::Mode> damageMode)
     : viewId(viewId)
     , rootLayer(CoordinatedPlatformLayer::create())
+    , damageMode(damageMode)
 {
 }
+
+CompositorScene::~CompositorScene() = default;
 
 void CompositorScene::requestComposition(CompositionReason reason)
 {
@@ -319,6 +379,13 @@ void CompositorScene::requestScrollingTick()
 
 void CompositorScene::setHidden(bool value)
 {
+    // BL_DAMAGE=target: GPU memory only for visible views, the next frame composites the whole view again
+    if (value && engineConfig().damage == DamageUse::Target) {
+        Compositor::dispatch([scene = Ref { *this }] {
+            Gpu::Scope scope;
+            scene->target = nullptr;
+        });
+    }
     Locker locker { lock };
     hidden = value;
     if (!hidden && (!reasons.isEmpty() || scrollingTick || notifyEngine))
@@ -367,10 +434,20 @@ bool LayerTreeHostWasm::isAvailable()
     return Compositor::isRunning() && !Compositor::isLost() && ensureSharedDisplay();
 }
 
+// Like WPE (LayerTreeHost): the damage settings of the page
+static std::optional<Damage::Mode> frameDamageMode(const Settings& settings)
+{
+    if (!settings.propagateDamagingInformation() || !settings.useDamagingInformationForCompositing())
+        return std::nullopt;
+    return settings.unifyDamagedRegions() ? Damage::Mode::BoundingBox : Damage::Mode::Rectangles;
+}
+
 LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
     : m_view(view)
-    , m_scene(CompositorScene::create(view.id()))
+    , m_scene(CompositorScene::create(view.id(), frameDamageMode(view.page().settings())))
+    , m_damagePropagation(view.page().settings().propagateDamagingInformation())
 {
+    m_scene->rootLayer->setDamagePropagationEnabled(m_damagePropagation);
     {
         Locker locker { m_scene->rootLayer->lock() };
         m_scene->rootLayer->setAnchorPoint(FloatPoint3D(0, 0, 0));
@@ -420,6 +497,7 @@ LayerTreeHostWasm::~LayerTreeHostWasm()
         for (auto& layer : std::exchange(scene->committedLayers, { }))
             layer->invalidateTarget();
         scene->rootLayer->invalidateTarget();
+        scene->target = nullptr;
     });
 }
 
@@ -470,7 +548,10 @@ void LayerTreeHostWasm::sizeDidChange(IntSize pixelSize, float deviceScaleFactor
 
 void LayerTreeHostWasm::forceRepaint()
 {
-    m_scene->requestComposition(CompositionReason::Animation);
+    Locker locker { m_scene->lock };
+    m_scene->repaintAll = true;
+    m_scene->reasons.add(CompositionReason::Animation);
+    m_scene->scheduleFrameLocked();
 }
 
 void LayerTreeHostWasm::detachScene()
@@ -546,6 +627,7 @@ Ref<CoordinatedImageBackingStore> LayerTreeHostWasm::imageBackingStore(Ref<Nativ
 
 void LayerTreeHostWasm::attachLayer(CoordinatedPlatformLayer& layer)
 {
+    layer.setDamagePropagationEnabled(m_damagePropagation);
     {
         Locker locker { m_layersLock };
         m_layers.add(layer);

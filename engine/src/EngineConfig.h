@@ -32,6 +32,12 @@ enum class Feature : uint32_t {
     Clipboard = 1 << 16,
 };
 
+// How the compositor uses the damage (BL_DAMAGE, only with test hooks, for
+// tests/perf until #220 is confirmed, goes away with it): to skip frames without a change (default),
+// only to count frames with a change (every frame composited and shown), or to
+// composite only the damage into a target that keeps the view
+enum class DamageUse : uint8_t { Skip, None, Target };
+
 // When the spare Web Workers load (BL_SPARE_WORKERS_AT, for tests/perf, goes
 // away with it): at the start of main(), when the engine is ready, at the
 // first paint of a view
@@ -47,6 +53,7 @@ struct EngineConfig {
     bool gpu { true }; // BL_GPU
     bool compositing { true }; // BL_COMPOSITING
     bool asyncScrolling { true }; // BL_ASYNC_SCROLLING
+    DamageUse damage { DamageUse::Skip }; // BL_DAMAGE
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB
