@@ -73,7 +73,7 @@ performance with several runs and inclusive times from profiles, not only load t
    did not help there (#217). Frames without a visible change are skipped since #220 (an
    animation outside the view took all CPU of the device before, now 0.03 CPU seconds per second
    on C); where every frame changes, a frame costs as much as before, and compositing only the
-   damage cost more under SwiftShader (CI perf 39644894451, #220).
+   damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
 ## Open: features
 
