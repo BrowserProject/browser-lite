@@ -66,50 +66,7 @@
   ],
   "groups": [
     {
-      "name": "damage-S",
-      "record": [
-        "example"
-      ],
-      "sections": [
-        {
-          "id": "damage-S-anim",
-          "kind": "frames",
-          "profile": "S",
-          "net": "lan",
-          "args": "--page anim --runs 5"
-        },
-        {
-          "id": "damage-S-video360",
-          "kind": "frames",
-          "profile": "S",
-          "net": "lan",
-          "args": "--page video360 --runs 5"
-        },
-        {
-          "id": "damage-S-webgl",
-          "kind": "frames",
-          "profile": "S",
-          "net": "lan",
-          "args": "--page webgl --runs 5"
-        },
-        {
-          "id": "damage-S-scroll",
-          "kind": "frames",
-          "profile": "S",
-          "net": "lan",
-          "args": "--page scroll --runs 5"
-        },
-        {
-          "id": "damage-S-idle",
-          "kind": "frames",
-          "profile": "S",
-          "net": "lan",
-          "args": "--page idle --runs 5"
-        }
-      ]
-    },
-    {
-      "name": "damage-C",
+      "name": "damage-C-anim",
       "record": [
         "example"
       ],
@@ -119,35 +76,142 @@
           "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--page anim --runs 5"
-        },
+          "args": "--page anim --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-C-video360",
+      "record": [
+        "example"
+      ],
+      "sections": [
         {
           "id": "damage-C-video360",
           "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--page video360 --runs 5"
-        },
+          "args": "--page video360 --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-C-webgl",
+      "record": [
+        "example"
+      ],
+      "sections": [
         {
           "id": "damage-C-webgl",
           "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--page webgl --runs 5"
-        },
+          "args": "--page webgl --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-C-scroll",
+      "record": [
+        "example"
+      ],
+      "sections": [
         {
           "id": "damage-C-scroll",
           "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--page scroll --runs 5"
-        },
+          "args": "--page scroll --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-C-idle",
+      "record": [
+        "example"
+      ],
+      "sections": [
         {
           "id": "damage-C-idle",
           "kind": "frames",
           "profile": "C",
           "net": "lan",
-          "args": "--page idle --runs 5"
+          "args": "--page idle --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-S-anim",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-anim",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page anim --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-S-video360",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-video360",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page video360 --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-S-webgl",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-webgl",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page webgl --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-S-scroll",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-scroll",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page scroll --runs 20"
+        }
+      ]
+    },
+    {
+      "name": "damage-S-idle",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-idle",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page idle --runs 20"
         }
       ]
     }
