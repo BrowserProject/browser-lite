@@ -165,7 +165,7 @@ static void compositeScene(CompositorScene& scene)
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     scene.rootLayer->flushCompositingState(reasons, true);
     for (auto& layer : scene.committedLayers) {
-        // A new contents buffer (WebGL, a video layer) is new content (tests/perf)
+        // A new contents buffer (a WebGL frame) is new content (tests/perf)
         auto* contents = layer->ensureSkiaTarget().contentsBuffer();
         layer->flushCompositingState(reasons, true);
         if (auto* shown = layer->ensureSkiaTarget().contentsBuffer(); shown && shown != contents)

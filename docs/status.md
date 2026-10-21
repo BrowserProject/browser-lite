@@ -66,6 +66,9 @@ performance with several runs and inclusive times from profiles, not only load t
    JIT to WASM) would help; small caches are done (#143).
 4. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 5. GC 5 to 7 % on JS-heavy sites (#60, #122).
+6. Video: frames are painted into the tiles of the view, locally under SwiftShader 1.8 to 9.7
+   frames per second against 25 to 30 in Chromium. A compositor layer for video did not help there
+   (#217); the full redraw of the view on every frame is the suspected cost, not yet measured.
 
 ## Open: features
 

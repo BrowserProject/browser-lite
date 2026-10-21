@@ -160,9 +160,10 @@ page <video src>  -> MediaPlayerPrivateWasm --create--> hidden host <video src=b
 
 `MediaFetch` loads http(s) with the shared loader, `blob:` and `data:` from memory. MSE: WebCore
 gets tracks and timestamps from own fMP4/WebM parsers (`ContainerParser`) and the same bytes go to
-a host MediaSource that decodes (#48). Sound comes straight from the host element. WebCodecs,
-MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's implementations
-(#107, #113, #114, #117 to #119); the corresponding services must be enabled.
+a host MediaSource that decodes (#48). Video frames are painted into the tiles like other
+content, there is no video layer in the compositor (#217). Sound comes straight from the host
+element. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
+implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 
 ## Audio
 
