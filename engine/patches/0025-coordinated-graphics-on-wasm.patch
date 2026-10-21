@@ -53,6 +53,22 @@ index 776466ea87..b463c05d25 100644
      RELEASE_ASSERT(s_skiaGLContext);
      return s_skiaGLContext->skiaGrContext();
  }
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
+index 1bf4ef2053..5f212e2616 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
+@@ -308,6 +308,11 @@ void SkiaBackingStore::Tile::update(const IntRect& dirtyRect, const IntRect& til
+         }
+     } else {
+         auto& unacceleratedBuffer = static_cast<CoordinatedUnacceleratedTileBuffer&>(buffer);
++#if PLATFORM(WASM)
++        // browser-lite: the tile threads may still paint into the buffer (a frame that does not wait
++        // for them), so wait like CoordinatedBackingStoreTile instead of uploading a half painted tile
++        unacceleratedBuffer.waitUntilPaintingComplete();
++#endif
+         ensureTexture(tileRect.size(), buffer);
+         m_texture->updateContents(unacceleratedBuffer.data(), dirtyRect, { }, unacceleratedBuffer.stride(), buffer.pixelFormat());
+     }
 diff --git a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp b/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
 index 9fee5e03f2..f060106844 100644
 --- a/Source/WebCore/platform/graphics/texmap/BitmapTexture.cpp
