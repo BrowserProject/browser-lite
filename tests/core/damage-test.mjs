@@ -1,11 +1,11 @@
 // Damage tracking in the compositor (#220): a frame without a change is neither composited nor
 // shown. Every step of a page with animation, a moving blur filter (cached filtered layers of
-// patch 0036), backdrop-filter, a fixed bar while scrolling, video, WebGL, a repaint while wheel
-// frames come (patch 0045: the damage goes with the tiles) and pinch zoom must look exactly like
-// with every frame composited and shown (BL_DAMAGE=0, until #220 is confirmed): 0 different
-// pixels in each of 3 runs, and while nothing visible changes (an animation off the view) no new
-// frame is shown. The same for the measurement arm that composites only the damage into a target
-// per view (BL_DAMAGE=target).
+// patch 0036), backdrop-filter, a fixed bar while scrolling, video, WebGL, a 2D canvas, text and
+// input selection, a change while the view is hidden, a new view size and device pixel ratio, a
+// repaint while wheel frames come (patch 0045: the damage goes with the tiles) and pinch zoom must
+// look exactly like with every frame composited and shown (BL_DAMAGE=0): 0 different pixels in
+// each of 3 runs, and while nothing visible changes (an animation off the view) no new frame is
+// shown.
 //
 //   node tests/core/damage-test.mjs [engine-dir]
 import fs from 'node:fs';
@@ -22,8 +22,10 @@ import {
   launch,
   near,
   openHost,
+  openView,
   pagePixel,
   screenshot,
+  selectView,
   serve,
   startStack,
   timeLimit,
@@ -48,7 +50,9 @@ const PAGE = `<!doctype html><title>Damage test</title>
   #spinner { position: absolute; top: 100px; left: -400px; width: 100px; height: 100px; background: #000; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   video { position: absolute; top: 200px; left: 420px; width: 160px; height: 120px; }
-  canvas { position: absolute; top: 360px; left: 20px; }
+  #gl { position: absolute; top: 360px; left: 20px; }
+  #flat { position: absolute; top: 500px; left: 20px; }
+  #field { position: absolute; top: 500px; left: 220px; width: 160px; font: 16px sans-serif; }
   #slow { position: absolute; top: 360px; left: 220px; width: 100px; height: 100px; background-image: paint(slow); --color: rgb(200, 0, 0); }
   .row { margin: 0 0 8px 640px; height: 40px; background: #eee; }
 </style>
@@ -60,6 +64,8 @@ const PAGE = `<!doctype html><title>Damage test</title>
 <div id="spinner"></div>
 <video id="video" src="/clip.webm" muted playsinline></video>
 <canvas id="gl" width="160" height="120"></canvas>
+<canvas id="flat" width="160" height="80"></canvas>
+<input id="field" value="Damage tracking">
 <div id="slow"></div>
 ${Array.from({ length: 60 }, (_, i) => `<div class="row">Row ${i}</div>`).join('')}
 <script>
@@ -149,6 +155,10 @@ const browser = await launch({ args: SWIFTSHADER });
 const CLIP = await colorClip(browser);
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/clip.webm') res.writeHead(200, { 'Content-Type': 'video/webm' }).end(CLIP);
+  else if (req.url === '/other')
+    res
+      .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      .end('<!doctype html><title>Other</title><p>Another view</p>');
   else if (req.url === '/slow.js')
     res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SLOW_WORKLET);
   else res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
@@ -292,6 +302,83 @@ const STEPS = [
   ],
   ['scroll back', ({ page }) => evalPage(page, 'scrollTo(0, 0)')],
   [
+    '2d canvas',
+    ({ page }) =>
+      evalPage(
+        page,
+        `(() => {
+          const context = document.getElementById('flat').getContext('2d');
+          context.fillStyle = 'rgb(0, 128, 255)';
+          context.fillRect(10, 10, 80, 40);
+        })()`,
+      ),
+  ],
+  [
+    '2d canvas again',
+    ({ page }) =>
+      evalPage(
+        page,
+        `(() => {
+          const context = document.getElementById('flat').getContext('2d');
+          context.fillStyle = 'rgb(255, 64, 0)';
+          context.fillRect(60, 30, 60, 30);
+        })()`,
+      ),
+  ],
+  [
+    'text selected',
+    ({ page }) =>
+      evalPage(page, `getSelection().selectAllChildren(document.querySelectorAll('.row')[2])`),
+  ],
+  // A selection that is not collapsed: no caret, which blinks
+  [
+    'input selected',
+    ({ page }) =>
+      evalPage(
+        page,
+        `(() => {
+          const field = document.getElementById('field');
+          field.focus();
+          field.setSelectionRange(0, 6);
+        })()`,
+      ),
+  ],
+  [
+    'changed while hidden',
+    // The change comes while another view is in front, then the view is shown again
+    async ({ page }) => {
+      await evalPage(
+        page,
+        `setTimeout(() => { document.getElementById('stripes').style.background = 'rgb(0, 160, 80)'; }, 200)`,
+      );
+      await openView(page, `${siteURL}other`);
+      await page.waitForTimeout(2500);
+      await selectView(page, 0);
+    },
+  ],
+  ['resized', ({ page }) => page.setViewportSize({ width: 900, height: 640 })],
+  ['size back', ({ page }) => page.setViewportSize({ width: 1000, height: 700 })],
+  [
+    'device pixel ratio 2',
+    ({ cdp }) =>
+      cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1000,
+        height: 700,
+        deviceScaleFactor: 2,
+        mobile: false,
+      }),
+  ],
+  [
+    'device pixel ratio back',
+    ({ cdp }) =>
+      cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 1000,
+        height: 700,
+        deviceScaleFactor: 1,
+        mobile: false,
+      }),
+  ],
+  [
     'repaint while wheel frames come',
     // Wheel frames of the scrolling thread before and while the rendering update paints the box
     // (the scrolling tree is out of sync with the engine thread then): the frame that brings its
@@ -349,9 +436,10 @@ async function scenario(env, run) {
   await page.waitForTimeout(1500);
   info.idleFrames = (await shown()) - before;
   const origin = await canvasOrigin(page);
+  const cdp = await context.newCDPSession(page);
   info.states = {};
   for (const [index, [name, step]] of STEPS.entries()) {
-    await step({ page, result, origin });
+    await step({ page, result, origin, cdp });
     shots.set(name, await settled(page));
     await evalPage(
       page,
@@ -364,46 +452,37 @@ async function scenario(env, run) {
   return { shots, info };
 }
 
-// The damage uses until #220 is confirmed: skipping frames without a change (default) and
-// compositing only the damage into a target (BL_DAMAGE=target)
-const ARMS = [
-  ['skip', ''],
-  ['target', 'BL_DAMAGE=target'],
-];
-
 for (let run = 1; run <= RUNS; run++) {
   const full = await scenario('BL_DAMAGE=0', run);
-  for (const [arm, env] of ARMS) {
-    const on = await scenario(env, run);
-    const label = `run ${run}, ${arm}`;
+  const on = await scenario('', run);
+  const label = `run ${run}`;
+  check(
+    `${label}: pages ready, video played to its end`,
+    on.info.ready && full.info.ready && on.info.ended && full.info.ended,
+    JSON.stringify({ on: on.info, full: full.info }),
+  );
+  check(
+    `${label}: last video frame shown (yellow)`,
+    near(on.info.video, [224, 224, 0], 60) && near(full.info.video, [224, 224, 0], 60),
+    JSON.stringify([on.info.video, full.info.video]),
+  );
+  // With every frame shown the engine still counts only frames with a change (tests/perf)
+  check(
+    `${label}: no new frame while nothing visible changes`,
+    on.info.idleFrames <= 2 && full.info.idleFrames <= 2,
+    `${on.info.idleFrames} and ${full.info.idleFrames} frames with a change in 1.5 s`,
+  );
+  for (const [name, shot] of on.shots) {
+    const diff = difference(shot, full.shots.get(name));
     check(
-      `${label}: pages ready, video played to its end`,
-      on.info.ready && full.info.ready && on.info.ended && full.info.ended,
-      JSON.stringify({ on: on.info, full: full.info }),
+      `${label}: ${name} like the whole view`,
+      diff.pixels === 0,
+      JSON.stringify({ ...diff, on: on.info.states[name], full: full.info.states[name] }),
     );
-    check(
-      `${label}: last video frame shown (yellow)`,
-      near(on.info.video, [224, 224, 0], 60) && near(full.info.video, [224, 224, 0], 60),
-      JSON.stringify([on.info.video, full.info.video]),
-    );
-    // With every frame shown the engine still counts only frames with a change (tests/perf)
-    check(
-      `${label}: no new frame while nothing visible changes`,
-      on.info.idleFrames <= 2 && full.info.idleFrames <= 2,
-      `${on.info.idleFrames} and ${full.info.idleFrames} frames with a change in 1.5 s`,
-    );
-    for (const [name, shot] of on.shots) {
-      const diff = difference(shot, full.shots.get(name));
-      check(
-        `${label}: ${name} like the whole view`,
-        diff.pixels === 0,
-        JSON.stringify({ ...diff, on: on.info.states[name], full: full.info.states[name] }),
-      );
-      if (diff.pixels) {
-        const file = `damage-${run}-${arm}-${name.replaceAll(' ', '-')}`;
-        await savePng(shot, `${file}-on`);
-        await savePng(full.shots.get(name), `${file}-full`);
-      }
+    if (diff.pixels) {
+      const file = `damage-${run}-${name.replaceAll(' ', '-')}`;
+      await savePng(shot, `${file}-on`);
+      await savePng(full.shots.get(name), `${file}-full`);
     }
   }
 }

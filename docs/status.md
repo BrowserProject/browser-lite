@@ -70,10 +70,10 @@ performance with several runs and inclusive times from profiles, not only load t
 5. GC 5 to 7 % on JS-heavy sites (#60, #122).
 6. Video and animations: frames are painted into the tiles of the view, locally under SwiftShader
    1.8 to 9.7 video frames per second against 25 to 30 in Chromium. A compositor layer for video
-   did not help there (#217). A frame without a change costs about as much as one with a change
-   (S: 0.17 to 0.20 CPU seconds per unchanged frame, 0.17 to 0.19 for an animation, 88 to 95 % in
-   the GPU process); compositing only the damage did not lower it, skipping unchanged frames
-   saves it where nothing visible changes (#220).
+   did not help there (#217). Frames without a visible change are skipped since #220 (an
+   animation outside the view took all CPU of the device before, now 0.03 CPU seconds per second
+   on C); where every frame changes, a frame costs as much as before, and compositing only the
+   damage cost more under SwiftShader (CI perf 39644894451, #220).
 
 ## Open: features
 

@@ -53,8 +53,8 @@ tools/apply-patches.sh     # reset, then apply engine/patches/*.patch
 
 1. `tools/apply-patches.sh` (puts the patched state into the git index of `third_party/WebKit`).
 2. Edit files in `third_party/WebKit`.
-3. `tools/export-patch.sh 0046-short-description` saves the new changes as
-   `engine/patches/0046-short-description.patch`.
+3. `tools/export-patch.sh <next number>-short-description` saves the new changes as
+   `engine/patches/<next number>-short-description.patch`.
 4. `tools/apply-patches.sh --check` verifies that all patches apply in order and leaves WebKit
    unpatched; run step 1 again before the next build.
 

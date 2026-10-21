@@ -24,7 +24,6 @@
 #include <WebCore/IntSize.h>
 #include <atomic>
 #include <optional>
-#include <skia/core/SkRefCnt.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Lock.h>
@@ -33,8 +32,6 @@
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/WeakPtr.h>
-
-class SkSurface;
 
 namespace WebCore {
 class CoordinatedImageBackingStore;
@@ -52,7 +49,6 @@ class CompositorScene final : public ThreadSafeRefCounted<CompositorScene> {
 public:
     // damageMode: how frames collect their damage, nullopt = composite the whole view every frame
     static Ref<CompositorScene> create(int viewId, std::optional<WebCore::Damage::Mode> damageMode) { return adoptRef(*new CompositorScene(viewId, damageMode)); }
-    ~CompositorScene();
     // From any thread: state of the view while it paints with layers
     static RefPtr<CompositorScene> forView(int viewId);
 
@@ -72,10 +68,9 @@ public:
     float deviceScaleFactor WTF_GUARDED_BY_LOCK(lock) { 1 };
     OptionSet<WebCore::CompositionReason> reasons WTF_GUARDED_BY_LOCK(lock);
     bool frameScheduled WTF_GUARDED_BY_LOCK(lock) { false };
-    // A rendering update waits for tiles (since when): the last finished tile
-    // schedules the next frame
+    // A rendering update waits for tiles: the last finished tile schedules
+    // the next frame
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
-    MonotonicTime tilesWaitStart WTF_GUARDED_BY_LOCK(lock);
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
     // Report "first paint" with this state (WebView::firstPaintShown)
     bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
@@ -114,12 +109,6 @@ public:
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
     // The size of the last frame shown
     WebCore::IntSize shownSize;
-    // BL_DAMAGE=target (tests/perf until #220 is confirmed): the view as last
-    // composited (holdsFrame), and whether the last frame changed the whole
-    // view, so the next one is composited straight into the framebuffer
-    sk_sp<SkSurface> target;
-    bool targetHoldsFrame { false };
-    bool composeInFramebuffer { true };
 
     // From any thread, the host calls directly: pinch gesture. The target goes
     // from here to the engine thread, so later host input (clicks) only arrives

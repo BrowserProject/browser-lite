@@ -40,9 +40,6 @@ private:
 
 // Target surface for a view (texture, the content stays between frames)
 sk_sp<SkSurface> createSurface(int width, int height);
-// The same with the origin of the framebuffer (bottom left): what Skia draws
-// into it has exactly the pixels it would have in the framebuffer (compositor)
-sk_sp<SkSurface> createFramebufferLikeSurface(int width, int height);
 
 // Submit and present: surface into the canvas of the view. Needs a scope.
 // false if the view has no canvas in the engine worker (yet).

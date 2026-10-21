@@ -44,18 +44,6 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
         setTimeout(run, 16);
 });
 
-// BL_DAMAGE=target: the target surface of the view, new when the size or the
-// context changed (it holds no frame then)
-static SkSurface* damageTarget(CompositorScene& scene, GrDirectContext& grContext, IntSize size)
-{
-    auto& target = scene.target;
-    if (!target || target->width() != size.width() || target->height() != size.height() || target->recordingContext() != &grContext) {
-        target = Gpu::createFramebufferLikeSurface(size.width(), size.height());
-        scene.targetHoldsFrame = false;
-    }
-    return target.get();
-}
-
 static void compositeScene(CompositorScene& scene)
 {
     ASSERT(Compositor::isCompositorThread());
@@ -85,29 +73,22 @@ static void compositeScene(CompositorScene& scene)
             keepTicking = false;
             return;
         }
-        // Only show the rendering update when all tiles are painted (the last
-        // finished tile schedules the next frame). But only briefly: animations
-        // and scrolling should not stop when painting takes time (slow
-        // machine), then rather with the old tiles.
+        // Only show the rendering update when all its tiles are painted (the
+        // last finished tile schedules the next frame), like WPE. Until then no
+        // frame: animations and scrolling wait as long as the painting takes
+        // (#220). The upload would wait for them anyway (patch 0025), but
+        // blocking this thread, without ticks for the scrolling thread.
         if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
-            auto now = MonotonicTime::now();
-            if (!scene.tilesWaitStart)
-                scene.tilesWaitStart = now;
-            if (now - scene.tilesWaitStart < 100_ms) {
-                scene.waitingForTiles = true;
-                // Look again in the next frame
-                scene.scheduleFrameLocked();
-                return;
-            }
-            debugLog("Compositor: tiles take over 100 ms, frame without them");
+            scene.waitingForTiles = true;
+            // Look again in the next frame
+            scene.scheduleFrameLocked();
+            return;
         }
         scene.waitingForTiles = false;
-        scene.tilesWaitStart = { };
         reasons = std::exchange(scene.reasons, { });
         notify = std::exchange(scene.notifyEngine, false);
         // Report the first paint with the rendering update that brings it: its
-        // tiles are in the frame, even after the 100 ms
-        // (processPendingBackingStoreTileUpdates waits until they are painted)
+        // tiles are in the frame
         if (reasons.contains(CompositionReason::RenderingUpdate)) {
             firstPaint = std::exchange(scene.firstPaint, false);
             newContent = std::exchange(scene.newVideoFrame, false);
@@ -213,45 +194,21 @@ static void compositeScene(CompositorScene& scene)
     // Damage tracking (#220): paint() collects what changed first. A frame
     // without a change is neither composited nor shown, the canvas keeps the
     // last one; a change composites the whole view into the framebuffer, which
-    // is new every frame.
+    // is new every frame. A new size (new canvas) and forceRepaint() show the
+    // whole view.
     repaintAll |= pixelSize != scene.shownSize;
     std::optional<Damage> frameDamage;
     if (scene.damageMode)
         frameDamage.emplace(pixelSize, *scene.damageMode);
-    // BL_DAMAGE=0 (for tests/perf until #220 is confirmed): every frame is
-    // composited whole and shown, but counted only with a change, like the
-    // other arms count
-    bool skipUnchanged = engineConfig().damage != DamageUse::None;
-    // BL_DAMAGE=target (for tests/perf until #220 is confirmed): only the
-    // damage into a target that keeps the view, copied into the framebuffer.
-    // Frames that changed the whole view before (scrolling, pinch zoom) go
-    // straight into the framebuffer.
-    bool useTarget = frameDamage && engineConfig().damage == DamageUse::Target;
-    std::optional<Damage> priorDamage;
-    SkSurface* viewTarget = nullptr;
-    if (useTarget) {
-        if (repaintAll)
-            scene.targetHoldsFrame = false;
-        if (!scene.composeInFramebuffer)
-            viewTarget = damageTarget(scene, *grContext, pixelSize);
-        if (viewTarget && scene.targetHoldsFrame)
-            priorDamage.emplace(pixelSize);
-    }
-    auto* canvas = (viewTarget ? viewTarget : surface.get())->getCanvas();
+    // BL_DAMAGE=0 (reference of tests/core/damage-test.mjs): every frame is
+    // composited and shown, but counted only with a change (tests/perf)
+    bool skipUnchanged = engineConfig().skipUnchangedFrames;
+    auto* canvas = surface->getCanvas();
     canvas->save();
-    auto drawsWholeTarget = frameDamage && skipUnchanged && !viewTarget && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
-    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, priorDamage, SK_ColorWHITE, drawsWholeTarget);
+    auto drawsWholeTarget = frameDamage && skipUnchanged && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
+    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE, drawsWholeTarget);
     canvas->restore();
-    bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty() || (viewTarget && !priorDamage);
-    if (useTarget) {
-        scene.targetHoldsFrame = !!viewTarget;
-        if (viewTarget && changed) {
-            SkPaint paint;
-            paint.setBlendMode(SkBlendMode::kSrc);
-            viewTarget->draw(surface->getCanvas(), 0, 0, SkSamplingOptions(), &paint);
-        }
-        scene.composeInFramebuffer = frameDamage->mode() == Damage::Mode::Full;
-    }
+    bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
     grContext->flushAndSubmit(surface.get());
     if (changed || !skipUnchanged) {
         Gpu::showFramebuffer(scene.viewId);
@@ -361,8 +318,6 @@ CompositorScene::CompositorScene(int viewId, std::optional<Damage::Mode> damageM
 {
 }
 
-CompositorScene::~CompositorScene() = default;
-
 void CompositorScene::requestComposition(CompositionReason reason)
 {
     Locker locker { lock };
@@ -379,13 +334,6 @@ void CompositorScene::requestScrollingTick()
 
 void CompositorScene::setHidden(bool value)
 {
-    // BL_DAMAGE=target: GPU memory only for visible views, the next frame composites the whole view again
-    if (value && engineConfig().damage == DamageUse::Target) {
-        Compositor::dispatch([scene = Ref { *this }] {
-            Gpu::Scope scope;
-            scene->target = nullptr;
-        });
-    }
     Locker locker { lock };
     hidden = value;
     if (!hidden && (!reasons.isEmpty() || scrollingTick || notifyEngine))
@@ -497,7 +445,6 @@ LayerTreeHostWasm::~LayerTreeHostWasm()
         for (auto& layer : std::exchange(scene->committedLayers, { }))
             layer->invalidateTarget();
         scene->rootLayer->invalidateTarget();
-        scene->target = nullptr;
     });
 }
 

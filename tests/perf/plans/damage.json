@@ -1,5 +1,5 @@
 {
-  "description": "U8 damage tracking in the compositor (#220): CPU per shown frame, shown frames per second, CPU per second and memory with frames without a change skipped (Skip, the default), with only the damage composited into a target per view (Target, BL_DAMAGE=target) and with every frame composited and shown (Off, BL_DAMAGE=0), all on the same engine (site 0, main with U8; all three count only frames with a change), and the engine before U8 (E0, site 1, counts every frame) for the correction check. Pages: CSS animation, 360p video, WebGL and scrolling (every frame changes the whole view, so Target composites straight into the framebuffer there and may cost at most 3 % more), plus idle (an animation outside the view, nothing visible changes: only CPU per second, frames.mjs reports no frame rate there). Rule R under SwiftShader (owner decision): the lever is CPU per second on idle, the other pages may not get worse (rule correction). engine_runs: <U8 run>,<run before U8>",
+  "description": "U8 damage tracking in the compositor (#220): CPU per shown frame, shown frames per second, CPU per second and memory with frames without a change skipped (Skip, the default) and with every frame composited and shown (Off, BL_DAMAGE=0), both on the same engine (site 0, main with U8; both count only frames with a change), and the engine before U8 (E0, site 1, counts every frame) for the correction check. Pages: CSS animation, 360p video, WebGL and scrolling (every frame changes the whole view), plus idle (an animation outside the view, nothing visible changes: only CPU per second, frames.mjs reports no frame rate there). Rule R under SwiftShader (owner decision, no device with a real GPU); the lever is CPU per second on idle (not part of the plan's U8 measurement, which names anim and video360; to be confirmed by the owner), the other pages may not get worse (rule correction). Perf run 39644894451 measured this plan with a third arm, Target (BL_DAMAGE=target, only the damage composited into a texture per view), which failed the correction and was removed. engine_runs: <U8 run>,<run before U8>",
   "metrics": [
     "cpuPerFrame",
     "fps",
@@ -10,15 +10,6 @@
     {
       "name": "Skip",
       "site": 0
-    },
-    {
-      "name": "Target",
-      "site": 0,
-      "engine": {
-        "env": {
-          "BL_DAMAGE": "target"
-        }
-      }
     },
     {
       "name": "Off",
@@ -38,8 +29,7 @@
     {
       "base": "Off",
       "arms": [
-        "Skip",
-        "Target"
+        "Skip"
       ],
       "rule": "lever",
       "where": {
@@ -49,8 +39,7 @@
     {
       "base": "Off",
       "arms": [
-        "Skip",
-        "Target"
+        "Skip"
       ],
       "rule": "correction"
     },
@@ -58,7 +47,6 @@
       "base": "E0",
       "arms": [
         "Skip",
-        "Target",
         "Off"
       ],
       "rule": "correction"
