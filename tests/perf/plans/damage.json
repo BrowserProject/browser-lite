@@ -1,0 +1,155 @@
+{
+  "description": "U8 damage tracking in the compositor (#220): CPU per shown frame, shown frames per second, CPU per second and memory with frames without a change skipped (Skip, the default), with only the damage composited into a target per view (Target, BL_DAMAGE=target) and with every frame composited and shown (Off, BL_DAMAGE=0), all on the same engine (site 0, main with U8; all three count only frames with a change), and the engine before U8 (E0, site 1, counts every frame) for the correction check. Pages: CSS animation, 360p video, WebGL and scrolling (every frame changes the whole view, so Target composites straight into the framebuffer there and may cost at most 3 % more), plus idle (an animation outside the view, nothing visible changes: only CPU per second, frames.mjs reports no frame rate there). Rule R under SwiftShader (owner decision): the lever is CPU per second on idle, the other pages may not get worse (rule correction). engine_runs: <U8 run>,<run before U8>",
+  "metrics": [
+    "cpuPerFrame",
+    "fps",
+    "cpuPerSecond"
+  ],
+  "secondary": [],
+  "configs": [
+    {
+      "name": "Skip",
+      "site": 0
+    },
+    {
+      "name": "Target",
+      "site": 0,
+      "engine": {
+        "env": {
+          "BL_DAMAGE": "target"
+        }
+      }
+    },
+    {
+      "name": "Off",
+      "site": 0,
+      "engine": {
+        "env": {
+          "BL_DAMAGE": "0"
+        }
+      }
+    },
+    {
+      "name": "E0",
+      "site": 1
+    }
+  ],
+  "compare": [
+    {
+      "base": "Off",
+      "arms": [
+        "Skip",
+        "Target"
+      ],
+      "rule": "lever",
+      "where": {
+        "site": "idle"
+      }
+    },
+    {
+      "base": "Off",
+      "arms": [
+        "Skip",
+        "Target"
+      ],
+      "rule": "correction"
+    },
+    {
+      "base": "E0",
+      "arms": [
+        "Skip",
+        "Target",
+        "Off"
+      ],
+      "rule": "correction"
+    }
+  ],
+  "groups": [
+    {
+      "name": "damage-S",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-S-anim",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page anim --runs 5"
+        },
+        {
+          "id": "damage-S-video360",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page video360 --runs 5"
+        },
+        {
+          "id": "damage-S-webgl",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page webgl --runs 5"
+        },
+        {
+          "id": "damage-S-scroll",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page scroll --runs 5"
+        },
+        {
+          "id": "damage-S-idle",
+          "kind": "frames",
+          "profile": "S",
+          "net": "lan",
+          "args": "--page idle --runs 5"
+        }
+      ]
+    },
+    {
+      "name": "damage-C",
+      "record": [
+        "example"
+      ],
+      "sections": [
+        {
+          "id": "damage-C-anim",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page anim --runs 5"
+        },
+        {
+          "id": "damage-C-video360",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page video360 --runs 5"
+        },
+        {
+          "id": "damage-C-webgl",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page webgl --runs 5"
+        },
+        {
+          "id": "damage-C-scroll",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page scroll --runs 5"
+        },
+        {
+          "id": "damage-C-idle",
+          "kind": "frames",
+          "profile": "C",
+          "net": "lan",
+          "args": "--page idle --runs 5"
+        }
+      ]
+    }
+  ]
+}

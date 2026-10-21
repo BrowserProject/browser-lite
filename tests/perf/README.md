@@ -35,14 +35,19 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   `main()` and the moment of the spare ones are measurement options (`engine.env` of a
   configuration, only with `debug`): `BL_POOL_WORKERS` (default 8), `BL_SPARE_WORKERS` and
   `BL_SPARE_WORKERS_AT` (`start`, `ready` or `paint`).
-- **Frames** (`frames.mjs --page video|video360|webgl|anim`): over 20 s, from 8 s after the first
+- **Frames** (`frames.mjs --page video|video360|webgl|anim|scroll|idle`): over 20 s, from 8 s after the first
   shown frame on (every run starts cold), `cpuPerSecond` (CPU seconds per second of the device), `fps` (frames shown per second),
   `cpuPerFrame` and memory, for every arm and Chromium itself (arm `chromium`). browser-lite counts
-  in the compositor: frames with a new video or WebGL image, all frames for `anim`. Chromium counts
-  `totalVideoFrames` minus `droppedVideoFrames` and the frames the WebGL page drew (none for
-  `anim`).
+  in the compositor: frames with a new video or WebGL image, all frames with a change for `anim`
+  and `scroll` (also with `BL_DAMAGE=0`, which shows every frame; an engine before #220 counts
+  every frame).
+  Chromium counts `totalVideoFrames` minus `droppedVideoFrames` and the frames the WebGL page drew
+  (none for `anim` and `scroll`).
   `video360` (`PERF_VIDEO360_URL`) stays below saturation, where CPU per frame is a quantity of its
-  own. Video pages need the live server.
+  own. `scroll` changes the whole view in every frame, `idle` runs an animation outside the view
+  (nothing visible changes, only `cpuPerSecond` is reported). Video pages need the live server.
+  The damage switch `BL_DAMAGE` (`0` or `target`, `engine.env` of a configuration, only with
+  `debug`) is the measurement option of `plans/damage.json`.
 - `foreign.sh` logs foreign load on the device cores and memory pressure every second;
   `stats.mjs` drops runs with either.
 
@@ -111,5 +116,11 @@ Hooks outside the folder that exist only for these measurements (#214):
   `test/config.test.mjs`, `blPoolWorkers` of `EngineModule` in `packages/core/src/engine.ts`,
   `SpareWorkersAt` in `engine/src/EngineConfig.h`, `.cpp`, `Engine.h`, `main.cpp` and `WebView.cpp`
   (`firstPaintShown`), the pool part of `tests/core/start-test.mjs`.
+- Damage switch (U8, until #220 is confirmed): `BL_DAMAGE` (`0`, `target`) in `engine/abi.json`,
+  `DamageUse` in `engine/src/EngineConfig.h` and `.cpp` and its uses in
+  `engine/src/LayerTreeHostWasm.cpp`, the target arm there (`target`, `targetHoldsFrame`,
+  `composeInFramebuffer`, `damageTarget()`, the release in `setHidden`) and
+  `Gpu::createFramebufferLikeSurface`, the arms of `tests/core/damage-test.mjs` (it then needs
+  another full repaint to compare against).
 - Pins: the `PERF_*` lines of `versions.env`.
 - `--mem-high` of `run.mjs` and `device.sh` goes with the folder itself.

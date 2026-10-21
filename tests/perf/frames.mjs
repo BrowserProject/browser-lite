@@ -7,10 +7,14 @@
 //   video360  the same at 360p (PERF_VIDEO360_URL), a load below saturation
 //   webgl     a WebGL animation (a shader over the whole canvas, drawn every animation frame)
 //   anim      CSS animations (a moving box and one that is painted again in every frame)
+//   scroll    a long page with a fixed bar that scrolls up and down in every animation frame
+//             (every frame changes the whole view)
+//   idle      a CSS animation outside the view: the compositor runs, nothing visible changes
 // Shown frames: browser-lite counts in its compositor (debug.measurements(), frames with a new
-// video or WebGL image; all frames for anim), Chromium totalVideoFrames minus droppedVideoFrames of
-// the video and the frames the WebGL page drew; anim has no frame count in Chromium. Video pages
-// need the live server (the replay server does not answer range requests reliably).
+// video or WebGL image; all frames with a change for anim, scroll and idle), Chromium
+// totalVideoFrames minus droppedVideoFrames of the video and the frames the WebGL page drew; anim,
+// scroll and idle have no frame count in Chromium. Video pages need the live server (the replay
+// server does not answer range requests reliably).
 //   node frames.mjs --out <jsonl> --page <page> --runs n [--label x] [--configs '<json>']
 import fs from 'node:fs';
 import os from 'node:os';
@@ -83,10 +87,35 @@ const ANIM = `<style>
 @keyframes move { to { transform: translateX(900px) rotate(180deg); } }
 @keyframes paint { from { background: #c33; } to { background: #3c3; } }
 </style><div class="move"></div><div class="paint"></div>`;
+const SCROLL = `<style>
+body { font: 16px sans-serif; }
+header { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #234; color: #fff; }
+.row { height: 120px; margin: 12px; padding: 8px; background: linear-gradient(90deg, #fc9, #9cf); }
+</style><header>scroll</header><script>
+for (let i = 0; i < 200; i++) {
+  const row = document.body.appendChild(document.createElement('div'));
+  row.className = 'row';
+  row.textContent = 'Row ' + i + ': the quick brown fox jumps over the lazy dog';
+}
+let y = 0;
+let step = 8;
+const scroll = () => {
+  const end = document.documentElement.scrollHeight - innerHeight;
+  y += step;
+  if (y <= 0 || y >= end) step = -step;
+  scrollTo(0, y);
+  requestAnimationFrame(scroll);
+};
+requestAnimationFrame(scroll);
+</script>`;
+const IDLE = `<style>
+.spin { position: absolute; left: -400px; top: 100px; width: 200px; height: 200px; background: #36c; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style><div class="spin"></div><p>Nothing here moves.</p>`;
 const video = VIDEOS[pageName];
 const body = video
   ? `<video src="${video.url}" autoplay muted loop playsinline style="width:${video.width}px;height:${video.height}px"></video>`
-  : { webgl: WEBGL, anim: ANIM }[pageName];
+  : { webgl: WEBGL, anim: ANIM, scroll: SCROLL, idle: IDLE }[pageName];
 if (!body) throw new Error(`unknown page ${pageName}`);
 const pageURL = `data:text/html,${encodeURIComponent(`<!doctype html><title>${pageName}</title><body style="margin:0">${body}`)}`;
 
@@ -131,7 +160,7 @@ async function measure(config) {
   } else {
     const query = new URLSearchParams({ url: pageURL, debug: '1', ...config.params });
     await tab.goto(`${origins[config.site]}/?${query}`);
-    const all = pageName === 'anim';
+    const all = ['anim', 'scroll', 'idle'].includes(pageName);
     readFrames = () =>
       tab.evaluate((all) => {
         const shown = window.blTest.measurements();
@@ -140,7 +169,7 @@ async function measure(config) {
   }
   // Warm up from the first shown frame on: every run starts cold, the engine alone takes about
   // 12 s on C then
-  const counted = !native || pageName !== 'anim';
+  const counted = !native || video || pageName === 'webgl';
   const shown = counted ? firstFrame(tab, readFrames) : Promise.resolve(true);
   if (!(await (failed ? Promise.race([shown, failed]) : shown))) {
     await context.close();
@@ -161,9 +190,11 @@ async function measure(config) {
     : await tab.evaluate(() => window.blTest.measurements()?.memoryBytes).catch(() => null);
   await context.close();
   fs.rmSync(dir, { recursive: true, force: true });
-  const frames = frames0 != null && frames1 != null ? frames1 - frames0 : null;
+  // idle: only CPU per second counts, with damage tracking next to no frame is shown
+  const frames =
+    frames0 != null && frames1 != null && pageName !== 'idle' ? frames1 - frames0 : null;
   return {
-    status: counted && !frames ? 'no-frames' : 'ok',
+    status: counted && pageName !== 'idle' && !frames ? 'no-frames' : 'ok',
     t0,
     wall: Math.round(seconds * 1000),
     cpuPerSecond: +(cpu / seconds).toFixed(3),
