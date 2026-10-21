@@ -1,7 +1,11 @@
 // Native tests of WTF fixes in engine/patches, built with the engine (target
 // BrowserLiteWTFTests in engine/engine.cmake) and run in node by wtf-test.mjs.
 // Prints "ok <name>" or "FAIL <name>: <reason>" per test; a crash aborts the program.
-#include "config.h"
+// Like Source/WTF/config.h: the WebCore config.h needs the JavaScriptCore headers
+#include "cmakeconfig.h"
+#include <wtf/ExportMacros.h>
+#include <wtf/FastMalloc.h>
+#include <wtf/TZoneMalloc.h>
 
 #include <cstdio>
 #include <wtf/MainThread.h>
