@@ -262,8 +262,10 @@ jobs:
         id: engine-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: build/webcore/bin/engine.*
-          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/patches/**', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'deps/**') }}
+          path: |
+            build/webcore/bin/engine.*
+            build/webcore/bin/wtf-tests.*
+          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/patches/**', 'tests/engine/*.cpp', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'deps/**') }}
       - name: Make room (the WebCore build needs a lot)
         if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
@@ -314,9 +316,11 @@ jobs:
         if: steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
-          path: build/webcore/bin/engine.*
+          path: |
+            build/webcore/bin/engine.*
+            build/webcore/bin/wtf-tests.*
           key: ${{ steps.engine-cache.outputs.cache-primary-key }}
-      - name: Engine tests in node (pages, error page, GC stress)
+      - name: Engine tests in node (pages, error page, GC stress, WTF)
         run: |
           docker run --rm -v "$PWD:/src" -w /src -e GITHUB_ACTIONS "$IMAGE" node tests/run.mjs engine
       # The license texts come from the dependency archives (tools/licenses.txt)

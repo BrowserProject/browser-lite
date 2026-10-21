@@ -1,4 +1,4 @@
-# Status (2026-10-20)
+# Status (2026-10-21)
 
 Where the project stands, what was measured, what is open. Numbers like #142 refer to
 [decisions.md](decisions.md); real sites are in [compatibility.md](compatibility.md).
@@ -27,7 +27,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), error pages with the
-  relay's reason and auto reload (#174, #175), dead relay detection (#177).
+  relay's reason and auto reload (#174, #175), dead relay detection (#177), fix of a WTF timer
+  bug that aborted about 1 % of heavy page loads (#219).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,

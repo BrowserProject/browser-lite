@@ -198,3 +198,25 @@ endif ()
 
 # Data package: link again when the WebAssembly API changes
 set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js)
+
+# Native tests of the WTF fixes in engine/patches (tests/engine/wtf-tests.cpp), run in
+# node by tests/engine/wtf-test.mjs: bin/wtf-tests.js and wtf-tests.wasm
+add_executable(BrowserLiteWTFTests ${BROWSER_LITE_ENGINE_DIR}/../tests/engine/wtf-tests.cpp)
+set_target_properties(BrowserLiteWTFTests PROPERTIES OUTPUT_NAME wtf-tests)
+target_include_directories(BrowserLiteWTFTests PRIVATE
+    ${WebCore_INCLUDE_DIRECTORIES}
+    ${WebCore_PRIVATE_INCLUDE_DIRECTORIES}
+)
+target_include_directories(BrowserLiteWTFTests SYSTEM PRIVATE
+    ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
+)
+target_link_libraries(BrowserLiteWTFTests PRIVATE WebKit::WTF)
+target_link_options(BrowserLiteWTFTests PRIVATE
+    "SHELL:-pthread"
+    "SHELL:-sPTHREAD_POOL_SIZE=2"
+    "SHELL:-sALLOW_MEMORY_GROWTH=1"
+    "SHELL:-sENVIRONMENT=node"
+    "SHELL:--profiling-funcs"
+)
+# Built with the engine (tools/build-webcore.sh builds BrowserLiteEngine)
+add_dependencies(BrowserLiteEngine BrowserLiteWTFTests)

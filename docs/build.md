@@ -53,13 +53,15 @@ tools/apply-patches.sh     # reset, then apply engine/patches/*.patch
 
 1. `tools/apply-patches.sh` (puts the patched state into the git index of `third_party/WebKit`).
 2. Edit files in `third_party/WebKit`.
-3. `tools/export-patch.sh 0045-short-description` saves the new changes as
-   `engine/patches/0045-short-description.patch`.
+3. `tools/export-patch.sh 0046-short-description` saves the new changes as
+   `engine/patches/0046-short-description.patch`.
 4. `tools/apply-patches.sh --check` verifies that all patches apply in order and leaves WebKit
    unpatched; run step 1 again before the next build.
 
 Rules: small patches, one topic each, the number gives the order. What does not have to be in
-WebKit belongs in `engine/`. Mark changes in WebKit with `PLATFORM(WASM)` or `__EMSCRIPTEN__`.
+WebKit belongs in `engine/`. Mark changes in WebKit with `PLATFORM(WASM)` or `__EMSCRIPTEN__`;
+fixes of WebKit bugs apply to every platform (patches 0022, 0046) and get a test, in
+`tests/engine/wtf-tests.cpp` when no page reaches the bug deterministically.
 Porting traps worth knowing: the `EmptyFrameLoaderClient` defaults block everything (policies
 dropped, `canHandleRequest()` false), so the engine has a full client; `ENABLE_FTPDIR=ON` breaks
 curl without FTP support (every protocol list fails); `Thread::suspend` cannot work without

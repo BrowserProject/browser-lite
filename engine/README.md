@@ -12,7 +12,8 @@ patches from `patches/`.
   features, host calls, environment). `tests/contract/abi-test.mjs` checks it against the
   sources.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
-  package. `BL_PRE_JS` is the only list of the `--pre-js` files.
+  package. `BL_PRE_JS` is the only list of the `--pre-js` files. Also builds the native WTF
+  tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
   - `sockets.js`: TCP streams over `Module.blTransport`

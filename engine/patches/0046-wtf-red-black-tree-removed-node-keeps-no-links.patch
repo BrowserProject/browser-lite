@@ -1,0 +1,15 @@
+diff --git a/Source/WTF/wtf/RedBlackTree.h b/Source/WTF/wtf/RedBlackTree.h
+index 3a122a4d99..5f5e95b695 100644
+--- a/Source/WTF/wtf/RedBlackTree.h
++++ b/Source/WTF/wtf/RedBlackTree.h
+@@ -286,6 +286,10 @@ public:
+         } else if (y->color() == Black)
+             removeFixup(x, xParent);
+ 
++        // browser-lite: a removed node keeps no links. Its CheckedPtrs would still
++        // count its former children, and deleting one of them before the node is
++        // inserted again or deleted turns that later reset into a crash.
++        z->reset();
+         return z;
+     }
+     
