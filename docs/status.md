@@ -93,7 +93,8 @@ performance with several runs and inclusive times from profiles, not only load t
 - CSS: `url(#...)` and SVG filters on the CPU; filtered layers with children, masks or video
   recompute every frame; `interpolate-size`; Paint Worklet scripts are classic (no
   `import`/`export`) and runtime errors reject differently than in Chromium.
-- Graphics: WebGL frames through `readPixels` instead of a texture, timer queries, queries and
+- Graphics: WebGL frames through `readPixels` instead of a texture (a GPU path was slower under
+  SwiftShader, #221), timer queries, queries and
   transform feedback across context switches, WebGPU. Views that lost the GPU while compositing
   stay without layers (new views get them again); a WebGL page that does not draw notices a loss
   only at its next draw.
