@@ -1,6 +1,7 @@
 // HTTP cache (engine/js/http-cache.js) without the engine: loaded in node, the Cache API is a
 // fake with the same order as in the browser (storing appends at the end, replacing too). Key
-// format with the partition, cache names by format version (other formats deleted), cleanup.
+// format with the partition, cache names by format version (other formats deleted), cleanup,
+// ranges of a resource (206): answered only when complete, stitched, versions replaced.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -26,14 +27,15 @@ class FakeCache {
   async match(request) {
     const url = typeof request === 'string' ? request : request.url;
     if (this.onMatch) await this.onMatch(url);
-    return this.entries.get(url);
+    // A new response each time, like the Cache API
+    return this.entries.get(url)?.clone();
   }
   async put(url, response) {
     this.entries.delete(url);
     this.entries.set(url, response);
   }
   async delete(request) {
-    return this.entries.delete(request.url);
+    return this.entries.delete(typeof request === 'string' ? request : request.url);
   }
 }
 
@@ -57,6 +59,7 @@ function load(namespace = 'browserlite', names = []) {
         replies.push({
           id,
           status,
+          headers: new TextDecoder().decode(heap.slice(headers, headers + headersLength)),
           body: new TextDecoder().decode(heap.slice(body, body + bodyLength)),
         }),
     },
@@ -77,6 +80,7 @@ function load(namespace = 'browserlite', names = []) {
     Headers,
     Response,
     TextEncoder,
+    URL,
     URLSearchParams,
     Promise,
     Number,
@@ -173,6 +177,119 @@ async function fill(http, cache, count, size) {
   );
   check('lookup: miss from another top site', status(2) === 0, String(status(2)));
   check('lookup: miss in a frame of another top site', status(3) === 0, String(status(3)));
+}
+
+// Ranges of a resource (206): key with range and version, answered only when the ranges of the
+// newest version cover the whole resource, stitched from overlapping ranges, replaced by another
+// version, by a range holding them and by a whole response
+{
+  const { http, cache, replies } = load();
+  await http.open();
+  const partition = 'http://a.test http://a.test';
+  const url = 'https://cdn.test/loop.mp4';
+  const file = '0123456789';
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await tick();
+  };
+  const store = async (first, last, version, text = file) => {
+    http.store(
+      partition,
+      url,
+      206,
+      `Content-Type: video/mp4\nContent-Range: bytes ${first}-${last}/10\nETag: ${version}\n`,
+      new TextEncoder().encode(text.slice(first, last + 1)),
+      first,
+      10,
+      version,
+    );
+    await settle();
+  };
+  let nextId = 100;
+  const lookup = async (start, end, from = partition) => {
+    const id = nextId++;
+    http.lookup(id, from, url, start, end);
+    await settle();
+    return replies.find((reply) => reply.id === id);
+  };
+  const ranges = () =>
+    http
+      .ranges(http.key(partition, url))
+      .map((range) => `${range.first}-${range.last}:${range.version}`)
+      .join();
+
+  const key = http.key(partition, url, { first: 0, last: 4, total: 10, version: '"a"\n\n' });
+  const parsed = new URL(key);
+  check(
+    'range key: fields and as the Cache API gives it back',
+    [...parsed.searchParams.keys()].join() === 'p,u,r,v' &&
+      parsed.searchParams.get('r') === '0-4/10' &&
+      parsed.searchParams.get('v') === '"a"\n\n' &&
+      parsed.href === key,
+    key,
+  );
+
+  await store(0, 4, '"a"');
+  let reply = await lookup(0, 4);
+  check('range: not answered while the resource is incomplete', reply.status === 0);
+  await store(3, 9, '"a"');
+  reply = await lookup(2, 7);
+  check(
+    'range: complete, stitched from overlapping ranges',
+    reply.status === 206 &&
+      reply.body === '234567' &&
+      reply.headers.includes('content-range: bytes 2-7/10\n') &&
+      reply.headers.split('content-range').length === 2 &&
+      !reply.headers.includes('x-bl-size'),
+    JSON.stringify(reply),
+  );
+  reply = await lookup(6, -1);
+  check(
+    'range: open end up to the end of the resource',
+    reply.status === 206 && reply.body === '6789' && reply.headers.includes('bytes 6-9/10'),
+    JSON.stringify(reply),
+  );
+  reply = await lookup(8, 2000000);
+  check(
+    'range: end beyond the resource is cut to it',
+    reply.status === 206 && reply.body === '89' && reply.headers.includes('bytes 8-9/10'),
+    JSON.stringify(reply),
+  );
+  reply = await lookup(10, 12);
+  check('range: start beyond the resource misses', reply.status === 0);
+  reply = await lookup(0, 4, 'http://b.test http://a.test');
+  check('range: miss in another partition', reply.status === 0);
+  reply = await lookup(-1, -1);
+  check('range: ranges do not answer a request for the whole resource', reply.status === 0);
+
+  await store(0, 9, '"a"');
+  check('range: a range holding others replaces them', ranges() === '0-9:"a"', ranges());
+
+  await store(0, 4, '"b"', 'ABCDEFGHIJ');
+  check('range: another version replaces the old one', ranges() === '0-4:"b"', ranges());
+  reply = await lookup(0, 4);
+  check('range: the new version alone is incomplete', reply.status === 0);
+  await store(5, 9, '"b"', 'ABCDEFGHIJ');
+  reply = await lookup(3, 6);
+  check(
+    'range: new version complete',
+    reply.status === 206 && reply.body === 'DEFG' && reply.headers.includes('etag: "b"'),
+    JSON.stringify(reply),
+  );
+  check(
+    'range: usage counts the deleted ranges',
+    http.total === null || http.total === 10,
+    String(http.total),
+  );
+
+  http.store(partition, url, 200, 'Content-Type: video/mp4\n', new TextEncoder().encode(file));
+  await settle();
+  check(
+    'range: a whole response replaces all ranges',
+    ranges() === '' && [...cache.entries.keys()].join() === http.key(partition, url),
+    [...cache.entries.keys()].join(),
+  );
+  reply = await lookup(0, 4);
+  check('range: a whole response does not answer ranges', reply.status === 0);
 }
 
 // Above the limit: the oldest go away until 80 % are used

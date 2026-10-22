@@ -59,6 +59,8 @@ public:
     // Bytes of blob: and data:, otherwise nullptr (loaded with curl)
     WebCore::BlobData* blob() const { return m_blob.get(); }
     String referrer() const;
+    // HTTP cache partition of the document of the element
+    String httpCachePartition() const;
 
     // From MediaSourcePrivateWasm
     void activeSourceBuffersChanged();

@@ -13,6 +13,15 @@
 // stored. WebCore computes freshness and age (CacheValidation.h) like in the
 // network process.
 //
+// Ranges (media loads a file piece by piece) like Chrome's sparse entries: a
+// 206 response with a strong validator is stored as a range of its resource
+// (up to 10 MB in total). Ranges of one version (validator and Vary values)
+// make up the resource, another version replaces them. A range request comes
+// from the cache only when the ranges of the newest version cover the whole
+// resource, so the pieces of one playback never mix versions; freshness and
+// revalidation go by the newest range. A whole response does not serve ranges
+// and ranges do not serve a request for the whole resource.
+//
 // Every entry belongs to a partition (top site, frame site, subframe document;
 // partition()) like in Chrome, so a page cannot tell from cache hits which
 // other sites were visited. WebCore's MemoryCache stays shared inside the engine.
@@ -34,6 +43,7 @@
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/Page.h>
+#include <WebCore/ParsedContentRange.h>
 #include <WebCore/ResourceLoader.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/SecurityOrigin.h>
@@ -50,11 +60,13 @@
 #include <wtf/text/StringBuilder.h>
 
 // Run on the main thread (engine/js/http-cache.js)
-EM_JS(void, blJsHttpCacheLookup, (int id, const char* partition, const char* url), {
-    blHttpCache.lookup(id, UTF8ToString(partition), UTF8ToString(url));
+// start < 0: the whole resource, end < 0: up to its end
+EM_JS(void, blJsHttpCacheLookup, (int id, const char* partition, const char* url, double start, double end), {
+    blHttpCache.lookup(id, UTF8ToString(partition), UTF8ToString(url), start, end);
 });
-EM_JS(void, blJsHttpCacheStore, (const char* partition, const char* url, int status, const char* headers, const uint8_t* body, int length), {
-    blHttpCache.store(UTF8ToString(partition), UTF8ToString(url), status, UTF8ToString(headers), HEAPU8.slice(body, body + length));
+// start < 0: a whole response, else a range of a resource of total bytes and this version
+EM_JS(void, blJsHttpCacheStore, (const char* partition, const char* url, int status, const char* headers, const uint8_t* body, int length, double start, double total, const char* version), {
+    blHttpCache.store(UTF8ToString(partition), UTF8ToString(url), status, UTF8ToString(headers), HEAPU8.slice(body, body + length), start, total, UTF8ToString(version));
 });
 
 namespace BrowserLite::HttpCache {
@@ -150,14 +162,32 @@ String partition(const ResourceLoader& loader)
     return partition(*frame, loader.request(), loader.options(), resource ? resource->origin() : nullptr);
 }
 
+String partition(const Document& document)
+{
+    return partition(originOf(document.firstPartyForCookies()), document.securityOrigin().data(), false);
+}
+
+// Range of a request: none without the header, nullopt for one the cache does not
+// handle (several ranges, the last n bytes)
+static std::optional<HTTPRange> requestRange(const ResourceRequest& request)
+{
+    auto header = request.httpHeaderField(HTTPHeaderName::Range);
+    if (header.isNull())
+        return HTTPRange { };
+    auto range = parseRange(header, RangeAllowWhitespace::No);
+    if (!range || !range->start)
+        return std::nullopt;
+    return range;
+}
+
 bool canUse(const ResourceRequest& request)
 {
     if (!engineConfig().httpCache || request.httpMethod() != "GET"_s || !request.url().protocolIsInHTTPFamily())
         return false;
-    if (request.cachePolicy() == ResourceRequestCachePolicy::DoNotUseAnyCache)
+    if (request.cachePolicy() == ResourceRequestCachePolicy::DoNotUseAnyCache || !requestRange(request))
         return false;
-    // Range requests (video) and WebCore's own conditional requests go straight to the network
-    for (auto name : { HTTPHeaderName::Range, HTTPHeaderName::IfNoneMatch, HTTPHeaderName::IfModifiedSince, HTTPHeaderName::IfMatch, HTTPHeaderName::IfUnmodifiedSince, HTTPHeaderName::IfRange, HTTPHeaderName::Authorization }) {
+    // WebCore's own conditional requests go straight to the network
+    for (auto name : { HTTPHeaderName::IfNoneMatch, HTTPHeaderName::IfModifiedSince, HTTPHeaderName::IfMatch, HTTPHeaderName::IfUnmodifiedSince, HTTPHeaderName::IfRange, HTTPHeaderName::Authorization }) {
         if (request.hasHTTPHeaderField(name))
             return false;
     }
@@ -167,6 +197,36 @@ bool canUse(const ResourceRequest& request)
 static bool hasValidators(const ResourceResponse& response)
 {
     return !response.httpHeaderField(HTTPHeaderName::ETag).isEmpty() || !response.httpHeaderField(HTTPHeaderName::LastModified).isEmpty();
+}
+
+// RFC 9110 8.8.1, like HttpUtil::HasStrongValidators in Chrome: a strong ETag, or a
+// Last-Modified at least 60 s before the Date of the response
+static bool hasStrongValidator(const ResourceResponse& response)
+{
+    auto etag = response.httpHeaderField(HTTPHeaderName::ETag);
+    if (!etag.isEmpty() && !etag.startsWith("W/"_s))
+        return true;
+    auto lastModified = response.lastModified();
+    auto date = response.date();
+    return lastModified && date && *date - *lastModified >= 60_s;
+}
+
+// The range a 206 response holds, if it may be stored as a range of its resource
+static std::optional<ParsedContentRange> storableRange(const ResourceRequest& request, const ResourceResponse& response)
+{
+    auto range = requestRange(request);
+    ParsedContentRange content { response.httpHeaderField(HTTPHeaderName::ContentRange) };
+    if (!range || !range->start || !content.isValid() || content.instanceLength() == ParsedContentRange::unknownLength)
+        return std::nullopt;
+    if (static_cast<uint64_t>(content.firstBytePosition()) != *range->start || (range->end && static_cast<uint64_t>(content.lastBytePosition()) > *range->end))
+        return std::nullopt;
+    if (static_cast<uint64_t>(content.instanceLength()) > maximumEntrySize || !hasStrongValidator(response))
+        return std::nullopt;
+    // Positions of the encoded bytes, but curl decodes them
+    auto encoding = response.httpHeaderField(HTTPHeaderName::ContentEncoding);
+    if (!encoding.isEmpty() && !equalLettersIgnoringASCIICase(encoding, "identity"_s))
+        return std::nullopt;
+    return content;
 }
 
 Use decide(const Entry& entry, const ResourceRequest& request)
@@ -206,13 +266,16 @@ void addValidationHeaders(ResourceRequest& request, const Entry& entry)
 
 bool isStorable(const String& partition, const ResourceRequest& request, const ResourceResponse& response)
 {
-    if (partition.isNull() || !canUse(request) || (response.httpStatusCode() != 200 && response.httpStatusCode() != 203))
+    if (partition.isNull() || !canUse(request) || cacheKey(response.url()) != cacheKey(request.url()))
         return false;
-    if (cacheKey(response.url()) != cacheKey(request.url()))
+    if (response.httpStatusCode() == 206) {
+        if (!storableRange(request, response))
+            return false;
+    } else if ((response.httpStatusCode() != 200 && response.httpStatusCode() != 203) || !response.httpHeaderField(HTTPHeaderName::ContentRange).isEmpty())
         return false;
     if (parseCacheControlDirectives(response.httpHeaderFields()).noStore || parseCacheControlDirectives(request.httpHeaderFields()).noStore)
         return false;
-    if (response.httpHeaderField(HTTPHeaderName::Vary).contains('*') || !response.httpHeaderField(HTTPHeaderName::ContentRange).isEmpty())
+    if (response.httpHeaderField(HTTPHeaderName::Vary).contains('*'))
         return false;
     if (response.expectedContentLength() > static_cast<long long>(maximumEntrySize))
         return false;
@@ -275,6 +338,9 @@ void lookup(const String& partition, const ResourceRequest& request, Completion&
 {
     if (partition.isNull())
         return completion(nullptr);
+    auto range = requestRange(request);
+    if (!range)
+        return completion(nullptr);
     static int nextId;
     int id = ++nextId;
     pendingLookups().add(id, PendingLookup { request.url(), WTF::move(completion) });
@@ -282,11 +348,14 @@ void lookup(const String& partition, const ResourceRequest& request, Completion&
         int id;
         CString partition;
         CString url;
+        double start;
+        double end;
     };
-    auto* job = new Job { id, partition.utf8(), cacheKey(request.url()).utf8() };
+    auto* job = new Job { id, partition.utf8(), cacheKey(request.url()).utf8(),
+        range->start ? static_cast<double>(*range->start) : -1, range->end ? static_cast<double>(*range->end) : -1 };
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
         std::unique_ptr<Job> job(static_cast<Job*>(argument));
-        blJsHttpCacheLookup(job->id, job->partition.data(), job->url.data());
+        blJsHttpCacheLookup(job->id, job->partition.data(), job->url.data(), job->start, job->end);
     }, job);
 }
 
@@ -320,7 +389,9 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
         auto contentType = fields.get(HTTPHeaderName::ContentType);
         auto response = ResourceResponse(URL { pending.url }, extractMIMETypeFromMediaType(contentType), bodyLength, extractCharsetFromMediaType(contentType).toString());
         response.setHTTPStatusCode(status);
-        response.setHTTPStatusText(statusText.isEmpty() ? String { "OK"_s } : WTF::move(statusText));
+        if (statusText.isEmpty())
+            statusText = status == 206 ? "Partial Content"_s : "OK"_s;
+        response.setHTTPStatusText(WTF::move(statusText));
         for (auto& field : fields)
             response.setHTTPHeaderField(field.key, field.value);
         entry = std::unique_ptr<Entry>(new Entry {
@@ -340,6 +411,13 @@ void store(const String& partition, const ResourceRequest& request, const Resour
 {
     if (partition.isNull())
         return;
+    std::optional<ParsedContentRange> range;
+    if (response.httpStatusCode() == 206) {
+        range = storableRange(request, response);
+        // A range cut short is not stored
+        if (!range || static_cast<uint64_t>(range->lastBytePosition() - range->firstBytePosition() + 1) != body.size())
+            return;
+    }
     // Headers without those that are no longer right (curl already decoded the body)
     StringBuilder headers;
     for (auto& field : response.httpHeaderFields()) {
@@ -366,9 +444,11 @@ void store(const String& partition, const ResourceRequest& request, const Resour
     headers.append(timeHeader, ": "_s, String::number(responseTime.secondsSinceEpoch().milliseconds()), '\n');
     if (!response.httpStatusText().isEmpty())
         headers.append(statusTextHeader, ": "_s, response.httpStatusText(), '\n');
-    auto varying = collectVaryingRequestHeaders(&networkStorageSession(), request, response);
+    auto varying = encodeVary(collectVaryingRequestHeaders(&networkStorageSession(), request, response));
     if (!varying.isEmpty())
-        headers.append(varyHeader, ": "_s, encodeVary(varying), '\n');
+        headers.append(varyHeader, ": "_s, varying, '\n');
+    // Ranges of the same version make up one resource
+    auto version = range ? makeString(response.httpHeaderField(HTTPHeaderName::ETag), '\n', response.httpHeaderField(HTTPHeaderName::LastModified), '\n', varying) : String { };
 
     struct Job {
         CString partition;
@@ -377,18 +457,52 @@ void store(const String& partition, const ResourceRequest& request, const Resour
         CString headers;
         uint8_t* body;
         size_t length;
+        double start;
+        double total;
+        CString version;
     };
     auto contiguous = body.makeContiguous();
     auto* data = static_cast<uint8_t*>(malloc(std::max<size_t>(contiguous->size(), 1)));
     if (!data)
         return;
     memcpySpan(std::span(data, contiguous->size()), contiguous->span());
-    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), response.httpStatusCode(), headers.toString().utf8(), data, contiguous->size() };
+    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), response.httpStatusCode(), headers.toString().utf8(), data, contiguous->size(),
+        range ? static_cast<double>(range->firstBytePosition()) : -1, range ? static_cast<double>(range->instanceLength()) : 0, version.utf8() };
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
         std::unique_ptr<Job> job(static_cast<Job*>(argument));
-        blJsHttpCacheStore(job->partition.data(), job->url.data(), job->status, job->headers.data(), job->body, job->length);
+        blJsHttpCacheStore(job->partition.data(), job->url.data(), job->status, job->headers.data(), job->body, job->length, job->start, job->total, job->version.data());
         free(job->body);
     }, job);
+}
+
+void Writer::start(const String& partition, const ResourceRequest& request, const ResourceResponse& response)
+{
+    m_body.reset();
+    m_storing = isStorable(partition, request, response);
+    if (!m_storing)
+        return;
+    m_partition = partition;
+    m_request = request;
+    m_response = response;
+    m_responseTime = WallTime::now();
+}
+
+void Writer::append(const SharedBuffer& buffer)
+{
+    if (!m_storing)
+        return;
+    if (m_body.size() + buffer.size() > maximumEntrySize) {
+        m_storing = false;
+        m_body.reset();
+        return;
+    }
+    m_body.append(buffer);
+}
+
+void Writer::finish()
+{
+    if (std::exchange(m_storing, false))
+        store(m_partition, m_request, m_response, m_responseTime, m_body.takeBuffer().get());
 }
 
 void lookupForLoad(const String& partition, ResourceRequest&& request, bool alwaysRevalidate, CompletionHandler<void(Lookup&&)>&& completion)

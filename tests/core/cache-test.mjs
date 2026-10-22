@@ -14,6 +14,12 @@
 // sandboxed frame is not cached. Opening the HTTP cache deletes other formats,
 // browser.storage.clearCaches() all of them.
 //
+// Range requests (206) like Chrome's sparse entries: ranges with a strong validator are stored,
+// a range request hits only once the ranges cover the whole resource, a changed resource
+// (other ETag after revalidation) replaces the old ranges, no validator or a weak ETag is not
+// stored, Vary and the partition apply as for whole responses. A media element gets its pieces
+// from the cache too (MediaFetch).
+//
 //   node tests/core/cache-test.mjs [engine-dir]
 import {
   TIMEOUT,
@@ -25,9 +31,10 @@ import {
   serve,
   startStack,
   timeLimit,
+  wav,
 } from '../lib/index.mjs';
 
-timeLimit(2 * TIMEOUT + 300000);
+timeLimit(2 * TIMEOUT + 420000);
 
 const PAGE = `<!doctype html><title>Cache test</title><link rel=stylesheet href="/etag.css"><script src="/fresh.js"></script>
 <body>Cache<script>
@@ -132,6 +139,57 @@ const MANY_PAGE = `<!doctype html><title>Many</title><body><script>
 })();
 </script>`;
 
+// Range requests: fetch() of two halves (bytes=0-499, bytes=500-) or only the first of resources
+// of 1000 bytes under /r/ with different headers; reports status, length and the first three
+// characters (the version) per resource. Absolute URLs of 127.0.0.1, so a top page of
+// localhost loads the same resources in its own partition
+const RANGE_FILES = { full: 2, part: 1, ver: 2, nov: 2, weak: 2, vary: 2 };
+const RANGE_PAGE = (variant, names) => `<!doctype html><title>Ranges</title><body><script>
+(async () => {
+  const out = {};
+  for (const name of ${JSON.stringify(names)}) {
+    const statuses = [];
+    let text = '';
+    for (const range of ['bytes=0-499', 'bytes=500-'].slice(0, ${JSON.stringify(RANGE_FILES)}[name])) {
+      const response = await fetch('${siteURL}r/' + name, { headers: { Range: range, 'X-Variant': '${variant}' } });
+      statuses.push(response.status);
+      text += await response.text();
+    }
+    out[name] = statuses.join('/') + ',' + text.length + ',' + text.slice(0, 3);
+  }
+  console.log('RESULT ranges=' + JSON.stringify(out));
+})().catch((e) => console.log('RESULT ranges=' + e));
+</script>`;
+const rangeBody = (version) => Buffer.from(`${version}:`.padEnd(1000, '0123456789'));
+// Version of /r/ver (changed between visits) and the requests per resource: range and If-None-Match
+let verVersion = 'v1';
+let rangeRequests = [];
+function serveRange(req, res, data, headers) {
+  const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '');
+  if (!match)
+    return res
+      .writeHead(200, { ...headers, 'Content-Length': data.length, 'Accept-Ranges': 'bytes' })
+      .end(data);
+  const start = Number(match[1]);
+  const end = Math.min(match[2] ? Number(match[2]) : data.length - 1, data.length - 1);
+  res
+    .writeHead(206, {
+      ...headers,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': end - start + 1,
+      'Content-Range': `bytes ${start}-${end}/${data.length}`,
+    })
+    .end(data.subarray(start, end + 1));
+}
+// Media: an audio file of 30 s (about 2.6 MB, two pieces of the service worker), cacheable
+const LOOP = wav(30, { rate: 44100 });
+const MEDIA_PAGE = `<!doctype html><title>Media</title><body>
+<audio id="audio" src="/r/loop.wav" muted preload="auto"></audio><script>
+const audio = document.getElementById('audio');
+audio.addEventListener('loadedmetadata', () => console.log('RESULT media=' + Math.round(audio.duration)));
+audio.addEventListener('error', () => console.log('RESULT media=error ' + (audio.error && audio.error.code)));
+</script>`;
+
 const requests = { fresh: 0, etag: 0, etag304: 0, nostore: 0, umlaut: 0, cut: 0 };
 // Partitions: requests per path, the worker script with its If-None-Match (none: '-'), the
 // navigation with its preload header
@@ -154,7 +212,55 @@ const count = (counts, name) => {
 };
 const { url: siteURL } = await serve((req, res) => {
   const { pathname, searchParams } = new URL(req.url, 'http://localhost');
+  if (pathname.startsWith('/r/')) {
+    const cors = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Range, X-Variant',
+    };
+    if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
+    const name = pathname.slice(3);
+    const inm = req.headers['if-none-match'];
+    rangeRequests.push(`${name}:${req.headers.range || '-'}:${inm || '-'}`);
+    cors['Content-Type'] = 'text/plain';
+    const max = { ...cors, 'Cache-Control': 'max-age=3600' };
+    switch (name) {
+      case 'full':
+        return serveRange(req, res, rangeBody('f1'), { ...max, ETag: '"f1"' });
+      case 'part':
+        return serveRange(req, res, rangeBody('p1'), { ...max, ETag: '"p1"' });
+      case 'ver': {
+        const headers = { ...cors, 'Cache-Control': 'no-cache', ETag: `"${verVersion}"` };
+        if (inm === `"${verVersion}"`) return res.writeHead(304, headers).end();
+        return serveRange(req, res, rangeBody(verVersion), headers);
+      }
+      case 'nov':
+        return serveRange(req, res, rangeBody('n1'), max);
+      case 'weak':
+        return serveRange(req, res, rangeBody('w1'), { ...max, ETag: 'W/"w1"' });
+      case 'vary': {
+        const variant = `y${req.headers['x-variant']}`;
+        return serveRange(req, res, rangeBody(variant), {
+          ...max,
+          ETag: `"${variant}"`,
+          Vary: 'X-Variant',
+        });
+      }
+      case 'loop.wav':
+        return serveRange(req, res, LOOP, {
+          'Content-Type': 'audio/wav',
+          'Cache-Control': 'max-age=3600',
+          ETag: '"l1"',
+        });
+    }
+    return res.writeHead(404).end();
+  }
   switch (pathname) {
+    case '/rangepage':
+      return res
+        .writeHead(200, html)
+        .end(RANGE_PAGE(searchParams.get('variant'), searchParams.get('names').split(',')));
+    case '/mediapage':
+      return res.writeHead(200, html).end(MEDIA_PAGE);
     case '/blobtop':
       return res.writeHead(200, html).end(BLOB_TOP_PAGE());
     case '/bframe':
@@ -364,7 +470,7 @@ const httpEntries = () =>
     const cache = await caches.open(name);
     return (await cache.keys()).map((request) => {
       const fields = new URL(request.url).searchParams;
-      return { p: fields.get('p'), u: fields.get('u') };
+      return { p: fields.get('p'), u: fields.get('u'), v: fields.get('v') };
     });
   }, HTTP_CACHE);
 const partitionsOf = async (url) =>
@@ -551,6 +657,114 @@ for (const visits of [1, 2]) {
 const sandboxKeys =
   (await partitionsOf(`${otherURL()}sbframe`)) + (await partitionsOf(`${otherURL()}sb.js`));
 check('sandboxed frame: no entries', sandboxKeys === '', sandboxKeys);
+
+// Range requests. Visit 1 stores, visit 2 (other Vary value, /r/ver changed) and visit 3 hit or
+// revalidate, visit 4 from a top page of localhost is another partition
+async function rangeVisit(top, variant, names = Object.keys(RANGE_FILES)) {
+  rangeRequests = [];
+  const value = await visit(`${top}rangepage?variant=${variant}&names=${names}`, 'ranges');
+  let got = {};
+  try {
+    got = JSON.parse(value);
+  } catch {}
+  const requestsOf = (name) => rangeRequests.filter((r) => r.startsWith(`${name}:`));
+  return { got, requestsOf, info: `${value} ${rangeRequests.join(' ')}` };
+}
+const whole = (version) => `206/206,1000,${version}:`;
+let ranges = await rangeVisit(siteURL, 'a');
+check(
+  'range: first visit from the network',
+  ranges.got.full === whole('f1') &&
+    ranges.got.part === '206,500,p1:' &&
+    ranges.got.ver === whole('v1') &&
+    ranges.got.nov === whole('n1') &&
+    ranges.got.weak === whole('w1') &&
+    ranges.got.vary === whole('ya') &&
+    Object.entries(RANGE_FILES).every(([name, parts]) => ranges.requestsOf(name).length === parts),
+  ranges.info,
+);
+verVersion = 'v2';
+ranges = await rangeVisit(siteURL, 'b');
+check(
+  'range: complete resource from the cache',
+  ranges.got.full === whole('f1') && ranges.requestsOf('full').length === 0,
+  ranges.info,
+);
+check(
+  'range: incomplete resource from the network',
+  ranges.got.part === '206,500,p1:' && ranges.requestsOf('part').length === 1,
+  ranges.info,
+);
+// The second request may still find the old ranges (storing is asynchronous)
+check(
+  'range: changed resource revalidated with the stored ETag, new content',
+  ranges.got.ver === whole('v2') &&
+    ranges.requestsOf('ver')[0] === 'ver:bytes=0-499:"v1"' &&
+    ranges.requestsOf('ver').length === 2,
+  ranges.info,
+);
+const verVersions = (await httpEntries())
+  .filter((entry) => entry.u === `${siteURL}r/ver`)
+  .map((entry) => entry.v);
+check(
+  'range: changed resource replaces the stored ranges',
+  verVersions.length === 2 && verVersions.every((v) => v?.startsWith('"v2"')),
+  JSON.stringify(verVersions),
+);
+check(
+  'range: no validator or a weak ETag is not stored',
+  ranges.got.nov === whole('n1') &&
+    ranges.got.weak === whole('w1') &&
+    ranges.requestsOf('nov').length === 2 &&
+    ranges.requestsOf('weak').length === 2,
+  ranges.info,
+);
+check(
+  'range: other Vary value from the network',
+  ranges.got.vary === whole('yb') && ranges.requestsOf('vary').length === 2,
+  ranges.info,
+);
+ranges = await rangeVisit(siteURL, 'b');
+check(
+  'range: revalidated with the stored ETag, 304 from the cache',
+  ranges.got.ver === whole('v2') &&
+    ranges.requestsOf('ver').join() === 'ver:bytes=0-499:"v2",ver:bytes=500-:"v2"',
+  ranges.info,
+);
+check(
+  'range: same Vary value from the cache',
+  ranges.got.vary === whole('yb') && ranges.requestsOf('vary').length === 0,
+  ranges.info,
+);
+ranges = await rangeVisit(otherURL(), 'b', ['full']);
+check(
+  'range: other partition from the network',
+  ranges.got.full === whole('f1') && ranges.requestsOf('full').length === 2,
+  ranges.info,
+);
+
+// Media: the service worker loads the audio in pieces through MediaFetch; once all pieces are
+// stored the next visit takes them from the cache
+rangeRequests = [];
+const loopEnd = `-${LOOP.length - 1}:`;
+let media = await visit(`${siteURL}mediapage`, 'media');
+for (let i = 0; i < 150 && !rangeRequests.some((r) => r.includes(loopEnd)); i++)
+  await page.waitForTimeout(200);
+await page.waitForTimeout(2000);
+const loopFromNetwork = rangeRequests.filter((r) => r.startsWith('loop.wav:'));
+check(
+  'media: first visit in pieces from the network',
+  media === '30' && loopFromNetwork.length >= 2 && loopFromNetwork.some((r) => r.includes(loopEnd)),
+  `${media} ${loopFromNetwork.join(' ')}`,
+);
+rangeRequests = [];
+media = await visit(`${siteURL}mediapage`, 'media');
+await page.waitForTimeout(3000);
+check(
+  'media: second visit from the cache',
+  media === '30' && !rangeRequests.some((r) => r.startsWith('loop.wav:')),
+  `${media} ${rangeRequests.join(' ')}`,
+);
 
 // Other formats of the HTTP cache: deleted when the engine opens the cache, and
 // browser.storage.clearCaches() deletes all formats

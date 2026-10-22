@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "Host.h"
+#include "HttpCache.h"
 #include "Measurements.h"
 #include "MediaSourceWasm.h"
 #include "VideoFrameWasm.h"
@@ -13,8 +14,10 @@
 
 #include <WebCore/BlobRegistry.h>
 #include <WebCore/BlobRegistryImpl.h>
+#include <WebCore/CachedResourceLoader.h>
 #include <WebCore/ContentType.h>
 #include <WebCore/DataURLDecoder.h>
+#include <WebCore/Document.h>
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/MediaSourcePrivateClient.h>
 #include <WebCore/MediaPlayer.h>
@@ -265,6 +268,14 @@ String MediaPlayerPrivateWasm::referrer() const
     if (RefPtr player = m_player.get())
         return player->referrer();
     return { };
+}
+
+String MediaPlayerPrivateWasm::httpCachePartition() const
+{
+    RefPtr player = m_player.get();
+    RefPtr loader = player ? player->cachedResourceLoader() : nullptr;
+    RefPtr document = loader ? loader->document() : nullptr;
+    return document ? HttpCache::partition(*document) : String { };
 }
 
 void MediaPlayerPrivateWasm::send(ASCIILiteral type, const String& json)

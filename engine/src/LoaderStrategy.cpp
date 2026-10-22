@@ -316,9 +316,7 @@ private:
         // Cacheable? Then write the content along (HttpCache.cpp)
         // Of the current request: after a redirect its target decides (navigations)
         m_partition = HttpCache::partition(*m_loader);
-        m_storing = HttpCache::isStorable(m_partition, m_loader->request(), m_response);
-        m_responseTime = WallTime::now();
-        m_cacheBody.reset();
+        m_cacheWriter.start(m_partition, m_loader->request(), m_response);
 
         m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }] {
             if (m_curlRequest && m_loader)
@@ -331,15 +329,8 @@ private:
         Ref protectedThis { *this };
         if (!m_loader || m_curlRequest != &request)
             return;
-        auto size = buffer->size();
-        if (m_storing) {
-            if (m_cacheBody.size() + size > HttpCache::maximumEntrySize) {
-                m_storing = false;
-                m_cacheBody.reset();
-            } else
-                m_cacheBody.append(buffer.get());
-        }
-        m_loader->didReceiveBuffer(buffer.get(), size, DataPayloadBytes);
+        m_cacheWriter.append(buffer.get());
+        m_loader->didReceiveBuffer(buffer.get(), buffer->size(), DataPayloadBytes);
     }
 
     void curlDidComplete(CurlRequest& request, NetworkLoadMetrics&& metrics) final
@@ -349,8 +340,7 @@ private:
             return;
         RefPtr loader = m_loader;
         debugLog("done %s", loader->url().string().utf8().data());
-        if (std::exchange(m_storing, false))
-            HttpCache::store(m_partition, loader->request(), m_response, m_responseTime, m_cacheBody.takeBuffer().get());
+        m_cacheWriter.finish();
         finish();
         loader->didFinishLoading(metrics);
     }
@@ -372,9 +362,7 @@ private:
     // HTTP cache: partition of the current request, entry being revalidated, and what is stored
     String m_partition;
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
-    bool m_storing { false };
-    WallTime m_responseTime;
-    SharedBufferBuilder m_cacheBody;
+    HttpCache::Writer m_cacheWriter;
 };
 
 // Fire-and-forget for sendBeacon, <a ping> and reports, the page does not see

@@ -8,6 +8,7 @@
 #include <wtf/WallTime.h>
 
 namespace WebCore {
+class Document;
 class Page;
 class ResourceLoader;
 struct SecurityOriginData;
@@ -44,14 +45,19 @@ String partition(const WebCore::SecurityOriginData& topOrigin, const WebCore::Se
 // its creator's document.
 String partition(const WebCore::ResourceLoader&);
 
+// Partition of a load of this document that WebCore's loader does not make (media)
+String partition(const WebCore::Document&);
+
 // Origin of the service worker or shared worker that runs in this page (its
 // placeholder document has an opaque origin)
 void setWorkerOrigin(WebCore::Page&, const WebCore::SecurityOriginData&);
 
-// May this request come from the cache or go into it?
+// May this request come from the cache or go into it? Of the range requests
+// only those with one range from a position on (bytes=a-b, bytes=a-)
 bool canUse(const WebCore::ResourceRequest&);
 
-// Asynchronous, the answer arrives on the engine thread (nullptr: nothing there)
+// Asynchronous, the answer arrives on the engine thread (nullptr: nothing there).
+// A range request gets a 206 entry with just that range
 void lookup(const String& partition, const WebCore::ResourceRequest&, CompletionHandler<void(std::unique_ptr<Entry>&&)>&&);
 
 // What to do with an entry for this request
@@ -63,10 +69,29 @@ void addValidationHeaders(WebCore::ResourceRequest&, const Entry&);
 // Should this response be stored? (before reading the body)
 bool isStorable(const String& partition, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
 
+// Largest body of an entry, and largest resource whose ranges are stored
 constexpr size_t maximumEntrySize = 10 << 20;
 
-// Stores asynchronously
+// Stores asynchronously (a 206 response as a range of its resource)
 void store(const String& partition, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&, WallTime responseTime, const WebCore::FragmentedSharedBuffer& body);
+
+// Writes a response from the network into the cache while it arrives
+class Writer {
+public:
+    // A new response: stores it if isStorable allows
+    void start(const String& partition, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
+    void append(const WebCore::SharedBuffer&);
+    // The body is complete
+    void finish();
+
+private:
+    bool m_storing { false };
+    String m_partition;
+    WebCore::ResourceRequest m_request;
+    WebCore::ResourceResponse m_response;
+    WallTime m_responseTime;
+    WebCore::SharedBufferBuilder m_body;
+};
 
 // What a loader does with the cache before the network (LoaderStrategy, in the
 // service worker background update and navigation preload)

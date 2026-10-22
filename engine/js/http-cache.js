@@ -9,6 +9,14 @@
 // HttpCache::partition). The list of keys is kept in memory, so a request that
 // is not in the cache costs no disk access.
 //
+// A range of a resource (206) has the key of the resource plus
+// &r=<first>-<last>/<total>&v=<version> (version: validator and Vary values,
+// HttpCache.cpp). A range request is answered when the ranges of the newest
+// version cover the whole resource; the answer is a 206 with the requested bytes
+// and the headers of the newest range. Storing a range deletes the ranges of
+// other versions and those inside it, storing a whole response all ranges of
+// the resource.
+//
 // Limit: 400 MB, at most a quarter of the host's quota. Only the own content
 // counts (header x-bl-size), not what else is in the OPFS or in the host's
 // Cache API. Above it, or when the quota is full, the oldest entries go away
@@ -72,32 +80,127 @@ var blHttpCache = {
     });
   },
 
-  // Request URL of the entry of url in partition: already in the form
+  // Request URL of the entry of url in partition (with range: of that range of
+  // the resource, {first, last, total, version}): already in the form
   // cache.keys() gives back, so it can be compared with those
-  key: function (partition, url) {
-    return 'https://http.invalid/?' + new URLSearchParams({ p: partition, u: url });
+  key: function (partition, url, range) {
+    var fields = { p: partition, u: url };
+    if (range) {
+      fields.r = range.first + '-' + range.last + '/' + range.total;
+      fields.v = range.version;
+    }
+    return 'https://http.invalid/?' + new URLSearchParams(fields);
   },
 
-  lookup: function (id, partition, url) {
+  // Stored ranges of the resource with this key, in the order of storing
+  ranges: function (key) {
+    var prefix = key + '&';
+    var ranges = [];
+    blHttpCache.urls.forEach(function (url) {
+      if (url.indexOf(prefix) !== 0)
+        return;
+      var fields = new URL(url).searchParams;
+      var match = /^(\d+)-(\d+)\/(\d+)$/.exec(fields.get('r') || '');
+      if (match)
+        ranges.push({ key: url, first: Number(match[1]), last: Number(match[2]), total: Number(match[3]), version: fields.get('v') });
+    });
+    return ranges;
+  },
+
+  // Ranges that together hold first to last, null if a byte is missing. Of the
+  // ranges that start at the next missing byte or before it, the one reaching
+  // furthest
+  cover: function (ranges, first, last) {
+    var sorted = ranges.slice().sort(function (a, b) { return a.first - b.first; });
+    var chosen = [];
+    var position = first;
+    var i = 0;
+    while (position <= last) {
+      var best = null;
+      for (; i < sorted.length && sorted[i].first <= position; i++) {
+        if (!best || sorted[i].last > best.last)
+          best = sorted[i];
+      }
+      if (!best || best.last < position)
+        return null;
+      chosen.push(best);
+      position = best.last + 1;
+    }
+    return chosen;
+  },
+
+  headerText: function (response, skip) {
+    var headers = '';
+    response.headers.forEach(function (value, name) {
+      if (name !== blHttpCache.sizeHeader && name !== skip)
+        headers += name + ': ' + value + '\n';
+    });
+    return headers;
+  },
+
+  // start < 0: the whole resource, end < 0: up to its end
+  lookup: function (id, partition, url, start, end) {
     var key = blHttpCache.key(partition, url);
+    var miss = function () { blHttpCache.reply(id, 0, '', null); };
     blHttpCache.open().then(function (cache) {
-      if (!cache || !blHttpCache.urls.has(key))
-        return blHttpCache.reply(id, 0, '', null);
+      if (!cache)
+        return miss();
+      if (start >= 0)
+        return blHttpCache.lookupRange(cache, id, key, start, end);
+      if (!blHttpCache.urls.has(key))
+        return miss();
       return cache.match(key, { ignoreVary: true }).then(function (response) {
         if (!response) {
           blHttpCache.urls.delete(key);
-          return blHttpCache.reply(id, 0, '', null);
+          return miss();
         }
         return response.arrayBuffer().then(function (buffer) {
-          var headers = '';
-          response.headers.forEach(function (value, name) {
-            if (name !== blHttpCache.sizeHeader)
-              headers += name + ': ' + value + '\n';
-          });
-          blHttpCache.reply(id, response.status, headers, new Uint8Array(buffer));
+          blHttpCache.reply(id, response.status, blHttpCache.headerText(response), new Uint8Array(buffer));
         });
       });
-    }).catch(function () { blHttpCache.reply(id, 0, '', null); });
+    }).catch(miss);
+  },
+
+  lookupRange: function (cache, id, key, start, end) {
+    var miss = function () { blHttpCache.reply(id, 0, '', null); };
+    var ranges = blHttpCache.ranges(key);
+    if (!ranges.length)
+      return miss();
+    var newest = ranges[ranges.length - 1];
+    ranges = ranges.filter(function (range) {
+      return range.version === newest.version && range.total === newest.total;
+    });
+    var last = end < 0 ? newest.total - 1 : Math.min(end, newest.total - 1);
+    if (start > last || !blHttpCache.cover(ranges, 0, newest.total - 1))
+      return miss();
+    var parts = blHttpCache.cover(ranges, start, last);
+    return Promise.all([newest].concat(parts).map(function (range) {
+      return cache.match(range.key, { ignoreVary: true });
+    })).then(function (responses) {
+      var gone = false;
+      responses.forEach(function (response, i) {
+        if (!response) {
+          blHttpCache.urls.delete((i ? parts[i - 1] : newest).key);
+          gone = true;
+        }
+      });
+      if (gone)
+        return miss();
+      return Promise.all(responses.slice(1).map(function (response) { return response.arrayBuffer(); })).then(function (buffers) {
+        var body = new Uint8Array(last - start + 1);
+        for (var i = 0; i < parts.length; i++) {
+          var bytes = new Uint8Array(buffers[i]);
+          if (bytes.length !== parts[i].last - parts[i].first + 1)
+            return miss();
+          var from = Math.max(start, parts[i].first);
+          var to = Math.min(last, parts[i].last);
+          body.set(bytes.subarray(from - parts[i].first, to - parts[i].first + 1), from - start);
+        }
+        var headers = blHttpCache.headerText(responses[0], 'content-range') +
+          'content-range: bytes ' + start + '-' + last + '/' + newest.total + '\n';
+        blHttpCache.reply(id, 206, headers, body);
+      });
+    });
   },
 
   // Without memory in the engine it becomes a miss (status 0)
@@ -119,8 +222,10 @@ var blHttpCache = {
     Module['_bl__http_cache_result'](id, status, headerPointer, headerBytes.length, bodyPointer, bodyLength);
   },
 
-  store: function (partition, url, status, headerText, body) {
-    var key = blHttpCache.key(partition, url);
+  // start < 0: a whole response, else a range of a resource of total bytes and this version
+  store: function (partition, url, status, headerText, body, start, total, version) {
+    var range = start >= 0 ? { first: start, last: start + body.length - 1, total: total, version: version } : null;
+    var key = blHttpCache.key(partition, url, range);
     blHttpCache.open().then(function (cache) {
       if (!cache)
         return;
@@ -142,6 +247,7 @@ var blHttpCache = {
         blHttpCache.urls.add(key);
         if (blHttpCache.total !== null)
           blHttpCache.total += body.length;
+        blHttpCache.dropRanges(cache, partition, url, range);
         if (blHttpCache.total === null || blHttpCache.total > blHttpCache.limit)
           blHttpCache.trim(false);
       };
@@ -151,6 +257,23 @@ var blHttpCache = {
         return blHttpCache.trim(true).then(put).then(stored);
       });
     }).catch(function () { });
+  },
+
+  // After storing range (null: the whole response) of a resource: deletes the
+  // ranges it replaces (all for a whole response; other versions and those
+  // inside it for a range)
+  dropRanges: function (cache, partition, url, range) {
+    var keep = blHttpCache.key(partition, url, range);
+    blHttpCache.ranges(blHttpCache.key(partition, url)).forEach(function (old) {
+      if (old.key === keep)
+        return;
+      if (range && old.version === range.version && (old.first < range.first || old.last > range.last))
+        return;
+      blHttpCache.urls.delete(old.key);
+      if (blHttpCache.total !== null)
+        blHttpCache.total -= old.last - old.first + 1;
+      cache.delete(old.key).catch(function () { });
+    });
   },
 
   // Deletes the oldest entries (order of the Cache API = order of storing).
