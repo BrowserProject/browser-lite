@@ -24,7 +24,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
-  HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213).
+  HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
+  (206, media pieces) like Chrome's sparse entries (#222).
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), error pages with the
