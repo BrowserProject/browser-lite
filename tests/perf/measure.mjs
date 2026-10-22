@@ -1,7 +1,9 @@
 // Shared parts of the runners in the device container (run.mjs, start.mjs, frames.mjs): arguments,
-// the forwarders to the sites of the server, configurations and readings of the device cgroup.
+// the forwarders to the sites of the server, configurations, readings of the device cgroup and of
+// the Chromium profile.
 import fs from 'node:fs';
 import { connect, createServer } from 'node:net';
+import path from 'node:path';
 
 /** Value of `--<name>` on the command line or the fallback. */
 export const arg = (name, fallback) => {
@@ -120,3 +122,34 @@ export function memoryHigh() {
     throw new Error(`memory.high is ${high ?? 'max'} MB, --mem-high wants ${wanted} MB`);
   return high;
 }
+
+const dirSize = (dir) =>
+  fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir, { withFileTypes: true })
+        .reduce(
+          (s, e) =>
+            s +
+            (e.isDirectory()
+              ? dirSize(path.join(dir, e.name))
+              : fs.statSync(path.join(dir, e.name)).size),
+          0,
+        )
+    : 0;
+
+/** Size of the WebAssembly code cache of V8 in a Chromium profile directory in MB. */
+export const wasmCodeCacheMB = (profileDir) =>
+  +(dirSize(path.join(profileDir, 'Default', 'Code Cache', 'wasm')) / 1048576).toFixed(1);
+
+/**
+ * Steps of the start in ms of performance.now() of the page (marks bl:<step> of the core: lock,
+ * beforeStart, engine.js, engine.data, compile, instantiate, main, ready, prepared). Runs in the
+ * page (page.evaluate).
+ */
+export const startMarks = () =>
+  Object.fromEntries(
+    performance
+      .getEntriesByType('mark')
+      .filter((mark) => mark.name.startsWith('bl:'))
+      .map((mark) => [mark.name.slice(3), Math.round(mark.startTime)]),
+  );

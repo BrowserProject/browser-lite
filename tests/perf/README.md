@@ -38,6 +38,10 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   `main()` and the moment of the spare ones are measurement options (`engine.env` of a
   configuration, only with `debug`): `BL_POOL_WORKERS` (default 8), `BL_SPARE_WORKERS` and
   `BL_SPARE_WORKERS_AT` (`start`, `ready` or `paint`).
+- **Template** (`run.mjs`): every visit starts from a profile that has loaded the demo of every
+  site once (engine in the HTTP cache and the WebAssembly code cache of Chromium). The job log
+  shows the size of that code cache after every site; rows have `markCompile`,
+  `markInstantiate` and `markMain` like `start.mjs`.
 - **Frames** (`frames.mjs --page video|video360|webgl|anim|scroll|idle`): over 20 s, from 8 s after the first
   shown frame on (every run starts cold), `cpuPerSecond` (CPU seconds per second of the device), `fps` (frames shown per second),
   `cpuPerFrame` and memory, for every arm and Chromium itself (arm `chromium`). browser-lite counts

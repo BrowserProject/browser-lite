@@ -21,7 +21,9 @@ import {
   netBytes,
   readConfigs,
   startError,
+  startMarks,
   testOptions,
+  wasmCodeCacheMB,
 } from './measure.mjs';
 
 const out = arg('out');
@@ -42,20 +44,6 @@ const HOOKS = () => {
     }
   }, 20);
 };
-const dirSize = (dir) =>
-  fs.existsSync(dir)
-    ? fs
-        .readdirSync(dir, { withFileTypes: true })
-        .reduce(
-          (s, e) =>
-            s +
-            (e.isDirectory()
-              ? dirSize(path.join(dir, e.name))
-              : fs.statSync(path.join(dir, e.name)).size),
-          0,
-        )
-    : 0;
-
 async function start(dir, config) {
   const context = await chromium.launchPersistentContext(dir, {
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
@@ -82,6 +70,7 @@ async function start(dir, config) {
   const wall = Date.now() - t0;
   const cpu = cpuSeconds() - cpu0;
   const rx = netBytes().rx - rx0;
+  const marks = await page.evaluate(startMarks);
   const info = await page.evaluate(() => ({
     perf: window.__perf,
     wasm: performance
@@ -93,12 +82,6 @@ async function start(dir, config) {
         duration: Math.round(r.duration),
         size: r.transferSize,
       }))[0],
-    marks: Object.fromEntries(
-      performance
-        .getEntriesByType('mark')
-        .filter((mark) => mark.name.startsWith('bl:'))
-        .map((mark) => [mark.name.slice(3), mark.startTime]),
-    ),
     engine: (() => {
       try {
         return window.blTest.measurements();
@@ -113,7 +96,6 @@ async function start(dir, config) {
   await context.close();
   const p = info.perf || {};
   const round = (value) => (value != null ? Math.round(value) : null);
-  const marks = info.marks || {};
   const engine = info.engine || {};
   return {
     status,
@@ -163,9 +145,7 @@ for (let run = 0; run < runs; run++) {
         start: n,
         visit: n === 1 ? 'cold' : 'warm',
         ...r,
-        wasmCodeCacheMB: +(
-          dirSize(path.join(dir, 'Default', 'Code Cache', 'wasm')) / 1048576
-        ).toFixed(1),
+        wasmCodeCacheMB: wasmCodeCacheMB(dir),
       };
       fs.appendFileSync(out, `${JSON.stringify(row)}\n`);
       console.log(

@@ -26,7 +26,9 @@ import {
   netBytes,
   readConfigs,
   startError,
+  startMarks,
   testOptions,
+  wasmCodeCacheMB,
 } from './measure.mjs';
 
 const SITES = {
@@ -82,17 +84,22 @@ async function launch(dir, engine) {
 }
 
 // The template profile has the engine of every site of the arms in the HTTP and code cache of
-// Chromium
+// Chromium. The size of the code cache after every site shows whether each engine got into it.
 async function makeTemplate() {
   if (fs.existsSync(TEMPLATE)) return;
   const context = await launch(TEMPLATE, {});
   const page = context.pages()[0] || (await context.newPage());
+  const sizes = [];
   for (const site of new Set(configs.map((config) => config.site))) {
     await page.goto(`${origins[site]}/?debug=1&url=about:blank`);
     await page.waitForFunction(() => window.__perf?.ready, null, { timeout: 300000 });
     await page.waitForTimeout(5000);
+    sizes.push(`site ${site} ${wasmCodeCacheMB(TEMPLATE)} MB`);
   }
   await context.close();
+  console.log(
+    `template wasm code cache: ${sizes.join(', ')}, closed ${wasmCodeCacheMB(TEMPLATE)} MB`,
+  );
 }
 
 async function measure(dir, site, config, stay) {
@@ -136,6 +143,7 @@ async function measure(dir, site, config, stay) {
   const net1 = netBytes();
   // The span of the cpu and rx readings, which the filter for foreign load checks (stats.mjs)
   const wall = Date.now() - t0;
+  const marks = await page.evaluate(startMarks).catch(() => ({}));
   const info = await page
     .evaluate(() => ({
       perf: window.__perf,
@@ -168,6 +176,9 @@ async function measure(dir, site, config, stay) {
     cpu: +cpu.toFixed(2),
     ready: p.ready != null ? Math.round(p.ready) : null,
     firstLayout: after('firstLayout'),
+    markCompile: marks.compile ?? null,
+    markInstantiate: marks.instantiate ?? null,
+    markMain: marks.main ?? null,
     firstPaint: after('firstPaint'),
     loaded: after('loaded'),
     ...mem,

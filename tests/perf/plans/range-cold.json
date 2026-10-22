@@ -1,0 +1,86 @@
+{
+  "description": "U8b first visit of CNN on C: engine before (site 0, main a54a5e1) against ranges in the HTTP cache (site 1) with the debug log, in three jobs (three template profiles), for the first layout of the first visit in run 39791274655",
+  "configs": [
+    {
+      "name": "Main",
+      "site": 0,
+      "params": {
+        "log": "1"
+      }
+    },
+    {
+      "name": "Range",
+      "site": 1,
+      "params": {
+        "log": "1"
+      }
+    }
+  ],
+  "compare": [
+    {
+      "base": "Main",
+      "arms": [
+        "Range"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [
+        "rx",
+        "cpu",
+        "firstLayout"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "range-cold-C-cnn-1",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "range-cold-C-cnn-1",
+          "kind": "run",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--visit cold --runs 4 --timeout 400 --sites cnn --logs /w/build/perf/results/logs"
+        }
+      ]
+    },
+    {
+      "name": "range-cold-C-cnn-2",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "range-cold-C-cnn-2",
+          "kind": "run",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--visit cold --runs 4 --timeout 400 --sites cnn --logs /w/build/perf/results/logs"
+        }
+      ]
+    },
+    {
+      "name": "range-cold-C-cnn-3",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "range-cold-C-cnn-3",
+          "kind": "run",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--visit cold --runs 4 --timeout 400 --sites cnn --logs /w/build/perf/results/logs"
+        }
+      ]
+    }
+  ]
+}
