@@ -96,7 +96,7 @@ export function installTestHooks(state: TestState): void {
     audioState: () => debugApi().audioState(),
     mediaState: () => debugApi().mediaState(),
     rtcState: () => debugApi().rtcState(),
-    measurements: () => debugApi().measurements(),
+    framesShown: () => debugApi().framesShown(),
     flags,
     /** Discards a background tab like on memory pressure; the id of the new view or 0. */
     checkMemory: () => discardForMemory()?.view.id ?? 0,

@@ -1,9 +1,5 @@
 import type { EngineModule } from './engine.js';
-import type { DebugApi, EngineMeasurements, View } from './types.js';
-
-// Doubles of bl_measurements (engine/abi.json): 7 readings, then 32 thread times
-const MEASUREMENTS = 7;
-const THREAD_TIMES = 32;
+import type { DebugApi, View } from './types.js';
 
 interface DebugHost {
   readonly module: EngineModule;
@@ -106,35 +102,8 @@ export class Debug implements DebugApi {
       this.host.module._bl_memory_limit_for_testing(Math.max(0, Math.round(megabytes)));
   }
 
-  measurements(): EngineMeasurements | null {
-    const { module } = this.host;
-    const ptr = this.host.ready ? module._bl_measurements() : 0;
-    if (!ptr) return null;
-    const values = Array.from(
-      new Float64Array(module.HEAPU8.buffer, ptr, MEASUREMENTS + THREAD_TIMES),
-    );
-    // Engine times are milliseconds since the epoch (emscripten_get_now)
-    const time = (value: number) => (value ? value - performance.timeOrigin : null);
-    const [
-      memoryBytes = 0,
-      framesShown = 0,
-      contentFramesShown = 0,
-      main = 0,
-      compositor = 0,
-      ready = 0,
-      threadsBeforeReady = 0,
-    ] = values;
-    return {
-      memoryBytes,
-      framesShown,
-      contentFramesShown,
-      main: time(main),
-      compositorReady: time(compositor),
-      ready: time(ready),
-      threadsBeforeReady,
-      threadTimes: values
-        .slice(MEASUREMENTS, MEASUREMENTS + Math.min(threadsBeforeReady, THREAD_TIMES))
-        .map((value) => time(value) ?? 0),
-    };
+  framesShown(): number | null {
+    const count = this.host.ready ? this.host.module._bl_frames_shown_for_testing() : -1;
+    return count < 0 ? null : count;
   }
 }

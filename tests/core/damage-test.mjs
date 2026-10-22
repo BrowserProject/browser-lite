@@ -431,7 +431,7 @@ async function scenario(env, run) {
   shots.set('load', await settled(page));
   info.video = await pagePixel(page, 500, 260);
   // The spinner off the view keeps the compositor busy, nothing visible changes
-  const shown = () => page.evaluate(() => window.blTest.measurements()?.framesShown ?? null);
+  const shown = () => page.evaluate(() => window.blTest.framesShown());
   const before = await shown();
   await page.waitForTimeout(1500);
   info.idleFrames = (await shown()) - before;
@@ -466,11 +466,11 @@ for (let run = 1; run <= RUNS; run++) {
     near(on.info.video, [224, 224, 0], 60) && near(full.info.video, [224, 224, 0], 60),
     JSON.stringify([on.info.video, full.info.video]),
   );
-  // With every frame shown the engine still counts only frames with a change (tests/perf)
+  // The reference shows a frame for every tick of the animation
   check(
     `${label}: no new frame while nothing visible changes`,
-    on.info.idleFrames <= 2 && full.info.idleFrames <= 2,
-    `${on.info.idleFrames} and ${full.info.idleFrames} frames with a change in 1.5 s`,
+    on.info.idleFrames <= 2 && full.info.idleFrames >= 10,
+    `${on.info.idleFrames} frames in 1.5 s, the reference ${full.info.idleFrames}`,
   );
   for (const [name, shot] of on.shots) {
     const diff = difference(shot, full.shots.get(name));

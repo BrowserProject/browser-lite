@@ -164,12 +164,6 @@ void loadEngineConfig()
     config.databaseMaxMB = number("BL_DATABASE_MAX_MB", config.databaseMaxMB);
     config.fontconfigEarly = flag("BL_FONTCONFIG_EARLY", true);
     config.spareWorkers = static_cast<int>(number("BL_SPARE_WORKERS", config.spareWorkers));
-    if (const char* moment = value("BL_SPARE_WORKERS_AT")) {
-        if (!strcmp(moment, "ready"))
-            config.spareWorkersAt = SpareWorkersAt::Ready;
-        else if (!strcmp(moment, "paint"))
-            config.spareWorkersAt = SpareWorkersAt::FirstPaint;
-    }
     installExtraCertificates();
 }
 

@@ -81,7 +81,7 @@ jobs:
           echo "image_emsdk=${TOOLCHAIN_IMAGE}:emsdk-${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
           echo "emsdk=${EMSDK_VERSION}" >> "$GITHUB_OUTPUT"
       # Only the pins of versions.env that the jsc and engine builds read; Emscripten and the
-      # toolchain are in the image tag. Other pins (Node, runner, perf) do not rebuild WebKit.
+      # toolchain are in the image tag. Other pins (Node, runner) do not rebuild WebKit.
       - name: Pins of the WebKit builds
         id: webkit-pins
         run: echo "hash=$(grep -E '^WEBKIT_' versions.env | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"

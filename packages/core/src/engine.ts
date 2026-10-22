@@ -4,7 +4,7 @@ import type { Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 7;
+export const ENGINE_ABI_VERSION = 8;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -67,7 +67,7 @@ const ENGINE_EXPORTS = [
   '_bl_memory_used',
   '_bl_crash_for_testing',
   '_bl_memory_limit_for_testing',
-  '_bl_measurements',
+  '_bl_frames_shown_for_testing',
   '_bl_gpu_lose_context_for_testing',
   '_bl_gpu_restore_context_for_testing',
   '_bl_webgl_lose_context_for_testing',
@@ -155,13 +155,11 @@ export interface EngineModule extends EngineExports, EngineHooks {
   print?: (text: string) => void;
   printErr?: (text: string) => void;
   preRun?: ((module: EngineModule) => void)[];
-  onRuntimeInitialized?: () => void;
   instantiateWasm?: (
     imports: WebAssembly.Imports,
     receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,
   ) => object;
   getPreloadedPackage?: (url: string, size: number) => ArrayBuffer | null;
-  blPoolWorkers?: number;
   blCrashReason?: () => string;
   blTransport?: Transport;
   blEngineWorker?: () => Worker | null;

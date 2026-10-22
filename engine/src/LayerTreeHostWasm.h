@@ -74,8 +74,6 @@ public:
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
     // Report "first paint" with this state (WebView::firstPaintShown)
     bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
-    // This state has a new video frame in its tiles (tests/perf, Measurements.h)
-    bool newVideoFrame WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
     // Hidden view (WebView::setVisible): no frames, what is pending comes when shown
     bool hidden WTF_GUARDED_BY_LOCK(lock) { false };

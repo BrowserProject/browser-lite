@@ -703,29 +703,9 @@ export interface DebugApi {
    * the engine.
    */
   memoryLimit(megabytes: number): void;
-  /** Readings for tests/perf, null before the engine is ready. They go away with tests/perf. */
-  measurements(): EngineMeasurements | null;
-}
-
-/**
- * Readings of the engine for tests/perf (`debug.measurements()`). Times are milliseconds on the
- * clock of `performance.now()` of the page, null when not reached. They go away with tests/perf.
- */
-export interface EngineMeasurements {
-  /** Size of the WebAssembly memory in bytes. */
-  readonly memoryBytes: number;
-  /** Frames the compositor put on screen. */
-  readonly framesShown: number;
-  /** Of these, the frames that show a new video or WebGL image. */
-  readonly contentFramesShown: number;
-  /** main() of the engine started. */
-  readonly main: number | null;
-  /** The compositor thread has its WebGL context. */
-  readonly compositorReady: number | null;
-  /** The engine is ready (before onEngineReady on the main thread). */
-  readonly ready: number | null;
-  /** Threads the engine started before it was ready. */
-  readonly threadsBeforeReady: number;
-  /** Times of their pthread_create calls (the first 32). */
-  readonly threadTimes: readonly number[];
+  /**
+   * Frames the engine put on screen so far, all views together; null before the engine is ready.
+   * A frame without a visible change is not shown.
+   */
+  framesShown(): number | null;
 }

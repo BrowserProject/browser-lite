@@ -1,4 +1,4 @@
-# Status (2026-10-21)
+# Status (2026-10-22)
 
 Where the project stands, what was measured, what is open. Numbers like #142 refer to
 [decisions.md](decisions.md); real sites are in [compatibility.md](compatibility.md).
@@ -57,6 +57,25 @@ From `tests/compat/site-test.mjs`, time from the start of the UI, 3 runs each on
 Engine ready after about 2 s locally. Real sites vary a lot (ads, changing content): compare
 performance with several runs and inclusive times from profiles, not only load time.
 
+## Measurements (emulated devices)
+
+From the performance work of #213 to #225 (CI and dedicated hosts, medians of 20 to 30 runs,
+under SwiftShader, no real GPU). S is a fast device with 2 cores, C a cheap Chromebook with
+2 cores at a third of the speed; sites came from Web Page Replay.
+
+| | S | C | Chromium on C |
+|---|---|---|---|
+| Start, first after an update: ready / first layout of a small page (LAN) | 3.0 / 6.6 s | 6.8 / 15.4 s | |
+| Start, again: ready / first layout (LAN) | 2.9 / 3.5 s | 6.7 / 8.2 s | |
+| Start, first after an update, mobile network (80 ms, 20 Mbit) | | 11.6 / 18.9 s | |
+| Video VP9 360p / 720p, frames per second (#217) | 9.7 / 4.5 | 2.4 / 1.8 | 25 to 30 |
+| WebGL 1280x720, drawn every frame, frames per second (#221) | 9.6 | 2.6 | |
+| Animation outside the view, CPU seconds per second (#220) | 0.025 | 0.026 | 0.012 |
+| CNN second visit, data received against before #222 | 6 to 61 % | 42 to 55 % | |
+
+A native WPE WebKit on one server core showed the first picture of Wikipedia and GitHub 4 to 21
+times earlier than the engine on the device (#224); the engine stays in the device.
+
 ## Open: performance (by value)
 
 1. First paint on heavy sites: usually 0.1 to 0.3 s after first layout (#164), but a long script
@@ -95,7 +114,9 @@ performance with several runs and inclusive times from profiles, not only load t
   recompute every frame; `interpolate-size`; Paint Worklet scripts are classic (no
   `import`/`export`) and runtime errors reject differently than in Chromium.
 - Graphics: WebGL frames through `readPixels` instead of a texture (a GPU path was slower under
-  SwiftShader, #221), timer queries, queries and
+  SwiftShader, #221), tiles painted on the CPU (Skia's GPU painting exists upstream, but
+  `LayerTreeHostWasm.cpp` passes no GPU context; not measurable without a real GPU, #224), timer
+  queries, queries and
   transform feedback across context switches, WebGPU. Views that lost the GPU while compositing
   stay without layers (new views get them again); a WebGL page that does not draw notices a loss
   only at its next draw.

@@ -53,7 +53,7 @@ them or load `media-sw.js` into the site's own worker:
 | `preferences` | all on, GPC off | `{ javascript, images, globalPrivacyControl }` |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |
 | `engine` | | `gpu`, `compositing`, `safepointGC`, `httpCache`, `scriptTimeoutSeconds`, `extraCA` (PEM), `log`, `env` (experimental `BL_*`, `JSC_*`, `FC_*` switches; keys the core sets are rejected) |
-| `debug` | `false` | Enables `browser.debug` (with `measurements()`, readings for `tests/perf` that go away with it, and `memoryLimit(megabytes)`, a limit of the engine memory like in a 32 bit browser) and the engine test hooks; never with foreign scripts on the page |
+| `debug` | `false` | Enables `browser.debug` (with `memoryLimit(megabytes)`, a limit of the engine memory like in a 32 bit browser, and `framesShown()`, the frames the engine put on screen) and the engine test hooks; never with foreign scripts on the page |
 
 ## Handlers and events
 

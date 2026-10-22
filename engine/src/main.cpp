@@ -10,7 +10,6 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
-#include "Measurements.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "Speech.h"
@@ -66,26 +65,21 @@ static void prepareFontCache(const char* path)
 // first load. Every further thread (data: URLs, IndexedDB, images, blobs) then
 // starts a new worker and the engine thread waits until it runs (CNN: about
 // 1 s). So right after the start load a few more workers, asynchronously on
-// the main thread, without waiting for them, until the pool and the spare
-// workers exist (workers started for threads meanwhile count). A bigger pool
-// (#133) delays the engine start instead.
-void BrowserLite::addSpareWorkers(SpareWorkersAt moment)
+// the main thread, without waiting for them. A bigger pool (#133) delays the
+// engine start instead.
+static void addSpareWorkers(int count)
 {
-    static std::atomic<bool> added { false };
-    auto& config = engineConfig();
-    if (moment != config.spareWorkersAt || config.spareWorkers <= 0 || added.exchange(true))
+    if (count <= 0)
         return;
     MAIN_THREAD_ASYNC_EM_ASM({
-        var workers = PThread.unusedWorkers.length + Object.keys(PThread.pthreads).length;
-        for (; workers < Module.blPoolWorkers + $0; workers++)
+        for (var i = 0; i < $0; i++)
             PThread.loadWasmModuleToWorker(PThread.allocateUnusedWorker());
-    }, config.spareWorkers);
+    }, count);
 }
 
 int main(int, char**)
 {
     using namespace BrowserLite;
-    Measurements::mark(Measurements::Mark::Main);
 
     // Before any other thread starts; the file system (WasmFS for BL_EXTRA_CA)
     // only exists from main() on
@@ -132,7 +126,7 @@ int main(int, char**)
             }
         })->detach();
     // Spare web workers (see addSpareWorkers)
-    addSpareWorkers(SpareWorkersAt::Start);
+    addSpareWorkers(config.spareWorkers);
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
     // Create the VM right away: from now on all work runs with DeferGC (EngineLoop.cpp)
@@ -189,8 +183,6 @@ int main(int, char**)
 #endif
 
     log("Engine ready");
-    Measurements::mark(Measurements::Mark::Ready);
-    addSpareWorkers(SpareWorkersAt::Ready);
     MAIN_THREAD_ASYNC_EM_ASM({
         if (Module.onEngineReady)
             Module.onEngineReady();

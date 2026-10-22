@@ -5,7 +5,6 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "GpuRaster.h"
-#include "Measurements.h"
 #include "ScrollingWasm.h"
 #include "WebView.h"
 #include <EGL/egl.h>
@@ -44,6 +43,9 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
         setTimeout(run, 16);
 });
 
+// Frames put on screen by all views (bl_frames_shown_for_testing)
+static std::atomic<unsigned> s_framesShown { 0 };
+
 static void compositeScene(CompositorScene& scene)
 {
     ASSERT(Compositor::isCompositorThread());
@@ -58,7 +60,6 @@ static void compositeScene(CompositorScene& scene)
     OptionSet<CompositionReason> reasons;
     bool notify = false;
     bool firstPaint = false;
-    bool newContent = false;
     bool repaintAll = false;
     IntSize pixelSize;
     float deviceScaleFactor = 1;
@@ -91,7 +92,6 @@ static void compositeScene(CompositorScene& scene)
         // tiles are in the frame
         if (reasons.contains(CompositionReason::RenderingUpdate)) {
             firstPaint = std::exchange(scene.firstPaint, false);
-            newContent = std::exchange(scene.newVideoFrame, false);
         }
         repaintAll = std::exchange(scene.repaintAll, false);
         layersToRemove = std::exchange(scene.pendingLayersToRemove, { });
@@ -163,11 +163,7 @@ static void compositeScene(CompositorScene& scene)
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     scene.rootLayer->flushCompositingState(reasons, true);
     for (auto& layer : scene.committedLayers) {
-        // A new contents buffer (a WebGL frame) is new content (tests/perf)
-        auto* contents = layer->ensureSkiaTarget().contentsBuffer();
         layer->flushCompositingState(reasons, true);
-        if (auto* shown = layer->ensureSkiaTarget().contentsBuffer(); shown && shown != contents)
-            newContent = true;
         if (layer->hasPendingBackingStoreTileUpdates())
             layersWithTileUpdates.append(layer);
     }
@@ -201,7 +197,7 @@ static void compositeScene(CompositorScene& scene)
     if (scene.damageMode)
         frameDamage.emplace(pixelSize, *scene.damageMode);
     // BL_DAMAGE=0 (reference of tests/core/damage-test.mjs): every frame is
-    // composited and shown, but counted only with a change (tests/perf)
+    // composited and shown
     bool skipUnchanged = engineConfig().skipUnchangedFrames;
     auto* canvas = surface->getCanvas();
     canvas->save();
@@ -213,9 +209,8 @@ static void compositeScene(CompositorScene& scene)
     if (changed || !skipUnchanged) {
         Gpu::showFramebuffer(scene.viewId);
         scene.shownSize = pixelSize;
+        s_framesShown.fetch_add(1, std::memory_order_relaxed);
     }
-    if (changed)
-        Measurements::frameShown(newContent);
     if (firstPaint)
         WebView::firstPaintShown(scene.viewId);
 
@@ -560,7 +555,6 @@ void LayerTreeHostWasm::flush(bool firstPaint)
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;
     m_scene->firstPaint |= firstPaint;
-    m_scene->newVideoFrame |= Measurements::takeVideoPainted();
     m_scene->scheduleFrameLocked();
 }
 
@@ -640,3 +634,12 @@ Ref<GraphicsLayer> LayerTreeHostWasm::createGraphicsLayer(GraphicsLayer::Type la
 }
 
 } // namespace BrowserLite
+
+// For tests, only with BL_TEST_HOOKS=1 (-1 otherwise): frames put on screen
+// so far (tests/core/damage-test.mjs)
+extern "C" EMSCRIPTEN_KEEPALIVE int bl_frames_shown_for_testing()
+{
+    if (!BrowserLite::engineConfig().testHooks)
+        return -1;
+    return static_cast<int>(BrowserLite::s_framesShown.load(std::memory_order_relaxed));
+}

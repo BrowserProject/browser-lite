@@ -44,7 +44,6 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
-    ${BL_ENGINE_SRC}/Measurements.cpp
     ${BL_ENGINE_SRC}/Permissions.cpp
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
@@ -109,9 +108,7 @@ target_link_options(BrowserLiteEngine PRIVATE
     # stays free for the UI.
     "SHELL:-pthread"
     "SHELL:-sPROXY_TO_PTHREAD"
-    # Workers prepared before main(): Module.blPoolWorkers, 8 unless tests/perf
-    # sets it (engine/js/engine-pre.js), goes away with tests/perf
-    "SHELL:-sPTHREAD_POOL_SIZE=Module.blPoolWorkers"
+    "SHELL:-sPTHREAD_POOL_SIZE=8"
     "SHELL:-sSTACK_SIZE=8MB"
     "SHELL:-sDEFAULT_PTHREAD_STACK_SIZE=4MB"
     "SHELL:-sINITIAL_MEMORY=256MB"
@@ -143,8 +140,6 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-Wl,--wrap=pipe2,--wrap=getaddrinfo,--wrap=freeaddrinfo"
     # access() on fixed files remembered (engine/src/FileAccessCache.cpp)
     "SHELL:-Wl,--wrap=access"
-    # Start times of the threads for tests/perf (engine/src/Measurements.cpp)
-    "SHELL:-Wl,--wrap=pthread_create"
     # Growth of the memory under one lock (engine/src/MemoryWatch.cpp)
     "SHELL:-Wl,--wrap=sbrk"
 )

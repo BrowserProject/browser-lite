@@ -172,8 +172,6 @@ private:
     RefPtr<WebCore::NativeImage> m_frame;
     unsigned m_presentedFrames { 0 };
     unsigned m_lastMetadataFrame { 0 };
-    // Last frame painted (tests/perf, Measurements.h)
-    unsigned m_lastPaintedFrame { 0 };
     MonotonicTime m_frameArrival;
     double m_frameMediaTime { 0 };
     WebCore::IntSize m_presentationSize;

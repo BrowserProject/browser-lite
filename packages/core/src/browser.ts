@@ -184,20 +184,11 @@ class BrowserImpl implements Browser, ViewHost {
   async start(): Promise<void> {
     const { config } = this;
     const signal = this.lifetime.signal;
-    // Steps of the start on the timeline of the page (tests/perf, only with debug)
-    const mark = (step: string) => {
-      if (config.debug) performance.mark(`bl:${step}`);
-    };
     // The engine files load from now on, while the storage lock and beforeStart run
     const files = loadEngineFiles(config.engineBase);
-    const ignore = () => {};
-    files.factory.then(() => mark('engine.js'), ignore);
-    files.data.then(() => mark('engine.data'), ignore);
-    files.wasm.then(() => mark('compile'), ignore);
     let persistent = config.persistent;
     if (persistent) {
       this.releaseLock = await holdStorageLock(config.namespace);
-      mark('lock');
       if (!this.releaseLock) {
         persistent = false;
         this.warn(
@@ -214,7 +205,6 @@ class BrowserImpl implements Browser, ViewHost {
           } catch (error) {
             console.warn('[browser-lite] storage.beforeStart failed:', error);
           }
-          mark('beforeStart');
         }
       }
     }
@@ -224,18 +214,10 @@ class BrowserImpl implements Browser, ViewHost {
     // (service worker) while the engine loads
     const context = this.services.context;
     const prepared = Promise.all(config.services.map((service) => service.setup(context)));
-    prepared.then(() => mark('prepared')).catch(() => {});
+    prepared.catch(() => {});
     const features = [...new Set(config.services.flatMap((service) => service.features))];
     const env = engineEnv(config, features, persistent);
-    // Emscripten calls preRun once the WebAssembly instance exists, onRuntimeInitialized right
-    // before main()
-    this.module.preRun = [
-      (module) => {
-        mark('instantiate');
-        Object.assign(module.ENV, env);
-      },
-    ];
-    this.module.onRuntimeInitialized = () => mark('main');
+    this.module.preRun = [(module) => Object.assign(module.ENV, env)];
 
     // Engine errors (traps, aborts) reach the page as error events: from a thread as the
     // ErrorEvent of its worker, whose error and stack the worker left in engine memory
@@ -274,10 +256,7 @@ class BrowserImpl implements Browser, ViewHost {
       this.failStart = reject;
     });
     const ready = new Promise<void>((resolve) => {
-      this.module.onEngineReady = () => {
-        mark('ready');
-        resolve();
-      };
+      this.module.onEngineReady = () => resolve();
     });
     // engine.data has to be there when the module starts, engine.wasm compiles on meanwhile
     const [factory, data] = await Promise.race([Promise.all([files.factory, files.data]), failed]);
@@ -352,7 +331,6 @@ class BrowserImpl implements Browser, ViewHost {
       blTransport: this.config.transport,
       locateFile: (path) => new URL(path, base).href,
       mainScriptUrlOrBlob: `${base}engine.js`,
-      ...(this.config.poolWorkers !== undefined ? { blPoolWorkers: this.config.poolWorkers } : {}),
       print: (text) => console.log('[engine]', text),
       printErr: (text) => console.warn('[engine]', text),
       onEngineEvent: (view, type, payload, fromEngineThread) =>

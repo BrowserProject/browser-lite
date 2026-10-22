@@ -232,26 +232,10 @@ try {
           'audioState',
           'mediaState',
           'rtcState',
-          'measurements',
+          'framesShown',
         ].every((name) => typeof window.blTest[name] === 'function') &&
         window.blTest.views().length === 1,
     ),
-  );
-  // Readings for tests/perf: start times of the engine and the core, memory size
-  const start = await page.evaluate(() => ({
-    engine: window.blTest.measurements(),
-    marks: performance.getEntriesByType('mark').map((mark) => mark.name),
-  }));
-  check(
-    'start readings',
-    start.engine?.memoryBytes > 0 &&
-      start.engine.main > 0 &&
-      start.engine.ready >= start.engine.main &&
-      start.engine.threadsBeforeReady > 0 &&
-      ['bl:engine.js', 'bl:instantiate', 'bl:main', 'bl:ready', 'bl:prepared'].every((name) =>
-        start.marks.includes(name),
-      ),
-    JSON.stringify(start),
   );
 
   // Navigation and title events, first paint, pixels of the page

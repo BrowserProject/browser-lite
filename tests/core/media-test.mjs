@@ -430,15 +430,6 @@ check(
   (await result('blobloop')) === 'plays',
   results.get('blobloop'),
 );
-const measurements = () => page.evaluate(() => window.blTest.measurements());
-const shownBefore = (await measurements()).contentFramesShown;
-await page.waitForTimeout(1000);
-const shownAfter = (await measurements()).contentFramesShown;
-check(
-  'blob: frames with a new video image are counted (tests/perf)',
-  shownAfter > shownBefore,
-  `${shownBefore} -> ${shownAfter}`,
-);
 check(
   'data: sound with a duration',
   (await result('dataduration')) === '0.5',

@@ -5,11 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 7;
-
-// Web Workers prepared before main() (-sPTHREAD_POOL_SIZE in engine/engine.cmake
-// reads it); tests/perf lets the host set it, goes away with it
-Module.blPoolWorkers ??= 8;
+Module.blAbiVersion = 8;
 
 // A thread that traps or aborts ends the engine. The error event the main
 // thread gets from a worker has only the message, so the worker writes the

@@ -32,11 +32,6 @@ void restartScriptWatchdog();
 // navigator.permissions.query() (Permissions.cpp)
 void installPermissionController();
 
-// Loads the spare Web Workers (BL_SPARE_WORKERS, main.cpp) once, when the
-// engine reaches the moment of BL_SPARE_WORKERS_AT (EngineConfig.h)
-enum class SpareWorkersAt : uint8_t;
-void addSpareWorkers(SpareWorkersAt);
-
 // Log output, ends up in the console of the host browser
 void log(const char* format, ...) WTF_ATTRIBUTE_PRINTF(1, 2);
 

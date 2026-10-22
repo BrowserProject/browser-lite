@@ -227,21 +227,6 @@ test('core-owned switches match engine/abi.json', () => {
     assert.ok(names.has(key), `${key} is not in engine/abi.json`);
 });
 
-test('pool workers for tests/perf only with debug', () => {
-  const pool = (debug, value) =>
-    resolveConfig({ ...base, debug, engine: { env: { BL_POOL_WORKERS: value } } }, PAGE)
-      .poolWorkers;
-  assert.equal(pool(true, '3'), 3);
-  assert.equal(pool(false, '3'), undefined);
-  assert.equal(resolveConfig({ ...base, debug: true }, PAGE).poolWorkers, undefined);
-  for (const value of ['0', '2.5', 'x', '65'])
-    assert.equal(
-      code(() => pool(true, value)),
-      'invalid-options',
-      value,
-    );
-});
-
 test('features of the services', () => {
   assert.deepEqual(audio().features, ['audio']);
   assert.deepEqual(media().features, ['media', 'pip']);

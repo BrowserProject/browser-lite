@@ -5,7 +5,6 @@
 #include "EngineConfig.h"
 #include "Host.h"
 #include "HttpCache.h"
-#include "Measurements.h"
 #include "MediaSourceWasm.h"
 #include "VideoFrameWasm.h"
 #if ENABLE(MEDIA_STREAM)
@@ -636,23 +635,16 @@ void MediaPlayerPrivateWasm::setPageIsVisible(bool visible)
 
 void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& rect)
 {
-    auto countFrame = [&] {
-        if (std::exchange(m_lastPaintedFrame, m_presentedFrames) != m_presentedFrames)
-            Measurements::videoPainted();
-    };
 #if ENABLE(MEDIA_STREAM)
     if (m_stream) {
-        if (RefPtr frame = m_stream->currentFrame(); frame && !context.paintingDisabled()) {
+        if (RefPtr frame = m_stream->currentFrame(); frame && !context.paintingDisabled())
             context.drawVideoFrame(*frame, rect, ImageOrientation::Orientation::None, true);
-            countFrame();
-        }
         return;
     }
 #endif
     if (context.paintingDisabled() || !m_frame)
         return;
     context.drawNativeImage(*m_frame, rect, FloatRect { { }, m_frame->size() });
-    countFrame();
 }
 
 RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
