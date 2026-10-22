@@ -176,7 +176,11 @@ private:
             return;
         }
         if (isRedirect(response)) {
-            if (auto error = followRedirect(m_request, *this, response, m_redirectCount); !error.isNull())
+            // The target gets no validators of the entry looked up (the media
+            // request never has its own)
+            auto current = request.resourceRequest();
+            HttpCache::removeValidationHeaders(current);
+            if (auto error = followRedirect(m_request, *this, current, response, m_redirectCount); !error.isNull())
                 fail(error);
             return;
         }

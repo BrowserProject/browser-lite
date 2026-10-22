@@ -63,8 +63,10 @@ void lookup(const String& partition, const WebCore::ResourceRequest&, Completion
 // What to do with an entry for this request
 Use decide(const Entry&, const WebCore::ResourceRequest&);
 
-// Headers for the conditional request (If-None-Match / If-Modified-Since)
+// Headers for the conditional request (If-None-Match / If-Modified-Since), and
+// without them again (they belong to the entry of this URL only)
 void addValidationHeaders(WebCore::ResourceRequest&, const Entry&);
+void removeValidationHeaders(WebCore::ResourceRequest&);
 
 // Should this response be stored? (before reading the body)
 bool isStorable(const String& partition, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);

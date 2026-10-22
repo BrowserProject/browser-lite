@@ -16,9 +16,11 @@
 //
 // Range requests (206) like Chrome's sparse entries: ranges with a strong validator are stored,
 // a range request hits only once the ranges cover the whole resource, a changed resource
-// (other ETag after revalidation) replaces the old ranges, no validator or a weak ETag is not
-// stored, Vary and the partition apply as for whole responses. A media element gets its pieces
-// from the cache too (MediaFetch).
+// (other ETag after revalidation) replaces the old ranges, no validator, a weak ETag or a
+// Last-Modified less than 60 s before the Date is not stored, Vary and the partition apply as for
+// whole responses. A media element gets its pieces from the cache too (MediaFetch), also with only
+// an old Last-Modified and no-cache (revalidated, 304); after a redirect the target gets no
+// validators.
 //
 //   node tests/core/cache-test.mjs [engine-dir]
 import {
@@ -34,7 +36,7 @@ import {
   wav,
 } from '../lib/index.mjs';
 
-timeLimit(2 * TIMEOUT + 420000);
+timeLimit(2 * TIMEOUT + 540000);
 
 const PAGE = `<!doctype html><title>Cache test</title><link rel=stylesheet href="/etag.css"><script src="/fresh.js"></script>
 <body>Cache<script>
@@ -143,7 +145,7 @@ const MANY_PAGE = `<!doctype html><title>Many</title><body><script>
 // of 1000 bytes under /r/ with different headers; reports status, length and the first three
 // characters (the version) per resource. Absolute URLs of 127.0.0.1, so a top page of
 // localhost loads the same resources in its own partition
-const RANGE_FILES = { full: 2, part: 1, ver: 2, nov: 2, weak: 2, vary: 2 };
+const RANGE_FILES = { full: 2, part: 1, ver: 2, nov: 2, weak: 2, young: 2, vary: 2 };
 const RANGE_PAGE = (variant, names) => `<!doctype html><title>Ranges</title><body><script>
 (async () => {
   const out = {};
@@ -161,7 +163,8 @@ const RANGE_PAGE = (variant, names) => `<!doctype html><title>Ranges</title><bod
 })().catch((e) => console.log('RESULT ranges=' + e));
 </script>`;
 const rangeBody = (version) => Buffer.from(`${version}:`.padEnd(1000, '0123456789'));
-// Version of /r/ver (changed between visits) and the requests per resource: range and If-None-Match
+// Version of /r/ver (changed between visits) and the requests per resource: range and validator
+// (If-None-Match or If-Modified-Since)
 let verVersion = 'v1';
 let rangeRequests = [];
 function serveRange(req, res, data, headers) {
@@ -181,10 +184,15 @@ function serveRange(req, res, data, headers) {
     })
     .end(data.subarray(start, end + 1));
 }
-// Media: an audio file of 30 s (about 2.6 MB, two pieces of the service worker), cacheable
+// Media: an audio file of 30 s (about 2.6 MB, two pieces of the service worker), cacheable.
+// /r/old.wav has only a Last-Modified long ago and no-cache (revalidated on every visit, like the
+// loop videos of CNN); once oldMoved is set it redirects to /r/old-target.wav, which answers any
+// If-Modified-Since with 304 (like a mirror of the same file)
 const LOOP = wav(30, { rate: 44100 });
-const MEDIA_PAGE = `<!doctype html><title>Media</title><body>
-<audio id="audio" src="/r/loop.wav" muted preload="auto"></audio><script>
+const OLD_DATE = 'Mon, 01 Jan 2024 00:00:00 GMT';
+let oldMoved = false;
+const MEDIA_PAGE = (src) => `<!doctype html><title>Media</title><body>
+<audio id="audio" src="/r/${src}" muted preload="auto"></audio><script>
 const audio = document.getElementById('audio');
 audio.addEventListener('loadedmetadata', () => console.log('RESULT media=' + Math.round(audio.duration)));
 audio.addEventListener('error', () => console.log('RESULT media=error ' + (audio.error && audio.error.code)));
@@ -220,7 +228,8 @@ const { url: siteURL } = await serve((req, res) => {
     if (req.method === 'OPTIONS') return res.writeHead(204, cors).end();
     const name = pathname.slice(3);
     const inm = req.headers['if-none-match'];
-    rangeRequests.push(`${name}:${req.headers.range || '-'}:${inm || '-'}`);
+    const ims = req.headers['if-modified-since'];
+    rangeRequests.push(`${name}:${req.headers.range || '-'}:${inm || ims || '-'}`);
     cors['Content-Type'] = 'text/plain';
     const max = { ...cors, 'Cache-Control': 'max-age=3600' };
     switch (name) {
@@ -237,6 +246,11 @@ const { url: siteURL } = await serve((req, res) => {
         return serveRange(req, res, rangeBody('n1'), max);
       case 'weak':
         return serveRange(req, res, rangeBody('w1'), { ...max, ETag: 'W/"w1"' });
+      case 'young':
+        return serveRange(req, res, rangeBody('o1'), {
+          ...max,
+          'Last-Modified': new Date(Date.now() - 30000).toUTCString(),
+        });
       case 'vary': {
         const variant = `y${req.headers['x-variant']}`;
         return serveRange(req, res, rangeBody(variant), {
@@ -251,6 +265,18 @@ const { url: siteURL } = await serve((req, res) => {
           'Cache-Control': 'max-age=3600',
           ETag: '"l1"',
         });
+      case 'old.wav':
+      case 'old-target.wav': {
+        if (name === 'old.wav' && oldMoved)
+          return res.writeHead(302, { Location: '/r/old-target.wav' }).end();
+        const headers = {
+          'Content-Type': 'audio/wav',
+          'Cache-Control': 'no-cache',
+          'Last-Modified': OLD_DATE,
+        };
+        if (ims) return res.writeHead(304, headers).end();
+        return serveRange(req, res, LOOP, headers);
+      }
     }
     return res.writeHead(404).end();
   }
@@ -260,7 +286,7 @@ const { url: siteURL } = await serve((req, res) => {
         .writeHead(200, html)
         .end(RANGE_PAGE(searchParams.get('variant'), searchParams.get('names').split(',')));
     case '/mediapage':
-      return res.writeHead(200, html).end(MEDIA_PAGE);
+      return res.writeHead(200, html).end(MEDIA_PAGE(searchParams.get('src')));
     case '/blobtop':
       return res.writeHead(200, html).end(BLOB_TOP_PAGE());
     case '/bframe':
@@ -679,6 +705,7 @@ check(
     ranges.got.ver === whole('v1') &&
     ranges.got.nov === whole('n1') &&
     ranges.got.weak === whole('w1') &&
+    ranges.got.young === whole('o1') &&
     ranges.got.vary === whole('ya') &&
     Object.entries(RANGE_FILES).every(([name, parts]) => ranges.requestsOf(name).length === parts),
   ranges.info,
@@ -712,11 +739,11 @@ check(
   JSON.stringify(verVersions),
 );
 check(
-  'range: no validator or a weak ETag is not stored',
+  'range: no validator, a weak ETag or a young Last-Modified is not stored',
   ranges.got.nov === whole('n1') &&
     ranges.got.weak === whole('w1') &&
-    ranges.requestsOf('nov').length === 2 &&
-    ranges.requestsOf('weak').length === 2,
+    ranges.got.young === whole('o1') &&
+    ['nov', 'weak', 'young'].every((name) => ranges.requestsOf(name).length === 2),
   ranges.info,
 );
 check(
@@ -744,26 +771,57 @@ check(
 );
 
 // Media: the service worker loads the audio in pieces through MediaFetch; once all pieces are
-// stored the next visit takes them from the cache
-rangeRequests = [];
+// stored the next visit takes them from the cache (or revalidates them). Value of the page and
+// the requests of the file (to the last byte: all pieces were requested and stored)
 const loopEnd = `-${LOOP.length - 1}:`;
-let media = await visit(`${siteURL}mediapage`, 'media');
-for (let i = 0; i < 150 && !rangeRequests.some((r) => r.includes(loopEnd)); i++)
-  await page.waitForTimeout(200);
-await page.waitForTimeout(2000);
-const loopFromNetwork = rangeRequests.filter((r) => r.startsWith('loop.wav:'));
+async function mediaVisit(src, untilEnd) {
+  rangeRequests = [];
+  const media = await visit(`${siteURL}mediapage?src=${src}`, 'media');
+  for (let i = 0; untilEnd && i < 150 && !rangeRequests.some((r) => r.includes(loopEnd)); i++)
+    await page.waitForTimeout(200);
+  await page.waitForTimeout(untilEnd ? 2000 : 3000);
+  // Of old.wav also its redirect target old-target.wav
+  const prefix = src.split('.')[0];
+  return { media, requests: rangeRequests.filter((r) => r.startsWith(prefix)) };
+}
+let media = await mediaVisit('loop.wav', true);
 check(
   'media: first visit in pieces from the network',
-  media === '30' && loopFromNetwork.length >= 2 && loopFromNetwork.some((r) => r.includes(loopEnd)),
-  `${media} ${loopFromNetwork.join(' ')}`,
+  media.media === '30' &&
+    media.requests.length >= 2 &&
+    media.requests.some((r) => r.includes(loopEnd)),
+  `${media.media} ${media.requests.join(' ')}`,
 );
-rangeRequests = [];
-media = await visit(`${siteURL}mediapage`, 'media');
-await page.waitForTimeout(3000);
+media = await mediaVisit('loop.wav', false);
 check(
   'media: second visit from the cache',
-  media === '30' && !rangeRequests.some((r) => r.startsWith('loop.wav:')),
-  `${media} ${rangeRequests.join(' ')}`,
+  media.media === '30' && media.requests.length === 0,
+  `${media.media} ${media.requests.join(' ')}`,
+);
+media = await mediaVisit('old.wav', true);
+check(
+  'media: only an old Last-Modified, first visit from the network',
+  media.media === '30' && media.requests[0]?.endsWith(':-'),
+  `${media.media} ${media.requests.join(' ')}`,
+);
+media = await mediaVisit('old.wav', false);
+check(
+  'media: only an old Last-Modified, revalidated (304) from the cache',
+  media.media === '30' &&
+    media.requests.length >= 1 &&
+    media.requests.every((r) => r.startsWith('old.wav:') && r.endsWith(`:${OLD_DATE}`)),
+  `${media.media} ${media.requests.join(' ')}`,
+);
+oldMoved = true;
+media = await mediaVisit('old.wav', true);
+const targetRequests = media.requests.filter((r) => r.startsWith('old-target.wav:'));
+check(
+  'media: after a redirect the target gets no validators',
+  media.media === '30' &&
+    targetRequests.length >= 2 &&
+    targetRequests.every((r) => r.endsWith(':-')) &&
+    targetRequests.some((r) => r.includes(loopEnd)),
+  `${media.media} ${media.requests.join(' ')}`,
 );
 
 // Other formats of the HTTP cache: deleted when the engine opens the cache, and

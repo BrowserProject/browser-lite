@@ -156,9 +156,9 @@ static Expected<ResourceRequest, ResourceError> redirectedRequest(const Resource
     return request;
 }
 
-ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient& client, const ResourceResponse& response, unsigned& redirectCount)
+ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient& client, const ResourceRequest& current, const ResourceResponse& response, unsigned& redirectCount)
 {
-    auto next = redirectedRequest(curlRequest->resourceRequest(), response, ++redirectCount);
+    auto next = redirectedRequest(current, response, ++redirectCount);
     if (auto old = std::exchange(curlRequest, nullptr)) {
         old->cancel();
         old->invalidateClient();
@@ -643,7 +643,7 @@ private:
         storeCookies(request.resourceRequest(), curlResponse);
         ResourceResponse response(curlResponse);
         if (isRedirect(response)) {
-            if (auto error = followRedirect(m_request, *this, response, m_redirectCount); !error.isNull()) {
+            if (auto error = followRedirect(m_request, *this, request.resourceRequest(), response, m_redirectCount); !error.isNull()) {
                 announce(response);
                 finish(errorText(error));
             }
@@ -747,7 +747,7 @@ private:
         ResourceResponse response(curlResponse);
         // /favicon.ico is often behind a redirect (http -> https, www, CDN)
         if (isRedirect(response)) {
-            if (!followRedirect(m_request, *this, response, m_redirectCount).isNull())
+            if (!followRedirect(m_request, *this, request.resourceRequest(), response, m_redirectCount).isNull())
                 done(false);
             return;
         }

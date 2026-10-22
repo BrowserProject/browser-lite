@@ -37,8 +37,9 @@ WebCore::ResourceResponse networkResponse(WebCore::CurlResponse&);
 // curl does not follow redirects itself: 3xx with Location
 bool isRedirect(const WebCore::ResourceResponse&);
 // For loaders without a ResourceLoader: the running request ends, the next one
-// starts (like Chrome, at most 20). An error means it does not continue.
-WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::CurlRequestClient&, const WebCore::ResourceResponse&, unsigned& redirectCount);
+// starts from current, the request that got the redirect (like Chrome, at most
+// 20). An error means it does not continue.
+WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::CurlRequestClient&, const WebCore::ResourceRequest& current, const WebCore::ResourceResponse&, unsigned& redirectCount);
 
 // Loads a favicon and hands it to the host (Module.onEngineIcon)
 void loadIcon(int viewId, const URL&);

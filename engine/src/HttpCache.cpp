@@ -269,6 +269,12 @@ void addValidationHeaders(ResourceRequest& request, const Entry& entry)
         request.setHTTPHeaderField(HTTPHeaderName::IfModifiedSince, lastModified);
 }
 
+void removeValidationHeaders(ResourceRequest& request)
+{
+    request.removeHTTPHeaderField(HTTPHeaderName::IfNoneMatch);
+    request.removeHTTPHeaderField(HTTPHeaderName::IfModifiedSince);
+}
+
 bool isStorable(const String& partition, const ResourceRequest& request, const ResourceResponse& response)
 {
     if (partition.isNull() || !canUse(request) || cacheKey(response.url()) != cacheKey(request.url()))
