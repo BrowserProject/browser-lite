@@ -2,7 +2,8 @@
 // fake with the same order as in the browser (storing appends at the end, replacing too) that
 // refuses 206 like the browser. Key format with the partition, cache names by format version
 // (other formats deleted), cleanup, ranges of a resource (206): answered only when complete,
-// stitched, versions replaced; after a 304 only the headers change.
+// stitched, versions replaced, found through an index per resource; after a 304 only the headers
+// change, never of an entry deleted in the meantime.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -27,9 +28,10 @@ class FakeCache {
   }
   async match(request) {
     const url = typeof request === 'string' ? request : request.url;
+    // A new response each time, like the Cache API; onMatch runs while it is on its way
+    const response = this.entries.get(url)?.clone();
     if (this.onMatch) await this.onMatch(url);
-    // A new response each time, like the Cache API
-    return this.entries.get(url)?.clone();
+    return response;
   }
   async put(url, response) {
     if (response.status === 206)
@@ -89,6 +91,7 @@ function load(namespace = 'browserlite', names = []) {
     Number,
     String,
     Set,
+    Map,
     Math,
   };
   vm.createContext(context);
@@ -327,6 +330,69 @@ async function fill(http, cache, count, size) {
   );
   reply = await lookup(0, 4);
   check('range: a whole response does not answer ranges', reply.status === 0);
+}
+
+// The ranges of a resource come from an index kept with the keys: built when opening, in the order
+// of storing, kept up to date by the cleanup; whole responses are not in it
+{
+  const { http, cache } = load();
+  const partition = 'http://a.test http://a.test';
+  const url = 'https://cdn.test/loop.mp4';
+  const rangeKey = (first, last, version) =>
+    http.key(partition, url, { first, last, total: 10, version });
+  await cache.put(rangeKey(5, 9, '"a"'), entry(5));
+  await cache.put(http.key(partition, 'https://cdn.test/page.html'), entry(100));
+  await cache.put(rangeKey(0, 4, '"a"'), entry(5));
+  await http.open();
+  const ranges = () =>
+    http
+      .ranges(http.key(partition, url))
+      .map((range) => `${range.first}-${range.last}`)
+      .join();
+  check(
+    'range index: built when opening, in the order of storing',
+    ranges() === '5-9,0-4' && http.rangesOf.size === 1,
+    ranges(),
+  );
+  http.store(partition, 'https://cdn.test/other.js', 200, '', new Uint8Array(1));
+  for (let i = 0; i < 20; i++) await tick();
+  check('range index: a whole response is not in it', http.rangesOf.size === 1);
+  http.limit = 100;
+  await http.trim(false);
+  check(
+    'range index: the cleanup removes deleted ranges',
+    ranges() === '0-4' && http.rangesOf.size === 1,
+    `${ranges()} ${[...cache.entries.keys()].join()}`,
+  );
+}
+
+// A 304 for a range whose version is replaced while its body is read: the old range stays deleted
+{
+  const { http, cache } = load();
+  await http.open();
+  const partition = 'http://a.test http://a.test';
+  const url = 'https://cdn.test/loop.mp4';
+  const settle = async () => {
+    for (let i = 0; i < 20; i++) await tick();
+  };
+  const store = (version) =>
+    http.store(partition, url, 206, `ETag: ${version}\n`, new Uint8Array(10), 0, 10, version);
+  store('"a"');
+  await settle();
+  const oldKey = http.key(partition, url, { first: 0, last: 9, total: 10, version: '"a"' });
+  cache.onMatch = async () => {
+    cache.onMatch = null;
+    store('"b"');
+    await settle();
+  };
+  http.update(partition, url, 'ETag: "a"\nX-New: 1\n', '"a"');
+  await settle();
+  await settle();
+  check(
+    'update: a range deleted in the meantime does not come back',
+    !cache.entries.has(oldKey) && !http.urls.has(oldKey) && cache.entries.size === 1,
+    [...cache.entries.keys()].join(),
+  );
 }
 
 // Above the limit: the oldest go away until 80 % are used
