@@ -240,8 +240,9 @@ var blHttpCache = {
         } catch (e) { }
       });
       headers.set(blHttpCache.sizeHeader, String(body.length));
+      // The Cache API refuses 206: a range is stored as 200, its key says what it is
       var put = function () {
-        return cache.put(key, new Response(body, { status: status, headers: headers }));
+        return cache.put(key, new Response(body, { status: range ? 200 : status, headers: headers }));
       };
       var stored = function () {
         blHttpCache.urls.add(key);

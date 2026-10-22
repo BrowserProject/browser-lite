@@ -1,7 +1,8 @@
 // HTTP cache (engine/js/http-cache.js) without the engine: loaded in node, the Cache API is a
-// fake with the same order as in the browser (storing appends at the end, replacing too). Key
-// format with the partition, cache names by format version (other formats deleted), cleanup,
-// ranges of a resource (206): answered only when complete, stitched, versions replaced.
+// fake with the same order as in the browser (storing appends at the end, replacing too) that
+// refuses 206 like the browser. Key format with the partition, cache names by format version
+// (other formats deleted), cleanup, ranges of a resource (206): answered only when complete,
+// stitched, versions replaced.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -31,6 +32,8 @@ class FakeCache {
     return this.entries.get(url)?.clone();
   }
   async put(url, response) {
+    if (response.status === 206)
+      throw new TypeError('Partial response (status code 206) is unsupported');
     this.entries.delete(url);
     this.entries.set(url, response);
   }
