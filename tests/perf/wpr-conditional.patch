@@ -1,0 +1,61 @@
+diff --git a/src/webpagereplay/proxy.go b/src/webpagereplay/proxy.go
+index 7534691..b709712 100644
+--- a/src/webpagereplay/proxy.go
++++ b/src/webpagereplay/proxy.go
+@@ -91,6 +91,34 @@ func updateDates(h http.Header, now time.Time) {
+ 	updateDate(h, "Expires", now, oldNow)
+ }
+ 
++// notModified tells whether a conditional request (RFC 9110 13.1.2 and 13.1.3) matches the
++// validator of the archived response. If-Modified-Since is compared with the archived
++// Last-Modified: the one a client got was shifted by updateDates to a later time.
++func notModified(req *http.Request, resp *http.Response) bool {
++	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
++		return false
++	}
++	if inm := req.Header.Get("If-None-Match"); inm != "" {
++		etag := strings.TrimPrefix(resp.Header.Get("Etag"), "W/")
++		if etag == "" {
++			return false
++		}
++		for _, tag := range strings.Split(inm, ",") {
++			tag = strings.TrimSpace(tag)
++			if tag == "*" || strings.TrimPrefix(tag, "W/") == etag {
++				return true
++			}
++		}
++		return false
++	}
++	since, err := http.ParseTime(req.Header.Get("If-Modified-Since"))
++	if err != nil {
++		return false
++	}
++	modified, err := http.ParseTime(resp.Header.Get("Last-Modified"))
++	return err == nil && !modified.After(since)
++}
++
+ // NewReplayingProxy constructs an HTTP proxy that replays responses from an archive.
+ // The proxy is listening for requests on a port that uses the given scheme (e.g., http, https).
+ func NewReplayingProxy(a *Archive, scheme string, quietMode bool, paramToIgnoreInURLPath string) http.Handler {
+@@ -140,6 +168,21 @@ func (proxy *replayingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
+ 	}
+ 	defer storedResp.Body.Close()
+ 
++	// A conditional request whose validator matches gets 304 like from the origin: the
++	// archived response never changes
++	if notModified(req, storedResp) {
++		updateDates(storedResp.Header, time.Now())
++		for _, name := range []string{"Content-Length", "Content-Range", "Content-Encoding", "Transfer-Encoding"} {
++			storedResp.Header.Del(name)
++		}
++		logger.Info("Proxy: SERVING response", "status", http.StatusNotModified)
++		for k, v := range storedResp.Header {
++			w.Header()[k] = append([]string{}, v...)
++		}
++		w.WriteHeader(http.StatusNotModified)
++		return
++	}
++
+ 	// Check if the stored Content-Encoding matches an encoding allowed by the client.
+ 	// If not, transform the response body to match the client's Accept-Encoding.
+ 	clientAE := strings.ToLower(req.Header.Get("Accept-Encoding"))

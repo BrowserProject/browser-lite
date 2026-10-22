@@ -1,0 +1,133 @@
+{
+  "description": "U8b ranges (206) in the HTTP cache: engine before (site 0, main a54a5e1) against the engine with ranges in the HTTP cache (site 1), second visit of CNN (loop videos) and YouTube, cheap (C, mobile) and fast (S, LAN) device",
+  "configs": [
+    {
+      "name": "Main",
+      "site": 0
+    },
+    {
+      "name": "Range",
+      "site": 1
+    }
+  ],
+  "compare": [
+    {
+      "base": "Main",
+      "arms": [
+        "Range"
+      ],
+      "rule": "lever",
+      "where": {
+        "visit": "warm",
+        "site": "cnn"
+      },
+      "metrics": [
+        "rx",
+        "cpu",
+        "firstLayout"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    },
+    {
+      "base": "Main",
+      "arms": [
+        "Range"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "warm",
+        "site": "youtube"
+      },
+      "metrics": [
+        "rx",
+        "cpu",
+        "firstLayout"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    },
+    {
+      "base": "Main",
+      "arms": [
+        "Range"
+      ],
+      "rule": "correction",
+      "where": {
+        "visit": "cold"
+      },
+      "metrics": [
+        "rx",
+        "cpu",
+        "firstLayout"
+      ],
+      "secondary": [
+        "loaded"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "range-C-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "range-C-cnn",
+          "kind": "run",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--visit warm --runs 15 --timeout 400 --sites cnn"
+        }
+      ]
+    },
+    {
+      "name": "range-C-youtube",
+      "record": [
+        "youtube"
+      ],
+      "sections": [
+        {
+          "id": "range-C-youtube",
+          "kind": "run",
+          "profile": "C",
+          "net": "mobile",
+          "args": "--visit warm --runs 15 --timeout 400 --sites youtube"
+        }
+      ]
+    },
+    {
+      "name": "range-S-cnn",
+      "record": [
+        "cnn"
+      ],
+      "sections": [
+        {
+          "id": "range-S-cnn",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites cnn"
+        }
+      ]
+    },
+    {
+      "name": "range-S-youtube",
+      "record": [
+        "youtube"
+      ],
+      "sections": [
+        {
+          "id": "range-S-youtube",
+          "kind": "run",
+          "profile": "S",
+          "net": "lan",
+          "args": "--visit warm --runs 15 --timeout 400 --sites youtube"
+        }
+      ]
+    }
+  ]
+}

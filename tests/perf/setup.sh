@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepares a host for perf measurements (repeatable, keeps what exists): Docker networks, the image
-# of the core stealer, Web Page Replay built at PERF_WPR_COMMIT, a test CA for the replay server, the
+# of the core stealer, Web Page Replay built at PERF_WPR_COMMIT with wpr-conditional.patch, a test CA for the replay server, the
 # test videos and, with "wpe", the image with native WPE WebKit.
 #
 #   tests/perf/setup.sh [wpe]
@@ -18,15 +18,18 @@ docker network inspect "$NET_ORIGIN" >/dev/null 2>&1 ||
 docker image inspect bl-perf-stealer >/dev/null 2>&1 ||
     docker build -q --build-arg NODE_IMAGE="$NODE_IMAGE" -t bl-perf-stealer "$PERF/docker/stealer" >/dev/null
 
-if [ ! -x "$OUT/wpr/wpr" ]; then
-    docker run --rm -v "$OUT/wpr:/out" -e CGO_ENABLED=0 "$PERF_GO_IMAGE" sh -c "
+# With wpr-conditional.patch: a conditional request whose validator matches gets 304 like from the
+# origin (the replay otherwise sends the whole archived response again). Rebuilt when it changes.
+if [ ! -x "$OUT/wpr/wpr" ] || ! cmp -s "$PERF/wpr-conditional.patch" "$OUT/wpr/wpr-conditional.patch"; then
+    docker run --rm -v "$OUT/wpr:/out" -v "$PERF:/perf:ro" -e CGO_ENABLED=0 "$PERF_GO_IMAGE" sh -c "
         set -e
         apk add -q git >/dev/null
         git clone -q $PERF_WPR_REPO /src
         cd /src
         git checkout -q $PERF_WPR_COMMIT
+        git apply /perf/wpr-conditional.patch
         go build -o /out/wpr ./src/wpr.go
-        cp deterministic.js /out/"
+        cp deterministic.js /perf/wpr-conditional.patch /out/"
 fi
 
 # Own test CA: the RSA root of Web Page Replay has only 1024 bits, which the engine (OpenSSL

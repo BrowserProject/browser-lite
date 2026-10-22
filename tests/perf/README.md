@@ -16,7 +16,10 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
 - **Link** (`netem.sh`): `lan`, `dc` (30 ms), `mobile` (80 ms, 20/5 Mbit), `poor` (150 ms, 5/1 Mbit,
   1 % loss), `rtt80` and `rate20` to separate latency and bandwidth.
 - **Sites**: each group first records its sites with browser-lite itself into a Web Page Replay
-  archive, then every section loads them from the replay. Archives never leave the runner.
+  archive, then every section loads them from the replay. Archives never leave the runner. The
+  replay answers a conditional request whose validator matches the archived response with 304
+  like the origin (`wpr-conditional.patch`; without it every revalidation got the whole response
+  again).
 - **Engines**: one job measures several engines. Site n (`build/perf/site-<n>`, one per engine) is
   served on port 8080 + n and opens as `localhost:<port>` inside the device: a secure context
   (else no OPFS and no caches) and its own origin per engine (storage lock, OPFS, HTTP cache and
