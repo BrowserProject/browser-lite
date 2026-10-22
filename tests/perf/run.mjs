@@ -25,6 +25,7 @@ import {
   memoryHigh,
   netBytes,
   readConfigs,
+  settledWasmCodeCacheMB,
   startError,
   startMarks,
   testOptions,
@@ -84,17 +85,21 @@ async function launch(dir, engine) {
 }
 
 // The template profile has the engine of every site of the arms in the HTTP and code cache of
-// Chromium. The size of the code cache after every site shows whether each engine got into it.
+// Chromium. Every site waits until its engine is in the code cache (the job fails otherwise), so
+// that every arm starts from the same state.
 async function makeTemplate() {
   if (fs.existsSync(TEMPLATE)) return;
   const context = await launch(TEMPLATE, {});
   const page = context.pages()[0] || (await context.newPage());
   const sizes = [];
   for (const site of new Set(configs.map((config) => config.site))) {
+    const before = wasmCodeCacheMB(TEMPLATE);
     await page.goto(`${origins[site]}/?debug=1&url=about:blank`);
     await page.waitForFunction(() => window.__perf?.ready, null, { timeout: 300000 });
-    await page.waitForTimeout(5000);
-    sizes.push(`site ${site} ${wasmCodeCacheMB(TEMPLATE)} MB`);
+    const size = await settledWasmCodeCacheMB(TEMPLATE, before).catch((error) => {
+      throw new Error(`template, site ${site}: ${error.message}`);
+    });
+    sizes.push(`site ${site} ${size} MB`);
   }
   await context.close();
   console.log(

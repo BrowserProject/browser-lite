@@ -137,9 +137,43 @@ const dirSize = (dir) =>
         )
     : 0;
 
+const wasmCodeCacheBytes = (profileDir) =>
+  dirSize(path.join(profileDir, 'Default', 'Code Cache', 'wasm'));
+const toMB = (bytes) => +(bytes / 1048576).toFixed(1);
+
 /** Size of the WebAssembly code cache of V8 in a Chromium profile directory in MB. */
-export const wasmCodeCacheMB = (profileDir) =>
-  +(dirSize(path.join(profileDir, 'Default', 'Code Cache', 'wasm')) / 1048576).toFixed(1);
+export const wasmCodeCacheMB = (profileDir) => toMB(wasmCodeCacheBytes(profileDir));
+
+/**
+ * Waits until the WebAssembly code cache of a Chromium profile directory has grown by at least
+ * `growthMB` over `beforeMB` and then stayed unchanged for `quietMs`, and returns its size in MB.
+ * V8 writes a module into it only once enough of its code is optimized (`wasm_caching_threshold`,
+ * 1 MB) and after a pause (`wasm_caching_timeout_ms`, 2 s), so when depends on the speed of the
+ * device. Throws after `timeoutMs`.
+ */
+export async function settledWasmCodeCacheMB(
+  profileDir,
+  beforeMB,
+  { growthMB = 1, quietMs = 4000, timeoutMs = 120000 } = {},
+) {
+  const end = Date.now() + timeoutMs;
+  let last = -1;
+  let since = Date.now();
+  for (;;) {
+    const bytes = wasmCodeCacheBytes(profileDir);
+    if (bytes !== last) {
+      last = bytes;
+      since = Date.now();
+    } else if (toMB(bytes) >= beforeMB + growthMB && Date.now() - since >= quietMs) {
+      return toMB(bytes);
+    }
+    if (Date.now() > end)
+      throw new Error(
+        `WebAssembly code cache at ${toMB(bytes)} MB after ${timeoutMs} ms, expected at least ${(beforeMB + growthMB).toFixed(1)} MB, unchanged for ${quietMs} ms`,
+      );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
 
 /**
  * Steps of the start in ms of performance.now() of the page (marks bl:<step> of the core: lock,

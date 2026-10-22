@@ -39,9 +39,11 @@ device (Chromium of Playwright, demo)  --netem--  server (browser-lite-server)  
   configuration, only with `debug`): `BL_POOL_WORKERS` (default 8), `BL_SPARE_WORKERS` and
   `BL_SPARE_WORKERS_AT` (`start`, `ready` or `paint`).
 - **Template** (`run.mjs`): every visit starts from a profile that has loaded the demo of every
-  site once (engine in the HTTP cache and the WebAssembly code cache of Chromium). The job log
-  shows the size of that code cache after every site; rows have `markCompile`,
-  `markInstantiate` and `markMain` like `start.mjs`.
+  site once (engine in the HTTP cache and the WebAssembly code cache of Chromium). V8 writes an
+  engine into the code cache only once enough of it is optimized, so the template waits per site
+  until the code cache has grown by at least 1 MB and stays unchanged for 4 s, and the job fails
+  after 2 minutes without it. The job log shows the size of that code cache after every site;
+  rows have `markCompile`, `markInstantiate` and `markMain` like `start.mjs`.
 - **Frames** (`frames.mjs --page video|video360|webgl|anim|scroll|idle`): over 20 s, from 8 s after the first
   shown frame on (every run starts cold), `cpuPerSecond` (CPU seconds per second of the device), `fps` (frames shown per second),
   `cpuPerFrame` and memory, for every arm and Chromium itself (arm `chromium`). browser-lite counts
