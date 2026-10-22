@@ -15,7 +15,7 @@
 // version cover the whole resource; the answer is a 206 with the requested bytes
 // and the headers of the newest range. Storing a range deletes the ranges of
 // other versions and those inside it, storing a whole response all ranges of
-// the resource.
+// the resource. After a 304 only the headers change (update).
 //
 // Limit: 400 MB, at most a quarter of the host's quota. Only the own content
 // counts (header x-bl-size), not what else is in the OPFS or in the host's
@@ -223,23 +223,29 @@ var blHttpCache = {
   },
 
   // start < 0: a whole response, else a range of a resource of total bytes and this version
+  // Headers of an entry from "name: value" lines and its size
+  headers: function (headerText, size) {
+    var headers = new Headers();
+    headerText.split('\n').forEach(function (line) {
+      var colon = line.indexOf(':');
+      if (colon <= 0)
+        return;
+      // Headers cannot hold values outside of Latin-1, only this field is missing then
+      try {
+        headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+      } catch (e) { }
+    });
+    headers.set(blHttpCache.sizeHeader, String(size));
+    return headers;
+  },
+
   store: function (partition, url, status, headerText, body, start, total, version) {
     var range = start >= 0 ? { first: start, last: start + body.length - 1, total: total, version: version } : null;
     var key = blHttpCache.key(partition, url, range);
     blHttpCache.open().then(function (cache) {
       if (!cache)
         return;
-      var headers = new Headers();
-      headerText.split('\n').forEach(function (line) {
-        var colon = line.indexOf(':');
-        if (colon <= 0)
-          return;
-        // Headers cannot hold values outside of Latin-1, only this field is missing then
-        try {
-          headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
-        } catch (e) { }
-      });
-      headers.set(blHttpCache.sizeHeader, String(body.length));
+      var headers = blHttpCache.headers(headerText, body.length);
       // The Cache API refuses 206: a range is stored as 200, its key says what it is
       var put = function () {
         return cache.put(key, new Response(body, { status: range ? 200 : status, headers: headers }));
@@ -256,6 +262,31 @@ var blHttpCache = {
         if (!error || error.name !== 'QuotaExceededError')
           return;
         return blHttpCache.trim(true).then(put).then(stored);
+      });
+    }).catch(function () { });
+  },
+
+  // After a 304: the entry (version: the newest range of that version) gets the
+  // new headers, the body stays in the Cache API
+  update: function (partition, url, headerText, version) {
+    var key = blHttpCache.key(partition, url);
+    blHttpCache.open().then(function (cache) {
+      if (!cache)
+        return;
+      if (version) {
+        var ranges = blHttpCache.ranges(key).filter(function (range) { return range.version === version; });
+        if (!ranges.length)
+          return;
+        key = ranges[ranges.length - 1].key;
+      }
+      if (!blHttpCache.urls.has(key))
+        return;
+      return cache.match(key, { ignoreVary: true }).then(function (response) {
+        if (!response)
+          return;
+        return response.blob().then(function (body) {
+          return cache.put(key, new Response(body, { status: response.status, headers: blHttpCache.headers(headerText, body.size) }));
+        });
       });
     }).catch(function () { });
   },

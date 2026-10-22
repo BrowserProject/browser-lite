@@ -20,7 +20,8 @@
 // from the cache only when the ranges of the newest version cover the whole
 // resource, so the pieces of one playback never mix versions; freshness and
 // revalidation go by the newest range. A whole response does not serve ranges
-// and ranges do not serve a request for the whole resource.
+// and ranges do not serve a request for the whole resource. A 304 only updates
+// the stored headers (of the newest range), the body stays in the cache.
 //
 // Every entry belongs to a partition (top site, frame site, subframe document;
 // partition()) like in Chrome, so a page cannot tell from cache hits which
@@ -63,6 +64,10 @@
 // start < 0: the whole resource, end < 0: up to its end
 EM_JS(void, blJsHttpCacheLookup, (int id, const char* partition, const char* url, double start, double end), {
     blHttpCache.lookup(id, UTF8ToString(partition), UTF8ToString(url), start, end);
+});
+// version empty: the whole response, else the newest range of this version
+EM_JS(void, blJsHttpCacheUpdate, (const char* partition, const char* url, const char* headers, const char* version), {
+    blHttpCache.update(UTF8ToString(partition), UTF8ToString(url), UTF8ToString(headers), UTF8ToString(version));
 });
 // start < 0: a whole response, else a range of a resource of total bytes and this version
 EM_JS(void, blJsHttpCacheStore, (const char* partition, const char* url, int status, const char* headers, const uint8_t* body, int length, double start, double total, const char* version), {
@@ -407,18 +412,22 @@ static void didLookup(int id, int status, char* headers, int headersLength, uint
         pending.completion(WTF::move(entry));
 }
 
-void store(const String& partition, const ResourceRequest& request, const ResourceResponse& response, WallTime responseTime, const FragmentedSharedBuffer& body)
+// Value of x-bl-vary: the request headers the response varies by
+static String varyingHeaders(const ResourceRequest& request, const ResourceResponse& response)
 {
-    if (partition.isNull())
-        return;
-    std::optional<ParsedContentRange> range;
-    if (response.httpStatusCode() == 206) {
-        range = storableRange(request, response);
-        // A range cut short is not stored
-        if (!range || static_cast<uint64_t>(range->lastBytePosition() - range->firstBytePosition() + 1) != body.size())
-            return;
-    }
-    // Headers without those that are no longer right (curl already decoded the body)
+    return encodeVary(collectVaryingRequestHeaders(&networkStorageSession(), request, response));
+}
+
+// Ranges of the same version make up one resource
+static String rangeVersion(const ResourceResponse& response, const String& varying)
+{
+    return makeString(response.httpHeaderField(HTTPHeaderName::ETag), '\n', response.httpHeaderField(HTTPHeaderName::LastModified), '\n', varying);
+}
+
+// Headers of an entry, without those that are no longer right (curl already
+// decoded the body; a range has its position in the key)
+static CString entryHeaders(const ResourceResponse& response, WallTime responseTime, const String& varying)
+{
     StringBuilder headers;
     for (auto& field : response.httpHeaderFields()) {
         if (field.keyAsHTTPHeaderName) {
@@ -427,6 +436,7 @@ void store(const String& partition, const ResourceRequest& request, const Resour
             case HTTPHeaderName::SetCookie2:
             case HTTPHeaderName::ContentEncoding:
             case HTTPHeaderName::ContentLength:
+            case HTTPHeaderName::ContentRange:
             case HTTPHeaderName::TransferEncoding:
             case HTTPHeaderName::Connection:
             case HTTPHeaderName::KeepAlive:
@@ -444,11 +454,24 @@ void store(const String& partition, const ResourceRequest& request, const Resour
     headers.append(timeHeader, ": "_s, String::number(responseTime.secondsSinceEpoch().milliseconds()), '\n');
     if (!response.httpStatusText().isEmpty())
         headers.append(statusTextHeader, ": "_s, response.httpStatusText(), '\n');
-    auto varying = encodeVary(collectVaryingRequestHeaders(&networkStorageSession(), request, response));
     if (!varying.isEmpty())
         headers.append(varyHeader, ": "_s, varying, '\n');
-    // Ranges of the same version make up one resource
-    auto version = range ? makeString(response.httpHeaderField(HTTPHeaderName::ETag), '\n', response.httpHeaderField(HTTPHeaderName::LastModified), '\n', varying) : String { };
+    return headers.toString().utf8();
+}
+
+void store(const String& partition, const ResourceRequest& request, const ResourceResponse& response, WallTime responseTime, const FragmentedSharedBuffer& body)
+{
+    if (partition.isNull())
+        return;
+    std::optional<ParsedContentRange> range;
+    if (response.httpStatusCode() == 206) {
+        range = storableRange(request, response);
+        // A range cut short is not stored
+        if (!range || static_cast<uint64_t>(range->lastBytePosition() - range->firstBytePosition() + 1) != body.size())
+            return;
+    }
+    auto varying = varyingHeaders(request, response);
+    auto version = range ? rangeVersion(response, varying) : String { };
 
     struct Job {
         CString partition;
@@ -466,7 +489,7 @@ void store(const String& partition, const ResourceRequest& request, const Resour
     if (!data)
         return;
     memcpySpan(std::span(data, contiguous->size()), contiguous->span());
-    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), response.httpStatusCode(), headers.toString().utf8(), data, contiguous->size(),
+    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), response.httpStatusCode(), entryHeaders(response, responseTime, varying), data, contiguous->size(),
         range ? static_cast<double>(range->firstBytePosition()) : -1, range ? static_cast<double>(range->instanceLength()) : 0, version.utf8() };
     emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
         std::unique_ptr<Job> job(static_cast<Job*>(argument));
@@ -525,9 +548,23 @@ void lookupForLoad(const String& partition, ResourceRequest&& request, bool alwa
 
 void didRevalidate(const String& partition, const ResourceRequest& request, Entry& entry, const ResourceResponse& notModified)
 {
+    // Of the stored ranges, before the 304 changes the headers
+    auto version = entry.response.httpStatusCode() == 206 ? rangeVersion(entry.response, encodeVary(entry.varyingHeaders)) : String { };
     updateResponseHeadersAfterRevalidation(entry.response, notModified);
     entry.responseTime = WallTime::now();
-    store(partition, request, entry.response, entry.responseTime, entry.body.get());
+    if (partition.isNull())
+        return;
+    struct Job {
+        CString partition;
+        CString url;
+        CString headers;
+        CString version;
+    };
+    auto* job = new Job { partition.utf8(), cacheKey(request.url()).utf8(), entryHeaders(entry.response, entry.responseTime, varyingHeaders(request, entry.response)), version.utf8() };
+    emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), [](void* argument) {
+        std::unique_ptr<Job> job(static_cast<Job*>(argument));
+        blJsHttpCacheUpdate(job->partition.data(), job->url.data(), job->headers.data(), job->version.data());
+    }, job);
 }
 
 } // namespace BrowserLite::HttpCache

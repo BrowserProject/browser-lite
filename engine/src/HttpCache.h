@@ -106,7 +106,8 @@ struct Lookup {
 // without cache, null partition). alwaysRevalidate: revalidate even a fresh entry
 void lookupForLoad(const String& partition, WebCore::ResourceRequest&&, bool alwaysRevalidate, CompletionHandler<void(Lookup&&)>&&);
 
-// 304 on the conditional request: entry with the new headers, stored again
+// 304 on the conditional request: entry with the new headers, which the stored
+// entry gets too (its body stays)
 void didRevalidate(const String& partition, const WebCore::ResourceRequest&, Entry&, const WebCore::ResourceResponse& notModified);
 
 } // namespace BrowserLite::HttpCache

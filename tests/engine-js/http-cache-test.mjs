@@ -2,7 +2,7 @@
 // fake with the same order as in the browser (storing appends at the end, replacing too) that
 // refuses 206 like the browser. Key format with the partition, cache names by format version
 // (other formats deleted), cleanup, ranges of a resource (206): answered only when complete,
-// stitched, versions replaced.
+// stitched, versions replaced; after a 304 only the headers change.
 //   node tests/engine-js/http-cache-test.mjs
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -180,6 +180,18 @@ async function fill(http, cache, count, size) {
   );
   check('lookup: miss from another top site', status(2) === 0, String(status(2)));
   check('lookup: miss in a frame of another top site', status(3) === 0, String(status(3)));
+
+  // After a 304: new headers, the same body
+  http.update('http://a.test http://a.test', url, 'Content-Type: text/javascript\nX-New: 1\n', '');
+  for (let i = 0; i < 20; i++) await tick();
+  http.lookup(4, 'http://a.test http://a.test', url);
+  for (let i = 0; i < 20 && replies.length < 4; i++) await tick();
+  const updated = replies.find((reply) => reply.id === 4);
+  check(
+    'update: new headers, same body',
+    updated?.status === 200 && updated.body === 'lib' && updated.headers.includes('x-new: 1'),
+    JSON.stringify(updated),
+  );
 }
 
 // Ranges of a resource (206): key with range and version, answered only when the ranges of the
@@ -282,6 +294,28 @@ async function fill(http, cache, count, size) {
     'range: usage counts the deleted ranges',
     http.total === null || http.total === 10,
     String(http.total),
+  );
+
+  // After a 304 the newest range of the version gets the new headers, the body stays
+  http.update(partition, url, 'Content-Type: video/mp4\nETag: "b"\nX-New: 1\n', '"b"');
+  await settle();
+  reply = await lookup(0, 9);
+  check(
+    'range: a 304 updates the headers of the newest range',
+    reply.status === 206 &&
+      reply.body === 'ABCDEFGHIJ' &&
+      reply.headers.includes('x-new: 1') &&
+      ranges() === '0-4:"b",5-9:"b"' &&
+      cache.entries.get([...cache.entries.keys()].pop()).headers.get('x-bl-size') === '5',
+    JSON.stringify(reply),
+  );
+  http.update(partition, url, 'X-Other: 1\n', '"c"');
+  await settle();
+  reply = await lookup(0, 9);
+  check(
+    'range: an update of another version changes nothing',
+    reply.status === 206 && !reply.headers.includes('x-other'),
+    JSON.stringify(reply),
   );
 
   http.store(partition, url, 200, 'Content-Type: video/mp4\n', new TextEncoder().encode(file));

@@ -140,7 +140,8 @@ memory cache stays shared by all views of the engine. Range requests (the pieces
 validator is stored as a range of its resource (resources up to 10 MB), and a range request is
 answered once the ranges of the newest version (validator and Vary values) cover the whole
 resource; another version replaces the ranges. `MediaFetch` looks up in the partition of the
-element's document.
+element's document. A 304 only updates the headers of the stored entry, its body stays in the
+Cache API.
 
 ## Storage
 
