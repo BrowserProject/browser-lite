@@ -35,8 +35,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
   (#235), the code that the start and common pages do not run loads after the start in chunks
-  (#238); a first visit at 5 Mbit/s, 150 ms starts after 16 s instead of 32 s
-  (`tests/bench/slow-start.mjs`).
+  (#238), an address typed meanwhile opens once the engine runs (#239); a first visit at
+  5 Mbit/s, 150 ms starts after 16 s instead of 32 s (`tests/bench/slow-start.mjs`).
 - **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
   after a browser restart the engine comes compiled from Chrome's code cache (#237).

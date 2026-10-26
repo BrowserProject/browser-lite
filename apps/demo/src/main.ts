@@ -9,6 +9,7 @@ import {
 } from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
 import { colorPicker, dateTimePicker, permissionPrompt, selectPopup } from '@browser-lite/ui';
+import { takePendingAddress } from './address-bar.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
@@ -106,18 +107,24 @@ function browserOptions(
 
 /** The tabs at the start: the last session (unless ?url=) or the start page. */
 function openStartTabs(restarted: boolean): void {
-  const url = restarted ? null : startUrl;
+  // An address typed while the engine started opens in front of a restored session
+  const typed = takePendingAddress();
+  const url = typed || (restarted ? null : startUrl);
   const safe = !!storage(SAFE_START_KEY, undefined, true);
   storage(SAFE_START_KEY, null, true);
-  const session = url ? null : sessionToRestore();
+  const session = url && !typed ? null : sessionToRestore();
   if (!session) {
     openTab(url || DEFAULT_URL);
     return;
   }
   const restored = session.map((entry) => restoredTab(entry));
   if (safe) {
-    openTab('about:blank');
+    openTab(typed || 'about:blank');
     showNotice('After the restart the tabs load only when clicked');
+    return;
+  }
+  if (typed) {
+    openTab(typed);
     return;
   }
   const index = session.findIndex((entry) => entry.active);

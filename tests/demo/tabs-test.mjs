@@ -5,7 +5,8 @@
 // nothing on other error pages) and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
-// the status line says that memory is full.
+// the status line says that memory is full. An address typed while the engine downloads opens
+// once it runs.
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -392,6 +393,38 @@ check(
   await page.evaluate(() => document.getElementById('boot').hidden && !!window.blTest.view()),
 );
 await page.evaluate(() => window.blTest.memoryLimit(0));
+
+// An address typed while the engine still downloads opens as soon as it runs
+{
+  const early = await browser.newContext({ viewport: { width: 1000, height: 700 } });
+  let release = () => {};
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  await early.route('**/engine.wasm', async (route) => {
+    await held;
+    await route.continue();
+  });
+  const earlyPage = await early.newPage();
+  await earlyPage.goto(stack.app());
+  await earlyPage.fill('#address', `${siteURL}opened`);
+  await earlyPage.press('#address', 'Enter');
+  const note = await earlyPage.evaluate(() => document.getElementById('boot').textContent);
+  check('typed during the download: the start message names it', note.includes('opened'), note);
+  release();
+  const opened = await earlyPage
+    .waitForFunction(
+      () => document.querySelector('#tab-list .tab.active .title')?.textContent === 'Opened',
+      null,
+      { timeout: TIMEOUT },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+  check('typed during the download: it opens once the engine runs', opened);
+  await early.close();
+}
 
 selfSigned.close();
 await browser.close();

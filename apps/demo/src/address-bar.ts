@@ -1,4 +1,5 @@
 import { bookmarks } from './bookmarks.js';
+import { showStartNote } from './engine-message.js';
 import { readHistory } from './history.js';
 import { SEARCH_ENGINES, settings } from './settings.js';
 import { activeTab, focusPage } from './tabs.js';
@@ -8,6 +9,14 @@ const form = byId<HTMLFormElement>('address-form');
 const address = byId<HTMLInputElement>('address');
 const box = byId('suggestions');
 let selected = -1;
+let pending = '';
+
+/** The address submitted while the engine was still starting; the start opens it. */
+export function takePendingAddress(): string {
+  const url = pending;
+  pending = '';
+  return url;
+}
 
 /** Text of the address bar as URL: an address, or a search with the search engine. */
 export function addressToURL(text: string): string {
@@ -90,11 +99,17 @@ function showSuggestions(): void {
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  const tab = activeTab();
-  if (!tab) return;
   hideSuggestions();
   const url = addressToURL(address.value);
   if (!url) return;
+  const tab = activeTab();
+  // While the engine downloads or starts there is no tab yet: the start opens the address
+  if (!tab) {
+    pending = url;
+    showStartNote(`${url} opens as soon as the engine runs.`);
+    address.blur();
+    return;
+  }
   tab.view.load(url);
   focusPage();
 });
