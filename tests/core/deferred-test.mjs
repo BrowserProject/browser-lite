@@ -1,6 +1,8 @@
 // Split engine (#238, tools/split-engine.mjs, engine/js/deferred.js): the chunks
-// engine.deferred-<n>.wasm load after the start. A page that needs deferred code (XSLT) while
-// they are held back still works: the engine thread reads its chunk itself and waits for it.
+// engine.deferred-<n>.wasm load after the start. The start and a simple page need none of them
+// (otherwise engine/hot-functions.txt is out of date: tools/hot-functions.mjs). A page that needs
+// deferred code (XSLT) while they are held back still works: the engine thread reads its chunk
+// itself and waits for it.
 // Once the host has all chunks they reach all threads, and another page with deferred code
 // (MathML, SVG filters) needs no further request. An unsplit engine skips the test.
 //
@@ -33,6 +35,12 @@ if (!chunks.length) {
 }
 
 const PAGES = {
+  // Text, an image, a form: what the start and common pages run
+  simple: `<!doctype html><title>Simple</title><style>body{font:16px sans-serif;margin:40px}</style>
+<h1>Simple</h1><p>${'Some text of a simple page. '.repeat(30)}</p>
+<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E">
+<form><input value="text"><button>Go</button></form>
+<script>requestAnimationFrame(() => requestAnimationFrame(() => console.log('RESULT simple=1')));</script>`,
   // XSLTProcessor: code the common pages of engine/hot-functions.txt do not run
   xslt: `<!doctype html><title>XSLT</title><script>
 const parse = (text) => new DOMParser().parseFromString(text, 'application/xml');
@@ -64,7 +72,12 @@ const HOLD_MS = 4000;
 let requests = 0;
 let released = false;
 let heldBack = 0;
-const release = new Promise((resolve) => setTimeout(resolve, HOLD_MS)).then(() => {
+let startRelease = () => {};
+const release = new Promise((resolve) => {
+  startRelease = () => setTimeout(resolve, HOLD_MS);
+  // A start that needs a chunk would wait for it: it gets it later and the check below fails
+  setTimeout(resolve, 30000);
+}).then(() => {
   released = true;
   heldBack = requests;
 });
@@ -76,8 +89,19 @@ await context.route('**/engine.deferred-*.wasm', async (route) => {
 
 check(
   'starts while the chunks are held back',
-  await openHost(page, stack.app({ url: new URL('xslt', siteURL).href })),
+  await openHost(page, stack.app({ url: new URL('simple', siteURL).href })),
 );
+check('a simple page loads', (await results.wait('simple')) === '1');
+await page.waitForTimeout(1000);
+// The host asks for one chunk at a time
+check(
+  'the start and a simple page need no deferred code',
+  requests === 1,
+  `${requests} chunk requests`,
+);
+
+startRelease();
+await load(page, new URL('xslt', siteURL).href);
 check('a page with deferred code works', (await results.wait('xslt')) === '3', results.get('xslt'));
 check('it waited for its chunk', released);
 // The host asks for one chunk at a time, so a second waiting request came from the engine thread

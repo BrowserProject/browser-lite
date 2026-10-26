@@ -1,9 +1,9 @@
 // Splits the linked engine (#238) into engine.wasm, the code the start and common pages run, and
 // chunks engine.deferred-<n>.wasm of the rest, which the host loads after the start
 // (engine/js/deferred.js):
-//  1. engine.wasm keeps the functions of engine/hot-functions.txt (tools/hot-functions.mjs) and
-//     everything the page main thread reaches by direct calls from the exports and from the
-//     functions it ran: it cannot wait for a chunk.
+//  1. engine.wasm keeps the functions of engine/hot-functions.txt (tools/hot-functions.mjs) that
+//     ran, functions newer than that list, and everything the page main thread reaches by direct
+//     calls from the exports and from the functions it ran: it cannot wait for a chunk.
 //  2. The rest goes into chunks of about CHUNK_BYTES, sorted by class, so a thread that needs
 //     deferred code before everything arrived waits for one chunk only (binaryen's wasm-split).
 //  3. wasm-split's placeholders (one imported JS function per deferred function, about 50000,
@@ -171,10 +171,12 @@ async function main() {
   const keep = new Set();
   const roots = [];
   for (const [index, name] of names) {
-    const entry = index >= importedFunctions && hot.get(nameHash(name));
-    if (!entry) continue;
+    if (index < importedFunctions) continue;
+    const entry = hot.get(nameHash(name));
+    // Cold functions are deferred; functions newer than the list stay
+    if (entry?.cold) continue;
     keep.add(name);
-    if (entry.main) roots.push(name);
+    if (entry?.main) roots.push(name);
   }
   for (const entry of wasmExports(full))
     if (entry.kind === 'function' && names.has(entry.index)) roots.push(names.get(entry.index));

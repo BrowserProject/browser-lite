@@ -124,8 +124,11 @@ of code, sorted by class, that load after the start (`engine/js/deferred.js`). T
 `-DBROWSER_LITE_SPLIT_ENGINE=OFF` keeps one module.
 
 `engine/hot-functions.txt` comes from a run of the demo over common sites with the unsplit
-engine. Renew it after changes that add or rename much engine code (a WebKit update); a function
-missing from it still works, a thread only waits for its chunk when it needs one
+engine: every function of that build, the ones that did not run marked cold. Only cold functions
+are deferred, so newer code stays in `engine.wasm` until the list is renewed. Renew it after
+changes that add or rename much engine code (a WebKit update), or when
+`tests/core/deferred-test.mjs` finds the start needing a chunk; a deferred function still works,
+a thread only waits for its chunk when it needs one
 before that download is through:
 
 ```bash

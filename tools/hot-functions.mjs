@@ -2,7 +2,8 @@
 // starts the demo in Chromium with the unsplit engine (engine.full.wasm of a build, with function
 // names) on a first visit and again after a restart, and the core's test host page, loads a local
 // page and the sites one after the other and scrolls them, and adds every function V8 compiled
-// meanwhile (it compiles each function at its first call) to engine/hot-functions.txt.
+// meanwhile (it compiles each function at its first call) to engine/hot-functions.txt; the other
+// functions of the build are added as cold.
 // Run it after changes that add or rename much engine code (a WebKit update): functions missing
 // from the list still work, a thread only waits for the chunk of one when it needs it before
 // the download is through.
@@ -20,7 +21,7 @@ import {
   tempDir,
 } from '../tests/lib/index.mjs';
 import { nameHash, readHotList, writeHotList } from './hot-functions-file.mjs';
-import { functionNames } from './wasm-binary.mjs';
+import { functionNames, wasmImports } from './wasm-binary.mjs';
 
 const SITES = [
   'https://en.wikipedia.org/wiki/Switzerland',
@@ -141,15 +142,22 @@ const core = await startStack({ engine });
 await scenario(core, tempDir('hot-profile'), [local.url, ...sites.slice(0, 3)]);
 
 const list = readHotList(options.out);
-const before = list.size;
 for (const [index, main] of compiled) {
   const name = names.get(index);
   if (!name) continue;
   const hash = nameHash(name);
-  list.set(hash, { main: main || !!list.get(hash)?.main });
+  list.set(hash, { main: main || !!list.get(hash)?.main, cold: false });
 }
+// What else this build has did not run: deferred (newer functions stay)
+const importedFunctions = wasmImports(readFileSync(fullWasm)).filter(
+  (entry) => entry.kind === 'function',
+).length;
+for (const [index, name] of names)
+  if (index >= importedFunctions && !list.has(nameHash(name)))
+    list.set(nameHash(name), { main: false, cold: true });
 writeHotList(options.out, list);
+const cold = [...list.values()].filter((entry) => entry.cold).length;
 console.log(
-  `${compiled.size} functions ran, ${list.size - before} new, ${list.size} in ${options.out}`,
+  `${compiled.size} functions ran; ${list.size - cold} hot and ${cold} cold in ${options.out}`,
 );
 process.exit(0);
