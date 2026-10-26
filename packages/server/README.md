@@ -69,7 +69,7 @@ process):
 | `ports` | `[80, 443, 8080, 8443]` | allowed target ports, or `'any'` |
 | `streamsPerConnection` | 256 | open streams per WebSocket |
 | `streamsPerHost` | 64 | open streams per WebSocket to one host name and port |
-| `connectionsPerIp` | 16 | WebSockets per client address (HTTP 429 beyond) |
+| `connectionsPerIp` | 16 | WebSockets per client address (HTTP 429 beyond); a `WispTransport` uses 3 by default |
 | `maxPayload` | 64 KiB + 5 | largest WebSocket message (the largest packet of `WispTransport`) |
 | `idleTimeoutMs` | 0 | close streams without traffic after this time; 0 never |
 

@@ -33,7 +33,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   bug that aborted about 1 % of heavy page loads (#219).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
-  data saver (`Save-Data`, #230); a first visit at 5 Mbit/s, 150 ms starts after 25 s instead of
+  data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
+  (#235); a first visit at 5 Mbit/s, 150 ms starts after 25 s instead of
   32 s (`tests/bench/slow-start.mjs`).
 - **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232).

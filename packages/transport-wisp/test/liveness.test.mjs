@@ -28,7 +28,7 @@ test('every Wisp close code maps to its reason', async () => {
     const code = Number.parseInt(Buffer.from(packet.subarray(8)).toString(), 16);
     ws.send(Uint8Array.of(0x04, ...packet.subarray(1, 5), code));
   });
-  const transport = new WispTransport({ url: server.url });
+  const transport = new WispTransport({ connections: 1, url: server.url });
   const expected = {
     '02': 'closed',
     '01': 'reset',
@@ -71,7 +71,7 @@ test('dead connection probe', async () => {
     if (answerProbes && packet[0] === 0x01 && packet[6] === 0 && packet[7] === 0)
       ws.send(Uint8Array.of(0x04, ...packet.subarray(1, 5), INVALID));
   });
-  const transport = new WispTransport({ url: server.url });
+  const transport = new WispTransport({ connections: 1, url: server.url });
   const waitForAnswer = async (ms) => {
     const stream = transport.openTCP('example.org', 80);
     stream.onopen = () => stream.send(new TextEncoder().encode('GET / HTTP/1.1\r\n\r\n'));
@@ -165,7 +165,7 @@ test('slow uploads, stalled lines and relay keepalives', async () => {
     const url = `ws://slow/?rate=${rate}&packets=${packets}${hidden ? '&hidden' : ''}`;
     let transport;
     try {
-      transport = new WispTransport({ url });
+      transport = new WispTransport({ connections: 1, url });
     } finally {
       globalThis.WebSocket = native;
     }

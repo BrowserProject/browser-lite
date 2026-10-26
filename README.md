@@ -8,7 +8,7 @@ WebAssembly, packaged as libraries you can embed in your own site.
 - WebKit runs in Web Workers of your page and loads, runs and renders sites itself into a canvas:
   no URL rewriting, no pixel streaming, no VM.
 - JavaScript runs in JSC's interpreter (no JIT in WASM); page WebAssembly runs in the host engine.
-- Network: every TCP connection goes as a stream over one WebSocket ([Wisp](https://github.com/MercuryWorkshop/wisp-protocol))
+- Network: every TCP connection goes as a stream over a few WebSockets ([Wisp](https://github.com/MercuryWorkshop/wisp-protocol))
   to a small relay. TLS happens inside the engine, the relay sees only encrypted bytes.
 - Media, audio, camera, WebGL and WebCodecs use the host browser's implementations.
 - Storage (cookies, IndexedDB, service workers, caches) lives in the origin private file system.

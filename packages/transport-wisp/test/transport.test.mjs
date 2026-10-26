@@ -35,9 +35,12 @@ after(() => echo.server.close());
 test('constructor needs a url', () => {
   assert.throws(() => new WispTransport({}), TypeError);
   assert.throws(() => new WispTransport(), TypeError);
-  assert.throws(() => new WispTransport({ url: 'ftp://127.0.0.1:1/wisp/' }), TypeError);
+  assert.throws(
+    () => new WispTransport({ connections: 1, url: 'ftp://127.0.0.1:1/wisp/' }),
+    TypeError,
+  );
   // Relative without a location to resolve against
-  assert.throws(() => new WispTransport({ url: '/wisp/' }), TypeError);
+  assert.throws(() => new WispTransport({ connections: 1, url: '/wisp/' }), TypeError);
 });
 
 test('relative and http URLs resolve against location', async () => {
@@ -51,7 +54,7 @@ test('relative and http URLs resolve against location', async () => {
     }
   };
   globalThis.location = { href: `http://127.0.0.1:${relay.port}/demo/index.html` };
-  const transport = new WispTransport({ url: '/wisp/' });
+  const transport = new WispTransport({ connections: 1, url: '/wisp/' });
   delete globalThis.location;
   globalThis.WebSocket = RealWebSocket;
   try {
@@ -66,12 +69,41 @@ test('relative and http URLs resolve against location', async () => {
 test('preconnect opens the WebSocket before the first stream, which then uses it', async () => {
   const relay = await startRelay();
   const proxy = await startProxy(relay.port);
-  const transport = new WispTransport({ url: proxy.url });
+  const transport = new WispTransport({ connections: 1, url: proxy.url });
   try {
     transport.preconnect();
     assert.ok(await waitUntil(() => proxy.connections() === 1, 2000), 'connected without a stream');
     assert.equal((await echoOver(transport, echo.port, 1000)).received, 1000);
     assert.equal(proxy.connections(), 1, 'one WebSocket');
+  } finally {
+    transport.close();
+    proxy.close();
+    await relay.stop();
+  }
+});
+
+test('connections: 1 to 8 WebSockets', () => {
+  for (const connections of [0, 9, 1.5, '2'])
+    assert.throws(
+      () => new WispTransport({ url: 'ws://127.0.0.1:1/wisp/', connections }),
+      TypeError,
+    );
+});
+
+test('several WebSockets: preconnect opens all, streams go to the least busy one', async () => {
+  const relay = await startRelay();
+  const proxy = await startProxy(relay.port);
+  const transport = new WispTransport({ url: proxy.url, connections: 3 });
+  try {
+    transport.preconnect();
+    assert.ok(await waitUntil(() => proxy.connections() === 3, 2000), 'three WebSockets');
+    const streams = await Promise.all(
+      Array.from({ length: 6 }, () => echoStream(transport, '127.0.0.1', echo.port)),
+    );
+    assert.ok(streams.every(Boolean), 'every stream echoes');
+    assert.equal(proxy.connections(), 3, 'no further WebSockets');
+    assert.equal((await echoOver(transport, echo.port, 98304)).received, 98304);
+    for (const stream of streams) stream.close();
   } finally {
     transport.close();
     proxy.close();
@@ -89,7 +121,7 @@ test('a throwing WebSocket constructor goes offline and reconnects', async () =>
       super(url);
     }
   };
-  const transport = new WispTransport({ url: relay.url });
+  const transport = new WispTransport({ connections: 1, url: relay.url });
   globalThis.WebSocket = RealWebSocket;
   try {
     const states = connectionLog(transport);
@@ -125,6 +157,7 @@ test('a relay refusing the token after the upgrade: error event, slower retries,
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const tokens = [];
   const transport = new WispTransport({
+    connections: 1,
     url: `ws://127.0.0.1:${server.address().port}/wisp/`,
     token: () => {
       tokens.push(Date.now());
@@ -155,7 +188,7 @@ describe('with token', () => {
   let transport;
   before(async () => {
     relay = await startRelay({ token: TOKEN });
-    transport = new WispTransport({ url: relay.url, token: TOKEN });
+    transport = new WispTransport({ connections: 1, url: relay.url, token: TOKEN });
   });
   after(async () => {
     transport.close();
@@ -164,7 +197,7 @@ describe('with token', () => {
 
   test('wrong and missing token: stream ends before onopen with transport-down', async () => {
     for (const options of [{ token: 'wrong-token-0123456789' }, {}]) {
-      const bad = new WispTransport({ url: relay.url, ...options });
+      const bad = new WispTransport({ connections: 1, url: relay.url, ...options });
       const states = connectionLog(bad);
       const result = await closeReason(bad, '127.0.0.1', echo.port);
       assert.deepEqual(result, { reason: 'transport-down', opened: false });
@@ -183,7 +216,7 @@ describe('with token', () => {
         return authorizeToken({ token: special })(req);
       },
     });
-    const client = new WispTransport({ url: own.url, token: special });
+    const client = new WispTransport({ connections: 1, url: own.url, token: special });
     const result = await echoOver(client, echo.port, 1000);
     assert.equal(result.received, 1000);
     assert.equal(seen[0].url, '/wisp/');
@@ -195,6 +228,7 @@ describe('with token', () => {
   test('token getter, also async, called per connect', async () => {
     let calls = 0;
     const getter = new WispTransport({
+      connections: 1,
       url: new URL(relay.url),
       token: async () => {
         calls++;
@@ -206,6 +240,7 @@ describe('with token', () => {
     assert.equal(result.received, 1000);
     assert.equal(calls, 1);
     const failing = new WispTransport({
+      connections: 1,
       url: relay.url,
       token: () => {
         throw new Error('no token');
@@ -376,6 +411,7 @@ describe('reconnect', () => {
     let relay = await startRelay({ token: TOKEN });
     let tokens = 0;
     const transport = new WispTransport({
+      connections: 1,
       url: relay.url,
       token: () => {
         tokens++;
@@ -404,7 +440,7 @@ describe('reconnect', () => {
   test('WebSocket dropped (proxy idle timeout), relay alive: reconnected, never offline', async () => {
     const relay = await startRelay();
     const proxy = await startProxy(relay.port);
-    const transport = new WispTransport({ url: proxy.url });
+    const transport = new WispTransport({ connections: 1, url: proxy.url });
     try {
       assert.equal((await echoOver(transport, echo.port, 1000)).received, 1000);
       const states = connectionLog(transport);
@@ -429,7 +465,7 @@ describe('reconnect', () => {
   test('close() ends streams and stops reconnecting', async () => {
     const relay = await startRelay();
     const proxy = await startProxy(relay.port);
-    const transport = new WispTransport({ url: proxy.url });
+    const transport = new WispTransport({ connections: 1, url: proxy.url });
     try {
       const stream = await echoStream(transport, '127.0.0.1', echo.port);
       assert.ok(stream);

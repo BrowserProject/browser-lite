@@ -1,7 +1,3 @@
-/** Wisp v1 transport for browser-lite: TCP connections of the engine over one WebSocket. */
-export {
-  WispErrorEvent,
-  type WispErrorReason,
-  WispTransport,
-  type WispTransportOptions,
-} from './transport.js';
+/** Wisp v1 transport for browser-lite: TCP connections of the engine over WebSockets. */
+export { WispErrorEvent, type WispErrorReason, type WispTransportOptions } from './api.js';
+export { WispTransport } from './transport.js';

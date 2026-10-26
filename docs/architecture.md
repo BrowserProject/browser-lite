@@ -28,7 +28,7 @@ How browser-lite is built, from the engine artifact up to the demo. Numbers like
 | Engine artifact | `engine/` | WebKit (`PORT=Wasm`) plus our embedder, built to three files. Contract: [engine/abi.json](../engine/abi.json), rules in [engine/README.md](../engine/README.md) |
 | Core | `packages/core` | The only code that touches the Emscripten module. Loads the engine, maps options to the engine environment (`config.ts`), frames, input, storage lock, watchdog, request handlers, events |
 | Services | `packages/core/src/services` | Host features a page may reach (`audio`, `media`, `capture`, `webrtc`, `devices`). Each enables its features in `BL_FEATURES` and registers its host calls |
-| Transport | `packages/transport-wisp` | `Transport` implementation: TCP streams over one WebSocket ([PROTOCOL.md](../packages/transport-wisp/PROTOCOL.md)) |
+| Transport | `packages/transport-wisp` | `Transport` implementation: TCP streams over a few WebSockets ([PROTOCOL.md](../packages/transport-wisp/PROTOCOL.md), #235) |
 | UI | `packages/ui` | Default request handlers and helpers in plain DOM, styled by the page |
 | Profile | `packages/profile` | Downloads a profile before start (`storage.beforeStart`), syncs it while running |
 | Server | `packages/server` | Node: relay, static files with COOP/COEP/CORP, tokens, profile store, `browser-lite-server` CLI |
