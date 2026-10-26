@@ -62,10 +62,10 @@ Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
 | Tile painters, image decoder, curl, IndexedDB, Web Audio, page workers | Background work; 8 pooled plus 4 spare workers (#136) |
 
 Every thread instantiates `engine.wasm` itself. A split engine (#238) has the code that the
-start and common pages do not run in `engine.deferred.wasm`: the core compiles it after the
-start, the main thread instantiates it at once, the workers at their first call into it
-(`engine/js/deferred.js`); a worker that needs it before the core's copy arrived reads and
-compiles it synchronously.
+start and common pages do not run in chunks `engine.deferred-<n>.wasm`: the core compiles them
+one after the other after the start, the main thread instantiates each at once, the workers at
+their first call into it (`engine/js/deferred.js`); a worker that needs a chunk before the core's
+copy arrived reads and compiles it synchronously.
 | WasmFS OPFS proxy | Synchronous access handles for `/data` (#142) |
 
 Rule for main thread code: while waiting for a lock (also malloc's) Emscripten runs the main

@@ -96,7 +96,7 @@ docker run --rm -v "$PWD:/src" -w /src -e BL_JOBS=4 \
   browser-lite-toolchain tools/build-webcore.sh
 ```
 
-Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.deferred.wasm`, `engine.data`
+Output: `build/webcore/bin/engine.js`, `engine.wasm`, `engine.deferred-<n>.wasm`, `engine.data`
 (and `engine.full.wasm`, the unsplit module, see below). The same sources at the
 same paths give the same files and so the same content hash of the packaged engine
 (`engine/<hash>/`), which keeps the host browser's HTTP and code cache valid; no step may embed a
@@ -119,13 +119,13 @@ More suites: [tests/README.md](../tests/README.md).
 After the link `tools/split-engine.mjs` (binaryen's `wasm-split`, `wasm-merge`, `wasm-as` of the
 image) splits `engine.wasm` in two (#238 in [decisions.md](decisions.md)): `engine.wasm` keeps
 the functions of `engine/hot-functions.txt` and everything the page main thread reaches through
-direct calls from the exports, `engine.deferred.wasm` gets the rest and loads after the start
-(`engine/js/deferred.js`). The linked module stays as `engine.full.wasm` (not delivered).
+direct calls from the exports, the rest goes into chunks `engine.deferred-<n>.wasm` of about 2 MB
+of code, sorted by class, that load after the start (`engine/js/deferred.js`). The linked module stays as `engine.full.wasm` (not delivered).
 `-DBROWSER_LITE_SPLIT_ENGINE=OFF` keeps one module.
 
 `engine/hot-functions.txt` comes from a run of the demo over common sites with the unsplit
 engine. Renew it after changes that add or rename much engine code (a WebKit update); a function
-missing from it still works, a thread only waits for `engine.deferred.wasm` when it needs one
+missing from it still works, a thread only waits for its chunk when it needs one
 before that download is through:
 
 ```bash

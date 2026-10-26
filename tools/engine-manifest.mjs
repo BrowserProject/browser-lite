@@ -4,7 +4,7 @@
 //
 //   node tools/engine-manifest.mjs <engine-folder>
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pins, version } from './pins.mjs';
 
@@ -15,9 +15,11 @@ if (!dir) {
 }
 
 const files = {};
-for (const name of ['engine.js', 'engine.wasm', 'engine.deferred.wasm', 'engine.data']) {
-  // engine.deferred.wasm only of a split engine (#238)
-  if (name === 'engine.deferred.wasm' && !existsSync(path.join(dir, name))) continue;
+// The chunks engine.deferred-<n>.wasm of a split engine (#238)
+const chunks = readdirSync(dir)
+  .filter((name) => /^engine\.deferred-\d+\.wasm$/.test(name))
+  .sort((a, b) => Number(a.match(/\d+/)) - Number(b.match(/\d+/)));
+for (const name of ['engine.js', 'engine.wasm', ...chunks, 'engine.data']) {
   const data = readFileSync(path.join(dir, name));
   files[name] = { sha256: createHash('sha256').update(data).digest('hex'), size: data.length };
 }

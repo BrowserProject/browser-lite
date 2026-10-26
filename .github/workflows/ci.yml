@@ -344,7 +344,7 @@ jobs:
           path: |
             build/webcore/bin/engine.js
             build/webcore/bin/engine.wasm
-            build/webcore/bin/engine.deferred.wasm
+            build/webcore/bin/engine.deferred-*.wasm
             build/webcore/bin/engine.full.wasm
             build/webcore/bin/engine.data
             build/webcore/bin/lazy

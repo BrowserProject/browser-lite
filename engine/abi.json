@@ -149,7 +149,7 @@
     { "name": "blWriteFiles", "setBy": "engine", "type": "(files: {file, path}[]) => Promise<boolean[]>", "doc": "Writes host files into the engine file system in chunks." },
     { "name": "blClearHttpCache", "setBy": "engine", "type": "() => Promise", "doc": "Deletes the HTTP cache of the namespace." },
     { "name": "blShutdown", "setBy": "engine", "type": "() => void", "doc": "Closes all transport streams and terminates all engine threads; the module is unusable afterwards." },
-    { "name": "blSetDeferred", "setBy": "engine", "type": "(module: WebAssembly.Module) => Promise", "doc": "Compiled engine.deferred.wasm of a split engine (custom section bl.deferred in engine.wasm, #238): instantiated on the main thread at once, sent to every worker; resolves when the main thread has it." }
+    { "name": "blSetDeferred", "setBy": "engine", "type": "(chunk: number, module: WebAssembly.Module) => Promise", "doc": "Compiled chunk engine.deferred-<chunk>.wasm of a split engine (custom section bl.deferred in engine.wasm: the number of chunks, #238): instantiated on the main thread at once, sent to every worker; resolves when the main thread has it." }
   ],
   "events": [
     { "type": "navigation", "scope": "view", "payload": "{url, canGoBack, canGoForward, loading, history: {entries: [{url, title}], index} | null}" },

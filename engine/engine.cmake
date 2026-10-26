@@ -232,9 +232,10 @@ if (BROWSER_LITE_RUNTIME_DIR)
     )
 endif ()
 
-# engine.wasm becomes the code the start and common pages run, engine.deferred.wasm the rest,
-# loaded after the start; the linked module stays as engine.full.wasm (tools/split-engine.mjs)
-option(BROWSER_LITE_SPLIT_ENGINE "Split engine.wasm into engine.wasm and engine.deferred.wasm" ON)
+# engine.wasm becomes the code the start and common pages run, chunks engine.deferred-<n>.wasm
+# the rest, loaded after the start; the linked module stays as engine.full.wasm
+# (tools/split-engine.mjs)
+option(BROWSER_LITE_SPLIT_ENGINE "Split engine.wasm into engine.wasm and engine.deferred-<n>.wasm" ON)
 if (BROWSER_LITE_SPLIT_ENGINE)
     add_custom_command(TARGET BrowserLiteEngine POST_BUILD
         COMMAND node ${BROWSER_LITE_ENGINE_DIR}/../tools/split-engine.mjs

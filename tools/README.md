@@ -24,7 +24,7 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `package-demo.sh` | demo site (`apps/demo`) with the packaged engine for the server |
 | `build-images.sh` | builds and tests the images `server` and `demo` of the `Dockerfile` |
 | `optimize-assets.mjs` | smaller delivered files (no "name" section in .wasm, .br/.gz) |
-| `split-engine.mjs` | splits the linked `engine.wasm` into `engine.wasm` and `engine.deferred.wasm` (build step, #238) |
+| `split-engine.mjs` | splits the linked `engine.wasm` into `engine.wasm` and chunks `engine.deferred-<n>.wasm` (build step, #238) |
 | `hot-functions.mjs` | records the engine functions common pages run into `engine/hot-functions.txt` |
 | `hot-functions-file.mjs` | reads and writes `engine/hot-functions.txt` |
 | `wasm-binary.mjs` | shared helper: sections, names, imports and exports of WebAssembly binaries |

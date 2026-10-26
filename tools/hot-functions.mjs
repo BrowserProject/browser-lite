@@ -4,7 +4,7 @@
 // page and the sites one after the other and scrolls them, and adds every function V8 compiled
 // meanwhile (it compiles each function at its first call) to engine/hot-functions.txt.
 // Run it after changes that add or rename much engine code (a WebKit update): functions missing
-// from the list still work, a thread only waits for engine.deferred.wasm when it needs one before
+// from the list still work, a thread only waits for the chunk of one when it needs it before
 // the download is through.
 //
 //   node tools/hot-functions.mjs <engine-dir> [--seconds 25] [--out engine/hot-functions.txt] [url...]

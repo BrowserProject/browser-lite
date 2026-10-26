@@ -15,7 +15,7 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 
 | Variable | |
 | --- | --- |
-| `ENGINE_DIR` | folder with `engine.js`, `engine.wasm`, `engine.deferred.wasm`, `engine.data` (required) |
+| `ENGINE_DIR` | folder with `engine.js`, `engine.wasm`, `engine.deferred-<n>.wasm`, `engine.data` (required) |
 | `PORT`, `HOST` | default `8080`, `127.0.0.1` |
 | `PUBLIC_ORIGIN` | origin the users open (relay origin check), default `http://localhost:PORT` |
 | `RELAY_SECRET` | secret for the relay tokens (at least 32 characters), default random per start |

@@ -209,3 +209,18 @@ export function withExports(bytes, keep) {
   }
   return Buffer.concat(parts);
 }
+
+/** Size in bytes of every function body of the code section, in order of the defined functions. */
+export function functionSizes(bytes) {
+  const sizes = [];
+  for (const section of wasmSections(bytes)) {
+    if (section.id !== 10) continue;
+    let [count, offset] = readLEB(bytes, section.payload);
+    while (count--) {
+      const [size, body] = readLEB(bytes, offset);
+      sizes.push(body + size - offset);
+      offset = body + size;
+    }
+  }
+  return sizes;
+}

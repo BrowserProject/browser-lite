@@ -2,7 +2,7 @@
 
 Copyable templates that use only the public packages (`@browser-lite/core`,
 `@browser-lite/transport-wisp`, `@browser-lite/ui`, `@browser-lite/server`). Both need an engine
-build (`engine.js`, `engine.wasm`, `engine.deferred.wasm`, `engine.data`), for example the
+build (`engine.js`, `engine.wasm`, `engine.deferred-<n>.wasm`, `engine.data`), for example the
 artifact `engine` of a CI run or `build/webcore/bin` of an own build
 ([docs/build.md](../docs/build.md)).
 

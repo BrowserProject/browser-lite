@@ -124,7 +124,7 @@ test('onProgress without a manifest reports an unknown total', async () => {
   assert.equal(events.at(-1).total, 0);
 });
 
-// A split engine.wasm (#238): the smallest module with the custom section bl.deferred
+// A split engine.wasm (#238): the smallest module with the custom section bl.deferred, 2 chunks
 const SPLIT_WASM = new Uint8Array([
   0,
   0x61,
@@ -135,21 +135,34 @@ const SPLIT_WASM = new Uint8Array([
   0,
   0,
   0,
-  12,
+  13,
   11,
   ...Buffer.from('bl.deferred'),
+  0x32,
 ]);
 
-test('a split engine gets engine.deferred.wasm once engine.wasm is there', async () => {
+test('a split engine gets its chunks one after the other once it runs', async () => {
   const requests = fakeHost();
   const url = base();
-  const compiled = await loadDeferredCode(url, Promise.resolve(new WebAssembly.Module(SPLIT_WASM)));
-  assert.deepEqual(requests, [[`${url}engine.deferred.wasm`, 'same-origin']]);
-  assert.ok(compiled instanceof WebAssembly.Module);
+  const handed = [];
+  const running = Promise.resolve({
+    blSetDeferred: async (chunk, module) => handed.push([chunk, module]),
+  });
+  await loadDeferredCode(url, Promise.resolve(new WebAssembly.Module(SPLIT_WASM)), running);
+  assert.deepEqual(requests, [
+    [`${url}engine.deferred-0.wasm`, 'same-origin'],
+    [`${url}engine.deferred-1.wasm`, 'same-origin'],
+  ]);
+  assert.deepEqual(
+    handed.map(([chunk]) => chunk),
+    [0, 1],
+  );
+  assert.ok(handed.every(([, module]) => module instanceof WebAssembly.Module));
 });
 
-test('an unsplit engine requests no engine.deferred.wasm', async () => {
+test('an unsplit engine requests no chunks', async () => {
   const requests = fakeHost();
-  assert.equal(await loadDeferredCode(base(), Promise.resolve(new WebAssembly.Module(WASM))), null);
+  const running = Promise.resolve({ blSetDeferred: async () => assert.fail('not split') });
+  await loadDeferredCode(base(), Promise.resolve(new WebAssembly.Module(WASM)), running);
   assert.equal(requests.length, 0);
 });

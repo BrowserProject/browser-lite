@@ -168,7 +168,7 @@ export interface EngineModule extends EngineExports, EngineHooks {
   blWriteFiles?: (files: { file: Blob; path: string }[]) => Promise<boolean[]>;
   blClearHttpCache?: () => Promise<void>;
   blShutdown?: () => void;
-  blSetDeferred?: (module: WebAssembly.Module) => Promise<void>;
+  blSetDeferred?: (chunk: number, module: WebAssembly.Module) => Promise<void>;
   blAbiVersion?: number;
 }
 
@@ -380,21 +380,26 @@ export function provideEngineFiles(
 }
 
 /**
- * Fetches and compiles engine.deferred.wasm of a split engine (#238) once engine.wasm is there:
- * its engine.wasm (custom section "bl.deferred") holds what the start and common pages run.
- * Compiled while it streams, so Chrome's code cache applies like for engine.wasm. Resolves null
- * for an unsplit engine. Threads that need deferred code before it reached them read it
- * themselves, so a failure here only leaves that to them.
+ * Loads the chunks engine.deferred-<n>.wasm of a split engine (#238) once engine.wasm is there,
+ * one after the other, and hands each to the engine once it runs: its engine.wasm (custom section
+ * "bl.deferred" with the number of chunks) holds what the start and common pages run. Compiled
+ * while they stream, so Chrome's code cache applies like for engine.wasm. Threads that need a
+ * chunk before it reached them read it themselves, so a failure here only leaves that to them.
  */
 export async function loadDeferredCode(
   base: string,
   wasm: Promise<WebAssembly.Module>,
-): Promise<WebAssembly.Module | null> {
-  if (!WebAssembly.Module.customSections(await wasm, 'bl.deferred').length) return null;
-  const response = await fetchEngineFile(`${base}engine.deferred.wasm`);
-  return response.headers.get('Content-Type')?.startsWith('application/wasm')
-    ? WebAssembly.compileStreaming(response)
-    : WebAssembly.compile(await response.arrayBuffer());
+  running: Promise<EngineModule>,
+): Promise<void> {
+  const [section] = WebAssembly.Module.customSections(await wasm, 'bl.deferred');
+  const chunks = section ? Number(new TextDecoder().decode(section)) : 0;
+  for (let chunk = 0; chunk < chunks; chunk++) {
+    const response = await fetchEngineFile(`${base}engine.deferred-${chunk}.wasm`);
+    const compiled = response.headers.get('Content-Type')?.startsWith('application/wasm')
+      ? await WebAssembly.compileStreaming(response)
+      : await WebAssembly.compile(await response.arrayBuffer());
+    await (await running).blSetDeferred?.(chunk, compiled);
+  }
 }
 
 /** Loads engine.js once per URL (a classic script, it defines createBrowserLiteEngine). */

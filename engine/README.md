@@ -1,9 +1,9 @@
 # engine/
 
 The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
-`engine.wasm` and `engine.data`, plus `engine.deferred.wasm`, the code the start and common pages
-do not run, which the host loads after the start, and `lazy/` with files it loads on first use
-(ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
+`engine.wasm` and `engine.data`, plus `engine.deferred-<n>.wasm`, chunks of the code the start and
+common pages do not run, which the host loads after the start, and `lazy/` with files it loads on
+first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
 patches from `patches/`.
@@ -22,7 +22,7 @@ patches from `patches/`.
   `tools/hot-functions.mjs` ([docs/build.md](../docs/build.md#split-engine)).
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
-  - `deferred.js`: loads `engine.deferred.wasm` into every thread (`Module.blSetDeferred`)
+  - `deferred.js`: loads the chunks `engine.deferred-<n>.wasm` into every thread (`Module.blSetDeferred`)
   - `sockets.js`: TCP streams over `Module.blTransport`
   - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's

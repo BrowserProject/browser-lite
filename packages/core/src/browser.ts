@@ -193,9 +193,14 @@ class BrowserImpl implements Browser, ViewHost {
     const signal = this.lifetime.signal;
     // The engine files load from now on, while the storage lock and beforeStart run
     const files = loadEngineFiles(config.engineBase, config.onProgress);
-    const deferred = loadDeferredCode(config.engineBase, files.wasm);
-    // Reported once the engine runs (below)
-    deferred.catch(() => {});
+    // The rest of a split engine, handed over once the engine runs
+    let engineRuns: (module: EngineModule) => void = () => {};
+    const running = new Promise<EngineModule>((resolve) => {
+      engineRuns = resolve;
+    });
+    loadDeferredCode(config.engineBase, files.wasm, running).catch((error) =>
+      console.warn('[browser-lite] engine.deferred chunks failed to load:', error),
+    );
     config.transport.preconnect?.();
     let persistent = config.persistent;
     if (persistent) {
@@ -282,11 +287,7 @@ class BrowserImpl implements Browser, ViewHost {
       factory(this.module).then(
         () => {
           checkEngine(this.module);
-          deferred
-            .then((compiled) => compiled && this.module.blSetDeferred?.(compiled))
-            .catch((error) =>
-              console.warn('[browser-lite] engine.deferred.wasm failed to load:', error),
-            );
+          engineRuns(this.module);
           return ready;
         },
         (error: unknown) => {
