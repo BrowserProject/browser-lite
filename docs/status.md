@@ -37,7 +37,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
   (#235), the code that the start and common pages do not run loads after the start in chunks
   (#238), an address typed meanwhile opens once the engine runs (#239); a first visit at
-  5 Mbit/s, 150 ms starts after 16 s instead of 32 s (`tests/bench/slow-start.mjs`).
+  5 Mbit/s, 150 ms starts after 15 s instead of 32 s (`tests/bench/slow-start.mjs`).
 - **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
   after a browser restart the engine comes compiled from Chrome's code cache (#237).
@@ -85,10 +85,10 @@ With 1 % packet loss (kernel netem between network namespaces) one TCP connectio
 it is, #234), and a page of 5 MB loaded 19.7 s after ready with 3 relay WebSockets instead of
 33.7 s with one (#235; plain Chromium 9 to 14 s).
 
-With the engine split (#238) the start needs 9.4 instead of 13.8 MB: ready after 16.0 s instead
-of 23 s, a small page painted after 17.0 s instead of 24.1 s; sites outside the profile wait for
-the chunks they need: Hacker News 20.5 instead of 25.7 s, elpais.com 18.4 instead of 24.6 s,
-python.org 27.9 instead of 27.0 s.
+With the engine split (#238) the start needs 8.8 instead of 13.8 MB: ready after 15.2 s instead
+of 23 s, a small page painted after 16.5 s instead of 24.1 s, Wikipedia after 21.2 s; sites
+outside the profile wait for the chunks they need (Hacker News 20.5 to 22.4 s instead of 25.7 s,
+elpais.com 18.4 instead of 24.6 s, python.org 27.9 instead of 27.0 s).
 
 After a restart of Chromium (same profile, local, 2 cores) a small page painted after 2.2 s
 instead of 2.9 s once the engine came from the code cache again (#237).
