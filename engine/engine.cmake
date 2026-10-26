@@ -102,17 +102,31 @@ set_source_files_properties(${BL_ENGINE_SRC}/LazyFiles.cpp
 # next to the engine that load on first use (tools/icu-data.mjs, LazyFiles.cpp)
 if (BROWSER_LITE_ICU_DATA)
     set(BL_ICU_OUT "${CMAKE_CURRENT_BINARY_DIR}/browser-lite-icu")
-    set(BL_LAZY_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy")
     add_custom_command(
         OUTPUT ${BL_ICU_OUT}/icudata.c
         COMMAND node ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs ${BROWSER_LITE_ICU_DATA}
-            ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt ${BL_ICU_OUT} ${BL_LAZY_DIR}/icu
+            ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt ${BL_ICU_OUT} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/icu
         DEPENDS ${BROWSER_LITE_ICU_DATA} ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt
             ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs
         VERBATIM
     )
     target_sources(BrowserLiteEngine PRIVATE ${BL_ICU_OUT}/icudata.c)
     set_source_files_properties(${BL_ICU_OUT}/icudata.c PROPERTIES COMPILE_OPTIONS "-std=c23")
+endif ()
+
+# Fonts that load on demand (deps/recipes/lazyfonts.sh, LazyFiles.cpp): copied to lazy/fonts
+# whenever their index in the data package changes
+if (BROWSER_LITE_LAZY_FONTS)
+    set(BL_LAZY_FONTS_STAMP "${CMAKE_CURRENT_BINARY_DIR}/browser-lite-lazy-fonts.stamp")
+    add_custom_command(
+        OUTPUT ${BL_LAZY_FONTS_STAMP}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${BROWSER_LITE_LAZY_FONTS} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/fonts
+        COMMAND ${CMAKE_COMMAND} -E touch ${BL_LAZY_FONTS_STAMP}
+        DEPENDS ${BROWSER_LITE_RUNTIME_DIR}/usr/share/browser-lite/lazy-fonts.txt
+        VERBATIM
+    )
+    target_sources(BrowserLiteEngine PRIVATE ${BL_LAZY_FONTS_STAMP})
 endif ()
 
 # WebCore is static, its private dependencies (JSC, WTF, PAL, curl, ICU, ...)

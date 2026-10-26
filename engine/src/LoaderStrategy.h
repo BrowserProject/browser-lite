@@ -28,7 +28,7 @@ void startViewSource(int viewId, const URL&);
 // Stores Set-Cookie of the response if the request may have cookies
 void storeCookies(const WebCore::ResourceRequest&, const WebCore::CurlResponse&);
 
-// Every CurlRequest of the engine: user agent, Sec-GPC (when enabled), plus
+// Every CurlRequest of the engine: user agent, Sec-GPC and Save-Data (when enabled), plus
 // cookies if the request may have them (allowCookies)
 Ref<WebCore::CurlRequest> createCurlRequest(WebCore::ResourceRequest&&, WebCore::CurlRequestClient&);
 // Response from curl like for a ResourceLoader: without Content-Type guess the

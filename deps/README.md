@@ -13,8 +13,10 @@ cache, CA certificates). Skia comes with WebKit.
 - `test.sh`: smoke test against the finished sysroot (`tests/smoke.cpp`).
 - `tools/fc-precache.c`: generates the fontconfig cache at build time.
 
-Output: `sysroot/` (headers, static libs, pkg-config) and `sysroot/runtime/` (fonts,
-fontconfig, CA certificates), which becomes `engine.data` when the engine is linked. Both are
+Output: `sysroot/` (headers, static libs, pkg-config), `sysroot/runtime/` (fonts,
+fontconfig, CA certificates), which becomes `engine.data` when the engine is linked, and
+`sysroot/lazy/fonts/` (recipe `lazyfonts`: fonts the engine loads on demand, cut with
+`tools/slice-fonts.py`), which the engine build copies to `lazy/fonts/`. Both are
 gitignored. Run inside the toolchain image, see [docs/build.md](../docs/build.md).
 
 ## Building
@@ -34,6 +36,8 @@ stamp of the previous lib. Everything from the first changed lib onwards is rebu
 
 1. Line in `sources.txt` (`name type version url sha256`, type `tar`, `zip`, `file`, `git`
    with commit, or `none`).
+   A recipe may fetch more lines with `dep_fetch <name>` (`lazyfonts` takes every `font-*`
+   line); such lines have no recipe of their own and no entry in `ORDER`.
 2. `recipes/<name>.sh` with a `build` function, usually `dep_cmake`, `dep_meson` or
    `dep_autotools "$SRC" ...`. Extra files the recipe reads go into `DEP_FILES`.
 3. Add the name to `ORDER` in `build-all.sh` after its dependencies, and to `pkgs` plus a

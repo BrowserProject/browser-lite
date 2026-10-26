@@ -59,6 +59,7 @@ export interface Config {
   timeZone: string;
   colorScheme: ColorScheme;
   device: Required<DeviceOptions> | null;
+  maxPixelRatio: number;
   preferences: Required<Preferences>;
   keepSessionCookies: boolean;
   gpu: boolean | undefined;
@@ -131,6 +132,14 @@ function device(value: unknown): Required<DeviceOptions> | null {
   };
 }
 
+/** Checks a limit of the pixel ratio; Infinity for none. */
+export function maxPixelRatio(value: unknown): number {
+  if (value === undefined || value === null) return Number.POSITIVE_INFINITY;
+  if (typeof value !== 'number' || !(value >= 1))
+    invalid('maxPixelRatio must be a number of at least 1');
+  return value;
+}
+
 /** Checks the preferences and fills in the defaults. */
 export function preferences(value: unknown): Required<Preferences> {
   if (value !== undefined && !isObject(value)) invalid('preferences must be an object');
@@ -140,12 +149,16 @@ export function preferences(value: unknown): Required<Preferences> {
     images: optionalBoolean(p.images, 'preferences.images') ?? true,
     globalPrivacyControl:
       optionalBoolean(p.globalPrivacyControl, 'preferences.globalPrivacyControl') ?? false,
+    saveData: optionalBoolean(p.saveData, 'preferences.saveData') ?? false,
   };
 }
 
 /** Flags of bl_set_preferences. */
 export const preferenceFlags = (p: Required<Preferences>): number =>
-  (p.javascript ? 0 : 1) | (p.images ? 0 : 2) | (p.globalPrivacyControl ? 4 : 0);
+  (p.javascript ? 0 : 1) |
+  (p.images ? 0 : 2) |
+  (p.globalPrivacyControl ? 4 : 0) |
+  (p.saveData ? 8 : 0);
 
 /** Checks a list of languages (navigator.languages). */
 export function languages(value: unknown): string[] {
@@ -317,6 +330,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     timeZone: timeZone(options.timeZone),
     colorScheme: colorScheme(options.colorScheme),
     device: device(options.device),
+    maxPixelRatio: maxPixelRatio(options.maxPixelRatio),
     preferences: preferences(options.preferences),
     keepSessionCookies: optionalBoolean(options.keepSessionCookies, 'keepSessionCookies') ?? false,
     gpu: optionalBoolean(engine.gpu, 'engine.gpu'),

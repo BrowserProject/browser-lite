@@ -226,6 +226,7 @@ function applyChanges(browser: Browser, running: StartSettings, next: StartSetti
   if (changed('languages')) browser.setLanguages(options.languages);
   if (changed('colorScheme')) browser.setColorScheme(options.colorScheme);
   if (changed('preferences')) browser.setPreferences(options.preferences);
+  if (changed('maxPixelRatio')) browser.setMaxPixelRatio(options.maxPixelRatio ?? null);
 }
 
 async function start(restarted: boolean): Promise<void> {

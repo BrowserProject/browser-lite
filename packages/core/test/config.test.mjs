@@ -35,6 +35,7 @@ test('defaults', () => {
     javascript: true,
     images: true,
     globalPrivacyControl: false,
+    saveData: false,
   });
   assert.equal(config.debug, false);
   assert.equal(config.httpCache, true);
@@ -264,9 +265,25 @@ test('features of the services', () => {
 });
 
 test('preference flags', () => {
-  assert.equal(preferenceFlags({ javascript: true, images: true, globalPrivacyControl: false }), 0);
+  const off = { javascript: true, images: true, globalPrivacyControl: false, saveData: false };
+  assert.equal(preferenceFlags(off), 0);
   assert.equal(
-    preferenceFlags({ javascript: false, images: false, globalPrivacyControl: true }),
-    7,
+    preferenceFlags({
+      javascript: false,
+      images: false,
+      globalPrivacyControl: true,
+      saveData: true,
+    }),
+    15,
   );
+});
+
+test('pixel ratio limit', () => {
+  assert.equal(resolveConfig(base, PAGE).maxPixelRatio, Number.POSITIVE_INFINITY);
+  assert.equal(resolveConfig({ ...base, maxPixelRatio: 2 }, PAGE).maxPixelRatio, 2);
+  for (const bad of [0.5, 0, '2', Number.NaN])
+    assert.equal(
+      code(() => resolveConfig({ ...base, maxPixelRatio: bad }, PAGE)),
+      'invalid-options',
+    );
 });

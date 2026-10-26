@@ -1,0 +1,56 @@
+<!doctype html><meta charset="utf-8"><title>lazy</title>
+<style>span { font: 20px sans-serif; white-space: pre }</style>
+<body><script>
+// Files the engine loads on first use (engine/src/LazyFiles.cpp): ICU data beyond the linked core
+// and fonts for more scripts. Output "LAZY name=ok" or "LAZY name=FALSE <value>", at the end
+// "LAZY done=ok". Run with
+//   RENDER_WAIT_FOR="LAZY done" node tests/engine/render.mjs build/webcore/bin tests/engine/pages/lazy.html /tmp/l.ppm 200 200
+const width = (text) => {
+  const span = document.createElement('span');
+  span.textContent = text;
+  document.body.append(span);
+  const result = span.getBoundingClientRect().width;
+  span.remove();
+  return result;
+};
+// Private use characters have no glyph in any font: the width of missing glyphs
+const missing = (text) => width(''.repeat([...text].length));
+const glyphs = (text) => Math.abs(width(text) - missing(text)) > 1;
+const tests = {
+  'date de-CH': () => new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: 'UTC' }).format(new Date(0)),
+  'collation de': () => ['z', 'ä', 'a'].sort(new Intl.Collator('de').compare).join(''),
+  // Pinyin order (zh collation), the root order would put U+963F after U+7238
+  'collation zh': () => new Intl.Collator('zh').compare('阿', '爸') < 0,
+  'region names fr': () => new Intl.DisplayNames(['fr'], { type: 'region' }).of('CH'),
+  // Thai has no spaces: the dictionary splits the greeting into two words
+  'words th': () => [...new Intl.Segmenter('th', { granularity: 'word' }).segment('สวัสดีครับ')].length,
+  'glyphs Hebrew': () => glyphs('שלום'),
+  'glyphs Arabic': () => glyphs('سلام'),
+  'glyphs Chinese': () => glyphs('中文'),
+  'glyphs Japanese': () => glyphs('ひらがな'),
+  'glyphs Devanagari': () => glyphs('नमस्ते'),
+  'glyphs emoji': () => glyphs('\u{1F600}'),
+  'glyphs check mark': () => glyphs('✓'),
+  'glyphs serif': () => { const span = document.createElement('span'); span.style.fontFamily = 'serif'; span.textContent = 'Serif'; document.body.append(span); const w = span.getBoundingClientRect().width; span.remove(); return w !== width('Serif'); },
+};
+const expected = {
+  'date de-CH': 'Donnerstag, 1. Januar 1970',
+  'collation de': 'aäz',
+  'region names fr': 'Suisse',
+  'words th': 2,
+};
+let bad = 0;
+for (const [name, test] of Object.entries(tests)) {
+  let value;
+  try {
+    value = test();
+  } catch (e) {
+    value = e.name + ': ' + e.message;
+  }
+  const ok = name in expected ? value === expected[name] : value === true;
+  console.log('LAZY ' + name + '=' + (ok ? 'ok' : 'FALSE ' + value));
+  if (!ok)
+    bad++;
+}
+console.log('LAZY done=' + (bad ? bad + ' errors' : 'ok'));
+</script>

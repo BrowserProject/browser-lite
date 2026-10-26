@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <dirent.h>
+#include <string>
 #include <fontconfig/fontconfig.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/threading.h>
@@ -44,20 +45,37 @@
 #include <wtf/Threading.h>
 #include <wtf/text/MakeString.h>
 
+// The fonts that load on demand (deps/recipes/lazyfonts.sh): files of lazy/fonts at /lazy/fonts,
+// listed in the data package. fontconfig's cache in the data package knows them already.
+static void mountLazyFonts()
+{
+    FILE* file = fopen("/usr/share/browser-lite/lazy-fonts.txt", "r");
+    if (!file)
+        return;
+    std::string index;
+    char buffer[4096];
+    for (size_t count; (count = fread(buffer, 1, sizeof(buffer), file));)
+        index.append(buffer, count);
+    fclose(file);
+    if (!BrowserLite::mountLazyFiles("/lazy/fonts", "lazy/fonts", index.c_str()))
+        BrowserLite::log("Fonts: /lazy/fonts could not be mounted");
+}
+
 // The fontconfig cache in the data package (deps/tools/fc-precache.c) is only
 // valid if the font folders have mtime 0. Otherwise fontconfig rescans all
 // fonts on the first layout (over 5 seconds).
 // ICU data beyond the linked core (engine/icu-core.txt), files of lazy/icu (tools/icu-data.mjs)
 extern "C" const char bl_icu_files[];
 
-// The linked ICU data first, then the files in /icu, which load on first use. Before ICU is used.
+// The linked ICU data first, then the files in /lazy/icu, which load on first use. Before ICU
+// is used.
 static void prepareICU()
 {
-    if (!BrowserLite::mountLazyFiles("/icu", "lazy/icu", bl_icu_files)) {
-        BrowserLite::log("ICU: /icu could not be mounted");
+    if (!BrowserLite::mountLazyFiles("/lazy/icu", "lazy/icu", bl_icu_files)) {
+        BrowserLite::log("ICU: /lazy/icu could not be mounted");
         return;
     }
-    u_setDataDirectory("/icu");
+    u_setDataDirectory("/lazy/icu");
     UErrorCode status = U_ZERO_ERROR;
     udata_setFileAccess(UDATA_PACKAGES_FIRST, &status);
 }
@@ -109,7 +127,9 @@ int main(int, char**)
     // fontconfig reads its configuration from the virtual file system
     // (data package from sysroot/runtime, see engine.cmake)
     setenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf", 1);
+    mountLazyFonts();
     prepareFontCache("/usr/share/fonts");
+    prepareFontCache("/lazy/fonts");
 
     // All views share curl. WebKit allows 6 connections per host (like Chrome) but
     // only 17 in total: a few long polls in background views kept the active view

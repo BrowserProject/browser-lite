@@ -59,6 +59,7 @@ public:
         NoJavaScript = 1 << 0,
         NoImages = 1 << 1,
         GlobalPrivacyControl = 1 << 2,
+        SaveData = 1 << 3,
     };
     static void setPreferences(OptionSet<Preference>);
     static OptionSet<Preference> preferences();

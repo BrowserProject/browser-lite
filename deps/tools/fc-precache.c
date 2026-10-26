@@ -59,6 +59,7 @@ int main(int argc, char** argv)
     }
     EM_ASM({ FS.mkdirTree('/var/cache/fontconfig'); });
     zeroMtimes("/usr/share/fonts");
+    zeroMtimes("/lazy/fonts");
     if (argc > 2 && !strcmp(argv[2], "-v"))
         setenv("FC_DEBUG", "16", 1);
 

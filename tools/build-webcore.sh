@@ -23,7 +23,8 @@ bl_webkit_configure "$out" \
     -DPORT=Wasm \
     -DBROWSER_LITE_ENGINE_DIR="$BL_ROOT/engine" \
     -DBROWSER_LITE_RUNTIME_DIR="$BL_SYSROOT/runtime" \
-    -DBROWSER_LITE_ICU_DATA="${icu_data[0]}"
+    -DBROWSER_LITE_ICU_DATA="${icu_data[0]}" \
+    -DBROWSER_LITE_LAZY_FONTS="$BL_SYSROOT/lazy/fonts"
 
 bl_log "Building $target with $jobs jobs"
 cmake --build "$out" --target "$target" -j "$jobs"

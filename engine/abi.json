@@ -66,7 +66,7 @@
     { "name": "bl_speech_recognition_event", "returns": "void", "args": "double id, int type, char* json", "doc": "Speech recognition events (0 start, 1-6 audio/sound/speech start and end, 7 result, 8 no match, 9 error, 10 end)." },
     { "name": "bl_set_user_agent", "returns": "void", "args": "char* userAgent, char* platform", "doc": "User agent and navigator.platform, empty = default. Before the first view." },
     { "name": "bl_set_languages", "returns": "void", "args": "char* languages", "doc": "Comma list for navigator.languages, Accept-Language and Intl, empty = en-US." },
-    { "name": "bl_set_preferences", "returns": "void", "args": "int flags", "doc": "For all views: 1 JavaScript off, 2 images off, 4 Global Privacy Control." },
+    { "name": "bl_set_preferences", "returns": "void", "args": "int flags", "doc": "For all views: 1 JavaScript off, 2 images off, 4 Global Privacy Control, 8 Save-Data." },
     { "name": "bl_set_online", "returns": "void", "args": "int onLine", "doc": "navigator.onLine and online/offline events (host network and transport.connected)." },
     { "name": "bl_set_clipboard_text", "returns": "void", "args": "char* text", "doc": "Puts text on the engine clipboard." },
     { "name": "bl_set_clipboard", "returns": "void", "args": "char* data", "doc": "Paste from the host: {\"text\",\"html\",\"files\":[engine paths]}." },

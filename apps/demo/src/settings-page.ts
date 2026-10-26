@@ -430,6 +430,25 @@ function renderDevice(section: HTMLElement): void {
       'Asks websites not to share or sell your data',
     ),
     row(
+      'Data saver',
+      toggle('setting-save-data', current.saveData, (value) => saveSettings({ saveData: value })),
+      'Asks websites for lighter pages and images',
+    ),
+    row(
+      'Rendering resolution',
+      choice(
+        'setting-resolution',
+        [
+          ['full', 'Full'],
+          ['balanced', 'Balanced (at most 2x)'],
+          ['fast', 'Fast (1x)'],
+        ],
+        current.resolution,
+        save('resolution', (value) => value as Settings['resolution']),
+      ),
+      'Lower is faster on high resolution screens, text gets slightly softer',
+    ),
+    row(
       'Limit per database in the profile',
       choice(
         'setting-db-limit',

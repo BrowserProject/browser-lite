@@ -65,7 +65,7 @@ export function installKeyboard(ctx: ServiceContext): void {
   });
 }
 
-/** navigator.connection and navigator.deviceMemory of the host. */
+/** navigator.connection and navigator.deviceMemory of the host; saveData also from the preference. */
 export function installNetworkInfo(ctx: ServiceContext): void {
   ctx.hostCall('network-info', async () => {
     const host = navigator as {
@@ -86,10 +86,12 @@ export function installNetworkInfo(ctx: ServiceContext): void {
             effectiveType: connection.effectiveType,
             downlink: connection.downlink,
             rtt: connection.rtt,
-            saveData: connection.saveData,
+            saveData: connection.saveData || ctx.config.preferences.saveData,
             type: connection.type,
           }
-        : null,
+        : ctx.config.preferences.saveData
+          ? { saveData: true }
+          : null,
     };
   });
 }

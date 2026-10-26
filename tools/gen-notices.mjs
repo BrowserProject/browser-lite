@@ -159,7 +159,7 @@ const bsd2Body = ownLicense.slice(
 out.push(
   `browser-lite engine ${version}: third party notices`,
   '',
-  'Files:    engine.js, engine.wasm, engine.data',
+  'Files:    engine.js, engine.wasm, engine.data, lazy/',
   `Version:  ${version}`,
   `Source:   ${repository}${commit ? ` (commit ${commit})` : ''}`,
   `Built of: WebKit ${pins.WEBKIT_TAG} (${pins.WEBKIT_COMMIT}), Emscripten ${pins.EMSDK_VERSION}`,
@@ -273,16 +273,30 @@ if (missing.length || extra.length)
   fail(
     `tools/licenses.txt does not match deps/sources.txt (missing: ${missing}, unknown: ${extra})`,
   );
+// Reader of the files of a source: its archive (downloaded and checked) or its pinned commit
+const readers = new Map();
+async function sourceReader(source) {
+  if (!readers.has(source.name)) {
+    if (source.type === 'git')
+      readers.set(source.name, gitSource(source.url, `refs/tags/${source.version}`, source.hash));
+    else {
+      const file = path.join(downloads, path.basename(source.url));
+      await download(source.url, file, source.hash);
+      readers.set(source.name, archiveReader(source.type, file));
+    }
+  }
+  return readers.get(source.name);
+}
 for (const source of sources) {
   const license = licenses.get(source.name);
   if (license.spdx === '-') continue;
-  let reader;
-  if (source.type === 'git')
-    reader = gitSource(source.url, `refs/tags/${source.version}`, source.hash);
-  else {
-    const file = path.join(downloads, path.basename(source.url));
-    await download(source.url, file, source.hash);
-    reader = archiveReader(source.type, file);
+  const texts = [];
+  // "<spec>@<name>": the license file comes from another source (a font file has none inside)
+  for (const spec of license.files) {
+    const [file, other] = spec.split('@');
+    const from = other ? sources.find((s) => s.name === other) : source;
+    if (!from) fail(`tools/licenses.txt: ${source.name} refers to the unknown source ${other}`);
+    texts.push(licenseText(file, await sourceReader(from)));
   }
   entry(
     `${source.name} ${source.version}`,
@@ -291,7 +305,7 @@ for (const source of sources) {
       Source: source.url,
       [source.type === 'git' ? 'Commit' : 'SHA256']: source.hash,
     },
-    license.files.map((spec) => licenseText(spec, reader)),
+    texts,
   );
 }
 

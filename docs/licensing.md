@@ -17,7 +17,9 @@ headers:
 with our embedder and the libraries of `deps/`. It is therefore a combined work with an
 LGPL-2.1 library. `engine.data` contains fonts (Noto, OFL-1.1), the Mozilla CA bundle (MPL-2.0),
 the fontconfig configuration and cache, WebKit's HRTF data `Composite.wav` and our
-`wasm-guest.js`; ICU data (Unicode license) is linked into `engine.wasm`.
+`wasm-guest.js`; ICU data (Unicode license) is linked into `engine.wasm` and lies in `lazy/icu/`.
+`lazy/fonts/` holds more Noto fonts (OFL-1.1): copied as they are, or cut into slices with
+fonttools that keep the copyright and license in their name table, as the OFL allows.
 
 Further licenses inside the engine, among others: OpenSSL (Apache-2.0), curl, nghttp2, zlib,
 brotli, zstd, libpng, libjpeg-turbo, libwebp, expat, libxml2, libxslt, SQLite (public domain),

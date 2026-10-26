@@ -159,11 +159,17 @@ memory and gets the `storage-locked` warning. With `storage.persistent: false`, 
 | `opfs/<origin>/`, `opfs-swap/` | OPFS of the pages (#95, #166) |
 | `tmp/` (incl. `tmp/uploads/<view>/`) | Atomic replacement and uploads, cleared at start (#142, #181) |
 
-Read-only files outside `/data`: `engine.data` (fonts, fontconfig, CA list) in memory, and
-`/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`). Its files
-lie in `lazy/icu/` next to the engine; `LazyFiles.cpp` lists them from an index and fetches a file
-whole with a synchronous request on its first read, so only pages that need a locale, collation,
-dictionary or charset converter download it (#228).
+Read-only files outside `/data`: `engine.data` (Noto Sans regular and bold, fontconfig with its
+cache, CA list) in memory, and `/lazy`, files of `lazy/` next to the engine that load on first
+use: `/lazy/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`,
+#228), and `/lazy/fonts`, Noto Serif, Mono, the italics, more scripts, symbols, Chinese,
+Japanese, Korean and emoji (#229). `LazyFiles.cpp` lists them from an index (sizes, so `stat`
+needs no request) and fetches a file whole with a synchronous request on its first read, so only
+pages that need a locale, collation, dictionary, charset converter or font download it.
+fontconfig's cache in `engine.data` already describes every font of `/lazy/fonts`, so finding a
+font for a character reads no font file; Chinese, Japanese and Korean are cut into the slices of
+Google Fonts (most frequent characters first, about 30 KB each with Brotli), emoji into the
+Unicode emoji groups and the symbol fonts into Unicode blocks.
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). IndexedDB is

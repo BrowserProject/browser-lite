@@ -22,6 +22,8 @@ build() {
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
 <fontconfig>
+  <!-- browser-lite: fonts the engine loads on demand (deps/recipes/lazyfonts.sh) -->
+  <dir>/lazy/fonts</dir>
   <!-- browser-lite: Noto as default fonts -->
   <alias binding="strong">
     <family>sans-serif</family>

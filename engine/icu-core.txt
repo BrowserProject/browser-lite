@@ -25,15 +25,22 @@ ulayout.icu
 uts46.nrm
 zoneinfo64.res
 
-# Locales root and English
+# Locales root and English, with the time zone and currency names every page loads (Date
+# strings, number formats)
 root.res
 en.res
+en_US.res
+en_US_POSIX.res
+zone/root.res
+zone/pool.res
+zone/en.res
+curr/root.res
+curr/pool.res
+curr/en.res
 
 # Text boundaries (characters, words, lines, sentences) without the dictionaries of languages
-# without spaces and without the rules for Chinese and Japanese
-brkitr/res_index.res
-brkitr/root.res
-brkitr/en.res
+# without spaces and without the rules for Chinese and Japanese; the locale files are small
+brkitr/*.res
 brkitr/char.brk
 brkitr/word.brk
 brkitr/line.brk

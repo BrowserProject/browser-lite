@@ -32,7 +32,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   relay's reason and auto reload (#174, #175), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
-  engine downloads (#227).
+  engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
+  data saver (`Save-Data`, #230); a first visit at 5 Mbit/s, 150 ms starts after 25 s instead of
+  32 s (`tests/bench/slow-start.mjs`).
+- **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
+  2x by default (#231).
+- **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
+  (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
@@ -168,7 +174,6 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - **Navigation policy**: a host hook to allow, block or redirect navigations of the pages.
 - **Engine from a CDN**: a same-origin worker trampoline so the large files can come from another
   origin.
-- **Fonts**: more scripts and emoji in `engine.data`, or loading fonts on demand.
 - **WireGuard**: `WireGuardTransport` (user space TCP/IP and WireGuard in WASM, UDP over Wisp), so
   sites see another network than the relay's datacenter IP.
 - **Firefox and Safari**: from best effort to supported.

@@ -1,5 +1,5 @@
 // Read-only files of the engine folder that load on first read: the ICU data beyond the core
-// linked into the engine (tools/icu-data.mjs). Sizes come from an index, so stat() and the
+// linked into the engine (tools/icu-data.mjs) and the fonts of deps/recipes/lazyfonts.sh. Sizes come from an index, so stat() and the
 // directory listing need no request. The first read of a file fetches it whole with a
 // synchronous XMLHttpRequest on the thread that reads (every engine thread is a worker), in node
 // (engine tests) from the file system. The host's HTTP cache keeps the files like the other
@@ -10,18 +10,22 @@
 #include "Engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <backend.h>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <emscripten/emscripten.h>
 #include <memory_backend.h>
 #include <string>
+#include <sys/stat.h>
 #include <vector>
 #include <wasmfs.h>
 
 // Fetches <engine folder>/<path> into buffer (size bytes); returns false when the file is
-// missing or has another size
+// missing, has another size or did not arrive within 15 s (the read fails, ICU falls back to the
+// root locale and text to other fonts; the next read tries again)
 EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
     var url = locateFile(UTF8ToString(path));
     var data;
@@ -31,6 +35,7 @@ EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
         } else {
             var request = new XMLHttpRequest();
             request.open('GET', url, false);
+            request.timeout = 15000;
             request.responseType = 'arraybuffer';
             request.send();
             if (request.status != 200)
@@ -49,6 +54,15 @@ EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
 // From emscripten/wasmfs.h, which declares backend_t as another type than the classes here
 extern "C" int wasmfs_create_directory(const char* path, mode_t, wasmfs::backend_t);
 
+// Starts fetching the files of a group (paths separated by newlines) without waiting, so the
+// requests of the reads that follow find them in the HTTP cache or already on the way
+EM_JS(void, bl_lazy_prefetch, (const char* paths), {
+    if (ENVIRONMENT_IS_NODE)
+        return;
+    for (var path of UTF8ToString(paths).split('\n'))
+        fetch(locateFile(path)).then((response) => response.arrayBuffer()).catch(() => {});
+});
+
 namespace BrowserLite {
 
 using wasmfs::DataFile;
@@ -61,12 +75,20 @@ using wasmfs::oflags_t;
 
 namespace {
 
+// Files that are usually needed together (the most frequent slices of a CJK font): the first read
+// of one fetches the others in parallel
+struct Group {
+    std::atomic<bool> started { false };
+    std::string paths;
+};
+
 class LazyFile final : public DataFile {
 public:
-    LazyFile(backend_t backend, std::string url, off_t size)
+    LazyFile(backend_t backend, std::string url, off_t size, std::shared_ptr<Group> group)
         : DataFile(S_IRUGO, backend)
         , m_url(std::move(url))
         , m_size(size)
+        , m_group(std::move(group))
     {
     }
 
@@ -82,6 +104,8 @@ private:
     ssize_t read(uint8_t* buffer, size_t length, off_t offset) final
     {
         if (m_data.empty() && m_size) {
+            if (m_group && !m_group->started.exchange(true))
+                bl_lazy_prefetch(m_group->paths.c_str());
             double start = emscripten_get_now();
             m_data.resize(m_size);
             if (!bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size)) {
@@ -100,6 +124,7 @@ private:
 
     std::string m_url;
     off_t m_size;
+    std::shared_ptr<Group> m_group;
     std::vector<uint8_t> m_data;
 };
 
@@ -133,9 +158,9 @@ private:
 // Its only directory is the mount point, built from the index
 class LazyBackend final : public wasmfs::Backend {
 public:
-    LazyBackend(const char* urlFolder, const char* index)
+    LazyBackend(const char* urlFolder, std::string index)
         : m_urlFolder(urlFolder)
-        , m_index(index)
+        , m_index(std::move(index))
     {
     }
 
@@ -144,35 +169,50 @@ public:
     std::shared_ptr<Directory> createDirectory(mode_t) final
     {
         auto root = std::make_shared<LazyDirectory>(this);
-        for (const char* line = m_index; *line;) {
+        std::map<std::string, std::shared_ptr<Group>> groups;
+        for (const char* line = m_index.c_str(); *line;) {
             const char* end = strchr(line, '\n');
             if (!end)
                 end = line + strlen(line);
             std::string entry(line, end);
             line = *end ? end + 1 : end;
-            auto space = entry.rfind(' ');
-            if (space == std::string::npos)
+            // "<path> <size>" or "<path> <size> <group>"
+            char path[512];
+            char groupName[128] = "";
+            long long size;
+            if (sscanf(entry.c_str(), "%511s %lld %127s", path, &size, groupName) < 2)
                 continue;
-            std::string path = entry.substr(0, space);
-            off_t size = strtoll(entry.c_str() + space + 1, nullptr, 10);
+            std::string url = m_urlFolder + '/' + path;
+            std::shared_ptr<Group> group;
+            if (*groupName) {
+                auto& found = groups[groupName];
+                if (!found)
+                    found = std::make_shared<Group>();
+                group = found;
+                group->paths += (group->paths.empty() ? "" : "\n") + url;
+            }
+            std::string relative(path);
             auto directory = root;
             size_t start = 0;
-            for (size_t slash; (slash = path.find('/', start)) != std::string::npos; start = slash + 1)
-                directory = directory->directory(path.substr(start, slash - start));
-            directory->add(path.substr(start), std::make_shared<LazyFile>(this, m_urlFolder + '/' + path, size));
+            for (size_t slash; (slash = relative.find('/', start)) != std::string::npos; start = slash + 1)
+                directory = directory->directory(relative.substr(start, slash - start));
+            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group));
         }
         return root;
     }
 
 private:
     std::string m_urlFolder;
-    const char* m_index;
+    std::string m_index;
 };
 
 } // namespace
 
 bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* index)
 {
+    std::string parent(mountPoint, strrchr(mountPoint, '/') - mountPoint);
+    if (!parent.empty() && mkdir(parent.c_str(), 0755) && errno != EEXIST)
+        return false;
     backend_t backend = wasmfs::wasmFS.addBackend(std::make_unique<LazyBackend>(urlFolder, index));
     return !wasmfs_create_directory(mountPoint, S_IRUGO | S_IXUGO, backend);
 }

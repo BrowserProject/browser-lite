@@ -76,6 +76,8 @@ Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient&
         request.setHTTPUserAgent(standardUserAgent());
     if (WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl))
         request.setHTTPHeaderField("Sec-GPC"_s, "1"_s);
+    if (WebView::preferences().contains(WebView::Preference::SaveData))
+        request.setHTTPHeaderField("Save-Data"_s, "on"_s);
     if (request.allowCookies())
         addCookieHeader(request);
     return CurlRequest::create(request, client);

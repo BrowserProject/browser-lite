@@ -65,8 +65,18 @@ export interface Settings {
   javascript: boolean;
   images: boolean;
   gpc: boolean;
+  saveData: boolean;
+  resolution: Resolution;
   dbLimit: number;
 }
+
+/** Rendering resolution: the pixel ratio of the screen, at most 2, or 1 (BrowserOptions.maxPixelRatio). */
+export type Resolution = 'full' | 'balanced' | 'fast';
+export const MAX_PIXEL_RATIO: Record<Resolution, number | null> = {
+  full: null,
+  balanced: 2,
+  fast: 1,
+};
 
 const DEFAULTS: Settings = {
   searchEngine: 'duckduckgo',
@@ -81,6 +91,8 @@ const DEFAULTS: Settings = {
   javascript: true,
   images: true,
   gpc: false,
+  saveData: false,
+  resolution: 'balanced',
   dbLimit: DEFAULT_DB_LIMIT_KB,
 };
 
@@ -118,7 +130,7 @@ export interface StartSettings {
       | 'keepSessionCookies'
     >
   > &
-    Pick<BrowserOptions, 'device'>;
+    Pick<BrowserOptions, 'device' | 'maxPixelRatio'>;
 }
 
 let start: StartSettings | null = null;
@@ -155,7 +167,9 @@ export function updateStartSettings(restarted: boolean): StartSettings {
         javascript: current.javascript,
         images: current.images,
         globalPrivacyControl: current.gpc,
+        saveData: current.saveData,
       },
+      maxPixelRatio: MAX_PIXEL_RATIO[current.resolution] ?? undefined,
       // Like Chrome with "Continue where you left off": session cookies stay
       keepSessionCookies: restoreSession,
     },

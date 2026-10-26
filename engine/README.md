@@ -1,7 +1,7 @@
 # engine/
 
 The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
-`engine.wasm` and `engine.data`, plus `lazy/` with files it loads on first use (ICU data). A host (`@browser-lite/core`) loads it into a page, gives it a
+`engine.wasm` and `engine.data`, plus `lazy/` with files it loads on first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
 patches from `patches/`.
@@ -36,7 +36,7 @@ patches from `patches/`.
     `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
-    (files of `lazy/` mounted read only, fetched on first read)
+    (files of `lazy/` mounted read only at `/lazy`, fetched on first read)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame

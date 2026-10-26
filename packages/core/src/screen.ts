@@ -19,7 +19,16 @@ export class Screen {
   }
 
   pixelRatio(): number {
-    return this.config.device?.pixelRatio || devicePixelRatio || 1;
+    return Math.min(
+      this.config.device?.pixelRatio || devicePixelRatio || 1,
+      this.config.maxPixelRatio,
+    );
+  }
+
+  /** A new limit of the pixel ratio: the views measure again. */
+  setMaxPixelRatio(limit: number): void {
+    this.config.maxPixelRatio = limit;
+    this.onPixelRatio();
   }
 
   start(signal: AbortSignal): void {

@@ -50,7 +50,8 @@ them or load `media-sw.js` into the site's own worker:
 | `timeZone` | host time zone | IANA name |
 | `colorScheme` | `system` | `light`, `dark` or `system` (follows the host) |
 | `device` | host screen | `{ width, height, pixelRatio, touch?, mobile? }` emulated device |
-| `preferences` | all on, GPC off | `{ javascript, images, globalPrivacyControl }` |
+| `maxPixelRatio` | no limit | Highest pixel ratio the pages render at (at least 1, `browser.setMaxPixelRatio()` changes it); above it the host scales the views up, the engine paints fewer pixels |
+| `preferences` | all on, GPC and data saver off | `{ javascript, images, globalPrivacyControl, saveData }` (`saveData`: `Save-Data: on` on every request, `navigator.connection.saveData`) |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |
 | `engine` | | `gpu`, `compositing`, `safepointGC`, `httpCache`, `scriptTimeoutSeconds`, `extraCA` (PEM), `log`, `env` (experimental `BL_*`, `JSC_*`, `FC_*` switches; keys the core sets are rejected) |
 | `onProgress` | none | Progress of the start for a loading indicator: `{ phase, loaded, total }`, `download` with the uncompressed bytes of `engine.wasm` and `engine.data` (total from `manifest.json`, 0 when unknown) only when the files do not come from the cache, then `start` |

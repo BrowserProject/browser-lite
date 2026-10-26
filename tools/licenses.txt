@@ -5,8 +5,9 @@
 #
 # <license files>: comma separated paths inside the source (a tar archive without its top
 # folder), "-" is the downloaded file itself, ":<from>-<to>" takes only these lines, an
-# absolute path is a file of the toolchain image. SPDX "-": no third party source, the recipe
-# generates the files itself.
+# absolute path is a file of the toolchain image, "<file>@<name>" a file of another source (a font
+# file has no license file inside). SPDX "-": nothing to list (no third party source, or a
+# license text only read by other entries).
 zlib            Zlib                                  LICENSE
 brotli          MIT                                   LICENSE
 zstd            BSD-3-Clause OR GPL-2.0-only          LICENSE
@@ -29,6 +30,42 @@ curl            curl                                  COPYING
 notosans        OFL-1.1                               OFL.txt
 notoserif       OFL-1.1                               OFL.txt
 notosansmono    OFL-1.1                               OFL.txt
+font-arabic         OFL-1.1                               OFL.txt@notosans
+font-hebrew         OFL-1.1                               OFL.txt@notosans
+font-devanagari     OFL-1.1                               OFL.txt@notosans
+font-bengali        OFL-1.1                               OFL.txt@notosans
+font-tamil          OFL-1.1                               OFL.txt@notosans
+font-telugu         OFL-1.1                               OFL.txt@notosans
+font-kannada        OFL-1.1                               OFL.txt@notosans
+font-malayalam      OFL-1.1                               OFL.txt@notosans
+font-gujarati       OFL-1.1                               OFL.txt@notosans
+font-gurmukhi       OFL-1.1                               OFL.txt@notosans
+font-oriya          OFL-1.1                               OFL.txt@notosans
+font-sinhala        OFL-1.1                               OFL.txt@notosans
+font-thai           OFL-1.1                               OFL.txt@notosans
+font-lao            OFL-1.1                               OFL.txt@notosans
+font-khmer          OFL-1.1                               OFL.txt@notosans
+font-myanmar        OFL-1.1                               OFL.txt@notosans
+font-georgian       OFL-1.1                               OFL.txt@notosans
+font-armenian       OFL-1.1                               OFL.txt@notosans
+font-ethiopic       OFL-1.1                               OFL.txt@notosans
+font-thaana         OFL-1.1                               OFL.txt@notosans
+font-symbols        OFL-1.1                               OFL.txt@notosans
+font-symbols2       OFL-1.1                               OFL.txt@notosans
+font-cjk-sc         OFL-1.1                               -@font-cjk-license
+font-cjk-tc         OFL-1.1                               -@font-cjk-license
+font-cjk-jp         OFL-1.1                               -@font-cjk-license
+font-cjk-kr         OFL-1.1                               -@font-cjk-license
+font-slices-sc      Apache-2.0                            /usr/share/common-licenses/Apache-2.0
+font-slices-tc      Apache-2.0                            /usr/share/common-licenses/Apache-2.0
+font-slices-jp      Apache-2.0                            /usr/share/common-licenses/Apache-2.0
+font-slices-kr      Apache-2.0                            /usr/share/common-licenses/Apache-2.0
+font-emoji          OFL-1.1                               -@font-emoji-license
+fonttools           MIT                                   fonttools-4.60.1.dist-info/licenses/LICENSE
+font-emoji-license  -                                     -
+font-cjk-license    -                                     -
+emoji-test          Unicode-3.0                           LICENSE@icu
+lazyfonts           -                                     -
 cacert          MPL-2.0                               -:1-19,/usr/share/common-licenses/MPL-2.0
 fontconfig-conf -                                     -
 fontcache       -                                     -

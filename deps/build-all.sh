@@ -36,6 +36,7 @@ ORDER=(
     notosans
     notoserif
     notosansmono
+    lazyfonts
     cacert
     fontconfig-conf
     fontcache

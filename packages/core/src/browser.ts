@@ -4,6 +4,7 @@ import {
   colorScheme,
   engineEnv,
   languages,
+  maxPixelRatio,
   PERMISSION_KINDS,
   permissionChange,
   preferenceFlags,
@@ -560,6 +561,10 @@ class BrowserImpl implements Browser, ViewHost {
   setColorScheme(scheme: ColorScheme): void {
     this.screen.colorScheme = colorScheme(scheme);
     if (this.ready) this.screen.send();
+  }
+
+  setMaxPixelRatio(limit: number | null): void {
+    this.screen.setMaxPixelRatio(maxPixelRatio(limit));
   }
 
   setLanguages(list: string[]): void {

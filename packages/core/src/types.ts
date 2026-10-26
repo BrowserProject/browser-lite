@@ -116,6 +116,11 @@ export interface Preferences {
   javascript?: boolean;
   images?: boolean;
   globalPrivacyControl?: boolean;
+  /**
+   * Data saver: every request carries `Save-Data: on` and `navigator.connection.saveData` is
+   * true, so sites that honour it send lighter pages and images. Default false.
+   */
+  saveData?: boolean;
 }
 
 /** Storage of the pages (cookies, localStorage, IndexedDB, caches). */
@@ -194,6 +199,11 @@ export interface BrowserOptions {
   colorScheme?: ColorScheme;
   /** Emulated device; default the host screen. */
   device?: DeviceOptions;
+  /**
+   * Highest pixel ratio the pages render at (at least 1), see {@link Browser.setMaxPixelRatio}.
+   * Default: no limit.
+   */
+  maxPixelRatio?: number;
   preferences?: Preferences;
   /** Keep session cookies over restarts (like restoring a session). Default false. */
   keepSessionCookies?: boolean;
@@ -237,6 +247,12 @@ export interface Browser {
   setColorScheme(scheme: ColorScheme): void;
   /** navigator.languages and Accept-Language of the pages. */
   setLanguages(languages: string[]): void;
+  /**
+   * Highest pixel ratio the pages render at (at least 1), null for no limit. On a screen with a
+   * higher pixel ratio the host scales the views up: slightly softer, but the engine paints
+   * fewer pixels (a quarter at ratio 2 with limit 1), and pages pick smaller images.
+   */
+  setMaxPixelRatio(limit: number | null): void;
   /** navigator.userAgent and navigator.platform; empty strings mean the engine default. */
   setUserAgent(userAgent: string, platform?: string): void;
   /** Changes some preferences; the others keep their value. */

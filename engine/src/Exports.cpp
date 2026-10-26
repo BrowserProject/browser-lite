@@ -547,7 +547,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
 EMSCRIPTEN_KEEPALIVE void bl_set_preferences(int flags)
 {
     runOnEngineThread([flags] {
-        WebView::setPreferences(OptionSet<WebView::Preference>::fromRaw(flags & 7));
+        WebView::setPreferences(OptionSet<WebView::Preference>::fromRaw(flags & 15));
     });
 }
 
