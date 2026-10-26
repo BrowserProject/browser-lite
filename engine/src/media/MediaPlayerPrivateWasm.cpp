@@ -754,15 +754,17 @@ void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 
 std::optional<VideoFrameMetadata> MediaPlayerPrivateWasm::videoFrameMetadata()
 {
-    if (!m_frame || m_presentedFrames == m_lastMetadataFrame)
+    // Overlay: the frames the host showed, mostly without a copy
+    if ((!m_frame && !m_overlay) || m_presentedFrames == m_lastMetadataFrame)
         return std::nullopt;
     m_lastMetadataFrame = m_presentedFrames;
     VideoFrameMetadata metadata;
     // Raw MonotonicTime seconds, HTMLVideoElement converts them to the page's time
     metadata.presentationTime = m_frameArrival.secondsSinceEpoch().seconds();
     metadata.expectedDisplayTime = (m_frameArrival + 16_ms).secondsSinceEpoch().seconds();
-    metadata.width = m_frame->size().width();
-    metadata.height = m_frame->size().height();
+    auto size = m_frame ? m_frame->size() : expandedIntSize(m_naturalSize);
+    metadata.width = size.width();
+    metadata.height = size.height();
     metadata.mediaTime = m_frameMediaTime;
     metadata.presentedFrames = m_presentedFrames;
     return metadata;
