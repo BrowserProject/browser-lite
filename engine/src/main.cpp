@@ -51,8 +51,8 @@
 // engine.deferred-<chunk>.wasm that their thread has not instantiated yet
 // (tools/split-engine.mjs, engine/js/deferred.js). The pointer keeps the import in the linked
 // module.
-EM_JS(void, bl_load_deferred, (unsigned chunk, unsigned slot), { blLoadDeferred(chunk, slot); });
-[[gnu::used]] static void (*const s_loadDeferred)(unsigned, unsigned) = bl_load_deferred;
+EM_JS(void, bl_load_deferred, (unsigned chunk), { blLoadDeferred(chunk); });
+[[gnu::used]] static void (*const s_loadDeferred)(unsigned) = bl_load_deferred;
 
 // The files of lazy/ that many sites need soon (engine/lazy-prefetch.txt in the data package):
 // fetched in the background, so a page finds them in the HTTP cache instead of waiting a round

@@ -2,13 +2,13 @@
 // chunks engine.deferred-<n>.wasm of the rest, which the host loads after the start
 // (engine/js/deferred.js):
 //  1. engine.wasm keeps the functions of engine/hot-functions.txt (tools/hot-functions.mjs) that
-//     ran, functions newer than that list, and everything the page main thread reaches by direct
-//     calls from the exports and from the functions it ran: it cannot wait for a chunk.
+//     ran, functions newer than that list, and what the functions the page main thread ran reach
+//     by direct calls (a chunk would block the page while it loads).
 //  2. The rest goes into chunks of about CHUNK_BYTES, sorted by class, so a thread that needs
 //     deferred code before everything arrived waits for one chunk only (binaryen's wasm-split).
 //  3. wasm-split's placeholders (one imported JS function per deferred function, about 50000,
 //     which made every instance in every thread 100 ms slower) become trampolines inside
-//     engine.wasm: they call the import bl_load_deferred(chunk, slot) (engine/src/main.cpp),
+//     engine.wasm: they call the import bl_load_deferred(chunk) (engine/src/main.cpp),
 //     then the slot, which the instance of the chunk has filled meanwhile.
 //  4. The engine.wasm functions the chunks call go into one exported table and small functions
 //     merged into each chunk call through it, so engine.wasm needs no export per function
@@ -40,8 +40,11 @@ import {
   withExports,
 } from './wasm-binary.mjs';
 
-// Code of the functions per chunk of the deferred part (before compression, about a fifth after)
+// Code of the functions per chunk of the deferred part (before compression, about a fifth after);
+// a class larger than that stays together up to MAX_CHUNK_BYTES, below the 8 MB up to which Chrome
+// compiles a module synchronously on the page main thread
 const CHUNK_BYTES = 1_000_000;
+const MAX_CHUNK_BYTES = 4_000_000;
 
 // Features of the engine build (the linked module has no target_features section to read them)
 const FEATURES = [
@@ -178,8 +181,6 @@ async function main() {
     keep.add(name);
     if (entry?.main) roots.push(name);
   }
-  for (const entry of wasmExports(full))
-    if (entry.kind === 'function' && names.has(entry.index)) roots.push(names.get(entry.index));
   const edges = await callGraph(input);
   const reached = new Set();
   while (roots.length) {
@@ -208,7 +209,10 @@ async function main() {
   const chunks = [[]];
   let chunkBytes = 0;
   for (const [index, entry] of cold.entries()) {
-    if (chunkBytes >= CHUNK_BYTES && entry.group !== cold[index - 1].group) {
+    if (
+      chunkBytes >= MAX_CHUNK_BYTES ||
+      (chunkBytes >= CHUNK_BYTES && entry.group !== cold[index - 1].group)
+    ) {
       chunks.push([]);
       chunkBytes = 0;
     }
@@ -232,7 +236,7 @@ async function main() {
     '-g',
   ]);
 
-  // 3. Placeholders as trampolines: bl_load_deferred(chunk, slot), then the slot
+  // 3. Placeholders as trampolines: bl_load_deferred(chunk), then the slot
   let primary = readFileSync(file('primary.wasm'));
   const primaryTypes = functionTypes(primary);
   const placeholders = wasmImports(primary).filter((entry) =>
@@ -248,12 +252,12 @@ async function main() {
     const functions = own.map(({ name, type }) => {
       const signature = signatures.name(primaryTypes[type]);
       const args = callArgs(primaryTypes[type].params);
-      return `  (func (export ${quoted(name)}) (type ${signature}) (call $load (i32.const ${chunk}) (i32.const ${name})) (call_indirect $slots (type ${signature})${args} (i32.const ${name})))`;
+      return `  (func (export ${quoted(name)}) (type ${signature}) (call $load (i32.const ${chunk})) (call_indirect $slots (type ${signature})${args} (i32.const ${name})))`;
     });
     return assemble(`trampolines-${chunk}`, [
       '(module',
       ...signatures.declarations(),
-      `  (import ${quoted(load.module)} ${quoted(load.name)} (func $load (param i32 i32)))`,
+      `  (import ${quoted(load.module)} ${quoted(load.name)} (func $load (param i32)))`,
       `  (import "primary" ${quoted(slotTables[0].name)} (table $slots 0 funcref))`,
       ...functions,
       ')',
@@ -365,7 +369,7 @@ async function main() {
   const mb = (bytes) => `${(bytes / 1e6).toFixed(1)} MB`;
   const deferredBytes = outputs.reduce((sum, bytes) => sum + bytes.length, 0);
   console.log(
-    `split-engine: ${keep.size} of ${names.size - importedFunctions} functions kept (${reached.size} reachable from the main thread); engine.wasm ${mb(primary.length)}, ${chunks.length} chunks engine.deferred-<n>.wasm ${mb(deferredBytes)} (from ${mb(full.length)})`,
+    `split-engine: ${keep.size} of ${names.size - importedFunctions} functions kept (${reached.size} reached from the main thread); engine.wasm ${mb(primary.length)}, ${chunks.length} chunks engine.deferred-<n>.wasm ${mb(deferredBytes)} (from ${mb(full.length)})`,
   );
 }
 

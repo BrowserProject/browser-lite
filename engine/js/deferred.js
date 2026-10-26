@@ -1,23 +1,33 @@
 // Deferred engine code (#238, tools/split-engine.mjs). The trampolines of a split engine.wasm
-// call the import bl_load_deferred(chunk, slot) (engine/src/main.cpp) for a function of chunk
+// call the import bl_load_deferred(chunk) (engine/src/main.cpp) for a function of chunk
 // engine.deferred-<chunk>.wasm that the calling thread has not instantiated yet, and call the
 // function after it returns.
 //
-// The host compiles the chunks after the start and hands each to Module.blSetDeferred. The main
-// thread instantiates them right away (it can neither download nor compile a module that large
-// synchronously); every worker gets the modules and instantiates a chunk at its first call into
-// it. A worker that needs a chunk before it arrived reads it synchronously (from the HTTP cache
-// once the host's download is through) and compiles it, as node always does.
+// The host compiles the chunks after the start and hands each to Module.blSetDeferred: the main
+// thread instantiates them right away, every worker gets the modules and instantiates a chunk at
+// its first call into it. A thread that needs a chunk before it arrived reads it synchronously
+// (from the HTTP cache once the host's download is through) and compiles it, as node always does;
+// chunks stay below the 8 MB up to which Chrome compiles synchronously on the page main thread.
 
 var blDeferred = { modules: [], instances: [] };
 
-function blLoadDeferred(chunk, slot) {
-  if (!blDeferred.modules[chunk]) {
-    if (!ENVIRONMENT_IS_PTHREAD && !ENVIRONMENT_IS_NODE)
-      abort(`engine.deferred-${chunk}.wasm needed on the main thread before it loaded (slot ${slot})`);
-    const bytes = readBinary(locateFile(`engine.deferred-${chunk}.wasm`));
-    blDeferred.modules[chunk] = new WebAssembly.Module(bytes);
-  }
+function blReadChunk(chunk) {
+  const url = locateFile(`engine.deferred-${chunk}.wasm`);
+  if (ENVIRONMENT_IS_PTHREAD || ENVIRONMENT_IS_NODE) return readBinary(url);
+  // On the page main thread a synchronous request cannot ask for an ArrayBuffer
+  const request = new XMLHttpRequest();
+  request.open('GET', url, false);
+  request.overrideMimeType('text/plain; charset=x-user-defined');
+  request.send();
+  if (request.status !== 200) abort(`${url}: HTTP ${request.status}`);
+  const text = request.responseText;
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+  return bytes;
+}
+
+function blLoadDeferred(chunk) {
+  blDeferred.modules[chunk] ??= new WebAssembly.Module(blReadChunk(chunk));
   blDeferred.instances[chunk] ??= new WebAssembly.Instance(blDeferred.modules[chunk], {
     bl_primary: wasmExports,
   });

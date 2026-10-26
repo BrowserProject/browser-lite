@@ -64,7 +64,7 @@ Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
 Every thread instantiates `engine.wasm` itself. A split engine (#238) has the code that the
 start and common pages do not run in chunks `engine.deferred-<n>.wasm`: the core compiles them
 one after the other after the start, the main thread instantiates each at once, the workers at
-their first call into it (`engine/js/deferred.js`); a worker that needs a chunk before the core's
+their first call into it (`engine/js/deferred.js`); a thread that needs a chunk before the core's
 copy arrived reads and compiles it synchronously.
 | WasmFS OPFS proxy | Synchronous access handles for `/data` (#142) |
 
