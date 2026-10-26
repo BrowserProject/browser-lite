@@ -57,30 +57,34 @@ isolation.
 
 ## Serving the engine
 
-- The engine folder (`engine.js`, `engine.wasm`, `engine.data`, `lazy/`) must be **same-origin** with the
-  page: the engine starts its workers from `engine.js`. `createBrowser` rejects a cross-origin
+- The engine folder (`engine.js`, `engine.wasm`, `engine.deferred.wasm`, `engine.data`, `lazy/`)
+  must be **same-origin** with the page: the engine starts its workers from `engine.js`. `createBrowser` rejects a cross-origin
   `engineUrl`. A CDN works only behind the same origin (reverse proxy).
 - Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
   it is. `audio-worklet.js` (export `@browser-lite/core/audio-worklet.js`) must stay a file next
   to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`).
 - Put each engine version in its own folder (for example `engine/<hash>/`, as
   `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
-- `engine.wasm` as `application/wasm` (streaming compilation), precompressed. Sizes of a
+- `engine.wasm` and `engine.deferred.wasm` as `application/wasm` (streaming compilation),
+  precompressed. Sizes of a
   packaged engine (name section stripped):
 
 | File | Raw | Brotli |
 |---|---|---|
-| `engine.wasm` | about 71 MB | about 14 MB |
+| `engine.wasm` (what the start and common pages run) | about 47 MB | about 9.4 MB |
+| `engine.deferred.wasm` (the rest, loaded after the start, #238) | about 27 MB | about 5.1 MB |
 | `engine.data` (Noto Sans, CA bundle, fontconfig, HRTF data) | about 2.7 MB | about 0.6 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
 | `lazy/icu/` (ICU data beyond the linked core, 2585 files, loaded on first use) | about 17 MB | about 6 MB |
 | `lazy/fonts/` (Noto Serif, Mono, italics, scripts, symbols, CJK and emoji slices, 611 files, loaded on first use) | about 26 MB | |
 
-A first visit transfers about 15 MB with Brotli; later visits come from the HTTP cache and
-Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`
-requests the three files at once, one request each, while the storage lock and
-`storage.beforeStart` run; `engine.wasm` compiles while it downloads (#218 in
-[decisions.md](decisions.md)). Preload hints in the page start two of them with the HTML instead
+A first visit transfers about 10 MB with Brotli before the engine starts and 5 MB more in the
+background; a page that needs code of `engine.deferred.wasm` before that download is through
+waits for it (#238). Later visits come from the HTTP cache and Chrome's code cache (about 16 MB
+of compiled engine code from the second start on). `createBrowser` requests the three files at
+once, one request each, while the storage lock and `storage.beforeStart` run; `engine.wasm`
+compiles while it downloads (#218 in [decisions.md](decisions.md)), `engine.deferred.wasm` is
+requested once it is there. Preload hints in the page start two of them with the HTML instead
 of after your script (the demo injects them in `apps/demo/vite.config.ts`, two round trips
 earlier):
 

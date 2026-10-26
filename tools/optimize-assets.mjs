@@ -8,6 +8,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { withoutSections } from './wasm-binary.mjs';
 
 const args = process.argv.slice(2);
 const stripOnly = args[0] === '--strip-only';
@@ -17,45 +18,14 @@ if (!dir) {
   process.exit(2);
 }
 
-function readLEB(bytes, offset) {
-  let result = 0;
-  let shift = 0;
-  for (;;) {
-    if (offset >= bytes.length) throw new Error('WebAssembly module is truncated');
-    const byte = bytes[offset++];
-    result += (byte & 0x7f) * 2 ** shift;
-    shift += 7;
-    if (byte < 0x80) return [result, offset];
-  }
-}
-
-// Every section of the module: name (custom sections only), start and end
-function* wasmSections(bytes) {
-  let offset = 8;
-  while (offset < bytes.length) {
-    const start = offset;
-    const id = bytes[offset++];
-    const [size, dataStart] = readLEB(bytes, offset);
-    const end = dataStart + size;
-    if (end > bytes.length) throw new Error('WebAssembly module is truncated');
-    let name;
-    if (id === 0) {
-      const [nameLength, nameStart] = readLEB(bytes, dataStart);
-      name = bytes.subarray(nameStart, nameStart + nameLength).toString();
-    }
-    yield { name, start, end };
-    offset = end;
-  }
-}
-
 function stripNameSection(bytes) {
-  const parts = [bytes.subarray(0, 8)];
   let removed = 0;
-  for (const section of wasmSections(bytes)) {
-    if (section.name === 'name') removed += section.end - section.start;
-    else parts.push(bytes.subarray(section.start, section.end));
-  }
-  return [Buffer.concat(parts), removed];
+  const stripped = withoutSections(bytes, (section) => {
+    if (section.name !== 'name') return false;
+    removed += section.end - section.start;
+    return true;
+  });
+  return [stripped, removed];
 }
 
 function* files(folder) {

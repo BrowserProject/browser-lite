@@ -1,5 +1,5 @@
 {
-  "abiVersion": 9,
+  "abiVersion": 10,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -148,7 +148,8 @@
     { "name": "blPresenterWorker", "setBy": "engine", "type": "() => Worker | null", "doc": "Worker the view canvases go to: postMessage({ blCanvas: offscreenCanvas, viewId }, [offscreenCanvas])." },
     { "name": "blWriteFiles", "setBy": "engine", "type": "(files: {file, path}[]) => Promise<boolean[]>", "doc": "Writes host files into the engine file system in chunks." },
     { "name": "blClearHttpCache", "setBy": "engine", "type": "() => Promise", "doc": "Deletes the HTTP cache of the namespace." },
-    { "name": "blShutdown", "setBy": "engine", "type": "() => void", "doc": "Closes all transport streams and terminates all engine threads; the module is unusable afterwards." }
+    { "name": "blShutdown", "setBy": "engine", "type": "() => void", "doc": "Closes all transport streams and terminates all engine threads; the module is unusable afterwards." },
+    { "name": "blSetDeferred", "setBy": "engine", "type": "(module: WebAssembly.Module) => Promise", "doc": "Compiled engine.deferred.wasm of a split engine (custom section bl.deferred in engine.wasm, #238): instantiated on the main thread at once, sent to every worker; resolves when the main thread has it." }
   ],
   "events": [
     { "type": "navigation", "scope": "view", "payload": "{url, canGoBack, canGoForward, loading, history: {entries: [{url, title}], index} | null}" },

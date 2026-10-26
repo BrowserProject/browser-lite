@@ -14,7 +14,13 @@ import {
 import { Debug } from './debug.js';
 import { Downloads } from './downloads.js';
 import { Emitter } from './emitter.js';
-import { checkEngine, type EngineModule, loadEngineFiles, provideEngineFiles } from './engine.js';
+import {
+  checkEngine,
+  type EngineModule,
+  loadDeferredCode,
+  loadEngineFiles,
+  provideEngineFiles,
+} from './engine.js';
 import { BrowserLiteError } from './errors.js';
 import { Fullscreen } from './fullscreen.js';
 import { Online } from './online.js';
@@ -187,6 +193,9 @@ class BrowserImpl implements Browser, ViewHost {
     const signal = this.lifetime.signal;
     // The engine files load from now on, while the storage lock and beforeStart run
     const files = loadEngineFiles(config.engineBase, config.onProgress);
+    const deferred = loadDeferredCode(config.engineBase, files.wasm);
+    // Reported once the engine runs (below)
+    deferred.catch(() => {});
     config.transport.preconnect?.();
     let persistent = config.persistent;
     if (persistent) {
@@ -273,6 +282,11 @@ class BrowserImpl implements Browser, ViewHost {
       factory(this.module).then(
         () => {
           checkEngine(this.module);
+          deferred
+            .then((compiled) => compiled && this.module.blSetDeferred?.(compiled))
+            .catch((error) =>
+              console.warn('[browser-lite] engine.deferred.wasm failed to load:', error),
+            );
           return ready;
         },
         (error: unknown) => {

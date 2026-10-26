@@ -1,5 +1,6 @@
-// Copies the engine build (engine.js, engine.wasm, engine.data, lazy/) from ENGINE_DIR into
-// public/engine/, where Vite serves it in development and copies it into the build.
+// Copies the engine build (engine.js, engine.wasm, engine.deferred.wasm of a split engine,
+// engine.data, lazy/) from ENGINE_DIR into public/engine/, where Vite serves it in development
+// and copies it into the build.
 //   ENGINE_DIR=/path/to/engine npm run copy-engine
 import { access, cp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +21,10 @@ try {
 }
 const target = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'engine');
 await mkdir(target, { recursive: true });
-for (const file of FILES)
+const deferred = await access(path.join(source, 'engine.deferred.wasm')).then(
+  () => ['engine.deferred.wasm'],
+  () => [],
+);
+for (const file of [...FILES, ...deferred])
   await cp(path.join(source, file), path.join(target, file), { recursive: true });
 console.log(`Engine copied to ${target}`);

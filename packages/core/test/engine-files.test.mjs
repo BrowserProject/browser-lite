@@ -3,7 +3,7 @@
 // getPreloadedPackage instead of requesting them again.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEngineFiles, provideEngineFiles } from '../dist/engine.js';
+import { loadDeferredCode, loadEngineFiles, provideEngineFiles } from '../dist/engine.js';
 import { BrowserLiteError } from '../dist/index.js';
 
 // Smallest module: one exported function f
@@ -21,7 +21,7 @@ function fakeHost({ wasmType = 'application/wasm', status = 200, manifest = null
     if (status !== 200) return new Response('', { status });
     if (String(url).endsWith('manifest.json'))
       return manifest ? Response.json(manifest) : new Response('', { status: 404 });
-    return String(url).endsWith('engine.wasm')
+    return String(url).endsWith('.wasm')
       ? new Response(WASM, { headers: { 'Content-Type': wasmType } })
       : new Response(DATA);
   };
@@ -122,4 +122,34 @@ test('onProgress without a manifest reports an unknown total', async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(events.at(-1).phase, 'start');
   assert.equal(events.at(-1).total, 0);
+});
+
+// A split engine.wasm (#238): the smallest module with the custom section bl.deferred
+const SPLIT_WASM = new Uint8Array([
+  0,
+  0x61,
+  0x73,
+  0x6d,
+  1,
+  0,
+  0,
+  0,
+  0,
+  12,
+  11,
+  ...Buffer.from('bl.deferred'),
+]);
+
+test('a split engine gets engine.deferred.wasm once engine.wasm is there', async () => {
+  const requests = fakeHost();
+  const url = base();
+  const compiled = await loadDeferredCode(url, Promise.resolve(new WebAssembly.Module(SPLIT_WASM)));
+  assert.deepEqual(requests, [[`${url}engine.deferred.wasm`, 'same-origin']]);
+  assert.ok(compiled instanceof WebAssembly.Module);
+});
+
+test('an unsplit engine requests no engine.deferred.wasm', async () => {
+  const requests = fakeHost();
+  assert.equal(await loadDeferredCode(base(), Promise.resolve(new WebAssembly.Module(WASM))), null);
+  assert.equal(requests.length, 0);
 });

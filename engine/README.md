@@ -1,7 +1,9 @@
 # engine/
 
 The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
-`engine.wasm` and `engine.data`, plus `lazy/` with files it loads on first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
+`engine.wasm` and `engine.data`, plus `engine.deferred.wasm`, the code the start and common pages
+do not run, which the host loads after the start, and `lazy/` with files it loads on first use
+(ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
 patches from `patches/`.
@@ -13,10 +15,14 @@ patches from `patches/`.
   sources.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
   package, the split of the ICU data (`icu-core.txt` is linked, the rest goes to `lazy/icu`
-  through `tools/icu-data.mjs`). `BL_PRE_JS` is the only list of the `--pre-js` files. Also builds the native WTF
-  tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
+  through `tools/icu-data.mjs`). `BL_PRE_JS` is the only list of the `--pre-js` files. After the
+  link `tools/split-engine.mjs` splits `engine.wasm` (`BROWSER_LITE_SPLIT_ENGINE`, #238). Also
+  builds the native WTF tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
+- `hot-functions.txt`: the functions that stay in `engine.wasm` when it is split, written by
+  `tools/hot-functions.mjs` ([docs/build.md](../docs/build.md#split-engine)).
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
+  - `deferred.js`: loads `engine.deferred.wasm` into every thread (`Module.blSetDeferred`)
   - `sockets.js`: TCP streams over `Module.blTransport`
   - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's

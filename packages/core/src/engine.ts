@@ -4,7 +4,7 @@ import type { StartProgress, Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 9;
+export const ENGINE_ABI_VERSION = 10;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -168,6 +168,7 @@ export interface EngineModule extends EngineExports, EngineHooks {
   blWriteFiles?: (files: { file: Blob; path: string }[]) => Promise<boolean[]>;
   blClearHttpCache?: () => Promise<void>;
   blShutdown?: () => void;
+  blSetDeferred?: (module: WebAssembly.Module) => Promise<void>;
   blAbiVersion?: number;
 }
 
@@ -376,6 +377,24 @@ export function provideEngineFiles(
       .catch(fail);
     return {};
   };
+}
+
+/**
+ * Fetches and compiles engine.deferred.wasm of a split engine (#238) once engine.wasm is there:
+ * its engine.wasm (custom section "bl.deferred") holds what the start and common pages run.
+ * Compiled while it streams, so Chrome's code cache applies like for engine.wasm. Resolves null
+ * for an unsplit engine. Threads that need deferred code before it reached them read it
+ * themselves, so a failure here only leaves that to them.
+ */
+export async function loadDeferredCode(
+  base: string,
+  wasm: Promise<WebAssembly.Module>,
+): Promise<WebAssembly.Module | null> {
+  if (!WebAssembly.Module.customSections(await wasm, 'bl.deferred').length) return null;
+  const response = await fetchEngineFile(`${base}engine.deferred.wasm`);
+  return response.headers.get('Content-Type')?.startsWith('application/wasm')
+    ? WebAssembly.compileStreaming(response)
+    : WebAssembly.compile(await response.arrayBuffer());
 }
 
 /** Loads engine.js once per URL (a classic script, it defines createBrowserLiteEngine). */

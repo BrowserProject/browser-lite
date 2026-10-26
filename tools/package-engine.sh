@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Packages a built engine for delivery and release:
 #   <out>/engine/<hash>/engine.js, engine.wasm, engine.data   with .br and .gz next to them
+#   <out>/engine/<hash>/engine.deferred.wasm                   of a split engine (#238)
 #   <out>/engine/<hash>/lazy/                                   files loaded on demand (ICU data)
 #   <out>/engine/<hash>/manifest.json                          tools/engine-manifest.mjs
 #   <out>/engine/<hash>/THIRD_PARTY_NOTICES.txt                tools/gen-notices.mjs
@@ -32,6 +33,9 @@ stage="$(mktemp -d "$out/.stage.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
 [ -d "$engine_dir/lazy" ] || bl_die "$engine_dir/lazy missing (build the engine first: tools/build-webcore.sh)"
 cp "$engine_dir"/engine.js "$engine_dir"/engine.wasm "$engine_dir"/engine.data "$stage/"
+if [ -f "$engine_dir/engine.deferred.wasm" ]; then
+    cp "$engine_dir/engine.deferred.wasm" "$stage/"
+fi
 cp -r "$engine_dir/lazy" "$stage/"
 node "$BL_ROOT/tools/optimize-assets.mjs" --strip-only "$stage"
 hash="$( (cd "$stage" && find . -type f | LC_ALL=C sort | xargs sha256sum) | sha256sum | cut -c1-12)"
@@ -39,7 +43,7 @@ hash="$( (cd "$stage" && find . -type f | LC_ALL=C sort | xargs sha256sum) | sha
 rm -rf "${out:?}/engine"
 dest="$out/engine/$hash"
 mkdir -p "$dest"
-mv "$stage"/engine.js "$stage"/engine.wasm "$stage"/engine.data "$stage"/lazy "$dest/"
+mv "$stage"/engine.* "$stage"/lazy "$dest/"
 node "$BL_ROOT/tools/optimize-assets.mjs" "$dest"
 node "$BL_ROOT/tools/engine-manifest.mjs" "$dest"
 if [ "$notices" = 1 ]; then

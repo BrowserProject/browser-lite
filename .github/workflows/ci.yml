@@ -266,7 +266,7 @@ jobs:
             build/webcore/bin/engine.*
             build/webcore/bin/wtf-tests.*
             build/webcore/bin/lazy
-          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/*.txt', 'engine/patches/**', 'tests/engine/*.cpp', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'tools/icu-data.mjs', 'deps/**') }}
+          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/*.txt', 'engine/patches/**', 'tests/engine/*.cpp', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'tools/icu-data.mjs', 'tools/split-engine.mjs', 'tools/hot-functions-file.mjs', 'tools/wasm-binary.mjs', 'deps/**') }}
       - name: Make room (the WebCore build needs a lot)
         if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
@@ -344,6 +344,8 @@ jobs:
           path: |
             build/webcore/bin/engine.js
             build/webcore/bin/engine.wasm
+            build/webcore/bin/engine.deferred.wasm
+            build/webcore/bin/engine.full.wasm
             build/webcore/bin/engine.data
             build/webcore/bin/lazy
           retention-days: 14

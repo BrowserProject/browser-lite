@@ -46,6 +46,12 @@
 #include <wtf/Threading.h>
 #include <wtf/text/MakeString.h>
 
+// The trampolines of a split engine.wasm call this import before a function of
+// engine.deferred.wasm that their thread has not instantiated yet (tools/split-engine.mjs,
+// engine/js/deferred.js). The pointer keeps the import in the linked module.
+EM_JS(void, bl_load_deferred, (unsigned slot), { blLoadDeferred(slot); });
+[[gnu::used]] static void (*const s_loadDeferred)(unsigned) = bl_load_deferred;
+
 // The fonts that load on demand (deps/recipes/lazyfonts.sh): files of lazy/fonts at /lazy/fonts,
 // listed in the data package. fontconfig's cache in the data package knows them already.
 static void mountLazyFonts()
