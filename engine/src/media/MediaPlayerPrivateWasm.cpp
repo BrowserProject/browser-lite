@@ -648,7 +648,11 @@ void MediaPlayerPrivateWasm::paint(GraphicsContext& context, const FloatRect& re
         return;
     }
 #endif
-    if (context.paintingDisabled() || !m_frame)
+    if (context.paintingDisabled())
+        return;
+    // Overlay: canvas.drawImage(video) and snapshots paint the video into a context
+    framesWanted();
+    if (!m_frame)
         return;
     context.drawNativeImage(*m_frame, rect, FloatRect { { }, m_frame->size() });
 }
