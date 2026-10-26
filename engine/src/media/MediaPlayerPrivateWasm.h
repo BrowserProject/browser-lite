@@ -125,7 +125,7 @@ private:
 
     void setPresentationSize(const WebCore::IntSize&) final;
     bool supportsAcceleratedRendering() const final { return !!m_overlay; }
-    WebCore::PlatformLayer* platformLayer() const final { return m_overlay.get(); }
+    PlatformLayer* platformLayer() const final { return m_overlay.get(); }
     void paint(WebCore::GraphicsContext&, const WebCore::FloatRect&) final;
     RefPtr<WebCore::NativeImage> nativeImageForCurrentTime() final;
     // new VideoFrame(video) (WebCodecs)
