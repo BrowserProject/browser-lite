@@ -118,8 +118,8 @@ More suites: [tests/README.md](../tests/README.md).
 
 After the link `tools/split-engine.mjs` (binaryen's `wasm-split`, `wasm-merge`, `wasm-as` of the
 image) splits `engine.wasm` in two (#238 in [decisions.md](decisions.md)): `engine.wasm` keeps
-the functions of `engine/hot-functions.txt` and what the functions the page main thread ran reach
-through direct calls, the rest goes into chunks `engine.deferred-<n>.wasm` of about 2 MB
+the functions of `engine/hot-functions.txt` and what the `bl_` exports and the functions the page
+main thread ran reach through direct calls, the rest goes into chunks `engine.deferred-<n>.wasm` of about 2 MB
 of code, sorted by class, that load after the start (`engine/js/deferred.js`). The linked module stays as `engine.full.wasm` (not delivered).
 `-DBROWSER_LITE_SPLIT_ENGINE=OFF` keeps one module.
 

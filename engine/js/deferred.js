@@ -11,7 +11,26 @@
 
 var blDeferred = { modules: [], instances: [] };
 
+// Chrome can abort a synchronous request, for example while another request for the same file
+// runs: a few tries
+function blRetry(read) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return read();
+    } catch (error) {
+      if (attempt === 4) throw error;
+      const until = performance.now() + 100 * attempt;
+      if (ENVIRONMENT_IS_PTHREAD) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 * attempt);
+      else while (performance.now() < until);
+    }
+  }
+}
+
 function blReadChunk(chunk) {
+  return blRetry(() => blReadChunkOnce(chunk));
+}
+
+function blReadChunkOnce(chunk) {
   const url = locateFile(`engine.deferred-${chunk}.wasm`);
   if (ENVIRONMENT_IS_PTHREAD || ENVIRONMENT_IS_NODE) return readBinary(url);
   // On the page main thread a synchronous request cannot ask for an ArrayBuffer

@@ -252,10 +252,20 @@ class BrowserImpl implements Browser, ViewHost {
           ? this.module.blCrashReason?.() || error.message
           : errorText(error)) || fallback
       ).slice(0, MAX_CRASH_REASON);
+    // While the page goes away its requests are cancelled, a thread that waits for one fails:
+    // no crash then
+    let leaving = false;
+    addEventListener(
+      'pagehide',
+      () => {
+        leaving = true;
+      },
+      { signal },
+    );
     addEventListener(
       'error',
       (event) => {
-        if (fromEngine(event.error, event.filename))
+        if (!leaving && fromEngine(event.error, event.filename))
           this.crashed(reason(event.error, event.message));
       },
       { signal },
@@ -263,7 +273,7 @@ class BrowserImpl implements Browser, ViewHost {
     addEventListener(
       'unhandledrejection',
       (event) => {
-        if (fromEngine(event.reason)) this.crashed(reason(event.reason, ''));
+        if (!leaving && fromEngine(event.reason)) this.crashed(reason(event.reason, ''));
       },
       { signal },
     );

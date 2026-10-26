@@ -2,8 +2,9 @@
 // chunks engine.deferred-<n>.wasm of the rest, which the host loads after the start
 // (engine/js/deferred.js):
 //  1. engine.wasm keeps the functions of engine/hot-functions.txt (tools/hot-functions.mjs) that
-//     ran, functions newer than that list, and what the functions the page main thread ran reach
-//     by direct calls (a chunk would block the page while it loads).
+//     ran, functions newer than that list, and what the bl_ exports and the functions the page
+//     main thread ran reach by direct calls (a chunk would block the page while it loads, and
+//     cannot load at all while the page goes away).
 //  2. The rest goes into chunks of about CHUNK_BYTES, sorted by class, so a thread that needs
 //     deferred code before everything arrived waits for one chunk only (binaryen's wasm-split).
 //  3. wasm-split's placeholders (one imported JS function per deferred function, about 50000,
@@ -180,6 +181,12 @@ async function main() {
     if (entry?.cold) continue;
     keep.add(name);
     if (entry?.main) roots.push(name);
+  }
+  // The host's API (bl_ exports, abi.json) runs on the page main thread, also while the page goes
+  // away (storage flush), when a chunk can no longer be read synchronously
+  for (const entry of wasmExports(full)) {
+    const name = names.get(entry.index);
+    if (entry.kind === 'function' && /^bl_[a-z]/.test(name ?? '')) roots.push(name);
   }
   const edges = await callGraph(input);
   const reached = new Set();
