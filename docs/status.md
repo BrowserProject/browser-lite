@@ -85,8 +85,9 @@ it is, #234), and a page of 5 MB loaded 19.7 s after ready with 3 relay WebSocke
 33.7 s with one (#235; plain Chromium 9 to 14 s).
 
 With the engine split (#238) the start needs 9.4 instead of 13.8 MB: ready after 16.0 s instead
-of 23 s, a small page painted after 17.0 s instead of 24.1 s, Hacker News (outside the profile,
-it waits for two chunks) after 20.5 s instead of 25.7 s.
+of 23 s, a small page painted after 17.0 s instead of 24.1 s; sites outside the profile wait for
+the chunks they need: Hacker News 20.5 instead of 25.7 s, elpais.com 18.4 instead of 24.6 s,
+python.org 27.9 instead of 27.0 s.
 
 After a restart of Chromium (same profile, local, 2 cores) a small page painted after 2.2 s
 instead of 2.9 s once the engine came from the code cache again (#237).
@@ -131,9 +132,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
 7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
-   code on its first load and waits for those chunks while the others download too; ordering the
-   chunks by how often sites need them could shorten that. Renew the list with
-   `tools/hot-functions.mjs` after WebKit updates.
+   code on its first load and waits for those chunks while the others download too; one that
+   needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
+   the list with `tools/hot-functions.mjs` after WebKit updates.
 
 ## Open: features
 
