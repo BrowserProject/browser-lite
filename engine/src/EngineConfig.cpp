@@ -157,6 +157,7 @@ void loadEngineConfig()
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
     config.skipUnchangedFrames = !config.testHooks || flag("BL_DAMAGE", true);
     config.videoOverlay = flag("BL_VIDEO_OVERLAY", true);
+    config.asyncImageDecoding = flag("BL_ASYNC_IMAGE_DECODING", true);
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));

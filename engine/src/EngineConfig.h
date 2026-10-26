@@ -48,6 +48,9 @@ struct EngineConfig {
     // BL_VIDEO_OVERLAY: the host shows its <video> behind the view canvas (#232); 0 copies the
     // frames into the engine (#217)
     bool videoOverlay { true };
+    // BL_ASYNC_IMAGE_DECODING: large images decode on a thread of their own (WebKit's default);
+    // 0 decodes them where they are painted
+    bool asyncImageDecoding { true };
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB
