@@ -280,6 +280,9 @@ button {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+#boot progress {
+  width: min(320px, 80%);
+}
 #boot .actions {
   display: flex;
   gap: 8px;

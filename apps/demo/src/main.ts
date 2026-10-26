@@ -12,7 +12,7 @@ import { colorPicker, dateTimePicker, permissionPrompt, selectPopup } from '@bro
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
-import { hideMessage, showMessage } from './engine-message.js';
+import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
 import { initFindBar, openFind } from './find-bar.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
 import { profilePermissions } from './permissions.js';
@@ -98,6 +98,7 @@ function browserOptions(
     permissions: profilePermissions,
     ...start.options,
     engine: engineOptions(),
+    onProgress: showStartProgress,
     debug,
   };
   return debug ? withTestOptions(options) : options;

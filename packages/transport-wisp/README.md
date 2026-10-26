@@ -37,11 +37,12 @@ URL ([PROTOCOL.md](PROTOCOL.md)).
 | --- | --- |
 | `connected` | false while the relay cannot be reached; event `connectedchange` on every change |
 | `openTCP(host, port)` | a `TransportStream`; `onclose` gets a `CloseReason` |
+| `preconnect()` | opens the WebSocket now (`createBrowser` calls it while the engine loads) |
 | `close()` | closes all streams (`transport-down`) and stops reconnecting |
 
 Behaviour:
 
-- The WebSocket opens with the first stream. After that the transport always reconnects: a
+- The WebSocket opens with `preconnect()` or the first stream. After that the transport always reconnects: a
   dropped connection is replaced at once, otherwise it retries every 2 s.
 - Flow control by Wisp credit; `onsent` reports bytes that left the transport (backpressure for
   the engine's sockets).

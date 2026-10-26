@@ -53,6 +53,7 @@ them or load `media-sw.js` into the site's own worker:
 | `preferences` | all on, GPC off | `{ javascript, images, globalPrivacyControl }` |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |
 | `engine` | | `gpu`, `compositing`, `safepointGC`, `httpCache`, `scriptTimeoutSeconds`, `extraCA` (PEM), `log`, `env` (experimental `BL_*`, `JSC_*`, `FC_*` switches; keys the core sets are rejected) |
+| `onProgress` | none | Progress of the start for a loading indicator: `{ phase, loaded, total }`, `download` with the uncompressed bytes of `engine.wasm` and `engine.data` (total from `manifest.json`, 0 when unknown) only when the files do not come from the cache, then `start` |
 | `debug` | `false` | Enables `browser.debug` (with `memoryLimit(megabytes)`, a limit of the engine memory like in a 32 bit browser, and `framesShown()`, the frames the engine put on screen) and the engine test hooks; never with foreign scripts on the page |
 
 ## Handlers and events

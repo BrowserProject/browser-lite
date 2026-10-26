@@ -14,11 +14,13 @@ const WASM = new Uint8Array([
 const DATA = new Uint8Array([1, 2, 3]);
 
 /** fetch and the script element of engine.js, recording every request. */
-function fakeHost({ wasmType = 'application/wasm', status = 200 } = {}) {
+function fakeHost({ wasmType = 'application/wasm', status = 200, manifest = null } = {}) {
   const requests = [];
   globalThis.fetch = async (url, init) => {
     requests.push([String(url), init?.credentials]);
     if (status !== 200) return new Response('', { status });
+    if (String(url).endsWith('manifest.json'))
+      return manifest ? Response.json(manifest) : new Response('', { status: 404 });
     return String(url).endsWith('engine.wasm')
       ? new Response(WASM, { headers: { 'Content-Type': wasmType } })
       : new Response(DATA);
@@ -95,4 +97,29 @@ test('a failed instantiation reaches the start', async () => {
   module.instantiateWasm({}, () => assert.fail('no instance'));
   assert.equal((await failed).message, 'broken');
   await files.wasm;
+});
+
+test('onProgress counts a download and ends with the start phase', async () => {
+  const total = WASM.length + DATA.length;
+  const manifest = {
+    files: { 'engine.wasm': { size: WASM.length }, 'engine.data': { size: DATA.length } },
+  };
+  const requests = fakeHost({ manifest });
+  const events = [];
+  const files = loadEngineFiles(base(), (progress) => events.push(progress));
+  await Promise.all([files.wasm, files.data]);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(requests.some(([name]) => name.endsWith('manifest.json')));
+  assert.deepEqual(events.at(-1), { phase: 'start', loaded: total, total });
+  assert.ok(events.slice(0, -1).every((event) => event.phase === 'download'));
+});
+
+test('onProgress without a manifest reports an unknown total', async () => {
+  fakeHost();
+  const events = [];
+  const files = loadEngineFiles(base(), (progress) => events.push(progress));
+  await Promise.all([files.wasm, files.data]);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(events.at(-1).phase, 'start');
+  assert.equal(events.at(-1).total, 0);
 });

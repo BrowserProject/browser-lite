@@ -185,7 +185,8 @@ class BrowserImpl implements Browser, ViewHost {
     const { config } = this;
     const signal = this.lifetime.signal;
     // The engine files load from now on, while the storage lock and beforeStart run
-    const files = loadEngineFiles(config.engineBase);
+    const files = loadEngineFiles(config.engineBase, config.onProgress);
+    config.transport.preconnect?.();
     let persistent = config.persistent;
     if (persistent) {
       this.releaseLock = await holdStorageLock(config.namespace);

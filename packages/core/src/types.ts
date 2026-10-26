@@ -72,6 +72,11 @@ export interface Transport extends EventTarget {
   readonly connected: boolean;
   /** Opens a TCP connection to host:port. */
   openTCP(host: string, port: number): TransportStream;
+  /**
+   * Optional: starts connecting ahead of the first `openTCP`. `createBrowser` calls it when the
+   * engine files start loading, so the first page does not wait for the transport's handshake.
+   */
+  preconnect?(): void;
 }
 
 /** A host service (audio, media, capture, ...). Created by the factory functions only. */
@@ -193,11 +198,26 @@ export interface BrowserOptions {
   /** Keep session cookies over restarts (like restoring a session). Default false. */
   keepSessionCookies?: boolean;
   engine?: EngineOptions;
+  /**
+   * Progress of the start for a loading indicator: the download of the engine files (only when
+   * they do not come from the cache), then `phase: 'start'` once they are there.
+   */
+  onProgress?: (progress: StartProgress) => void;
   /** Enables `browser.debug` and the engine test hooks. Never with foreign scripts on the page. */
   debug?: boolean;
 }
 
 /** Color scheme of the pages; 'system' follows the host. */
+/** See {@link BrowserOptions.onProgress}. */
+export interface StartProgress {
+  /** 'download' while engine.wasm and engine.data load, 'start' once they are there. */
+  phase: 'download' | 'start';
+  /** Bytes of engine.wasm and engine.data received, uncompressed. */
+  loaded: number;
+  /** Their size (from manifest.json next to the engine), 0 while unknown. */
+  total: number;
+}
+
 export type ColorScheme = 'light' | 'dark' | 'system';
 
 /** The running engine. One per page at a time. */

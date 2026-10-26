@@ -78,7 +78,10 @@ A first visit transfers about 21 MB with Brotli; later visits come from the HTTP
 Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`
 requests the three files at once, one request each, while the storage lock and
 `storage.beforeStart` run; `engine.wasm` compiles while it downloads (#218 in
-[decisions.md](decisions.md)).
+[decisions.md](decisions.md)). On a slow network the first visit takes a while (about 35 s at
+5 Mbit/s): show the `onProgress` of `createBrowser` (#226). It counts only a download, because
+counting a copy of the body costs 0.1 to 0.2 s also when the files come from the cache; the
+files count as cached when `engine.js` came from the cache.
 
 ## Content Security Policy
 
@@ -132,6 +135,9 @@ Needed only for `<video>` and `<audio>` with media files; the core never registe
 ## Relay
 
 The engine opens TCP connections through a `Transport`; `WispTransport` talks to a Wisp relay.
+`createBrowser` calls the optional `preconnect()` of the transport when the engine files start
+loading, so the WebSocket handshake (3 to 4 round trips with the token) is done before the first
+page (#227).
 
 - Run `createRelay` in your Node server (`server.on('upgrade', ...)`, see the
   [server README](../packages/server/README.md)), or the `browser-lite-server` command, or the

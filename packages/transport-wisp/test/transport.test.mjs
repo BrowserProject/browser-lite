@@ -63,6 +63,22 @@ test('relative and http URLs resolve against location', async () => {
   }
 });
 
+test('preconnect opens the WebSocket before the first stream, which then uses it', async () => {
+  const relay = await startRelay();
+  const proxy = await startProxy(relay.port);
+  const transport = new WispTransport({ url: proxy.url });
+  try {
+    transport.preconnect();
+    assert.ok(await waitUntil(() => proxy.connections() === 1, 2000), 'connected without a stream');
+    assert.equal((await echoOver(transport, echo.port, 1000)).received, 1000);
+    assert.equal(proxy.connections(), 1, 'one WebSocket');
+  } finally {
+    transport.close();
+    proxy.close();
+    await relay.stop();
+  }
+});
+
 test('a throwing WebSocket constructor goes offline and reconnects', async () => {
   const relay = await startRelay();
   const RealWebSocket = globalThis.WebSocket;

@@ -1,3 +1,4 @@
+import type { StartProgress } from '@browser-lite/core';
 import { byId } from './util.js';
 
 const box = byId('boot');
@@ -33,6 +34,24 @@ export function showMessage(
     box.append(row);
   }
   box.hidden = false;
+}
+
+/** Progress of the start: a bar while the engine downloads, then "Starting engine". */
+export function showStartProgress({ phase, loaded, total }: StartProgress): void {
+  if (phase === 'start') {
+    showMessage('Starting engine…');
+    return;
+  }
+  let bar = box.querySelector('progress');
+  if (!bar) {
+    showMessage('Downloading the browser engine…', [
+      'Only on the first visit and after updates, then it starts from the cache.',
+    ]);
+    bar = document.createElement('progress');
+    box.append(bar);
+  }
+  if (total > 0) bar.value = Math.min(loaded / total, 1);
+  else bar.removeAttribute('value');
 }
 
 export function hideMessage(): void {

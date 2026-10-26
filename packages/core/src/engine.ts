@@ -1,5 +1,5 @@
 import { BrowserLiteError } from './errors.js';
-import type { Transport } from './types.js';
+import type { StartProgress, Transport } from './types.js';
 
 type Export = (...args: number[]) => number;
 
@@ -211,23 +211,144 @@ async function fetchEngineFile(url: string): Promise<Response> {
   return response;
 }
 
+const PROGRESS_INTERVAL_MS = 100;
+
+/**
+ * Counts the bytes of engine.wasm and engine.data for {@link StartProgress}. Only for a download:
+ * reading a copy of the body costs about 0.1 to 0.2 s even when the files come from the cache, so
+ * the files count as cached when engine.js came from the cache (same release, same folder).
+ */
+class DownloadProgress {
+  private loaded = 0;
+  /** Size from manifest.json, else the sum of unencoded Content-Lengths once both are known. */
+  private manifestTotal = 0;
+  private lengths: number[] = [];
+  private last = 0;
+  private finished = false;
+  /** Resolves to true when the files are downloaded, so their bytes are counted. */
+  readonly counting: Promise<boolean>;
+
+  constructor(
+    private readonly report: (progress: StartProgress) => void,
+    base: string,
+    factory: Promise<unknown>,
+    loadedBefore: boolean,
+  ) {
+    const scriptUrl = `${base}engine.js`;
+    this.counting = loadedBefore
+      ? Promise.resolve(false)
+      : factory.then(
+          () => {
+            const entry = performance.getEntriesByName(scriptUrl, 'resource').at(-1) as
+              | PerformanceResourceTiming
+              | undefined;
+            return !entry || entry.transferSize > 0;
+          },
+          () => false,
+        );
+    this.counting.then((counting) => {
+      if (counting) this.readTotal(`${base}manifest.json`);
+    });
+  }
+
+  /** Counts the body of `response` (a copy of it, the caller consumes the original). */
+  count(response: Response): void {
+    // Without the manifest only an unencoded length tells the size of the body
+    const length = Number(response.headers.get('Content-Length'));
+    this.lengths.push(response.headers.get('Content-Encoding') ? 0 : length || 0);
+    const reader = response.clone().body?.getReader();
+    if (!reader) return;
+    const read = (): Promise<void> =>
+      reader.read().then(({ done, value }) => {
+        if (done) return;
+        this.add(value.byteLength);
+        return read();
+      });
+    read().catch(() => {});
+  }
+
+  /** The files are there, the engine starts. */
+  done(): void {
+    if (this.finished) return;
+    this.finished = true;
+    this.emit({ phase: 'start', loaded: this.loaded, total: this.size() });
+  }
+
+  private size(): number {
+    if (this.manifestTotal) return this.manifestTotal;
+    return this.lengths.length === 2 && this.lengths.every(Boolean)
+      ? this.lengths.reduce((sum, length) => sum + length, 0)
+      : 0;
+  }
+
+  private readTotal(url: string): void {
+    fetch(url, { credentials: 'same-origin' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((manifest: { files?: Record<string, { size?: number }> } | null) => {
+        const files = manifest?.files;
+        const size = (name: string) => Number(files?.[name]?.size) || 0;
+        const wasm = size('engine.wasm');
+        const data = size('engine.data');
+        if (wasm && data) this.manifestTotal = wasm + data;
+      })
+      .catch(() => {});
+  }
+
+  private add(bytes: number): void {
+    this.loaded += bytes;
+    const now = performance.now();
+    if (this.finished || now - this.last < PROGRESS_INTERVAL_MS) return;
+    this.last = now;
+    this.emit({ phase: 'download', loaded: this.loaded, total: this.size() });
+  }
+
+  private emit(progress: StartProgress): void {
+    try {
+      this.report(progress);
+    } catch (error) {
+      console.warn('[browser-lite] onProgress failed:', error);
+    }
+  }
+}
+
 /**
  * Requests engine.js, engine.wasm and engine.data at once, one request each: the start then runs
  * the storage lock and beforeStart while they load. engine.wasm compiles while it streams (the
  * host's code cache applies); without the type application/wasm it compiles after the download.
+ * With `onProgress` a download is counted ({@link DownloadProgress}).
  */
-export function loadEngineFiles(base: string): EngineFiles {
+export function loadEngineFiles(
+  base: string,
+  onProgress?: (progress: StartProgress) => void,
+): EngineFiles {
+  const scriptUrl = `${base}engine.js`;
+  const loadedBefore = factories.has(scriptUrl);
+  const factory = loadEngineFactory(scriptUrl);
+  const progress = onProgress && new DownloadProgress(onProgress, base, factory, loadedBefore);
+  const counted = async (response: Response) => {
+    if (progress && (await progress.counting)) progress.count(response);
+    return response;
+  };
   const files: EngineFiles = {
-    factory: loadEngineFactory(`${base}engine.js`),
-    wasm: fetchEngineFile(`${base}engine.wasm`).then(async (response) =>
-      response.headers.get('Content-Type')?.startsWith('application/wasm')
-        ? WebAssembly.compileStreaming(response)
-        : WebAssembly.compile(await response.arrayBuffer()),
-    ),
-    data: fetchEngineFile(`${base}engine.data`).then((response) => response.arrayBuffer()),
+    factory,
+    wasm: fetchEngineFile(`${base}engine.wasm`)
+      .then(counted)
+      .then(async (response) =>
+        response.headers.get('Content-Type')?.startsWith('application/wasm')
+          ? WebAssembly.compileStreaming(response)
+          : WebAssembly.compile(await response.arrayBuffer()),
+      ),
+    data: fetchEngineFile(`${base}engine.data`)
+      .then(counted)
+      .then((response) => response.arrayBuffer()),
   };
   // A failure counts where the start waits for the file
   for (const file of Object.values(files)) file.catch(() => {});
+  if (progress)
+    Promise.all([files.wasm, files.data]).then(
+      () => progress.done(),
+      () => {},
+    );
   return files;
 }
 

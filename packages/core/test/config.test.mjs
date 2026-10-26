@@ -77,6 +77,7 @@ test('invalid options', () => {
     { ...base, engine: { extraCA: 'not pem' } },
     { ...base, engine: { safepointGC: 'sometimes' } },
     { ...base, permissions: {} },
+    { ...base, onProgress: 'bar' },
   ];
   for (const options of bad)
     assert.equal(

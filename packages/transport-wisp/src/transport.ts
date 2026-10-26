@@ -54,7 +54,7 @@ const PROBE_TIMEOUT_MS = 5000;
  * Transport of the engine over a Wisp v1 relay (TCP over one WebSocket): flow control,
  * reconnect, dead connection probe. Dispatches `connectedchange` when {@link connected} changes
  * and a {@link WispErrorEvent} `error` when the relay refuses the token. The WebSocket is opened
- * with the first stream; after that the transport keeps reconnecting until {@link close}, also
+ * with {@link preconnect} or the first stream; after that the transport keeps reconnecting until {@link close}, also
  * after the browser was destroyed: close it when it is no longer used. Uses the `WebSocket` of
  * `globalThis` at construction time.
  */
@@ -129,6 +129,11 @@ export class WispTransport extends EventTarget implements Transport {
       },
     );
     return stream;
+  }
+
+  /** Opens the WebSocket now instead of with the first stream (`createBrowser` calls it). */
+  preconnect(): void {
+    if (!this.isClosed) this.connect().catch(() => {});
   }
 
   /** Closes the WebSocket and all streams; the transport does not reconnect anymore. */

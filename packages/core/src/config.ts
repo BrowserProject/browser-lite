@@ -69,6 +69,7 @@ export interface Config {
   extraCA: string | undefined;
   log: boolean;
   env: Record<string, string>;
+  onProgress: BrowserOptions['onProgress'];
   debug: boolean;
 }
 
@@ -294,6 +295,8 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
   const timeout = engine.scriptTimeoutSeconds;
   if (timeout !== undefined && (typeof timeout !== 'number' || !(timeout >= 0)))
     invalid('engine.scriptTimeoutSeconds must be a number >= 0');
+  if (options.onProgress !== undefined && typeof options.onProgress !== 'function')
+    invalid('onProgress must be a function');
   const extraCA = optionalString(engine.extraCA, 'engine.extraCA');
   if (extraCA !== undefined && !extraCA.includes('-----BEGIN CERTIFICATE-----'))
     invalid('engine.extraCA must hold PEM certificates');
@@ -324,6 +327,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     extraCA,
     log: optionalBoolean(engine.log, 'engine.log') ?? false,
     env: env(engine.env),
+    onProgress: options.onProgress,
     debug: optionalBoolean(options.debug, 'debug') ?? false,
   };
 }
