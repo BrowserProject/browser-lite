@@ -70,18 +70,27 @@ isolation.
 
 | File | Raw | Brotli |
 |---|---|---|
-| `engine.wasm` | about 89 MB | about 19 MB |
+| `engine.wasm` | about 71 MB | about 14 MB |
 | `engine.data` (Noto Sans, CA bundle, fontconfig, HRTF data) | about 2.7 MB | about 0.6 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
 | `lazy/icu/` (ICU data beyond the linked core, 2585 files, loaded on first use) | about 17 MB | about 6 MB |
 | `lazy/fonts/` (Noto Serif, Mono, italics, scripts, symbols, CJK and emoji slices, 499 files, loaded on first use) | about 26 MB | |
 
-A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache and
+A first visit transfers about 15 MB with Brotli; later visits come from the HTTP cache and
 Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`
 requests the three files at once, one request each, while the storage lock and
 `storage.beforeStart` run; `engine.wasm` compiles while it downloads (#218 in
-[decisions.md](decisions.md)). On a slow network the first visit takes a while (about 35 s at
-5 Mbit/s): show the `onProgress` of `createBrowser` (#226). It counts only a download, because
+[decisions.md](decisions.md)). Preload hints in the page start them with the HTML instead of after
+your script (the demo injects them in `apps/demo/vite.config.ts`, two round trips earlier):
+
+```html
+<link rel="preload" href="/engine/0.1.0/engine.wasm" as="fetch" crossorigin>
+<link rel="preload" href="/engine/0.1.0/engine.data" as="fetch" crossorigin>
+<link rel="preload" href="/engine/0.1.0/engine.js" as="script">
+```
+
+On a slow network the first visit takes a while (about 25 s until the engine runs at 5 Mbit/s
+and 150 ms, `tests/bench/slow-start.mjs`): show the `onProgress` of `createBrowser` (#226). It counts only a download, because
 counting a copy of the body costs 0.1 to 0.2 s also when the files come from the cache; the
 files count as cached when `engine.js` came from the cache.
 
