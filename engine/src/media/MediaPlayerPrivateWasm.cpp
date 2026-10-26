@@ -507,7 +507,8 @@ void MediaPlayerPrivateWasm::cancelLoad()
 bool MediaPlayerPrivateWasm::hasAvailableVideoFrame() const
 {
     BL_IF_STREAM(return !!m_stream->currentFrame())
-    return m_frame || (m_overlay && m_presentedFrames);
+    // Overlay: the host <video> shows the frame itself once it has one
+    return m_frame || (m_overlay && m_readyState >= MediaPlayer::ReadyState::HaveCurrentData);
 }
 
 void MediaPlayerPrivateWasm::play()
