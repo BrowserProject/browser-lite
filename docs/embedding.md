@@ -74,7 +74,7 @@ isolation.
 | `engine.data` (Noto Sans, CA bundle, fontconfig, HRTF data) | about 2.7 MB | about 0.6 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
 | `lazy/icu/` (ICU data beyond the linked core, 2585 files, loaded on first use) | about 17 MB | about 6 MB |
-| `lazy/fonts/` (Noto Serif, Mono, italics, scripts, symbols, CJK and emoji slices, 499 files, loaded on first use) | about 26 MB | |
+| `lazy/fonts/` (Noto Serif, Mono, italics, scripts, symbols, CJK and emoji slices, 611 files, loaded on first use) | about 26 MB | |
 
 A first visit transfers about 15 MB with Brotli; later visits come from the HTTP cache and
 Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`

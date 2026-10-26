@@ -37,7 +37,8 @@ stamp of the previous lib. Everything from the first changed lib onwards is rebu
 1. Line in `sources.txt` (`name type version url sha256`, type `tar`, `zip`, `file`, `git`
    with commit, or `none`).
    A recipe may fetch more lines with `dep_fetch <name>` (`lazyfonts` takes every `font-*`
-   line); such lines have no recipe of their own and no entry in `ORDER`.
+   line, `notoserif` and `notosansmono`); such lines have no recipe of their own and no entry in
+   `ORDER`.
 2. `recipes/<name>.sh` with a `build` function, usually `dep_cmake`, `dep_meson` or
    `dep_autotools "$SRC" ...`. Extra files the recipe reads go into `DEP_FILES`.
 3. Add the name to `ORDER` in `build-all.sh` after its dependencies, and to `pkgs` plus a

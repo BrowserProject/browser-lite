@@ -34,8 +34,6 @@ ORDER=(
     nghttp2
     curl
     notosans
-    notoserif
-    notosansmono
     lazyfonts
     cacert
     fontconfig-conf
