@@ -34,14 +34,15 @@ function browserLite(): Plugin {
         served.then((done) => done || next(), next);
       });
     },
-    // The engine files start loading with the page instead of after the app script (two round
-    // trips earlier); createBrowser's requests then take these responses
+    // engine.data and engine.js start loading with the page instead of after the app script (two
+    // round trips earlier). Not engine.wasm: a fetch() that takes a preloaded response gets no
+    // code cache in Chromium, every start would compile the engine again (#237)
     transformIndexHtml: () => [
-      ...['engine.wasm', 'engine.data'].map((file) => ({
+      {
         tag: 'link',
-        attrs: { rel: 'preload', href: `${engineBase}${file}`, as: 'fetch', crossorigin: '' },
+        attrs: { rel: 'preload', href: `${engineBase}engine.data`, as: 'fetch', crossorigin: '' },
         injectTo: 'head-prepend' as const,
-      })),
+      },
       {
         tag: 'link',
         attrs: { rel: 'preload', href: `${engineBase}engine.js`, as: 'script' },

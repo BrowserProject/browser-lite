@@ -80,14 +80,17 @@ A first visit transfers about 15 MB with Brotli; later visits come from the HTTP
 Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`
 requests the three files at once, one request each, while the storage lock and
 `storage.beforeStart` run; `engine.wasm` compiles while it downloads (#218 in
-[decisions.md](decisions.md)). Preload hints in the page start them with the HTML instead of after
-your script (the demo injects them in `apps/demo/vite.config.ts`, two round trips earlier):
+[decisions.md](decisions.md)). Preload hints in the page start two of them with the HTML instead
+of after your script (the demo injects them in `apps/demo/vite.config.ts`, two round trips
+earlier):
 
 ```html
-<link rel="preload" href="/engine/0.1.0/engine.wasm" as="fetch" crossorigin>
 <link rel="preload" href="/engine/0.1.0/engine.data" as="fetch" crossorigin>
 <link rel="preload" href="/engine/0.1.0/engine.js" as="script">
 ```
+
+Do not preload `engine.wasm`: Chromium gives a `fetch()` that takes a preloaded response no code
+cache, so every start compiles the engine again (#237, `tests/demo/code-cache-test.mjs`).
 
 On a slow network the first visit takes a while (about 25 s until the engine runs at 5 Mbit/s
 and 150 ms, `tests/bench/slow-start.mjs`): show the `onProgress` of `createBrowser` (#226). It counts only a download, because

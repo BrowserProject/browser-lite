@@ -17,9 +17,10 @@ export function launch({ args = [], ...options } = {}) {
 /**
  * Chromium with its own profile on disk, like a normal browser. In a context of newContext() the
  * OPFS lives in memory, and Chromium refuses writes when the machine has little free memory.
+ * `dir` starts again with the profile of an earlier launch (closed before).
  */
-export function launchProfile({ args = [], ...options } = {}) {
-  return chromium.launchPersistentContext(tempDir('chromium-profile'), {
+export function launchProfile({ args = [], dir = tempDir('chromium-profile'), ...options } = {}) {
+  return chromium.launchPersistentContext(dir, {
     executablePath: process.env.CHROMIUM_PATH || undefined,
     args,
     ...options,
