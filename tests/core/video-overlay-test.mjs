@@ -3,7 +3,8 @@
 // page (what Chromium really shows): the video appears through the hole, page content above the
 // video stays above it, no frames are copied into the engine, requestVideoFrameCallback and
 // canvas.drawImage(video) still work (frames only on demand), the video follows scrolling, and a
-// video with opacity falls back to frames painted into the page.
+// video with opacity falls back to frames painted into the page, and a video hidden and shown
+// again gets its hole back.
 //
 //   node tests/core/video-overlay-test.mjs [engine-dir]
 import {
@@ -139,6 +140,14 @@ check(
   before.length === 2 && after[0] - before[0] <= 2 && after[1] - before[1] > 10,
   `${before.join('/')} -> ${after.join('/')}`,
 );
+
+// Hidden and shown again (YouTube does that around its consent dialog): WebCore makes a new
+// layer for the video, which must get the hole again (patch 0048)
+await page.evaluate(() => window.blTest.eval("document.getElementById('video').style.display = 'none'"));
+await waitForScreen(250, 100, isWhite);
+await page.evaluate(() => window.blTest.eval("document.getElementById('video').style.display = ''"));
+const again = await waitForScreen(250, 100, isRed);
+check('hidden and shown again, the video shows through the hole', isRed(again), JSON.stringify(again));
 
 // Scrolling: the video moves up with the page, the hole and the host video together
 await page.evaluate(() => window.blTest.eval('scrollTo(0, 100)'));
