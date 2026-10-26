@@ -143,11 +143,19 @@ check(
 
 // Hidden and shown again (YouTube does that around its consent dialog): WebCore makes a new
 // layer for the video, which must get the hole again (patch 0048)
-await page.evaluate(() => window.blTest.eval("document.getElementById('video').style.display = 'none'"));
+await page.evaluate(() =>
+  window.blTest.eval("document.getElementById('video').style.display = 'none'"),
+);
 await waitForScreen(250, 100, isWhite);
-await page.evaluate(() => window.blTest.eval("document.getElementById('video').style.display = ''"));
+await page.evaluate(() =>
+  window.blTest.eval("document.getElementById('video').style.display = ''"),
+);
 const again = await waitForScreen(250, 100, isRed);
-check('hidden and shown again, the video shows through the hole', isRed(again), JSON.stringify(again));
+check(
+  'hidden and shown again, the video shows through the hole',
+  isRed(again),
+  JSON.stringify(again),
+);
 
 // Scrolling: the video moves up with the page, the hole and the host video together
 await page.evaluate(() => window.blTest.eval('scrollTo(0, 100)'));
