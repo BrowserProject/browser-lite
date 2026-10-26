@@ -66,6 +66,22 @@ From `tests/compat/site-test.mjs`, time from the start of the UI, 3 runs each on
 Engine ready after about 2 s locally. Real sites vary a lot (ads, changing content): compare
 performance with several runs and inclusive times from profiles, not only load time.
 
+## Measurements (slow network)
+
+`tests/bench/slow-start.mjs` (packaged demo behind a link of 150 ms, 5/1 Mbit, medians, this
+machine), on 2026-10-26 before and after #226 to #229:
+
+| | Before | After |
+|---|---|---|
+| First visit: engine files transferred | 20.3 MB | 14.1 MB |
+| First visit: ready / first paint of a small page | 32.4 / 33.9 s | 22.6 / 23.5 s |
+| Second visit: ready / first paint | 1.6 / 2.2 s | 1.6 / 2.0 s |
+
+With 1 % packet loss (kernel netem between network namespaces) one TCP connection carries about
+1.3 Mbit: the first visit was ready after 133 to 151 s (the server's congestion control stays as
+it is, #234), and a page of 5 MB loaded 19.7 s after ready with 3 relay WebSockets instead of
+33.7 s with one (#235; plain Chromium 9 to 14 s).
+
 ## Measurements (emulated devices)
 
 From the performance work of #213 to #225 (CI and dedicated hosts, medians of 20 to 30 runs,
