@@ -71,9 +71,10 @@ bool isRunning()
     return s_running.load(std::memory_order_acquire);
 }
 
+// Also while it starts (its WebGL context is made then, GpuRaster.cpp)
 bool isCompositorThread()
 {
-    return isRunning() && pthread_equal(pthread_self(), s_thread);
+    return s_thread && pthread_equal(pthread_self(), s_thread);
 }
 
 pthread_t thread()

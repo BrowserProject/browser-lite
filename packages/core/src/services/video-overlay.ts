@@ -26,6 +26,8 @@ export function placeVideo(
   const { matrix, rect } = placement;
   const canvas = view.canvas;
   if (!matrix || !rect || !canvas.isConnected) return;
+  // Out of the flow before it goes next to the canvas, which it would push down otherwise
+  video.style.position = 'absolute';
   if (video.nextElementSibling !== canvas) canvas.before(video);
   // Device pixels of the engine to CSS pixels of the canvas
   const devicePixels = view.viewSize.width * view.host.pixelRatio();
