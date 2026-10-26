@@ -36,7 +36,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   data saver (`Save-Data`, #230); a first visit at 5 Mbit/s, 150 ms starts after 25 s instead of
   32 s (`tests/bench/slow-start.mjs`).
 - **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
-  2x by default (#231).
+  2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
@@ -96,9 +96,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    JIT to WASM) would help; small caches are done (#143).
 4. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 5. GC 5 to 7 % on JS-heavy sites (#60, #122).
-6. Video and animations: frames are painted into the tiles of the view, locally under SwiftShader
-   1.8 to 9.7 video frames per second against 25 to 30 in Chromium. A compositor layer for video
-   did not help there (#217). Frames without a visible change are skipped since #220 (an
+6. Video and animations: with compositing Chromium shows the video itself behind the view canvas
+   (#232); videos with opacity, blend modes, filters or 3D transforms keep frames painted into the
+   tiles of the view, locally under SwiftShader 1.8 to 9.7 video frames per second against 25 to
+   30 in Chromium (#217). Frames without a visible change are skipped since #220 (an
    animation outside the view took all CPU of the device before, now 0.03 CPU seconds per second
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).

@@ -390,6 +390,15 @@ EMSCRIPTEN_KEEPALIVE void bl_media_frame(int playerId, uint8_t* pixels, int widt
     });
 }
 
+// Overlay (#232): the host <video> showed a frame
+EMSCRIPTEN_KEEPALIVE void bl_media_presented(int playerId, double mediaTime)
+{
+    runOnEngineThread([=] {
+        if (auto* player = MediaPlayerPrivateWasm::fromId(playerId))
+            player->hostFramePresented(mediaTime);
+    });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_media_fetch(int playerId, int fetchId, double start, double end)
 {
     runOnEngineThread([=] { startMediaFetch(playerId, fetchId, start, end); });

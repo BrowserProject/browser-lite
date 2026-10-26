@@ -1,6 +1,7 @@
 #include "config.h"
 #include "MediaPlayerPrivateWasm.h"
 
+#include "Compositor.h"
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "Host.h"
@@ -15,6 +16,7 @@
 #include <WebCore/BlobRegistryImpl.h>
 #include <WebCore/CachedResourceLoader.h>
 #include <WebCore/ContentType.h>
+#include <WebCore/CoordinatedPlatformLayerBufferHolePunch.h>
 #include <WebCore/DataURLDecoder.h>
 #include <WebCore/Document.h>
 #include <WebCore/GraphicsContext.h>
@@ -316,8 +318,10 @@ void MediaPlayerPrivateWasm::load(const String& urlString)
     RefPtr player = m_player.get();
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
+    startOverlay();
     send("create"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume,
-        ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, '}'));
+        ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s,
+        ",\"overlay\":"_s, m_overlay ? "true"_s : "false"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
 }
 
@@ -353,9 +357,10 @@ void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourc
     RefPtr player = m_player.get();
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
+    startOverlay();
     // Create the host player first, the SourceBuffers come right after
     send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate,
-        ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, '}'));
+        ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, ",\"overlay\":"_s, m_overlay ? "true"_s : "false"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
     if (RefPtr existing = client.mediaSourcePrivate(); existing && existing->platformType() == MediaPlatformType::Wasm) {
         // Reuse (e.g. after a player change): the host starts over
@@ -502,7 +507,7 @@ void MediaPlayerPrivateWasm::cancelLoad()
 bool MediaPlayerPrivateWasm::hasAvailableVideoFrame() const
 {
     BL_IF_STREAM(return !!m_stream->currentFrame())
-    return m_frame;
+    return m_frame || (m_overlay && m_presentedFrames);
 }
 
 void MediaPlayerPrivateWasm::play()
@@ -655,12 +660,61 @@ RefPtr<NativeImage> MediaPlayerPrivateWasm::nativeImageForCurrentTime()
         return frame ? frame->copyNativeImage() : nullptr;
     }
 #endif
+    framesWanted();
     return m_frame;
+}
+
+void MediaPlayerPrivateWasm::framesWanted()
+{
+    if (!m_overlay)
+        return;
+    m_framesWantedUntil = MonotonicTime::now() + 2_s;
+    if (!std::exchange(m_hostCopiesFrames, true))
+        send("frames"_s, "{\"copy\":true}"_s);
+}
+
+// Overlay only where the compositor punches the holes (#232); once refused, frames stay copied
+void MediaPlayerPrivateWasm::startOverlay()
+{
+    if (m_overlay || m_overlayRefused || !engineConfig().videoOverlay || !Compositor::isRunning())
+        return;
+    m_overlay = CoordinatedPlatformLayerBufferProxy::create();
+    m_hostCopiesFrames = false;
+    updateOverlayBuffer();
+    if (RefPtr player = m_player.get())
+        player->renderingModeChanged();
+}
+
+void MediaPlayerPrivateWasm::updateOverlayBuffer()
+{
+    if (m_overlay)
+        m_overlay->setDisplayBuffer(CoordinatedPlatformLayerBufferHolePunch::create(expandedIntSize(m_naturalSize), m_id));
+}
+
+void MediaPlayerPrivateWasm::overlayRefused()
+{
+    if (!m_overlay)
+        return;
+    debugLog("Media %d: no overlay, frames are copied", m_id);
+    m_overlay = nullptr;
+    m_overlayRefused = true;
+    m_hostCopiesFrames = true;
+    send("overlay"_s, "{\"overlay\":false}"_s);
+    if (RefPtr player = m_player.get())
+        player->renderingModeChanged();
+}
+
+void MediaPlayerPrivateWasm::hostFramePresented(double mediaTime)
+{
+    ++m_presentedFrames;
+    m_frameArrival = MonotonicTime::now();
+    m_frameMediaTime = mediaTime;
 }
 
 RefPtr<VideoFrame> MediaPlayerPrivateWasm::videoFrameForCurrentTime()
 {
     BL_IF_STREAM(return m_stream->currentFrame())
+    framesWanted();
     SkPixmap pixmap;
     if (!m_frame || !m_frame->platformImage()->peekPixels(&pixmap))
         return nullptr;
@@ -682,6 +736,14 @@ void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
     auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kOpaque_SkAlphaType);
     m_frame = NativeImage::create(SkImages::RasterFromData(info, SkData::MakeFromMalloc(pixels, rowBytes * height), rowBytes));
     send("frame"_s);
+    // Overlay: frames only for their readers, the host shows the video itself
+    if (m_overlay) {
+        if (m_hostCopiesFrames && MonotonicTime::now() > m_framesWantedUntil) {
+            m_hostCopiesFrames = false;
+            send("frames"_s, "{\"copy\":false}"_s);
+        }
+        return;
+    }
     ++m_presentedFrames;
     m_frameArrival = MonotonicTime::now();
     m_frameMediaTime = currentTime().toDouble();
@@ -763,6 +825,7 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     bool hasAudio = object->getBoolean("hasAudio"_s).value_or(m_hasAudio);
     if (size != m_naturalSize) {
         m_naturalSize = size;
+        updateOverlayBuffer();
         player->sizeChanged();
     }
     if (hasVideo != m_hasVideo || hasAudio != m_hasAudio) {

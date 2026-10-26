@@ -178,16 +178,26 @@ limited to 256 MB per origin for writing (#179).
 ## Media
 
 ```
-page <video src>  -> MediaPlayerPrivateWasm --create--> hidden host <video src=bl-media/...>
+page <video src>  -> MediaPlayerPrivateWasm --create--> host <video src=bl-media/...>
                      MediaFetch (curl, Range) <-------- service worker (media-sw.js, 2 MB chunks)
-                     paints the frame        <--------- frame copied into engine memory
+                     hole in the page (compositor) -place-> host <video> behind the view canvas
+                     or paints the frame     <--------- frame copied into engine memory
 ```
 
 `MediaFetch` loads http(s) with the shared loader, `blob:` and `data:` from memory. MSE: WebCore
 gets tracks and timestamps from own fMP4/WebM parsers (`ContainerParser`) and the same bytes go to
-a host MediaSource that decodes (#48). Video frames are painted into the tiles like other
-content, there is no video layer in the compositor (#217). Sound comes straight from the host
-element. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
+a host MediaSource that decodes (#48). With compositing the host shows its own `<video>`
+(#232): the video gets a composited layer whose contents is a hole punch buffer (patch 0047), the
+compositor clears that rect in the framebuffer (its WebGL context has alpha) and
+`VideoOverlay.cpp` sends the transform of every hole after a shown frame ("place"); the core puts
+the host `<video>` before the view canvas (`position: relative`) with that transform, so page
+content over the video stays on top and clipping comes from the hole. Frames are copied only
+while the page reads them (`drawImage`, WebGL, `VideoFrame`), `requestVideoFrameCallback` gets
+the presented frames of the host (`bl_media_presented`). A hole the compositor cannot punch
+straight into the framebuffer (opacity, blend mode, color filter, perspective, inside the
+offscreen surface of an effect) is refused and that player goes back to copied frames painted
+into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Sound
+comes straight from the host element. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 
 ## Audio

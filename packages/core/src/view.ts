@@ -82,7 +82,8 @@ export class ViewImpl implements View {
     const device = host.config.device;
     this.canvas = document.createElement('canvas');
     this.canvas.setAttribute('data-bl-view', String(id));
-    this.canvas.style.cssText = `display:block;width:100%;height:100%;outline:none;touch-action:none;${
+    // position:relative: video overlays (#232) lie before the canvas, underneath it
+    this.canvas.style.cssText = `display:block;position:relative;width:100%;height:100%;outline:none;touch-action:none;${
       device ? `max-width:${device.width}px;max-height:${device.height}px;margin:0 auto;` : ''
     }`;
     // The canvas goes to the worker that paints (compositor or engine thread); only where

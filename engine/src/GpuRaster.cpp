@@ -24,15 +24,16 @@
 
 // Own WebGL 2 context on an OffscreenCanvas in the engine worker. Without depth
 // and antialiasing: Skia paints into its own textures, the framebuffer only
-// gets the finished frame. Skia needs stencil for some paths.
-EM_JS(int, bl_gpu_create_context, (), {
+// gets the finished frame. Skia needs stencil for some paths. With alpha (the
+// compositor with video overlays, #232) the holes of videos stay transparent.
+EM_JS(int, bl_gpu_create_context, (int alpha), {
     if (typeof OffscreenCanvas === "undefined")
         return 0;
     var canvas = new OffscreenCanvas(1, 1);
     var handle = 0;
     try {
         handle = GL.createContext(canvas, {
-            majorVersion: 2, minorVersion: 0, alpha: false, depth: false, stencil: true,
+            majorVersion: 2, minorVersion: 0, alpha: !!alpha, depth: false, stencil: true,
             antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false,
             powerPreference: "high-performance", failIfMajorPerformanceCaveat: false,
             enableExtensionsByDefault: 1
@@ -164,7 +165,7 @@ GrDirectContext* context()
         return s_context.get();
     s_tried = true;
 
-    s_handle = bl_gpu_create_context();
+    s_handle = bl_gpu_create_context(Compositor::isCompositorThread() && engineConfig().videoOverlay);
     if (!s_handle) {
         debugLog("GPU: no WebGL 2, painting on the CPU");
         return nullptr;

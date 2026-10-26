@@ -1,6 +1,7 @@
 // <video>/<audio> through the media service of @browser-lite/core: the hidden <video> of the host
 // page plays, the data comes from the engine through the service worker (range requests over
-// the relay), the engine paints the frames into the page. Also MSE, blob:, data:, preload,
+// the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
+// has video-overlay-test.mjs). Also MSE, blob:, data:, preload,
 // picture-in-picture and the range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
@@ -292,7 +293,8 @@ async function waitForPixel(x, y, test) {
   return pixel;
 }
 
-await openHost(page, stack.app({ url: siteURL }));
+// Frames copied and painted into the page (#217); the overlay has video-overlay-test.mjs
+await openHost(page, stack.app({ url: siteURL, env: 'BL_VIDEO_OVERLAY=0' }));
 
 check(
   'video: metadata',

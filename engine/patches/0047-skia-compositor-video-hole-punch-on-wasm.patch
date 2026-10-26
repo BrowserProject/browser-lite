@@ -1,0 +1,112 @@
+diff --git a/Source/WebCore/platform/TextureMapper.cmake b/Source/WebCore/platform/TextureMapper.cmake
+index 462f5c6dc8..7cb9063911 100644
+--- a/Source/WebCore/platform/TextureMapper.cmake
++++ b/Source/WebCore/platform/TextureMapper.cmake
+@@ -97,6 +97,7 @@ if (USE_COORDINATED_GRAPHICS)
+         platform/graphics/texmap/coordinated/CoordinatedImageBackingStore.h
+         platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+         platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBuffer.h
++        platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.h
+         platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferProxy.h
+         platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
+         platform/graphics/texmap/coordinated/GraphicsLayerContentsDisplayDelegateCoordinated.h
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index 9519cc6466..890e094f5e 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -843,9 +843,15 @@ void SkiaCompositingLayer::paintContents(SkCanvas& canvas, PaintContext& context
+                 TransformationMatrix matrix = canvas.getLocalToDevice();
+                 downcast<CoordinatedPlatformLayerBufferHolePunch>(*m_contentsBuffer).setHolePunchVideoRectangle(enclosingIntRect(matrix.mapRect(m_contentsRect)));
+ #endif
+-                SkPaint paint = setupPaint();
+-                paint.setBlendMode(SkBlendMode::kClear);
+-                drawRectRestricted(canvas, context.damageRegionOrNull(), SkRect(m_contentsRect), paint);
++#if PLATFORM(WASM)
++                bool hasEffects = context.opacity != 1 || context.blendMode || context.colorFilter;
++                if (downcast<CoordinatedPlatformLayerBufferHolePunch>(*m_contentsBuffer).punch(canvas, m_contentsRect, hasEffects))
++#endif
++                {
++                    SkPaint paint = setupPaint();
++                    paint.setBlendMode(SkBlendMode::kClear);
++                    drawRectRestricted(canvas, context.damageRegionOrNull(), SkRect(m_contentsRect), paint);
++                }
+             } else
+ #endif // ENABLE(VIDEO)
+                 image = m_contentsBuffer->skiaImage();
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.cpp
+index ffbbbd7ea5..bdeffee3b3 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.cpp
+@@ -63,6 +63,27 @@ CoordinatedPlatformLayerBufferHolePunch::CoordinatedPlatformLayerBufferHolePunch
+ 
+ CoordinatedPlatformLayerBufferHolePunch::~CoordinatedPlatformLayerBufferHolePunch() = default;
+ 
++#if PLATFORM(WASM)
++static CoordinatedPlatformLayerBufferHolePunch::PunchCallback s_punchCallback;
++
++void CoordinatedPlatformLayerBufferHolePunch::setPunchCallback(PunchCallback callback)
++{
++    s_punchCallback = callback;
++}
++
++std::unique_ptr<CoordinatedPlatformLayerBufferHolePunch> CoordinatedPlatformLayerBufferHolePunch::create(const IntSize& size, uint64_t client)
++{
++    auto buffer = makeUnique<CoordinatedPlatformLayerBufferHolePunch>(size);
++    buffer->m_client = client;
++    return buffer;
++}
++
++bool CoordinatedPlatformLayerBufferHolePunch::punch(SkCanvas& canvas, const FloatRect& contentsRect, bool hasEffects) const
++{
++    return !s_punchCallback || s_punchCallback(m_client, canvas, contentsRect, hasEffects);
++}
++#endif
++
+ #if USE(GSTREAMER)
+ void CoordinatedPlatformLayerBufferHolePunch::setHolePunchVideoRectangle(const IntRect& rect)
+ {
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.h
+index 61e324c403..fda55894c2 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayerBufferHolePunch.h
+@@ -32,8 +32,13 @@
+ #include "GStreamerCommon.h"
+ #endif
+ 
++#if PLATFORM(WASM)
++class SkCanvas;
++#endif
++
+ namespace WebCore {
+ 
++class FloatRect;
+ class GStreamerQuirksManager;
+ 
+ class CoordinatedPlatformLayerBufferHolePunch final : public CoordinatedPlatformLayerBuffer {
+@@ -50,6 +55,16 @@ public:
+     void setHolePunchVideoRectangle(const IntRect&);
+ #endif
+ 
++#if PLATFORM(WASM)
++    // browser-lite: the embedder shows the real video where the compositor punches the hole of
++    // client (the canvas transform maps contentsRect to the target). It may refuse the hole (in
++    // an offscreen surface, with effects), then nothing is drawn there.
++    using PunchCallback = bool (*)(uint64_t client, SkCanvas&, const FloatRect& contentsRect, bool hasEffects);
++    WEBCORE_EXPORT static void setPunchCallback(PunchCallback);
++    WEBCORE_EXPORT static std::unique_ptr<CoordinatedPlatformLayerBufferHolePunch> create(const IntSize&, uint64_t client);
++    bool punch(SkCanvas&, const FloatRect& contentsRect, bool hasEffects) const;
++#endif
++
+ private:
+     void paintToTextureMapper(TextureMapper&, const FloatRect&, const TransformationMatrix& modelViewMatrix = TransformationMatrix(), float opacity = 1.0) override;
+ 
+@@ -57,6 +72,9 @@ private:
+     GRefPtr<GstElement> m_videoSink;
+     RefPtr<GStreamerQuirksManager> m_quirksManager;
+ #endif
++#if PLATFORM(WASM)
++    uint64_t m_client { 0 };
++#endif
+ };
+ 
+ } // namespace WebCore

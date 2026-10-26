@@ -45,6 +45,9 @@ struct EngineConfig {
     // BL_DAMAGE, 0 only with test hooks: every frame composited and shown, the
     // reference of tests/core/damage-test.mjs (#220)
     bool skipUnchangedFrames { true };
+    // BL_VIDEO_OVERLAY: the host shows its <video> behind the view canvas (#232); 0 copies the
+    // frames into the engine (#217)
+    bool videoOverlay { true };
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB

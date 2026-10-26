@@ -1,5 +1,6 @@
 // Reading the page under test: RESULT lines from the console, pixels of the view, waiting.
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { TIMEOUT, VERBOSE, buildDir } from './env.mjs';
 import { watchErrors } from './report.mjs';
 
@@ -54,6 +55,24 @@ export function canvasOrigin(page) {
 /** Color [r, g, b] of the active view at x, y (window.blTest), null without a view. */
 export const pagePixel = (page, x, y) =>
   page.evaluate(([x, y]) => (window.blTest.view() ? window.blTest.pagePixel(x, y) : null), [x, y]);
+
+/**
+ * Color { r, g, b } of the host page at x, y as Chromium shows it (a screenshot of one pixel):
+ * the canvas of the view together with what lies behind it, like the video overlay (#232).
+ */
+export async function screenPixel(page, x, y) {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 } });
+  // One pixel: the row after the filter byte is the raw color, every PNG filter predicts 0
+  let data = Buffer.alloc(0);
+  for (let offset = 8; offset < png.length; ) {
+    const length = png.readUInt32BE(offset);
+    if (png.toString('latin1', offset + 4, offset + 8) === 'IDAT')
+      data = Buffer.concat([data, png.subarray(offset + 8, offset + 8 + length)]);
+    offset += 12 + length;
+  }
+  const [, r, g, b] = zlib.inflateSync(data);
+  return { r, g, b };
+}
 
 /** Colors roughly equal: every channel at most tolerance apart. */
 export const near = (pixel, rgb, tolerance = 40) =>

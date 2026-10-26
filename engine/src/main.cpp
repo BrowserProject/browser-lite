@@ -16,6 +16,7 @@
 #include "Speech.h"
 #include "Storage.h"
 #include "Strategies.h"
+#include "VideoOverlay.h"
 #include "WebCodecsWasm.h"
 #include "wasm/WasmBridge.h"
 
@@ -186,6 +187,8 @@ int main(int, char**)
     WebCodecs::initialize();
     BrowserLite::initializeWebAssembly();
     initializeEngineLoop();
+    // Video overlays punched by the compositor (#232)
+    VideoOverlay::initialize();
     // Own thread for compositing and presentation (needs WebGL 2)
     Compositor::start();
 

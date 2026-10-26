@@ -17,6 +17,7 @@ export {
   collect,
   near,
   pagePixel,
+  screenPixel,
   screenshot,
   waitFor,
 } from './results.mjs';

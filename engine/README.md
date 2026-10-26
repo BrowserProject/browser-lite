@@ -39,7 +39,8 @@ patches from `patches/`.
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`
-  - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame
+  - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
+    `VideoOverlay.cpp` (holes of videos the host shows behind the canvas)
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly
   - `websocket/`: WebSockets of the pages over curl (from WebKitLegacy, WebKit license)
 

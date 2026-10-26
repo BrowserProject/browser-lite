@@ -6,6 +6,7 @@
 #include "EngineConfig.h"
 #include "GpuRaster.h"
 #include "ScrollingWasm.h"
+#include "VideoOverlay.h"
 #include "WebView.h"
 #include <EGL/egl.h>
 #include "GLDisplay.h"
@@ -210,6 +211,8 @@ static void compositeScene(CompositorScene& scene)
     // composited and shown
     bool skipUnchanged = engineConfig().skipUnchangedFrames;
     auto* canvas = surface->getCanvas();
+    // Holes of videos the host shows behind the canvas (#232)
+    VideoOverlay::Frame overlayFrame(scene.viewId, *canvas);
     canvas->save();
     auto drawsWholeTarget = frameDamage && skipUnchanged && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
     bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE, drawsWholeTarget);
@@ -218,6 +221,7 @@ static void compositeScene(CompositorScene& scene)
     grContext->flushAndSubmit(surface.get());
     if (changed || !skipUnchanged) {
         Gpu::showFramebuffer(scene.viewId);
+        overlayFrame.shown();
         scene.shownSize = pixelSize;
         s_framesShown.fetch_add(1, std::memory_order_relaxed);
     }
@@ -508,9 +512,14 @@ void LayerTreeHostWasm::forceRepaint()
 
 void LayerTreeHostWasm::detachScene()
 {
-    Locker locker { s_scenesLock };
-    if (scenes().get(m_scene->viewId) == m_scene.ptr())
-        scenes().remove(m_scene->viewId);
+    {
+        Locker locker { s_scenesLock };
+        if (scenes().get(m_scene->viewId) == m_scene.ptr())
+            scenes().remove(m_scene->viewId);
+    }
+    Compositor::dispatch([viewId = m_scene->viewId] {
+        VideoOverlay::forgetView(viewId);
+    });
 }
 
 void LayerTreeHostWasm::didApplyPinch(unsigned commit)

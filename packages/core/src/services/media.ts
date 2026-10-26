@@ -1,5 +1,7 @@
+import type { ViewImpl } from '../view.js';
 import { installPictureInPicture } from './pip.js';
 import { Service, type ServiceContext } from './service.js';
+import { placeVideo, unplaceVideo, type VideoPlacement } from './video-overlay.js';
 
 const STATE_EVENTS = [
   'loadedmetadata',
@@ -29,6 +31,7 @@ interface PlayerOptions {
   volume?: number;
   rate?: number;
   mse?: boolean;
+  overlay?: boolean;
 }
 
 type Operation = (() => void) & { retry?: boolean };
@@ -39,12 +42,15 @@ export interface MediaHost {
   readonly container: HTMLElement;
   readonly players: Map<number, Player>;
   mediaUrl(player: number): string;
+  view(id: number): ViewImpl | undefined;
 }
 
 /**
- * One engine media player: a hidden <video> of the host plays it. Its bytes come through the
- * service worker from the engine (or MSE commands), frames are copied into WASM memory where
- * the engine paints them into the page. The sound comes straight from this <video>.
+ * One engine media player: a <video> of the host plays it. Its bytes come through the service
+ * worker from the engine (or MSE commands). With the overlay (#232) it lies behind the view canvas
+ * where the engine punched its hole ("place"), and frames are copied only while the page reads
+ * them ("frames"); otherwise it is hidden and every frame is copied into WASM memory, where the
+ * engine paints it into the page. The sound comes straight from this <video>.
  */
 export class Player {
   readonly video: HTMLVideoElement;
@@ -61,6 +67,10 @@ export class Player {
   private readonly mediaSource: MediaSource | null = null;
   private readonly sourceBuffers = new Map<number, SourceBuffer>();
   private readonly queue: Operation[] = [];
+  private overlay: boolean;
+  private copyFrames: boolean;
+  private placement: VideoPlacement | null = null;
+  private destroyed = false;
 
   constructor(
     private readonly host: MediaHost,
@@ -68,6 +78,8 @@ export class Player {
     options: PlayerOptions,
   ) {
     this.hidden = !!options.hidden;
+    this.overlay = !!options.overlay;
+    this.copyFrames = !this.overlay;
     const video = document.createElement('video');
     this.video = video;
     video.playsInline = true;
@@ -96,6 +108,31 @@ export class Player {
       video.src = host.mediaUrl(id);
     }
     this.raf = requestAnimationFrame(() => this.pump());
+    if (this.overlay) this.watchPresentedFrames();
+  }
+
+  // Overlay: requestVideoFrameCallback of the page needs the frames the host shows
+  private watchPresentedFrames(): void {
+    const video = this.video;
+    if (typeof video.requestVideoFrameCallback !== 'function') return;
+    const presented = (_now: number, metadata: VideoFrameCallbackMetadata) => {
+      if (this.destroyed || !this.overlay) return;
+      const { ctx } = this.host;
+      if (!ctx.signal.aborted) ctx.module._bl_media_presented(this.id, metadata.mediaTime);
+      video.requestVideoFrameCallback(presented);
+    };
+    video.requestVideoFrameCallback(presented);
+  }
+
+  private place(placement: VideoPlacement): void {
+    const view = placement.matrix ? this.host.view(placement.view) : undefined;
+    if (!view || this.hidden) {
+      this.placement = view ? placement : null;
+      unplaceVideo(this.video, this.host.container);
+      return;
+    }
+    this.placement = placement;
+    placeVideo(this.video, view, placement);
   }
 
   private send(object: Record<string, unknown>): void {
@@ -275,9 +312,23 @@ export class Player {
       case 'frame':
         this.frameInFlight = false;
         break;
+      case 'frames':
+        this.copyFrames = !this.overlay || !!data.copy;
+        this.forceFrame = true;
+        break;
+      case 'overlay':
+        this.overlay = false;
+        this.copyFrames = true;
+        this.forceFrame = true;
+        this.place({ view: 0 });
+        break;
+      case 'place':
+        this.place(data as unknown as VideoPlacement);
+        break;
       case 'visible':
         this.hidden = !data.visible;
         this.forceFrame = true;
+        if (this.placement) this.place(this.placement);
         break;
       case 'preload':
         // A higher value applies by itself in Chrome; load() would start over
@@ -306,7 +357,14 @@ export class Player {
   private pump(): void {
     this.raf = requestAnimationFrame(() => this.pump());
     const video = this.video;
-    if (this.hidden || video.readyState < 2 || !video.videoWidth || this.frameInFlight) return;
+    if (
+      !this.copyFrames ||
+      this.hidden ||
+      video.readyState < 2 ||
+      !video.videoWidth ||
+      this.frameInFlight
+    )
+      return;
     if (video.currentTime === this.lastTime && !this.forceFrame) return;
     this.lastTime = video.currentTime;
     this.forceFrame = false;
@@ -335,6 +393,7 @@ export class Player {
   }
 
   destroy(): void {
+    this.destroyed = true;
     cancelAnimationFrame(this.raf);
     const video = this.video;
     video.pause();
@@ -423,6 +482,12 @@ export class MediaService extends Service {
         navigator.serviceWorker.controller?.postMessage({ bl: 'media-hello', instance });
     });
     const players = new Map<number, Player>();
+    // Views by id, for the video overlay (#232)
+    const views = new Map<number, ViewImpl>();
+    ctx.onView((view, signal) => {
+      views.set(view.id, view);
+      signal.addEventListener('abort', () => views.delete(view.id));
+    });
     // Must be in the document, Chrome throttles detached videos
     const container = document.createElement('div');
     container.setAttribute('data-bl-media', '');
@@ -435,6 +500,7 @@ export class MediaService extends Service {
       players,
       mediaUrl: (player) =>
         new URL(`bl-media/${instance}/${player}/${Date.now().toString(36)}`, scope).href,
+      view: (id) => views.get(id),
     };
 
     // Bytes for the service worker: one engine fetch per worker request

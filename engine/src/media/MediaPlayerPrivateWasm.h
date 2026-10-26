@@ -3,12 +3,16 @@
 // Playback happens in a hidden <video> of the host browser (it can play all of
 // its formats). The host fetches the data through a service worker from the
 // engine, which loads it with curl through the transport (range requests,
-// piece by piece), blob: and data: from memory. The host copies the frames
-// into WASM memory, the engine paints them at the right place of the page.
+// piece by piece), blob: and data: from memory. With compositing the host shows
+// its <video> behind the view canvas where the compositor punches a hole into
+// the page (#232, VideoOverlay.cpp) and copies frames only while the page reads
+// them (canvas, WebGL, VideoFrame); otherwise it copies every frame into WASM
+// memory and the engine paints them at the right place of the page (#217).
 // The sound comes directly from the host <video>.
 #pragma once
 
 #include <WebCore/BlobData.h>
+#include <WebCore/CoordinatedPlatformLayerBufferProxy.h>
 #include <WebCore/MediaPlayerPrivate.h>
 #include <WebCore/PlatformTimeRanges.h>
 #include <WebCore/VideoFrameMetadata.h>
@@ -44,6 +48,11 @@ public:
     // Messages from the host (Exports.cpp)
     void hostEvent(const String& json);
     void hostFrame(uint8_t* pixels, int width, int height);
+    // Overlay: the host showed a frame of its <video> (requestVideoFrameCallback data)
+    void hostFramePresented(double mediaTime);
+    // Overlay: the compositor cannot punch the hole straight into the view (effects, offscreen
+    // surface, perspective); frames are copied from now on
+    void overlayRefused();
 
     int id() const { return m_id; }
     // false with srcObject = MediaStream (then there is no <video> in the host)
@@ -115,6 +124,8 @@ private:
     bool didLoadingProgress() const final;
 
     void setPresentationSize(const WebCore::IntSize&) final;
+    bool supportsAcceleratedRendering() const final { return !!m_overlay; }
+    WebCore::PlatformLayer* platformLayer() const final { return m_overlay.get(); }
     void paint(WebCore::GraphicsContext&, const WebCore::FloatRect&) final;
     RefPtr<WebCore::NativeImage> nativeImageForCurrentTime() final;
     // new VideoFrame(video) (WebCodecs)
@@ -127,6 +138,11 @@ private:
     bool didPassCORSAccessCheck() const final { return true; }
 
     void send(ASCIILiteral type, const String& json = "{}"_s);
+    void startOverlay();
+    void updateOverlayBuffer();
+    // A reader of frames (canvas, WebGL, VideoFrame) in overlay mode: the host copies frames
+    // until 2 s after the last read
+    void framesWanted();
     void seekHost(const MediaTime&);
     void setNetworkState(WebCore::MediaPlayer::NetworkState);
 
@@ -176,6 +192,13 @@ private:
     double m_frameMediaTime { 0 };
     WebCore::IntSize m_presentationSize;
     bool m_pageIsVisible { true };
+
+    // Overlay (#232): the contents of the composited video layer, a hole punch buffer; null
+    // when frames are copied
+    RefPtr<WebCore::CoordinatedPlatformLayerBufferProxy> m_overlay;
+    bool m_overlayRefused { false };
+    bool m_hostCopiesFrames { true };
+    MonotonicTime m_framesWantedUntil;
 };
 
 } // namespace BrowserLite

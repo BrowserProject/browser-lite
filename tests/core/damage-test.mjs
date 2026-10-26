@@ -424,7 +424,12 @@ async function scenario(env, run) {
   const page = await context.newPage();
   const results = collect(page);
   const result = (key) => results.wait(key, 30000);
-  await openHost(page, stack.app({ url: siteURL, compositing: '1', env }));
+  // The ended video counts as painted frames of the page: without the overlay (#232)
+  const overlayOff = 'BL_VIDEO_OVERLAY=0';
+  await openHost(
+    page,
+    stack.app({ url: siteURL, compositing: '1', env: env ? `${env},${overlayOff}` : overlayOff }),
+  );
   const shots = new Map();
   const info = { ready: (await result('ready')) === '1' };
   info.ended = (await result('ended')) === '1';
