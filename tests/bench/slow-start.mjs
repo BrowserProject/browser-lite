@@ -69,10 +69,9 @@ const RECORD = () => {
     if (!test) return;
     if (!times.ready && test.browser?.ready) times.ready = performance.now();
     if (!times.firstPaint && test.flags.firstPaint) times.firstPaint = performance.now();
-    if (!times.loaded && test.flags.loaded) {
-      times.loaded = performance.now();
-      clearInterval(timer);
-    }
+    // A page from the cache can finish loading before its first paint
+    if (!times.loaded && test.flags.loaded) times.loaded = performance.now();
+    if (times.loaded && times.firstPaint) clearInterval(timer);
   }, 20);
 };
 
@@ -82,7 +81,7 @@ async function visit(page) {
   let times = {};
   while (Date.now() < end) {
     times = await page.evaluate(() => window.benchTimes);
-    if (times.loaded) break;
+    if (times.loaded && times.firstPaint) break;
     await page.waitForTimeout(200);
   }
   const engineKB = await page.evaluate(
