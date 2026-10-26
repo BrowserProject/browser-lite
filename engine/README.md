@@ -18,6 +18,8 @@ patches from `patches/`.
   through `tools/icu-data.mjs`). `BL_PRE_JS` is the only list of the `--pre-js` files. After the
   link `tools/split-engine.mjs` splits `engine.wasm` (`BROWSER_LITE_SPLIT_ENGINE`, #238). Also
   builds the native WTF tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
+- `lazy-prefetch.txt`: files of `lazy/` the engine fetches in the background once it runs (data
+  package, #240).
 - `hot-functions.txt`: the functions that stay in `engine.wasm` when it is split, written by
   `tools/hot-functions.mjs` ([docs/build.md](../docs/build.md#split-engine)).
 - `js/`: JavaScript parts of the engine

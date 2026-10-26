@@ -175,7 +175,10 @@ pages that need a locale, collation, dictionary, charset converter or font downl
 fontconfig's cache in `engine.data` already describes every font of `/lazy/fonts`, so finding a
 font for a character reads no font file; Chinese, Japanese and Korean are cut into the slices of
 Google Fonts (most frequent characters first, about 30 KB each with Brotli), emoji into the
-Unicode emoji groups and the symbol fonts into Unicode blocks.
+Unicode emoji groups and the symbol fonts into Unicode blocks. Files usually needed together are
+a group (a CJK font's most frequent slices, the data of an ICU locale): the first read fetches the
+others in parallel. Once the engine runs it fetches the files of `engine/lazy-prefetch.txt` and
+the ICU groups of the user's languages in the background (#240).
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). IndexedDB is

@@ -1,0 +1,11 @@
+# Files of lazy/ that many sites need soon: the engine fetches them in the background once it
+# runs (engine/src/main.cpp), so a page finds them in the HTTP cache instead of waiting a round
+# trip for each (#240). From 14 common sites: Noto Serif regular 9, bold 7, Mono 3, the italics
+# 1 to 2.
+lazy/fonts/noto/NotoSerif-Regular.000.ttf
+lazy/fonts/noto/NotoSerif-Bold.000.ttf
+lazy/fonts/noto/NotoSerif-Italic.000.ttf
+lazy/fonts/noto/NotoSerif-BoldItalic.000.ttf
+lazy/fonts/noto/NotoSans-Italic.000.ttf
+lazy/fonts/noto/NotoSans-BoldItalic.000.ttf
+lazy/fonts/noto/NotoSansMono-Regular.000.ttf

@@ -10,4 +10,12 @@ namespace BrowserLite {
 // Returns false when the mount failed.
 bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* index);
 
+// Starts fetching the files of group `name` of a mounted index without waiting, unless a read
+// of one of them did already; an unknown group does nothing.
+void prefetchLazyGroup(const char* name);
+
+// Starts fetching files of the engine folder (paths, one per line) without waiting, so their
+// first reads find them in the HTTP cache.
+void prefetchLazyFiles(const char* paths);
+
 } // namespace BrowserLite

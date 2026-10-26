@@ -29,6 +29,7 @@
 #include <WebCore/MemoryCache.h>
 #include <WebCore/WasmPlatform.h>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <cstdio>
 #include <sys/stat.h>
@@ -52,6 +53,27 @@
 // module.
 EM_JS(void, bl_load_deferred, (unsigned chunk, unsigned slot), { blLoadDeferred(chunk, slot); });
 [[gnu::used]] static void (*const s_loadDeferred)(unsigned, unsigned) = bl_load_deferred;
+
+// The files of lazy/ that many sites need soon (engine/lazy-prefetch.txt in the data package):
+// fetched in the background, so a page finds them in the HTTP cache instead of waiting a round
+// trip for each
+static void prefetchCommonLazyFiles()
+{
+    FILE* file = fopen("/usr/share/browser-lite/lazy-prefetch.txt", "r");
+    if (!file)
+        return;
+    std::string paths;
+    char line[512];
+    while (fgets(line, sizeof(line), file)) {
+        std::string entry(line);
+        while (!entry.empty() && isspace(static_cast<unsigned char>(entry.back())))
+            entry.pop_back();
+        if (!entry.empty() && entry[0] != '#')
+            paths += (paths.empty() ? "" : "\n") + entry;
+    }
+    fclose(file);
+    BrowserLite::prefetchLazyFiles(paths.c_str());
+}
 
 // The fonts that load on demand (deps/recipes/lazyfonts.sh): files of lazy/fonts at /lazy/fonts,
 // listed in the data package. fontconfig's cache in the data package knows them already.
@@ -231,6 +253,7 @@ int main(int, char**)
     });
 #endif
 
+    prefetchCommonLazyFiles();
     log("Engine ready");
     MAIN_THREAD_ASYNC_EM_ASM({
         if (Module.onEngineReady)

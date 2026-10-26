@@ -33,6 +33,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   bug that aborted about 1 % of heavy page loads (#219).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
+  the common ones and the user's languages in the background right after the start (#240),
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
   (#235), the code that the start and common pages do not run loads after the start in chunks
   (#238), an address typed meanwhile opens once the engine runs (#239); a first visit at

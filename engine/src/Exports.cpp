@@ -14,6 +14,7 @@
 #include "Gamepad.h"
 #include "Host.h"
 #include "LayerTreeHostWasm.h"
+#include "LazyFiles.h"
 #include "MediaFetch.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "MemoryVFS.h"
@@ -40,6 +41,7 @@
 #include <malloc.h>
 #include <wtf/FileSystem.h>
 #include <wtf/Language.h>
+#include <wtf/text/MakeString.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/JSDOMWindowBase.h>
 #include <WebCore/LocalFrameInlines.h>
@@ -548,6 +550,16 @@ EMSCRIPTEN_KEEPALIVE void bl_set_languages(char* languages)
                 list.append(WTF::move(trimmed));
         }
         WTF::overrideUserPreferredLanguages(list);
+        // Their ICU data loads in the background (tools/icu-data.mjs groups the files of a
+        // locale): "de-CH" fetches de_CH and de
+        for (auto& language : list) {
+            String id = makeStringByReplacingAll(language, '-', '_');
+            while (!id.isEmpty()) {
+                BrowserLite::prefetchLazyGroup(makeString("icu:"_s, id).utf8().data());
+                size_t cut = id.reverseFind('_');
+                id = cut == notFound ? String() : id.left(cut);
+            }
+        }
     });
 }
 

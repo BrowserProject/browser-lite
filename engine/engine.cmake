@@ -229,6 +229,8 @@ if (BROWSER_LITE_RUNTIME_DIR)
         "SHELL:--preload-file ${WEBCORE_DIR}/platform/audio/resources/Composite.wav@/usr/share/webkit/audio/Composite.wav"
         # WebAssembly API for the pages, evaluated in JSC
         "SHELL:--preload-file ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js@/usr/share/browser-lite/wasm-guest.js"
+        # Files of lazy/ fetched in the background at the start (main.cpp)
+        "SHELL:--preload-file ${BROWSER_LITE_ENGINE_DIR}/lazy-prefetch.txt@/usr/share/browser-lite/lazy-prefetch.txt"
     )
 endif ()
 
@@ -251,7 +253,10 @@ if (BROWSER_LITE_SPLIT_ENGINE)
 endif ()
 
 # Data package: link again when the WebAssembly API changes
-set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js)
+set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS
+    ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js
+    ${BROWSER_LITE_ENGINE_DIR}/lazy-prefetch.txt
+)
 
 # Native tests of the WTF fixes in engine/patches (tests/engine/wtf-tests.cpp), run in
 # node by tests/engine/wtf-test.mjs: bin/wtf-tests.js and wtf-tests.wasm

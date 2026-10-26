@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <mutex>
 #include <emscripten/emscripten.h>
 #include <memory_backend.h>
 #include <string>
@@ -76,12 +77,30 @@ using wasmfs::oflags_t;
 
 namespace {
 
-// Files that are usually needed together (the most frequent slices of a CJK font): the first read
-// of one fetches the others in parallel
+// Files that are usually needed together (the most frequent slices of a CJK font, the data of an
+// ICU locale): the first read of one fetches the others in parallel
 struct Group {
     std::atomic<bool> started { false };
     std::string paths;
+
+    void prefetch()
+    {
+        if (!started.exchange(true))
+            bl_lazy_prefetch(paths.c_str());
+    }
 };
+
+// The groups of all mounted indexes by name, for prefetchLazyGroup
+struct GroupRegistry {
+    std::mutex lock;
+    std::map<std::string, std::shared_ptr<Group>> groups;
+};
+
+GroupRegistry& groupRegistry()
+{
+    static auto* registry = new GroupRegistry;
+    return *registry;
+}
 
 class LazyFile final : public DataFile {
 public:
@@ -105,8 +124,8 @@ private:
     ssize_t read(uint8_t* buffer, size_t length, off_t offset) final
     {
         if (m_data.empty() && m_size) {
-            if (m_group && !m_group->started.exchange(true))
-                bl_lazy_prefetch(m_group->paths.c_str());
+            if (m_group)
+                m_group->prefetch();
             double start = emscripten_get_now();
             m_data.resize(m_size);
             if (!bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size)) {
@@ -187,8 +206,12 @@ public:
             std::shared_ptr<Group> group;
             if (*groupName) {
                 auto& found = groups[groupName];
-                if (!found)
+                if (!found) {
                     found = std::make_shared<Group>();
+                    auto& registry = groupRegistry();
+                    std::lock_guard lock(registry.lock);
+                    registry.groups[groupName] = found;
+                }
                 group = found;
                 group->paths += (group->paths.empty() ? "" : "\n") + url;
             }
@@ -208,6 +231,25 @@ private:
 };
 
 } // namespace
+
+void prefetchLazyGroup(const char* name)
+{
+    std::shared_ptr<Group> group;
+    {
+        auto& registry = groupRegistry();
+        std::lock_guard lock(registry.lock);
+        auto found = registry.groups.find(name);
+        if (found == registry.groups.end())
+            return;
+        group = found->second;
+    }
+    group->prefetch();
+}
+
+void prefetchLazyFiles(const char* paths)
+{
+    bl_lazy_prefetch(paths);
+}
 
 bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* index)
 {

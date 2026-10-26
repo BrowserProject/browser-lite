@@ -1,5 +1,7 @@
 // Start of the engine (packages/core/src/browser.ts start(), engine.ts): engine.js, engine.wasm
 // and engine.data are requested once each, and already while a slow storage.beforeStart runs.
+// Right after the start the engine fetches the common lazy files and the ICU data of the user's
+// languages in the background (#240).
 //
 //   node tests/core/start-test.mjs [engine-dir]
 import {
@@ -11,6 +13,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
   watchErrors,
 } from '../lib/index.mjs';
 
@@ -86,6 +89,23 @@ async function newPage() {
       `start ${Math.round(loads[name].start)} ms, beforeStart done ${Math.round(done)} ms`,
     );
   }
+  await context.close();
+}
+
+// Noto Serif before any page needs it, the ICU data of de-CH and de (navigator.languages)
+{
+  const context = await browser.newContext({ locale: 'de-CH' });
+  const page = await context.newPage();
+  const requested = new Set();
+  context.on('request', (request) => requested.add(new URL(request.url()).pathname));
+  check('browser in de-CH starts', await openHost(page, stack.app({ url: pageURL })));
+  const ahead = [
+    '/engine/lazy/fonts/noto/NotoSerif-Regular.000.ttf',
+    '/engine/lazy/icu/icudt78l/de.res',
+    '/engine/lazy/icu/icudt78l/curr/de.res',
+  ];
+  await waitFor(() => ahead.every((path) => requested.has(path)), 15000);
+  for (const path of ahead) check(`fetched ahead: ${path}`, requested.has(path));
   await context.close();
 }
 
