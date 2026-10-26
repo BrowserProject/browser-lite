@@ -48,6 +48,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
+    ${BL_ENGINE_SRC}/LazyFiles.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/MemoryWatch.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
@@ -90,6 +91,29 @@ target_include_directories(BrowserLiteEngine PRIVATE
 target_include_directories(BrowserLiteEngine SYSTEM PRIVATE
     ${WebCore_SYSTEM_INCLUDE_DIRECTORIES}
 )
+
+# LazyFiles.cpp is a WasmFS backend: its base classes are in Emscripten's system/lib/wasmfs
+set_source_files_properties(${BL_ENGINE_SRC}/LazyFiles.cpp
+    PROPERTIES INCLUDE_DIRECTORIES "${EMSCRIPTEN_ROOT_PATH}/system/lib/wasmfs"
+)
+
+# ICU data: the items of icu-core.txt are linked (icudata.c, before libicudata.a in the link
+# order, so the full data of the sysroot is not taken), the others become files under lazy/icu
+# next to the engine that load on first use (tools/icu-data.mjs, LazyFiles.cpp)
+if (BROWSER_LITE_ICU_DATA)
+    set(BL_ICU_OUT "${CMAKE_CURRENT_BINARY_DIR}/browser-lite-icu")
+    set(BL_LAZY_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy")
+    add_custom_command(
+        OUTPUT ${BL_ICU_OUT}/icudata.c
+        COMMAND node ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs ${BROWSER_LITE_ICU_DATA}
+            ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt ${BL_ICU_OUT} ${BL_LAZY_DIR}/icu
+        DEPENDS ${BROWSER_LITE_ICU_DATA} ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt
+            ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs
+        VERBATIM
+    )
+    target_sources(BrowserLiteEngine PRIVATE ${BL_ICU_OUT}/icudata.c)
+    set_source_files_properties(${BL_ICU_OUT}/icudata.c PROPERTIES COMPILE_OPTIONS "-std=c23")
+endif ()
 
 # WebCore is static, its private dependencies (JSC, WTF, PAL, curl, ICU, ...)
 # come along as LINK_ONLY. Skia directly for the include paths.

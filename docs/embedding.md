@@ -57,7 +57,7 @@ isolation.
 
 ## Serving the engine
 
-- The engine folder (`engine.js`, `engine.wasm`, `engine.data`) must be **same-origin** with the
+- The engine folder (`engine.js`, `engine.wasm`, `engine.data`, `lazy/`) must be **same-origin** with the
   page: the engine starts its workers from `engine.js`. `createBrowser` rejects a cross-origin
   `engineUrl`. A CDN works only behind the same origin (reverse proxy).
 - Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
@@ -73,6 +73,7 @@ isolation.
 | `engine.wasm` | about 89 MB | about 19 MB |
 | `engine.data` (fonts, CA bundle, fontconfig, HRTF data) | about 5 MB | about 1.7 MB |
 | `engine.js` | about 0.3 MB | about 0.06 MB |
+| `lazy/icu/` (ICU data beyond the linked core, 2585 files, loaded on first use) | about 17 MB | about 6 MB |
 
 A first visit transfers about 21 MB with Brotli; later visits come from the HTTP cache and
 Chrome's code cache (about 16 MB of compiled engine code from the second start on). `createBrowser`

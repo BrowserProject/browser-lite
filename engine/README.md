@@ -1,7 +1,7 @@
 # engine/
 
 The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine.js`,
-`engine.wasm` and `engine.data`. A host (`@browser-lite/core`) loads it into a page, gives it a
+`engine.wasm` and `engine.data`, plus `lazy/` with files it loads on first use (ICU data). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
 patches from `patches/`.
@@ -12,7 +12,8 @@ patches from `patches/`.
   features, host calls, environment). `tests/contract/abi-test.mjs` checks it against the
   sources.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
-  package. `BL_PRE_JS` is the only list of the `--pre-js` files. Also builds the native WTF
+  package, the split of the ICU data (`icu-core.txt` is linked, the rest goes to `lazy/icu`
+  through `tools/icu-data.mjs`). `BL_PRE_JS` is the only list of the `--pre-js` files. Also builds the native WTF
   tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
@@ -34,7 +35,8 @@ patches from `patches/`.
   - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `PlatformStrategies.cpp`,
     `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
-    `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`
+    `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
+    (files of `lazy/` mounted read only, fetched on first read)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame

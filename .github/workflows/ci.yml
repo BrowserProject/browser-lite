@@ -265,7 +265,8 @@ jobs:
           path: |
             build/webcore/bin/engine.*
             build/webcore/bin/wtf-tests.*
-          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/patches/**', 'tests/engine/*.cpp', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'deps/**') }}
+            build/webcore/bin/lazy
+          key: engine-${{ needs.toolchain.outputs.image }}-${{ needs.toolchain.outputs.webkit_pins }}-${{ hashFiles('engine/**/*.cpp', 'engine/**/*.h', 'engine/js/**', 'engine/engine.cmake', 'engine/*.txt', 'engine/patches/**', 'tests/engine/*.cpp', 'tools/env.sh', 'tools/build-webcore.sh', 'tools/fetch-webkit.sh', 'tools/apply-patches.sh', 'tools/icu-data.mjs', 'deps/**') }}
       - name: Make room (the WebCore build needs a lot)
         if: steps.engine-cache.outputs.cache-hit != 'true'
         run: |
@@ -319,6 +320,7 @@ jobs:
           path: |
             build/webcore/bin/engine.*
             build/webcore/bin/wtf-tests.*
+            build/webcore/bin/lazy
           key: ${{ steps.engine-cache.outputs.cache-primary-key }}
       - name: Engine tests in node (pages, error page, GC stress, WTF)
         run: |
@@ -343,6 +345,7 @@ jobs:
             build/webcore/bin/engine.js
             build/webcore/bin/engine.wasm
             build/webcore/bin/engine.data
+            build/webcore/bin/lazy
           retention-days: 14
       - name: Packaged engine as artifact (deploy, release)
         if: success()

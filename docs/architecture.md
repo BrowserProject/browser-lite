@@ -159,6 +159,12 @@ memory and gets the `storage-locked` warning. With `storage.persistent: false`, 
 | `opfs/<origin>/`, `opfs-swap/` | OPFS of the pages (#95, #166) |
 | `tmp/` (incl. `tmp/uploads/<view>/`) | Atomic replacement and uploads, cleared at start (#142, #181) |
 
+Read-only files outside `/data`: `engine.data` (fonts, fontconfig, CA list) in memory, and
+`/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`). Its files
+lie in `lazy/icu/` next to the engine; `LazyFiles.cpp` lists them from an index and fetches a file
+whole with a synchronous request on its first read, so only pages that need a locale, collation,
+dictionary or charset converter download it (#228).
+
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). IndexedDB is
 limited to 256 MB per origin for writing (#179).

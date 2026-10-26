@@ -10,6 +10,7 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "LazyFiles.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "Speech.h"
@@ -30,6 +31,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <sys/stat.h>
+#include <unicode/putil.h>
+#include <unicode/udata.h>
 #include <unistd.h>
 #include <cstring>
 #include <dirent.h>
@@ -44,6 +47,21 @@
 // The fontconfig cache in the data package (deps/tools/fc-precache.c) is only
 // valid if the font folders have mtime 0. Otherwise fontconfig rescans all
 // fonts on the first layout (over 5 seconds).
+// ICU data beyond the linked core (engine/icu-core.txt), files of lazy/icu (tools/icu-data.mjs)
+extern "C" const char bl_icu_files[];
+
+// The linked ICU data first, then the files in /icu, which load on first use. Before ICU is used.
+static void prepareICU()
+{
+    if (!BrowserLite::mountLazyFiles("/icu", "lazy/icu", bl_icu_files)) {
+        BrowserLite::log("ICU: /icu could not be mounted");
+        return;
+    }
+    u_setDataDirectory("/icu");
+    UErrorCode status = U_ZERO_ERROR;
+    udata_setFileAccess(UDATA_PACKAGES_FIRST, &status);
+}
+
 static void prepareFontCache(const char* path)
 {
     struct utimbuf times = { 0, 0 };
@@ -86,6 +104,7 @@ int main(int, char**)
     loadEngineConfig();
     setEngineThread();
     auto& config = engineConfig();
+    prepareICU();
 
     // fontconfig reads its configuration from the virtual file system
     // (data package from sysroot/runtime, see engine.cmake)

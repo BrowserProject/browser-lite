@@ -1,0 +1,46 @@
+# ICU data linked into engine.wasm (tools/icu-data.mjs); everything else loads on first use
+# from icu/ next to the engine files (engine/src/LazyFiles.cpp). One pattern per line, relative
+# to the package (icudt<N>l), * within one path segment.
+
+# Locale independent data: aliases of the charset converters, locale metadata, time zones,
+# plurals, number systems, IDNA (host names), properties of the layout and emoji
+cnvalias.icu
+currencyNumericCodes.res
+dayPeriods.res
+icustd.res
+icuver.res
+keyTypeData.res
+langInfo.res
+metaZones.res
+metadata.res
+numberingSystems.res
+pluralRanges.res
+plurals.res
+pool.res
+res_index.res
+supplementalData.res
+timezoneTypes.res
+uemoji.icu
+ulayout.icu
+uts46.nrm
+zoneinfo64.res
+
+# Locales root and English
+root.res
+en.res
+
+# Text boundaries (characters, words, lines, sentences) without the dictionaries of languages
+# without spaces and without the rules for Chinese and Japanese
+brkitr/res_index.res
+brkitr/root.res
+brkitr/en.res
+brkitr/char.brk
+brkitr/word.brk
+brkitr/line.brk
+brkitr/line_normal.brk
+brkitr/line_loose.brk
+brkitr/sent.brk
+brkitr/title.brk
+
+# Indexes of the other trees, so lookups of missing locales need no file
+*/res_index.res

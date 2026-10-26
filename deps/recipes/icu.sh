@@ -4,6 +4,8 @@
 # WASM with --with-cross-build. Data is linked statically: the WASM build only
 # produces stub data (data/ needs the tools), so libicudata.a is made here from
 # the .dat archive of the host build.
+# The filtered archive also goes to share/icu: the engine links only a core of it and loads the
+# rest on demand (tools/icu-data.mjs), the jsc shell and native tests link libicudata.a.
 # ---- Data filter: shrinks the ICU data archive (33 MB -> 19 MB).
 #
 #   icu_filter_list < list-of-all-items   prints the items that can be removed
@@ -125,6 +127,9 @@ build() {
     mkdir -p "$gen/filtered"
     LD_LIBRARY_PATH="$host/lib" icu_filter_dat "$host/bin/icupkg" "$dat" "$gen/filtered/$(basename "$dat")"
     dat="$gen/filtered/$(basename "$dat")"
+    rm -rf "$BL_SYSROOT/share/icu"
+    mkdir -p "$BL_SYSROOT/share/icu"
+    cp "$dat" "$BL_SYSROOT/share/icu/"
     # genccode turns the archive into a .c file with the symbol icudtNN_dat.
     # -e: entry point name without the endianness letter (icudt78l.dat -> icudt78),
     # as ICU looks it up when loading (symbol icudt78_dat).

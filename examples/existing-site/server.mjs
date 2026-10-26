@@ -27,7 +27,7 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN ?? `http://localhost:${PORT}`;
 const RELAY_SECRET = process.env.RELAY_SECRET || randomBytes(32).toString('hex');
 if (!process.env.ENGINE_DIR) {
-  console.error('Set ENGINE_DIR to the folder with engine.js, engine.wasm and engine.data');
+  console.error('Set ENGINE_DIR to the folder with engine.js, engine.wasm, engine.data and lazy/');
   process.exit(1);
 }
 // npm runs scripts in the package folder; INIT_CWD is where the command was typed
