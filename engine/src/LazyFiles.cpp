@@ -24,8 +24,9 @@
 #include <wasmfs.h>
 
 // Fetches <engine folder>/<path> into buffer (size bytes); returns false when the file is
-// missing, has another size or did not arrive within 15 s (the read fails, ICU falls back to the
-// root locale and text to other fonts; the next read tries again)
+// missing, has another size or did not arrive within 8 s, before the core reports the engine as
+// unresponsive after 10 s (the read fails, ICU falls back to the root locale and text to other
+// fonts; the next read tries again)
 EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
     var url = locateFile(UTF8ToString(path));
     var data;
@@ -35,7 +36,7 @@ EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
         } else {
             var request = new XMLHttpRequest();
             request.open('GET', url, false);
-            request.timeout = 15000;
+            request.timeout = 8000;
             request.responseType = 'arraybuffer';
             request.send();
             if (request.status != 200)
