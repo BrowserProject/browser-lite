@@ -248,9 +248,10 @@ export interface Browser {
   /** navigator.languages and Accept-Language of the pages. */
   setLanguages(languages: string[]): void;
   /**
-   * Highest pixel ratio the pages render at (at least 1), null for no limit. On a screen with a
-   * higher pixel ratio the host scales the views up: slightly softer, but the engine paints
-   * fewer pixels (a quarter at ratio 2 with limit 1), and pages pick smaller images.
+   * Highest pixel ratio the pages render at on the host screen (at least 1), null for no limit;
+   * an emulated device keeps its own. On a screen with a higher pixel ratio the host scales the
+   * views up: slightly softer, but the engine paints fewer pixels (a quarter at ratio 2 with
+   * limit 1), and pages pick smaller images.
    */
   setMaxPixelRatio(limit: number | null): void;
   /** navigator.userAgent and navigator.platform; empty strings mean the engine default. */

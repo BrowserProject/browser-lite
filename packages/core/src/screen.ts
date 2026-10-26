@@ -18,10 +18,10 @@ export class Screen {
     this.colorScheme = config.colorScheme;
   }
 
+  /** The emulated device's pixel ratio, else the host's up to maxPixelRatio. */
   pixelRatio(): number {
-    return Math.min(
-      this.config.device?.pixelRatio || devicePixelRatio || 1,
-      this.config.maxPixelRatio,
+    return (
+      this.config.device?.pixelRatio || Math.min(devicePixelRatio || 1, this.config.maxPixelRatio)
     );
   }
 
