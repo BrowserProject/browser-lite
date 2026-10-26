@@ -11,7 +11,7 @@
 | `demo/` | the demo UI (`apps/demo`) in Chromium: tabs, prompts, dialogs, settings, profile | engine build, packages, Playwright | e2e-demo |
 | `examples/` | both [examples](../examples/README.md) in Chromium: rendering, relay tokens, own service worker, iframe, strict CSP, Vite build, `npm run relay` | engine build, packages, Playwright | e2e-core |
 | `compat/` | real sites of `sites.txt`, informational | engine build, internet | compat |
-| `bench/` | benchmarks to run by hand with `engine/render.mjs` | engine build | none |
+| `bench/` | benchmarks to run by hand: pages for `engine/render.mjs`, `slow-start.mjs` (first and second start of the packaged demo behind a slow link, `shaper.mjs`) | engine build, Playwright | none |
 
 `lib/` is the shared harness of the browser suites, `fixtures/` holds shared test data (WebAssembly
 modules with `wasm/build.sh`, `wasm-bytes.mjs`, `certs.mjs`, `features.html` for the parity test).
