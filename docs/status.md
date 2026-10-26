@@ -132,7 +132,12 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+7. New threads on the engine thread: WebKit starts one per asynchronously decoded image
+   (`ImageFrameWorkQueue`) and per `window.crypto` (`SubtleCrypto`), plus once for `data:` URLs and
+   IndexedDB; the engine thread waits until it runs, 80 to 170 ms each when no loaded worker is
+   free (elpais.com about 0.4 s per load, bbc.com 0.16 s). Keeping 3 loaded workers in reserve
+   helped one site and cost the other; shared queues in a WebKit patch would remove the cause.
+8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
