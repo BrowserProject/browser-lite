@@ -121,6 +121,16 @@ static void compositeScene(CompositorScene& scene)
                 view->didComposite();
         });
     };
+    // A frame that shows nothing (no GPU, no canvas yet) leaves the first paint and its rendering
+    // update to the next frame, which the arriving canvas schedules (forceRepaint)
+    auto skipFrame = [&] {
+        if (firstPaint) {
+            Locker locker { scene.lock };
+            scene.firstPaint = true;
+            scene.reasons.add(CompositionReason::RenderingUpdate);
+        }
+        notifyEngine();
+    };
 
     Gpu::Scope scope;
     for (auto& layer : layersToRemove)
@@ -129,7 +139,7 @@ static void compositeScene(CompositorScene& scene)
 
     auto* grContext = Gpu::context();
     if (!scope || !grContext || Compositor::isLost() || reasons.isEmpty()) {
-        notifyEngine();
+        skipFrame();
         return;
     }
 
@@ -173,7 +183,7 @@ static void compositeScene(CompositorScene& scene)
     // Without a canvas (not there yet) only take the state
     auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
     if (!surface) {
-        notifyEngine();
+        skipFrame();
         return;
     }
 
