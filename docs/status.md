@@ -130,9 +130,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-7. Split engine (#238): a site outside `engine/hot-functions.txt` often needs a deferred function
-   on its first load and then waits for `engine.deferred.wasm`; renew the list with
-   `tools/hot-functions.mjs` after WebKit updates.
+7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs a deferred
+   function on its first load and then waits for `engine.deferred.wasm`, a larger profile does not
+   help; renew the list with `tools/hot-functions.mjs` after WebKit updates.
 
 ## Open: features
 
