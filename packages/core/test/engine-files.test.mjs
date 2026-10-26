@@ -141,14 +141,19 @@ const SPLIT_WASM = new Uint8Array([
   0x32,
 ]);
 
-test('a split engine gets its chunks one after the other once it runs', async () => {
+const split = (downloaded) => ({
+  wasm: Promise.resolve(new WebAssembly.Module(SPLIT_WASM)),
+  downloaded: Promise.resolve(downloaded),
+});
+
+test('a downloaded split engine gets its chunks one after the other at once', async () => {
   const requests = fakeHost();
   const url = base();
   const handed = [];
   const running = Promise.resolve({
     blSetDeferred: async (chunk, module) => handed.push([chunk, module]),
   });
-  await loadDeferredCode(url, Promise.resolve(new WebAssembly.Module(SPLIT_WASM)), running);
+  await loadDeferredCode(url, split(true), running);
   assert.deepEqual(requests, [
     [`${url}engine.deferred-0.wasm`, 'same-origin'],
     [`${url}engine.deferred-1.wasm`, 'same-origin'],
@@ -160,9 +165,23 @@ test('a split engine gets its chunks one after the other once it runs', async ()
   assert.ok(handed.every(([, module]) => module instanceof WebAssembly.Module));
 });
 
+test('a cached split engine loads its chunks only after the delay', async () => {
+  const requests = fakeHost();
+  const running = Promise.resolve({ blSetDeferred: async () => {} });
+  const loading = loadDeferredCode(base(), split(false), running, 100);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(requests.length, 0);
+  await loading;
+  assert.equal(requests.length, 2);
+});
+
 test('an unsplit engine requests no chunks', async () => {
   const requests = fakeHost();
   const running = Promise.resolve({ blSetDeferred: async () => assert.fail('not split') });
-  await loadDeferredCode(base(), Promise.resolve(new WebAssembly.Module(WASM)), running);
+  const files = {
+    wasm: Promise.resolve(new WebAssembly.Module(WASM)),
+    downloaded: Promise.resolve(true),
+  };
+  await loadDeferredCode(base(), files, running);
   assert.equal(requests.length, 0);
 });

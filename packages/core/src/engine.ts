@@ -201,6 +201,12 @@ export interface EngineFiles {
   readonly wasm: Promise<WebAssembly.Module>;
   /** engine.data (fonts, certificates, fontconfig). */
   readonly data: Promise<ArrayBuffer>;
+  /**
+   * True when the files came over the network this time, false when they came from the HTTP
+   * cache: engine.js was loaded into this page before, or its resource timing shows no transfer
+   * (same release, same folder).
+   */
+  readonly downloaded: Promise<boolean>;
 }
 
 async function fetchEngineFile(url: string): Promise<Response> {
@@ -227,27 +233,12 @@ class DownloadProgress {
   private lengths: number[] = [];
   private last = 0;
   private finished = false;
-  /** Resolves to true when the files are downloaded, so their bytes are counted. */
-  readonly counting: Promise<boolean>;
-
   constructor(
     private readonly report: (progress: StartProgress) => void,
     base: string,
-    factory: Promise<unknown>,
-    loadedBefore: boolean,
+    /** Resolves to true when the files are downloaded, so their bytes are counted. */
+    readonly counting: Promise<boolean>,
   ) {
-    const scriptUrl = `${base}engine.js`;
-    this.counting = loadedBefore
-      ? Promise.resolve(false)
-      : factory.then(
-          () => {
-            const entry = performance.getEntriesByName(scriptUrl, 'resource').at(-1) as
-              | PerformanceResourceTiming
-              | undefined;
-            return !entry || entry.transferSize > 0;
-          },
-          () => false,
-        );
     this.counting.then((counting) => {
       if (counting) this.readTotal(`${base}manifest.json`);
     });
@@ -326,7 +317,18 @@ export function loadEngineFiles(
   const scriptUrl = `${base}engine.js`;
   const loadedBefore = factories.has(scriptUrl);
   const factory = loadEngineFactory(scriptUrl);
-  const progress = onProgress && new DownloadProgress(onProgress, base, factory, loadedBefore);
+  const downloaded = loadedBefore
+    ? Promise.resolve(false)
+    : factory.then(
+        () => {
+          const entry = performance.getEntriesByName(scriptUrl, 'resource').at(-1) as
+            | PerformanceResourceTiming
+            | undefined;
+          return !entry || entry.transferSize > 0;
+        },
+        () => false,
+      );
+  const progress = onProgress && new DownloadProgress(onProgress, base, downloaded);
   const counted = async (response: Response) => {
     if (progress && (await progress.counting)) progress.count(response);
     return response;
@@ -343,6 +345,7 @@ export function loadEngineFiles(
     data: fetchEngineFile(`${base}engine.data`)
       .then(counted)
       .then((response) => response.arrayBuffer()),
+    downloaded,
   };
   // A failure counts where the start waits for the file
   for (const file of Object.values(files)) file.catch(() => {});
@@ -379,21 +382,40 @@ export function provideEngineFiles(
   };
 }
 
+/** How long after the start a cached split engine waits before it loads its chunks. */
+export const DEFERRED_DELAY_MS = 5000;
+
+const idle = () =>
+  new Promise<void>((resolve) => {
+    if (typeof requestIdleCallback === 'function')
+      requestIdleCallback(() => resolve(), { timeout: 1000 });
+    else setTimeout(resolve, 50);
+  });
+
 /**
- * Loads the chunks engine.deferred-<n>.wasm of a split engine (#238) once engine.wasm is there,
- * one after the other, and hands each to the engine once it runs: its engine.wasm (custom section
- * "bl.deferred" with the number of chunks) holds what the start and common pages run. Compiled
- * while they stream, so Chrome's code cache applies like for engine.wasm. Threads that need a
- * chunk before it reached them read it themselves, so a failure here only leaves that to them.
+ * Loads the chunks engine.deferred-<n>.wasm of a split engine (#238), one after the other, and
+ * hands each to the engine once it runs: its engine.wasm (custom section "bl.deferred" with the
+ * number of chunks) holds what the start and common pages run. After a download the chunks follow
+ * at once; from the cache they wait `delayMs` after the start and then one idle period each, so
+ * their compiling does not slow down the start (about 1 s on one core). Compiled while they
+ * stream, so Chrome's code cache applies like for engine.wasm. Threads that need a chunk before
+ * it reached them read it themselves, so a failure here only leaves that to them.
  */
 export async function loadDeferredCode(
   base: string,
-  wasm: Promise<WebAssembly.Module>,
+  files: Pick<EngineFiles, 'wasm' | 'downloaded'>,
   running: Promise<EngineModule>,
+  delayMs = DEFERRED_DELAY_MS,
 ): Promise<void> {
-  const [section] = WebAssembly.Module.customSections(await wasm, 'bl.deferred');
+  const [section] = WebAssembly.Module.customSections(await files.wasm, 'bl.deferred');
   const chunks = section ? Number(new TextDecoder().decode(section)) : 0;
+  const cached = chunks > 0 && !(await files.downloaded);
+  if (cached) {
+    await running;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
   for (let chunk = 0; chunk < chunks; chunk++) {
+    if (cached) await idle();
     const response = await fetchEngineFile(`${base}engine.deferred-${chunk}.wasm`);
     const compiled = response.headers.get('Content-Type')?.startsWith('application/wasm')
       ? await WebAssembly.compileStreaming(response)

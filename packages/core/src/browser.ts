@@ -198,7 +198,7 @@ class BrowserImpl implements Browser, ViewHost {
     const running = new Promise<EngineModule>((resolve) => {
       engineRuns = resolve;
     });
-    loadDeferredCode(config.engineBase, files.wasm, running).catch((error) =>
+    loadDeferredCode(config.engineBase, files, running).catch((error) =>
       console.warn('[browser-lite] engine.deferred chunks failed to load:', error),
     );
     config.transport.preconnect?.();
