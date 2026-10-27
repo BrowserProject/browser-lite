@@ -76,6 +76,7 @@ p { position: absolute; left: 400px; top: 20px }
 <script>
 const $ = (id) => document.getElementById(id);
 console.log('more console');
+console.log('%cstyled %s and %d%%', 'color: red', 'text', 42, { a: 1 }, 'rest');
 $('file').addEventListener('change', async () => {
   const file = $('file').files[0];
   document.title = 'file:' + file.name + ':' + (await file.text());
@@ -342,6 +343,14 @@ try {
   check(
     'console event',
     await waitFor(() => window.blHost.events.includes('console:log:more console')),
+  );
+  check(
+    'console event with all arguments and format specifiers',
+    await waitFor(() =>
+      window.blHost.events.includes('console:log:styled text and 42% [object Object] rest'),
+    ),
+    (await page.evaluate(() => window.blHost.events.filter((e) => e.includes('styled')).join())) ||
+      'no event',
   );
 
   await page.evaluate(() => window.blTest.view().find('findme'));
