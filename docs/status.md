@@ -136,7 +136,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+7. `<link rel=preconnect>` does nothing (`preconnectTo` in `engine/src/LoaderStrategy.cpp`): curl
+   never reuses a connection it opened with `CURLOPT_CONNECT_ONLY`, so a preconnect needs a small
+   curl patch (deps rebuild, batch it); it would save a round trip per preconnected origin.
+8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
