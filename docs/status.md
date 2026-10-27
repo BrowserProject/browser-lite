@@ -107,7 +107,10 @@ response of another origin came after 0.5 to 0.85 s instead of 17 to 20 s (nativ
 1.1 s, #245); the first request to a preconnected origin took 0.16 instead of 0.44 s (#247).
 Wikipedia on a first visit: ready 14.8 s, first paint 21.8 s, loaded 25.6 s. With a warm engine
 Wikipedia (one `<video controls>`) painted 2.87 instead of 3.65 s after ready once the media
-controls came after the first paint (#253).
+controls came after the first paint (#253), and restarted with Wikipedia as address 2.25
+instead of 2.82 s once curl, the cookie database and our page extensions were set up ahead
+(#254). bbc.com, whose language menu needs 13 fonts of other scripts, painted after 4.4 instead
+of 5.7 s once those fonts no longer held up the text (#255).
 A warm start (same profile, local) on 2 cores painted a small page after a median 1.70 instead
 of 2.06 s once the compositor's WebGL context came during the start and the worker reserve waited
 3 s (#249, #242); the demo, where the profile and the engine now load side by side (#248), after
