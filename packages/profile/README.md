@@ -59,6 +59,10 @@ larger ones stay on the device. When another device opens the profile, the statu
 | `reset(all)` | Deletes site data (`all = false`: cookies, site storage, the `sitePrefs`) or the whole profile on the server and here. The directory is cleared at the next start: destroy the browser and start again, or reload. |
 | `siteOfPath(path)` | Site (`https://example.com`) of a profile file path. |
 
+Files are written with `createWritable`; where the main thread lacks it (Safari 18) a small
+module worker (`dist/opfs-writer.js`, started next to the package code with `new Worker(new
+URL('./opfs-writer.js', import.meta.url))`) writes them with a synchronous access handle.
+
 Local state (prefs cache, upload record, pending clear) lives in `localStorage` under keys
 starting with `bl-profile <url>`.
 
