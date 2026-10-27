@@ -275,7 +275,7 @@ test('select popup: typing, Escape, Space, Tab and page keys', async () => {
   });
 });
 
-test('select popup: click, click outside, abort, a new request and resize', async () => {
+test('select popup: click, click outside, abort, a new request and a width change', async () => {
   const result = await page.evaluate(async () => {
     const { selectPopup } = ui.selectPopup();
     const view = makeView();
@@ -312,7 +312,17 @@ test('select popup: click, click outside, abort, a new request and resize', asyn
     const second = open();
     out.replaced = await first;
     out.count = document.querySelectorAll('.bl-select-popup').length;
+    // Only a change of the width closes it (not an on-screen keyboard that goes away)
     window.dispatchEvent(new Event('resize'));
+    out.heightOnly = document.querySelectorAll('.bl-select-popup').length;
+    const innerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', {
+      value: window.innerWidth + 100,
+      configurable: true,
+    });
+    window.dispatchEvent(new Event('resize'));
+    if (innerWidth) Object.defineProperty(window, 'innerWidth', innerWidth);
+    else delete window.innerWidth;
     out.resize = await second;
     const pre = new AbortController();
     pre.abort();
@@ -330,6 +340,7 @@ test('select popup: click, click outside, abort, a new request and resize', asyn
     removed: true,
     replaced: -1,
     count: 1,
+    heightOnly: 1,
     resize: -1,
     preAborted: -1,
     left: 0,

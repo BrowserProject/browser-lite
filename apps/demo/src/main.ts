@@ -31,6 +31,7 @@ import { needsNewEngine, type StartSettings, updateStartSettings } from './setti
 import { openSettings } from './settings-page.js';
 import { installShortcuts } from './shortcuts.js';
 import { initSidePanel, panelOpen, togglePanel } from './side-panel.js';
+import { initTabOverview } from './tab-overview.js';
 import {
   activate,
   activeTab,
@@ -314,6 +315,7 @@ initSidePanel({
   openSettings: () => openSettings(),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
+initTabOverview();
 onPreviewClosed(focusPage);
 onBookmarksChange(() => {
   const tab = activeTab();

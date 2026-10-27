@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>browser-lite</title>
 <link rel="stylesheet" href="./src/style.css">
 </head>
@@ -23,6 +23,7 @@
       <span id="status"></span>
       <button type="button" id="bookmark" title="Bookmark (Ctrl+D)" disabled>&#9734;</button>
       <button type="button" id="zoom" title="Reset zoom" hidden></button>
+      <button type="button" id="tab-count" title="Tabs" aria-label="Tabs"><span>0</span></button>
       <button type="button" id="clear-data" title="Profile and site data">&#128465;</button>
       <button type="button" id="menu-button" title="Menu">&#8942;</button>
     </div>
@@ -43,6 +44,11 @@
     </div>
   </main>
   <aside id="side-panel" hidden></aside>
+  <div id="sheet-backdrop"></div>
+  <section id="tab-overview" role="dialog" aria-label="Tabs" hidden>
+    <header><button type="button" class="overview-new">+ New tab</button><span class="overview-count"></span><button type="button" class="overview-done">Done</button></header>
+    <div class="overview-grid"></div>
+  </section>
   <div id="suggestions" hidden></div>
   <div id="print-preview" role="dialog" aria-label="Print preview" hidden>
     <header><span class="print-title"></span><button type="button" class="print-now primary">Print</button><button type="button" class="print-save">Save as PDF</button><button type="button" class="print-close" aria-label="Close">&#215;</button></header>

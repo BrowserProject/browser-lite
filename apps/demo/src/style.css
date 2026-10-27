@@ -1017,3 +1017,387 @@ button {
     align-self: flex-start;
   }
 }
+
+/* Tab overview, tab count and sheet backdrop: only reachable in the phone layout below */
+#tab-count,
+#sheet-backdrop,
+.panel-toolbar {
+  display: none;
+}
+#tab-overview {
+  position: fixed;
+  inset: 0;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
+  background: var(--bg);
+  color: var(--fg);
+}
+#tab-overview[hidden] {
+  display: none;
+}
+#tab-overview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--tab-active);
+}
+#tab-overview header button {
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 16px;
+  cursor: pointer;
+}
+#tab-overview .overview-done {
+  font-weight: 600;
+}
+.overview-count {
+  color: var(--muted);
+}
+.overview-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+}
+.overview-card {
+  position: relative;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--tab-active);
+}
+.overview-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.overview-open {
+  flex: 1;
+  min-width: 0;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 12px 40px 12px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.overview-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.overview-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.overview-url {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.overview-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+/*
+ * Phone layout (portrait or landscape): back, address, tab count and menu in the toolbar, the tab
+ * overview instead of the strip, menu and panels as bottom sheets, touch targets of at least
+ * 44 px, 16 px text in fields (iOS zooms into smaller), safe areas of notch and home indicator.
+ * --keyboard-height and --visible-height come from visual-viewport.ts while the iOS keyboard
+ * covers the page. --layout tells the code (layout.ts) that this applies.
+ */
+@media (max-width: 640px), (max-height: 500px) {
+  :root {
+    --layout: compact;
+  }
+  .bl-permission-prompt {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: var(--keyboard-height, 0px);
+    max-width: 560px;
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0;
+    font-size: 16px;
+  }
+  .bl-permission-prompt p {
+    flex-basis: 100%;
+    margin: 0 0 4px;
+    font-size: 16px;
+  }
+  .bl-permission-prompt button {
+    min-width: 96px;
+    min-height: 44px;
+    margin: 0;
+    float: none;
+  }
+  .bl-login-prompt {
+    top: calc(env(safe-area-inset-top) + 8px);
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: 420px;
+    max-height: calc(var(--visible-height, 100dvh) - env(safe-area-inset-top) - 16px);
+    margin: 0 auto;
+    overflow-y: auto;
+    font-size: 16px;
+  }
+  .bl-login-prompt input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .bl-login-prompt .bl-cancel,
+  .bl-login-prompt .bl-sign-in {
+    min-height: 44px;
+    min-width: 96px;
+  }
+  .bl-context-menu {
+    max-height: calc(var(--visible-height, 100dvh) - 8px);
+    overflow-y: auto;
+  }
+  .bl-context-menu .bl-menu-item {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 16px;
+  }
+  .bl-select-popup .bl-option,
+  .bl-select-popup .bl-group {
+    padding: 12px 16px;
+    font-size: 16px;
+    line-height: 20px;
+  }
+
+  #chrome {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+    background: var(--tab-active);
+  }
+  body {
+    -webkit-tap-highlight-color: transparent;
+  }
+  #tabs,
+  #forward,
+  #reload,
+  #bookmark,
+  #zoom,
+  #clear-data,
+  #status {
+    display: none;
+  }
+  #toolbar {
+    gap: 2px;
+    padding: 4px;
+  }
+  #toolbar > button:active:not(:disabled),
+  #tab-overview button:active,
+  .panel-icon:active:not(:disabled) {
+    background: var(--tab);
+  }
+  #toolbar > button {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    font-size: 20px;
+  }
+  #tab-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #tab-count span {
+    min-width: 22px;
+    height: 22px;
+    padding: 0 3px;
+    border: 2px solid currentColor;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 18px;
+  }
+  #address {
+    height: 40px;
+    border-radius: 20px;
+    font-size: 16px;
+  }
+  /* "Not secure" as a sign, like mobile Chrome */
+  #security.insecure {
+    font-size: 0;
+  }
+  #security.insecure::before {
+    content: "\26A0";
+    font-size: 16px;
+  }
+  #address-form.with-security.insecure #address {
+    padding-left: 36px;
+  }
+  #viewport {
+    margin: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #viewport.device {
+    flex: 1;
+    width: auto;
+    max-width: none;
+    align-self: stretch;
+    margin: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    box-shadow: none;
+  }
+  .suggestion {
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+  }
+
+  #side-panel {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: var(--keyboard-height, 0px);
+    width: auto;
+    max-width: 560px;
+    max-height: calc(var(--visible-height, 100dvh) - env(safe-area-inset-top) - 24px);
+    margin: 0 auto;
+    padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.2);
+  }
+  #side-panel:not([hidden]) + #sheet-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 12;
+    background: rgba(0, 0, 0, 0.35);
+  }
+  .panel-toolbar {
+    display: flex;
+    justify-content: space-around;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-icon {
+    width: 64px;
+    height: 44px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--fg);
+    font-size: 22px;
+    cursor: pointer;
+  }
+  .panel-icon:disabled {
+    opacity: 0.35;
+  }
+  .panel-icon.active {
+    color: var(--accent);
+  }
+  .panel-close,
+  .panel-remove {
+    width: 44px;
+    height: 44px;
+    flex: none;
+  }
+  .panel-menu-item,
+  .panel-link,
+  .panel-action {
+    min-height: 44px;
+    align-items: center;
+    font-size: 16px;
+  }
+  .panel-link {
+    align-items: stretch;
+    justify-content: center;
+  }
+  .panel-menu-item kbd {
+    display: none;
+  }
+  .panel-search {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  #find-bar {
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 2px 4px 2px 8px;
+    border-width: 0 0 1px;
+    border-radius: 0;
+  }
+  #find-input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    height: 40px;
+    font-size: 16px;
+  }
+  #find-count {
+    min-width: 0;
+  }
+  #find-bar button {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+
+  #print-preview {
+    inset: 0;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+    border: none;
+    border-radius: 0;
+  }
+  #print-preview header {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 4px 4px 12px;
+  }
+  #print-preview button {
+    min-height: 44px;
+  }
+  #settings {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+      env(safe-area-inset-left);
+  }
+  .settings-close {
+    top: calc(env(safe-area-inset-top) + 2px);
+    right: calc(env(safe-area-inset-right) + 2px);
+    width: 44px;
+    height: 44px;
+  }
+}

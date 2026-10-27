@@ -15,6 +15,7 @@ import { sourcePage } from './view-source.js';
 const list: Tab[] = [];
 let active: Tab | null = null;
 const created = new Set<(tab: Tab) => void>();
+const changeListeners = new Set<() => void>();
 
 const pages = () => byId('pages');
 
@@ -215,6 +216,7 @@ export class Tab implements SessionTab {
     this.part('.title').textContent = this.title || this.url || 'New tab';
     this.element.title = this.title;
     if (this.isActive) document.title = `${this.title ? `${this.title} - ` : ''}browser-lite`;
+    tabsChanged();
   }
 
   /** Marker at the tab: dialogs blocked or skipped in the background. */
@@ -246,6 +248,7 @@ export class Tab implements SessionTab {
     img.onerror = () => {
       img.hidden = true;
     };
+    tabsChanged();
   }
 
   /** @internal Shows or hides the view and the bubble of the link under the mouse. */
@@ -279,6 +282,15 @@ export function onTabCreated(listener: (tab: Tab) => void): void {
   created.add(listener);
 }
 
+/** Calls listener after a tab was added, removed or activated, or its title or icon changed. */
+export function onTabsChange(listener: () => void): void {
+  changeListeners.add(listener);
+}
+
+function tabsChanged(): void {
+  for (const listener of changeListeners) listener();
+}
+
 /** Keyboard into the page of the active tab. */
 export function focusPage(): void {
   active?.view.focus();
@@ -294,6 +306,7 @@ function add(tab: Tab, before?: Tab): Tab {
     byId('tab-list').append(tab.element);
   }
   for (const listener of created) listener(tab);
+  tabsChanged();
   return tab;
 }
 
@@ -414,6 +427,7 @@ function removeTab(tab: Tab): void {
   if (index < 0) return;
   list.splice(index, 1);
   tab.dispose();
+  tabsChanged();
   if (runtime.stopped) return;
   setTimeout(persistSession);
   updateHostBeforeUnload();
@@ -488,5 +502,6 @@ export function printTab(tab: Tab | null): void {
 export function clearTabs(): void {
   for (const tab of list.splice(0)) tab.dispose();
   active = null;
+  tabsChanged();
   window.onbeforeunload = null;
 }
