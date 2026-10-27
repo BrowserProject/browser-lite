@@ -664,7 +664,7 @@ class BrowserImpl implements Browser, ViewHost {
 
   async destroy(): Promise<void> {
     if (this.phase === 'destroyed') return;
-    // An open dialog holds the engine thread: answer it so the engine can flush and close
+    // Answer open dialogs, so their pages finish their scripts before the flush
     this.requests.closeDialogs();
     if (this.ready) this.storage.flush(500);
     this.watchdog.stop();

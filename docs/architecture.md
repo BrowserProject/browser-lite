@@ -77,7 +77,8 @@ core reports it as the reason of `crash` (#218).
 
 All views share one engine thread. A JS entry may run at most 30 s (`scriptTimeoutSeconds`,
 #146). The core watchdog emits `unresponsive` when input or an expected answer gets no reply
-within 10 s (#147, #172).
+within 10 s (#147, #172). A page dialog holds only its page: until the answer the engine thread
+runs the other views in a nested event loop (`runNestedEventLoop`, #258).
 
 ## Frames
 

@@ -50,6 +50,7 @@
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/SubresourceLoader.h>
 #include <WebCore/UserAgent.h>
+#include <wtf/Deque.h>
 #include <wtf/Expected.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
@@ -194,23 +195,34 @@ public:
         debugLog("loading %s", m_loader->request().url().string().utf8().data());
         // Look in the HTTP cache first (HttpCache.cpp)
         m_partition = HttpCache::partition(*m_loader);
-        HttpCache::lookupForLoad(m_partition, ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) {
-            if (!m_loader)
-                return;
-            if (lookup.fresh)
-                return serveFromCache(WTF::move(lookup.entry), ResourceResponse::Source::DiskCache);
-            m_cachedEntry = WTF::move(lookup.entry);
-            startNetwork(WTF::move(lookup.request));
+        HttpCache::lookupForLoad(m_partition, ResourceRequest { m_loader->request() }, false, [this, protectedThis = Ref { *this }](HttpCache::Lookup&& lookup) mutable {
+            deliver([this, protectedThis = WTF::move(protectedThis), lookup = WTF::move(lookup)]() mutable {
+                if (!m_loader)
+                    return;
+                if (lookup.fresh)
+                    return serveFromCache(WTF::move(lookup.entry), ResourceResponse::Source::DiskCache);
+                m_cachedEntry = WTF::move(lookup.entry);
+                startNetwork(WTF::move(lookup.request));
+            });
         });
     }
 
     void cancel()
     {
         m_loader = nullptr;
+        m_deferred.clear();
         if (auto request = std::exchange(m_curlRequest, nullptr)) {
             request->cancel();
             request->invalidateClient();
         }
+    }
+
+    // The page defers loading while one of its dialogs is open (#258,
+    // Page::setDefersLoading): what arrives waits and comes in order afterwards
+    void runDeferred()
+    {
+        while (!m_deferred.isEmpty() && !isDeferred())
+            m_deferred.takeFirst()();
     }
 
 private:
@@ -218,6 +230,17 @@ private:
         : m_loader(&loader)
         , m_done(WTF::move(done))
     {
+    }
+
+    bool isDeferred() const { return m_loader && m_loader->defersLoading(); }
+
+    void deliver(Function<void()>&& callback)
+    {
+        if (isDeferred() || !m_deferred.isEmpty()) {
+            m_deferred.append(WTF::move(callback));
+            return;
+        }
+        callback();
     }
 
     void startNetwork(ResourceRequest&& request)
@@ -286,14 +309,21 @@ private:
     // CurlRequestClient (calls arrive on the engine thread)
     void curlDidSendData(CurlRequest&, unsigned long long sent, unsigned long long total) final
     {
-        Ref protectedThis { *this };
-        if (m_loader)
-            m_loader->didSendData(sent, total);
+        deliver([this, protectedThis = Ref { *this }, sent, total] {
+            if (m_loader)
+                m_loader->didSendData(sent, total);
+        });
     }
 
     void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
     {
-        Ref protectedThis { *this };
+        deliver([this, protectedThis = Ref { *this }, request = Ref { request }, curlResponse = WTF::move(curlResponse)]() mutable {
+            receiveResponse(request, WTF::move(curlResponse));
+        });
+    }
+
+    void receiveResponse(CurlRequest& request, CurlResponse&& curlResponse)
+    {
         if (!m_loader || m_curlRequest != &request)
             return;
 
@@ -330,32 +360,35 @@ private:
 
     void curlDidReceiveData(CurlRequest& request, Ref<SharedBuffer>&& buffer) final
     {
-        Ref protectedThis { *this };
-        if (!m_loader || m_curlRequest != &request)
-            return;
-        m_cacheWriter.append(buffer.get());
-        m_loader->didReceiveBuffer(buffer.get(), buffer->size(), DataPayloadBytes);
+        deliver([this, protectedThis = Ref { *this }, request = Ref { request }, buffer = WTF::move(buffer)] {
+            if (!m_loader || m_curlRequest != request.ptr())
+                return;
+            m_cacheWriter.append(buffer.get());
+            m_loader->didReceiveBuffer(buffer.get(), buffer->size(), DataPayloadBytes);
+        });
     }
 
     void curlDidComplete(CurlRequest& request, NetworkLoadMetrics&& metrics) final
     {
-        Ref protectedThis { *this };
-        if (!m_loader || m_curlRequest != &request)
-            return;
-        RefPtr loader = m_loader;
-        debugLog("done %s", loader->url().string().utf8().data());
-        m_cacheWriter.finish();
-        finish();
-        loader->didFinishLoading(metrics);
+        deliver([this, protectedThis = Ref { *this }, request = Ref { request }, metrics = WTF::move(metrics)] {
+            if (!m_loader || m_curlRequest != request.ptr())
+                return;
+            RefPtr loader = m_loader;
+            debugLog("done %s", loader->url().string().utf8().data());
+            m_cacheWriter.finish();
+            finish();
+            loader->didFinishLoading(metrics);
+        });
     }
 
     void curlDidFailWithError(CurlRequest& request, ResourceError&& error, CertificateInfo&&) final
     {
-        Ref protectedThis { *this };
         log("Load failed (%d): %s %s", error.errorCode(), error.failingURL().string().utf8().data(), error.localizedDescription().utf8().data());
-        if (!m_loader || m_curlRequest != &request)
-            return;
-        fail(error);
+        deliver([this, protectedThis = Ref { *this }, request = Ref { request }, error = WTF::move(error)] {
+            if (!m_loader || m_curlRequest != request.ptr())
+                return;
+            fail(error);
+        });
     }
 
     RefPtr<ResourceLoader> m_loader;
@@ -367,6 +400,7 @@ private:
     String m_partition;
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     HttpCache::Writer m_cacheWriter;
+    Deque<Function<void()>> m_deferred;
 };
 
 // Fire-and-forget for sendBeacon, <a ping> and reports, the page does not see
@@ -847,7 +881,12 @@ private:
             load->cancel();
     }
 
-    void setDefersLoading(ResourceLoader&, bool) final { }
+    void setDefersLoading(ResourceLoader& loader, bool defers) final
+    {
+        // In a later task: the page's script is still running when its dialog ends
+        if (RefPtr load = defers ? nullptr : m_loads.get(&loader))
+            runOnEngineThread([load = load.releaseNonNull()] { load->runDeferred(); });
+    }
     void crossOriginRedirectReceived(ResourceLoader*, const URL&) final { }
     void servePendingRequests(ResourceLoadPriority) final { }
     void suspendPendingRequests() final { }

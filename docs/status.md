@@ -16,6 +16,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen.
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch, pointer lock, ctrl + wheel to the page first (#167).
+- **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
+  Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
+  rendering (#258).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
   waiting scripts (#246), GPU blur and shadow, CSS Paint
@@ -236,8 +239,6 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   encryption in the browser (WebCrypto), versions to roll back. Sign-ins in big IndexedDBs
   (WhatsApp Web, Telegram Web) do not follow to other devices; changes of the last seconds before
   closing reach the server only at the next start of that device.
-- **Async dialogs**: the `dialog` handler is synchronous (the engine thread waits); an async
-  variant would allow custom in-page dialogs.
 - **Navigation policy**: a host hook to allow, block or redirect navigations of the pages.
 - **Engine from a CDN**: a same-origin worker trampoline so the large files can come from another
   origin.

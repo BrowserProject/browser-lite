@@ -96,8 +96,8 @@ export class Requests {
   }
 
   /**
-   * alert/confirm/prompt/beforeunload (Module.engineDialog). The engine thread waits until
-   * bl_dialog_answer; the handler may answer later (a promise). Meanwhile the watchdog pauses.
+   * alert/confirm/prompt/beforeunload (Module.engineDialog). The asking page waits until
+   * bl_dialog_answer, the other views go on; the handler may answer later (a promise).
    */
   dialog(
     id: number,
@@ -115,7 +115,6 @@ export class Requests {
     }
     const controller = this.track(view);
     this.dialogs.set(id, { view, type: kind, controller });
-    this.host.watchdog.pause();
     let result: DialogAnswer | Promise<DialogAnswer>;
     try {
       result = handler({
@@ -147,7 +146,7 @@ export class Requests {
     if (!dialog) return;
     this.dialogs.delete(id);
     this.done(dialog.view, dialog.controller);
-    this.host.watchdog.resume();
+    this.host.watchdog.dialogClosed();
     this.answerDialog(id, dialog.type, answer);
   }
 
@@ -167,12 +166,22 @@ export class Requests {
       );
   }
 
-  /** Answers every open dialog with the default (the engine must run, for example to stop). */
-  closeDialogs(): void {
+  /** Whether a dialog of the view is open: its page waits and runs the view's calls afterwards. */
+  hasDialog(view: ViewImpl): boolean {
+    for (const dialog of this.dialogs.values()) if (dialog.view === view) return true;
+    return false;
+  }
+
+  /**
+   * Answers the open dialogs of a view, or all, with the default and aborts their requests: the
+   * view navigates (like Chrome) or the browser ends.
+   */
+  closeDialogs(view?: ViewImpl): void {
     for (const [id, dialog] of [...this.dialogs]) {
+      if (view && dialog.view !== view) continue;
       this.dialogs.delete(id);
       dialog.controller.abort();
-      this.host.watchdog.resume();
+      this.host.watchdog.dialogClosed();
       this.answerDialog(id, dialog.type, undefined);
     }
   }
@@ -336,12 +345,7 @@ export class Requests {
 
   /** The view closes: abort its requests; open dialogs and permission questions count as dismissed. */
   closeView(view: ViewImpl): void {
-    for (const [id, dialog] of [...this.dialogs]) {
-      if (dialog.view !== view) continue;
-      this.dialogs.delete(id);
-      this.host.watchdog.resume();
-      this.answerDialog(id, dialog.type, undefined);
-    }
+    this.closeDialogs(view);
     for (const [id, entry] of this.permissions) {
       if (entry.view !== view.id) continue;
       this.permissions.delete(id);

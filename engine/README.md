@@ -66,7 +66,8 @@ The full list is `abi.json`; the rules behind it:
 - Threads: `main()` runs on its own pthread, the engine thread (`-sPROXY_TO_PTHREAD`). Exports
   may be called from any thread and run asynchronously on the engine thread, unless
   `abi.json` marks them synchronous. Hooks run on the main thread of the page.
-  `engineDialog` is synchronous: the engine thread waits for its answer.
+  `engineDialog` returns at once; only the asking page waits for `bl_dialog_answer`, the
+  engine thread runs the other views meanwhile (#258).
 - Frames: the host transfers each view canvas with `transferControlToOffscreen` to
   `Module.blPresenterWorker()` (`{ blCanvas, viewId }`); the engine paints into it, on the
   compositor thread when compositing with WebGL 2. Without that canvas, `onEngineFrame` hands
