@@ -10,6 +10,7 @@
 #include <WebCore/InputMode.h>
 #include <WebCore/Page.h>
 #include <WebCore/DocumentInlines.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
