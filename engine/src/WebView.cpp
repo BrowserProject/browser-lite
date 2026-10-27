@@ -1608,7 +1608,6 @@ void WebView::firstPaintShown(int id)
 {
     debugLog("View %d: first paint", id);
     notifyHost(id, "first-paint");
-    didFirstPaint();
 }
 
 void WebView::exitFullscreen()
