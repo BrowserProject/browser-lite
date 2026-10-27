@@ -4,7 +4,8 @@ The full demo browser on browser-lite: tabs (with popups, restored tabs that loa
 click, discarding under memory pressure and a message when none is left), address bar with
 suggestions, history, bookmarks, downloads panel, settings page with profile and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
-handling. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
+handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
+runs). Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
 `@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the home server:
 [deploy/](deploy/README.md).
 

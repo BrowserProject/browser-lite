@@ -138,8 +138,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    about 0.4 s, bbc.com 0.16 s). Keeping 3 loaded workers in reserve
    helped one site and cost the other. `BL_ASYNC_IMAGE_DECODING=0` (#241) cut the waits to 0.27 and
    0.09 s and moved 10 to 50 ms of decoding to the engine thread, but a large image would then
-   block it while it decodes, so the default stays. Starting these queues right after the engine
-   start would take the waits off the first page.
+   block it while it decodes, so the default stays; 8 spare workers instead of 4 did not shorten
+   the waits either. Starting these queues right after the engine start would take them off the
+   first page.
 8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
