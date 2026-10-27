@@ -56,14 +56,21 @@ EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
 // From emscripten/wasmfs.h, which declares backend_t as another type than the classes here
 extern "C" int wasmfs_create_directory(const char* path, mode_t, wasmfs::backend_t);
 
-// Starts fetching the files of a group (paths separated by newlines) without waiting, so the
-// requests of the reads that follow find them in the HTTP cache or already on the way
-EM_JS(void, bl_lazy_prefetch, (const char* paths), {
-    if (ENVIRONMENT_IS_NODE)
-        return;
-    for (var path of UTF8ToString(paths).split('\n'))
-        fetch(locateFile(path)).then((response) => response.arrayBuffer()).catch(() => {});
-});
+// Starts fetching files (paths separated by newlines) without waiting, so the requests of the
+// reads that follow find them in the HTTP cache or already on the way. On the page main thread:
+// the thread that reads waits in its synchronous request right after, and the fetches of a worker
+// went out only once it ran its event loop again (bbc.com: 0.55 s later)
+static void bl_lazy_prefetch(const char* paths)
+{
+    MAIN_THREAD_ASYNC_EM_ASM({
+        var paths = UTF8ToString($0);
+        _free($0);
+        if (ENVIRONMENT_IS_NODE)
+            return;
+        for (var path of paths.split('\n'))
+            fetch(locateFile(path)).then((response) => response.arrayBuffer()).catch(() => {});
+    }, strdup(paths));
+}
 
 namespace BrowserLite {
 
