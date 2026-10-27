@@ -41,6 +41,7 @@ private:
     void unfocus() final { }
     bool canTakeFocus(WebCore::FocusDirection) const final { return true; }
     void takeFocus(WebCore::FocusDirection) final;
+    void focusedElementChanged(WebCore::Element*, WebCore::LocalFrame*, WebCore::FocusOptions, WebCore::BroadcastFocusedElement) final;
 
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;

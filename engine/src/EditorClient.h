@@ -20,6 +20,9 @@ public:
     {
     }
 
+    // "text-input" again when the focus moved (ChromeClient::focusedElementChanged)
+    void updateTextInput(WebCore::LocalFrame&);
+
 private:
     bool shouldDeleteRange(const std::optional<WebCore::SimpleRange>&) final { return true; }
     bool smartInsertDeleteEnabled() final { return false; }
