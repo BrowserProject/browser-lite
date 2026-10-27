@@ -2,9 +2,9 @@
 // /lazy/fonts (LazyFiles.cpp) loads on its first read, synchronously, in the middle of the layout
 // that needs it; a page with many scripts (the language menu of bbc.com: Bengali, Gujarati,
 // Korean, Myanmar, Thai, ...) waited one round trip after the other, 4 s at 150 ms before its
-// first paint. At the first such read the text that has a renderer gets scanned once, and the
-// files its characters need start loading at once; the reads that follow find them on the way or
-// in the HTTP cache.
+// first paint. Before such a read waits, the text that has a renderer gets scanned and the files
+// its characters need start loading at once; the reads that follow find them on the way or in the
+// HTTP cache.
 #include "config.h"
 #include "FontPrefetch.h"
 
@@ -28,7 +28,6 @@
 #include <unicode/uchar.h>
 #include <unicode/utypes.h>
 #include <vector>
-#include <wtf/MonotonicTime.h>
 #include <wtf/text/StringView.h>
 
 namespace BrowserLite {
@@ -132,18 +131,14 @@ void collect(Document& document, std::set<char32_t>& characters)
 
 } // namespace
 
-void prefetchFontsOfRenderedText()
+void prefetchFontsOfRenderedText(const char* path)
 {
-    if (!isEngineThread())
-        return;
-    // The misses of one layout come in a burst: one scan for them
-    static MonotonicTime last;
-    auto now = MonotonicTime::now();
-    if (now - last < 500_ms)
-        return;
-    last = now;
-
     static std::set<std::string> started;
+    // A file an earlier scan foresaw is already on the way; one it did not means new text (a scan
+    // per such file, each file waits once)
+    if (!isEngineThread() || started.count(path))
+        return;
+
     std::string paths;
     auto add = [&](const std::string& path) {
         if (started.insert(path).second)

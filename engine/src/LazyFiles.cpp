@@ -109,7 +109,7 @@ GroupRegistry& groupRegistry()
     return *registry;
 }
 
-using MissHandler = void (*)();
+using MissHandler = void (*)(const char* path);
 
 class LazyFile final : public DataFile {
 public:
@@ -137,7 +137,7 @@ private:
             if (m_group)
                 m_group->prefetch();
             if (*m_miss)
-                (*m_miss)();
+                (*m_miss)(m_url.c_str());
             double start = emscripten_get_now();
             m_data.resize(m_size);
             if (!bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size)) {
@@ -284,7 +284,7 @@ bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* i
     return !wasmfs_create_directory(mountPoint, S_IRUGO | S_IXUGO, backend);
 }
 
-void setLazyMissHandler(const char* mountPoint, void (*handler)())
+void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path))
 {
     auto found = backends().find(mountPoint);
     if (found != backends().end())
