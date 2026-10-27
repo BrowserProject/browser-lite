@@ -251,6 +251,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // Large images decode on the shared decoder thread (patch 0024, #241)
     settings.setLargeImageAsyncDecodingEnabled(config.asyncImageDecoding);
     settings.setAnimatedImageAsyncDecodingEnabled(config.asyncImageDecoding);
+    // Images drawn small decode small (patch 0054, #270)
+    settings.setImageSubsamplingEnabled(config.imageSubsampling);
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
