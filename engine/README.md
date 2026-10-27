@@ -25,6 +25,7 @@ patches from `patches/`.
 - `js/`: JavaScript parts of the engine
   - `engine-pre.js`: module hooks of the engine (canvases, file writes, crash reason, shutdown)
   - `deferred.js`: loads the chunks `engine.deferred-<n>.wasm` into every thread (`Module.blSetDeferred`)
+  - `workers.js`: loaded web workers for new threads, a reserve refilled in the background
   - `sockets.js`: TCP streams over `Module.blTransport`
   - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's

@@ -40,7 +40,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   5 Mbit/s, 150 ms starts after 15 s instead of 32 s (`tests/bench/slow-start.mjs`).
 - **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
-  after a browser restart the engine comes compiled from Chrome's code cache (#237).
+  after a browser restart the engine comes compiled from Chrome's code cache (#237); new threads get
+  loaded web workers from a reserve that refills in the background, the engine thread no longer
+  waits 60 to 180 ms for a worker to load (#242).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
@@ -132,16 +134,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-7. Thread starts during the first page: the shared queues of the image decoder and of
-   `window.crypto` (patch 0024), of `data:` URLs and of IndexedDB start once per engine, and the
-   engine thread waits until each runs, 80 to 170 ms when no loaded worker is free (elpais.com
-   about 0.4 s, bbc.com 0.16 s). Keeping 3 loaded workers in reserve
-   helped one site and cost the other. `BL_ASYNC_IMAGE_DECODING=0` (#241) cut the waits to 0.27 and
-   0.09 s and moved 10 to 50 ms of decoding to the engine thread, but a large image would then
-   block it while it decodes, so the default stays; 8 spare workers instead of 4 did not shorten
-   the waits either. Starting these queues right after the engine start would take them off the
-   first page.
-8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.

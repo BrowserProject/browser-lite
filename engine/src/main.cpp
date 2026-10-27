@@ -127,20 +127,11 @@ static void prepareFontCache(const char* path)
     utime(path, &times);
 }
 
-// The 8 prepared web workers (PTHREAD_POOL_SIZE) are taken quickly on the
-// first load. Every further thread (data: URLs, IndexedDB, images, blobs) then
-// starts a new worker and the engine thread waits until it runs (CNN: about
-// 1 s). So right after the start load a few more workers, asynchronously on
-// the main thread, without waiting for them. A bigger pool (#133) delays the
-// engine start instead.
-static void addSpareWorkers(int count)
+// Loaded web workers for new threads: a reserve that is refilled in the background
+// (engine/js/workers.js). A bigger pool (#133) delays the engine start instead.
+static void keepSpareWorkers(int count)
 {
-    if (count <= 0)
-        return;
-    MAIN_THREAD_ASYNC_EM_ASM({
-        for (var i = 0; i < $0; i++)
-            PThread.loadWasmModuleToWorker(PThread.allocateUnusedWorker());
-    }, count);
+    MAIN_THREAD_ASYNC_EM_ASM({ blKeepWorkers($0); }, count);
 }
 
 int main(int, char**)
@@ -194,8 +185,8 @@ int main(int, char**)
                 }
             }
         })->detach();
-    // Spare web workers (see addSpareWorkers)
-    addSpareWorkers(config.spareWorkers);
+    // Spare web workers (see keepSpareWorkers)
+    keepSpareWorkers(config.spareWorkers);
     WebCore::initializeCommonAtomStrings();
     initializeStorage();
     // Create the VM right away: from now on all work runs with DeferGC (EngineLoop.cpp)

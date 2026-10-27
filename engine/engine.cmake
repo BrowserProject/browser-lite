@@ -189,6 +189,8 @@ set(BL_PRE_JS
     engine-pre.js
     # Deferred engine code of a split engine.wasm (tools/split-engine.mjs)
     deferred.js
+    # Web workers for new threads (engine/src/main.cpp)
+    workers.js
     # WebAssembly of the pages (engine/src/wasm/WasmBridge.cpp)
     wasm-rewrite.js
     wasm-host.js
