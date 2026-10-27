@@ -106,8 +106,9 @@ struct Group {
 
     void prefetch()
     {
+        // Fonts behind the other requests: the text does not wait for them long (setLazyWaitLimit)
         if (!started.exchange(true))
-            bl_lazy_prefetch(paths.c_str(), false);
+            bl_lazy_prefetch(paths.c_str(), !paths.rfind("lazy/fonts/", 0));
     }
 };
 
