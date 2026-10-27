@@ -15,7 +15,12 @@ export const SWIFTSHADER = ['--use-angle=swiftshader', '--enable-unsafe-swiftsha
 
 // Firefox preferences that stand in for the Chromium switches of the tests; other switches are
 // dropped. Firefox has no clipboard permission, the testing pref lets pages read without a prompt.
-const FIREFOX_BASE_PREFS = { 'dom.events.testing.asyncClipboard': true };
+// Sound starts without a gesture, like in headless Chromium.
+const FIREFOX_BASE_PREFS = {
+  'dom.events.testing.asyncClipboard': true,
+  'media.autoplay.default': 0,
+  'media.autoplay.blocking_policy': 0,
+};
 const FIREFOX_PREFS = {
   '--use-fake-device-for-media-stream': { 'media.navigator.streams.fake': true },
   '--use-fake-ui-for-media-stream': { 'media.navigator.permission.disabled': true },

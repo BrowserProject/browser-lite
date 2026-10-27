@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  chromiumOnly,
   SWIFTSHADER,
   canvasOrigin,
   check,
@@ -285,26 +286,29 @@ check(
 // the photo at 1/2 (sharp stripes)
 const stripesRow = async (y) =>
   (await page.evaluate((y) => window.blTest.pageRow(y), y)).slice(8, 360);
-const smallSpread = contrast(await stripesRow(20));
-const cdp = await small.context.newCDPSession(page);
-const origin = await canvasOrigin(page);
-await cdp.send('Input.synthesizePinchGesture', {
-  x: origin.x + 1,
-  y: origin.y + 1,
-  scaleFactor: 4,
-  relativeSpeed: 3000,
-  gestureSourceType: 'mouse',
-});
-let pinched = 0;
-const pinchSharp = await waitFor(async () => {
-  pinched = contrast(await stripesRow(60));
-  return pinched > 120;
-}, 20000);
-check(
-  'pinch zoom 4 decodes the photo again: sharp stripes',
-  smallSpread < 80 && pinchSharp,
-  `brightness spread ${smallSpread} at 400 x 300, ${pinched} after the pinch`,
-);
+// The pinch gesture comes from CDP
+if (chromiumOnly('pinch zoom 4 decodes the photo again (CDP pinch gesture)')) {
+  const smallSpread = contrast(await stripesRow(20));
+  const cdp = await small.context.newCDPSession(page);
+  const origin = await canvasOrigin(page);
+  await cdp.send('Input.synthesizePinchGesture', {
+    x: origin.x + 1,
+    y: origin.y + 1,
+    scaleFactor: 4,
+    relativeSpeed: 3000,
+    gestureSourceType: 'mouse',
+  });
+  let pinched = 0;
+  const pinchSharp = await waitFor(async () => {
+    pinched = contrast(await stripesRow(60));
+    return pinched > 120;
+  }, 20000);
+  check(
+    'pinch zoom 4 decodes the photo again: sharp stripes',
+    smallSpread < 80 && pinchSharp,
+    `brightness spread ${smallSpread} at 400 x 300, ${pinched} after the pinch`,
+  );
+}
 
 // 3) The page again (scale 1, decoded at 1/8), then page zoom 4: the photo is 1600 x 1200
 small.results.delete('loaded');

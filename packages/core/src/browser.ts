@@ -359,6 +359,10 @@ class BrowserImpl implements Browser, ViewHost {
       },
       { signal },
     );
+    // A navigation or reload of the host page goes on running it until the next page answers:
+    // the engine writes meanwhile. Firefox does not let the engine write while pagehide waits
+    // on the main thread, Chromium does.
+    addEventListener('beforeunload', () => this.storage.flush(), { signal });
     addEventListener('pagehide', () => this.storage.flush(500), { signal });
     this.fullscreen.start(signal);
     this.network.start(signal);
