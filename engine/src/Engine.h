@@ -25,6 +25,9 @@ void runOnEngineThread(Function<void()>&&);
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);
 
+// After the first paint of a view, from any thread (main.cpp)
+void didFirstPaint();
+
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();

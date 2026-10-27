@@ -44,6 +44,7 @@
 #include <emscripten/threading.h>
 #include <utime.h>
 #include <wtf/MainThread.h>
+#include <wtf/RunLoop.h>
 #include <wtf/Threading.h>
 #include <wtf/text/MakeString.h>
 
@@ -53,6 +54,29 @@
 // module.
 EM_JS(void, bl_load_deferred, (unsigned chunk), { blLoadDeferred(chunk); });
 [[gnu::used]] static void (*const s_loadDeferred)(unsigned) = bl_load_deferred;
+
+#if ENABLE(WEBGL)
+// The host WebGL contexts of the pages (ANGLEShimWasm.cpp): their first creation queries the GPU
+// synchronously and waited for seconds when the GPU was busy painting (#123), so they come
+// ahead of the pages' first getContext. After the first paint, not as the first task after the
+// start: that held the first page back about 0.1 s (0.2 s with SwiftShader)
+static void prewarmWebGL()
+{
+    static std::atomic<bool> done;
+    if (done.exchange(true))
+        return;
+    callOnMainThread([] {
+        WebCore::angleShimPrewarm();
+    });
+}
+#endif
+
+void BrowserLite::didFirstPaint()
+{
+#if ENABLE(WEBGL)
+    prewarmWebGL();
+#endif
+}
 
 // The files of lazy/ that many sites need soon (engine/lazy-prefetch.txt in the data package):
 // fetched in the background, so a page finds them in the HTTP cache instead of waiting a round
@@ -239,10 +263,9 @@ int main(int, char**)
     WebCore::BackForwardCache::singleton().setMaxSize(3);
 
 #if ENABLE(WEBGL)
-    // Create the host WebGL contexts as the first task, while the GPU has
-    // nothing to do yet (ANGLEShimWasm.cpp)
-    callOnMainThread([] {
-        WebCore::angleShimPrewarm();
+    // The host WebGL contexts, at the latest after 5 s (see prewarmWebGL)
+    WTF::RunLoop::mainSingleton().dispatchAfter(WTF::Seconds(5), [] {
+        prewarmWebGL();
     });
 #endif
 
