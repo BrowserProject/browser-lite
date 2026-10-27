@@ -34,6 +34,13 @@ const IMMUTABLE = /^\/engine\/|^\/assets\/[^/]+-[\w-]{8}\.\w+$/;
 const cacheControl = (urlPath: string) =>
   IMMUTABLE.test(urlPath) ? 'public, max-age=31536000, immutable' : 'no-cache';
 
+// A file of an engine is the dictionary for the same file of the next engine version, which then
+// comes as a delta (<file>.<sha256 of the old file>.dcz, tools/engine-deltas.mjs)
+const useAsDictionary = (urlPath: string) => {
+  const rest = /^\/engine\/[^/]+\/(.+)$/.exec(urlPath)?.[1];
+  return rest ? `match="/engine/*/${rest}"` : undefined;
+};
+
 function refuse(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () =>
     socket.destroy(),
@@ -78,7 +85,10 @@ export function createApp(config: CliConfig, logger: Pick<Console, 'warn' | 'err
       return;
     }
     if (profile && (await profile.handle(req, res))) return;
-    if (config.siteDir && (await serveStatic(req, res, config.siteDir, { urlPath, cacheControl })))
+    if (
+      config.siteDir &&
+      (await serveStatic(req, res, config.siteDir, { urlPath, cacheControl, useAsDictionary }))
+    )
       return;
     res.writeHead(404, { 'Content-Type': 'text/plain' }).end('browser-lite\n');
   }

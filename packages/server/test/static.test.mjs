@@ -12,6 +12,8 @@ let site;
 let server;
 let port;
 const body = Buffer.from('0123456789abcdefghij');
+// SHA-256 of a dictionary the client has (Compression Dictionary Transport)
+const DICTIONARY = Buffer.alloc(32, 7);
 
 before(async () => {
   site = fs.mkdtempSync(path.join(os.tmpdir(), 'bl-static-test-'));
@@ -20,6 +22,7 @@ before(async () => {
   fs.writeFileSync(path.join(site, 'app.js'), 'console.log(1);'.repeat(50));
   fs.writeFileSync(path.join(site, 'app.js.gz'), 'gzip');
   fs.writeFileSync(path.join(site, 'app.js.br'), 'brotli');
+  fs.writeFileSync(path.join(site, `app.js.${DICTIONARY.toString('hex')}.dcz`), 'delta');
   fs.mkdirSync(path.join(site, 'mounted'));
   fs.writeFileSync(path.join(site, 'mounted', 'x.txt'), 'mounted');
   server = http.createServer(async (req, res) => {
@@ -30,6 +33,7 @@ before(async () => {
         })
       : await serveStatic(req, res, site, {
           cacheControl: (p) => (p === '/data.bin' ? 'max-age=60' : 'no-cache'),
+          useAsDictionary: (p) => (p === '/app.js' ? 'match="/app*.js"' : undefined),
         });
     if (!handled) res.writeHead(404).end();
   });
@@ -152,4 +156,28 @@ test('missing, traversal, other methods and broken URLs are not served', async (
   ])
     assert.equal((await request(port, bad)).status, 404, bad);
   assert.equal((await request(port, '/data.bin', { method: 'POST' })).status, 404);
+});
+
+test('dictionary delta (dcz) when the client offers its dictionary', async () => {
+  const offer = (hash, encodings = 'gzip, br, dcz') => ({
+    headers: {
+      'Accept-Encoding': encodings,
+      'Available-Dictionary': `:${hash.toString('base64')}:`,
+    },
+  });
+  const delta = await request(port, '/app.js', offer(DICTIONARY));
+  assert.equal(delta.headers['content-encoding'], 'dcz');
+  assert.equal(delta.body.toString(), 'delta');
+  assert.equal(delta.headers.vary, 'Accept-Encoding, Available-Dictionary');
+  assert.equal(delta.headers['use-as-dictionary'], 'match="/app*.js"');
+  // Another dictionary, or dcz not accepted: Brotli
+  assert.equal(
+    (await request(port, '/app.js', offer(Buffer.alloc(32, 8)))).headers['content-encoding'],
+    'br',
+  );
+  assert.equal(
+    (await request(port, '/app.js', offer(DICTIONARY, 'gzip, br'))).headers['content-encoding'],
+    'br',
+  );
+  assert.equal((await request(port, '/data.bin')).headers['use-as-dictionary'], undefined);
 });

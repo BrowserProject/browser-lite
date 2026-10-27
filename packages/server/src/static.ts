@@ -39,6 +39,12 @@ export interface ServeStaticOptions {
   cacheControl?: string | ((urlPath: string) => string);
   /** `Cross-Origin-Resource-Policy`, default `'same-origin'`. */
   corp?: ResourcePolicy;
+  /**
+   * `Use-As-Dictionary` value for a URL path (Compression Dictionary Transport), for example
+   * `match="/app-*.wasm"`: the browser keeps the file as a dictionary for later requests that
+   * match, and offers it when it asks for one of them. Default none.
+   */
+  useAsDictionary?: (urlPath: string) => string | undefined;
 }
 
 async function fileStat(file: string): Promise<Stats | null> {
@@ -78,6 +84,14 @@ function parseRange(
   return { start, end };
 }
 
+// The SHA-256 (hex) of the dictionary the client offers ("Available-Dictionary: :<base64>:")
+function offeredDictionary(req: IncomingMessage): string | null {
+  const hash = /^:([A-Za-z0-9+/]{43}=):$/.exec(
+    String(req.headers['available-dictionary'] ?? ''),
+  )?.[1];
+  return hash ? Buffer.from(hash, 'base64').toString('hex') : null;
+}
+
 function decodedPath(req: IncomingMessage): string | null {
   try {
     return decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname);
@@ -88,9 +102,10 @@ function decodedPath(req: IncomingMessage): string | null {
 
 /**
  * Serves `<root>/<path>` for GET and HEAD with the cross-origin isolation headers, a precompressed
- * `.br`/`.gz` file next to it when the client accepts it, ETag/Last-Modified (304) and single
- * byte ranges (206, on the uncompressed file). Resolves false (nothing sent) when there is no
- * such file, the method is not GET/HEAD or the URL is invalid.
+ * file next to it when the client accepts it (`<file>.<sha256 hex of a dictionary>.dcz` when the
+ * client offers that dictionary, else `.br`, `.gz`), ETag/Last-Modified (304) and single byte
+ * ranges (206, on the uncompressed file). Resolves false (nothing sent) when there is no such
+ * file, the method is not GET/HEAD or the URL is invalid.
  */
 export async function serveStatic(
   req: IncomingMessage,
@@ -115,10 +130,13 @@ export async function serveStatic(
   let encoding: string | null = null;
   if (!rangeHeader) {
     const accepted = String(req.headers['accept-encoding'] ?? '');
-    for (const [name, ext] of [
+    const variants: [string, string][] = [
       ['br', '.br'],
       ['gzip', '.gz'],
-    ] as const) {
+    ];
+    const dictionary = offeredDictionary(req);
+    if (dictionary) variants.unshift(['dcz', `.${dictionary}.dcz`]);
+    for (const [name, ext] of variants) {
       const compressed = accepted.includes(name) ? await fileStat(file + ext) : null;
       if (compressed) {
         send = file + ext;
@@ -135,10 +153,12 @@ export async function serveStatic(
   const headers: Record<string, string | number> = {
     ...securityHeaders({ corp: o.corp }),
     'Cache-Control': cacheControl,
-    Vary: 'Accept-Encoding',
+    Vary: encoding === 'dcz' ? 'Accept-Encoding, Available-Dictionary' : 'Accept-Encoding',
     ETag: etag,
     'Last-Modified': stats.mtime.toUTCString(),
   };
+  const useAsDictionary = o.useAsDictionary?.(urlPath);
+  if (useAsDictionary) headers['Use-As-Dictionary'] = useAsDictionary;
   const ifNoneMatch = req.headers['if-none-match'];
   if (ifNoneMatch && matchesETag(ifNoneMatch, etag)) {
     res.writeHead(304, headers).end();

@@ -21,7 +21,8 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `engine-manifest.mjs` | writes `manifest.json` (version, pins, SHA256 of the files) |
 | `gen-notices.mjs` | writes `THIRD_PARTY_NOTICES.txt` (runs in the toolchain image) |
 | `licenses.txt` | SPDX and license files of every dependency in `deps/sources.txt` |
-| `package-demo.sh` | demo site (`apps/demo`) with the packaged engine for the server |
+| `package-demo.sh` | demo site (`apps/demo`) with the packaged engine for the server; with the previous site its engine stays and the new one gets deltas against it |
+| `engine-deltas.mjs` | `.dcz` deltas of an engine against the previous one (Compression Dictionary Transport, #244) |
 | `build-images.sh` | builds and tests the images `server` and `demo` of the `Dockerfile` |
 | `optimize-assets.mjs` | smaller delivered files (no "name" section in .wasm, .br/.gz) |
 | `split-engine.mjs` | splits the linked `engine.wasm` into `engine.wasm` and chunks `engine.deferred-<n>.wasm` (build step, #238) |

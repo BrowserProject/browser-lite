@@ -73,9 +73,12 @@ process):
 | `maxPayload` | 64 KiB + 5 | largest WebSocket message (the largest packet of `WispTransport`) |
 | `idleTimeoutMs` | 0 | close streams without traffic after this time; 0 never |
 
-`@browser-lite/server/static`: `serveStatic(req, res, root, { urlPath?, cacheControl?, corp? })`
-(GET/HEAD, `.br`/`.gz` next to the file, ETag/304, single byte ranges; resolves false when it
-sent nothing), `coiHeaders({ corp? })` (COOP, COEP, CORP), `contentType(path)`.
+`@browser-lite/server/static`: `serveStatic(req, res, root, { urlPath?, cacheControl?, corp?,
+useAsDictionary? })` (GET/HEAD, `.br`/`.gz` next to the file, or `<file>.<sha256 hex>.dcz` when
+the browser offers that dictionary (`Available-Dictionary`, Compression Dictionary Transport),
+ETag/304, single byte ranges; `useAsDictionary(urlPath)` gives the `Use-As-Dictionary` header;
+resolves false when it sent nothing), `coiHeaders({ corp? })` (COOP, COEP, CORP),
+`contentType(path)`.
 
 `@browser-lite/server/token`: `signToken({ secret, ttlSeconds, audience, subject? })` (claims
 `{ exp, aud, sub? }`), `verifyToken(secret, token, audience)` (`{ subject? }` or null),
@@ -94,7 +97,7 @@ image (`SERVER_IMAGE:<version>` of `versions.env`, `Dockerfile` target `server`)
 | Variable | |
 | --- | --- |
 | `PORT`, `HOST` | default `5001`, `0.0.0.0` |
-| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable, so every engine version needs its own folder below it, and so are files of `/assets/` with a content hash in their name like Vite writes them (`index-Vc6q4Bex.js`) |
+| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable, so every engine version needs its own folder below it, and so are files of `/assets/` with a content hash in their name like Vite writes them (`index-Vc6q4Bex.js`); every file of `/engine/<hash>/` is a dictionary for the same path of the next engine (`.dcz` deltas of `tools/engine-deltas.mjs`) |
 | `PROFILE_DIR` | directory of the profile; without it `/profile/` answers 404 |
 | `PROFILE_MAX_MB` | limit of the profile, default 64 |
 | `ALLOWED_HOSTS` | host names of relay and profile besides IP addresses and `localhost`, comma separated (`.ts.net` matches all names ending so); other `Host` headers get 403 (DNS rebinding) |
@@ -160,4 +163,5 @@ still runs and the endpoint answers 503. The paths below use the default `path`.
 
 ```bash
 npm run build && npm test -w @browser-lite/server
+node packages/server/test/browser.mjs   # engine deltas in Chromium (suite packages)
 ```

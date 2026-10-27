@@ -65,6 +65,11 @@ isolation.
   to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`).
 - Put each engine version in its own folder (for example `engine/<hash>/`, as
   `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
+- After an update Chrome can load the new engine as deltas against the old one (Compression
+  Dictionary Transport, #244): `browser-lite-server` marks the engine files as dictionaries and
+  sends the `.dcz` files of `tools/engine-deltas.mjs` (`tools/package-demo.sh <engine> <out>
+  <previous>`), about 1 MB instead of 9.4 MB for `engine.wasm`. Keep the previous engine folder
+  for a while, open tabs still load chunks and `lazy/` files from it.
 - `engine.wasm` and the chunks `engine.deferred-<n>.wasm` as `application/wasm` (streaming compilation),
   precompressed. Sizes of a
   packaged engine (name section stripped):

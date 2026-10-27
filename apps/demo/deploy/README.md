@@ -19,7 +19,9 @@ names of `ALLOWED_HOSTS` (in `compose.yml` `.ts.net` for `tailscale serve`, chan
 
 1. *CI* builds and tests the engine and packages it (artifact `engine-dist`).
 2. *Deploy* (`.github/workflows/deploy.yml`, only after a green CI):
-   - packages the demo site from `engine-dist` (`tools/package-demo.sh`)
+   - packages the demo site from `engine-dist` (`tools/package-demo.sh`), with the engine of
+     the image deployed so far: it stays for open tabs, and the new engine gets deltas against
+     it, which Chrome loads instead of the whole files after the update (#244)
    - builds the images and tests them read-only (`tools/build-images.sh`: headers, Brotli,
      relay, profile, clean exit on SIGTERM)
    - pushes the demo image to `DEMO_IMAGE` of `versions.env` (tags `<commit>` and `main`)

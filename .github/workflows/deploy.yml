@@ -76,16 +76,25 @@ jobs:
           path: build/engine-dist
           run-id: ${{ steps.run.outputs.id }}
           github-token: ${{ github.token }}
-      - name: Package the demo
-        run: tools/package-demo.sh build/engine-dist build/demo
-      - name: Build and test the images (headers, compression, relay, profile, SIGTERM)
-        run: tools/build-images.sh build/demo "${{ steps.run.outputs.sha }}"
       - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Get the demo deployed so far (its engine stays, the new one gets deltas against it)
+        run: |
+          source versions.env
+          mkdir -p build/previous
+          if docker pull "$DEMO_IMAGE:main"; then
+            id="$(docker create "$DEMO_IMAGE:main")"
+            docker cp "$id:/app/site/." build/previous
+            docker rm "$id"
+          fi
+      - name: Package the demo
+        run: tools/package-demo.sh build/engine-dist build/demo build/previous
+      - name: Build and test the images (headers, compression, relay, profile, SIGTERM)
+        run: tools/build-images.sh build/demo "${{ steps.run.outputs.sha }}"
       - name: Push the demo image
         id: push
         env:

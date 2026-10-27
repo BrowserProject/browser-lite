@@ -49,7 +49,9 @@ smoke() { # <tag> <with-site>
         curl -fsI "$base/" | grep -qi '^cross-origin-embedder-policy: require-corp' ||
             bl_die "$tag: no COEP header on /"
         local wasm
-        wasm="$(cd "$site" && ls engine/*/engine.wasm)"
+        # The current engine and maybe the previous one (tools/package-demo.sh): one of them
+        local wasms=("$site"/engine/*/engine.wasm)
+        wasm="${wasms[0]#"$site"/}"
         curl -fsI -H 'Accept-Encoding: br' "$base/$wasm" | grep -qi '^content-encoding: br' ||
             bl_die "$tag: $wasm not delivered with Brotli"
         curl -fsS "$base/profile/info" | grep -q '"maxBytes"' || bl_die "$tag: /profile/info does not answer"
