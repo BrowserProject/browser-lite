@@ -1582,8 +1582,19 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
         return;
     debugLog("View %d: first visible layout%s", m_id, m_inRenderingUpdate ? " (in a rendering update)" : "");
     notifyHost(m_id, "first-layout");
-    if (m_firstPaint == FirstPaint::WaitingForLayout)
-        m_firstPaint = FirstPaint::WaitingForUpdate;
+    if (m_firstPaint != FirstPaint::WaitingForLayout)
+        return;
+    m_firstPaint = FirstPaint::WaitingForUpdate;
+    // A layout outside a rendering update (a script or the parser asked for it): show it before
+    // the waiting tasks (parsing, scripts), which otherwise ran first while the frame of the host
+    // waited behind them
+    if (!m_inRenderingUpdate && engineConfig().firstPaintEarly) {
+        scheduleRenderingUpdate();
+        runNextOnEngineThread([id = m_id] {
+            if (auto* view = fromID(id))
+                view->presentIfNeeded();
+        });
+    }
 }
 
 void WebView::firstPaintShown(int id)

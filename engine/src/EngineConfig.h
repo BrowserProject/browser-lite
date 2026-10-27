@@ -51,6 +51,9 @@ struct EngineConfig {
     // BL_ASYNC_IMAGE_DECODING: large images decode on the decoder thread (WebKit's default);
     // 0 decodes them where they are painted
     bool asyncImageDecoding { true };
+    // BL_FIRST_PAINT_EARLY: the rendering update after the first visible layout runs before the
+    // waiting tasks instead of with the next frame of the host
+    bool firstPaintEarly { true };
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB

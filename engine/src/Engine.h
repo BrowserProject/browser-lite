@@ -21,6 +21,9 @@ pthread_t engineThread();
 // Runs a function on the engine thread (callable from any thread).
 // Runs asynchronously as soon as the engine thread is back in the event loop.
 void runOnEngineThread(Function<void()>&&);
+// On the engine thread: runs `function` before the other waiting tasks of the engine thread,
+// right after the current one.
+void runNextOnEngineThread(Function<void()>&&);
 
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();

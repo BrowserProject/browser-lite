@@ -176,6 +176,13 @@ void runOnEngineThread(Function<void()>&& function)
     }
 }
 
+void runNextOnEngineThread(Function<void()>&& function)
+{
+    RELEASE_ASSERT(isEngineThread());
+    localTasks().prepend(new Function<void()>(WTF::move(function)));
+    scheduleLocalDrain();
+}
+
 static std::atomic<bool> s_pumpScheduled { false };
 static long s_timerId { 0 };
 static double s_timerDeadline { 0 };
