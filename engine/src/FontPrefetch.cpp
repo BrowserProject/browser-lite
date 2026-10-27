@@ -13,9 +13,11 @@
 #include "WebView.h"
 
 #include <WebCore/Document.h>
+#include <WebCore/DocumentInlines.h>
 #include <WebCore/ElementInlines.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/LocalFrame.h>
+#include <WebCore/LocalFrameInlines.h>
 #include <WebCore/NodeTraversal.h>
 #include <WebCore/Page.h>
 #include <WebCore/Text.h>
