@@ -13,6 +13,9 @@ namespace BrowserLite {
 
 class WebView;
 
+// Ends the open dialogs of a view with the default answer (the view closes)
+void dismissDialogs(int viewId);
+
 class ChromeClient final : public WebCore::EmptyChromeClient {
 public:
     explicit ChromeClient(WebView&);

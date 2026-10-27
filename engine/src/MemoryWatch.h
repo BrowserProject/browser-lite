@@ -6,6 +6,9 @@
 namespace BrowserLite {
 
 // After every work item on the engine thread; cheap unless malloc grew by 32 MB.
-void checkMemory();
+// Inside a dialog's nested event loop (script of the page waits below) caches
+// are not released, the reserve and the pressure report still work.
+enum class ReleaseCaches : bool { No, Yes };
+void checkMemory(ReleaseCaches = ReleaseCaches::Yes);
 
 } // namespace BrowserLite

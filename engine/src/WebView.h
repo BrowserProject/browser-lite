@@ -14,6 +14,8 @@
 #include <skia/core/SkRefCnt.h>
 #include <wtf/CheckedRef.h>
 #include <wtf/CompletionHandler.h>
+#include <wtf/Deque.h>
+#include <wtf/Function.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/URL.h>
@@ -51,6 +53,8 @@ public:
     ~WebView();
 
     static WebView* fromID(int);
+    // Not closed yet; after close() a dialog of its page may still hold the view
+    bool isOpen() const;
     static void forEach(const Function<void(WebView&)>&);
     void setDarkAppearance(bool);
 
@@ -175,6 +179,15 @@ public:
     void find(const String&, bool backwards, bool again);
     void stopFind();
 
+    // A dialog of this view's page group is open (Clients.cpp, #258): its
+    // script waits, so the view drops input, holds back commands and makes no
+    // rendering update (the last frame stays) until unblockAfterDialog()
+    void blockForDialog() { ++m_dialogBlocks; }
+    void unblockAfterDialog();
+    bool isBlockedByDialog() const { return m_dialogBlocks; }
+    // A command of the host: runs now, while blocked afterwards in order
+    void runWhenNotBlocked(Function<void(WebView&)>&&);
+
     // For the clients
     void didStartLoading();
     // The next error page (ErrorPage.cpp) is because of an invalid certificate
@@ -216,6 +229,9 @@ private:
     void notifyNavigationState();
 
     int m_id;
+    unsigned m_dialogBlocks { 0 };
+    Deque<Function<void(WebView&)>> m_heldCommands;
+    void runHeldCommands();
     WebCore::IntSize m_size;
     float m_deviceScaleFactor { 1 };
     WebCore::IntSize m_pixelSize;

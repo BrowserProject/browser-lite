@@ -13,6 +13,7 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "HttpAuth.h"
 #include "Preconnect.h"
 #include "LayerTreeHostWasm.h"
 #include "LazyFiles.h"
@@ -61,11 +62,23 @@ static String takeString(char* utf8)
     return string;
 }
 
+// A command for a view. While a dialog of its page group is open (#258) it
+// runs only afterwards, in order, like in Chrome where the page's thread waits.
 template<typename Function>
 static void withView(int id, Function&& function)
 {
     runOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
         if (auto* view = WebView::fromID(id))
+            view->runWhenNotBlocked(WTF::move(function));
+    });
+}
+
+// Input for a view: dropped while a dialog of its page group is open, like Chrome
+template<typename Function>
+static void withInput(int id, Function&& function)
+{
+    runOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
+        if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
             function(*view);
     });
 }
@@ -126,7 +139,8 @@ EMSCRIPTEN_KEEPALIVE void bl_try_close(int id)
     runOnEngineThread([id] {
         RefPtr view = WebView::fromID(id);
         RefPtr frame = view ? view->mainFrame() : nullptr;
-        bool close = !frame || frame->loader().shouldClose();
+        // A page waiting in a dialog closes without asking, like in Chrome
+        bool close = !frame || view->isBlockedByDialog() || frame->loader().shouldClose();
         notifyHost(id, "try-close", close ? "{\"close\":true}"_s : "{\"close\":false}"_s);
     });
 }
@@ -208,21 +222,21 @@ EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
 
 EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, double x, double y, int clickCount, int modifiers)
 {
-    withView(id, [=](WebView& view) { view.mouseEvent(type, button, x, y, clickCount, modifiers); });
+    withInput(id, [=](WebView& view) { view.mouseEvent(type, button, x, y, clickCount, modifiers); });
 }
 
 // Mouse move with movementX/Y (also with pointer lock). button: pressed
 // button like in bl_mouse (-1 = none), otherwise there is no dragging/selecting
 EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int button, int modifiers)
 {
-    withView(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
+    withInput(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
 }
 
 // Dragging from the host over the page: phase 0 = over, 1 = left, 2 = dropped.
 // data: JSON with text/HTML/URI list and file paths (WebView::hostDrag)
 EMSCRIPTEN_KEEPALIVE void bl_drag(int id, int phase, double x, double y, int modifiers, char* data)
 {
-    withView(id, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
+    withInput(id, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
@@ -245,7 +259,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         // wheel listener)
         RefPtr scene = CompositorScene::forView(id);
         if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
-            withView(id, [=](WebView& view) {
+            withInput(id, [=](WebView& view) {
                 view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
             });
             return;
@@ -255,7 +269,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         });
         return;
     }
-    withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
+    withInput(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
 }
 
 // Ctrl + wheel (zoom) goes to the page first like in Chrome (maps, editors
@@ -267,13 +281,16 @@ EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX
 {
     auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers);
     bool blocking = cancelable && Scrolling::mayCancelWheelEvent(id, event);
-    withView(id, [event, blocking](WebView& view) { view.zoomWheelEvent(event, blocking); });
+    runOnEngineThread([id, event, blocking] {
+        if (auto* view = WebView::fromID(id))
+            view->zoomWheelEvent(event, blocking);
+    });
     return blocking;
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* text, int keyCode, int repeat, int modifiers)
 {
-    withView(id, [=, key = takeString(key), code = takeString(code), text = takeString(text)](WebView& view) {
+    withInput(id, [=, key = takeString(key), code = takeString(code), text = takeString(text)](WebView& view) {
         view.keyEvent(type, key, code, text, keyCode, repeat, modifiers);
     });
 }
@@ -281,17 +298,17 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
 // Preview during text input (compositionupdate) and completion (compositionend)
 EMSCRIPTEN_KEEPALIVE void bl_set_composition(int id, char* text, int selectionStart, int selectionEnd)
 {
-    withView(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
+    withInput(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_confirm_composition(int id, char* text)
 {
-    withView(id, [text = takeString(text)](WebView& view) { view.confirmComposition(text); });
+    withInput(id, [text = takeString(text)](WebView& view) { view.confirmComposition(text); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_insert_text(int id, char* text)
 {
-    withView(id, [text = takeString(text)](WebView& view) { view.insertText(text); });
+    withInput(id, [text = takeString(text)](WebView& view) { view.insertText(text); });
 }
 
 // paths: paths in the virtual file system, separated by newlines. Empty = cancelled.
@@ -306,22 +323,22 @@ EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
 // "#rrggbb", date/time as the value of the input field. done = chooser closed
 EMSCRIPTEN_KEEPALIVE void bl_popup_choose(int id, int index)
 {
-    runOnEngineThread([=] { choosePopupItem(id, index); });
+    withView(id, [=](WebView&) { choosePopupItem(id, index); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_color_chosen(int id, char* color, int done)
 {
-    runOnEngineThread([id, color = takeString(color), done] { chooseColor(id, color, done); });
+    withView(id, [id, color = takeString(color), done](WebView&) { chooseColor(id, color, done); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_datetime_chosen(int id, char* value, int done)
 {
-    runOnEngineThread([id, value = takeString(value), done] { chooseDateTime(id, value, done); });
+    withView(id, [id, value = takeString(value), done](WebView&) { chooseDateTime(id, value, done); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_focus_initial(int id, int forward)
 {
-    withView(id, [=](WebView& view) { view.focusInitial(forward); });
+    withInput(id, [=](WebView& view) { view.focusInitial(forward); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)
@@ -341,7 +358,7 @@ EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, d
         scene->pinch(pinchPhase, factor, focus);
         return;
     }
-    withView(id, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
+    withInput(id, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
 }
 
 // Find: again = find next with the same input (Enter / Shift+Enter)
@@ -374,12 +391,12 @@ EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)
 
 EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)
 {
-    withView(id, [=](WebView& view) { view.contextMenu(x, y); });
+    withInput(id, [=](WebView& view) { view.contextMenu(x, y); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
 {
-    withView(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });
+    withInput(id, [name = takeString(name)](WebView& view) { view.executeCommand(name); });
 }
 
 // Video/audio: state of the host <video> (JSON), new frame, data for the service worker
@@ -462,7 +479,7 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
 
 EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers)
 {
-    withView(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
+    withInput(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
 }
 
 // Permissions, geolocation, notifications (DeviceClients.cpp).
@@ -471,6 +488,17 @@ EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers
 EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int answer)
 {
     runOnEngineThread([=] { answerPermission(requestId, static_cast<PermissionDecision>(std::clamp(answer, 0, 2))); });
+}
+
+// HTTP authentication (HttpAuth.cpp): username null = cancelled
+EMSCRIPTEN_KEEPALIVE void bl_auth_answer(int requestId, char* username, char* password)
+{
+    std::optional<std::pair<String, String>> answer;
+    if (username)
+        answer = std::pair { takeString(username), takeString(password) };
+    else
+        free(password);
+    runOnEngineThread([requestId, answer = WTF::move(answer)]() mutable { HttpAuth::answer(requestId, WTF::move(answer)); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_permission(char* kind, char* origin, int decision)

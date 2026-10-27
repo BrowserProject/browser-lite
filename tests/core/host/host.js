@@ -222,6 +222,27 @@ async function askPermission(request) {
   return answer;
 }
 
+function authenticate(request) {
+  host.events.push(`auth:${request.realm}`);
+  host.authRequests.push({
+    url: request.url,
+    origin: request.origin,
+    realm: request.realm,
+    scheme: request.scheme,
+    retry: request.retry,
+    view: request.view.id,
+  });
+  const answer = host.authAnswers.shift() ?? null;
+  if (answer === 'wait')
+    return new Promise((resolve) => {
+      request.signal.addEventListener('abort', () => {
+        host.events.push(`auth-aborted:${request.realm}`);
+        resolve(null);
+      });
+    });
+  return Promise.resolve(answer);
+}
+
 const host = {
   support: checkSupport(),
   ready: null,
@@ -237,6 +258,9 @@ const host = {
   colorRequests: [],
   dateRequests: [],
   permissionRequests: [],
+  authRequests: [],
+  /** Answers of the authenticate handler in turn: {username, password}, null or 'wait'. */
+  authAnswers: [],
   /** Index of the <select> item, -1 cancels. */
   selectAnswer: -1,
   /**
@@ -251,10 +275,20 @@ const host = {
   dateAnswer: null,
   /**
    * 'answer': confirm true, prompt 'answer'; 'async': the same after dialogDelay ms (a promise);
-   * 'native': the dialogs of the host page.
+   * 'native': the dialogs of the host page; 'hold': open until answerDialog(message, answer),
+   * an aborted one records 'dialog-aborted:<message>'.
    */
   dialogMode: 'answer',
   dialogDelay: 1000,
+  /** Dialogs held open in mode 'hold': [{ message, resolve }]. */
+  heldDialogs: [],
+  /** Answers the held dialog with this message; false when none is open. */
+  answerDialog(message, answer) {
+    const index = host.heldDialogs.findIndex((dialog) => dialog.message === message);
+    if (index < 0) return false;
+    host.heldDialogs.splice(index, 1)[0].resolve(answer);
+    return true;
+  },
   /** Payloads of the 'memory-pressure' events ({footprint, limit}). */
   memoryPressure: [],
   /** Download objects of the 'download' event (for cancel()). */
@@ -310,6 +344,7 @@ const host = {
           return Promise.resolve(host.dateAnswer);
         },
         permission: askPermission,
+        authenticate,
         fileChooser(request) {
           host.events.push(`filechooser:${request.multiple}`);
           return Promise.resolve(
@@ -329,6 +364,15 @@ const host = {
             view: request.view.id,
           });
           if (host.dialogMode === 'native') return nativeDialog(request);
+          if (host.dialogMode === 'hold')
+            return new Promise((resolve) => {
+              const held = { message: request.message, resolve };
+              host.heldDialogs.push(held);
+              request.signal.addEventListener('abort', () => {
+                host.events.push(`dialog-aborted:${request.message}`);
+                host.heldDialogs = host.heldDialogs.filter((dialog) => dialog !== held);
+              });
+            });
           const answer = request.type === 'prompt' ? 'answer' : true;
           if (host.dialogMode === 'async')
             return new Promise((resolve) => setTimeout(() => resolve(answer), host.dialogDelay));

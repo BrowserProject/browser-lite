@@ -50,6 +50,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Prewarm.cpp
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
+    ${BL_ENGINE_SRC}/HttpAuth.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/LazyFiles.cpp
     ${BL_ENGINE_SRC}/FontPrefetch.cpp
@@ -233,12 +234,13 @@ if (BROWSER_LITE_RUNTIME_DIR)
         "SHELL:--preload-file ${BROWSER_LITE_RUNTIME_DIR}@/"
         # HRTF data for PannerNode (AudioBus::loadPlatformResource)
         "SHELL:--preload-file ${WEBCORE_DIR}/platform/audio/resources/Composite.wav@/usr/share/webkit/audio/Composite.wav"
-        # Broken image icon and resize corner of text areas (engine/src/PlatformResources.cpp)
+        # Broken image icon and resize corner of text areas (engine/src/PlatformResources.cpp),
+        # "@@" is an "@" of the file name
         "SHELL:--preload-file ${WEBCORE_DIR}/Resources/missingImage.png@/usr/share/webkit/images/missingImage.png"
-        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/missingImage@2x.png@/usr/share/webkit/images/missingImage@2x.png"
-        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/missingImage@3x.png@/usr/share/webkit/images/missingImage@3x.png"
+        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/missingImage@@2x.png@/usr/share/webkit/images/missingImage@@2x.png"
+        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/missingImage@@3x.png@/usr/share/webkit/images/missingImage@@3x.png"
         "SHELL:--preload-file ${WEBCORE_DIR}/Resources/textAreaResizeCorner.png@/usr/share/webkit/images/textAreaResizeCorner.png"
-        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/textAreaResizeCorner@2x.png@/usr/share/webkit/images/textAreaResizeCorner@2x.png"
+        "SHELL:--preload-file ${WEBCORE_DIR}/Resources/textAreaResizeCorner@@2x.png@/usr/share/webkit/images/textAreaResizeCorner@@2x.png"
         # WebAssembly API for the pages, evaluated in JSC
         "SHELL:--preload-file ${BROWSER_LITE_ENGINE_DIR}/js/wasm-guest.js@/usr/share/browser-lite/wasm-guest.js"
         # Files of lazy/ fetched in the background at the start (main.cpp)

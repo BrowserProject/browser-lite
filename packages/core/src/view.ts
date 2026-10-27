@@ -217,22 +217,33 @@ export class ViewImpl implements View {
     this.host.module._bl_set_visible(this.id, visible ? 1 : 0);
   }
 
+  // A view with an open dialog answers only after it (the engine holds its calls back)
   private call(fn: (module: EngineModule) => void, expectAnswer = false): void {
     if (!this.alive) return;
-    if (expectAnswer) this.host.watchdog.expectAnswer();
+    if (expectAnswer && !this.host.requests.hasDialog(this)) this.host.watchdog.expectAnswer();
     fn(this.host.module);
   }
 
+  // Like Chrome, a navigation first ends the open dialogs of the view with their default answer
+  private navigate(fn: (module: EngineModule) => void, expectAnswer = false): void {
+    if (!this.alive) return;
+    this.host.requests.closeDialogs(this);
+    this.call(fn, expectAnswer);
+  }
+
   load(url: string): void {
-    this.call((m) => m._bl_load_url(this.id, this.host.text(url)), true);
+    this.navigate((m) => m._bl_load_url(this.id, this.host.text(url)), true);
   }
 
   loadHTML(html: string, baseURL: string): void {
-    this.call((m) => m._bl_load_html(this.id, this.host.text(html), this.host.text(baseURL)), true);
+    this.navigate(
+      (m) => m._bl_load_html(this.id, this.host.text(html), this.host.text(baseURL)),
+      true,
+    );
   }
 
   reload(): void {
-    this.call((m) => m._bl_reload(this.id), true);
+    this.navigate((m) => m._bl_reload(this.id), true);
   }
 
   stop(): void {
@@ -240,15 +251,18 @@ export class ViewImpl implements View {
   }
 
   back(): void {
-    this.call((m) => m._bl_go_back(this.id));
+    this.navigate((m) => m._bl_go_back(this.id));
   }
 
   forward(): void {
-    this.call((m) => m._bl_go_forward(this.id));
+    this.navigate((m) => m._bl_go_forward(this.id));
   }
 
   restoreHistory(history: SessionHistory): void {
-    this.call((m) => m._bl_restore_history(this.id, this.host.text(JSON.stringify(history))), true);
+    this.navigate(
+      (m) => m._bl_restore_history(this.id, this.host.text(JSON.stringify(history))),
+      true,
+    );
   }
 
   setVisible(visible: boolean): void {
