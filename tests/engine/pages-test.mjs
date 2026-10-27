@@ -6,6 +6,7 @@
 //   hang.html      watchdog: an endless loop is stopped, the engine keeps running (BL_SCRIPT_TIMEOUT=2)
 //   bridges.html   features and host bridges: no __bl globals, disabled features missing (none, all)
 //   lazy.html      ICU data and fonts loaded on first use (lazy/ next to the engine)
+//   svg-use.html   load events of <use> elements of an external sprite (patch 0051)
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -25,6 +26,7 @@ const CASES = [
   { name: 'limits', wait: 'LIMITS done' },
   { name: 'hang', wait: 'HANG done', env: { BL_SCRIPT_TIMEOUT: '2' } },
   { name: 'lazy', wait: 'LAZY done' },
+  { name: 'svg-use', size: [400, 40], wait: 'SVGUSE done' },
   {
     name: 'bridges',
     label: 'bridges (no features)',

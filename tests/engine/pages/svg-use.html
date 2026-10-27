@@ -1,0 +1,30 @@
+<!doctype html>
+<title>SVG use</title>
+<!-- <use> of an external sprite (patch 0051): every use gets one load event, as a task after
+     all uses took the sprite (like Blink): the first listener already sees the last use drawn -->
+<svg id="icons" width="400" height="20"></svg>
+<script>
+const sprite = new Blob(
+  ['<svg xmlns="http://www.w3.org/2000/svg"><symbol id="dot" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="teal"/></symbol></svg>'],
+  { type: 'image/svg+xml' },
+);
+const href = URL.createObjectURL(sprite) + '#dot';
+const total = 20;
+let count = 0;
+let lastWidth = -1;
+let last = null;
+for (let i = 0; i < total; i++) {
+  last = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  last.setAttribute('href', href);
+  last.setAttribute('x', i * 20);
+  last.setAttribute('width', 16);
+  last.setAttribute('height', 16);
+  last.addEventListener('load', () => {
+    if (++count === 1) lastWidth = last.getBBox().width;
+    if (count === total)
+      console.log('SVGUSE done=' + (lastWidth > 0 ? 'ok' : 'first-listener-saw-width-' + lastWidth));
+  });
+  document.getElementById('icons').append(last);
+}
+setTimeout(() => console.log('SVGUSE done=' + count + '-load-events'), 5000);
+</script>

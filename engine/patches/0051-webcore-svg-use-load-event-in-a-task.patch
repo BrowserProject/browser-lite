@@ -1,0 +1,33 @@
+diff --git a/Source/WebCore/svg/SVGUseElement.cpp b/Source/WebCore/svg/SVGUseElement.cpp
+index d50aae695d..7675687018 100644
+--- a/Source/WebCore/svg/SVGUseElement.cpp
++++ b/Source/WebCore/svg/SVGUseElement.cpp
+@@ -29,6 +29,7 @@
+ 
+ #include "CachedSVGDocument.h"
+ #include "ContainerNodeInlines.h"
++#include "NodeInlines.h"
+ #include "DocumentResourceLoader.h"
+ #include "ElementAncestorIteratorInlines.h"
+ #include "ElementChildIteratorInlines.h"
+@@ -651,11 +652,17 @@ void SVGUseElement::notifyFinished(CachedResource& resource, const NetworkLoadMe
+ {
+     ASSERT(ScriptDisallowedScope::InMainThread::isScriptAllowed());
+     invalidateShadowTree();
++    // browser-lite: the event in a task, like Blink: every use of a sprite takes its new shadow
++    // tree first, so a listener that reads layout updates it once for all of them instead of
++    // once per use (20min.ch: 164 uses of one sprite, 4.3 s of layouts in the load listeners)
+     if (resource.errorOccurred()) {
+         setErrorOccurred(true);
+-        dispatchEvent(Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
+-    } else if (!resource.wasCanceled())
+-        SVGURIReference::dispatchLoadEvent();
++        queueTaskToDispatchEvent(TaskSource::DOMManipulation, Event::create(eventNames().errorEvent, Event::CanBubble::No, Event::IsCancelable::No));
++    } else if (!resource.wasCanceled()) {
++        queueTaskKeepingNodeAlive(*this, TaskSource::DOMManipulation, [](SVGUseElement& element) {
++            element.SVGURIReference::dispatchLoadEvent();
++        });
++    }
+ }
+ 
+ void SVGUseElement::updateExternalDocument()
