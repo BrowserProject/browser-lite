@@ -158,14 +158,15 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
   }
 
   // Work still running (decoding sound, compiling WebAssembly) holds the documents of the last
-  // pages for a moment: measure until the number no longer drops
-  async function measureSettled() {
+  // pages for a moment: measure until the number no longer drops, with `limit` until it is at
+  // most that (a slow machine needs longer), at most 20 s
+  async function measureSettled(limit = Number.POSITIVE_INFINITY) {
     let best = await measure();
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 10; i++) {
       await page.waitForTimeout(2000);
       const next = await measure();
-      if (next.documents >= best.documents) return best;
-      best = next;
+      if (next.documents >= best.documents && best.documents <= limit) return best;
+      if (next.documents < best.documents) best = next;
     }
     return best;
   }
@@ -236,7 +237,7 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
 
   await go(`${siteURL}empty?r=end`);
   await waitDone('empty-end');
-  const end = await measureSettled();
+  const end = await measureSettled(base.documents + 2);
   console.log(
     `     at the end: ${JSON.stringify({ ...end, documentList: end.documentList.length })}`,
   );
