@@ -105,6 +105,10 @@ once the hashed app files were no longer revalidated (#243); behind 4 downloads 
 response of another origin came after 0.5 to 0.85 s instead of 17 to 20 s (native Chromium 0.5 to
 1.1 s, #245); the first request to a preconnected origin took 0.16 instead of 0.44 s (#247).
 Wikipedia on a first visit: ready 14.8 s, first paint 21.8 s, loaded 25.6 s.
+A warm start (same profile, local) on 2 cores painted a small page after a median 1.70 instead
+of 2.06 s once the compositor's WebGL context came during the start and the worker reserve waited
+3 s (#249, #242); the demo, where the profile and the engine now load side by side (#248), after
+about 2.0 instead of 3.2 s.
 
 ## Measurements (emulated devices)
 
