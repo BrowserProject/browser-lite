@@ -2,6 +2,8 @@ import type { Config } from './config.js';
 import type { EngineModule } from './engine.js';
 import { storePermission } from './permissions.js';
 import type {
+  AuthCredentials,
+  AuthRequest,
   DialogAnswer,
   DialogRequest,
   FileChooserRequest,
@@ -65,15 +67,16 @@ const rectOf = (data: Record<string, unknown>): Rect => ({
 });
 
 /**
- * Requests the engine waits for (dialogs, permissions, file chooser, popups and pickers),
- * answered by the request handlers of the options or safe defaults. Every request has an
- * AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
+ * Requests the engine waits for (dialogs, permissions, HTTP authentication, file chooser, popups
+ * and pickers), answered by the request handlers of the options or safe defaults. Every request
+ * has an AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
  */
 export class Requests {
   private readonly pending = new Map<number, Set<AbortController>>();
   private readonly pickers = new Map<string, AbortController>();
   private readonly permissions = new Map<number, { view: number; controller: AbortController }>();
   private readonly dialogs = new Map<number, OpenDialog>();
+  private readonly auths = new Map<number, { view: number; controller: AbortController }>();
 
   constructor(private readonly host: RequestsHost) {}
 
@@ -94,8 +97,8 @@ export class Requests {
   }
 
   /**
-   * alert/confirm/prompt/beforeunload (Module.engineDialog). The engine thread waits until
-   * bl_dialog_answer; the handler may answer later (a promise). Meanwhile the watchdog pauses.
+   * alert/confirm/prompt/beforeunload (Module.engineDialog). The asking page waits until
+   * bl_dialog_answer, the other views go on; the handler may answer later (a promise).
    */
   dialog(
     id: number,
@@ -113,7 +116,6 @@ export class Requests {
     }
     const controller = this.track(view);
     this.dialogs.set(id, { view, type: kind, controller });
-    this.host.watchdog.pause();
     let result: DialogAnswer | Promise<DialogAnswer>;
     try {
       result = handler({
@@ -145,7 +147,7 @@ export class Requests {
     if (!dialog) return;
     this.dialogs.delete(id);
     this.done(dialog.view, dialog.controller);
-    this.host.watchdog.resume();
+    this.host.watchdog.dialogClosed();
     this.answerDialog(id, dialog.type, answer);
   }
 
@@ -165,12 +167,22 @@ export class Requests {
       );
   }
 
-  /** Answers every open dialog with the default (the engine must run, for example to stop). */
-  closeDialogs(): void {
+  /** Whether a dialog of the view is open: its page waits and runs the view's calls afterwards. */
+  hasDialog(view: ViewImpl): boolean {
+    for (const dialog of this.dialogs.values()) if (dialog.view === view) return true;
+    return false;
+  }
+
+  /**
+   * Answers the open dialogs of a view, or all, with the default and aborts their requests: the
+   * view navigates (like Chrome) or the browser ends.
+   */
+  closeDialogs(view?: ViewImpl): void {
     for (const [id, dialog] of [...this.dialogs]) {
+      if (view && dialog.view !== view) continue;
       this.dialogs.delete(id);
       dialog.controller.abort();
-      this.host.watchdog.resume();
+      this.host.watchdog.dialogClosed();
       this.answerDialog(id, dialog.type, undefined);
     }
   }
@@ -204,6 +216,62 @@ export class Requests {
     if (!this.host.ready) return;
     if (answer !== 'dismiss') storePermission(config.permissions, data.origin, data.kind, answer);
     module._bl_permission_answer(data.id, answer === 'grant' ? 1 : answer === 'deny' ? 2 : 0);
+  }
+
+  /** A 401 the engine asks the user about ('auth'); answered with bl_auth_answer. */
+  async authenticate(
+    view: ViewImpl,
+    data: {
+      id: number;
+      url?: string;
+      origin?: string;
+      realm?: string;
+      scheme?: string;
+      retry?: boolean;
+    },
+  ): Promise<void> {
+    const { module } = this.host;
+    const handler = this.host.handler('authenticate');
+    if (!handler) {
+      module._bl_auth_answer(data.id, 0, 0);
+      return;
+    }
+    const controller = this.track(view);
+    this.auths.set(data.id, { view: view.id, controller });
+    let answer: AuthCredentials | null = null;
+    try {
+      const request: AuthRequest = {
+        view,
+        url: String(data.url ?? ''),
+        origin: String(data.origin ?? ''),
+        realm: String(data.realm ?? ''),
+        scheme: data.scheme === 'digest' ? 'digest' : 'basic',
+        retry: !!data.retry,
+        signal: controller.signal,
+      };
+      const result = await handler(request);
+      if (result && typeof result.username === 'string' && typeof result.password === 'string')
+        answer = { username: result.username, password: result.password };
+    } catch {}
+    if (controller.signal.aborted || !this.auths.has(data.id)) return;
+    this.auths.delete(data.id);
+    this.done(view, controller);
+    if (!this.host.ready) return;
+    if (answer)
+      module._bl_auth_answer(
+        data.id,
+        this.host.text(answer.username),
+        this.host.text(answer.password),
+      );
+    else module._bl_auth_answer(data.id, 0, 0);
+  }
+
+  /** No load waits for the answer any more ('auth-cancel'). */
+  cancelAuth(id: number): void {
+    const entry = this.auths.get(id);
+    if (!entry) return;
+    this.auths.delete(id);
+    entry.controller.abort();
   }
 
   async fileChooser(view: ViewImpl, data: { multiple?: boolean; accept?: string }): Promise<void> {
@@ -334,16 +402,16 @@ export class Requests {
 
   /** The view closes: abort its requests; open dialogs and permission questions count as dismissed. */
   closeView(view: ViewImpl): void {
-    for (const [id, dialog] of [...this.dialogs]) {
-      if (dialog.view !== view) continue;
-      this.dialogs.delete(id);
-      this.host.watchdog.resume();
-      this.answerDialog(id, dialog.type, undefined);
-    }
+    this.closeDialogs(view);
     for (const [id, entry] of this.permissions) {
       if (entry.view !== view.id) continue;
       this.permissions.delete(id);
       if (this.host.ready) this.host.module._bl_permission_answer(id, 0);
+    }
+    for (const [id, entry] of this.auths) {
+      if (entry.view !== view.id) continue;
+      this.auths.delete(id);
+      if (this.host.ready) this.host.module._bl_auth_answer(id, 0, 0);
     }
     for (const controller of [...(this.pending.get(view.id) ?? [])]) controller.abort();
     this.pending.delete(view.id);
@@ -354,6 +422,7 @@ export class Requests {
   /** The engine ended: abort everything without answers. */
   abortAll(): void {
     this.permissions.clear();
+    this.auths.clear();
     this.dialogs.clear();
     for (const set of this.pending.values()) for (const controller of [...set]) controller.abort();
     this.pending.clear();

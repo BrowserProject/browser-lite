@@ -167,9 +167,55 @@ WebView& WebView::openFromEngine(int openerId, IntSize size, float deviceScaleFa
 
 void WebView::close(int id)
 {
-    closeChoosers(id);
+    // Its open dialogs end with the default answer; until their script is
+    // done the dialog keeps the view and closes its choosers (Clients.cpp)
+    if (auto* view = fromID(id); !view || !view->isBlockedByDialog())
+        closeChoosers(id);
+    dismissDialogs(id);
     openViews().remove(id);
     detachDeviceClients(id);
+}
+
+bool WebView::isOpen() const
+{
+    auto entry = openViews().find(m_id);
+    return entry != openViews().end() && entry->value.ptr() == this;
+}
+
+void WebView::unblockAfterDialog()
+{
+    ASSERT(m_dialogBlocks);
+    if (--m_dialogBlocks)
+        return;
+    // After the task of the dialog's script
+    runOnEngineThread([weakThis = WeakPtr { *this }] {
+        if (RefPtr view = weakThis.get())
+            view->runHeldCommands();
+    });
+}
+
+void WebView::runWhenNotBlocked(Function<void(WebView&)>&& command)
+{
+    if (m_dialogBlocks || !m_heldCommands.isEmpty()) {
+        m_heldCommands.append(WTF::move(command));
+        return;
+    }
+    command(*this);
+}
+
+void WebView::runHeldCommands()
+{
+    Ref protectedThis { *this };
+    if (!isOpen()) {
+        m_heldCommands.clear();
+        return;
+    }
+    // A command may open a dialog again, then the rest waits once more
+    while (!m_dialogBlocks && !m_heldCommands.isEmpty())
+        m_heldCommands.takeFirst()(*this);
+    // A frame wanted while blocked
+    if (!m_dialogBlocks && m_frameRequested && m_visible)
+        requestFrameFromHost(m_id);
 }
 
 class SessionProvider final : public StorageSessionProvider {
@@ -645,7 +691,7 @@ void WebView::checkRenderingStall()
     m_stallCheckPending = false;
     if (!m_renderingUpdateRequested)
         return;
-    if (m_renderingUpdates != m_renderingUpdatesAtStallCheck || !m_visible) {
+    if (m_renderingUpdates != m_renderingUpdatesAtStallCheck || !m_visible || m_dialogBlocks) {
         m_stallChecksMissed = 0;
         scheduleRenderingUpdate();
         return;
@@ -868,8 +914,10 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 void WebView::presentIfNeeded()
 {
     // Hidden we do not paint, not even for a frame the host still sends from
-    // before: setVisible(true) catches up
-    if (!m_visible) {
+    // before: setVisible(true) catches up. Blocked by a dialog: the rendering
+    // update would run the waiting page's script (observers), runHeldCommands
+    // catches up
+    if (!m_visible || m_dialogBlocks) {
         m_frameRequested = true;
         return;
     }
@@ -1111,7 +1159,7 @@ void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, doubl
 void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
 {
     RefPtr frame = mainFrame();
-    if (!frame)
+    if (!frame || m_dialogBlocks)
         return;
     frame->eventHandler().handleWheelEvent(event, steps);
 }
@@ -1119,7 +1167,7 @@ void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<Whee
 void WebView::zoomWheelEvent(const PlatformWheelEvent& event, bool cancelable)
 {
     bool consumed = false;
-    if (RefPtr frame = mainFrame()) {
+    if (RefPtr frame = m_dialogBlocks ? nullptr : mainFrame()) {
         auto handling = frame->eventHandler().handleWheelEvent(event, { cancelable ? WheelEventProcessingSteps::BlockingDOMEventDispatch : WheelEventProcessingSteps::NonBlockingDOMEventDispatch }).second;
         consumed = handling.contains(EventHandling::DefaultPrevented);
     }

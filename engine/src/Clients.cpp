@@ -78,7 +78,9 @@
 #endif
 #include <wtf/RunLoop.h>
 #include <wtf/text/MakeString.h>
-#include <unordered_map>
+#include <memory>
+#include <wtf/HashMap.h>
+#include <wtf/NeverDestroyed.h>
 
 extern "C" void bl_dialog_answer(int id, int accepted, char* text);
 
@@ -205,39 +207,43 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
     m_view->didReceiveConsoleMessage(static_cast<int>(level), message, sourceID, lineNumber);
 }
 
-// Dialogs: the engine thread waits until the host answered. The main thread is
-// not blocked: Module.engineDialog(dialogId, viewId, type, origin, message,
-// default) shows the dialog and the host answers later with bl_dialog_answer.
-// type: alert (0), confirm (1), prompt (2), beforeunload when leaving (3) or
-// reloading (4). origin is the origin of the asking frame (like "<host> says"
-// in Chrome).
+// Dialogs (#258): Module.engineDialog(dialogId, viewId, type, origin, message,
+// default) shows the dialog on the main thread, the host answers later with
+// bl_dialog_answer. type: alert (0), confirm (1), prompt (2), beforeunload when
+// leaving (3) or reloading (4). origin is the origin of the asking frame (like
+// "<host> says" in Chrome). Until the answer the asking script waits in a
+// nested event loop of the engine thread (runNestedEventLoop): WebCore defers
+// the dialog's page group (Chrome::runJavaScriptAlert and the others), its
+// views hold back input and commands (WebView::blockForDialog), all other
+// views go on.
 namespace {
-struct PendingDialog {
+struct DialogRequest {
+    int id;
     int viewId;
     int type;
     CString origin;
     CString message;
     CString defaultValue;
-    em_proxying_ctx* context { nullptr };
+};
+
+struct OpenDialog {
+    int viewId;
+    bool answered { false };
     bool accepted { false };
-    char* text { nullptr };
+    String text;
 };
 }
 
-// Open dialogs by id, only used on the main thread
-static std::unordered_map<int, PendingDialog*>& pendingDialogs()
+// Open dialogs by id (engine thread)
+static HashMap<int, OpenDialog*>& openDialogs()
 {
-    static std::unordered_map<int, PendingDialog*> dialogs;
+    static NeverDestroyed<HashMap<int, OpenDialog*>> dialogs;
     return dialogs;
 }
 
-static void showDialogOnMainThread(em_proxying_ctx* context, void* argument)
+static void showDialogOnMainThread(void* argument)
 {
-    static int nextID = 1;
-    auto* dialog = static_cast<PendingDialog*>(argument);
-    dialog->context = context;
-    int id = nextID++;
-    pendingDialogs().emplace(id, dialog);
+    std::unique_ptr<DialogRequest> request { static_cast<DialogRequest*>(argument) };
     int shown = EM_ASM_INT({
         if (!Module.engineDialog)
             return 0;
@@ -248,24 +254,56 @@ static void showDialogOnMainThread(em_proxying_ctx* context, void* argument)
             console.error(error);
             return 0;
         }
-    }, id, dialog->viewId, dialog->type, dialog->origin.data(), dialog->message.data(), dialog->defaultValue.data());
+    }, request->id, request->viewId, request->type, request->origin.data(), request->message.data(), request->defaultValue.data());
     if (!shown)
-        bl_dialog_answer(id, 0, nullptr);
+        bl_dialog_answer(request->id, 0, nullptr);
+}
+
+void dismissDialogs(int viewId)
+{
+    for (auto* dialog : openDialogs().values()) {
+        if (dialog->viewId == viewId)
+            dialog->answered = true;
+    }
 }
 
 // Returns whether the user accepted; text gets the answer of a prompt
-static bool runDialog(int viewId, LocalFrame& frame, int type, const String& message, const String& defaultValue, String* text = nullptr)
+static bool runDialog(WebView& view, LocalFrame& frame, int type, const String& message, const String& defaultValue, String* text = nullptr)
 {
+    // Closed during an earlier dialog of the same script
+    if (!view.isOpen())
+        return false;
+    static int nextID = 1;
+    int id = nextID++;
+    OpenDialog dialog { view.id() };
+    openDialogs().add(id, &dialog);
     RefPtr document = frame.document();
-    PendingDialog dialog { viewId, type, (document ? document->securityOrigin().toString() : String { }).utf8(), message.utf8(), defaultValue.utf8() };
-    bool answered = emscripten_proxy_sync_with_ctx(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), showDialogOnMainThread, &dialog);
-    restartScriptWatchdog();
-    if (dialog.text) {
-        if (text)
-            *text = String::fromUTF8(dialog.text);
-        free(dialog.text);
+    auto* request = new DialogRequest { id, view.id(), type, (document ? document->securityOrigin().toString() : String { }).utf8(), message.utf8(), defaultValue.utf8() };
+    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), showDialogOnMainThread, request)) {
+        delete request;
+        dialog.answered = true;
     }
-    return answered && dialog.accepted;
+    // Views of the page group (popups with their opener) share script with
+    // the waiting one. They stay alive until it is done, also when closed.
+    Vector<Ref<WebView>> views;
+    auto& group = view.page().group();
+    WebView::forEach([&](WebView& other) {
+        if (&other.page().group() == &group)
+            views.append(other);
+    });
+    for (auto& blocked : views)
+        blocked->blockForDialog();
+    runNestedEventLoop([&] { return dialog.answered; });
+    openDialogs().remove(id);
+    for (auto& blocked : views) {
+        blocked->unblockAfterDialog();
+        // Closed meanwhile: torn down in a later task, not under the waiting script
+        if (!blocked->isOpen())
+            runOnEngineThread([closed = WTF::move(blocked)] { closeChoosers(closed->id()); });
+    }
+    if (text && dialog.accepted)
+        *text = WTF::move(dialog.text);
+    return dialog.accepted;
 }
 
 void ChromeClient::print(LocalFrame& frame, const StringWithDirection&)
@@ -293,17 +331,17 @@ void ChromeClient::isPlayingMediaDidChange(MediaProducerMediaStateFlags state)
 
 void ChromeClient::runJavaScriptAlert(LocalFrame& frame, const String& message)
 {
-    runDialog(m_view->id(), frame, 0, message, { });
+    runDialog(m_view.get(), frame, 0, message, { });
 }
 
 bool ChromeClient::runJavaScriptConfirm(LocalFrame& frame, const String& message)
 {
-    return runDialog(m_view->id(), frame, 1, message, { });
+    return runDialog(m_view.get(), frame, 1, message, { });
 }
 
 bool ChromeClient::runJavaScriptPrompt(LocalFrame& frame, const String& message, const String& defaultValue, String& result)
 {
-    return runDialog(m_view->id(), frame, 2, message, defaultValue, &result);
+    return runDialog(m_view.get(), frame, 2, message, defaultValue, &result);
 }
 
 // beforeunload (navigation, reload, closing the view through bl_try_close):
@@ -313,7 +351,7 @@ bool ChromeClient::runBeforeUnloadConfirmPanel(String&&, LocalFrame& frame)
 {
     RefPtr mainFrame = dynamicDowncast<LocalFrame>(frame.mainFrame());
     bool reload = mainFrame && mainFrame->loader().policyDocumentLoader() && isReload(mainFrame->loader().policyChecker().loadType());
-    return runDialog(m_view->id(), frame, reload ? 4 : 3, { }, { });
+    return runDialog(m_view.get(), frame, reload ? 4 : 3, { }, { });
 }
 
 // Only in the next step: when reported, the listener is not yet added or
@@ -342,8 +380,14 @@ RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedM
 {
     auto& popup = WebView::openFromEngine(m_view->id(), m_view->size(), m_view->deviceScaleFactor());
     Ref mainFrame = popup.page().mainFrame();
-    if (!features.wantsNoOpener())
+    if (!features.wantsNoOpener()) {
         mainFrame->setOpenerForWebKitLegacy(&frame);
+        // Opener and popup share script: one page group, a dialog defers both (#258)
+        auto& opener = m_view->page();
+        if (opener.groupName().isEmpty())
+            opener.setGroupName(makeString("view-"_s, m_view->id()));
+        popup.page().setGroupName(opener.groupName());
+    }
     auto sandboxFlags = frame.effectiveSandboxFlags();
     if (!sandboxFlags.contains(SandboxFlag::PropagatesToAuxiliaryBrowsingContexts))
         sandboxFlags = { };
@@ -831,19 +875,18 @@ void DragClient::startDrag(DragItem, DataTransfer& dataTransfer, Frame&, const s
 
 } // namespace BrowserLite
 
-// Answer of the host to Module.engineDialog (main thread only): the waiting
-// engine thread continues. text is the answer of a prompt (the engine frees it).
+// Answer of the host to Module.engineDialog: the waiting script continues.
+// text is the answer of a prompt (the engine frees it).
 extern "C" EMSCRIPTEN_KEEPALIVE void bl_dialog_answer(int id, int accepted, char* text)
 {
-    auto& dialogs = BrowserLite::pendingDialogs();
-    auto entry = dialogs.find(id);
-    if (entry == dialogs.end()) {
-        free(text);
-        return;
-    }
-    auto* dialog = entry->second;
-    dialogs.erase(entry);
-    dialog->accepted = accepted;
-    dialog->text = text;
-    emscripten_proxy_finish(dialog->context);
+    String answer = text ? String::fromUTF8(text) : String { };
+    free(text);
+    BrowserLite::runOnEngineThread([id, accepted, answer = WTF::move(answer)]() mutable {
+        auto* dialog = BrowserLite::openDialogs().get(id);
+        if (!dialog || dialog->answered)
+            return;
+        dialog->answered = true;
+        dialog->accepted = accepted;
+        dialog->text = WTF::move(answer);
+    });
 }

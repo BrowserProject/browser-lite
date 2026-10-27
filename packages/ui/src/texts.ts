@@ -21,6 +21,13 @@ export interface UiTexts {
   permissionOther: string;
   allow: string;
   block: string;
+  /** Title and button of the sign-in dialog (HTTP authentication). */
+  signIn: string;
+  /** Warning of the sign-in dialog for a server without https. */
+  notPrivate: string;
+  username: string;
+  password: string;
+  cancel: string;
   openLinkInNewTab: string;
   copyLinkAddress: string;
   openImageInNewTab: string;
@@ -54,6 +61,11 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   permissionOther: '{host} wants to use {kind}',
   allow: 'Allow',
   block: 'Block',
+  signIn: 'Sign in',
+  notPrivate: 'Your connection to this site is not private',
+  username: 'Username',
+  password: 'Password',
+  cancel: 'Cancel',
   openLinkInNewTab: 'Open link in new tab',
   copyLinkAddress: 'Copy link address',
   openImageInNewTab: 'Open image in new tab',

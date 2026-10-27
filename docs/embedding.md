@@ -46,7 +46,7 @@ browser page and other pages of the site is cut. `checkSupport()` reports what i
 | Response | Headers |
 |---|---|
 | The page with the browser, and in an iframe setup the top-level page | `Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp` |
-| Worker and worklet scripts (`engine.js`, `sw.js`, `media-sw.js`, `audio-worklet.js`) | Same as the page |
+| Worker and worklet scripts (`engine.js`, `sw.js`, `media-sw.js`, `audio-worklet.js`, `opfs-writer.js`) | Same as the page |
 | Every subresource of the page | Same-origin, or `Cross-Origin-Resource-Policy` (`cross-origin` for shared CDNs) or CORS |
 
 The simplest rule: send COOP, COEP and CORP with every response of the browser route. That is
@@ -62,7 +62,10 @@ isolation.
   `engineUrl`. A CDN works only behind the same origin (reverse proxy).
 - Never bundle `engine.js`: the core loads it as a classic script at runtime. Copy the folder as
   it is. `audio-worklet.js` (export `@browser-lite/core/audio-worklet.js`) must stay a file next
-  to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`).
+  to the core's `dist/` code (Vite: keep `.js` assets out of `assetsInlineLimit`). The same for
+  the module worker `opfs-writer.js` of `@browser-lite/profile` (only started where
+  `createWritable` is missing, Safari 18), which bundlers that know `new Worker(new URL(...,
+  import.meta.url))` (Vite, webpack) emit by themselves.
 - Put each engine version in its own folder (for example `engine/<hash>/`, as
   `tools/package-demo.sh` does) and cache it `public, max-age=31536000, immutable`.
 - After an update Chrome can load the new engine as deltas against the old one (Compression
@@ -206,6 +209,13 @@ origin, once for all pages inside browser-lite. The engine then asks per page or
 `permission` handler (default: deny), and the core remembers answers in the `PermissionStore` you
 pass (default: in memory). Grant `notifications` only after `Notification.requestPermission()`
 of the host succeeded (the `@browser-lite/ui` prompt does this).
+
+HTTP authentication (401 with Basic or Digest) goes to the `authenticate` handler (default:
+cancel, the page shows the 401 response), like Chrome only for the main frame and same origin
+loads, never for workers, `credentials: 'omit'` or requests with their own `Authorization`
+header. The engine keeps the credentials in memory for the session, per realm; they are gone
+after a restart of the engine. Show the `origin` of the request, not the `realm` (a text of the
+server); `loginPrompt` of `@browser-lite/ui` does this.
 
 `services` decides what pages can reach at all; a feature without its service is missing for the
 pages. `defaultServices()` is `[audio(), media(), capture(), devices()]`. `webrtc()` is opt-in:

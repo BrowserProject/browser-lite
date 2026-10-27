@@ -116,6 +116,6 @@ does not bundle the host: the core of such an integrator grows by 0.5 KB with gz
 | Add-on | Uses now | Needs later |
 |---|---|---|
 | Accessibility | a script or `onView` for focus and navigation, `panel` or a hidden DOM over the canvas from the integrator's page | an engine export of WebCore's accessibility tree (`AXObjectCache`) per view, delivered to the extension (for example `context.onView` plus a new view event), mirrored as hidden ARIA DOM over the canvas |
-| Password manager | an isolated script finds login forms and asks with `sendMessage`, `postMessage` fills; `toolbar` and `panel` for the vault; `storage` or its own encrypted store; a `handle` for HTTP authentication once that request type exists | nothing |
+| Password manager | an isolated script finds login forms and asks with `sendMessage`, `postMessage` fills; `toolbar` and `panel` for the vault; `storage` or its own encrypted store; `handle('authenticate', ...)` answers HTTP sign-ins from the vault | nothing |
 | Ad blocker | `addStyle` for cosmetic filters, `addScript` with `world: 'main'` at `document-start` for scriptlets | blocking requests: WebCore's content extensions (`ENABLE_CONTENT_EXTENSIONS`, Safari's rule lists compiled to a DFA; off in our build) or a URL filter in `LoaderStrategy.cpp`; either is one engine export taking the rules |
 | Custom UI | `toolbar`, `panel`, `context-menu`, `settings`; scripts with their own shadow DOM in pages | nothing |

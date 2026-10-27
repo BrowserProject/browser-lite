@@ -317,7 +317,7 @@ export interface BrowserEvents {
    * expert switch `BL_MEMORY_PRESSURE_MB`).
    */
   'memory-pressure': MemoryPressureEvent;
-  /** No answer from the engine for 10 s after input (an open page dialog does not count). */
+  /** No answer from the engine for 10 s after input (the time of a page dialog does not count). */
   unresponsive: Record<string, never>;
   /** The engine answers again after `unresponsive`. */
   responsive: Record<string, never>;
@@ -554,9 +554,12 @@ export interface RequestHandlers {
   /**
    * alert, confirm, prompt and beforeunload, answered directly or with a promise (an in-page
    * dialog). Answer: confirm true for OK, prompt the text or null, beforeunload false to stay.
-   * While a dialog is open the engine waits: all views stop until the answer (the host page
-   * stays responsive). The signal aborts when the view closes or the engine ends.
-   * Default: alert ignored, confirm false, prompt null, beforeunload true.
+   * Like in Chrome only the asking page waits for the answer (with the popups it shares script
+   * with): it gets no input and holds back the view's calls, its last frame stays. All other
+   * views go on. A navigation of the view (`load`, `reload`, `back`, ...) answers its open
+   * dialogs with the default first. The signal aborts then, when the view closes or the engine
+   * ends. A native dialog of the host page (`window.alert`) still stops the host page and so
+   * all views. Default: alert ignored, confirm false, prompt null, beforeunload true.
    */
   dialog(request: DialogRequest): DialogAnswer | Promise<DialogAnswer>;
   /**
@@ -566,6 +569,14 @@ export interface RequestHandlers {
    * (Notification.requestPermission), as the ui permission prompt does.
    */
   permission(request: PermissionRequest): Promise<PermissionAnswer>;
+  /**
+   * HTTP authentication (401 with Basic or Digest), like the sign-in dialog of Chrome. Asked for
+   * the main frame and same origin loads without stored credentials; loads of the same realm wait
+   * for one answer. The credentials are kept for the session of the engine, so further requests to
+   * the realm do not ask; refused ones ask again (`retry`). Default null: the page shows the 401
+   * response.
+   */
+  authenticate(request: AuthRequest): Promise<AuthCredentials | null>;
   /** Default: the native file dialog of the host browser. */
   fileChooser(request: FileChooserRequest): Promise<File[] | null>;
   /** `<select>` popup; resolves the chosen index or -1. Default -1. */
@@ -618,6 +629,31 @@ export interface PermissionRequest {
   origin: string;
   /** Aborted when the view closes or the engine ends. */
   signal: AbortSignal;
+}
+
+/** A server asks for a user name and password (handler `authenticate`). */
+export interface AuthRequest {
+  view: View;
+  /** Address that answered 401: the page or a same origin resource of it. */
+  url: string;
+  /** Origin of the server, what to show the user (like Chrome). */
+  origin: string;
+  /** Realm the server named, '' without one. Text of the server, not of the browser. */
+  realm: string;
+  scheme: 'basic' | 'digest';
+  /** The credentials sent last were refused. */
+  retry: boolean;
+  /**
+   * Aborted when no load waits for the answer any more (stopped, navigated away), the view closes
+   * or the engine ends; the answer is ignored then.
+   */
+  signal: AbortSignal;
+}
+
+/** Answer of the `authenticate` handler. */
+export interface AuthCredentials {
+  username: string;
+  password: string;
 }
 
 /** Text a page copied or cut (handler `clipboardWrite`). */

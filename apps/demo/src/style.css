@@ -503,6 +503,73 @@ button {
   background: var(--accent);
   color: #fff;
 }
+.bl-login-prompt {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  z-index: 12;
+  width: 340px;
+  margin-left: -170px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tab-active);
+  color: var(--fg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  font-size: 14px;
+}
+.bl-login-prompt::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.bl-login-prompt h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.bl-login-prompt .bl-origin,
+.bl-login-prompt .bl-not-private {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+.bl-login-prompt .bl-not-private {
+  color: var(--muted);
+  font-size: 12px;
+}
+.bl-login-prompt label {
+  display: block;
+  margin-bottom: 10px;
+}
+.bl-login-prompt input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+}
+.bl-login-prompt .bl-cancel,
+.bl-login-prompt .bl-sign-in {
+  margin: 4px 0 0 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+  float: right;
+}
+.bl-login-prompt .bl-sign-in {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
 #bookmark,
 #menu-button {
   width: 30px;

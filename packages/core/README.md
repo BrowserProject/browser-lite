@@ -69,13 +69,21 @@ any number of listeners.
 
 | Handler | Default |
 |---|---|
-| `dialog` (synchronous) | alert ignored, confirm `false`, prompt `null`, beforeunload `true` (leave) |
+| `dialog` | alert ignored, confirm `false`, prompt `null`, beforeunload `true` (leave) |
 | `permission` | denied without remembering; grant `notifications` only after the host allowed them (`Notification.requestPermission`) |
+| `authenticate` | `null`: the page shows the 401 response. Called for a 401 with Basic or Digest of the main frame or a same origin load without stored credentials, with `url`, `origin`, `realm`, `scheme` and `retry` (the last credentials were refused); resolve `{ username, password }` to sign in. The engine keeps them for the session per realm |
 | `fileChooser` | native file dialog of the host |
 | `selectPopup`, `colorPicker`, `dateTimePicker` | cancel |
 
 Every request carries an `AbortSignal` that aborts when the page hides the popup, the view closes,
 the engine ends or the page opens the same popup again (the old answer is then ignored).
+
+A `dialog` handler may answer with a promise (an own in-page dialog). Like in Chrome only the
+asking page waits meanwhile, together with popups it shares script with: it gets no input, its
+view runs calls afterwards and shows its last frame. All other views go on. Navigating the view
+(`load`, `reload`, `back`, `forward`, `restoreHistory`) first answers its open dialogs with the
+default and aborts their signal. A native dialog of the host page (`window.alert`) stops the host
+page itself and with it every view.
 
 The events are listed with their payloads in `BrowserEvents` and `ViewEvents` of
 [src/types.ts](src/types.ts) (a `Download` has `progress`, `done` and `error`). Some only report

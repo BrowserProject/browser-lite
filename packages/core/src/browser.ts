@@ -492,6 +492,18 @@ class BrowserImpl implements Browser, ViewHost {
       }),
     );
     this.handle(
+      'auth',
+      withView((view, data) => {
+        this.requests.authenticate(
+          view,
+          data as unknown as Parameters<Requests['authenticate']>[1],
+        );
+      }),
+    );
+    this.handle<{ id?: number }>('auth-cancel', (data) =>
+      this.requests.cancelAuth(Number(data.id)),
+    );
+    this.handle(
       'file-chooser',
       withView((view, data) => {
         this.requests.fileChooser(view, data);
@@ -686,7 +698,7 @@ class BrowserImpl implements Browser, ViewHost {
 
   async destroy(): Promise<void> {
     if (this.phase === 'destroyed') return;
-    // An open dialog holds the engine thread: answer it so the engine can flush and close
+    // Answer open dialogs, so their pages finish their scripts before the flush
     this.requests.closeDialogs();
     if (this.ready) this.storage.flush(500);
     this.watchdog.stop();

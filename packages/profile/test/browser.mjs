@@ -216,3 +216,32 @@ test('server not reachable keeps the local files and reports local', async () =>
     files: ['cookies.db'],
   });
 });
+
+test('without createWritable (Safari 18) the seed writes through the worker', async () => {
+  const result = await page.evaluate(async () => {
+    localStorage.clear();
+    const fake = new FakeServer();
+    const enc = (text) => new TextEncoder().encode(text);
+    fake.files.set('cookies.db', enc('server cookies'));
+    fake.files.set('localstorage/https_a.com_0.localstorage', enc('ls'));
+    const dir = await freshDir('no-writable');
+    const original = FileSystemFileHandle.prototype.createWritable;
+    delete FileSystemFileHandle.prototype.createWritable;
+    try {
+      const profile = lib.createProfile({ url: '/profile/', fetch: fake.fetch });
+      await profile.beforeStart(dir);
+      return {
+        status: profile.status,
+        files: await listFiles(dir),
+        cookies: await readFile(dir, 'cookies.db'),
+      };
+    } finally {
+      FileSystemFileHandle.prototype.createWritable = original;
+    }
+  });
+  assert.deepEqual(result, {
+    status: 'connected',
+    files: ['cookies.db', 'localstorage/https_a.com_0.localstorage', 'profile-id'],
+    cookies: 'server cookies',
+  });
+});

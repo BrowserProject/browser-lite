@@ -9,6 +9,7 @@ type Handler = (request: unknown) => unknown;
 const DEFAULTS: RequestHandlers = {
   dialog: () => undefined,
   permission: async () => 'dismiss',
+  authenticate: async () => null,
   fileChooser: nativeFileChooser,
   selectPopup: async () => -1,
   colorPicker: async () => null,
