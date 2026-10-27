@@ -51,6 +51,9 @@ Behaviour:
   `connected` is true while one WebSocket is.
 - Flow control by Wisp credit; `onsent` reports bytes that left the transport (backpressure for
   the engine's sockets).
+- Acknowledges what arrived, so a relay of `@browser-lite/server` keeps only about two round
+  trips of data on the way and a small response does not queue behind large downloads
+  ([PROTOCOL.md](PROTOCOL.md)); other Wisp servers ignore it.
 - Dead connections (sleep, network change, `online` event of the page) are detected with a probe
   and replaced.
 - Uses the `WebSocket` of `globalThis` at construction time.

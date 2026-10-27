@@ -46,8 +46,9 @@ reuses one on the same WebSocket.
 3. The server writes DATA to the target. After every 64 packets handed to the operating system it
    sends CONTINUE with the remaining buffer (128 minus packets not yet written). A target that
    does not read thus stops the client. The client sets its credit to the received value.
-4. Data from the target comes as DATA. The server reads from targets only while the WebSocket
-   send buffer is below 8 MiB.
+4. Data from the target comes as DATA. A target that sends is held (not read) while the
+   WebSocket send buffer is above 8 MiB or, for a client that acknowledges, while more than its
+   delivery window is unacknowledged (below); a target that has not sent yet is not held.
 5. Either side ends a stream with CLOSE. The other side does not answer. When the client closes,
    the server still delivers what the client sent, then drops the target socket; data still
    arriving from the target is discarded.
@@ -82,6 +83,14 @@ ends before `onopen` was never sent to a relay (no connection).
   logging. Without an answer within 5 s the client drops the WebSocket and reconnects. While the
   WebSocket buffer drains the connection counts as alive; if it does not drain for 10 s, it is
   dead.
+- **Acknowledgements**: the client sends CONTINUE on stream 0 with the bytes it received on this
+  WebSocket in all, every message counted with its header, modulo 2^32: right after the first
+  CONTINUE of the server (9), then after every 32 KiB or 5 ms. Wisp v1 servers ignore it. From
+  the first one on the server keeps at most a window of unacknowledged bytes on the way: 2.5 times
+  the largest delivery rate of the last 2 s times the shortest round trip (measured on bytes sent
+  with at most 64 KiB on the way), at least 128 KiB, at most 16 MiB; a held target is read again
+  once three quarters of the window are free. Otherwise everything waits in the buffers of the
+  operating system, and a small response queues behind the large ones of the other streams.
 - **Reason 0x4a** (see above).
 - **Reconnect**: a dropped WebSocket is replaced at once once; if that fails the client is offline
   (`connected` false) and retries every 2 s until it succeeds or is closed. The token is fetched
@@ -105,7 +114,7 @@ ends before `onopen` was never sent to a relay (no connection).
 - A stream closed by the client while its name is still being resolved is never connected.
 - Protocol errors close the WebSocket: text messages (1003), packets shorter than 5 bytes or a
   CONNECT on stream 0 or on an open stream id (1002), messages above the size limit (1009,
-  default 64 KiB plus the 5 byte header, the largest packet of `WispTransport`). DATA and CLOSE for unknown streams, CONTINUE from the client and unknown packet
+  default 64 KiB plus the 5 byte header, the largest packet of `WispTransport`). DATA and CLOSE for unknown streams, CONTINUE from the client on other streams than 0 and unknown packet
   types are ignored.
 - The server pings the WebSocket every 30 s and drops a client that missed a pong.
 - Stream contents are never logged.

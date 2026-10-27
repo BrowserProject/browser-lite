@@ -82,6 +82,43 @@ test('preconnect opens the WebSocket before the first stream, which then uses it
   }
 });
 
+test('acknowledges what it received: at once after the handshake, then while data arrives', async () => {
+  const relay = await startRelay();
+  const RealWebSocket = globalThis.WebSocket;
+  const acks = [];
+  let received = 0;
+  globalThis.WebSocket = class extends RealWebSocket {
+    constructor(...args) {
+      super(...args);
+      this.addEventListener('message', (event) => {
+        received += event.data.byteLength ?? event.data.size;
+      });
+    }
+    send(data) {
+      const bytes = new Uint8Array(data);
+      if (bytes[0] === 0x03 && new DataView(bytes.buffer).getUint32(1, true) === 0)
+        acks.push(new DataView(bytes.buffer).getUint32(5, true));
+      super.send(data);
+    }
+  };
+  const transport = new WispTransport({
+    connections: 1,
+    url: `ws://127.0.0.1:${relay.port}/wisp/`,
+  });
+  globalThis.WebSocket = RealWebSocket;
+  try {
+    assert.equal((await echoOver(transport, echo.port, 16384 * 12)).received, 16384 * 12);
+    assert.equal(acks[0], 9, 'the first CONTINUE of the relay');
+    assert.ok(
+      await waitUntil(() => acks.at(-1) === received, 1000),
+      `${acks.at(-1)} of ${received}`,
+    );
+  } finally {
+    transport.close();
+    await relay.stop();
+  }
+});
+
 test('connections: 1 to 8 WebSockets', () => {
   for (const connections of [0, 9, 1.5, '2'])
     assert.throws(

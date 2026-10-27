@@ -602,3 +602,52 @@ test('close() ends open connections and refuses new ones', async () => {
   assert.equal((await open(stack.url())).status, 503);
   await stack.close();
 });
+
+describe('acknowledging client (delivery window)', () => {
+  let stack;
+  let flood;
+  let small;
+  before(async () => {
+    stack = await startRelays([local]);
+    flood = await tcpServer((socket) => socket.end(Buffer.alloc(4 * 1024 * 1024, 1)));
+    small = await tcpServer((socket) => socket.end('hi'));
+  });
+  after(async () => {
+    flood.server.close();
+    small.server.close();
+    await stack.close();
+  });
+
+  // Bytes of all messages the client got, the first CONTINUE included
+  const received = (client) =>
+    9 + client.packets.reduce((sum, packet) => sum + 5 + packet.payload.length, 0);
+  const ack = (client) => {
+    const payload = Buffer.alloc(4);
+    payload.writeUInt32LE(received(client) >>> 0);
+    client.send(CONTINUE, 0, payload);
+  };
+
+  test('a sending target is held at the window, a new stream still gets through', async () => {
+    const client = await open(stack.url());
+    ack(client);
+    client.connectTCP(1, '127.0.0.1', flood.port);
+    await sleep(300);
+    const held = client.data(1).length;
+    assert.ok(held > 0 && held < 1024 * 1024, `held after ${held} bytes`);
+    client.connectTCP(2, '127.0.0.1', small.port);
+    assert.ok(await waitUntil(() => client.data(2).toString() === 'hi', 2000), 'small response');
+    for (let i = 0; i < 200 && client.data(1).length < 4 * 1024 * 1024; i++) {
+      ack(client);
+      await sleep(10);
+    }
+    assert.equal(client.data(1).length, 4 * 1024 * 1024, 'acknowledgements release the target');
+    await client.close();
+  });
+
+  test('without acknowledgements nothing is held', async () => {
+    const client = await open(stack.url());
+    client.connectTCP(1, '127.0.0.1', flood.port);
+    assert.ok(await waitUntil(() => client.data(1).length === 4 * 1024 * 1024, 5000));
+    await client.close();
+  });
+});

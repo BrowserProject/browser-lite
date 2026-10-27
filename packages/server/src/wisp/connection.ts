@@ -5,6 +5,7 @@ import {
   BUFFER_SIZE,
   CLOSE,
   CONNECT,
+  CONTINUE,
   type ConnectRequest,
   closePacket,
   continuePacket,
@@ -16,12 +17,13 @@ import {
   STREAM_TCP,
 } from './protocol.js';
 import { allowedAddresses, ConnectError, connectSocket, reasonForError } from './target.js';
+import { DeliveryWindow } from './window.js';
 
 /** Without other traffic, a CONTINUE on stream 0 at least this often while streams are open. */
 const KEEPALIVE_MS = 3000;
 /** WebSocket ping interval; a client that misses one pong is dropped. */
 const PING_MS = 30000;
-/** Above this many buffered bytes towards the client, reading from targets pauses. */
+/** Above this many buffered bytes towards the client, targets that send are held. */
 const SEND_BUFFER = 8 * 1024 * 1024;
 /** How long a target may still read what the client sent before its stream was closed. */
 const CLOSE_TIMEOUT_MS = 10000;
@@ -76,7 +78,10 @@ export class WispConnection {
   private readonly connectionQueueBytes: number;
   private lastSend = 0;
   private alive = true;
-  private paused = false;
+  /** Streams whose target is not read while the client does not keep up. */
+  private readonly held = new Set<Stream>();
+  /** Bytes on the way to a client that acknowledges them (window.ts). */
+  private readonly window = new DeliveryWindow();
   private readonly timers: NodeJS.Timeout[] = [];
   private resumeTimer: NodeJS.Timeout | null = null;
   /** Resolves when the WebSocket is closed and every stream is cleaned up. */
@@ -125,20 +130,28 @@ export class WispConnection {
     if (this.ws.readyState !== this.ws.OPEN) return;
     this.ws.send(packet);
     this.lastSend = Date.now();
-    if (!this.paused && this.ws.bufferedAmount > SEND_BUFFER) this.pauseTargets();
+    this.window.onSent(packet.length, this.lastSend);
   }
 
-  // Backpressure at the source: while the client does not keep up, targets are not read
-  private pauseTargets(): void {
-    this.paused = true;
-    for (const stream of this.streams.values()) stream.socket?.pause();
-    this.resumeTimer = setInterval(() => {
-      if (this.ws.readyState === this.ws.OPEN && this.ws.bufferedAmount > SEND_BUFFER / 2) return;
-      clearInterval(this.resumeTimer as NodeJS.Timeout);
-      this.resumeTimer = null;
-      this.paused = false;
-      for (const stream of this.streams.values()) stream.socket?.resume();
-    }, 10);
+  // Backpressure at the source: while the client does not keep up, a target that sent is not read
+  // any more. Only the ones that send: a target that has not sent yet gets its first data out at
+  // once, so a small response does not wait behind the large ones (holding all at once also let
+  // a resumed socket that never read be paused again before it started)
+  private holdIfBehind(stream: Stream): void {
+    const behind = this.ws.bufferedAmount > SEND_BUFFER || this.window.full;
+    if (!behind || this.held.has(stream)) return;
+    this.held.add(stream);
+    stream.socket?.pause();
+    this.resumeTimer ??= setInterval(() => this.releaseHeld(), 10);
+  }
+
+  private releaseHeld(): void {
+    const sending = this.ws.readyState === this.ws.OPEN;
+    if (sending && (this.ws.bufferedAmount > SEND_BUFFER / 2 || !this.window.open)) return;
+    if (this.resumeTimer) clearInterval(this.resumeTimer);
+    this.resumeTimer = null;
+    for (const stream of this.held) stream.socket?.resume();
+    this.held.clear();
   }
 
   private receive(data: Buffer, isBinary: boolean): void {
@@ -163,8 +176,15 @@ export class WispConnection {
       case CLOSE:
         if (stream) this.closeByClient(stream);
         break;
+      case CONTINUE:
+        // On stream 0: what the client received in all (an extra of browser-lite, window.ts)
+        if (packet.streamId === 0 && packet.payload.length >= 4) {
+          this.window.onAck(packet.payload.readUInt32LE(0), Date.now());
+          this.releaseHeld();
+        }
+        break;
       default:
-        // CONTINUE from a client and unknown types (Wisp v2 INFO) carry nothing for us
+        // Unknown types (Wisp v2 INFO) carry nothing for us
         break;
     }
   }
@@ -222,7 +242,6 @@ export class WispConnection {
     if (stream.closed) return;
     const socket = connectSocket(hostname, port, addresses);
     stream.socket = socket;
-    if (this.paused) socket.pause();
     socket.on('connect', () => {
       // Defense in depth: the lookup only returned checked addresses
       if (!allowAddress(socket.remoteAddress ?? '')) {
@@ -239,6 +258,7 @@ export class WispConnection {
       if (stream.closed) return;
       this.touch(stream);
       this.send(dataPacket(stream.id, data));
+      this.holdIfBehind(stream);
     });
     socket.on('error', (error) => {
       if (!stream.connected) stream.failure = reasonForError(error);
@@ -324,6 +344,7 @@ export class WispConnection {
   }
 
   private release(stream: Stream): void {
+    this.held.delete(stream);
     stream.closed = true;
     stream.pending = [];
     if (stream.idleTimer) clearTimeout(stream.idleTimer);

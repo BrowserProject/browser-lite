@@ -21,6 +21,10 @@ const MAX_RECONNECT_DELAY_MS = 60000;
 const UNAUTHORIZED = new Set([4401, 4403]);
 const SILENCE_MS = 10000;
 const PROBE_TIMEOUT_MS = 5000;
+// Acknowledgement of the received bytes (CONTINUE on stream 0, PROTOCOL.md): after this many
+// bytes, or this long after the first unacknowledged one
+const ACK_BYTES = 32 * 1024;
+const ACK_DELAY_MS = 5;
 
 /**
  * One WebSocket to a Wisp v1 relay with its TCP streams: flow control, reconnect, dead connection
@@ -44,6 +48,10 @@ export class WispSession extends EventTarget {
   // Is the connection still alive? (expectAnswer)
   private received = 0;
   private sent = 0;
+  /** Bytes received on the current WebSocket, and how many of them were acknowledged. */
+  private receivedBytes = 0;
+  private ackedBytes = 0;
+  private ackTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
   private probeTimer: ReturnType<typeof setTimeout> | null = null;
   private drop: (() => void) | null = null;
@@ -166,6 +174,7 @@ export class WispSession extends EventTarget {
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
       this.sent = 0;
+      this.receivedBytes = this.ackedBytes = 0;
       let handshake = false;
       let closed = false;
       const onClosed = () => {
@@ -203,6 +212,8 @@ export class WispSession extends EventTarget {
         const packet = new Uint8Array(event.data);
         if (handshake) {
           this.received++;
+          this.receivedBytes += packet.byteLength;
+          this.acknowledge();
           if (this.probeTimer) clearTimeout(this.probeTimer);
           this.probeTimer = null;
           this.handlePacket(packet);
@@ -216,6 +227,9 @@ export class WispSession extends EventTarget {
           clearTimeout(timeout);
           this.bufferSize = view.getUint32(5, true);
           this.drop = drop;
+          // Acknowledged at once: our relay then keeps its data on the way small from the start
+          this.receivedBytes = packet.byteLength;
+          this.sendAck();
           resolve();
           this.setConnected(true);
         }
@@ -264,6 +278,27 @@ export class WispSession extends EventTarget {
     this.sent += packet.byteLength;
     if (type !== CLOSE) this.expectAnswer();
     return true;
+  }
+
+  // Tells the relay what arrived, so it keeps only about two round trips of data on the way
+  // instead of filling the buffers of the operating system: a small response of one stream would
+  // wait behind them (PROTOCOL.md)
+  private acknowledge(): void {
+    if (this.receivedBytes - this.ackedBytes >= ACK_BYTES) this.sendAck();
+    else if (!this.ackTimer) this.ackTimer = setTimeout(() => this.sendAck(), ACK_DELAY_MS);
+  }
+
+  private sendAck(): void {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    this.ackTimer = null;
+    const ws = this.ws;
+    if (!ws || ws.readyState !== OPEN || this.receivedBytes === this.ackedBytes) return;
+    this.ackedBytes = this.receivedBytes;
+    const payload = new Uint8Array(4);
+    new DataView(payload.buffer).setUint32(0, this.receivedBytes >>> 0, true);
+    const packet = encodePacket(CONTINUE, 0, payload);
+    ws.send(packet);
+    this.sent += packet.byteLength;
   }
 
   // Wisp has no ping. If nothing at all comes back 10 s after sending (half open connection, for

@@ -35,7 +35,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
-  (#235), the code that the start and common pages do not run loads after the start in chunks
+  (#235), the relay keeps only about two round trips of data on the way, so a small response no
+  longer waits seconds behind large downloads (#245), the code that the start and common pages do not run loads after the start in chunks
   (#238), an address typed meanwhile opens once the engine runs (#239); a first visit at
   5 Mbit/s, 150 ms starts after 15 s instead of 32 s (`tests/bench/slow-start.mjs`); after an
   engine update Chrome loads deltas against the old engine, ready after 2.5 instead of 15 s
