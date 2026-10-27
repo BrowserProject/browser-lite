@@ -210,6 +210,13 @@ origin, once for all pages inside browser-lite. The engine then asks per page or
 pass (default: in memory). Grant `notifications` only after `Notification.requestPermission()`
 of the host succeeded (the `@browser-lite/ui` prompt does this).
 
+HTTP authentication (401 with Basic or Digest) goes to the `authenticate` handler (default:
+cancel, the page shows the 401 response), like Chrome only for the main frame and same origin
+loads, never for workers, `credentials: 'omit'` or requests with their own `Authorization`
+header. The engine keeps the credentials in memory for the session, per realm; they are gone
+after a restart of the engine. Show the `origin` of the request, not the `realm` (a text of the
+server); `loginPrompt` of `@browser-lite/ui` does this.
+
 `services` decides what pages can reach at all; a feature without its service is missing for the
 pages. `defaultServices()` is `[audio(), media(), capture(), devices()]`. `webrtc()` is opt-in:
 its connections bypass the relay and reveal the device's IP address. With an iframe setup also

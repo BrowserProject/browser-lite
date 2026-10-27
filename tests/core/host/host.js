@@ -222,6 +222,27 @@ async function askPermission(request) {
   return answer;
 }
 
+function authenticate(request) {
+  host.events.push(`auth:${request.realm}`);
+  host.authRequests.push({
+    url: request.url,
+    origin: request.origin,
+    realm: request.realm,
+    scheme: request.scheme,
+    retry: request.retry,
+    view: request.view.id,
+  });
+  const answer = host.authAnswers.shift() ?? null;
+  if (answer === 'wait')
+    return new Promise((resolve) => {
+      request.signal.addEventListener('abort', () => {
+        host.events.push(`auth-aborted:${request.realm}`);
+        resolve(null);
+      });
+    });
+  return Promise.resolve(answer);
+}
+
 const host = {
   support: checkSupport(),
   ready: null,
@@ -237,6 +258,9 @@ const host = {
   colorRequests: [],
   dateRequests: [],
   permissionRequests: [],
+  authRequests: [],
+  /** Answers of the authenticate handler in turn: {username, password}, null or 'wait'. */
+  authAnswers: [],
   /** Index of the <select> item, -1 cancels. */
   selectAnswer: -1,
   /**
@@ -320,6 +344,7 @@ const host = {
           return Promise.resolve(host.dateAnswer);
         },
         permission: askPermission,
+        authenticate,
         fileChooser(request) {
           host.events.push(`filechooser:${request.multiple}`);
           return Promise.resolve(

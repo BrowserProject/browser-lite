@@ -472,6 +472,18 @@ class BrowserImpl implements Browser, ViewHost {
       }),
     );
     this.handle(
+      'auth',
+      withView((view, data) => {
+        this.requests.authenticate(
+          view,
+          data as unknown as Parameters<Requests['authenticate']>[1],
+        );
+      }),
+    );
+    this.handle<{ id?: number }>('auth-cancel', (data) =>
+      this.requests.cancelAuth(Number(data.id)),
+    );
+    this.handle(
       'file-chooser',
       withView((view, data) => {
         this.requests.fileChooser(view, data);

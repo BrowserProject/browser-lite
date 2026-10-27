@@ -12,12 +12,14 @@
 
 #include "Engine.h"
 #include "Host.h"
+#include "HttpAuth.h"
 #include "HttpCache.h"
 #include "Preconnect.h"
 #include "Prewarm.h"
 #include "Strategies.h"
 #include "WebView.h"
 
+#include <WebCore/AuthenticationChallenge.h>
 #include <WebCore/BlobRegistry.h>
 #include <WebCore/BlobRegistryImpl.h>
 #include <WebCore/BlobResourceHandle.h>
@@ -72,7 +74,8 @@ static void addCookieHeader(ResourceRequest& request)
         request.setHTTPHeaderField(HTTPHeaderName::Cookie, cookies);
 }
 
-// allowCookies is false for credentials: 'omit' or foreign CSP reports
+// allowCookies is false for credentials: 'omit' or foreign CSP reports; it also decides about
+// the stored HTTP credentials
 Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient& client)
 {
     if (request.httpUserAgent().isEmpty())
@@ -83,7 +86,9 @@ Ref<CurlRequest> createCurlRequest(ResourceRequest&& request, CurlRequestClient&
         request.setHTTPHeaderField("Save-Data"_s, "on"_s);
     if (request.allowCookies())
         addCookieHeader(request);
-    return CurlRequest::create(request, client);
+    Ref curlRequest = CurlRequest::create(request, client);
+    HttpAuth::applyStoredCredential(curlRequest, request);
+    return curlRequest;
 }
 
 void storeCookies(const ResourceRequest& request, const CurlResponse& response)
@@ -211,6 +216,8 @@ public:
     {
         m_loader = nullptr;
         m_deferred.clear();
+        if (auto ticket = std::exchange(m_authTicket, 0))
+            HttpAuth::withdraw(ticket);
         if (auto request = std::exchange(m_curlRequest, nullptr)) {
             request->cancel();
             request->invalidateClient();
@@ -271,6 +278,9 @@ private:
 
     void finish()
     {
+        // The paused request of a prompt can still fail (connection closed)
+        if (auto ticket = std::exchange(m_authTicket, 0))
+            HttpAuth::withdraw(ticket);
         if (auto done = std::exchange(m_done, nullptr))
             done(*this);
     }
@@ -331,6 +341,12 @@ private:
         debugLog("response %d %s", m_response.httpStatusCode(), m_response.url().string().utf8().data());
         storeCookies(request.resourceRequest(), curlResponse);
 
+        // Before the cache: a retry with credentials stays conditional
+        if (m_response.isUnauthorized() && curlResponse.availableHttpAuth) {
+            authenticate(AuthenticationChallenge(curlResponse, m_authFailures, m_response));
+            return;
+        }
+
         // Conditional request from the cache: 304 means the stored content is still right
         if (auto entry = std::exchange(m_cachedEntry, nullptr); entry && m_response.httpStatusCode() == 304) {
             if (auto old = std::exchange(m_curlRequest, nullptr)) {
@@ -347,6 +363,61 @@ private:
             return;
         }
 
+        deliverResponse();
+    }
+
+    // HTTP authentication like NetworkDataTaskCurl::tryHttpAuthentication: credentials of the
+    // address once (curl sent them as Basic already), then the stored ones unless they were just
+    // refused, then the user (HttpAuth.cpp). Without credentials the page gets the 401.
+    void authenticate(const AuthenticationChallenge& challenge)
+    {
+        static constexpr unsigned maxAttempts = 5;
+        const auto& space = challenge.protectionSpace();
+        const auto& request = m_curlRequest->resourceRequest();
+        Credential sent { m_curlRequest->user(), m_curlRequest->password(), CredentialPersistence::None };
+        ++m_authFailures;
+        if (!request.allowCookies() || request.hasHTTPHeaderField(HTTPHeaderName::Authorization) || m_authFailures > maxAttempts)
+            return deliverResponse();
+
+        const auto& url = request.url();
+        if (url.hasCredentials()) {
+            if (m_authFailures == 1 && space.authenticationScheme() != ProtectionSpace::AuthenticationScheme::HTTPBasic)
+                return retry(space, Credential { url.user(), url.password(), CredentialPersistence::None });
+        } else if (auto stored = HttpAuth::stored(space); !stored.isEmpty()) {
+            if (stored.user() != sent.user() || stored.password() != sent.password())
+                return retry(space, stored);
+            HttpAuth::forget(space);
+        }
+
+        int viewId = HttpAuth::viewToAsk(*m_loader);
+        if (!viewId)
+            return deliverResponse();
+        m_authTicket = HttpAuth::ask(viewId, m_response.url(), space, !sent.isEmpty(), [this, protectedThis = Ref { *this }, space](std::optional<Credential>&& credential) {
+            m_authTicket = 0;
+            if (!m_loader || !m_curlRequest)
+                return;
+            if (!credential)
+                return deliverResponse();
+            retry(space, *credential);
+        });
+    }
+
+    // The same request again with a user name and password; curl answers the challenge
+    void retry(const ProtectionSpace& space, const Credential& credential)
+    {
+        auto request = m_curlRequest->resourceRequest();
+        if (auto old = std::exchange(m_curlRequest, nullptr)) {
+            old->cancel();
+            old->invalidateClient();
+        }
+        m_curlRequest = createCurlRequest(WTF::move(request), *this);
+        m_curlRequest->setAuthenticationScheme(space.authenticationScheme());
+        m_curlRequest->setUserPass(credential.user(), credential.password());
+        m_curlRequest->resume();
+    }
+
+    void deliverResponse()
+    {
         // Cacheable? Then write the content along (HttpCache.cpp)
         // Of the current request: after a redirect its target decides (navigations)
         m_partition = HttpCache::partition(*m_loader);
@@ -396,6 +467,9 @@ private:
     Function<void(ResourceLoad&)> m_done;
     ResourceResponse m_response;
     unsigned m_redirectCount { 0 };
+    // 401 answers so far and the prompt this load waits for (HttpAuth.cpp)
+    unsigned m_authFailures { 0 };
+    uint64_t m_authTicket { 0 };
     // HTTP cache: partition of the current request, entry being revalidated, and what is stored
     String m_partition;
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;

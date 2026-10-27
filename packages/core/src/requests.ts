@@ -2,6 +2,8 @@ import type { Config } from './config.js';
 import type { EngineModule } from './engine.js';
 import { storePermission } from './permissions.js';
 import type {
+  AuthCredentials,
+  AuthRequest,
   DialogAnswer,
   DialogRequest,
   FileChooserRequest,
@@ -63,15 +65,16 @@ const rectOf = (data: Record<string, unknown>): Rect => ({
 });
 
 /**
- * Requests the engine waits for (dialogs, permissions, file chooser, popups and pickers),
- * answered by the request handlers of the options or safe defaults. Every request has an
- * AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
+ * Requests the engine waits for (dialogs, permissions, HTTP authentication, file chooser, popups
+ * and pickers), answered by the request handlers of the options or safe defaults. Every request
+ * has an AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
  */
 export class Requests {
   private readonly pending = new Map<number, Set<AbortController>>();
   private readonly pickers = new Map<string, AbortController>();
   private readonly permissions = new Map<number, { view: number; controller: AbortController }>();
   private readonly dialogs = new Map<number, OpenDialog>();
+  private readonly auths = new Map<number, { view: number; controller: AbortController }>();
 
   constructor(private readonly host: RequestsHost) {}
 
@@ -217,6 +220,62 @@ export class Requests {
     module._bl_permission_answer(data.id, answer === 'grant' ? 1 : answer === 'deny' ? 2 : 0);
   }
 
+  /** A 401 the engine asks the user about ('auth'); answered with bl_auth_answer. */
+  async authenticate(
+    view: ViewImpl,
+    data: {
+      id: number;
+      url?: string;
+      origin?: string;
+      realm?: string;
+      scheme?: string;
+      retry?: boolean;
+    },
+  ): Promise<void> {
+    const { module } = this.host;
+    const handler = this.handlers.authenticate;
+    if (!handler) {
+      module._bl_auth_answer(data.id, 0, 0);
+      return;
+    }
+    const controller = this.track(view);
+    this.auths.set(data.id, { view: view.id, controller });
+    let answer: AuthCredentials | null = null;
+    try {
+      const request: AuthRequest = {
+        view,
+        url: String(data.url ?? ''),
+        origin: String(data.origin ?? ''),
+        realm: String(data.realm ?? ''),
+        scheme: data.scheme === 'digest' ? 'digest' : 'basic',
+        retry: !!data.retry,
+        signal: controller.signal,
+      };
+      const result = await handler(request);
+      if (result && typeof result.username === 'string' && typeof result.password === 'string')
+        answer = { username: result.username, password: result.password };
+    } catch {}
+    if (controller.signal.aborted || !this.auths.has(data.id)) return;
+    this.auths.delete(data.id);
+    this.done(view, controller);
+    if (!this.host.ready) return;
+    if (answer)
+      module._bl_auth_answer(
+        data.id,
+        this.host.text(answer.username),
+        this.host.text(answer.password),
+      );
+    else module._bl_auth_answer(data.id, 0, 0);
+  }
+
+  /** No load waits for the answer any more ('auth-cancel'). */
+  cancelAuth(id: number): void {
+    const entry = this.auths.get(id);
+    if (!entry) return;
+    this.auths.delete(id);
+    entry.controller.abort();
+  }
+
   async fileChooser(view: ViewImpl, data: { multiple?: boolean; accept?: string }): Promise<void> {
     const controller = this.track(view);
     const handler = this.handlers.fileChooser ?? nativeFileChooser;
@@ -351,6 +410,11 @@ export class Requests {
       this.permissions.delete(id);
       if (this.host.ready) this.host.module._bl_permission_answer(id, 0);
     }
+    for (const [id, entry] of this.auths) {
+      if (entry.view !== view.id) continue;
+      this.auths.delete(id);
+      if (this.host.ready) this.host.module._bl_auth_answer(id, 0, 0);
+    }
     for (const controller of [...(this.pending.get(view.id) ?? [])]) controller.abort();
     this.pending.delete(view.id);
     for (const key of [...this.pickers.keys()])
@@ -360,6 +424,7 @@ export class Requests {
   /** The engine ended: abort everything without answers. */
   abortAll(): void {
     this.permissions.clear();
+    this.auths.clear();
     this.dialogs.clear();
     for (const set of this.pending.values()) for (const controller of [...set]) controller.abort();
     this.pending.clear();

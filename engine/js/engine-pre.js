@@ -5,7 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 11;
+Module.blAbiVersion = 12;
 
 // A thread that traps or aborts ends the engine. The error event the main
 // thread gets from a worker has only the message, so the worker writes the

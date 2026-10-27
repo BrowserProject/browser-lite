@@ -13,6 +13,7 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "HttpAuth.h"
 #include "Preconnect.h"
 #include "LayerTreeHostWasm.h"
 #include "LazyFiles.h"
@@ -487,6 +488,17 @@ EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers
 EMSCRIPTEN_KEEPALIVE void bl_permission_answer(int requestId, int answer)
 {
     runOnEngineThread([=] { answerPermission(requestId, static_cast<PermissionDecision>(std::clamp(answer, 0, 2))); });
+}
+
+// HTTP authentication (HttpAuth.cpp): username null = cancelled
+EMSCRIPTEN_KEEPALIVE void bl_auth_answer(int requestId, char* username, char* password)
+{
+    std::optional<std::pair<String, String>> answer;
+    if (username)
+        answer = std::pair { takeString(username), takeString(password) };
+    else
+        free(password);
+    runOnEngineThread([requestId, answer = WTF::move(answer)]() mutable { HttpAuth::answer(requestId, WTF::move(answer)); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_permission(char* kind, char* origin, int decision)

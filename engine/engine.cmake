@@ -50,6 +50,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Prewarm.cpp
     ${BL_ENGINE_SRC}/Printing.cpp
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
+    ${BL_ENGINE_SRC}/HttpAuth.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/LazyFiles.cpp
     ${BL_ENGINE_SRC}/FontPrefetch.cpp

@@ -237,6 +237,7 @@ function serviceWorker(value: unknown): ServiceWorkerOption | undefined {
 const HANDLERS = [
   'dialog',
   'permission',
+  'authenticate',
   'fileChooser',
   'selectPopup',
   'colorPicker',
