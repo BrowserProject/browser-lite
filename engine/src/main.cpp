@@ -8,6 +8,7 @@
 #include "Compositor.h"
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "FontPrefetch.h"
 #include "Gamepad.h"
 #include "Host.h"
 #include "LazyFiles.h"
@@ -151,6 +152,9 @@ int main(int, char**)
     mountLazyFonts();
     prepareFontCache("/usr/share/fonts");
     prepareFontCache("/lazy/fonts");
+    // The first lazy font or dictionary a layout waits for fetches the others it needs alongside
+    setLazyMissHandler("/lazy/fonts", prefetchFontsOfRenderedText);
+    setLazyMissHandler("/lazy/icu", prefetchFontsOfRenderedText);
 
     // All views share curl. WebKit allows 6 connections per host (like Chrome) but
     // only 17 in total: a few long polls in background views kept the active view

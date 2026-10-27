@@ -102,13 +102,16 @@ GroupRegistry& groupRegistry()
     return *registry;
 }
 
+using MissHandler = void (*)();
+
 class LazyFile final : public DataFile {
 public:
-    LazyFile(backend_t backend, std::string url, off_t size, std::shared_ptr<Group> group)
+    LazyFile(backend_t backend, std::string url, off_t size, std::shared_ptr<Group> group, MissHandler* miss)
         : DataFile(S_IRUGO, backend)
         , m_url(std::move(url))
         , m_size(size)
         , m_group(std::move(group))
+        , m_miss(miss)
     {
     }
 
@@ -126,6 +129,8 @@ private:
         if (m_data.empty() && m_size) {
             if (m_group)
                 m_group->prefetch();
+            if (*m_miss)
+                (*m_miss)();
             double start = emscripten_get_now();
             m_data.resize(m_size);
             if (!bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size)) {
@@ -145,6 +150,7 @@ private:
     std::string m_url;
     off_t m_size;
     std::shared_ptr<Group> m_group;
+    MissHandler* m_miss;
     std::vector<uint8_t> m_data;
 };
 
@@ -220,15 +226,24 @@ public:
             size_t start = 0;
             for (size_t slash; (slash = relative.find('/', start)) != std::string::npos; start = slash + 1)
                 directory = directory->directory(relative.substr(start, slash - start));
-            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group));
+            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group, &m_miss));
         }
         return root;
     }
+
+    MissHandler m_miss { nullptr };
 
 private:
     std::string m_urlFolder;
     std::string m_index;
 };
+
+// The backend of each mount point, for setLazyMissHandler
+std::map<std::string, LazyBackend*>& backends()
+{
+    static auto* backends = new std::map<std::string, LazyBackend*>;
+    return *backends;
+}
 
 } // namespace
 
@@ -256,8 +271,17 @@ bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* i
     std::string parent(mountPoint, strrchr(mountPoint, '/') - mountPoint);
     if (!parent.empty() && mkdir(parent.c_str(), 0755) && errno != EEXIST)
         return false;
-    backend_t backend = wasmfs::wasmFS.addBackend(std::make_unique<LazyBackend>(urlFolder, index));
+    auto lazy = std::make_unique<LazyBackend>(urlFolder, index);
+    backends()[mountPoint] = lazy.get();
+    backend_t backend = wasmfs::wasmFS.addBackend(std::move(lazy));
     return !wasmfs_create_directory(mountPoint, S_IRUGO | S_IXUGO, backend);
+}
+
+void setLazyMissHandler(const char* mountPoint, void (*handler)())
+{
+    auto found = backends().find(mountPoint);
+    if (found != backends().end())
+        found->second->m_miss = handler;
 }
 
 } // namespace BrowserLite

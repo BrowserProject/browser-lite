@@ -50,6 +50,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/PlatformStrategies.cpp
     ${BL_ENGINE_SRC}/HttpCache.cpp
     ${BL_ENGINE_SRC}/LazyFiles.cpp
+    ${BL_ENGINE_SRC}/FontPrefetch.cpp
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/MemoryWatch.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp

@@ -14,6 +14,10 @@ bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* i
 // of one of them did already; an unknown group does nothing.
 void prefetchLazyGroup(const char* name);
 
+// Called on the thread of a read that is about to wait for a file of `mountPoint` (once per such
+// read), before it waits; for example to start fetching what is needed next.
+void setLazyMissHandler(const char* mountPoint, void (*handler)());
+
 // Starts fetching files of the engine folder (paths, one per line) without waiting, so their
 // first reads find them in the HTTP cache.
 void prefetchLazyFiles(const char* paths);
