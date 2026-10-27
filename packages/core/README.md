@@ -69,6 +69,7 @@ an event (`browser.on`, `view.on`, `download.on`), with any number of listeners.
 |---|---|
 | `dialog` (synchronous) | alert ignored, confirm `false`, prompt `null`, beforeunload `true` (leave) |
 | `permission` | denied without remembering; grant `notifications` only after the host allowed them (`Notification.requestPermission`) |
+| `authenticate` | `null`: the page shows the 401 response. Called for a 401 with Basic or Digest of the main frame or a same origin load without stored credentials, with `url`, `origin`, `realm`, `scheme` and `retry` (the last credentials were refused); resolve `{ username, password }` to sign in. The engine keeps them for the session per realm |
 | `fileChooser` | native file dialog of the host |
 | `selectPopup`, `colorPicker`, `dateTimePicker` | cancel |
 

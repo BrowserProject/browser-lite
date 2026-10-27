@@ -1,5 +1,5 @@
 {
-  "abiVersion": 11,
+  "abiVersion": 12,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -55,6 +55,7 @@
     { "name": "bl_touch", "returns": "void", "args": "int id, int type, char* points, int modifiers", "doc": "Touch: type 0 start, 1 move, 2 end, 3 cancel; points JSON [{id, x, y, state, rx, ry, force}]. Answer 'touch-result'." },
     { "name": "bl_dialog_answer", "returns": "void", "args": "int id, int accepted, char* text", "thread": "Main thread only; the waiting engine thread continues right away.", "doc": "Answer to engineDialog: accepted 1 for OK (confirm, prompt) or leave (beforeunload), text the answer of a prompt or null. Unknown ids are ignored." },
     { "name": "bl_permission_answer", "returns": "void", "args": "int requestId, int answer", "doc": "Answer to 'permission': 1 granted, 2 denied, 0 closed without decision." },
+    { "name": "bl_auth_answer", "returns": "void", "args": "int requestId, char* username, char* password", "doc": "Answer to 'auth': username null cancels (the waiting loads show the 401 response), otherwise the credentials are stored for the protection space for the session and the waiting loads retry with them. Unknown ids are ignored." },
     { "name": "bl_set_permission", "returns": "void", "args": "char* kind, char* origin, int decision", "doc": "Stored decision (PermissionStore of the host): 0 ask, 1 granted, 2 denied." },
     { "name": "bl_geolocation_position", "returns": "void", "args": "int id, double latitude, double longitude, double accuracy, double altitude, double altitudeAccuracy, double heading, double speed, double timestamp", "doc": "Position after 'geolocation-start' (NaN = value missing)." },
     { "name": "bl_geolocation_error", "returns": "void", "args": "int id, int code, char* message", "doc": "Geolocation error: code 1 denied, otherwise unavailable." },
@@ -190,6 +191,8 @@
     { "type": "touch-result", "scope": "view", "payload": "{type, consumed, pinch}" },
     { "type": "download-start", "scope": "view", "payload": "{id, url, filename, mime, size, viewSource?}" },
     { "type": "download-done", "scope": "view", "payload": "{id, error} (error empty = success)" },
+    { "type": "auth", "scope": "view", "payload": "{id, url, origin, realm, scheme: 'basic' | 'digest', retry} (a 401 of the main frame or a same origin load without stored credentials; retry: the credentials sent were refused); answer bl_auth_answer" },
+    { "type": "auth-cancel", "scope": "view", "payload": "{id}: the loads waiting for 'auth' are gone (stopped, navigated away, view closed); bl_auth_answer is ignored then" },
     { "type": "permission", "scope": "view", "payload": "{id, kind, origin}; answer bl_permission_answer" },
     { "type": "host-call", "scope": "view", "payload": "{id, name, origin, payload (JSON string)}; answer bl_host_call_result", "feature": "see hostCalls" },
     { "type": "geolocation-start", "scope": "view", "payload": "{highAccuracy}", "feature": "geolocation" },

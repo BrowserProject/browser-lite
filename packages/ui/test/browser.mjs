@@ -490,6 +490,96 @@ test('permission prompt: queue, answers, abort, texts and notifications', async 
   });
 });
 
+test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
+  await page.evaluate(() => {
+    const { authenticate } = ui.loginPrompt({ texts: { signIn: 'Anmelden' } });
+    window.login = { authenticate, answers: [] };
+  });
+  await page.evaluate(
+    ([first, second, third]) => {
+      const view = makeView(5);
+      const controller = new AbortController();
+      window.login.abort = () => controller.abort();
+      for (const [index, origin] of [first, second, third].entries())
+        window.login
+          .authenticate({
+            view,
+            url: `${origin}/private/`,
+            origin,
+            realm: 'Members',
+            scheme: 'basic',
+            retry: false,
+            signal: index === 1 ? controller.signal : new AbortController().signal,
+          })
+          .then((answer) => window.login.answers.push([index, answer]));
+    },
+    ['http://plain.example', 'https://aborted.example', 'https://secure.example'],
+  );
+  const shown = () =>
+    page.evaluate(() => {
+      const forms = document.querySelectorAll('.bl-login-prompt');
+      const form = forms[0];
+      return {
+        count: forms.length,
+        title: form?.querySelector('h2').textContent,
+        origin: form?.querySelector('.bl-origin').textContent,
+        warning: form?.querySelector('.bl-not-private')?.textContent ?? null,
+        labels: form ? [...form.querySelectorAll('label')].map((l) => l.textContent) : [],
+        buttons: form
+          ? [...form.querySelectorAll('button')].map(
+              (b) => `${b.dataset.blAnswer}:${b.textContent}`,
+            )
+          : [],
+        focused: document.activeElement?.name ?? null,
+        attrs: form ? [form.dataset.blView, form.getAttribute('role')] : [],
+      };
+    });
+  assert.deepEqual(await shown(), {
+    count: 1,
+    title: 'Anmelden',
+    origin: 'http://plain.example',
+    warning: 'Your connection to this site is not private',
+    labels: ['Username', 'Password'],
+    buttons: ['cancel:Cancel', 'sign-in:Anmelden'],
+    focused: 'username',
+    attrs: ['5', 'dialog'],
+  });
+  // Real typing, Tab and Enter sign in
+  await page.keyboard.type('ann');
+  await page.keyboard.press('Tab');
+  await page.keyboard.type('sécret');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.login.answers.length === 1);
+  // The aborted one leaves the queue, the next shows without the warning
+  await page.evaluate(() => window.login.abort());
+  await page.waitForFunction(() => window.login.answers.length === 2);
+  const third = await shown();
+  assert.equal(third.origin, 'https://secure.example');
+  assert.equal(third.warning, null);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => window.login.answers.length === 3);
+  // Cancel button of another request
+  const last = page.evaluate(() =>
+    window.login.authenticate({
+      view: makeView(6),
+      url: 'https://x.example/',
+      origin: 'https://x.example',
+      realm: '',
+      scheme: 'digest',
+      retry: true,
+      signal: new AbortController().signal,
+    }),
+  );
+  await page.click('.bl-login-prompt [data-bl-answer=cancel]');
+  assert.equal(await last, null);
+  assert.deepEqual(await page.evaluate(() => window.login.answers), [
+    [0, { username: 'ann', password: 'sécret' }],
+    [1, null],
+    [2, null],
+  ]);
+  assert.equal(await page.evaluate(() => document.querySelectorAll('.bl-login-prompt').length), 0);
+});
+
 test('context menu with the default items', async () => {
   const result = await page.evaluate(async () => {
     const view = makeView(4);

@@ -8,7 +8,13 @@ import {
   webrtc,
 } from '@browser-lite/core';
 import { WispTransport } from '@browser-lite/transport-wisp';
-import { colorPicker, dateTimePicker, permissionPrompt, selectPopup } from '@browser-lite/ui';
+import {
+  colorPicker,
+  dateTimePicker,
+  loginPrompt,
+  permissionPrompt,
+  selectPopup,
+} from '@browser-lite/ui';
 import { takePendingAddress } from './address-bar.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
@@ -94,6 +100,7 @@ function browserOptions(
       ...colorPicker(),
       ...dateTimePicker(),
       ...permissionPrompt(),
+      ...loginPrompt(),
       ...dialogHandler(),
     },
     permissions: profilePermissions,

@@ -55,8 +55,8 @@ Every browser test starts its own servers with `startStack()` of `lib/`: the pag
 The host page and the demo (with `?debug=1`) expose `window.blTest` (browser, active view,
 `open`, `load`, `eval`, `pagePixel`, debug hooks). The host page also has `window.blHost`: recorded
 events (`navigation:`, `title:`, `commit:`, `icon-image:`, `permission:`, `external-url:`, ...),
-answers of the request handlers (`selectAnswer`, `permissionAnswer`, `fileAnswer`, `dialogMode`,
-...), `start(options)`, `stop()`, `select(index)`. `window.blTestOptions`, set before the start
+answers of the request handlers (`selectAnswer`, `permissionAnswer`, `authAnswers`, `fileAnswer`,
+`dialogMode`, ...), `start(options)`, `stop()`, `select(index)`. `window.blTestOptions`, set before the start
 with `page.addInitScript`, is merged into the `BrowserOptions`. Parameters of the host page are
 listed at the top of `core/host/host.js` (`persistent`, `namespace`, `device`, `services`, `env`,
 engine switches).

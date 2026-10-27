@@ -1,4 +1,5 @@
-// Parts of the core that need no browser: page dialogs and permission answers (Requests), the
+// Parts of the core that need no browser: page dialogs, permission and HTTP authentication
+// answers (Requests), the
 // downloads, the upload limit, popups without a new-view listener and the engine check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -28,6 +29,7 @@ function fakeModule() {
     },
     _bl_dialog_answer: record('dialog'),
     _bl_permission_answer: record('permission'),
+    _bl_auth_answer: record('auth'),
     _bl_download_cancel: record('cancel'),
     _bl_remove_path: record('remove'),
   };
@@ -184,6 +186,52 @@ test('permissions: grant and deny are remembered, dismiss and errors are not', a
       ['https://b.example', 'microphone', 'deny'],
     ],
   );
+});
+
+test('authentication: credentials, cancel, defaults, auth-cancel and closed views', async () => {
+  const none = requestsWith({});
+  await none.requests.authenticate(fakeView(), { id: 1, realm: 'r' });
+  assert.deepEqual(none.module.calls, [['auth', 1, 0, 0]]);
+
+  const seen = [];
+  const answers = [{ username: 'ann', password: 'pw' }, null, { username: 1 }];
+  const { requests, module } = requestsWith({
+    async authenticate(request) {
+      seen.push([request.url, request.origin, request.realm, request.scheme, request.retry]);
+      if (request.realm === 'wait')
+        return new Promise((resolve) =>
+          request.signal.addEventListener('abort', () => resolve({ username: 'x', password: 'y' })),
+        );
+      if (request.realm === 'throw') throw new Error('no');
+      return answers.shift();
+    },
+  });
+  const view = fakeView();
+  const data = {
+    url: 'https://a.example/p',
+    origin: 'https://a.example',
+    realm: 'Area',
+    scheme: 'digest',
+  };
+  await requests.authenticate(view, { id: 2, ...data, retry: true });
+  await requests.authenticate(view, { id: 3, ...data });
+  await requests.authenticate(view, { id: 4, ...data, scheme: 'other' });
+  await requests.authenticate(view, { id: 5, realm: 'throw' });
+  const cancelled = requests.authenticate(view, { id: 6, realm: 'wait' });
+  requests.cancelAuth(6);
+  await cancelled;
+  const closed = requests.authenticate(view, { id: 7, realm: 'wait' });
+  requests.closeView(view);
+  await closed;
+  assert.deepEqual(seen[0], ['https://a.example/p', 'https://a.example', 'Area', 'digest', true]);
+  assert.deepEqual(seen[2].slice(3), ['basic', false]);
+  assert.deepEqual(module.calls, [
+    ['auth', 2, 'ann', 'pw'],
+    ['auth', 3, 0, 0],
+    ['auth', 4, 0, 0],
+    ['auth', 5, 0, 0],
+    ['auth', 7, 0, 0],
+  ]);
 });
 
 test('downloads: events with the download, cancel, abort and auto save', () => {

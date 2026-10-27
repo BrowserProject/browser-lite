@@ -553,6 +553,14 @@ export interface RequestHandlers {
    * (Notification.requestPermission), as the ui permission prompt does.
    */
   permission(request: PermissionRequest): Promise<PermissionAnswer>;
+  /**
+   * HTTP authentication (401 with Basic or Digest), like the sign-in dialog of Chrome. Asked for
+   * the main frame and same origin loads without stored credentials; loads of the same realm wait
+   * for one answer. The credentials are kept for the session of the engine, so further requests to
+   * the realm do not ask; refused ones ask again (`retry`). Default null: the page shows the 401
+   * response.
+   */
+  authenticate(request: AuthRequest): Promise<AuthCredentials | null>;
   /** Default: the native file dialog of the host browser. */
   fileChooser(request: FileChooserRequest): Promise<File[] | null>;
   /** `<select>` popup; resolves the chosen index or -1. Default -1. */
@@ -605,6 +613,31 @@ export interface PermissionRequest {
   origin: string;
   /** Aborted when the view closes or the engine ends. */
   signal: AbortSignal;
+}
+
+/** A server asks for a user name and password (handler `authenticate`). */
+export interface AuthRequest {
+  view: View;
+  /** Address that answered 401: the page or a same origin resource of it. */
+  url: string;
+  /** Origin of the server, what to show the user (like Chrome). */
+  origin: string;
+  /** Realm the server named, '' without one. Text of the server, not of the browser. */
+  realm: string;
+  scheme: 'basic' | 'digest';
+  /** The credentials sent last were refused. */
+  retry: boolean;
+  /**
+   * Aborted when no load waits for the answer any more (stopped, navigated away), the view closes
+   * or the engine ends; the answer is ignored then.
+   */
+  signal: AbortSignal;
+}
+
+/** Answer of the `authenticate` handler. */
+export interface AuthCredentials {
+  username: string;
+  password: string;
 }
 
 /** Text a page copied or cut (handler `clipboardWrite`). */

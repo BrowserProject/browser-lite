@@ -141,7 +141,10 @@ whose `firstPartyForCookies` is the top origin of the registration or creator, d
 through their creator's document. A load WebCore made opaque (CORS after a cross-origin redirect)
 takes the frame's context instead: the worker of a worker page or the document. Opaque contexts
 (sandboxed frames, `data:` tops) and origins without a site (`file:`) are not cached. WebKit's
-memory cache stays shared by all views of the engine. Range requests (the pieces of `MediaFetch`,
+memory cache stays shared by all views of the engine. HTTP authentication (#257, `HttpAuth.cpp`):
+curl answers Basic and Digest itself once it has a user name and password; the credentials of the
+session are kept per protection space (host, port, scheme, realm) in WebCore's `CredentialStorage`
+and sent ahead for Basic in the same directory, a 401 without them asks the host (`auth`). Range requests (the pieces of `MediaFetch`,
 `fetch()` with `Range`) are cached like Chrome's sparse entries (#222): a 206 with a strong
 validator is stored as a range of its resource (resources up to 10 MB), and a range request is
 answered once the ranges of the newest version (validator and Vary values) cover the whole

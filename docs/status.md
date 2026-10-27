@@ -13,7 +13,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   our own Wisp relay that connects only to public addresses and web ports (#159, #178, #201).
 - **Browsing**: views with popups (opener, name, sandbox), history incl. back/forward cache,
   downloads, uploads, find, zoom, pinch zoom on the compositor (#150), print to PDF, view source,
-  external schemes to the host after a click (#148), context menu data, link hover, fullscreen.
+  external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
+  HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257).
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch, pointer lock, ctrl + wheel to the page first (#167).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
@@ -196,8 +197,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   muted autoplay video briefly reports `pause` and `playing` again right after loading (Chrome
   does not).
 - Service workers: Push, Background Sync, Background Fetch.
-- Network: HTTP authentication (401 with Basic/Digest) has no login dialog, the page shows the
-  body of the 401 response; WebTransport, streams as request body, Storage Buckets,
+- Network: WebTransport, streams as request body, Storage Buckets,
   WebSocketStream without read backpressure (#120).
 - Storage: localStorage reaches SQLite 1 s after a change and can miss the last change on close;
   with `/data` in memory (second tab) uploads sit in WASM memory. WebKit's memory cache is shared

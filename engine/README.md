@@ -41,7 +41,8 @@ patches from `patches/`.
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread)
-  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `PlatformStrategies.cpp`,
+  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
+    Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,
     `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
