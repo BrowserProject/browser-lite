@@ -129,11 +129,13 @@ are deferred, so newer code stays in `engine.wasm` until the list is renewed. Re
 changes that add or rename much engine code (a WebKit update), or when
 `tests/core/deferred-test.mjs` finds the start needing a chunk; a deferred function still works,
 a thread only waits for its chunk when it needs one
-before that download is through:
+before that download is through. `--add` only marks what a scenario ran as hot in the existing
+list (the page with text in other scripts whose fonts are held back, and given addresses):
 
 ```bash
 npm run build
-node tools/hot-functions.mjs build/webcore/bin   # adds to engine/hot-functions.txt
+node tools/hot-functions.mjs build/webcore/bin   # writes engine/hot-functions.txt
+node tools/hot-functions.mjs build/webcore/bin --add https://example.com/   # only adds
 ```
 
 ## Packaging
