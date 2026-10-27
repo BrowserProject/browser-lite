@@ -274,6 +274,8 @@ try {
   });
   const violations = [];
   strict.on('console', (message) => {
+    // Firefox checks its own request of the site's /favicon.ico against the page's policy
+    if (/favicon\.ico/.test(message.text())) return;
     if (/Content Security Policy|Refused to|CSP violation/i.test(message.text()))
       violations.push(message.text());
   });
