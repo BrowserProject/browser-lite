@@ -59,7 +59,7 @@ Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation
 | Engine thread (`main()`, `-sPROXY_TO_PTHREAD`) | WebCore and JSC for all views, the event loop (`EngineLoop.cpp`), every `bl_*` export |
 | Compositor | Composites layers with its own WebGL 2 context into the view canvases it owns (#98) |
 | Scrolling | WebCore's scrolling tree; wheel and swipe go there through the compositor (#101) |
-| Tile painters, image decoder, curl, IndexedDB, Web Audio, page workers | Background work; 8 pooled workers plus 3 loaded in reserve (#242) |
+| Tile painters, image decoder, curl, IndexedDB, Web Audio, page workers | Background work; 8 pooled workers plus 4 loaded in reserve (#242) |
 
 Every thread instantiates `engine.wasm` itself. A split engine (#238) has the code that the
 start and common pages do not run in chunks `engine.deferred-<n>.wasm`: the core compiles them

@@ -58,7 +58,7 @@ struct EngineConfig {
     uint64_t indexedDBQuotaMB { 256 }; // BL_INDEXEDDB_QUOTA_MB
     uint64_t databaseMaxMB { 512 }; // BL_DATABASE_MAX_MB
     bool fontconfigEarly { true }; // BL_FONTCONFIG_EARLY
-    int spareWorkers { 3 }; // BL_SPARE_WORKERS
+    int spareWorkers { 4 }; // BL_SPARE_WORKERS
 };
 
 // Reads the environment and writes BL_EXTRA_CA to a file (then removes it from

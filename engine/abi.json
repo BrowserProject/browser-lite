@@ -259,7 +259,7 @@
     { "name": "BL_INDEXEDDB_QUOTA_MB", "type": "number", "default": "256", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "IndexedDB limit per origin." },
     { "name": "BL_DATABASE_MAX_MB", "type": "number", "default": "512", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Biggest SQLite file loaded into memory." },
     { "name": "BL_FONTCONFIG_EARLY", "type": "bool", "default": "1", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "0: fontconfig is set up on first use instead of in the background at start." },
-    { "name": "BL_SPARE_WORKERS", "type": "number", "default": "3", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Loaded pthread workers kept in reserve, refilled after a thread takes one." },
+    { "name": "BL_SPARE_WORKERS", "type": "number", "default": "4", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Loaded pthread workers kept in reserve, refilled after a thread takes one." },
     { "name": "BL_MALLOC_CACHE", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0015-wtf-fastmalloc-on-emscripten.patch", "doc": "Size of the FastMalloc cache." },
     { "name": "BL_LLINT_TUNING", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0031-jsc-llint-slow-paths-on-wasm.patch", "doc": "Tuning of the LLInt slow paths." },
     { "name": "JSC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "JavaScriptCore", "doc": "JSC options, e.g. JSC_useLLIntICs=false." },
