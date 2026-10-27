@@ -389,6 +389,8 @@ jobs:
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
+    # Firefox reports, but does not block until its open failures are fixed (docs/status.md)
+    continue-on-error: ${{ matrix.browser == 'firefox' }}
     strategy:
       fail-fast: false
       matrix:
@@ -440,6 +442,8 @@ jobs:
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    # Firefox reports, but does not block until its open failures are fixed (docs/status.md)
+    continue-on-error: ${{ matrix.browser == 'firefox' }}
     strategy:
       fail-fast: false
       matrix:

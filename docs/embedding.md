@@ -230,8 +230,9 @@ delegate the matching `allow=` features.
 
 ## Browser support
 
-Chromium (Chrome, Edge, Chromebooks) and Firefox are supported: CI runs every browser suite in
-both ([tests/README.md](../tests/README.md)). Safari is best effort: some APIs the engine and its
+Chromium (Chrome, Edge, Chromebooks) is supported. CI runs every browser suite in Firefox too
+([tests/README.md](../tests/README.md)); its open failures are in [status.md](status.md), until
+they are fixed Firefox does not block CI. Safari is best effort: some APIs the engine and its
 services rely on are missing or behave differently there. Call `checkSupport()` before showing the
 browser and fall back gracefully.
 

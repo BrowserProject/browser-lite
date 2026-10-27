@@ -104,7 +104,7 @@ check(
 startRelease();
 await load(page, new URL('xslt', siteURL).href);
 check('a page with deferred code works', (await results.wait('xslt')) === '3', results.get('xslt'));
-// Playwright routes the synchronous request of the engine thread only in Chromium
+// Playwright holds back the synchronous request of the engine thread only in Chromium
 if (chromiumOnly('the engine thread waits for its chunk (route of a synchronous request)')) {
   check('it waited for its chunk', released);
   // The host asks for one chunk at a time, so a second waiting request came from the engine

@@ -215,6 +215,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 ## Open: tests and operations
 
+- Firefox (CI job reports without blocking): storage (`smoke-test` OPFS namespace files,
+  `storage-test` IndexedDB and cookie after a reload right after writing), `network-test` resend
+  of a POST from the error page, `compositing-test` CPU painting after GPU loss, `parity-test`,
+  both soak tests, `existing-site-test` (CSP report for the favicon), and the demo suites
+  `profile`, `settings`, `ui` (time limit).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page
