@@ -316,6 +316,8 @@ test('match patterns and scripts are checked', () => {
         code: 'invalid-options',
       });
       assert.throws(() => context.addStyle({ matches: ['*://*/*'] }), { code: 'invalid-options' });
+      assert.throws(() => context.handle('dialogs', () => {}), { code: 'invalid-options' });
+      assert.throws(() => context.handle('dialog', 'no'), { code: 'invalid-options' });
     }),
   );
 });

@@ -1,5 +1,6 @@
 import { Emitter } from '../emitter.js';
 import { BrowserLiteError } from '../errors.js';
+import { isRequestType } from '../handlers.js';
 import type { Browser, RequestHandlers, Unsubscribe, View } from '../types.js';
 import { type EngineScript, type EngineStyle, engineScript, engineStyle } from './content.js';
 import {
@@ -260,6 +261,8 @@ class ExtensionHostImpl<App> implements ExtensionHost<App>, AttachableHost {
         };
       },
       handle(type, handler) {
+        if (!isRequestType(type))
+          throw new BrowserLiteError('invalid-options', `Unknown request type: ${String(type)}`);
         if (typeof handler !== 'function')
           throw new BrowserLiteError(
             'invalid-options',

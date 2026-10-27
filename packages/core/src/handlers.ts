@@ -16,6 +16,11 @@ const DEFAULTS: RequestHandlers = {
   clipboardWrite: writeHostClipboard,
 };
 
+/** True for the name of a request type (a key of RequestHandlers). */
+export function isRequestType(type: unknown): type is keyof RequestHandlers {
+  return typeof type === 'string' && Object.hasOwn(DEFAULTS, type);
+}
+
 /**
  * The handler of a request: the chain of the extensions (in their order, each may call `next`),
  * ending in the handler of the options or the default. Without extension handlers just the

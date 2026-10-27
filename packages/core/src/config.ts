@@ -1,5 +1,6 @@
 import { BrowserLiteError } from './errors.js';
 import { type AttachableHost, attachableHost } from './extensions/link.js';
+import { isRequestType } from './handlers.js';
 import { MemoryPermissionStore } from './permissions.js';
 import { defaultServices } from './services/index.js';
 import { Service } from './services/service.js';
@@ -236,21 +237,11 @@ function serviceWorker(value: unknown): ServiceWorkerOption | undefined {
   return invalid('serviceWorker must be { registration } or { url, scope? }');
 }
 
-const HANDLERS = [
-  'dialog',
-  'permission',
-  'fileChooser',
-  'selectPopup',
-  'colorPicker',
-  'dateTimePicker',
-  'clipboardWrite',
-] as const;
-
 function handlers(value: unknown): Partial<RequestHandlers> {
   if (value === undefined) return {};
   if (!isObject(value)) return invalid('handlers must be an object');
   for (const [key, handler] of Object.entries(value)) {
-    if (!(HANDLERS as readonly string[]).includes(key)) invalid(`Unknown handler: ${key}`);
+    if (!isRequestType(key)) invalid(`Unknown handler: ${key}`);
     if (handler !== undefined && typeof handler !== 'function')
       invalid(`handlers.${key} must be a function`);
   }
