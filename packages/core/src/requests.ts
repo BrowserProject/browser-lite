@@ -65,9 +65,9 @@ const rectOf = (data: Record<string, unknown>): Rect => ({
 });
 
 /**
- * Requests the engine waits for (dialogs, permissions, HTTP authentication, file chooser, popups and pickers),
- * answered by the request handlers of the options or safe defaults. Every request has an
- * AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
+ * Requests the engine waits for (dialogs, permissions, HTTP authentication, file chooser, popups
+ * and pickers), answered by the request handlers of the options or safe defaults. Every request
+ * has an AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
  */
 export class Requests {
   private readonly pending = new Map<number, Set<AbortController>>();
