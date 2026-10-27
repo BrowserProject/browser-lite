@@ -11,7 +11,9 @@ import {
   canvasOrigin,
   check,
   collect,
+  evalPage,
   finish,
+  hostEvents,
   launch,
   load,
   openHost,
@@ -376,7 +378,17 @@ await page.waitForTimeout(1000);
 // 4) Color scheme: the host switches to dark, the page notices
 check('color scheme light at the start', (await result('dark')) === 'false');
 await page.emulateMedia({ colorScheme: 'dark' });
-check('color scheme dark arrives', (await result('darkchange', 10000)) === 'true');
+const darkArrived = (await result('darkchange', 10000)) === 'true';
+check('color scheme dark arrives', darkArrived);
+// Rare in CI, never locally: everything after it failed too. What the page and the host say then
+if (!darkArrived) {
+  await evalPage(
+    page,
+    "console.log('RESULT diag=' + [scrollY, matchMedia('(prefers-color-scheme: dark)').matches, document.hasFocus(), document.visibilityState].join(','))",
+  );
+  console.log(`     page: ${(await result('diag', 5000)) ?? 'no answer'}`);
+  console.log(`     host events: ${(await hostEvents(page)).slice(-8).join(' | ')}`);
+}
 
 // 5) Location: the permission handler grants it, then the position arrives
 await answer('geolocation', 'grant');
