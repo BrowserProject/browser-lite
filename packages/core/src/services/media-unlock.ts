@@ -41,8 +41,14 @@ export class MediaUnlock {
   }
 
   private unlock(video: HTMLVideoElement, done: (ok: boolean) => void): void {
-    // Rejected at once with NotAllowedError outside a gesture (iOS: pointerdown), otherwise
-    // pause() aborts the playback and the restriction of the element is gone
+    // The play and pause events of the unlock are not the page's: they stop here (capture
+    // listeners of the target run first)
+    const swallow = (event: Event) => event.stopImmediatePropagation();
+    const options = { capture: true, once: true };
+    video.addEventListener('play', swallow, options);
+    video.addEventListener('pause', swallow, options);
+    // Rejected at once with NotAllowedError outside a gesture (iOS: pointerdown of a finger),
+    // otherwise pause() aborts the playback and the restriction of the element is gone
     video.play().then(
       () => {
         this.unlocked.add(video);
@@ -51,6 +57,10 @@ export class MediaUnlock {
       (error: unknown) => {
         const ok = (error as Error | null)?.name !== 'NotAllowedError';
         if (ok) this.unlocked.add(video);
+        else {
+          video.removeEventListener('play', swallow, options);
+          video.removeEventListener('pause', swallow, options);
+        }
         done(ok);
       },
     );
