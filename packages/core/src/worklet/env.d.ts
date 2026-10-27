@@ -6,6 +6,7 @@ interface WorkletMessagePort {
 }
 
 declare const currentTime: number;
+/** Sample rate of the AudioContext. */
 declare const sampleRate: number;
 
 declare class AudioWorkletProcessor {
@@ -17,6 +18,3 @@ declare function registerProcessor(
   name: string,
   processorCtor: new (options: { processorOptions: unknown }) => AudioWorkletProcessor,
 ): void;
-
-/** Sample rate of the AudioContext. */
-declare const sampleRate: number;
