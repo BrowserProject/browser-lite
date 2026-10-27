@@ -198,7 +198,9 @@ export class Tab implements SessionTab {
     });
     if (!debug)
       this.on('console', (event) => {
+        // '%s': the message is text, not a format string of the host console
         console[event.level](
+          '%s',
           `[page ${view.id}] ${event.message}`,
           event.source ? `(${event.source}:${event.line})` : '',
         );

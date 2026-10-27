@@ -459,8 +459,13 @@ class BrowserImpl implements Browser, ViewHost {
       const source = String(data.source ?? '');
       const line = Number(data.line) || 0;
       view?.emit('console', { level, message, source, line });
+      // '%s': the message is text, not a format string of the host console (the engine formatted it)
       if (this.config.debug)
-        console[level](`[page ${view?.id ?? 0}] ${message}`, source ? `(${source}:${line})` : '');
+        console[level](
+          '%s',
+          `[page ${view?.id ?? 0}] ${message}`,
+          source ? `(${source}:${line})` : '',
+        );
     });
     this.handle<{ opener?: number }>('new-view', (data, _view, viewId) =>
       this.openEngineView(viewId, Number(data.opener)),
