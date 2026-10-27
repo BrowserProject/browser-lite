@@ -80,6 +80,7 @@
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/StorageSessionProvider.h>
 #include <WebCore/SubstituteData.h>
+#include <WebCore/WindowEventLoop.h>
 #include <pal/SessionID.h>
 #include <optional>
 #include <skia/core/SkCanvas.h>
@@ -1592,6 +1593,10 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
     // waited behind them
     if (!m_inRenderingUpdate && engineConfig().firstPaintEarly) {
         scheduleRenderingUpdate();
+        // Ends the current RunLoop cycle after this timer, like the rendering update of the Mac
+        // and WPE ports: otherwise the parser yields for the paint, and its next chunk with a long
+        // script still ran in the same cycle (YouTube: 1.9 s)
+        WindowEventLoop::breakToAllowRenderingUpdate();
         runNextOnEngineThread([id = m_id] {
             if (auto* view = fromID(id))
                 view->presentIfNeeded();
