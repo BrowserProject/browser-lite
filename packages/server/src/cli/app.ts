@@ -35,9 +35,10 @@ const cacheControl = (urlPath: string) =>
   IMMUTABLE.test(urlPath) ? 'public, max-age=31536000, immutable' : 'no-cache';
 
 // A file of an engine is the dictionary for the same file of the next engine version, which then
-// comes as a delta (<file>.<sha256 of the old file>.dcz, tools/engine-deltas.mjs)
+// comes as a delta (<file>.<sha256 of the old file>.dcz, tools/engine-deltas.mjs). Only plain
+// names, which need no escaping in the URL pattern
 const useAsDictionary = (urlPath: string) => {
-  const rest = /^\/engine\/[^/]+\/(.+)$/.exec(urlPath)?.[1];
+  const rest = /^\/engine\/[^/]+\/([\w./-]+)$/.exec(urlPath)?.[1];
   return rest ? `match="/engine/*/${rest}"` : undefined;
 };
 
