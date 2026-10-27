@@ -43,6 +43,7 @@
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
+#include <WebCore/FrameSelection.h>
 #include <WebCore/GraphicsContextSkia.h>
 #include <WebCore/HandleUserInputEventResult.h>
 #include <WebCore/LinkIconCollector.h>
@@ -561,11 +562,19 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
 {
     if (size == m_size && deviceScaleFactor == m_deviceScaleFactor)
         return;
+    bool shorter = size.height() < m_size.height();
     m_size = size;
     m_deviceScaleFactor = deviceScaleFactor;
     m_page->setDeviceScaleFactor(deviceScaleFactor);
     if (RefPtr view = mainFrameView())
         view->resize(size);
+    // An on-screen keyboard of the host covers the lower part: keep the field being typed in
+    // visible, like Chrome
+    if (shorter) {
+        RefPtr focused = m_page->focusController().focusedOrMainFrame();
+        if (focused && focused->selection().selection().isContentEditable())
+            focused->selection().revealSelection();
+    }
     createSurface();
     if (m_compositing) {
         scheduleRenderingUpdate();

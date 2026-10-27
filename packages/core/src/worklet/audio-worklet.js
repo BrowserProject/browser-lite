@@ -65,48 +65,57 @@ class EngineAudioPlayer extends AudioWorkletProcessor {
 
 registerProcessor('engine-audio-player', EngineAudioPlayer);
 
-/**
- * Hands the samples of its input to the page in planes of 1024 frames (stand-in for
- * MediaStreamTrackProcessor, services/track-reader.ts). Outputs silence.
- */
+// Records its input for the engine (a microphone or a received WebRTC track where the host has
+// no AudioData, Safari): blocks of about 20 ms as planar float32 go straight to the engine
+// worker over the MessagePort it gets first (engine/js/webcodecs-host.js, attachCapturePort).
+const CAPTURE_BLOCK = 1024;
+
 class EngineAudioCapture extends AudioWorkletProcessor {
   constructor() {
     super();
-    /** @type {Float32Array[][]} */
-    this.blocks = [];
-    this.frames = 0;
-  }
-
-  flush() {
-    const first = this.blocks[0];
-    if (!first) return;
-    const planes = first.map((_, channel) => {
-      const plane = new Float32Array(this.frames);
-      let offset = 0;
-      for (const block of this.blocks) {
-        const samples = /** @type {Float32Array} */ (block[channel]);
-        plane.set(samples, offset);
-        offset += samples.length;
-      }
-      return plane;
-    });
-    this.port.postMessage(
-      planes,
-      planes.map((plane) => plane.buffer),
-    );
-    this.blocks = [];
-    this.frames = 0;
+    /** @type {WorkletMessagePort | null} */
+    this.target = null;
+    /** @type {Float32Array[]} */
+    this.planes = [];
+    this.filled = 0;
+    this.start = 0;
+    this.running = true;
+    /** @param {{ data: unknown }} event */
+    this.port.onmessage = (event) => {
+      if (event.data === 'stop') {
+        this.running = false;
+        this.target?.close();
+      } else this.target = /** @type {{ port: WorkletMessagePort }} */ (event.data).port;
+    };
   }
 
   /** @param {Float32Array[][]} inputs */
   process(inputs) {
+    if (!this.running) return false;
     const input = inputs[0];
     const first = input?.[0];
-    if (!input || !first) return true;
-    if (this.blocks.length && this.blocks[0]?.length !== input.length) this.flush();
-    this.blocks.push(input.map((channel) => channel.slice()));
-    this.frames += first.length;
-    if (this.frames >= 1024) this.flush();
+    if (!this.target || !input || !first) return true;
+    if (this.planes.length !== input.length) {
+      this.planes = input.map(() => new Float32Array(CAPTURE_BLOCK));
+      this.filled = 0;
+    }
+    if (!this.filled) this.start = currentTime;
+    const count = Math.min(first.length, CAPTURE_BLOCK - this.filled);
+    for (let c = 0; c < input.length; c++)
+      /** @type {Float32Array} */ (this.planes[c]).set(
+        /** @type {Float32Array} */ (input[c]).subarray(0, count),
+        this.filled,
+      );
+    this.filled += count;
+    if (this.filled === CAPTURE_BLOCK) {
+      const planes = this.planes;
+      this.target.postMessage(
+        { planes, sampleRate, timestamp: Math.round(this.start * 1e6) },
+        planes.map((plane) => plane.buffer),
+      );
+      this.planes = input.map(() => new Float32Array(CAPTURE_BLOCK));
+      this.filled = 0;
+    }
     return true;
   }
 }

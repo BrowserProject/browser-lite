@@ -1,4 +1,6 @@
 import type { ViewImpl } from '../view.js';
+import { mediaSourceClass } from './host-apis.js';
+import { MediaUnlock } from './media-unlock.js';
 import { installPictureInPicture } from './pip.js';
 import { Service, type ServiceContext } from './service.js';
 import { placeVideo, unplaceVideo, type VideoPlacement } from './video-overlay.js';
@@ -41,6 +43,7 @@ export interface MediaHost {
   readonly ctx: ServiceContext;
   readonly container: HTMLElement;
   readonly players: Map<number, Player>;
+  readonly unlock: MediaUnlock;
   mediaUrl(player: number): string;
   view(id: number): ViewImpl | undefined;
 }
@@ -80,7 +83,7 @@ export class Player {
     this.hidden = !!options.hidden;
     this.overlay = !!options.overlay;
     this.copyFrames = !this.overlay;
-    const video = document.createElement('video');
+    const video = host.unlock.take();
     this.video = video;
     video.playsInline = true;
     video.preload = (options.preload || 'auto') as HTMLVideoElement['preload'];
@@ -99,11 +102,15 @@ export class Player {
       this.send({ type: 'error', code: video.error?.code || 4 });
     });
     host.container.append(video);
-    if (options.mse) {
+    const hostSource = options.mse ? mediaSourceClass() : undefined;
+    if (hostSource) {
       // MSE: own MediaSource, the engine sends the data (SourceBufferPrivateWasm)
-      this.mediaSource = new MediaSource();
+      this.mediaSource = new hostSource.Source();
       this.mediaSource.addEventListener('sourceopen', () => this.runQueue(), { once: true });
+      if (hostSource.managed) video.disableRemotePlayback = true;
       video.src = URL.createObjectURL(this.mediaSource);
+    } else if (options.mse) {
+      queueMicrotask(() => this.send({ type: 'error', code: 4 }));
     } else {
       video.src = host.mediaUrl(id);
     }
@@ -287,7 +294,10 @@ export class Player {
     const video = this.video;
     switch (type) {
       case 'play':
-        video.play().catch(() => this.sendState('pause'));
+        video.play().then(
+          () => this.host.unlock.played(video),
+          () => this.sendState('pause'),
+        );
         break;
       case 'pause':
         video.pause();
@@ -502,10 +512,13 @@ export class MediaService extends Service {
     container.style.cssText =
       'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
     document.body.append(container);
+    const unlock = new MediaUnlock();
+    ctx.onUserGesture(() => unlock.gesture([...players.values()].map((player) => player.video)));
     const host: MediaHost = {
       ctx,
       container,
       players,
+      unlock,
       mediaUrl: (player) =>
         new URL(`bl-media/${instance}/${player}/${Date.now().toString(36)}`, scope).href,
       view: (id) => views.get(id),

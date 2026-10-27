@@ -167,6 +167,7 @@
     { "type": "cursor", "scope": "view", "payload": "{cursor} (CSS cursor name)" },
     { "type": "hover", "scope": "view", "payload": "{link, tooltip}" },
     { "type": "caret", "scope": "view", "payload": "{x, y, height} (for the IME field)" },
+    { "type": "text-input", "scope": "view", "payload": "{mode, enterKeyHint} of the focused editable element (mode: inputmode or from the input type), mode \"\" when nothing editable has the selection (on-screen keyboard)" },
     { "type": "find", "scope": "view", "payload": "{matches, index}" },
     { "type": "fullscreen", "scope": "view", "payload": "{on}" },
     { "type": "pointer-lock", "scope": "view", "payload": "{on}; on true asks the host to lock, answer bl_pointer_lock" },

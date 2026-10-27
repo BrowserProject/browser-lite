@@ -1,8 +1,8 @@
-// Stand-ins for MediaStreamTrackProcessor and MediaStreamTrackGenerator where the host has
-// neither (Firefox), built from WebCodecs, a <video>, a <canvas> and the AudioWorklets of the core
-// (engine-audio-capture and engine-audio-feed in audio-worklet.js).
+// Stand-ins for MediaStreamTrackProcessor (video) and MediaStreamTrackGenerator where the host
+// has neither (Firefox), built from WebCodecs, a <video>, a <canvas> and the engine-audio-feed
+// AudioWorklet of the core (audio-worklet.js).
 
-/** Whether the host has what the stand-ins need (WebCodecs and AudioWorklet). */
+/** Whether the host has what the generator stand-in needs (WebCodecs and AudioWorklet). */
 export const canStandIn = (): boolean =>
   typeof VideoFrame === 'function' &&
   typeof AudioData === 'function' &&
@@ -12,19 +12,11 @@ const now = () => Math.round(performance.now() * 1000);
 const workletUrl = () => new URL('../audio-worklet.js', import.meta.url).href;
 
 /**
- * Like MediaStreamTrackProcessor: the frames of a track as a ReadableStream. Video: a hidden
- * <video> plays the track, every new frame becomes a VideoFrame. Audio: the samples of an
- * AudioWorklet become AudioData (f32-planar).
+ * Like the readable of a video MediaStreamTrackProcessor: a hidden <video> plays the track,
+ * every new frame becomes a VideoFrame (sound goes through the engine-audio-capture worklet,
+ * track-source.ts).
  */
-export class TrackReader {
-  readonly readable: ReadableStream<VideoFrame | AudioData>;
-
-  constructor({ track }: { track: MediaStreamTrack }) {
-    this.readable = track.kind === 'audio' ? audioFrames(track) : videoFrames(track);
-  }
-}
-
-function videoFrames(track: MediaStreamTrack): ReadableStream<VideoFrame> {
+export function videoFrames(track: MediaStreamTrack): ReadableStream<VideoFrame> {
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
@@ -57,54 +49,6 @@ function videoFrames(track: MediaStreamTrack): ReadableStream<VideoFrame> {
     },
     { highWaterMark: 0 },
   );
-}
-
-function audioFrames(track: MediaStreamTrack): ReadableStream<AudioData> {
-  const context = new AudioContext();
-  let stopped = false;
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-    context.close().catch(() => {});
-  };
-  return new ReadableStream<AudioData>({
-    async start(controller) {
-      await context.audioWorklet.addModule(workletUrl());
-      if (stopped) return;
-      const node = new AudioWorkletNode(context, 'engine-audio-capture');
-      node.port.onmessage = (event: MessageEvent<Float32Array[]>) => {
-        const planes = event.data;
-        const frames = planes[0]?.length ?? 0;
-        if (!frames || stopped) return;
-        const data = new Float32Array(frames * planes.length);
-        for (const [channel, plane] of planes.entries()) data.set(plane, channel * frames);
-        controller.enqueue(
-          new AudioData({
-            format: 'f32-planar',
-            sampleRate: context.sampleRate,
-            numberOfFrames: frames,
-            numberOfChannels: planes.length,
-            timestamp: now(),
-            data,
-          }),
-        );
-      };
-      context.createMediaStreamSource(new MediaStream([track])).connect(node);
-      // Silent output: a node connected to the destination is always processed
-      node.connect(context.destination);
-      track.addEventListener(
-        'ended',
-        () => {
-          if (stopped) return;
-          stop();
-          controller.close();
-        },
-        { once: true },
-      );
-      await context.resume().catch(() => {});
-    },
-    cancel: stop,
-  });
 }
 
 /** A host track with a WritableStream for its frames, like MediaStreamTrackGenerator. */

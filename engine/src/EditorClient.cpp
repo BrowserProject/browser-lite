@@ -4,7 +4,13 @@
 #include "Host.h"
 
 #include <WebCore/Document.h>
+#include <WebCore/EnterKeyHint.h>
+#include <WebCore/FocusController.h>
+#include <WebCore/HTMLInputElement.h>
+#include <WebCore/InputMode.h>
+#include <WebCore/Page.h>
 #include <WebCore/DocumentInlines.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
@@ -28,9 +34,54 @@ using namespace WebCore;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(EditorClient);
 
+// The on-screen keyboard for an editable element: inputmode, else the input type, like iOS
+static String inputModeOf(Element* element)
+{
+    RefPtr html = dynamicDowncast<HTMLElement>(element);
+    if (!html)
+        return "text"_s;
+    auto mode = html->canonicalInputMode();
+    if (mode != InputMode::Unspecified)
+        return stringForInputMode(mode);
+    if (RefPtr input = dynamicDowncast<HTMLInputElement>(*html)) {
+        if (input->isEmailField())
+            return "email"_s;
+        if (input->isTelephoneField())
+            return "tel"_s;
+        if (input->isURLField())
+            return "url"_s;
+        if (input->isNumberField())
+            return "decimal"_s;
+        if (input->isSearchField())
+            return "search"_s;
+    }
+    return "text"_s;
+}
+
+// Text input of the focused frame for "text-input": mode "" while nothing editable has the
+// selection, so the host shows no on-screen keyboard
+static String textInputState(LocalFrame& frame)
+{
+    RefPtr page = frame.page();
+    RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
+    if (!focused || !focused->selection().selection().isContentEditable())
+        return "{\"mode\":\"\"}"_s;
+    RefPtr root = focused->selection().selection().rootEditableElement();
+    RefPtr html = dynamicDowncast<HTMLElement>(root.get());
+    String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
+    return makeString("{\"mode\":\""_s, inputModeOf(root.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+}
+
 void EditorClient::respondToChangedSelection(LocalFrame* frame)
 {
-    if (!frame || !frame->view() || !frame->selection().selection().isContentEditable())
+    if (!frame)
+        return;
+    auto textInput = textInputState(*frame);
+    if (textInput != m_textInput) {
+        m_textInput = textInput;
+        notifyHost(m_viewId, "text-input", textInput);
+    }
+    if (!frame->view() || !frame->selection().selection().isContentEditable())
         return;
     // End of the selection or caret, in view coordinates (CSS pixels)
     auto caret = frame->view()->contentsToRootView(frame->selection().absoluteCaretBounds());
