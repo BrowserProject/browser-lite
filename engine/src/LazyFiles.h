@@ -29,7 +29,8 @@ void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path
 void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)());
 
 // Starts fetching files of the engine folder (paths, one per line) without waiting, so their
-// first reads find them in the HTTP cache.
-void prefetchLazyFiles(const char* paths);
+// first reads find them in the HTTP cache. Low: behind the other requests of the host (the
+// synchronous reads come first).
+void prefetchLazyFiles(const char* paths, bool low = false);
 
 } // namespace BrowserLite

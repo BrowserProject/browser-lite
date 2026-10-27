@@ -143,11 +143,15 @@ void prefetchFontsOfRenderedText(const char* path)
     static std::set<std::string> started;
     // A file an earlier scan foresaw is already on the way; one it did not means new text (a scan
     // per such file, each file waits once)
-    if (!isEngineThread() || started.count(path))
+    if (!isEngineThread() || !started.insert(path).second)
         return;
 
-    std::string paths;
-    auto add = [&](const std::string& path) {
+    // The dictionaries hold up the layout (ICU keeps a missing one), the fonts only up to the
+    // wait limit (setLazyWaitLimit): the fonts come behind them. The file of this read is fetched
+    // by the read itself.
+    std::string dictionaries;
+    std::string fontFiles;
+    auto add = [&](std::string& paths, const std::string& path) {
         if (started.insert(path).second)
             paths += (paths.empty() ? "" : "\n") + path;
     };
@@ -162,21 +166,23 @@ void prefetchFontsOfRenderedText(const char* path)
         const char* cjk = cjkFamily(root ? root->getAttribute(HTMLNames::langAttr).string() : String());
         for (char32_t c : characters) {
             if (const char* dictionary = breakDictionary(c))
-                add(std::string("lazy/icu/" U_ICUDATA_NAME "/brkitr/") + dictionary);
+                add(dictionaries, std::string("lazy/icu/" U_ICUDATA_NAME "/brkitr/") + dictionary);
             for (auto& font : fonts().lazy) {
                 if (isHan(c) && font.family != cjk)
                     continue;
                 if (FcCharSetHasChar(font.charset, c)) {
-                    add(font.path);
+                    add(fontFiles, font.path);
                     break;
                 }
             }
         }
     });
-    if (!paths.empty()) {
-        debugLog("Fonts ahead: %s", paths.c_str());
-        prefetchLazyFiles(paths.c_str());
-    }
+    if (!dictionaries.empty() || !fontFiles.empty())
+        debugLog("Fonts ahead: %s\n%s", dictionaries.c_str(), fontFiles.c_str());
+    if (!dictionaries.empty())
+        prefetchLazyFiles(dictionaries.c_str());
+    if (!fontFiles.empty())
+        prefetchLazyFiles(fontFiles.c_str(), true);
 }
 
 } // namespace BrowserLite

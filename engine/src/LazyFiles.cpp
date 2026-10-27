@@ -60,7 +60,7 @@ extern "C" int wasmfs_create_directory(const char* path, mode_t, wasmfs::backend
 // reads that follow find them in the HTTP cache or already on the way. On the page main thread:
 // the thread that reads waits in its synchronous request right after, and the fetches of a worker
 // went out only once it ran its event loop again (bbc.com: 0.55 s later)
-static void bl_lazy_prefetch(const char* paths)
+static void bl_lazy_prefetch(const char* paths, bool low)
 {
     MAIN_THREAD_ASYNC_EM_ASM({
         var paths = UTF8ToString($0);
@@ -68,8 +68,8 @@ static void bl_lazy_prefetch(const char* paths)
         if (ENVIRONMENT_IS_NODE)
             return;
         for (var path of paths.split('\n'))
-            fetch(locateFile(path)).then((response) => response.arrayBuffer()).catch(() => {});
-    }, strdup(paths));
+            fetch(locateFile(path), { priority: $1 ? 'low' : 'auto' }).then((response) => response.arrayBuffer()).catch(() => {});
+    }, strdup(paths), low);
 }
 
 // Fetches a file on the page main thread and reports its arrival (bl__lazy_arrived) to the
@@ -107,7 +107,7 @@ struct Group {
     void prefetch()
     {
         if (!started.exchange(true))
-            bl_lazy_prefetch(paths.c_str());
+            bl_lazy_prefetch(paths.c_str(), false);
     }
 };
 
@@ -335,9 +335,9 @@ void prefetchLazyGroup(const char* name)
     group->prefetch();
 }
 
-void prefetchLazyFiles(const char* paths)
+void prefetchLazyFiles(const char* paths, bool low)
 {
-    bl_lazy_prefetch(paths);
+    bl_lazy_prefetch(paths, low);
 }
 
 bool mountLazyFiles(const char* mountPoint, const char* urlFolder, const char* index)
