@@ -105,7 +105,9 @@ one, ready after 2.5 instead of 15 s (#244); a second visit was ready after 1.0 
 once the hashed app files were no longer revalidated (#243); behind 4 downloads of 3 MB a small
 response of another origin came after 0.5 to 0.85 s instead of 17 to 20 s (native Chromium 0.5 to
 1.1 s, #245); the first request to a preconnected origin took 0.16 instead of 0.44 s (#247).
-Wikipedia on a first visit: ready 14.8 s, first paint 21.8 s, loaded 25.6 s.
+Wikipedia on a first visit: ready 14.8 s, first paint 21.8 s, loaded 25.6 s. With a warm engine
+Wikipedia (one `<video controls>`) painted 2.87 instead of 3.65 s after ready once the media
+controls came after the first paint (#253).
 A warm start (same profile, local) on 2 cores painted a small page after a median 1.70 instead
 of 2.06 s once the compositor's WebGL context came during the start and the worker reserve waited
 3 s (#249, #242); the demo, where the profile and the engine now load side by side (#248), after
