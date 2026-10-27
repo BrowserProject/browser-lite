@@ -240,6 +240,10 @@ function oddRange(req, res) {
   res.end(TONE.subarray(start, end + 1));
 }
 
+// <audio controls> on a blue page: the bar is only drawn once the controls exist
+const CONTROLS_PAGE = `<!doctype html><title>Controls</title><body style="margin:0;background:#00f">
+<audio controls src="/tone.wav" preload="none" style="position:absolute;left:20px;top:20px;width:300px;height:25px"></audio>`;
+
 const ranges = [];
 const { url: siteURL } = await serve((req, res) => {
   const files = {
@@ -247,7 +251,12 @@ const { url: siteURL } = await serve((req, res) => {
     '/clip.mov': [CLIP, 'video/quicktime'],
     '/tone.wav': [TONE, 'audio/wav'],
   };
-  const html = { '/': PAGE, '/mse.html': MSE_PAGE, '/blob.html': BLOB_PAGE }[req.url];
+  const html = {
+    '/': PAGE,
+    '/mse.html': MSE_PAGE,
+    '/blob.html': BLOB_PAGE,
+    '/controls.html': CONTROLS_PAGE,
+  }[req.url];
   if (html) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
     return;
@@ -464,6 +473,24 @@ check(
   JSON.stringify(lazyNow),
 );
 await screenshot(page, 'media-blob');
+
+// ------------------------------------------------------------------- controls
+// Made after a rendering update once the document painted (patch 0049), not while parsing
+await load(page, `${siteURL}controls.html`);
+let barPixels = [];
+const barShown = await waitFor(
+  async () => {
+    barPixels = [];
+    for (let x = 30; x < 320; x += 20) {
+      const [r, g, b] = await pagePixel(page, x, 32);
+      barPixels.push([r, g, b]);
+    }
+    return barPixels.some(([r, g, b]) => r > 40 || g > 40 || b < 200);
+  },
+  20000,
+  250,
+);
+check('controls: <audio controls> shows its bar', barShown, JSON.stringify(barPixels.slice(0, 4)));
 
 // ------------------------------------------- range special cases (media-sw.js of the core)
 // The answer of the service worker must end instead of loading forever. We read

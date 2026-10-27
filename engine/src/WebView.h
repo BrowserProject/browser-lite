@@ -252,6 +252,15 @@ private:
     bool m_frameInFlight { false };
     bool m_needsFullPresent { false };
     bool m_compositedFrameMissed { false };
+    // A visible view that wants a rendering update but gets none for 2 s asks for the frame
+    // again, after twice its state goes to the log (once). Seen only in CI (devices-test: no
+    // media query events and scrolling anymore, while scripts still ran).
+    unsigned m_renderingUpdates { 0 };
+    unsigned m_renderingUpdatesAtStallCheck { 0 };
+    unsigned m_stallChecksMissed { 0 };
+    bool m_stallCheckPending { false };
+    bool m_stallLogged { false };
+    void checkRenderingStall();
     // First frame after the first visible layout of a page (event
     // "first-paint"): the next rendering update carries it, with layers the
     // compositor thread reports it with the frame that shows it

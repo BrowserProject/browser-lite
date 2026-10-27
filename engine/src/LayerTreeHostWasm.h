@@ -151,6 +151,8 @@ public:
     bool isWaitingForCompositor() const { return m_waitingForCompositor; }
     // From the compositor (engine thread)
     void didComposite() { m_waitingForCompositor = false; }
+    // State of the frame pipeline for the log of a view that stopped rendering
+    String stallState() const;
     // Show everything again (e.g. new canvas)
     void forceRepaint();
     // Hidden, the compositor does not composite the view (no animations either)

@@ -116,7 +116,7 @@
     { "name": "bl__wasm_memory_grow", "caller": "engine/js/wasm-host.js", "doc": "memory.grow of a page module." },
     { "name": "bl__wasm_memory_retain", "caller": "engine/js/wasm-host.js", "doc": "An instance uses a memory." },
     { "name": "bl__wasm_memory_release", "caller": "engine/js/wasm-host.js", "doc": "An instance released a memory." },
-    { "name": "bl__compositor_frame", "caller": "engine/src/LayerTreeHostWasm.cpp", "doc": "Frame tick of the compositor worker." },
+    { "name": "bl__compositor_frame", "caller": "engine/src/LayerTreeHostWasm.cpp", "doc": "Frame tick of the compositor worker (late: from the timer when no animation frame came)." },
     { "name": "bl__run_local_tasks", "caller": "engine/src/EngineLoop.cpp", "doc": "Drains the engine thread's own task list." },
     { "name": "bl__gpu_context_lost_event", "caller": "engine/src/GpuRaster.cpp", "doc": "webglcontextlost of the engine's context." },
     { "name": "bl__gpu_context_restored_event", "caller": "engine/src/GpuRaster.cpp", "doc": "webglcontextrestored of the engine's context." },

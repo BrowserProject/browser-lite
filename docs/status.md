@@ -206,6 +206,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
+- `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page
+  keeps its scroll position) while scripts still run, and every check after it fails. A view
+  without a rendering update for twice 2 s now logs the state of its frame pipeline ("no rendering
+  update for 2 s") and asks for the frame again; the compositor logs a frame that only its timer
+  brought.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.

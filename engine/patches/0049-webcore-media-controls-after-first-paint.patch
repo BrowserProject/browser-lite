@@ -1,0 +1,179 @@
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/time-label.js b/Source/WebCore/Modules/modern-media-controls/controls/time-label.js
+index be157aa81e..deeac41776 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/time-label.js
++++ b/Source/WebCore/Modules/modern-media-controls/controls/time-label.js
+@@ -107,7 +107,12 @@ class TimeLabel extends LayoutNode
+         if (numberOfDigits == 6)
+             formatterOptions.hours = "2-digit";
+ 
+-        this._formatter = new Intl.DurationFormat(undefined, formatterOptions);
++        // browser-lite: one formatter per number of digits for all labels, creating one costs
++        // more than the rest of a label
++        TimeLabel._formatters ??= new Map;
++        if (!TimeLabel._formatters.has(numberOfDigits))
++            TimeLabel._formatters.set(numberOfDigits, new Intl.DurationFormat(undefined, formatterOptions));
++        this._formatter = TimeLabel._formatters.get(numberOfDigits);
+ 
+         this.markDirtyProperty("value");
+     }
+diff --git a/Source/WebCore/dom/DocumentMediaElement.cpp b/Source/WebCore/dom/DocumentMediaElement.cpp
+index 984e58c674..1430d8acbe 100644
+--- a/Source/WebCore/dom/DocumentMediaElement.cpp
++++ b/Source/WebCore/dom/DocumentMediaElement.cpp
+@@ -32,6 +32,9 @@
+ #include "DOMWrapperWorld.h"
+ #include "Document.h"
+ #include "FrameDestructionObserverInlines.h"
++#include "HTMLMediaElement.h"
++#include "LocalFrameView.h"
++#include "Page.h"
+ #include "PlatformRenderTheme.h"
+ #include "RenderTheme.h"
+ #include "ScriptController.h"
+@@ -56,6 +59,31 @@ DocumentMediaElement& DocumentMediaElement::from(Document& document)
+     return *supplement;
+ }
+ 
++DocumentMediaElement* DocumentMediaElement::fromIfExists(Document& document)
++{
++    return downcast<DocumentMediaElement>(Supplement<Document>::from(&document, supplementName()));
++}
++
++void DocumentMediaElement::createControlsAfterPaint(HTMLMediaElement& element)
++{
++    m_controlsAfterPaint.append(element);
++    if (RefPtr page = document().page())
++        page->scheduleRenderingUpdate(RenderingUpdateStep::LayerFlush);
++}
++
++void DocumentMediaElement::didUpdateRendering()
++{
++    if (m_controlsAfterPaint.isEmpty())
++        return;
++    RefPtr view = document().view();
++    if (!view || !view->hasEverPainted())
++        return;
++    for (auto& weakElement : std::exchange(m_controlsAfterPaint, { })) {
++        if (RefPtr element = weakElement.get())
++            element->createMediaControlsSoon();
++    }
++}
++
+ DocumentMediaElement::DocumentMediaElement(Document& document)
+     : m_document { document }
+ {
+diff --git a/Source/WebCore/dom/DocumentMediaElement.h b/Source/WebCore/dom/DocumentMediaElement.h
+index 2d6496adaf..2472974c36 100644
+--- a/Source/WebCore/dom/DocumentMediaElement.h
++++ b/Source/WebCore/dom/DocumentMediaElement.h
+@@ -31,6 +31,7 @@
+ #include <wtf/CheckedPtr.h>
+ #include <wtf/TZoneMalloc.h>
+ #include <wtf/TypeCasts.h>
++#include <wtf/WeakPtr.h>
+ 
+ namespace JSC {
+ class JSGlobalObject;
+@@ -40,6 +41,7 @@ namespace WebCore {
+ 
+ class DOMWrapperWorld;
+ class Document;
++class HTMLMediaElement;
+ class JSDOMGlobalObject;
+ class ScriptController;
+ 
+@@ -47,6 +49,7 @@ class DocumentMediaElement final : public Supplement<Document> {
+     WTF_MAKE_TZONE_ALLOCATED(DocumentMediaElement);
+ public:
+     static DocumentMediaElement& from(Document&);
++    static DocumentMediaElement* fromIfExists(Document&);
+ 
+     DocumentMediaElement(Document&);
+ 
+@@ -55,6 +58,12 @@ public:
+     bool setupAndCallYouTubeQuirkJS(NOESCAPE const JSSetupFunction&);
+     bool setupAndCallCNNQuirkJS(NOESCAPE const JSSetupFunction&);
+ 
++    // browser-lite: the controls of an inserted media element run script and build their
++    // elements; they come after a rendering update once the document painted, so a page shows
++    // its content first (Page::didUpdateRendering)
++    void createControlsAfterPaint(HTMLMediaElement&);
++    void didUpdateRendering();
++
+ private:
+     bool isDocumentMediaElement() const final { return true; }
+     static ASCIILiteral supplementName();
+@@ -73,6 +82,7 @@ private:
+     bool m_haveParsedMediaControlsScript { false };
+     bool m_haveParsedYouTubeQuirkScript { false };
+     bool m_haveParsedCNNQuirkScript { false };
++    Vector<WeakPtr<HTMLMediaElement>> m_controlsAfterPaint;
+ };
+ 
+ }
+diff --git a/Source/WebCore/html/HTMLMediaElement.cpp b/Source/WebCore/html/HTMLMediaElement.cpp
+index 7f673553bd..ee9e25c8db 100644
+--- a/Source/WebCore/html/HTMLMediaElement.cpp
++++ b/Source/WebCore/html/HTMLMediaElement.cpp
+@@ -1159,7 +1159,10 @@ void HTMLMediaElement::postConnectionSteps()
+         canProduceAudioChanged();
+     }
+ 
+-    configureMediaControls();
++    if (controls() && m_controlsState == ControlsState::None)
++        DocumentMediaElement::from(protect(document())).createControlsAfterPaint(*this);
++    else
++        configureMediaControls();
+ 
+     if (protect(document())->quirks().needsYouTubeCaptionsQuirk()) {
+         DocumentMediaElement::from(protect(document())).setupAndCallYouTubeQuirkJS([this](JSDOMGlobalObject& globalObject, JSC::JSGlobalObject& lexicalGlobalObject, ScriptController&, DOMWrapperWorld&) {
+@@ -8155,6 +8158,13 @@ bool HTMLMediaElement::shouldForceControlsDisplay() const
+     return isVideo() && autoplay() && (mediaSession().hasBehaviorRestriction(MediaElementSession::RequireUserGestureForVideoDueToLowPowerMode) || mediaSession().hasBehaviorRestriction(MediaElementSession::RequireUserGestureForVideoDueToAggressiveThermalMitigation));
+ }
+ 
++void HTMLMediaElement::createMediaControlsSoon()
++{
++    queueTaskKeepingObjectAlive(*this, TaskSource::MediaElement, [](auto& element) {
++        element.configureMediaControls();
++    });
++}
++
+ void HTMLMediaElement::configureMediaControls()
+ {
+     bool requireControls = controls();
+diff --git a/Source/WebCore/html/HTMLMediaElement.h b/Source/WebCore/html/HTMLMediaElement.h
+index beedcb87d1..a9bc0894ee 100644
+--- a/Source/WebCore/html/HTMLMediaElement.h
++++ b/Source/WebCore/html/HTMLMediaElement.h
+@@ -576,6 +576,8 @@ public:
+     void setControllerForBindings(MediaController*);
+ 
+     void enteredOrExitedFullscreen() { configureMediaControls(); }
++    // browser-lite: DocumentMediaElement::createControlsAfterPaint
++    void createMediaControlsSoon();
+ 
+     unsigned long long fileSize() const;
+ 
+diff --git a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+index 00eb128cda..4ed7393c6f 100644
+--- a/Source/WebCore/page/Page.cpp
++++ b/Source/WebCore/page/Page.cpp
+@@ -70,6 +70,7 @@
+ #include "DocumentFullscreen.h"
+ #include "DocumentInlines.h"
+ #include "DocumentLoader.h"
++#include "DocumentMediaElement.h"
+ #include "DocumentMarkerController.h"
+ #include "DocumentPage.h"
+ #include "DocumentQuirks.h"
+@@ -2625,6 +2626,10 @@ void Page::didUpdateRendering()
+     LOG_WITH_STREAM(EventLoop, stream << "Page " << this << " didUpdateRendering()");
+     forEachDocument([&] (Document& document) {
+         document.flushDeferredRenderingIsSuppressedForViewTransitionChanges();
++#if ENABLE(VIDEO)
++        if (auto* mediaElements = DocumentMediaElement::fromIfExists(document))
++            mediaElements->didUpdateRendering();
++#endif
+     });
+ }
+ 

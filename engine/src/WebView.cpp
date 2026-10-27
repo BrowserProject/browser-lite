@@ -91,6 +91,8 @@
 #include <wtf/HashMap.h>
 #include <wtf/JSONValues.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/RunLoop.h>
+#include <wtf/Scope.h>
 #include <wtf/SetForScope.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
@@ -626,6 +628,32 @@ void WebView::scheduleRenderingUpdate()
 {
     m_renderingUpdateRequested = true;
     requestFrame();
+    if (!std::exchange(m_stallCheckPending, true)) {
+        m_renderingUpdatesAtStallCheck = m_renderingUpdates;
+        RunLoop::mainSingleton().dispatchAfter(2_s, [id = m_id] {
+            if (auto* view = fromID(id))
+                view->checkRenderingStall();
+        });
+    }
+}
+
+void WebView::checkRenderingStall()
+{
+    m_stallCheckPending = false;
+    if (!m_renderingUpdateRequested)
+        return;
+    if (m_renderingUpdates != m_renderingUpdatesAtStallCheck || !m_visible) {
+        m_stallChecksMissed = 0;
+        scheduleRenderingUpdate();
+        return;
+    }
+    // Once can be a busy engine thread (the check came late)
+    if (++m_stallChecksMissed >= 2 && !std::exchange(m_stallLogged, true)) {
+        log("View %d: no rendering update for 2 s (frame requested %d, in flight %d, compositing %d, frame missed %d, %s)", m_id, m_frameRequested, m_frameInFlight,
+            m_compositing, m_compositedFrameMissed, m_layerTreeHost ? m_layerTreeHost->stallState().utf8().data() : "no layers");
+    }
+    m_frameRequested = false;
+    scheduleRenderingUpdate();
 }
 
 void WebView::requestComposite()
@@ -706,6 +734,7 @@ bool WebView::renderCompositedFrame(IntRect*)
     }
     auto start = MonotonicTime::now();
     m_renderingUpdateRequested = false;
+    ++m_renderingUpdates;
     {
         SetForScope inRenderingUpdate(m_inRenderingUpdate, true);
         m_page->updateRendering();
@@ -717,6 +746,7 @@ bool WebView::renderCompositedFrame(IntRect*)
     host.flush(firstPaint);
     if (firstPaint && host.isWaitingForCompositor())
         m_firstPaint = FirstPaint::None;
+    m_page->didUpdateRendering();
     // Nothing to show: the frame is "done" anyway
     if (!host.isWaitingForCompositor())
         didComposite();
@@ -753,8 +783,14 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         return renderCompositedFrame(dirtyOut);
     auto start = MonotonicTime::now();
 
-    if (m_renderingUpdateRequested) {
-        m_renderingUpdateRequested = false;
+    // After the frame like WebKit2: work WebCore defers until then (media controls)
+    bool renderingUpdated = std::exchange(m_renderingUpdateRequested, false);
+    auto didUpdateRendering = makeScopeExit([&] {
+        if (renderingUpdated)
+            m_page->didUpdateRendering();
+    });
+    if (renderingUpdated) {
+        ++m_renderingUpdates;
         // requestAnimationFrame callbacks, animations, style, layout, ...
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ });

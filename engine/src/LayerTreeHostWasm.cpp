@@ -28,6 +28,7 @@
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 #include <wtf/Scope.h>
+#include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
 
@@ -35,13 +36,21 @@ using namespace WebCore;
 
 // ------------------------------------------------------------ Compositor thread
 
-// Next frame in the compositor's worker (rAF, otherwise 16 ms)
+// Next frame in the compositor's worker (rAF, otherwise 16 ms). If the animation frame does not
+// come, a timer brings it (logged once, bl__compositor_frame)
 EM_JS(void, bl_compositor_request_frame, (void* scene), {
-    var run = function () { Module._bl__compositor_frame(scene); };
-    if (typeof requestAnimationFrame === "function")
-        requestAnimationFrame(run);
-    else
-        setTimeout(run, 16);
+    var done = false;
+    var run = function (late) {
+        if (done)
+            return;
+        done = true;
+        Module._bl__compositor_frame(scene, late);
+    };
+    if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(function () { run(0); });
+        setTimeout(function () { run(1); }, 500);
+    } else
+        setTimeout(function () { run(0); }, 16);
 });
 
 // Frames put on screen by all views (bl_frames_shown_for_testing)
@@ -233,10 +242,13 @@ static void compositeScene(CompositorScene& scene)
     notifyEngine();
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void bl__compositor_frame(CompositorScene* scenePointer)
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__compositor_frame(CompositorScene* scenePointer, int late)
 {
     // The reference from scheduleFrameLocked()
     Ref scene = adoptRef(*scenePointer);
+    static std::atomic<bool> loggedLate;
+    if (late && !loggedLate.exchange(true))
+        log("Compositor: no animation frame for 500 ms, frame from a timer");
     compositeScene(scene);
 }
 
@@ -526,6 +538,14 @@ void LayerTreeHostWasm::didApplyPinch(unsigned commit)
 {
     m_pinchCommit = commit;
     m_compositionRequired = true;
+}
+
+String LayerTreeHostWasm::stallState() const
+{
+    Locker locker { m_scene->lock };
+    auto flag = [](bool value) { return value ? '1' : '0'; };
+    return makeString("waiting "_s, flag(m_waitingForCompositor), ", frame scheduled "_s, flag(m_scene->frameScheduled), ", waiting for tiles "_s, flag(m_scene->waitingForTiles),
+        " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine));
 }
 
 void LayerTreeHostWasm::flushLayerStates()
