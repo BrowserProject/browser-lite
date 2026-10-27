@@ -63,13 +63,15 @@ EM_JS(void, blJsPrefetchHostAnswers, (), {
         'video/webm; codecs="vp8, vorbis"', 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
         'video/mp4', 'video/webm', 'audio/mp4', 'audio/webm'];
     var video = document.createElement('video');
+    // iPhone Safari has only ManagedMediaSource
+    var Source = self.MediaSource || self.ManagedMediaSource;
     var lines = [];
     play.forEach(function(type) {
         var answer = video.canPlayType(type);
         lines.push('play:' + type + '\t' + (answer === 'probably' ? 2 : answer === 'maybe' ? 1 : 0));
     });
     mse.forEach(function(type) {
-        var supported = self.MediaSource && MediaSource.isTypeSupported(type);
+        var supported = Source && Source.isTypeSupported(type);
         lines.push('mse:' + type + '\t' + (supported ? 1 : 0));
     });
     var text = stringToNewUTF8(lines.join('\n'));
@@ -149,7 +151,8 @@ static bool hostMediaSourceSupports(const String& type)
         auto utf8 = type.utf8();
         return MAIN_THREAD_EM_ASM_INT({
             try {
-                return self.MediaSource && MediaSource.isTypeSupported(UTF8ToString($0)) ? 1 : 0;
+                var Source = self.MediaSource || self.ManagedMediaSource;
+                return Source && Source.isTypeSupported(UTF8ToString($0)) ? 1 : 0;
             } catch (e) {
                 return 0;
             }

@@ -34,6 +34,11 @@ export class ServiceRegistry {
     host.handle<Record<string, unknown>>('host-call', (data, view) => {
       void this.hostCall(data, view);
     });
+    // The activation events of HTML anywhere in the host page: Safari allows starting sound and
+    // media only inside them (on iOS not in pointerdown of a finger, only in its pointerup)
+    if (typeof addEventListener === 'function')
+      for (const type of ['keydown', 'mousedown', 'pointerdown', 'pointerup', 'touchend'])
+        addEventListener(type, () => this.gesture(), { capture: true, passive: true, signal });
     this.context = {
       module: host.module,
       config: host.config,
@@ -73,7 +78,7 @@ export class ServiceRegistry {
     }
   }
 
-  /** Click, key or touch into a view. */
+  /** Click, key or touch into a view or anywhere in the host page. */
   gesture(): void {
     for (const listener of this.gestureListeners) listener();
   }
