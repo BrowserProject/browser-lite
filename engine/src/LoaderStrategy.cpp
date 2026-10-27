@@ -816,7 +816,8 @@ private:
         });
         m_loads.set(&loader, load.copyRef());
         load->start();
-        prewarmPageExtensionsSoon();
+        if (RefPtr frame = loader.frame())
+            prewarmPageExtensionsSoon(*frame);
     }
 
     void loadResource(LocalFrame& frame, CachedResource& resource, ResourceRequest&& request, const ResourceLoaderOptions& options, CompletionHandler<void(RefPtr<SubresourceLoader>&&)>&& completion) final

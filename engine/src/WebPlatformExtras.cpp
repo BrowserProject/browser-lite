@@ -13,13 +13,11 @@
 #include <JavaScriptCore/Completion.h>
 #include <JavaScriptCore/JSArray.h>
 #include <JavaScriptCore/JSCInlines.h>
-#include <JavaScriptCore/JSGlobalObject.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSNativeStdFunction.h>
 #include <JavaScriptCore/ObjectConstructor.h>
 #include <JavaScriptCore/PropertyNameArray.h>
 #include <JavaScriptCore/StrongInlines.h>
-#include <WebCore/CommonVM.h>
 #include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/EventLoop.h>
 #include <WebCore/Exception.h>
@@ -927,31 +925,6 @@ void installPageExtensions(JSC::JSGlobalObject& globalObject, int viewId)
     if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))
         callEngineFunction(globalObject, String::fromUTF8(webrtcPolyfillSource), arguments);
     callEngineFunction(globalObject, String::fromUTF8(polyfillSource), arguments);
-}
-
-void compilePageExtensions()
-{
-    auto& vm = WebCore::commonVM();
-    JSC::JSLockHolder lock(vm);
-    auto scope = DECLARE_TOP_EXCEPTION_SCOPE(vm);
-    // In a plain global object, without a bridge: the body compiles as in every window (the code
-    // cache keys it by source), then stops at the first DOM class or bridge access. Nothing
-    // outside this global object is reachable.
-    auto* globalObject = JSC::JSGlobalObject::create(vm, JSC::JSGlobalObject::createStructure(vm, JSC::jsNull()));
-    auto compile = [&](const char* source) {
-        NakedPtr<JSC::Exception> exception;
-        auto function = JSC::evaluate(globalObject, engineFunctionSource(String::fromUTF8(source)), JSC::JSValue(), exception);
-        auto callData = JSC::getCallData(function);
-        if (!exception && callData.type != JSC::CallData::Type::None) {
-            JSC::MarkedArgumentBuffer arguments;
-            arguments.append(JSC::jsUndefined());
-            JSC::call(globalObject, function, callData, JSC::jsUndefined(), arguments, exception);
-        }
-        scope.clearException();
-    };
-    if (featureEnabled(Feature::WebRTC) || featureEnabled(Feature::PictureInPicture))
-        compile(webrtcPolyfillSource);
-    compile(polyfillSource);
 }
 
 // The answer arrives as a task in the event loop of the document: if it is gone,
