@@ -110,7 +110,7 @@ function attachTouch(
     fling = 0;
   };
   const scrollBy = (x: number, y: number, dx: number, dy: number) =>
-    module._bl_wheel(view.id, x, y, dx, dy, 0);
+    module._bl_wheel(view.id, x, y, dx, dy, 0, 0, 0);
   const isTouch = (e: PointerEvent) =>
     e.pointerType === 'touch' || (mouseIsTouch && e.pointerType === 'mouse');
   const options = { capture: true, signal };

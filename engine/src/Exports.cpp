@@ -235,7 +235,7 @@ EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
 #endif
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers)
+EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
     // With the compositor thread: through it to the scrolling thread (ScrollingWasm.h),
     // so the page scrolls even when its JS blocks the engine thread
@@ -246,16 +246,16 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         RefPtr scene = CompositorScene::forView(id);
         if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
             withView(id, [=](WebView& view) {
-                view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
+                view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
             });
             return;
         }
         Compositor::dispatch([=] {
-            Scrolling::wheelEvent(id, WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers));
+            Scrolling::wheelEvent(id, WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers));
         });
         return;
     }
-    withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, modifiers); });
+    withView(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
 }
 
 // Ctrl + wheel (zoom) goes to the page first like in Chrome (maps, editors
@@ -263,9 +263,9 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
 // arrives as "wheel-result". 0: only sent for observing (no blocking listener
 // at that point or not cancelable), the host zooms right away, even when JS
 // blocks the engine thread.
-EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX, double deltaY, int modifiers, int cancelable)
+EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers, int cancelable)
 {
-    auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, modifiers);
+    auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers);
     bool blocking = cancelable && Scrolling::mayCancelWheelEvent(id, event);
     withView(id, [event, blocking](WebView& view) { view.zoomWheelEvent(event, blocking); });
     return blocking;

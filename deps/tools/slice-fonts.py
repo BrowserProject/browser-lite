@@ -32,7 +32,8 @@ EMOJI_COMPONENTS = set(
 
 def cjk_slices(path):
     """Text proto of nam-files: 'subsets { codepoints: N ... }', listed lowest priority first."""
-    text = open(path, encoding="utf-8").read()
+    # Comments name the characters, also braces ("codepoints: 125 # } RIGHT CURLY BRACKET")
+    text = re.sub(r"#[^\n]*", "", open(path, encoding="utf-8").read())
     blocks = re.findall(r"subsets\s*\{(.*?)\}", text, re.S)
     slices = [set(int(cp) for cp in re.findall(r"codepoints:\s*(\d+)", block)) for block in blocks]
     slices.reverse()

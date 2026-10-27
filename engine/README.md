@@ -47,7 +47,8 @@ patches from `patches/`.
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
-    `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`
+    `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,
+    `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
     `VideoOverlay.cpp` (holes of videos the host shows behind the canvas)
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly

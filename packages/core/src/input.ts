@@ -56,9 +56,11 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
     passive = true,
   ) => canvas.addEventListener(type, (event) => view.alive && listener(event), { signal, passive });
 
-  const wheelDelta = (e: WheelEvent): [number, number] => {
+  // Pixels, and the legacy wheelDelta of the host (120 per notch) that pages read as theirs
+  const wheelDelta = (e: WheelEvent): [number, number, number, number] => {
     const factor = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? 800 : 1; // lines, pages
-    return [e.deltaX * factor, e.deltaY * factor];
+    const legacy = e as WheelEvent & { wheelDeltaX?: number; wheelDeltaY?: number };
+    return [e.deltaX * factor, e.deltaY * factor, legacy.wheelDeltaX || 0, legacy.wheelDeltaY || 0];
   };
 
   // Ctrl + wheel goes to the page first like Chrome (maps and editors zoom themselves); the
@@ -68,8 +70,8 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
   view.onWheelResult = (consumed) => wheelAnswers.shift()?.(consumed);
   const zoomWheel = (e: WheelEvent, cancelable: boolean, answer: (consumed: boolean) => void) => {
     const [x, y] = view.position(e);
-    const [dx, dy] = wheelDelta(e);
-    if (module._bl_zoom_wheel(view.id, x, y, dx, dy, modifierBits(e), cancelable ? 1 : 0))
+    const [dx, dy, wdx, wdy] = wheelDelta(e);
+    if (module._bl_zoom_wheel(view.id, x, y, dx, dy, wdx, wdy, modifierBits(e), cancelable ? 1 : 0))
       wheelAnswers.push(answer);
     else answer(false);
   };
@@ -196,8 +198,8 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
       }
       endPinch();
       const [x, y] = view.position(e);
-      const [dx, dy] = wheelDelta(e);
-      module._bl_wheel(view.id, x, y, dx, dy, modifierBits(e));
+      const [dx, dy, wdx, wdy] = wheelDelta(e);
+      module._bl_wheel(view.id, x, y, dx, dy, wdx, wdy, modifierBits(e));
     },
     false,
   );

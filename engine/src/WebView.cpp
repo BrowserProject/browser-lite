@@ -1089,17 +1089,20 @@ void WebView::hostDrag(int phase, double x, double y, int modifiers, const Strin
         endDrag(point, true, modifiers);
 }
 
-PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)
+PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
     IntPoint position { static_cast<int>(x), static_cast<int>(y) };
-    // DOM: deltaY > 0 means scroll down. WebCore: inverted sign.
-    return { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), static_cast<float>(-deltaX / 40), static_cast<float>(-deltaY / 40),
+    // DOM: deltaY > 0 means scroll down. WebCore: inverted sign. Pages read the ticks as
+    // wheelDelta (120 per tick): take the host's own, its ratio to the delta differs by
+    // platform (Chrome 1.2 on Windows and Linux, 3 on macOS); 40 pixels per tick without.
+    auto ticks = [](double wheelDelta, double delta) { return static_cast<float>(wheelDelta ? wheelDelta / 120 : -delta / 40); };
+    return { position, position, static_cast<float>(-deltaX), static_cast<float>(-deltaY), ticks(wheelDeltaX, deltaX), ticks(wheelDeltaY, deltaY),
         PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
 }
 
-void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers)
+void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
-    dispatchWheelEvent(makeWheelEvent(x, y, deltaX, deltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
+    dispatchWheelEvent(makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
 }
 
 void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)

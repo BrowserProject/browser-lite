@@ -106,6 +106,7 @@ const PAGE = `<!doctype html>
   text.addEventListener('keydown', (e) => { if (e.key === 'Enter') console.log('RESULT text=' + text.value); });
   document.getElementById('button').addEventListener('click', () => console.log('RESULT click=1'));
   let scrolled = false;
+  window.addEventListener('wheel', (e) => console.log('RESULT wheeldelta=' + e.deltaY + ',' + e.wheelDeltaY), { once: true, passive: true });
   window.addEventListener('scroll', () => {
     if (!scrolled && window.scrollY > 100) {
       scrolled = true;
@@ -653,11 +654,28 @@ await host(() => window.blTest.view().setZoom(1));
 const resetWidth = await result('width', 10000);
 check('reset zoom', Number(resetWidth) >= 950, String(resetWidth));
 
-// 6) Scrolling with the mouse wheel
+// 6) Scrolling with the mouse wheel; the page reads the host's wheelDelta (Monaco and others
+// count notches with it)
+await host(() => {
+  document.getElementById('view').addEventListener(
+    'wheel',
+    (e) => {
+      window.hostWheel = `${e.deltaY},${e.wheelDeltaY}`;
+    },
+    { once: true, capture: true },
+  );
+});
 await page.mouse.move(...(await at(500, 400)));
 await page.mouse.wheel(0, 600);
 const scroll = await result('scroll');
 check('scrolling', Number(scroll) > 100, String(scroll));
+const pageWheel = await result('wheeldelta', 10000);
+const hostWheel = await host(() => window.hostWheel);
+check(
+  'wheelDelta like the host',
+  !!pageWheel && pageWheel === hostWheel,
+  `page ${pageWheel}, host ${hostWheel}`,
+);
 
 // 7) Fullscreen: the page requests it, the core makes the view container fullscreen; when the
 // host ends it (like with Esc), the page notices too

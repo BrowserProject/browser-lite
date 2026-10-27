@@ -127,13 +127,13 @@ public:
 
     // Input (coordinates in CSS pixels relative to the view)
     void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0);
-    void wheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+    void wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Drag and drop: from the page (DragClient) and from the host (bl_drag,
     // phase 0 = over the page, 1 = left, 2 = drop; data as JSON)
     void startPageDrag(Ref<WebCore::WasmPlatform::DragContent>&&, OptionSet<WebCore::DragOperation> sourceOperations);
     void hostDrag(int phase, double x, double y, int modifiers, const String& data);
     void cancelDrag();
-    static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, int modifiers);
+    static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Also from the scrolling thread (ScrollingWasm.cpp), with the steps still missing
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
     // Ctrl + wheel: only the DOM event, no scrolling. With cancelable the
