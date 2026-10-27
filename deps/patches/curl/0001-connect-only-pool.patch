@@ -1,0 +1,54 @@
+diff --git a/lib/multi.c b/lib/multi.c
+--- a/lib/multi.c
++++ b/lib/multi.c
+@@ -820,7 +820,7 @@
+   /* Tell event handling that this transfer is definitely going away */
+   Curl_multi_ev_xfer_done(multi, data);
+ 
+-  if(data->set.connect_only) {
++  if(data->set.connect_only && !data->set.connect_only_pool) {
+     if(data->multi_easy) {
+       if(data->state.last_conn_id != -1) {
+         /* Mark any connect-only connection for closure */
+diff --git a/lib/setopt.c b/lib/setopt.c
+--- a/lib/setopt.c
++++ b/lib/setopt.c
+@@ -840,11 +840,14 @@
+       s->ipver = (unsigned char)arg;
+     break;
+   case CURLOPT_CONNECT_ONLY:
+-    if(arg < 0 || arg > 2)
++    if(arg < 0 || arg > 3)
+       result = CURLE_BAD_FUNCTION_ARGUMENT;
+     else {
+       s->connect_only = !!arg;
+       s->connect_only_ws = (arg == 2);
++      /* browser-lite: 3 connects for the pool (a preconnect), the connection
++         stays reusable for the next transfers */
++      s->connect_only_pool = (arg == 3);
+     }
+     break;
+ #ifdef USE_IPV6
+diff --git a/lib/url.c b/lib/url.c
+--- a/lib/url.c
++++ b/lib/url.c
+@@ -1147,7 +1147,7 @@
+   conn->bits.ftp_use_eprt = data->set.ftp_use_eprt;
+ #endif
+   conn->ip_version = data->set.ipver;
+-  conn->bits.connect_only = (bool)data->set.connect_only;
++  conn->bits.connect_only = data->set.connect_only && !data->set.connect_only_pool;
+   conn->transport_wanted = TRNSPRT_TCP; /* most of them are TCP streams */
+ 
+   /* Store the local bind parameters that will be used for this connection */
+diff --git a/lib/urldata.h b/lib/urldata.h
+--- a/lib/urldata.h
++++ b/lib/urldata.h
+@@ -1034,6 +1034,7 @@
+   BIT(connect_only); /* make connection/request, then let application use the
+                         socket */
+   BIT(connect_only_ws); /* special websocket connect-only level */
++  BIT(connect_only_pool); /* browser-lite: connect for the connection pool */
+ #ifndef CURL_DISABLE_SMTP
+   BIT(mail_rcpt_allowfails); /* allow RCPT TO command to fail for some
+                                 recipients */

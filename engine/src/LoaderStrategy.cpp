@@ -13,6 +13,7 @@
 #include "Engine.h"
 #include "Host.h"
 #include "HttpCache.h"
+#include "Preconnect.h"
 #include "Strategies.h"
 #include "WebView.h"
 
@@ -860,9 +861,9 @@ private:
         PingLoad::start(*document, request, originalRequestHeaders, options, policyCheck, WTF::move(completion));
     }
 
-    void preconnectTo(FrameLoader&, ResourceRequest&&, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&& completion) final
+    void preconnectTo(FrameLoader&, ResourceRequest&& request, StoredCredentialsPolicy, ShouldPreconnectAsFirstParty, PreconnectCompletionHandler&& completion) final
     {
-        // curl has its own connection pool, preconnecting is not worth it
+        preconnect(request.url());
         if (completion)
             completion({ });
     }

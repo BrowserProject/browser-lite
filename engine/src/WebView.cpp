@@ -250,6 +250,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
+    // <link rel=preconnect> (Preconnect.cpp)
+    settings.setLinkPreconnectEnabled(true);
     // Without the audio feature there is no AudioContext, like a browser without Web Audio
     settings.setWebAudioEnabled(featureEnabled(Feature::Audio));
 #if ENABLE(WEBGL)
