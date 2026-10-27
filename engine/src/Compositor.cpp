@@ -42,17 +42,27 @@ static void* compositorMain(void*)
     return nullptr;
 }
 
+static pthread_t s_starting;
+static bool s_begun;
+
+void begin()
+{
+    auto& config = engineConfig();
+    if (s_begun || !config.compositing || !config.gpu)
+        return;
+    s_begun = true;
+    if (pthread_create(&s_starting, nullptr, compositorMain, nullptr)) {
+        debugLog("Compositor: no thread");
+        s_startState.store(2, std::memory_order_release);
+    }
+}
+
 bool start()
 {
     auto& config = engineConfig();
     if (!config.compositing || !config.gpu)
         return false;
-
-    pthread_t thread;
-    if (pthread_create(&thread, nullptr, compositorMain, nullptr)) {
-        debugLog("Compositor: no thread");
-        return false;
-    }
+    begin();
     // The worker starts on the main thread of the browser, that can take a while
     for (int i = 0; i < 5000 && !s_startState.load(std::memory_order_acquire); ++i)
         usleep(1000);
@@ -60,7 +70,7 @@ bool start()
         debugLog("Compositor: no WebGL 2, frames come from the engine worker");
         return false;
     }
-    pthread_detach(thread);
+    pthread_detach(s_starting);
     s_running.store(true, std::memory_order_release);
     debugLog("Compositor: own thread with WebGL 2");
     return true;

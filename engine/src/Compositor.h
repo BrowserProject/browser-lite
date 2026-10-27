@@ -14,8 +14,11 @@
 
 namespace BrowserLite::Compositor {
 
-// At engine start (engine thread): create the thread, check WebGL 2.
-// false = no compositor thread (then the engine worker shows the frames).
+// Early in the engine start (engine thread): creates the thread, which makes its WebGL 2 context
+// (190 ms with SwiftShader) while the start goes on.
+void begin();
+// Later in the start: waits for that context. false = no compositor thread (then the engine
+// worker shows the frames).
 bool start();
 
 bool isRunning();

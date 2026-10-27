@@ -159,6 +159,8 @@ int main(int, char**)
 
     JSC::initialize();
     WTF::initializeMainThread();
+    // Its WebGL context comes while the rest starts (Compositor::start below waits for it)
+    Compositor::begin();
 
     // Set up fontconfig in the background right away: it reads its configuration
     // with many file accesses. Otherwise that happens in the middle of loading the
