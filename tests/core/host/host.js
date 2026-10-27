@@ -21,6 +21,7 @@ import {
   capture,
   checkSupport,
   createBrowser,
+  createExtensionHost,
   defaultServices,
   devices,
   media,
@@ -224,6 +225,8 @@ async function askPermission(request) {
 
 const host = {
   support: checkSupport(),
+  /** For tests of extensions (pass the host to start({ extensions })). */
+  createExtensionHost,
   ready: null,
   error: null,
   beforeStart: null,

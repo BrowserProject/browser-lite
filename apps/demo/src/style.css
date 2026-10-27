@@ -127,6 +127,9 @@ button {
   cursor: pointer;
   color: var(--muted);
 }
+#extension-buttons {
+  display: contents;
+}
 #toolbar {
   display: flex;
   align-items: center;
@@ -134,7 +137,8 @@ button {
   padding: 6px 8px;
   background: var(--tab-active);
 }
-#toolbar > button {
+#toolbar > button,
+#extension-buttons > button {
   width: 32px;
   height: 32px;
   border: none;
@@ -143,7 +147,8 @@ button {
   font-size: 16px;
   cursor: pointer;
 }
-#toolbar > button:hover:not(:disabled) {
+#toolbar > button:hover:not(:disabled),
+#extension-buttons > button:hover {
   background: var(--tab);
 }
 #toolbar > button:disabled {

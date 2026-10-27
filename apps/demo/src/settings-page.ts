@@ -1,4 +1,5 @@
 import { type LocalStats, type ProfileInfo, siteOfPath } from '@browser-lite/profile';
+import { renderExtensionSettings } from './extensions.js';
 import { reloadUI, restartUI } from './reload.js';
 import { profile, runtime } from './runtime.js';
 import {
@@ -15,13 +16,16 @@ import {
 import { focusPage } from './tabs.js';
 import { element, formatSize, formatTime } from './util.js';
 
-type Section = 'general' | 'profile' | 'device';
+type Section = 'general' | 'profile' | 'device' | 'extensions';
 
 const SECTIONS: Record<Section, string> = {
   general: 'General',
   profile: 'Profile',
   device: 'Device and browser',
+  extensions: 'Extensions',
 };
+/** Runs when the shown section goes away (sections of extensions). */
+let leaveSection: (() => void) | null = null;
 
 // Modal like chrome://settings: the browser behind it is inert, Esc closes
 const page = element('dialog', { id: 'settings' });
@@ -39,6 +43,8 @@ close.setAttribute('aria-label', 'Close');
 close.addEventListener('click', () => page.close());
 page.append(nav, content, close);
 page.addEventListener('close', () => {
+  leaveSection?.();
+  leaveSection = null;
   content.textContent = '';
   focusPage();
 });
@@ -61,10 +67,13 @@ function showSection(name: Section): void {
   }
   // New for every section: what comes later (profile info) checks section.isConnected
   const section = element('section', {}, element('h2', { textContent: SECTIONS[name] }));
+  leaveSection?.();
+  leaveSection = null;
   content.replaceChildren(section);
   if (name === 'general') renderGeneral(section);
   else if (name === 'profile') renderProfile(section);
-  else renderDevice(section);
+  else if (name === 'device') renderDevice(section);
+  else leaveSection = renderExtensionSettings(section);
 }
 
 function row(label: string, control: HTMLElement, hint = ''): HTMLElement {

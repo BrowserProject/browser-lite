@@ -1,10 +1,11 @@
 import { bookmarks, onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { downloadState, downloads, onDownloadsChange } from './downloads.js';
+import { ui } from './extensions.js';
 import { clearHistory, onHistoryChange, readHistory } from './history.js';
 import { byId, element, formatTime } from './util.js';
 
-/** Panel names; 'menu' is the menu of the toolbar. */
-export type PanelName = 'menu' | 'history' | 'bookmarks' | 'downloads';
+/** Panel names; 'menu' is the menu of the toolbar, `extension:<id>` a panel of an extension. */
+export type PanelName = 'menu' | 'history' | 'bookmarks' | 'downloads' | `extension:${string}`;
 
 /** What the panel can start in the rest of the demo. */
 export interface PanelActions {
@@ -14,7 +15,7 @@ export interface PanelActions {
   openSettings(): void;
 }
 
-const TITLES: Record<PanelName, string> = {
+const TITLES: Record<string, string> = {
   menu: 'Menu',
   history: 'History',
   bookmarks: 'Bookmarks',
@@ -25,6 +26,8 @@ const panel = byId('side-panel');
 let current: PanelName | null = null;
 let filter = '';
 let actions: PanelActions;
+/** Runs when the shown panel of an extension goes away. */
+let leavePanel: (() => void) | undefined;
 
 /** Side panel like Chrome: menu, history (Ctrl+H), bookmarks (Ctrl+Shift+O), downloads (Ctrl+J). */
 export function initSidePanel(panelActions: PanelActions): void {
@@ -32,7 +35,18 @@ export function initSidePanel(panelActions: PanelActions): void {
   onHistoryChange(() => refresh('history'));
   onBookmarksChange(() => refresh('bookmarks'));
   onDownloadsChange(() => refresh('downloads'));
+  ui.on('open-panel', ({ id }) => {
+    if (current !== `extension:${id}`) togglePanel(`extension:${id}`);
+  });
+  ui.on('change', ({ slot }) => {
+    if (slot !== 'panel') return;
+    if (current?.startsWith('extension:') && !extensionPanel(current)) togglePanel(null);
+    else refresh('menu');
+  });
 }
+
+const extensionPanel = (name: PanelName) =>
+  ui.items('panel').find((item) => `extension:${item.id}` === name);
 
 export const panelOpen = (): boolean => current !== null;
 
@@ -40,6 +54,7 @@ export const panelOpen = (): boolean => current !== null;
 export function togglePanel(name: PanelName | null): void {
   if (!name || name === current) {
     current = null;
+    clear();
     panel.hidden = true;
     return;
   }
@@ -81,6 +96,13 @@ function renderMenu(): void {
     ['Downloads', 'Ctrl+J', () => togglePanel('downloads')],
     ['Find in page', 'Ctrl+F', close(() => actions.find())],
     ['Print…', 'Ctrl+P', close(() => actions.print())],
+    ...ui
+      .items('panel')
+      .map((item): [string, string, () => void] => [
+        item.title,
+        '',
+        () => togglePanel(`extension:${item.id}`),
+      ]),
     ['Settings', '', close(() => actions.openSettings())],
   ];
   for (const [label, key, action] of items) {
@@ -171,17 +193,42 @@ function renderDownloads(): void {
   panel.append(list);
 }
 
+function clear(): void {
+  const leave = leavePanel;
+  leavePanel = undefined;
+  try {
+    leave?.();
+  } catch (error) {
+    console.warn('extension panel:', error);
+  }
+  panel.textContent = '';
+}
+
+function renderExtension(name: PanelName): void {
+  const item = extensionPanel(name);
+  const container = element('div', { className: 'panel-extension' });
+  if (item) container.dataset.blItem = item.id;
+  panel.append(container);
+  try {
+    leavePanel = item?.render(container);
+  } catch (error) {
+    console.warn('extension panel:', error);
+  }
+}
+
 function render(): void {
   if (!current) return;
-  panel.textContent = '';
+  clear();
   const close = element('button', {
     className: 'panel-close',
     title: 'Close',
     textContent: '×',
   });
   close.addEventListener('click', () => togglePanel(null));
-  panel.append(element('header', {}, element('h2', { textContent: TITLES[current] }), close));
+  const title = TITLES[current] ?? extensionPanel(current)?.title ?? '';
+  panel.append(element('header', {}, element('h2', { textContent: title }), close));
   if (current === 'menu') renderMenu();
   else if (current === 'downloads') renderDownloads();
-  else renderLinks(current);
+  else if (current === 'history' || current === 'bookmarks') renderLinks(current);
+  else renderExtension(current);
 }

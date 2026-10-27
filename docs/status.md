@@ -54,6 +54,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   last device writes (#188 to #191, #197).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
+- **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
+  #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
+  messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
+  it runs.
 - **Yardstick**: 257 of 280 checks like Chromium.
 - **CI and deploy**: every push to `main` builds, tests and deploys the demo to the home server
   through a LAN runner without foreign actions (#160, #185).
@@ -208,6 +212,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   the same tab, deliberately not here because an accidental drop would replace the page).
 - Devices and identity: WebAuthn, Credential Management, Payment Request, Web MIDI/USB/HID/Serial,
   WebXR.
+- Extensions: no blocking or observing of requests (an engine export for WebCore's content
+  extensions or a URL filter), no accessibility tree (an engine export), scripts not in workers,
+  in already open documents or in `about:blank` frames.
 - Core API: no event for console messages without a view (service workers), no warning for
   skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait".
 - The test hooks `gpu()` are not gated by `BL_TEST_HOOKS` in the engine (only the host can call

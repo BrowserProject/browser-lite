@@ -46,6 +46,7 @@ them or load `media-sw.js` into the site's own worker:
 | `serviceWorker` | none | `{ registration }` or `{ url, scope? }` of a worker that loads `media-sw.js`; never registered implicitly |
 | `services` | `defaultServices()` | Host services, see below |
 | `handlers` | safe defaults | Request handlers, see below |
+| `extensions` | none | Host of `createExtensionHost()`, see [Extensions](#extensions) |
 | `permissions` | in memory | `PermissionStore` with remembered decisions |
 | `errorPage` | engine default | HTML template of the error page (placeholders in the engine README) |
 | `userAgent`, `platform` | engine default | `navigator.userAgent`, `navigator.platform` |
@@ -62,8 +63,9 @@ them or load `media-sw.js` into the site's own worker:
 
 ## Handlers and events
 
-Requests the engine waits for have exactly one handler (`options.handlers`); everything else is
-an event (`browser.on`, `view.on`, `download.on`), with any number of listeners.
+Requests the engine waits for have one handler (`options.handlers`), behind those extensions
+put in front of it; everything else is an event (`browser.on`, `view.on`, `download.on`), with
+any number of listeners.
 
 | Handler | Default |
 |---|---|
@@ -97,6 +99,20 @@ Without a `download` listener finished downloads are saved automatically.
 through the transport and TLS), for example while the user types it into an address bar; the
 engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down
 on.
+
+## Extensions
+
+`createExtensionHost({ app?, store? })` returns the host of an integrator's extensions; pass it as
+`extensions` to every browser it should serve (one at a time, it outlives restarts). An extension
+is `{ id, version, setup(context) }`; the context offers `onBrowser`, `onView`, `handle(type,
+handler)` (request handler chain: extensions in install order, then `options.handlers`, then the
+default), `addScript` and `addStyle` (pages by match patterns, scripts in an isolated world per
+extension with the global `extension`), `onMessage` and `postMessage`, `storage`, `app` and
+`signal`. Host: `install`, `uninstall`, `enable`, `disable`, `extensions`, `on('change')`. Types:
+`Extension`, `ExtensionContext`, `ExtensionHost`, `ExtensionHostOptions`, `ExtensionInfo`,
+`ExtensionStorage`, `ExtensionStore`, `ChainedHandler`, `ContentScript`, `ContentStyle`,
+`MessageSender`, `Disposer`, `SetupResult`. Design and examples:
+[docs/extensions.md](../../docs/extensions.md).
 
 ## Services
 

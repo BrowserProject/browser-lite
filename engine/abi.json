@@ -1,5 +1,5 @@
 {
-  "abiVersion": 11,
+  "abiVersion": 12,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -61,6 +61,8 @@
     { "name": "bl_device_orientation", "returns": "void", "args": "int id, double alpha, double beta, double gamma, int absolute", "doc": "deviceorientation of the host after 'sensor-start' (NaN = missing)." },
     { "name": "bl_device_motion", "returns": "void", "args": "int id, double x, double y, double z, double gravityX, double gravityY, double gravityZ, double rotationAlpha, double rotationBeta, double rotationGamma, double interval", "doc": "devicemotion of the host after 'sensor-start' (NaN = missing)." },
     { "name": "bl_host_call_result", "returns": "void", "args": "double identifier, int ok, char* result", "doc": "Answer to 'host-call': ok 1 resolves with the JSON result, 0 rejects with {name, message}." },
+    { "name": "bl_set_user_content", "returns": "void", "args": "char* json", "doc": "Replaces the page content of the host's extensions: [{extension, scripts: [{source, matches, excludes, runAt ('document-start' or 'document-end'), allFrames, world ('isolated' or 'main')}], styles: [{source, matches, excludes, allFrames}]}]. matches and excludes are WebCore user content URL patterns (scheme://host/path). Scripts run from the next document on, isolated ones in a world per extension with the global 'extension'; styles are user style sheets and apply to open documents too. Until the first non-empty call the pages keep WebCore's empty provider." },
+    { "name": "bl_extension_message", "returns": "void", "args": "int id, char* extension, char* json", "doc": "A message (JSON) to the listeners of extension.onMessage in every frame of the view where the world of the extension exists." },
     { "name": "bl_notification_event", "returns": "void", "args": "char* notificationID, int type", "doc": "Notification shown (0), clicked (1), closed (2) or failed (3)." },
     { "name": "bl_gamepad", "returns": "void", "args": "int index, char* json", "doc": "Gamepad state {connected, id, mapping, axes, buttons, haptics} while 'gamepad-monitor' is on." },
     { "name": "bl_speech_voices", "returns": "void", "args": "char* json", "doc": "Voices of the host [{uri, name, lang, local, default}]." },
@@ -191,6 +193,7 @@
     { "type": "download-start", "scope": "view", "payload": "{id, url, filename, mime, size, viewSource?}" },
     { "type": "download-done", "scope": "view", "payload": "{id, error} (error empty = success)" },
     { "type": "permission", "scope": "view", "payload": "{id, kind, origin}; answer bl_permission_answer" },
+    { "type": "extension-message", "scope": "view", "payload": "{id, extension, url (of the frame), message (JSON string)}: extension.sendMessage of an extension's script; answer bl_host_call_result" },
     { "type": "host-call", "scope": "view", "payload": "{id, name, origin, payload (JSON string)}; answer bl_host_call_result", "feature": "see hostCalls" },
     { "type": "geolocation-start", "scope": "view", "payload": "{highAccuracy}", "feature": "geolocation" },
     { "type": "geolocation-stop", "scope": "view", "payload": "empty", "feature": "geolocation" },

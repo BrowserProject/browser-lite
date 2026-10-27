@@ -1,7 +1,8 @@
 # @browser-lite/ui
 
 Unstyled default UI for browser-lite: the select popup, color and date/time pickers, the
-permission prompt, Chrome-like native dialogs, the context menu and the link status bubble.
+permission prompt, Chrome-like native dialogs, the context menu, the link status bubble and the
+UI slots of extensions.
 The elements carry class names and `data-bl-*` attributes; only position and size are set
 inline, the page styles the rest.
 
@@ -37,6 +38,9 @@ const removeStatus = linkStatus(view);
 | `showContextMenu(view, info, items, o?)` | Renders a menu at the position of a `context-menu` event; returns a close function. Escape, a click outside, window blur or closing the view close it. |
 | `defaultMenuItems(view, info, actions, o?)` | The standard items: open and copy link or image, copy, cut, paste, select all, back, forward, reload, print, view source. `actions.openTab(url)` is required; `reload`, `print`, `viewSource`, `copyText`, `readText` are optional overrides. |
 | `linkStatus(view, o?)` | Bubble with the URL under the mouse; returns a function that removes it. |
+| `createUiSlots()` | Registry of the slots `toolbar` (`ToolbarButton`), `panel` (`SidePanel`), `context-menu` (`ContextMenuEntry`) and `settings` (`SettingsSection`) that extensions fill and the app renders: `add(slot, item)` returns a remover (ids unique per slot), `items(slot)`, `openPanel(id)`, events `change` and `open-panel` ([docs/extensions.md](../../docs/extensions.md#ui-slots)). |
+| `renderToolbar(slots, container, view)` | Renders the toolbar slot into `container` and keeps it current; `view()` is the view a click acts on. Returns a function that removes the buttons. |
+| `slotMenuItems(slots, view, info)` | The context menu entries of the slot that apply to `info`, after a separator, to append to `defaultMenuItems`. |
 | `defaultTexts`, `UiTexts` | English texts. |
 
 Every handler honours `request.signal`: an aborted request removes its element and resolves the
@@ -79,6 +83,7 @@ runs first: register shortcut handlers in the bubble phase, or skip them while
 | `.bl-permission-prompt` | `role=dialog`, `data-bl-view`, `data-bl-kind`; `p`, `button.bl-block`, `button.bl-allow` (`data-bl-answer`). Not positioned. |
 | `.bl-context-menu` | `role=menu`, `data-bl-view`; `button.bl-menu-item` (`data-bl-item`, `disabled`), `hr.bl-separator`. Inline: `position: fixed`, `left`, `top`. |
 | `.bl-link-status` | `data-bl-view`, `hidden` without a link. Not positioned. |
+| `button.bl-toolbar-button` | `data-bl-item`, `title` and `aria-label` (the label), text the icon. Not positioned. |
 
 Every element also has `data-bl-ui` with its name (for example `data-bl-ui="select-popup"`).
 

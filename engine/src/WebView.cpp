@@ -14,6 +14,7 @@
 #include "LayerTreeHostWasm.h"
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
+#include "UserContent.h"
 #include "WebPlatformExtras.h"
 #include "WebCodecsWasm.h"
 #if ENABLE(MEDIA_STREAM)
@@ -216,6 +217,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     m_page = Page::create(WTF::move(configuration));
     debugLog("View %d: page created", id);
+    // Scripts and styles of the host's extensions, if there are any
+    attachUserContent(*m_page);
     // Report the first visible layout (host, measurements in tests/core)
     m_page->addLayoutMilestones({ LayoutMilestone::DidFirstVisuallyNonEmptyLayout });
     attachDeviceClients(*this, *m_page);

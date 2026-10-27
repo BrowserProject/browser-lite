@@ -1,5 +1,6 @@
 import type { SessionHistory, View, ViewEvents } from '@browser-lite/core';
-import { defaultMenuItems, linkStatus, showContextMenu } from '@browser-lite/ui';
+import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
+import { ui } from './extensions.js';
 import { showFindCount } from './find-bar.js';
 import { recordVisit } from './history.js';
 import { debug } from './params.js';
@@ -187,7 +188,7 @@ export class Tab implements SessionTab {
         openTab: (url) => openTab(url),
         print: () => printTab(this),
       });
-      showContextMenu(view, info, items);
+      showContextMenu(view, info, [...items, ...slotMenuItems(ui, view, info)]);
     });
     this.on('print', (event) => {
       if (this.isActive) showPreview(event.pdf, event.title);

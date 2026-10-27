@@ -1,4 +1,5 @@
 import { BrowserLiteError } from './errors.js';
+import { type AttachableHost, attachableHost } from './extensions/link.js';
 import { MemoryPermissionStore } from './permissions.js';
 import { defaultServices } from './services/index.js';
 import { Service } from './services/service.js';
@@ -51,6 +52,7 @@ export interface Config {
   serviceWorker: ServiceWorkerOption | undefined;
   services: Service[];
   handlers: Partial<RequestHandlers>;
+  extensions: AttachableHost | null;
   permissions: PermissionStore;
   errorPage: string | undefined;
   userAgent: string;
@@ -255,6 +257,11 @@ function handlers(value: unknown): Partial<RequestHandlers> {
   return value as Partial<RequestHandlers>;
 }
 
+function extensions(value: unknown): AttachableHost | null {
+  if (value === undefined) return null;
+  return attachableHost(value) ?? invalid('extensions must be created with createExtensionHost()');
+}
+
 function permissionStore(value: unknown): PermissionStore {
   if (value === undefined) return new MemoryPermissionStore();
   if (!isObject(value) || typeof value.set !== 'function' || typeof value.entries !== 'function')
@@ -322,6 +329,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     serviceWorker: serviceWorker(options.serviceWorker),
     services: services(options.services),
     handlers: handlers(options.handlers),
+    extensions: extensions(options.extensions),
     permissions: permissionStore(options.permissions),
     errorPage: optionalString(options.errorPage, 'errorPage'),
     userAgent: optionalString(options.userAgent, 'userAgent') ?? '',

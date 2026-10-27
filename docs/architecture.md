@@ -30,6 +30,7 @@ How browser-lite is built, from the engine artifact up to the demo. Numbers like
 | Services | `packages/core/src/services` | Host features a page may reach (`audio`, `media`, `capture`, `webrtc`, `devices`). Each enables its features in `BL_FEATURES` and registers its host calls |
 | Transport | `packages/transport-wisp` | `Transport` implementation: TCP streams over a few WebSockets ([PROTOCOL.md](../packages/transport-wisp/PROTOCOL.md), #235) |
 | UI | `packages/ui` | Default request handlers and helpers in plain DOM, styled by the page |
+| Extensions | `packages/core/src/extensions`, `packages/ui/src/slots.ts` | Plugins of the integrator: request handler chain, scripts and CSS in pages (isolated worlds, `engine/src/UserContent.cpp`), UI slots ([extensions.md](extensions.md)) |
 | Profile | `packages/profile` | Downloads a profile before start (`storage.beforeStart`), syncs it while running |
 | Server | `packages/server` | Node: relay, static files with COOP/COEP/CORP, tokens, profile store, `browser-lite-server` CLI |
 | Demo | `apps/demo` | A full browser for testing, built only on the packages |
