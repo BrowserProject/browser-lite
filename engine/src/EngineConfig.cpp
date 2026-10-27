@@ -159,6 +159,8 @@ void loadEngineConfig()
     config.videoOverlay = flag("BL_VIDEO_OVERLAY", true);
     config.asyncImageDecoding = flag("BL_ASYNC_IMAGE_DECODING", true);
     config.firstPaintEarly = flag("BL_FIRST_PAINT_EARLY", true);
+    if (const char* wait = value("BL_FALLBACK_FONT_WAIT"))
+        config.fallbackFontWaitMs = atof(wait);
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));

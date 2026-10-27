@@ -54,6 +54,9 @@ struct EngineConfig {
     // BL_FIRST_PAINT_EARLY: the rendering update after the first visible layout runs before the
     // waiting tasks instead of with the next frame of the host
     bool firstPaintEarly { true };
+    // BL_FALLBACK_FONT_WAIT: ms the text of a page waits for lazy fallback fonts before it goes on
+    // without them (main.cpp, setLazyWaitLimit); negative: until they are there
+    double fallbackFontWaitMs { 300 };
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB

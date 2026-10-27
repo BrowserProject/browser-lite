@@ -25,10 +25,10 @@
 #include <wasmfs.h>
 
 // Fetches <engine folder>/<path> into buffer (size bytes); returns false when the file is
-// missing, has another size or did not arrive within 8 s, before the core reports the engine as
-// unresponsive after 10 s (the read fails, ICU falls back to the root locale and text to other
-// fonts; the next read tries again)
-EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
+// missing, has another size or did not arrive within timeout ms (at most 8 s, before the core
+// reports the engine as unresponsive after 10 s: the read fails, ICU falls back to the root locale
+// and text to other fonts; the next read tries again)
+EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size, double timeout), {
     var url = locateFile(UTF8ToString(path));
     var data;
     try {
@@ -37,7 +37,7 @@ EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size), {
         } else {
             var request = new XMLHttpRequest();
             request.open('GET', url, false);
-            request.timeout = 8000;
+            request.timeout = Math.max(1, Math.round(timeout));
             request.responseType = 'arraybuffer';
             request.send();
             if (request.status != 200)
@@ -70,6 +70,20 @@ static void bl_lazy_prefetch(const char* paths)
         for (var path of paths.split('\n'))
             fetch(locateFile(path)).then((response) => response.arrayBuffer()).catch(() => {});
     }, strdup(paths));
+}
+
+// Fetches a file on the page main thread and reports its arrival (bl__lazy_arrived) to the
+// thread that started it, whether it worked or not
+static void bl_lazy_fetch_then_report(const char* path, void* file)
+{
+    MAIN_THREAD_ASYNC_EM_ASM({
+        var url = locateFile(UTF8ToString($0));
+        _free($0);
+        var report = () => _bl__lazy_arrived($1);
+        if (ENVIRONMENT_IS_NODE)
+            return report();
+        fetch(url).then((response) => response.arrayBuffer()).catch(() => {}).then(report);
+    }, strdup(path), file);
 }
 
 namespace BrowserLite {
@@ -109,17 +123,38 @@ GroupRegistry& groupRegistry()
     return *registry;
 }
 
-using MissHandler = void (*)(const char* path);
+// How the reads of a mount wait (setLazyMissHandler, setLazyWaitLimit). The wait limit state is
+// only used on the engine thread.
+struct ReadPolicy {
+    void (*miss)(const char* path) { nullptr };
+    std::vector<std::string> limitedFolders; // URL prefixes
+    double budget { -1 }; // ms, negative: no limit
+    void (*arrived)() { nullptr };
+    double deadline { 0 };
+    unsigned pending { 0 }; // files on the way that a limited read started
+    bool gaveUp { false }; // a read failed since the last arrived()
+};
 
 class LazyFile final : public DataFile {
 public:
-    LazyFile(backend_t backend, std::string url, off_t size, std::shared_ptr<Group> group, MissHandler* miss)
+    LazyFile(backend_t backend, std::string url, off_t size, std::shared_ptr<Group> group, ReadPolicy* policy)
         : DataFile(S_IRUGO, backend)
         , m_url(std::move(url))
         , m_size(size)
         , m_group(std::move(group))
-        , m_miss(miss)
+        , m_policy(policy)
     {
+    }
+
+    // The fetch of a limited read finished (engine thread)
+    void arrived()
+    {
+        m_arrived = true;
+        auto& policy = *m_policy;
+        if (--policy.pending || !std::exchange(policy.gaveUp, false))
+            return;
+        if (policy.arrived)
+            policy.arrived();
     }
 
 private:
@@ -136,13 +171,19 @@ private:
         if (m_data.empty() && m_size) {
             if (m_group)
                 m_group->prefetch();
-            if (*m_miss)
-                (*m_miss)(m_url.c_str());
+            if (m_policy->miss)
+                m_policy->miss(m_url.c_str());
             double start = emscripten_get_now();
+            bool limited = false;
+            double timeout = waitLimit(limited);
             m_data.resize(m_size);
-            if (!bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size)) {
-                log("[lazy] %s could not be loaded", m_url.c_str());
+            if (timeout <= 0 || !bl_lazy_fetch(m_url.c_str(), m_data.data(), m_size, timeout)) {
                 m_data.clear();
+                if (limited) {
+                    m_policy->gaveUp = true;
+                    debugLog("[lazy] %s still on the way, the text goes on without it", m_url.c_str());
+                } else
+                    log("[lazy] %s could not be loaded", m_url.c_str());
                 return -EIO;
             }
             log("[lazy] %s %lld bytes in %.0f ms", m_url.c_str(), static_cast<long long>(m_size), emscripten_get_now() - start);
@@ -154,10 +195,36 @@ private:
         return count;
     }
 
+    // How long this read may wait (ms): 8 s, or for a limited folder on the engine thread until
+    // the deadline of the burst of such reads; then the file goes on loading in the background
+    double waitLimit(bool& limited)
+    {
+        constexpr double maximum = 8000;
+        auto& policy = *m_policy;
+        if (m_arrived || policy.budget < 0 || !isEngineThread() || !inLimitedFolder())
+            return maximum;
+        limited = true;
+        double now = emscripten_get_now();
+        if (!policy.pending && now > policy.deadline)
+            policy.deadline = now + policy.budget;
+        if (!std::exchange(m_fetching, true)) {
+            ++policy.pending;
+            bl_lazy_fetch_then_report(m_url.c_str(), this);
+        }
+        return std::min(maximum, policy.deadline - now);
+    }
+
+    bool inLimitedFolder() const
+    {
+        return std::ranges::any_of(m_policy->limitedFolders, [&](auto& prefix) { return !m_url.rfind(prefix, 0); });
+    }
+
     std::string m_url;
     off_t m_size;
     std::shared_ptr<Group> m_group;
-    MissHandler* m_miss;
+    ReadPolicy* m_policy;
+    bool m_fetching { false };
+    bool m_arrived { false };
     std::vector<uint8_t> m_data;
 };
 
@@ -233,15 +300,15 @@ public:
             size_t start = 0;
             for (size_t slash; (slash = relative.find('/', start)) != std::string::npos; start = slash + 1)
                 directory = directory->directory(relative.substr(start, slash - start));
-            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group, &m_miss));
+            directory->add(relative.substr(start), std::make_shared<LazyFile>(this, url, size, group, &m_policy));
         }
         return root;
     }
 
-    MissHandler m_miss { nullptr };
+    ReadPolicy m_policy;
+    std::string m_urlFolder;
 
 private:
-    std::string m_urlFolder;
     std::string m_index;
 };
 
@@ -288,7 +355,26 @@ void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path
 {
     auto found = backends().find(mountPoint);
     if (found != backends().end())
-        found->second->m_miss = handler;
+        found->second->m_policy.miss = handler;
+}
+
+void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)())
+{
+    auto found = backends().find(mountPoint);
+    if (found == backends().end())
+        return;
+    auto& policy = found->second->m_policy;
+    for (auto& folder : folders)
+        policy.limitedFolders.push_back(found->second->m_urlFolder + '/' + folder + '/');
+    policy.budget = budget;
+    policy.arrived = arrived;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__lazy_arrived(void* file)
+{
+    runOnEngineThread([file] {
+        static_cast<LazyFile*>(file)->arrived();
+    });
 }
 
 } // namespace BrowserLite

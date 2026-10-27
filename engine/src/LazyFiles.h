@@ -1,6 +1,9 @@
 // Read-only files of the engine folder that load on first read (LazyFiles.cpp).
 #pragma once
 
+#include <string>
+#include <vector>
+
 namespace BrowserLite {
 
 // Mounts the files of `index` (lines "<path> <size> [<group>]") at `mountPoint`, whose parent is created
@@ -17,6 +20,13 @@ void prefetchLazyGroup(const char* name);
 // Called on the thread of a read that is about to wait for a file of `mountPoint` (its path in
 // the engine folder), before it waits; for example to start fetching what is needed next.
 void setLazyMissHandler(const char* mountPoint, void (*handler)(const char* path));
+
+// Reads on the engine thread of files in these folders of `mountPoint` (fonts only used as a
+// fallback for characters) wait at most `budget` ms from the first such read that waits: the
+// reads after that deadline do not wait at all, they fail. A file that could not wait goes on
+// loading; once every such file arrived, `arrived` runs on the engine thread (to look up the fonts
+// again). A negative budget waits for every file.
+void setLazyWaitLimit(const char* mountPoint, const std::vector<std::string>& folders, double budget, void (*arrived)());
 
 // Starts fetching files of the engine folder (paths, one per line) without waiting, so their
 // first reads find them in the HTTP cache.

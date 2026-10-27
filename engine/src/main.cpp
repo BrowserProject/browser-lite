@@ -156,6 +156,9 @@ int main(int, char**)
     // The first lazy font or dictionary a layout waits for fetches the others it needs alongside
     setLazyMissHandler("/lazy/fonts", prefetchFontsOfRenderedText);
     setLazyMissHandler("/lazy/icu", prefetchFontsOfRenderedText);
+    // Fonts only reached as a fallback for characters: the text goes on without them after a
+    // while and is laid out again once they are there (like font-display: swap)
+    setLazyWaitLimit("/lazy/fonts", { "scripts", "cjk", "emoji" }, config.fallbackFontWaitMs, lazyFontsArrived);
 
     // All views share curl. WebKit allows 6 connections per host (like Chrome) but
     // only 17 in total: a few long polls in background views kept the active view

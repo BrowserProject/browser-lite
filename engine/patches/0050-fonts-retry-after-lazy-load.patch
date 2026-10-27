@@ -1,0 +1,54 @@
+diff --git a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
+index ffe424f857..f37164556a 100644
+--- a/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
++++ b/Source/ThirdParty/skia/src/ports/SkFontMgr_fontconfig.cpp
+@@ -798,8 +798,11 @@ protected:
+             }
+         }
+         bool accessible = FontAccessibleUncached(font);
+-        std::lock_guard<std::mutex> lock(fAccessibleMutex);
+-        fAccessible.emplace(filename, accessible);
++        // Only a readable file: one that loads on demand can still arrive
++        if (accessible) {
++            std::lock_guard<std::mutex> lock(fAccessibleMutex);
++            fAccessible.emplace(filename, accessible);
++        }
+         return accessible;
+     }
+     mutable std::mutex fAccessibleMutex;
+diff --git a/Source/WebCore/platform/graphics/FontCache.cpp b/Source/WebCore/platform/graphics/FontCache.cpp
+index ab88353fed..bb27248e5f 100644
+--- a/Source/WebCore/platform/graphics/FontCache.cpp
++++ b/Source/WebCore/platform/graphics/FontCache.cpp
+@@ -36,6 +36,7 @@
+ #include "FontPlatformData.h"
+ #include "FontSelector.h"
+ #include "Logging.h"
++#include "SystemFallbackFontCache.h"
+ #include "SystemFontDatabase.h"
+ #include "ThreadGlobalData.h"
+ #include "WebKitFontFamilyNames.h"
+@@ -387,6 +388,10 @@ void FontCache::invalidate()
+     m_fontDataCaches->verticalData.clear();
+ #endif
+     m_fontCascadeCache.invalidate();
++    // browser-lite: also the fallbacks per font, they remember a font file that could not be
++    // read yet (fonts the embedder loads on demand)
++    if (auto* systemFallbackFontCache = SystemFallbackFontCache::forCurrentThreadIfExists())
++        systemFallbackFontCache->clear();
+ 
+     SystemFontDatabase::singleton().invalidate();
+ 
+diff --git a/Source/WebCore/platform/graphics/SystemFallbackFontCache.h b/Source/WebCore/platform/graphics/SystemFallbackFontCache.h
+index dba6033d23..0a772cc7eb 100644
+--- a/Source/WebCore/platform/graphics/SystemFallbackFontCache.h
++++ b/Source/WebCore/platform/graphics/SystemFallbackFontCache.h
+@@ -67,6 +67,8 @@ public:
+ 
+     RefPtr<Font> systemFallbackFontForCharacterCluster(const Font*, StringView, const FontDescription&, ResolvedEmojiPolicy, IsForPlatformFont);
+     void remove(Font*);
++    // browser-lite: FontCache::invalidate, so a fallback that was missing is looked up again
++    void clear() { m_characterFallbackMaps.clear(); }
+ 
+ private:
+     struct CharacterFallbackMapKeyHashTraits : SimpleClassHashTraits<CharacterFallbackMapKey> {

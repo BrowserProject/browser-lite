@@ -178,7 +178,10 @@ Google Fonts (most frequent characters first, about 30 KB each with Brotli), emo
 Unicode emoji groups and the symbol fonts into Unicode blocks. Files usually needed together are
 a group (a CJK font's most frequent slices, the data of an ICU locale): the first read fetches the
 others in parallel. Once the engine runs it fetches the files of `engine/lazy-prefetch.txt` and
-the ICU groups of the user's languages in the background (#240).
+the ICU groups of the user's languages in the background (#240). The first read the layout waits
+for scans the rendered text and fetches the fonts and dictionaries it needs side by side (#252);
+fonts only reached as a fallback for characters (scripts, CJK, emoji) hold up the engine thread at
+most 300 ms, the text is laid out again once they are there (#255).
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). IndexedDB is

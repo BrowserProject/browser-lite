@@ -15,6 +15,7 @@
 #include <WebCore/Document.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/ElementInlines.h>
+#include <WebCore/FontCache.h>
 #include <WebCore/HTMLNames.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
@@ -130,6 +131,12 @@ void collect(Document& document, std::set<char32_t>& characters)
 }
 
 } // namespace
+
+void lazyFontsArrived()
+{
+    debugLog("Lazy fonts arrived: the pages look up their fonts again");
+    FontCache::forCurrentThread().invalidate();
+}
 
 void prefetchFontsOfRenderedText(const char* path)
 {
