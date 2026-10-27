@@ -93,6 +93,8 @@ visible change is neither composited nor shown, otherwise the compositor composi
 (compositing only the damage would need a copy of the view per frame, which costs more under
 SwiftShader). Pinch zoom scales the shown tiles on the compositor and commits once at the end
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
+A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
+libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 Without a transferable canvas the engine hands pixels in shared memory (`onEngineFrame`).
 
 ## WebGL

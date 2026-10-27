@@ -47,7 +47,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
   after a browser restart the engine comes compiled from Chrome's code cache (#237); new threads get
   loaded web workers from a reserve that refills in the background, the engine thread no longer
-  waits 60 to 180 ms for a worker to load (#242).
+  waits 60 to 180 ms for a worker to load (#242); a JPEG drawn at half its size or smaller
+  decodes smaller, a 4000 x 3000 photo shown at 400 x 300 takes 0.7 instead of 46 MB of pixels
+  (#270).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
@@ -151,9 +153,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-6. Images decode at full size: WebKit's decoders of this port ignore the subsampling level
-   (`ScalableImageDecoder`), a 4000 x 3000 photo shown small takes 48 MB and its full decoding
-   time. Scaled JPEG decoding (libjpeg-turbo) needs a WebKit patch; batch it with other patches.
+6. Images drawn small still decode at full size unless they are JPEGs (#270): PNG, WebP, AVIF
+   and GIF decoders ignore the subsampling level (libwebp could scale still images). A JPEG also
+   decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and
+   repeated CSS backgrounds, and keeps that frame for later small draws (like Safari).
 7. Memory of the host tab: with a trivial page the renderer of Chromium holds about 480 MB
    (2026-10-27, local): the engine memory (256 MB reserved, about 90 MB touched), about 220 MB
    of malloc inside the renderer that does not change with the number of workers (each spare
