@@ -158,6 +158,7 @@ void loadEngineConfig()
     config.skipUnchangedFrames = !config.testHooks || flag("BL_DAMAGE", true);
     config.videoOverlay = flag("BL_VIDEO_OVERLAY", true);
     config.asyncImageDecoding = flag("BL_ASYNC_IMAGE_DECODING", true);
+    config.imageSubsampling = flag("BL_IMAGE_SUBSAMPLING", true);
     config.firstPaintEarly = flag("BL_FIRST_PAINT_EARLY", true);
     if (const char* wait = value("BL_FALLBACK_FONT_WAIT"))
         config.fallbackFontWaitMs = atof(wait);

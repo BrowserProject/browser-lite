@@ -51,6 +51,9 @@ struct EngineConfig {
     // BL_ASYNC_IMAGE_DECODING: large images decode on the decoder thread (WebKit's default);
     // 0 decodes them where they are painted
     bool asyncImageDecoding { true };
+    // BL_IMAGE_SUBSAMPLING: images drawn at half their size or smaller decode smaller (JPEG,
+    // patch 0054); 0 decodes every image at full size
+    bool imageSubsampling { true };
     // BL_FIRST_PAINT_EARLY: the rendering update after the first visible layout runs before the
     // waiting tasks instead of with the next frame of the host
     bool firstPaintEarly { true };

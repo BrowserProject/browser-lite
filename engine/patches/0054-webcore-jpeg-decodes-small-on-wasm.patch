@@ -1,0 +1,214 @@
+diff --git a/Source/WebCore/platform/graphics/BitmapImageDescriptor.cpp b/Source/WebCore/platform/graphics/BitmapImageDescriptor.cpp
+index 7b73c38ad2..3bab64a85e 100644
+--- a/Source/WebCore/platform/graphics/BitmapImageDescriptor.cpp
++++ b/Source/WebCore/platform/graphics/BitmapImageDescriptor.cpp
+@@ -238,6 +238,18 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
+     if (!isSizeAvailable())
+         return SubsamplingLevel::Default;
+ 
++#if PLATFORM(WASM)
++    // browser-lite: the deepest level the decoder really decodes smaller
++    // (JPEG, patch 0054); the other decoders report the full size for every
++    // level. Asks the decoder, not the source: the source would throw away a
++    // frame decoded for another level.
++    auto level = SubsamplingLevel::First;
++    for (auto next = SubsamplingLevel::Level1; next <= SubsamplingLevel::Last; ++next) {
++        if (decoder->frameSizeAtIndex(0, next) == decoder->frameSizeAtIndex(0, level))
++            break;
++        level = next;
++    }
++#else
+     // FIXME: this value was chosen to be appropriate for Apple ports since the image
+     // subsampling is only enabled by default on Apple ports. Choose a different value
+     // if image subsampling is enabled on other platform.
+@@ -249,6 +261,7 @@ SubsamplingLevel BitmapImageDescriptor::maximumSubsamplingLevel() const
+         if (area < maximumImageAreaBeforeSubsampling)
+             break;
+     }
++#endif
+ 
+     m_maximumSubsamplingLevel = level;
+     m_cachedFlags.add(CachedFlag::MaximumSubsamplingLevel);
+@@ -271,6 +284,22 @@ SubsamplingLevel BitmapImageDescriptor::subsamplingLevelForScaleFactor(GraphicsC
+ 
+     int result = std::ceil(std::log2(1 / scale));
+     return static_cast<SubsamplingLevel>(std::min(result, static_cast<int>(maximumSubsamplingLevel())));
++#elif PLATFORM(WASM)
++    // browser-lite: an image drawn at half its size or smaller decodes at
++    // 1/2, 1/4 or 1/8 (patch 0054). Unlike above the level rounds down, so the
++    // decoded image keeps at least as many pixels as drawn and stays sharp.
++    // Drawn larger later (zoom), the level goes down and the frame decodes
++    // again; a frame of a lower level serves every higher one.
++    UNUSED_PARAM(context);
++    if (allowImageSubsampling == AllowImageSubsampling::No)
++        return SubsamplingLevel::Default;
++
++    float scale = std::max(scaleFactor.width(), scaleFactor.height());
++    if (!(scale > 0 && scale < 1))
++        return SubsamplingLevel::Default;
++
++    int result = std::floor(std::log2(1 / scale));
++    return static_cast<SubsamplingLevel>(std::min(result, static_cast<int>(maximumSubsamplingLevel())));
+ #else
+     UNUSED_PARAM(context);
+     UNUSED_PARAM(scaleFactor);
+diff --git a/Source/WebCore/platform/image-decoders/ScalableImageDecoder.cpp b/Source/WebCore/platform/image-decoders/ScalableImageDecoder.cpp
+index 3f46090c1c..bd69494446 100644
+--- a/Source/WebCore/platform/image-decoders/ScalableImageDecoder.cpp
++++ b/Source/WebCore/platform/image-decoders/ScalableImageDecoder.cpp
+@@ -219,13 +219,19 @@ Seconds ScalableImageDecoder::frameDurationAtIndex(size_t index) const
+     return duration;
+ }
+ 
+-PlatformImagePtr ScalableImageDecoder::createFrameImageAtIndex(size_t index, SubsamplingLevel, const DecodingOptions&)
++PlatformImagePtr ScalableImageDecoder::createFrameImageAtIndex(size_t index, SubsamplingLevel subsamplingLevel, const DecodingOptions&)
+ {
+     Locker locker { m_lock };
+     // Zero-height images can cause problems for some ports. If we have an empty image dimension, just bail.
+     if (size().isEmpty())
+         return nullptr;
+ 
++#if PLATFORM(WASM)
++    setSubsamplingLevel(subsamplingLevel);
++#else
++    UNUSED_PARAM(subsamplingLevel);
++#endif
++
+     auto* buffer = frameBufferAtIndex(index);
+     if (!buffer || buffer->isInvalid() || !buffer->hasBackingStore())
+         return nullptr;
+diff --git a/Source/WebCore/platform/image-decoders/ScalableImageDecoder.h b/Source/WebCore/platform/image-decoders/ScalableImageDecoder.h
+index 4da7f761d4..96a34c0501 100644
+--- a/Source/WebCore/platform/image-decoders/ScalableImageDecoder.h
++++ b/Source/WebCore/platform/image-decoders/ScalableImageDecoder.h
+@@ -166,6 +166,14 @@ public:
+     std::optional<IntPoint> hotSpot() const override { return std::nullopt; }
+ 
+ protected:
++#if PLATFORM(WASM)
++    // browser-lite: called with the subsampling level of every frame request
++    // before frameBufferAtIndex(). A decoder that can decode smaller (JPEG)
++    // reports the smaller sizes in frameSizeAtIndex() and decodes again when
++    // the level changes; the others ignore it and report the full size.
++    virtual void setSubsamplingLevel(SubsamplingLevel) WTF_REQUIRES_LOCK(m_lock) { }
++#endif
++
+     // Decodes as much of the requested frame as possible, and returns an
+     // ScalableImageDecoder-owned pointer.
+     virtual ScalableImageDecoderFrame* frameBufferAtIndex(size_t) WTF_REQUIRES_LOCK(m_lock) = 0;
+diff --git a/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp b/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp
+index dc9e4228ce..0896b85f0a 100644
+--- a/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp
++++ b/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.cpp
+@@ -379,8 +379,16 @@ public:
+             m_state = JPEG_START_DECOMPRESS;
+ 
+             // We can fill in the size now that the header is available.
++#if PLATFORM(WASM)
++            // browser-lite: a reader for another subsampling level reads the
++            // header again, the size is known already (setSize() would set
++            // the data status back from Complete).
++            if (!m_decoder->isSizeAvailable() && !m_decoder->setSize(IntSize(m_info.image_width, m_info.image_height)))
++                return false;
++#else
+             if (!m_decoder->setSize(IntSize(m_info.image_width, m_info.image_height)))
+                 return false;
++#endif
+ 
+             m_decoder->setOrientation(readImageOrientation(info()));
+ #if USE(LCMS)
+@@ -392,6 +400,13 @@ public:
+             // image is a sequential JPEG.
+             m_info.buffered_image = jpeg_has_multiple_scans(&m_info);
+ 
++#if PLATFORM(WASM)
++            // browser-lite: libjpeg-turbo scales in the DCT, so an image
++            // drawn small decodes faster and takes 1/4 to 1/64 of the memory.
++            m_info.scale_num = 1;
++            m_info.scale_denom = 1u << static_cast<unsigned>(m_decoder->subsamplingLevel());
++#endif
++
+             // Used to set up image size so arrays can be allocated.
+             jpeg_calc_output_dimensions(&m_info);
+ 
+@@ -581,6 +596,31 @@ ScalableImageDecoderFrame* JPEGImageDecoder::frameBufferAtIndex(size_t index)
+     return &frame;
+ }
+ 
++#if PLATFORM(WASM)
++IntSize JPEGImageDecoder::frameSizeAtIndex(size_t, SubsamplingLevel subsamplingLevel) const
++{
++    // What jpeg_calc_output_dimensions() gives for a scale of 1 / 2^level: rounded up.
++    auto size = this->size();
++    int denominator = 1 << static_cast<int>(std::min(subsamplingLevel, SubsamplingLevel::Last));
++    return { (size.width() + denominator - 1) / denominator, (size.height() + denominator - 1) / denominator };
++}
++
++void JPEGImageDecoder::setSubsamplingLevel(SubsamplingLevel subsamplingLevel)
++{
++    assertIsHeld(m_lock);
++    subsamplingLevel = std::min(subsamplingLevel, SubsamplingLevel::Last);
++    if (subsamplingLevel == m_subsamplingLevel)
++        return;
++
++    // Another scale starts over with a new reader and frame. A native image
++    // made from the old frame keeps its own reference to the old pixels.
++    m_subsamplingLevel = subsamplingLevel;
++    clear();
++    if (!m_frameBufferCache.isEmpty())
++        m_frameBufferCache[0].clear();
++}
++#endif
++
+ void JPEGImageDecoder::clear()
+ {
+     m_reader = nullptr;
+@@ -661,8 +701,15 @@ bool JPEGImageDecoder::outputScanlines()
+     // Initialize the framebuffer if needed.
+     auto& buffer = m_frameBufferCache[0];
+     if (buffer.isInvalid()) {
++#if PLATFORM(WASM)
++        IntSize outputSize(m_reader->info()->output_width, m_reader->info()->output_height);
++        ASSERT(outputSize == frameSizeAtIndex(0, m_subsamplingLevel));
++        if (!buffer.initialize(outputSize, m_premultiplyAlpha))
++            return setFailed();
++#else
+         if (!buffer.initialize(size(), m_premultiplyAlpha))
+             return setFailed();
++#endif
+         buffer.setDecodingStatus(DecodingStatus::Partial);
+         // The buffer is transparent outside the decoded area while the image is
+         // loading. The completed image will be marked fully opaque in jpegComplete().
+diff --git a/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.h b/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.h
+index 8772ef3e08..ab1749422e 100644
+--- a/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.h
++++ b/Source/WebCore/platform/image-decoders/jpeg/JPEGImageDecoder.h
+@@ -71,9 +71,17 @@ namespace WebCore {
+         void setICCProfile(RefPtr<SharedBuffer>&&);
+ #endif
+ 
++#if PLATFORM(WASM)
++        IntSize frameSizeAtIndex(size_t, SubsamplingLevel) const final;
++        SubsamplingLevel subsamplingLevel() const { return m_subsamplingLevel; }
++#endif
++
+     private:
+         JPEGImageDecoder(AlphaOption, GammaAndColorProfileOption);
+         void tryDecodeSize(bool allDataReceived) override { decode(true, allDataReceived); }
++#if PLATFORM(WASM)
++        void setSubsamplingLevel(SubsamplingLevel) final;
++#endif
+ 
+         // Decodes the image.  If |onlySize| is true, stops decoding after
+         // calculating the image size.  If decoding fails but there is no more
+@@ -89,6 +97,10 @@ namespace WebCore {
+         void clear();
+ 
+         std::unique_ptr<JPEGImageReader> m_reader;
++#if PLATFORM(WASM)
++        // The scale of m_reader and the frame: 1 / 2^level
++        SubsamplingLevel m_subsamplingLevel { SubsamplingLevel::Default };
++#endif
+ #if USE(LCMS)
+         LCMSTransformPtr m_iccTransform;
+ #endif
