@@ -26,12 +26,15 @@
 #include <pthread.h>
 #include <JavaScriptCore/ConsoleTypes.h>
 #include <JavaScriptCore/DeferGCInlines.h>
+#include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/VM.h>
 #include <JavaScriptCore/Watchdog.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/JSDOMGlobalObject.h>
 #include <WebCore/ScriptExecutionContext.h>
+#include <WebCore/ThreadGlobalData.h>
+#include <WebCore/Timer.h>
 #include <wtf/Deque.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
@@ -143,9 +146,9 @@ static void scheduleLocalDrain()
     bl_schedule_local_drain();
 }
 
-extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
+// One pass: only what was waiting at the start
+static void runLocalTasks()
 {
-    s_localDrainScheduled = false;
     auto& tasks = localTasks();
     for (size_t count = tasks.size(); count && !tasks.isEmpty(); --count) {
         auto* function = tasks.takeFirst();
@@ -154,7 +157,13 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
         });
         delete function;
     }
-    if (!tasks.isEmpty())
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
+{
+    s_localDrainScheduled = false;
+    runLocalTasks();
+    if (!localTasks().isEmpty())
         scheduleLocalDrain();
 }
 
@@ -255,10 +264,14 @@ static double scriptTimeLimit()
     return engineConfig().scriptTimeoutSeconds;
 }
 
-static bool terminateRunawayScript(JSC::JSGlobalObject* globalObject, void*, void*)
+static bool terminateRunawayScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
 {
     auto message = makeString("Script terminated: it blocked the engine (all views) for "_s, scriptTimeLimit(), " s"_s);
     log("%s", message.utf8().data());
+    // The running script, also when it runs nested below a dialog (the VM entry is the dialog's)
+    auto* globalObject = WebCore::threadGlobalDataSingleton().currentState();
+    if (!globalObject)
+        globalObject = entryGlobalObject;
     if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
         if (RefPtr context = domGlobalObject->scriptExecutionContext())
             context->addConsoleMessage(JSC::MessageSource::JS, JSC::MessageLevel::Error, message);
@@ -280,13 +293,91 @@ static void installScriptWatchdog()
 }
 
 // In the middle of an entry into JS, setTimeLimit restarts the deadline from now
-void restartScriptWatchdog()
+static void restartScriptWatchdog()
 {
     auto& vm = WebCore::commonVM();
     if (auto* watchdog = vm.watchdog()) {
         JSC::JSLockHolder lock(vm);
         watchdog->setTimeLimit(WTF::Seconds(scriptTimeLimit()), terminateRunawayScript);
     }
+}
+
+// From Emscripten (system/lib/pthread/thread_mailbox.c): runs the work other
+// threads sent to this one, what the JS event loop does on a notification
+extern "C" void _emscripten_check_mailbox();
+
+// A work item of the nested event loop. The script watchdog restarts, so its
+// limit applies to each item and not to the dialog's script below. A script
+// it stopped leaves a termination request until the outermost VM entry ends,
+// cleared here like there (VM::executeEntryScopeServicesOnExit), so the next
+// script of another view runs.
+template<typename Work>
+static void runNestedWork(JSC::VM& vm, Work&& work)
+{
+    restartScriptWatchdog();
+    work();
+    JSC::JSLockHolder lock(vm);
+    if (vm.hasTerminationRequest() && !vm.traps().hasTrapBit(JSC::VMTraps::NeedTermination))
+        vm.clearHasTerminationRequest();
+}
+
+// A dialog's page waits until the user answered, the other views go on (#258),
+// like WebKitLegacy's modal run loop: WebCore defers the page group of the
+// dialog (PageGroupLoadDeferrer), the views of that group hold back input and
+// commands (WebView::blockForDialog). The worker's JS event loop does not run
+// here, so the loop does its work itself:
+// - the mailbox (host calls, curl, compositor), then the local tasks it queued
+// - due RunLoop timers (WebCore's timers)
+// - otherwise it waits with Atomics.wait on the thread's pthread address,
+//   where Emscripten notifies a thread that waits with Atomics.waitAsync
+//   (thread_mailbox.c); at most 10 ms, for a notification that came right
+//   before the wait or a browser without Atomics.waitAsync (postMessage then)
+// Script of other views runs inside the VM entry of the waiting script. Its
+// JSExecState starts empty, so microtasks run after each script like in a
+// task. When idle the GC may run if the waiting script is the only JS entry on
+// the stack (Heap::collectAtSafepoint, patch 0012), like at a safepoint of the
+// interpreter: the C++ between that script and here (the dialog's binding and
+// Chrome) holds no JS values.
+void runNestedEventLoop(const Function<bool()>& done)
+{
+    RELEASE_ASSERT(isEngineThread());
+    auto& vm = WebCore::commonVM();
+    auto& threadData = WebCore::threadGlobalDataSingleton();
+    auto* scriptState = threadData.currentState();
+    threadData.setCurrentState(nullptr);
+    // Called from a timer: WebCore's timers may fire again
+    WebCore::TimerBase::fireTimersInNestedEventLoop();
+    pthread_t self = pthread_self();
+    while (!done()) {
+        _emscripten_check_mailbox();
+        if (!localTasks().isEmpty()) {
+            runNestedWork(vm, [] { runLocalTasks(); });
+            continue;
+        }
+        auto next = WTF::RunLoop::nextTimerFireTime();
+        auto now = WTF::MonotonicTime::now();
+        if (next && *next <= now) {
+            runNestedWork(vm, [] { pumpRunLoop(); });
+            continue;
+        }
+        {
+            JSC::JSLockHolder lock(vm);
+            vm.heap.collectAtSafepoint();
+        }
+        // Releasing caches is for when no task runs (the dialog's script or
+        // navigation is below), the reserve and the pressure report work here too
+        checkMemory(ReleaseCaches::No);
+        double wait = 10;
+        if (next)
+            wait = std::min(wait, (*next - now).milliseconds());
+        __builtin_wasm_memory_atomic_wait32(reinterpret_cast<int*>(self), static_cast<int>(self), static_cast<int64_t>(wait * 1e6));
+    }
+    threadData.setCurrentState(scriptState);
+    restartScriptWatchdog();
+    // What is left runs from the JS event loop again
+    if (!localTasks().isEmpty())
+        scheduleLocalDrain();
+    armTimerForNextScheduledTask();
 }
 
 void initializeEngineLoop()

@@ -68,7 +68,7 @@ function fakeView(id = 1) {
 
 function requestsWith(handlers, store = new MemoryPermissionStore()) {
   const module = fakeModule();
-  const watchdog = { paused: 0, pause: () => watchdog.paused++, resume: () => watchdog.paused-- };
+  const watchdog = { closed: 0, dialogClosed: () => watchdog.closed++ };
   const host = {
     module,
     watchdog,
@@ -95,7 +95,7 @@ test('dialogs: defaults without a handler', () => {
   ]);
 });
 
-test('dialogs: direct and promised answers, watchdog paused meanwhile', async () => {
+test('dialogs: direct and promised answers, the watchdog restarts after each', async () => {
   let resolveLater;
   const requests_ = [];
   const { requests, module, watchdog } = requestsWith({
@@ -113,12 +113,14 @@ test('dialogs: direct and promised answers, watchdog paused meanwhile', async ()
   requests.dialog(1, view, 2, 'https://a.example', 'Name?', 'anna');
   requests.dialog(2, view, 3, 'https://a.example', '', '');
   requests.dialog(3, view, 1, 'https://a.example', 'Sure?', '');
-  assert.equal(watchdog.paused, 1);
+  assert.equal(watchdog.closed, 2);
+  assert.equal(requests.hasDialog(view), true);
   assert.equal(requests_[2].reload, false);
   assert.ok(requests_[2].signal instanceof AbortSignal);
   resolveLater(true);
   await tick();
-  assert.equal(watchdog.paused, 0);
+  assert.equal(watchdog.closed, 3);
+  assert.equal(requests.hasDialog(view), false);
   assert.deepEqual(module.calls, [
     ['dialog', 1, 1, 'ANNA'],
     ['dialog', 2, 0, 0],
@@ -139,13 +141,20 @@ test('dialogs: closing the view answers with the default and aborts the request'
   view.closed = true;
   requests.closeView(view);
   assert.equal(signal.aborted, true);
-  assert.equal(watchdog.paused, 0);
+  assert.equal(watchdog.closed, 1);
   assert.deepEqual(module.calls, [['dialog', 7, 1, 0]]);
-  // closeDialogs (destroy) answers what is still open
+  // closeDialogs answers the dialogs of one view (it navigates) or all (destroy)
   const other = requestsWith({ dialog: () => new Promise(() => {}) });
-  other.requests.dialog(8, fakeView(2), 1, 'o', 'm', '');
-  other.requests.closeDialogs();
+  const first = fakeView(2);
+  other.requests.dialog(8, first, 1, 'o', 'm', '');
+  other.requests.dialog(9, fakeView(3), 2, 'o', 'm', 'd');
+  other.requests.closeDialogs(first);
   assert.deepEqual(other.module.calls, [['dialog', 8, 0, 0]]);
+  other.requests.closeDialogs();
+  assert.deepEqual(other.module.calls, [
+    ['dialog', 8, 0, 0],
+    ['dialog', 9, 0, 0],
+  ]);
 });
 
 test('permissions: grant and deny are remembered, dismiss and errors are not', async () => {

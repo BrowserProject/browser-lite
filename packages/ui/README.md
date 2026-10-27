@@ -49,8 +49,9 @@ default answer (-1, null or 'deny'), which the core ignores.
 const handlers = defaultHandlers({ texts: { allow: 'Erlauben', block: 'Blockieren' } });
 ```
 
-Dialogs are synchronous: the engine waits until the handler returns. To suppress dialogs of
-background views, wrap the handler:
+`nativeDialogs` uses the blocking dialogs of the host browser, so the host page and every view
+wait until the user answers (an own in-page dialog returning a promise only holds the asking
+page). To suppress dialogs of background views, wrap the handler:
 
 ```js
 const { dialog } = nativeDialogs({ onBlocked: (view) => markBlocked(view) });

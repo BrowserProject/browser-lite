@@ -307,7 +307,7 @@ export interface BrowserEvents {
    * expert switch `BL_MEMORY_PRESSURE_MB`).
    */
   'memory-pressure': MemoryPressureEvent;
-  /** No answer from the engine for 10 s after input (an open page dialog does not count). */
+  /** No answer from the engine for 10 s after input (the time of a page dialog does not count). */
   unresponsive: Record<string, never>;
   /** The engine answers again after `unresponsive`. */
   responsive: Record<string, never>;
@@ -541,9 +541,12 @@ export interface RequestHandlers {
   /**
    * alert, confirm, prompt and beforeunload, answered directly or with a promise (an in-page
    * dialog). Answer: confirm true for OK, prompt the text or null, beforeunload false to stay.
-   * While a dialog is open the engine waits: all views stop until the answer (the host page
-   * stays responsive). The signal aborts when the view closes or the engine ends.
-   * Default: alert ignored, confirm false, prompt null, beforeunload true.
+   * Like in Chrome only the asking page waits for the answer (with the popups it shares script
+   * with): it gets no input and holds back the view's calls, its last frame stays. All other
+   * views go on. A navigation of the view (`load`, `reload`, `back`, ...) answers its open
+   * dialogs with the default first. The signal aborts then, when the view closes or the engine
+   * ends. A native dialog of the host page (`window.alert`) still stops the host page and so
+   * all views. Default: alert ignored, confirm false, prompt null, beforeunload true.
    */
   dialog(request: DialogRequest): DialogAnswer | Promise<DialogAnswer>;
   /**

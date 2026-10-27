@@ -125,10 +125,11 @@ static void keepReserve()
     debugLog("Memory limit %llu MB (malloc area %llu MB)", mb(s_limit), mb(malloc_footprint()));
 }
 
-void checkMemory()
+void checkMemory(ReleaseCaches release)
 {
     uint64_t footprint = malloc_footprint();
-    releaseCaches(footprint);
+    if (release == ReleaseCaches::Yes)
+        releaseCaches(footprint);
     if (footprint < s_footprintAtCheck + checkStep)
         return;
     s_footprintAtCheck = footprint;

@@ -28,9 +28,9 @@ void runNextOnEngineThread(Function<void()>&&);
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
-// After a synchronous wait for the user (alert, confirm, prompt): the time
-// until then does not count for aborting blocking scripts
-void restartScriptWatchdog();
+// A page dialog: runs the work of the engine thread nested until done()
+// returns true; the views of the dialog's page group hold back (WebView.h)
+void runNestedEventLoop(const Function<bool()>& done);
 
 // navigator.permissions.query() (Permissions.cpp)
 void installPermissionController();
