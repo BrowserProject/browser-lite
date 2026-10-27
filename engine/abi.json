@@ -1,5 +1,5 @@
 {
-  "abiVersion": 10,
+  "abiVersion": 11,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -7,6 +7,7 @@
     { "name": "bl_destroy_view", "returns": "void", "args": "int id", "doc": "Closes a view without asking beforeunload." },
     { "name": "bl_try_close", "returns": "void", "args": "int id", "doc": "Asks beforeunload (dialog type 3), answers with the event 'try-close'." },
     { "name": "bl_load_url", "returns": "void", "args": "int id, char* url", "doc": "Loads an address typed by the user (adds https:// without a scheme, allows data:)." },
+    { "name": "bl_preconnect", "returns": "void", "args": "char* url", "doc": "Connects to the origin of an http(s) address ahead (TCP, TLS), for example while the user types it; repeats within 10 s do nothing." },
     { "name": "bl_load_html", "returns": "void", "args": "int id, char* html, char* baseURL", "doc": "Loads an HTML string under a base URL." },
     { "name": "bl_restore_history", "returns": "void", "args": "int id, char* data", "doc": "Puts back the history {\"entries\":[{\"url\",\"title\"}],\"index\":n} and loads the current entry." },
     { "name": "bl_go_back", "returns": "void", "args": "int id", "doc": "History back." },

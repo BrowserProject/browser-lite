@@ -507,6 +507,27 @@ check(
   again,
 );
 
+// Preconnect (#247, #251): one TLS connection ahead, which the following load takes
+{
+  const server = https.createServer(certs.good, (req, res) =>
+    res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>preconnected</title>'),
+  );
+  let connections = 0;
+  server.on('secureConnection', () => connections++);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `https://127.0.0.1:${server.address().port}/`;
+  await page.evaluate((target) => window.blTest.preconnect(target), url);
+  const opened = await waitFor(() => connections === 1, 10000);
+  await load(page, url);
+  const loaded = !!(await waitEvent(page, 'title:preconnected', 15000));
+  check(
+    'preconnect: the load takes the connection opened ahead',
+    opened && loaded && connections === 1,
+    `${connections} TLS connections, loaded ${loaded}`,
+  );
+  server.close();
+}
+
 // Relay gone: the page is offline (navigator.onLine, offline event), then the transport
 // reconnects by itself and the page is online again
 await page.evaluate(() =>

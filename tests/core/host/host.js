@@ -177,6 +177,7 @@ const blTest = {
   load(url) {
     active.load(url);
   },
+  preconnect: (url) => browser.preconnect(url),
   eval: (source) => browser.debug.eval(active, source),
   pagePixel: (x, y) => browser.debug.pagePixel(active, x, y),
   pageRow: (y) => browser.debug.pageRow(active, y),

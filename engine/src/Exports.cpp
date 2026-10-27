@@ -13,6 +13,7 @@
 #include "EngineConfig.h"
 #include "Gamepad.h"
 #include "Host.h"
+#include "Preconnect.h"
 #include "LayerTreeHostWasm.h"
 #include "LazyFiles.h"
 #include "MediaFetch.h"
@@ -90,6 +91,14 @@ EMSCRIPTEN_KEEPALIVE void bl_load_url(int id, char* url)
     withView(id, [url = takeString(url)](WebView& view) {
         debugLog("bl_load_url %s", url.utf8().data());
         view.loadURL(url);
+    });
+}
+
+// An address the user is about to open (typed in the address bar): connects to its origin ahead
+EMSCRIPTEN_KEEPALIVE void bl_preconnect(char* url)
+{
+    runOnEngineThread([url = takeString(url)] {
+        preconnect(URL { url });
     });
 }
 

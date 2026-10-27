@@ -93,6 +93,11 @@ what a browser UI has to do, and nothing happens without a listener:
 
 Without a `download` listener finished downloads are saved automatically.
 
+`browser.preconnect(url)` opens the connection to the origin of an http(s) address ahead (TCP
+through the transport and TLS), for example while the user types it into an address bar; the
+engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down
+on.
+
 ## Services
 
 `defaultServices()` is `[audio(), media(), capture(), devices()]`.

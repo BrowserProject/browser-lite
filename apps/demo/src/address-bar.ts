@@ -1,6 +1,7 @@
 import { bookmarks } from './bookmarks.js';
 import { showStartNote } from './engine-message.js';
 import { readHistory } from './history.js';
+import { runtime } from './runtime.js';
 import { SEARCH_ENGINES, settings } from './settings.js';
 import { activeTab, focusPage } from './tabs.js';
 import { byId, element } from './util.js';
@@ -10,6 +11,7 @@ const address = byId<HTMLInputElement>('address');
 const box = byId('suggestions');
 let selected = -1;
 let pending = '';
+let preconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** The address submitted while the engine was still starting; the start opens it. */
 export function takePendingAddress(): string {
@@ -113,7 +115,21 @@ form.addEventListener('submit', (e) => {
   tab.view.load(url);
   focusPage();
 });
-address.addEventListener('input', showSuggestions);
+// While the user still types, connect to where Enter most likely goes, like Chrome: the first
+// suggestion, else the typed address or the search engine (saves the round trips of TCP and TLS
+// on a slow link)
+function preconnectTyped(): void {
+  clearTimeout(preconnectTimer);
+  preconnectTimer = setTimeout(() => {
+    const url = suggestions(address.value, 1)[0]?.url ?? addressToURL(address.value);
+    if (url) runtime.browser?.preconnect(url);
+  }, 300);
+}
+
+address.addEventListener('input', () => {
+  showSuggestions();
+  preconnectTyped();
+});
 address.addEventListener('blur', () => setTimeout(hideSuggestions, 100));
 address.addEventListener('keydown', (e) => {
   // Tab in the address bar: into the page (first or last element)

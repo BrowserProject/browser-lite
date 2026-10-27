@@ -248,6 +248,12 @@ export interface Browser {
   /** navigator.languages and Accept-Language of the pages. */
   setLanguages(languages: string[]): void;
   /**
+   * Connects to the origin of an http(s) address ahead (TCP through the transport and TLS), for
+   * example while the user types it into an address bar, so loading it saves those round trips.
+   * Other schemes and repeats within 10 s do nothing.
+   */
+  preconnect(url: string): void;
+  /**
    * Highest pixel ratio the pages render at on the host screen (at least 1), null for no limit;
    * an emulated device keeps its own. On a screen with a higher pixel ratio the host scales the
    * views up: slightly softer, but the engine paints fewer pixels (a quarter at ratio 2 with

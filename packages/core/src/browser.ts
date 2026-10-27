@@ -611,6 +611,11 @@ class BrowserImpl implements Browser, ViewHost {
     this.screen.setMaxPixelRatio(maxPixelRatio(limit));
   }
 
+  preconnect(url: string): void {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+    if (this.ready) this.module._bl_preconnect(this.text(url));
+  }
+
   setLanguages(list: string[]): void {
     const checked = languages(list);
     this.config.languages = checked;

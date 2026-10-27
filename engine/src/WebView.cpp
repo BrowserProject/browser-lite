@@ -20,6 +20,7 @@
 #include "MediaStreamWasm.h"
 #endif
 #include "Host.h"
+#include "Preconnect.h"
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
 #include "Storage.h"
@@ -940,6 +941,9 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     auto& handler = frame->eventHandler();
     switch (eventType) {
     case PlatformEvent::Type::MousePressed:
+        // The click comes with the release, about 0.1 s later: the connection starts now
+        if (mouseButton == MouseButton::Left && !m_hoveredLink.isEmpty())
+            preconnect(URL { m_hoveredLink });
         handler.handleMousePressEvent(event);
         break;
     case PlatformEvent::Type::MouseReleased:

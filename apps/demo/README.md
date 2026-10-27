@@ -66,7 +66,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
-| `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions, find bar, zoom steps, print preview |
+| `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library and the side panel (menu, history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
 | `dialogs.ts`, `permissions.ts` | native dialogs with background suppression; permission decisions in the profile |

@@ -402,6 +402,7 @@ void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSe
     if (link == m_hoveredLink && toolTip == m_toolTip)
         return;
     m_hoveredLink = link;
+    m_view->setHoveredLink(link);
     m_toolTip = toolTip;
     notifyHost(m_view->id(), "hover", makeString("{\"link\":\""_s, jsonEscape(link), "\",\"tooltip\":\""_s, jsonEscape(toolTip), "\"}"_s));
 }

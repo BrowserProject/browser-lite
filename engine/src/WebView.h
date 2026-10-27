@@ -93,6 +93,8 @@ public:
     void addDamage(const WebCore::IntRect&);
     void scrollDamage(const WebCore::IntSize& delta, const WebCore::IntRect& rectToScroll, const WebCore::IntRect& clipRect);
     void scheduleRenderingUpdate();
+    // Link under the mouse (ChromeClient): a press on it connects to its origin ahead
+    void setHoveredLink(const String& link) { m_hoveredLink = link; }
     // Rendering update (rAF, style, layout) and repaint what is damaged.
     // Returns true if pixels changed.
     bool renderFrame(WebCore::IntRect* dirtyOut = nullptr);
@@ -255,6 +257,7 @@ private:
     // compositor thread reports it with the frame that shows it
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
+    String m_hoveredLink;
     // In Page::updateRendering (for the debug log of the first layout)
     bool m_inRenderingUpdate { false };
     bool m_errorPageCertificate { false };
