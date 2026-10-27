@@ -281,6 +281,14 @@ await context.addInitScript(() => {
 });
 const page = await context.newPage();
 const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
+// The last engine log lines, for the rare stall below (CI runs without E2E_VERBOSE)
+const engineLog = [];
+page.on('console', (message) => {
+  const text = message.text();
+  if (!text.includes('[engine]')) return;
+  engineLog.push(text.slice(0, 400));
+  if (engineLog.length > 40) engineLog.shift();
+});
 const result = (key, timeout = 30000) => results.wait(key, timeout);
 async function at(x, y) {
   const box = await canvasOrigin(page);
@@ -388,6 +396,9 @@ if (!darkArrived) {
   );
   console.log(`     page: ${(await result('diag', 5000)) ?? 'no answer'}`);
   console.log(`     host events: ${(await hostEvents(page)).slice(-8).join(' | ')}`);
+  // A view without a rendering update logs the state of its frame pipeline after 4 s
+  await page.waitForTimeout(5000);
+  console.log(`     engine log:\n       ${engineLog.join('\n       ')}`);
 }
 
 // 5) Location: the permission handler grants it, then the position arrives
