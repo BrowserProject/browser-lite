@@ -255,6 +255,9 @@ private:
 
     void finish()
     {
+        // The paused request of a prompt can still fail (connection closed)
+        if (auto ticket = std::exchange(m_authTicket, 0))
+            HttpAuth::withdraw(ticket);
         if (auto done = std::exchange(m_done, nullptr))
             done(*this);
     }

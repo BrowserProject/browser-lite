@@ -38,14 +38,9 @@ static CredentialStorage& storage()
     return networkStorageSession().credentialStorage();
 }
 
-static bool mayUseCredentials(const ResourceRequest& request)
-{
-    return request.allowCookies() && !request.url().hasCredentials() && !request.hasHTTPHeaderField(HTTPHeaderName::Authorization);
-}
-
 void applyStoredCredential(CurlRequest& curlRequest, const ResourceRequest& request)
 {
-    if (!request.url().protocolIsInHTTPFamily() || !mayUseCredentials(request))
+    if (!request.url().protocolIsInHTTPFamily() || !request.allowCookies() || request.url().hasCredentials() || request.hasHTTPHeaderField(HTTPHeaderName::Authorization))
         return;
     auto credential = storage().get(partition(), request.url());
     if (credential.isEmpty())
@@ -77,7 +72,7 @@ int viewToAsk(ResourceLoader& loader)
     default:
         break;
     }
-    if (!mayUseCredentials(loader.request()) || !loader.isAllowedToAskUserForCredentials())
+    if (!loader.isAllowedToAskUserForCredentials())
         return 0;
     RefPtr frame = loader.frame();
     RefPtr document = frame ? frame->document() : nullptr;
