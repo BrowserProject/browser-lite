@@ -156,6 +156,8 @@ export interface EngineModule extends EngineExports, EngineHooks {
   print?: (text: string) => void;
   printErr?: (text: string) => void;
   preRun?: ((module: EngineModule) => void)[];
+  addRunDependency(id: string): void;
+  removeRunDependency(id: string): void;
   instantiateWasm?: (
     imports: WebAssembly.Imports,
     receive: (instance: WebAssembly.Instance, module: WebAssembly.Module) => void,

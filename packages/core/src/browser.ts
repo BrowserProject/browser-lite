@@ -54,6 +54,8 @@ const CONSOLE_LEVELS = ['log', 'warn', 'error', 'debug', 'info'] as const;
 
 /** Longest crash reason in characters (message and stack). */
 const MAX_CRASH_REASON = 4096;
+// Run dependency of the engine module: main() waits for the storage (prepareStorage)
+const STORAGE_DEPENDENCY = 'bl-storage';
 
 type EventHandler = (
   data: Record<string, unknown>,
@@ -202,29 +204,10 @@ class BrowserImpl implements Browser, ViewHost {
       console.warn('[browser-lite] engine.deferred chunks failed to load:', error),
     );
     config.transport.preconnect?.();
-    let persistent = config.persistent;
-    if (persistent) {
-      this.releaseLock = await holdStorageLock(config.namespace);
-      if (!this.releaseLock) {
-        persistent = false;
-        this.warn(
-          'storage-locked',
-          `Storage "${config.namespace}" is used by another tab: data stays in memory here`,
-        );
-      } else {
-        this.storage.directory = await namespaceDirectory(config.namespace);
-        // Without OPFS the engine keeps everything in memory
-        persistent = !!this.storage.directory;
-        if (this.storage.directory && config.beforeStart) {
-          try {
-            await config.beforeStart(this.storage.directory);
-          } catch (error) {
-            console.warn('[browser-lite] storage.beforeStart failed:', error);
-          }
-        }
-      }
-    }
-    this.storage.persistent = persistent;
+    // The storage lock, the directory and beforeStart (for example a profile from a server) run
+    // while the engine compiles, instantiates and loads its workers: only main() of the engine
+    // waits for them (a run dependency, below)
+    const storage = this.prepareStorage();
 
     // The synchronous part of setup (module hooks, handlers) runs now, async preparation
     // (service worker) while the engine loads
@@ -232,8 +215,15 @@ class BrowserImpl implements Browser, ViewHost {
     const prepared = Promise.all(config.services.map((service) => service.setup(context)));
     prepared.catch(() => {});
     const features = [...new Set(config.services.flatMap((service) => service.features))];
-    const env = engineEnv(config, features, persistent);
-    this.module.preRun = [(module) => Object.assign(module.ENV, env)];
+    this.module.preRun = [
+      (module) => {
+        module.addRunDependency(STORAGE_DEPENDENCY);
+        void storage.then((persistent) => {
+          Object.assign(module.ENV, engineEnv(config, features, persistent));
+          module.removeRunDependency(STORAGE_DEPENDENCY);
+        });
+      },
+    ];
 
     // Engine errors (traps, aborts) reach the page as error events: from a thread as the
     // ErrorEvent of its worker, whose error and stack the worker left in engine memory
@@ -314,6 +304,35 @@ class BrowserImpl implements Browser, ViewHost {
       throw new BrowserLiteError('destroyed', 'Destroyed while starting');
     this.phase = 'ready';
     this.afterReady();
+  }
+
+  /** Storage lock, directory and beforeStart; resolves whether the engine stores persistently. */
+  private async prepareStorage(): Promise<boolean> {
+    const { config } = this;
+    let persistent = config.persistent;
+    if (persistent) {
+      this.releaseLock = await holdStorageLock(config.namespace);
+      if (!this.releaseLock) {
+        persistent = false;
+        this.warn(
+          'storage-locked',
+          `Storage "${config.namespace}" is used by another tab: data stays in memory here`,
+        );
+      } else {
+        this.storage.directory = await namespaceDirectory(config.namespace);
+        // Without OPFS the engine keeps everything in memory
+        persistent = !!this.storage.directory;
+        if (this.storage.directory && config.beforeStart) {
+          try {
+            await config.beforeStart(this.storage.directory);
+          } catch (error) {
+            console.warn('[browser-lite] storage.beforeStart failed:', error);
+          }
+        }
+      }
+    }
+    this.storage.persistent = persistent;
+    return persistent;
   }
 
   private afterReady(): void {

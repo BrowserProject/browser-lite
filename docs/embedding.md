@@ -86,7 +86,8 @@ isolation.
 A first visit transfers about 10 MB with Brotli before the engine starts and 5.6 MB more in the
 background; a page that needs code of a chunk before it arrived waits for that chunk (#238). Later visits come from the HTTP cache and Chrome's code cache (about 16 MB
 of compiled engine code from the second start on). `createBrowser` requests the three files at
-once, one request each, while the storage lock and `storage.beforeStart` run; `engine.wasm`
+once, one request each, while the storage lock and `storage.beforeStart` run (the engine compiles,
+instantiates and loads its workers meanwhile, only its `main()` waits for them); `engine.wasm`
 compiles while it downloads (#218 in [decisions.md](decisions.md)), the chunks are requested
 one after the other once it is there. Preload hints in the page start two of them with the HTML instead
 of after your script (the demo injects them in `apps/demo/vite.config.ts`, two round trips
