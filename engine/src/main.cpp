@@ -13,6 +13,7 @@
 #include "Host.h"
 #include "LazyFiles.h"
 #include "MediaPlayerPrivateWasm.h"
+#include "Prewarm.h"
 #include "ServiceWorkerWasm.h"
 #include "Speech.h"
 #include "Storage.h"
@@ -249,6 +250,8 @@ int main(int, char**)
         WebCore::angleShimPrewarm();
     });
 #endif
+    // What the first request would set up first (Prewarm.h)
+    callOnMainThread(prewarmNetwork);
 
     prefetchCommonLazyFiles();
     log("Engine ready");

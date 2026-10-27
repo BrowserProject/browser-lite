@@ -38,6 +38,9 @@ void screenOrientationMayHaveChanged();
 // tracks (MediaStreamWasm.cpp) and extendPrototype(className, descriptors)
 // adds properties to a DOM prototype once the window creates it.
 void installPageExtensions(JSC::JSGlobalObject&, int viewId);
+// Compiles the polyfills of installPageExtensions (without a window they stop early): JSC's
+// code cache keeps their bytecode for the windows (Prewarm.cpp)
+void compilePageExtensions();
 void hostCallFinished(uint64_t identifier, bool ok, const WTF::String& resultJSON);
 
 // Calls the function expression source in the window with the arguments. Runs

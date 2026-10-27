@@ -14,6 +14,7 @@
 #include "Host.h"
 #include "HttpCache.h"
 #include "Preconnect.h"
+#include "Prewarm.h"
 #include "Strategies.h"
 #include "WebView.h"
 
@@ -815,6 +816,7 @@ private:
         });
         m_loads.set(&loader, load.copyRef());
         load->start();
+        prewarmPageExtensionsSoon();
     }
 
     void loadResource(LocalFrame& frame, CachedResource& resource, ResourceRequest&& request, const ResourceLoaderOptions& options, CompletionHandler<void(RefPtr<SubresourceLoader>&&)>&& completion) final
