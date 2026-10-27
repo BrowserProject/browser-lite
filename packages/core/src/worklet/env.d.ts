@@ -1,8 +1,12 @@
 /** Globals of the AudioWorkletGlobalScope (not part of the TypeScript libs). */
 interface WorkletMessagePort {
   onmessage: ((event: { data: unknown }) => void) | null;
-  postMessage(message: unknown): void;
+  postMessage(message: unknown, transfer?: unknown[]): void;
+  close(): void;
 }
+
+declare const currentTime: number;
+declare const sampleRate: number;
 
 declare class AudioWorkletProcessor {
   readonly port: WorkletMessagePort;

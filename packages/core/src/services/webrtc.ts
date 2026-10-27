@@ -1,7 +1,8 @@
 import { base64ToBytes, bytesToBase64, domError } from '../util.js';
 import type { CaptureApi } from './capture.js';
-import { trackGenerator, trackProcessor } from './host-apis.js';
+import { trackGenerator } from './host-apis.js';
 import { Service, type ServiceContext } from './service.js';
+import { streamTrackToEngine } from './track-source.js';
 
 const POLL_WAIT = 20000;
 const CLIENT_TIMEOUT = 60000;
@@ -601,16 +602,13 @@ export class WebRTCService extends Service {
     ctx.hostCall<Payload | null>('rtc-receive', async (payload, origin) => {
       const client = clientFor(payload?.client, origin, false);
       const track = transceiverFor(client, payload?.transceiver).receiver.track;
-      const worker = ctx.engineWorker();
-      const Processor = trackProcessor();
-      if (!worker || !Processor)
-        throw domError('NotSupportedError', 'MediaStreamTrackProcessor is missing');
       const source = Number(payload?.source);
-      const processor = new Processor({ track });
-      worker.postMessage(
-        { blCapture: { id: source, kind: track.kind, readable: processor.readable } },
-        [processor.readable],
-      );
+      let stopHost: () => void;
+      try {
+        stopHost = await streamTrackToEngine(ctx, source, track);
+      } catch (error) {
+        throw domError('NotSupportedError', `${(error as Error)?.message ?? error}`);
+      }
       // Chrome pulls WebRTC audio only when it plays somewhere: a muted <audio> keeps it
       // running (the engine makes it audible)
       let player: HTMLAudioElement | null = null;
@@ -630,6 +628,7 @@ export class WebRTCService extends Service {
         'ended',
         () => {
           if (player) player.srcObject = null;
+          stopHost();
           if (!ctx.signal.aborted) ctx.module._bl_capture_ended(source);
         },
         { once: true },
