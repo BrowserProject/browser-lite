@@ -1,5 +1,5 @@
 import type { ColorRequest, DateTimeRequest, RequestHandlers, View } from '@browser-lite/core';
-import { dateTimeType, stepAttribute, valueFromNumber } from './datetime.js';
+import { dateFallback, dateTimeType, stepAttribute, valueFromNumber } from './datetime.js';
 import {
   context,
   element,
@@ -22,8 +22,8 @@ const openPickers = new WeakMap<Document, () => void>();
 /**
  * Shows the native picker of the host browser: a hidden input at the place of the field of the
  * page, opened with showPicker(). Every input event previews the value in the page. Resolves
- * its value on change or when the user clicks elsewhere, null when aborted. A new picker in the
- * same document finishes the open one.
+ * its value (read from the input) on change or when the user clicks elsewhere, null when
+ * aborted. A new picker in the same document finishes the open one.
  */
 function openHostPicker(
   ui: UiContext,
@@ -31,6 +31,7 @@ function openHostPicker(
   type: string,
   value: string,
   setup?: (input: HTMLInputElement) => void,
+  read: (input: HTMLInputElement) => string = (input) => input.value,
 ): Promise<string | null> {
   const root = ui.root();
   const doc = root.ownerDocument;
@@ -64,11 +65,11 @@ function openHostPicker(
       input.remove();
       resolve(result);
     };
-    const done = () => finish(input.value || null);
+    const done = () => finish(read(input) || null);
     const onAbort = () => finish(null);
     openPickers.set(doc, done);
     const stopListening = listen([
-      [input, 'input', () => request.preview?.(input.value)],
+      [input, 'input', () => request.preview?.(read(input))],
       [input, 'change', done],
       [
         doc,
@@ -104,13 +105,27 @@ export function colorPicker(options?: UiOptions): Pick<RequestHandlers, 'colorPi
 
 /**
  * Date and time inputs (date, time, datetime-local, month, week) with the picker of the host
- * browser, limited by min, max and step of the field. Element: hidden `input.bl-host-picker`.
+ * browser, limited by min, max and step of the field. A host without month or week inputs shows
+ * its date picker for them. Element: hidden `input.bl-host-picker`.
  */
 export function dateTimePicker(options?: UiOptions): Pick<RequestHandlers, 'dateTimePicker'> {
   const ui = context(options);
   return {
     dateTimePicker(request: DateTimeRequest) {
       const type = dateTimeType(request.type);
+      const fallback = dateFallback(ui.root().ownerDocument, type);
+      if (fallback)
+        return openHostPicker(
+          ui,
+          request,
+          'date',
+          fallback.toDate(request.value || ''),
+          (input) => {
+            if (request.min) input.min = fallback.limit(request.min, false);
+            if (request.max) input.max = fallback.limit(request.max, true);
+          },
+          fallback.fromDate,
+        );
       return openHostPicker(ui, request, type, request.value || '', (input) => {
         const doc = input.ownerDocument;
         if (request.min) input.min = valueFromNumber(doc, type, request.min);

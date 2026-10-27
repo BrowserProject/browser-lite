@@ -231,7 +231,13 @@ test('core-owned switches match engine/abi.json', () => {
 
 test('features of the services', () => {
   assert.deepEqual(audio().features, ['audio']);
+  // Picture-in-picture only where the host has it
+  assert.deepEqual(media().features, ['media']);
+  globalThis.HTMLVideoElement = class {
+    requestPictureInPicture() {}
+  };
   assert.deepEqual(media().features, ['media', 'pip']);
+  delete globalThis.HTMLVideoElement;
   assert.deepEqual(media({ pictureInPicture: false }).features, ['media']);
   assert.deepEqual(webrtc().features, ['webrtc']);
   assert.deepEqual(devices().features, [

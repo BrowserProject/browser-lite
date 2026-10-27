@@ -12,7 +12,7 @@ export function audio(): HostService {
 
 /**
  * `<video>` and `<audio>` of the pages through hidden media elements of the host. Needs the
- * `serviceWorker` option (media-sw.js) for media files. Picture-in-picture is on by default.
+ * `serviceWorker` option (media-sw.js) for media files. Picture-in-picture is on by default where the host has it (not in Firefox).
  */
 export function media(options?: { pictureInPicture?: boolean }): HostService {
   return new MediaService(options?.pictureInPicture !== false);

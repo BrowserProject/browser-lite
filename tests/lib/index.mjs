@@ -1,6 +1,15 @@
-// Shared harness of the browser suites (tests/core, tests/demo, tests/examples, tests/compat).
+// Shared harness of the browser suites (tests/core, tests/demo, tests/examples, tests/compat),
+// in Chromium or Firefox (BL_BROWSER, browser.mjs).
 export { TIMEOUT, VERBOSE, buildDir, engineDir, root } from './env.mjs';
-export { SWIFTSHADER, launch, launchProfile } from './chromium.mjs';
+export {
+  BROWSER,
+  SWIFTSHADER,
+  chromiumOnly,
+  emulateTouchPoints,
+  launch,
+  launchProfile,
+  permissions,
+} from './browser.mjs';
 export { recordClip, serve, serveBytes, wav } from './pages.mjs';
 export {
   freePort,
@@ -19,6 +28,7 @@ export {
   pagePixel,
   screenPixel,
   screenshot,
+  shownPixel,
   waitFor,
 } from './results.mjs';
 export { buildDemo, coreSite, demoSite } from './site.mjs';

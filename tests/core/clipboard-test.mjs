@@ -6,14 +6,17 @@
 //
 //   node tests/core/clipboard-test.mjs [engine-dir]
 import {
+  BROWSER,
   SWIFTSHADER,
   TIMEOUT,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
   openHost,
+  permissions,
   serve,
   startStack,
   timeLimit,
@@ -68,7 +71,7 @@ const stack = await startStack({ token: 'clipboard-token-0123456789abcdef' });
 const browser = await launch({ args: SWIFTSHADER });
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
-  permissions: ['clipboard-read', 'clipboard-write'],
+  permissions: permissions(['clipboard-read', 'clipboard-write']),
 });
 const page = await context.newPage();
 const results = collect(page);
@@ -81,21 +84,36 @@ const box = await canvasOrigin(page);
 // 1. Paste from the host: text, HTML and an image (like a screenshot)
 await page.mouse.click(box.x + 200, box.y + 70);
 check('editor has the focus', (await result('focus')) === '1');
-await page.evaluate(() => {
-  const dataTransfer = new DataTransfer();
-  dataTransfer.setData('text/plain', 'Hello bold');
-  dataTransfer.setData('text/html', '<meta charset="utf-8">Hello <b>bold</b>');
+// Firefox gives an untrusted paste event no data: there the paste comes for real from the
+// clipboard, which encodes the image again
+const realPaste = BROWSER === 'firefox';
+await page.evaluate(async (realPaste) => {
   const png = Uint8Array.from(
     atob(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     ),
     (c) => c.charCodeAt(0),
   );
+  const html = '<meta charset="utf-8">Hello <b>bold</b>';
+  if (realPaste) {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob(['Hello bold'], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'image/png': new Blob([png], { type: 'image/png' }),
+      }),
+    ]);
+    return;
+  }
+  const dataTransfer = new DataTransfer();
+  dataTransfer.setData('text/plain', 'Hello bold');
+  dataTransfer.setData('text/html', html);
   dataTransfer.items.add(new File([png], 'image.png', { type: 'image/png' }));
   document.activeElement.dispatchEvent(
     new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true }),
   );
-});
+}, realPaste);
+if (realPaste) await page.keyboard.press('Control+v');
 const types = await result('pastetypes');
 check(
   'paste: types like Chrome (text/plain, text/html, Files)',
@@ -112,10 +130,13 @@ check(
   (await result('pastehtml')) === 'yes',
   results.get('pastehtml'),
 );
+const pastedFiles = await result('pastefiles');
 check(
   'paste: image in clipboardData.files',
-  (await result('pastefiles')) === 'image.png:image/png:70',
-  results.get('pastefiles'),
+  realPaste
+    ? /^image\.png:image\/png:\d+$/.test(pastedFiles)
+    : pastedFiles === 'image.png:image/png:70',
+  pastedFiles,
 );
 check(
   'paste into contenteditable is formatted',
@@ -161,35 +182,37 @@ check(
 );
 
 // 4. Input method (IME): preview in the page, candidate window at the cursor
-await page.mouse.click(box.x + 100, box.y + 320);
-await page.waitForTimeout(300);
-const cdp = await context.newCDPSession(page);
-await cdp.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
-await page.waitForTimeout(300);
-await cdp.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
-await page.waitForTimeout(300);
-await cdp.send('Input.insertText', { text: '日本' });
-// compositionupdate comes before the change in the field (like Chrome): at the second one the
-// preview of the first character is already in the field, before the end comes the finished text
-check(
-  'IME: compositionstart/update (preview in the field) and end',
-  (await result('composition')) ===
-    'start|update:に:|update:にほ:に|update:日本:にほ|end:日本|日本',
-  results.get('composition'),
-);
-const imePlace = await page.evaluate(() => {
-  const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find(
-    (c) => c.style.display !== 'none',
+if (chromiumOnly('input method (CDP Input.imeSetComposition)')) {
+  await page.mouse.click(box.x + 100, box.y + 320);
+  await page.waitForTimeout(300);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'に', selectionStart: 1, selectionEnd: 1 });
+  await page.waitForTimeout(300);
+  await cdp.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
+  await page.waitForTimeout(300);
+  await cdp.send('Input.insertText', { text: '日本' });
+  // compositionupdate comes before the change in the field (like Chrome): at the second one the
+  // preview of the first character is already in the field, before the end comes the finished text
+  check(
+    'IME: compositionstart/update (preview in the field) and end',
+    (await result('composition')) ===
+      'start|update:に:|update:にほ:に|update:日本:にほ|end:日本|日本',
+    results.get('composition'),
   );
-  const rect = canvas.getBoundingClientRect();
-  const ime = canvas.nextElementSibling;
-  return { x: parseFloat(ime.style.left) - rect.left, y: parseFloat(ime.style.top) - rect.top };
-});
-check(
-  'IME field at the cursor (for the candidate window)',
-  imePlace.x > 15 && imePlace.x < 80 && imePlace.y > 290 && imePlace.y < 340,
-  JSON.stringify(imePlace),
-);
+  const imePlace = await page.evaluate(() => {
+    const canvas = [...document.querySelectorAll('canvas[data-bl-view]')].find(
+      (c) => c.style.display !== 'none',
+    );
+    const rect = canvas.getBoundingClientRect();
+    const ime = canvas.nextElementSibling;
+    return { x: parseFloat(ime.style.left) - rect.left, y: parseFloat(ime.style.top) - rect.top };
+  });
+  check(
+    'IME field at the cursor (for the candidate window)',
+    imePlace.x > 15 && imePlace.x < 80 && imePlace.y > 290 && imePlace.y < 340,
+    JSON.stringify(imePlace),
+  );
+}
 
 await browser.close();
 finish();

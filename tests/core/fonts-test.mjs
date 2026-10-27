@@ -5,6 +5,7 @@
 //   node tests/core/fonts-test.mjs [engine-dir]
 import {
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -65,12 +66,16 @@ check('browser starts', await openHost(page, stack.app({ url: siteURL })));
 const first = await results.wait('first', HOLD_MS + 10000);
 check('the text is laid out while its font is held back', first !== null && !releasedAt, first);
 check('the font was requested', requests >= 1, `${requests} requests`);
-const laidOut = await results.wait('laidout', 20000);
-check(
-  'once the font is there the text is laid out again with it',
-  laidOut !== null && releasedAt > 0,
-  `${first} -> ${laidOut}`,
-);
+// Playwright holds back the synchronous request of the engine thread only in Chromium: in Firefox
+// the font is there at once
+if (chromiumOnly('relayout once the font is there (route of a synchronous request)')) {
+  const laidOut = await results.wait('laidout', 20000);
+  check(
+    'once the font is there the text is laid out again with it',
+    laidOut !== null && releasedAt > 0,
+    `${first} -> ${laidOut}`,
+  );
+}
 
 await browser.close();
 finish();

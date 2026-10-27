@@ -279,20 +279,20 @@ export class WebRTCService extends Service {
     };
 
     // Page track -> host track. Camera/microphone: a clone of the real track; otherwise a
-    // MediaStreamTrackGenerator the engine worker writes into
+    // MediaStreamTrackGenerator (or its stand-in) the engine worker writes into
     const hostTrack = async (client: Client, info: TrackInfo | undefined) => {
       if (!info) return null;
       let track = client.tracks.get(info.id);
       if (track && track.readyState !== 'ended') return track;
-      const Generator = trackGenerator();
+      const generate = trackGenerator();
       if (info.capture) {
         const original = await ctx.use<CaptureApi>('capture')?.track(info.capture);
         if (!original) throw domError('InvalidStateError', 'The track has ended.');
         track = original.clone();
-      } else if (info.sink && Generator) {
+      } else if (info.sink && generate) {
         const worker = ctx.engineWorker();
         if (!worker) throw domError('InvalidStateError', 'No engine');
-        const generator = new Generator({ kind: info.kind });
+        const generator = generate(info.kind);
         worker.postMessage({ blSink: { id: info.sink, writable: generator.writable } }, [
           generator.writable,
         ]);

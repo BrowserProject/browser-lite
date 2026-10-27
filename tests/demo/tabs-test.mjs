@@ -21,6 +21,7 @@ import {
   collect,
   finish,
   launch,
+  permissions,
   screenshot,
   serve,
   startStack,
@@ -109,7 +110,7 @@ const browser = await launch({
 });
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
-  permissions: ['camera', 'microphone'],
+  permissions: permissions(['camera', 'microphone']),
 });
 // Host notifications: headless has none, a stand-in records them so the test can click them
 await context.addInitScript(() => {

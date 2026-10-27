@@ -13,12 +13,13 @@ import {
   check,
   collect,
   finish,
+  hostEvents,
   launch,
   openHost,
+  permissions,
   serve,
   startStack,
   timeLimit,
-  hostEvents,
   waitEvent,
   waitFor,
 } from '../lib/index.mjs';
@@ -257,7 +258,7 @@ const browser = await launch({
 });
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
-  permissions: ['camera', 'microphone'],
+  permissions: permissions(['camera', 'microphone']),
 });
 const page = await context.newPage();
 const results = collect(page);
@@ -440,56 +441,59 @@ const mutedStreamPeak = await hostPeak((peak) => peak <= 0.01);
 check('<audio>.muted makes the stream silent', mutedStreamPeak <= 0.01, String(mutedStreamPeak));
 
 // Picture-in-picture for streams: the PiP video of the host shows the track
-const hostPip = () =>
-  page.evaluate(async () => {
-    for (let i = 0; i < 20; i++) {
-      const video = document.pictureInPictureElement;
-      if (video && video.srcObject && video.videoWidth > 0)
-        return video.videoWidth + 'x' + video.videoHeight;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return document.pictureInPictureElement ? 'no-picture' : 'no-pip';
-  });
-const pipErr = () => results.get('piperror') || '';
-await page.mouse.click(box.x + 120, box.y + 430);
-check(
-  'PiP for a camera stream (srcObject)',
-  (await result('pipcam', 30000)) === 'true,true',
-  results.get('pipcam') || pipErr(),
-);
-check(
-  'PiP window of the host shows the camera',
-  (await hostPip()) === '320x240',
-  results.has('pipcam') ? '' : pipErr(),
-);
-check(
-  'PiP camera: events and exit',
-  (await result('pipcamevents', 30000)) === 'enter|leave,true',
-  results.get('pipcamevents') || pipErr(),
-);
-await page.mouse.click(box.x + 360, box.y + 430);
-check(
-  'PiP for a canvas stream (sink of the engine)',
-  (await result('pipcanvas', 30000)) === 'true,true',
-  results.get('pipcanvas') || pipErr(),
-);
-check('PiP window of the host shows the canvas', (await hostPip()) === '160x120', pipErr());
-check(
-  'PiP canvas: events and exit',
-  (await result('pipcanvasevents', 30000)) === 'enter|leave,true',
-  results.get('pipcanvasevents') || pipErr(),
-);
-check(
-  'PiP video in the host cleaned up',
-  await page.evaluate(
-    () =>
-      [...document.querySelectorAll('video')].every(
-        (v) =>
-          !(v.srcObject instanceof MediaStream) ||
-          v.srcObject.getVideoTracks().every((t) => t.readyState === 'live'),
-      ) && !document.pictureInPictureElement,
-  ),
-);
+// (Firefox has no picture-in-picture API, the pages do not see it either: media-test.mjs)
+if (await page.evaluate(() => 'requestPictureInPicture' in HTMLVideoElement.prototype)) {
+  const hostPip = () =>
+    page.evaluate(async () => {
+      for (let i = 0; i < 20; i++) {
+        const video = document.pictureInPictureElement;
+        if (video && video.srcObject && video.videoWidth > 0)
+          return video.videoWidth + 'x' + video.videoHeight;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return document.pictureInPictureElement ? 'no-picture' : 'no-pip';
+    });
+  const pipErr = () => results.get('piperror') || '';
+  await page.mouse.click(box.x + 120, box.y + 430);
+  check(
+    'PiP for a camera stream (srcObject)',
+    (await result('pipcam', 30000)) === 'true,true',
+    results.get('pipcam') || pipErr(),
+  );
+  check(
+    'PiP window of the host shows the camera',
+    (await hostPip()) === '320x240',
+    results.has('pipcam') ? '' : pipErr(),
+  );
+  check(
+    'PiP camera: events and exit',
+    (await result('pipcamevents', 30000)) === 'enter|leave,true',
+    results.get('pipcamevents') || pipErr(),
+  );
+  await page.mouse.click(box.x + 360, box.y + 430);
+  check(
+    'PiP for a canvas stream (sink of the engine)',
+    (await result('pipcanvas', 30000)) === 'true,true',
+    results.get('pipcanvas') || pipErr(),
+  );
+  check('PiP window of the host shows the canvas', (await hostPip()) === '160x120', pipErr());
+  check(
+    'PiP canvas: events and exit',
+    (await result('pipcanvasevents', 30000)) === 'enter|leave,true',
+    results.get('pipcanvasevents') || pipErr(),
+  );
+  check(
+    'PiP video in the host cleaned up',
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll('video')].every(
+          (v) =>
+            !(v.srcObject instanceof MediaStream) ||
+            v.srcObject.getVideoTracks().every((t) => t.readyState === 'live'),
+        ) && !document.pictureInPictureElement,
+    ),
+  );
+} else console.log('skip PiP for streams (the host has no picture-in-picture)');
 
 // Broken frames of the host camera: the page gets "ended", the camera goes off. An ImageBitmap
 // has close() but no visibleRect: every frame fails only when copied, the track may only end

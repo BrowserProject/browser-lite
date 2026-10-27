@@ -28,7 +28,8 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 ## Requirements
 
-- A Chromium based browser (Chrome, Edge, Chromebooks). Firefox and Safari are best effort.
+- A Chromium based browser (Chrome, Edge, Chromebooks). Firefox runs in CI with a few open
+  failures ([docs/status.md](docs/status.md)), Safari is best effort.
 - A cross-origin isolated page (`Cross-Origin-Opener-Policy: same-origin`,
   `Cross-Origin-Embedder-Policy: require-corp`) over HTTPS, with the engine on the same origin.
 - A relay: Node 22 or newer with `@browser-lite/server`, or the server image of the release.

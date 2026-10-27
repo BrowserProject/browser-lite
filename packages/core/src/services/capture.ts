@@ -46,7 +46,8 @@ function openHostDevice(data: CaptureRequest): Promise<MediaStream> {
 /**
  * Camera, microphone and screen for the pages (engine MediaStreamWasm.cpp). The engine asked
  * for permission already; here the host device opens and its frames go as a stream straight
- * to the engine worker (MediaStreamTrackProcessor, engine/js/webcodecs-host.js).
+ * to the engine worker (MediaStreamTrackProcessor or its stand-in in track-reader.ts,
+ * engine/js/webcodecs-host.js).
  */
 export class CaptureService extends Service {
   readonly features = ['capture'] as const;
