@@ -1,4 +1,4 @@
-# Status (2026-10-26)
+# Status (2026-10-27)
 
 Where the project stands, what was measured, what is open. Numbers like #142 refer to
 [decisions.md](decisions.md); real sites are in [compatibility.md](compatibility.md).
@@ -99,6 +99,13 @@ elpais.com 18.4 instead of 24.6 s, python.org 27.9 instead of 27.0 s).
 After a restart of Chromium (same profile, local, 2 cores) a small page painted after 2.2 s
 instead of 2.9 s once the engine came from the code cache again (#237).
 
+On 2026-10-27, same link: after an engine update the new engine came as deltas against the old
+one, ready after 2.5 instead of 15 s (#244); a second visit was ready after 1.0 instead of 1.13 s
+once the hashed app files were no longer revalidated (#243); behind 4 downloads of 3 MB a small
+response of another origin came after 0.5 to 0.85 s instead of 17 to 20 s (native Chromium 0.5 to
+1.1 s, #245); the first request to a preconnected origin took 0.16 instead of 0.44 s (#247).
+Wikipedia on a first visit: ready 14.8 s, first paint 21.8 s, loaded 25.6 s.
+
 ## Measurements (emulated devices)
 
 From the performance work of #213 to #225 (CI and dedicated hosts, medians of 20 to 30 runs,
@@ -134,7 +141,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-6. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+6. Images decode at full size: WebKit's decoders of this port ignore the subsampling level
+   (`ScalableImageDecoder`), a 4000 x 3000 photo shown small takes 48 MB and its full decoding
+   time. Scaled JPEG decoding (libjpeg-turbo) needs a WebKit patch; batch it with other patches.
+7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
