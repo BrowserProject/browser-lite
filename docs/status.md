@@ -17,7 +17,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch, pointer lock, ctrl + wheel to the page first (#167).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
-  no frame without a visible change (damage tracking, #220), GPU blur and shadow, CSS Paint
+  no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
+  waiting scripts (#246), GPU blur and shadow, CSS Paint
   Worklet, WebGL 1 and 2, recovery after GPU loss.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
@@ -36,7 +37,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the common ones and the user's languages in the background right after the start (#240),
   data saver (`Save-Data`, #230), the relay traffic spread over 3 WebSockets against packet loss
   (#235), the relay keeps only about two round trips of data on the way, so a small response no
-  longer waits seconds behind large downloads (#245), the code that the start and common pages do not run loads after the start in chunks
+  longer waits seconds behind large downloads (#245), `<link rel=preconnect>` opens the connection ahead (#247), the code that the start and common pages do not run loads after the start in chunks
   (#238), an address typed meanwhile opens once the engine runs (#239); a first visit at
   5 Mbit/s, 150 ms starts after 15 s instead of 32 s (`tests/bench/slow-start.mjs`); after an
   engine update Chrome loads deltas against the old engine, ready after 2.5 instead of 15 s
@@ -119,17 +120,13 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 ## Open: performance (by value)
 
-1. First paint on heavy sites: usually 0.1 to 0.3 s after first layout (#164), but a long script
-   right after it delays the frame. A shorter parser time limit brought nothing without cost
-   (#186). To check: with any `?env=` the first paint on YouTube came under 3.5 s in 32 of 36
-   runs, without in 10 of 24.
-2. Compiling on first call (weather.com about 11 s parser and bytecode), also on repeat visits:
+1. Compiling on first call (weather.com about 11 s parser and bytecode), also on repeat visits:
    a persistent bytecode cache hit but brought no measurable gain (#215).
-3. Interpreter time (15 to 21 % on JS-heavy sites): only a big rework (tail-call interpreter or a
+2. Interpreter time (15 to 21 % on JS-heavy sites): only a big rework (tail-call interpreter or a
    JIT to WASM) would help; small caches are done (#143).
-4. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
-5. GC 5 to 7 % on JS-heavy sites (#60, #122).
-6. Video and animations: with compositing Chromium shows the video itself behind the view canvas
+3. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
+4. GC 5 to 7 % on JS-heavy sites (#60, #122).
+5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
    (#232); videos with opacity, blend modes, filters or 3D transforms keep frames painted into the
    tiles of the view, locally under SwiftShader 1.8 to 9.7 video frames per second against 25 to
    30 in Chromium (#217). Frames without a visible change are skipped since #220 (an
@@ -137,10 +134,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-7. `<link rel=preconnect>` does nothing (`preconnectTo` in `engine/src/LoaderStrategy.cpp`): curl
-   never reuses a connection it opened with `CURLOPT_CONNECT_ONLY`, so a preconnect needs a small
-   curl patch (deps rebuild, batch it); it would save a round trip per preconnected origin.
-8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+6. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
