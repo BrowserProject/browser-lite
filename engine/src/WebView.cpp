@@ -243,7 +243,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setAsyncFrameScrollingEnabled(useAsyncScrolling);
     settings.setAsyncOverflowScrollingEnabled(useAsyncScrolling);
 #endif
-    // WebKit starts a thread for every large image it decodes asynchronously (#241)
+    // Large images decode on the shared decoder thread (patch 0024, #241)
     settings.setLargeImageAsyncDecodingEnabled(config.asyncImageDecoding);
     settings.setAnimatedImageAsyncDecodingEnabled(config.asyncImageDecoding);
     settings.setLocalStorageEnabled(true);
