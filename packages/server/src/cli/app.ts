@@ -28,9 +28,11 @@ function clientAddressFor(trustProxy: number) {
   };
 }
 
-// Engine files live in engine/<version>/ and never change
+// Engine files live in engine/<version>/ and never change, nor do the files of a Vite build with
+// the content hash in their name (assets/index-Vc6q4Bex.js), so a second visit does not ask again
+const IMMUTABLE = /^\/engine\/|^\/assets\/[^/]+-[\w-]{8}\.\w+$/;
 const cacheControl = (urlPath: string) =>
-  urlPath.startsWith('/engine/') ? 'public, max-age=31536000, immutable' : 'no-cache';
+  IMMUTABLE.test(urlPath) ? 'public, max-age=31536000, immutable' : 'no-cache';
 
 function refuse(socket: Duplex, status: string): void {
   socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`, () =>

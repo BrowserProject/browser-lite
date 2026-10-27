@@ -94,7 +94,7 @@ image (`SERVER_IMAGE:<version>` of `versions.env`, `Dockerfile` target `server`)
 | Variable | |
 | --- | --- |
 | `PORT`, `HOST` | default `5001`, `0.0.0.0` |
-| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable, so every engine version needs its own folder below it |
+| `SITE_DIR` | directory of the built site (for example `tools/package-demo.sh`); `/engine/` is cached as immutable, so every engine version needs its own folder below it, and so are files of `/assets/` with a content hash in their name like Vite writes them (`index-Vc6q4Bex.js`) |
 | `PROFILE_DIR` | directory of the profile; without it `/profile/` answers 404 |
 | `PROFILE_MAX_MB` | limit of the profile, default 64 |
 | `ALLOWED_HOSTS` | host names of relay and profile besides IP addresses and `localhost`, comma separated (`.ts.net` matches all names ending so); other `Host` headers get 403 (DNS rebinding) |

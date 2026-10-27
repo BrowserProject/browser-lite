@@ -217,6 +217,9 @@ describe('site', () => {
     fs.writeFileSync(path.join(site, 'a.js'), 'console.log("a");'.repeat(100));
     fs.writeFileSync(path.join(site, 'a.js.br'), 'brotli');
     // Large enough that a download does not vanish in the socket buffer at once
+    fs.mkdirSync(path.join(site, 'assets'));
+    fs.writeFileSync(path.join(site, 'assets', 'worklet-SS6O-rUU.js'), '1');
+    fs.writeFileSync(path.join(site, 'assets', 'logo.svg'), '<svg/>');
     fs.mkdirSync(path.join(site, 'engine'));
     fs.writeFileSync(path.join(site, 'engine', 'big.wasm'), '');
     fs.truncateSync(path.join(site, 'engine', 'big.wasm'), 64 * 1024 * 1024);
@@ -270,6 +273,13 @@ describe('site', () => {
     const range = await request(cli.port, '/engine/big.wasm', { headers: { Range: 'bytes=0-9' } });
     assert.equal(range.status, 206);
     assert.equal(range.body.length, 10);
+  });
+
+  test('immutable Vite assets with a content hash', async () => {
+    const hashed = await request(cli.port, '/assets/worklet-SS6O-rUU.js');
+    assert.ok(hashed.headers['cache-control'].includes('immutable'));
+    const plain = await request(cli.port, '/assets/logo.svg');
+    assert.equal(plain.headers['cache-control'], 'no-cache');
   });
 
   test('missing files, traversal and broken URLs', async () => {
