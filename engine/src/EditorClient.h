@@ -42,7 +42,8 @@ private:
 
     void didBeginEditing() final { }
     void respondToChangedContents() final { }
-    // Caret position to the host: the input field for IME is placed there
+    // Caret position to the host: the input field for IME is placed there. Also the kind of
+    // text input of the focused frame (on-screen keyboard of the host)
     void respondToChangedSelection(WebCore::LocalFrame*) final;
     void updateEditorStateAfterLayoutIfEditabilityChanged() final { }
     void discardedComposition(const WebCore::Document&) final { }
@@ -113,6 +114,7 @@ private:
 
     int m_viewId;
     WebCore::IntRect m_caret;
+    String m_textInput;
 };
 
 } // namespace BrowserLite

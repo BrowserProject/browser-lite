@@ -534,6 +534,11 @@ export class ViewImpl implements View {
         this.caret = data as unknown as Caret;
         this.placeIme();
         return;
+      case 'text-input':
+        // The on-screen keyboard follows the focused field of the page, none without one
+        this.ime.inputMode = String(data.mode ?? '') || 'none';
+        this.ime.enterKeyHint = String(data.enterKeyHint ?? '');
+        return;
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);
         return;
