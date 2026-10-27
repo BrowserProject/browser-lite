@@ -1,7 +1,7 @@
 // Paths and settings shared by the browser suites.
 //
 // Environment: E2E_TIMEOUT (ms per wait, default 180000), E2E_VERBOSE=1 (console of the pages and
-// the servers), BL_ENGINE_DIR (engine folder when no argument is given), CHROMIUM_PATH.
+// the servers), BL_ENGINE_DIR (engine folder when no argument is given); the browser: browser.mjs.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

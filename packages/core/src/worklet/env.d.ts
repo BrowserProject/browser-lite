@@ -1,7 +1,7 @@
 /** Globals of the AudioWorkletGlobalScope (not part of the TypeScript libs). */
 interface WorkletMessagePort {
   onmessage: ((event: { data: unknown }) => void) | null;
-  postMessage(message: unknown): void;
+  postMessage(message: unknown, transfer?: Transferable[]): void;
 }
 
 declare class AudioWorkletProcessor {
@@ -13,3 +13,6 @@ declare function registerProcessor(
   name: string,
   processorCtor: new (options: { processorOptions: unknown }) => AudioWorkletProcessor,
 ): void;
+
+/** Sample rate of the AudioContext. */
+declare const sampleRate: number;

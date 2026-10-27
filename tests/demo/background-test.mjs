@@ -236,29 +236,32 @@ await dialog.context.close();
 const pip = await openApp({ url: `${siteURL}pip` });
 await pip.wait('loaded', 'pip');
 check('PiP: muted video plays', !!(await pip.wait('playing', 'visible')));
-const pipOrigin = await canvasOrigin(pip.page);
-await pip.page.mouse.click(pipOrigin.x + 100, pipOrigin.y + 100);
-check(
-  'PiP: video in the PiP window',
-  (await pip.wait('pip'))?.[2] === 'ok' &&
-    (await pip.page.evaluate(() => !!document.pictureInPictureElement)),
-);
-// Only what comes from here on (autoplay also reports pause at the start)
-pip.results.length = 0;
-await pip.newTab(`${siteURL}empty`);
-await pip.wait('loaded', 'empty');
-await pip.newTab(`${siteURL}memory?new`);
-await pip.wait('loaded', 'new');
-const discarded = await pip.page.evaluate(() => window.blTest.checkMemory());
-const pipTitles = await pip.page.locator('#tab-list .tab .title').allTextContents();
-check(
-  'memory pressure: the tab with the PiP window stays',
-  discarded > 0 &&
-    (await pip.page.evaluate(() => !!document.pictureInPictureElement)) &&
-    !pip.results.some((r) => r[1] === 'pause'),
-  `discarded ${discarded}, tabs ${pipTitles}`,
-);
-await pip.page.evaluate(() => document.exitPictureInPicture().catch(() => {}));
+// Firefox has no picture-in-picture API (the pages do not see it either, core/media-test.mjs)
+if (await pip.page.evaluate(() => 'requestPictureInPicture' in HTMLVideoElement.prototype)) {
+  const pipOrigin = await canvasOrigin(pip.page);
+  await pip.page.mouse.click(pipOrigin.x + 100, pipOrigin.y + 100);
+  check(
+    'PiP: video in the PiP window',
+    (await pip.wait('pip'))?.[2] === 'ok' &&
+      (await pip.page.evaluate(() => !!document.pictureInPictureElement)),
+  );
+  // Only what comes from here on (autoplay also reports pause at the start)
+  pip.results.length = 0;
+  await pip.newTab(`${siteURL}empty`);
+  await pip.wait('loaded', 'empty');
+  await pip.newTab(`${siteURL}memory?new`);
+  await pip.wait('loaded', 'new');
+  const discarded = await pip.page.evaluate(() => window.blTest.checkMemory());
+  const pipTitles = await pip.page.locator('#tab-list .tab .title').allTextContents();
+  check(
+    'memory pressure: the tab with the PiP window stays',
+    discarded > 0 &&
+      (await pip.page.evaluate(() => !!document.pictureInPictureElement)) &&
+      !pip.results.some((r) => r[1] === 'pause'),
+    `discarded ${discarded}, tabs ${pipTitles}`,
+  );
+  await pip.page.evaluate(() => document.exitPictureInPicture().catch(() => {}));
+} else console.log('skip PiP tab and memory pressure (the host has no picture-in-picture)');
 await pip.context.close();
 
 await browser.close();

@@ -14,6 +14,7 @@ import {
   finish,
   launch,
   openHost,
+  permissions,
   serve,
   startStack,
   timeLimit,
@@ -259,7 +260,7 @@ const browser = await launch({
 });
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
-  permissions: ['camera', 'microphone'],
+  permissions: permissions(['camera', 'microphone']),
 });
 const page = await context.newPage();
 const results = collect(page);

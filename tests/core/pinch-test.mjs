@@ -14,6 +14,7 @@ import {
   SWIFTSHADER,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -29,6 +30,9 @@ import {
 } from '../lib/index.mjs';
 
 timeLimit();
+// Every gesture of the test comes through CDP
+if (!chromiumOnly('pinch zoom (CDP Input.synthesizePinchGesture and Input.dispatchTouchEvent)'))
+  finish();
 
 // Red box 100..200, green 250..300 (top left), a blue box with touch-action: none, a gray one
 // with a touchmove listener that wants two fingers itself and a wheel listener without

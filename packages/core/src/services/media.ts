@@ -436,7 +436,9 @@ async function serviceWorkerRegistration(
             option.url,
             option.scope ? { scope: option.scope } : {},
           );
-    // On the first visit the worker controls the page only after clients.claim()
+    // On the first visit the worker controls the page only after clients.claim(). Firefox also
+    // leaves later visits of a cross-origin isolated page uncontrolled: the worker claims it on
+    // request (media-sw.js).
     if (!navigator.serviceWorker.controller)
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 3000);
@@ -448,6 +450,7 @@ async function serviceWorkerRegistration(
           },
           { once: true },
         );
+        registration.active?.postMessage({ bl: 'claim' });
       });
     if (!navigator.serviceWorker.controller) {
       ctx.warn(
@@ -468,7 +471,12 @@ export class MediaService extends Service {
 
   constructor(private readonly pictureInPicture: boolean) {
     super('media');
-    this.features = pictureInPicture ? ['media', 'pip'] : ['media'];
+    // Pages see requestPictureInPicture only when the host has it (not Firefox)
+    this.pictureInPicture =
+      pictureInPicture &&
+      typeof HTMLVideoElement === 'function' &&
+      'requestPictureInPicture' in HTMLVideoElement.prototype;
+    this.features = this.pictureInPicture ? ['media', 'pip'] : ['media'];
   }
 
   setup(ctx: ServiceContext): Promise<void> {

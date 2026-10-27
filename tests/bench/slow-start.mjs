@@ -12,7 +12,7 @@
 // `firstPaint` and `loaded` of the page; `engineKB` is what the engine files transferred.
 import { spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
-import { SWIFTSHADER, launchProfile } from '../lib/chromium.mjs';
+import { SWIFTSHADER, launchProfile } from '../lib/browser.mjs';
 import { serve } from '../lib/pages.mjs';
 import { startServer, tempDir } from '../lib/processes.mjs';
 import { startShaper } from './shaper.mjs';

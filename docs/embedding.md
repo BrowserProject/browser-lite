@@ -230,9 +230,14 @@ delegate the matching `allow=` features.
 
 ## Browser support
 
-Chromium (Chrome, Edge, Chromebooks) is supported and tested in CI. Firefox and Safari are best
-effort: some APIs the engine and its services rely on are missing or behave differently there.
-Call `checkSupport()` before showing the browser and fall back gracefully.
+Chromium (Chrome, Edge, Chromebooks) and Firefox are supported: CI runs every browser suite in
+both ([tests/README.md](../tests/README.md)). Safari is best effort: some APIs the engine and its
+services rely on are missing or behave differently there. Call `checkSupport()` before showing the
+browser and fall back gracefully.
+
+Differences in Firefox: no picture-in-picture (the pages do not see `requestPictureInPicture`),
+no month and week inputs (`@browser-lite/ui` shows the date picker for them), no Compression
+Dictionary Transport (engine updates come whole, as Brotli).
 
 ## Updating the engine
 

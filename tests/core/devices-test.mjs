@@ -10,7 +10,9 @@ import {
   TIMEOUT,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
+  emulateTouchPoints,
   evalPage,
   finish,
   hostEvents,
@@ -176,6 +178,7 @@ const context = await browser.newContext({
   geolocation: { latitude: 46.948, longitude: 7.447 },
   permissions: ['geolocation', 'notifications'],
 });
+await emulateTouchPoints(context);
 // Speech recognition of the host as a stand-in (headless has no microphone)
 await context.addInitScript(() => {
   class FakeRecognition extends EventTarget {
@@ -356,24 +359,29 @@ check('touch event (touchstart)', (await result('touchstart', 10000)) === '1');
 check('tap becomes a click', (await result('tapclick', 10000)) === '1');
 
 // 3) Swiping scrolls the page (CDP: drag the finger up)
-const cdp = await context.newCDPSession(page);
-const [sx, sy] = await at(600, 500);
-await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy }] });
-for (let i = 1; i <= 10; i++) {
+if (chromiumOnly('swiping scrolls (CDP Input.dispatchTouchEvent)')) {
+  const cdp = await context.newCDPSession(page);
+  const [sx, sy] = await at(600, 500);
   await cdp.send('Input.dispatchTouchEvent', {
-    type: 'touchMove',
-    touchPoints: [{ x: sx, y: sy - i * 30 }],
+    type: 'touchStart',
+    touchPoints: [{ x: sx, y: sy }],
   });
-  await page.waitForTimeout(16);
+  for (let i = 1; i <= 10; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x: sx, y: sy - i * 30 }],
+    });
+    await page.waitForTimeout(16);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const touchScroll = await result('touchscroll', 10000);
+  check('swiping scrolls', Number(touchScroll) > 50, String(touchScroll));
+  // Let the fling end, then back to the top
+  await page.waitForTimeout(2000);
+  await page.mouse.move(...(await at(600, 400)));
+  await page.mouse.wheel(0, -5000);
+  await page.waitForTimeout(1000);
 }
-await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-const touchScroll = await result('touchscroll', 10000);
-check('swiping scrolls', Number(touchScroll) > 50, String(touchScroll));
-// Let the fling end, then back to the top
-await page.waitForTimeout(2000);
-await page.mouse.move(...(await at(600, 400)));
-await page.mouse.wheel(0, -5000);
-await page.waitForTimeout(1000);
 
 // 4) Color scheme: the host switches to dark, the page notices
 check('color scheme light at the start', (await result('dark')) === 'false');

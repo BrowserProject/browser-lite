@@ -13,7 +13,7 @@ import {
   launch,
   near,
   openHost,
-  pagePixel,
+  shownPixel,
   screenshot,
   serve,
   startStack,
@@ -128,7 +128,7 @@ for (const compositing of ['1', '0']) {
   const label = compositing === '1' ? 'with compositing' : 'without compositing';
   const page = await browser.newPage({ viewport: { width: 800, height: 400 } });
   const results = collect(page);
-  const pixelAt = (x, y) => pagePixel(page, x, y);
+  const pixelAt = (x, y) => shownPixel(page, x, y);
   checkerRequests = 0;
   foreignRequests.length = 0;
   await openHost(page, stack.app({ url: siteURL, compositing }));

@@ -33,6 +33,12 @@
 
   sw.addEventListener('message', (event) => {
     const message = event.data;
+    // A page the worker does not control asks for it (Firefox leaves later visits of a cross-origin
+    // isolated page uncontrolled)
+    if (message?.bl === 'claim') {
+      event.waitUntil(sw.clients.claim());
+      return;
+    }
     if (!message || typeof message.bl !== 'string' || typeof message.instance !== 'string') return;
     const source = /** @type {Client | null} */ (event.source);
     if (source && 'id' in source) instances.set(message.instance, source.id);

@@ -1,17 +1,29 @@
+import { canStandIn, TrackReader, type WritableTrack, writableTrack } from './track-streams.js';
+
 /** Host browser APIs that are missing from the TypeScript DOM library. */
 
 export type TrackProcessor = new (init: {
   track: MediaStreamTrack;
 }) => { readable: ReadableStream };
 
-export type TrackGenerator = new (init: {
-  kind: string;
-}) => MediaStreamTrack & { writable: WritableStream };
+type TrackGenerator = new (init: { kind: string }) => WritableTrack;
 
-/** MediaStreamTrackProcessor (Chromium), undefined elsewhere. */
+/**
+ * MediaStreamTrackProcessor (Chromium), else the stand-in of track-streams.ts (Firefox),
+ * undefined without WebCodecs.
+ */
 export const trackProcessor = (): TrackProcessor | undefined =>
-  (globalThis as { MediaStreamTrackProcessor?: TrackProcessor }).MediaStreamTrackProcessor;
+  (globalThis as { MediaStreamTrackProcessor?: TrackProcessor }).MediaStreamTrackProcessor ??
+  (canStandIn() ? TrackReader : undefined);
 
-/** MediaStreamTrackGenerator (Chromium), undefined elsewhere. */
-export const trackGenerator = (): TrackGenerator | undefined =>
-  (globalThis as { MediaStreamTrackGenerator?: TrackGenerator }).MediaStreamTrackGenerator;
+/**
+ * Makes a host track of kind that the engine worker writes frames into: a
+ * MediaStreamTrackGenerator (Chromium), else the stand-in of track-streams.ts (Firefox),
+ * undefined without WebCodecs.
+ */
+export function trackGenerator(): ((kind: string) => WritableTrack) | undefined {
+  const Generator = (globalThis as { MediaStreamTrackGenerator?: TrackGenerator })
+    .MediaStreamTrackGenerator;
+  if (Generator) return (kind) => new Generator({ kind });
+  return canStandIn() ? writableTrack : undefined;
+}

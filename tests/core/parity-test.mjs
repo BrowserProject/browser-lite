@@ -1,14 +1,16 @@
 // Parity with Chromium: loads tests/fixtures/features.html once directly in the host Chromium and
 // once in browser-lite (core with the default services and webrtc) and compares which features
 // are there. Output: "x of y like Chromium", the differences by area and a Markdown report
-// (PARITY_REPORT=file). Fails only when a feature of parity-baseline.txt is missing (regression).
-// PARITY_UPDATE=1 writes the list again.
+// (PARITY_REPORT=file). Fails only when a feature of parity-baseline.txt is missing (regression);
+// in another browser under test (BL_BROWSER) not when that browser lacks it itself, as some
+// features come from the host (picture-in-picture). PARITY_UPDATE=1 writes the list again.
 //
 //   node tests/core/parity-test.mjs [engine-dir]
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import {
+  BROWSER,
   TIMEOUT,
   VERBOSE,
   check,
@@ -58,6 +60,15 @@ let reference;
   }
   const page = await browser.newPage();
   reference = await collect(page, () => page.goto(siteURL));
+  await browser.close();
+}
+
+// The browser under test itself, when it is not the reference
+let host = reference;
+if (BROWSER !== 'chromium') {
+  const browser = await launch();
+  const page = await browser.newPage();
+  host = await collect(page, () => page.goto(siteURL));
   await browser.close();
 }
 
@@ -120,7 +131,9 @@ if (process.env.PARITY_UPDATE || !existsSync(baselineFile)) {
     .split('\n')
     .filter((l) => l && !l.startsWith('#'));
   for (const name of baseline) {
-    if (!ours.get(name)) check(`regression: ${name} worked before`, false);
+    if (ours.get(name)) continue;
+    if (host.get(name) === false) console.log(`skip ${name} (${BROWSER} has none)`);
+    else check(`regression: ${name} worked before`, false);
   }
   const added = present.filter((n) => !baseline.includes(n));
   if (added.length) console.log(`  new (PARITY_UPDATE=1 to store): ${added.join(', ')}`);

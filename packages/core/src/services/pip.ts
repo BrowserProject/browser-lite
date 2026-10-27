@@ -82,16 +82,16 @@ export function installPictureInPicture(host: MediaHost): void {
   const enterStream = async (info: TrackInfo | undefined, view: ViewImpl | undefined) => {
     if (info?.kind !== 'video') throw notAvailable();
     let track: MediaStreamTrack;
-    const Generator = trackGenerator();
+    const generate = trackGenerator();
     if (info.capture) {
       const original = await ctx.use<CaptureApi>('capture')?.track(info.capture);
       if (!original || original.readyState === 'ended')
         throw domError('InvalidStateError', 'The track has ended.');
       track = original.clone();
-    } else if (info.sink && Generator) {
+    } else if (info.sink && generate) {
       const worker = ctx.engineWorker();
       if (!worker) throw domError('InvalidStateError', 'No engine');
-      const generator = new Generator({ kind: 'video' });
+      const generator = generate('video');
       worker.postMessage({ blSink: { id: info.sink, writable: generator.writable } }, [
         generator.writable,
       ]);

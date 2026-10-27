@@ -330,21 +330,32 @@ check(
 // Picture-in-picture: click on the video
 const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 180, box.y + 140);
-check(
-  'picture-in-picture: requestPictureInPicture',
-  (await result('pip', 20000)) === 'true,true,true',
-  results.get('pip'),
-);
-check(
-  'picture-in-picture: events and exit',
-  (await result('pipevents', 20000)) === 'enter:true|leave,true',
-  results.get('pipevents'),
-);
-check(
-  'picture-in-picture: in a frame without video',
-  (await result('pipframe')) === 'function,null,true,null,null,function',
-  results.get('pipframe'),
-);
+// The pages see picture-in-picture only where the host has it (not in Firefox)
+const hostPip = await page.evaluate(() => 'requestPictureInPicture' in HTMLVideoElement.prototype);
+if (hostPip) {
+  check(
+    'picture-in-picture: requestPictureInPicture',
+    (await result('pip', 20000)) === 'true,true,true',
+    results.get('pip'),
+  );
+  check(
+    'picture-in-picture: events and exit',
+    (await result('pipevents', 20000)) === 'enter:true|leave,true',
+    results.get('pipevents'),
+  );
+  check(
+    'picture-in-picture: in a frame without video',
+    (await result('pipframe')) === 'function,null,true,null,null,function',
+    results.get('pipframe'),
+  );
+} else {
+  check(
+    'picture-in-picture: missing like in the host',
+    /^TypeError:/.test(await result('pip', 20000)) &&
+      (await result('pipframe')) === 'undefined,undefined,false,undefined,undefined,undefined',
+    `${results.get('pip')} ${results.get('pipframe')}`,
+  );
+}
 
 check(
   'audio: duration known',

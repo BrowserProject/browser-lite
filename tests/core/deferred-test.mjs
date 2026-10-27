@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   check,
+  chromiumOnly,
   collect,
   engineDir,
   finish,
@@ -103,9 +104,17 @@ check(
 startRelease();
 await load(page, new URL('xslt', siteURL).href);
 check('a page with deferred code works', (await results.wait('xslt')) === '3', results.get('xslt'));
-check('it waited for its chunk', released);
-// The host asks for one chunk at a time, so a second waiting request came from the engine thread
-check('the engine thread requested it itself', heldBack >= 2, `${heldBack} chunk requests waited`);
+// Playwright routes the synchronous request of the engine thread only in Chromium
+if (chromiumOnly('the engine thread waits for its chunk (route of a synchronous request)')) {
+  check('it waited for its chunk', released);
+  // The host asks for one chunk at a time, so a second waiting request came from the engine
+  // thread
+  check(
+    'the engine thread requested it itself',
+    heldBack >= 2,
+    `${heldBack} chunk requests waited`,
+  );
+}
 
 // The host fetches every chunk once, one after the other
 await waitFor(() => requests >= chunks.length + 1, 30000);

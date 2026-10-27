@@ -1,4 +1,4 @@
-// The profile client with the real origin private file system of headless Chromium and the
+// The profile client with the real origin private file system of the browser of tests/lib and the
 // in-memory server of fake-server.mjs (playwright from the workspace):
 //   npx tsc -b && node packages/profile/test/browser.mjs
 // Not part of `npm test`, which runs without a browser.
@@ -8,7 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launch } from '../../../tests/lib/browser.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let server;
@@ -26,17 +26,16 @@ before(async () => {
     try {
       const file = path.join(root, path.normalize(url.pathname));
       if (!file.startsWith(root)) throw new Error('outside');
+      const body = await readFile(file);
       res.writeHead(200, { 'Content-Type': 'text/javascript' });
-      res.end(await readFile(file));
+      res.end(body);
     } catch {
       res.writeHead(404);
       res.end();
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  browser = await chromium.launch(
-    process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
-  );
+  browser = await launch();
   page = await browser.newPage();
   page.on('pageerror', (error) => console.log('page error:', error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);

@@ -26,6 +26,7 @@
 import {
   TIMEOUT,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -868,35 +869,37 @@ check(
 
 // Cleanup: with a 40 MB quota the limit is 10 MB, eight answers of 2 MB do not all fit, the
 // oldest go away (own sizes, x-bl-size)
-const small = await browser.newContext();
-const smallPage = await small.newPage();
-const cdp = await small.newCDPSession(smallPage);
-await cdp.send('Storage.overrideQuotaForOrigin', { origin: stack.origin, quotaSize: 40 << 20 });
-const smallResults = collect(smallPage);
-await openHost(smallPage, appURL(`${siteURL}many`));
-check('many large answers loaded', (await smallResults.wait('many')) === '1');
-const readCache = () =>
-  smallPage.evaluate(async (name) => {
-    const cache = await caches.open(name);
-    const keys = (await cache.keys()).map(
-      (request) => new URL(new URL(request.url).searchParams.get('u')).pathname,
-    );
-    const total = (await cache.matchAll()).reduce(
-      (sum, response) => sum + Number(response.headers.get('x-bl-size')),
-      0,
-    );
-    return { keys, total };
-  }, HTTP_CACHE);
-let stored = await readCache();
-for (let i = 0; i < 100 && !(stored.keys.includes('/blob/8') && stored.total <= 10 << 20); i++) {
-  await smallPage.waitForTimeout(200);
-  stored = await readCache();
+if (chromiumOnly('cleanup under a small quota (CDP Storage.overrideQuotaForOrigin)')) {
+  const small = await browser.newContext();
+  const smallPage = await small.newPage();
+  const cdp = await small.newCDPSession(smallPage);
+  await cdp.send('Storage.overrideQuotaForOrigin', { origin: stack.origin, quotaSize: 40 << 20 });
+  const smallResults = collect(smallPage);
+  await openHost(smallPage, appURL(`${siteURL}many`));
+  check('many large answers loaded', (await smallResults.wait('many')) === '1');
+  const readCache = () =>
+    smallPage.evaluate(async (name) => {
+      const cache = await caches.open(name);
+      const keys = (await cache.keys()).map(
+        (request) => new URL(new URL(request.url).searchParams.get('u')).pathname,
+      );
+      const total = (await cache.matchAll()).reduce(
+        (sum, response) => sum + Number(response.headers.get('x-bl-size')),
+        0,
+      );
+      return { keys, total };
+    }, HTTP_CACHE);
+  let stored = await readCache();
+  for (let i = 0; i < 100 && !(stored.keys.includes('/blob/8') && stored.total <= 10 << 20); i++) {
+    await smallPage.waitForTimeout(200);
+    stored = await readCache();
+  }
+  check(
+    'cleanup: under the limit, newest entry there, oldest gone',
+    stored.total <= 10 << 20 && stored.keys.includes('/blob/8') && !stored.keys.includes('/blob/1'),
+    JSON.stringify(stored),
+  );
 }
-check(
-  'cleanup: under the limit, newest entry there, oldest gone',
-  stored.total <= 10 << 20 && stored.keys.includes('/blob/8') && !stored.keys.includes('/blob/1'),
-  JSON.stringify(stored),
-);
 
 await browser.close();
 finish();

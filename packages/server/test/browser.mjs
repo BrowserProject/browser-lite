@@ -1,4 +1,4 @@
-// Compression Dictionary Transport with headless Chromium (playwright from the workspace): the CLI
+// Compression Dictionary Transport (playwright from the workspace, browser of tests/lib): the CLI
 // serves engine/<old>/, Chromium keeps its files as dictionaries, then engine/<new>/ comes as
 // the deltas of tools/engine-deltas.mjs (#244).
 //   npm run build && node packages/server/test/browser.mjs
@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { chromiumOnly, launch } from '../../../tests/lib/browser.mjs';
 import { startCli, stopCli } from './helpers.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -40,9 +40,7 @@ before(async () => {
     path.join(site, 'engine/old'),
   ]);
   cli = await startCli({ SITE_DIR: site });
-  browser = await chromium.launch(
-    process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
-  );
+  browser = await launch();
 });
 after(async () => {
   await browser?.close();
@@ -71,6 +69,8 @@ test('the new engine file comes as a delta against the old one', async () => {
   assert.equal(result.old.hash, sha(OLD));
   assert.equal(result.next.hash, sha(NEW), 'the delta decodes to the new file');
   assert.ok(result.old.transfer > 4_000_000, `old file whole (${result.old.transfer})`);
-  assert.ok(result.next.transfer < 100_000, `new file as delta (${result.next.transfer})`);
+  // Only Chromium offers dictionaries, other browsers get the whole file
+  if (chromiumOnly('new file as delta'))
+    assert.ok(result.next.transfer < 100_000, `new file as delta (${result.next.transfer})`);
   await page.close();
 });
