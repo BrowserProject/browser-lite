@@ -1,3 +1,5 @@
+import type { WriteRequest } from './opfs-writer.js';
+
 /** Errors of handles that do not exist (any more) or have the other kind. */
 export function isMissing(error: unknown): boolean {
   const name = (error as { name?: string } | null)?.name;
@@ -48,6 +50,66 @@ function split(path: string): [string[], string] {
   return [parts, name];
 }
 
+// The writer worker of browsers without createWritable, ended when idle
+const WRITER_IDLE_MS = 5000;
+interface Writer {
+  worker: Worker;
+  pending: Map<number, { resolve(): void; reject(error: Error): void }>;
+  timer?: ReturnType<typeof setTimeout>;
+}
+let writer: Writer | null = null;
+let nextWrite = 1;
+
+/** Writes through opfs-writer.ts: Safari 18 has synchronous access handles only in workers. */
+async function writeInWorker(
+  handle: FileSystemFileHandle,
+  data: BufferSource | string,
+): Promise<void> {
+  const path = await (await navigator.storage.getDirectory()).resolve(handle);
+  if (!path) throw new DOMException('File outside the origin private file system', 'NotFoundError');
+  if (!writer) {
+    const worker = new Worker(new URL('./opfs-writer.js', import.meta.url), { type: 'module' });
+    const current: Writer = { worker, pending: new Map() };
+    worker.onmessage = (event: MessageEvent<{ id: number; error?: string }>) => {
+      const { id, error } = event.data;
+      const entry = current.pending.get(id);
+      current.pending.delete(id);
+      if (error) entry?.reject(new DOMException(error, 'InvalidStateError'));
+      else entry?.resolve();
+    };
+    worker.onerror = () => {
+      worker.terminate();
+      if (writer === current) writer = null;
+      for (const entry of current.pending.values())
+        entry.reject(new DOMException('The writer worker failed', 'InvalidStateError'));
+      current.pending.clear();
+    };
+    writer = current;
+  }
+  const current = writer;
+  clearTimeout(current.timer);
+  const id = nextWrite++;
+  const bytes =
+    typeof data === 'string'
+      ? data
+      : ArrayBuffer.isView(data)
+        ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        : data.slice(0);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      current.pending.set(id, { resolve, reject });
+      current.worker.postMessage({ id, path, data: bytes } satisfies WriteRequest);
+    });
+  } finally {
+    if (!current.pending.size)
+      current.timer = setTimeout(() => {
+        if (current.pending.size) return;
+        current.worker.terminate();
+        if (writer === current) writer = null;
+      }, WRITER_IDLE_MS);
+  }
+}
+
 /** Writes a file, creating its directories. */
 export async function writeFile(
   top: FileSystemDirectoryHandle,
@@ -58,9 +120,13 @@ export async function writeFile(
   const dir = await folder(top, dirs, true);
   if (!dir) throw new DOMException(`Cannot create ${path}`, 'NotFoundError');
   const handle = await dir.getFileHandle(name, { create: true });
-  const writable = await handle.createWritable();
-  await writable.write(data);
-  await writable.close();
+  if (typeof handle.createWritable === 'function') {
+    const writable = await handle.createWritable();
+    await writable.write(data);
+    await writable.close();
+  } else {
+    await writeInWorker(handle, data);
+  }
   return handle.getFile();
 }
 
