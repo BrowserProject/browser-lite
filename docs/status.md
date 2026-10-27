@@ -154,7 +154,13 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 6. Images decode at full size: WebKit's decoders of this port ignore the subsampling level
    (`ScalableImageDecoder`), a 4000 x 3000 photo shown small takes 48 MB and its full decoding
    time. Scaled JPEG decoding (libjpeg-turbo) needs a WebKit patch; batch it with other patches.
-7. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
+7. Memory of the host tab: with a trivial page the renderer of Chromium holds about 480 MB
+   (2026-10-27, local): the engine memory (256 MB reserved, about 90 MB touched), about 220 MB
+   of malloc inside the renderer that does not change with the number of workers (each spare
+   worker about 4 MB) and is most likely V8's data of the 44 MB `engine.wasm` and the chunks,
+   34 MB of compiled code; after bbc.com/news 720 MB, after CNN 960 MB. Smaller only with a
+   smaller module.
+8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
