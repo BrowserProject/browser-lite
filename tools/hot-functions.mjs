@@ -1,12 +1,11 @@
 // Records which engine functions run, for the split of engine.wasm (#238, tools/split-engine.mjs):
 // starts the demo in Chromium with the unsplit engine (engine.full.wasm of a build, with function
-// names) on a first visit and again after a restart, and the core's test host page, loads a local
-// page and the sites one after the other and scrolls them, and adds every function V8 compiled
-// meanwhile (it compiles each function at its first call) to engine/hot-functions.txt; the other
-// functions of the build are added as cold.
-// Run it after changes that add or rename much engine code (a WebKit update): functions missing
-// from the list still work, a thread only waits for the chunk of one when it needs it before
-// the download is through.
+// names) on a first visit and again after a restart, and the core's test host page, with a local
+// page, then each site in a fresh Chromium, scrolled; V8 compiles each function at its first call.
+// engine/hot-functions.txt gets what the start, MIN_SITES of the sites or the page main thread
+// ran as hot, the other functions of the build as cold. Run it after changes that add or rename
+// much engine code (a WebKit update), or when tests/core/deferred-test.mjs finds the start
+// needing a chunk: functions newer than the list stay in engine.wasm.
 //
 //   node tools/hot-functions.mjs <engine-dir> [--seconds 25] [--out engine/hot-functions.txt] [url...]
 import { existsSync, mkdirSync, readFileSync, symlinkSync } from 'node:fs';
@@ -20,8 +19,13 @@ import {
   TIMEOUT,
   tempDir,
 } from '../tests/lib/index.mjs';
-import { nameHash, readHotList, writeHotList } from './hot-functions-file.mjs';
+import { nameHash, writeHotList } from './hot-functions-file.mjs';
 import { functionNames, wasmImports } from './wasm-binary.mjs';
+
+// Sites that must have run a function for it to stay in engine.wasm. With 2 the start needed 1 MB
+// less, but Wikipedia then waited for chunk after chunk: first paint at 5 Mbit/s after 44 instead
+// of 24.5 s (#238)
+const MIN_SITES = 1;
 
 const SITES = [
   'https://en.wikipedia.org/wiki/Switzerland',
@@ -82,11 +86,12 @@ const local = await serve((req, res) => {
   );
 });
 
-// Function index -> ran on the page main thread, over all scenarios
-const compiled = new Map();
 const seconds = Number(options.seconds) * 1000;
 
-/** One start of Chromium with the app, then the pages one after the other. */
+/**
+ * One start of Chromium with the app, then the pages one after the other; resolves what ran
+ * (function index -> ran on the page main thread).
+ */
 async function scenario(stack, profile, pages) {
   const context = await launchProfile({
     dir: profile,
@@ -126,38 +131,51 @@ async function scenario(stack, profile, pages) {
   await cdp.send('Tracing.end');
   await complete;
   await context.close();
-  for (const [index, tids] of ran) {
-    const main = [...tids].some((tid) => threads.get(tid) === 'CrRendererMain');
-    compiled.set(index, main || !!compiled.get(index));
-  }
+  return new Map(
+    [...ran].map(([index, tids]) => [
+      index,
+      [...tids].some((tid) => threads.get(tid) === 'CrRendererMain'),
+    ]),
+  );
 }
 
-// The demo on a first visit, again after a restart (stored data), and the core's test host page
-// (storage in memory)
+const merge = (into, ran) => {
+  for (const [index, main] of ran) into.set(index, main || !!into.get(index));
+};
+
+// What the start needs: the demo on a first visit and again after a restart (stored data), the
+// core's test host page (storage in memory), each with the local page
+const start = new Map();
 const demo = await startStack({ app: 'demo', engine });
 const profile = tempDir('hot-profile');
-await scenario(demo, profile, [local.url, ...sites]);
-await scenario(demo, profile, [local.url, ...sites.slice(0, 3)]);
+merge(start, await scenario(demo, profile, [local.url]));
+merge(start, await scenario(demo, profile, [local.url]));
 const core = await startStack({ engine });
-await scenario(core, tempDir('hot-profile'), [local.url, ...sites.slice(0, 3)]);
+merge(start, await scenario(core, tempDir('hot-profile'), [local.url]));
 
-const list = readHotList(options.out);
-for (const [index, main] of compiled) {
-  const name = names.get(index);
-  if (!name) continue;
-  const hash = nameHash(name);
-  list.set(hash, { main: main || !!list.get(hash)?.main, cold: false });
+// Each site in a fresh Chromium (V8 compiles a function once per process), to count the sites
+const counts = new Map();
+const main = new Map(start);
+for (const url of sites) {
+  const ran = await scenario(demo, tempDir('hot-profile'), [url]);
+  for (const index of ran.keys()) counts.set(index, (counts.get(index) ?? 0) + 1);
+  merge(main, ran);
 }
-// What else this build has did not run: deferred (newer functions stay)
+
+// Hot: what the start or MIN_SITES sites ran, and what ran on the page main thread; the other
+// functions of this build are cold. Names that share a hash: hot wins.
 const importedFunctions = wasmImports(readFileSync(fullWasm)).filter(
   (entry) => entry.kind === 'function',
 ).length;
-for (const [index, name] of names)
-  if (index >= importedFunctions && !list.has(nameHash(name)))
-    list.set(nameHash(name), { main: false, cold: true });
+const list = new Map();
+for (const [index, name] of names) {
+  if (index < importedFunctions) continue;
+  const hash = nameHash(name);
+  const hot = start.has(index) || main.get(index) || (counts.get(index) ?? 0) >= MIN_SITES;
+  if (hot) list.set(hash, { main: !!main.get(index) || !!list.get(hash)?.main, cold: false });
+  else if (!list.has(hash)) list.set(hash, { main: false, cold: true });
+}
 writeHotList(options.out, list);
 const cold = [...list.values()].filter((entry) => entry.cold).length;
-console.log(
-  `${compiled.size} functions ran; ${list.size - cold} hot and ${cold} cold in ${options.out}`,
-);
+console.log(`${list.size - cold} hot and ${cold} cold in ${options.out}`);
 process.exit(0);
