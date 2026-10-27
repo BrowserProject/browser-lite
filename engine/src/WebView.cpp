@@ -89,6 +89,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/JSONValues.h>
 #include <wtf/NeverDestroyed.h>
+#include <wtf/SetForScope.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -701,9 +702,14 @@ bool WebView::renderCompositedFrame(IntRect*)
     }
     auto start = MonotonicTime::now();
     m_renderingUpdateRequested = false;
-    m_page->updateRendering();
-    m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
+    {
+        SetForScope inRenderingUpdate(m_inRenderingUpdate, true);
+        m_page->updateRendering();
+        m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
+    }
     bool firstPaint = m_firstPaint == FirstPaint::WaitingForUpdate;
+    if (firstPaint)
+        debugLog("View %d: first paint goes to the compositor", m_id);
     host.flush(firstPaint);
     if (firstPaint && host.isWaitingForCompositor())
         m_firstPaint = FirstPaint::None;
@@ -1574,7 +1580,7 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
 {
     if (!milestones.contains(LayoutMilestone::DidFirstVisuallyNonEmptyLayout))
         return;
-    debugLog("View %d: first visible layout", m_id);
+    debugLog("View %d: first visible layout%s", m_id, m_inRenderingUpdate ? " (in a rendering update)" : "");
     notifyHost(m_id, "first-layout");
     if (m_firstPaint == FirstPaint::WaitingForLayout)
         m_firstPaint = FirstPaint::WaitingForUpdate;

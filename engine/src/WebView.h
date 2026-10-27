@@ -255,6 +255,8 @@ private:
     // compositor thread reports it with the frame that shows it
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
+    // In Page::updateRendering (for the debug log of the first layout)
+    bool m_inRenderingUpdate { false };
     bool m_errorPageCertificate { false };
     void loadFavicon();
 
