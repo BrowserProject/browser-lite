@@ -15,7 +15,7 @@ import {
   hostEvents,
   launch,
   openHost,
-  pagePixel,
+  shownPixel,
   serve,
   startStack,
   timeLimit,
@@ -104,11 +104,12 @@ check(
   bTicks >= 20 && bFrames >= 10,
   `${bTicks} ticks, ${bFrames} frames`,
 );
+// Shown on screen: while A's engine thread waits, Firefox and WebKit cannot read the canvas
 const blue = await waitFor(async () => {
-  const [r, g, b] = (await pagePixel(page, 50, 50)) ?? [];
+  const [r, g, b] = (await shownPixel(page, 50, 50)) ?? [];
   return b > 200 && r < 60 && g < 60;
 }, 10000);
-check('B: renders while A waits', blue, JSON.stringify(await pagePixel(page, 50, 50)));
+check('B: renders while A waits', blue, JSON.stringify(await shownPixel(page, 50, 50)));
 check('A: still waiting', !results.has('a_first'));
 
 check('A: answer delivered', await answer('first', true));

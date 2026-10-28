@@ -40,6 +40,17 @@ pulseaudio --start --exit-idle-time=-1
 xvfb-run -a env BL_BROWSER=firefox node tests/run.mjs core
 ```
 
+`BL_BROWSER=webkit` runs them in Playwright's WebKit, the engine of Safari (not in CI). On Linux it
+needs the libraries of Playwright's Docker image of the same version, for example:
+
+```bash
+docker run --rm --network host --ipc=host -e BL_BROWSER=webkit -v "$PWD:$PWD" -w "$PWD" \
+  mcr.microsoft.com/playwright:v1.63.0-noble node tests/run.mjs core --engine=<dir>
+```
+
+There WebKit has no WebGL, OPFS, `MediaRecorder` or fake camera and Playwright does not route
+requests of workers, so the tests of those fail; it finds Safari's differences in the rest.
+
 Checks that need a Chromium-only API (CDP, V8 tracing) print `skip <name> (skipped in firefox)`
 instead (`chromiumOnly()` of `lib/browser.mjs`); `permissions()` drops permissions that Firefox
 cannot grant, and Chromium switches of a test become Firefox preferences there (fake camera and

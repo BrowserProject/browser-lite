@@ -83,11 +83,13 @@ export function installImageDecoder(ctx: ServiceContext): void {
       if (!context) throw domError('EncodingError', 'No 2d context');
       context.drawImage(image, 0, 0, width, height);
       const pixels = new Uint8Array(context.getImageData(0, 0, width, height).data.buffer);
+      // WebKit gives a still image the timestamp -2^63, which the engine's VideoFrame refuses;
+      // Chrome gives 0
       return {
         width,
         height,
-        timestamp: image.timestamp,
-        duration: image.duration,
+        timestamp: Number.isSafeInteger(image.timestamp) ? image.timestamp : 0,
+        duration: Number.isSafeInteger(image.duration) ? image.duration : null,
         data: bytesToBase64(pixels),
       };
     } finally {

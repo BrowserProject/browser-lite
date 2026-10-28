@@ -1,5 +1,5 @@
 // Shared harness of the browser suites (tests/core, tests/demo, tests/examples, tests/compat),
-// in Chromium or Firefox (BL_BROWSER, browser.mjs).
+// in Chromium, Firefox or WebKit (BL_BROWSER, browser.mjs).
 export { TIMEOUT, VERBOSE, buildDir, engineDir, root } from './env.mjs';
 export {
   BROWSER,
