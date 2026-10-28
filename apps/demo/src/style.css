@@ -311,6 +311,22 @@ button {
     display: none;
   }
 }
+/* Touch screens above the phone layout (tablets): the same layout with targets of 44 px */
+@media (pointer: coarse) {
+  #toolbar > button {
+    width: 44px;
+    height: 44px;
+  }
+  #address {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  #new-tab,
+  .tab .close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 
 /* Elements of @browser-lite/ui (context menu, select popup, pickers, link status, permission prompt) */
 .bl-context-menu {
