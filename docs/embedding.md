@@ -222,6 +222,47 @@ pages. `defaultServices()` is `[audio(), media(), capture(), devices()]`. `webrt
 its connections bypass the relay and reveal the device's IP address. With an iframe setup also
 delegate the matching `allow=` features.
 
+## Extensions
+
+Features of your own (or of others) that hook into requests, pages and your UI: an extension is
+an object with `id`, `version` and `setup(context)`, installed on a host you pass to
+`createBrowser`. Design, context and slots: [extensions.md](extensions.md).
+
+```js
+import { createBrowser, createExtensionHost } from '@browser-lite/core';
+import { createUiSlots, renderToolbar } from '@browser-lite/ui';
+
+const ui = createUiSlots();
+renderToolbar(ui, document.querySelector('#extension-buttons'), () => activeView);
+const extensions = createExtensionHost({ app: { ui } });
+await extensions.install({
+  id: 'word-count',
+  version: '1.0.0',
+  setup({ addScript, onMessage, app }) {
+    addScript({
+      matches: ['https://*/*'],
+      code: 'extension.sendMessage(document.body.innerText.split(/\\s+/).length)',
+    });
+    let words = 0;
+    onMessage((count) => {
+      words = count;
+      return true;
+    });
+    return app.ui.add('toolbar', {
+      id: 'word-count.show',
+      label: 'Word count',
+      icon: 'W',
+      action: () => alert(`${words} words`),
+    });
+  },
+});
+const browser = await createBrowser({ engineUrl, transport, extensions });
+```
+
+Install before `createBrowser` so the scripts reach the first page. Keep the host across restarts
+(after a crash) and pass it to the next browser. `store` of `createExtensionHost` keeps the data
+of `context.storage` (default in memory), for example in your user's profile.
+
 ## Lifecycle
 
 - `browser.destroy()` closes all views, stops the engine threads and releases the storage lock;

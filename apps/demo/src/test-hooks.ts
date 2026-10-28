@@ -1,5 +1,6 @@
 import type { Browser, BrowserOptions, DebugApi, Transport, View } from '@browser-lite/core';
 import { addressToURL } from './address-bar.js';
+import { extensions, installExtension, ui } from './extensions.js';
 import { relayUrl, tokenFor } from './params.js';
 import { profile, runtime } from './runtime.js';
 import { settings } from './settings.js';
@@ -64,7 +65,7 @@ export function withTestOptions(options: BrowserOptions): BrowserOptions {
 /**
  * window.blTest for the e2e tests (tests/core and tests/demo): the browser, its views and the debug API,
  * plus hooks of the demo (checkMemory, memoryUsed, gpu, profile, settings, addressToURL, transport, relay,
- * options).
+ * options, extensions, installExtension, ui).
  */
 export function installTestHooks(state: TestState): void {
   onTabCreated((tab) => {
@@ -113,5 +114,8 @@ export function installTestHooks(state: TestState): void {
     get options() {
       return state.options;
     },
+    extensions,
+    installExtension,
+    ui,
   };
 }

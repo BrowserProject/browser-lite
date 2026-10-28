@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
+import { requestHandler } from '../dist/handlers.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
 import { Requests } from '../dist/requests.js';
@@ -68,7 +69,7 @@ function fakeView(id = 1) {
   };
 }
 
-function requestsWith(handlers, store = new MemoryPermissionStore()) {
+function requestsWith(handlers, store = new MemoryPermissionStore(), chain = {}) {
   const module = fakeModule();
   const watchdog = { closed: 0, dialogClosed: () => watchdog.closed++ };
   const host = {
@@ -78,6 +79,7 @@ function requestsWith(handlers, store = new MemoryPermissionStore()) {
     config: { handlers, permissions: store },
     text: (value) => module.stringToNewUTF8(value ?? ''),
     uploads: { write: async () => [] },
+    handler: (type) => requestHandler(type, handlers[type], chain[type] ?? []),
   };
   return { requests: new Requests(host), module, watchdog, host };
 }
@@ -127,6 +129,24 @@ test('dialogs: direct and promised answers, the watchdog restarts after each', a
     ['dialog', 1, 1, 'ANNA'],
     ['dialog', 2, 0, 0],
     ['dialog', 3, 1, 0],
+  ]);
+});
+
+test('dialogs and selects: handlers of extensions run before the own handler', async () => {
+  const { requests, module } = requestsWith({ dialog: () => 'own' }, undefined, {
+    dialog: [(request, next) => (request.type === 'confirm' ? true : next())],
+    selectPopup: [async () => 1],
+  });
+  const view = fakeView();
+  requests.dialog(1, view, 1, 'https://a.example', 'Sure?', '');
+  requests.dialog(2, view, 2, 'https://a.example', 'Name?', '');
+  // No own select handler: the extension answers anyway
+  module._bl_popup_choose = (id, index) => module.calls.push(['popup', id, index]);
+  await requests.selectPopup(view, { items: [{ text: 'a' }, { text: 'b' }] });
+  assert.deepEqual(module.calls, [
+    ['dialog', 1, 1, 0],
+    ['dialog', 2, 1, 'own'],
+    ['popup', 1, 1],
   ]);
 });
 

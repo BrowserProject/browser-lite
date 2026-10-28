@@ -39,6 +39,8 @@ interface RequestsHost {
   readonly ready: boolean;
   text(value: string | null | undefined): number;
   readonly uploads: { write(view: ViewImpl, files: File[]): Promise<string[]> };
+  /** The handler of a request (with those of the extensions), undefined when there is none. */
+  handler<K extends keyof RequestHandlers>(type: K): RequestHandlers[K] | undefined;
 }
 
 interface OpenDialog {
@@ -78,10 +80,6 @@ export class Requests {
 
   constructor(private readonly host: RequestsHost) {}
 
-  private get handlers(): Partial<RequestHandlers> {
-    return this.host.config.handlers;
-  }
-
   private track(view: ViewImpl): AbortController {
     const controller = new AbortController();
     let set = this.pending.get(view.id);
@@ -111,7 +109,7 @@ export class Requests {
     defaultValue: string,
   ): void {
     const kind = DIALOG_TYPES[type] ?? 'alert';
-    const handler = this.handlers.dialog;
+    const handler = this.host.handler('dialog');
     if (!view?.alive || !handler) {
       this.answerDialog(id, kind, undefined);
       return;
@@ -194,7 +192,7 @@ export class Requests {
     data: { id: number; kind: PermissionKind; origin: string },
   ): Promise<void> {
     const { module, config } = this.host;
-    const handler = this.handlers.permission;
+    const handler = this.host.handler('permission');
     // Without a handler: no for now, nothing remembered
     if (!handler) {
       module._bl_permission_answer(data.id, 0);
@@ -233,7 +231,7 @@ export class Requests {
     },
   ): Promise<void> {
     const { module } = this.host;
-    const handler = this.handlers.authenticate;
+    const handler = this.host.handler('authenticate');
     if (!handler) {
       module._bl_auth_answer(data.id, 0, 0);
       return;
@@ -278,7 +276,7 @@ export class Requests {
 
   async fileChooser(view: ViewImpl, data: { multiple?: boolean; accept?: string }): Promise<void> {
     const controller = this.track(view);
-    const handler = this.handlers.fileChooser ?? nativeFileChooser;
+    const handler = this.host.handler('fileChooser') ?? nativeFileChooser;
     let files: File[] | null = null;
     try {
       files = await handler({
@@ -335,7 +333,7 @@ export class Requests {
       separator: item.separator ?? false,
     }));
     let index = -1;
-    const handler = this.handlers.selectPopup;
+    const handler = this.host.handler('selectPopup');
     if (handler) {
       try {
         const chosen = await handler({
@@ -356,7 +354,7 @@ export class Requests {
     const controller = this.openPicker(view, 'color');
     const { module } = this.host;
     let value: string | null = null;
-    const handler = this.handlers.colorPicker;
+    const handler = this.host.handler('colorPicker');
     if (handler) {
       try {
         value = await handler({
@@ -379,7 +377,7 @@ export class Requests {
     const controller = this.openPicker(view, 'datetime');
     const { module } = this.host;
     let value: string | null = null;
-    const handler = this.handlers.dateTimePicker;
+    const handler = this.host.handler('dateTimePicker');
     if (handler) {
       try {
         value = await handler({

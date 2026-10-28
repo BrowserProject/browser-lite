@@ -13,6 +13,7 @@ import {
   dateTimePicker,
   loginPrompt,
   permissionPrompt,
+  renderToolbar,
   selectPopup,
 } from '@browser-lite/ui';
 import { takePendingAddress } from './address-bar.js';
@@ -20,6 +21,7 @@ import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
+import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
 import { profilePermissions } from './permissions.js';
@@ -109,6 +111,7 @@ function browserOptions(
       ...dialogHandler(),
     },
     permissions: profilePermissions,
+    extensions,
     ...start.options,
     engine: engineOptions(),
     onProgress: showStartProgress,
@@ -261,6 +264,8 @@ async function start(restarted: boolean): Promise<void> {
   // The prefs of the last start on this device: the profile of the server only arrives in
   // storage.beforeStart, after the options of the engine are fixed
   const cached = updateStartSettings(keepSession);
+  // Their scripts reach the first page
+  await builtInExtensions;
   let browser = await launch(cached, restarted, true);
   if (!browser) return;
   const settings = updateStartSettings(keepSession);
@@ -326,6 +331,7 @@ onBookmarksChange(() => {
 });
 installShortcuts();
 fitVisualViewport();
+renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 
 byId('back').addEventListener('click', () => activeTab()?.view.back());

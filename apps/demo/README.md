@@ -2,7 +2,7 @@
 
 The full demo browser on browser-lite: tabs (with popups, restored tabs that load on the first
 click, discarding under memory pressure and a message when none is left), address bar with
-suggestions, history, bookmarks, downloads panel, settings page with profile and device
+suggestions, history, bookmarks, downloads panel, settings page with profile, extensions and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
 handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
 runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
@@ -44,7 +44,8 @@ An extra CA certificate only comes through code: with `debug=1` a test sets
 `eval(source)`, `pagePixel(x, y)`, `pageRow(y)`, `memory(report?)`, `memoryPressure()`,
 `memoryLimit(megabytes)` (a limit like in a 32 bit browser), `crash(kind)`, `audioState()`,
 `mediaState()`, `rtcState()`, `framesShown()`, `flags` (`firstLayout`,
-`firstPaint`, `loaded`), and for the demo `checkMemory()` (discards a background tab, returns the
+`firstPaint`, `loaded`), and for the demo `extensions`, `installExtension(extension)`, `ui` (the
+slots), `checkMemory()` (discards a background tab, returns the
 new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`,
 `transport`, `relay`, `options`.
 
@@ -69,7 +70,7 @@ window (only a device the host is not gets a frame of its size). Everything is C
 
 ## Storage
 
-Settings, bookmarks and permission decisions are prefs of the profile on the server
+Settings, bookmarks, permission decisions and the extensions' data are prefs of the profile on the server
 (`@browser-lite/profile`, so they follow to other devices); history, the session and the access
 tokens stay in localStorage of this device. Pages store in the OPFS namespace `browserlite`.
 
@@ -89,5 +90,6 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library and the side panel (menu, history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
+| `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |
 | `dialogs.ts`, `permissions.ts` | native dialogs with background suppression; permission decisions in the profile |
 | `shortcuts.ts`, `engine-message.ts`, `view-source.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, messages over the page area, page source, reloads, `window.blTest`, helpers |

@@ -13,6 +13,7 @@
 namespace JSC {
 class ArgList;
 class JSGlobalObject;
+class JSObject;
 }
 
 namespace WebCore {
@@ -39,6 +40,9 @@ void screenOrientationMayHaveChanged();
 // adds properties to a DOM prototype once the window creates it.
 void installPageExtensions(JSC::JSGlobalObject&, int viewId);
 void hostCallFinished(uint64_t identifier, bool ok, const WTF::String& resultJSON);
+// A call to the host that hostCallFinished answers: callback(ok, resultJSON)
+// runs as a task of the window. Returns the identifier of the call.
+uint64_t addHostCall(JSC::JSGlobalObject&, JSC::JSObject& callback);
 
 // Calls the function expression source in the window with the arguments. Runs
 // outside of the page's CSP, exceptions go to the page's console.

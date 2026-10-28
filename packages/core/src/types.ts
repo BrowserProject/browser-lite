@@ -3,6 +3,8 @@
  * package; everything here is semver-stable API.
  */
 
+import type { ExtensionHost } from './extensions/types.js';
+
 /** Unsubscribes a listener registered with `on()`. */
 export type Unsubscribe = () => void;
 
@@ -176,8 +178,16 @@ export interface BrowserOptions {
   serviceWorker?: ServiceWorkerOption;
   /** Host services; default {@link defaultServices}. */
   services?: HostService[];
-  /** Answers to requests of the engine; missing ones get safe defaults. */
+  /**
+   * Answers to requests of the engine; missing ones get safe defaults. Handlers of extensions
+   * run before these ({@link ChainedHandler}).
+   */
   handlers?: Partial<RequestHandlers>;
+  /**
+   * Extensions of {@link createExtensionHost}: one host serves one browser at a time and stays
+   * across restarts. Without it, or without extensions, nothing of them runs.
+   */
+  extensions?: ExtensionHost<unknown>;
   /** Remembered permission decisions; default in memory. */
   permissions?: PermissionStore;
   /**
@@ -539,7 +549,10 @@ export interface ContextMenuInfo {
 /** Answer of a dialog handler: confirm boolean, prompt string or null, beforeunload true to leave. */
 export type DialogAnswer = boolean | string | null | undefined;
 
-/** Requests the engine waits for. Each has exactly one handler. */
+/**
+ * Requests the engine waits for. Each has one handler here; extensions may put handlers in
+ * front of it ({@link ExtensionContext.handle}).
+ */
 export interface RequestHandlers {
   /**
    * alert, confirm, prompt and beforeunload, answered directly or with a promise (an in-page
