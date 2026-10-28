@@ -397,9 +397,10 @@ check(
     h2.settings.initialWindowSize === 2097152,
   JSON.stringify(h2.settings),
 );
+// The cookie of the first page (same host, another port) comes last like in Safari
 check(
   'navigation headers in Safari order',
-  h2Names.join(',') ===
+  h2Names.join(',').replace(/,cookie$/, '') ===
     ':method,:scheme,:authority,:path,sec-fetch-dest,user-agent,accept,sec-fetch-site,sec-fetch-mode,accept-language,priority,accept-encoding',
   h2Names.join(','),
 );
