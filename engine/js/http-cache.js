@@ -18,7 +18,7 @@
 // other versions and those inside it, storing a whole response all ranges of
 // the resource. After a 304 only the headers change (update).
 //
-// Limit: 400 MB, at most a quarter of the host's quota. Only the own content
+// Limit: 400 MB (BL_HTTP_CACHE_MB), at most a quarter of the host's quota. Only the own content
 // counts (header x-bl-size), not what else is in the OPFS or in the host's
 // Cache API. Above it, or when the quota is full, the oldest entries go away
 // until 80 % are used.
@@ -48,6 +48,8 @@ var blHttpCache = {
       return blHttpCache.ready = Promise.resolve(null);
     var base = blHttpCache.base();
     blHttpCache.name = base + '-v' + blHttpCache.format;
+    if (Module._bl__http_cache_limit_mb)
+      blHttpCache.limit = Module._bl__http_cache_limit_mb() * 1024 * 1024;
     if (navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (estimate) {
         if (estimate.quota)

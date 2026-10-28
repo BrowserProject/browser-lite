@@ -13,4 +13,16 @@ export { defaultMenuItems, type MenuActions } from './menu-items.js';
 export type { UiOptions } from './options.js';
 export { permissionPrompt } from './permission-prompt.js';
 export { selectPopup } from './select-popup.js';
+export {
+  type ContextMenuEntry,
+  createUiSlots,
+  renderToolbar,
+  type SettingsSection,
+  type SidePanel,
+  slotMenuItems,
+  type ToolbarButton,
+  type UiSlot,
+  type UiSlotItems,
+  type UiSlots,
+} from './slots.js';
 export { defaultTexts, type UiTexts } from './texts.js';

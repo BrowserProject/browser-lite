@@ -131,6 +131,9 @@ button {
   cursor: pointer;
   color: var(--muted);
 }
+#extension-buttons {
+  display: contents;
+}
 #toolbar {
   display: flex;
   align-items: center;
@@ -138,7 +141,8 @@ button {
   padding: 6px 8px;
   background: var(--tab-active);
 }
-#toolbar > button {
+#toolbar > button,
+#extension-buttons > button {
   width: 32px;
   height: 32px;
   border: none;
@@ -147,7 +151,8 @@ button {
   font-size: 16px;
   cursor: pointer;
 }
-#toolbar > button:hover:not(:disabled) {
+#toolbar > button:hover:not(:disabled),
+#extension-buttons > button:hover {
   background: var(--tab);
 }
 #toolbar > button:disabled {
@@ -473,7 +478,11 @@ button {
 #find-bar button:hover {
   background: var(--tab);
 }
-#zoom {
+/* Its text, not a square icon: wins over #toolbar > button */
+#toolbar > #zoom {
+  width: auto;
+  height: auto;
+  white-space: nowrap;
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -482,7 +491,7 @@ button {
   font-size: 12px;
   cursor: pointer;
 }
-#zoom[hidden] {
+#toolbar > #zoom[hidden] {
   display: none;
 }
 .bl-permission-prompt {
@@ -1236,6 +1245,7 @@ button {
   #bookmark,
   #zoom,
   #clear-data,
+  #extension-buttons,
   #status {
     display: none;
   }

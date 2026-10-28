@@ -685,6 +685,15 @@ bool isAllowedHostCall(const String& name)
 
 }
 
+uint64_t addHostCall(JSC::JSGlobalObject& globalObject, JSC::JSObject& callback)
+{
+    static uint64_t nextIdentifier;
+    auto identifier = ++nextIdentifier;
+    auto& vm = globalObject.vm();
+    pendingHostCalls().add(identifier, PendingHostCall { { vm, &globalObject }, { vm, &callback } });
+    return identifier;
+}
+
 // ---------------------------------------------------------------- Prototypes on demand
 
 // Entries of the polyfills for DOM prototypes the window has not created yet
@@ -855,9 +864,7 @@ static JSC::JSObject* createHostCaller(JSC::JSGlobalObject& globalObject, int vi
         auto* callback = callFrame->argument(2).getObject();
         if (!callback || !callback->isCallable())
             return JSC::JSValue::encode(JSC::jsUndefined());
-        static uint64_t nextIdentifier;
-        auto identifier = ++nextIdentifier;
-        pendingHostCalls().add(identifier, PendingHostCall { { vm, globalObject }, { vm, callback } });
+        auto identifier = addHostCall(*globalObject, *callback);
         // Rejected like the host rejects (asynchronously), so the page's promise settles
         if (!isAllowedHostCall(name)) {
             hostCallFinished(identifier, false, "{\"name\":\"NotSupportedError\",\"message\":\"Not supported\"}"_s);

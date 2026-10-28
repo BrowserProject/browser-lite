@@ -22,6 +22,7 @@
 #include "MemoryVFS.h"
 #include "ScrollingWasm.h"
 #include "Speech.h"
+#include "UserContent.h"
 #include "WebPlatformExtras.h"
 #include "LoaderStrategy.h"
 #include "WebView.h"
@@ -537,6 +538,21 @@ EMSCRIPTEN_KEEPALIVE void bl_host_call_result(double identifier, int ok, char* r
 {
     runOnEngineThread([identifier = static_cast<uint64_t>(identifier), ok, result = takeString(result)] {
         hostCallFinished(identifier, ok, result);
+    });
+}
+
+// Scripts and styles of the host's extensions (UserContent.h): [{extension,
+// scripts, styles}] replaces all of them
+EMSCRIPTEN_KEEPALIVE void bl_set_user_content(char* json)
+{
+    runOnEngineThread([json = takeString(json)] { setUserContent(json); });
+}
+
+// A message (JSON) of the host to the scripts of an extension in a view
+EMSCRIPTEN_KEEPALIVE void bl_extension_message(int id, char* extension, char* json)
+{
+    withView(id, [extension = takeString(extension), json = takeString(json)](WebView& view) {
+        sendExtensionMessage(view, extension, json);
     });
 }
 

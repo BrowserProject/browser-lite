@@ -1,4 +1,4 @@
-import { writeHostClipboard } from './clipboard.js';
+import { trackClipboardWrite, writeHostClipboard } from './clipboard.js';
 import {
   type Config,
   colorScheme,
@@ -22,7 +22,10 @@ import {
   provideEngineFiles,
 } from './engine.js';
 import { BrowserLiteError } from './errors.js';
+import { answerScriptMessage, attachExtensions } from './extensions/attach.js';
+import type { ExtensionLink } from './extensions/link.js';
 import { Fullscreen } from './fullscreen.js';
+import { requestHandler } from './handlers.js';
 import { Online } from './online.js';
 import { storePermission } from './permissions.js';
 import { redirectPopup } from './popups.js';
@@ -41,6 +44,7 @@ import type {
   PermissionDecision,
   PermissionKind,
   Preferences,
+  RequestHandlers,
   Unsubscribe,
   ViewOptions,
   WarningCode,
@@ -149,6 +153,7 @@ class BrowserImpl implements Browser, ViewHost {
   private nextViewId = 1;
   private focused: ViewImpl | null = null;
   private releaseLock: (() => void) | null = null;
+  private extensions: ExtensionLink | null = null;
   private failStart: ((error: Error) => void) | null = null;
 
   constructor(readonly config: Config) {
@@ -366,6 +371,7 @@ class BrowserImpl implements Browser, ViewHost {
     addEventListener('pagehide', () => this.storage.flush(500), { signal });
     this.fullscreen.start(signal);
     this.network.start(signal);
+    if (config.extensions) this.extensions = attachExtensions(config.extensions, this);
 
     // Warnings of the start go out once the caller could subscribe
     const warnings = this.warnings.splice(0);
@@ -424,6 +430,17 @@ class BrowserImpl implements Browser, ViewHost {
     else view?.engineEvent(type, data);
   }
 
+  /** The handler of a request: those of the extensions, then the one of the options. */
+  handler<K extends keyof RequestHandlers>(type: K): RequestHandlers[K] | undefined {
+    return requestHandler(type, this.config.handlers[type], this.extensions?.handlers(type) ?? []);
+  }
+
+  /** The extension host lets go of this browser (crash or destroy). */
+  private detachExtensions(): void {
+    this.extensions?.detach();
+    this.extensions = null;
+  }
+
   /** Takes an engine event away from the views; one handler per type. */
   handle<T>(type: string, handler: (data: T, view: ViewImpl | undefined, viewId: number) => void) {
     if (this.handlers.has(type)) throw new Error(`Engine event ${type} is handled twice`);
@@ -443,12 +460,13 @@ class BrowserImpl implements Browser, ViewHost {
       }),
     );
     this.handle<Record<string, unknown>>('clipboard', (data) => {
-      const write = this.config.handlers.clipboardWrite ?? writeHostClipboard;
+      const write = this.handler('clipboardWrite') ?? writeHostClipboard;
       const request = { text: String(data.text ?? ''), html: String(data.html ?? '') };
       try {
-        Promise.resolve(write(request)).catch((error: unknown) =>
+        const written = Promise.resolve(write(request)).catch((error: unknown) =>
           console.warn('[browser-lite] clipboardWrite failed:', error),
         );
+        trackClipboardWrite(request.text, request.html, written);
       } catch (error) {
         console.warn('[browser-lite] clipboardWrite failed:', error);
       }
@@ -467,6 +485,9 @@ class BrowserImpl implements Browser, ViewHost {
           message,
           ...(source ? [`(${source}:${line})`] : []),
         );
+    });
+    this.handle<Record<string, unknown>>('extension-message', (data, view) => {
+      void answerScriptMessage(this, this.extensions, data, view);
     });
     this.handle<{ opener?: number }>('new-view', (data, _view, viewId) =>
       this.openEngineView(viewId, Number(data.opener)),
@@ -542,6 +563,7 @@ class BrowserImpl implements Browser, ViewHost {
     const view = new ViewImpl(this, id, options, fromEngine);
     this.views.set(id, view);
     this.services.setupView(view);
+    this.extensions?.viewAdded(view);
     return view;
   }
 
@@ -680,6 +702,7 @@ class BrowserImpl implements Browser, ViewHost {
     this.watchdog.stop();
     this.requests.abortAll();
     this.downloads.abortAll();
+    this.detachExtensions();
     this.lifetime.abort();
     this.events.emit('crash', { reason });
   }
@@ -694,6 +717,7 @@ class BrowserImpl implements Browser, ViewHost {
     this.downloads.abortAll();
     // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
+    this.detachExtensions();
     this.phase = 'destroyed';
     this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.lifetime.abort();

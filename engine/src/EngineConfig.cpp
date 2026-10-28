@@ -168,6 +168,7 @@ void loadEngineConfig()
     config.memoryPressureMB = static_cast<size_t>(number("BL_MEMORY_PRESSURE_MB", config.memoryPressureMB));
     config.indexedDBQuotaMB = number("BL_INDEXEDDB_QUOTA_MB", config.indexedDBQuotaMB);
     config.databaseMaxMB = number("BL_DATABASE_MAX_MB", config.databaseMaxMB);
+    config.httpCacheMB = number("BL_HTTP_CACHE_MB", config.httpCacheMB);
     config.fontconfigEarly = flag("BL_FONTCONFIG_EARLY", true);
     config.spareWorkers = static_cast<int>(number("BL_SPARE_WORKERS", config.spareWorkers));
     installExtraCertificates();
@@ -180,4 +181,10 @@ void loadEngineConfig()
 extern "C" EMSCRIPTEN_KEEPALIVE const char* bl__storage_namespace()
 {
     return BrowserLite::engineConfig().storageNamespace.data();
+}
+
+// Limit of the HTTP cache in the host's Cache API (engine/js/http-cache.js)
+extern "C" EMSCRIPTEN_KEEPALIVE double bl__http_cache_limit_mb()
+{
+    return static_cast<double>(BrowserLite::engineConfig().httpCacheMB);
 }

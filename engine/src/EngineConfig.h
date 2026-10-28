@@ -66,6 +66,7 @@ struct EngineConfig {
     size_t memoryPressureMB { 3072 }; // BL_MEMORY_PRESSURE_MB
     uint64_t indexedDBQuotaMB { 256 }; // BL_INDEXEDDB_QUOTA_MB
     uint64_t databaseMaxMB { 512 }; // BL_DATABASE_MAX_MB
+    uint64_t httpCacheMB { 400 }; // BL_HTTP_CACHE_MB
     bool fontconfigEarly { true }; // BL_FONTCONFIG_EARLY
     int spareWorkers { 4 }; // BL_SPARE_WORKERS
 };

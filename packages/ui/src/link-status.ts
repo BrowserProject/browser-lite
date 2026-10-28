@@ -18,6 +18,9 @@ export function linkStatus(view: View, options?: UiOptions): () => void {
   };
   const stops = [
     view.on('hover', (event) => show(event.url)),
+    // Also same-document navigations (history.pushState, back in a single page app): the link is
+    // usually gone, a new one comes with the next mouse move
+    view.on('navigation', () => show(null)),
     view.on('commit', () => show(null)),
     view.on('close', () => dispose()),
   ];

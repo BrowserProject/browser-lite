@@ -16,6 +16,7 @@
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
+#include "UserContent.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
 #include "wasm/WasmBridge.h"
@@ -544,12 +545,15 @@ RefPtr<HistoryItem> FrameLoaderClient::createHistoryItemTree(bool clipAtTarget, 
 
 // New window object: create WebAssembly (JSC cannot do it itself, see
 // wasm/WasmBridge.h), then the page extensions with their host bridges and, in
-// an error page, its retry button (ErrorPage.cpp)
+// an error page, its retry button (ErrorPage.cpp). In the world of an
+// extension its bridge (UserContent.h).
 void FrameLoaderClient::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld& world)
 {
-    if (!world.isNormal())
-        return;
     Ref frame = m_frameLoader->frame();
+    if (!world.isNormal()) {
+        installExtensionBridge(frame, world, m_view->id());
+        return;
+    }
     if (auto* globalObject = frame->script().globalObject(world)) {
         installWebAssembly(*globalObject);
         installPageExtensions(*globalObject, m_view->id());
