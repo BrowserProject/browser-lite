@@ -730,8 +730,9 @@ EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
         if (full > 1) {
             // Live documents: references, frame, URL
             for (auto& document : WebCore::Document::allDocuments()) {
-                printf("[memory]   doc refs=%u frame=%d %s\n", document->refCount(), document->frame() ? 1 : 0,
-                    document->url().string().left(100).utf8().data());
+                // What keeps a detached one: nodes (JS wrappers or C++), its JS wrapper
+                printf("[memory]   doc refs=%u nodes=%u frame=%d wrapper=%d %s\n", document->refCount(), document->referencingNodeCount(),
+                    document->frame() ? 1 : 0, document->wrapper() ? 1 : 0, document->url().string().left(100).utf8().data());
             }
         }
     });
