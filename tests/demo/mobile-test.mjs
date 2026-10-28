@@ -116,7 +116,8 @@ await tab.evaluate(() =>
 check(
   'Android host: the Android phone by default, with the screen of the host',
   device === 'android' &&
-    (await results.wait('identity', 10000)) === `true,true,${PORTRAIT.width},5`,
+    (await results.wait('identity', 10000)) ===
+      `true,true,${await tab.evaluate(() => screen.width)},5`,
   `${device} ${results.get('identity')}`,
 );
 check(
