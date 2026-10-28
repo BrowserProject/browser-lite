@@ -1,0 +1,139 @@
+diff --git a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+index 26988f5812..b4e061d207 100644
+--- a/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/FontCacheSkia.cpp
+@@ -134,7 +134,17 @@ RefPtr<Font> FontCache::systemFallbackForCharacterCluster(const FontDescription&
+     if (isDefaultIgnorableCodePoint(baseCharacter) || isPrivateUseAreaCharacter(baseCharacter))
+         return nullptr;
+ 
++#if PLATFORM(WASM)
++    // browser-lite: like Chrome, a character shown as text by default (U+2665 heart suit,
++    // U+2708 airplane) takes a text font such as Noto Sans Symbols 2, one shown as emoji
++    // by default (U+26BD soccer ball) the color font; a variation selector decides first.
++    // Before, the order of the font set decided, and the color font came first.
++    char32_t variationSelector = codePointsIterator != codePoints.end() ? *codePointsIterator : 0;
++    bool isEmoji = variationSelector == emojiVariationSelector || preferColoredFont == PreferColoredFont::Yes
++        || (variationSelector != textVariationSelector && isEmojiWithPresentationByDefault(baseCharacter));
++#else
+     bool isEmoji = (codePointsIterator != codePoints.end() && *codePointsIterator == emojiVariationSelector) || preferColoredFont == PreferColoredFont::Yes;
++#endif
+ 
+ #if OS(ANDROID) || PLATFORM(WIN)
+     // FIXME: handle locale.
+@@ -142,8 +152,12 @@ RefPtr<Font> FontCache::systemFallbackForCharacterCluster(const FontDescription&
+     if (isEmoji)
+         bcp47.append("und-Zsye");
+     auto typeface = fontManager().matchFamilyStyleCharacter(nullptr, { }, bcp47.mutableSpan().data(), bcp47.size(), baseCharacter);
++#else
++#if PLATFORM(WASM)
++    auto typeface = m_skiaSystemFallbackFontCache.fontForCharacterCluster(isEmoji ? "und-Zsye"_s : description.computedLocale(), stringView, isEmoji ? SkiaSystemFallbackFontCache::PreferColorFont::Yes : SkiaSystemFallbackFontCache::PreferColorFont::No);
+ #else
+     auto typeface = m_skiaSystemFallbackFontCache.fontForCharacterCluster(isEmoji ? "und-Zsye"_s : description.computedLocale(), stringView);
++#endif
+ #endif
+     if (!typeface)
+         return nullptr;
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
+index a21b411f92..fbb0e8c337 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
+@@ -79,12 +79,22 @@ public:
+         String path;
+         int ttcIndex { 0 };
+         FcCharSet* charSet { nullptr }; // Owned by FcFontSet.
++#if PLATFORM(WASM)
++        bool isColor { false };
++#endif
+     };
+ 
++#if PLATFORM(WASM)
++    const FontSetCache::Font* fontForCharacterCluster(FcCharSet* charSet, SkiaSystemFallbackFontCache::PreferColorFont preferColorFont)
++    {
++        return m_fontSet->bestForCharacterCluster(charSet, preferColorFont);
++    }
++#else
+     const FontSetCache::Font* fontForCharacterCluster(FcCharSet* charSet)
+     {
+         return m_fontSet->bestForCharacterCluster(charSet);
+     }
++#endif
+ 
+ private:
+     class FontSet {
+@@ -137,7 +147,14 @@ private:
+                 if (FcPatternGetInteger(pattern, FC_INDEX, 0, &ttcIndex) != FcResultMatch)
+                     ttcIndex = 0;
+ 
++#if PLATFORM(WASM)
++                Font font(WTF::move(filepath), ttcIndex, charSet);
++                FcBool isColor;
++                font.isColor = FcPatternGetBool(pattern, FC_COLOR, 0, &isColor) == FcResultMatch && isColor;
++                m_fallbackList.append(WTF::move(font));
++#else
+                 m_fallbackList.append(Font(WTF::move(filepath), ttcIndex, charSet));
++#endif
+             }
+         }
+ 
+@@ -146,6 +163,19 @@ private:
+             FcFontSetDestroy(m_fontSet);
+         }
+ 
++#if PLATFORM(WASM)
++        const FontSetCache::Font* bestForCharacterCluster(FcCharSet* charSet, SkiaSystemFallbackFontCache::PreferColorFont preferColorFont)
++        {
++            if (preferColorFont == SkiaSystemFallbackFontCache::PreferColorFont::No) {
++                for (const auto& font : m_fallbackList) {
++                    if (!font.isColor && !FcCharSetSubtractCount(charSet, font.charSet))
++                        return &font;
++                }
++            }
++            return bestForCharacterCluster(charSet);
++        }
++#endif
++
+         const FontSetCache::Font* bestForCharacterCluster(FcCharSet* charSet)
+         {
+             if (m_fallbackList.isEmpty())
+@@ -181,7 +211,11 @@ SkiaSystemFallbackFontCache::SkiaSystemFallbackFontCache() = default;
+ 
+ SkiaSystemFallbackFontCache::~SkiaSystemFallbackFontCache() = default;
+ 
++#if PLATFORM(WASM)
++sk_sp<SkTypeface> SkiaSystemFallbackFontCache::fontForCharacterCluster(const String& locale, StringView stringView, PreferColorFont preferColorFont)
++#else
+ sk_sp<SkTypeface> SkiaSystemFallbackFontCache::fontForCharacterCluster(const String& locale, StringView stringView)
++#endif
+ {
+     FcCharSet* charSet = FcCharSetCreate();
+     bool hasNonIgnorableCharacters = false;
+@@ -204,7 +238,11 @@ sk_sp<SkTypeface> SkiaSystemFallbackFontCache::fontForCharacterCluster(const Str
+     if (!fontSetCache)
+         return nullptr;
+ 
++#if PLATFORM(WASM)
++    const auto* font = fontSetCache->fontForCharacterCluster(charSet, preferColorFont);
++#else
+     const auto* font = fontSetCache->fontForCharacterCluster(charSet);
++#endif
+     FcCharSetDestroy(charSet);
+     if (!font)
+         return nullptr;
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
+index 6066768400..8956b5372b 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
+@@ -42,7 +42,13 @@ public:
+     SkiaSystemFallbackFontCache();
+     ~SkiaSystemFallbackFontCache();
+ 
++#if PLATFORM(WASM)
++    // browser-lite: No skips color fonts when a font without color has every character
++    enum class PreferColorFont : bool { No, Yes };
++    sk_sp<SkTypeface> fontForCharacterCluster(const String& locale, StringView, PreferColorFont);
++#else
+     sk_sp<SkTypeface> fontForCharacterCluster(const String& locale, StringView);
++#endif
+     void clear();
+ private:
+     HashMap<String, std::unique_ptr<FontSetCache>> m_cache;
