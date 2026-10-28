@@ -60,6 +60,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   last device writes (#188 to #191, #197).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
+- **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4
+  (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
+  sound after a tap), Samsung Galaxy S23 Chrome, Windows 11 Firefox; Firefox runs every suite in
+  CI (open failures below).
 - **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
   #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
@@ -258,4 +262,3 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   origin.
 - **WireGuard**: `WireGuardTransport` (user space TCP/IP and WireGuard in WASM, UDP over Wisp), so
   sites see another network than the relay's datacenter IP.
-- **Firefox and Safari**: from best effort to supported.

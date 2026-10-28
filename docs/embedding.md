@@ -281,11 +281,13 @@ of `context.storage` (default in memory), for example in your user's profile.
 
 ## Browser support
 
-Chromium (Chrome, Edge, Chromebooks) is supported. CI runs every browser suite in Firefox too
-([tests/README.md](../tests/README.md)); its open failures are in [status.md](status.md), until
-they are fixed Firefox does not block CI. Safari is best effort: some APIs the engine and its
-services rely on are missing or behave differently there. Call `checkSupport()` before showing the
-browser and fall back gracefully.
+Chromium (Chrome, Edge, Chromebooks, Android) and Safari 18 or newer (macOS, iOS, iPadOS) are
+supported, Firefox with a few open failures. CI runs every browser suite in Chromium and Firefox
+([tests/README.md](../tests/README.md)); the Firefox open failures are in [status.md](status.md),
+until they are fixed Firefox does not block CI. Safari runs on real devices outside CI; its own
+paths (ManagedMediaSource, capture without MediaStreamTrackProcessor, profile writes without
+`createWritable`) are forced in Chromium by `tests/core/safari-test.mjs`. Call `checkSupport()`
+before showing the browser and fall back gracefully.
 
 Differences in Firefox: no picture-in-picture (the pages do not see `requestPictureInPicture`),
 no month and week inputs (`@browser-lite/ui` shows the date picker for them), no Compression

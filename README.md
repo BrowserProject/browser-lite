@@ -28,8 +28,9 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 ## Requirements
 
-- A Chromium based browser (Chrome, Edge, Chromebooks). Firefox runs in CI with a few open
-  failures ([docs/status.md](docs/status.md)), Safari is best effort.
+- A Chromium based browser (Chrome, Edge, Chromebooks, Android), Safari 18 or newer (macOS, iOS,
+  iPadOS) or Firefox. Chromium is tested in CI, Firefox too with a few open failures, Safari on
+  real devices ([docs/status.md](docs/status.md)).
 - A cross-origin isolated page (`Cross-Origin-Opener-Policy: same-origin`,
   `Cross-Origin-Embedder-Policy: require-corp`) over HTTPS, with the engine on the same origin.
 - A relay: Node 22 or newer with `@browser-lite/server`, or the server image of the release.
