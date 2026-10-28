@@ -5,7 +5,8 @@
 // The test server delivers a page through a redirect, sets a cookie, loads a script and a gzip
 // response with fetch(); the script writes everything into the title. Then the failures: bad
 // certificates (self-signed, wrong name, expired), refused connection, unknown name, failing
-// navigations (error page with reason, reload, back, the view keeps the address), many hanging
+// navigations (error page with reason, reload, back, the view keeps the address), Safari's HTTP/2
+// settings and request headers (#283), many hanging
 // connections (limit of curl) and a relay that restarts during the session (also
 // navigator.onLine and the error page "No connection" that reloads itself, a form only after
 // "Resend"). Last, reasons only a stand-in relay delivers reliably (no answer, blocked, address
@@ -13,6 +14,7 @@
 //
 //   node tests/core/network-test.mjs [engine-dir]
 import http from 'node:http';
+import http2 from 'node:http2';
 import https from 'node:https';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -259,6 +261,22 @@ secureURLs = {
   expired: certs.expired ? await secureServer(certs.expired, 'expired') : null,
 };
 
+// HTTP/2 server with the good certificate: the engine's SETTINGS and the headers of a navigation
+const h2 = { settings: null, headers: [] };
+const h2Server = http2.createSecureServer({ ...certs.good, allowHTTP1: true });
+h2Server.on('session', (session) =>
+  session.once('remoteSettings', (settings) => {
+    h2.settings ??= settings;
+  }),
+);
+h2Server.on('stream', (stream, headers, flags, rawHeaders) => {
+  if (headers[':path'] === '/fingerprint') h2.headers = rawHeaders;
+  stream.respond({ ':status': 200, 'content-type': 'text/html' });
+  stream.end('<!doctype html><title>H2</title>');
+});
+await new Promise((r) => h2Server.listen(0, '127.0.0.1', r));
+const h2URL = `https://127.0.0.1:${h2Server.address().port}`;
+
 // 4 servers that accept connections and never answer, 6 requests each (limit per host)
 const hangServers = [];
 let hangConnections = 0;
@@ -365,6 +383,34 @@ check(
   String(icon),
 );
 await screenshot(page, 'network');
+
+// Safari 26 on the network (#283): its HTTP/2 SETTINGS, pseudo-header and header order, Priority
+// and Accept-Encoding, Accept-Language with qualities
+await go(`${h2URL}/fingerprint`);
+await waitTitle('H2', 60000);
+const h2Names = h2.headers.filter((_, i) => i % 2 === 0);
+const h2Value = (name) => h2.headers[h2.headers.indexOf(name) + 1];
+check(
+  'HTTP/2 SETTINGS like Safari',
+  h2.settings?.enablePush === false &&
+    h2.settings.maxConcurrentStreams === 100 &&
+    h2.settings.initialWindowSize === 2097152,
+  JSON.stringify(h2.settings),
+);
+check(
+  'navigation headers in Safari order',
+  h2Names.join(',') ===
+    ':method,:scheme,:authority,:path,sec-fetch-dest,user-agent,accept,sec-fetch-site,sec-fetch-mode,accept-language,priority,accept-encoding',
+  h2Names.join(','),
+);
+check(
+  'Priority, Accept-Encoding and Accept-Language like Safari',
+  h2Value('priority') === 'u=0, i' &&
+    h2Value('accept-encoding') === 'gzip, deflate, br, zstd' &&
+    /^[a-zA-Z-]+(,[a-zA-Z-]+;q=0\.[1-9])*$/.test(h2Value('accept-language') ?? ''),
+  `${h2Value('priority')} / ${h2Value('accept-encoding')} / ${h2Value('accept-language')}`,
+);
+h2Server.close();
 
 // ------------------------------------------------------------- failures
 

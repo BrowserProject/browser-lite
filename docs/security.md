@@ -21,7 +21,9 @@ what that means and what to do before going to production. Setup details: [embed
 | Profile on the server | `createProfileStore` stores cookies (sign-ins) unencrypted | `authorize` is required, with its own token audience (`profile`) so a relay token never opens it; the store also checks `Host` (DNS rebinding) and refuses simple cross-site requests |
 
 The relay sees only encrypted bytes (TLS happens inside the engine), but it sees target host
-names and ports, and timing.
+names and ports, and timing. To look like Safari the engine offers Safari's TLS parameters (#283),
+including its three 3DES suites (last, servers pick them only without AES) and `rsa_pkcs1_sha1`
+(offered, but a server signature with SHA-1 is still refused).
 
 ## Production checklist
 

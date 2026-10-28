@@ -64,6 +64,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   get an Android identity by default like iPhone and iPad hosts (#290).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
+- **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)
+  and HTTP/2 its Akamai fingerprint (`2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p`), request headers
+  come in Safari's order with its values, compared with real Safari 26 on tls.peet.ws and a header
+  logging server (#283). Bot managed sites (Amazon, Nike, Zalando, Ticketmaster, Best Buy, Lowe's,
+  Costco, adidas, leboncoin, StockX, Indeed) load from the test machine; Home Depot (Akamai), Hermes
+  and G2 (DataDome) block that IP also for Chromium, Walmart and Zillow (HUMAN) ask for press and
+  hold after repeated automated visits, with the old and the new fingerprint alike.
 - **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4
   (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
   sound after a tap), Samsung Galaxy S23 Chrome, Windows 11 Firefox; Firefox runs every suite in
@@ -212,7 +219,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   does not).
 - Service workers: Push, Background Sync, Background Fetch.
 - Network: WebTransport, streams as request body, Storage Buckets,
-  WebSocketStream without read backpressure (#120).
+  WebSocketStream without read backpressure (#120). Fingerprint (#283): no GREASE, OpenSSL's
+  extension order and point formats (JA3 and peetprint differ from Safari's), Safari's header order
+  only approximated for header sets not measured (cross-origin GET, beacons); the TCP/IP
+  fingerprint is the relay's.
 - Storage: localStorage reaches SQLite 1 s after a change and can miss the last change on close;
   with `/data` in memory (second tab) uploads sit in WASM memory. WebKit's memory cache is shared
   by all views of a running engine, only the HTTP cache is partitioned (#213).

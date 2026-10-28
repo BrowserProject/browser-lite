@@ -131,8 +131,15 @@ in flight and `onsent` gives backpressure. `getaddrinfo` returns placeholders, t
 resolves names. A `CloseReason` becomes an errno and then a curl code (patch 0039), which picks
 the error page (#174, #175).
 
-TLS happens inside the engine with ChaCha20-Poly1305 preferred (#65), so the relay only sees
-encrypted bytes. All loaders share one request path (`LoaderStrategy.cpp`: cookies, at most 20
+TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
+looks like Safari 26 (#283; patch 0057 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch
+`deps/patches/curl/0002`), because bot managers compare that with the user agent: Safari's cipher
+suites (ChaCha20-Poly1305 first, #65), groups with key shares for X25519MLKEM768 and X25519,
+signature algorithms, `status_request`, SCT and zlib certificate compression, so the ClientHello
+has Safari's JA4; HTTP/2 with Safari's SETTINGS, windows and pseudo-header order (Akamai
+fingerprint); request headers in Safari's order with its `Accept-Language`, `Priority` (urgency
+from the load priority) and `Accept-Encoding`. OpenSSL has no GREASE and its own extension order,
+so JA3 differs; the TCP/IP fingerprint is the relay's. All loaders share one request path (`LoaderStrategy.cpp`: cookies, at most 20
 redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). The HTTP cache
 stores responses in the host's Cache API (`<namespace>-http-v<format>`, #70, #182), partitioned
 like Chrome's HTTP cache (#213): every entry belongs to the top site, the frame site and whether

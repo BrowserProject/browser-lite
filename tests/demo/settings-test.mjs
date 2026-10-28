@@ -312,11 +312,12 @@ check(
     phone.hover === 'none',
   JSON.stringify(phone),
 );
-// navigator.languages has only the first language like in Safari, Accept-Language all
+// navigator.languages has only the first language like in Safari, Accept-Language all in Safari's
+// format (#283)
 check(
   'own language and time zone',
   phone.languages === 'fr-CH' &&
-    phone.acceptLanguage === 'fr-CH, fr' &&
+    phone.acceptLanguage === 'fr-CH,fr;q=0.9' &&
     phone.timeZone === 'America/New_York',
   JSON.stringify(phone),
 );
