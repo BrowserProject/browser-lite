@@ -8,6 +8,7 @@
 #include <pthread.h>
 
 #include <wtf/Function.h>
+#include <wtf/Seconds.h>
 #include <wtf/text/WTFString.h>
 
 namespace BrowserLite {
@@ -28,6 +29,8 @@ void runNextOnEngineThread(Function<void()>&&);
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
+// How long the engine thread has been in its current work item (0 while it waits for work)
+WTF::Seconds engineThreadBusyFor();
 // A page dialog: runs the work of the engine thread nested until done()
 // returns true; the views of the dialog's page group hold back (WebView.h)
 void runNestedEventLoop(const Function<bool()>& done);

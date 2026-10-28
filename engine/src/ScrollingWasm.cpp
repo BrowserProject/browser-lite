@@ -31,12 +31,12 @@ struct Entry {
     MonotonicTime nonBlockingUntil;
 };
 
-// Like Safari for a trackpad gesture (ThreadedScrollingTree::waitForEventToBeProcessedByMainThread,
-// 50 ms there; longer here, a weak device takes that long for an ordinary task): a wheel event
-// over a listener that may cancel it waits at most this long for the engine thread,
-// then scrolls without it and the page gets the event as not cancelable. The following events of
-// that burst do not wait. Pages with long scripts (ads) otherwise scrolled seconds late.
-constexpr Seconds maxEngineDelay = 250_ms;
+// Like Safari for a trackpad gesture (ThreadedScrollingTree::waitForEventToBeProcessedByMainThread):
+// a wheel event over a listener that may cancel it waits for the engine thread, but not while that
+// thread is in a long task (a page script): then the scrolling thread scrolls and the page gets the
+// event later as not cancelable. The following events of that burst do not wait. Pages with long
+// scripts (ads) otherwise scrolled seconds late.
+constexpr Seconds longTask = 100_ms;
 constexpr Seconds nonBlockingBurst = 500_ms;
 
 // Who handles a blocking wheel event: the engine thread when it starts it in time, else the
@@ -117,13 +117,16 @@ void blockingWheelEvent(int viewId, ThreadedScrollingTree& tree, const PlatformW
         else
             view->dispatchWheelEvent(event, { WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
     });
-    if (claim->waitForEngine(maxEngineDelay)) {
+    // Wait while the engine thread is free or in a short task; take over when it is in a long one
+    while (!claim->waitForEngine(10_ms)) {
+        if (engineThreadBusyFor() > longTask && claim->take(WheelClaim::Owner::ScrollingThread))
+            break;
+    }
+    if (claim->waitForEngine(0_s)) {
         tree.willSendEventToMainThread(event);
         tree.waitForEventToBeProcessedByMainThread(event);
         return;
     }
-    if (!claim->take(WheelClaim::Owner::ScrollingThread))
-        return;
     {
         Locker locker { s_lock };
         auto it = entries().find(viewId);

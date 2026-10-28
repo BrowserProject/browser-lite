@@ -84,6 +84,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_input_mark_address()
 // run when nothing of JSC/WebCore is on the stack: at the end of the outermost
 // DeferGC, so here after the work (patch 0012, Heap.cpp). That way there is no
 // need for --spill-pointers, which makes everything about 10x slower.
+// Since when the engine thread runs its outermost work item, 0 while it waits for work: the
+// scrolling thread does not wait for a thread busy with a long task (engineThreadBusyFor)
+static std::atomic<double> s_workSince { 0 };
+
+Seconds engineThreadBusyFor()
+{
+    double since = s_workSince.load(std::memory_order_relaxed);
+    return since ? WTF::MonotonicTime::now() - WTF::MonotonicTime::fromRawSeconds(since) : 0_s;
+}
+
 template<typename Work>
 static void runWithGCAfterwards(Work&& work)
 {
@@ -101,6 +111,7 @@ static void runWithGCAfterwards(Work&& work)
         return;
     }
     auto gcStart = WTF::MonotonicTime::now();
+    s_workSince.store(gcStart.secondsSinceEpoch().value(), std::memory_order_relaxed);
     // heap.size() is expensive, only for the debug output
     size_t sizeBefore = debugEnabled() ? vm->heap.size() : 0;
     {
@@ -108,6 +119,7 @@ static void runWithGCAfterwards(Work&& work)
         work();
         gcStart = WTF::MonotonicTime::now();
     } // a deferred GC runs here
+    s_workSince.store(0, std::memory_order_relaxed);
     if (debugEnabled()) {
         auto duration = (WTF::MonotonicTime::now() - gcStart).milliseconds();
         if (duration > 5)
