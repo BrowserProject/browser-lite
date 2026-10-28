@@ -59,7 +59,11 @@ targets are at least 44 px and fields have 16 px text (iOS zooms into smaller). 
 `viewport-fit=cover` and keeps toolbar, page and sheets out of the notch and the home indicator
 (`env(safe-area-inset-*)`). While the iOS keyboard covers the page, `visual-viewport.ts` sets
 `--visible-height` and `--keyboard-height`, so sheets stay above it. An emulated device of the
-settings fills the page area there. Everything is CSS plus the tab overview; the media query of
+settings fills the page area there. The page is `100dvh` high, so it fills the screen also while
+the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android device the setting
+"Device" defaults to that device (Android: a WebKit user agent with "Android" and, on phones,
+"Mobile", no Chrome token) with the real screen of the host; then the page area keeps the whole
+window (only a device the host is not gets a frame of its size). Everything is CSS plus the tab overview; the media query of
 `style.css` is the only breakpoint (`layout.ts` reads it through `--layout`).
 `tests/demo/mobile-test.mjs` checks it on an emulated phone.
 

@@ -30,6 +30,10 @@ body {
     14px system-ui,
     sans-serif;
 }
+/* As high as the visible part, also while the toolbar of a mobile browser is hidden */
+html {
+  height: 100dvh;
+}
 body {
   display: flex;
   flex-direction: column;

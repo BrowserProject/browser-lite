@@ -26,9 +26,11 @@ interface DeviceProfile {
 
 // Only WebKit (Safari) user agents; the default is the one of the engine (Linux). The iPad
 // reports itself as a Mac like real iPadOS, so sites see what they see on an iPad and detect it
-// by navigator.maxTouchPoints like there.
+// by navigator.maxTouchPoints like there. Android without a Chrome token, like the WebKit
+// browsers Android had: sites see Android, and "Mobile" on phones.
 const SAFARI = 'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0';
 const MAC_UA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ${SAFARI} Safari/605.1.15`;
+const ANDROID = 'Mozilla/5.0 (Linux; Android 10; K)';
 
 /** Devices of the settings; one with a screen is a mobile device with touch. */
 export const DEVICES: Record<string, DeviceProfile> = {
@@ -46,15 +48,32 @@ export const DEVICES: Record<string, DeviceProfile> = {
     platform: 'MacIntel',
     screen: { width: 820, height: 1180, pixelRatio: 2 },
   },
+  android: {
+    name: 'Android phone',
+    userAgent: `${ANDROID} ${SAFARI} Mobile Safari/605.1.15`,
+    platform: 'Linux armv8l',
+    screen: { width: 412, height: 915, pixelRatio: 2.625 },
+  },
+  'android-tablet': {
+    name: 'Android tablet',
+    userAgent: `${ANDROID} ${SAFARI} Safari/605.1.15`,
+    platform: 'Linux armv8l',
+    screen: { width: 800, height: 1280, pixelRatio: 2 },
+  },
 };
 
 /**
- * The device of the settings that matches the host: on an iPhone or iPad pages get the mobile
- * Safari of that device by default, desktops the engine's own identity.
+ * The device of the settings that matches the host: on an iPhone, iPad or Android device pages
+ * get the mobile identity of that device by default (with the real screen, see
+ * updateStartSettings), desktops the engine's own identity.
  */
 export function hostDevice(): string {
   if (typeof navigator === 'undefined') return 'desktop';
   if (/iPhone|iPod/.test(navigator.userAgent)) return 'iphone';
+  if (/Android/.test(navigator.userAgent)) {
+    const data = (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData;
+    return (data?.mobile ?? /Mobile/.test(navigator.userAgent)) ? 'android' : 'android-tablet';
+  }
   // iPadOS reports a Mac, but with touch
   if (
     /iPad/.test(navigator.userAgent) ||
@@ -131,6 +150,11 @@ export const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions(
 /** What applies from the start of the engine. */
 export interface StartSettings {
   device: DeviceProfile;
+  /**
+   * Size of the page area for a mobile device the host is not; null for desktops and for the
+   * device the host is (its page area follows the window).
+   */
+  frame: { width: number; height: number } | null;
   zoom: number;
   restoreSession: boolean;
   /** Options of createBrowser. */
@@ -166,8 +190,9 @@ export function updateStartSettings(restarted: boolean): StartSettings {
   const maxPixelRatio = MAX_PIXEL_RATIO[current.resolution] ?? undefined;
   // The device the host is: its real screen instead of the emulated one, at the resolution of
   // the settings
+  const host = current.device === hostDevice();
   const screen =
-    device.screen && current.device === hostDevice()
+    device.screen && host
       ? {
           width: window.screen.width,
           height: window.screen.height,
@@ -181,6 +206,7 @@ export function updateStartSettings(restarted: boolean): StartSettings {
     .filter((language) => /^[A-Za-z0-9-]+$/.test(language));
   start = {
     device,
+    frame: device.screen && !host ? device.screen : null,
     zoom: current.zoom,
     restoreSession,
     options: {

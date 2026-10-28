@@ -2,7 +2,8 @@
 // compact toolbar fits and has touch targets of at least 44 px, the address entry navigates, the
 // tab overview shows the tabs, switches and closes one, the menu opens as a bottom sheet, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, and the desktop layout
-// comes back above the breakpoint. Screenshots: build/e2e-mobile-*.png.
+// comes back above the breakpoint. An Android phone as host gets the Android device by default.
+// Screenshots: build/e2e-mobile-*.png.
 //
 //   node tests/demo/mobile-test.mjs [engine-dir]
 import {
@@ -39,8 +40,12 @@ const { url: siteURL } = await serve((req, res) => {
 
 const stack = await startStack({ app: 'demo', token: 'mobile-token-0123456789abcdef' });
 const browser = await launch();
+// Chrome on an Android phone
+const ANDROID_UA =
+  'Mozilla/5.0 (Linux; Android 13; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 const context = await browser.newContext({
   viewport: PORTRAIT,
+  userAgent: ANDROID_UA,
   deviceScaleFactor: 3,
   hasTouch: true,
   // Playwright has no isMobile in Firefox
@@ -102,6 +107,25 @@ const TOOLBAR_BUTTONS = '#toolbar > button';
 
 await tab.goto(stack.app({ url: `${siteURL}one` }));
 check('first page', await loaded('Page one', TIMEOUT));
+const device = await tab.evaluate(() => window.blTest.settings().device);
+await tab.evaluate(() =>
+  window.blTest.eval(
+    "console.log('RESULT identity=' + /Android.*Mobile/.test(navigator.userAgent) + ',' + !/Chrome/.test(navigator.userAgent) + ',' + screen.width + ',' + navigator.maxTouchPoints)",
+  ),
+);
+check(
+  'Android host: the Android phone by default, with the screen of the host',
+  device === 'android' &&
+    (await results.wait('identity', 10000)) === `true,true,${PORTRAIT.width},5`,
+  `${device} ${results.get('identity')}`,
+);
+check(
+  'Android host: the page area keeps the whole window (no device frame)',
+  await tab.evaluate(() => {
+    const viewport = document.getElementById('viewport');
+    return !viewport.classList.contains('device') && viewport.offsetWidth === innerWidth;
+  }),
+);
 
 // Portrait: back, address, tab count and menu; the rest moved into the menu
 const visible = await tab.evaluate(() =>
@@ -301,6 +325,26 @@ check(
   desktop === 'tabs=true,forward=true,reload=true,bookmark=true,tab-count=false',
   desktop,
 );
+await context.close();
+
+// An iPad as host: the iPad device by default, the page area over the whole wide window
+const tablet = await browser.newContext({
+  viewport: { width: 1024, height: 1366 },
+  hasTouch: true,
+  userAgent:
+    'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+});
+await emulateTouchPoints(tablet);
+const ipad = await tablet.newPage();
+const ipadResults = collect(ipad, /RESULT (\w+)=(.*?)(\s+\(|$)/);
+await ipad.goto(stack.app({ url: `${siteURL}tablet` }));
+await ipadResults.wait('loaded', TIMEOUT);
+const ipadArea = await ipad.evaluate(() => {
+  const viewport = document.getElementById('viewport');
+  return `${window.blTest.settings().device},${viewport.classList.contains('device')},${viewport.offsetWidth}`;
+});
+check('iPad host: the page area keeps the whole window', ipadArea === 'ipad,false,1024', ipadArea);
+await screenshot(ipad, 'mobile-ipad');
 
 await browser.close();
 finish();

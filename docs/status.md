@@ -60,7 +60,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   last device writes (#188 to #191, #197).
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
   Chrome (compact toolbar, tab overview, menu and panels as bottom sheets, touch targets of
-  44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones (#290).
+  44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones; Android hosts
+  get an Android identity by default like iPhone and iPad hosts (#290).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Yardstick**: 257 of 280 checks like Chromium.
