@@ -66,8 +66,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4
   (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
-  sound after a tap), Samsung Galaxy S23 Chrome, Windows 11 Firefox; Firefox runs every suite in
-  CI (open failures below).
+  sound after a tap, the on-screen keyboard with the field's input mode, 20min.ch with its consent
+  dialog for two minutes), Samsung Galaxy S23 and Motorola Moto G71 Chrome, Windows 11 Firefox;
+  Firefox runs every suite in CI (open failures below).
 - **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
   #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
