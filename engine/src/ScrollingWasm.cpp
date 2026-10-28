@@ -33,7 +33,7 @@ struct Entry {
 
 // Like Safari for a trackpad gesture (ThreadedScrollingTree::waitForEventToBeProcessedByMainThread):
 // a wheel event over a listener that may cancel it waits for the engine thread, but not while that
-// thread is in a long task (a page script): then the scrolling thread scrolls and the page gets the
+// thread is in a long script of the page: then the scrolling thread scrolls and the page gets the
 // event later as not cancelable. The following events of that burst do not wait. Pages with long
 // scripts (ads) otherwise scrolled seconds late.
 constexpr Seconds longTask = 100_ms;
@@ -117,9 +117,9 @@ void blockingWheelEvent(int viewId, ThreadedScrollingTree& tree, const PlatformW
         else
             view->dispatchWheelEvent(event, { WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
     });
-    // Wait while the engine thread is free or in a short task; take over when it is in a long one
+    // Wait unless the engine thread is in a long script
     while (!claim->waitForEngine(10_ms)) {
-        if (engineThreadBusyFor() > longTask && claim->take(WheelClaim::Owner::ScrollingThread))
+        if (engineThreadInLongScript(longTask) && claim->take(WheelClaim::Owner::ScrollingThread))
             break;
     }
     if (claim->waitForEngine(0_s)) {

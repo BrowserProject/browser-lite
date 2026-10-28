@@ -85,13 +85,19 @@ extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_input_mark_address()
 // DeferGC, so here after the work (patch 0012, Heap.cpp). That way there is no
 // need for --spill-pointers, which makes everything about 10x slower.
 // Since when the engine thread runs its outermost work item, 0 while it waits for work: the
-// scrolling thread does not wait for a thread busy with a long task (engineThreadBusyFor)
+// scrolling thread does not wait for a thread in a long script (engineThreadInLongScript)
 static std::atomic<double> s_workSince { 0 };
+static std::atomic<JSC::VM*> s_workVM { nullptr };
 
-Seconds engineThreadBusyFor()
+bool engineThreadInLongScript(Seconds minimum)
 {
     double since = s_workSince.load(std::memory_order_relaxed);
-    return since ? WTF::MonotonicTime::now() - WTF::MonotonicTime::fromRawSeconds(since) : 0_s;
+    auto* vm = s_workVM.load(std::memory_order_relaxed);
+    if (!since || !vm || WTF::MonotonicTime::now() - WTF::MonotonicTime::fromRawSeconds(since) < minimum)
+        return false;
+    // Read from another thread: only whether JS is on the engine thread's stack right now (a long
+    // rendering update is not a reason to scroll past a listener that may cancel)
+    return std::atomic_ref(vm->entryScope).load(std::memory_order_relaxed);
 }
 
 template<typename Work>
@@ -111,6 +117,7 @@ static void runWithGCAfterwards(Work&& work)
         return;
     }
     auto gcStart = WTF::MonotonicTime::now();
+    s_workVM.store(vm, std::memory_order_relaxed);
     s_workSince.store(gcStart.secondsSinceEpoch().value(), std::memory_order_relaxed);
     // heap.size() is expensive, only for the debug output
     size_t sizeBefore = debugEnabled() ? vm->heap.size() : 0;

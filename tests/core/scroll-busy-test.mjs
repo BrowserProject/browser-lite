@@ -84,7 +84,10 @@ check(
   scrolled,
   `${Date.now() - started} ms, pixel ${JSON.stringify(await pagePixel(page, 50, 50))}`,
 );
-const after = await state();
+// The page learns the new position with its next rendering update after the block
+await page.waitForTimeout(Math.max(0, started + 4500 - Date.now()));
+let after = null;
+await waitFor(async () => Number((after = await state())?.split(',')[0]) >= 300, 5000, 500);
 check(
   'the listener got the event afterwards, the page stays scrolled',
   Number(after?.split(',')[0]) >= 300 && Number(after?.split(',')[1]) >= 2,

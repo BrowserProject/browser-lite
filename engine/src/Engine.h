@@ -29,8 +29,8 @@ void runNextOnEngineThread(Function<void()>&&);
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
-// How long the engine thread has been in its current work item (0 while it waits for work)
-WTF::Seconds engineThreadBusyFor();
+// Whether the engine thread runs JS in a work item that started at least minimum ago
+bool engineThreadInLongScript(WTF::Seconds minimum);
 // A page dialog: runs the work of the engine thread nested until done()
 // returns true; the views of the dialog's page group hold back (WebView.h)
 void runNestedEventLoop(const Function<bool()>& done);
