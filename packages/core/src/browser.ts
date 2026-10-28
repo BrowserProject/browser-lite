@@ -1,4 +1,4 @@
-import { writeHostClipboard } from './clipboard.js';
+import { trackClipboardWrite, writeHostClipboard } from './clipboard.js';
 import {
   type Config,
   colorScheme,
@@ -463,9 +463,10 @@ class BrowserImpl implements Browser, ViewHost {
       const write = this.handler('clipboardWrite') ?? writeHostClipboard;
       const request = { text: String(data.text ?? ''), html: String(data.html ?? '') };
       try {
-        Promise.resolve(write(request)).catch((error: unknown) =>
+        const written = Promise.resolve(write(request)).catch((error: unknown) =>
           console.warn('[browser-lite] clipboardWrite failed:', error),
         );
+        trackClipboardWrite(request.text, request.html, written);
       } catch (error) {
         console.warn('[browser-lite] clipboardWrite failed:', error);
       }

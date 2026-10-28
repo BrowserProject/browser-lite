@@ -1,3 +1,4 @@
+import { pendingClipboardWrite } from './clipboard.js';
 import { modifierBits } from './input.js';
 import type { ViewImpl } from './view.js';
 
@@ -119,8 +120,12 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     e.preventDefault();
     view.userInput(false);
     const clipboardData = e.clipboardData;
-    const data: Record<string, unknown> = { text: clipboardData?.getData('text/plain') ?? '' };
-    const html = clipboardData?.getData('text/html');
+    // Right after a copy of a page the host clipboard may still have the old content
+    const pending = pendingClipboardWrite();
+    const data: Record<string, unknown> = {
+      text: pending ? pending.text : (clipboardData?.getData('text/plain') ?? ''),
+    };
+    const html = pending ? pending.html : clipboardData?.getData('text/html');
     if (html) data.html = html;
     // After an await the data of the event is gone
     const files = [...(clipboardData?.files ?? [])];
