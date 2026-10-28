@@ -245,7 +245,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   compiled code; the tab's process grew from 0.5 to 4.4 GB after 14 loads, the same with the
   engine destroyed before leaving, without services and without the back-forward cache): after
   about 15 loads of an engine page in one tab the next fails with "failed to allocate executable
-  memory". A new tab per load does not grow, nor does a page that only compiles the engine and
+  memory". Chromium frees them (the renderer goes up and down between 0.7 and 1.6 GB over 24 loads). A new tab per load does not grow, nor does a page that only compiles the engine and
   its chunks and instantiates them in workers. Which reference holds the old documents is open;
   `cache-test` opens a new tab every 6 visits (#288).
 - Soak tests, about every third CI run: after 200 navigations 3 to 4 pages of random kinds stay
