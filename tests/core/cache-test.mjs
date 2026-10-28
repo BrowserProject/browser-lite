@@ -689,6 +689,7 @@ check(
   workerKeys.join('|'),
 );
 
+await freshTab();
 // A frame sandboxed without allow-same-origin has an opaque origin: neither its document nor
 // its script is stored
 for (const visits of [1, 2]) {
