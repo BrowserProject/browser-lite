@@ -241,6 +241,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   blob and redirected CORS loads (and its time limit), `compositing-test` CPU painting after a GPU
   loss without the compositor thread, both soak tests. Closing a tab within about a second of a
   change can lose that change (#275).
+- Soak tests, about every third CI run: after 200 navigations 3 to 4 pages of random kinds stay
+  alive (detached, with their JS wrapper and all their nodes), so the JS heap still reaches them;
+  which root holds them is open (the memory report prints nodes and wrapper per document).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page
