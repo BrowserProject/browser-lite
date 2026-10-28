@@ -80,12 +80,19 @@ if (ENVIRONMENT_IS_PTHREAD) {
     return thread ? PThread.pthreads[thread] || null : null;
   };
   // Stops all engine threads so the host can drop the module. The module is
-  // unusable afterwards.
+  // unusable afterwards. The main thread waits for messages of its threads
+  // with Atomics.waitAsync (once the module is instantiated); Firefox roots a
+  // pending wait until it is notified, and with it the page and its engine
+  // after the page is left (#291). ABORT keeps the woken mailbox check
+  // (checkMailbox) from waiting again.
   Module.blShutdown = () => {
     Module.blTransport = null;
     if (typeof blSockets !== 'undefined')
       blSockets.closeAll();
     PThread.terminateAllThreads();
+    ABORT = true;
+    if (typeof _pthread_self === 'function')
+      PThread.clearMailboxAwait(_pthread_self());
   };
 }
 

@@ -248,12 +248,16 @@ class BrowserImpl implements Browser, ViewHost {
           : errorText(error)) || fallback
       ).slice(0, MAX_CRASH_REASON);
     // While the page goes away its requests are cancelled, a thread that waits for one fails:
-    // no crash then
+    // no crash then. A page left for good ends its engine after a last write (leave), one in the
+    // back-forward cache keeps it. Firefox does not let the engine write while pagehide waits on
+    // the main thread, Chromium does.
     let leaving = false;
     addEventListener(
       'pagehide',
-      () => {
+      (event) => {
         leaving = true;
+        if (event.persisted) this.storage.flush(500);
+        else this.leave();
       },
       { signal },
     );
@@ -365,10 +369,8 @@ class BrowserImpl implements Browser, ViewHost {
       { signal },
     );
     // A navigation or reload of the host page goes on running it until the next page answers:
-    // the engine writes meanwhile. Firefox does not let the engine write while pagehide waits
-    // on the main thread, Chromium does.
+    // the engine writes meanwhile
     addEventListener('beforeunload', () => this.storage.flush(), { signal });
-    addEventListener('pagehide', () => this.storage.flush(500), { signal });
     this.fullscreen.start(signal);
     this.network.start(signal);
     if (config.extensions) this.extensions = attachExtensions(config.extensions, this);
@@ -718,6 +720,24 @@ class BrowserImpl implements Browser, ViewHost {
     // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
     this.detachExtensions();
+    this.stopEngine();
+    this.events.clear();
+  }
+
+  /**
+   * The page is left for good (pagehide, not into the back-forward cache): the engine writes
+   * and stops, without events (the page cannot react anymore). Firefox keeps a left page with its
+   * engine while the engine's main thread still waits for messages of its threads (#291).
+   */
+  private leave(): void {
+    if (this.phase === 'destroyed') return;
+    if (this.ready) this.storage.flush(500);
+    this.watchdog.stop();
+    this.stopEngine();
+  }
+
+  /** Ends the engine and lets go of it (destroy, leave). */
+  private stopEngine(): void {
     this.phase = 'destroyed';
     this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.lifetime.abort();
@@ -735,7 +755,6 @@ class BrowserImpl implements Browser, ViewHost {
     this.releaseLock = null;
     this.storage.persistent = false;
     this.storage.directory = null;
-    this.events.clear();
     if (live === this) live = null;
   }
 }
