@@ -793,41 +793,48 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
             printf("[memory]   retainers of %s: wrapper not in the snapshot\n", url.utf8().data());
             continue;
         }
-        // Breadth first towards a root
-        HashMap<int, std::pair<int, size_t>> cameFrom; // node -> (node it keeps alive, edge)
-        Deque<int> queue;
-        queue.append(start->value);
-        cameFrom.add(start->value + 1, std::pair<int, size_t> { -1, 0 });
-        int found = -1;
-        while (!queue.isEmpty() && found < 0 && cameFrom.size() < 2000000) {
-            int node = queue.takeFirst();
-            if (rootReason.contains(node + 1)) {
-                found = node;
-                break;
+        // Breadth first towards a root. A root "WeakSets" is a wrapper kept for an opaque root
+        // (its document or window) that something else marked: first look for another root.
+        auto pathToRoot = [&](bool acceptWeakSets) -> String {
+            HashMap<int, std::pair<int, size_t>> cameFrom; // node -> (node it keeps alive, edge)
+            Deque<int> queue;
+            queue.append(start->value);
+            cameFrom.add(start->value + 1, std::pair<int, size_t> { -1, 0 });
+            int found = -1;
+            while (!queue.isEmpty() && cameFrom.size() < 2000000) {
+                int node = queue.takeFirst();
+                if (auto reason = rootReason.find(node + 1); reason != rootReason.end() && (acceptWeakSets || reason->value != "WeakSets"_s)) {
+                    found = node;
+                    break;
+                }
+                auto it = referrers.find(node + 1);
+                if (it == referrers.end())
+                    continue;
+                for (auto& [from, edge] : it->value) {
+                    if (cameFrom.add(from + 1, std::pair<int, size_t> { node, edge }).isNewEntry)
+                        queue.append(from);
+                }
             }
-            auto it = referrers.find(node + 1);
-            if (it == referrers.end())
-                continue;
-            for (auto& [from, edge] : it->value) {
-                if (cameFrom.add(from + 1, std::pair<int, size_t> { node, edge }).isNewEntry)
-                    queue.append(from);
+            if (found < 0)
+                return { };
+            StringBuilder path;
+            path.append("root ("_s, rootReason.get(found + 1), ") "_s);
+            for (int node = found, steps = 0; node >= 0 && steps < 14; ++steps) {
+                auto [next, edge] = cameFrom.get(node + 1);
+                path.append(describe(node));
+                if (next < 0)
+                    break;
+                path.append(" -"_s, edgeLabel(edge), "-> "_s);
+                node = next;
             }
-        }
-        if (found < 0) {
-            printf("[memory]   retainers of %s: no path to a root\n", url.utf8().data());
-            continue;
-        }
-        StringBuilder path;
-        path.append("root ("_s, rootReason.get(found + 1), ") "_s);
-        for (int node = found, steps = 0; node >= 0 && steps < 14; ++steps) {
-            auto [next, edge] = cameFrom.get(node + 1);
-            path.append(describe(node));
-            if (next < 0)
-                break;
-            path.append(" -"_s, edgeLabel(edge), "-> "_s);
-            node = next;
-        }
-        printf("[memory]   retainers of %s: %s\n", url.utf8().data(), path.toString().utf8().data());
+            return path.toString();
+        };
+        auto path = pathToRoot(false);
+        if (path.isNull())
+            path = pathToRoot(true);
+        if (path.isNull())
+            path = "no path to a root"_s;
+        printf("[memory]   retainers of %s: %s\n", url.utf8().data(), path.utf8().data());
     }
 }
 

@@ -507,9 +507,9 @@ const partitionsOf = async (url) =>
     .sort()
     .join('|');
 // Firefox keeps the engines of earlier documents of a tab (memory and compiled code, about 270 MB
-// each) and runs out of executable memory after about 15 (#288): every few visits a new tab, which
-// waits for the storage lock of the old one
-let visits = 0;
+// each) and runs out of executable memory after about 15 (#288): a new tab before some sections
+// (never within one, its visits compare with each other), which waits for the storage lock of
+// the old one
 async function freshTab() {
   await page.goto('about:blank');
   await page.close();
@@ -522,7 +522,6 @@ async function freshTab() {
   );
 }
 async function visit(url, key) {
-  if (++visits % 6 === 0) await freshTab();
   results.clear();
   await openHost(page, appURL(url));
   const value = await result(key);
@@ -575,6 +574,7 @@ check(
   framePartitions,
 );
 
+await freshTab();
 // Service worker of the cross-site frame. First the frame navigates to /sw2/nav without a worker
 // (stored in the partition of a subframe document), then registers the worker. Its fetch()
 // stores and hits in the partition of the frame (top site 127.0.0.1, worker site localhost),
@@ -625,6 +625,7 @@ check(
   `${value} ${counts()}`,
 );
 
+await freshTab();
 // A blob: top document has the site of its creator: the same frame under blob: tops of two
 // sites misses, and hits again under the first
 const bframeURL = `${otherURL()}bframe`;
@@ -647,6 +648,7 @@ check(
   blobPartitions,
 );
 
+await freshTab();
 // After a cross-origin redirect WebCore loads with an opaque origin: the document's site
 // decides, so the target is stored and hits
 for (const name of ['from the network', 'hits']) {
@@ -701,6 +703,7 @@ const sandboxKeys =
   (await partitionsOf(`${otherURL()}sbframe`)) + (await partitionsOf(`${otherURL()}sb.js`));
 check('sandboxed frame: no entries', sandboxKeys === '', sandboxKeys);
 
+await freshTab();
 // Range requests. Visit 1 stores, visit 2 (other Vary value, /r/ver changed) and visit 3 hit or
 // revalidate, visit 4 from a top page of localhost is another partition
 async function rangeVisit(top, variant, names = Object.keys(RANGE_FILES)) {
@@ -787,6 +790,7 @@ check(
   ranges.info,
 );
 
+await freshTab();
 // Media: the service worker loads the audio in pieces through MediaFetch; once all pieces are
 // stored the next visit takes them from the cache (or revalidates them). Value of the page and
 // the requests of the file (to the last byte: all pieces were requested and stored)
