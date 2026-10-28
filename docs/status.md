@@ -248,9 +248,12 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   memory". Chromium frees them (the renderer goes up and down between 0.7 and 1.6 GB over 24 loads). A new tab per load does not grow, nor does a page that only compiles the engine and
   its chunks and instantiates them in workers. Which reference holds the old documents is open;
   `cache-test` opens a new tab every 6 visits (#288).
-- Soak tests, about every third CI run: after 200 navigations 3 to 4 pages of random kinds stay
-  alive (detached, with their JS wrapper and all their nodes), so the JS heap still reaches them;
-  which root holds them is open (the memory report prints nodes and wrapper per document).
+- Soak tests, about every third CI run: after 200 navigations 3 to 4 pages stay alive (detached,
+  with their JS wrapper and all their nodes). The retainer paths (memory report 4) start at the
+  root "WeakSets": a node or `Location` wrapper counts as reachable through its opaque root (the
+  document or window) and holds the window and the document; who marks that opaque root does not
+  show in the snapshot. Mostly the `dom` page (3000 elements with onclick, a srcdoc iframe), once
+  its srcdoc document without any path (held from C++).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page
