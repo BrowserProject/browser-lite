@@ -1,6 +1,7 @@
 import { bookmarks, onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { downloadState, downloads, onDownloadsChange } from './downloads.js';
 import { clearHistory, onHistoryChange, readHistory } from './history.js';
+import { compactLayout } from './layout.js';
 import { byId, element, formatTime } from './util.js';
 
 /** Panel names; 'menu' is the menu of the toolbar. */
@@ -32,6 +33,8 @@ export function initSidePanel(panelActions: PanelActions): void {
   onHistoryChange(() => refresh('history'));
   onBookmarksChange(() => refresh('bookmarks'));
   onDownloadsChange(() => refresh('downloads'));
+  // Only shown in the phone layout, where the panel is a sheet
+  byId('sheet-backdrop').addEventListener('click', () => togglePanel(null));
 }
 
 export const panelOpen = (): boolean => current !== null;
@@ -69,11 +72,32 @@ function linkRow(entry: { url: string; title: string }, extra: HTMLElement): HTM
   return row;
 }
 
+// The toolbar buttons the phone layout hides, as a row at the top of the menu
+const TOOLBAR_ROW = ['forward', 'reload', 'bookmark'];
+
 function renderMenu(): void {
   const close = (run: () => void) => () => {
     togglePanel(null);
     run();
   };
+  const row = element('div', { className: 'panel-toolbar' });
+  for (const id of TOOLBAR_ROW) {
+    const source = byId<HTMLButtonElement>(id);
+    const button = element('button', {
+      className: 'panel-icon',
+      title: source.title,
+      textContent: source.textContent,
+      disabled: source.disabled,
+    });
+    button.setAttribute('aria-label', source.title);
+    button.classList.toggle('active', source.classList.contains('active'));
+    button.addEventListener(
+      'click',
+      close(() => source.click()),
+    );
+    row.append(button);
+  }
+  panel.append(row);
   const items: [string, string, () => void][] = [
     ['New tab', 'Ctrl+T', () => actions.openURL('', true)],
     ['History', 'Ctrl+H', () => togglePanel('history')],
@@ -146,7 +170,8 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
     panel.append(clear);
   }
   renderList();
-  search.focus();
+  // On a phone the keyboard would cover half of the sheet before the user wants to search
+  if (!compactLayout()) search.focus();
 }
 
 function renderDownloads(): void {

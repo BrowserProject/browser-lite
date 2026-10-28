@@ -31,7 +31,7 @@ const removeStatus = linkStatus(view);
 | Export | Purpose |
 | --- | --- |
 | `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>` (file chooser stays with the core). |
-| `selectPopup(o?)` | `<select>` list below or above the field. Keys: arrows, PageUp/PageDown, Home/End, typing jumps, Enter/Space choose, Escape/Tab cancel. Click outside, resize or window blur cancel. |
+| `selectPopup(o?)` | `<select>` list below or above the field. Keys: arrows, PageUp/PageDown, Home/End, typing jumps, Enter/Space choose, Escape/Tab cancel. Click outside, a change of the window width or window blur cancel (not a height change, like an on-screen keyboard going away). |
 | `colorPicker(o?)`, `dateTimePicker(o?)` | Native pickers of the host browser through a hidden input (`showPicker()`), with min, max and step of the field; a host without month or week inputs (Firefox, Safari) shows its date picker for them. Every `input` event previews the value in the page (`request.preview`); resolve on change or on a click elsewhere. One picker per document, also when composed separately: a new one finishes the open one. |
 | `permissionPrompt(o?)` | "example.com wants to know your location" with Block and Allow; one at a time, queued. Only asks: remembering is the job of the `PermissionStore`. Allowing notifications also asks the host browser. |
 | `loginPrompt(o?)` | HTTP authentication like Chrome's sign-in dialog: "Sign in", the origin, for `http:` "Your connection to this site is not private", user name and password, Cancel and Sign in (Enter signs in, Escape cancels). Like Chrome without the realm, a text of the server. One at a time, queued. |

@@ -11,8 +11,8 @@ interface Entry {
 /**
  * List of a `<select>` below the field (above when there is more room), with keyboard
  * navigation (arrows, page keys, Home/End, typing jumps to a matching entry, Enter or Space
- * chooses, Escape or Tab cancels). A click outside, a resize or losing the window focus
- * cancels. Elements: `.bl-select-popup` with rows `.bl-option` (`data-bl-highlighted`,
+ * chooses, Escape or Tab cancels). A click outside, a change of the window width or losing the
+ * window focus cancels. Elements: `.bl-select-popup` with rows `.bl-option` (`data-bl-highlighted`,
  * `aria-selected`, `aria-disabled`), `.bl-group` and `hr.bl-separator`.
  */
 export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectPopup'> {
@@ -116,12 +116,14 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
         const onPointer = (event: Event) => {
           if (!popup.contains(event.target as Node)) choose(-1);
         };
+        const width = win.innerWidth;
         // Keys go to the popup while it is open, wherever the focus is (the page keeps it)
         const stopListening = listen([
           [win, 'keydown', onKey, true],
           [doc, 'pointerdown', onPointer, true],
           [win, 'blur', () => choose(-1)],
-          [win, 'resize', () => choose(-1)],
+          // Not the height: an on-screen keyboard that goes away as the field loses focus
+          [win, 'resize', () => win.innerWidth !== width && choose(-1)],
         ]);
         request.signal.addEventListener('abort', onAbort);
 

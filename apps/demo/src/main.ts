@@ -31,6 +31,7 @@ import { needsNewEngine, type StartSettings, updateStartSettings } from './setti
 import { openSettings } from './settings-page.js';
 import { installShortcuts } from './shortcuts.js';
 import { initSidePanel, panelOpen, togglePanel } from './side-panel.js';
+import { initTabOverview } from './tab-overview.js';
 import {
   activate,
   activeTab,
@@ -73,14 +74,17 @@ function showNotice(text: string): void {
   setStatus(text);
 }
 
-/** Mobile device: the page area as large as its screen, at most as large as the space. */
+/**
+ * Emulated mobile device: the page area as large as its screen, at most as large as the space.
+ * The device the host is keeps the whole window.
+ */
 function emulateDevice(start: StartSettings): void {
   const viewport = byId('viewport');
-  const screen = start.device.screen;
-  viewport.classList.toggle('device', !!screen);
-  if (!screen) return;
-  viewport.style.setProperty('--device-width', `${screen.width}px`);
-  viewport.style.setProperty('--device-height', `${screen.height}px`);
+  const frame = start.frame;
+  viewport.classList.toggle('device', !!frame);
+  if (!frame) return;
+  viewport.style.setProperty('--device-width', `${frame.width}px`);
+  viewport.style.setProperty('--device-height', `${frame.height}px`);
 }
 
 /** `openProfile`: download the profile into the storage directory before the engine starts. */
@@ -314,6 +318,7 @@ initSidePanel({
   openSettings: () => openSettings(),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
+initTabOverview();
 onPreviewClosed(focusPage);
 onBookmarksChange(() => {
   const tab = activeTab();

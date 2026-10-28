@@ -5,7 +5,7 @@ click, discarding under memory pressure and a message when none is left), addres
 suggestions, history, bookmarks, downloads panel, settings page with profile and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
 handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
-runs). Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
+runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
 `@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the home server:
 [deploy/](deploy/README.md).
 
@@ -48,6 +48,25 @@ An extra CA certificate only comes through code: with `debug=1` a test sets
 new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`,
 `transport`, `relay`, `options`.
 
+## Phone layout
+
+Below 640 px of width or 500 px of height (a phone in portrait or landscape) `style.css` switches
+to a layout like mobile Chrome: the toolbar has back, the address, the tab count and the menu;
+forward, reload and the star move into a row at the top of the menu; the tab count opens the tab
+overview (a card per tab: tap to switch, cross to close, new tab); menu and panels are bottom
+sheets over a backdrop; find bar, permission prompt and sign-in dialog fit the width; touch
+targets are at least 44 px and fields have 16 px text (iOS zooms into smaller). The page uses
+`viewport-fit=cover` and keeps toolbar, page and sheets out of the notch and the home indicator
+(`env(safe-area-inset-*)`). While the iOS keyboard covers the page, `visual-viewport.ts` sets
+`--visible-height` and `--keyboard-height`, so sheets stay above it. An emulated device of the
+settings fills the page area there. The page is `100dvh` high, so it fills the screen also while
+the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android device the setting
+"Device" defaults to that device (Android: a WebKit user agent with "Android" and, on phones,
+"Mobile", no Chrome token) with the real screen of the host; then the page area keeps the whole
+window (only a device the host is not gets a frame of its size). Everything is CSS plus the tab overview; the media query of
+`style.css` is the only breakpoint (`layout.ts` reads it through `--layout`).
+`tests/demo/mobile-test.mjs` checks it on an emulated phone.
+
 ## Storage
 
 Settings, bookmarks and permission decisions are prefs of the profile on the server
@@ -66,6 +85,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
+| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library and the side panel (menu, history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |

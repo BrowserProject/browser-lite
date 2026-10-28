@@ -58,6 +58,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
+- **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
+  Chrome (compact toolbar, tab overview, menu and panels as bottom sheets, touch targets of
+  44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones; Android hosts
+  get an Android identity by default like iPhone and iPad hosts (#290).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Browsers and devices** (2026-10-28, real devices through BrowserStack): macOS Safari 18.4

@@ -5,6 +5,7 @@ import { closePreview, previewOpen } from './print-preview.js';
 import { runtime } from './runtime.js';
 import { settingsOpen } from './settings-page.js';
 import { panelOpen, togglePanel } from './side-panel.js';
+import { overviewOpen, toggleOverview } from './tab-overview.js';
 import {
   activate,
   activeTab,
@@ -34,6 +35,10 @@ function shortcut(e: KeyboardEvent): boolean {
   }
   if (key === 'Escape' && panelOpen()) {
     togglePanel(null);
+    return true;
+  }
+  if (key === 'Escape' && overviewOpen()) {
+    toggleOverview(false);
     return true;
   }
   if (ctrl && !e.altKey) {
