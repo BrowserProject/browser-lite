@@ -109,7 +109,9 @@ empty user content provider until the first content arrives, `bl_set_user_conten
 when the content changed), no download, no extra work per request (a handler chain exists only
 for request types an extension handles). An integrator that does not import `createExtensionHost`
 does not bundle the host: the core of such an integrator grows by 0.5 KB with gzip (29.1 to
-29.7 KB, `createBrowser` and the default services, minified); the host adds 2.2 KB.
+29.7 KB, `createBrowser` and the default services, minified); the host adds 2.2 KB. Start and
+first page on the core test host page (Chromium, medians of 5): 1.77 s without a host, 1.71 s
+with an empty one, 1.78 s with one extension with a script and CSS, all within the noise.
 
 ## Future add-ons
 
