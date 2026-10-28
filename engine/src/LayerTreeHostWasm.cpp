@@ -561,6 +561,14 @@ String LayerTreeHostWasm::stallState() const
         ", compositor phase "_s, static_cast<unsigned>(m_scene->framePhase.load()), " for "_s, static_cast<int>(MonotonicTime::now().secondsSinceEpoch().value() - m_scene->framePhaseSince.load()), " s"_s);
 }
 
+bool LayerTreeHostWasm::compositorIdleWhileWaiting() const
+{
+    if (!m_waitingForCompositor || m_scene->framePhase.load())
+        return false;
+    Locker locker { m_scene->lock };
+    return !m_scene->frameScheduled && !m_scene->notifyEngine && !m_scene->waitingForTiles && m_scene->reasons.isEmpty() && !m_scene->hidden;
+}
+
 void LayerTreeHostWasm::flushLayerStates()
 {
     Locker stateLocker { m_scene->stateLock };

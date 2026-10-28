@@ -157,6 +157,9 @@ public:
     void didComposite() { m_waitingForCompositor = false; }
     // State of the frame pipeline for the log of a view that stopped rendering
     String stallState() const;
+    // Waiting for the compositor while it has no frame of ours scheduled, running or to report:
+    // its answer got lost (WebView::checkRenderingStall goes on without it)
+    bool compositorIdleWhileWaiting() const;
     // Show everything again (e.g. new canvas)
     void forceRepaint();
     // Hidden, the compositor does not composite the view (no animations either)
