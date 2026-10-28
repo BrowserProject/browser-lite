@@ -34,7 +34,7 @@ index 26988f5812..b4e061d207 100644
      if (!typeface)
          return nullptr;
 diff --git a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
-index a21b411f92..fbb0e8c337 100644
+index a21b411f92..c0efb1d03d 100644
 --- a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
 +++ b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.cpp
 @@ -79,12 +79,22 @@ public:
@@ -75,18 +75,17 @@ index a21b411f92..fbb0e8c337 100644
              }
          }
  
-@@ -146,6 +163,19 @@ private:
+@@ -146,6 +163,18 @@ private:
              FcFontSetDestroy(m_fontSet);
          }
  
 +#if PLATFORM(WASM)
 +        const FontSetCache::Font* bestForCharacterCluster(FcCharSet* charSet, SkiaSystemFallbackFontCache::PreferColorFont preferColorFont)
 +        {
-+            if (preferColorFont == SkiaSystemFallbackFontCache::PreferColorFont::No) {
-+                for (const auto& font : m_fallbackList) {
-+                    if (!font.isColor && !FcCharSetSubtractCount(charSet, font.charSet))
-+                        return &font;
-+                }
++            bool wantsColor = preferColorFont == SkiaSystemFallbackFontCache::PreferColorFont::Yes;
++            for (const auto& font : m_fallbackList) {
++                if (font.isColor == wantsColor && !FcCharSetSubtractCount(charSet, font.charSet))
++                    return &font;
 +            }
 +            return bestForCharacterCluster(charSet);
 +        }
@@ -95,7 +94,7 @@ index a21b411f92..fbb0e8c337 100644
          const FontSetCache::Font* bestForCharacterCluster(FcCharSet* charSet)
          {
              if (m_fallbackList.isEmpty())
-@@ -181,7 +211,11 @@ SkiaSystemFallbackFontCache::SkiaSystemFallbackFontCache() = default;
+@@ -181,7 +210,11 @@ SkiaSystemFallbackFontCache::SkiaSystemFallbackFontCache() = default;
  
  SkiaSystemFallbackFontCache::~SkiaSystemFallbackFontCache() = default;
  
@@ -107,7 +106,7 @@ index a21b411f92..fbb0e8c337 100644
  {
      FcCharSet* charSet = FcCharSetCreate();
      bool hasNonIgnorableCharacters = false;
-@@ -204,7 +238,11 @@ sk_sp<SkTypeface> SkiaSystemFallbackFontCache::fontForCharacterCluster(const Str
+@@ -204,7 +237,11 @@ sk_sp<SkTypeface> SkiaSystemFallbackFontCache::fontForCharacterCluster(const Str
      if (!fontSetCache)
          return nullptr;
  
@@ -120,15 +119,16 @@ index a21b411f92..fbb0e8c337 100644
      if (!font)
          return nullptr;
 diff --git a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
-index 6066768400..8956b5372b 100644
+index 6066768400..eb91fcde58 100644
 --- a/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
 +++ b/Source/WebCore/platform/graphics/skia/SkiaSystemFallbackFontCache.h
-@@ -42,7 +42,13 @@ public:
+@@ -42,7 +42,14 @@ public:
      SkiaSystemFallbackFontCache();
      ~SkiaSystemFallbackFontCache();
  
 +#if PLATFORM(WASM)
-+    // browser-lite: No skips color fonts when a font without color has every character
++    // browser-lite: the first font of the wanted kind (color or not) that has every character,
++    // else the first that has the most
 +    enum class PreferColorFont : bool { No, Yes };
 +    sk_sp<SkTypeface> fontForCharacterCluster(const String& locale, StringView, PreferColorFont);
 +#else

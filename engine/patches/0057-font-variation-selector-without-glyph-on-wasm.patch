@@ -19,3 +19,26 @@ diff --git a/Source/WebCore/platform/graphics/Font.cpp b/Source/WebCore/platform
              }
              ++it;
              continue;
+diff --git a/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp b/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
+index ea605103c9..cb5818e711 100644
+--- a/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
+@@ -94,6 +94,18 @@ RefPtr<const Font> FontCascade::fontForCombiningCharacterSequence(StringView str
+         return { emojiPolicy, emojiPolicy == ResolvedEmojiPolicy::RequireEmoji && m_fontDescription.variantEmoji() == FontVariantEmoji::Emoji };
+     }();
+ 
++#if PLATFORM(WASM)
++    // browser-lite: the emoji font comes in slices (deps/tools/slice-fonts.py), the slice of the cat
++    // below rarely has the base character and "heart, VS16" showed a box. The system fallback for
++    // the cluster prefers color fonts here and finds the slice that has it.
++    if (shouldForceEmojiFont) {
++        if (RefPtr systemFallback = FontCache::forCurrentThread().systemFallbackForCharacterCluster(m_fontDescription, fallbackRangesAt(0).fontForFirstRange(), IsForPlatformFont::No, FontCache::PreferColoredFont::Yes, stringView)) {
++            if (systemFallback->canRenderCombiningCharacterSequence(stringView))
++                return systemFallback.get();
++        }
++    }
++#endif
++
+     char32_t baseCharacterForBaseFont = baseCharacter;
+     if (shouldForceEmojiFont) {
+         // System fallback doesn't support character sequences, so here we override

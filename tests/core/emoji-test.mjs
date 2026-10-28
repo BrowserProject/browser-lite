@@ -1,7 +1,7 @@
 // Emoji in the page: with the variation selector VS16 (U+FE0F, "warning sign" as in many pages)
 // they take the color emoji font (patch 0057); without one, like in Chrome, a character that is
 // text by default (warning sign, heart suit) takes a text font and one that is emoji by default
-// (soccer ball) the color font (patch 0059). The fonts load on first use.
+// (star) the color font (patch 0059). The fonts load on first use.
 //
 //   node tests/core/emoji-test.mjs [engine-dir]
 import {
@@ -24,7 +24,7 @@ timeLimit();
 const PAGE = `<!doctype html><meta charset="utf-8"><title>Emoji</title>
 <style>body { margin: 0 } span { position: absolute; top: 20px; font: 80px sans-serif; line-height: 1 }</style>
 <span style="left: 20px">⚠️</span><span style="left: 220px">❤️</span><span style="left: 420px">⚠</span>
-<span style="left: 620px">⚽</span><span style="left: 20px; top: 140px">♥</span>`;
+<span style="left: 620px">⭐</span><span style="left: 20px; top: 140px">♥</span>`;
 const { url: siteURL } = await serve((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
 });
@@ -50,7 +50,7 @@ const asText = async (left, top = 20) => {
   const found = await pixels(left, top);
   return found.some(isDark) && !found.some(isColored);
 };
-check('soccer ball (emoji by default) in color', await waitFor(() => anyColored(620), 20000));
+check('star (emoji by default) in color', await waitFor(() => anyColored(620), 20000));
 check('warning sign with VS16 in color', await waitFor(() => anyColored(20), 10000));
 check('heart with VS16 in color', await waitFor(() => anyColored(220), 10000));
 check('warning sign without a selector as text', await waitFor(() => asText(420), 10000));
