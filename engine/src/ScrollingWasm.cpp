@@ -8,12 +8,9 @@
 #if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
 #include <WebCore/ScrollingThread.h>
 #include <WebCore/ScrollingTreeCoordinated.h>
-#include <wtf/Condition.h>
 #include <wtf/HashMap.h>
 #include <wtf/Lock.h>
-#include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/ThreadSafeRefCounted.h>
 
 namespace BrowserLite {
 
@@ -26,47 +23,6 @@ struct Entry {
     bool animatedScroll { false };
     // A wheel event scrolled, the next frame of the compositor has not come yet
     bool wheelScrolled { false };
-    // Until then wheel events over listeners that may cancel them scroll without waiting for the
-    // engine thread, which did not take one in time (blockingWheelEvent)
-    MonotonicTime nonBlockingUntil;
-};
-
-// Like Safari for a trackpad gesture (ThreadedScrollingTree::waitForEventToBeProcessedByMainThread):
-// a wheel event over a listener that may cancel it waits at most this long for the engine thread,
-// then scrolls without it and the page gets the event as not cancelable. The following events of
-// that burst do not wait. Pages with long scripts (ads) otherwise scrolled seconds late.
-constexpr Seconds maxEngineDelay = 50_ms;
-constexpr Seconds nonBlockingBurst = 500_ms;
-
-// Who handles a blocking wheel event: the engine thread when it starts it in time, else the
-// scrolling thread
-class WheelClaim : public ThreadSafeRefCounted<WheelClaim> {
-public:
-    enum class Owner : uint8_t { None, Engine, ScrollingThread };
-    static Ref<WheelClaim> create() { return adoptRef(*new WheelClaim); }
-
-    // Returns whether the caller got it
-    bool take(Owner owner)
-    {
-        Locker locker { m_lock };
-        if (m_owner != Owner::None)
-            return m_owner == owner;
-        m_owner = owner;
-        m_condition.notifyAll();
-        return true;
-    }
-    // Scrolling thread: whether the engine thread took it within timeout
-    bool waitForEngine(Seconds timeout)
-    {
-        Locker locker { m_lock };
-        m_condition.waitFor(m_lock, timeout, [&] { return m_owner != Owner::None; });
-        return m_owner == Owner::Engine;
-    }
-
-private:
-    Lock m_lock;
-    Condition m_condition;
-    Owner m_owner WTF_GUARDED_BY_LOCK(m_lock) { Owner::None };
 };
 
 Lock s_lock;
@@ -99,53 +55,6 @@ void sendToEngine(int viewId, const PlatformWheelEvent& event, OptionSet<WheelEv
         if (auto* view = WebView::fromID(viewId))
             view->dispatchWheelEvent(event, steps);
     });
-}
-
-// A wheel event over a listener that may cancel it (blocking, the engine thread scrolls): sent to
-// the engine thread, which takes it when it gets to it in time; else the scrolling thread scrolls
-// and the page gets it as not cancelable
-void blockingWheelEvent(int viewId, ThreadedScrollingTree& tree, const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
-{
-    auto claim = WheelClaim::create();
-    runOnEngineThread([viewId, event, steps, claim] {
-        auto* view = WebView::fromID(viewId);
-        if (!view)
-            return;
-        if (claim->take(WheelClaim::Owner::Engine))
-            view->dispatchWheelEvent(event, steps);
-        else
-            view->dispatchWheelEvent(event, { WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
-    });
-    tree.willSendEventToMainThread(event);
-    if (claim->waitForEngine(maxEngineDelay)) {
-        tree.waitForEventToBeProcessedByMainThread(event);
-        return;
-    }
-    if (!claim->take(WheelClaim::Owner::ScrollingThread))
-        return;
-    {
-        Locker locker { s_lock };
-        auto it = entries().find(viewId);
-        if (it != entries().end())
-            it->value.nonBlockingUntil = MonotonicTime::now() + nonBlockingBurst;
-    }
-    auto result = tree.handleWheelEvent(event, { WheelEventProcessingSteps::AsyncScrolling });
-    if (result.wasHandled) {
-        tree.didScheduleRenderingUpdate();
-        Locker locker { s_lock };
-        auto it = entries().find(viewId);
-        if (it != entries().end())
-            it->value.wheelScrolled = true;
-    }
-    if (result.wasHandled)
-        requestTick(viewId);
-}
-
-bool inNonBlockingBurst(int viewId)
-{
-    Locker locker { s_lock };
-    auto it = entries().find(viewId);
-    return it != entries().end() && MonotonicTime::now() < it->value.nonBlockingUntil;
 }
 
 } // namespace
@@ -211,17 +120,14 @@ void wheelEvent(int viewId, const PlatformWheelEvent& event)
     // Like EventDispatcher::internalWheelEvent() in WebKit2
     auto steps = tree->determineWheelEventProcessing(event);
     bool useEngineThreadForScrolling = steps.contains(WheelEventProcessingSteps::SynchronousScrolling);
-    // In a burst the engine thread missed: scroll here, the page gets it as not cancelable
-    if (useEngineThreadForScrolling && inNonBlockingBurst(viewId)) {
-        steps = { WheelEventProcessingSteps::AsyncScrolling, WheelEventProcessingSteps::NonBlockingDOMEventDispatch };
-        useEngineThreadForScrolling = false;
-    }
     tree->willProcessWheelEvent();
 
     ScrollingThread::dispatch([tree = WTF::move(tree), viewId, event, steps, useEngineThreadForScrolling] {
         if (useEngineThreadForScrolling) {
             // The page has a wheel listener that can prevent scrolling
-            blockingWheelEvent(viewId, *tree, event, steps);
+            tree->willSendEventToMainThread(event);
+            sendToEngine(viewId, event, steps);
+            tree->waitForEventToBeProcessedByMainThread(event);
             return;
         }
 
