@@ -133,7 +133,7 @@ resolves names. A `CloseReason` becomes an errno and then a curl code (patch 003
 the error page (#174, #175).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
-looks like Safari 26 (#283; patch 0057 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch
+looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch
 `deps/patches/curl/0002`), because bot managers compare that with the user agent: Safari's cipher
 suites (ChaCha20-Poly1305 first, #65), groups with key shares for X25519MLKEM768 and X25519,
 signature algorithms, `status_request`, SCT and zlib certificate compression, so the ClientHello
