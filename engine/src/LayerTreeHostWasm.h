@@ -82,6 +82,10 @@ public:
     // Next frame even without new content (tick for the scrolling thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
+    // Where the compositor thread is in a frame (stall diagnostics, stallState): 0 idle, 1 frame
+    // state taken, 2 layers flushed, 3 painting, 4 GPU submit, 5 showing
+    std::atomic<uint8_t> framePhase { 0 };
+    std::atomic<double> framePhaseSince { 0 };
     // View of the last rendering update (pinch zoom): the layer the main frame
     // moves for scrolling, and the last gesture taken over
     PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);
@@ -153,6 +157,9 @@ public:
     void didComposite() { m_waitingForCompositor = false; }
     // State of the frame pipeline for the log of a view that stopped rendering
     String stallState() const;
+    // Waiting for the compositor while it has no frame of ours scheduled, running or to report:
+    // its answer got lost (WebView::checkRenderingStall goes on without it)
+    bool compositorIdleWhileWaiting() const;
     // Show everything again (e.g. new canvas)
     void forceRepaint();
     // Hidden, the compositor does not composite the view (no animations either)

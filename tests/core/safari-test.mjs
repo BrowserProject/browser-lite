@@ -8,6 +8,7 @@
 //
 //   node tests/core/safari-test.mjs [engine-dir]
 import {
+  chromiumOnly,
   SWIFTSHADER,
   TIMEOUT,
   canvasOrigin,
@@ -25,6 +26,11 @@ import {
 } from '../lib/index.mjs';
 
 timeLimit();
+// The Safari paths are forced in Chromium (Firefox has its own suite run)
+if (!chromiumOnly('the Safari 18 paths (forced in Chromium)')) {
+  finish();
+  process.exit(0);
+}
 
 const PAGE = `<!doctype html><title>Safari paths</title>
 <style>body { margin: 0 } input, button { position: absolute; left: 20px; width: 200px; height: 30px }</style>
