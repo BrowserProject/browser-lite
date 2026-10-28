@@ -1,5 +1,6 @@
 // Images drawn small decode small (patch 0054, #270): a 4000 x 3000 JPEG shown at 400 x 300
-// decodes at 1/8 in the DCT instead of taking 48 MB at full size, and the picture matches the
+// decodes at 1/8 in the DCT instead of taking 48 MB at full size, a WebP of the same size at
+// 200 x 150 decodes scaled by libwebp (patch 0058, #286), and the pictures match the
 // full decoding (BL_IMAGE_SUBSAMPLING=0) at the shown size. Drawn larger later (page zoom, pinch
 // zoom) it decodes again and its fine stripes come out sharp; canvas drawImage at full size gets
 // every pixel. A progressive JPEG and one with EXIF orientation arrive in slow pieces (partial
@@ -38,7 +39,7 @@ const YELLOW = [230, 200, 40];
 
 // Quadrants red, green, blue, yellow; in the top left corner (a quarter wide, an eighth high)
 // vertical stripes 4 px black, 4 px white: too fine for a decoding at 1/8, sharp at 1/2
-function drawPicture([width, height, stripes]) {
+function drawPicture([width, height, stripes, type]) {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -63,7 +64,7 @@ function drawPicture([width, height, stripes]) {
         reader.onload = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(blob);
       },
-      'image/jpeg',
+      type,
       0.9,
     ),
   );
@@ -112,24 +113,26 @@ function withOrientation(jpeg, orientation) {
 
 const browser = await launch({ args: SWIFTSHADER });
 const maker = await browser.newPage();
-const jpeg = async (width, height, stripes) =>
-  Buffer.from(await maker.evaluate(drawPicture, [width, height, stripes]), 'base64');
+const picture = async (width, height, stripes, type = 'image/jpeg') =>
+  Buffer.from(await maker.evaluate(drawPicture, [width, height, stripes, type]), 'base64');
 const IMAGES = {
-  'photo.jpg': await jpeg(4000, 3000, true),
+  'photo.jpg': await picture(4000, 3000, true),
   // Stored 2000 x 1000, shown turned a quarter clockwise (1000 x 2000)
-  'exif.jpg': withOrientation(await jpeg(2000, 1000, false), 6),
+  'exif.jpg': withOrientation(await picture(2000, 1000, false), 6),
+  'photo.webp': await picture(4000, 3000, true, 'image/webp'),
   'progressive.jpg': fs.readFileSync(path.join(root, 'tests/fixtures/progressive.jpg')),
 };
 await maker.close();
 
 // The photo at 400 x 300, the progressive image at 200 x 150 (x 420), the turned one 100 x 200
-// (x 640). canvasRow() draws the photo at full size into a canvas and reports the first stripes;
+// (x 640), the WebP at 200 x 150 (x 760). canvasRow() draws the photo at full size into a canvas and reports the first stripes;
 // decodeTime() draws a fresh copy of the photo small into a canvas (a synchronous decoding).
 const PAGE = `<!doctype html><title>Images</title>
 <style>body { margin: 0; background: #fff } img { position: absolute; top: 0 }</style>
 <img id="photo" src="/photo.jpg" style="left:0;width:400px;height:300px">
 <img src="/progressive.jpg" style="left:420px;width:200px;height:150px">
 <img src="/exif.jpg" style="left:640px;width:100px">
+<img src="/photo.webp" style="left:760px;width:200px;height:150px">
 <script>
 let pending = document.images.length;
 for (const img of document.images)
@@ -175,8 +178,9 @@ const { url: siteURL } = await serve((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
     return;
   }
-  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
-  if (name === 'photo.jpg') {
+  const type = name.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  if (name.startsWith('photo.')) {
     res.end(image);
     return;
   }
@@ -205,6 +209,10 @@ const SPOTS = [
   [715, 50, RED],
   [665, 150, YELLOW],
   [715, 150, GREEN],
+  [790, 60, RED],
+  [910, 40, GREEN],
+  [810, 110, BLUE],
+  [910, 110, YELLOW],
 ];
 // Rows of the pictures compared between both runs: [y, from x, to x]
 const ROWS = [
@@ -216,6 +224,8 @@ const ROWS = [
   [50, 640, 740],
   [100, 640, 740],
   [150, 640, 740],
+  [40, 760, 960],
+  [110, 760, 960],
 ];
 const luma = ([r, g, b]) => 0.3 * r + 0.59 * g + 0.11 * b;
 // Contrast of the stripes: spread of the brightness along a row
@@ -254,8 +264,8 @@ async function run(env) {
     if (!near(pixel, color, 30)) missing.push(`${x},${y}: ${pixel} instead of ${color}`);
   }
   check(
-    `${label}: the three pictures show right (quadrants, EXIF orientation, progressive in pieces)`,
-    loaded === '4000x3000,1600x1200,1000x2000' && shown,
+    `${label}: the pictures show right (quadrants, EXIF orientation, progressive in pieces, WebP)`,
+    loaded === '4000x3000,1600x1200,1000x2000,4000x3000' && shown,
     `${loaded} ${missing.join('; ')}`,
   );
   await page.waitForTimeout(500);
@@ -276,7 +286,7 @@ async function run(env) {
 const small = await run('');
 const { page } = small;
 check(
-  'the photo shown at 400 x 300 takes little memory',
+  'the photos shown at 400 x 300 (JPEG) and 200 x 150 (WebP) take little memory',
   small.memory < 16 * MB,
   `${(small.memory / MB).toFixed(1)} MB more than the blank page`,
 );
@@ -337,8 +347,8 @@ await small.context.close();
 const full = await run('BL_IMAGE_SUBSAMPLING=0');
 await full.context.close();
 check(
-  'decoded at full size the same photo takes about 48 MB more',
-  full.memory > 40 * MB,
+  'decoded at full size the same photos take about 96 MB more',
+  full.memory > 80 * MB,
   `${(full.memory / MB).toFixed(1)} MB more than the blank page`,
 );
 // Mean difference per channel of the shown pictures

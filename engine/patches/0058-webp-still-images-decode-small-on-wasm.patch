@@ -1,0 +1,142 @@
+diff --git a/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp b/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp
+index ab37ca6ac5..8dae37e7c1 100644
+--- a/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp
++++ b/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.cpp
+@@ -191,8 +191,18 @@ void WEBPImageDecoder::decodeFrame(size_t frameIndex, WebPDemuxer* demuxer)
+     WebPDecBuffer decoderBuffer;
+     WebPInitDecBuffer(&decoderBuffer);
+     decoderBuffer.colorspace = MODE_RGBA;
++#if PLATFORM(WASM)
++    // browser-lite: a still image drawn small decodes small (patch 0058),
++    // libwebp scales while decoding
++    IntSize outputSize { webpFrame.width, webpFrame.height };
++    if (m_subsamplingLevel != SubsamplingLevel::Default)
++        outputSize = frameSizeAtIndex(frameIndex, m_subsamplingLevel);
++    decoderBuffer.u.RGBA.stride = outputSize.width() * sizeof(uint32_t);
++    decoderBuffer.u.RGBA.size = decoderBuffer.u.RGBA.stride * outputSize.height();
++#else
+     decoderBuffer.u.RGBA.stride = webpFrame.width * sizeof(uint32_t);
+     decoderBuffer.u.RGBA.size = decoderBuffer.u.RGBA.stride * webpFrame.height;
++#endif
+     decoderBuffer.is_external_memory = 1;
+     auto p = makeUniqueArray<uint8_t>(decoderBuffer.u.RGBA.size);
+     decoderBuffer.u.RGBA.rgba = p.get();
+@@ -201,7 +211,20 @@ void WEBPImageDecoder::decodeFrame(size_t frameIndex, WebPDemuxer* demuxer)
+         return;
+     }
+ 
++#if PLATFORM(WASM)
++    // WebPIDecode() keeps pointers into config until WebPIDelete()
++    WebPDecoderConfig config;
++    WebPInitDecoderConfig(&config);
++    config.output = decoderBuffer;
++    if (outputSize != IntSize { webpFrame.width, webpFrame.height }) {
++        config.options.use_scaling = 1;
++        config.options.scaled_width = outputSize.width();
++        config.options.scaled_height = outputSize.height();
++    }
++    WebPIDecoder* decoder = WebPIDecode(nullptr, 0, &config);
++#else
+     WebPIDecoder* decoder = WebPINewDecoder(&decoderBuffer);
++#endif
+     if (!decoder) {
+         setFailed();
+         return;
+@@ -240,6 +263,14 @@ bool WEBPImageDecoder::initFrameBuffer(size_t frameIndex, const WebPIterator* we
+     // Make sure the frameRect doesn't extend outside the buffer.
+     frameRect.intersect({ { }, size() });
+ 
++#if PLATFORM(WASM)
++    if (m_subsamplingLevel != SubsamplingLevel::Default) {
++        // A still image: one frame over the whole canvas
++        frameRect = { { }, frameSizeAtIndex(frameIndex, m_subsamplingLevel) };
++        if (!buffer.initialize(frameRect.size(), m_premultiplyAlpha))
++            return false;
++    } else
++#endif
+     if (!frameIndex || !m_frameBufferCache[frameIndex - 1].backingStore()) {
+         // This frame doesn't rely on any previous data.
+         if (!buffer.initialize(size(), m_premultiplyAlpha))
+@@ -326,6 +357,11 @@ void WEBPImageDecoder::parseHeader()
+         return; // Wait until the encoded image frame data arrives.
+     }
+ 
++#if PLATFORM(WASM)
++    // browser-lite: known before the size, which lets the image ask for a
++    // subsampling level (decodesScaled())
++    m_formatFlags = WebPDemuxGetI(demuxer, WEBP_FF_FORMAT_FLAGS);
++#endif
+     int width = WebPDemuxGetI(demuxer, WEBP_FF_CANVAS_WIDTH);
+     int height = WebPDemuxGetI(demuxer, WEBP_FF_CANVAS_HEIGHT);
+     if (!isSizeAvailable() && !setSize(IntSize(width, height))) {
+@@ -333,7 +369,9 @@ void WEBPImageDecoder::parseHeader()
+         return;
+     }
+ 
++#if !PLATFORM(WASM)
+     m_formatFlags = WebPDemuxGetI(demuxer, WEBP_FF_FORMAT_FLAGS);
++#endif
+     if (!(m_formatFlags & ANIMATION_FLAG))
+         m_repetitionCount = WebCore::RepetitionCountNone;
+     else {
+@@ -349,6 +387,33 @@ void WEBPImageDecoder::parseHeader()
+     WebPDemuxDelete(demuxer);
+ }
+ 
++#if PLATFORM(WASM)
++IntSize WEBPImageDecoder::frameSizeAtIndex(size_t, SubsamplingLevel subsamplingLevel) const
++{
++    // Like JPEG (patch 0054): a scale of 1 / 2^level, rounded up. Animations
++    // keep the full size, their frames build on each other.
++    auto size = this->size();
++    if (!decodesScaled())
++        return size;
++    int denominator = 1 << static_cast<int>(std::min(subsamplingLevel, SubsamplingLevel::Last));
++    return { (size.width() + denominator - 1) / denominator, (size.height() + denominator - 1) / denominator };
++}
++
++void WEBPImageDecoder::setSubsamplingLevel(SubsamplingLevel subsamplingLevel)
++{
++    assertIsHeld(m_lock);
++    subsamplingLevel = decodesScaled() ? std::min(subsamplingLevel, SubsamplingLevel::Last) : SubsamplingLevel::Default;
++    if (subsamplingLevel == m_subsamplingLevel)
++        return;
++
++    // Another scale decodes the frame again. A native image made from the old
++    // frame keeps its own reference to the old pixels.
++    m_subsamplingLevel = subsamplingLevel;
++    if (!m_frameBufferCache.isEmpty())
++        m_frameBufferCache[0].clear();
++}
++#endif
++
+ void WEBPImageDecoder::clearDecodedPixelDataIfNeeded(size_t clearBeforeFrame)
+ {
+     assertIsHeld(m_lock);
+diff --git a/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h b/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h
+index bafd2441c2..62086f4db4 100644
+--- a/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h
++++ b/Source/WebCore/platform/image-decoders/webp/WEBPImageDecoder.h
+@@ -50,6 +50,9 @@ public:
+     RepetitionCount repetitionCount() const override;
+     size_t decodeIfNeededAndGetFrameCount() const override { return m_frameCount; }
+     void clearDecodedPixelDataIfNeeded(size_t) override;
++#if PLATFORM(WASM)
++    IntSize frameSizeAtIndex(size_t, SubsamplingLevel) const final;
++#endif
+ 
+ private:
+     WEBPImageDecoder(AlphaOption, GammaAndColorProfileOption);
+@@ -60,6 +63,12 @@ private:
+     bool initFrameBuffer(size_t, const WebPIterator*);
+     void applyPostProcessing(size_t, WebPIDecoder*, WebPDecBuffer&, bool);
+     size_t findFirstRequiredFrameToDecode(size_t, WebPDemuxer*);
++#if PLATFORM(WASM)
++    void setSubsamplingLevel(SubsamplingLevel) final;
++    bool decodesScaled() const { return !(m_formatFlags & ANIMATION_FLAG); }
++    // The scale of frame 0 of a still image: 1 / 2^level
++    SubsamplingLevel m_subsamplingLevel { SubsamplingLevel::Default };
++#endif
+ 
+     int m_repetitionCount { 0 };
+     size_t m_frameCount { 0 };

@@ -170,8 +170,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
 
-6. Images drawn small still decode at full size unless they are JPEGs (#270): PNG, WebP, AVIF
-   and GIF decoders ignore the subsampling level (libwebp could scale still images). A JPEG also
+6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
+   #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
    decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and
    repeated CSS backgrounds, and keeps that frame for later small draws (like Safari).
 7. Memory of the host tab: with a trivial page the renderer of Chromium holds about 480 MB
