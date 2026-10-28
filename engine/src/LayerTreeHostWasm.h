@@ -82,6 +82,10 @@ public:
     // Next frame even without new content (tick for the scrolling thread)
     bool scrollingTick WTF_GUARDED_BY_LOCK(lock) { false };
     std::atomic<unsigned> pendingTiles { 0 };
+    // Where the compositor thread is in a frame (stall diagnostics, stallState): 0 idle, 1 frame
+    // state taken, 2 layers flushed, 3 painting, 4 GPU submit, 5 showing
+    std::atomic<uint8_t> framePhase { 0 };
+    std::atomic<double> framePhaseSince { 0 };
     // View of the last rendering update (pinch zoom): the layer the main frame
     // moves for scrolling, and the last gesture taken over
     PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);

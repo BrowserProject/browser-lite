@@ -56,8 +56,15 @@ EM_JS(void, bl_compositor_request_frame, (void* scene), {
 // Frames put on screen by all views (bl_frames_shown_for_testing)
 static std::atomic<unsigned> s_framesShown { 0 };
 
+static void setFramePhase(CompositorScene& scene, uint8_t phase)
+{
+    scene.framePhase.store(phase, std::memory_order_relaxed);
+    scene.framePhaseSince.store(MonotonicTime::now().secondsSinceEpoch().value(), std::memory_order_relaxed);
+}
+
 static void compositeScene(CompositorScene& scene)
 {
+    auto idle = makeScopeExit([&] { setFramePhase(scene, 0); });
     ASSERT(Compositor::isCompositorThread());
     // Tick for the scrolling thread: it applies new scroll positions when the
     // engine thread does not do a rendering update in time, and continues
@@ -142,6 +149,7 @@ static void compositeScene(CompositorScene& scene)
         notifyEngine();
     };
 
+    setFramePhase(scene, 1);
     Gpu::Scope scope;
     for (auto& layer : layersToRemove)
         layer->invalidateTarget();
@@ -190,6 +198,7 @@ static void compositeScene(CompositorScene& scene)
     for (auto& layer : layersWithTileUpdates)
         layer->processPendingBackingStoreTileUpdates();
 
+    setFramePhase(scene, 2);
     // Without a canvas (not there yet) only take the state
     auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
     if (!surface) {
@@ -222,13 +231,16 @@ static void compositeScene(CompositorScene& scene)
     auto* canvas = surface->getCanvas();
     // Holes of videos the host shows behind the canvas (#232)
     VideoOverlay::Frame overlayFrame(scene.viewId, *canvas);
+    setFramePhase(scene, 3);
     canvas->save();
     auto drawsWholeTarget = frameDamage && skipUnchanged && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
     bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE, drawsWholeTarget);
     canvas->restore();
     bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
+    setFramePhase(scene, 4);
     grContext->flushAndSubmit(surface.get());
     if (changed || !skipUnchanged) {
+        setFramePhase(scene, 5);
         Gpu::showFramebuffer(scene.viewId);
         overlayFrame.shown();
         scene.shownSize = pixelSize;
@@ -545,7 +557,8 @@ String LayerTreeHostWasm::stallState() const
     Locker locker { m_scene->lock };
     auto flag = [](bool value) { return value ? '1' : '0'; };
     return makeString("waiting "_s, flag(m_waitingForCompositor), ", frame scheduled "_s, flag(m_scene->frameScheduled), ", waiting for tiles "_s, flag(m_scene->waitingForTiles),
-        " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine));
+        " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine),
+        ", compositor phase "_s, static_cast<unsigned>(m_scene->framePhase.load()), " for "_s, static_cast<int>(MonotonicTime::now().secondsSinceEpoch().value() - m_scene->framePhaseSince.load()), " s"_s);
 }
 
 void LayerTreeHostWasm::flushLayerStates()

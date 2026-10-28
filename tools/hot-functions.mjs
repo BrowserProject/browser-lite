@@ -80,7 +80,8 @@ symlinkSync(fullWasm, path.join(engine, 'engine.wasm'));
 const LOCAL = `<!doctype html><title>Local</title><style>body{font:16px sans-serif;margin:40px}</style>
 <h1>Local page</h1><p>${'Some text for the first paint of a simple page. '.repeat(30)}</p>
 <img src="image.svg" width="200" height="100"><form><input name="q" value="text"><select><option>a</option></select><button>Go</button></form>
-<table><tr><th>a</th><td>1</td></tr></table>`;
+<table><tr><th>a</th><td>1</td></tr></table>
+<script>console.log('Local page %s', 'ready', 1, { a: 1 });</script>`;
 // Text in scripts whose fonts are lazy fallback fonts, in a grid (measured more than once)
 const FONTS = `<!doctype html><title>Scripts</title><style>body{font:16px sans-serif;margin:40px}
 ul{display:grid;grid-template-columns:repeat(4,auto)}</style><ul>
