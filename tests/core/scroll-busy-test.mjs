@@ -1,6 +1,6 @@
 // Wheel over a listener that may cancel it (engine/src/ScrollingWasm.cpp, blockingWheelEvent): with
 // a free engine thread preventDefault still keeps the page in place; while the page's script
-// blocks the engine thread the page scrolls anyway after at most 50 ms (like Safari for a trackpad
+// blocks the engine thread the page scrolls anyway after at most 250 ms (like Safari for a trackpad
 // gesture), the listener gets the event afterwards as not cancelable.
 //
 //   node tests/core/scroll-busy-test.mjs [engine-dir]
