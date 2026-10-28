@@ -8,7 +8,7 @@
 // SOAK_ROUNDS (default 40) rounds through all pages, SOAK_TABS (default 30) views or tabs.
 import fs from 'node:fs';
 import path from 'node:path';
-import { TIMEOUT, VERBOSE, check, root, serve, serveBytes, wav } from '../lib/index.mjs';
+import { TIMEOUT, VERBOSE, check, root, serve, serveBytes, waitFor, wav } from '../lib/index.mjs';
 
 const ROUNDS = Number(process.env.SOAK_ROUNDS || 40);
 const TABS = Number(process.env.SOAK_TABS || 30);
@@ -243,7 +243,15 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
   );
   const leaked = end.documents > base.documents + 2;
   check('documents back as after the warm up', !leaked, `${base.documents} -> ${end.documents}`);
-  if (leaked) console.log(end.documentList.join('\n'));
+  if (leaked) {
+    console.log(end.documentList.join('\n'));
+    // What in the JS heap keeps them (memory report 4: path to a GC root)
+    reportLines.length = 0;
+    await page.evaluate(() => window.blTest.memory(4));
+    await waitFor(() => reportLines.some((l) => l.includes('retainers of')), 60000);
+    await page.waitForTimeout(2000);
+    console.log(reportLines.filter((l) => l.includes('retainers')).join('\n'));
+  }
   check(
     'malloc uses hardly more',
     end.malloc - base.malloc < 48,

@@ -414,7 +414,8 @@ jobs:
         run: |
           npm ci
           npm run build
-          npx playwright install --with-deps "$BL_BROWSER"
+          # parity-test compares with Chromium also in the Firefox run
+          npx playwright install --with-deps "$BL_BROWSER" chromium
       - name: Audio output for Firefox (PulseAudio with a null sink)
         if: matrix.browser == 'firefox'
         run: |

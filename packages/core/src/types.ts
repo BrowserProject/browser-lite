@@ -769,8 +769,12 @@ export interface DebugApi {
   readonly module: unknown;
   /** Runs JavaScript in the page; the result goes to the console as [eval]. */
   eval(view: View, source: string): void;
-  /** Size of the engine memory; a report level writes a report to the console. */
-  memory(report?: 0 | 1 | 2 | 3): number;
+  /**
+   * Size of the engine memory; a report level writes a report to the console: 1 after a GC, 2
+   * with the documents, 3 after releasing what memory pressure releases, 4 also with what in the
+   * JS heap keeps documents without a frame alive (slow).
+   */
+  memory(report?: 0 | 1 | 2 | 3 | 4): number;
   /** Bytes allocated with malloc in the engine memory (walks the heap, slow). */
   memoryUsed(): number;
   /** Color at a CSS pixel of the visible page. */
