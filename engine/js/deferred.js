@@ -30,18 +30,32 @@ function blReadChunk(chunk) {
   return blRetry(() => blReadChunkOnce(chunk));
 }
 
+// Throws (a try of blRetry) for anything but a WebAssembly module: Emscripten's readBinary in a
+// worker passes an error page or an empty answer on (Firefox: "CompileError ... magic number")
 function blReadChunkOnce(chunk) {
   const url = locateFile(`engine.deferred-${chunk}.wasm`);
-  if (ENVIRONMENT_IS_PTHREAD || ENVIRONMENT_IS_NODE) return readBinary(url);
-  // On the page main thread a synchronous request cannot ask for an ArrayBuffer
-  const request = new XMLHttpRequest();
-  request.open('GET', url, false);
-  request.overrideMimeType('text/plain; charset=x-user-defined');
-  request.send();
-  if (request.status !== 200) abort(`${url}: HTTP ${request.status}`);
-  const text = request.responseText;
-  const bytes = new Uint8Array(text.length);
-  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+  let bytes;
+  if (ENVIRONMENT_IS_NODE) bytes = readBinary(url);
+  else if (ENVIRONMENT_IS_PTHREAD) {
+    const request = new XMLHttpRequest();
+    request.open('GET', url, false);
+    request.responseType = 'arraybuffer';
+    request.send();
+    if (request.status !== 200) throw new Error(`${url}: HTTP ${request.status}`);
+    bytes = new Uint8Array(request.response);
+  } else {
+    // On the page main thread a synchronous request cannot ask for an ArrayBuffer
+    const request = new XMLHttpRequest();
+    request.open('GET', url, false);
+    request.overrideMimeType('text/plain; charset=x-user-defined');
+    request.send();
+    if (request.status !== 200) throw new Error(`${url}: HTTP ${request.status}`);
+    const text = request.responseText;
+    bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+  }
+  if (bytes.length < 8 || bytes[0] !== 0 || bytes[1] !== 0x61 || bytes[2] !== 0x73 || bytes[3] !== 0x6d)
+    throw new Error(`${url}: no WebAssembly module (${bytes.length} bytes)`);
   return bytes;
 }
 
