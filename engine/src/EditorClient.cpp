@@ -7,6 +7,7 @@
 #include <WebCore/EnterKeyHint.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/HTMLInputElement.h>
+#include <WebCore/HTMLTextFormControlElement.h>
 #include <WebCore/InputMode.h>
 #include <WebCore/Page.h>
 #include <WebCore/DocumentInlines.h>
@@ -58,29 +59,53 @@ static String inputModeOf(Element* element)
     return "text"_s;
 }
 
-// Text input of the focused frame for "text-input": mode "" while nothing editable has the
-// selection, so the host shows no on-screen keyboard
-static String textInputState(LocalFrame& frame)
+// The focused element of the focused frame when it takes text: a text field or text area that
+// is not read only or disabled, or an editable element. Not the root of the selection: in a
+// text field that is the inner element of its shadow tree, and the selection stays in a field
+// when the focus moves to a button.
+static RefPtr<Element> focusedTextInput(LocalFrame& frame)
 {
     RefPtr page = frame.page();
     RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
-    if (!focused || !focused->selection().selection().isContentEditable())
+    RefPtr document = focused ? focused->document() : nullptr;
+    RefPtr element = document ? document->focusedElement() : nullptr;
+    if (!element)
+        return nullptr;
+    if (RefPtr control = dynamicDowncast<HTMLTextFormControlElement>(*element)) {
+        RefPtr input = dynamicDowncast<HTMLInputElement>(*control);
+        if ((input && !input->isTextField()) || !control->isMutable())
+            return nullptr;
+        return element;
+    }
+    return element->hasEditableStyle() ? element : nullptr;
+}
+
+// Text input of the focused frame for "text-input": mode "" while nothing takes text, so the
+// host shows no on-screen keyboard
+static String textInputState(LocalFrame& frame)
+{
+    RefPtr element = focusedTextInput(frame);
+    if (!element)
         return "{\"mode\":\"\"}"_s;
-    RefPtr root = focused->selection().selection().rootEditableElement();
-    RefPtr html = dynamicDowncast<HTMLElement>(root.get());
+    RefPtr html = dynamicDowncast<HTMLElement>(*element);
     String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
-    return makeString("{\"mode\":\""_s, inputModeOf(root.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+    return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+}
+
+void EditorClient::updateTextInput(LocalFrame& frame)
+{
+    auto textInput = textInputState(frame);
+    if (textInput == m_textInput)
+        return;
+    m_textInput = textInput;
+    notifyHost(m_viewId, "text-input", textInput);
 }
 
 void EditorClient::respondToChangedSelection(LocalFrame* frame)
 {
     if (!frame)
         return;
-    auto textInput = textInputState(*frame);
-    if (textInput != m_textInput) {
-        m_textInput = textInput;
-        notifyHost(m_viewId, "text-input", textInput);
-    }
+    updateTextInput(*frame);
     if (!frame->view() || !frame->selection().selection().isContentEditable())
         return;
     // End of the selection or caret, in view coordinates (CSS pixels)

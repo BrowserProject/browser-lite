@@ -48,7 +48,7 @@ source.addEventListener('sourceopen', async () => {
   await new Promise((resolve) => { buffer.addEventListener('updateend', resolve, { once: true }); buffer.appendBuffer(data); });
   source.endOfStream();
   video.addEventListener('timeupdate', () => {
-    if (video.currentTime > 1) result('msetime', video.currentTime.toFixed(1));
+    if (video.currentTime > 1.2) result('msetime', video.currentTime.toFixed(1));
   });
   video.play().then(() => result('mseplay', 'ok'), (e) => result('mseplay', e.name));
 });
@@ -121,7 +121,8 @@ check('MSE: time runs', mseTime > 1, String(mseTime));
 check(
   'MSE: host element without remote playback (needed by ManagedMediaSource)',
   await page.evaluate(() =>
-    [...document.querySelectorAll('[data-bl-media] video')].some(
+    // In the media container or behind the view canvas (video overlay, #232)
+    [...document.querySelectorAll('video')].some(
       (video) => video.disableRemotePlayback && video.src.startsWith('blob:'),
     ),
   ),
