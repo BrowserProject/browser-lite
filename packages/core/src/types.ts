@@ -295,7 +295,10 @@ export interface BrowserStorage {
   readonly persistent: boolean;
   /** OPFS namespace directory, null when memory only. Read only while running. */
   readonly directory: FileSystemDirectoryHandle | null;
-  /** Writes pending databases now; waitMs > 0 blocks up to that long (page hide). */
+  /**
+   * Writes pending databases now; waitMs > 0 blocks up to that long (page hide). Only Chromium
+   * lets the engine write while the main thread waits; elsewhere the writing goes on after it.
+   */
   flush(waitMs?: number): void;
   /** Clears the HTTP cache of this namespace. */
   clearCaches(): Promise<void>;

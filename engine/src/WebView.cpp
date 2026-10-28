@@ -712,6 +712,12 @@ void WebView::checkRenderingStall()
         log("View %d: no rendering update for 2 s (frame requested %d, in flight %d, compositing %d, frame missed %d, %s)", m_id, m_frameRequested, m_frameInFlight,
             m_compositing, m_compositedFrameMissed, m_layerTreeHost ? m_layerTreeHost->stallState().utf8().data() : "no layers");
     }
+    // Rare in CI: the view waited for the compositor while it had nothing of ours pending. Go on
+    // as if it had answered, else the page gets no rendering update any more.
+    if (m_stallChecksMissed >= 2 && m_compositing && m_layerTreeHost && m_layerTreeHost->compositorIdleWhileWaiting()) {
+        log("View %d: the compositor's answer got lost, going on", m_id);
+        didComposite();
+    }
     m_frameRequested = false;
     scheduleRenderingUpdate();
 }

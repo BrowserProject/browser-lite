@@ -364,6 +364,10 @@ class BrowserImpl implements Browser, ViewHost {
       },
       { signal },
     );
+    // A navigation or reload of the host page goes on running it until the next page answers:
+    // the engine writes meanwhile. Firefox does not let the engine write while pagehide waits
+    // on the main thread, Chromium does.
+    addEventListener('beforeunload', () => this.storage.flush(), { signal });
     addEventListener('pagehide', () => this.storage.flush(500), { signal });
     this.fullscreen.start(signal);
     this.network.start(signal);
@@ -472,8 +476,14 @@ class BrowserImpl implements Browser, ViewHost {
       const source = String(data.source ?? '');
       const line = Number(data.line) || 0;
       view?.emit('console', { level, message, source, line });
+      // The prefix first: the message is text, not a format string of the host console (the
+      // engine formatted it)
       if (this.config.debug)
-        console[level](`[page ${view?.id ?? 0}] ${message}`, source ? `(${source}:${line})` : '');
+        console[level](
+          `[page ${view?.id ?? 0}]`,
+          message,
+          ...(source ? [`(${source}:${line})`] : []),
+        );
     });
     this.handle<Record<string, unknown>>('extension-message', (data, view) => {
       void answerScriptMessage(this, this.extensions, data, view);

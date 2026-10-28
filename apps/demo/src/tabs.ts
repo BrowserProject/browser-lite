@@ -199,9 +199,11 @@ export class Tab implements SessionTab {
     });
     if (!debug)
       this.on('console', (event) => {
+        // The prefix first: the message is text, not a format string of the host console
         console[event.level](
-          `[page ${view.id}] ${event.message}`,
-          event.source ? `(${event.source}:${event.line})` : '',
+          `[page ${view.id}]`,
+          event.message,
+          ...(event.source ? [`(${event.source}:${event.line})`] : []),
         );
       });
     this.on('close', () => removeTab(this));

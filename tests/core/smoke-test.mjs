@@ -1058,7 +1058,9 @@ try {
       ),
   );
   const ownFiles = await own.evaluate(async (ns) => {
-    window.blTest.browser.storage.flush(2000);
+    // Without waiting on the main thread: Firefox lets the engine write only then
+    window.blTest.browser.storage.flush();
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     const root = await navigator.storage.getDirectory();
     const names = [];
     for await (const name of root.keys()) names.push(name);
