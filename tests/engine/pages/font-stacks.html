@@ -1,0 +1,41 @@
+<!doctype html>
+<title>Font stacks</title>
+<!-- A family the engine does not have is skipped for the next one of the stack, Apple and system
+     names map to the matching Noto (deps/recipes/fontconfig-conf.sh) -->
+<div id="out"></div>
+<script>
+const out = document.getElementById('out');
+const width = (family, text) => {
+  const span = document.createElement('span');
+  span.style.fontFamily = family;
+  span.style.fontSize = '20px';
+  span.textContent = text;
+  out.append(span);
+  const result = span.getBoundingClientRect().width;
+  span.remove();
+  return result;
+};
+// Monospace: a run of i as wide as a run of M
+const mono = (family) => Math.abs(width(family, 'iiiiiiii') - width(family, 'MMMMMMMM')) < 1;
+const same = (family, reference) =>
+  Math.abs(width(family, 'Hamburgefonstiv') - width(reference, 'Hamburgefonstiv')) < 0.5;
+const failures = [];
+for (const family of [
+  'monospace',
+  'SFMono-Regular, monospace',
+  'ui-monospace, monospace',
+  'NoSuchFontAtAll, monospace',
+  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+]) {
+  if (!mono(family)) failures.push('not-mono:' + family.split(',')[0]);
+}
+for (const [family, reference] of [
+  ['NoSuchFontAtAll, serif', 'serif'],
+  ['ui-serif', 'serif'],
+  ['-apple-system, sans-serif', 'sans-serif'],
+]) {
+  if (!same(family, reference)) failures.push('not-' + reference + ':' + family.split(',')[0]);
+}
+if (same('serif', 'sans-serif')) failures.push('serif-like-sans');
+console.log('FONTS done=' + (failures.length ? failures.join(',') : 'ok'));
+</script>
