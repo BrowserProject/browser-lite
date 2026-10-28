@@ -26,10 +26,11 @@ const { url: siteURL } = await serve((req, res) =>
 const stack = await startStack({ app: 'demo', token: 'slots-token-0123456789abcdef' });
 const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1000, height: 700 } });
-const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
+const results = collect(page);
 
 await page.goto(stack.app({ url: siteURL }));
-check('page ready', (await results.wait('ready', TIMEOUT)) === '1');
+const ready = await results.wait('ready', TIMEOUT);
+check('page ready', ready === '1', ready);
 
 await page.evaluate(() =>
   window.blTest.installExtension({
