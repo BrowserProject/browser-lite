@@ -90,7 +90,7 @@ export function installTestHooks(state: TestState): void {
     eval: (source: string) => debugApi().eval(view(), source),
     pagePixel: (x: number, y: number) => debugApi().pagePixel(view(), x, y),
     pageRow: (y: number) => debugApi().pageRow(view(), y),
-    memory: (report?: 0 | 1 | 2 | 3) => debugApi().memory(report),
+    memory: (report?: 0 | 1 | 2 | 3 | 4) => debugApi().memory(report),
     memoryPressure: () => debugApi().memoryPressure(),
     memoryLimit: (megabytes: number) => debugApi().memoryLimit(megabytes),
     crash: (kind: 'abort' | 'trap') => debugApi().crash(kind),

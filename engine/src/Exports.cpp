@@ -30,6 +30,7 @@
 #include <JavaScriptCore/DeferGCInlines.h>
 #include <JavaScriptCore/JSCJSValueInlines.h>
 #include <JavaScriptCore/HeapInlines.h>
+#include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSLock.h>
 #include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/MediaProducer.h>
@@ -720,6 +721,116 @@ EMSCRIPTEN_KEEPALIVE double bl_memory_used()
     return static_cast<double>(mallinfo().uordblks);
 }
 
+// Memory report 4 (tests): what in the JS heap keeps the documents without a frame alive. A GC
+// debugging snapshot of JSC, from the JS wrapper of each such document back to a root: the path
+// with class names and edge names, and the reason of the root (conservative scan, strong handle,
+// ...)
+static void printDetachedDocumentRetainers(JSC::VM& vm)
+{
+    Vector<std::pair<String, String>> targets; // cell address of the wrapper, URL
+    for (auto& document : WebCore::Document::allDocuments()) {
+        if (document->frame() || !document->wrapper())
+            continue;
+        targets.append({ makeString("0x"_s, hex(reinterpret_cast<uintptr_t>(document->wrapper()), Lowercase)), document->url().string().left(80) });
+    }
+    if (targets.isEmpty())
+        return;
+    JSC::HeapSnapshotBuilder builder(vm.ensureHeapProfiler(), JSC::HeapSnapshotBuilder::SnapshotType::GCDebuggingSnapshot);
+    builder.buildSnapshot();
+    auto json = builder.json();
+    auto parsed = JSON::Value::parseJSON(json);
+    RefPtr object = parsed ? parsed->asObject() : nullptr;
+    if (!object) {
+        printf("[memory]   retainers: no snapshot\n");
+        return;
+    }
+    auto array = [&](ASCIILiteral name) { return object->getArray(name); };
+    RefPtr nodes = array("nodes"_s);
+    RefPtr edges = array("edges"_s);
+    RefPtr roots = array("roots"_s);
+    RefPtr labels = array("labels"_s);
+    RefPtr classNames = array("nodeClassNames"_s);
+    RefPtr edgeNames = array("edgeNames"_s);
+    RefPtr edgeTypes = array("edgeTypes"_s);
+    if (!nodes || !edges || !roots || !labels || !classNames || !edgeNames || !edgeTypes)
+        return;
+    auto integer = [](JSON::Array& list, size_t index) { return list.get(index)->asInteger().value_or(0); };
+    auto string = [](JSON::Array& list, size_t index) { return index < list.length() ? list.get(index)->asString() : String(); };
+    HashMap<int, size_t> nodeIndex; // id -> first field
+    HashMap<String, int> cellToNode;
+    for (size_t i = 0; i + 6 < nodes->length(); i += 7) {
+        int id = integer(*nodes, i);
+        nodeIndex.add(id + 1, i);
+        cellToNode.add(string(*nodes, i + 5), id);
+    }
+    auto describe = [&](int id) {
+        auto entry = nodeIndex.find(id + 1);
+        if (entry == nodeIndex.end())
+            return String("?"_s);
+        auto i = entry->value;
+        auto label = string(*labels, integer(*nodes, i + 4));
+        auto name = string(*classNames, integer(*nodes, i + 2));
+        return label.isEmpty() ? name : makeString(name, '[', label.left(40), ']');
+    };
+    HashMap<int, String> rootReason;
+    for (size_t i = 0; i + 2 < roots->length(); i += 3)
+        rootReason.add(integer(*roots, i) + 1, string(*labels, integer(*roots, i + 1)));
+    // Reverse edges: to -> (from, edge index)
+    HashMap<int, Vector<std::pair<int, size_t>>> referrers;
+    for (size_t i = 0; i + 3 < edges->length(); i += 4)
+        referrers.ensure(integer(*edges, i + 1) + 1, [] { return Vector<std::pair<int, size_t>> { }; }).iterator->value.append({ integer(*edges, i), i });
+    auto edgeLabel = [&](size_t i) {
+        auto type = string(*edgeTypes, integer(*edges, i + 2));
+        if (type == "Property"_s || type == "Variable"_s)
+            return string(*edgeNames, integer(*edges, i + 3)).left(30);
+        if (type == "Index"_s)
+            return makeString('[', integer(*edges, i + 3), ']');
+        return String("internal"_s);
+    };
+    for (auto& [cell, url] : targets) {
+        auto start = cellToNode.find(cell);
+        if (start == cellToNode.end()) {
+            printf("[memory]   retainers of %s: wrapper not in the snapshot\n", url.utf8().data());
+            continue;
+        }
+        // Breadth first towards a root
+        HashMap<int, std::pair<int, size_t>> cameFrom; // node -> (node it keeps alive, edge)
+        Deque<int> queue;
+        queue.append(start->value);
+        cameFrom.add(start->value + 1, std::pair<int, size_t> { -1, 0 });
+        int found = -1;
+        while (!queue.isEmpty() && found < 0 && cameFrom.size() < 2000000) {
+            int node = queue.takeFirst();
+            if (rootReason.contains(node + 1)) {
+                found = node;
+                break;
+            }
+            auto it = referrers.find(node + 1);
+            if (it == referrers.end())
+                continue;
+            for (auto& [from, edge] : it->value) {
+                if (cameFrom.add(from + 1, std::pair<int, size_t> { node, edge }).isNewEntry)
+                    queue.append(from);
+            }
+        }
+        if (found < 0) {
+            printf("[memory]   retainers of %s: no path to a root\n", url.utf8().data());
+            continue;
+        }
+        StringBuilder path;
+        path.append("root ("_s, rootReason.get(found + 1), ") "_s);
+        for (int node = found, steps = 0; node >= 0 && steps < 14; ++steps) {
+            auto [next, edge] = cameFrom.get(node + 1);
+            path.append(describe(node));
+            if (next < 0)
+                break;
+            path.append(" -"_s, edgeLabel(edge), "-> "_s);
+            node = next;
+        }
+        printf("[memory]   retainers of %s: %s\n", url.utf8().data(), path.toString().utf8().data());
+    }
+}
+
 // Engine memory in the console (tests and debugging). Only with BL_TEST_HOOKS=1.
 // full: run a full GC first.
 EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
@@ -729,8 +840,8 @@ EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
     runOnEngineThread([full] {
         auto& vm = WebCore::commonVM();
         JSC::JSLockHolder lock(vm);
-        // 3: first release everything releasable like under memory pressure
-        if (full == 3)
+        // 3, 4: first release everything releasable like under memory pressure
+        if (full >= 3)
             WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
         if (full)
             vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
@@ -751,6 +862,8 @@ EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
                     document->frame() ? 1 : 0, document->wrapper() ? 1 : 0, document->url().string().left(100).utf8().data());
             }
         }
+        if (full == 4)
+            printDetachedDocumentRetainers(vm);
     });
 }
 
