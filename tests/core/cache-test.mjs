@@ -26,7 +26,6 @@
 import {
   TIMEOUT,
   check,
-  chromiumOnly,
   collect,
   finish,
   launch,
@@ -867,15 +866,16 @@ check(
   `${results.get('cut')} ${requests.cut} requests`,
 );
 
-// Cleanup: with a 40 MB quota the limit is 10 MB, eight answers of 2 MB do not all fit, the
+// Cleanup: with a limit of 10 MB (BL_HTTP_CACHE_MB) eight answers of 2 MB do not all fit, the
 // oldest go away (own sizes, x-bl-size)
-if (chromiumOnly('cleanup under a small quota (CDP Storage.overrideQuotaForOrigin)')) {
+{
   const small = await browser.newContext();
   const smallPage = await small.newPage();
-  const cdp = await small.newCDPSession(smallPage);
-  await cdp.send('Storage.overrideQuotaForOrigin', { origin: stack.origin, quotaSize: 40 << 20 });
   const smallResults = collect(smallPage);
-  await openHost(smallPage, appURL(`${siteURL}many`));
+  await openHost(
+    smallPage,
+    stack.app({ url: `${siteURL}many`, persistent: '1', env: 'BL_HTTP_CACHE_MB=10' }),
+  );
   check('many large answers loaded', (await smallResults.wait('many')) === '1');
   const readCache = () =>
     smallPage.evaluate(async (name) => {
