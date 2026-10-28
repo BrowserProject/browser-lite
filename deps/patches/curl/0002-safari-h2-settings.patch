@@ -1,0 +1,58 @@
+diff --git a/lib/http2.c b/lib/http2.c
+--- a/lib/http2.c
++++ b/lib/http2.c
+@@ -68,7 +68,8 @@
+ /* this is how much we want "in flight" for a stream, initially, IFF
+  * nghttp2 allows us to tweak the local window size. */
+ #if NGHTTP2_HAS_SET_LOCAL_WINDOW_SIZE
+-#define H2_STREAM_WINDOW_SIZE_INITIAL  (64 * 1024)
++/* browser-lite: 2 MB like Safari (SETTINGS_INITIAL_WINDOW_SIZE) */
++#define H2_STREAM_WINDOW_SIZE_INITIAL  (2 * 1024 * 1024)
+ #else
+ #define H2_STREAM_WINDOW_SIZE_INITIAL H2_STREAM_WINDOW_SIZE_MAX
+ #endif
+@@ -82,9 +83,11 @@
+  * the overall connection. Streams might become PAUSED which will block their
+  * received QUOTA in the connection window. If we run out of space, the server
+  * is blocked from sending us any data. See #10988 for an issue with this. */
+-#define HTTP2_HUGE_WINDOW_SIZE (100 * H2_STREAM_WINDOW_SIZE_MAX)
++/* browser-lite: 10 MB like Safari. Data of paused streams is consumed on
++ * receipt (on_data_chunk_recv), so it does not hold the connection window. */
++#define HTTP2_HUGE_WINDOW_SIZE H2_CONN_WINDOW_SIZE
+ 
+-#define H2_SETTINGS_IV_LEN 3
++#define H2_SETTINGS_IV_LEN 4
+ #define H2_BINSETTINGS_LEN 80
+ 
+ struct cf_h2_ctx {
+@@ -218,17 +221,22 @@
+                                 struct Curl_easy *data,
+                                 struct cf_h2_ctx *ctx)
+ {
+-  iv[0].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
+-  iv[0].value = Curl_multi_max_concurrent_streams(data->multi);
++  /* browser-lite: the settings and their order of Safari */
++  iv[0].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
++  iv[0].value = !!data->multi->push_cb;
+ 
+-  iv[1].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+-  iv[1].value = cf_h2_initial_win_size(data);
++  iv[1].settings_id = NGHTTP2_SETTINGS_MAX_CONCURRENT_STREAMS;
++  iv[1].value = Curl_multi_max_concurrent_streams(data->multi);
++
++  iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
++  iv[2].value = cf_h2_initial_win_size(data);
+   if(ctx)
+-    ctx->initial_win_size = iv[1].value;
+-  iv[2].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+-  iv[2].value = !!data->multi->push_cb;
++    ctx->initial_win_size = iv[2].value;
++
++  iv[3].settings_id = NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES;
++  iv[3].value = 1;
+ 
+-  return 3;
++  return 4;
+ }
+ 
+ static ssize_t populate_binsettings(uint8_t *binsettings,
