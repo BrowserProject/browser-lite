@@ -260,7 +260,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   root "WeakSets": a node or `Location` wrapper counts as reachable through its opaque root (the
   document or window) and holds the window and the document; who marks that opaque root does not
   show in the snapshot. Mostly the `dom` page (3000 elements with onclick, a srcdoc iframe), once
-  its srcdoc document without any path (held from C++).
+  its srcdoc document without any path (held from C++). Locally in 1 of 6 runs. Then the test
+  runs as many rounds again and only fails if the number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page

@@ -254,8 +254,9 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
     `     at the end: ${JSON.stringify({ ...end, documentList: end.documentList.length })}`,
   );
   const leaked = end.documents > base.documents + 2;
-  check('documents back as after the warm up', !leaked, `${base.documents} -> ${end.documents}`);
-  if (leaked) {
+  if (!leaked)
+    check('documents back as after the warm up', true, `${base.documents} -> ${end.documents}`);
+  else {
     console.log(end.documentList.join('\n'));
     // What in the JS heap keeps them (memory report 4: path to a GC root)
     reportLines.length = 0;
@@ -263,6 +264,16 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
     await waitFor(() => reportLines.some((l) => l.includes('retainers of')), 60000);
     await page.waitForTimeout(2000);
     console.log(reportLines.filter((l) => l.includes('retainers')).join('\n'));
+    // A few pages now and then stay (status.md: soak tests); a leak grows with more rounds
+    await rounds(ROUNDS, 2 * ROUNDS);
+    await go(`${siteURL}empty?r=again`);
+    await waitDone('empty-again');
+    const again = await measureSettled(end.documents + 2);
+    check(
+      'documents back as after the warm up, or a few that stay and do not grow',
+      !failedAt && again.documents <= end.documents + 2,
+      `${base.documents} -> ${end.documents} -> ${again.documents} after ${ROUNDS - WARMUP} more rounds`,
+    );
   }
   check(
     'malloc uses hardly more',
