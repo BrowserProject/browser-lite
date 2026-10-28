@@ -33,6 +33,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
   wav,
 } from '../lib/index.mjs';
 
@@ -449,8 +450,8 @@ const { url: siteURL } = await serve((req, res) => {
 
 const stack = await startStack({ token: 'cache-token-0123456789abcdef' });
 const browser = await launch();
-const page = await browser.newPage();
-const results = collect(page);
+let page = await browser.newPage();
+let results = collect(page);
 const result = (key) => results.wait(key);
 
 const appURL = (url) => stack.app({ url, persistent: '1' });
@@ -505,7 +506,23 @@ const partitionsOf = async (url) =>
     .map((entry) => entry.p)
     .sort()
     .join('|');
+// Firefox keeps the engines of earlier documents of a tab (memory and compiled code, about 270 MB
+// each) and runs out of executable memory after about 15 (#288): every few visits a new tab, which
+// waits for the storage lock of the old one
+let visits = 0;
+async function freshTab() {
+  await page.goto('about:blank');
+  await page.close();
+  page = await browser.newPage();
+  results = collect(page);
+  await page.goto(stack.app({ manual: '1' }));
+  await waitFor(
+    () => page.evaluate(async () => !(await navigator.locks.query()).held?.length),
+    20000,
+  );
+}
 async function visit(url, key) {
+  if (++visits % 6 === 0) await freshTab();
   results.clear();
   await openHost(page, appURL(url));
   const value = await result(key);
