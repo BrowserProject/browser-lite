@@ -268,7 +268,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   keeps its scroll position) while scripts still run, and every check after it fails. A view
   without a rendering update for twice 2 s now logs the state of its frame pipeline ("no rendering
   update for 2 s") and asks for the frame again; the compositor logs a frame that only its timer
-  brought.
+  brought. On 2026-10-28 it showed the compositor 5 s in phase 13 (`flushCompositingState` of the
+  layers, LayerTreeHostWasm.cpp): it waits for the lock of a `CoordinatedPlatformLayer` that another
+  thread holds (not the engine thread, which logged it; scrolling or tile threads), after the
+  page switched to the dark color scheme.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
