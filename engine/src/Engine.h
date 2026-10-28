@@ -28,6 +28,9 @@ void runNextOnEngineThread(Function<void()>&&);
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();
 void scheduleRunLoopPump();
+// Runs work after the current work item and its GC, where the heap is not deferred: a
+// synchronous full GC (collectNow) inside a work item only runs at its end (patch 0012)
+void runAtTopLevel(Function<void()>&&);
 // A page dialog: runs the work of the engine thread nested until done()
 // returns true; the views of the dialog's page group hold back (WebView.h)
 void runNestedEventLoop(const Function<bool()>& done);

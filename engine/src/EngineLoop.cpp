@@ -39,6 +39,7 @@
 #include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
+#include <wtf/Vector.h>
 #include <wtf/text/MakeString.h>
 
 namespace BrowserLite {
@@ -84,12 +85,25 @@ extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_input_mark_address()
 // run when nothing of JSC/WebCore is on the stack: at the end of the outermost
 // DeferGC, so here after the work (patch 0012, Heap.cpp). That way there is no
 // need for --spill-pointers, which makes everything about 10x slower.
+static Vector<Function<void()>>& topLevelWork()
+{
+    static NeverDestroyed<Vector<Function<void()>>> work;
+    return work;
+}
+
+void runAtTopLevel(Function<void()>&& work)
+{
+    topLevelWork().append(WTF::move(work));
+}
+
 template<typename Work>
 static void runWithGCAfterwards(Work&& work)
 {
     auto* vm = WebCore::commonVMOrNull();
     if (!vm) {
         work();
+        for (auto& next : std::exchange(topLevelWork(), { }))
+            next();
         return;
     }
     JSC::JSLockHolder lock(*vm);
@@ -108,6 +122,8 @@ static void runWithGCAfterwards(Work&& work)
         work();
         gcStart = WTF::MonotonicTime::now();
     } // a deferred GC runs here
+    for (auto& next : std::exchange(topLevelWork(), { }))
+        next();
     if (debugEnabled()) {
         auto duration = (WTF::MonotonicTime::now() - gcStart).milliseconds();
         if (duration > 5)

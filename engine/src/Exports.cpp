@@ -831,39 +831,45 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
     }
 }
 
+static void printMemoryReport(int full)
+{
+    auto& vm = WebCore::commonVM();
+    JSC::JSLockHolder lock(vm);
+    // 3, 4: first release everything releasable like under memory pressure
+    if (full >= 3)
+        WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
+    if (full)
+        vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
+    struct mallinfo info = mallinfo();
+    auto& cache = WebCore::MemoryCache::singleton();
+    printf("[memory] malloc used %zu MB, free %zu MB, JS heap %zu MB (capacity %zu MB), documents %u, cache %u KB\n",
+        static_cast<size_t>(info.uordblks) >> 20, static_cast<size_t>(info.fordblks) >> 20,
+        vm.heap.size() >> 20, vm.heap.capacity() >> 20, WebCore::Document::allDocumentsMap().size(), cache.size() >> 10);
+    auto statistics = cache.getStatistics();
+    printf("[memory]   cache images %d (%d KB, decoded %d KB), scripts %d KB, CSS %d KB, fonts %d KB\n",
+        statistics.images.count, statistics.images.size >> 10, statistics.images.decodedSize >> 10,
+        statistics.scripts.size >> 10, statistics.cssStyleSheets.size >> 10, statistics.fonts.size >> 10);
+    if (full > 1) {
+        // Live documents: references, frame, URL
+        for (auto& document : WebCore::Document::allDocuments()) {
+            // What keeps a detached one: nodes (JS wrappers or C++), its JS wrapper
+            printf("[memory]   doc refs=%u nodes=%u frame=%d wrapper=%d %s\n", document->refCount(), document->referencingNodeCount(),
+                document->frame() ? 1 : 0, document->wrapper() ? 1 : 0, document->url().string().left(100).utf8().data());
+        }
+    }
+    if (full == 4)
+        printDetachedDocumentRetainers(vm);
+}
+
 // Engine memory in the console (tests and debugging). Only with BL_TEST_HOOKS=1.
 // full: run a full GC first.
 EMSCRIPTEN_KEEPALIVE void bl_memory_report(int full)
 {
     if (!engineConfig().testHooks)
         return;
+    // At top level, so the GC runs before the report and the heap snapshot has a GC to record
     runOnEngineThread([full] {
-        auto& vm = WebCore::commonVM();
-        JSC::JSLockHolder lock(vm);
-        // 3, 4: first release everything releasable like under memory pressure
-        if (full >= 3)
-            WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
-        if (full)
-            vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
-        struct mallinfo info = mallinfo();
-        auto& cache = WebCore::MemoryCache::singleton();
-        printf("[memory] malloc used %zu MB, free %zu MB, JS heap %zu MB (capacity %zu MB), documents %u, cache %u KB\n",
-            static_cast<size_t>(info.uordblks) >> 20, static_cast<size_t>(info.fordblks) >> 20,
-            vm.heap.size() >> 20, vm.heap.capacity() >> 20, WebCore::Document::allDocumentsMap().size(), cache.size() >> 10);
-        auto statistics = cache.getStatistics();
-        printf("[memory]   cache images %d (%d KB, decoded %d KB), scripts %d KB, CSS %d KB, fonts %d KB\n",
-            statistics.images.count, statistics.images.size >> 10, statistics.images.decodedSize >> 10,
-            statistics.scripts.size >> 10, statistics.cssStyleSheets.size >> 10, statistics.fonts.size >> 10);
-        if (full > 1) {
-            // Live documents: references, frame, URL
-            for (auto& document : WebCore::Document::allDocuments()) {
-                // What keeps a detached one: nodes (JS wrappers or C++), its JS wrapper
-                printf("[memory]   doc refs=%u nodes=%u frame=%d wrapper=%d %s\n", document->refCount(), document->referencingNodeCount(),
-                    document->frame() ? 1 : 0, document->wrapper() ? 1 : 0, document->url().string().left(100).utf8().data());
-            }
-        }
-        if (full == 4)
-            printDetachedDocumentRetainers(vm);
+        runAtTopLevel([full] { printMemoryReport(full); });
     });
 }
 
