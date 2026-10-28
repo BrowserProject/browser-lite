@@ -250,6 +250,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
   loss without the compositor thread. Closing a tab within about a second of a change can lose
   that change (#275).
+- WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
+  tests pass, of the demo suite 6; the failures come from the image (no WebGL, OPFS,
+  `MediaRecorder`, fake camera, grantable permissions, `DeviceOrientationEvent` constructor, routes
+  of worker requests) or from frames of a view without the compositor while another view's dialog
+  blocks the engine thread (WebKit shows a worker's canvas frame only at the end of its task).
 - Firefox frees the documents a tab left only when memory runs short: a page with a 200 MB
   buffer loaded every 1.5 s in one tab grew its process to 5 GB (also without Playwright), an
   engine page grows by about 270 MB per load up to about 4.4 GB, then Firefox frees them all
