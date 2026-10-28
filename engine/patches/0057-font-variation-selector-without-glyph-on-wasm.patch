@@ -1,0 +1,21 @@
+diff --git a/Source/WebCore/platform/graphics/Font.cpp b/Source/WebCore/platform/graphics/Font.cpp
+--- a/Source/WebCore/platform/graphics/Font.cpp
++++ b/Source/WebCore/platform/graphics/Font.cpp
+@@ -647,9 +647,17 @@
+ 
+         if (it != end && isVariationSelector(*it)) {
+             if (!platformSupportsCodePoint(codePoint, *it)) {
++#if PLATFORM(WASM)
++                // browser-lite: a variation selector the font does not map is ignored when the font
++                // has the base character, like HarfBuzz drops it (and Chrome): the emoji fonts have
++                // no glyph for U+FE0F, so "warning sign, VS16" showed a box
++                if (!supportsCodePoint(codePoint))
++                    return false;
++#else
+                 // Try the characters individually.
+                 if (!supportsCodePoint(codePoint) || !supportsCodePoint(*it))
+                     return false;
++#endif
+             }
+             ++it;
+             continue;
