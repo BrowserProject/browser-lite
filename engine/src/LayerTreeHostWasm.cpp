@@ -149,8 +149,11 @@ static void compositeScene(CompositorScene& scene)
         notifyEngine();
     };
 
+    // Phases for the stall diagnostics (stallState): 1 GPU context, 11 removed layers, 12 state
+    // lock, 13 compositing state, 14 tile updates, 2 to 5 below
     setFramePhase(scene, 1);
     Gpu::Scope scope;
+    setFramePhase(scene, 11);
     for (auto& layer : layersToRemove)
         layer->invalidateTarget();
     layersToRemove.clear();
@@ -162,6 +165,7 @@ static void compositeScene(CompositorScene& scene)
     }
 
     std::optional<FloatPoint> shownScrollPosition;
+    setFramePhase(scene, 12);
     {
         Locker stateLocker { scene.stateLock };
         scene.rootLayer->flushPositionChanges(reasons, true);
@@ -189,12 +193,14 @@ static void compositeScene(CompositorScene& scene)
     }
 
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
+    setFramePhase(scene, 13);
     scene.rootLayer->flushCompositingState(reasons, true);
     for (auto& layer : scene.committedLayers) {
         layer->flushCompositingState(reasons, true);
         if (layer->hasPendingBackingStoreTileUpdates())
             layersWithTileUpdates.append(layer);
     }
+    setFramePhase(scene, 14);
     for (auto& layer : layersWithTileUpdates)
         layer->processPendingBackingStoreTileUpdates();
 
