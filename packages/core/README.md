@@ -132,6 +132,8 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   media files need the service worker ([Service worker](../../docs/embedding.md#service-worker)).
   Without it a `warning` event with code `media-sw-missing` follows.
   A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
+  Picture-in-picture needs the host's `requestPictureInPicture` (not in Firefox): without it the
+  pages do not see the API.
 - `capture()`: camera, microphone and screen.
 - `webrtc()`: opt-in; the connections bypass the transport and reveal the IP of the device.
 - `devices({ ... })`: geolocation, sensors, gamepad, speech, notifications, fileSystemAccess,

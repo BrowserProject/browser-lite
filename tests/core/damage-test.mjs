@@ -16,6 +16,7 @@ import {
   buildDir,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   evalPage,
   finish,
@@ -417,6 +418,9 @@ const STEPS = [
     },
   ],
 ];
+// Steps that change the device pixel ratio need CDP (Emulation.setDeviceMetricsOverride)
+const withCDP = chromiumOnly('device pixel ratio steps (CDP Emulation.setDeviceMetricsOverride)');
+const steps = withCDP ? STEPS : STEPS.filter(([name]) => !name.startsWith('device pixel ratio'));
 
 /** One engine through all steps: snapshots by step and frames shown while nothing changed. */
 async function scenario(env, run) {
@@ -441,9 +445,9 @@ async function scenario(env, run) {
   await page.waitForTimeout(1500);
   info.idleFrames = (await shown()) - before;
   const origin = await canvasOrigin(page);
-  const cdp = await context.newCDPSession(page);
+  const cdp = withCDP ? await context.newCDPSession(page) : null;
   info.states = {};
-  for (const [index, [name, step]] of STEPS.entries()) {
+  for (const [index, [name, step]] of steps.entries()) {
     await step({ page, result, origin, cdp });
     shots.set(name, await settled(page));
     await evalPage(

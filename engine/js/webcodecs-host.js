@@ -139,15 +139,29 @@ var blCodecs = (function () {
     }
   }
 
-  // Camera, microphone, screen (engine/src/media/MediaStreamWasm.cpp): the
-  // host sends the ReadableStream of a MediaStreamTrackProcessor. Single
-  // broken frames are dropped, if it stays broken the track ends.
+
+  // Camera, microphone, screen and received WebRTC tracks
+  // (engine/src/media/MediaStreamWasm.cpp). The host sends one of: the
+  // ReadableStream of a MediaStreamTrackProcessor (Chromium), a video
+  // MediaStreamTrack whose processor runs here (Safari has it only in
+  // workers), or a MessagePort with {planes, sampleRate, timestamp} from an
+  // AudioWorklet (Safari has no AudioData). Single broken frames are
+  // dropped, if it stays broken the track ends.
   const MAX_FAILED_FRAMES = 30;
-  const captures = new Map(); // id -> reader
-  function attachCapture(id, kind, readable) {
+  const captures = new Map(); // id -> { stop() }
+  function attachCapture(id, kind, readable, track) {
     detachCapture(id);
+    if (track)
+      readable = new MediaStreamTrackProcessor({ track }).readable;
     const reader = readable.getReader();
-    captures.set(id, reader);
+    const entry = {
+      stop() {
+        reader.cancel().catch(() => {});
+        if (track)
+          track.stop();
+      },
+    };
+    captures.set(id, entry);
     (async () => {
       let failures = 0;
       for (;;) {
@@ -157,7 +171,7 @@ var blCodecs = (function () {
         try {
           if (kind === 'video') {
             const copy = await copyVideoFrame(value);
-            if (captures.get(id) === reader)
+            if (captures.get(id) === entry)
               Module._bl__capture_video(id, copy.ptr, copy.size, copy.format, copy.width, copy.height, value.timestamp);
             else
               Module._free(copy.ptr);
@@ -172,44 +186,68 @@ var blCodecs = (function () {
         }
       }
     })().catch((e) => {
-      if (captures.get(id) !== reader)
+      if (captures.get(id) !== entry)
         return;
       console.warn('[capture] ' + kind + ': ' + (e && e.message || e));
-      reader.cancel().catch(() => {});
+      captures.delete(id);
+      entry.stop();
       Module._bl_capture_failed(id);
     }).finally(() => {
-      if (captures.get(id) === reader)
+      if (captures.get(id) === entry)
         captures.delete(id);
     });
   }
-  function deliverCaptureAudio(id, data) {
-    const frames = data.numberOfFrames, channels = data.numberOfChannels;
+  function attachCapturePort(id, port) {
+    detachCapture(id);
+    const entry = {
+      stop() {
+        port.onmessage = null;
+        port.close();
+      },
+    };
+    captures.set(id, entry);
+    port.onmessage = (event) => {
+      const { planes, sampleRate, timestamp } = event.data;
+      if (captures.get(id) === entry && planes.length)
+        deliverCapturePlanes(id, planes, sampleRate, timestamp);
+    };
+  }
+  function deliverCapturePlanes(id, planes, sampleRate, timestamp) {
+    const frames = planes[0].length, channels = planes.length;
     const ptr = Module.blAlloc(frames * channels * 4);
     try {
-      const plane = new Float32Array(frames);
-      for (let channel = 0; channel < channels; channel++) {
-        data.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
-        HEAPU8.set(new Uint8Array(plane.buffer), ptr + channel * frames * 4);
-      }
-      Module._bl__capture_audio(id, ptr, frames, channels, data.sampleRate, data.timestamp);
+      for (let channel = 0; channel < channels; channel++)
+        HEAPU8.set(new Uint8Array(planes[channel].buffer, planes[channel].byteOffset, frames * 4), ptr + channel * frames * 4);
+      Module._bl__capture_audio(id, ptr, frames, channels, sampleRate, timestamp);
     } finally {
       Module._free(ptr);
     }
   }
+  function deliverCaptureAudio(id, data) {
+    const planes = [];
+    for (let channel = 0; channel < data.numberOfChannels; channel++) {
+      const plane = new Float32Array(data.numberOfFrames);
+      data.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
+      planes.push(plane);
+    }
+    deliverCapturePlanes(id, planes, data.sampleRate, data.timestamp);
+  }
   function detachCapture(id) {
-    const reader = captures.get(id);
-    if (!reader)
+    const entry = captures.get(id);
+    if (!entry)
       return;
     captures.delete(id);
-    reader.cancel().catch(() => {});
+    entry.stop();
   }
   if (typeof ENVIRONMENT_IS_PTHREAD !== 'undefined' && ENVIRONMENT_IS_PTHREAD && typeof self !== 'undefined') {
     self.addEventListener('message', (event) => {
       const data = event.data && event.data.blCapture;
       if (!data)
         return;
-      if (data.readable)
-        attachCapture(data.id, data.kind, data.readable);
+      if (data.port)
+        attachCapturePort(data.id, data.port);
+      else if (data.readable || data.track)
+        attachCapture(data.id, data.kind, data.readable, data.track);
       else
         detachCapture(data.id);
     });

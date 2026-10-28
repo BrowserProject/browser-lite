@@ -44,6 +44,7 @@
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
 #include <WebCore/FrameLoader.h>
+#include <WebCore/FrameSelection.h>
 #include <WebCore/GraphicsContextSkia.h>
 #include <WebCore/HandleUserInputEventResult.h>
 #include <WebCore/LinkIconCollector.h>
@@ -300,6 +301,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // Large images decode on the shared decoder thread (patch 0024, #241)
     settings.setLargeImageAsyncDecodingEnabled(config.asyncImageDecoding);
     settings.setAnimatedImageAsyncDecodingEnabled(config.asyncImageDecoding);
+    // Images drawn small decode small (patch 0054, #270)
+    settings.setImageSubsamplingEnabled(config.imageSubsampling);
     settings.setLocalStorageEnabled(true);
     settings.setSessionStorageEnabled(true);
     settings.setRequestIdleCallbackEnabled(true);
@@ -562,11 +565,19 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
 {
     if (size == m_size && deviceScaleFactor == m_deviceScaleFactor)
         return;
+    bool shorter = size.height() < m_size.height();
     m_size = size;
     m_deviceScaleFactor = deviceScaleFactor;
     m_page->setDeviceScaleFactor(deviceScaleFactor);
     if (RefPtr view = mainFrameView())
         view->resize(size);
+    // An on-screen keyboard of the host covers the lower part: keep the field being typed in
+    // visible, like Chrome
+    if (shorter) {
+        RefPtr focused = m_page->focusController().focusedOrMainFrame();
+        if (focused && focused->selection().selection().isContentEditable())
+            focused->selection().revealSelection();
+    }
     createSurface();
     if (m_compositing) {
         scheduleRenderingUpdate();

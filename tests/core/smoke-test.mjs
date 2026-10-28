@@ -11,7 +11,7 @@
 //   node tests/core/smoke-test.mjs [engine-dir]      (default build/webcore/bin)
 // Environment: E2E_TIMEOUT (ms per wait, default 60000), E2E_VERBOSE=1, CHROMIUM_PATH.
 import http from 'node:http';
-import { check, finish, launch, startStack, wav } from '../lib/index.mjs';
+import { check, finish, launch, permissions, startStack, wav } from '../lib/index.mjs';
 
 const WAIT = Number(process.env.E2E_TIMEOUT || 60000);
 const VERBOSE = !!process.env.E2E_VERBOSE;
@@ -839,7 +839,9 @@ try {
     ),
     await page.evaluate(() => window.blTest.view()?.title),
   );
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: ORIGIN });
+  await context.grantPermissions(permissions(['clipboard-read', 'clipboard-write']), {
+    origin: ORIGIN,
+  });
   await page.evaluate(() => navigator.clipboard.writeText('before'));
   await page.evaluate((url) => window.blTest.load(url), MORE_URL);
   await waitFor(() => window.blTest.view()?.title === 'More');

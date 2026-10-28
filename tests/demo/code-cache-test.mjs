@@ -8,6 +8,7 @@ import path from 'node:path';
 import {
   TIMEOUT,
   check,
+  chromiumOnly,
   finish,
   launchProfile,
   startStack,
@@ -17,6 +18,8 @@ import {
 } from '../lib/index.mjs';
 
 timeLimit(3 * TIMEOUT);
+// The cache hit is a V8 trace event, read through CDP
+if (!chromiumOnly('code cache (V8 trace events through CDP)')) finish();
 
 const stack = await startStack({ app: 'demo' });
 const profile = tempDir('chromium-profile');

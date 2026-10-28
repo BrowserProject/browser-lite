@@ -25,6 +25,7 @@ import {
   startStack,
   timeLimit,
   waitEvent,
+  waitFor,
   watchErrors,
   wav,
 } from '../lib/index.mjs';
@@ -297,6 +298,8 @@ async function visibility(label, params) {
   );
   const playerTime = () =>
     app.page.evaluate(() => window.blTest.mediaState().map((p) => [p.time, p.paused]));
+  // Firefox reports the play before the host element starts (up to about 1.5 s later)
+  await waitFor(async () => (await playerTime())[0]?.[0] > 0, 10000);
   const timeBefore = await playerTime();
   await app.page.waitForTimeout(3000);
   const timeAfter = await playerTime();
@@ -443,33 +446,36 @@ await muted.context.close();
 const pip = await openApp({ url: `${siteURL}pip` });
 await pip.wait('loaded', 'pip');
 check('PiP: muted video plays', !!(await pip.wait('playing', 'visible')));
-const pipOrigin = await canvasOrigin(pip.page);
-await pip.page.mouse.click(pipOrigin.x + 100, pipOrigin.y + 100);
-const entered = await pip.wait('pip');
-const hostPip = await pip.page.evaluate(() => !!document.pictureInPictureElement);
-check(
-  'PiP: video in the PiP window (picture-in-picture event)',
-  entered?.[2] === 'ok' &&
-    hostPip &&
-    !!(await waitEvent(pip.page, 'picture-in-picture:true', 5000)),
-  JSON.stringify(entered),
-);
-// Only what comes from here on (autoplay also reports pause at the start)
-pip.results.length = 0;
-await pip.newTab(`${siteURL}empty`);
-check('PiP: view hidden in the background', !!(await pip.wait('state', 'hidden')));
-const pipBefore = await pip.page.evaluate(() => window.blTest.mediaState().map((p) => p.time));
-await pip.page.waitForTimeout(3000);
-const pipAfter = await pip.page.evaluate(() =>
-  window.blTest.mediaState().map((p) => [p.time, p.paused]),
-);
-const paused = pip.results.find((r) => r[1] === 'pause');
-check(
-  'PiP: video goes on in the background',
-  !paused && pipAfter.length === 1 && !pipAfter[0][1] && pipAfter[0][0] !== pipBefore[0],
-  `${JSON.stringify(paused)} ${JSON.stringify(pipBefore)} -> ${JSON.stringify(pipAfter)}`,
-);
-await pip.page.evaluate(() => document.exitPictureInPicture().catch(() => {}));
+// Firefox has no picture-in-picture API (the pages do not see it either, media-test.mjs)
+if (await pip.page.evaluate(() => 'requestPictureInPicture' in HTMLVideoElement.prototype)) {
+  const pipOrigin = await canvasOrigin(pip.page);
+  await pip.page.mouse.click(pipOrigin.x + 100, pipOrigin.y + 100);
+  const entered = await pip.wait('pip');
+  const hostPip = await pip.page.evaluate(() => !!document.pictureInPictureElement);
+  check(
+    'PiP: video in the PiP window (picture-in-picture event)',
+    entered?.[2] === 'ok' &&
+      hostPip &&
+      !!(await waitEvent(pip.page, 'picture-in-picture:true', 5000)),
+    JSON.stringify(entered),
+  );
+  // Only what comes from here on (autoplay also reports pause at the start)
+  pip.results.length = 0;
+  await pip.newTab(`${siteURL}empty`);
+  check('PiP: view hidden in the background', !!(await pip.wait('state', 'hidden')));
+  const pipBefore = await pip.page.evaluate(() => window.blTest.mediaState().map((p) => p.time));
+  await pip.page.waitForTimeout(3000);
+  const pipAfter = await pip.page.evaluate(() =>
+    window.blTest.mediaState().map((p) => [p.time, p.paused]),
+  );
+  const paused = pip.results.find((r) => r[1] === 'pause');
+  check(
+    'PiP: video goes on in the background',
+    !paused && pipAfter.length === 1 && !pipAfter[0][1] && pipAfter[0][0] !== pipBefore[0],
+    `${JSON.stringify(paused)} ${JSON.stringify(pipBefore)} -> ${JSON.stringify(pipAfter)}`,
+  );
+  await pip.page.evaluate(() => document.exitPictureInPicture().catch(() => {}));
+} else console.log('skip PiP in the background (the host has no picture-in-picture)');
 await pip.context.close();
 
 await browser.close();

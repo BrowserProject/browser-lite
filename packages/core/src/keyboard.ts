@@ -55,9 +55,12 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
   ime.setAttribute('autocorrect', 'off');
   ime.setAttribute('autocapitalize', 'off');
   ime.spellcheck = false;
+  // On-screen keyboards only while the page has an editable element focused ("text-input")
+  ime.inputMode = 'none';
   ime.tabIndex = -1;
+  // 16px: iOS zooms the page into fields with a smaller font
   ime.style.cssText =
-    'position:fixed;left:-1000px;top:0;width:1px;height:10px;opacity:0;pointer-events:none;resize:none;border:0;padding:0;margin:0;overflow:hidden';
+    'position:fixed;left:-1000px;top:0;width:1px;height:10px;opacity:0;pointer-events:none;resize:none;border:0;padding:0;margin:0;overflow:hidden;font-size:16px';
   const { host } = view;
   let composing = false;
   const isTextInput = (e: KeyboardEvent) =>

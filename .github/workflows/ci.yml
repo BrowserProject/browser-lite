@@ -382,11 +382,21 @@ jobs:
               while read -r id; do gh cache delete -R "$GITHUB_REPOSITORY" "$id" || true; done
           done
 
+  # Every browser suite runs in Chromium and in Firefox (tests/lib, BL_BROWSER). Firefox runs
+  # headed under Xvfb (headless it has no WebGL) and needs an audio output for Web Audio.
   e2e-core:
-    name: End-to-end core (Chromium + core test host page + relay + engine)
+    name: End-to-end core (${{ matrix.browser }} + core test host page + relay + engine)
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 50
+    # Firefox reports, but does not block until its open failures are fixed (docs/status.md)
+    continue-on-error: ${{ matrix.browser == 'firefox' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      BL_BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Node version from versions.env
@@ -399,34 +409,47 @@ jobs:
         with:
           name: engine
           path: build/webcore/bin
-      - name: Install (packages + Playwright Chromium)
+      - name: Install (packages + Playwright browser)
         id: install
         run: |
           npm ci
           npm run build
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps "$BL_BROWSER"
+      - name: Audio output for Firefox (PulseAudio with a null sink)
+        if: matrix.browser == 'firefox'
+        run: |
+          command -v pulseaudio || sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
       # Every test runs even if an earlier one failed (the job stays red then)
       - name: Core suites (tests/core, one after the other)
-        run: PARITY_REPORT="$GITHUB_STEP_SUMMARY" node tests/run.mjs core
+        run: PARITY_REPORT="$GITHUB_STEP_SUMMARY" xvfb-run -a node tests/run.mjs core
       - name: DOM tests of the packages (packages/*/test/browser.mjs)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node tests/run.mjs packages
+        run: xvfb-run -a node tests/run.mjs packages
       - name: Examples (tests/examples)
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node tests/run.mjs examples --engine=build/webcore/bin
+        run: xvfb-run -a node tests/run.mjs examples --engine=build/webcore/bin
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: e2e-core-screenshots
+          name: e2e-core-screenshots-${{ matrix.browser }}
           path: build/e2e-*.png
           if-no-files-found: ignore
 
   e2e-demo:
-    name: End-to-end demo (Chromium + packaged demo + relay + engine)
+    name: End-to-end demo (${{ matrix.browser }} + packaged demo + relay + engine)
     needs: [engine]
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    # Firefox reports, but does not block until its open failures are fixed (docs/status.md)
+    continue-on-error: ${{ matrix.browser == 'firefox' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox]
+    env:
+      BL_BROWSER: ${{ matrix.browser }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Node version from versions.env
@@ -439,20 +462,25 @@ jobs:
         with:
           name: engine
           path: build/webcore/bin
-      - name: Install (packages + Playwright Chromium)
+      - name: Install (packages + Playwright browser)
         run: |
           npm ci
           npm run build
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps "$BL_BROWSER"
+      - name: Audio output for Firefox (PulseAudio with a null sink)
+        if: matrix.browser == 'firefox'
+        run: |
+          command -v pulseaudio || sudo apt-get install -y --no-install-recommends pulseaudio
+          pulseaudio --start --exit-idle-time=-1
       - name: Package the demo once (tools/package-demo.sh)
         run: tools/package-demo.sh build/webcore/bin build/demo
       - name: Demo suites (tests/demo against the packaged demo)
-        run: E2E_SITE_DIR=build/demo node tests/run.mjs demo
+        run: E2E_SITE_DIR=build/demo xvfb-run -a node tests/run.mjs demo
       - name: Screenshots as artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: e2e-demo-screenshots
+          name: e2e-demo-screenshots-${{ matrix.browser }}
           path: build/e2e-*.png
           if-no-files-found: ignore
 

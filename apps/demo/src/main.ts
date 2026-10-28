@@ -48,6 +48,7 @@ import {
 import { installTestHooks, type TestState, withTestOptions } from './test-hooks.js';
 import { setStatus, updateStar } from './toolbar.js';
 import { byId, storage } from './util.js';
+import { fitVisualViewport } from './visual-viewport.js';
 import { changeZoom } from './zoom.js';
 
 const DEFAULT_URL = 'https://example.com/';
@@ -324,6 +325,7 @@ onBookmarksChange(() => {
   if (tab) updateStar(tab.url);
 });
 installShortcuts();
+fitVisualViewport();
 renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 

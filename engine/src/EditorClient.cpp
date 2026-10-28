@@ -4,7 +4,14 @@
 #include "Host.h"
 
 #include <WebCore/Document.h>
+#include <WebCore/EnterKeyHint.h>
+#include <WebCore/FocusController.h>
+#include <WebCore/HTMLInputElement.h>
+#include <WebCore/HTMLTextFormControlElement.h>
+#include <WebCore/InputMode.h>
+#include <WebCore/Page.h>
 #include <WebCore/DocumentInlines.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/Editor.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
@@ -28,9 +35,78 @@ using namespace WebCore;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(EditorClient);
 
+// The on-screen keyboard for an editable element: inputmode, else the input type, like iOS
+static String inputModeOf(Element* element)
+{
+    RefPtr html = dynamicDowncast<HTMLElement>(element);
+    if (!html)
+        return "text"_s;
+    auto mode = html->canonicalInputMode();
+    if (mode != InputMode::Unspecified)
+        return stringForInputMode(mode);
+    if (RefPtr input = dynamicDowncast<HTMLInputElement>(*html)) {
+        if (input->isEmailField())
+            return "email"_s;
+        if (input->isTelephoneField())
+            return "tel"_s;
+        if (input->isURLField())
+            return "url"_s;
+        if (input->isNumberField())
+            return "decimal"_s;
+        if (input->isSearchField())
+            return "search"_s;
+    }
+    return "text"_s;
+}
+
+// The focused element of the focused frame when it takes text: a text field or text area that
+// is not read only or disabled, or an editable element. Not the root of the selection: in a
+// text field that is the inner element of its shadow tree, and the selection stays in a field
+// when the focus moves to a button.
+static RefPtr<Element> focusedTextInput(LocalFrame& frame)
+{
+    RefPtr page = frame.page();
+    RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
+    RefPtr document = focused ? focused->document() : nullptr;
+    RefPtr element = document ? document->focusedElement() : nullptr;
+    if (!element)
+        return nullptr;
+    if (RefPtr control = dynamicDowncast<HTMLTextFormControlElement>(*element)) {
+        RefPtr input = dynamicDowncast<HTMLInputElement>(*control);
+        if ((input && !input->isTextField()) || !control->isMutable())
+            return nullptr;
+        return element;
+    }
+    return element->hasEditableStyle() ? element : nullptr;
+}
+
+// Text input of the focused frame for "text-input": mode "" while nothing takes text, so the
+// host shows no on-screen keyboard
+static String textInputState(LocalFrame& frame)
+{
+    RefPtr element = focusedTextInput(frame);
+    if (!element)
+        return "{\"mode\":\"\"}"_s;
+    RefPtr html = dynamicDowncast<HTMLElement>(*element);
+    String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
+    return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+}
+
+void EditorClient::updateTextInput(LocalFrame& frame)
+{
+    auto textInput = textInputState(frame);
+    if (textInput == m_textInput)
+        return;
+    m_textInput = textInput;
+    notifyHost(m_viewId, "text-input", textInput);
+}
+
 void EditorClient::respondToChangedSelection(LocalFrame* frame)
 {
-    if (!frame || !frame->view() || !frame->selection().selection().isContentEditable())
+    if (!frame)
+        return;
+    updateTextInput(*frame);
+    if (!frame->view() || !frame->selection().selection().isContentEditable())
         return;
     // End of the selection or caret, in view coordinates (CSS pixels)
     auto caret = frame->view()->contentsToRootView(frame->selection().absoluteCaretBounds());

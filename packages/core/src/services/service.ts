@@ -26,7 +26,10 @@ export interface ServiceContext {
   hostCall<P>(name: string, handler: HostCall<P>): void;
   /** Runs for every view; the signal aborts when the view closes. */
   onView(setup: (view: ViewImpl, signal: AbortSignal) => void): void;
-  /** Click, key or touch into a view. */
+  /**
+   * Click, key or touch into a view or anywhere in the host page, called inside the event
+   * (the user activation of the host).
+   */
   onUserGesture(listener: () => void): void;
   provide(key: string, value: unknown): void;
   use<T>(key: string): T | undefined;

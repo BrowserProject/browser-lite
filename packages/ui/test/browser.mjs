@@ -1,4 +1,4 @@
-// DOM tests of @browser-lite/ui in headless Chromium (playwright from the workspace):
+// DOM tests of @browser-lite/ui in the browser of tests/lib (BL_BROWSER):
 //   npx tsc -b && node packages/ui/test/browser.mjs
 // Not part of `npm test`, which runs without a browser.
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import { launch } from '../../../tests/lib/browser.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let server;
@@ -36,9 +36,7 @@ before(async () => {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
-  browser = await chromium.launch(
-    process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
-  );
+  browser = await launch();
   const context = await browser.newContext({ viewport: { width: 800, height: 600 } });
   await context.grantPermissions(['notifications'], { origin });
   page = await context.newPage();
@@ -787,9 +785,28 @@ test('color and date/time pickers', async () => {
       signal: new AbortController().signal,
     });
     out.week = [input().type, input().min, input().step];
-    input().value = '2024-W10';
+    // Firefox and Safari have no week input: their date picker stands in
+    out.hostWeek = input().type === 'week';
+    input().value = out.hostWeek ? '2024-W10' : '2024-03-05';
     input().dispatchEvent(new Event('change'));
     out.weekValue = await promise;
+    promise = dateTimePicker({
+      view,
+      rect,
+      type: 'month',
+      value: '2024-03',
+      min: (2024 - 1970) * 12,
+      max: (2024 - 1970) * 12 + 5,
+      step: 0,
+      signal: new AbortController().signal,
+      preview: (value) => previews.push(value),
+    });
+    out.month = [input().type, input().value, input().min, input().max];
+    input().value = out.hostWeek ? '2024-04' : '2024-04-17';
+    input().dispatchEvent(new Event('input'));
+    out.monthPreview = previews.at(-1);
+    input().dispatchEvent(new Event('change'));
+    out.monthValue = await promise;
     promise = dateTimePicker({
       view,
       rect,
@@ -832,6 +849,7 @@ test('color and date/time pickers', async () => {
     out.separateColor = await color;
     return out;
   });
+  const { hostWeek } = result;
   assert.deepEqual(result, {
     color: ['color', '#ff0000', '55px', '66px', '70px', '0'],
     chosen: '#00ff00',
@@ -845,8 +863,14 @@ test('color and date/time pickers', async () => {
     replaced: null,
     single: 1,
     next: '#123456',
-    week: ['week', '', '1'],
+    week: hostWeek ? ['week', '', '1'] : ['date', '', ''],
+    hostWeek,
     weekValue: '2024-W10',
+    month: hostWeek
+      ? ['month', '2024-03', '2024-01', '2024-06']
+      : ['date', '2024-03-01', '2024-01-01', '2024-06-30'],
+    monthPreview: '2024-04',
+    monthValue: '2024-04',
     fallback: ['date', ''],
     ownClick: true,
     empty: null,

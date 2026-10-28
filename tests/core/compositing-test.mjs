@@ -9,6 +9,7 @@
 import {
   SWIFTSHADER,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -18,6 +19,7 @@ import {
   pagePixel,
   screenshot,
   serve,
+  shownPixel,
   startStack,
   timeLimit,
   waitFor,
@@ -320,7 +322,8 @@ const boxColor = (rgb) =>
 // Pixel of the box as soon as it has the color (else the last one after 10 s)
 const boxPixel = async (rgb) => {
   let pixel = null;
-  await waitFor(async () => near((pixel = await pixelAt(50, 50, gpuPage)), rgb), 10000);
+  // Without the compositor from the screen (shownPixel)
+  await waitFor(async () => near((pixel = await shownPixel(gpuPage, 50, 50)), rgb), 10000);
   return pixel;
 };
 let box = await boxPixel([255, 0, 0]);
@@ -458,17 +461,21 @@ await animated.evaluate(() =>
 let changed = null;
 await waitFor(async () => near((changed = await pixelAt(750, 390, animated)), [0, 0, 255]), 10000);
 check('filtered layer shows new content', near(changed, [0, 0, 255]), JSON.stringify(changed));
-const filterFps = await compositorFps(animated);
+// The frame rate comes from the Chrome trace
+const filterFps = chromiumOnly('frame rate with blur and shadow')
+  ? await compositorFps(animated)
+  : null;
 await animated.close();
-
-const plain = await openFilterPage('?nofilter', '1');
-const plainFps = await compositorFps(plain);
-await plain.close();
-check(
-  'frame rate with blur and shadow almost like without filters',
-  plainFps > 10 && filterFps >= 0.5 * plainFps,
-  `${filterFps.toFixed(1)} vs ${plainFps.toFixed(1)} frames/s`,
-);
+if (filterFps !== null) {
+  const plain = await openFilterPage('?nofilter', '1');
+  const plainFps = await compositorFps(plain);
+  await plain.close();
+  check(
+    'frame rate with blur and shadow almost like without filters',
+    plainFps > 10 && filterFps >= 0.5 * plainFps,
+    `${filterFps.toFixed(1)} vs ${plainFps.toFixed(1)} frames/s`,
+  );
+}
 
 const still = await openFilterPage('?still', '1');
 const stillRows = await filterRows(still);

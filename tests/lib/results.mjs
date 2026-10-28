@@ -1,6 +1,7 @@
 // Reading the page under test: RESULT lines from the console, pixels of the view, waiting.
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { BROWSER } from './browser.mjs';
 import { TIMEOUT, VERBOSE, buildDir } from './env.mjs';
 import { watchErrors } from './report.mjs';
 
@@ -72,6 +73,19 @@ export async function screenPixel(page, x, y) {
   }
   const [, r, g, b] = zlib.inflateSync(data);
   return { r, g, b };
+}
+
+/**
+ * Color [r, g, b] of the active view at x, y like pagePixel, in Firefox from a screenshot: there
+ * the main thread reads the view canvas from the worker that draws it, without the compositor the
+ * engine thread, and while that thread waits for the main thread the read stalls for 10 s and
+ * comes back empty.
+ */
+export async function shownPixel(page, x, y) {
+  if (BROWSER !== 'firefox') return pagePixel(page, x, y);
+  const origin = await canvasOrigin(page);
+  const { r, g, b } = await screenPixel(page, Math.round(origin.x + x), Math.round(origin.y + y));
+  return [r, g, b];
 }
 
 /** Colors roughly equal: every channel at most tolerance apart. */

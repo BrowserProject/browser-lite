@@ -17,6 +17,9 @@ function worker(scope, pages) {
     clients: {
       get: async (id) => pages.find((page) => page.id === id),
       matchAll: async () => pages,
+      claim: async () => {
+        self.claimed = (self.claimed ?? 0) + 1;
+      },
     },
   };
   const globals = {
@@ -30,7 +33,9 @@ function worker(scope, pages) {
     queueMicrotask,
   };
   vm.runInContext(source, vm.createContext(globals));
-  const message = (data, client) => listeners.message({ data, source: client });
+  const waits = [];
+  const message = (data, client) =>
+    listeners.message({ data, source: client, waitUntil: (promise) => waits.push(promise) });
   const fetch = (url, headers = {}, clientId = '') => {
     let response = null;
     listeners.fetch({
@@ -42,7 +47,7 @@ function worker(scope, pages) {
     });
     return response;
   };
-  return { message, fetch };
+  return { message, fetch, self, waits };
 }
 
 function page(id, instance, file, log) {
@@ -122,4 +127,11 @@ test('no page at all: 503', async () => {
   const sw = worker('https://site.example/', []);
   const response = await sw.fetch('https://site.example/bl-media/one/3/x');
   assert.equal(response.status, 503);
+});
+
+test('a page that is not controlled gets claimed on request', async () => {
+  const sw = worker('https://site.example/', []);
+  sw.message({ bl: 'claim' }, null);
+  await Promise.all(sw.waits);
+  assert.equal(sw.self.claimed, 1);
 });

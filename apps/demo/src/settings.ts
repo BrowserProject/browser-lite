@@ -48,6 +48,22 @@ export const DEVICES: Record<string, DeviceProfile> = {
   },
 };
 
+/**
+ * The device of the settings that matches the host: on an iPhone or iPad pages get the mobile
+ * Safari of that device by default, desktops the engine's own identity.
+ */
+export function hostDevice(): string {
+  if (typeof navigator === 'undefined') return 'desktop';
+  if (/iPhone|iPod/.test(navigator.userAgent)) return 'iphone';
+  // iPadOS reports a Mac, but with touch
+  if (
+    /iPad/.test(navigator.userAgent) ||
+    (/Mac/.test(navigator.platform) && navigator.maxTouchPoints > 1)
+  )
+    return 'ipad';
+  return 'desktop';
+}
+
 /** Size limits per database in the profile (KB). */
 export const DB_LIMITS = [128, 256, 512, 1024, 4096];
 
@@ -82,7 +98,7 @@ const DEFAULTS: Settings = {
   searchEngine: 'duckduckgo',
   restoreSession: true,
   homePage: '',
-  device: 'desktop',
+  device: hostDevice(),
   userAgent: '',
   languages: '',
   timeZone: '',
@@ -147,6 +163,17 @@ export function startSettings(): StartSettings {
 export function updateStartSettings(restarted: boolean): StartSettings {
   const current = settings();
   const device = DEVICES[current.device] ?? (DEVICES.desktop as DeviceProfile);
+  const maxPixelRatio = MAX_PIXEL_RATIO[current.resolution] ?? undefined;
+  // The device the host is: its real screen instead of the emulated one, at the resolution of
+  // the settings
+  const screen =
+    device.screen && current.device === hostDevice()
+      ? {
+          width: window.screen.width,
+          height: window.screen.height,
+          pixelRatio: Math.min(devicePixelRatio || 1, maxPixelRatio ?? Infinity),
+        }
+      : device.screen;
   const restoreSession = current.restoreSession || restarted;
   const languages = current.languages
     .split(',')
@@ -162,14 +189,14 @@ export function updateStartSettings(restarted: boolean): StartSettings {
       languages: languages.length ? languages : hostLanguages(),
       timeZone: current.timeZone.trim() || hostTimeZone(),
       colorScheme: current.colorScheme,
-      ...(device.screen ? { device: { ...device.screen, touch: true, mobile: true } } : {}),
+      ...(screen ? { device: { ...screen, touch: true, mobile: true } } : {}),
       preferences: {
         javascript: current.javascript,
         images: current.images,
         globalPrivacyControl: current.gpc,
         saveData: current.saveData,
       },
-      maxPixelRatio: MAX_PIXEL_RATIO[current.resolution] ?? undefined,
+      maxPixelRatio,
       // Like Chrome with "Continue where you left off": session cookies stay
       keepSessionCookies: restoreSession,
     },

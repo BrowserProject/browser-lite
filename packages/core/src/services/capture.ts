@@ -1,5 +1,5 @@
-import { trackProcessor } from './host-apis.js';
 import { Service, type ServiceContext } from './service.js';
+import { streamTrackToEngine } from './track-source.js';
 
 interface CaptureRequest {
   id: number;
@@ -13,6 +13,7 @@ interface CaptureRequest {
 interface Entry {
   stream: MediaStream | null;
   track: MediaStreamTrack | null;
+  stopHost: () => void;
   ready: Promise<MediaStreamTrack | null>;
   resolve(track: MediaStreamTrack | null): void;
 }
@@ -45,8 +46,8 @@ function openHostDevice(data: CaptureRequest): Promise<MediaStream> {
 
 /**
  * Camera, microphone and screen for the pages (engine MediaStreamWasm.cpp). The engine asked
- * for permission already; here the host device opens and its frames go as a stream straight
- * to the engine worker (MediaStreamTrackProcessor, engine/js/webcodecs-host.js).
+ * for permission already; here the host device opens and its frames go straight to the engine
+ * worker (track-source.ts, engine/js/webcodecs-host.js).
  */
 export class CaptureService extends Service {
   readonly features = ['capture'] as const;
@@ -62,6 +63,7 @@ export class CaptureService extends Service {
       const entry = captures.get(data.id);
       if (!entry) return;
       captures.delete(data.id);
+      entry.stopHost();
       for (const track of entry.stream?.getTracks() ?? []) track.stop();
       ctx.engineWorker()?.postMessage({ blCapture: { id: data.id } });
     };
@@ -72,7 +74,7 @@ export class CaptureService extends Service {
       const ready = new Promise<MediaStreamTrack | null>((done) => {
         resolve = done;
       });
-      const entry: Entry = { stream: null, track: null, ready, resolve };
+      const entry: Entry = { stream: null, track: null, stopHost: () => {}, ready, resolve };
       captures.set(data.id, entry);
       try {
         if (!navigator.mediaDevices) throw new Error('No media devices');
@@ -83,10 +85,7 @@ export class CaptureService extends Service {
         }
         const track =
           data.kind === 'microphone' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0];
-        const worker = ctx.engineWorker();
-        const Processor = trackProcessor();
-        if (!track || !worker || !Processor)
-          throw new Error('MediaStreamTrackProcessor is missing');
+        if (!track) throw new Error('No track');
         entry.stream = stream;
         entry.track = track;
         entry.resolve(track);
@@ -94,19 +93,12 @@ export class CaptureService extends Service {
         track.addEventListener('ended', () => {
           if (captures.get(data.id) !== entry) return;
           captures.delete(data.id);
+          entry.stopHost();
           ctx.module._bl_capture_ended(data.id);
         });
-        const processor = new Processor({ track });
-        worker.postMessage(
-          {
-            blCapture: {
-              id: data.id,
-              kind: data.kind === 'microphone' ? 'audio' : 'video',
-              readable: processor.readable,
-            },
-          },
-          [processor.readable],
-        );
+        const stopHost = await streamTrackToEngine(ctx, data.id, track);
+        if (captures.get(data.id) !== entry) stopHost();
+        else entry.stopHost = stopHost;
       } catch (error) {
         if (captures.get(data.id) === entry) captures.delete(data.id);
         console.warn('[browser-lite] capture', data.kind, (error as Error)?.message ?? error);
@@ -126,8 +118,10 @@ export class CaptureService extends Service {
       },
     } satisfies CaptureApi);
     ctx.signal.addEventListener('abort', () => {
-      for (const entry of captures.values())
+      for (const entry of captures.values()) {
+        entry.stopHost();
         for (const track of entry.stream?.getTracks() ?? []) track.stop();
+      }
       captures.clear();
     });
   }

@@ -5,6 +5,8 @@
 
 #include "config.h"
 #include "Clients.h"
+
+#include "EditorClient.h"
 #include "Printing.h"
 #include "BackForwardList.h"
 #include "Choosers.h"
@@ -405,6 +407,13 @@ void ChromeClient::runOpenPanel(LocalFrame&, FileChooser& chooser)
 void ChromeClient::takeFocus(FocusDirection direction)
 {
     notifyHost(m_view->id(), "take-focus", makeString("{\"forward\":"_s, direction == FocusDirection::Backward ? "false"_s : "true"_s, '}'));
+}
+
+// The on-screen keyboard of the host follows the focus (a button takes it from a text field)
+void ChromeClient::focusedElementChanged(Element*, LocalFrame* frame, FocusOptions, BroadcastFocusedElement)
+{
+    if (auto* client = frame ? frame->editor().client() : nullptr)
+        static_cast<EditorClient*>(client)->updateTextInput(*frame);
 }
 
 RefPtr<PopupMenu> ChromeClient::createPopupMenu(PopupMenuClient& client) const

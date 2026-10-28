@@ -5,10 +5,15 @@ interface Output {
   stopped: boolean;
 }
 
+/** The engine renders all sound at this rate (AudioDestinationWasm). */
+const ENGINE_SAMPLE_RATE = 48000;
+
 /**
  * Web Audio of the pages through an AudioWorklet of the host: the engine renders into a ring
  * buffer in shared memory, the worklet plays it. Host browsers allow sound only after a user
- * gesture; until then the engine keeps rendering silently.
+ * gesture; until then the engine keeps rendering silently. Safari starts an AudioContext only
+ * inside a gesture, so the first gesture creates it already (suspended again while no page
+ * plays sound); after that it may start at any time.
  */
 export class AudioService extends Service {
   readonly features = ['audio'] as const;
@@ -24,18 +29,26 @@ export class AudioService extends Service {
     const outputs = new Map<number, Output>();
     let lastPeak = 0;
 
-    const resume = () => {
-      if (context?.state === 'suspended' && outputs.size) context.resume().catch(() => {});
-    };
-
     const audioContext = (sampleRate: number) => {
       if (!context) {
         context = new AudioContext({ sampleRate, latencyHint: 'interactive' });
         workletReady = context.audioWorklet.addModule(workletUrl);
-        for (const type of ['pointerdown', 'touchend'])
-          addEventListener(type, resume, { capture: true, passive: true, signal: ctx.signal });
       }
       return context;
+    };
+
+    // The context ran once: from now on it may start without a gesture
+    let started = false;
+    const gesture = () => {
+      const audio = audioContext(ENGINE_SAMPLE_RATE);
+      if (audio.state !== 'suspended' || (started && !outputs.size)) return;
+      audio.resume().then(
+        () => {
+          started = true;
+          if (!outputs.size && audio.state === 'running') audio.suspend().catch(() => {});
+        },
+        () => {},
+      );
     };
 
     const stopOutput = (id: number) => {
@@ -90,7 +103,7 @@ export class AudioService extends Service {
         }, 500);
       }
     };
-    ctx.onUserGesture(resume);
+    ctx.onUserGesture(gesture);
     ctx.debugState('audio', () => ({
       state: (context as AudioContext | null)?.state ?? 'none',
       outputs: outputs.size,
