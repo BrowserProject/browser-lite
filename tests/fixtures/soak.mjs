@@ -8,7 +8,17 @@
 // SOAK_ROUNDS (default 40) rounds through all pages, SOAK_TABS (default 30) views or tabs.
 import fs from 'node:fs';
 import path from 'node:path';
-import { TIMEOUT, VERBOSE, check, root, serve, serveBytes, waitFor, wav } from '../lib/index.mjs';
+import {
+  TIMEOUT,
+  VERBOSE,
+  check,
+  chromiumOnly,
+  root,
+  serve,
+  serveBytes,
+  waitFor,
+  wav,
+} from '../lib/index.mjs';
 
 const ROUNDS = Number(process.env.SOAK_ROUNDS || 40);
 const TABS = Number(process.env.SOAK_TABS || 30);
@@ -64,7 +74,7 @@ const SEQUENCE = ['dom', 'images', 'worker', 'wasm', 'audio'];
 
 /**
  * Resident memory in MB of the renderers and the GPU process of Chromium (triggers no garbage
- * collection), null where it cannot be read (not Linux, no browser object).
+ * collection), null where it cannot be read (not Linux, no browser object, not Chromium).
  */
 async function hostMemory(page) {
   const browser = page.context().browser();
@@ -206,7 +216,9 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
   );
 
   // Host memory while closing: the highest value, a garbage collection may release a leak again
-  const hostBefore = await hostMemory(page);
+  const hostBefore = chromiumOnly('host memory while opening and closing (CDP)')
+    ? await hostMemory(page)
+    : null;
   let hostPeak = hostBefore;
   // Open views or tabs (load the DOM page with an iframe) and close them again
   // A host page that stops answering fails the check instead of ending the test with a timeout
