@@ -250,13 +250,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
   loss without the compositor thread. Closing a tab within about a second of a change can lose
   that change (#275).
-- Firefox keeps the engine of every earlier document of a tab (about 270 MB each with its
-  compiled code; the tab's process grew from 0.5 to 4.4 GB after 14 loads, the same with the
-  engine destroyed before leaving, without services and without the back-forward cache): after
-  about 15 loads of an engine page in one tab the next fails with "failed to allocate executable
-  memory". Chromium frees them (the renderer goes up and down between 0.7 and 1.6 GB over 24 loads). A new tab per load does not grow, nor does a page that only compiles the engine and
-  its chunks and instantiates them in workers. Which reference holds the old documents is open;
-  `cache-test` opens a new tab between some of its sections (#288).
+- Firefox frees the documents a tab left only when memory runs short: a page with a 200 MB
+  buffer loaded every 1.5 s in one tab grew its process to 5 GB (also without Playwright), an
+  engine page grows by about 270 MB per load up to about 4.4 GB, then Firefox frees them all
+  (#291). Chromium frees them right away (the renderer goes up and down between 0.4 and 1.6 GB).
+  `cache-test` still opens a new tab between some of its sections (#288).
 - Soak tests, about every third CI run: after 200 navigations 3 to 4 pages stay alive (detached,
   with their JS wrapper and all their nodes). The retainer paths (memory report 4) start at the
   root "WeakSets": a node or `Location` wrapper counts as reachable through its opaque root (the

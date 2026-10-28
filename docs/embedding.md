@@ -278,6 +278,9 @@ of `context.storage` (default in memory), for example in your user's profile.
 - `memory-pressure` (`{footprint, limit}` in bytes): the engine memory runs short. Close or
   discard background views; when none is left, tell the user (the demo shows a message).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
+- When the page is left for good (`pagehide` without the back-forward cache) the browser ends
+  like `destroy()`, without events: the page can no longer react. In the back-forward cache it
+  keeps running.
 
 ## Browser support
 

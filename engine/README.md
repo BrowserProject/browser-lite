@@ -99,8 +99,9 @@ The full list is `abi.json`; the rules behind it:
   The `commit` event reports `errorPage: '<kind>'`.
 - Crashes: a thread that traps or aborts writes its error with the stack into engine memory
   before the error event reaches the main thread; `Module.blCrashReason()` returns it.
-- Shutdown: `Module.blShutdown()` closes all transport streams and terminates all engine
-  threads, so the host can drop the module.
+- Shutdown: `Module.blShutdown()` closes all transport streams, terminates all engine threads
+  and ends the main thread's wait for their messages, so the host can drop the module (a pending
+  wait keeps the page alive in Firefox, #291).
 
 Building: `tools/build-webcore.sh` ([docs/build.md](../docs/build.md)). Threads, storage, media
 and GC in context: [docs/architecture.md](../docs/architecture.md).
