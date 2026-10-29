@@ -299,7 +299,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   records the step inside the flush; the next stall (2026-10-29) showed layer 7 of 8 at step 0,
   after its flush: `hasPendingBackingStoreTileUpdates` takes the layer's lock when the layer has
   no Skia target yet (its flush had nothing to do), so another thread holds that lock for
-  seconds. Phase 132 now logs that case with the layer.
+  seconds. Phase 132 now logs that case with the layer. The next one (layer 1 of 8, step 0)
+  had no phase 132, so it waits right after a flush in `hasPendingBackingStoreTileUpdates` or the
+  append (malloc); phases 133 and 134 tell them apart. It always follows a touch fling and a
+  wheel scroll back to the top, and came in 4 of the last 8 CI runs.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.

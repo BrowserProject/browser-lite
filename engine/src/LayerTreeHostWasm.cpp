@@ -173,7 +173,8 @@ static void compositeScene(CompositorScene& scene)
     };
 
     // Phases for the stall diagnostics (stallState): 1 GPU context, 11 removed layers, 12 state
-    // lock, 13 compositing state (131 a layer's lock), 14 tile updates, 2 to 5 below
+    // lock, 13 compositing state (131 and 132 a layer's lock, 133 and 134 after a layer's flush),
+    // 14 tile updates, 2 to 5 below
     setFramePhase(scene, 1);
     Gpu::Scope scope;
     setFramePhase(scene, 11);
@@ -225,8 +226,13 @@ static void compositeScene(CompositorScene& scene)
         waitForLayerLock(scene, layer.get(), index);
         layer->flushCompositingState(reasons, true);
         waitForLayerLock(scene, layer.get(), index++, 132);
-        if (layer->hasPendingBackingStoreTileUpdates())
+        // 133: asks for tile updates (the layer's lock without a Skia target), 134: appends (malloc)
+        setFramePhase(scene, 133);
+        bool tileUpdates = layer->hasPendingBackingStoreTileUpdates();
+        setFramePhase(scene, 134);
+        if (tileUpdates)
             layersWithTileUpdates.append(layer);
+        setFramePhase(scene, 13);
     }
     setFramePhase(scene, 14);
     for (auto& layer : layersWithTileUpdates)
