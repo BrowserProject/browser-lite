@@ -297,7 +297,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   now records the step inside the flush (own lock, backing store update, backdrop's lock,
   contents buffer), the log line ends with it.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
-  sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
+  sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
 - Without tests: the sample count limit in fMP4 (`trun`), GC cleanup of host objects other than
   WebAssembly, Set-Cookie on a service worker update, the write timeout of databases (#180).
