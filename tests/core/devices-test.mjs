@@ -123,6 +123,12 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
     controller.abort();
     const aborted = await task.then(() => false, (e) => e.name === 'AbortError');
     result('scheduler', order.join('') + (aborted ? '+abort' : ''));
+    const platform = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    const capabilities = await PublicKeyCredential.getClientCapabilities();
+    const refused = await navigator.credentials
+      .get({ publicKey: { challenge: new Uint8Array(16) } })
+      .then(() => 'resolved', (e) => e.name);
+    result('webauthn', [platform, capabilities.passkeyPlatformAuthenticator, refused].join(','));
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 20;
     document.body.append(canvas);
@@ -313,6 +319,11 @@ check(
   'scheduler.postTask/yield with abort',
   (await result('scheduler')) === 'ab+abort',
   results.get('scheduler'),
+);
+check(
+  'WebAuthn without an authenticator: no passkeys, get() refused',
+  (await result('webauthn')) === 'false,false,NotAllowedError',
+  results.get('webauthn'),
 );
 check(
   'canvas filter (blur)',

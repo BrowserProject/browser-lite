@@ -243,8 +243,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   `document.featurePolicy`.
 - UI: drag and drop outside a drop target opens nothing (#125; Chrome loads the link or file in
   the same tab, deliberately not here because an accidental drop would replace the page).
-- Devices and identity: WebAuthn, Credential Management, Payment Request, Web MIDI/USB/HID/Serial,
-  WebXR.
+- Devices and identity: passkeys (WebAuthn has no authenticator, #298), password credentials,
+  Payment Request, Web MIDI/USB/HID/Serial, WebXR.
 - Extensions: no blocking or observing of requests (an engine export for WebCore's content
   extensions or a URL filter), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.

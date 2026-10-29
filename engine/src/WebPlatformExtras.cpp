@@ -239,6 +239,77 @@ static constexpr auto polyfillSource = R"JS((bridge) => {
   if (typeof Navigator === 'function')
     define(Navigator.prototype, 'vibrate', function vibrate() { return true; });
 
+  // WebAuthn without an authenticator (#298): pages that expect PublicKeyCredential (Safari has
+  // it) find no passkeys and fall back to passwords; create() and get() fail like a dialog the
+  // user closed
+  if (isSecureContext && typeof Navigator === 'function' && !('credentials' in Navigator.prototype)) {
+    lazy(['Credential', 'PublicKeyCredential', 'CredentialsContainer'], () => {
+      const illegal = () => {
+        throw new TypeError('Illegal constructor');
+      };
+      const bytes = (text) => {
+        const base64 = String(text).replace(/-/g, '+').replace(/_/g, '/');
+        return Uint8Array.from(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')), (c) => c.charCodeAt(0)).buffer;
+      };
+      const withIds = (list) => list.map((entry) => ({ ...entry, id: bytes(entry.id) }));
+      class Credential {
+        constructor() { illegal(); }
+      }
+      class PublicKeyCredential extends Credential {
+        static isUserVerifyingPlatformAuthenticatorAvailable() { return Promise.resolve(false); }
+        static isConditionalMediationAvailable() { return Promise.resolve(false); }
+        static getClientCapabilities() {
+          return Promise.resolve({
+            conditionalCreate: false, conditionalGet: false, hybridTransport: false, passkeyPlatformAuthenticator: false,
+            userVerifyingPlatformAuthenticator: false, relatedOrigins: false, signalAllAcceptedCredentials: false,
+            signalCurrentUserDetails: false, signalUnknownCredential: false,
+          });
+        }
+        static parseCreationOptionsFromJSON(options) {
+          const parsed = { ...options, challenge: bytes(options.challenge), user: { ...options.user, id: bytes(options.user.id) } };
+          if (options.excludeCredentials)
+            parsed.excludeCredentials = withIds(options.excludeCredentials);
+          return parsed;
+        }
+        static parseRequestOptionsFromJSON(options) {
+          const parsed = { ...options, challenge: bytes(options.challenge) };
+          if (options.allowCredentials)
+            parsed.allowCredentials = withIds(options.allowCredentials);
+          return parsed;
+        }
+        static signalUnknownCredential() { return Promise.resolve(); }
+        static signalAllAcceptedCredentials() { return Promise.resolve(); }
+        static signalCurrentUserDetails() { return Promise.resolve(); }
+      }
+      const refuse = (options) => {
+        if (options?.signal?.aborted)
+          return Promise.reject(options.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+        if (!options?.publicKey)
+          return Promise.reject(new DOMException('Only public key credentials are supported.', 'NotSupportedError'));
+        return Promise.reject(new DOMException('No authenticator is available.', 'NotAllowedError'));
+      };
+      class CredentialsContainer {
+        constructor() { illegal(); }
+        get(options) { return refuse(options); }
+        create(options) { return refuse(options); }
+        store() { return Promise.reject(new DOMException('Storing credentials is not supported.', 'NotSupportedError')); }
+        preventSilentAccess() { return Promise.resolve(); }
+      }
+      defineValue(globalThis, 'Credential', Credential);
+      defineValue(globalThis, 'PublicKeyCredential', PublicKeyCredential);
+      defineValue(globalThis, 'CredentialsContainer', CredentialsContainer);
+    });
+    // The same object on every access; the classes come with it
+    let container;
+    Object.defineProperty(Navigator.prototype, 'credentials', {
+      get() {
+        return container ??= Object.create(globalThis.CredentialsContainer.prototype);
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
+
   // WebSocketStream (Chrome): streams over a normal WebSocket. A WebSocket
   // cannot pause, so reading has no backpressure.
   lazy(['WebSocketStream', 'WebSocketError'], () => {

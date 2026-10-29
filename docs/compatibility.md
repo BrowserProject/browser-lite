@@ -42,8 +42,9 @@ and in browser-lite. State 2026-10-16: **257 of 280 like Chromium (91.8 %)**. Mi
   request body, Storage Buckets, Background Sync, `document.featurePolicy`, IdleDetector.
 - Needs own network or engine work: WebTransport (QUIC through the relay), JSPI, MSE in workers
   (#121 in [decisions.md](decisions.md)).
-- Open without a decision ([status.md](status.md)): WebAuthn, Credential Management, Payment
-  Request, Web MIDI/USB/HID/Serial, WebXR, EME, WebGPU, Push. Left out on purpose: only
+- WebAuthn without an authenticator (#298): `PublicKeyCredential` and `navigator.credentials`
+  exist, no passkeys, `create()`/`get()` refuse.
+- Open without a decision ([status.md](status.md)): password credentials, Payment Request, Web MIDI/USB/HID/Serial, WebXR, EME, WebGPU, Push. Left out on purpose: only
   `userAgentData` (#90).
 
 browser-lite already has `Math.sumPrecise`, Temporal and `ReadableStream.from`, which the host
