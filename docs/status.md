@@ -274,16 +274,15 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   engine page grows by about 270 MB per load up to about 4.4 GB, then Firefox frees them all
   (#291). Chromium frees them right away (the renderer goes up and down between 0.4 and 1.6 GB).
   `cache-test` still opens a new tab between some of its sections (#288).
-- Soak tests, about every third CI run: after 200 navigations 3 to 4 pages stay alive (detached,
-  with their JS wrapper and all their nodes). The retainer paths (memory report 4) start at the
-  root "WeakSets": a node or `Location` wrapper counts as reachable through its opaque root (the
-  document or window) and holds the window and the document; who marks that opaque root does not
-  show in the snapshot (2026-10-29: all roots that reach such a document are its connected nodes
-  and its `Location`, so something outside adds the document and the window as opaque roots).
-  Memory report 4 now also runs one GC with JSC's verifier and prints its marking chain, which
-  names what added the opaque root. Mostly the `dom` page (3000 elements with onclick, a srcdoc iframe), once
-  its srcdoc document without any path (held from C++). Locally in 1 of 6 runs. Then the test
-  runs as many rounds again and only fails if the number grows (#292).
+- Soak tests, about every third CI run: after 200 navigations 3 to 5 pages stay alive (detached,
+  with their JS wrapper and all their nodes). Cause (2026-10-29, marking chain of JSC's verifier in
+  memory report 4): the conservative scan of the C stack finds an old pointer to one of the page's
+  objects (or its document) in a slot the GC's own frames do not write; the object holds its
+  window, the window the document, the opaque root of the document all its nodes. JSC zeroes only
+  the interpreter's stack in WebAssembly; the engine now zeroes 64 KB below the stack pointer
+  before its GCs (#296). Not covered: GCs at safe points in the middle of JS (patch 0012), where a
+  page may still stay until a later GC. Then the test runs as many rounds again and only fails if
+  the number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page

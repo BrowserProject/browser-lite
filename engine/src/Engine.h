@@ -32,6 +32,8 @@ void scheduleRunLoopPump();
 // Runs work after the current work item and its GC, where the heap is not deferred: a
 // synchronous full GC (collectNow) inside a work item only runs at its end (patch 0012)
 void runAtTopLevel(Function<void()>&&);
+// Zeroes the unused C stack right below the caller, right before a GC (EngineLoop.cpp)
+void clearStackBelow();
 // Whether the engine thread runs JS in a work item that started at least minimum ago
 bool engineThreadInLongScript(WTF::Seconds minimum);
 // A page dialog: runs the work of the engine thread nested until done()

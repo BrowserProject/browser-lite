@@ -16,12 +16,15 @@
 #include "EngineConfig.h"
 #include "MemoryWatch.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
+#include <emscripten/stack.h>
 #include <emscripten/threading.h>
 #include <pthread.h>
 #include <JavaScriptCore/ConsoleTypes.h>
@@ -91,6 +94,21 @@ void runAtTopLevel(Function<void()>&& work)
     topLevelWork().append(WTF::move(work));
 }
 
+// The conservative GC scans the C stack from its own frames up. In WebAssembly JSC only zeroes
+// the stack of the interpreter (sanitizeStackForVM with C_LOOP), so the GC's frames, which do not
+// write every slot (the register state of setjmp), still hold pointers that deeper calls and the
+// last GC left there; one of them kept a whole page with its document alive. A GC's frames take a
+// few KB: zero more than that below the caller. Needs no frame of its own on the stack (no
+// address taken), so the caller's stack pointer is the current one.
+static constexpr size_t clearedStackBytes = 64 * 1024;
+
+NEVER_INLINE void clearStackBelow()
+{
+    auto top = emscripten_stack_get_current();
+    auto end = std::max(emscripten_stack_get_end(), top - std::min(top, clearedStackBytes));
+    memset(reinterpret_cast<void*>(end), 0, top - end);
+}
+
 // Since when the engine thread runs its outermost work item, 0 while it waits for work: the
 // scrolling thread does not wait for a thread in a long script (engineThreadInLongScript)
 static std::atomic<double> s_workSince { 0 };
@@ -139,6 +157,7 @@ static void runWithGCAfterwards(Work&& work)
         JSC::DeferGC deferGC(*vm);
         work();
         gcStart = WTF::MonotonicTime::now();
+        clearStackBelow();
     } // a deferred GC runs here
     s_workSince.store(0, std::memory_order_relaxed);
     for (auto& next : std::exchange(topLevelWork(), { }))
@@ -397,6 +416,7 @@ void runNestedEventLoop(const Function<bool()>& done)
         }
         {
             JSC::JSLockHolder lock(vm);
+            clearStackBelow();
             vm.heap.collectAtSafepoint();
         }
         // Releasing caches is for when no task runs (the dialog's script or

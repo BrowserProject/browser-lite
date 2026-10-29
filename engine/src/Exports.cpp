@@ -891,6 +891,7 @@ static void printDetachedDocumentMarkers(JSC::VM& vm)
     JSC::Options::verifyGC() = true;
     JSC::Options::verboseVerifyGC() = true;
     vm.heap.setKeepVerifierSlotVisitor();
+    clearStackBelow();
     vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
     for (auto& [cell, url] : targets) {
         printf("[memory]   marking of %s:\n", url.utf8().data());
@@ -911,8 +912,10 @@ static void printMemoryReport(int full)
     // 3, 4: first release everything releasable like under memory pressure
     if (full >= 3)
         WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
-    if (full)
+    if (full) {
+        clearStackBelow();
         vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
+    }
     struct mallinfo info = mallinfo();
     auto& cache = WebCore::MemoryCache::singleton();
     printf("[memory] malloc used %zu MB, free %zu MB, JS heap %zu MB (capacity %zu MB), documents %u, cache %u KB\n",
