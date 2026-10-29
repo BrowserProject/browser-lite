@@ -258,8 +258,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   asks for and presents the right CPU frame at once (`transferFromImageBitmap` of a 2D canvas into
   the view canvas's `bitmaprenderer`, which showed WebGL frames before), but Firefox shows white
   until the context is back; a page that does the same outside the engine shows the frame. Now and then in CI (auth, clipboard, background tests)
-  about four workers report an error while they load the engine module right after the start;
-  the engine runs and the test's other checks pass, locally (Xvfb) it did not happen in 3 runs. Closing a tab within about a second of a change can lose
+  four or five engine workers that load while a page needs new threads hang for about 60 s and
+  then fail with an `error` event without a message (script load failure); the page waits that
+  long, later checks pass. Locally (Xvfb, 2 cores) not in 9 runs. The engine now logs such a
+  worker (`[workers] engine worker did not load after ... ms`) with the state of the service
+  worker that controls the page, which also sees the script request. Closing a tab within about a second of a change can lose
   that change (#275).
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
   tests pass, of the demo suite 6; the failures come from the image (no WebGL, OPFS,
