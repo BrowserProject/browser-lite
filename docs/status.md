@@ -275,15 +275,13 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   (#291). Chromium frees them right away (the renderer goes up and down between 0.4 and 1.6 GB).
   `cache-test` still opens a new tab between some of its sections (#288).
 - Soak tests, about every third CI run: after 200 navigations 3 to 5 pages stay alive (detached,
-  with their JS wrapper and all their nodes). Cause (2026-10-29, marking chain of JSC's verifier in
-  memory report 4): the conservative scan of the C stack finds an old pointer to one of the page's
-  objects (or its document) in a slot the GC's own frames do not write; the object holds its
-  window, the window the document, the opaque root of the document all its nodes. JSC zeroes only
-  the interpreter's stack in WebAssembly; the engine also zeroes 64 KB below the stack pointer
-  before its GCs (#296), but locally still 3 of 15 runs kept pages (roots: a function, a list
-  object or the document wrapper of the page), so the pointer sits in a frame above the GC. Memory
-  report 4 now prints the words of the scanned C stack and the mark lists to find that frame. The
-  test runs as many rounds again and only fails if the number grows (#292).
+  with their JS wrapper and all their nodes). Cause (2026-10-29, memory report 4: marking chain of
+  JSC's verifier and the scanned C stack words): the conservative scan of the C stack finds old
+  words in slots that live frames do not write, mostly text like `"040\n"`, which is an address in
+  the heap; the cell there holds its window, the window its document, the document all its nodes.
+  The engine now zeroes the stack below each work item before it runs and before its GC (#296);
+  whether that ends it needs soak runs. The test runs as many rounds again and only fails if the
+  number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page

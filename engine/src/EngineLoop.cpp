@@ -94,12 +94,14 @@ void runAtTopLevel(Function<void()>&& work)
     topLevelWork().append(WTF::move(work));
 }
 
-// The conservative GC scans the C stack from its own frames up. In WebAssembly JSC only zeroes
-// the stack of the interpreter (sanitizeStackForVM with C_LOOP), so the GC's frames, which do not
-// write every slot (the register state of setjmp), still hold pointers that deeper calls and the
-// last GC left there; one of them kept a whole page with its document alive. A GC's frames take a
-// few KB: zero more than that below the caller. Needs no frame of its own on the stack (no
-// address taken), so the caller's stack pointer is the current one.
+// The conservative GC scans the C stack from its own frames up to the base. In WebAssembly JSC
+// only zeroes the stack of the interpreter (sanitizeStackForVM with C_LOOP), so frames that do not
+// write every slot (the register state of setjmp, buffers, padding) show what earlier calls left
+// there: text like "123\n" is an address in a heap of more than 160 MB, and such words kept whole
+// pages alive. So the engine zeroes the stack below a work item before its frames grow there and
+// again before the GC at its end. A work item's frames take a few KB, the GC's too: zero more
+// than that below the caller. Needs no frame of its own on the stack (no address taken), so the
+// caller's stack pointer is the current one.
 static constexpr size_t clearedStackBytes = 64 * 1024;
 
 NEVER_INLINE void clearStackBelow()
@@ -148,6 +150,7 @@ static void runWithGCAfterwards(Work&& work)
         work();
         return;
     }
+    clearStackBelow();
     auto gcStart = WTF::MonotonicTime::now();
     s_workVM.store(vm, std::memory_order_relaxed);
     s_workSince.store(gcStart.secondsSinceEpoch().value(), std::memory_order_relaxed);
@@ -215,6 +218,7 @@ static void runLocalTasks()
 
 extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
 {
+    clearStackBelow();
     s_localDrainScheduled = false;
     runLocalTasks();
     if (!localTasks().isEmpty())
