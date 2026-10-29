@@ -257,9 +257,12 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
   loss without the compositor thread (only with `compositing=0`, an expert setting): the engine
-  asks for and presents the right CPU frame at once (`transferFromImageBitmap` of a 2D canvas into
-  the view canvas's `bitmaprenderer`, which showed WebGL frames before), but Firefox shows white
-  until the context is back; a page that does the same outside the engine shows the frame. Now and then in CI (auth, clipboard, background tests)
+  presents the right CPU frame at once (checked in the worker: the scratch canvas has the new
+  color), but Firefox shows white until the context is back. Neither the source of the
+  `ImageBitmap` (`transferToImageBitmap` of a 2D canvas, `createImageBitmap` of `ImageData`) nor
+  the size handling changes that. With the compositor thread (the default) the screen shows the
+  CPU frames after a loss; probably because there the worker that lost the WebGL context is not
+  the one that presents. A workaround would be a new view canvas from the main thread after the loss. Now and then in CI (auth, clipboard, background tests)
   four or five engine workers that load while a page needs new threads hang for about 60 s and
   then fail with an `error` event without a message (script load failure); the page waits that
   long, later checks pass. Locally (Xvfb, 2 cores) not in 9 runs. The engine now logs such a
