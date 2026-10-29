@@ -151,6 +151,19 @@ export class Player {
     if (!ctx.signal.aborted) ctx.module._bl_media_event(this.id, ctx.text(JSON.stringify(object)));
   }
 
+  // iOS Safari loads only the metadata until play() even with preload auto and suspends; WebKit's
+  // autoplay of the page waits for enough data, so the video never started. Suspended like that,
+  // the element can play as soon as it is asked: enough data for the engine.
+  private readyState(): number {
+    const video = this.video;
+    const waitsForPlay =
+      video.preload === 'auto' &&
+      video.paused &&
+      video.readyState === HTMLMediaElement.HAVE_METADATA &&
+      video.networkState === HTMLMediaElement.NETWORK_IDLE;
+    return waitsForPlay ? HTMLMediaElement.HAVE_ENOUGH_DATA : video.readyState;
+  }
+
   private sendState(type: string): void {
     const video = this.video;
     const buffered: number[] = [];
@@ -168,7 +181,7 @@ export class Player {
       hasAudio: video.readyState >= 1,
       paused: video.paused,
       ended: video.ended,
-      readyState: video.readyState,
+      readyState: this.readyState(),
       loading: video.networkState === HTMLMediaElement.NETWORK_LOADING,
       buffered,
     });
@@ -351,6 +364,8 @@ export class Player {
       case 'preload':
         // A higher value applies by itself in Chrome; load() would start over
         video.preload = data.preload as HTMLVideoElement['preload'];
+        // iOS suspended at the metadata: the engine learns that it can play now (readyState())
+        this.sendState('progress');
         break;
       case 'size':
         this.presentation = { width: data.width as number, height: data.height as number };
@@ -522,11 +537,12 @@ export class MediaService extends Service {
       views.set(view.id, view);
       signal.addEventListener('abort', () => views.delete(view.id));
     });
-    // Must be in the document, Chrome throttles detached videos
+    // Must be in the document, Chrome throttles detached videos. Not behind the page (z-index):
+    // iOS Safari stops a nearly transparent video that the page covers
     const container = document.createElement('div');
     container.setAttribute('data-bl-media', '');
     container.style.cssText =
-      'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1';
+      'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;pointer-events:none';
     document.body.append(container);
     const unlock = new MediaUnlock();
     ctx.onUserGesture(() => unlock.gesture([...players.values()].map((player) => player.video)));
