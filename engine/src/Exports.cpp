@@ -43,6 +43,8 @@
 #include <WebCore/MemoryRelease.h>
 #include <WebCore/WasmPlatform.h>
 #include <malloc.h>
+#include <algorithm>
+#include <wtf/HashSet.h>
 #include <wtf/FileSystem.h>
 #include <wtf/Language.h>
 #include <wtf/text/MakeString.h>
@@ -773,8 +775,12 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
         return label.isEmpty() ? name : makeString(name, '[', label.left(40), ']');
     };
     HashMap<int, String> rootReason;
-    for (size_t i = 0; i + 2 < roots->length(); i += 3)
+    HashMap<int, String> reachability; // why a root of WeakSets counts as reachable
+    for (size_t i = 0; i + 2 < roots->length(); i += 3) {
         rootReason.add(integer(*roots, i) + 1, string(*labels, integer(*roots, i + 1)));
+        if (int reason = integer(*roots, i + 2))
+            reachability.add(integer(*roots, i) + 1, string(*labels, reason));
+    }
     // Reverse edges: to -> (from, edge index)
     HashMap<int, Vector<std::pair<int, size_t>>> referrers;
     for (size_t i = 0; i + 3 < edges->length(); i += 4)
@@ -835,6 +841,36 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
         if (path.isNull())
             path = "no path to a root"_s;
         printf("[memory]   retainers of %s: %s\n", url.utf8().data(), path.utf8().data());
+
+        // Every root that reaches the document, by class and reason: the one that keeps it is
+        // mostly a rare kind among thousands of its connected nodes
+        HashMap<String, unsigned> kinds;
+        HashSet<int> seen;
+        Deque<int> queue;
+        queue.append(start->value);
+        seen.add(start->value + 1);
+        while (!queue.isEmpty() && seen.size() < 2000000) {
+            int node = queue.takeFirst();
+            if (auto reason = rootReason.find(node + 1); reason != rootReason.end()) {
+                auto entry = nodeIndex.find(node + 1);
+                auto name = entry == nodeIndex.end() ? String("?"_s) : string(*classNames, integer(*nodes, entry->value + 2));
+                auto why = reachability.get(node + 1);
+                kinds.add(makeString(name, " ("_s, reason->value, why.isEmpty() ? ""_s : ": "_s, why, ')'), 0).iterator->value++;
+            }
+            auto it = referrers.find(node + 1);
+            if (it == referrers.end())
+                continue;
+            for (auto& [from, edge] : it->value) {
+                if (seen.add(from + 1).isNewEntry)
+                    queue.append(from);
+            }
+        }
+        auto sorted = copyToVector(kinds);
+        std::ranges::sort(sorted, [](auto& a, auto& b) { return a.value < b.value; });
+        StringBuilder list;
+        for (size_t i = 0; i < sorted.size() && i < 12; ++i)
+            list.append(i ? ", "_s : ""_s, sorted[i].key, " x"_s, sorted[i].value);
+        printf("[memory]   roots that reach %s (rarest first): %s\n", url.utf8().data(), list.toString().utf8().data());
     }
 }
 

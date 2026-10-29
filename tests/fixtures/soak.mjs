@@ -263,7 +263,7 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
     await page.evaluate(() => window.blTest.memory(4));
     await waitFor(() => reportLines.some((l) => l.includes('retainers of')), 60000);
     await page.waitForTimeout(2000);
-    console.log(reportLines.filter((l) => l.includes('retainers')).join('\n'));
+    console.log(reportLines.filter((l) => /retainers|roots that reach/.test(l)).join('\n'));
     // A few pages now and then stay (status.md: soak tests); a leak grows with more rounds
     await rounds(ROUNDS, 2 * ROUNDS);
     await go(`${siteURL}empty?r=again`);
