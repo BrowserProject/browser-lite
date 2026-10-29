@@ -63,20 +63,22 @@ static void setFramePhase(CompositorScene& scene, uint8_t phase)
     scene.framePhaseSince.store(MonotonicTime::now().secondsSinceEpoch().value(), std::memory_order_relaxed);
 }
 
-// Phase 131 (stall diagnostics): another thread holds the lock of a layer; logs its index after
-// 1 s. Afterwards phase 13 can only wait inside the flush (its backing store, its contents).
-static void waitForLayerLock(CompositorScene& scene, CoordinatedPlatformLayer& layer, size_t index)
+// Phases 131 and 132 (stall diagnostics): another thread holds the lock of a layer before its
+// flush (131) or right after it (132, hasPendingBackingStoreTileUpdates takes the lock of a layer
+// that has no Skia target yet); logs its index after 1 s. Otherwise phase 13 waits inside the
+// flush (the step of patch 0062 tells where).
+static void waitForLayerLock(CompositorScene& scene, CoordinatedPlatformLayer& layer, size_t index, uint8_t phase = 131)
 {
     if (!layer.lock().isLocked())
         return;
-    setFramePhase(scene, 131);
+    setFramePhase(scene, phase);
     auto start = MonotonicTime::now();
     bool logged = false;
     while (layer.lock().isLocked()) {
         if (!logged && MonotonicTime::now() - start > 1_s) {
             logged = true;
-            log("Compositor: layer %zu (of %u, scrolling layer %d) is locked by another thread for 1 s", index,
-                scene.committedLayers.size(), scene.scrollLayer.get() == &layer ? 1 : 0);
+            log("Compositor: layer %zu (of %u, scrolling layer %d) is locked by another thread for 1 s (phase %u)", index,
+                scene.committedLayers.size(), scene.scrollLayer.get() == &layer ? 1 : 0, phase);
         }
         Thread::yield();
     }
@@ -220,8 +222,9 @@ static void compositeScene(CompositorScene& scene)
     size_t index = 0;
     for (auto& layer : scene.committedLayers) {
         scene.flushingLayer.store(index, std::memory_order_relaxed);
-        waitForLayerLock(scene, layer.get(), index++);
+        waitForLayerLock(scene, layer.get(), index);
         layer->flushCompositingState(reasons, true);
+        waitForLayerLock(scene, layer.get(), index++, 132);
         if (layer->hasPendingBackingStoreTileUpdates())
             layersWithTileUpdates.append(layer);
     }

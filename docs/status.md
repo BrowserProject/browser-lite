@@ -296,8 +296,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   layer 6 of 8, so the compositor holds that layer's lock and waits inside its flush (the
   backdrop's lock, the backing store's update lock in `takePendingUpdate`, or a buffer it
   drops); the lock order of the engine thread (parent, then child or backdrop) matches. Patch 0062
-  now records the step inside the flush (own lock, backing store update, backdrop's lock,
-  contents buffer), the log line ends with it.
+  records the step inside the flush; the next stall (2026-10-29) showed layer 7 of 8 at step 0,
+  after its flush: `hasPendingBackingStoreTileUpdates` takes the layer's lock when the layer has
+  no Skia target yet (its flush had nothing to do), so another thread holds that lock for
+  seconds. Phase 132 now logs that case with the layer.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
