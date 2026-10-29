@@ -15,6 +15,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
 } from '../lib/index.mjs';
 
 timeLimit(4 * TIMEOUT + 120000);
@@ -468,7 +469,23 @@ const freshContext = await launchProfile();
 await freshContext.addInitScript(() => {
   window.blTestOptions = { handlers: { fileChooser: undefined } };
 });
-const fresh = freshContext.pages()[0] || (await freshContext.newPage());
+let fresh = freshContext.pages()[0] || (await freshContext.newPage());
+// Firefox keeps the engines of earlier documents of a tab (#291); after about 7 engine starts in
+// one tab its content process crashed: a new tab before the quota and upload sections, once the old
+// one let go of the storage lock
+async function freshTab() {
+  // The new tab first: closing the last page of a profile closes Firefox's window
+  const old = fresh;
+  fresh = await freshContext.newPage();
+  results.watch(fresh);
+  await old.goto('about:blank');
+  await old.close();
+  await fresh.goto(stack.app({ manual: '1' }));
+  await waitFor(
+    () => fresh.evaluate(async () => !(await navigator.locks.query()).held?.length),
+    20000,
+  );
+}
 results.clear();
 results.watch(fresh);
 await fresh.goto(appURL(siteURL));
@@ -511,6 +528,7 @@ check(
 );
 
 // Limit for IndexedDB per origin: QuotaExceededError, what came before stays
+await freshTab();
 results.clear();
 await fresh.goto(appURL(`${siteURL}quota?fill`, { env: 'BL_INDEXEDDB_QUOTA_MB=4' }));
 const filled = (await result('quotafill'))?.split(',') || [];
@@ -580,6 +598,7 @@ const engineMallocMB = async () => {
   await fresh.evaluate(() => window.blTest.memory(0));
   return Number(/malloc used (\d+) MB/.exec((await line).text())[1]);
 };
+await freshTab();
 results.clear();
 await fresh.goto(appURL(`${siteURL}upload`));
 await result('uploadready');
