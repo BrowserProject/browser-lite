@@ -4,7 +4,7 @@ import type { StartProgress, Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 13;
+export const ENGINE_ABI_VERSION = 14;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -150,7 +150,8 @@ export interface EngineHooks {
 
 /** The Emscripten module of engine.js as far as the core uses it. */
 export interface EngineModule extends EngineExports, EngineHooks {
-  HEAPU8: Uint8Array;
+  /** The engine memory as it is now: take it anew for every use, other threads grow it. */
+  blHeap(): Uint8Array;
   ENV: Record<string, string>;
   stringToNewUTF8(text: string): number;
   _malloc(size: number): number;

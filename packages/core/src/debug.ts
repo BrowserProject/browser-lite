@@ -43,7 +43,7 @@ export class Debug implements DebugApi {
   memory(report?: 0 | 1 | 2 | 3 | 4): number {
     const { module } = this.host;
     if (report !== undefined && this.host.ready) module._bl_memory_report(report);
-    return module.HEAPU8?.length ?? 0;
+    return module.blHeap?.().length ?? 0;
   }
 
   memoryUsed(): number {

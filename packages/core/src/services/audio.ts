@@ -80,7 +80,7 @@ export class AudioService extends Service {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [2],
-          processorOptions: { buffer: ctx.module.HEAPU8.buffer, ptr, capacity, channels },
+          processorOptions: { buffer: ctx.module.blHeap().buffer, ptr, capacity, channels },
         });
         output.node.port.onmessage = (event) => {
           lastPeak = event.data.peak;

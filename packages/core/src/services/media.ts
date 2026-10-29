@@ -427,7 +427,7 @@ export class Player {
     const pixels = context.getImageData(0, 0, width, height).data;
     const ptr = module._malloc(pixels.length);
     if (!ptr) return;
-    module.HEAPU8.set(pixels, ptr);
+    module.blHeap().set(pixels, ptr);
     this.frameInFlight = true;
     this.frames++;
     module._bl_media_frame(this.id, ptr, width, height);

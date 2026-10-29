@@ -63,7 +63,7 @@ export class Watchdog {
   // Mark the engine thread stores after the last handled input (bl_input_mark)
   private handledMark(): number {
     if (!this.markAddress) this.markAddress = this.module._bl_input_mark_address();
-    const heap = this.module.HEAPU8;
+    const heap = this.module.blHeap();
     const at = this.markAddress;
     return (
       ((heap[at] ?? 0) |

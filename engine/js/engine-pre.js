@@ -5,7 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 13;
+Module.blAbiVersion = 14;
 
 // A thread that traps or aborts ends the engine. The error event the main
 // thread gets from a worker has only the message, so the worker writes the
@@ -49,6 +49,12 @@ Module.blAlloc = (size) => {
     throw new RangeError('Out of memory');
   return ptr;
 };
+
+// The engine memory for the JS hosts. Module.HEAPU8 is the view from when the main thread last
+// ran engine JS: after another thread grew the memory it ends at the old size, and a frame
+// written above that end threw "offset is out of bounds". Emscripten turns this HEAPU8 into a
+// check that renews the views first (growMemViews), like every access inside the module.
+Module.blHeap = () => HEAPU8;
 
 // Frames are painted directly in the engine worker: the host hands the canvas
 // of every view to the worker of the presenting thread with

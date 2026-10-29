@@ -624,7 +624,7 @@ class BrowserImpl implements Browser, ViewHost {
 
   memoryPressure(): void {
     if (!this.ready) return;
-    const size = this.module.HEAPU8.length;
+    const size = this.module.blHeap().length;
     this.events.emit('memory-pressure', { footprint: size, limit: size });
   }
 

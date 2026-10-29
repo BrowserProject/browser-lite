@@ -424,7 +424,7 @@ export class ViewImpl implements View {
     if (w <= 0 || h <= 0) return;
     // ImageData must not point at a SharedArrayBuffer: copy the rows
     const pixels = new Uint8ClampedArray(w * h * 4);
-    const heap = this.host.module.HEAPU8;
+    const heap = this.host.module.blHeap();
     for (let row = 0; row < h; row++) {
       const start = ptr + ((y + row) * width + x) * 4;
       pixels.set(heap.subarray(start, start + w * 4), row * w * 4);
