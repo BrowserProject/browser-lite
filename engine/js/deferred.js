@@ -11,6 +11,11 @@
 
 var blDeferred = { modules: [], instances: [] };
 
+// A thread that reads a chunk itself waits for it; the compositor and the scrolling thread then
+// show no new frame meanwhile, so those reads and every long one are logged
+const BL_CHUNK_READ_TIMEOUT_MS = 30000;
+const BL_SLOW_CHUNK_READ_MS = 1000;
+
 // Chrome can abort a synchronous request, for example while another request for the same file
 // runs: a few tries
 function blRetry(read) {
@@ -40,6 +45,9 @@ function blReadChunkOnce(chunk) {
     const request = new XMLHttpRequest();
     request.open('GET', url, false);
     request.responseType = 'arraybuffer';
+    // A request that never ends would stop the thread for good (allowed in workers); blRetry tries
+    // again
+    request.timeout = BL_CHUNK_READ_TIMEOUT_MS;
     request.send();
     if (request.status !== 200) throw new Error(`${url}: HTTP ${request.status}`);
     bytes = new Uint8Array(request.response);
@@ -60,7 +68,15 @@ function blReadChunkOnce(chunk) {
 }
 
 function blLoadDeferred(chunk) {
-  blDeferred.modules[chunk] ??= new WebAssembly.Module(blReadChunk(chunk));
+  if (!blDeferred.modules[chunk]) {
+    const thread = ENVIRONMENT_IS_PTHREAD ? _pthread_self() : 0;
+    const who = thread ? (thread === Module._bl__engine_thread() ? 'engine thread' : `thread ${thread}`) : 'main thread';
+    if (who.startsWith('thread')) err(`[deferred] ${who} reads chunk ${chunk} itself`);
+    const start = performance.now();
+    blDeferred.modules[chunk] = new WebAssembly.Module(blReadChunk(chunk));
+    const ms = Math.round(performance.now() - start);
+    if (ms > BL_SLOW_CHUNK_READ_MS) err(`[deferred] ${who} waited ${ms} ms for chunk ${chunk}`);
+  }
   blDeferred.instances[chunk] ??= new WebAssembly.Instance(blDeferred.modules[chunk], {
     bl_primary: wasmExports,
   });
