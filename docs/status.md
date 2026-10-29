@@ -192,6 +192,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
    the list with `tools/hot-functions.mjs` after WebKit updates.
+9. The relay transport runs on the host page's main thread, every packet of the engine passes it.
+   With the main thread busy 80 ms of every 100 ms (2026-10-29, local, 60 small fetches in a row)
+   the median of a fetch stayed at 2 to 3 ms, the 90th percentile went from 3 to 5 ms up to 82 ms
+   and the mean from 2.2 to 11.8 ms: only packets that meet a long task wait for it. A transport in
+   a worker pays off for hosts with long tasks of their own, not for the demo.
 
 ## Open: features
 
