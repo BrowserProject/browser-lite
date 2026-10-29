@@ -279,10 +279,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   memory report 4): the conservative scan of the C stack finds an old pointer to one of the page's
   objects (or its document) in a slot the GC's own frames do not write; the object holds its
   window, the window the document, the opaque root of the document all its nodes. JSC zeroes only
-  the interpreter's stack in WebAssembly; the engine now zeroes 64 KB below the stack pointer
-  before its GCs (#296). Not covered: GCs at safe points in the middle of JS (patch 0012), where a
-  page may still stay until a later GC. Then the test runs as many rounds again and only fails if
-  the number grows (#292).
+  the interpreter's stack in WebAssembly; the engine also zeroes 64 KB below the stack pointer
+  before its GCs (#296), but locally still 3 of 15 runs kept pages (roots: a function, a list
+  object or the document wrapper of the page), so the pointer sits in a frame above the GC. Memory
+  report 4 now prints the words of the scanned C stack and the mark lists to find that frame. The
+  test runs as many rounds again and only fails if the number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
   like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page

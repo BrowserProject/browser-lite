@@ -32,6 +32,7 @@
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/MarkedVector.h>
 #include <JavaScriptCore/Options.h>
 #include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/MediaProducer.h>
@@ -54,6 +55,8 @@
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/ScriptController.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/heap.h>
+#include <emscripten/stack.h>
 #include <wtf/JSONValues.h>
 
 using namespace BrowserLite;
@@ -875,6 +878,39 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
     }
 }
 
+// What the conservative scan sees above this function (the GC's own frames are below): the words
+// of the C stack that may point into the heap, by their distance from the stack's base, to match
+// with the cell the verifier names "from scan of ConservativeScan roots"; and the
+// MarkedArgumentBuffers on the heap, which also count as conservative roots
+static void printConservativeRoots(JSC::VM& vm)
+{
+    auto base = emscripten_stack_get_base();
+    auto top = emscripten_stack_get_current() & ~uintptr_t { 3 };
+    auto heapEnd = emscripten_get_heap_size();
+    printf("[memory]   C stack %u bytes\n", static_cast<unsigned>(base - top));
+    StringBuilder line;
+    unsigned count = 0;
+    for (auto address = top; address < base; address += 4) {
+        auto value = *reinterpret_cast<uint32_t*>(address);
+        if (value < 0x100000 || value >= heapEnd)
+            continue;
+        line.append(' ', base - address, ":"_s, hex(value, Lowercase));
+        if (++count % 16)
+            continue;
+        printf("[memory]   C stack words%s\n", line.toString().utf8().data());
+        line.clear();
+    }
+    if (!line.isEmpty())
+        printf("[memory]   C stack words%s\n", line.toString().utf8().data());
+    size_t lists = 0;
+    size_t values = 0;
+    for (auto* list : vm.heap.markListSet()) {
+        ++lists;
+        values += list->size();
+    }
+    printf("[memory]   mark lists %zu with %zu values\n", lists, values);
+}
+
 // Who marks the documents without a frame: the snapshot has no edge for an opaque root (a
 // wrapper that adds its document while marking keeps all wrappers of that document). One more
 // full GC with JSC's verifier, which remembers for each cell and opaque root what marked or added
@@ -903,6 +939,7 @@ static void printDetachedDocumentMarkers(JSC::VM& vm)
     vm.heap.clearVerifierSlotVisitor();
     JSC::Options::verifyGC() = false;
     JSC::Options::verboseVerifyGC() = false;
+    printConservativeRoots(vm);
 }
 
 static void printMemoryReport(int full)
