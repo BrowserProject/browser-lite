@@ -7,5 +7,10 @@ importScripts('media-sw.js');
 {
   const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
   sw.addEventListener('install', () => sw.skipWaiting());
-  sw.addEventListener('activate', (event) => event.waitUntil(sw.clients.claim()));
+  // Claims the pages without holding up the activation: until then their requests wait, also the
+  // script of a new engine worker, which is a client claim() waits for (Firefox ended that after
+  // about 60 s, and the worker did not load)
+  sw.addEventListener('activate', () => {
+    sw.clients.claim().catch(() => {});
+  });
 }

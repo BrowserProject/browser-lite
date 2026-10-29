@@ -265,12 +265,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   the size handling changes that. With the compositor thread (the default) the screen shows the
   CPU frames after a loss; probably because there the worker that lost the WebGL context is not
   the one that presents. A workaround would be a new view canvas from the main thread after the loss. Now and then in CI (auth, clipboard, background tests)
-  four or five engine workers that load while a page needs new threads hang for about 60 s and
-  then fail with an `error` event without a message (script load failure); the page waits that
-  long, later checks pass. Locally (Xvfb, 2 cores) not in 9 runs. The engine logs such a worker:
-  on 2026-10-29 "did not load after 57232 ms (4 unused, 5 threads, service worker activated)",
-  a spare worker loading while 4 loaded ones waited, under the core's active service worker
-  (which sees the script request but only answers media URLs). Closing a tab within about a second of a change can lose
+  an engine worker loaded for about 60 s and then failed: the core's service worker waited in
+  `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
+  the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such
+  a worker (`[workers] engine worker did not load after ... ms`). Closing a tab within about a second of a change can lose
   that change (#275); in Firefox also a reload (the engine cannot write while `pagehide` waits):
   `storage-test` "reloaded right after writing" fails locally and in about 1 of 3 CI runs.
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13

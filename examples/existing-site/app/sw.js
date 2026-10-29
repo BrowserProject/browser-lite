@@ -3,8 +3,12 @@
 importScripts('media-sw.js');
 
 self.addEventListener('install', () => self.skipWaiting());
-// Control the open pages right away, so videos play on the first visit too
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+// Control the open pages right away, so videos play on the first visit too. Not in waitUntil():
+// requests wait until the activation ends, also the script of a new engine worker, a client that
+// claim() waits for (docs/embedding.md)
+self.addEventListener('activate', () => {
+  self.clients.claim().catch(() => {});
+});
 
 const isolation = {
   'Cross-Origin-Opener-Policy': 'same-origin',

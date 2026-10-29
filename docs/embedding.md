@@ -154,6 +154,9 @@ Needed only for `<video>` and `<audio>` with media files; the core never registe
   `bl-media/` URLs alone and keep COOP/COEP/CORP on the responses it produces.
 - Call `skipWaiting()` and `clients.claim()` in the worker. Otherwise the page is not controlled
   on the first visit: the core waits 3 s for `controllerchange` and emits `media-sw-missing`.
+  Do not pass `claim()` to `event.waitUntil()` in `activate`: the page's requests wait for the
+  activation, also the script of a new engine worker, which is a client `claim()` waits for
+  (Firefox resolves that only after about 60 s, and the worker fails to load).
 - The scope must cover the browser page: media URLs are `<scope>bl-media/...` (with `/app/sw.js`
   the scope is `/app/`). Without a worker media files do not play and the browser emits the
   warning `media-sw-missing`.
