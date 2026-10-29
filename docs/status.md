@@ -249,7 +249,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 ## Open: tests and operations
 
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
-  loss without the compositor thread. Now and then in CI (auth, clipboard, background tests)
+  loss without the compositor thread (only with `compositing=0`, an expert setting): the engine
+  asks for and presents the right CPU frame at once (`transferFromImageBitmap` of a 2D canvas into
+  the view canvas's `bitmaprenderer`, which showed WebGL frames before), but Firefox shows white
+  until the context is back; a page that does the same outside the engine shows the frame. Now and then in CI (auth, clipboard, background tests)
   about four workers report an error while they load the engine module right after the start;
   the engine runs and the test's other checks pass, locally (Xvfb) it did not happen in 3 runs. Closing a tab within about a second of a change can lose
   that change (#275).
