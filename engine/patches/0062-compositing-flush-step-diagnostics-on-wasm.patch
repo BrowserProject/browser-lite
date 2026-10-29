@@ -1,0 +1,95 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+index 75dcc488b7..06e0b02424 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+@@ -40,6 +40,7 @@
+ #include "NativeImage.h"
+ #include "TextureMapperLayer.h"
+ #include <wtf/MainThread.h>
++#include <wtf/Scope.h>
+ 
+ #if USE(SKIA)
+ #include "SkiaCompositingLayer.h"
+@@ -1052,10 +1053,24 @@ void CoordinatedPlatformLayer::flushPositionChanges(const OptionSet<CompositionR
+     applyPositionChanges(ensureTarget());
+ }
+ 
++#if PLATFORM(WASM)
++std::atomic<uint8_t>& CoordinatedPlatformLayer::flushStepForDiagnostics()
++{
++    static std::atomic<uint8_t> step;
++    return step;
++}
++#define FLUSH_STEP(step) flushStepForDiagnostics().store(step, std::memory_order_relaxed)
++#else
++#define FLUSH_STEP(step)
++#endif
++
+ void CoordinatedPlatformLayer::flushCompositingState(const OptionSet<CompositionReason>& reasons, bool useSkiaTarget)
+ {
+     ASSERT(!isMainThread());
++    FLUSH_STEP(1);
+     Locker locker { m_lock };
++    FLUSH_STEP(2);
++    auto done = makeScopeExit([] { FLUSH_STEP(0); });
+     if (m_pendingChanges.isEmpty() && (!reasons.contains(CompositionReason::RenderingUpdate) || !m_backingStoreProxy))
+         return;
+ 
+@@ -1395,7 +1410,9 @@ void CoordinatedPlatformLayer::flushCompositingStateOnSkiaTarget(const OptionSet
+             layer.setBackdropFilters(FilterOperations());
+             m_pendingChanges.remove(Change::Backdrop);
+         } else if (m_backdrop) {
++            FLUSH_STEP(4);
+             Locker locker { m_backdrop->lock() };
++            FLUSH_STEP(2);
+             if (m_pendingChanges.contains(Change::Backdrop) || m_backdrop->m_pendingChanges.contains(Change::Filters)) {
+                 layer.setBackdropFilters(m_backdrop->m_filters);
+                 m_pendingChanges.remove(Change::Backdrop);
+@@ -1440,8 +1457,11 @@ void CoordinatedPlatformLayer::flushCompositingStateOnSkiaTarget(const OptionSet
+             m_pendingChanges.remove(Change::Children);
+         }
+ 
+-        if (m_backingStoreProxy)
++        if (m_backingStoreProxy) {
++            FLUSH_STEP(3);
+             layer.updateBackingStore(m_backingStoreProxy->takePendingUpdate(), m_contentsScale);
++            FLUSH_STEP(2);
++        }
+     }
+ 
+     if (reasons.containsAny({ CompositionReason::RenderingUpdate, CompositionReason::VideoFrame, CompositionReason::AsyncScrolling })) {
+@@ -1458,7 +1478,9 @@ void CoordinatedPlatformLayer::flushCompositingStateOnSkiaTarget(const OptionSet
+ #endif
+         if (m_pendingChanges.contains(Change::ContentsBuffer)) {
+             m_contentsBuffer.hasCommitted = !!m_contentsBuffer.pending;
++            FLUSH_STEP(5);
+             layer.setContentsBuffer(WTF::move(m_contentsBuffer.pending));
++            FLUSH_STEP(2);
+             m_pendingChanges.remove(Change::ContentsBuffer);
+         }
+     }
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+index fca96e8bb7..a8134c4e2f 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+@@ -34,6 +34,7 @@
+ #include "PlatformLayerIdentifier.h"
+ #include "TextureMapperAnimation.h"
+ #include "TransformationMatrix.h"
++#include <atomic>
+ #include <wtf/EnumSet.h>
+ #include <wtf/Lock.h>
+ #include <wtf/MainThread.h>
+@@ -96,6 +97,12 @@ public:
+ 
+     PlatformLayerIdentifier id() const { return m_id; }
+     Lock& lock() LIFETIME_BOUND WTF_RETURNS_LOCK(m_lock) { return m_lock; }
++#if PLATFORM(WASM)
++    // browser-lite: where flushCompositingState is (stall diagnostics of the embedder): 1 waits
++    // for the layer's lock, 2 has it, 3 takes the backing store update, 4 waits for the
++    // backdrop's lock, 5 hands over the contents buffer, 0 done. Only one thread flushes.
++    WEBCORE_EXPORT static std::atomic<uint8_t>& flushStepForDiagnostics();
++#endif
+ 
+     Client& client() const { ASSERT(m_client); return *m_client; }
+     void invalidateClient();

@@ -209,6 +209,12 @@ const { server: site, url: siteRoot } = await serve((req, res) => {
         .end(NEGATIVE.replace('<script>', `<script>${script}`));
       break;
     }
+    case '/data.json':
+      // No charset: JSON is UTF-8 (patch 0061)
+      res
+        .writeHead(200, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ text: 'äöü €' }));
+      break;
     case '/data.txt': {
       const gz = (req.headers['accept-encoding'] || '').includes('gzip');
       const body = Buffer.from('hello-gzip\n');
@@ -670,6 +676,24 @@ check(
     'error page after POST: resend sends POST with the data',
     sent.startsWith('SENT|POST|field=value'),
     sent,
+  );
+}
+
+// A JSON document without a charset shows its text as UTF-8 (like Chromium and Firefox)
+{
+  await go(`${siteURL}/data.json`);
+  const from = consoleLines.length;
+  await waitFor(async () => {
+    await page.evaluate(() =>
+      window.blTest.eval('console.log("JSONTEXT|" + document.body.innerText)'),
+    );
+    return consoleLines.slice(from).some((line) => line.includes('JSONTEXT|{'));
+  }, 20000);
+  const shown = consoleLines.slice(from).find((line) => line.includes('JSONTEXT|{')) || '';
+  check(
+    'JSON document without a charset is UTF-8',
+    shown.includes('"text":"äöü €"'),
+    shown.slice(0, 120),
   );
 }
 

@@ -1,0 +1,17 @@
+diff --git a/Source/WebCore/loader/TextResourceDecoder.cpp b/Source/WebCore/loader/TextResourceDecoder.cpp
+index 0ad4ccd460..741dc9aa65 100644
+--- a/Source/WebCore/loader/TextResourceDecoder.cpp
++++ b/Source/WebCore/loader/TextResourceDecoder.cpp
+@@ -270,6 +270,12 @@ inline TextResourceDecoder::TextResourceDecoder(ContentType contentType, const P
+ Ref<TextResourceDecoder> TextResourceDecoder::create(const String& mimeType, const PAL::TextEncoding& encoding, bool usesEncodingDetector)
+ {
+     auto contentType = determineContentType(mimeType);
++#if PLATFORM(WASM)
++    // browser-lite: JSON without a charset is UTF-8 (RFC 8259), like in Chromium and Firefox. The
++    // default encoding of the settings (windows-1252) showed its non-ASCII text as mojibake.
++    if (MIMETypeRegistry::isSupportedJSONMIMEType(mimeType))
++        return adoptRef(*new TextResourceDecoder(contentType, PAL::UTF8Encoding(), usesEncodingDetector));
++#endif
+     return adoptRef(*new TextResourceDecoder(contentType, defaultEncoding(contentType, encoding), usesEncodingDetector));
+ }
+ 

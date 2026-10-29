@@ -293,8 +293,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   paint); the log line now names the layer being flushed (-1 the root layer). 2026-10-29 again:
   layer 6 of 8, so the compositor holds that layer's lock and waits inside its flush (the
   backdrop's lock, the backing store's update lock in `takePendingUpdate`, or a buffer it
-  drops); the lock order of the engine thread (parent, then child or backdrop) matches. Telling
-  them apart needs a WebKit patch (log the lock it waits for).
+  drops); the lock order of the engine thread (parent, then child or backdrop) matches. Patch 0062
+  now records the step inside the flush (own lock, backing store update, backdrop's lock,
+  contents buffer), the log line ends with it.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
