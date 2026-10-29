@@ -249,7 +249,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 ## Open: tests and operations
 
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
-  loss without the compositor thread. Closing a tab within about a second of a change can lose
+  loss without the compositor thread. Now and then in CI (auth, clipboard, background tests)
+  about four workers report an error while they load the engine module right after the start;
+  the engine runs and the test's other checks pass, locally (Xvfb) it did not happen in 3 runs. Closing a tab within about a second of a change can lose
   that change (#275).
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
   tests pass, of the demo suite 6; the failures come from the image (no WebGL, OPFS,
