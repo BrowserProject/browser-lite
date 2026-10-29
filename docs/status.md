@@ -193,7 +193,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
-   the list with `tools/hot-functions.mjs` after WebKit updates.
+   the list with `tools/hot-functions.mjs` after WebKit updates and after patches that change
+   WebKit code: identical functions folded by the linker can come out under another name (after
+   patches 0061 and 0062 the start needed 25 chunks, `deferred-test.mjs` found it).
 9. The relay transport runs on the host page's main thread, every packet of the engine passes it.
    With the main thread busy 80 ms of every 100 ms (2026-10-29, local, 60 small fetches in a row)
    the median of a fetch stayed at 2 to 3 ms, the 90th percentile went from 3 to 5 ms up to 82 ms
