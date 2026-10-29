@@ -643,8 +643,20 @@ check(
     consoleLines.slice(from).some((line) => line.includes('BUTTON|Resend')),
     consoleLines.slice(from).join(' | '),
   );
+  const relayBack = consoleLines.length;
+  await page.evaluate(() =>
+    window.blTest.eval(
+      'addEventListener("online", () => console.log("NET online " + navigator.onLine))',
+    ),
+  );
   await stack.restartRelay();
-  await page.waitForTimeout(5000);
+  // Firefox delays new WebSockets to a host whose connections just failed: wait until the engine
+  // is online again, then a while without a reload
+  await waitFor(
+    () => consoleLines.slice(relayBack).some((line) => line.includes('NET online true')),
+    30000,
+  );
+  await page.waitForTimeout(3000);
   check(
     'error page after POST: no reload by itself',
     !requests.includes('/sent'),
