@@ -267,9 +267,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   the one that presents. A workaround would be a new view canvas from the main thread after the loss. Now and then in CI (auth, clipboard, background tests)
   four or five engine workers that load while a page needs new threads hang for about 60 s and
   then fail with an `error` event without a message (script load failure); the page waits that
-  long, later checks pass. Locally (Xvfb, 2 cores) not in 9 runs. The engine now logs such a
-  worker (`[workers] engine worker did not load after ... ms`) with the state of the service
-  worker that controls the page, which also sees the script request. Closing a tab within about a second of a change can lose
+  long, later checks pass. Locally (Xvfb, 2 cores) not in 9 runs. The engine logs such a worker:
+  on 2026-10-29 "did not load after 57232 ms (4 unused, 5 threads, service worker activated)",
+  a spare worker loading while 4 loaded ones waited, under the core's active service worker
+  (which sees the script request but only answers media URLs). Closing a tab within about a second of a change can lose
   that change (#275); in Firefox also a reload (the engine cannot write while `pagehide` waits):
   `storage-test` "reloaded right after writing" fails locally and in about 1 of 3 CI runs.
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
@@ -307,7 +308,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   itself with a synchronous request that never ends; such reads taking over 1 s are now logged,
   and in workers the request gives up after 30 s and tries again.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
-  sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
+  sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
+  view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
 - Without tests: the sample count limit in fMP4 (`trun`), GC cleanup of host objects other than
   WebAssembly, Set-Cookie on a service worker update, the write timeout of databases (#180).
