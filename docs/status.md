@@ -279,7 +279,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   brought. On 2026-10-28 it showed the compositor 5 s in phase 13 (`flushCompositingState` of the
   layers, LayerTreeHostWasm.cpp): it waits for the lock of a `CoordinatedPlatformLayer` that another
   thread holds (not the engine thread, which logged it; scrolling or tile threads), after the
-  page switched to the dark color scheme.
+  page switched to the dark color scheme. Phase 131 and a log line with the layer now tell a
+  layer lock held by another thread apart from a wait inside the flush (backing store, contents).
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.

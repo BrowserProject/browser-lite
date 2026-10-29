@@ -19,6 +19,7 @@
 #include <WebCore/PlatformDisplay.h>
 #include <WebCore/ScrollingThread.h>
 #include <WebCore/Settings.h>
+#include <wtf/Threading.h>
 #include <WebCore/SkiaCompositingLayer.h>
 #include <WebCore/SkiaPaintingEngine.h>
 #include <emscripten/emscripten.h>
@@ -60,6 +61,26 @@ static void setFramePhase(CompositorScene& scene, uint8_t phase)
 {
     scene.framePhase.store(phase, std::memory_order_relaxed);
     scene.framePhaseSince.store(MonotonicTime::now().secondsSinceEpoch().value(), std::memory_order_relaxed);
+}
+
+// Phase 131 (stall diagnostics): another thread holds the lock of a layer; logs its index after
+// 1 s. Afterwards phase 13 can only wait inside the flush (its backing store, its contents).
+static void waitForLayerLock(CompositorScene& scene, CoordinatedPlatformLayer& layer, size_t index)
+{
+    if (!layer.lock().isLocked())
+        return;
+    setFramePhase(scene, 131);
+    auto start = MonotonicTime::now();
+    bool logged = false;
+    while (layer.lock().isLocked()) {
+        if (!logged && MonotonicTime::now() - start > 1_s) {
+            logged = true;
+            log("Compositor: layer %zu (of %u, scrolling layer %d) is locked by another thread for 1 s", index,
+                scene.committedLayers.size(), scene.scrollLayer.get() == &layer ? 1 : 0);
+        }
+        Thread::yield();
+    }
+    setFramePhase(scene, 13);
 }
 
 static void compositeScene(CompositorScene& scene)
@@ -150,7 +171,7 @@ static void compositeScene(CompositorScene& scene)
     };
 
     // Phases for the stall diagnostics (stallState): 1 GPU context, 11 removed layers, 12 state
-    // lock, 13 compositing state, 14 tile updates, 2 to 5 below
+    // lock, 13 compositing state (131 a layer's lock), 14 tile updates, 2 to 5 below
     setFramePhase(scene, 1);
     Gpu::Scope scope;
     setFramePhase(scene, 11);
@@ -195,7 +216,9 @@ static void compositeScene(CompositorScene& scene)
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     setFramePhase(scene, 13);
     scene.rootLayer->flushCompositingState(reasons, true);
+    size_t index = 0;
     for (auto& layer : scene.committedLayers) {
+        waitForLayerLock(scene, layer.get(), index++);
         layer->flushCompositingState(reasons, true);
         if (layer->hasPendingBackingStoreTileUpdates())
             layersWithTileUpdates.append(layer);
