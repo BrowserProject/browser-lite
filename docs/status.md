@@ -35,7 +35,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), error pages with the
   relay's reason and auto reload (#174, #175), dead relay detection (#177), fix of a WTF timer
-  bug that aborted about 1 % of heavy page loads (#219).
+  bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
+  by old words on the C stack that the conservative GC scans (#296; soak test 0 of 15 local runs
+  with pages that stay, before about 1 in 5).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
@@ -275,17 +277,6 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   engine page grows by about 270 MB per load up to about 4.4 GB, then Firefox frees them all
   (#291). Chromium frees them right away (the renderer goes up and down between 0.4 and 1.6 GB).
   `cache-test` still opens a new tab between some of its sections (#288).
-- Soak tests, about every third CI run: after 200 navigations 3 to 5 pages stay alive (detached,
-  with their JS wrapper and all their nodes). Cause (2026-10-29, memory report 4: marking chain of
-  JSC's verifier and the scanned C stack words): the conservative scan of the C stack finds old
-  words in slots that live frames do not write, mostly text like `"040\n"`, which is an address in
-  the heap; the cell there holds its window, the window its document, the document all its nodes.
-  The words sat in the frames of `main`, which stay below the base after its unwind (the same
-  words in every run); the engine now zeroes them and the stack below each work item (#296);
-  whether that ends it needs soak runs. The test runs as many rounds again and only fails if the
-  number grows (#292).
-- `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks
-  like a main thread futex spin). Run browser tests with `ulimit -c 0`.
 - `devices-test.mjs`, rarely in CI: the view stops rendering (no media query events, the page
   keeps its scroll position) while scripts still run, and every check after it fails. A view
   without a rendering update for twice 2 s now logs the state of its frame pipeline ("no rendering
