@@ -60,6 +60,8 @@ const state = async () => {
   return results.wait('state', 20000);
 };
 await page.mouse.move(box.x + 100, box.y + 100);
+// The scrolling thread knows the listener's region only after a rendering update of the page
+await page.waitForTimeout(1000);
 
 // 1) Free engine thread: preventDefault keeps the page in place
 await evalPage('cancelWheel = true');
