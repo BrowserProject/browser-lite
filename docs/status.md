@@ -278,7 +278,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   with their JS wrapper and all their nodes). The retainer paths (memory report 4) start at the
   root "WeakSets": a node or `Location` wrapper counts as reachable through its opaque root (the
   document or window) and holds the window and the document; who marks that opaque root does not
-  show in the snapshot. Mostly the `dom` page (3000 elements with onclick, a srcdoc iframe), once
+  show in the snapshot (2026-10-29: all roots that reach such a document are its connected nodes
+  and its `Location`, so something outside adds the document and the window as opaque roots).
+  Memory report 4 now also runs one GC with JSC's verifier and prints its marking chain, which
+  names what added the opaque root. Mostly the `dom` page (3000 elements with onclick, a srcdoc iframe), once
   its srcdoc document without any path (held from C++). Locally in 1 of 6 runs. Then the test
   runs as many rounds again and only fails if the number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks

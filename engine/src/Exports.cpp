@@ -32,6 +32,7 @@
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/Options.h>
 #include <WebCore/ANGLEShimWasm.h>
 #include <WebCore/MediaProducer.h>
 #include <WebCore/Page.h>
@@ -874,6 +875,35 @@ static void printDetachedDocumentRetainers(JSC::VM& vm)
     }
 }
 
+// Who marks the documents without a frame: the snapshot has no edge for an opaque root (a
+// wrapper that adds its document while marking keeps all wrappers of that document). One more
+// full GC with JSC's verifier, which remembers for each cell and opaque root what marked or added
+// it; its chain from the document's wrapper ends at a real root.
+static void printDetachedDocumentMarkers(JSC::VM& vm)
+{
+    Vector<std::pair<JSC::JSCell*, String>> targets;
+    for (auto& document : WebCore::Document::allDocuments()) {
+        if (!document->frame() && document->wrapper())
+            targets.append({ document->wrapper(), document->url().string().left(80) });
+    }
+    if (targets.isEmpty())
+        return;
+    JSC::Options::verifyGC() = true;
+    JSC::Options::verboseVerifyGC() = true;
+    vm.heap.setKeepVerifierSlotVisitor();
+    vm.heap.collectNow(JSC::Sync, JSC::CollectionScope::Full);
+    for (auto& [cell, url] : targets) {
+        printf("[memory]   marking of %s:\n", url.utf8().data());
+        fflush(stdout);
+        vm.heap.dumpVerifierMarkerData(cell);
+        WTF::dataFile().flush();
+        printf("[memory]   marking end\n");
+    }
+    vm.heap.clearVerifierSlotVisitor();
+    JSC::Options::verifyGC() = false;
+    JSC::Options::verboseVerifyGC() = false;
+}
+
 static void printMemoryReport(int full)
 {
     auto& vm = WebCore::commonVM();
@@ -900,8 +930,10 @@ static void printMemoryReport(int full)
                 document->frame() ? 1 : 0, document->wrapper() ? 1 : 0, document->url().string().left(100).utf8().data());
         }
     }
-    if (full == 4)
+    if (full == 4) {
         printDetachedDocumentRetainers(vm);
+        printDetachedDocumentMarkers(vm);
+    }
 }
 
 // Engine memory in the console (tests and debugging). Only with BL_TEST_HOOKS=1.

@@ -129,12 +129,15 @@ export async function serveSoakPages() {
 export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCount, unit }) {
   const finished = new Set();
   const reportLines = [];
+  // The marking chain of memory report 4 comes from JSC's verifier without the [memory] prefix
+  let inMarking = false;
   page.on('console', (msg) => {
     const text = msg.text();
     if (VERBOSE) console.log('   ', text);
     const match = /RESULT done=(\S+)/.exec(text);
     if (match) finished.add(match[1]);
-    if (text.includes('[memory]')) reportLines.push(text);
+    if (text.includes('[memory]   marking ')) inMarking = !text.includes('marking end');
+    if (text.includes('[memory]') || inMarking) reportLines.push(text.slice(0, 400));
   });
   async function waitDone(key, ms = 30000) {
     for (
@@ -261,9 +264,11 @@ export async function soak({ page, siteURL, start, go, openTab, closeTab, tabCou
     // What in the JS heap keeps them (memory report 4: path to a GC root)
     reportLines.length = 0;
     await page.evaluate(() => window.blTest.memory(4));
-    await waitFor(() => reportLines.some((l) => l.includes('retainers of')), 60000);
+    await waitFor(() => reportLines.some((l) => l.includes('marking end')), 120000);
     await page.waitForTimeout(2000);
-    console.log(reportLines.filter((l) => /retainers|roots that reach/.test(l)).join('\n'));
+    console.log(
+      reportLines.filter((l) => !/\[memory\] (malloc|  cache|  doc refs)/.test(l)).join('\n'),
+    );
     // A few pages now and then stay (status.md: soak tests); a leak grows with more rounds
     await rounds(ROUNDS, 2 * ROUNDS);
     await go(`${siteURL}empty?r=again`);
