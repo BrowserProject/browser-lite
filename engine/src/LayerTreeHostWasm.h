@@ -86,6 +86,8 @@ public:
     // state taken, 2 layers flushed, 3 painting, 4 GPU submit, 5 showing
     std::atomic<uint8_t> framePhase { 0 };
     std::atomic<double> framePhaseSince { 0 };
+    // Phase 13: index of the layer being flushed, -1 the root layer
+    std::atomic<int> flushingLayer { -1 };
     // View of the last rendering update (pinch zoom): the layer the main frame
     // moves for scrolling, and the last gesture taken over
     PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);

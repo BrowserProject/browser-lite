@@ -215,9 +215,11 @@ static void compositeScene(CompositorScene& scene)
 
     Vector<Ref<CoordinatedPlatformLayer>, 16> layersWithTileUpdates;
     setFramePhase(scene, 13);
+    scene.flushingLayer.store(-1, std::memory_order_relaxed);
     scene.rootLayer->flushCompositingState(reasons, true);
     size_t index = 0;
     for (auto& layer : scene.committedLayers) {
+        scene.flushingLayer.store(index, std::memory_order_relaxed);
         waitForLayerLock(scene, layer.get(), index++);
         layer->flushCompositingState(reasons, true);
         if (layer->hasPendingBackingStoreTileUpdates())
@@ -587,7 +589,8 @@ String LayerTreeHostWasm::stallState() const
     auto flag = [](bool value) { return value ? '1' : '0'; };
     return makeString("waiting "_s, flag(m_waitingForCompositor), ", frame scheduled "_s, flag(m_scene->frameScheduled), ", waiting for tiles "_s, flag(m_scene->waitingForTiles),
         " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine),
-        ", compositor phase "_s, static_cast<unsigned>(m_scene->framePhase.load()), " for "_s, static_cast<int>(MonotonicTime::now().secondsSinceEpoch().value() - m_scene->framePhaseSince.load()), " s"_s);
+        ", compositor phase "_s, static_cast<unsigned>(m_scene->framePhase.load()), " for "_s, static_cast<int>(MonotonicTime::now().secondsSinceEpoch().value() - m_scene->framePhaseSince.load()), " s, layer "_s,
+        m_scene->flushingLayer.load(), " of "_s, m_scene->committedLayers.size());
 }
 
 bool LayerTreeHostWasm::compositorIdleWhileWaiting() const

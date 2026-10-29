@@ -28,7 +28,8 @@ export function timeLimit(ms = TIMEOUT + 120000) {
 
 /**
  * Logs page errors; errors from the engine (Aborted(...) or a stack in engine.wasm) count as a
- * crash. Returns a function that stops watching (before an intended crash).
+ * crash; also prints the diagnostics of the engine's workers. Returns a function that stops
+ * watching (before an intended crash).
  */
 export function watchErrors(page, prefix = '   page error:') {
   const onError = (error) => {
@@ -36,6 +37,14 @@ export function watchErrors(page, prefix = '   page error:') {
     if (/^Aborted\(/.test(error.message) || /engine\.wasm/.test(error.stack || ''))
       engineCrashes.push(`${error.message} (${(error.stack || '').split('\n')[1]?.trim() || ''})`);
   };
+  // Diagnostics of the engine's workers (engine/js/workers.js)
+  const onConsole = (msg) => {
+    if (msg.text().startsWith('[workers]')) console.log(prefix, msg.text());
+  };
   page.on('pageerror', onError);
-  return () => page.off('pageerror', onError);
+  page.on('console', onConsole);
+  return () => {
+    page.off('pageerror', onError);
+    page.off('console', onConsole);
+  };
 }
