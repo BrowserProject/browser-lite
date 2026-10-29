@@ -1,0 +1,22 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 1e0adff81d..533584204a 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -5046,7 +5046,7 @@ bool EventHandler::defaultKeyboardScrollEventHandler(KeyboardEvent& event, Scrol
+ 
+ void EventHandler::defaultPageUpDownEventHandler(KeyboardEvent& event)
+ {
+-#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN)
++#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN) || PLATFORM(WASM)
+     ASSERT(event.type() == eventNames().keydownEvent);
+ 
+     if (event.ctrlKey() || event.metaKey() || event.altKey() || event.shiftKey())
+@@ -5062,7 +5062,7 @@ void EventHandler::defaultPageUpDownEventHandler(KeyboardEvent& event)
+ 
+ void EventHandler::defaultHomeEndEventHandler(KeyboardEvent& event)
+ {
+-#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN)
++#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WIN) || PLATFORM(WASM)
+     ASSERT(event.type() == eventNames().keydownEvent);
+ 
+     if (event.ctrlKey() || event.metaKey() || event.altKey() || event.shiftKey())

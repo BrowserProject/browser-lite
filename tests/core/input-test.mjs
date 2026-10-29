@@ -677,6 +677,27 @@ check(
   `page ${pageWheel}, host ${hostWheel}`,
 );
 
+// 6b) Scrolling with the keyboard on the page itself (patch 0063: PageDown/End/Home did nothing)
+await page.mouse.wheel(0, -2000);
+await evalPage(page, 'document.activeElement?.blur()');
+await page.waitForTimeout(500);
+for (const [key, name] of [
+  ['PageDown', 'keypagedown'],
+  ['End', 'keyend'],
+  ['Home', 'keyhome'],
+]) {
+  await page.keyboard.press(key);
+  await page.waitForTimeout(800);
+  await evalPage(page, `console.log("RESULT ${name}=" + Math.round(scrollY))`);
+}
+const pageDown = Number(await result('keypagedown'));
+const end = Number(await result('keyend'));
+check(
+  'keyboard scrolling: PageDown, End, Home',
+  pageDown > 100 && end >= pageDown && Number(await result('keyhome')) === 0,
+  `${pageDown}, ${end}, ${results.get('keyhome')}`,
+);
+
 // 7) Fullscreen: the page requests it, the core makes the view container fullscreen; when the
 // host ends it (like with Esc), the page notices too
 await page.mouse.wheel(0, -2000);
