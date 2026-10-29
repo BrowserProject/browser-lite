@@ -29,8 +29,9 @@ function blKeepWorkers(count) {
   PThread.allocateUnusedWorker = () => {
     const worker = allocate();
     created.set(worker, performance.now());
-    // Firefox in CI: now and then a worker loads for about 60 s, then fails without a message
-    worker.addEventListener('error', (event) => {
+    // Firefox in CI: now and then a worker loads for about 60 s, then fails without a message.
+    // Not in Node (worker_threads have no addEventListener).
+    worker.addEventListener?.('error', (event) => {
       if (!(event instanceof ErrorEvent)) blWorkerLog(worker, created, 'did not load');
     });
     return worker;
