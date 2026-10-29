@@ -93,11 +93,15 @@ export class Player {
     for (const type of STATE_EVENTS) video.addEventListener(type, () => this.sendState(type));
     video.addEventListener('seeked', () => {
       this.forceFrame = true;
+      this.schedulePump();
       this.sendState('seeked');
     });
     video.addEventListener('loadeddata', () => {
       this.forceFrame = true;
+      this.schedulePump();
     });
+    for (const type of ['playing', 'resize'])
+      video.addEventListener(type, () => this.schedulePump());
     video.addEventListener('error', () => {
       this.send({ type: 'error', code: video.error?.code || 4 });
     });
@@ -114,7 +118,7 @@ export class Player {
     } else {
       video.src = host.mediaUrl(id);
     }
-    this.raf = requestAnimationFrame(() => this.pump());
+    this.schedulePump();
     if (this.overlay) this.watchPresentedFrames();
   }
 
@@ -321,15 +325,18 @@ export class Player {
         break;
       case 'frame':
         this.frameInFlight = false;
+        this.schedulePump();
         break;
       case 'frames':
         this.copyFrames = !this.overlay || !!data.copy;
         this.forceFrame = true;
+        this.schedulePump();
         break;
       case 'overlay':
         this.overlay = false;
         this.copyFrames = true;
         this.forceFrame = true;
+        this.schedulePump();
         this.place({ view: 0 });
         break;
       case 'place':
@@ -338,6 +345,7 @@ export class Player {
       case 'visible':
         this.hidden = !data.visible;
         this.forceFrame = true;
+        this.schedulePump();
         if (this.placement) this.place(this.placement);
         break;
       case 'preload':
@@ -347,6 +355,7 @@ export class Player {
       case 'size':
         this.presentation = { width: data.width as number, height: data.height as number };
         this.forceFrame = true;
+        this.schedulePump();
         break;
     }
   }
@@ -364,17 +373,24 @@ export class Player {
     return [width, height];
   }
 
+  // A frame on the next display refresh, only while the video plays or a frame is due: a loop per
+  // player kept the host's main thread busy every frame (pages with several paused players)
+  private schedulePump(): void {
+    if (this.raf || this.destroyed) return;
+    this.raf = requestAnimationFrame(() => {
+      this.raf = 0;
+      this.pump();
+    });
+  }
+
   private pump(): void {
-    this.raf = requestAnimationFrame(() => this.pump());
     const video = this.video;
-    if (
-      !this.copyFrames ||
-      this.hidden ||
-      video.readyState < 2 ||
-      !video.videoWidth ||
-      this.frameInFlight
-    )
-      return;
+    // The answer to a frame in flight, new data and visibility schedule again
+    if (!this.copyFrames || this.hidden || this.frameInFlight) return;
+    // Audio only (metadata without a picture) needs no frames; a picture later comes with resize
+    const picture = video.readyState < 1 || video.videoWidth > 0;
+    if (!video.paused && picture) this.schedulePump();
+    if (video.readyState < 2 || !video.videoWidth) return;
     if (video.currentTime === this.lastTime && !this.forceFrame) return;
     this.lastTime = video.currentTime;
     this.forceFrame = false;
