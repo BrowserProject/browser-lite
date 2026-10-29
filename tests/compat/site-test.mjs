@@ -7,7 +7,7 @@
 // build/sites/ (name from host, path and query, for example www.google.com_maps.png).
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { SWIFTSHADER, launch as launchChromium, root, startStack } from '../lib/index.mjs';
+import { BROWSER, SWIFTSHADER, launch as launchChromium, root, startStack } from '../lib/index.mjs';
 
 const args = process.argv.slice(2);
 let engineDir = path.join(root, 'build', 'webcore', 'bin');
@@ -184,8 +184,9 @@ async function mainThreadStack(cdp) {
 
 for (const site of sites) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Debugger.enable').catch(() => {});
+  // The main thread's stack of a hanging page: only Chromium has CDP
+  const cdp = BROWSER === 'chromium' ? await page.context().newCDPSession(page) : null;
+  await cdp?.send('Debugger.enable').catch(() => {});
   const log = [];
   let outcome;
   try {
@@ -199,7 +200,7 @@ for (const site of sites) {
       firstLayout: '-',
       firstPaint: '-',
     };
-    log.push('Stack of the main thread:', ...(await mainThreadStack(cdp)));
+    if (cdp) log.push('Stack of the main thread:', ...(await mainThreadStack(cdp)));
   }
   const { result, seconds, title, firstLayout, firstPaint } = outcome;
   if (result !== 'ok') failed++;
