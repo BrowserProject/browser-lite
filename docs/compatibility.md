@@ -4,6 +4,15 @@ The site list is `tests/compat/sites.txt`. CI loads it in the job `compat` (info
 servers fail now and then) and writes a table into the run summary. Screenshots are in the
 artifact `compat`, named by host and path (`build/sites/<host>_<path>.png`).
 
+## State 2026-10-29 (local)
+
+All 54 sites load without a crash in Chromium and in Firefox (screenshots after 10 s look like
+Chrome; after the default 1.5 s some are still empty). Page errors after loading and scrolling,
+compared with native Chromium with the same user agent: nearly all also happen there. Only here:
+amazon.de's login code expected `PublicKeyCredential` (now there without an authenticator,
+#298), a host error on discord.com (stale memory view, #297), Twitch's bot check (below), a
+reCAPTCHA load timeout on reddit.com and an `Error` without a message on paypal.com.
+
 ## State 2026-10-16 (local)
 
 All 54 sites load without a crash (eBay shows its block page). Tested through a local relay,
@@ -19,7 +28,8 @@ starts without stored data.
 | X, Instagram, Facebook, LinkedIn | ok | Login pages |
 | Reddit, old.reddit | ok | Reddit runs a JavaScript check first |
 | TikTok | ok | Video plays |
-| Twitch, Discord, Netflix, PayPal | ok | |
+| Twitch | partly | Loads; the featured stream of the front page does not start: the player loads segments but never attaches media to its `<video>` (YouTube plays through MSE), and Twitch's bot check script (Kasada `ips.js`) throws only here (2026-10-29) |
+| Discord, Netflix, PayPal | ok | |
 | Spotify Web Player | ok | Takes longer until content |
 | GitHub, Stack Overflow, MDN, W3Schools, Python docs, Hacker News | ok | |
 | npm, Medium | ok | Cloudflare may show "Verify you are human" for datacenter IPs; the check gets there with WebAssembly |
