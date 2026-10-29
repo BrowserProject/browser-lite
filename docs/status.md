@@ -280,7 +280,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   JSC's verifier and the scanned C stack words): the conservative scan of the C stack finds old
   words in slots that live frames do not write, mostly text like `"040\n"`, which is an address in
   the heap; the cell there holds its window, the window its document, the document all its nodes.
-  The engine now zeroes the stack below each work item before it runs and before its GC (#296);
+  The words sat in the frames of `main`, which stay below the base after its unwind (the same
+  words in every run); the engine now zeroes them and the stack below each work item (#296);
   whether that ends it needs soak runs. The test runs as many rounds again and only fails if the
   number grows (#292).
 - `soak-test.mjs`: the host page hangs after 200 navigations in about every second run (looks

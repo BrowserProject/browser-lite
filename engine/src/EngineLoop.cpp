@@ -111,6 +111,17 @@ NEVER_INLINE void clearStackBelow()
     memset(reinterpret_cast<void*>(end), 0, top - end);
 }
 
+// main() runs on the engine thread (PROXY_TO_PTHREAD) and ends with an unwind to the JS event
+// loop, which leaves the stack pointer where main was: its frames and those above it stay below
+// the base for good, and every GC scans them, so their old words kept the same pages alive in
+// every run. Zeroes them from the caller up to the base, right before that unwind (nothing
+// reads them afterwards, the unwind runs no destructors).
+NEVER_INLINE void clearStackAboveForUnwind()
+{
+    auto top = emscripten_stack_get_current();
+    memset(reinterpret_cast<void*>(top), 0, emscripten_stack_get_base() - top);
+}
+
 // Since when the engine thread runs its outermost work item, 0 while it waits for work: the
 // scrolling thread does not wait for a thread in a long script (engineThreadInLongScript)
 static std::atomic<double> s_workSince { 0 };

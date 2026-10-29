@@ -263,6 +263,7 @@ int main(int, char**)
             Module.onEngineReady();
     });
 
+    clearStackAboveForUnwind();
     emscripten_exit_with_live_runtime();
     return 0;
 }

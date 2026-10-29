@@ -34,6 +34,8 @@ void scheduleRunLoopPump();
 void runAtTopLevel(Function<void()>&&);
 // Zeroes the unused C stack right below the caller, before a work item and a GC (EngineLoop.cpp)
 void clearStackBelow();
+// Zeroes the C stack from the caller up to its base, right before main unwinds (EngineLoop.cpp)
+void clearStackAboveForUnwind();
 // Whether the engine thread runs JS in a work item that started at least minimum ago
 bool engineThreadInLongScript(WTF::Seconds minimum);
 // A page dialog: runs the work of the engine thread nested until done()
