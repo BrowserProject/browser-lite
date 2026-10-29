@@ -304,8 +304,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   append (malloc); phases 133 and 134 tell them apart. It always follows a touch fling and a
   wheel scroll back to the top, and came in 4 of the last 8 CI runs. Since the split engine
   (#238): a stop at a place that cannot block fits a thread that reads a chunk of deferred code
-  itself with a synchronous request that never ends; such reads now log the thread, and in
-  workers the request gives up after 30 s and tries again.
+  itself with a synchronous request that never ends; such reads taking over 1 s are now logged,
+  and in workers the request gives up after 30 s and tries again.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
