@@ -19,7 +19,9 @@ background: the unpainted area showed white for seconds (now the page's backgrou
 The same 40 sites with Firefox as host (headless, without WebGL, so without compositing): codepen.io,
 airbnb.com and soundcloud.com ended the engine (#306, now painted flattened); the rest looks like
 in Chromium. chatgpt.com keeps the engine thread busy for 15 s (Chromium) to 21 s (Firefox) in
-one task shortly after loading (its scripts in the interpreter); meanwhile the page does not
+one task shortly after loading: a timer's async function, 12 of 20 s in the interpreter loop
+itself with `charCodeAt` and bit operations on top (hashing, likely its proof of work); only a
+faster interpreter or a JIT would help (status.md, performance). Meanwhile the page does not
 react. In Firefox without WebGL the view is white for a few seconds around such long tasks,
 although Firefox shows a worker's canvas frames at once (checked with a plain OffscreenCanvas);
 cause open.
