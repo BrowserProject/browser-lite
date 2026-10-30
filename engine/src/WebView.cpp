@@ -730,10 +730,16 @@ GraphicsLayerFactory* WebView::graphicsLayerFactory() const
 
 void WebView::attachRootGraphicsLayer(GraphicsLayer* layer)
 {
-    if (m_layerTreeHost)
+    if (m_layerTreeHost) {
         m_layerTreeHost->setRootCompositingLayer(layer);
-    else if (layer && !std::exchange(m_layersWithoutCompositorLogged, true))
-        log("View %d: layers without the compositor (not shown)", m_id);
+        return;
+    }
+    // In Firefox without WebGL some pages got layers anyway (cause unknown, #306): renderFrame
+    // then paints them flattened into the view
+    if (layer && !m_layersWithoutCompositor)
+        log("View %d: layers without the compositor, painted flattened", m_id);
+    m_layersWithoutCompositor = layer;
+    addDamage(IntRect { { }, m_size });
 }
 
 void WebView::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)
@@ -858,6 +864,9 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         // requestAnimationFrame callbacks, animations, style, layout, ...
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ });
+        // Changes inside layers damage only the layers
+        if (m_layersWithoutCompositor)
+            addDamage(IntRect { { }, m_size });
         // After stopCompositing: as long as WebCore still has layers it does
         // not paint the content itself. Once they are gone, repaint everything.
         if (m_repaintAfterCompositingStopped) {
@@ -893,6 +902,12 @@ bool WebView::renderFrame(IntRect* dirtyOut)
 
     auto damage = std::exchange(m_damage, Region { });
     SkCanvas* canvas = m_gpuSurface ? m_gpuSurface->getCanvas() : m_surface->getCanvas();
+    auto paintBehavior = view->paintBehavior();
+    if (m_layersWithoutCompositor)
+        view->setPaintBehavior(paintBehavior | PaintBehavior::FlattenCompositingLayers);
+    auto restorePaintBehavior = makeScopeExit([&] {
+        view->setPaintBehavior(paintBehavior);
+    });
     for (auto& rect : damage.rects()) {
         canvas->save();
         canvas->scale(m_deviceScaleFactor, m_deviceScaleFactor);

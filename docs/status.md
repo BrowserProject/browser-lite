@@ -307,8 +307,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   and in workers the request gives up after 30 s and tries again. 2026-10-30: layer 5 of 8 at step
   0 in phase 13, not 133 or 134: before the layer's flush started, where nothing waits; phase 135
   now marks the call of the flush itself.
-- Firefox without WebGL: some pages get layers although the view paints without them (#306, no
-  longer a crash; the engine logs "layers without the compositor"). Cause not found yet.
+- Firefox without WebGL: some pages get layers although the view paints without them (#306): no
+  longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
+  found yet.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in

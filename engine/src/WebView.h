@@ -276,7 +276,7 @@ private:
     unsigned m_stallChecksMissed { 0 };
     bool m_stallCheckPending { false };
     bool m_stallLogged { false };
-    bool m_layersWithoutCompositorLogged { false };
+    bool m_layersWithoutCompositor { false };
     void checkRenderingStall();
     // First frame after the first visible layout of a page (event
     // "first-paint"): the next rendering update carries it, with layers the
