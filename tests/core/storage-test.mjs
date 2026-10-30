@@ -604,6 +604,8 @@ for (const [search, quota, again] of [
   ['full', 4, 'ok'],
   ['over', 1, 'QuotaExceededError'],
 ]) {
+  // Firefox's content process crashed here after many engine starts in one tab
+  await freshTab();
   results.clear();
   await fresh.goto(appURL(`${siteURL}quota?${search}`, { env: `BL_INDEXEDDB_QUOTA_MB=${quota}` }));
   check(
@@ -632,6 +634,7 @@ const databaseFiles = () =>
     return files;
   });
 const bigFiles = (files) => files.filter((size) => size > 1 << 20).length;
+await freshTab();
 const filesBefore = await databaseFiles();
 results.clear();
 await fresh.goto(appURL(`${siteURL}quota`, { env: 'BL_DATABASE_MAX_MB=1' }));
