@@ -34,6 +34,10 @@ its page shows (many scripts in the interpreter). Site errors that native Chromi
 shows too (uzh.ch `$`, homegate.ch, Kickstarter's Apollo warnings) and bot checks (homegate,
 TripAdvisor, Yelp, zeit.de, Expedia) aside, the rest renders.
 
+All three lists (134 addresses) with Firefox as host and WebGL (Xvfb, like CI), engine of
+0d48c8a: no crash, the pages look like in Chromium apart from bot checks and pages still loading
+after 10 s (fifa.com, expedia.com).
+
 ## State 2026-10-29 (local)
 
 All 54 sites load without a crash in Chromium and in Firefox (screenshots after 10 s look like

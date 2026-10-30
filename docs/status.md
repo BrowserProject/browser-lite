@@ -313,6 +313,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - `settings-test.mjs` (demo), once on 2026-10-30: right after a restart `getFile()` of an OPFS
   file the page had written before failed with `NotFoundError`, although `getFileHandle()` found
   it (FileSystemStorageWasm.cpp); the next runs passed.
+- `background-test.mjs` in Firefox with the compositor: the frames per second of a visible view
+  vary between CI runs (4, 13, 27, 37, 47; without the compositor about 50), once below the limit.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
