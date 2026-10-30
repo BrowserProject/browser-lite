@@ -28,7 +28,9 @@ cause open.
 
 A third sweep (40 sites: Swiss news, real estate, universities, design and productivity tools,
 shops, travel, sports, developer docs, news) found espn.com without any frame with the compositor
-and the engine ending on an iPhone (backdrop filters, #308). Site errors that native Chromium
+and the engine ending on an iPhone (backdrop filters, #308; since then it renders on both, and
+open.spotify.com, rts.ch and npr.org, which stayed blank, too). fifa.com needs about 40 s until
+its page shows (many scripts in the interpreter). Site errors that native Chromium
 shows too (uzh.ch `$`, homegate.ch, Kickstarter's Apollo warnings) and bot checks (homegate,
 TripAdvisor, Yelp, zeit.de, Expedia) aside, the rest renders.
 
