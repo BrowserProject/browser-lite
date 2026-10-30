@@ -16,6 +16,10 @@ checkbox comes after about 25 s instead of about 10 s in native Chromium (its fi
 inside the obfuscated script and repeats). Etsy, Coop, Reuters and AliExpress block this host's
 address in native Chromium too. codepen.io scrolled faster than the engine painted its animated
 background: the unpainted area showed white for seconds (now the page's background, #305).
+The same 40 sites with Firefox as host (headless, without WebGL, so without compositing): codepen.io,
+airbnb.com and soundcloud.com ended the engine (#306); chatgpt.com and outlook.live.com stay white
+although the page runs (evals answer, its frames stop after about 3 s), the rest looks like in
+Chromium.
 
 ## State 2026-10-29 (local)
 
