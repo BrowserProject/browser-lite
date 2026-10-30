@@ -221,14 +221,18 @@ const QUICK_PAGE = `<!doctype html><title>Quick</title><script>
     get.onerror = () => resolve('error');
   });
   console.log('RESULT quick=' + value + ',' + ((document.cookie.match(/bl_quick=(\\w+)/) || [])[1] || 'empty'));
-  // ?put=<value>: overwrites the value
+  console.log('RESULT quickls=' + (localStorage.getItem('quick') || 'empty'));
+  // ?put=<value>: overwrites the value, also in localStorage, then waits a little (localStorage
+  // reaches SQLite after a short delay)
   const put = new URLSearchParams(location.search).get('put');
   if (put) {
+    localStorage.setItem('quick', put);
     await new Promise((resolve) => {
       const tx = db.transaction('w', 'readwrite');
       tx.objectStore('w').put(put, 'x');
       tx.oncomplete = tx.onerror = resolve;
     });
+    await new Promise((resolve) => setTimeout(resolve, 400));
     console.log('RESULT quickput=' + put);
     return;
   }
@@ -543,7 +547,10 @@ check(
 // the commit log (#302)
 results.clear();
 await fresh.goto(appURL(`${siteURL}quick?put=logged`));
-check('IndexedDB: written right before a crash', (await result('quickput')) === 'logged');
+check(
+  'IndexedDB and localStorage: written right before a crash',
+  (await result('quickput')) === 'logged',
+);
 results.unwatchErrors();
 await fresh.evaluate(() => window.blTest.crash('abort'));
 await fresh.waitForTimeout(500);
@@ -554,6 +561,11 @@ check(
   'IndexedDB: the commit is there after the crash (commit log)',
   (await result('quick'))?.startsWith('logged,'),
   results.get('quick'),
+);
+check(
+  'localStorage: the change is there after the crash',
+  (await result('quickls')) === 'logged',
+  results.get('quickls'),
 );
 
 // Limit for IndexedDB per origin: QuotaExceededError, what came before stays

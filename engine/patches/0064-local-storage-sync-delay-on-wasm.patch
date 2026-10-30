@@ -1,0 +1,17 @@
+diff --git a/Source/WebKitLegacy/Storage/StorageAreaSync.cpp b/Source/WebKitLegacy/Storage/StorageAreaSync.cpp
+index ebdbff7992..095f1c370f 100644
+--- a/Source/WebKitLegacy/Storage/StorageAreaSync.cpp
++++ b/Source/WebKitLegacy/Storage/StorageAreaSync.cpp
+@@ -42,7 +42,12 @@ namespace WebKit {
+ 
+ // If the StorageArea undergoes rapid changes, don't sync each change to disk.
+ // Instead, queue up a batch of items to sync and actually do the sync at the following interval.
++#if PLATFORM(WASM)
++// The engine ends with its tab, without a chance to sync what is still queued
++static const Seconds StorageSyncInterval { 100_ms };
++#else
+ static const Seconds StorageSyncInterval { 1_s };
++#endif
+ 
+ // A sane limit on how many items we'll schedule to sync all at once.  This makes it
+ // much harder to starve the rest of LocalStorage and the OS's IO subsystem in general.
