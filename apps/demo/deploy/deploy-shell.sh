@@ -11,7 +11,10 @@ set -euo pipefail
 repo=BrowserProject/browser-lite
 dir=/opt/browser-lite
 
-[ "$#" = 2 ] && [ "$1" = -c ] || { echo "deploy-shell: only -c '<image> <commit> <user>'" >&2; exit 2; }
+if [ "$#" != 2 ] || [ "$1" != -c ]; then
+    echo "deploy-shell: only -c '<image> <commit> <user>'" >&2
+    exit 2
+fi
 read -r image sha user extra <<<"$2"
 if [[ ! "$image" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ || ! "$sha" =~ ^[0-9a-f]{40}$ ||
     ! "$user" =~ ^[A-Za-z0-9-]+(\[bot\])?$ || -n "${extra:-}" ]]; then
