@@ -264,7 +264,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   `ImageBitmap` (`transferToImageBitmap` of a 2D canvas, `createImageBitmap` of `ImageData`) nor
   the size handling changes that. With the compositor thread (the default) the screen shows the
   CPU frames after a loss; probably because there the worker that lost the WebGL context is not
-  the one that presents. A workaround would be a new view canvas from the main thread after the loss. Now and then in CI (auth, clipboard, background tests)
+  the one that presents. A workaround would be a new view canvas from the main thread after the loss; `compositing-test` skips this check in Firefox. Now and then in CI (auth, clipboard, background tests)
   an engine worker loaded for about 60 s and then failed: the core's service worker waited in
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
   the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such

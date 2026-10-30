@@ -7,6 +7,7 @@
 //
 //   node tests/core/compositing-test.mjs [engine-dir]
 import {
+  BROWSER,
   SWIFTSHADER,
   check,
   chromiumOnly,
@@ -338,11 +339,16 @@ await gpuPage.evaluate(() => window.blTest.browser.debug.gpu('lose'));
 await waitFor(async () => gpuLog(/GPU: WebGL context lost/), 10000);
 await boxColor([0, 0, 255]);
 box = await boxPixel([0, 0, 255]);
-check(
-  'without the compositor: painted on the CPU after GPU loss',
-  near(box, [0, 0, 255]),
-  JSON.stringify(box),
-);
+// Firefox shows no frame of the worker that lost its WebGL context until it is back (only without
+// the compositor thread, an expert setting; status.md)
+if (BROWSER === 'firefox')
+  console.log('skip without the compositor: painted on the CPU after GPU loss (Firefox)');
+else
+  check(
+    'without the compositor: painted on the CPU after GPU loss',
+    near(box, [0, 0, 255]),
+    JSON.stringify(box),
+  );
 await gpuPage.evaluate(() => window.blTest.browser.debug.gpu('restore'));
 const viewsBack = await waitFor(async () => gpuLog(/GPU: views back on the GPU: 1/), 10000);
 await boxColor([0, 160, 0]);
