@@ -151,7 +151,7 @@ public:
     // Answer/end from the host: false = not granted or lost (Esc)
     void pointerLockResult(bool locked);
 #endif
-    void touchEvent(int type, const String& pointsJSON, int modifiers);
+    void touchEvent(int type, const String& pointsJSON, int modifiers, bool tap);
     bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
     // Text input with preview (IME, dead keys): underlined text in the page
@@ -277,6 +277,8 @@ private:
     bool m_stallCheckPending { false };
     bool m_stallLogged { false };
     bool m_layersWithoutCompositor { false };
+    // The page cancelled the touchstart of the current touches: their tap does not click
+    bool m_touchStartConsumed { false };
     void checkRenderingStall();
     // First frame after the first visible layout of a page (event
     // "first-paint"): the next rendering update carries it, with layers the

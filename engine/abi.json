@@ -1,5 +1,5 @@
 {
-  "abiVersion": 14,
+  "abiVersion": 15,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -52,7 +52,7 @@
     { "name": "bl_focus", "returns": "void", "args": "int id, int focused", "doc": "Keyboard focus of the view." },
     { "name": "bl_set_visible", "returns": "void", "args": "int id, int visible", "doc": "Visible or hidden (no painting, timers throttled)." },
     { "name": "bl_set_screen", "returns": "void", "args": "int width, int height, int availableWidth, int availableHeight, int flags", "doc": "Screen in CSS pixels; flags 1 dark color scheme, 2 touch screen, 4 mobile (coarse pointer without hover)." },
-    { "name": "bl_touch", "returns": "void", "args": "int id, int type, char* points, int modifiers", "doc": "Touch: type 0 start, 1 move, 2 end, 3 cancel; points JSON [{id, x, y, state, rx, ry, force}]. Answer 'touch-result'." },
+    { "name": "bl_touch", "returns": "void", "args": "int id, int type, char* points, int modifiers, int tap", "doc": "Touch: type 0 start, 1 move, 2 end, 3 cancel; points JSON [{id, x, y, state, rx, ry, force}]. tap 1 on the end of a tap (no movement, no long press, one finger): unless the page cancelled the touch, the engine clicks at the released point in the same task (mouse move, down, up, like a browser's tap). Answer 'touch-result'." },
     { "name": "bl_dialog_answer", "returns": "void", "args": "int id, int accepted, char* text", "doc": "Answer to engineDialog: accepted 1 for OK (confirm, prompt) or leave (beforeunload), text the answer of a prompt or null; the waiting page continues. Unknown and already answered ids are ignored." },
     { "name": "bl_permission_answer", "returns": "void", "args": "int requestId, int answer", "doc": "Answer to 'permission': 1 granted, 2 denied, 0 closed without decision." },
     { "name": "bl_auth_answer", "returns": "void", "args": "int requestId, char* username, char* password", "doc": "Answer to 'auth': username null cancels (the waiting loads show the 401 response), otherwise the credentials are stored for the protection space for the session and the waiting loads retry with them. Unknown ids are ignored." },

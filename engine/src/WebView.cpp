@@ -1267,10 +1267,12 @@ bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
 
 // Touch (Chromebooks): type 0 start, 1 move, 2 end, 3 cancel. Points as JSON
 // [{id, x, y, state, rx, ry, force}], state like PlatformTouchPoint::State.
-// The host learns whether the page handled the event (then no scrolling and no
-// click from it) and on start whether touch-action at the new points allows
-// pinch zoom.
-void WebView::touchEvent(int type, const String& json, int modifiers)
+// The host learns whether the page handled the event (then no scrolling) and on
+// start whether touch-action at the new points allows pinch zoom. The click of a
+// tap follows the end at once, in the same task like in a browser: otherwise the
+// page's reaction to the touch (Google opens its suggestions when the field gets
+// focus on touchend) was already there and took the click.
+void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
 {
 #if ENABLE(TOUCH_EVENTS)
     RefPtr frame = mainFrame();
@@ -1280,6 +1282,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
         return;
     Vector<PlatformTouchPoint> points;
     bool pinchAllowed = true;
+    std::optional<DoublePoint> released;
     for (auto& item : *array) {
         auto point = item->asObject();
         if (!point)
@@ -1288,6 +1291,8 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
         DoublePoint position { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) };
         if (state == PlatformTouchPoint::State::TouchPressed)
             pinchAllowed = pinchAllowed && touchActionAllowsPinchZoom(*frame, position);
+        if (state == PlatformTouchPoint::State::TouchReleased)
+            released = position;
         points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
@@ -1296,12 +1301,20 @@ void WebView::touchEvent(int type, const String& json, int modifiers)
     TouchEventWasm event { types[std::clamp(type, 0, 3)], WTF::move(points), modifiersFromBits(modifiers) };
     auto result = frame->eventHandler().handleTouchEvent(event);
     bool consumed = result && *result;
+    if (!type)
+        m_touchStartConsumed = consumed;
     notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, consumed ? "true"_s : "false"_s,
         ",\"pinch\":"_s, pinchAllowed ? "true"_s : "false"_s, '}'));
+    if (tap && type == 2 && released && !consumed && !std::exchange(m_touchStartConsumed, false)) {
+        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers);
+        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers);
+        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers);
+    }
 #else
     UNUSED_PARAM(type);
     UNUSED_PARAM(json);
     UNUSED_PARAM(modifiers);
+    UNUSED_PARAM(tap);
 #endif
 }
 

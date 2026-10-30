@@ -54,6 +54,16 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   const tap = document.getElementById('tap');
   tap.addEventListener('touchstart', (e) => result('touchstart', e.touches.length));
   tap.addEventListener('click', () => result('tapclick', 1));
+  // Like Google's search field: the touch makes the page put something over the tapped place
+  // right afterwards (timer). The click of the tap must still go to the tapped element
+  tap.addEventListener('touchend', () => setTimeout(() => {
+    if (document.getElementById('cover')) return;
+    const cover = document.createElement('div');
+    cover.id = 'cover';
+    cover.style.cssText = 'position:absolute;left:20px;top:100px;width:200px;height:60px';
+    cover.addEventListener('click', () => result('tapclick', 'cover'));
+    document.body.append(cover);
+  }, 0));
   let reported = false;
   window.addEventListener('scroll', () => {
     if (!reported && scrollY > 50) {
@@ -375,7 +385,11 @@ check('select with the mouse', selection && selection.length > 10, JSON.stringif
 // 2) Tap: touch events go to the page, a click follows
 await page.touchscreen.tap(...(await at(100, 130)));
 check('touch event (touchstart)', (await result('touchstart', 10000)) === '1');
-check('tap becomes a click', (await result('tapclick', 10000)) === '1');
+check(
+  'tap becomes a click on the tapped element, before the page reacts to the touch',
+  (await result('tapclick', 10000)) === '1',
+  results.get('tapclick'),
+);
 
 // 3) Swiping scrolls the page (CDP: drag the finger up)
 if (chromiumOnly('swiping scrolls (CDP Input.dispatchTouchEvent)')) {

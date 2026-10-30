@@ -485,9 +485,9 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
     });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers)
+EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers, int tap)
 {
-    withInput(id, [type, points = takeString(points), modifiers](WebView& view) { view.touchEvent(type, points, modifiers); });
+    withInput(id, [type, points = takeString(points), modifiers, tap](WebView& view) { view.touchEvent(type, points, modifiers, tap); });
 }
 
 // Permissions, geolocation, notifications (DeviceClients.cpp).

@@ -34,8 +34,8 @@ interface Gesture {
 
 /**
  * Fingers go to the page as touch events. When the page does not take them (preventDefault),
- * a swipe scrolls with momentum, a short tap clicks, a long press opens the context menu and two
- * fingers zoom the view, like Chrome. With an emulated touch device the left mouse button is a
+ * a swipe scrolls with momentum, a short tap clicks (the engine, right after the touchend), a long
+ * press opens the context menu and two fingers zoom the view, like Chrome. With an emulated touch device the left mouse button is a
  * finger and the mouse without a button moves nothing in the page.
  */
 export function installTouch(ctx: ServiceContext): void {
@@ -64,7 +64,8 @@ function attachTouch(
   // pointerId per touchstart; the answers come in order
   const startsWithoutResult: number[] = [];
 
-  const send = (type: number, changedId: number, state: number, e: PointerEvent) => {
+  // tap: the end of a tap, the engine clicks there itself (in the same task as the touchend)
+  const send = (type: number, changedId: number, state: number, e: PointerEvent, tap = false) => {
     const points = [...touches.entries()].map(([pointerId, t]) => ({
       id: t.id,
       x: t.x,
@@ -74,7 +75,7 @@ function attachTouch(
       ry: (e.height || 1) / 2,
       force: e.pressure || 0,
     }));
-    module._bl_touch(view.id, type, ctx.text(JSON.stringify(points)), modifierBits(e));
+    module._bl_touch(view.id, type, ctx.text(JSON.stringify(points)), modifierBits(e), tap ? 1 : 0);
   };
 
   const fingers = () => {
@@ -209,21 +210,15 @@ function attachTouch(
     const [x, y] = view.position(e);
     touch.x = x;
     touch.y = y;
-    send(cancelled ? 3 : 2, e.pointerId, cancelled ? 4 : 0, e);
+    const g = touches.size === 1 ? gesture : null;
+    const tap = !!g && !cancelled && !g.consumed && !g.longPress && !g.moved;
+    send(cancelled ? 3 : 2, e.pointerId, cancelled ? 4 : 0, e, tap);
     touches.delete(e.pointerId);
     if (touches.size < 2) stopPinch(cancelled ? 3 : 2);
-    if (!gesture || touches.size) return;
-    const g = gesture;
+    if (!g) return;
     gesture = null;
     clearTimeout(g.timer);
-    if (cancelled || g.consumed || g.longPress) return;
-    if (!g.moved) {
-      // Tap = click (mouse down and up at the same place)
-      module._bl_mouse(view.id, 2, -1, x, y, 0, 0);
-      module._bl_mouse(view.id, 0, 0, x, y, 1, 0);
-      module._bl_mouse(view.id, 1, 0, x, y, 1, 0);
-      return;
-    }
+    if (cancelled || g.consumed || g.longPress || !g.moved) return;
     // Momentum: let the velocity decay slowly
     let vx = g.velocityX * 16;
     let vy = g.velocityY * 16;
