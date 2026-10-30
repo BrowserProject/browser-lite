@@ -306,7 +306,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   itself with a synchronous request that never ends; such reads taking over 1 s are now logged,
   and in workers the request gives up after 30 s and tries again. 2026-10-30: layer 5 of 8 at step
   0 in phase 13, not 133 or 134: before the layer's flush started, where nothing waits; phase 135
-  now marks the call of the flush itself.
+  now marks the call of the flush itself. 2026-10-31: phase 135 for 4 s at layer 6 of 8, step 0:
+  the thread stopped between setting the phase and the first statement of
+  `CoordinatedPlatformLayer::flushCompositingState` (in engine.wasm, no chunk to load, the step is
+  inlined there). Nothing of ours can wait there; next: a CPU profile of the compositor's worker
+  when the stall is detected.
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
