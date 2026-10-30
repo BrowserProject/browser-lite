@@ -254,6 +254,13 @@ await waitFor(async () => {
     .catch(() => 0);
   return localBig > 256 * 1024;
 }, 10000);
+// localStorage reaches its file in steps (100 ms, #303): a version below the limit can get to the
+// server first, the next sync deletes it there
+await waitFor(
+  async () => !paths((profile = await info())).includes(`localstorage/${originB}.localstorage`),
+  20000,
+  1000,
+);
 check(
   'server: large IndexedDB and large localStorage not in the profile, they stay on device 1',
   databases(profile, originA).length === 1 &&
