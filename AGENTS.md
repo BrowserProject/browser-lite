@@ -77,9 +77,9 @@ Never log tokens. The demo server runs internally without a relay token; never e
 publicly (for example Tailscale Funnel) without setting `RELAY_TOKEN` or `RELAY_SECRET` first.
 Threat model: [docs/security.md](docs/security.md).
 
-The self-hosted runner (label `browser-lite-deploy`) is in the LAN. Only the job `deploy` in
-`deploy.yml` may use it, never a job that runs for pull requests or forks, and no action
-(`uses:`) runs on it. Actions elsewhere are pinned by commit SHA.
+All jobs run on GitHub-hosted runners, never a self-hosted one. Only the job `deploy` in
+`deploy.yml` joins the tailnet (OIDC, Tailscale SSH to the server as `deploy`), never a job that
+runs for pull requests or forks. Actions are pinned by commit SHA.
 
 ## Checks
 

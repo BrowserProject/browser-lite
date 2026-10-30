@@ -1,8 +1,9 @@
 name: Deploy
 
 # After a green CI on main (or by hand): build and test the images (tools/build-images.sh), push
-# the demo image to ghcr.io and restart it on the server. The server is the self-hosted runner
-# with the label browser-lite-deploy (apps/demo/deploy/setup-proxmox.sh).
+# the demo image to ghcr.io and restart it on the server. The job deploy joins the tailnet for
+# that (OIDC, ephemeral node with tag:browser-lite-ci) and logs in to the server through Tailscale
+# SSH as deploy, whose login shell only restarts the demo (apps/demo/deploy/deploy-shell.sh).
 
 on:
   workflow_run:
@@ -109,38 +110,32 @@ jobs:
   deploy:
     name: Restart on the server
     needs: image
-    runs-on: [browser-lite-deploy]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: read
-    env:
-      IMAGE: ${{ needs.image.outputs.image }}
-      DIR: /opt/browser-lite
-    # No foreign action runs on the runner in the LAN, compose.yml comes directly from the API
+      id-token: write
     steps:
-      - name: Get compose.yml
-        env:
-          TOKEN: ${{ github.token }}
-          SHA: ${{ needs.image.outputs.sha }}
-        run: |
-          printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -fsSL --retry 3 --config - \
-            -H 'Accept: application/vnd.github.raw' -o "$RUNNER_TEMP/compose.yml" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/contents/apps/demo/deploy/compose.yml?ref=$SHA"
-      - name: Log in to ghcr.io
-        env:
-          TOKEN: ${{ github.token }}
-        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ needs.image.outputs.sha }}
+          sparse-checkout: versions.env
+          sparse-checkout-cone-mode: false
+      - name: Tailscale version from versions.env
+        run: grep -E '^TAILSCALE_(VERSION|SHA256)=' versions.env >> "$GITHUB_ENV"
+      - name: Join the tailnet
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OIDC_CLIENT_ID }}
+          audience: ${{ secrets.TS_OIDC_AUDIENCE }}
+          tags: tag:browser-lite-ci
+          version: ${{ env.TAILSCALE_VERSION }}
+          sha256sum: ${{ env.TAILSCALE_SHA256 }}
       - name: Restart
-        run: |
-          install -m 644 "$RUNNER_TEMP/compose.yml" "$DIR/compose.yml"
-          printf 'IMAGE=%s\n' "$IMAGE" > "$DIR/image.env"
-          cd "$DIR"
-          docker compose -p browser-lite --env-file image.env pull -q
-          docker compose -p browser-lite --env-file image.env up -d --wait --wait-timeout 60
-          curl -fsS http://127.0.0.1:8080/healthz
-          running="$(docker inspect --format '{{.Image}}' browser-lite-browser-lite-1)"
-          [ "$running" = "$(docker image inspect --format '{{.Id}}' "$IMAGE")" ] || { echo "Wrong image running"; exit 1; }
-      - name: Remove old images
-        run: docker image prune -af
-      - name: Log out
-        if: always()
-        run: docker logout ghcr.io
+        env:
+          TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          SHA: ${{ needs.image.outputs.sha }}
+          ACTOR: ${{ github.actor }}
+        # The token only on stdin: deploy-shell.sh fetches compose.yml with it and pulls the image
+        run: printf '%s\n' "$TOKEN" | tailscale ssh deploy@browser-lite "$IMAGE $SHA $ACTOR"

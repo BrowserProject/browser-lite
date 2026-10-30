@@ -84,8 +84,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
   it runs.
 - **Yardstick**: 257 of 280 checks like Chromium.
-- **CI and deploy**: every push to `main` builds, tests and deploys the demo to the home server
-  through a LAN runner without foreign actions (#160, #185).
+- **CI and deploy**: every push to `main` builds, tests and deploys the demo to the home server;
+  all jobs on GitHub-hosted runners, the deploy reaches the server through Tailscale SSH (#307).
 
 ## Measurements (local, first visit)
 
