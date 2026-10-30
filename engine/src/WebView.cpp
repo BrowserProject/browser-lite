@@ -39,6 +39,7 @@
 #include <WebCore/EventHandler.h>
 #include <WebCore/ContextMenuController.h>
 #include <WebCore/FileChooser.h>
+#include <WebCore/HTMLInputElement.h>
 #include <WebCore/HitTestResult.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameInlines.h>
@@ -1265,6 +1266,24 @@ bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
 }
 #endif
 
+#if ENABLE(TOUCH_EVENTS)
+// A tap anywhere in a date or time field opens its picker, like in mobile browsers. WebKit opens
+// it only on a click on the field itself, a tap on one of its parts (day, month, ...) just selects
+// that part: without a keyboard there was no way to enter a date
+static void showPickerOfTappedField(LocalFrame& frame)
+{
+    RefPtr page = frame.page();
+    RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
+    RefPtr document = focused ? focused->document() : nullptr;
+    RefPtr element = document ? document->focusedElement() : nullptr;
+    if (RefPtr host = element ? element->shadowHost() : nullptr)
+        element = WTF::move(host);
+    RefPtr input = dynamicDowncast<HTMLInputElement>(element.get());
+    if (input && (input->isDateField() || input->isDateTimeLocalField() || input->isMonthField() || input->isTimeField() || input->isWeekField()))
+        input->showPicker();
+}
+#endif
+
 // Touch (Chromebooks): type 0 start, 1 move, 2 end, 3 cancel. Points as JSON
 // [{id, x, y, state, rx, ry, force}], state like PlatformTouchPoint::State.
 // The host learns whether the page handled the event (then no scrolling) and on
@@ -1309,6 +1328,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
         mouseEvent(2, -1, released->x(), released->y(), 0, modifiers);
         mouseEvent(0, 0, released->x(), released->y(), 1, modifiers);
         mouseEvent(1, 0, released->x(), released->y(), 1, modifiers);
+        showPickerOfTappedField(*frame);
     }
 #else
     UNUSED_PARAM(type);

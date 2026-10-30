@@ -24,6 +24,7 @@ import {
   startStack,
   timeLimit,
   waitEvent,
+  waitFor,
 } from '../lib/index.mjs';
 
 timeLimit();
@@ -37,6 +38,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #notify { position: absolute; left: 260px; top: 200px; width: 200px; height: 40px; }
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
   #files { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
+  #date { position: absolute; left: 20px; top: 280px; width: 200px; height: 40px; font-size: 20px; }
 </style></head><body>
 <p id="text">This sentence should be selectable with the mouse.</p>
 <div id="tap">Tap</div>
@@ -44,6 +46,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
 <button id="notify">Notification</button>
 <button id="speech">Speak</button>
 <button id="files">Files</button>
+<input id="date" type="date" value="2026-10-30">
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -389,6 +392,17 @@ check(
   'tap becomes a click on the tapped element, before the page reacts to the touch',
   (await result('tapclick', 10000)) === '1',
   results.get('tapclick'),
+);
+// A tap on a part of a date field (here the start: month or day) opens its picker, like on phones
+await page.touchscreen.tap(...(await at(40, 300)));
+const dateRequest = await waitFor(
+  () => page.evaluate(() => window.blHost.dateRequests.length > 0),
+  10000,
+).then((found) => (found ? page.evaluate(() => window.blHost.dateRequests[0]) : null));
+check(
+  'tap into a date field opens its picker',
+  dateRequest?.type === 'date' && dateRequest?.value === '2026-10-30',
+  JSON.stringify(dateRequest),
 );
 
 // 3) Swiping scrolls the page (CDP: drag the finger up)
