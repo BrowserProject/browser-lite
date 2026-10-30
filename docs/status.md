@@ -310,6 +310,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
+- `settings-test.mjs` (demo), once on 2026-10-30: right after a restart `getFile()` of an OPFS
+  file the page had written before failed with `NotFoundError`, although `getFileHandle()` found
+  it (FileSystemStorageWasm.cpp); the next runs passed.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
