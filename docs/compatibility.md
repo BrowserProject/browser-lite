@@ -41,7 +41,11 @@ after 10 s (fifa.com, expedia.com).
 iPhone (iOS 18, BrowserStack, engine of 0d48c8a): Wikipedia, YouTube, Google, amazon.de,
 srf.ch, GitHub, Airbnb, ChatGPT and Spotify load without a crash; reddit.com ended the engine
 once in two runs (status.md). The same ten on an Android phone (Chrome): all load without a crash
-and look right (Spotify asks for its app on mobile).
+and look right (Spotify asks for its app on mobile). Interactive on both phones (engine of
+4f3ad4d): a Google search (tap into the field, type, Enter; before #309 the tap opened a
+suggestion), a Wikipedia search, filling GitHub's sign-in form (also the password field), a
+YouTube video that plays with sound after a tap; on the iPhone also swiping with momentum, a cookie
+dialog and a link on srf.ch, and tabs (new tab, address, switching back).
 
 ## State 2026-10-29 (local)
 
