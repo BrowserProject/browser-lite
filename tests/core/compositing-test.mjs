@@ -498,5 +498,37 @@ check(
   gpuVsCpu.max <= 16 && gpuVsCpu.mean <= 1,
   JSON.stringify(gpuVsCpu),
 );
+
+// Many small backdrop filters side by side (espn.com: 11). Each backdrop paints the layers before
+// it again, with their backdrops: without skipping the ones outside the clip (patch 0065) that was
+// exponential, the first frame never came (Chromium) or the stack overflowed (Safari)
+const badges = [];
+for (let i = 0; i < 24; i++)
+  badges.push(
+    `<div style="position:absolute;left:${20 + (i % 8) * 110}px;top:${200 + Math.floor(i / 8) * 60}px;width:80px;height:30px;backdrop-filter:blur(2px);background:rgba(255,255,255,0.3)"></div>`,
+  );
+const { url: backdropURL } = await serve((req, res) =>
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(
+      `<!doctype html><body style="margin:0;background:linear-gradient(90deg,rgb(0,120,255),rgb(255,160,0))"><div style="position:absolute;left:20px;top:20px;width:100px;height:100px;background:rgb(0,255,0)"></div>${badges.join('')}<script>console.log('RESULT backdropready=1')</script>`,
+    ),
+);
+const backdropTab = await browser.newPage({ viewport: { width: 1000, height: 700 } });
+const backdropResults = collect(backdropTab);
+await openHost(backdropTab, stack.app({ url: backdropURL, compositing: '1' }));
+await backdropResults.wait('backdropready');
+const backdropStart = Date.now();
+let backdropPixel = null;
+await waitFor(
+  async () => near((backdropPixel = await pixelAt(70, 70, backdropTab)), [0, 255, 0]),
+  15000,
+);
+check(
+  '24 small backdrop filters: the first frame comes',
+  near(backdropPixel, [0, 255, 0]),
+  `${JSON.stringify(backdropPixel)} after ${Date.now() - backdropStart} ms`,
+);
+await backdropTab.close();
 await browser.close();
 finish();

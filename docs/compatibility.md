@@ -26,6 +26,12 @@ react. In Firefox without WebGL the view is white for a few seconds around such 
 although Firefox shows a worker's canvas frames at once (checked with a plain OffscreenCanvas);
 cause open.
 
+A third sweep (40 sites: Swiss news, real estate, universities, design and productivity tools,
+shops, travel, sports, developer docs, news) found espn.com without any frame with the compositor
+and the engine ending on an iPhone (backdrop filters, #308). Site errors that native Chromium
+shows too (uzh.ch `$`, homegate.ch, Kickstarter's Apollo warnings) and bot checks (homegate,
+TripAdvisor, Yelp, zeit.de, Expedia) aside, the rest renders.
+
 ## State 2026-10-29 (local)
 
 All 54 sites load without a crash in Chromium and in Firefox (screenshots after 10 s look like
