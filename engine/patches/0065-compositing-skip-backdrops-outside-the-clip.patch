@@ -1,19 +1,16 @@
 diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
-index 5e30339483..aab3681016 100644
+index 890e094f5e..aab3681016 100644
 --- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
 +++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
-@@ -1285,13 +1285,11 @@ void SkiaCompositingLayer::paintBackdrop(SkCanvas& canvas, PaintContext& context
+@@ -1285,6 +1285,11 @@ void SkiaCompositingLayer::paintBackdrop(SkCanvas& canvas, PaintContext& context
      SkAutoCanvasRestore autoRestore(&canvas, true);
      const auto clipTransform = combinedTransform(context);
      clipRect(canvas, m_backdrop.clipRect, clipTransform);
--#if PLATFORM(WASM)
-     // Outside the area being painted (also while painting another layer's backdrop, which paints
-     // the layers before it again, with their backdrops) it shows nothing. Without this, every
--    // backdrop repainted all earlier ones: exponential in their number, a stack overflow in Safari
++    // Outside the area being painted (also while painting another layer's backdrop, which paints
++    // the layers before it again, with their backdrops) it shows nothing. Without this, every
 +    // backdrop repainted all earlier ones: exponential in their number.
-     if (canvas.isClipEmpty())
-         return;
--#endif
++    if (canvas.isClipEmpty())
++        return;
  
      // Paint the backdrop root's subtree into a fresh surface (spec step 1),
      // apply the backdrop filter (step 2), and composite via SrcOver so the
