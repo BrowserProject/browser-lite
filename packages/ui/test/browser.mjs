@@ -891,6 +891,59 @@ test('color and date/time pickers', async () => {
   });
 });
 
+test('pickers on an iPhone: a sheet with the input, opened by the tap on it', async () => {
+  const result = await page.evaluate(async () => {
+    const restore = [
+      ['userAgent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X)'],
+      ['maxTouchPoints', 5],
+    ].map(([name, value]) => {
+      Object.defineProperty(navigator, name, { configurable: true, get: () => value });
+      return () => delete navigator[name];
+    });
+    try {
+      const { dateTimePicker } = ui.defaultHandlers();
+      const view = makeView(8);
+      const rect = { x: 5, y: 6, width: 70, height: 22 };
+      const request = () =>
+        dateTimePicker({
+          view,
+          rect,
+          type: 'date',
+          value: '2024-03-05',
+          min: 0,
+          max: 0,
+          step: 0,
+          signal: new AbortController().signal,
+        });
+      const out = {};
+      let promise = request();
+      const sheet = document.querySelector('form.bl-picker-sheet');
+      const input = sheet?.querySelector('input.bl-host-picker');
+      out.sheet = [!!sheet, input?.type, input?.value, input?.style.opacity, sheet?.style.top];
+      sheet.querySelector('button[data-bl-answer=cancel]').click();
+      out.cancelled = await promise;
+      out.removed = !document.querySelector('form.bl-picker-sheet');
+      promise = request();
+      const next = document.querySelector('form.bl-picker-sheet input');
+      pointerdown(next);
+      out.stillOpen = !!document.querySelector('form.bl-picker-sheet');
+      next.value = '2024-04-01';
+      next.dispatchEvent(new Event('change'));
+      out.chosen = await promise;
+      return out;
+    } finally {
+      for (const undo of restore) undo();
+    }
+  });
+  assert.deepEqual(result, {
+    sheet: [true, 'date', '2024-03-05', '', '92px'],
+    cancelled: null,
+    removed: true,
+    stillOpen: true,
+    chosen: '2024-04-01',
+  });
+});
+
 test('native dialogs show Chrome-like texts and protect against loops', async () => {
   const shown = [];
   const answers = [];

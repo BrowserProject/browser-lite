@@ -20,10 +20,23 @@ interface PickerRequest {
 const openPickers = new WeakMap<Document, () => void>();
 
 /**
+ * iPhone and iPad (also as "Macintosh" with touch): Safari opens its pickers only on a tap or a
+ * focus() within the tap, not later (the request comes after a round trip through the engine),
+ * and showPicker() does nothing for dates.
+ */
+function pickerNeedsTap(doc: Document): boolean {
+  const nav = doc.defaultView?.navigator;
+  return !!nav && /iPhone|iPad|iPod|Macintosh/.test(nav.userAgent) && nav.maxTouchPoints > 1;
+}
+
+/**
  * Shows the native picker of the host browser: a hidden input at the place of the field of the
- * page, opened with showPicker(). Every input event previews the value in the page. Resolves
- * its value (read from the input) on change or when the user clicks elsewhere, null when
- * aborted. A new picker in the same document finishes the open one.
+ * page, opened with showPicker(). Where pickers open only on a tap (pickerNeedsTap) the input is
+ * visible in a small sheet below the field (`.bl-picker-sheet` with the input and
+ * `button[data-bl-answer=cancel]`), the tap on it opens the picker. Every input event previews
+ * the value in the page. Resolves its value (read from the input) on change or when the user
+ * clicks elsewhere, null when aborted or cancelled. A new picker in the same document finishes
+ * the open one.
  */
 function openHostPicker(
   ui: UiContext,
@@ -43,17 +56,32 @@ function openHostPicker(
     }
     const input = element(root, 'input', 'host-picker');
     input.type = type;
-    input.tabIndex = -1;
     const anchor = viewportRect(request.view, request.rect);
-    Object.assign(input.style, {
-      position: 'fixed',
-      left: `${anchor.x}px`,
-      top: `${anchor.y}px`,
-      width: `${Math.max(anchor.width, 1)}px`,
-      height: `${Math.max(anchor.height, 1)}px`,
-      opacity: '0',
-      pointerEvents: 'none',
-    });
+    const sheet = pickerNeedsTap(doc) ? element(root, 'form', 'picker-sheet') : null;
+    if (sheet) {
+      Object.assign(sheet.style, {
+        position: 'fixed',
+        left: `${anchor.x}px`,
+        top: `${anchor.y + anchor.height + 4}px`,
+      });
+      const cancel = element(root, 'button', 'cancel');
+      cancel.type = 'button';
+      cancel.dataset.blAnswer = 'cancel';
+      cancel.textContent = ui.texts.cancel;
+      cancel.addEventListener('click', () => finish(null));
+      sheet.append(input, cancel);
+    } else {
+      input.tabIndex = -1;
+      Object.assign(input.style, {
+        position: 'fixed',
+        left: `${anchor.x}px`,
+        top: `${anchor.y}px`,
+        width: `${Math.max(anchor.width, 1)}px`,
+        height: `${Math.max(anchor.height, 1)}px`,
+        opacity: '0',
+        pointerEvents: 'none',
+      });
+    }
     setup?.(input);
     input.value = value;
 
@@ -62,7 +90,7 @@ function openHostPicker(
       openPickers.delete(doc);
       stopListening();
       request.signal.removeEventListener('abort', onAbort);
-      input.remove();
+      (sheet ?? input).remove();
       resolve(result);
     };
     const done = () => finish(read(input) || null);
@@ -75,13 +103,14 @@ function openHostPicker(
         doc,
         'pointerdown',
         (event) => {
-          if (event.target !== input) done();
+          if (!(sheet ?? input).contains(event.target as Node)) done();
         },
         true,
       ],
     ]);
     request.signal.addEventListener('abort', onAbort);
-    root.append(input);
+    root.append(sheet ?? input);
+    if (sheet) return;
     try {
       input.showPicker();
     } catch {

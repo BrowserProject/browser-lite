@@ -411,6 +411,33 @@ button {
   padding: 0;
   border: 0;
 }
+/* iPhone and iPad: the input of a picker is visible, the tap on it opens the picker */
+.bl-picker-sheet {
+  z-index: 12;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--tab-active);
+  color: var(--fg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+.bl-picker-sheet .bl-host-picker {
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
+  min-width: 150px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 16px;
+}
+.bl-picker-sheet button {
+  padding: 6px 12px;
+  font-size: 16px;
+}
 .bl-link-status {
   position: fixed;
   left: 0;
