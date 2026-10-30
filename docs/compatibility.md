@@ -17,9 +17,12 @@ inside the obfuscated script and repeats). Etsy, Coop, Reuters and AliExpress bl
 address in native Chromium too. codepen.io scrolled faster than the engine painted its animated
 background: the unpainted area showed white for seconds (now the page's background, #305).
 The same 40 sites with Firefox as host (headless, without WebGL, so without compositing): codepen.io,
-airbnb.com and soundcloud.com ended the engine (#306); chatgpt.com and outlook.live.com stay white
-although the page runs (evals answer, its frames stop after about 3 s), the rest looks like in
-Chromium.
+airbnb.com and soundcloud.com ended the engine (#306, now painted flattened); the rest looks like
+in Chromium. chatgpt.com keeps the engine thread busy for 15 s (Chromium) to 21 s (Firefox) in
+one task shortly after loading (its scripts in the interpreter); meanwhile the page does not
+react. In Firefox without WebGL the view is white for a few seconds around such long tasks,
+although Firefox shows a worker's canvas frames at once (checked with a plain OffscreenCanvas);
+cause open.
 
 ## State 2026-10-29 (local)
 
