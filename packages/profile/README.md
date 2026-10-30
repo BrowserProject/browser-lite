@@ -39,7 +39,7 @@ every 30 s while hidden and 2.5 s after hiding (the core flushes the storage on 
 the directory, uploads changed files and deletes on the server what is gone locally.
 
 A database of the profile is `cookies.db`, one `.localstorage` file or the directory of one
-IndexedDB. Except `cookies.db`, it goes into the profile only up to `dbLimitKB` (default 256);
+IndexedDB, without hidden files (the engine's commit logs). Except `cookies.db`, it goes into the profile only up to `dbLimitKB` (default 256);
 larger ones stay on the device. When another device opens the profile, the status becomes
 `taken` (or `reset` after a reset there) and nothing more is written; reload to take it back.
 

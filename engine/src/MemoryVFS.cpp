@@ -30,6 +30,7 @@
 #include "Storage.h"
 
 #include <algorithm>
+#include <bit>
 #include <atomic>
 #include <cerrno>
 #include <climits>
@@ -188,10 +189,12 @@ struct Family {
     bool dirty { false }; // changed since the last write
     // Do not rewrite a big database completely all the time (flushFamily)
     MonotonicTime nextWrite;
-    // Commit log (<name>-bllog): the committed WAL frames already in a record, the records not
-    // yet appended (drainLog, in order) and whether the file may exist
+    // Commit log (logPath): the committed WAL frames already in a record, the records not yet
+    // appended (drainLog, in order), the hash of the database file on disk (the base of the log)
+    // and whether the log on disk has that base
     WalFrames loggedFrames;
     std::vector<std::vector<uint8_t>> pendingLog;
+    uint64_t logBase { 0 };
     bool logOnDisk { false };
     // Locks on the database (rollback journal)
     int sharedCount { 0 };
@@ -361,7 +364,10 @@ WalFrames committedFrames(const Content& wal, const WalFrames& from = { })
 // The database as SQLite would have it after a full checkpoint: first the
 // content of the file, on top the committed pages from the WAL in order (a
 // later version of a page overwrites the earlier one)
-void writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
+uint64_t checkpointHash(const Content& database, const Content* wal, const WalFrames& frames, uint64_t size);
+
+// Returns the hash of the written file (StreamHash)
+uint64_t writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
 {
     auto frames = wal ? committedFrames(*wal) : WalFrames { };
     uint64_t size = frames.count ? static_cast<uint64_t>(frames.databasePages) * frames.pageSize : database.size();
@@ -384,23 +390,125 @@ void writeDatabase(FileReplacement& file, const Content& database, const Content
         });
     }
     file.truncate(size);
+    return checkpointHash(database, wal, frames, size);
 }
 
 // ---------------------------------------------------------------- Commit log
 
 // The whole database goes to disk only some time after a change (flushDelay): a tab closed or
 // reloaded meanwhile lost the change, in Firefox also because the engine cannot write while the
-// page goes away. So every commit appends its new WAL frames as a record to <database>-bllog right
-// away (on the committing thread); opening the database applies the valid records, the next full
-// write empties the file. Record: "BLL1", page size, frame count, pages of the database after the
-// commit (all uint32 little endian), the frames (page number, page), then FNV-1a 64 of all before.
+// page goes away. So every commit appends its new WAL frames as a record to the log of the
+// database right away (on the committing thread); opening the database applies the valid records,
+// the next full write empties the file. The log is hidden (.<name>-bllog, not part of a synced
+// profile) and starts with "BLLF", 4 zero bytes and the hash of the database file it goes on from
+// (uint64 little endian): a log whose database was replaced or deleted without it does not apply.
+// Record: "BLL1", page size, frame count, pages of the database after the commit (all uint32
+// little endian), the frames (page number, page), then FNV-1a 64 of all before.
 constexpr char logSuffix[] = "-bllog";
+constexpr uint8_t logFileMagic[4] = { 'B', 'L', 'L', 'F' };
+constexpr size_t logFileHeaderSize = 16;
 constexpr uint8_t logMagic[4] = { 'B', 'L', 'L', '1' };
 constexpr size_t logHeaderSize = 16;
 
 std::string logPath(const std::string& database)
 {
-    return database + logSuffix;
+    auto slash = database.rfind('/') + 1;
+    return database.substr(0, slash) + '.' + database.substr(slash) + logSuffix;
+}
+
+// 64-bit hash of a byte stream taken in words, whatever the pieces: tells whether the database
+// file is the one a commit log goes on from
+class StreamHash {
+public:
+    void add(const uint8_t* data, size_t length)
+    {
+        m_size += length;
+        while (m_pending && length) {
+            m_buffer[m_pending++] = *data++;
+            --length;
+            if (m_pending == 8) {
+                mix(load(m_buffer));
+                m_pending = 0;
+            }
+        }
+        for (; length >= 8; data += 8, length -= 8)
+            mix(load(data));
+        for (; length; --length)
+            m_buffer[m_pending++] = *data++;
+    }
+
+    uint64_t finish()
+    {
+        uint64_t last = 0;
+        memcpy(&last, m_buffer, m_pending);
+        mix(last);
+        mix(m_size);
+        uint64_t hash = m_hash;
+        hash ^= hash >> 33;
+        hash *= 0xff51afd7ed558ccdull;
+        return hash ^ (hash >> 33);
+    }
+
+private:
+    static uint64_t load(const uint8_t* data)
+    {
+        uint64_t word;
+        memcpy(&word, data, 8);
+        return word;
+    }
+    void mix(uint64_t word) { m_hash = std::rotl(m_hash ^ word, 27) * 0x100000001b3ull; }
+
+    uint64_t m_hash { 0xcbf29ce484222325ull };
+    uint64_t m_size { 0 };
+    uint8_t m_buffer[8];
+    size_t m_pending { 0 };
+};
+
+uint64_t contentHash(const Content& content)
+{
+    StreamHash hash;
+    content.forEach(0, content.size(), [&](const uint8_t* data, size_t length) {
+        hash.add(data, length);
+    });
+    return hash.finish();
+}
+
+// Hash of the file writeDatabase writes, page by page from memory
+uint64_t checkpointHash(const Content& database, const Content* wal, const WalFrames& frames, uint64_t size)
+{
+    if (!frames.count) {
+        StreamHash hash;
+        database.forEach(0, size, [&](const uint8_t* data, size_t length) {
+            hash.add(data, length);
+        });
+        return hash.finish();
+    }
+    // Frame of the latest version of each page, 0: none
+    std::vector<uint32_t> latest(frames.databasePages);
+    uint64_t frameSize = walFrameHeaderSize + frames.pageSize;
+    for (uint32_t index = 0; index < frames.count; ++index) {
+        uint8_t header[walFrameHeaderSize];
+        wal->read(header, sizeof(header), walHeaderSize + index * frameSize);
+        uint32_t page = get32(header);
+        if (page && page <= frames.databasePages)
+            latest[page - 1] = index + 1;
+    }
+    StreamHash hash;
+    auto add = [&](const uint8_t* data, size_t length) {
+        hash.add(data, length);
+    };
+    std::vector<uint8_t> zeros(frames.pageSize);
+    for (uint32_t page = 0; page < frames.databasePages; ++page) {
+        if (latest[page]) {
+            wal->forEach(walHeaderSize + (latest[page] - 1) * frameSize + walFrameHeaderSize, frames.pageSize, add);
+            continue;
+        }
+        uint64_t start = static_cast<uint64_t>(page) * frames.pageSize;
+        uint64_t available = start < database.size() ? std::min<uint64_t>(frames.pageSize, database.size() - start) : 0;
+        database.forEach(start, available, add);
+        hash.add(zeros.data(), frames.pageSize - available);
+    }
+    return hash.finish();
 }
 
 uint64_t fnv1a(std::span<const uint8_t> data)
@@ -468,14 +576,21 @@ void drainLog(Family& family)
 {
     std::lock_guard ioLock(ioMutex);
     std::vector<std::vector<uint8_t>> records;
+    // The first records on top of a database file start the log anew, with its hash
+    uint8_t fileHeader[logFileHeaderSize] { };
+    bool fresh;
     {
         std::lock_guard lock(family.mutex);
         records = std::exchange(family.pendingLog, { });
         if (records.empty())
             return;
-        family.logOnDisk = true;
+        fresh = !std::exchange(family.logOnDisk, true);
+        memcpy(fileHeader, logFileMagic, 4);
+        memcpy(fileHeader + 8, &family.logBase, 8);
     }
-    int fd = open(logPath(family.name).c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fresh)
+        records.insert(records.begin(), std::vector<uint8_t>(fileHeader, fileHeader + logFileHeaderSize));
+    int fd = open(logPath(family.name).c_str(), O_WRONLY | O_CREAT | (fresh ? O_TRUNC : O_APPEND), 0644);
     if (fd < 0)
         return;
     for (auto& record : records) {
@@ -492,12 +607,18 @@ void drainLog(Family& family)
     close(fd);
 }
 
-// The valid records of a log on top of the database content, in order. Stops at the first broken
-// one (a write that was cut off). false: no memory
+// Whether the log goes on from the database file with this hash
+bool logFits(std::span<const uint8_t> log, uint64_t base)
+{
+    return log.size() >= logFileHeaderSize && !memcmp(log.data(), logFileMagic, 4) && !memcmp(log.data() + 8, &base, 8);
+}
+
+// The valid records of a fitting log on top of the database content, in order. Stops at the first
+// broken one (a write that was cut off). false: no memory
 bool applyLog(Content& database, std::span<const uint8_t> log, bool& applied)
 {
     applied = false;
-    size_t offset = 0;
+    size_t offset = logFileHeaderSize;
     while (offset + logHeaderSize + 8 <= log.size()) {
         const uint8_t* header = log.data() + offset;
         uint32_t pageSize = get32le(header + 4);
@@ -539,15 +660,17 @@ bool writeFamily(Family& family)
             wal = node.get();
     }
     std::optional<FileReplacement> file;
+    uint64_t hash = 0;
     if (database && database->exists) {
         file.emplace();
-        writeDatabase(*file, database->content, wal ? &wal->content : nullptr);
+        hash = writeDatabase(*file, database->content, wal ? &wal->content : nullptr);
         if (!file->ok())
             return false;
     }
     bool written = file ? file->commit(family.name.c_str()) : !unlink(family.name.c_str()) || errno == ENOENT;
     if (!written)
         return false;
+    family.logBase = hash;
     // The database now holds every commit of the log: records still waiting are done too. The log
     // is emptied rather than deleted (deleting a file runs code the start otherwise never needs,
     // split engine #238), it goes with its database
@@ -997,10 +1120,12 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
             return SQLITE_IOERR;
         }
         // Commits after the last full write (commit log)
+        uint64_t base = contentHash(content);
         std::vector<uint8_t> log;
         auto logResult = readWholeFile(logPath(path).c_str(), log);
+        bool fits = logResult == ReadResult::Done && logFits(log, base);
         bool fromLog = false;
-        if (logResult == ReadResult::Failed || (logResult == ReadResult::Done && !applyLog(content, log, fromLog))) {
+        if (logResult == ReadResult::Failed || (fits && !applyLog(content, log, fromLog))) {
             release();
             return SQLITE_IOERR;
         }
@@ -1010,9 +1135,10 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
             node->content = WTF::move(content);
             node->exists = result == ReadResult::Done || fromLog;
             node->loaded = true;
-            family->logOnDisk = logResult == ReadResult::Done && !log.empty();
-            // The next full write takes the records into the database and deletes the log
-            if (family->logOnDisk)
+            family->logBase = base;
+            family->logOnDisk = fits;
+            // The next full write takes the records into the database and empties the log
+            if (fits)
                 markDirty(*family);
         }
     }
@@ -1096,7 +1222,7 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
     // Created and committed, but not yet fully written: only in its commit log
     struct stat log;
     if (status == SQLITE_OK && !*result && flags == SQLITE_ACCESS_EXISTS)
-        *result = !stat(logPath(path).c_str(), &log) && log.st_size > 0;
+        *result = !stat(logPath(path).c_str(), &log) && static_cast<uint64_t>(log.st_size) > logFileHeaderSize;
     return status;
 }
 

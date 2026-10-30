@@ -28,7 +28,10 @@ export function unitOf(path: string): string {
 
 const encoder = new TextEncoder();
 
-/** Names the profile server accepts, without leftovers of broken databases. */
+/**
+ * Names the profile server accepts, without leftovers of broken databases and without hidden
+ * files (the engine's commit logs).
+ */
 export function validName(name: string): boolean {
   return (
     name !== '' &&
@@ -105,7 +108,9 @@ async function databaseUnit(
   };
   const main = await fileHandle(dir, 'IndexedDB.sqlite3');
   if (!main) {
-    const hasFiles = (await children(dir)).some((handle) => handle.kind === 'file');
+    const hasFiles = (await children(dir)).some(
+      (handle) => handle.kind === 'file' && validName(handle.name),
+    );
     return hasFiles ? { ...unit, unstable: true } : null;
   }
   if (!add(await readEntry(main, `${key}/IndexedDB.sqlite3`))) return unit;

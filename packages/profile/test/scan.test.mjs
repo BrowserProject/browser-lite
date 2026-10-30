@@ -41,6 +41,9 @@ test('scan finds cookies, localStorage and IndexedDBs with limits', async () => 
   top.put('indexeddb/v1/https_a.com_0/db1/IndexedDB.sqlite3', 'abc');
   top.put('indexeddb/v1/https_a.com_0/db1/IndexedDB.sqlite3-wal', 'de');
   top.put('indexeddb/v1/https_a.com_0/db1/x-corrupted', 'skip');
+  top.put('indexeddb/v1/https_a.com_0/db1/.IndexedDB.sqlite3-bllog', 'log');
+  top.put('indexeddb/v1/https_a.com_0/deleted/.IndexedDB.sqlite3-bllog', 'log');
+  top.put('.cookies.db-bllog', 'log');
   top.put('indexeddb/v1/https_a.com_0/https_frame.com_0/db2/IndexedDB.sqlite3', '1');
   top.put('indexeddb/v1/https_a.com_0/replacing/journal', 'tmp');
   await top

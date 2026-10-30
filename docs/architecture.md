@@ -199,8 +199,9 @@ most 300 ms, the text is laid out again once they are there (#255).
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). Every commit also
-appends its new WAL pages to `<database>-bllog` at once; opening applies them, the next full
-write empties the file (#302). IndexedDB is
+appends its new WAL pages to a hidden log next to it (`.<database>-bllog`) at once; opening
+applies them if the log goes on from that very database file (hash), the next full write empties
+the log (#302). IndexedDB is
 limited to 256 MB per origin for writing (#179).
 
 ## Media
