@@ -40,7 +40,8 @@ after 10 s (fifa.com, expedia.com).
 
 iPhone (iOS 18, BrowserStack, engine of 0d48c8a): Wikipedia, YouTube, Google, amazon.de,
 srf.ch, GitHub, Airbnb, ChatGPT and Spotify load without a crash; reddit.com ended the engine
-once in two runs (status.md).
+once in two runs (status.md). The same ten on an Android phone (Chrome): all load without a crash
+and look right (Spotify asks for its app on mobile).
 
 ## State 2026-10-29 (local)
 
