@@ -392,7 +392,7 @@ void writeDatabase(FileReplacement& file, const Content& database, const Content
 // reloaded meanwhile lost the change, in Firefox also because the engine cannot write while the
 // page goes away. So every commit appends its new WAL frames as a record to <database>-bllog right
 // away (on the committing thread); opening the database applies the valid records, the next full
-// write deletes the file. Record: "BLL1", page size, frame count, pages of the database after the
+// write empties the file. Record: "BLL1", page size, frame count, pages of the database after the
 // commit (all uint32 little endian), the frames (page number, page), then FNV-1a 64 of all before.
 constexpr char logSuffix[] = "-bllog";
 constexpr uint8_t logMagic[4] = { 'B', 'L', 'L', '1' };
@@ -548,10 +548,17 @@ bool writeFamily(Family& family)
     bool written = file ? file->commit(family.name.c_str()) : !unlink(family.name.c_str()) || errno == ENOENT;
     if (!written)
         return false;
-    // The database now holds every commit of the log: records still waiting are done too
+    // The database now holds every commit of the log: records still waiting are done too. The log
+    // is emptied rather than deleted (deleting a file runs code the start otherwise never needs,
+    // split engine #238), it goes with its database
     family.pendingLog.clear();
-    if (std::exchange(family.logOnDisk, false) || !file)
+    if (!file)
         unlink(logPath(family.name).c_str());
+    else if (std::exchange(family.logOnDisk, false)) {
+        int fd = open(logPath(family.name).c_str(), O_WRONLY | O_TRUNC);
+        if (fd >= 0)
+            close(fd);
+    }
     return true;
 }
 
@@ -1003,7 +1010,7 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
             node->content = WTF::move(content);
             node->exists = result == ReadResult::Done || fromLog;
             node->loaded = true;
-            family->logOnDisk = logResult == ReadResult::Done;
+            family->logOnDisk = logResult == ReadResult::Done && !log.empty();
             // The next full write takes the records into the database and deletes the log
             if (family->logOnDisk)
                 markDirty(*family);
@@ -1087,8 +1094,9 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
     }
     int status = baseVFS->xAccess(baseVFS, name, flags, result);
     // Created and committed, but not yet fully written: only in its commit log
+    struct stat log;
     if (status == SQLITE_OK && !*result && flags == SQLITE_ACCESS_EXISTS)
-        *result = !access(logPath(path).c_str(), F_OK);
+        *result = !stat(logPath(path).c_str(), &log) && log.st_size > 0;
     return status;
 }
 
