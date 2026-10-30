@@ -10,6 +10,7 @@
 #include "EngineConfig.h"
 #include "CacheStorageWasm.h"
 #include "Compositor.h"
+#include "CookieJarWasm.h"
 #include "GpuRaster.h"
 #include "LayerTreeHostWasm.h"
 #include "ScrollingWasm.h"
@@ -25,7 +26,6 @@
 #include "LoaderStrategy.h"
 #include "WasmSocketProvider.h"
 #include "Storage.h"
-#include "Strategies.h"
 
 #include <WebCore/BackForwardController.h>
 #include <WebCore/CookieJar.h>
@@ -81,7 +81,6 @@
 #include <WebCore/StyleComputedStyle+GettersInlines.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StorageNamespaceProvider.h>
-#include <WebCore/StorageSessionProvider.h>
 #include <WebCore/SubstituteData.h>
 #include <WebCore/WindowEventLoop.h>
 #include <pal/SessionID.h>
@@ -219,12 +218,6 @@ void WebView::runHeldCommands()
         requestFrameFromHost(m_id);
 }
 
-class SessionProvider final : public StorageSessionProvider {
-public:
-    static Ref<SessionProvider> create() { return adoptRef(*new SessionProvider); }
-    NetworkStorageSession* storageSession() const final { return &networkStorageSession(); }
-};
-
 Ref<WebView> WebView::create(int id, IntSize size, float deviceScaleFactor)
 {
     return adoptRef(*new WebView(id, size, deviceScaleFactor));
@@ -245,7 +238,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.speechRecognitionProvider = createSpeechRecognitionProvider(m_id);
     configuration.backForwardClient = BackForwardList::create();
     configuration.progressTrackerClient = makeUniqueRef<ProgressTrackerClient>(*this);
-    configuration.cookieJar = CookieJar::create(SessionProvider::create());
+    configuration.cookieJar = createCookieJar();
     configuration.storageNamespaceProvider = &storageNamespaceProvider();
     configuration.databaseProvider = &databaseProvider();
     configuration.socketProvider = createSocketProvider();

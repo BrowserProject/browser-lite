@@ -44,7 +44,8 @@ patches from `patches/`.
   - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
     Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,
     `ErrorPage.cpp`
-  - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CacheStorageWasm.cpp`,
+  - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CookieJarWasm.cpp` (Cookie Store API),
+    `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),

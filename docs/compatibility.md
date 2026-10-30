@@ -4,6 +4,14 @@ The site list is `tests/compat/sites.txt`. CI loads it in the job `compat` (info
 servers fail now and then) and writes a table into the run summary. Screenshots are in the
 artifact `compat`, named by host and path (`build/sites/<host>_<path>.png`).
 
+## State 2026-10-30 (local)
+
+40 further sites (Google Maps, Office, Outlook, DeepL, ChatGPT, Notion, Stripe, Airbnb, Etsy,
+AliExpress, IKEA, Swiss shops and services, news, Codepen, Excalidraw, Photopea, Canva, learning
+sites, GeoGebra, Desmos) load without a crash. Only here: `cookieStore` failed on every call
+(Airbnb, Notion's consent manager; implemented since #304), IKEA's report-only CSP reports its
+scripts (only console lines), Outlook's duplicate `let` (native Chromium got a 503 page instead).
+
 ## State 2026-10-29 (local)
 
 All 54 sites load without a crash in Chromium and in Firefox (screenshots after 10 s look like

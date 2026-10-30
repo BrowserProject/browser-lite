@@ -2,12 +2,12 @@
 #include "ServiceWorkerWasm.h"
 
 #include "CacheStorageWasm.h"
+#include "CookieJarWasm.h"
 #include "DeviceClients.h"
 #include "Engine.h"
 #include "HttpCache.h"
 #include "LoaderStrategy.h"
 #include "Storage.h"
-#include "Strategies.h"
 #include "WasmSocketProvider.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
@@ -82,7 +82,6 @@
 #include <WebCore/Settings.h>
 #include <WebCore/StorageNamespaceProvider.h>
 #include <WebCore/StorageProvider.h>
-#include <WebCore/StorageSessionProvider.h>
 #include <WebCore/TextResourceDecoder.h>
 #include <WebCore/UserContentProvider.h>
 #include <WebCore/WorkerFetchResult.h>
@@ -1217,12 +1216,6 @@ void ServerConnection::updateBackgroundFetchRegistration(const BackgroundFetchIn
 // ------------------------------------------------------------ ContextConnection
 
 // Own page for the worker, like WebSWContextManagerConnection::installServiceWorker
-class SessionProvider final : public StorageSessionProvider {
-public:
-    static Ref<SessionProvider> create() { return adoptRef(*new SessionProvider); }
-    NetworkStorageSession* storageSession() const final { return &networkStorageSession(); }
-};
-
 static Ref<CacheStorageProvider>& cacheStorageProvider()
 {
     static NeverDestroyed<Ref<CacheStorageProvider>> provider { createCacheStorageProvider() };
@@ -1233,7 +1226,7 @@ static Ref<CacheStorageProvider>& cacheStorageProvider()
 static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> privacy)
 {
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
-    configuration.cookieJar = CookieJar::create(SessionProvider::create());
+    configuration.cookieJar = createCookieJar();
     configuration.storageNamespaceProvider = &storageNamespaceProvider();
     configuration.databaseProvider = &databaseProvider();
     configuration.socketProvider = createSocketProvider();

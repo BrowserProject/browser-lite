@@ -37,6 +37,17 @@ const PAGE = `<!doctype html><title>Storage test</title><script>
     };
   });
   console.log('RESULT read=' + [cookie, local, db].join(','));
+  // Cookie Store API (engine/src/CookieJarWasm.cpp), next to document.cookie
+  try {
+    await cookieStore.set('bl_cs', 'one');
+    await cookieStore.set({ name: 'bl_gone', value: 'x' });
+    await cookieStore.delete('bl_gone');
+    const got = await cookieStore.get('bl_cs');
+    const names = (await cookieStore.getAll()).map((c) => c.name).sort().join('+');
+    console.log('RESULT cookiestore=' + [got && got.value, names, document.cookie.includes('bl_cs=one')].join(','));
+  } catch (e) {
+    console.log('RESULT cookiestore=error:' + e.name + ':' + e.message);
+  }
   localStorage.setItem('bl', 'stored');
   await new Promise((resolve) => {
     const open = indexedDB.open('bl-test', 1);
@@ -347,6 +358,11 @@ await page.goto(appURL(siteURL));
 const first = await result('read');
 check('first visit: only the new cookie', first === 'yes,empty,empty', String(first));
 check('data written', (await result('written')) === '1');
+check(
+  'Cookie Store API: set, delete, get and getAll, seen by document.cookie',
+  (await result('cookiestore')) === 'one,bl_cs+bl_store,true',
+  results.get('cookiestore'),
+);
 check('Cache API empty at the start', results.get('cacheapi') === 'empty', results.get('cacheapi'));
 check(
   'OPFS: files, folders, resolve()',
