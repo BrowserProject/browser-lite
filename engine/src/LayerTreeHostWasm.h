@@ -92,11 +92,14 @@ public:
     // moves for scrolling, and the last gesture taken over
     PinchViewport pendingViewport WTF_GUARDED_BY_LOCK(lock);
     RefPtr<WebCore::CoordinatedPlatformLayer> pendingScrollLayer WTF_GUARDED_BY_LOCK(lock);
+    // Background of the page (opaque ARGB): what areas without painted tiles show
+    uint32_t pendingBackground WTF_GUARDED_BY_LOCK(lock) { 0xffffffff };
     unsigned pendingPinchCommit WTF_GUARDED_BY_LOCK(lock) { 0 };
 
     // What is visible right now (the scroll position comes from the layer)
     PinchViewport viewport WTF_GUARDED_BY_LOCK(lock);
     RefPtr<WebCore::CoordinatedPlatformLayer> scrollLayer WTF_GUARDED_BY_LOCK(lock);
+    uint32_t background WTF_GUARDED_BY_LOCK(lock) { 0xffffffff };
     // Target of the gesture until a rendering update shows it
     std::optional<PinchZoom> pinchZoom WTF_GUARDED_BY_LOCK(lock);
     bool pinchActive WTF_GUARDED_BY_LOCK(lock) { false };

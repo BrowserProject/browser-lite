@@ -10,6 +10,7 @@
 #include "WebView.h"
 #include <EGL/egl.h>
 #include "GLDisplay.h"
+#include <WebCore/ColorBlending.h>
 #include <WebCore/CoordinatedImageBackingStore.h>
 #include <WebCore/Damage.h>
 #include <WebCore/GraphicsLayerCoordinated.h>
@@ -85,6 +86,17 @@ static void waitForLayerLock(CompositorScene& scene, CoordinatedPlatformLayer& l
     setFramePhase(scene, 13);
 }
 
+// Areas without painted tiles yet (scrolled into view before the engine painted them) show the
+// background of the page instead of white, like Chromium: dark pages do not flash white
+static SkColor backgroundOf(const LocalFrameView& frameView)
+{
+    auto color = frameView.documentBackgroundColor();
+    if (!color.isValid())
+        return SK_ColorWHITE;
+    auto [red, green, blue, alpha] = blendSourceOver(Color::white, color).toColorTypeLossy<SRGBA<uint8_t>>().resolved();
+    return SkColorSetARGB(255, red, green, blue);
+}
+
 static void compositeScene(CompositorScene& scene)
 {
     auto idle = makeScopeExit([&] { setFramePhase(scene, 0); });
@@ -105,6 +117,7 @@ static void compositeScene(CompositorScene& scene)
     float deviceScaleFactor = 1;
     HashSet<Ref<CoordinatedPlatformLayer>> layersToRemove;
     RefPtr<CoordinatedPlatformLayer> scrollLayer;
+    SkColor background = SK_ColorWHITE;
     bool pinching = false;
     {
         Locker locker { scene.lock };
@@ -140,11 +153,13 @@ static void compositeScene(CompositorScene& scene)
         if (reasons.contains(CompositionReason::RenderingUpdate)) {
             scene.viewport = { scene.pendingViewport.scale, scene.viewport.scrollPosition, scene.pendingViewport.documentRect, scene.pendingViewport.visibleSize };
             scene.scrollLayer = scene.pendingScrollLayer;
+            scene.background = scene.pendingBackground;
             // The engine thread shows the target of the gesture itself now
             if (scene.pinchZoom && !scene.pinchActive && scene.pendingPinchCommit >= scene.pinchCommit)
                 scene.pinchZoom = std::nullopt;
         }
         scrollLayer = scene.scrollLayer;
+        background = scene.background;
         pinching = !!scene.pinchZoom;
         pixelSize = scene.pixelSize;
         deviceScaleFactor = scene.deviceScaleFactor;
@@ -274,7 +289,7 @@ static void compositeScene(CompositorScene& scene)
     setFramePhase(scene, 3);
     canvas->save();
     auto drawsWholeTarget = frameDamage && skipUnchanged && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
-    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, SK_ColorWHITE, drawsWholeTarget);
+    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, background, drawsWholeTarget);
     canvas->restore();
     bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
     setFramePhase(scene, 4);
@@ -644,15 +659,19 @@ void LayerTreeHostWasm::flush(bool firstPaint)
     m_waitingForCompositor = true;
     RefPtr<CoordinatedPlatformLayer> scrollLayer;
     PinchViewport viewport;
+    SkColor background = SK_ColorWHITE;
     if (m_view) {
         viewport = m_view->pinchViewport();
         auto* frameView = m_view->mainFrameView();
         if (auto* layer = frameView ? frameView->graphicsLayerForScrolledContents() : nullptr)
             scrollLayer = &downcast<GraphicsLayerCoordinated>(*layer).coordinatedPlatformLayer();
+        if (frameView)
+            background = backgroundOf(*frameView);
     }
     Locker locker { m_scene->lock };
     m_scene->pendingViewport = viewport;
     m_scene->pendingScrollLayer = WTF::move(scrollLayer);
+    m_scene->pendingBackground = background;
     m_scene->pendingPinchCommit = m_pinchCommit;
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;

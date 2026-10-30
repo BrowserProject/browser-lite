@@ -11,6 +11,11 @@ AliExpress, IKEA, Swiss shops and services, news, Codepen, Excalidraw, Photopea,
 sites, GeoGebra, Desmos) load without a crash. Only here: `cookieStore` failed on every call
 (Airbnb, Notion's consent manager; implemented since #304), IKEA's report-only CSP reports its
 scripts (only console lines), Outlook's duplicate `let` (native Chromium got a 503 page instead).
+Cloudflare's challenge (Turnstile, on Moodle, Quora, Codepen from this host) passes, the
+checkbox comes after about 25 s instead of about 10 s in native Chromium (its first attempt fails
+inside the obfuscated script and repeats). Etsy, Coop, Reuters and AliExpress block this host's
+address in native Chromium too. codepen.io scrolled faster than the engine painted its animated
+background: the unpainted area showed white for seconds (now the page's background, #305).
 
 ## State 2026-10-29 (local)
 
