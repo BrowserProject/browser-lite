@@ -666,6 +666,7 @@ check(
   corsPartitions,
 );
 
+await freshTab();
 // Dedicated and shared worker of the cross-site frame: partition of the frame (top site
 // 127.0.0.1, worker site localhost), also after a cross-origin redirect
 for (const name of ['from the network', 'hit']) {
