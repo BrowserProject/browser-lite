@@ -268,9 +268,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   an engine worker loaded for about 60 s and then failed: the core's service worker waited in
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
   the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such
-  a worker (`[workers] engine worker did not load after ... ms`). Closing a tab within about a second of a change can lose
-  that change (#275); in Firefox also a reload (the engine cannot write while `pagehide` waits):
-  `storage-test` "reloaded right after writing" fails locally and in about 1 of 3 CI runs.
+  a worker (`[workers] engine worker did not load after ... ms`). Closing or reloading a tab right after a
+  change lost it in Firefox (#275, the engine cannot write while `pagehide` waits): commits now go
+  to a commit log at once (#302); localStorage still reaches SQLite only 1 s after a change.
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
   tests pass, of the demo suite 6; the failures come from the image (no WebGL, OPFS,
   `MediaRecorder`, fake camera, grantable permissions, `DeviceOrientationEvent` constructor, routes

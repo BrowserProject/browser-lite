@@ -163,6 +163,16 @@ private:
     uint64_t m_size { 0 };
 };
 
+// Committed frames of a WAL (committedFrames)
+struct WalFrames {
+    uint32_t pageSize { 0 };
+    uint32_t count { 0 }; // frames up to the last commit
+    uint32_t databasePages { 0 }; // pages of the database after this commit
+    // To go on from there (commit log): salt of the WAL and the chained checksum after frame count
+    uint8_t salt[8] { };
+    uint32_t sum[2] { 0, 0 };
+};
+
 struct Node {
     std::string path;
     Content content;
@@ -178,6 +188,11 @@ struct Family {
     bool dirty { false }; // changed since the last write
     // Do not rewrite a big database completely all the time (flushFamily)
     MonotonicTime nextWrite;
+    // Commit log (<name>-bllog): the committed WAL frames already in a record, the records not
+    // yet appended (drainLog, in order) and whether the file may exist
+    WalFrames loggedFrames;
+    std::vector<std::vector<uint8_t>> pendingLog;
+    bool logOnDisk { false };
     // Locks on the database (rollback journal)
     int sharedCount { 0 };
     bool reserved { false };
@@ -292,16 +307,11 @@ void walChecksum(bool bigEndian, const uint8_t* data, size_t length, uint32_t su
     }
 }
 
-struct WalFrames {
-    uint32_t pageSize { 0 };
-    uint32_t count { 0 }; // frames up to the last commit
-    uint32_t databasePages { 0 }; // pages of the database after this commit
-};
-
 // Like the recovery in SQLite (walIndexRecover in wal.c): frames with the salt
 // from the header and a chained checksum are valid, everything up to the last
-// frame with a commit is committed
-WalFrames committedFrames(const Content& wal)
+// frame with a commit is committed. With from (an earlier result for the same
+// WAL) only the frames after it are checked.
+WalFrames committedFrames(const Content& wal, const WalFrames& from = { })
 {
     uint8_t header[walHeaderSize];
     if (wal.read(header, sizeof(header), 0) < sizeof(header))
@@ -311,14 +321,23 @@ WalFrames committedFrames(const Content& wal)
     if ((magic & ~1u) != 0x377f0682 || get32(header + 4) != 3007000 || pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)))
         return { };
     bool bigEndian = magic & 1;
-    uint32_t sum[2] = { 0, 0 };
-    walChecksum(bigEndian, header, 24, sum);
-    if (sum[0] != get32(header + 24) || sum[1] != get32(header + 28))
-        return { };
-
     WalFrames result { pageSize };
+    memcpy(result.salt, header + 16, sizeof(result.salt));
+    uint32_t sum[2] = { 0, 0 };
+    uint64_t index = 0;
+    if (from.count && from.pageSize == pageSize && !memcmp(from.salt, result.salt, sizeof(result.salt))) {
+        result = from;
+        index = from.count;
+        memcpy(sum, from.sum, sizeof(sum));
+    } else {
+        walChecksum(bigEndian, header, 24, sum);
+        if (sum[0] != get32(header + 24) || sum[1] != get32(header + 28))
+            return { };
+        memcpy(result.sum, sum, sizeof(sum));
+    }
+
     uint64_t frameSize = walFrameHeaderSize + pageSize;
-    for (uint64_t index = 0; walHeaderSize + (index + 1) * frameSize <= wal.size(); ++index) {
+    for (; walHeaderSize + (index + 1) * frameSize <= wal.size(); ++index) {
         uint64_t offset = walHeaderSize + index * frameSize;
         uint8_t frame[walFrameHeaderSize];
         wal.read(frame, sizeof(frame), offset);
@@ -333,6 +352,7 @@ WalFrames committedFrames(const Content& wal)
         if (uint32_t pages = get32(frame + 4)) {
             result.count = index + 1;
             result.databasePages = pages;
+            memcpy(result.sum, sum, sizeof(sum));
         }
     }
     return result;
@@ -366,6 +386,146 @@ void writeDatabase(FileReplacement& file, const Content& database, const Content
     file.truncate(size);
 }
 
+// ---------------------------------------------------------------- Commit log
+
+// The whole database goes to disk only some time after a change (flushDelay): a tab closed or
+// reloaded meanwhile lost the change, in Firefox also because the engine cannot write while the
+// page goes away. So every commit appends its new WAL frames as a record to <database>-bllog right
+// away (on the committing thread); opening the database applies the valid records, the next full
+// write deletes the file. Record: "BLL1", page size, frame count, pages of the database after the
+// commit (all uint32 little endian), the frames (page number, page), then FNV-1a 64 of all before.
+constexpr char logSuffix[] = "-bllog";
+constexpr uint8_t logMagic[4] = { 'B', 'L', 'L', '1' };
+constexpr size_t logHeaderSize = 16;
+
+std::string logPath(const std::string& database)
+{
+    return database + logSuffix;
+}
+
+uint64_t fnv1a(std::span<const uint8_t> data)
+{
+    uint64_t hash = 0xcbf29ce484222325ull;
+    for (uint8_t byte : data)
+        hash = (hash ^ byte) * 0x100000001b3ull;
+    return hash;
+}
+
+void put32le(uint8_t* target, uint32_t value)
+{
+    memcpy(target, &value, 4);
+}
+
+uint32_t get32le(const uint8_t* data)
+{
+    uint32_t value;
+    memcpy(&value, data, 4);
+    return value;
+}
+
+// Under the lock of the family, when a connection ends its write transaction (releases the WAL
+// write lock): the frames committed since the last record become a record for drainLog
+void captureCommit(Family& family)
+{
+    Node* wal = nullptr;
+    for (auto& node : family.nodes) {
+        if (endsWith(node->path, "-wal") && node->exists)
+            wal = node.get();
+    }
+    if (!wal)
+        return;
+    auto frames = committedFrames(wal->content, family.loggedFrames);
+    bool sameWal = family.loggedFrames.count && frames.pageSize == family.loggedFrames.pageSize
+        && !memcmp(frames.salt, family.loggedFrames.salt, sizeof(frames.salt));
+    uint32_t first = sameWal ? family.loggedFrames.count : 0;
+    if (frames.count <= first)
+        return;
+    family.loggedFrames = frames;
+    uint64_t frameSize = walFrameHeaderSize + frames.pageSize;
+    uint32_t count = frames.count - first;
+    std::vector<uint8_t> record(logHeaderSize + static_cast<size_t>(count) * (4 + frames.pageSize) + 8);
+    memcpy(record.data(), logMagic, 4);
+    put32le(record.data() + 4, frames.pageSize);
+    put32le(record.data() + 8, count);
+    put32le(record.data() + 12, frames.databasePages);
+    uint8_t* target = record.data() + logHeaderSize;
+    for (uint32_t index = first; index < frames.count; ++index) {
+        uint64_t frame = walHeaderSize + index * frameSize;
+        uint8_t header[walFrameHeaderSize];
+        wal->content.read(header, sizeof(header), frame);
+        put32le(target, get32(header));
+        wal->content.read(target + 4, frames.pageSize, frame + walFrameHeaderSize);
+        target += 4 + frames.pageSize;
+    }
+    uint64_t hash = fnv1a({ record.data(), record.size() - 8 });
+    memcpy(target, &hash, 8);
+    family.pendingLog.push_back(WTF::move(record));
+}
+
+// Without the lock of the family: appends its waiting records in the order of the commits. If
+// that fails, the full write later still has them (the family stays dirty)
+void drainLog(Family& family)
+{
+    std::lock_guard ioLock(ioMutex);
+    std::vector<std::vector<uint8_t>> records;
+    {
+        std::lock_guard lock(family.mutex);
+        records = std::exchange(family.pendingLog, { });
+        if (records.empty())
+            return;
+        family.logOnDisk = true;
+    }
+    int fd = open(logPath(family.name).c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (fd < 0)
+        return;
+    for (auto& record : records) {
+        size_t written = 0;
+        while (written < record.size()) {
+            ssize_t result = ::write(fd, record.data() + written, record.size() - written);
+            if (result <= 0)
+                break;
+            written += result;
+        }
+        if (written < record.size())
+            break;
+    }
+    close(fd);
+}
+
+// The valid records of a log on top of the database content, in order. Stops at the first broken
+// one (a write that was cut off). false: no memory
+bool applyLog(Content& database, std::span<const uint8_t> log, bool& applied)
+{
+    applied = false;
+    size_t offset = 0;
+    while (offset + logHeaderSize + 8 <= log.size()) {
+        const uint8_t* header = log.data() + offset;
+        uint32_t pageSize = get32le(header + 4);
+        uint32_t count = get32le(header + 8);
+        uint32_t pages = get32le(header + 12);
+        if (memcmp(header, logMagic, 4) || pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)))
+            break;
+        uint64_t size = logHeaderSize + static_cast<uint64_t>(count) * (4 + pageSize) + 8;
+        if (offset + size > log.size())
+            break;
+        uint64_t hash;
+        memcpy(&hash, header + size - 8, 8);
+        if (fnv1a({ header, static_cast<size_t>(size - 8) }) != hash)
+            break;
+        const uint8_t* frame = header + logHeaderSize;
+        for (uint32_t index = 0; index < count; ++index, frame += 4 + pageSize) {
+            uint32_t page = get32le(frame);
+            if (page && page <= pages && !database.write(frame + 4, pageSize, static_cast<uint64_t>(page - 1) * pageSize))
+                return false;
+        }
+        if (!database.resize(static_cast<uint64_t>(pages) * pageSize))
+            return false;
+        applied = true;
+        offset += size;
+    }
+    return true;
+}
+
 // Under the lock of the family and ioMutex. The copy replaces the database in
 // one step
 bool writeFamily(Family& family)
@@ -385,9 +545,14 @@ bool writeFamily(Family& family)
         if (!file->ok())
             return false;
     }
-    if (file)
-        return file->commit(family.name.c_str());
-    return !unlink(family.name.c_str()) || errno == ENOENT;
+    bool written = file ? file->commit(family.name.c_str()) : !unlink(family.name.c_str()) || errno == ENOENT;
+    if (!written)
+        return false;
+    // The database now holds every commit of the log: records still waiting are done too
+    family.pendingLog.clear();
+    if (std::exchange(family.logOnDisk, false) || !file)
+        unlink(logPath(family.name).c_str());
+    return true;
 }
 
 enum class Flush : uint8_t { Scheduled, Now };
@@ -684,11 +849,22 @@ int memoryShmLock(sqlite3_file* file, int offset, int count, int flags)
     auto* memory = reinterpret_cast<MemoryFile*>(file);
     auto& family = *memory->family;
     uint16_t mask = (1 << (offset + count)) - (1 << offset);
-    std::lock_guard lock(family.mutex);
     if (flags & SQLITE_SHM_UNLOCK) {
-        releaseShmLocks(*memory, mask);
+        // The end of a write transaction (WAL_WRITE_LOCK, slot 0 in wal.c): log its commit, appended
+        // without the lock of the family (file accesses need ioMutex first)
+        bool endsWrite;
+        {
+            std::lock_guard lock(family.mutex);
+            endsWrite = mask & memory->shmExclusiveMask & 1;
+            releaseShmLocks(*memory, mask);
+            if (endsWrite)
+                captureCommit(family);
+        }
+        if (endsWrite)
+            drainLog(family);
         return SQLITE_OK;
     }
+    std::lock_guard lock(family.mutex);
     if (flags & SQLITE_SHM_SHARED) {
         if (memory->shmSharedMask & mask)
             return SQLITE_OK;
@@ -813,12 +989,24 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
             release();
             return SQLITE_IOERR;
         }
+        // Commits after the last full write (commit log)
+        std::vector<uint8_t> log;
+        auto logResult = readWholeFile(logPath(path).c_str(), log);
+        bool fromLog = false;
+        if (logResult == ReadResult::Failed || (logResult == ReadResult::Done && !applyLog(content, log, fromLog))) {
+            release();
+            return SQLITE_IOERR;
+        }
         std::lock_guard lock(family->mutex);
         auto* node = family->find(path);
         if (!node->loaded) {
             node->content = WTF::move(content);
-            node->exists = result == ReadResult::Done;
+            node->exists = result == ReadResult::Done || fromLog;
             node->loaded = true;
+            family->logOnDisk = logResult == ReadResult::Done;
+            // The next full write takes the records into the database and deletes the log
+            if (family->logOnDisk)
+                markDirty(*family);
         }
     }
 
@@ -872,6 +1060,9 @@ int memoryDelete(sqlite3_vfs*, const char* name, int syncDirectory)
             return SQLITE_OK;
         }
     }
+    // Its commit log would bring the database back
+    if (path == familyName(path))
+        unlink(logPath(path).c_str());
     int result = baseVFS->xDelete(baseVFS, name, syncDirectory);
     return result == SQLITE_IOERR_DELETE_NOENT ? SQLITE_OK : result;
 }
@@ -894,7 +1085,11 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
         *result = 0;
         return SQLITE_OK;
     }
-    return baseVFS->xAccess(baseVFS, name, flags, result);
+    int status = baseVFS->xAccess(baseVFS, name, flags, result);
+    // Created and committed, but not yet fully written: only in its commit log
+    if (status == SQLITE_OK && !*result && flags == SQLITE_ACCESS_EXISTS)
+        *result = !access(logPath(path).c_str(), F_OK);
+    return status;
 }
 
 int memoryFullPathname(sqlite3_vfs*, const char* name, int size, char* out)

@@ -24,7 +24,8 @@ export class Results extends Map {
       const match = this.pattern.exec(text);
       if (match) this.set(match[1], match[2]);
     });
-    watchErrors(page);
+    // Before an intended crash (watchErrors)
+    this.unwatchErrors = watchErrors(page);
     return this;
   }
 

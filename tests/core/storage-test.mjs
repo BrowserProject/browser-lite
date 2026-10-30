@@ -16,6 +16,7 @@ import {
   startStack,
   timeLimit,
   waitFor,
+  watchErrors,
 } from '../lib/index.mjs';
 
 timeLimit(4 * TIMEOUT + 120000);
@@ -220,6 +221,17 @@ const QUICK_PAGE = `<!doctype html><title>Quick</title><script>
     get.onerror = () => resolve('error');
   });
   console.log('RESULT quick=' + value + ',' + ((document.cookie.match(/bl_quick=(\\w+)/) || [])[1] || 'empty'));
+  // ?put=<value>: overwrites the value
+  const put = new URLSearchParams(location.search).get('put');
+  if (put) {
+    await new Promise((resolve) => {
+      const tx = db.transaction('w', 'readwrite');
+      tx.objectStore('w').put(put, 'x');
+      tx.oncomplete = tx.onerror = resolve;
+    });
+    console.log('RESULT quickput=' + put);
+    return;
+  }
   if (value !== 'empty')
     return;
   document.cookie = 'bl_quick=cookie; Path=/; Max-Age=86400';
@@ -524,6 +536,23 @@ await fresh.reload();
 check(
   'reloaded right after writing: IndexedDB and cookie there',
   (await result('quick')) === 'value,cookie',
+  results.get('quick'),
+);
+
+// A commit survives an engine that ends right after it, before the full write of the database:
+// the commit log (#302)
+results.clear();
+await fresh.goto(appURL(`${siteURL}quick?put=logged`));
+check('IndexedDB: written right before a crash', (await result('quickput')) === 'logged');
+results.unwatchErrors();
+await fresh.evaluate(() => window.blTest.crash('abort'));
+await fresh.waitForTimeout(500);
+results.unwatchErrors = watchErrors(fresh);
+results.clear();
+await fresh.goto(appURL(`${siteURL}quick`));
+check(
+  'IndexedDB: the commit is there after the crash (commit log)',
+  (await result('quick'))?.startsWith('logged,'),
   results.get('quick'),
 );
 
