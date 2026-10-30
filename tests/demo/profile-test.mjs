@@ -241,14 +241,19 @@ if (profile.cookies)
       JSON.stringify([{ domain: '127.0.0.1', count: 2, session: 1 }]),
     JSON.stringify(profile.cookies),
   );
-const localBig = await one.page
-  .evaluate(async (name) => {
-    const dir = await (
-      await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')
-    ).getDirectoryHandle('localstorage');
-    return (await (await dir.getFileHandle(name)).getFile()).size;
-  }, `${originB}.localstorage`)
-  .catch(() => 0);
+// The engine replaces the file by a rename while writing it: reading can fail for a moment
+let localBig = 0;
+await waitFor(async () => {
+  localBig = await one.page
+    .evaluate(async (name) => {
+      const dir = await (
+        await (await navigator.storage.getDirectory()).getDirectoryHandle('browserlite')
+      ).getDirectoryHandle('localstorage');
+      return (await (await dir.getFileHandle(name)).getFile()).size;
+    }, `${originB}.localstorage`)
+    .catch(() => 0);
+  return localBig > 256 * 1024;
+}, 10000);
 check(
   'server: large IndexedDB and large localStorage not in the profile, they stay on device 1',
   databases(profile, originA).length === 1 &&
