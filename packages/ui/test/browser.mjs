@@ -930,6 +930,25 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
       next.value = '2024-04-01';
       next.dispatchEvent(new Event('change'));
       out.chosen = await promise;
+      // An empty field: Safari's picker reports a change already when it opens (today), only the
+      // next one is the choice
+      promise = dateTimePicker({
+        view,
+        rect,
+        type: 'date',
+        value: '',
+        min: 0,
+        max: 0,
+        step: 0,
+        signal: new AbortController().signal,
+      });
+      const empty = document.querySelector('form.bl-picker-sheet input');
+      empty.value = '2024-05-06';
+      empty.dispatchEvent(new Event('change'));
+      out.openAfterOpeningChange = !!document.querySelector('form.bl-picker-sheet');
+      empty.value = '2024-05-15';
+      empty.dispatchEvent(new Event('change'));
+      out.chosenFromEmpty = await promise;
       return out;
     } finally {
       for (const undo of restore) undo();
@@ -941,6 +960,8 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
     removed: true,
     stillOpen: true,
     chosen: '2024-04-01',
+    openAfterOpeningChange: true,
+    chosenFromEmpty: '2024-05-15',
   });
 });
 

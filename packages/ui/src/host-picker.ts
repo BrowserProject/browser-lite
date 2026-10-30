@@ -34,9 +34,10 @@ function pickerNeedsTap(doc: Document): boolean {
  * page, opened with showPicker(). Where pickers open only on a tap (pickerNeedsTap) the input is
  * visible in a small sheet below the field (`.bl-picker-sheet` with the input and
  * `button[data-bl-answer=cancel]`), the tap on it opens the picker. Every input event previews
- * the value in the page. Resolves its value (read from the input) on change or when the user
- * clicks elsewhere, null when aborted or cancelled. A new picker in the same document finishes
- * the open one.
+ * the value in the page. Resolves its value (read from the input) on change (in the sheet not on
+ * the change Safari reports when its picker opens on an empty field) or when the user clicks
+ * elsewhere, null when aborted or cancelled. A new
+ * picker in the same document finishes the open one.
  */
 function openHostPicker(
   ui: UiContext,
@@ -88,6 +89,7 @@ function openHostPicker(
     const finish = (result: string | null) => {
       if (openPickers.get(doc) !== done) return;
       openPickers.delete(doc);
+      clearTimeout(blurTimer);
       stopListening();
       request.signal.removeEventListener('abort', onAbort);
       (sheet ?? input).remove();
@@ -96,9 +98,31 @@ function openHostPicker(
     const done = () => finish(read(input) || null);
     const onAbort = () => finish(null);
     openPickers.set(doc, done);
+    const preview = () => request.preview?.(read(input));
+    // In the sheet Safari reports a change already when its picker opens on an empty field (it
+    // puts today there): that one only previews, the next change is the choice. "Done" without
+    // another choice keeps the focus in the input, a tap elsewhere then takes today. Losing the
+    // focus also finishes; a tap on Cancel right after still wins
+    let openingChange = !!sheet && !value;
+    let blurTimer: ReturnType<typeof setTimeout> | undefined;
     const stopListening = listen([
-      [input, 'input', () => request.preview?.(read(input))],
-      [input, 'change', done],
+      [input, 'input', preview],
+      [
+        input,
+        'change',
+        () => {
+          if (!openingChange) return done();
+          openingChange = false;
+          preview();
+        },
+      ],
+      [
+        input,
+        'blur',
+        () => {
+          if (sheet) blurTimer = setTimeout(done, 300);
+        },
+      ],
       [
         doc,
         'pointerdown',
