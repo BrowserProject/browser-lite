@@ -442,7 +442,7 @@ void CompositorScene::scheduleFrameLocked()
 
 // WebCore asks for the compositor context through PlatformDisplay::sharedDisplay().
 // There is no real EGL context (skiaGLContext() is always nullptr on PORT=Wasm),
-// the display only needs Emscripten's EGL replacement.
+// the display only needs Emscripten's EGL replacement, no WebGL.
 class PlatformDisplayWasm final : public PlatformDisplay {
 public:
     explicit PlatformDisplayWasm(Ref<GLDisplay>&& display)
@@ -468,6 +468,12 @@ static bool ensureSharedDisplay()
 bool LayerTreeHostWasm::isAvailable()
 {
     return Compositor::isRunning() && !Compositor::isLost() && ensureSharedDisplay();
+}
+
+void LayerTreeHostWasm::ensureDisplay()
+{
+    if (!ensureSharedDisplay())
+        log("No EGL display: pages with layers would end the engine");
 }
 
 // Like WPE (LayerTreeHost): the damage settings of the page

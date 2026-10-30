@@ -270,6 +270,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     auto& settings = m_page->settings();
     auto& config = engineConfig();
+    // Also without our compositor: in Firefox without WebGL some pages still got layers, whose
+    // tiles asked for the display and ended the engine (codepen.io, airbnb.com, soundcloud.com)
+    LayerTreeHostWasm::ensureDisplay();
     // Compositing with layers when the GPU works (BL_COMPOSITING=0 turns it off)
     if (config.compositing && LayerTreeHostWasm::isAvailable()) {
         // Damage tracking like WPE (LayerTreeHostWasm reads it). The damage stays
@@ -729,6 +732,8 @@ void WebView::attachRootGraphicsLayer(GraphicsLayer* layer)
 {
     if (m_layerTreeHost)
         m_layerTreeHost->setRootCompositingLayer(layer);
+    else if (layer && !std::exchange(m_layersWithoutCompositorLogged, true))
+        log("View %d: layers without the compositor (not shown)", m_id);
 }
 
 void WebView::attachViewOverlayGraphicsLayer(GraphicsLayer* layer)

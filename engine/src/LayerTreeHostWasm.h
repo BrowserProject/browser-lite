@@ -147,6 +147,9 @@ public:
 
     // Only with the compositor thread (Compositor.h)
     static bool isAvailable();
+    // The display WebCore asks for whenever a frame has layers, also when the view paints
+    // without them. Engine thread, before the first page
+    static void ensureDisplay();
 
     void setRootCompositingLayer(WebCore::GraphicsLayer*);
     void setViewOverlayRootLayer(WebCore::GraphicsLayer*);

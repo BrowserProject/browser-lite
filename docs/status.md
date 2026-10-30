@@ -305,6 +305,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   (#238): a stop at a place that cannot block fits a thread that reads a chunk of deferred code
   itself with a synchronous request that never ends; such reads taking over 1 s are now logged,
   and in workers the request gives up after 30 s and tries again.
+- Firefox without WebGL: some pages get layers although the view paints without them (#306, no
+  longer a crash; the engine logs "layers without the compositor"). Cause not found yet.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
