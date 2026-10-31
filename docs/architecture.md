@@ -272,4 +272,4 @@ that fails, the current size is the limit. From then on, or above 3 GB, it repor
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
 mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
-brought no measurable gain and was removed (#215).
+brought no measurable gain and was removed (#215). A JIT to WebAssembly is in work: [jit.md](jit.md).
