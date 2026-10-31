@@ -663,6 +663,8 @@ private:
     void storeCell(VirtualRegister reg, uint32_t payloadLocal) { storeTag(reg, cellTag, payloadLocal); }
     void storeDouble(VirtualRegister, uint32_t doubleLocal);
     void address(VirtualRegister);
+    // Offset of a register from the base
+    uint32_t slot(VirtualRegister) const;
     // Pushes whether the tag in the local is a number's (int32 or double)
     void isNumberTag(uint32_t tagLocal);
     // Pushes a number register as f64, its tag in the local
@@ -738,6 +740,9 @@ private:
     // Parameters: the frame and the block to start with
     static constexpr uint32_t cfr = 0;
     static constexpr uint32_t entry = 1;
+    // cfr minus m_baseBias, below every local
+    uint32_t m_base { 0 };
+    uint32_t m_baseBias { 0 };
     uint32_t m_block { 0 }, m_a { 0 }, m_b { 0 }, m_c { 0 }, m_d { 0 }, m_e { 0 }, m_t1 { 0 }, m_t2 { 0 }, m_next { 0 }, m_wide { 0 }, m_x { 0 }, m_y { 0 };
     // Basic blocks: bytecode offset of each start, and the block of an offset
     Vector<unsigned> m_starts;
@@ -749,11 +754,18 @@ private:
     uint32_t m_blockDepth { 0 };
 };
 
-void Compiler::address(VirtualRegister reg)
+// Registers are at negative offsets from the frame down to its locals: addressed from a base below
+// them, so every access is one load or store with the register's offset as its immediate
+void Compiler::address(VirtualRegister)
 {
-    m_body->localGet(cfr);
-    m_body->i32Const(reg.offset() * static_cast<int>(sizeof(Register)));
-    m_body->op(Op::I32Add);
+    m_body->localGet(m_base);
+}
+
+uint32_t Compiler::slot(VirtualRegister reg) const
+{
+    int offset = reg.offset() * static_cast<int>(sizeof(Register)) + static_cast<int>(m_baseBias);
+    RELEASE_ASSERT(offset >= 0);
+    return offset;
 }
 
 void Compiler::loadTag(VirtualRegister reg)
@@ -763,7 +775,7 @@ void Compiler::loadTag(VirtualRegister reg)
         return;
     }
     address(reg);
-    m_body->i32Load(TagOffset);
+    m_body->i32Load(slot(reg) + TagOffset);
 }
 
 void Compiler::loadPayload(VirtualRegister reg)
@@ -773,7 +785,7 @@ void Compiler::loadPayload(VirtualRegister reg)
         return;
     }
     address(reg);
-    m_body->i32Load(PayloadOffset);
+    m_body->i32Load(slot(reg) + PayloadOffset);
 }
 
 void Compiler::load(VirtualRegister reg, uint32_t tagLocal, uint32_t payloadLocal)
@@ -788,20 +800,20 @@ void Compiler::storeTagAndPayload(VirtualRegister reg, uint32_t tagLocal, uint32
 {
     address(reg);
     m_body->localGet(tagLocal);
-    m_body->i32Store(TagOffset);
+    m_body->i32Store(slot(reg) + TagOffset);
     address(reg);
     m_body->localGet(payloadLocal);
-    m_body->i32Store(PayloadOffset);
+    m_body->i32Store(slot(reg) + PayloadOffset);
 }
 
 void Compiler::storeTag(VirtualRegister reg, int32_t tag, uint32_t payloadLocal)
 {
     address(reg);
     m_body->i32Const(tag);
-    m_body->i32Store(TagOffset);
+    m_body->i32Store(slot(reg) + TagOffset);
     address(reg);
     m_body->localGet(payloadLocal);
-    m_body->i32Store(PayloadOffset);
+    m_body->i32Store(slot(reg) + PayloadOffset);
 }
 
 // A double in the register's 8 bytes, as the interpreter stores them (not made int32)
@@ -809,7 +821,7 @@ void Compiler::storeDouble(VirtualRegister reg, uint32_t doubleLocal)
 {
     address(reg);
     m_body->localGet(doubleLocal);
-    m_body->f64Store(0);
+    m_body->f64Store(slot(reg));
 }
 
 void Compiler::isNumberTag(uint32_t tagLocal)
@@ -833,7 +845,7 @@ void Compiler::loadNumber(VirtualRegister reg, uint32_t tagLocal)
     loadPayload(reg);
     m_body->op(Op::F64ConvertI32S);
     address(reg);
-    m_body->f64Load(0);
+    m_body->f64Load(slot(reg));
     m_body->localGet(tagLocal);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
@@ -2963,6 +2975,12 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_x = m_body->addLocal(ValueType::F64);
     m_y = m_body->addLocal(ValueType::F64);
 
+    m_base = m_body->addLocal(ValueType::I32);
+    m_baseBias = (m_codeBlock->numCalleeLocals() + 16) * sizeof(Register);
+    m_body->localGet(cfr);
+    m_body->i32Const(m_baseBias);
+    m_body->op(Op::I32Sub);
+    m_body->localSet(m_base);
     m_body->localGet(entry);
     m_body->localSet(m_block);
     // loop { block * n { br_table } code 0 } code 1 ... } code n - 1 }
