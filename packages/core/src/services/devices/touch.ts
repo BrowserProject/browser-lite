@@ -1,7 +1,7 @@
 import { modifierBits } from '../../input.js';
 import type { ViewImpl } from '../../view.js';
 import type { ServiceContext } from '../service.js';
-import { VelocityTracker } from './fling.js';
+import { engineFlingVelocity, VelocityTracker } from './fling.js';
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
@@ -237,7 +237,8 @@ function attachTouch(
     // (at the nearest snap point)
     const fling = !cancelled && !g.consumed && g.scrolled;
     const finger = fling ? g.velocity.release(e.timeStamp, x, y) : { x: 0, y: 0 };
-    touchScroll(g, 3, g.panX ? -finger.x * 1000 : 0, g.panY ? -finger.y * 1000 : 0);
+    const page = engineFlingVelocity({ x: g.panX ? -finger.x : 0, y: g.panY ? -finger.y : 0 });
+    touchScroll(g, 3, page.x, page.y);
   };
   canvas.addEventListener('pointerup', (e) => end(e, false), options);
   canvas.addEventListener('pointercancel', (e) => end(e, true), options);

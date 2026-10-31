@@ -37,3 +37,21 @@ export class VelocityTracker {
     return { x: vx * scale, y: vy * scale };
   }
 }
+
+/** WebCore's fling (ScrollAnimationKinetic) travels the velocity (px/s) divided by this. */
+const ENGINE_FRICTION = 4;
+/** Android's fling curve (OverScroller), which Chrome on Android uses: its friction in px. */
+const ANDROID_FRICTION = 0.015 * 9.80665 * 39.37 * 160 * 0.84;
+const ANDROID_EXPONENT = Math.log(0.78) / Math.log(0.9) / (Math.log(0.78) / Math.log(0.9) - 1);
+
+/**
+ * The velocity (px/s) to give the engine for a fling of the finger at `velocity` px/ms, so it
+ * travels as far as in Chrome on Android: there fast flings go further than in proportion.
+ */
+export function engineFlingVelocity(velocity: { x: number; y: number }): { x: number; y: number } {
+  const speed = Math.hypot(velocity.x, velocity.y) * 1000;
+  if (!speed) return { x: 0, y: 0 };
+  const distance = ANDROID_FRICTION * ((0.35 * speed) / ANDROID_FRICTION) ** ANDROID_EXPONENT;
+  const scale = (distance * ENGINE_FRICTION) / speed;
+  return { x: velocity.x * 1000 * scale, y: velocity.y * 1000 * scale };
+}

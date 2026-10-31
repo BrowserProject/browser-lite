@@ -1,7 +1,7 @@
 // Velocity of the finger for the fling after a swipe.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { VelocityTracker } from '../dist/services/devices/fling.js';
+import { engineFlingVelocity, VelocityTracker } from '../dist/services/devices/fling.js';
 
 test('fling: steady swipe, the velocity of the finger', () => {
   const tracker = new VelocityTracker();
@@ -33,4 +33,16 @@ test('fling: at most 8 px/ms', () => {
   tracker.add(0, 0, 0);
   const v = tracker.release(10, 0, 1000);
   assert.ok(Math.abs(v.y - 8) < 1e-9, String(v.y));
+});
+
+test('fling: as far as in Chrome on Android, fast flings further than in proportion', () => {
+  // The engine travels velocity / 4
+  const distance = (v) => Math.hypot(v.x, v.y) / 4;
+  const slow = distance(engineFlingVelocity({ x: 0, y: 2 }));
+  const fast = distance(engineFlingVelocity({ x: 0, y: 5 }));
+  assert.ok(slow > 600 && slow < 700, String(slow));
+  assert.ok(fast > 3000 && fast < 3300, String(fast));
+  const v = engineFlingVelocity({ x: 3, y: -4 });
+  assert.ok(v.x > 0 && v.y < 0 && Math.abs(v.x / v.y + 0.75) < 1e-9, JSON.stringify(v));
+  assert.deepEqual(engineFlingVelocity({ x: 0, y: 0 }), { x: 0, y: 0 });
 });
