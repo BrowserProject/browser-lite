@@ -60,6 +60,10 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   const tap = document.getElementById('tap');
   tap.addEventListener('touchstart', (e) => result('touchstart', e.touches.length));
   tap.addEventListener('click', () => result('tapclick', 1));
+  // A tap: pointer events of the touch, then only the compatibility mouse events
+  const tapPointers = [];
+  tap.addEventListener('pointerdown', (e) => tapPointers.push(e.pointerType));
+  tap.addEventListener('click', (e) => result('tappointers', tapPointers.join('+') + '/' + e.pointerType));
   // Like Google's search field: the touch makes the page put something over the tapped place
   // right afterwards (timer). The click of the tap must still go to the tapped element
   tap.addEventListener('touchend', () => setTimeout(() => {
@@ -409,6 +413,12 @@ check('select with the mouse', selection && selection.length > 10, JSON.stringif
 // 2) Tap: touch events go to the page, a click follows
 await page.touchscreen.tap(...(await at(100, 130)));
 check('touch event (touchstart)', (await result('touchstart', 10000)) === '1');
+const tapPointers = await result('tappointers', 10000);
+check(
+  'tap: one pointerdown, of the touch (pointerdowns/click type)',
+  String(tapPointers).startsWith('touch/'),
+  String(tapPointers),
+);
 check(
   'tap becomes a click on the tapped element, before the page reacts to the touch',
   (await result('tapclick', 10000)) === '1',

@@ -1021,15 +1021,15 @@ namespace {
 // movementX/Y come from the host (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
-    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement)
-        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven)
+    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, SyntheticClickType clickType)
+        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, clickType, MouseEventInputSource::UserDriven)
     {
         m_movementDelta = movement;
     }
 };
 }
 
-void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY)
+void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY, bool tap)
 {
     RefPtr frame = mainFrame();
     if (!frame)
@@ -1057,7 +1057,7 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
 
     DoublePoint position { x, y };
-    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY } };
+    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tap ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap };
 
     auto& handler = frame->eventHandler();
     switch (eventType) {
@@ -1126,7 +1126,7 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
     m_page->dragController().dragEnded();
     if (session.fromPage) {
         // dragend to the source, with the result (dropEffect)
-        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
+        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { }, SyntheticClickType::NoTap };
         frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
     }
 }
@@ -1391,9 +1391,9 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, flag(consumed),
         ",\"pinch\":"_s, flag(allowed.pinchZoom), ",\"panX\":"_s, flag(allowed.panX), ",\"panY\":"_s, flag(allowed.panY), '}'));
     if (tap && type == 2 && released && !consumed && !std::exchange(m_touchStartConsumed, false)) {
-        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers);
-        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers);
-        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers);
+        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers, 0, 0, true);
+        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers, 0, 0, true);
+        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers, 0, 0, true);
         showPickerOfTappedField(*frame);
     }
 #else
