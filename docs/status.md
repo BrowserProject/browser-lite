@@ -312,7 +312,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   `CoordinatedPlatformLayer::flushCompositingState` (in engine.wasm, no chunk to load, the step is
   inlined there). Nothing of ours can wait there. In Chromium `devices-test` now records a CPU
   profile of all threads when the engine logs the stall (`build/e2e-devices-stall.trace.json` in
-  the artifact `e2e-core-screenshots-chromium`).
+  the artifact `e2e-core-screenshots-chromium`). Not seen in the 6 CI runs since the new touch
+  fling and touch scrolling (#313, #314), which changed the scrolling it always followed.
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
