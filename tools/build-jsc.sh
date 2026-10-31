@@ -35,6 +35,7 @@ fi
 bl_log "Configuring JSC ($out)"
 bl_webkit_configure "$out" \
     -DPORT=JSCOnly \
+    -DBROWSER_LITE_ENGINE_DIR="$BL_ROOT/engine" \
     -DJSC_SHELL_LINK_OPTIONS="$link_flags" \
     -DENABLE_STATIC_JSC=ON \
     -DENABLE_JIT=OFF \

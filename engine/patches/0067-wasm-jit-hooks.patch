@@ -1,0 +1,91 @@
+diff --git a/Source/JavaScriptCore/CMakeLists.txt b/Source/JavaScriptCore/CMakeLists.txt
+index 86aa580a26..e90fe025b4 100644
+--- a/Source/JavaScriptCore/CMakeLists.txt
++++ b/Source/JavaScriptCore/CMakeLists.txt
+@@ -1784,6 +1784,11 @@ endif ()
+ 
+ WEBKIT_FRAMEWORK_DECLARE(JavaScriptCore)
+ WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS()
++
++# browser-lite: the JIT to WebAssembly (engine/jit/jit.cmake, docs/jit.md)
++if (BROWSER_LITE_ENGINE_DIR)
++    include("${BROWSER_LITE_ENGINE_DIR}/jit/jit.cmake")
++endif ()
+ WEBKIT_ADD_TARGET_UNSAFE_BUFFER_WARNINGS(JavaScriptCore)
+ 
+ if (COMPILER_IS_GCC_OR_CLANG)
+diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+index fbb54faa54..c239a1c9c6 100644
+--- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
++++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+@@ -62,6 +62,7 @@
+ #include "LLIntData.h"
+ #include "LLIntEntrypoint.h"
+ #include "LLIntExceptions.h"
++#include "LLIntWasmJIT.h"
+ #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
+ #include "LLIntThunks.h"
+ #include "MaxFrameExtentForSlowPathCall.h"
+@@ -535,6 +536,8 @@ LLINT_SLOW_PATH_DECL(replace)
+         codeBlock->dontJITAnytimeSoon();
+     LLINT_END_IMPL();
+ #else // ENABLE(JIT)
++    // browser-lite: the JIT to WebAssembly (docs/jit.md)
++    wasmJITTierUp(vm, codeBlock);
+     codeBlock->dontJITAnytimeSoon();
+     LLINT_END_IMPL();
+ #endif // ENABLE(JIT)
+diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+new file mode 100644
+index 0000000000..acf399d874
+--- /dev/null
++++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+@@ -0,0 +1,25 @@
++/*
++ * browser-lite: the JIT to WebAssembly (engine/jit of browser-lite, docs/jit.md). JavaScriptCore
++ * runs the C loop; these hooks let hot CodeBlocks run as compiled WebAssembly instead.
++ */
++#pragma once
++
++#include "Instruction.h"
++
++namespace JSC {
++
++class CallFrame;
++class CodeBlock;
++class VM;
++
++namespace LLInt {
++
++// At op_enter (slow_path_enter): runs the compiled code of the CodeBlock, if any. Returns the
++// instruction to go on with (an op_ret, or the exception instructions), nullptr to interpret.
++const JSInstruction* wasmJITEnter(CallFrame*, CodeBlock*);
++
++// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can.
++void wasmJITTierUp(VM&, CodeBlock*);
++
++} // namespace LLInt
++} // namespace JSC
+diff --git a/Source/JavaScriptCore/runtime/CommonSlowPaths.cpp b/Source/JavaScriptCore/runtime/CommonSlowPaths.cpp
+index 83a7cb7be6..84f2ffae85 100644
+--- a/Source/JavaScriptCore/runtime/CommonSlowPaths.cpp
++++ b/Source/JavaScriptCore/runtime/CommonSlowPaths.cpp
+@@ -60,6 +60,7 @@
+ #include "LLIntExceptions.h"
+ #include "MathCommon.h"
+ #include "ObjectConstructor.h"
++#include "LLIntWasmJIT.h"
+ #include "ScopedArguments.h"
+ #include "TypeProfilerLog.h"
+ #include "runtime/Error.h"
+@@ -1227,6 +1228,10 @@ JSC_DEFINE_COMMON_SLOW_PATH(slow_path_enter)
+     GET(codeBlock->scopeRegister()) = uncheckedDowncast<JSCallee>(callFrame->jsCallee())->scope();
+     if (codeBlock->couldBeTainted()) [[unlikely]]
+         vm.setMightBeExecutingTaintedCode();
++    // browser-lite: compiled code (docs/jit.md). The C loop steps over op_enter after this, so
++    // the next instruction is handed back that much earlier
++    if (auto* next = LLInt::wasmJITEnter(callFrame, codeBlock))
++        RETURN_TWO(reinterpret_cast<const JSInstruction*>(reinterpret_cast<const uint8_t*>(next) - pc->size()), callFrame);
+     END();
+ }
+ 
