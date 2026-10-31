@@ -29,9 +29,11 @@ never baked into the code (the GC resets inline caches).
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
-- **Calls**: to a compiled function directly in the frame the bytecode prepared, to a host
-  function like the interpreter, else JSC's generic call or construct; varargs (`apply`,
-  spread) through JSC's generic call. Tail calls are ordinary calls.
+- **Calls**: to a compiled function directly in the frame the bytecode prepared (moved down for
+  missing arguments, like the interpreter's arity fixup), found through a cache per call site
+  (the callee's executable, valid until the next GC); to a host function like the interpreter;
+  else JSC's generic call or construct. Varargs (`apply`, spread) go through JSC's generic call,
+  tail calls are ordinary calls.
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.
@@ -44,8 +46,9 @@ never baked into the code (the GC resets inline caches).
 In the `jsc` shell (node), interpreter against compiled: an int32 loop 352 against 28 ms, with
 `%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 261 against 89 ms.
 Octane scores (higher is better): Richards 275 against 659, DeltaBlue 263 against 581, Crypto
-312 against 1308, RayTrace 713 against 993, NavierStokes 422 against 1943. What is left is mostly
-calls through C++ (the frame set up per call, generic calls of functions not compiled).
+312 against 1308, RayTrace 713 against 993, NavierStokes 422 against 1943. The TypeScript compiler
+(transpiling 176 KB) gains only about 10 %: its many small calls cost about as much through C++
+as in the interpreter, and V8 runs the many small modules in its baseline tier at first.
 
 ## Phases
 

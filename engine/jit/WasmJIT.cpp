@@ -32,6 +32,7 @@
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
 #include "SlowPathCall.h"
+#include "StackAlignment.h"
 #include "StructureChain.h"
 #include "VMTraps.h"
 #include "Watchpoint.h"
@@ -67,11 +68,28 @@ bool enabled()
 
 using OffsetMap = HashMap<unsigned, unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
 
-// A CodeBlock the compiler saw: the table index of its function (0 when it cannot be compiled)
-// and, by bytecode offset, the blocks that start after its loop hints
+// A call site's last compiled callee by its executable, and what its frame needs, so a call
+// neither looks up the map nor reads the executable and its CodeBlock. Valid until the next GC
+// (which may throw the code away).
+struct CallCache {
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(CallCache);
+    ExecutableBase* executable { nullptr };
+    HeapVersion markingVersion { 0 };
+    HeapVersion edenVersion { 0 };
+    CodeBlock* codeBlock { nullptr };
+    uint32_t function { 0 };
+    unsigned numParameters { 0 };
+    unsigned numCalleeLocals { 0 };
+    unsigned numVars { 0 };
+    VirtualRegister scopeRegister;
+};
+
+// A CodeBlock the compiler saw: the table index of its function (0 when it cannot be compiled),
+// by bytecode offset the blocks that start after its loop hints, the caches of its calls
 struct Compiled {
     uint32_t function { 0 };
     OffsetMap loops;
+    Vector<std::unique_ptr<CallCache>> callCaches;
 };
 
 // CodeBlocks of this thread's VM. Tables are per thread, so are the indexes.
@@ -162,7 +180,7 @@ int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
 // calls it, everything else through JSC's generic call or construct (bound functions, proxies,
 // interpreted functions, arity fixup, stack overflow). A tail call is an ordinary call here.
 template<typename Bytecode>
-UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
 {
     constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
     auto bytecode = pc->as<Bytecode>();
@@ -191,27 +209,50 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
         calleeFrame->setArgumentCountIncludingThis(argumentCount);
     };
 
-    if (auto* function = dynamicDowncast<JSFunction>(callee); function && !function->isHostFunction() && depth < maximumDepth && vm.isSafeToRecurseSoft()) {
-        auto* calleeCodeBlock = function->jsExecutable()->codeBlockFor(isConstruct ? CodeSpecializationKind::CodeForConstruct : CodeSpecializationKind::CodeForCall);
-        uint32_t compiled = calleeCodeBlock ? compiledFunction(calleeCodeBlock) : 0;
-        auto* top = compiled ? reinterpret_cast<Register*>(calleeFrame) - calleeCodeBlock->numCalleeLocals() : nullptr;
-        if (compiled && argumentCount >= calleeCodeBlock->numParameters() && vm.cloopStack().ensureCapacityFor(top)) {
-            setUpFrame(calleeCodeBlock);
-            // What op_enter and slow_path_enter do
-            for (int local = CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters(); local < calleeCodeBlock->numVars(); ++local)
-                calleeFrame->uncheckedR(virtualRegisterForLocal(local)) = jsUndefined();
-            vm.writeBarrier(calleeCodeBlock);
-            calleeFrame->uncheckedR(calleeCodeBlock->scopeRegister()) = function->scope();
-            if (calleeCodeBlock->couldBeTainted()) [[unlikely]]
-                vm.setMightBeExecutingTaintedCode();
-            auto* previous = vm.cloopStack().currentStackPointer();
-            vm.cloopStack().setCurrentStackPointer(top);
-            auto status = runCompiled(compiled, calleeFrame, 0);
-            vm.cloopStack().setCurrentStackPointer(previous);
-            vm.topCallFrame = callFrame;
-            if (status)
-                return encodeResult(exceptionInstructions(), callFrame);
-            return finish(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue());
+    if (callee.isCell() && callee.asCell()->type() == JSFunctionType && depth < maximumDepth && vm.isSafeToRecurseSoft()) {
+        auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
+        auto* executable = function->executable();
+        auto& space = vm.heap.objectSpace();
+        if (cache->executable != executable || cache->markingVersion != space.markingVersion() || cache->edenVersion != space.edenVersion()) {
+            cache->executable = nullptr;
+            CodeBlock* calleeCodeBlock = function->isHostFunction() ? nullptr : function->jsExecutable()->codeBlockFor(isConstruct ? CodeSpecializationKind::CodeForConstruct : CodeSpecializationKind::CodeForCall);
+            uint32_t compiled = calleeCodeBlock && !calleeCodeBlock->couldBeTainted() ? compiledFunction(calleeCodeBlock) : 0;
+            if (compiled) {
+                *cache = { executable, space.markingVersion(), space.edenVersion(), calleeCodeBlock, compiled,
+                    calleeCodeBlock->numParameters(), calleeCodeBlock->numCalleeLocals(), calleeCodeBlock->numVars(), calleeCodeBlock->scopeRegister() };
+            }
+        }
+        if (cache->executable == executable) {
+            // Too few arguments: like the interpreter's arity fixup, the frame moves down (by a
+            // multiple of the stack alignment) and the missing parameters are undefined
+            unsigned padding = argumentCount < cache->numParameters ? WTF::roundUpToMultipleOf(stackAlignmentRegisters(), cache->numParameters - argumentCount) : 0;
+            auto* shiftedFrame = calleeFrame - padding;
+            auto* top = reinterpret_cast<Register*>(shiftedFrame) - cache->numCalleeLocals;
+            if (vm.cloopStack().ensureCapacityFor(top)) {
+                if (padding) {
+                    auto* from = reinterpret_cast<Register*>(calleeFrame);
+                    auto* to = reinterpret_cast<Register*>(shiftedFrame);
+                    for (unsigned i = 0; i < CallFrame::headerSizeInRegisters + argumentCount; ++i)
+                        to[i] = from[i];
+                    for (unsigned i = argumentCount; i < cache->numParameters; ++i)
+                        shiftedFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(i)) = jsUndefined();
+                    calleeFrame = shiftedFrame;
+                }
+                setUpFrame(cache->codeBlock);
+                // What op_enter and slow_path_enter do
+                for (int local = CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters(); local < static_cast<int>(cache->numVars); ++local)
+                    calleeFrame->uncheckedR(virtualRegisterForLocal(local)) = jsUndefined();
+                vm.writeBarrier(cache->codeBlock);
+                calleeFrame->uncheckedR(cache->scopeRegister) = function->scope();
+                auto* previous = vm.cloopStack().currentStackPointer();
+                vm.cloopStack().setCurrentStackPointer(top);
+                auto status = runCompiled(cache->function, calleeFrame, 0);
+                vm.cloopStack().setCurrentStackPointer(previous);
+                vm.topCallFrame = callFrame;
+                if (status)
+                    return encodeResult(exceptionInstructions(), callFrame);
+                return finish(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue());
+            }
         }
     }
 
@@ -427,6 +468,7 @@ public:
     OpcodeID unsupported() const { return m_unsupported; }
     // Blocks after loop hints, by bytecode offset
     OffsetMap takeLoops() { return WTF::move(m_loops); }
+    Vector<std::unique_ptr<CallCache>> takeCallCaches() { return WTF::move(m_callCaches); }
 
 private:
     bool scan();
@@ -471,6 +513,10 @@ private:
     // pointer in m_next, and on an exception goes to the instruction's handler (a try around it)
     // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
+    // The same for a call (callFromCompiledCode), with a new cache of the call site
+    template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
+    // After a helper's call: its result into m_next, an exception to the handler or out
+    void checkException(const JSInstructionStream::Ref&);
     // Fast paths mark m_next when they did the instruction; the slow path does it otherwise
     void beginFastPaths();
     void fastPathDone();
@@ -519,6 +565,8 @@ private:
     uint32_t m_slowPathType { 0 };
     uint32_t m_barrierType { 0 };
     uint32_t m_checkType { 0 };
+    uint32_t m_callType { 0 };
+    Vector<std::unique_ptr<CallCache>> m_callCaches;
     // Parameters: the frame and the block to start with
     static constexpr uint32_t cfr = 0;
     static constexpr uint32_t entry = 1;
@@ -678,6 +726,23 @@ void Compiler::callSlowPath(SlowPath slowPath, const JSInstructionStream::Ref& i
     m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
     m_body->i32Const(reinterpret_cast<uintptr_t>(slowPath));
     m_body->callIndirect(m_slowPathType);
+    checkException(instruction);
+}
+
+template<typename Bytecode>
+void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
+{
+    m_callCaches.append(makeUnique<CallCache>());
+    m_body->localGet(cfr);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
+    m_body->i32Const(reinterpret_cast<uintptr_t>(m_callCaches.last().get()));
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
+    m_body->callIndirect(m_callType);
+    checkException(instruction);
+}
+
+void Compiler::checkException(const JSInstructionStream::Ref& instruction)
+{
     m_body->op(Op::I32WrapI64);
     m_body->localTee(m_next);
     m_body->i32Const(reinterpret_cast<uintptr_t>(exceptionInstructions()));
@@ -2461,11 +2526,11 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_LLINT)
 #undef BL_JIT_COMMON
 #undef BL_JIT_LLINT
-    case op_call: callSlowPath(callFromCompiledCode<OpCall>, instruction); return;
-    case op_call_ignore_result: callSlowPath(callFromCompiledCode<OpCallIgnoreResult>, instruction); return;
-    case op_tail_call: callSlowPath(callFromCompiledCode<OpTailCall>, instruction); return;
-    case op_construct: callSlowPath(callFromCompiledCode<OpConstruct>, instruction); return;
-    case op_super_construct: callSlowPath(callFromCompiledCode<OpSuperConstruct>, instruction); return;
+    case op_call: emitCall<OpCall>(instruction); return;
+    case op_call_ignore_result: emitCall<OpCallIgnoreResult>(instruction); return;
+    case op_tail_call: emitCall<OpTailCall>(instruction); return;
+    case op_construct: emitCall<OpConstruct>(instruction); return;
+    case op_super_construct: emitCall<OpSuperConstruct>(instruction); return;
     case op_call_varargs: callSlowPath(callVarargsFromCompiledCode<OpCallVarargs>, instruction); return;
     case op_tail_call_varargs: callSlowPath(callVarargsFromCompiledCode<OpTailCallVarargs>, instruction); return;
     case op_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpConstructVarargs>, instruction); return;
@@ -2621,6 +2686,8 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_slowPathType = m_module.addType(parameters, slowPathResult);
     m_barrierType = m_module.addType(parameters, std::span<const ValueType>());
     m_checkType = m_module.addType(parameters, status);
+    const ValueType callParameters[] = { ValueType::I32, ValueType::I32, ValueType::I32 };
+    m_callType = m_module.addType(callParameters, slowPathResult);
     m_body = &m_module.function(2);
     m_block = m_body->addLocal(ValueType::I32);
     m_a = m_body->addLocal(ValueType::I32);
@@ -2686,6 +2753,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
         if (bytes) {
             compiled.function = wasmJITInstall(bytes->data(), bytes->size(), level() >= 3);
             compiled.loops = compiler.takeLoops();
+            compiled.callCaches = compiler.takeCallCaches();
         }
         if (level() >= 2) {
             if (bytes)

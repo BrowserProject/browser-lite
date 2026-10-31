@@ -31,6 +31,8 @@ function pushTwice(list, v) { list.push(v); list.push(v); return list.length; }
 function add3(a, b, c) { return a + b + c; }
 function callBound(f) { return f(1); }
 function callShort() { return add3(1, 2); }
+function fourParameters(a, b, c, d) { return [a, b, c, d, arguments.length].join(); }
+function callFewer(x) { return fourParameters() + "|" + fourParameters(x) + "|" + fourParameters(x, x, x); }
 function countArguments() { return arguments.length; }
 function callArguments() { return countArguments(1, 2, 3); }
 function thrower(x) { if (x > 0) throw new RangeError("x"); return x; }
@@ -367,6 +369,7 @@ for (let round = 0; round < 300; round++) {
     check("push", pushTwice([], round), 2);
     check("bound", callBound(add3.bind(null, 10, 20)), 31);
     check("arity", callShort(), NaN);
+    check("arity shift", callFewer(round), ",,,,0|" + round + ",,,,1|" + round + "," + round + "," + round + ",,3");
     check("arguments", callArguments(), 3);
     check("callee returns", callThrower(0), 0);
     let calleeThrew = null;
