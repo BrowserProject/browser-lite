@@ -36,7 +36,7 @@ index d7aee01b62..857252ea09 100644
      if (cc.isEnabled) {
          RELEASE_ASSERT(cc.get(CrashChecker::This) == cc.hash(this),
 diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-index fbb54faa54..c239a1c9c6 100644
+index fbb54faa54..981a5799e2 100644
 --- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 +++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 @@ -62,6 +62,7 @@
@@ -47,7 +47,16 @@ index fbb54faa54..c239a1c9c6 100644
  #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
  #include "LLIntThunks.h"
  #include "MaxFrameExtentForSlowPathCall.h"
-@@ -535,6 +536,8 @@ LLINT_SLOW_PATH_DECL(replace)
+@@ -513,6 +514,8 @@ LLINT_SLOW_PATH_DECL(loop_osr)
+     LLINT_RETURN_TWO(jumpTarget, callFrame->topOfFrame());
+ #else // ENABLE(JIT)
+     UNUSED_PARAM(pc);
++    // browser-lite: the JIT to WebAssembly (docs/jit.md), for the next call of the function
++    wasmJITTierUp(vm, codeBlock);
+     codeBlock->dontJITAnytimeSoon();
+     LLINT_RETURN_TWO(0, 0);
+ #endif // ENABLE(JIT)
+@@ -535,6 +538,8 @@ LLINT_SLOW_PATH_DECL(replace)
          codeBlock->dontJITAnytimeSoon();
      LLINT_END_IMPL();
  #else // ENABLE(JIT)
