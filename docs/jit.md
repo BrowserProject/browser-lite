@@ -32,8 +32,8 @@ never baked into the code (the GC resets inline caches).
 - **Calls**: to a compiled function directly in the frame the bytecode prepared (moved down for
   missing arguments, like the interpreter's arity fixup), found through a cache per call site
   (the callee's executable, valid until the next GC); to a host function like the interpreter;
-  else JSC's generic call or construct. Varargs (`apply`, spread) go through JSC's generic call,
-  tail calls are ordinary calls.
+  else JSC's generic call or construct. Varargs (`apply`, spread) get a frame like the
+  interpreter's and then the same call, tail calls are ordinary calls.
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.

@@ -97,6 +97,7 @@ function character(c) { switch (c) { case "a": return 1; case "b": return 2; def
 function word(w) { switch (w) { case "hello": return 1; case "world": return 2; default: return 0; } }
 function sumArguments() { let s = 0; for (let i = 0; i < arguments.length; i++) s += arguments[i]; return s; }
 function applyAll(list) { return sumArguments.apply(null, list); }
+function collectN(a, b, c) { const junk = []; for (let i = 0; i < 1000; i++) junk.push({ i }); return a.n + b.n + c.n; }
 function spreadAll(list) { return sumArguments(...list); }
 function constructSpread(list) { return new Point(...list).x; }
 function tailSum(n, total) { "use strict"; if (n === 0) return total; return tailSum(n - 1, total + n); }
@@ -339,6 +340,11 @@ for (let round = 0; round < 300; round++) {
     check("switch string other", word("x"), 0);
     check("apply", applyAll([1, 2, 3]), 6);
     check("apply empty", applyAll(undefined), 0);
+    if (round % 100 === 99) {
+        // A GC while the arguments load: the frame below the caller holds the earlier ones
+        const holder = { length: 3, 0: { n: 1 }, get 1() { gc(); return { n: 2 }; }, 2: { n: 3 } };
+        check("apply with GC", collectN.apply(null, holder), 6);
+    }
     let applyThrew = null;
     try {
         applyAll(5);

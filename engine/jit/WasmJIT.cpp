@@ -23,6 +23,7 @@
 #include "FrameTracers.h"
 #include "IndexingType.h"
 #include "Interpreter.h"
+#include "InterpreterInlines.h"
 #include "JSCJSValueInlines.h"
 #include "JSFunction.h"
 #include "JSFunctionInlines.h"
@@ -192,33 +193,13 @@ int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
     return status;
 }
 
-// A call from compiled code (op_call, op_call_ignore_result, op_tail_call, op_construct,
-// op_super_construct), with the signature of a slow path. A compiled callee runs directly in the
-// frame the bytecode prepared (argv slots below callFrame), a host function like the interpreter
-// calls it, everything else through JSC's generic call or construct (bound functions, proxies,
-// interpreted functions, arity fixup, stack overflow). A tail call is an ordinary call here.
-template<typename Bytecode>
-UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
+// Calls the callee in its frame below callFrame, where `this` (new.target for a construct) and
+// the arguments already are: a compiled callee directly in that frame, a host function like the
+// interpreter calls it, everything else through JSC's generic call or construct (bound functions,
+// proxies, interpreted functions, stack overflow). Returns the result, empty after an exception.
+template<bool isConstruct>
+JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, CallFrame* callFrame, CallFrame* calleeFrame, JSValue callee, unsigned argumentCount, CallCache* cache)
 {
-    constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
-    auto bytecode = pc->as<Bytecode>();
-    CodeBlock* codeBlock = callFrame->codeBlock();
-    VM& vm = codeBlock->vm();
-    JSGlobalObject* globalObject = codeBlock->globalObject();
-    SlowPathFrameTracer tracer(vm, callFrame);
-    callFrame->setCurrentVPC(pc);
-    auto scope = DECLARE_THROW_SCOPE(vm);
-
-    CallFrame* calleeFrame = callFrame - bytecode.m_argv;
-    JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
-    unsigned argumentCount = bytecode.m_argc;
-    auto finish = [&](JSValue result) {
-        if (scope.exception()) [[unlikely]]
-            return encodeResult(exceptionInstructions(), callFrame);
-        if constexpr (requires { bytecode.m_dst; })
-            callFrame->uncheckedR(bytecode.m_dst) = result;
-        return encodeResult(pc, callFrame);
-    };
     auto setUpFrame = [&](CodeBlock* calleeCodeBlock) {
         calleeFrame->setCallerFrame(callFrame);
         calleeFrame->setReturnPC(nullptr);
@@ -268,8 +249,8 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
                 vm.cloopStack().setCurrentStackPointer(previous);
                 vm.topCallFrame = callFrame;
                 if (status)
-                    return encodeResult(exceptionInstructions(), callFrame);
-                return finish(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue());
+                    return JSValue();
+                return calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
             }
         }
     }
@@ -284,17 +265,16 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
         }
         return true;
     };
+    JSValue thisValue = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
     if constexpr (isConstruct) {
-        // new.target is in the `this` slot
         auto constructData = JSC::getConstructData(callee);
         if (constructData.type == CallData::Type::None) {
             throwException(globalObject, scope, createNotAConstructorError(globalObject, callee));
-            return encodeResult(exceptionInstructions(), callFrame);
+            return JSValue();
         }
         if (!collectArguments())
-            return encodeResult(exceptionInstructions(), callFrame);
-        JSValue newTarget = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
-        return finish(JSC::construct(globalObject, callee, constructData, arguments, newTarget));
+            return JSValue();
+        return JSC::construct(globalObject, callee, constructData, arguments, thisValue);
     } else {
         auto callData = JSC::getCallData(callee);
         if (callData.type == CallData::Type::Native && vm.isSafeToRecurseSoft()) {
@@ -305,25 +285,47 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
             JSValue result = JSValue::decode(callData.native.function(globalObject, calleeFrame));
             vm.cloopStack().setCurrentStackPointer(previous);
             vm.topCallFrame = callFrame;
-            return finish(result);
+            return result;
         }
         if (callData.type == CallData::Type::None) {
             throwException(globalObject, scope, createNotAFunctionError(globalObject, callee));
-            return encodeResult(exceptionInstructions(), callFrame);
+            return JSValue();
         }
         if (!collectArguments())
-            return encodeResult(exceptionInstructions(), callFrame);
-        JSValue thisValue = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
-        return finish(JSC::call(globalObject, callee, callData, thisValue, arguments));
+            return JSValue();
+        return JSC::call(globalObject, callee, callData, thisValue, arguments);
     }
 }
 
-// op_call_varargs, op_tail_call_varargs, op_construct_varargs, op_super_construct_varargs
-// (f.apply(this, arguments), new F(...args)): the arguments of the array-like, then JSC's generic
-// call or construct
+// A call from compiled code (op_call, op_call_ignore_result, op_tail_call, op_construct,
+// op_super_construct), with the signature of a slow path and a cache of the call site: in the
+// frame the bytecode prepared (argv slots below callFrame). A tail call is an ordinary call here.
 template<typename Bytecode>
-UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
 {
+    constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
+    auto bytecode = pc->as<Bytecode>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    JSValue result = callInFrame<isConstruct>(vm, codeBlock->globalObject(), scope, callFrame, callFrame - bytecode.m_argv, callFrame->r(bytecode.m_callee).jsValue(), bytecode.m_argc, cache);
+    if (scope.exception()) [[unlikely]]
+        return encodeResult(exceptionInstructions(), callFrame);
+    if constexpr (requires { bytecode.m_dst; })
+        callFrame->uncheckedR(bytecode.m_dst) = result;
+    return encodeResult(pc, callFrame);
+}
+
+// op_call_varargs, op_tail_call_varargs, op_construct_varargs, op_super_construct_varargs
+// (f.apply(this, arguments), new F(...args)): like the interpreter, a frame below the caller's
+// registers in use with the arguments of the array-like (the stack pointer covers it while they
+// load), then the call in that frame
+template<typename Bytecode>
+UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
+{
+    constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstructVarargs> || std::is_same_v<Bytecode, OpSuperConstructVarargs>;
     auto bytecode = pc->as<Bytecode>();
     CodeBlock* codeBlock = callFrame->codeBlock();
     VM& vm = codeBlock->vm();
@@ -331,44 +333,22 @@ UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* 
     SlowPathFrameTracer tracer(vm, callFrame);
     callFrame->setCurrentVPC(pc);
     auto scope = DECLARE_THROW_SCOPE(vm);
-    auto exception = [&] { return encodeResult(exceptionInstructions(), callFrame); };
 
-    JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
-    JSValue thisValue = callFrame->r(bytecode.m_thisValue).jsValue();
     JSValue source = callFrame->r(bytecode.m_arguments).jsValue();
-    unsigned length = sizeOfVarargs(globalObject, source, bytecode.m_firstVarArg);
+    unsigned usedSlots = -bytecode.m_firstFree.offset();
+    unsigned length = sizeFrameForVarargs(globalObject, callFrame, vm, source, usedSlots, bytecode.m_firstVarArg);
     if (scope.exception())
-        return exception();
-    MarkedArgumentBuffer arguments;
-    arguments.fill(vm, length, [&](JSValue* buffer) {
-        loadVarargs(globalObject, buffer, source, bytecode.m_firstVarArg, length);
-    });
-    if (arguments.hasOverflowed()) [[unlikely]] {
-        throwOutOfMemoryError(globalObject, scope);
-        return exception();
-    }
-    if (scope.exception())
-        return exception();
-
+        return encodeResult(exceptionInstructions(), callFrame);
+    CallFrame* calleeFrame = calleeFrameForVarargs(callFrame, usedSlots, length + 1);
+    auto* previous = vm.cloopStack().currentStackPointer();
+    vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
+    setupVarargsFrameAndSetThis(globalObject, callFrame, calleeFrame, callFrame->r(bytecode.m_thisValue).jsValue(), source, bytecode.m_firstVarArg, length);
     JSValue result;
-    if constexpr (std::is_same_v<Bytecode, OpConstructVarargs> || std::is_same_v<Bytecode, OpSuperConstructVarargs>) {
-        // new.target is the `this` operand
-        auto constructData = JSC::getConstructData(callee);
-        if (constructData.type == CallData::Type::None) {
-            throwException(globalObject, scope, createNotAConstructorError(globalObject, callee));
-            return exception();
-        }
-        result = JSC::construct(globalObject, callee, constructData, arguments, thisValue);
-    } else {
-        auto callData = JSC::getCallData(callee);
-        if (callData.type == CallData::Type::None) {
-            throwException(globalObject, scope, createNotAFunctionError(globalObject, callee));
-            return exception();
-        }
-        result = JSC::call(globalObject, callee, callData, thisValue, arguments);
-    }
+    if (!scope.exception())
+        result = callInFrame<isConstruct>(vm, globalObject, scope, callFrame, calleeFrame, callFrame->r(bytecode.m_callee).jsValue(), length + 1, cache);
+    vm.cloopStack().setCurrentStackPointer(previous);
     if (scope.exception())
-        return exception();
+        return encodeResult(exceptionInstructions(), callFrame);
     callFrame->uncheckedR(bytecode.m_dst) = result;
     return encodeResult(pc, callFrame);
 }
@@ -637,7 +617,8 @@ private:
     // pointer in m_next, and on an exception goes to the instruction's handler (a try around it)
     // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
-    // The same for a call (callFromCompiledCode), with a new cache of the call site
+    // The same for a call (callFromCompiledCode, callVarargsFromCompiledCode), with a new cache of
+    // the call site
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
     // After a helper's call: its result into m_next, an exception to the handler or out
     void checkException(const JSInstructionStream::Ref&);
@@ -860,7 +841,10 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
     m_body->localGet(cfr);
     m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
     m_body->i32Const(reinterpret_cast<uintptr_t>(m_callCaches.last().get()));
-    m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
+    if constexpr (requires(Bytecode bytecode) { bytecode.m_firstVarArg; })
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&callVarargsFromCompiledCode<Bytecode>));
+    else
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
     m_body->callIndirect(m_callType);
     checkException(instruction);
 }
@@ -2739,10 +2723,10 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_tail_call: emitCall<OpTailCall>(instruction); return;
     case op_construct: emitCall<OpConstruct>(instruction); return;
     case op_super_construct: emitCall<OpSuperConstruct>(instruction); return;
-    case op_call_varargs: callSlowPath(callVarargsFromCompiledCode<OpCallVarargs>, instruction); return;
-    case op_tail_call_varargs: callSlowPath(callVarargsFromCompiledCode<OpTailCallVarargs>, instruction); return;
-    case op_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpConstructVarargs>, instruction); return;
-    case op_super_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpSuperConstructVarargs>, instruction); return;
+    case op_call_varargs: emitCall<OpCallVarargs>(instruction); return;
+    case op_tail_call_varargs: emitCall<OpTailCallVarargs>(instruction); return;
+    case op_construct_varargs: emitCall<OpConstructVarargs>(instruction); return;
+    case op_super_construct_varargs: emitCall<OpSuperConstructVarargs>(instruction); return;
     case op_catch: callSlowPath(catchFromCompiledCode, instruction); return;
     case op_iterator_open: callSlowPath(iteratorOpenFromCompiledCode, instruction); return;
     case op_iterator_next: callSlowPath(iteratorNextFromCompiledCode, instruction); return;
