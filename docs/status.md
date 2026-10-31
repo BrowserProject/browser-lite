@@ -329,7 +329,7 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - `background-test.mjs` in Firefox with the compositor: the frames per second of a visible view
   vary between CI runs (4, 13, 27, 37, 47; without the compositor about 50), once below the limit.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
-  sometimes short), the MSE `remove()` end of `media-test.mjs` (once 2.6 instead of 2.5 in Firefox), in Firefox once a white
+  sometimes short), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
   `compositing-test.mjs`, the hang checks of `ui-test.mjs`, `serviceworker-test.mjs` in parallel.
 - Without tests: the sample count limit in fMP4 (`trun`), GC cleanup of host objects other than

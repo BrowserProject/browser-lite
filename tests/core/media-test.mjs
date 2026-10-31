@@ -139,7 +139,10 @@ source.addEventListener('sourceopen', async () => {
     if (removed)
       return;
     removed = true;
-    buffer.addEventListener('updateend', () => result('mseremoved', buffer.buffered.length ? buffer.buffered.end(0).toFixed(1) : 'empty'), { once: true });
+    // The end afterwards: that of the last frame before 2.5, which may go past it (Firefox's
+    // MediaRecorder writes long frames now and then)
+    const before = buffer.buffered.end(0).toFixed(2);
+    buffer.addEventListener('updateend', () => result('mseremoved', before + '/' + (buffer.buffered.length ? buffer.buffered.end(0).toFixed(2) : 'empty')), { once: true });
     buffer.remove(2.5, Infinity);
   });
   video.play().then(() => result('mseplay', 'ok'), (e) => result('mseplay', e.name));
@@ -391,9 +394,10 @@ const msePixel = await waitForPixel(180, 140, isRed);
 check('MSE: frame painted in the page', isRed(msePixel), JSON.stringify(msePixel));
 await screenshot(page, 'mse');
 const mseRemoved = await result('mseremoved');
+const [removeFrom, removedTo] = String(mseRemoved).split('/').map(Number);
 check(
-  'MSE: remove() in the engine',
-  Number(mseRemoved) > 2 && Number(mseRemoved) <= 2.5,
+  'MSE: remove() in the engine (buffered end before/after)',
+  removedTo > 2 && removedTo < 2.7 && removedTo < removeFrom,
   mseRemoved,
 );
 let hostBuffered = null;
@@ -401,12 +405,12 @@ const removeEnd = Date.now() + 10000;
 while (Date.now() < removeEnd) {
   const players = await page.evaluate(() => window.blTest.mediaState());
   hostBuffered = players.length ? players[players.length - 1].buffered : null;
-  if (hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6) break;
+  if (hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.7) break;
   await page.waitForTimeout(250);
 }
 check(
   'MSE: remove() in the host too',
-  hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.6,
+  hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.7,
   JSON.stringify(hostBuffered),
 );
 
