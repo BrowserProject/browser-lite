@@ -495,7 +495,9 @@ await result('deleted');
 await result('opfsworker');
 
 // clearStorage(): after destroy() the namespace (OPFS directory and caches) is emptied, the next
-// start begins without the file. First create a file in the OPFS of the page in a new profile
+// start begins without the file. First create a file in the OPFS of the page in a new profile.
+// The first tab lets go of its engine: Firefox's content process crashed with both running
+await page.goto('about:blank');
 const freshContext = await launchProfile();
 // Without a fileChooser handler the core uses the native file dialog of the host page
 await freshContext.addInitScript(() => {

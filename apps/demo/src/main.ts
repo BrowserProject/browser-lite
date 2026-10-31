@@ -11,6 +11,7 @@ import { WispTransport } from '@browser-lite/transport-wisp';
 import {
   colorPicker,
   dateTimePicker,
+  fileChooser,
   loginPrompt,
   permissionPrompt,
   renderToolbar,
@@ -106,6 +107,7 @@ function browserOptions(
       ...selectPopup(),
       ...colorPicker(),
       ...dateTimePicker(),
+      ...fileChooser(),
       ...permissionPrompt(),
       ...loginPrompt(),
       ...dialogHandler(),

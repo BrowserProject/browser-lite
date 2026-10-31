@@ -424,6 +424,15 @@ button {
   color: var(--fg);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
 }
+.bl-file-sheet {
+  top: 88px;
+  right: 12px;
+  left: 12px;
+}
+.bl-file-sheet .bl-host-picker {
+  flex: 1;
+  min-width: 0;
+}
 .bl-picker-sheet .bl-host-picker {
   position: static;
   opacity: 1;

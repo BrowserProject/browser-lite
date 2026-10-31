@@ -891,6 +891,55 @@ test('color and date/time pickers', async () => {
   });
 });
 
+test('file chooser: core default on desktop, a sheet on an iPhone', async () => {
+  const result = await page.evaluate(async () => {
+    const out = { desktop: Object.keys(ui.fileChooser()) };
+    const restore = [
+      ['userAgent', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X)'],
+      ['maxTouchPoints', 5],
+    ].map(([name, value]) => {
+      Object.defineProperty(navigator, name, { configurable: true, get: () => value });
+      return () => delete navigator[name];
+    });
+    try {
+      const { fileChooser } = ui.fileChooser();
+      out.inDefaults = typeof ui.defaultHandlers().fileChooser;
+      const view = makeView(9);
+      const request = () =>
+        fileChooser({
+          view,
+          multiple: true,
+          accept: 'image/*',
+          signal: new AbortController().signal,
+        });
+      let promise = request();
+      const sheet = document.querySelector('form.bl-picker-sheet.bl-file-sheet');
+      const input = sheet?.querySelector('input[type=file]');
+      out.sheet = [!!sheet, input?.multiple, input?.accept];
+      const files = new DataTransfer();
+      files.items.add(new File(['abc'], 'a.png', { type: 'image/png' }));
+      input.files = files.files;
+      input.dispatchEvent(new Event('change'));
+      out.chosen = (await promise).map((file) => `${file.name}:${file.size}`);
+      out.removed = !document.querySelector('form.bl-file-sheet');
+      promise = request();
+      document.querySelector('form.bl-file-sheet button[data-bl-answer=cancel]').click();
+      out.cancelled = await promise;
+      return out;
+    } finally {
+      for (const undo of restore) undo();
+    }
+  });
+  assert.deepEqual(result, {
+    desktop: [],
+    inDefaults: 'function',
+    sheet: [true, true, 'image/*'],
+    chosen: ['a.png:3'],
+    removed: true,
+    cancelled: null,
+  });
+});
+
 test('pickers on an iPhone: a sheet with the input, opened by the tap on it', async () => {
   const result = await page.evaluate(async () => {
     const restore = [

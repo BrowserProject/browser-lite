@@ -5,6 +5,7 @@ export {
   showContextMenu,
 } from './context-menu.js';
 export { type NativeDialogOptions, nativeDialogs } from './dialogs.js';
+export { fileChooser } from './file-chooser.js';
 export { defaultHandlers } from './handlers.js';
 export { colorPicker, dateTimePicker } from './host-picker.js';
 export { linkStatus } from './link-status.js';

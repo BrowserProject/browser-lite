@@ -8,6 +8,7 @@ import {
   type UiOptions,
   viewportRect,
 } from './options.js';
+import { needsTap, tapSheet } from './tap-sheet.js';
 
 interface PickerRequest {
   view: View;
@@ -20,18 +21,8 @@ interface PickerRequest {
 const openPickers = new WeakMap<Document, () => void>();
 
 /**
- * iPhone and iPad (also as "Macintosh" with touch): Safari opens its pickers only on a tap or a
- * focus() within the tap, not later (the request comes after a round trip through the engine),
- * and showPicker() does nothing for dates.
- */
-function pickerNeedsTap(doc: Document): boolean {
-  const nav = doc.defaultView?.navigator;
-  return !!nav && /iPhone|iPad|iPod|Macintosh/.test(nav.userAgent) && nav.maxTouchPoints > 1;
-}
-
-/**
  * Shows the native picker of the host browser: a hidden input at the place of the field of the
- * page, opened with showPicker(). Where pickers open only on a tap (pickerNeedsTap) the input is
+ * page, opened with showPicker(). Where pickers open only on a tap (needsTap) the input is
  * visible in a small sheet below the field (`.bl-picker-sheet` with the input and
  * `button[data-bl-answer=cancel]`), the tap on it opens the picker. Every input event previews
  * the value in the page. Resolves its value (read from the input) on change (in the sheet not on
@@ -58,19 +49,10 @@ function openHostPicker(
     const input = element(root, 'input', 'host-picker');
     input.type = type;
     const anchor = viewportRect(request.view, request.rect);
-    const sheet = pickerNeedsTap(doc) ? element(root, 'form', 'picker-sheet') : null;
+    const sheet = needsTap(doc) ? tapSheet(ui, input, () => finish(null)) : null;
     if (sheet) {
-      Object.assign(sheet.style, {
-        position: 'fixed',
-        left: `${anchor.x}px`,
-        top: `${anchor.y + anchor.height + 4}px`,
-      });
-      const cancel = element(root, 'button', 'cancel');
-      cancel.type = 'button';
-      cancel.dataset.blAnswer = 'cancel';
-      cancel.textContent = ui.texts.cancel;
-      cancel.addEventListener('click', () => finish(null));
-      sheet.append(input, cancel);
+      sheet.style.left = `${anchor.x}px`;
+      sheet.style.top = `${anchor.y + anchor.height + 4}px`;
     } else {
       input.tabIndex = -1;
       Object.assign(input.style, {

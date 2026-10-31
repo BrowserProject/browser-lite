@@ -30,9 +30,10 @@ const removeStatus = linkStatus(view);
 
 | Export | Purpose |
 | --- | --- |
-| `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>` (file chooser stays with the core). |
+| `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>` (the file chooser stays with the core except on an iPhone or iPad). |
 | `selectPopup(o?)` | `<select>` list below or above the field. Keys: arrows, PageUp/PageDown, Home/End, typing jumps, Enter/Space choose, Escape/Tab cancel. Click outside, a change of the window width or window blur cancel (not a height change, like an on-screen keyboard going away). |
 | `colorPicker(o?)`, `dateTimePicker(o?)` | Native pickers of the host browser through a hidden input (`showPicker()`), with min, max and step of the field; on an iPhone or iPad, where Safari opens pickers only on a tap, the input is visible in a small sheet below the field with Cancel, the tap on it opens the picker; a host without month or week inputs (Firefox, Safari) shows its date picker for them. Every `input` event previews the value in the page (`request.preview`); resolve on change or on a click elsewhere. One picker per document, also when composed separately: a new one finishes the open one. |
+| `fileChooser(o?)` | On an iPhone or iPad, where Safari opens its file chooser only on a tap: a sheet at the top with a visible file input (multiple and accept of the page's field) and Cancel; resolves the chosen files, `null` on Cancel, a tap elsewhere or abort. Elsewhere an empty object, the core's default opens the chooser at once. |
 | `permissionPrompt(o?)` | "example.com wants to know your location" with Block and Allow; one at a time, queued. Only asks: remembering is the job of the `PermissionStore`. Allowing notifications also asks the host browser. |
 | `loginPrompt(o?)` | HTTP authentication like Chrome's sign-in dialog: "Sign in", the origin, for `http:` "Your connection to this site is not private", user name and password, Cancel and Sign in (Enter signs in, Escape cancels). Like Chrome without the realm, a text of the server. One at a time, queued. |
 | `nativeDialogs(o?)` | `alert`, `confirm`, `prompt` with "example.com says:", `beforeunload` as "Leave site?" or "Reload site?" with the standard sentence. A page showing dialogs in a fast loop is asked about once (`onBlocked(view)` when the user blocks); blocking lasts until the next document. |
@@ -82,6 +83,7 @@ runs first: register shortcut handlers in the bubble phase, or skip them while
 | --- | --- |
 | `.bl-select-popup` | `role=listbox`, `data-bl-view`; rows `.bl-option` (`data-bl-index`, `data-bl-highlighted` and `.bl-highlighted`, `aria-selected`, `aria-disabled`), `.bl-group`, `hr.bl-separator`. Inline: `position: fixed`, `top`, `left`, `min-width`, `max-height`, `overflow-y: auto`. |
 | `input.bl-host-picker` | Hidden field at the place of the page field (inline `opacity: 0`, `pointer-events: none`). |
+| `form.bl-picker-sheet.bl-file-sheet` | iPhone and iPad: the sheet of the file chooser (no inline position, place it with CSS). |
 | `form.bl-picker-sheet` | iPhone and iPad: the visible `input.bl-host-picker` and `button[data-bl-answer=cancel]`, inline `position: fixed` below the page field. |
 | `.bl-login-prompt` | `form` with `role=dialog`, `data-bl-view`; `h2`, `p.bl-origin`, `p.bl-not-private` (only `http:`), `label` with `input[name=username]` and `input[name=password]`, `button.bl-cancel` and `button.bl-sign-in` (`data-bl-answer`). Not positioned. |
 | `.bl-permission-prompt` | `role=dialog`, `data-bl-view`, `data-bl-kind`; `p`, `button.bl-block`, `button.bl-allow` (`data-bl-answer`). Not positioned. |
