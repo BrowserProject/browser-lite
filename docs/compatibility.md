@@ -53,7 +53,8 @@ screenshots do not show native dialogs). A file input on the iPhone opens Safari
 library, camera, files) through the sheet of #312. Also on Android: a DuckDuckGo search, swiping
 on Wikipedia (before #313 one short swipe of the driver flung over 4000 px) and tabs; on the iPhone
 sbb.ch's timetable form (consent, typing into From and To with the suggestions above the keyboard,
-the location prompt of "Current location").
+the location prompt of "Current location"). On an iPad (Safari reports a Mac) the date field's
+sheet appears as well and opens Safari's calendar popover.
 
 ## State 2026-10-29 (local)
 
