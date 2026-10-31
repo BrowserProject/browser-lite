@@ -118,6 +118,13 @@ function withFinally(list) { let r = 0; try { r = list.length; } finally { r += 
 function nestedTry(x) { try { try { thrower(x); } catch (e) { throw "inner"; } } catch (e) { return e; } return "none"; }
 function catchInLoop(n) { let caught = 0; for (let i = 0; i < n; i++) { try { if (i % 3 === 0) throw i; } catch (e) { caught += e >= 0 ? 1 : 0; } } return caught; }
 function deepTry(n) { try { return deepTry(n + 1); } catch (e) { return n; } }
+function complement(x) { return ~x; }
+function power(a, b) { return a ** b; }
+function keysOf(o) { let k = ""; for (const key in o) k += key + o[key]; return k; }
+function hasEach(o) { let n = 0; for (const key in o) if (key in o) n++; return n; }
+async function awaitValue(v) { return await v; }
+function* counting(n) { for (let i = 0; i < n; i++) yield i; }
+function sumGenerator(n) { let s = 0; const g = counting(n); for (let r = g.next(); !r.done; r = g.next()) s += r.value; return s; }
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -364,6 +371,14 @@ for (let round = 0; round < 300; round++) {
     check("catch in loop", catchInLoop(30), 10);
     if (round === 299)
         check("stack overflow caught", deepTry(0) > 100, true);
+    check("~", complement(5), -6);
+    check("~ double", complement(1.5), -2);
+    check("**", power(2, 10), 1024);
+    check("for in", keysOf({ a: 1, b: 2 }), "a1b2");
+    check("for in array", keysOf([7, 8]), "0718");
+    check("for in in", hasEach({ x: 1, y: 2 }), 2);
+    check("generator", sumGenerator(5), 10);
+    awaitValue(round).then((v) => check("await", v, round));
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

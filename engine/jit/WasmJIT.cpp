@@ -26,6 +26,7 @@
 #include "JSFunction.h"
 #include "JSFunctionInlines.h"
 #include "JSGlobalLexicalEnvironment.h"
+#include "JSInternalFieldObjectImpl.h"
 #include "JSLexicalEnvironment.h"
 #include "JSObject.h"
 #include "JSString.h"
@@ -155,7 +156,8 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
     v(get_by_val_with_this) v(get_property_enumerator) v(is_callable) v(is_constructor) v(new_array_buffer) \
     v(new_array_with_species) v(new_array_with_spread) v(new_async_function_generator) v(new_generator) \
     v(new_promise) v(push_with_scope) v(put_by_id_with_this) v(put_by_val_with_this) v(spread) v(strcat) \
-    v(throw_static_error) v(typeof_is_function) v(typeof_is_object) v(unsigned) v(get_prototype_of)
+    v(throw_static_error) v(typeof_is_function) v(typeof_is_object) v(unsigned) v(get_prototype_of) v(pow) \
+    v(enumerator_get_by_val) v(enumerator_in_by_val) v(enumerator_put_by_val)
 #define BL_JIT_LLINT_SLOW_PATH_OPS(v) \
     v(create_cloned_arguments) v(create_direct_arguments) v(create_lexical_environment) \
     v(create_scoped_arguments) v(del_by_id) v(del_by_val) v(get_by_id_with_this) v(has_private_brand) \
@@ -2252,7 +2254,8 @@ bool Compiler::scan()
         case op_super_construct_varargs: case op_argument_count: case op_get_argument:
         case op_eq_null: case op_neq_null: case op_nop: case op_check_tdz: case op_get_scope: case op_is_empty:
         case op_is_undefined_or_null: case op_is_boolean: case op_is_number: case op_is_cell_with_type:
-        case op_is_object: case op_typeof_is_undefined: case op_catch:
+        case op_is_object: case op_typeof_is_undefined: case op_catch: case op_bitnot: case op_get_parent_scope:
+        case op_get_internal_field: case op_put_internal_field:
 #define BL_JIT_CASE(name) case op_##name:
         BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
         BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
@@ -2436,6 +2439,59 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
         m_body->ifThen();
         callSlowPath(slow_path_check_tdz, instruction);
         m_body->end();
+        return;
+    }
+    case op_bitnot: {
+        auto bytecode = instruction->as<OpBitnot>();
+        load(bytecode.m_operand, m_t1, m_a);
+        tagIs(int32Tag);
+        m_body->ifThen();
+        m_body->localGet(m_a);
+        m_body->i32Const(-1);
+        m_body->op(Op::I32Xor);
+        m_body->localSet(m_c);
+        storeInt32(bytecode.m_dst, m_c);
+        m_body->elseThen();
+        callSlowPath(slow_path_bitnot, instruction);
+        m_body->end();
+        return;
+    }
+    case op_get_parent_scope: {
+        auto bytecode = instruction->as<OpGetParentScope>();
+        loadPayload(bytecode.m_scope);
+        m_body->i32Load(JSScope::offsetOfNext());
+        m_body->localSet(m_a);
+        storeCell(bytecode.m_dst, m_a);
+        return;
+    }
+    case op_get_internal_field: {
+        // Promises, iterators, generators: a field at a fixed index
+        auto bytecode = instruction->as<OpGetInternalField>();
+        loadPayload(bytecode.m_base);
+        m_body->i32Const(JSInternalFieldObjectImpl<>::offsetOfInternalField(bytecode.m_index));
+        m_body->op(Op::I32Add);
+        m_body->localTee(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        return;
+    }
+    case op_put_internal_field: {
+        auto bytecode = instruction->as<OpPutInternalField>();
+        loadPayload(bytecode.m_base);
+        m_body->localTee(m_d);
+        m_body->i32Const(JSInternalFieldObjectImpl<>::offsetOfInternalField(bytecode.m_index));
+        m_body->op(Op::I32Add);
+        m_body->localTee(m_c);
+        loadTag(bytecode.m_value);
+        m_body->i32Store(TagOffset);
+        m_body->localGet(m_c);
+        loadPayload(bytecode.m_value);
+        m_body->i32Store(PayloadOffset);
+        writeBarrier(m_d);
         return;
     }
     case op_get_scope: {
