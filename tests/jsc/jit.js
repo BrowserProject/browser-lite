@@ -167,6 +167,9 @@ for (let i = 0; i < 300; i++) {
     if (i % 50 === 49)
         gc();
 }
+// A function too large to compile (over 100 KB of bytecode) with a hot loop stays interpreted
+const large = new Function("n", "let x = 0; for (let i = 0; i < n; i++) { " + "x = (x + i) | 0; ".repeat(12000) + "} return x;");
+check("too large to compile", large(1500), (1499 * 1500 / 2) * 12000 | 0);
 const proto = {};
 const child = Object.create(proto);
 const counter = makeCounter();

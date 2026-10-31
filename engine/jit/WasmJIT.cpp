@@ -612,6 +612,10 @@ UGPRPair catchFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
     return encodeResult(pc, callFrame);
 }
 
+// Larger CodeBlocks (whole bundles run once as one function) stay interpreted: their module would
+// be about 20 times their bytecode, past V8's limit of a function and much memory to build
+constexpr unsigned maximumBytecodeSize = 100000;
+
 constexpr int32_t int32Tag = static_cast<int32_t>(JSValue::Int32Tag);
 constexpr int32_t booleanTag = static_cast<int32_t>(JSValue::BooleanTag);
 constexpr int32_t cellTag = static_cast<int32_t>(JSValue::CellTag);
@@ -627,6 +631,7 @@ public:
 
     std::optional<std::vector<uint8_t>> compile();
     OpcodeID unsupported() const { return m_unsupported; }
+    bool tooLarge() const { return m_tooLarge; }
     // Blocks after loop hints, by bytecode offset
     OffsetMap takeLoops() { return WTF::move(m_loops); }
     Vector<std::unique_ptr<CallCache>> takeCallCaches() { return WTF::move(m_callCaches); }
@@ -635,6 +640,7 @@ private:
     bool scan();
     // The first instruction it does not take, for the log
     OpcodeID m_unsupported { op_enter };
+    bool m_tooLarge { false };
     void emitInstruction(const JSInstructionStream::Ref&, unsigned block);
 
     unsigned targetOf(const JSInstructionStream::Ref& instruction, int label)
@@ -2927,6 +2933,10 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
 
 std::optional<std::vector<uint8_t>> Compiler::compile()
 {
+    if (m_codeBlock->instructions().size() > maximumBytecodeSize) {
+        m_tooLarge = true;
+        return std::nullopt;
+    }
     if (!scan())
         return std::nullopt;
 
@@ -3010,7 +3020,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
             if (bytes)
                 dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, function ", compiled.function);
             else
-                dataLogLn("[jit] ", *codeBlock, ": not compiled (", opcodeNames[compiler.unsupported()], ")");
+                dataLogLn("[jit] ", *codeBlock, ": not compiled (", compiler.tooLarge() ? "too large" : opcodeNames[compiler.unsupported()], ")");
         }
         compiledCode().add(codeBlock, WTF::move(compiled));
     }
