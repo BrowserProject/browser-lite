@@ -63,6 +63,7 @@ void FunctionBody::f64Const(double value)
 void FunctionBody::i32Load(uint32_t offset) { m_code.push_back(0x28); m_code.push_back(2); unsignedLEB(m_code, offset); }
 void FunctionBody::i32Load8U(uint32_t offset) { m_code.push_back(0x2d); m_code.push_back(0); unsignedLEB(m_code, offset); }
 void FunctionBody::i32Store(uint32_t offset) { m_code.push_back(0x36); m_code.push_back(2); unsignedLEB(m_code, offset); }
+void FunctionBody::i32Store8(uint32_t offset) { m_code.push_back(0x3a); m_code.push_back(0); unsignedLEB(m_code, offset); }
 void FunctionBody::f64Load(uint32_t offset) { m_code.push_back(0x2b); m_code.push_back(3); unsignedLEB(m_code, offset); }
 void FunctionBody::f64Store(uint32_t offset) { m_code.push_back(0x39); m_code.push_back(3); unsignedLEB(m_code, offset); }
 

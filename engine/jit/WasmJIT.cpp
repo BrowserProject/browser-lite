@@ -12,6 +12,7 @@
 #include "BytecodeStructs.h"
 #include "CallData.h"
 #include "CellState.h"
+#include "ConstructData.h"
 #include "CodeBlock.h"
 #include "CommonSlowPaths.h"
 #include "Fits.h"
@@ -96,6 +97,25 @@ const JSInstruction* returnInstruction()
 }
 
 uint32_t compiledFunction(CodeBlock*);
+
+// Instructions the interpreter runs only as a slow path (slowPathOp, llintSlowPathOp in its
+// assembly, and some more): compiled code calls the same one
+#define BL_JIT_COMMON_SLOW_PATH_OPS(v) \
+    v(create_async_generator) v(create_generator) v(create_promise) v(create_rest) v(create_this) \
+    v(define_accessor_property) v(define_data_property) v(enumerator_has_own_property) v(enumerator_next) \
+    v(get_by_val_with_this) v(get_property_enumerator) v(is_callable) v(is_constructor) v(new_array_buffer) \
+    v(new_array_with_species) v(new_array_with_spread) v(new_async_function_generator) v(new_generator) \
+    v(new_promise) v(push_with_scope) v(put_by_id_with_this) v(put_by_val_with_this) v(spread) v(strcat) \
+    v(throw_static_error) v(typeof_is_function) v(typeof_is_object) v(unsigned) v(to_this) v(to_string) \
+    v(to_object) v(get_prototype_of)
+#define BL_JIT_LLINT_SLOW_PATH_OPS(v) \
+    v(create_cloned_arguments) v(create_direct_arguments) v(create_lexical_environment) \
+    v(create_scoped_arguments) v(del_by_id) v(del_by_val) v(get_by_id_with_this) v(has_private_brand) \
+    v(has_private_name) v(has_structure_with_flags) v(new_array_with_size) v(new_async_func) \
+    v(new_async_func_exp) v(new_async_generator_func) v(new_async_generator_func_exp) v(new_func) \
+    v(new_func_exp) v(new_generator_func) v(new_generator_func_exp) v(new_reg_exp) v(put_getter_by_id) \
+    v(put_getter_by_val) v(put_getter_setter_by_id) v(put_setter_by_id) v(put_setter_by_val) \
+    v(set_function_name) v(throw) v(instanceof) v(in_by_id) v(in_by_val)
 
 // Compiled code nests on the host's machine stack (every JS call is a WASM call), which is much
 // smaller than the JS stack of the C loop: beyond this depth the interpreter takes the calls,
@@ -193,6 +213,50 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
     JSValue thisValue = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
     JSValue result = JSC::call(globalObject, callee, callData, thisValue, arguments);
     return finish(result);
+}
+
+// op_eq_null, op_neq_null: == null, also for objects that masquerade as undefined
+template<typename Bytecode>
+UGPRPair equalsNullFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<Bytecode>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    JSValue value = callFrame->r(bytecode.m_operand).jsValue();
+    bool isNull = value.isUndefinedOrNull() || (value.isCell() && value.asCell()->structure()->masqueradesAsUndefined(codeBlock->globalObject()));
+    callFrame->uncheckedR(bytecode.m_dst) = jsBoolean(std::is_same_v<Bytecode, OpEqNull> ? isNull : !isNull);
+    return encodeResult(pc, callFrame);
+}
+
+// op_construct from compiled code: JSC's generic construct, new.target the callee
+UGPRPair constructFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpConstruct>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    CallFrame* calleeFrame = callFrame - bytecode.m_argv;
+    JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
+    auto constructData = JSC::getConstructData(callee);
+    if (constructData.type == CallData::Type::None) {
+        throwException(globalObject, scope, createNotAConstructorError(globalObject, callee));
+        return encodeResult(exceptionInstructions(), callFrame);
+    }
+    MarkedArgumentBuffer arguments;
+    for (unsigned i = 1; i < bytecode.m_argc; ++i)
+        arguments.append(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(i)).jsValue());
+    if (arguments.hasOverflowed()) [[unlikely]] {
+        throwOutOfMemoryError(globalObject, scope);
+        return encodeResult(exceptionInstructions(), callFrame);
+    }
+    JSObject* result = JSC::construct(globalObject, callee, constructData, arguments, callee);
+    if (scope.exception()) [[unlikely]]
+        return encodeResult(exceptionInstructions(), callFrame);
+    callFrame->uncheckedR(bytecode.m_dst) = result;
+    return encodeResult(pc, callFrame);
 }
 
 constexpr int32_t int32Tag = static_cast<int32_t>(JSValue::Int32Tag);
@@ -994,8 +1058,16 @@ bool Compiler::scan()
         case op_rshift: case op_urshift: case op_not: case op_to_number: case op_get_by_id: case op_put_by_id:
         case op_get_by_val: case op_put_by_val: case op_get_from_scope: case op_put_to_scope: case op_resolve_scope:
         case op_typeof: case op_new_object: case op_new_array: case op_get_length: case op_to_primitive:
-        case op_loop_hint: case op_check_traps: case op_call: case op_call_ignore_result:
+        case op_loop_hint: case op_check_traps: case op_call: case op_call_ignore_result: case op_construct:
+        case op_argument_count: case op_get_argument: case op_eq_null: case op_neq_null:
+#define BL_JIT_CASE(name) case op_##name:
+        BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
+        BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
+#undef BL_JIT_CASE
             break;
+        case op_jundefined_or_null: jump(instruction->as<OpJundefinedOrNull>().m_targetLabel.target()); break;
+        case op_jneq_ptr: jump(instruction->as<OpJneqPtr>().m_targetLabel.target()); break;
+        case op_jnundefined_or_null: jump(instruction->as<OpJnundefinedOrNull>().m_targetLabel.target()); break;
         case op_ret:
             starts.add(next);
             break;
@@ -1079,6 +1151,80 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_new_array: emitGeneric(instruction, llint_slow_path_new_array); return;
     case op_get_length: emitGeneric(instruction, llint_slow_path_get_length); return;
     case op_to_primitive: emitGeneric(instruction, slow_path_to_primitive); return;
+#define BL_JIT_COMMON(name) case op_##name: emitGeneric(instruction, slow_path_##name); return;
+#define BL_JIT_LLINT(name) case op_##name: emitGeneric(instruction, llint_slow_path_##name); return;
+    BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_COMMON)
+    BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_LLINT)
+#undef BL_JIT_COMMON
+#undef BL_JIT_LLINT
+    case op_construct: emitGeneric(instruction, constructFromCompiledCode); return;
+    case op_eq_null: emitGeneric(instruction, equalsNullFromCompiledCode<OpEqNull>); return;
+    case op_neq_null: emitGeneric(instruction, equalsNullFromCompiledCode<OpNeqNull>); return;
+    case op_jneq_ptr: {
+        // Jump unless the value is that cell (an intrinsic like Array), noted in the cache
+        auto bytecode = instruction->as<OpJneqPtr>();
+        loadTag(bytecode.m_value);
+        m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+        m_body->op(Op::I32Ne);
+        loadPayload(bytecode.m_value);
+        loadPayload(bytecode.m_specialPointer);
+        m_body->op(Op::I32Ne);
+        m_body->op(Op::I32Or);
+        m_body->ifThen();
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&bytecode.metadata(m_codeBlock).m_hasJumped));
+        m_body->i32Const(1);
+        m_body->i32Store8(0);
+        jumpToFromIf(targetOf(instruction, bytecode.m_targetLabel.target()), block);
+        m_body->end();
+        return;
+    }
+    case op_argument_count: {
+        // argc including this, minus this
+        m_body->localGet(cfr);
+        m_body->i32Load(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + PayloadOffset);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Sub);
+        m_body->localSet(m_c);
+        storeInt32(instruction->as<OpArgumentCount>().m_dst, m_c);
+        return;
+    }
+    case op_get_argument: {
+        // The argument at the index (with this at 0), undefined past the ones passed
+        auto bytecode = instruction->as<OpGetArgument>();
+        m_body->localGet(cfr);
+        m_body->i32Load(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + PayloadOffset);
+        m_body->i32Const(bytecode.m_index);
+        m_body->op(Op::I32GtS);
+        m_body->ifThen();
+        loadTag(virtualRegisterForArgumentIncludingThis(bytecode.m_index));
+        m_body->localSet(m_a);
+        loadPayload(virtualRegisterForArgumentIncludingThis(bytecode.m_index));
+        m_body->localSet(m_b);
+        m_body->elseThen();
+        m_body->i32Const(static_cast<int32_t>(JSValue::UndefinedTag));
+        m_body->localSet(m_a);
+        m_body->i32Const(0);
+        m_body->localSet(m_b);
+        m_body->end();
+        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        return;
+    }
+    case op_jundefined_or_null:
+    case op_jnundefined_or_null: {
+        // Undefined and null differ only in the lowest bit of the tag
+        bool jumpIfNullish = instruction->opcodeID() == op_jundefined_or_null;
+        VirtualRegister value = jumpIfNullish ? instruction->as<OpJundefinedOrNull>().m_value : instruction->as<OpJnundefinedOrNull>().m_value;
+        int label = jumpIfNullish ? instruction->as<OpJundefinedOrNull>().m_targetLabel.target() : instruction->as<OpJnundefinedOrNull>().m_targetLabel.target();
+        loadTag(value);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Or);
+        m_body->i32Const(static_cast<int32_t>(JSValue::NullTag));
+        m_body->op(jumpIfNullish ? Op::I32Eq : Op::I32Ne);
+        m_body->ifThen();
+        jumpToFromIf(targetOf(instruction, label), block);
+        m_body->end();
+        return;
+    }
     case op_call: emitGeneric(instruction, callFromCompiledCode<OpCall>); return;
     case op_call_ignore_result: emitGeneric(instruction, callFromCompiledCode<OpCallIgnoreResult>); return;
     case op_loop_hint:

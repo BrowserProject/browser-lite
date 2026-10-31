@@ -44,6 +44,17 @@ var globalVar = 5;
 function readGlobalVar() { return globalVar; }
 globalThis.globalProperty = 1;
 function readGlobalProperty() { return globalProperty; }
+// More instructions: construct, instanceof, in, delete, regexp, closures, nullish jumps
+function Point(x) { this.x = x; }
+class Box { constructor(v) { this.v = v; } }
+function makeThings(n) { const p = new Point(n); const b = new Box(n); const a = new Array(2); return p.x + b.v + a.length + (p instanceof Point ? 1 : 0); }
+function hasKeys(o) { return ("x" in o ? 1 : 0) + ("nope" in o ? 10 : 0); }
+function removeKey(o) { delete o.gone; return o.gone === undefined; }
+function matches(text) { return /b+/.test(text); }
+function adder(n) { const add = (x) => x + n; return add(1); }
+function nullish(x) { return x ?? "default"; }
+function isNullish(x) { return x == null; }
+function secondArgument() { return arguments[1]; }
 let captured = 0;
 function closure() { captured++; return captured; }
 
@@ -104,6 +115,17 @@ for (let round = 0; round < 300; round++) {
     check("global var", readGlobalVar(), 5);
     check("global property", readGlobalProperty(), round === 0 ? 1 : round);
     globalThis.globalProperty = round + 1;
+    check("construct", makeThings(round), round * 2 + 3);
+    check("in", hasKeys({ x: 1 }), 1);
+    check("delete", removeKey({ gone: 1 }), true);
+    check("regexp", matches("abbc"), true);
+    check("closure creation", adder(round), round + 1);
+    check("??", nullish(null), "default");
+    check("?? value", nullish(0), 0);
+    check("== null", isNullish(undefined), true);
+    check("== null object", isNullish({}), false);
+    check("missing argument", secondArgument(1), undefined);
+    check("argument", secondArgument(1, 2), 2);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

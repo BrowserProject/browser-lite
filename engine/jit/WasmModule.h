@@ -26,6 +26,7 @@ public:
     void i32Load(uint32_t offset);
     void i32Load8U(uint32_t offset);
     void i32Store(uint32_t offset);
+    void i32Store8(uint32_t offset);
     void f64Load(uint32_t offset);
     void f64Store(uint32_t offset);
     // Numeric instructions without immediates (i32.add, i64.shr_u, ...)
