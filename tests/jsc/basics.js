@@ -5,6 +5,10 @@ function assert(cond, msg) {
 }
 
 assert(1 + 2 === 3, "math");
+// Int32 division whose result is no int32 (patch 0068)
+function divide(a, b) { return a / b; }
+assert(divide(5, 0) === Infinity && divide(-5, 0) === -Infinity, "division by zero");
+assert(divide(-2147483648, -1) === 2147483648 && Object.is(divide(0, -5), -0) && divide(7, 2) === 3.5, "division");
 assert([3, 1, 2].sort().join() === "1,2,3", "sort");
 assert(JSON.stringify({ a: [1, { b: 2 }] }) === '{"a":[1,{"b":2}]}', "json");
 assert("Grüezi".toUpperCase() === "GRÜEZI", "unicode upper");
