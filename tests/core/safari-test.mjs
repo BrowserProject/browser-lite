@@ -43,6 +43,7 @@ const PAGE = `<!doctype html><title>Safari paths</title>
 <video id="video" muted playsinline style="position:absolute;left:300px;top:20px;width:320px;height:240px"></video>
 <script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
+document.getElementById('text').addEventListener('keydown', (e) => { if (e.key === 'Enter') location.href = '/next'; });
 const type = 'video/webm; codecs="vp8"';
 result('msesupported', MediaSource.isTypeSupported(type));
 const video = document.getElementById('video');
@@ -91,6 +92,8 @@ const browser = await launch({
 const CLIP = await recordClip(browser, 3);
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/clip.webm') serveBytes(req, res, CLIP, 'video/webm');
+  else if (req.url === '/next')
+    res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><title>Next</title>');
   else res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
 });
 
@@ -163,6 +166,12 @@ check('keyboard: none after a button', mode === 'none/', mode);
 await page.mouse.click(box.x + 120, box.y + 285);
 const micPeak = await result('micpeak');
 check('microphone through the AudioWorklet', micPeak === 'sound', micPeak);
+
+// Enter in a search field loads the results: the keyboard closes with the old page
+mode = await tapAndMode(35, 'text/send');
+await page.keyboard.press('Enter');
+await waitFor(async () => (mode = await imeMode()) === 'none/', 10000);
+check('keyboard: none after the page with the field is gone', mode === 'none/', mode);
 
 await browser.close();
 finish();

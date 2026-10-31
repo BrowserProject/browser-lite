@@ -762,6 +762,11 @@ void FrameLoaderClient::dispatchDidCommitLoad(std::optional<HasInsecureContent>,
         m_view->didCommitLoad();
         ChromeClient::reportBeforeUnload(m_view.get());
     }
+    // The focused field left with the old document without a focus change: the on-screen
+    // keyboard of the host closes like in a browser after a search
+    Ref frame = m_frameLoader->frame();
+    if (auto* client = frame->editor().client())
+        static_cast<EditorClient*>(client)->updateTextInput(frame);
 }
 
 void FrameLoaderClient::dispatchDidReceiveTitle(const StringWithDirection& title)
