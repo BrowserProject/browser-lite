@@ -387,6 +387,29 @@ int32_t structureChainMatches(Structure* structure, StructureChain* chain)
     return 1;
 }
 
+// An exception in a try of compiled code: whether its handler may take it (not a termination)
+int32_t exceptionIsCatchable(CallFrame* callFrame, const JSInstruction*)
+{
+    VM& vm = callFrame->codeBlock()->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    Exception* exception = scope.exception();
+    return exception && !vm.isTerminationException(exception);
+}
+
+// op_catch: the exception and its value into their registers, like the interpreter
+UGPRPair catchFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpCatch>();
+    VM& vm = callFrame->codeBlock()->vm();
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    Exception* exception = scope.exception();
+    if (!scope.tryClearException())
+        return encodeResult(exceptionInstructions(), callFrame);
+    callFrame->uncheckedR(bytecode.m_exception) = exception;
+    callFrame->uncheckedR(bytecode.m_thrownValue) = exception->value();
+    return encodeResult(pc, callFrame);
+}
+
 constexpr int32_t int32Tag = static_cast<int32_t>(JSValue::Int32Tag);
 constexpr int32_t booleanTag = static_cast<int32_t>(JSValue::BooleanTag);
 constexpr int32_t cellTag = static_cast<int32_t>(JSValue::CellTag);
@@ -445,7 +468,8 @@ private:
     void writeBarrierOnConstant(JSCell*, VirtualRegister value);
 
     // Calls a slow path of the interpreter for the instruction; leaves the returned instruction
-    // pointer in m_next and returns 1 on an exception
+    // pointer in m_next, and on an exception goes to the instruction's handler (a try around it)
+    // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
     // Fast paths mark m_next when they did the instruction; the slow path does it otherwise
     void beginFastPaths();
@@ -504,7 +528,8 @@ private:
     OffsetMap m_blockAt;
     OffsetMap m_loops;
     unsigned m_blockCount { 0 };
-    // Depth of the current block's code, for branches out of nested blocks
+    // The block being compiled and the depth of its code, for branches out of nested blocks
+    unsigned m_currentBlock { 0 };
     uint32_t m_blockDepth { 0 };
 };
 
@@ -658,8 +683,21 @@ void Compiler::callSlowPath(SlowPath slowPath, const JSInstructionStream::Ref& i
     m_body->i32Const(reinterpret_cast<uintptr_t>(exceptionInstructions()));
     m_body->op(Op::I32Eq);
     m_body->ifThen();
-    m_body->i32Const(1);
-    m_body->returnValue();
+    if (auto* handler = m_codeBlock->handlerForBytecodeIndex(BytecodeIndex(instruction.offset()))) {
+        m_body->localGet(cfr);
+        m_body->i32Const(0);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&exceptionIsCatchable));
+        m_body->callIndirect(m_checkType);
+        m_body->op(Op::I32Eqz);
+        m_body->ifThen();
+        m_body->i32Const(1);
+        m_body->returnValue();
+        m_body->end();
+        jumpTo(handler->target, m_currentBlock);
+    } else {
+        m_body->i32Const(1);
+        m_body->returnValue();
+    }
     m_body->end();
 }
 
@@ -2144,7 +2182,7 @@ bool Compiler::scan()
         case op_super_construct_varargs: case op_argument_count: case op_get_argument:
         case op_eq_null: case op_neq_null: case op_nop: case op_check_tdz: case op_get_scope: case op_is_empty:
         case op_is_undefined_or_null: case op_is_boolean: case op_is_number: case op_is_cell_with_type:
-        case op_is_object: case op_typeof_is_undefined:
+        case op_is_object: case op_typeof_is_undefined: case op_catch:
 #define BL_JIT_CASE(name) case op_##name:
         BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
         BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
@@ -2189,6 +2227,9 @@ bool Compiler::scan()
             return false;
         }
     }
+    // Handlers start at their op_catch
+    for (size_t i = 0; i < m_codeBlock->numberOfExceptionHandlers(); ++i)
+        starts.add(m_codeBlock->exceptionHandler(i).target);
     unsigned end = instructions.size();
     for (auto start : starts) {
         if (start < end)
@@ -2429,6 +2470,7 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_tail_call_varargs: callSlowPath(callVarargsFromCompiledCode<OpTailCallVarargs>, instruction); return;
     case op_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpConstructVarargs>, instruction); return;
     case op_super_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpSuperConstructVarargs>, instruction); return;
+    case op_catch: callSlowPath(catchFromCompiledCode, instruction); return;
     case op_eq_null: callSlowPath(equalsNullFromCompiledCode<OpEqNull>, instruction); return;
     case op_neq_null: callSlowPath(equalsNullFromCompiledCode<OpNeqNull>, instruction); return;
     case op_jeq_null: emitJumpIfNull<OpJeqNull>(instruction, block); return;
@@ -2608,6 +2650,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     auto& instructions = m_codeBlock->instructions();
     for (unsigned block = 0; block < m_blockCount; ++block) {
         m_body->end();
+        m_currentBlock = block;
         m_blockDepth = m_body->depth();
         unsigned end = block + 1 < m_blockCount ? m_starts[block + 1] : instructions.size();
         for (unsigned offset = m_starts[block]; offset < end;) {

@@ -109,6 +109,13 @@ function isUndefined(x) { return typeof x === "undefined"; }
 function isString(x) { return typeof x === "string"; }
 function jumpNull(x) { if (x == null) return "null"; return "value"; }
 function beforeInit(early) { if (early) return read(); let v = 1; function read() { return v; } return read(); }
+// try: the handler in compiled code
+function safeRead(o) { try { return o.value.x; } catch (e) { return "caught " + (e instanceof TypeError); } }
+function rethrow(x) { try { thrower(x); return "no"; } catch (e) { throw new Error("again"); } }
+function withFinally(list) { let r = 0; try { r = list.length; } finally { r += 100; } return r; }
+function nestedTry(x) { try { try { thrower(x); } catch (e) { throw "inner"; } } catch (e) { return e; } return "none"; }
+function catchInLoop(n) { let caught = 0; for (let i = 0; i < n; i++) { try { if (i % 3 === 0) throw i; } catch (e) { caught += e >= 0 ? 1 : 0; } } return caught; }
+function deepTry(n) { try { return deepTry(n + 1); } catch (e) { return n; } }
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -333,6 +340,28 @@ for (let round = 0; round < 300; round++) {
         early = e;
     }
     check("before initialization", early instanceof ReferenceError, true);
+    check("try", safeRead({ value: { x: 1 } }), 1);
+    check("catch", safeRead({}), "caught true");
+    let again = null;
+    try {
+        rethrow(1);
+    } catch (e) {
+        again = e;
+    }
+    check("throw in catch", again && again.message, "again");
+    check("finally", withFinally([1, 2]), 102);
+    let afterFinally = null;
+    try {
+        withFinally(null);
+    } catch (e) {
+        afterFinally = e;
+    }
+    check("finally rethrows", afterFinally instanceof TypeError, true);
+    check("nested try", nestedTry(1), "inner");
+    check("nested try no throw", nestedTry(0), "none");
+    check("catch in loop", catchInLoop(30), 10);
+    if (round === 299)
+        check("stack overflow caught", deepTry(0) > 100, true);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

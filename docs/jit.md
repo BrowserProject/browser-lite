@@ -32,8 +32,9 @@ never baked into the code (the GC resets inline caches).
 - **Calls**: to a compiled function directly in the frame the bytecode prepared, to a host
   function like the interpreter, else JSC's generic call or construct; varargs (`apply`,
   spread) through JSC's generic call. Tail calls are ordinary calls.
-- **Exceptions**: the compiled function returns a status, the interpreter unwinds. Functions with
-  `try` stay interpreted for now.
+- **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
+  whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
+  returns a status and the interpreter unwinds.
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
   them.
