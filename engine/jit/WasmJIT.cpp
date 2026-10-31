@@ -18,6 +18,7 @@
 #include "CodeBlock.h"
 #include "CodeSpecializationKind.h"
 #include "CommonSlowPaths.h"
+#include "DirectArguments.h"
 #include "Fits.h"
 #include "FrameTracers.h"
 #include "IndexingType.h"
@@ -165,7 +166,8 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
     v(new_async_func_exp) v(new_async_generator_func) v(new_async_generator_func_exp) v(new_func) \
     v(new_func_exp) v(new_generator_func) v(new_generator_func_exp) v(new_reg_exp) v(put_getter_by_id) \
     v(put_getter_by_val) v(put_getter_setter_by_id) v(put_setter_by_id) v(put_setter_by_val) \
-    v(set_function_name) v(throw) v(instanceof) v(in_by_id) v(in_by_val) v(put_by_val_direct)
+    v(set_function_name) v(throw) v(instanceof) v(in_by_id) v(in_by_val) v(put_by_val_direct) \
+    v(get_private_name) v(put_private_name) v(check_private_brand) v(set_private_brand)
 
 // Compiled code nests on the host's machine stack (every JS call is a WASM call), which is much
 // smaller than the JS stack of the C loop: beyond this depth the interpreter takes the calls,
@@ -2362,6 +2364,7 @@ bool Compiler::scan()
         case op_is_undefined_or_null: case op_is_boolean: case op_is_number: case op_is_cell_with_type:
         case op_is_object: case op_typeof_is_undefined: case op_catch: case op_bitnot: case op_get_parent_scope:
         case op_get_internal_field: case op_put_internal_field: case op_iterator_open: case op_iterator_next:
+        case op_get_from_arguments: case op_put_to_arguments:
 #define BL_JIT_CASE(name) case op_##name:
         BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
         BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
@@ -2598,6 +2601,35 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
         loadPayload(bytecode.m_value);
         m_body->i32Store(PayloadOffset);
         writeBarrier(m_d);
+        return;
+    }
+    case op_get_from_arguments: {
+        // A slot of the function's own arguments object
+        auto bytecode = instruction->as<OpGetFromArguments>();
+        loadPayload(bytecode.m_arguments);
+        m_body->i32Const(DirectArguments::offsetOfSlot(bytecode.m_index));
+        m_body->op(Op::I32Add);
+        m_body->localTee(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        return;
+    }
+    case op_put_to_arguments: {
+        auto bytecode = instruction->as<OpPutToArguments>();
+        writeBarrierOnOperands(bytecode.m_arguments, bytecode.m_value);
+        loadPayload(bytecode.m_arguments);
+        m_body->i32Const(DirectArguments::offsetOfSlot(bytecode.m_index));
+        m_body->op(Op::I32Add);
+        m_body->localTee(m_c);
+        loadTag(bytecode.m_value);
+        m_body->i32Store(TagOffset);
+        m_body->localGet(m_c);
+        loadPayload(bytecode.m_value);
+        m_body->i32Store(PayloadOffset);
         return;
     }
     case op_get_scope: {

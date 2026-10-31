@@ -130,6 +130,9 @@ function entriesOf(map) { let s = ""; for (const [k, v] of map) s += k + v; retu
 function charsOf(text) { let n = 0; for (const c of text) n += c.length; return n; }
 const customIterable = { *[Symbol.iterator]() { yield 1; yield 2; } };
 const badIterable = { [Symbol.iterator]() { return 5; } };
+function sloppyArguments(a) { a = a + 1; return arguments[0] + arguments.length; }
+function sloppyWrite(a) { arguments[0] = 10; return a; }
+class Account { #balance = 0; static #count = 0; deposit(v) { this.#balance += v; Account.#count++; return this.#balance; } #check() { return this.#balance >= 0; } valid() { return this.#check(); } static has(o) { return #balance in o; } }
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -404,6 +407,20 @@ for (let round = 0; round < 300; round++) {
         notIterable = e;
     }
     check("for of not iterable", notIterable instanceof TypeError, true);
+    check("arguments mapped", sloppyArguments(1), 3);
+    check("arguments write", sloppyWrite(1), 10);
+    const account = new Account();
+    account.deposit(round);
+    check("private field", account.deposit(1), round + 1);
+    check("private method", account.valid(), true);
+    check("private in", Account.has(account) && !Account.has({}), true);
+    let privateThrew = null;
+    try {
+        Account.prototype.deposit.call({}, 1);
+    } catch (e) {
+        privateThrew = e;
+    }
+    check("private missing", privateThrew instanceof TypeError, true);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);
