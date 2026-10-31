@@ -1368,7 +1368,6 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     if (!frame || !array)
         return;
     Vector<PlatformTouchPoint> points;
-    Vector<PointerID> pointerIds;
     TouchActions allowed;
     std::optional<DoublePoint> released;
     std::optional<PointerID> releasedPointer;
@@ -1386,25 +1385,18 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
         points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
-        pointerIds.append(PointerEvent::pointerIdForTouchPoint(points.last()));
+        auto pointerId = PointerEvent::pointerIdForTouchPoint(points.last());
         if (state == PlatformTouchPoint::State::TouchReleased) {
             released = position;
-            releasedPointer = pointerIds.last();
+            releasedPointer = pointerId;
         }
         if (state == PlatformTouchPoint::State::TouchReleased || state == PlatformTouchPoint::State::TouchCancelled)
-            ended.append(pointerIds.last());
+            ended.append(pointerId);
     }
     static constexpr PlatformEvent::Type types[] = { PlatformEvent::Type::TouchStart, PlatformEvent::Type::TouchMove, PlatformEvent::Type::TouchEnd, PlatformEvent::Type::TouchCancel };
     TouchEventWasm event { types[std::clamp(type, 0, 3)], WTF::move(points), modifiersFromBits(modifiers) };
     auto result = frame->eventHandler().handleTouchEvent(event);
     bool consumed = result && *result;
-    // WebCore also takes a pointerdown the page prevented as a handled touch. In browsers that only
-    // drops the compatibility mouse events (mousedown, mouseup): the view still scrolls and a tap
-    // still clicks. With touch listeners it cannot tell them apart, so they decide
-    auto& pointers = frame->page()->pointerCaptureController();
-    if (consumed && !protect(frame->document())->hasTouchEventHandlers()
-        && std::ranges::any_of(pointerIds, [&](auto id) { return pointers.preventsCompatibilityMouseEventsForIdentifier(id); }))
-        consumed = false;
     if (!type)
         m_touchStartConsumed = consumed;
     auto flag = [](bool value) { return value ? "true"_s : "false"_s; };
@@ -1418,7 +1410,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     }
     // The pointer of a finger that lifted is gone (its state would stay forever otherwise)
     for (auto id : ended)
-        pointers.touchWithIdentifierWasRemoved(id);
+        frame->page()->pointerCaptureController().touchWithIdentifierWasRemoved(id);
 #else
     UNUSED_PARAM(type);
     UNUSED_PARAM(json);
