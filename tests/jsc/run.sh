@@ -7,11 +7,14 @@ jsc="${1:-$here/../../build/jsc/bin/jsc.js}"
 [ -f "$jsc" ] || { echo "jsc.js not found: $jsc" >&2; exit 1; }
 
 fail=0
+# Second pass with the JIT to WebAssembly (docs/jit.md)
+jit=0
 run() {
     local name="$1"
     shift
+    [ "$jit" = 0 ] || name="$name (jit)"
     local out
-    if out="$(node "$jsc" "$@" 2>&1)" && grep -q "^OK " <<< "$out"; then
+    if out="$(BL_JIT=$jit node "$jsc" "$@" 2>&1)" && grep -q "^OK " <<< "$out"; then
         echo "ok    $name"
     else
         echo "FAIL  $name"
@@ -20,6 +23,7 @@ run() {
     fi
 }
 
+for jit in 0 1; do
 run basics "$here/basics.js"
 run calls "$here/calls.js"
 run resizable "$here/resizable.js"
@@ -30,5 +34,7 @@ run gc-stress "$here/gc-stress.js"
 # Trigger the GC very often (every few allocations)
 run gc-stress-aggressive --slowPathAllocsBetweenGCs=10 "$here/gc-stress.js"
 run gc-stress-collect-continuously --collectContinuously=1 "$here/gc-stress.js"
+run jit "$here/jit.js"
+done
 
 exit $fail

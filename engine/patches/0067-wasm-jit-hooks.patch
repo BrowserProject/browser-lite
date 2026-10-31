@@ -14,6 +14,27 @@ index 86aa580a26..e90fe025b4 100644
  WEBKIT_ADD_TARGET_UNSAFE_BUFFER_WARNINGS(JavaScriptCore)
  
  if (COMPILER_IS_GCC_OR_CLANG)
+diff --git a/Source/JavaScriptCore/bytecode/CodeBlock.cpp b/Source/JavaScriptCore/bytecode/CodeBlock.cpp
+index d7aee01b62..857252ea09 100644
+--- a/Source/JavaScriptCore/bytecode/CodeBlock.cpp
++++ b/Source/JavaScriptCore/bytecode/CodeBlock.cpp
+@@ -70,6 +70,7 @@
+ #include "LLIntData.h"
+ #include "LLIntEntrypoint.h"
+ #include "LLIntExceptions.h"
++#include "LLIntWasmJIT.h"
+ #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
+ #include "MetadataTable.h"
+ #include "ModuleProgramCodeBlock.h"
+@@ -866,6 +867,8 @@ void CodeBlock::setupWithUnlinkedBaselineCode(Ref<BaselineJITCode> jitCode)
+ 
+ CodeBlock::~CodeBlock()
+ {
++    // browser-lite: compiled code of the JIT to WebAssembly (docs/jit.md)
++    LLInt::wasmJITForget(this);
+     auto& cc = checker();
+     if (cc.isEnabled) {
+         RELEASE_ASSERT(cc.get(CrashChecker::This) == cc.hash(this),
 diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 index fbb54faa54..c239a1c9c6 100644
 --- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
@@ -37,10 +58,10 @@ index fbb54faa54..c239a1c9c6 100644
  #endif // ENABLE(JIT)
 diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
 new file mode 100644
-index 0000000000..acf399d874
+index 0000000000..d60ab8e481
 --- /dev/null
 +++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,28 @@
 +/*
 + * browser-lite: the JIT to WebAssembly (engine/jit of browser-lite, docs/jit.md). JavaScriptCore
 + * runs the C loop; these hooks let hot CodeBlocks run as compiled WebAssembly instead.
@@ -63,6 +84,9 @@ index 0000000000..acf399d874
 +
 +// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can.
 +void wasmJITTierUp(VM&, CodeBlock*);
++
++// The CodeBlock goes away (~CodeBlock): its compiled code too.
++void wasmJITForget(CodeBlock*);
 +
 +} // namespace LLInt
 +} // namespace JSC

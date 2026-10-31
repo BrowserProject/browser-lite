@@ -22,6 +22,8 @@ jobs="${BL_JOBS:-$(nproc)}"
 link_flags="-sPROXY_TO_PTHREAD -sEXIT_RUNTIME=1 -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=4MB"
 link_flags+=" -sINITIAL_MEMORY=256MB -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4GB -sPTHREAD_POOL_SIZE=8"
 link_flags+=" -sNODERAWFS=1 -sENVIRONMENT=node,worker"
+# The JIT adds its functions to the table (engine/jit)
+link_flags+=" -sALLOW_TABLE_GROWTH=1"
 # GC roots: JSC looks for live objects conservatively on the stack. It does not see
 # pointers in WASM locals. --spill-pointers writes them to the shadow stack in linear
 # memory before every call, and the GC scans that (see docs/architecture.md).

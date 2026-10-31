@@ -7,4 +7,5 @@ it through `LLIntWasmJIT.h`. Off unless `BL_JIT=1`.
 
 | File | |
 |---|---|
-| `WasmJIT.cpp` | Hooks of the C loop: entry at `op_enter`, tier-up at `llint_replace` |
+| `WasmJIT.cpp` | Hooks of the C loop (entry at `op_enter`, tier-up at `llint_replace`) and the compiler of a `CodeBlock` |
+| `WasmModule.cpp` | Writes the WASM module of one function |

@@ -160,6 +160,8 @@ target_link_options(BrowserLiteEngine PRIVATE
     "SHELL:-sINITIAL_MEMORY=256MB"
     "SHELL:-sALLOW_MEMORY_GROWTH=1"
     "SHELL:-sMAXIMUM_MEMORY=4GB"
+    # The JIT adds its functions to the table (engine/jit)
+    "SHELL:-sALLOW_TABLE_GROWTH=1"
     # The engine runs "forever", main() returns with a live runtime
     "SHELL:-sEXIT_RUNTIME=0"
     "SHELL:-sENVIRONMENT=web,worker,node"

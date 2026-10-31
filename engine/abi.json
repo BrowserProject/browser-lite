@@ -278,6 +278,7 @@
     { "name": "BL_SPARE_WORKERS", "type": "number", "default": "4", "class": "expert", "readBy": "engine/src/EngineConfig.cpp", "doc": "Loaded pthread workers kept in reserve, refilled after a thread takes one." },
     { "name": "BL_MALLOC_CACHE", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0015-wtf-fastmalloc-on-emscripten.patch", "doc": "Size of the FastMalloc cache." },
     { "name": "BL_LLINT_TUNING", "type": "string", "default": "", "class": "expert", "readBy": "engine/patches/0031-jsc-llint-slow-paths-on-wasm.patch", "doc": "Tuning of the LLInt slow paths." },
+    { "name": "BL_JIT", "type": "string", "default": "", "class": "expert", "readBy": "engine/jit/WasmJIT.cpp", "doc": "1 turns on the JIT to WebAssembly (docs/jit.md), off by default while it grows; 2 also logs what it compiles." },
     { "name": "JSC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "JavaScriptCore", "doc": "JSC options, e.g. JSC_useLLIntICs=false." },
     { "name": "FC_*", "type": "pattern", "default": "", "class": "expert", "readBy": "fontconfig", "doc": "fontconfig switches, e.g. FC_DEBUG." }
   ]
