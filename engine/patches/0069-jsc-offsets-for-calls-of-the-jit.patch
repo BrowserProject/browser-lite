@@ -1,0 +1,44 @@
+diff --git a/Source/JavaScriptCore/heap/MarkedSpace.h b/Source/JavaScriptCore/heap/MarkedSpace.h
+index da331de41e..ac51a84e6b 100644
+--- a/Source/JavaScriptCore/heap/MarkedSpace.h
++++ b/Source/JavaScriptCore/heap/MarkedSpace.h
+@@ -155,6 +155,9 @@ public:
+     HeapVersion markingVersion() const { return m_markingVersion; }
+     HeapVersion newlyAllocatedVersion() const { return m_newlyAllocatedVersion; }
+     HeapVersion edenVersion() const { return m_edenVersion; }
++    // browser-lite: for call caches of the JIT to WebAssembly (engine/jit), valid until a GC
++    static constexpr ptrdiff_t offsetOfMarkingVersion() { return OBJECT_OFFSETOF(MarkedSpace, m_markingVersion); }
++    static constexpr ptrdiff_t offsetOfEdenVersion() { return OBJECT_OFFSETOF(MarkedSpace, m_edenVersion); }
+ 
+     void registerPreciseAllocation(PreciseAllocation*, bool isNewAllocation);
+     const Vector<PreciseAllocation*>& preciseAllocations() const LIFETIME_BOUND { return m_preciseAllocations; }
+diff --git a/Source/JavaScriptCore/interpreter/CLoopStack.h b/Source/JavaScriptCore/interpreter/CLoopStack.h
+index 5d04f98578..8b736faa4b 100644
+--- a/Source/JavaScriptCore/interpreter/CLoopStack.h
++++ b/Source/JavaScriptCore/interpreter/CLoopStack.h
+@@ -72,6 +72,8 @@ namespace JSC {
+             return m_currentStackPointer;
+         }
+         void setCurrentStackPointer(void* sp) { m_currentStackPointer = sp; }
++        // browser-lite: for calls of the JIT to WebAssembly (engine/jit)
++        static constexpr ptrdiff_t offsetOfCurrentStackPointer() { return OBJECT_OFFSETOF(CLoopStack, m_currentStackPointer); }
+ 
+         size_t size() const { return highAddress() - lowAddress(); }
+ 
+diff --git a/Source/JavaScriptCore/runtime/StackManager.h b/Source/JavaScriptCore/runtime/StackManager.h
+index 4d094e0f11..51a2bd4ea0 100644
+--- a/Source/JavaScriptCore/runtime/StackManager.h
++++ b/Source/JavaScriptCore/runtime/StackManager.h
+@@ -88,6 +88,12 @@ public:
+     {
+         return OBJECT_OFFSETOF(StackManager, m_cloopStack);
+     }
++
++    // browser-lite: for calls of the JIT to WebAssembly (engine/jit)
++    static constexpr ptrdiff_t offsetOfCLoopStackLimit()
++    {
++        return OBJECT_OFFSETOF(StackManager, m_cloopStackLimit);
++    }
+ #endif
+ 
+     VM& vm();

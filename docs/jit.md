@@ -29,9 +29,12 @@ never baked into the code (the GC resets inline caches).
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
-- **Calls**: to a compiled function directly in the frame the bytecode prepared (moved down for
-  missing arguments, like the interpreter's arity fixup), found through a cache per call site
-  (the callee's executable, valid until the next GC); to a host function like the interpreter;
+- **Calls**: to a compiled function directly in the frame the bytecode prepared, found through a
+  cache per call site (the callee's executable, valid until the next GC): from the compiled code
+  itself (`call_indirect`, the interpreter's stack pointer and limit through the offsets of
+  patch 0069) when there are enough arguments and the stack has room, else from C++ (also moving
+  the frame down for missing arguments, like the interpreter's arity fixup); to a host function
+  like the interpreter;
   else JSC's generic call or construct. Varargs (`apply`, spread) get a frame like the
   interpreter's and then the same call, tail calls are ordinary calls.
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
@@ -48,9 +51,10 @@ never baked into the code (the GC resets inline caches).
 ## Measured
 
 In the `jsc` shell (node), interpreter against compiled: an int32 loop 352 against 28 ms, with
-`%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 37 against 13 ms.
-Octane scores (higher is better): Richards 275 against 662, DeltaBlue 263 against 575, Crypto
-312 against 1560, RayTrace 698 against 1250, NavierStokes 422 against 2435. The TypeScript
+`%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 37 against 11 ms,
+a call 174 against 27 ns. Octane scores (higher is better): Richards 275 against 778, DeltaBlue
+263 against 899, Crypto 312 against 1685, RayTrace 698 against 1278, NavierStokes 422 against
+2671. The TypeScript
 compiler (transpiling 176 KB) gains only about 10 %: its many small calls cost about as much
 through C++ as in the interpreter. In the engine (Chromium, 2026-10-31) Octane ran 2x faster
 (Richards 324 against 671, DeltaBlue 348 against 696, Crypto 646 against 1453, NavierStokes 876
