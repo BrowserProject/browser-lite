@@ -110,6 +110,11 @@ export class ViewImpl implements View {
       module._bl_resize(id, width, height, host.pixelRatio());
     } else {
       this.engineVisible = true;
+      // The first request waits for the new view (seconds on a slow phone): its connection opens
+      // meanwhile
+      const history = options.history;
+      const first = history?.entries?.length ? history.entries[history.index]?.url : options.url;
+      if (first) module._bl_preconnect(host.text(first));
       module._bl_create_view(id, width, height, host.pixelRatio());
     }
     this.updateVisibility();
