@@ -48,11 +48,16 @@ never baked into the code (the GC resets inline caches).
 ## Measured
 
 In the `jsc` shell (node), interpreter against compiled: an int32 loop 352 against 28 ms, with
-`%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 261 against 89 ms.
-Octane scores (higher is better): Richards 275 against 659, DeltaBlue 263 against 581, Crypto
-312 against 1308, RayTrace 713 against 993, NavierStokes 422 against 1943. The TypeScript compiler
-(transpiling 176 KB) gains only about 10 %: its many small calls cost about as much through C++
-as in the interpreter, and V8 runs the many small modules in its baseline tier at first.
+`%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 37 against 13 ms.
+Octane scores (higher is better): Richards 275 against 662, DeltaBlue 263 against 575, Crypto
+312 against 1560, RayTrace 698 against 1250, NavierStokes 422 against 2435. The TypeScript
+compiler (transpiling 176 KB) gains only about 10 %: its many small calls cost about as much
+through C++ as in the interpreter. In the engine (Chromium, 2026-10-31) Octane ran 2x faster
+(Richards 324 against 671, DeltaBlue 348 against 696, Crypto 646 against 1453, NavierStokes 876
+against 1736); page loads take as long as without it (the code of a load runs once). The
+modules of the TypeScript compiler (1772 functions) are 12 MB of WASM; functions with more than
+100 KB of bytecode stay interpreted (YouTube's bundles gave modules of 19 and 102 MB). With
+YouTube open the engine's memory is the same as without the JIT, the renderer about 25 MB more.
 
 ## Phases
 
