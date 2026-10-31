@@ -1,0 +1,15 @@
+diff --git a/Source/JavaScriptCore/offlineasm/cloop.rb b/Source/JavaScriptCore/offlineasm/cloop.rb
+index 3e64e8a44e..07ece841a4 100644
+--- a/Source/JavaScriptCore/offlineasm/cloop.rb
++++ b/Source/JavaScriptCore/offlineasm/cloop.rb
+@@ -759,6 +759,10 @@ class Instruction
+         when "bcd2i"  # operands: srcDbl dstInt slowPath
+             $asm.putc "{ // bcd2i"
+             $asm.putc "    double d = #{operands[0].clValue(:double)};"
++            # browser-lite: int32_t(d) out of the int32 range is undefined behavior, which let
++            # clang drop the check below (5 / 0 became 2147483647)
++            $asm.putc "    if (!(d > -2147483649.0 && d < 2147483648.0)) // also NaN"
++            $asm.putc "        goto  #{operands[2].cLabel};"
+             $asm.putc "    const int32_t asInt32 = int32_t(d);"
+             $asm.putc "    if (asInt32 != d || (!asInt32 && std::signbit(d))) // true for -0.0"
+             $asm.putc "        goto  #{operands[2].cLabel};"

@@ -318,6 +318,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
+- `storage-test.mjs` in Firefox, twice on 2026-10-31: `localStorage` written 400 ms before a crash was
+  gone (its 100 ms timer of the engine thread came later); the test waits 1.5 s now.
 - `profile-test.mjs` (demo) in Firefox, once on 2026-10-31: with the profile server unreachable
   a `localStorage` value written seconds before was gone after the reload (cookies and IndexedDB
   were there); the rerun passed. Its commit log (#302) would only drop it on a base mismatch.
