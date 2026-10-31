@@ -8,6 +8,7 @@
 #include <WebCore/IntSize.h>
 #include <WebCore/LayoutMilestone.h>
 #include <WebCore/PlatformWheelEvent.h>
+#include <WebCore/PointerID.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
 #include <WebCore/Region.h>
 #include <WebCore/WasmPlatform.h>
@@ -130,8 +131,9 @@ public:
     WebCore::IntSize pixelSize() const { return m_pixelSize; }
 
     // Input (coordinates in CSS pixels relative to the view)
-    // tap: the mouse events of a tap, after its pointer events (no second pointerdown)
-    void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0, bool tap = false);
+    // tapPointer: the mouse events of a tap by that touch pointer, after its pointer events (no
+    // second pointerdown, click of type "touch")
+    void mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0, std::optional<WebCore::PointerID> tapPointer = std::nullopt);
     void wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Drag and drop: from the page (DragClient) and from the host (bl_drag,
     // phase 0 = over the page, 1 = left, 2 = drop; data as JSON)

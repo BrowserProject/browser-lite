@@ -72,6 +72,9 @@
 #include <WebCore/PlatformTouchPoint.h>
 #include <WebCore/WasmPlatform.h>
 #include <WebCore/RemoteFrameGeometryTransformer.h>
+#include <WebCore/PointerCaptureController.h>
+#include <WebCore/PointerEvent.h>
+#include <WebCore/PointerEventTypeNames.h>
 #include <WebCore/RenderLayerCompositor.h>
 #include <WebCore/RenderLayerScrollableArea.h>
 #include "RenderListBox.h"
@@ -1021,15 +1024,17 @@ namespace {
 // movementX/Y come from the host (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
-    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, SyntheticClickType clickType)
-        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, clickType, MouseEventInputSource::UserDriven)
+    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt)
+        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
     {
         m_movementDelta = movement;
+        if (tapPointer)
+            m_pointerType = touchPointerEventType();
     }
 };
 }
 
-void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY, bool tap)
+void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY, std::optional<PointerID> tapPointer)
 {
     RefPtr frame = mainFrame();
     if (!frame)
@@ -1057,7 +1062,7 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
 
     DoublePoint position { x, y };
-    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tap ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap };
+    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
 
     auto& handler = frame->eventHandler();
     switch (eventType) {
@@ -1126,7 +1131,7 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
     m_page->dragController().dragEnded();
     if (session.fromPage) {
         // dragend to the source, with the result (dropEffect)
-        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { }, SyntheticClickType::NoTap };
+        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
         frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
     }
 }
@@ -1363,8 +1368,11 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     if (!frame || !array)
         return;
     Vector<PlatformTouchPoint> points;
+    Vector<PointerID> pointerIds;
     TouchActions allowed;
     std::optional<DoublePoint> released;
+    std::optional<PointerID> releasedPointer;
+    Vector<PointerID> ended;
     for (auto& item : *array) {
         auto point = item->asObject();
         if (!point)
@@ -1375,27 +1383,42 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             auto here = touchActionAt(*frame, position);
             allowed = { allowed.panX && here.panX, allowed.panY && here.panY, allowed.pinchZoom && here.pinchZoom };
         }
-        if (state == PlatformTouchPoint::State::TouchReleased)
-            released = position;
         points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
+        pointerIds.append(PointerEvent::pointerIdForTouchPoint(points.last()));
+        if (state == PlatformTouchPoint::State::TouchReleased) {
+            released = position;
+            releasedPointer = pointerIds.last();
+        }
+        if (state == PlatformTouchPoint::State::TouchReleased || state == PlatformTouchPoint::State::TouchCancelled)
+            ended.append(pointerIds.last());
     }
     static constexpr PlatformEvent::Type types[] = { PlatformEvent::Type::TouchStart, PlatformEvent::Type::TouchMove, PlatformEvent::Type::TouchEnd, PlatformEvent::Type::TouchCancel };
     TouchEventWasm event { types[std::clamp(type, 0, 3)], WTF::move(points), modifiersFromBits(modifiers) };
     auto result = frame->eventHandler().handleTouchEvent(event);
     bool consumed = result && *result;
+    // WebCore also takes a pointerdown the page prevented as a handled touch. In browsers that only
+    // drops the compatibility mouse events (mousedown, mouseup): the view still scrolls and a tap
+    // still clicks. With touch listeners it cannot tell them apart, so they decide
+    auto& pointers = frame->page()->pointerCaptureController();
+    if (consumed && !protect(frame->document())->hasTouchEventHandlers()
+        && std::ranges::any_of(pointerIds, [&](auto id) { return pointers.preventsCompatibilityMouseEventsForIdentifier(id); }))
+        consumed = false;
     if (!type)
         m_touchStartConsumed = consumed;
     auto flag = [](bool value) { return value ? "true"_s : "false"_s; };
     notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, flag(consumed),
         ",\"pinch\":"_s, flag(allowed.pinchZoom), ",\"panX\":"_s, flag(allowed.panX), ",\"panY\":"_s, flag(allowed.panY), '}'));
     if (tap && type == 2 && released && !consumed && !std::exchange(m_touchStartConsumed, false)) {
-        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers, 0, 0, true);
-        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers, 0, 0, true);
-        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers, 0, 0, true);
+        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers, 0, 0, releasedPointer);
+        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
+        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
         showPickerOfTappedField(*frame);
     }
+    // The pointer of a finger that lifted is gone (its state would stay forever otherwise)
+    for (auto id : ended)
+        pointers.touchWithIdentifierWasRemoved(id);
 #else
     UNUSED_PARAM(type);
     UNUSED_PARAM(json);

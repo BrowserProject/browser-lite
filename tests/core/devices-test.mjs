@@ -40,6 +40,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
   #files { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
   #date { position: absolute; left: 20px; top: 280px; width: 200px; height: 40px; font-size: 20px; }
+  #pd { position: absolute; left: 20px; top: 360px; width: 200px; height: 40px; }
   #nopan { position: absolute; left: 300px; top: 300px; width: 200px; height: 150px; touch-action: none; }
 </style></head><body>
 <p id="text">This sentence should be selectable with the mouse.</p>
@@ -50,6 +51,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
 <button id="files">Files</button>
 <input id="date" type="date" value="2026-10-30">
 <div id="nopan">No panning</div>
+<div id="pd">Keeps the focus</div>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -74,6 +76,13 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
     cover.addEventListener('click', () => result('tapclick', 'cover'));
     document.body.append(cover);
   }, 0));
+  // Prevents pointerdown (keeps the focus, like many UI libraries): the tap still clicks, only
+  // the compatibility mouse events stay away
+  const pd = document.getElementById('pd');
+  let pdMouseDown = false;
+  pd.addEventListener('pointerdown', (e) => e.preventDefault());
+  pd.addEventListener('mousedown', () => { pdMouseDown = true; });
+  pd.addEventListener('click', () => result('pdclick', 'mousedown ' + pdMouseDown));
   // touch-action: none, the page moves things with pointer events (like a map)
   let nopanMoves = 0;
   const nopan = document.getElementById('nopan');
@@ -415,9 +424,16 @@ await page.touchscreen.tap(...(await at(100, 130)));
 check('touch event (touchstart)', (await result('touchstart', 10000)) === '1');
 const tapPointers = await result('tappointers', 10000);
 check(
-  'tap: one pointerdown, of the touch (pointerdowns/click type)',
-  String(tapPointers).startsWith('touch/'),
+  'tap: one pointerdown of the touch, a click of type touch',
+  tapPointers === 'touch/touch',
   String(tapPointers),
+);
+await page.touchscreen.tap(...(await at(100, 380)));
+const pdClick = await result('pdclick', 10000);
+check(
+  'tap where the page prevents pointerdown: click, no mousedown',
+  pdClick === 'mousedown_false' || pdClick === 'mousedown false',
+  String(pdClick),
 );
 check(
   'tap becomes a click on the tapped element, before the page reacts to the touch',
