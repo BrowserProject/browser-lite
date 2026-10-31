@@ -118,6 +118,7 @@ function rethrow(x) { try { thrower(x); return "no"; } catch (e) { throw new Err
 function withFinally(list) { let r = 0; try { r = list.length; } finally { r += 100; } return r; }
 function nestedTry(x) { try { try { thrower(x); } catch (e) { throw "inner"; } } catch (e) { return e; } return "none"; }
 function catchInLoop(n) { let caught = 0; for (let i = 0; i < n; i++) { try { if (i % 3 === 0) throw i; } catch (e) { caught += e >= 0 ? 1 : 0; } } return caught; }
+function throughMap(n) { return n > 0 ? [n].map((x) => throughMap(x - 1))[0] + 1 : 0; }
 function deepTry(n) { try { return deepTry(n + 1); } catch (e) { return n; } }
 function complement(x) { return ~x; }
 function power(a, b) { return a ** b; }
@@ -393,8 +394,18 @@ for (let round = 0; round < 300; round++) {
     check("nested try", nestedTry(1), "inner");
     check("nested try no throw", nestedTry(0), "none");
     check("catch in loop", catchInLoop(30), 10);
-    if (round === 299)
+    if (round === 299) {
         check("stack overflow caught", deepTry(0) > 100, true);
+        // Through a host function: the machine stack would run out before JSC's limit
+        let viaHost = null;
+        try {
+            throughMap(100000);
+        } catch (e) {
+            viaHost = e;
+        }
+        check("stack overflow through a host function", viaHost instanceof RangeError, true);
+        check("deep through a host function", throughMap(2000), 2000);
+    }
     check("~", complement(5), -6);
     check("~ double", complement(1.5), -2);
     check("**", power(2, 10), 1024);

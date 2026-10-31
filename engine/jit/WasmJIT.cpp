@@ -180,10 +180,48 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
     v(get_private_name) v(put_private_name) v(check_private_brand) v(set_private_brand)
 
 // Compiled code nests on the host's machine stack (every JS call is a WASM call), which is much
-// smaller than the JS stack of the C loop: beyond this depth the interpreter takes the calls,
-// which nest only in the JS stack, until JSC's own limit throws a RangeError
+// smaller than the JS stack of the C loop and which JSC does not see; V8 stopping it halfway
+// leaves the engine broken. Beyond this depth, or with little room left, the interpreter takes
+// the calls, which nest only in the JS stack, until JSC's own limit throws a RangeError.
 constexpr unsigned maximumDepth = 1000;
 thread_local unsigned depth;
+
+// Whether the machine stack has room for about 100 KB more: a WASM recursion with frames of known
+// size (eight values live across each call), which V8 stops with a RangeError where it would not
+// fit, caught right there with nothing of the engine in between
+EM_JS(int, wasmJITStackHasRoom, (), {
+    let probe = globalThis.blJitStackProbe;
+    if (!probe) {
+        const body = [1, 8, 0x7e];
+        for (let k = 1; k <= 8; k++)
+            body.push(0x20, 0, 0xad, 0x42, k, 0x7c, 0x21, k);
+        body.push(0x20, 0, 0x45, 0x04, 0x7f, 0x41, 0, 0x05, 0x20, 0, 0x41, 1, 0x6b, 0x10, 0, 0x0b, 0x20, 1);
+        for (let k = 2; k <= 8; k++)
+            body.push(0x20, k, 0x7c);
+        body.push(0xa7, 0x6a, 0x0b);
+        const code = [1, body.length, ...body];
+        const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 6, 1, 0x60, 1, 0x7f, 1, 0x7f, 3, 2, 1, 0,
+            7, 5, 1, 1, 0x70, 0, 0, 10, code.length, ...code]);
+        probe = globalThis.blJitStackProbe = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.p;
+    }
+    try {
+        probe(1000);
+        return 1;
+    } catch (e) {
+        return 0;
+    }
+});
+
+// Room for one more level of compiled code: shallow nesting cannot run out, deeper the stack is
+// probed every 4 levels
+bool roomForCompiledCode()
+{
+    if (depth >= maximumDepth)
+        return false;
+    if (depth < 64 || (depth & 3))
+        return true;
+    return wasmJITStackHasRoom();
+}
 
 int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
 {
@@ -208,7 +246,7 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
         calleeFrame->setArgumentCountIncludingThis(argumentCount);
     };
 
-    if (callee.isCell() && callee.asCell()->type() == JSFunctionType && depth < maximumDepth && vm.isSafeToRecurseSoft()) {
+    if (callee.isCell() && callee.asCell()->type() == JSFunctionType && vm.isSafeToRecurseSoft() && roomForCompiledCode()) {
         auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
         auto* executable = function->executable();
         auto& space = vm.heap.objectSpace();
@@ -2932,7 +2970,7 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
     if (!enabled())
         return nullptr;
     auto function = compiledFunction(codeBlock);
-    if (!function || depth >= maximumDepth)
+    if (!function || !roomForCompiledCode())
         return nullptr;
     auto status = runCompiled(function, callFrame, 0);
     return status ? exceptionInstructions() : returnInstruction();
@@ -2964,7 +3002,7 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
 {
     wasmJITTierUp(codeBlock);
     auto it = compiledCode().find(codeBlock);
-    if (it == compiledCode().end() || !it->value.function || depth >= maximumDepth)
+    if (it == compiledCode().end() || !it->value.function || !roomForCompiledCode())
         return;
     auto loop = it->value.loops.find(codeBlock->bytecodeOffset(pc) + pc->size());
     if (loop == it->value.loops.end())
