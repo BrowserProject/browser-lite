@@ -234,7 +234,8 @@ const QUICK_PAGE = `<!doctype html><title>Quick</title><script>
   console.log('RESULT quick=' + value + ',' + ((document.cookie.match(/bl_quick=(\\w+)/) || [])[1] || 'empty'));
   console.log('RESULT quickls=' + (localStorage.getItem('quick') || 'empty'));
   // ?put=<value>: overwrites the value, also in localStorage, then waits a little (localStorage
-  // reaches SQLite after a short delay)
+  // reaches SQLite after a 100 ms timer of the engine thread, in Firefox in CI now and then only
+  // after 400 ms)
   const put = new URLSearchParams(location.search).get('put');
   if (put) {
     localStorage.setItem('quick', put);
@@ -243,7 +244,7 @@ const QUICK_PAGE = `<!doctype html><title>Quick</title><script>
       tx.objectStore('w').put(put, 'x');
       tx.oncomplete = tx.onerror = resolve;
     });
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     console.log('RESULT quickput=' + put);
     return;
   }
