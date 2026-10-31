@@ -17,7 +17,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257).
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
-  without wheel events (#314), pointer lock, ctrl + wheel to the page first (#167).
+  without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167).
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258).

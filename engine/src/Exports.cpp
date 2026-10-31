@@ -280,14 +280,14 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
     withInput(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
 }
 
-// A finger scrolls: like bl_wheel without the DOM wheel event (WebView::touchScroll)
-EMSCRIPTEN_KEEPALIVE void bl_touch_scroll(int id, double x, double y, double deltaX, double deltaY)
+// A finger scrolls: a gesture without DOM wheel events (WebView::makeTouchScrollEvent, touchScroll)
+EMSCRIPTEN_KEEPALIVE void bl_touch_scroll(int id, double x, double y, double deltaX, double deltaY, int phase)
 {
-    auto event = WebView::makeWheelEvent(x, y, deltaX, deltaY, 0, 0, 0);
+    auto event = WebView::makeTouchScrollEvent(x, y, deltaX, deltaY, phase);
     if (Compositor::isRunning()) {
         // Pinch zoom the engine thread does not show yet: the finger moves the scaled view
         RefPtr scene = CompositorScene::forView(id);
-        if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) }))
+        if ((phase == 1 || phase == 2) && scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) }))
             return;
         Compositor::dispatch([=] { Scrolling::touchScroll(id, event); });
         return;

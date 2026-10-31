@@ -1,7 +1,7 @@
 import { modifierBits } from '../../input.js';
 import type { ViewImpl } from '../../view.js';
 import type { ServiceContext } from '../service.js';
-import { flingCurve, VelocityTracker } from './fling.js';
+import { VelocityTracker } from './fling.js';
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
@@ -31,6 +31,8 @@ interface Gesture {
   lastX: number;
   lastY: number;
   velocity: VelocityTracker;
+  // The view scrolled with this gesture (bl_touch_scroll phase 1 sent)
+  scrolled: boolean;
   moved: boolean;
   consumed: boolean;
   longPress: boolean;
@@ -64,7 +66,6 @@ function attachTouch(
   const canvas = view.canvas;
   const touches = new Map<number, Point>();
   let gesture: Gesture | null = null;
-  let fling = 0;
   // Two fingers: pinch zoom of the view like Chrome when the page does not take them
   let pinch: { x: number; y: number; distance: number } | null = null;
   // pointerId per touchstart; the answers come in order
@@ -117,12 +118,11 @@ function attachTouch(
     }
   });
 
-  const stopFling = () => {
-    cancelAnimationFrame(fling);
-    fling = 0;
-  };
-  const scrollBy = (x: number, y: number, dx: number, dy: number) =>
-    module._bl_touch_scroll(view.id, x, y, dx, dy);
+  // A scroll gesture for the engine (it flings and snaps itself): 0 the finger is down, 1 the
+  // first move, 2 further moves, 3 lifted with the velocity of the fling (px/s). Every event of a
+  // gesture goes to where it began, so all of it scrolls the same box
+  const touchScroll = (g: Gesture, phase: number, dx = 0, dy = 0) =>
+    module._bl_touch_scroll(view.id, g.startX, g.startY, dx, dy, phase);
   const isTouch = (e: PointerEvent) =>
     e.pointerType === 'touch' || (mouseIsTouch && e.pointerType === 'mouse');
   const options = { capture: true, signal };
@@ -134,7 +134,6 @@ function attachTouch(
       e.preventDefault();
       e.stopImmediatePropagation();
       view.userInput();
-      stopFling();
       canvas.setPointerCapture(e.pointerId);
       const [x, y] = view.position(e);
       touches.set(e.pointerId, { id: e.pointerId, x, y, pinch: false });
@@ -150,6 +149,7 @@ function attachTouch(
           lastX: x,
           lastY: y,
           velocity: new VelocityTracker(),
+          scrolled: false,
           moved: false,
           consumed: false,
           longPress: false,
@@ -163,6 +163,8 @@ function attachTouch(
         }, LONG_PRESS);
         current.velocity.add(e.timeStamp, x, y);
         gesture = current;
+        // A finger on the page stops a fling
+        touchScroll(current, 0);
       } else if (gesture) {
         // Second finger: no click and no scrolling for this gesture
         gesture.consumed = true;
@@ -200,7 +202,10 @@ function attachTouch(
       if (gesture.moved && !gesture.consumed) {
         const dx = gesture.panX ? gesture.lastX - x : 0;
         const dy = gesture.panY ? gesture.lastY - y : 0;
-        if (dx || dy) scrollBy(x, y, dx, dy);
+        if (dx || dy) {
+          touchScroll(gesture, gesture.scrolled ? 2 : 1, dx, dy);
+          gesture.scrolled = true;
+        }
       }
       gesture.velocity.add(e.timeStamp, x, y);
       gesture.lastX = x;
@@ -228,28 +233,15 @@ function attachTouch(
     if (!g) return;
     gesture = null;
     clearTimeout(g.timer);
-    if (cancelled || g.consumed || g.longPress || !g.moved) return;
-    // Momentum: the page goes on against the direction of the finger
-    const finger = g.velocity.release(e.timeStamp, x, y);
-    const curve = flingCurve(performance.now(), {
-      x: g.panX ? -finger.x : 0,
-      y: g.panY ? -finger.y : 0,
-    });
-    const step = (time: number) => {
-      const delta = view.alive ? curve(time) : null;
-      if (!delta) {
-        fling = 0;
-        return;
-      }
-      scrollBy(x, y, delta.x, delta.y);
-      fling = requestAnimationFrame(step);
-    };
-    fling = requestAnimationFrame(step);
+    // The end of the gesture: the page flings on against the direction of the finger, or stays
+    // (at the nearest snap point)
+    const fling = !cancelled && !g.consumed && g.scrolled;
+    const finger = fling ? g.velocity.release(e.timeStamp, x, y) : { x: 0, y: 0 };
+    touchScroll(g, 3, g.panX ? -finger.x * 1000 : 0, g.panY ? -finger.y * 1000 : 0);
   };
   canvas.addEventListener('pointerup', (e) => end(e, false), options);
   canvas.addEventListener('pointercancel', (e) => end(e, true), options);
   signal.addEventListener('abort', () => {
-    stopFling();
     if (gesture) clearTimeout(gesture.timer);
   });
 }

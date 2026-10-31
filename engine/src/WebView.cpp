@@ -1190,6 +1190,50 @@ PlatformWheelEvent WebView::makeWheelEvent(double x, double y, double deltaX, do
         PlatformWheelEventGranularity::ScrollByPixelWheelEvent, !!(modifiers & 1), !!(modifiers & 2), !!(modifiers & 4), !!(modifiers & 8) };
 }
 
+namespace {
+// A scroll gesture with precise deltas like a touchpad's: no snapping while the finger moves, and
+// at its end WebCore either snaps (to the nearest point, or the next one in the direction of a
+// fling) or flings itself (ScrollAnimationKinetic). Like the touch scrolling of WebKitGTK the
+// velocity of the fling goes in the deltas of the event that turns into momentum
+class TouchScrollEvent final : public PlatformWheelEvent {
+public:
+    TouchScrollEvent(double x, double y, double deltaX, double deltaY, int phase)
+        : PlatformWheelEvent(IntPoint { static_cast<int>(x), static_cast<int>(y) }, IntPoint { static_cast<int>(x), static_cast<int>(y) },
+            static_cast<float>(-deltaX), static_cast<float>(-deltaY), 0, 0, PlatformWheelEventGranularity::ScrollByPixelWheelEvent, false, false, false, false)
+    {
+        m_hasPreciseScrollingDeltas = true;
+        switch (phase) {
+        case 0:
+            m_deltaX = m_deltaY = 0;
+            m_phase = PlatformWheelEventPhase::MayBegin;
+            break;
+        case 1:
+            m_phase = PlatformWheelEventPhase::Began;
+            break;
+        case 2:
+            m_phase = PlatformWheelEventPhase::Changed;
+            break;
+        default:
+            // Where a fling of this velocity would end (snap points in its direction), and the velocity
+            m_deltaX = static_cast<float>(-deltaX * flingProjection);
+            m_deltaY = static_cast<float>(-deltaY * flingProjection);
+            m_wheelTicksX = static_cast<float>(deltaX);
+            m_wheelTicksY = static_cast<float>(deltaY);
+            m_momentumPhase = PlatformWheelEventPhase::Began;
+            break;
+        }
+    }
+
+private:
+    static constexpr double flingProjection = 0.325;
+};
+}
+
+PlatformWheelEvent WebView::makeTouchScrollEvent(double x, double y, double deltaX, double deltaY, int phase)
+{
+    return TouchScrollEvent { x, y, deltaX, deltaY, phase };
+}
+
 void WebView::wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers)
 {
     dispatchWheelEvent(makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WheelEventProcessingSteps::SynchronousScrolling, WheelEventProcessingSteps::BlockingDOMEventDispatch });
@@ -1223,7 +1267,8 @@ static bool scrollUnderFinger(LocalFrame& frame, const PlatformWheelEvent& event
     }
     auto delta = event.delta();
     auto scroll = [&](ScrollableArea& area) {
-        bool canScroll = false;
+        // The start of a gesture has no delta (it stops a fling)
+        bool canScroll = delta.isZero();
         for (auto axis : { ScrollEventAxis::Vertical, ScrollEventAxis::Horizontal }) {
             if (auto side = ScrollableArea::targetSideForScrollDelta(-delta, axis); side && !area.isPinnedOnSide(*side))
                 canScroll = true;

@@ -141,6 +141,9 @@ public:
     void hostDrag(int phase, double x, double y, int modifiers, const String& data);
     void cancelDrag();
     static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
+    // A finger scrolls (bl_touch_scroll): phase 0 down, 1 first move, 2 move (DOM deltas), 3 lifted
+    // (deltas: velocity in px/s, 0 without a fling)
+    static WebCore::PlatformWheelEvent makeTouchScrollEvent(double x, double y, double deltaX, double deltaY, int phase);
     // Also from the scrolling thread (ScrollingWasm.cpp), with the steps still missing
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
     // A finger moves: scrolls what is under it without a DOM wheel event (pages that zoom or

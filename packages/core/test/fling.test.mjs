@@ -1,18 +1,7 @@
-// Momentum after swipes: velocity of the finger and the decay of the fling.
+// Velocity of the finger for the fling after a swipe.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { flingCurve, VelocityTracker } from '../dist/services/devices/fling.js';
-
-/** Total distance of a fling at a frame rate (frames every `frame` ms). */
-function distance(velocity, frame) {
-  const curve = flingCurve(0, velocity);
-  let total = 0;
-  for (let t = frame; ; t += frame) {
-    const step = curve(t);
-    if (!step) return total;
-    total += step.y;
-  }
-}
+import { VelocityTracker } from '../dist/services/devices/fling.js';
 
 test('fling: steady swipe, the velocity of the finger', () => {
   const tracker = new VelocityTracker();
@@ -44,12 +33,4 @@ test('fling: at most 8 px/ms', () => {
   tracker.add(0, 0, 0);
   const v = tracker.release(10, 0, 1000);
   assert.ok(Math.abs(v.y - 8) < 1e-9, String(v.y));
-});
-
-test('fling: same distance at any frame rate, about 325 ms of the velocity', () => {
-  const at60 = distance({ x: 0, y: 2 }, 1000 / 60);
-  const at120 = distance({ x: 0, y: 2 }, 1000 / 120);
-  assert.ok(Math.abs(at60 - at120) < 1, `${at60} ${at120}`);
-  assert.ok(at60 > 600 && at60 < 650, String(at60));
-  assert.equal(flingCurve(0, { x: 0, y: 0.001 })(16), null);
 });

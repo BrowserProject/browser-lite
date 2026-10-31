@@ -40,6 +40,8 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
   #files { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
   #date { position: absolute; left: 20px; top: 280px; width: 200px; height: 40px; font-size: 20px; }
+  #snap { position: absolute; left: 20px; top: 470px; width: 300px; height: 100px; display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  #snap div { flex: 0 0 300px; scroll-snap-align: start; }
   #pd { position: absolute; left: 20px; top: 360px; width: 200px; height: 40px; }
   #nopan { position: absolute; left: 300px; top: 300px; width: 200px; height: 150px; touch-action: none; }
 </style></head><body>
@@ -52,6 +54,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
 <input id="date" type="date" value="2026-10-30">
 <div id="nopan">No panning</div>
 <div id="pd">Keeps the focus</div>
+<div id="snap"><div>1</div><div>2</div><div>3</div><div>4</div></div>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -455,17 +458,41 @@ check(
 // 3) Swiping scrolls the page (CDP: drag the finger up)
 if (chromiumOnly('swiping scrolls (CDP Input.dispatchTouchEvent)')) {
   const cdp = await context.newCDPSession(page);
-  const swipe = async (x, y, step) => {
+  // Up by 10 steps (or left with horizontal), then the finger rests for `rest` ms and lifts
+  const swipe = async (x, y, step, { horizontal = false, rest = 0, steps = 10 } = {}) => {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= steps; i++) {
       await cdp.send('Input.dispatchTouchEvent', {
         type: 'touchMove',
-        touchPoints: [{ x, y: y - i * step }],
+        touchPoints: [horizontal ? { x: x - i * step, y } : { x, y: y - i * step }],
       });
       await page.waitForTimeout(16);
     }
+    if (rest) await page.waitForTimeout(rest);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
+  // Scroll snapping: a short drag that rests goes back, a long one or a flick to the next item
+  const snapLeft = async () => {
+    await page.waitForTimeout(1500);
+    await evalPage(
+      page,
+      "console.log('RESULT snapleft=' + document.getElementById('snap').scrollLeft)",
+    );
+    const value = await result('snapleft', 5000);
+    results.delete('snapleft');
+    return Number(value);
+  };
+  await swipe(...(await at(250, 520)), 6, { horizontal: true, rest: 300 });
+  const snapBack = await snapLeft();
+  await swipe(...(await at(250, 520)), 20, { horizontal: true, rest: 300 });
+  const snapNext = await snapLeft();
+  await swipe(...(await at(250, 520)), 12, { horizontal: true, steps: 5 });
+  const snapFlick = await snapLeft();
+  check(
+    'scroll snap under a finger: back after a short drag, the next item after a long drag or a flick',
+    snapBack === 0 && snapNext === 300 && snapFlick === 600,
+    `${snapBack}, ${snapNext}, ${snapFlick}`,
+  );
   await swipe(...(await at(400, 440)), 12);
   const [moves, nopanScroll] = String(await result('nopan', 10000)).split(',');
   check(
