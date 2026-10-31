@@ -317,8 +317,10 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
         auto callData = JSC::getCallData(callee);
         if (callData.type == CallData::Type::Native && vm.isSafeToRecurseSoft()) {
             setUpFrame(nullptr);
+            // The whole frame is in use, its caller and return pc too: a host function that enters
+            // the VM again puts its entry frame below
             auto* previous = vm.cloopStack().currentStackPointer();
-            vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame) + CallerFrameAndPC::sizeInRegisters);
+            vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
             vm.topCallFrame = calleeFrame;
             JSValue result = JSValue::decode(callData.native.function(globalObject, calleeFrame));
             vm.cloopStack().setCurrentStackPointer(previous);

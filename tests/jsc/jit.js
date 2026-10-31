@@ -135,6 +135,10 @@ const badIterable = { [Symbol.iterator]() { return 5; } };
 function sloppyArguments(a) { a = a + 1; return arguments[0] + arguments.length; }
 function sloppyWrite(a) { arguments[0] = 10; return a; }
 class Account { #balance = 0; static #count = 0; deposit(v) { this.#balance += v; Account.#count++; return this.#balance; } #check() { return this.#balance >= 0; } valid() { return this.#check(); } static has(o) { return #balance in o; } }
+// A host function that enters the VM again (a bound Error): the stack walk through compiled frames
+const makeError = Error.bind(null);
+function errorThroughBound(i) { return makeError("x" + i); }
+function stackOf(i) { return errorThroughBound(i).stack; }
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -448,6 +452,8 @@ for (let round = 0; round < 300; round++) {
         privateThrew = e;
     }
     check("private missing", privateThrew instanceof TypeError, true);
+    const trace = stackOf(round);
+    check("stack through a host function", trace.includes("errorThroughBound") && trace.includes("stackOf"), true);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);
