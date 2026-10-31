@@ -50,7 +50,10 @@ iPhone: checkbox, `<select>` (our list), a date field through Safari's calendar 
 the field, then the input in the sheet, pick a day). On Android the tap on a date field opens
 Chrome's date dialog through `showPicker()` (it consumes the activation of the tap; the driver's
 screenshots do not show native dialogs). A file input on the iPhone opens Safari's chooser (photo
-library, camera, files) through the sheet of #312.
+library, camera, files) through the sheet of #312. Also on Android: a DuckDuckGo search, swiping
+on Wikipedia (before #313 one short swipe of the driver flung over 4000 px) and tabs; on the iPhone
+sbb.ch's timetable form (consent, typing into From and To with the suggestions above the keyboard,
+the location prompt of "Current location").
 
 ## State 2026-10-29 (local)
 
