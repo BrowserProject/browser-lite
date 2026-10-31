@@ -59,7 +59,9 @@ NavierStokes 422 against 2508. The TypeScript
 compiler (transpiling 176 KB) runs about 13 % faster: its many small functions are compiled once
 each (V8 compiles a module at its first call) and called a few times. In the engine (Chromium, 2026-10-31) Octane ran 2x faster
 (Richards 324 against 671, DeltaBlue 348 against 696, Crypto 646 against 1453, NavierStokes 876
-against 1736); page loads take as long as without it (the code of a load runs once). The
+against 1736), on an iPhone 16 with iOS 18 (BrowserStack) 3 to 7x (Richards 701 against 2123,
+DeltaBlue 713 against 2072, Crypto 660 against 4658); page loads take as long as without it (the
+code of a load runs once). The
 modules of the TypeScript compiler (1772 functions) are 11.9 MB of WASM; functions with more than
 100 KB of bytecode stay interpreted (YouTube's bundles gave modules of 19 and 102 MB). With
 YouTube open the engine's memory is the same as without the JIT, the renderer about 25 MB more.
