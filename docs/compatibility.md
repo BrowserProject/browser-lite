@@ -57,7 +57,8 @@ the location prompt of "Current location"). On an iPad (Safari reports a Mac) th
 sheet appears as well and opens Safari's calendar popover. Google Maps on the iPhone: the app
 promo, panning; until #314 a swipe that began on its bottom sheet zoomed the map out (the page got
 wheel events). An Amazon search on Android (cookie sheet, search, results). openstreetmap.org
-(Leaflet, pointer events) pans under a finger on both phones since #316.
+(Leaflet, pointer events) pans under a finger on both phones since #316. A scroll-snap carousel
+on Android: a short drag goes back to its item since #319 (before, every move went to the next).
 
 ## State 2026-10-29 (local)
 
