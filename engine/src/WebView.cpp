@@ -73,8 +73,11 @@
 #include <WebCore/WasmPlatform.h>
 #include <WebCore/RemoteFrameGeometryTransformer.h>
 #include <WebCore/RenderLayerCompositor.h>
+#include <WebCore/RenderLayerScrollableArea.h>
+#include "RenderListBox.h"
 #include <WebCore/RenderObjectInlines.h>
 #include <WebCore/RenderView.h>
+#include <WebCore/RenderWidget.h>
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
@@ -1195,6 +1198,56 @@ void WebView::dispatchWheelEvent(const PlatformWheelEvent& event, OptionSet<Whee
     frame->eventHandler().handleWheelEvent(event, steps);
 }
 
+// The scrollable boxes under the point from the inside out, then the frame: the default action
+// of a wheel event (EventHandler::handleWheelEventInAppropriateEnclosingBox), without the event
+static bool scrollUnderFinger(LocalFrame& frame, const PlatformWheelEvent& event)
+{
+    RefPtr view = frame.view();
+    RefPtr document = frame.document();
+    if (!view || !document)
+        return false;
+    DoublePoint position = event.position();
+    HitTestResult result(view->windowToContents(flooredIntPoint(position)));
+    document->hitTest(HitTestRequest(), result);
+    RefPtr node = result.innerNode();
+    if (node && result.isOverWidget()) {
+        if (CheckedPtr widget = dynamicDowncast<RenderWidget>(node->renderer())) {
+            if (RefPtr subframeView = dynamicDowncast<LocalFrameView>(widget->widget()); subframeView && scrollUnderFinger(subframeView->frame(), event))
+                return true;
+        }
+    }
+    auto delta = event.delta();
+    auto scroll = [&](ScrollableArea& area) {
+        bool canScroll = false;
+        for (auto axis : { ScrollEventAxis::Vertical, ScrollEventAxis::Horizontal }) {
+            if (auto side = ScrollableArea::targetSideForScrollDelta(-delta, axis); side && !area.isPinnedOnSide(*side))
+                canScroll = true;
+        }
+        return canScroll && area.handleWheelEventForScrolling(event.copyWithDeltaAndVelocity(delta, { }), std::nullopt);
+    };
+    for (CheckedPtr<RenderBox> box = node && node->renderer() ? &node->renderer()->enclosingBox() : nullptr; box && !box->isRenderView(); box = box->containingBlock()) {
+        ScrollableArea* area = nullptr;
+        if (auto* listBox = dynamicDowncast<RenderListBox>(*box))
+            area = listBox;
+        else if (box->hasLayer())
+            area = box->layer()->scrollableArea();
+        if (!area)
+            continue;
+        if (scroll(*area))
+            return true;
+        delta = area->deltaForPropagation(delta);
+        if (area->shouldBlockScrollPropagation(delta))
+            return true;
+    }
+    return scroll(*view);
+}
+
+void WebView::touchScroll(const PlatformWheelEvent& event)
+{
+    if (RefPtr frame = m_dialogBlocks ? nullptr : mainFrame())
+        scrollUnderFinger(*frame, event);
+}
+
 void WebView::zoomWheelEvent(const PlatformWheelEvent& event, bool cancelable)
 {
     bool consumed = false;
@@ -1246,22 +1299,32 @@ public:
     }
 };
 
-// CSS touch-action at the point: may two fingers zoom the view?
-bool touchActionAllowsPinchZoom(LocalFrame& frame, DoublePoint point)
+// CSS touch-action at the point: what the browser may do with the fingers there (scroll along
+// an axis, zoom the view), the rest is the page's
+struct TouchActions {
+    bool panX { true };
+    bool panY { true };
+    bool pinchZoom { true };
+};
+
+TouchActions touchActionAt(LocalFrame& frame, DoublePoint point)
 {
+    static constexpr TouchActions all;
     RefPtr view = frame.view();
     if (!view)
-        return true;
+        return all;
     auto result = frame.eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(point))), { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::AllowChildFrameContent });
     RefPtr node = result.innerNode();
     CheckedPtr renderer = node ? node->renderer() : nullptr;
     if (!renderer)
-        return true;
+        return all;
     auto touchAction = renderer->style().usedTouchAction();
     if (touchAction.isAuto() || touchAction.isManipulation())
-        return true;
+        return all;
     auto values = touchAction.tryEnumSet();
-    return values && values->contains(Style::TouchActionValue::PinchZoom);
+    if (!values)
+        return { false, false, false };
+    return { values->contains(Style::TouchActionValue::PanX), values->contains(Style::TouchActionValue::PanY), values->contains(Style::TouchActionValue::PinchZoom) };
 }
 }
 #endif
@@ -1300,7 +1363,7 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     if (!frame || !array)
         return;
     Vector<PlatformTouchPoint> points;
-    bool pinchAllowed = true;
+    TouchActions allowed;
     std::optional<DoublePoint> released;
     for (auto& item : *array) {
         auto point = item->asObject();
@@ -1308,8 +1371,10 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             continue;
         auto state = static_cast<PlatformTouchPoint::State>(std::clamp(point->getInteger("state"_s).value_or(0), 0, 4));
         DoublePoint position { point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) };
-        if (state == PlatformTouchPoint::State::TouchPressed)
-            pinchAllowed = pinchAllowed && touchActionAllowsPinchZoom(*frame, position);
+        if (state == PlatformTouchPoint::State::TouchPressed) {
+            auto here = touchActionAt(*frame, position);
+            allowed = { allowed.panX && here.panX, allowed.panY && here.panY, allowed.pinchZoom && here.pinchZoom };
+        }
         if (state == PlatformTouchPoint::State::TouchReleased)
             released = position;
         points.append(TouchPointWasm(point->getInteger("id"_s).value_or(0), state, position,
@@ -1322,8 +1387,9 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     bool consumed = result && *result;
     if (!type)
         m_touchStartConsumed = consumed;
-    notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, consumed ? "true"_s : "false"_s,
-        ",\"pinch\":"_s, pinchAllowed ? "true"_s : "false"_s, '}'));
+    auto flag = [](bool value) { return value ? "true"_s : "false"_s; };
+    notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, flag(consumed),
+        ",\"pinch\":"_s, flag(allowed.pinchZoom), ",\"panX\":"_s, flag(allowed.panX), ",\"panY\":"_s, flag(allowed.panY), '}'));
     if (tap && type == 2 && released && !consumed && !std::exchange(m_touchStartConsumed, false)) {
         mouseEvent(2, -1, released->x(), released->y(), 0, modifiers);
         mouseEvent(0, 0, released->x(), released->y(), 1, modifiers);

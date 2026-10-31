@@ -44,6 +44,10 @@ void stopForView(int viewId);
 // engine thread
 void wheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
 
+// Compositor thread: scrolling by a finger (WebView::touchScroll), on the scrolling thread
+// when it can, never with a DOM event
+void touchScroll(int viewId, const WebCore::PlatformWheelEvent&);
+
 // Any thread: does the page have a wheel listener at that point that can call
 // preventDefault (wheel event regions)? Without a scrolling thread: yes
 bool mayCancelWheelEvent(int viewId, const WebCore::PlatformWheelEvent&);

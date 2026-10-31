@@ -10,6 +10,8 @@ interface TouchResult {
   type: number;
   consumed: boolean;
   pinch: boolean;
+  panX?: boolean;
+  panY?: boolean;
 }
 
 interface Point {
@@ -20,6 +22,10 @@ interface Point {
 }
 
 interface Gesture {
+  pointerId: number;
+  // CSS touch-action where the finger came down: may the view scroll along x, y?
+  panX: boolean;
+  panY: boolean;
   startX: number;
   startY: number;
   lastX: number;
@@ -33,9 +39,10 @@ interface Gesture {
 
 /**
  * Fingers go to the page as touch events. When the page does not take them (preventDefault),
- * a swipe scrolls with momentum, a short tap clicks (the engine, right after the touchend), a long
- * press opens the context menu and two fingers zoom the view, like Chrome. With an emulated touch device the left mouse button is a
- * finger and the mouse without a button moves nothing in the page.
+ * a swipe scrolls with momentum along the axes CSS touch-action allows (without wheel events),
+ * a short tap clicks (the engine, right after the touchend), a long press opens the context
+ * menu and two fingers zoom the view, like Chrome. With an emulated touch device the left mouse
+ * button is a finger and the mouse without a button moves nothing in the page.
  */
 export function installTouch(ctx: ServiceContext): void {
   const results = new WeakMap<ViewImpl, (data: TouchResult) => void>();
@@ -95,8 +102,13 @@ function attachTouch(
 
   results.set(view, (data) => {
     if (data.type === 0) {
-      const touch = touches.get(startsWithoutResult.shift() ?? -1);
+      const pointerId = startsWithoutResult.shift() ?? -1;
+      const touch = touches.get(pointerId);
       if (touch) touch.pinch = data.pinch && !data.consumed;
+      if (gesture?.pointerId === pointerId) {
+        gesture.panX = data.panX !== false;
+        gesture.panY = data.panY !== false;
+      }
       startPinch();
     }
     if (data.consumed) {
@@ -110,7 +122,7 @@ function attachTouch(
     fling = 0;
   };
   const scrollBy = (x: number, y: number, dx: number, dy: number) =>
-    module._bl_wheel(view.id, x, y, dx, dy, 0, 0, 0);
+    module._bl_touch_scroll(view.id, x, y, dx, dy);
   const isTouch = (e: PointerEvent) =>
     e.pointerType === 'touch' || (mouseIsTouch && e.pointerType === 'mouse');
   const options = { capture: true, signal };
@@ -130,6 +142,9 @@ function attachTouch(
       send(0, e.pointerId, 1, e);
       if (touches.size === 1) {
         const current: Gesture = {
+          pointerId: e.pointerId,
+          panX: true,
+          panY: true,
           startX: x,
           startY: y,
           lastX: x,
@@ -183,7 +198,9 @@ function attachTouch(
         clearTimeout(gesture.timer);
       }
       if (gesture.moved && !gesture.consumed) {
-        scrollBy(x, y, gesture.lastX - x, gesture.lastY - y);
+        const dx = gesture.panX ? gesture.lastX - x : 0;
+        const dy = gesture.panY ? gesture.lastY - y : 0;
+        if (dx || dy) scrollBy(x, y, dx, dy);
       }
       gesture.velocity.add(e.timeStamp, x, y);
       gesture.lastX = x;
@@ -214,7 +231,10 @@ function attachTouch(
     if (cancelled || g.consumed || g.longPress || !g.moved) return;
     // Momentum: the page goes on against the direction of the finger
     const finger = g.velocity.release(e.timeStamp, x, y);
-    const curve = flingCurve(performance.now(), { x: -finger.x, y: -finger.y });
+    const curve = flingCurve(performance.now(), {
+      x: g.panX ? -finger.x : 0,
+      y: g.panY ? -finger.y : 0,
+    });
     const step = (time: number) => {
       const delta = view.alive ? curve(time) : null;
       if (!delta) {

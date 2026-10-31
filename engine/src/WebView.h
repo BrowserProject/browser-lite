@@ -140,6 +140,9 @@ public:
     static WebCore::PlatformWheelEvent makeWheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Also from the scrolling thread (ScrollingWasm.cpp), with the steps still missing
     void dispatchWheelEvent(const WebCore::PlatformWheelEvent&, OptionSet<WebCore::WheelEventProcessingSteps>);
+    // A finger moves: scrolls what is under it without a DOM wheel event (pages that zoom or
+    // page on wheel must not see it); from the scrolling thread when it cannot scroll there
+    void touchScroll(const WebCore::PlatformWheelEvent&);
     // Ctrl + wheel: only the DOM event, no scrolling. With cancelable the
     // engine reports "wheel-result", whether the page called preventDefault
     void zoomWheelEvent(const WebCore::PlatformWheelEvent&, bool cancelable);

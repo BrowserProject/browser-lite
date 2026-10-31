@@ -233,6 +233,26 @@ void wheelEvent(int viewId, const PlatformWheelEvent& event)
     });
 }
 
+void touchScroll(int viewId, const PlatformWheelEvent& event)
+{
+    RefPtr tree = treeForView(viewId);
+    auto onEngineThread = [viewId, event] {
+        runOnEngineThread([viewId, event] {
+            if (auto* view = WebView::fromID(viewId))
+                view->touchScroll(event);
+        });
+    };
+    if (!tree) {
+        onEngineThread();
+        return;
+    }
+    tree->willProcessWheelEvent();
+    ScrollingThread::dispatch([tree = WTF::move(tree), viewId, event, onEngineThread] {
+        if (scrollInScrollingThread(viewId, *tree, event, { WheelEventProcessingSteps::AsyncScrolling }).needsMainThreadProcessing())
+            onEngineThread();
+    });
+}
+
 bool displayDidRefresh(int viewId)
 {
     RefPtr<ThreadedScrollingTree> tree;
@@ -301,6 +321,13 @@ void wheelEvent(int viewId, const WebCore::PlatformWheelEvent& event)
     runOnEngineThread([viewId, event] {
         if (auto* view = WebView::fromID(viewId))
             view->dispatchWheelEvent(event, { WebCore::WheelEventProcessingSteps::SynchronousScrolling, WebCore::WheelEventProcessingSteps::BlockingDOMEventDispatch });
+    });
+}
+void touchScroll(int viewId, const WebCore::PlatformWheelEvent& event)
+{
+    runOnEngineThread([viewId, event] {
+        if (auto* view = WebView::fromID(viewId))
+            view->touchScroll(event);
     });
 }
 bool mayCancelWheelEvent(int, const WebCore::PlatformWheelEvent&) { return true; }

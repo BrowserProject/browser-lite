@@ -40,6 +40,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
   #files { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
   #date { position: absolute; left: 20px; top: 280px; width: 200px; height: 40px; font-size: 20px; }
+  #nopan { position: absolute; left: 300px; top: 300px; width: 200px; height: 150px; touch-action: none; }
 </style></head><body>
 <p id="text">This sentence should be selectable with the mouse.</p>
 <div id="tap">Tap</div>
@@ -48,6 +49,7 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
 <button id="speech">Speak</button>
 <button id="files">Files</button>
 <input id="date" type="date" value="2026-10-30">
+<div id="nopan">No panning</div>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.addEventListener('mouseup', () => {
@@ -68,11 +70,20 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
     cover.addEventListener('click', () => result('tapclick', 'cover'));
     document.body.append(cover);
   }, 0));
+  // touch-action: none, the page moves things with pointer events (like a map)
+  let nopanMoves = 0;
+  const nopan = document.getElementById('nopan');
+  nopan.addEventListener('pointermove', () => nopanMoves++);
+  nopan.addEventListener('pointerup', () => setTimeout(() => result('nopan', nopanMoves + ',' + Math.round(scrollY)), 1000));
   let reported = false;
+  // A listener that may cancel: touch scrolling must neither wait for it nor reach it
+  let wheels = 0;
+  window.addEventListener('wheel', () => wheels++, { passive: false });
   window.addEventListener('scroll', () => {
     if (!reported && scrollY > 50) {
       reported = true;
       result('touchscroll', Math.round(scrollY));
+      setTimeout(() => result('touchwheels', wheels), 1000);
     }
   });
   const dark = matchMedia('(prefers-color-scheme: dark)');
@@ -418,21 +429,29 @@ check(
 // 3) Swiping scrolls the page (CDP: drag the finger up)
 if (chromiumOnly('swiping scrolls (CDP Input.dispatchTouchEvent)')) {
   const cdp = await context.newCDPSession(page);
-  const [sx, sy] = await at(600, 500);
-  await cdp.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [{ x: sx, y: sy }],
-  });
-  for (let i = 1; i <= 10; i++) {
-    await cdp.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x: sx, y: sy - i * 30 }],
-    });
-    await page.waitForTimeout(16);
-  }
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const swipe = async (x, y, step) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let i = 1; i <= 10; i++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: y - i * step }],
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await swipe(...(await at(400, 440)), 12);
+  const [moves, nopanScroll] = String(await result('nopan', 10000)).split(',');
+  check(
+    'touch-action: none keeps the view still, the page gets the moves',
+    Number(moves) > 0 && nopanScroll === '0',
+    `${moves} moves, scrollY ${nopanScroll}`,
+  );
+  await swipe(...(await at(600, 500)), 30);
   const touchScroll = await result('touchscroll', 10000);
   check('swiping scrolls', Number(touchScroll) > 50, String(touchScroll));
+  const touchWheels = await result('touchwheels', 5000);
+  check('swiping sends the page no wheel events', touchWheels === '0', String(touchWheels));
   // Let the fling end, then back to the top
   await page.waitForTimeout(2000);
   await page.mouse.move(...(await at(600, 400)));
