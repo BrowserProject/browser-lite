@@ -125,6 +125,11 @@ function hasEach(o) { let n = 0; for (const key in o) if (key in o) n++; return 
 async function awaitValue(v) { return await v; }
 function* counting(n) { for (let i = 0; i < n; i++) yield i; }
 function sumGenerator(n) { let s = 0; const g = counting(n); for (let r = g.next(); !r.done; r = g.next()) s += r.value; return s; }
+function sumOf(iterable) { let s = 0; for (const v of iterable) s += v; return s; }
+function entriesOf(map) { let s = ""; for (const [k, v] of map) s += k + v; return s; }
+function charsOf(text) { let n = 0; for (const c of text) n += c.length; return n; }
+const customIterable = { *[Symbol.iterator]() { yield 1; yield 2; } };
+const badIterable = { [Symbol.iterator]() { return 5; } };
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -379,6 +384,26 @@ for (let round = 0; round < 300; round++) {
     check("for in in", hasEach({ x: 1, y: 2 }), 2);
     check("generator", sumGenerator(5), 10);
     awaitValue(round).then((v) => check("await", v, round));
+    check("for of array", sumOf([1, 2, 3]), 6);
+    check("for of set", sumOf(new Set([4, 5])), 9);
+    check("for of map", entriesOf(new Map([["a", 1], ["b", 2]])), "a1b2");
+    check("for of string", charsOf("h\u{1F600}"), 3);
+    check("for of generator", sumOf(customIterable), 3);
+    check("for of keys", sumOf([5, 6].keys()), 1);
+    let notIterator = null;
+    try {
+        sumOf(badIterable);
+    } catch (e) {
+        notIterator = e;
+    }
+    check("for of not an object", notIterator instanceof TypeError, true);
+    let notIterable = null;
+    try {
+        sumOf(7);
+    } catch (e) {
+        notIterable = e;
+    }
+    check("for of not iterable", notIterable instanceof TypeError, true);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

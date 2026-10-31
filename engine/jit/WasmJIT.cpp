@@ -362,6 +362,112 @@ UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* 
     return encodeResult(pc, callFrame);
 }
 
+// op_iterator_open, op_iterator_next (for of): the interpreter's fast modes (arrays, maps, sets,
+// strings) through its slow paths, else the iteration protocol through JSC's generic call
+using IteratorFastPath = UGPRPair (*)(CallFrame*, const JSInstruction*);
+
+IteratorFastPath byWidth(const JSInstruction* pc, IteratorFastPath narrow, IteratorFastPath wide16, IteratorFastPath wide32)
+{
+    switch (pc->width()) {
+    case OpcodeSize::Narrow: return narrow;
+    case OpcodeSize::Wide16: return wide16;
+    case OpcodeSize::Wide32: return wide32;
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
+// The iteration mode of an iterator fast path's result, or nullopt after an exception
+std::optional<IterationMode> iterationMode(UGPRPair result)
+{
+    const void* next;
+    const void* mode;
+    decodeResult(result, next, mode);
+    if (!next || next == exceptionInstructions())
+        return std::nullopt;
+    return static_cast<IterationMode>(reinterpret_cast<uintptr_t>(mode));
+}
+
+UGPRPair iteratorOpenFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpIteratorOpen>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    auto exception = [&] { return encodeResult(exceptionInstructions(), callFrame); };
+    auto mode = iterationMode(byWidth(pc, iterator_open_try_fast_narrow, iterator_open_try_fast_wide16, iterator_open_try_fast_wide32)(callFrame, pc));
+    if (!mode)
+        return exception();
+    if (*mode != IterationMode::Generic)
+        return encodeResult(pc, callFrame);
+
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    JSValue symbolIterator = callFrame->r(bytecode.m_symbolIterator).jsValue();
+    JSValue iterable = callFrame->r(bytecode.m_iterable).jsValue();
+    auto callData = JSC::getCallData(symbolIterator);
+    if (callData.type == CallData::Type::None) {
+        throwException(globalObject, scope, createNotAFunctionError(globalObject, symbolIterator));
+        return exception();
+    }
+    JSValue iterator = JSC::call(globalObject, symbolIterator, callData, iterable, ArgList());
+    if (scope.exception())
+        return exception();
+    if (!iterator.isObject()) {
+        throwException(globalObject, scope, createTypeError(globalObject, "Iterator result interface is not an object."_s));
+        return exception();
+    }
+    callFrame->uncheckedR(bytecode.m_iterator) = iterator;
+    JSValue next = iterator.get(globalObject, vm.propertyNames->next);
+    if (scope.exception())
+        return exception();
+    callFrame->uncheckedR(bytecode.m_next) = next;
+    return encodeResult(pc, callFrame);
+}
+
+UGPRPair iteratorNextFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<OpIteratorNext>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    auto exception = [&] { return encodeResult(exceptionInstructions(), callFrame); };
+    JSValue next = callFrame->r(bytecode.m_next).jsValue();
+    if (next.isCell() && next.asCell()->type() == SentinelType) {
+        if (!iterationMode(byWidth(pc, iterator_next_try_fast_narrow, iterator_next_try_fast_wide16, iterator_next_try_fast_wide32)(callFrame, pc)))
+            return exception();
+        return encodeResult(pc, callFrame);
+    }
+
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+    JSValue iterator = callFrame->r(bytecode.m_iterator).jsValue();
+    auto callData = JSC::getCallData(next);
+    if (callData.type == CallData::Type::None) {
+        throwException(globalObject, scope, createNotAFunctionError(globalObject, next));
+        return exception();
+    }
+    JSValue result = JSC::call(globalObject, next, callData, iterator, ArgList());
+    if (scope.exception())
+        return exception();
+    if (!result.isObject()) {
+        throwException(globalObject, scope, createTypeError(globalObject, "Iterator result interface is not an object."_s));
+        return exception();
+    }
+    JSValue done = result.get(globalObject, vm.propertyNames->done);
+    if (scope.exception())
+        return exception();
+    callFrame->uncheckedR(bytecode.m_done) = done;
+    if (!done.toBoolean(globalObject)) {
+        JSValue value = result.get(globalObject, vm.propertyNames->value);
+        if (scope.exception())
+            return exception();
+        callFrame->uncheckedR(bytecode.m_value) = value;
+    }
+    return encodeResult(pc, callFrame);
+}
+
 bool equalsNull(CodeBlock* codeBlock, JSValue value)
 {
     return value.isUndefinedOrNull() || (value.isCell() && value.asCell()->structure()->masqueradesAsUndefined(codeBlock->globalObject()));
@@ -2255,7 +2361,7 @@ bool Compiler::scan()
         case op_eq_null: case op_neq_null: case op_nop: case op_check_tdz: case op_get_scope: case op_is_empty:
         case op_is_undefined_or_null: case op_is_boolean: case op_is_number: case op_is_cell_with_type:
         case op_is_object: case op_typeof_is_undefined: case op_catch: case op_bitnot: case op_get_parent_scope:
-        case op_get_internal_field: case op_put_internal_field:
+        case op_get_internal_field: case op_put_internal_field: case op_iterator_open: case op_iterator_next:
 #define BL_JIT_CASE(name) case op_##name:
         BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
         BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
@@ -2597,6 +2703,8 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpConstructVarargs>, instruction); return;
     case op_super_construct_varargs: callSlowPath(callVarargsFromCompiledCode<OpSuperConstructVarargs>, instruction); return;
     case op_catch: callSlowPath(catchFromCompiledCode, instruction); return;
+    case op_iterator_open: callSlowPath(iteratorOpenFromCompiledCode, instruction); return;
+    case op_iterator_next: callSlowPath(iteratorNextFromCompiledCode, instruction); return;
     case op_eq_null: callSlowPath(equalsNullFromCompiledCode<OpEqNull>, instruction); return;
     case op_neq_null: callSlowPath(equalsNullFromCompiledCode<OpNeqNull>, instruction); return;
     case op_jeq_null: emitJumpIfNull<OpJeqNull>(instruction, block); return;
