@@ -1,6 +1,7 @@
 import { modifierBits } from '../../input.js';
 import type { ViewImpl } from '../../view.js';
 import type { ServiceContext } from '../service.js';
+import { flingCurve, VelocityTracker } from './fling.js';
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
@@ -23,9 +24,7 @@ interface Gesture {
   startY: number;
   lastX: number;
   lastY: number;
-  lastTime: number;
-  velocityX: number;
-  velocityY: number;
+  velocity: VelocityTracker;
   moved: boolean;
   consumed: boolean;
   longPress: boolean;
@@ -135,9 +134,7 @@ function attachTouch(
           startY: y,
           lastX: x,
           lastY: y,
-          lastTime: e.timeStamp,
-          velocityX: 0,
-          velocityY: 0,
+          velocity: new VelocityTracker(),
           moved: false,
           consumed: false,
           longPress: false,
@@ -149,6 +146,7 @@ function attachTouch(
             module._bl_context_menu(view.id, x, y);
           }
         }, LONG_PRESS);
+        current.velocity.add(e.timeStamp, x, y);
         gesture = current;
       } else if (gesture) {
         // Second finger: no click and no scrolling for this gesture
@@ -185,16 +183,11 @@ function attachTouch(
         clearTimeout(gesture.timer);
       }
       if (gesture.moved && !gesture.consumed) {
-        const dx = gesture.lastX - x;
-        const dy = gesture.lastY - y;
-        const dt = Math.max(1, e.timeStamp - gesture.lastTime);
-        gesture.velocityX = 0.8 * (dx / dt) + 0.2 * gesture.velocityX;
-        gesture.velocityY = 0.8 * (dy / dt) + 0.2 * gesture.velocityY;
-        scrollBy(x, y, dx, dy);
+        scrollBy(x, y, gesture.lastX - x, gesture.lastY - y);
       }
+      gesture.velocity.add(e.timeStamp, x, y);
       gesture.lastX = x;
       gesture.lastY = y;
-      gesture.lastTime = e.timeStamp;
     },
     options,
   );
@@ -219,20 +212,19 @@ function attachTouch(
     gesture = null;
     clearTimeout(g.timer);
     if (cancelled || g.consumed || g.longPress || !g.moved) return;
-    // Momentum: let the velocity decay slowly
-    let vx = g.velocityX * 16;
-    let vy = g.velocityY * 16;
-    const step = () => {
-      vx *= 0.95;
-      vy *= 0.95;
-      if ((Math.abs(vx) < 0.5 && Math.abs(vy) < 0.5) || !view.alive) {
+    // Momentum: the page goes on against the direction of the finger
+    const finger = g.velocity.release(e.timeStamp, x, y);
+    const curve = flingCurve(performance.now(), { x: -finger.x, y: -finger.y });
+    const step = (time: number) => {
+      const delta = view.alive ? curve(time) : null;
+      if (!delta) {
         fling = 0;
         return;
       }
-      scrollBy(x, y, vx, vy);
+      scrollBy(x, y, delta.x, delta.y);
       fling = requestAnimationFrame(step);
     };
-    if (Math.hypot(vx, vy) > 2) fling = requestAnimationFrame(step);
+    fling = requestAnimationFrame(step);
   };
   canvas.addEventListener('pointerup', (e) => end(e, false), options);
   canvas.addEventListener('pointercancel', (e) => end(e, true), options);
