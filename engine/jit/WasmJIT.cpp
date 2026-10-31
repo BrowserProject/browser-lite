@@ -120,13 +120,22 @@ EM_JS(uint32_t, wasmJITInstall, (const uint8_t* bytes, uint32_t size, int dump),
             require('fs').writeFileSync('jit-' + wasmTable.length + '.wasm', code);
         const module = new WebAssembly.Module(code);
         const instance = new WebAssembly.Instance(module, { env: { memory: wasmMemory, table: wasmTable } });
-        const index = wasmTable.grow(1);
+        // Slots of functions that went away first (tables are per thread, so is this list)
+        const free = globalThis.blJitFreeSlots;
+        const index = free && free.length ? free.pop() : wasmTable.grow(1);
         wasmTable.set(index, instance.exports.f);
         return index;
     } catch (e) {
         err('[jit] ' + e);
         return 0;
     }
+});
+
+// The function's CodeBlock went away: its table slot no longer holds the module, which V8 then
+// collects, and serves the next function
+EM_JS(void, wasmJITRelease, (uint32_t index), {
+    wasmTable.set(index, null);
+    (globalThis.blJitFreeSlots ||= []).push(index);
 });
 
 using CompiledFunction = int32_t (*)(CallFrame*, uint32_t block);
@@ -2986,7 +2995,12 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
 
 void wasmJITForget(CodeBlock* codeBlock)
 {
-    compiledCode().remove(codeBlock);
+    auto it = compiledCode().find(codeBlock);
+    if (it == compiledCode().end())
+        return;
+    if (it->value.function)
+        wasmJITRelease(it->value.function);
+    compiledCode().remove(it);
 }
 
 } // namespace JSC::LLInt

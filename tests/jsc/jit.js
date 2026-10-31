@@ -151,6 +151,16 @@ let expectedCalls = 0;
 for (let i = 0; i < loops; i++)
     expectedCalls += (i + 3) & 7;
 check("loop entry calls", longLoopCalls(loops), expectedCalls);
+// Compiled functions that die: their table slots serve the next ones
+for (let i = 0; i < 300; i++) {
+    const f = new Function("x", "return x * 2 + " + i);
+    let s = 0;
+    for (let k = 0; k < 300; k++)
+        s += f(k);
+    check("short-lived " + i, s, 300 * 299 + 300 * i);
+    if (i % 50 === 49)
+        gc();
+}
 const proto = {};
 const child = Object.create(proto);
 const counter = makeCounter();
