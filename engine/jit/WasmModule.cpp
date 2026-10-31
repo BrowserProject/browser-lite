@@ -68,12 +68,14 @@ void FunctionBody::f64Load(uint32_t offset) { m_code.push_back(0x2b); m_code.pus
 void FunctionBody::f64Store(uint32_t offset) { m_code.push_back(0x39); m_code.push_back(3); unsignedLEB(m_code, offset); }
 
 void FunctionBody::op(uint8_t opcode) { m_code.push_back(opcode); }
+void FunctionBody::prefixedOp(uint8_t opcode) { m_code.push_back(0xfc); unsignedLEB(m_code, opcode); }
+void FunctionBody::select() { m_code.push_back(0x1b); }
 // Blocks without results (empty block type 0x40)
-void FunctionBody::block() { m_code.push_back(0x02); m_code.push_back(0x40); }
-void FunctionBody::loop() { m_code.push_back(0x03); m_code.push_back(0x40); }
-void FunctionBody::ifThen() { m_code.push_back(0x04); m_code.push_back(0x40); }
+void FunctionBody::block() { m_code.push_back(0x02); m_code.push_back(0x40); ++m_depth; }
+void FunctionBody::loop() { m_code.push_back(0x03); m_code.push_back(0x40); ++m_depth; }
+void FunctionBody::ifThen() { m_code.push_back(0x04); m_code.push_back(0x40); ++m_depth; }
 void FunctionBody::elseThen() { m_code.push_back(0x05); }
-void FunctionBody::end() { m_code.push_back(0x0b); }
+void FunctionBody::end() { m_code.push_back(0x0b); --m_depth; }
 void FunctionBody::br(uint32_t depth) { m_code.push_back(0x0c); unsignedLEB(m_code, depth); }
 void FunctionBody::brIf(uint32_t depth) { m_code.push_back(0x0d); unsignedLEB(m_code, depth); }
 

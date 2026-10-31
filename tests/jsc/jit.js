@@ -57,7 +57,78 @@ function isNullish(x) { return x == null; }
 function secondArgument() { return arguments[1]; }
 let captured = 0;
 function closure() { captured++; return captured; }
+// The interpreter's other fast paths: doubles, arrays, transitions, prototypes, scopes, switch
+function addition(a, b) { return a + b; }
+function product(a, b) { return a * b; }
+function quotient(a, b) { return a / b; }
+function lessThan(a, b) { return a < b; }
+function jumpLess(a, b) { if (a < b) return 1; return 0; }
+function jumpNotLess(a, b) { if (!(a < b)) return 1; return 0; }
+function strictEqual(a, b) { return a === b; }
+function looseEqual(a, b) { return a == b; }
+function jumpStrictEqual(a, b) { if (a === b) return "y"; return "n"; }
+function negative(a) { return -a; }
+function not(a) { return !a; }
+function shiftLeft(a, b) { return a << b; }
+function shiftRight(a, b) { return a >> b; }
+function shiftUnsigned(a, b) { return a >>> b; }
+function plus(a) { return +a; }
+function truthy(a) { if (a) return 1; return 0; }
+function sumAll(list) { let s = 0; for (let i = 0; i < list.length; i++) s += list[i]; return s; }
+function setAt(list, i, v) { list[i] = v; return list; }
+function literalFirst() { const list = [1, 2, 3]; list[0] = 9; return list[0] + [1, 2, 3][0]; }
+function lengthOf(x) { return x.length; }
+class Animal { constructor(name) { this.name = name; } speak() { return "I am " + this.name; } }
+function speak(a) { return a.speak(); }
+function maybe(o) { return o.later; }
+function Pair(a, b) { this.a = a; this.b = b; }
+function pairB(x) { return new Pair(x, x).b; }
+let globalCount = 0;
+function incrementGlobal() { globalCount++; return globalCount; }
+var globalVariable = 0;
+function setGlobalVariable(v) { globalVariable = v; return globalVariable; }
+const constant = 1;
+function setConstant() { constant = 2; }
+function kindOfThis() { return typeof this; }
+function number(x) { switch (x) { case 1: return "one"; case 2: return "two"; case 5: return "five"; default: return "other"; } }
+function character(c) { switch (c) { case "a": return 1; case "b": return 2; default: return 0; } }
+function word(w) { switch (w) { case "hello": return 1; case "world": return 2; default: return 0; } }
+function sumArguments() { let s = 0; for (let i = 0; i < arguments.length; i++) s += arguments[i]; return s; }
+function applyAll(list) { return sumArguments.apply(null, list); }
+function spreadAll(list) { return sumArguments(...list); }
+function constructSpread(list) { return new Point(...list).x; }
+function tailSum(n, total) { "use strict"; if (n === 0) return total; return tailSum(n - 1, total + n); }
+class Base { constructor(x) { this.x = x; } }
+class Derived extends Base { constructor(x) { super(x); this.y = 2; } }
+function derivedSum(x) { const d = new Derived(x); return d.x + d.y; }
+function Replaced() { this.a = 1; return { b: 2 }; }
+function replacedB() { return new Replaced().b; }
+function Target() { this.ok = new.target === Target; }
+function targetOk() { return new Target().ok; }
+function isUndefined(x) { return typeof x === "undefined"; }
+function isString(x) { return typeof x === "string"; }
+function jumpNull(x) { if (x == null) return "null"; return "value"; }
+function beforeInit(early) { if (early) return read(); let v = 1; function read() { return v; } return read(); }
+// Loops that get hot while running: the rest of the call runs compiled
+function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
+function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
+function longLoopCalls(n) { let s = 0; for (let i = 0; i < n; i++) s += add3(i, 1, 2) & 7; return s; }
 
+const loops = 200000;
+check("loop entry", longLoop(loops), (3 * loops * (loops - 1) / 2) % 1000003);
+let loopThrew = null;
+try {
+    longLoopThrows(loops);
+} catch (e) {
+    loopThrew = e;
+}
+check("loop entry throws", loopThrew && loopThrew.message, "end");
+let expectedCalls = 0;
+for (let i = 0; i < loops; i++)
+    expectedCalls += (i + 3) & 7;
+check("loop entry calls", longLoopCalls(loops), expectedCalls);
+const proto = {};
+const child = Object.create(proto);
 const counter = makeCounter();
 let tdz = null;
 try {
@@ -126,6 +197,142 @@ for (let round = 0; round < 300; round++) {
     check("== null object", isNullish({}), false);
     check("missing argument", secondArgument(1), undefined);
     check("argument", secondArgument(1, 2), 2);
+    check("double add", addition(0.1, 0.2), 0.30000000000000004);
+    check("int and double", addition(1, 0.5), 1.5);
+    check("add overflow", addition(2147483647, 2147483647), 4294967294);
+    check("add strings", addition("a", 1), "a1");
+    check("mul overflow", product(65536, 65536), 4294967296);
+    check("mul -0 double", product(-0, 5), -0);
+    check("mul doubles", product(1.5, -2), -3);
+    check("div int", quotient(6, 3), 2);
+    check("div fraction", quotient(1, 4), 0.25);
+    check("div -0", quotient(-0, 5), -0);
+    check("div by -", quotient(0, -5), -0);
+    check("div by 0", quotient(5, 0), Infinity);
+    check("div 0 by 0", quotient(0, 0), NaN);
+    check("div min", quotient(-2147483648, -1), 2147483648);
+    check("div string", quotient("9", 3), 3);
+    check("< doubles", lessThan(1.5, 2), true);
+    check("< NaN", lessThan(NaN, 1), false);
+    check("< mixed", lessThan(2, 2.5), true);
+    check("< strings", lessThan("a", "b"), true);
+    check("jless NaN", jumpLess(1, NaN), 0);
+    check("jless double", jumpLess(-0.5, 0), 1);
+    check("jnless NaN", jumpNotLess(NaN, 1), 1);
+    check("jnless double", jumpNotLess(0.5, 0.25), 1);
+    check("=== strings", strictEqual("ab", "a" + "b"), true);
+    check("=== objects", strictEqual(o, o), true);
+    check("=== other objects", strictEqual(o, {}), false);
+    check("=== int double", strictEqual(1, 1.0), true);
+    check("=== -0", strictEqual(0, -0), true);
+    check("=== NaN", strictEqual(NaN, NaN), false);
+    check("=== null undefined", strictEqual(null, undefined), false);
+    check("=== string number", strictEqual("1", 1), false);
+    check("=== booleans", strictEqual(true, true), true);
+    check("== null undefined", looseEqual(null, undefined), true);
+    check("== string number", looseEqual("1", 1), true);
+    check("== doubles", looseEqual(1, 1.5), false);
+    check("== objects", looseEqual(o, o), true);
+    check("jstricteq", jumpStrictEqual("x", "x"), "y");
+    check("jstricteq no", jumpStrictEqual(1, 2), "n");
+    check("negate", negative(5), -5);
+    check("negate 0", negative(0), -0);
+    check("negate min", negative(-2147483648), 2147483648);
+    check("negate double", negative(1.5), -1.5);
+    check("negate string", negative("3"), -3);
+    check("not", not(true), false);
+    check("not 0", not(0), true);
+    check("not string", not(""), true);
+    check("<<", shiftLeft(1, 33), 2);
+    check(">>", shiftRight(-8, 1), -4);
+    check(">>> big", shiftUnsigned(-1, 0), 4294967295);
+    check(">>> small", shiftUnsigned(8, 1), 4);
+    check("to number", plus("5"), 5);
+    check("to number double", plus(2.5), 2.5);
+    check("truthy object", truthy({}), 1);
+    check("truthy undefined", truthy(undefined), 0);
+    check("truthy null", truthy(null), 0);
+    check("truthy string", truthy("x"), 1);
+    check("truthy empty string", truthy(""), 0);
+    check("truthy double", truthy(0.5), 1);
+    check("truthy NaN", truthy(NaN), 0);
+    check("int array", sumAll([1, 2, 3]), 6);
+    check("double array", sumAll([1.5, 2.5]), 4);
+    check("contiguous array", sumAll([1, "x"]), "1x");
+    check("holes", sumAll([1, , 3]), NaN);
+    check("typed array", sumAll(new Float64Array([0.5, 0.25])), 0.75);
+    check("arguments", sumAll((function () { return arguments; })(4, 5)), 9);
+    check("put int", setAt([1, 2, 3], 1, 7)[1], 7);
+    check("put double into ints", setAt([1, 2, 3], 1, 2.5)[1], 2.5);
+    check("put int into doubles", setAt([1.5, 2.5], 0, 3)[0], 3);
+    check("put NaN into doubles", setAt([1.5, 2.5], 0, NaN)[0], NaN);
+    check("put object into ints", setAt([1, 2], 0, o)[0], o);
+    check("put extends", setAt([1, 2], 2, 3).length, 3);
+    check("put far", setAt([1, 2], 50, 3).length, 51);
+    check("put on object", setAt({}, 0, "z")[0], "z");
+    check("put negative index", setAt([], -1, "n")[-1], "n");
+    check("copy on write", literalFirst(), 10);
+    check("array length", lengthOf([1, 2, 3]), 3);
+    check("string length", lengthOf("abcd"), 4);
+    check("length property", lengthOf({ length: "own" }), "own");
+    check("prototype method", speak(new Animal("cat")), "I am cat");
+    if (round === 150)
+        proto.later = 5;
+    check("unset", maybe(child), round >= 150 ? 5 : undefined);
+    if (round === 150)
+        Object.defineProperty(Pair.prototype, "b", { set(v) { this.doubled = v * 2; }, get() { return this.doubled; } });
+    check("transition", pairB(round), round >= 150 ? round * 2 : round);
+    check("global let write", incrementGlobal(), round + 1);
+    check("global var write", setGlobalVariable(round), round);
+    let constThrew = null;
+    try {
+        setConstant();
+    } catch (e) {
+        constThrew = e;
+    }
+    check("const write", constThrew instanceof TypeError, true);
+    check("this of a primitive", kindOfThis.call(1), "object");
+    check("this of an object", kindOfThis.call(o), "object");
+    check("switch", number(2), "two");
+    check("switch default", number(3), "other");
+    check("switch double", number(5.0), "five");
+    check("switch fraction", number(1.5), "other");
+    check("switch string", number("1"), "other");
+    check("switch char", character("b"), 2);
+    check("switch char long", character("ab"), 0);
+    check("switch char other", character(1), 0);
+    check("switch string", word("world"), 2);
+    check("switch string other", word("x"), 0);
+    check("apply", applyAll([1, 2, 3]), 6);
+    check("apply empty", applyAll(undefined), 0);
+    let applyThrew = null;
+    try {
+        applyAll(5);
+    } catch (e) {
+        applyThrew = e;
+    }
+    check("apply not array-like", applyThrew instanceof TypeError, true);
+    check("spread", spreadAll([4, 5]), 9);
+    check("construct spread", constructSpread([round]), round);
+    check("tail call", tailSum(100, 0), 5050);
+    check("derived", derivedSum(round), round + 2);
+    check("constructor returns object", replacedB(), 2);
+    check("new.target", targetOk(), true);
+    check("typeof undefined", isUndefined(undefined), true);
+    check("typeof undefined object", isUndefined({}), false);
+    check("typeof string", isString("s"), true);
+    check("typeof not string", isString(1), false);
+    check("jeq null", jumpNull(null), "null");
+    check("jeq undefined", jumpNull(undefined), "null");
+    check("jeq value", jumpNull(0), "value");
+    check("initialized", beforeInit(false), 1);
+    let early = null;
+    try {
+        beforeInit(true);
+    } catch (e) {
+        early = e;
+    }
+    check("before initialization", early instanceof ReferenceError, true);
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

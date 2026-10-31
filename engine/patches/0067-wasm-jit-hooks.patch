@@ -36,7 +36,7 @@ index d7aee01b62..857252ea09 100644
      if (cc.isEnabled) {
          RELEASE_ASSERT(cc.get(CrashChecker::This) == cc.hash(this),
 diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
-index fbb54faa54..981a5799e2 100644
+index fbb54faa54..4aae8c17b4 100644
 --- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 +++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
 @@ -62,6 +62,7 @@
@@ -47,30 +47,33 @@ index fbb54faa54..981a5799e2 100644
  #include "LLIntPrototypeLoadAdaptiveStructureWatchpoint.h"
  #include "LLIntThunks.h"
  #include "MaxFrameExtentForSlowPathCall.h"
-@@ -513,6 +514,8 @@ LLINT_SLOW_PATH_DECL(loop_osr)
+@@ -512,8 +513,8 @@ LLINT_SLOW_PATH_DECL(loop_osr)
+     
      LLINT_RETURN_TWO(jumpTarget, callFrame->topOfFrame());
  #else // ENABLE(JIT)
-     UNUSED_PARAM(pc);
-+    // browser-lite: the JIT to WebAssembly (docs/jit.md), for the next call of the function
-+    wasmJITTierUp(vm, codeBlock);
-     codeBlock->dontJITAnytimeSoon();
+-    UNUSED_PARAM(pc);
+-    codeBlock->dontJITAnytimeSoon();
++    // browser-lite: the JIT to WebAssembly (docs/jit.md), from this loop on
++    wasmJITLoop(callFrame, codeBlock, pc);
      LLINT_RETURN_TWO(0, 0);
  #endif // ENABLE(JIT)
-@@ -535,6 +538,8 @@ LLINT_SLOW_PATH_DECL(replace)
+ }
+@@ -535,7 +536,8 @@ LLINT_SLOW_PATH_DECL(replace)
          codeBlock->dontJITAnytimeSoon();
      LLINT_END_IMPL();
  #else // ENABLE(JIT)
+-    codeBlock->dontJITAnytimeSoon();
 +    // browser-lite: the JIT to WebAssembly (docs/jit.md)
-+    wasmJITTierUp(vm, codeBlock);
-     codeBlock->dontJITAnytimeSoon();
++    wasmJITTierUp(codeBlock);
      LLINT_END_IMPL();
  #endif // ENABLE(JIT)
+ }
 diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
 new file mode 100644
-index 0000000000..d60ab8e481
+index 0000000000..d5a535115d
 --- /dev/null
 +++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,33 @@
 +/*
 + * browser-lite: the JIT to WebAssembly (engine/jit of browser-lite, docs/jit.md). JavaScriptCore
 + * runs the C loop; these hooks let hot CodeBlocks run as compiled WebAssembly instead.
@@ -83,7 +86,6 @@ index 0000000000..d60ab8e481
 +
 +class CallFrame;
 +class CodeBlock;
-+class VM;
 +
 +namespace LLInt {
 +
@@ -91,8 +93,14 @@ index 0000000000..d60ab8e481
 +// instruction to go on with (an op_ret, or the exception instructions), nullptr to interpret.
 +const JSInstruction* wasmJITEnter(CallFrame*, CodeBlock*);
 +
-+// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can.
-+void wasmJITTierUp(VM&, CodeBlock*);
++// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can, and stops the
++// interpreter's counter.
++void wasmJITTierUp(CodeBlock*);
++
++// A loop of the CodeBlock got hot (llint_loop_osr at the op_loop_hint `pc`): tiers up, then runs
++// the rest of the function compiled from that loop and points the frame's bytecode offset (which
++// the C loop reloads) at the instruction to go on with.
++void wasmJITLoop(CallFrame*, CodeBlock*, const JSInstruction* pc);
 +
 +// The CodeBlock goes away (~CodeBlock): its compiled code too.
 +void wasmJITForget(CodeBlock*);

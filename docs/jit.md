@@ -17,18 +17,23 @@ never baked into the code (the GC resets inline caches).
 
 - **Install**: the compiler writes a module that imports the engine's memory and function table,
   compiles it synchronously in its thread (`new WebAssembly.Module`, about 0.1 ms for a small
-  one), adds its export to that thread's table (tables are per thread) and keeps the index in the
-  `CodeBlock`'s own `JITCode`.
-- **Entry**: a new glue label of the C loop (`llint_wasmjit_entry`) becomes the `CodeBlock`'s
-  call address: prologue, then the compiled function `(cfr, entry) -> status`, then return or the
-  interpreter's throw trampoline. Loops enter the same way from `op_loop_hint` with the index of
-  the loop.
+  one) and adds its export to that thread's table (tables are per thread); a map of the thread
+  keeps the index by `CodeBlock`.
+- **Entry**: the compiled function is `(cfr, block) -> status` and starts at a basic block.
+  `slow_path_enter` runs it from the first block and hands the C loop an `op_ret` of the `this`
+  slot, where compiled code leaves the return value. A hot loop (`llint_loop_osr`) compiles the
+  function and runs the rest of the call from the block after its `op_loop_hint`, then points the
+  frame's bytecode offset (which the C loop reloads) at that `op_ret`.
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
   `llint_loop_osr` at loops) call the compiler instead of giving up.
-- **Calls**: compiled to compiled is a direct WASM call; to an interpreted function through the
-  interpreter's call path.
-- **Exceptions**: the compiled function returns a status, the interpreter unwinds; a `catch`
-  goes on in the interpreter (its frame is the same).
+- **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
+  and comparisons, equality, property access (own, prototype, array length, unset, transitions),
+  array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
+- **Calls**: to a compiled function directly in the frame the bytecode prepared, to a host
+  function like the interpreter, else JSC's generic call or construct; varargs (`apply`,
+  spread) through JSC's generic call. Tail calls are ordinary calls.
+- **Exceptions**: the compiled function returns a status, the interpreter unwinds. Functions with
+  `try` stay interpreted for now.
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
   them.
@@ -36,10 +41,10 @@ never baked into the code (the GC resets inline caches).
 ## Measured
 
 In the `jsc` shell (node), interpreter against compiled: an int32 loop 352 against 28 ms, with
-`%` 494 against 18 ms, property reads and writes through the interpreter's caches 451 against
-41 ms; with calls (compiled callees directly, host functions like the interpreter, the rest
-generic) `fib(25)` 261 against 89 ms, a call in a loop 402 against 154 ms, `Math.max` in a loop
-326 against 114 ms.
+`%` 494 against 18 ms, property reads and writes 451 against 41 ms, `fib(25)` 261 against 89 ms.
+Octane scores (higher is better): Richards 275 against 659, DeltaBlue 263 against 581, Crypto
+312 against 1308, RayTrace 713 against 993, NavierStokes 422 against 1943. What is left is mostly
+calls through C++ (the frame set up per call, generic calls of functions not compiled).
 
 ## Phases
 
