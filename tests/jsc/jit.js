@@ -20,6 +20,10 @@ function kind(x) { return typeof x; }
 function loopWithBreak(limit) { let i = 0; while (true) { i++; if (i >= limit) break; } return i; }
 function unsignedShift(a) { return a >>> 1; }
 function division(a, b) { return a / b; }
+function readX(o) { return o.x; }
+function writeX(o, v) { o.x = v; return o.x; }
+function remainder(a, b) { return a % b; }
+function manyProperties() { const o = {}; for (let i = 0; i < 80; i++) o["p" + i] = i; return o; }
 let captured = 0;
 function closure() { captured++; return captured; }
 
@@ -47,6 +51,25 @@ for (let round = 0; round < 300; round++) {
     check(">>>", unsignedShift(-2), 2147483647);
     check("/", division(7, 2), 3.5);
     check("closure", closure(), round + 1);
+    // Property caches: one shape, then others (the cache misses, the slow path answers)
+    const plain = { x: round };
+    check("get cached", readX(plain), round);
+    check("get other shape", readX({ y: 1, x: "s" }), "s");
+    check("get getter", readX({ get x() { return 7; } }), 7);
+    check("get prototype", readX(Object.create({ x: 9 })), 9);
+    const big = manyProperties();
+    big.x = round * 2;
+    check("get out of line", readX(big), round * 2);
+    check("put cached", writeX(plain, round + 1), round + 1);
+    check("put out of line", writeX(big, "o"), "o");
+    check("put new property", writeX({}, 3), 3);
+    check("put cell", writeX(plain, plain), plain);
+    check("%", remainder(17, 5), 2);
+    check("% negative", remainder(-7, 3), -1);
+    check("% -0", remainder(-6, 3), -0);
+    check("% 0", remainder(5, 0), NaN);
+    check("% min", remainder(-2147483648, -1), -0);
+    check("% double", remainder(5.5, 2), 1.5);
     let caught = null;
     try {
         throws({});

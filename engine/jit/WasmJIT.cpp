@@ -10,9 +10,11 @@
 
 #include "BytecodeGenerator.h"
 #include "BytecodeStructs.h"
+#include "CellState.h"
 #include "CodeBlock.h"
 #include "CommonSlowPaths.h"
 #include "Fits.h"
+#include "JSObject.h"
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
 #include "VMTraps.h"
@@ -128,12 +130,19 @@ private:
     template<typename Bytecode> void emitConditionJump(const JSInstructionStream::Ref&, unsigned block, bool jumpIfTrue, SlowPath);
     template<typename Bytecode> void emitIncrement(const JSInstructionStream::Ref&, int32_t delta, SlowPath);
     void emitGeneric(const JSInstructionStream::Ref&, SlowPath);
+    void emitGetById(const JSInstructionStream::Ref&);
+    void emitPutById(const JSInstructionStream::Ref&);
+    void emitMod(const JSInstructionStream::Ref&);
+    // Address of a property at the offset in the local, of the object in the local: inline storage
+    // or the butterfly's
+    void propertyAddress(uint32_t objectLocal, uint32_t offsetLocal);
     template<typename Bytecode> void emitGenericJump(const JSInstructionStream::Ref&, unsigned block, SlowPath);
 
     CodeBlock* m_codeBlock;
     Module m_module;
     FunctionBody* m_body { nullptr };
     uint32_t m_slowPathType { 0 };
+    uint32_t m_barrierType { 0 };
     // Locals: the frame is parameter 0
     static constexpr uint32_t cfr = 0;
     uint32_t m_block { 0 }, m_a { 0 }, m_b { 0 }, m_c { 0 }, m_next { 0 }, m_wide { 0 };
@@ -235,6 +244,207 @@ void Compiler::jumpToFromIf(unsigned targetOffset, unsigned fromBlock)
 void Compiler::emitGeneric(const JSInstructionStream::Ref& instruction, SlowPath slowPath)
 {
     callSlowPath(slowPath, instruction);
+}
+
+void Compiler::propertyAddress(uint32_t objectLocal, uint32_t offsetLocal)
+{
+    m_body->localGet(offsetLocal);
+    m_body->i32Const(firstOutOfLineOffset);
+    m_body->op(Op::I32LtS);
+    m_body->ifThen();
+    {
+        m_body->localGet(objectLocal);
+        m_body->i32Const(sizeof(JSObjectWithButterfly));
+        m_body->op(Op::I32Add);
+        m_body->localGet(offsetLocal);
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Add);
+        m_body->localSet(m_c);
+    }
+    m_body->elseThen();
+    {
+        // below the butterfly: (offset minus firstOutOfLineOffset plus 2) * 8
+        m_body->localGet(objectLocal);
+        m_body->i32Load(JSObject::butterflyOffset());
+        m_body->localGet(offsetLocal);
+        m_body->i32Const(firstOutOfLineOffset - 2);
+        m_body->op(Op::I32Sub);
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Sub);
+        m_body->localSet(m_c);
+    }
+    m_body->end();
+    m_body->localGet(m_c);
+}
+
+// The interpreter's inline cache (metadata), default mode: same structure, value at the offset
+void Compiler::emitGetById(const JSInstructionStream::Ref& instruction)
+{
+    auto bytecode = instruction->as<OpGetById>();
+    auto& cache = bytecode.metadata(m_codeBlock).m_modeMetadata;
+    m_body->i32Const(0);
+    m_body->localSet(m_next);
+    loadTag(bytecode.m_base);
+    m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_base);
+        m_body->localSet(m_a);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.mode));
+        m_body->i32Load8U(0);
+        m_body->i32Const(static_cast<int32_t>(GetByIdMode::Default));
+        m_body->op(Op::I32Eq);
+        m_body->localGet(m_a);
+        m_body->i32Load(JSCell::structureIDOffset());
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.defaultMode.structureID));
+        m_body->i32Load(0);
+        m_body->op(Op::I32Eq);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        {
+            m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.defaultMode.cachedOffset));
+            m_body->i32Load(0);
+            m_body->localSet(m_b);
+            propertyAddress(m_a, m_b);
+            m_body->localSet(m_b);
+            m_body->localGet(m_b);
+            m_body->i32Load(TagOffset);
+            m_body->localSet(m_a);
+            m_body->localGet(m_b);
+            m_body->i32Load(PayloadOffset);
+            m_body->localSet(m_b);
+            storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+            m_body->i32Const(1);
+            m_body->localSet(m_next);
+        }
+        m_body->end();
+    }
+    m_body->end();
+    m_body->localGet(m_next);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    callSlowPath(llint_slow_path_get_by_id, instruction);
+    m_body->end();
+}
+
+// Stores without a structure transition inline; the write barrier first, like the interpreter
+void Compiler::emitPutById(const JSInstructionStream::Ref& instruction)
+{
+    auto bytecode = instruction->as<OpPutById>();
+    auto& cache = bytecode.metadata(m_codeBlock);
+    loadTag(bytecode.m_value);
+    m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+    m_body->op(Op::I32Eq);
+    loadTag(bytecode.m_base);
+    m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+    m_body->op(Op::I32Eq);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_base);
+        m_body->localTee(m_a);
+        m_body->i32Load8U(JSCell::cellStateOffset());
+        m_body->i32Const(blackThreshold);
+        m_body->op(Op::I32LeU);
+        m_body->ifThen();
+        m_body->localGet(cfr);
+        m_body->localGet(m_a);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&llint_write_barrier_slow));
+        m_body->callIndirect(m_barrierType);
+        m_body->end();
+    }
+    m_body->end();
+
+    m_body->i32Const(0);
+    m_body->localSet(m_next);
+    loadTag(bytecode.m_base);
+    m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_base);
+        m_body->localSet(m_a);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_newStructureID));
+        m_body->i32Load(0);
+        m_body->op(Op::I32Eqz);
+        m_body->localGet(m_a);
+        m_body->i32Load(JSCell::structureIDOffset());
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_oldStructureID));
+        m_body->i32Load(0);
+        m_body->op(Op::I32Eq);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        {
+            m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_offset));
+            m_body->i32Load(0);
+            m_body->localSet(m_b);
+            propertyAddress(m_a, m_b);
+            m_body->localSet(m_b);
+            m_body->localGet(m_b);
+            loadTag(bytecode.m_value);
+            m_body->i32Store(TagOffset);
+            m_body->localGet(m_b);
+            loadPayload(bytecode.m_value);
+            m_body->i32Store(PayloadOffset);
+            m_body->i32Const(1);
+            m_body->localSet(m_next);
+        }
+        m_body->end();
+    }
+    m_body->end();
+    m_body->localGet(m_next);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    callSlowPath(llint_slow_path_put_by_id, instruction);
+    m_body->end();
+}
+
+// int32 % int32 inline unless the divisor is 0, INT_MIN % -1, or the result is -0
+void Compiler::emitMod(const JSInstructionStream::Ref& instruction)
+{
+    auto bytecode = instruction->as<OpMod>();
+    m_body->i32Const(0);
+    m_body->localSet(m_next);
+    loadTag(bytecode.m_lhs);
+    m_body->i32Const(int32Tag);
+    m_body->op(Op::I32Eq);
+    loadTag(bytecode.m_rhs);
+    m_body->i32Const(int32Tag);
+    m_body->op(Op::I32Eq);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_lhs);
+        m_body->localSet(m_a);
+        loadPayload(bytecode.m_rhs);
+        m_body->localSet(m_b);
+        // divisor > 0 (then no INT_MIN % -1), dividend >= 0 (then no -0)
+        m_body->localGet(m_b);
+        m_body->i32Const(0);
+        m_body->op(Op::I32GtS);
+        m_body->localGet(m_a);
+        m_body->i32Const(0);
+        m_body->op(Op::I32GeS);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        m_body->localGet(m_a);
+        m_body->localGet(m_b);
+        m_body->op(Op::I32RemS);
+        m_body->localSet(m_c);
+        storeInt32(bytecode.m_dst, m_c);
+        m_body->i32Const(1);
+        m_body->localSet(m_next);
+        m_body->end();
+    }
+    m_body->end();
+    m_body->localGet(m_next);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    callSlowPath(slow_path_mod, instruction);
+    m_body->end();
 }
 
 // Conditional jumps without a fast path: the slow path returns the target or the next instruction
@@ -519,7 +729,7 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_sub: emitBinaryInt32<OpSub>(instruction, block, Op::I64Sub, slow_path_sub); return;
     case op_mul: emitBinaryInt32<OpMul>(instruction, block, Op::I64Mul, slow_path_mul); return;
     case op_div: emitGeneric(instruction, slow_path_div); return;
-    case op_mod: emitGeneric(instruction, slow_path_mod); return;
+    case op_mod: emitMod(instruction); return;
     case op_inc: emitIncrement<OpInc>(instruction, 1, slow_path_inc); return;
     case op_dec: emitIncrement<OpDec>(instruction, -1, slow_path_dec); return;
     case op_negate: emitGeneric(instruction, slow_path_negate); return;
@@ -539,8 +749,8 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_urshift: emitGeneric(instruction, slow_path_urshift); return;
     case op_not: emitGeneric(instruction, slow_path_not); return;
     case op_to_number: emitGeneric(instruction, slow_path_to_number); return;
-    case op_get_by_id: emitGeneric(instruction, llint_slow_path_get_by_id); return;
-    case op_put_by_id: emitGeneric(instruction, llint_slow_path_put_by_id); return;
+    case op_get_by_id: emitGetById(instruction); return;
+    case op_put_by_id: emitPutById(instruction); return;
     case op_get_by_val: emitGeneric(instruction, llint_slow_path_get_by_val); return;
     case op_put_by_val: emitGeneric(instruction, llint_slow_path_put_by_val); return;
     case op_get_from_scope: emitGeneric(instruction, llint_slow_path_get_from_scope); return;
@@ -621,6 +831,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     const ValueType slowPathParameters[] = { ValueType::I32, ValueType::I32 };
     const ValueType slowPathResult[] = { ValueType::I64 };
     m_slowPathType = m_module.addType(slowPathParameters, slowPathResult);
+    m_barrierType = m_module.addType(slowPathParameters, std::span<const ValueType>());
     m_body = &m_module.function(1);
     m_block = m_body->addLocal(ValueType::I32);
     m_a = m_body->addLocal(ValueType::I32);

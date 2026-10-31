@@ -24,6 +24,7 @@ public:
     void i64Const(int64_t);
     void f64Const(double);
     void i32Load(uint32_t offset);
+    void i32Load8U(uint32_t offset);
     void i32Store(uint32_t offset);
     void f64Load(uint32_t offset);
     void f64Store(uint32_t offset);
@@ -69,8 +70,8 @@ private:
 // Instruction codes without immediates that the JIT uses
 namespace Op {
 constexpr uint8_t I32Eqz = 0x45, I32Eq = 0x46, I32Ne = 0x47, I32LtS = 0x48, I32LtU = 0x49, I32GtS = 0x4a,
-    I32GtU = 0x4b, I32LeS = 0x4c, I32GeS = 0x4e, I64Eq = 0x51, I64Ne = 0x52, I32Add = 0x6a, I32Sub = 0x6b,
-    I32Mul = 0x6c, I32And = 0x71, I32Or = 0x72, I32Xor = 0x73, I32Shl = 0x74, I32ShrS = 0x75, I32ShrU = 0x76,
+    I32GtU = 0x4b, I32LeS = 0x4c, I32LeU = 0x4d, I32GeS = 0x4e, I64Eq = 0x51, I64Ne = 0x52, I32Add = 0x6a, I32Sub = 0x6b,
+    I32Mul = 0x6c, I32RemS = 0x6f, I32And = 0x71, I32Or = 0x72, I32Xor = 0x73, I32Shl = 0x74, I32ShrS = 0x75, I32ShrU = 0x76,
     I64Add = 0x7c, I64Sub = 0x7d, I64Mul = 0x7e, I64ShrU = 0x88, I32WrapI64 = 0xa7, I64ExtendI32S = 0xac,
     I64ExtendI32U = 0xad;
 }
