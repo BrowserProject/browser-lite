@@ -27,7 +27,8 @@ never baked into the code (the GC resets inline caches).
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
   `llint_loop_osr` at loops) call the compiler instead of giving up.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
-  and comparisons, equality, property access (own, prototype, array length, unset, transitions),
+  and comparisons, equality, property access (own, prototype, array length, unset, transitions;
+  reads of own properties also from the last 4 structures of the site, until the next GC),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
 - **Calls**: to a compiled function directly in the frame the bytecode prepared, found through a
   cache per call site (the callee's executable, valid until the next GC): from the compiled code

@@ -139,6 +139,10 @@ class Account { #balance = 0; static #count = 0; deposit(v) { this.#balance += v
 const makeError = Error.bind(null);
 function errorThroughBound(i) { return makeError("x" + i); }
 function stackOf(i) { return errorThroughBound(i).stack; }
+// One property of objects of several shapes: more than the interpreter's cache holds
+function readKind(node) { return node.kind; }
+const shapes = [{ kind: 1 }, { a: 0, kind: 2 }, { b: 0, c: 0, kind: 3 }, { d: 0, kind: 4, e: 0 }, { f: 0, g: 0, h: 0, kind: 5 }];
+function sumKinds(n) { let s = 0; for (let i = 0; i < n; i++) s += readKind(shapes[i % shapes.length]); return s; }
 // Loops that get hot while running: the rest of the call runs compiled
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
@@ -457,6 +461,12 @@ for (let round = 0; round < 300; round++) {
     check("private missing", privateThrew instanceof TypeError, true);
     const trace = stackOf(round);
     check("stack through a host function", trace.includes("errorThroughBound") && trace.includes("stackOf"), true);
+    check("polymorphic read", sumKinds(50), 150);
+    if (round % 100 === 50) {
+        gc();
+        // New objects of other shapes after a GC
+        check("polymorphic after GC", readKind({ z: 9, y: 8, kind: 7 }) + readKind({ kind: "s" }), "7s");
+    }
     check("fib", fib(15), 610);
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);

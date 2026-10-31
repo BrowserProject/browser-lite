@@ -96,12 +96,26 @@ struct CallCache {
     int32_t scopeOffset { 0 };
 };
 
+// More own properties of a get_by_id than the interpreter's cache holds (it keeps one structure):
+// the structures and offsets it had before, valid until the next GC
+struct PropertyCache {
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(PropertyCache);
+    static constexpr unsigned size = 4;
+    HeapVersion markingVersion { 0 };
+    HeapVersion edenVersion { 0 };
+    StructureID structures[size] { };
+    int32_t offsets[size] { };
+    unsigned next { 0 };
+};
+
 // A CodeBlock the compiler saw: the table index of its function (0 when it cannot be compiled),
-// by bytecode offset the blocks that start after its loop hints, the caches of its calls
+// by bytecode offset the blocks that start after its loop hints, the caches of its calls and
+// property reads
 struct Compiled {
     uint32_t function { 0 };
     OffsetMap loops;
     Vector<std::unique_ptr<CallCache>> callCaches;
+    Vector<std::unique_ptr<PropertyCache>> propertyCaches;
 };
 
 // CodeBlocks of this thread's VM. Tables are per thread, so are the indexes.
@@ -521,6 +535,30 @@ UGPRPair iteratorNextFromCompiledCode(CallFrame* callFrame, const JSInstruction*
     return encodeResult(pc, callFrame);
 }
 
+// op_get_by_id after the inline caches missed: the interpreter's slow path, then the structure it
+// cached also into the property cache of the instruction
+UGPRPair getByIdFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, PropertyCache* cache)
+{
+    auto result = llint_slow_path_get_by_id(callFrame, pc);
+    auto& metadata = pc->as<OpGetById>().metadata(callFrame->codeBlock()).m_modeMetadata;
+    if (metadata.mode != GetByIdMode::Default || !metadata.defaultMode.structureID)
+        return result;
+    auto& space = callFrame->codeBlock()->vm().heap.objectSpace();
+    if (cache->markingVersion != space.markingVersion() || cache->edenVersion != space.edenVersion()) {
+        *cache = { };
+        cache->markingVersion = space.markingVersion();
+        cache->edenVersion = space.edenVersion();
+    }
+    for (auto structure : cache->structures) {
+        if (structure == metadata.defaultMode.structureID)
+            return result;
+    }
+    unsigned entry = cache->next++ % PropertyCache::size;
+    cache->structures[entry] = metadata.defaultMode.structureID;
+    cache->offsets[entry] = metadata.defaultMode.cachedOffset;
+    return result;
+}
+
 bool equalsNull(CodeBlock* codeBlock, JSValue value)
 {
     return value.isUndefinedOrNull() || (value.isCell() && value.asCell()->structure()->masqueradesAsUndefined(codeBlock->globalObject()));
@@ -640,6 +678,7 @@ public:
     // Blocks after loop hints, by bytecode offset
     OffsetMap takeLoops() { return WTF::move(m_loops); }
     Vector<std::unique_ptr<CallCache>> takeCallCaches() { return WTF::move(m_callCaches); }
+    Vector<std::unique_ptr<PropertyCache>> takePropertyCaches() { return WTF::move(m_propertyCaches); }
 
 private:
     bool scan();
@@ -745,6 +784,7 @@ private:
     uint32_t m_checkType { 0 };
     uint32_t m_callType { 0 };
     Vector<std::unique_ptr<CallCache>> m_callCaches;
+    Vector<std::unique_ptr<PropertyCache>> m_propertyCaches;
     // Parameters: the frame and the block to start with
     static constexpr uint32_t cfr = 0;
     static constexpr uint32_t entry = 1;
@@ -1266,6 +1306,11 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction, SlowPath
 {
     auto bytecode = instruction->as<Bytecode>();
     auto& cache = bytecode.metadata(m_codeBlock).m_modeMetadata;
+    PropertyCache* propertyCache = nullptr;
+    if constexpr (std::is_same_v<Bytecode, OpGetById>) {
+        m_propertyCaches.append(makeUnique<PropertyCache>());
+        propertyCache = m_propertyCaches.last().get();
+    }
     auto mode = [&](GetByIdMode value) {
         m_body->localGet(m_t1);
         m_body->i32Const(static_cast<int32_t>(value));
@@ -1359,9 +1404,56 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction, SlowPath
         storeTag(bytecode.m_dst, static_cast<int32_t>(JSValue::UndefinedTag), m_b);
         fastPathDone();
         m_body->end();
+
+        if (propertyCache) {
+            // The structures the interpreter's cache had before, while no GC came since
+            auto* space = reinterpret_cast<const uint8_t*>(&m_codeBlock->vm().heap.objectSpace());
+            m_body->localGet(m_next);
+            m_body->op(Op::I32Eqz);
+            m_body->i32Const(reinterpret_cast<uintptr_t>(space + MarkedSpace::offsetOfMarkingVersion()));
+            m_body->i32Load(0);
+            m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->markingVersion));
+            m_body->i32Load(0);
+            m_body->op(Op::I32Eq);
+            m_body->op(Op::I32And);
+            m_body->i32Const(reinterpret_cast<uintptr_t>(space + MarkedSpace::offsetOfEdenVersion()));
+            m_body->i32Load(0);
+            m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->edenVersion));
+            m_body->i32Load(0);
+            m_body->op(Op::I32Eq);
+            m_body->op(Op::I32And);
+            m_body->ifThen();
+            for (unsigned i = 0; i < PropertyCache::size; ++i) {
+                m_body->localGet(m_next);
+                m_body->op(Op::I32Eqz);
+                structureIs(&propertyCache->structures[i]);
+                m_body->op(Op::I32And);
+                m_body->ifThen();
+                m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->offsets[i]));
+                m_body->i32Load(0);
+                m_body->localSet(m_t2);
+                loadProperty(m_d, m_t2);
+                storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+                fastPathDone();
+                m_body->end();
+            }
+            m_body->end();
+        }
     }
     m_body->end();
-    endFastPaths(slowPath, instruction);
+    if (propertyCache) {
+        m_body->localGet(m_next);
+        m_body->op(Op::I32Eqz);
+        m_body->ifThen();
+        m_body->localGet(cfr);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
+        m_body->i32Const(reinterpret_cast<uintptr_t>(propertyCache));
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&getByIdFromCompiledCode));
+        m_body->callIndirect(m_callType);
+        checkException(instruction);
+        m_body->end();
+    } else
+        endFastPaths(slowPath, instruction);
 }
 
 // An own property: same structure, value at the offset
@@ -3259,6 +3351,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
             compiled.function = wasmJITInstall(bytes->data(), bytes->size(), level() >= 3);
             compiled.loops = compiler.takeLoops();
             compiled.callCaches = compiler.takeCallCaches();
+            compiled.propertyCaches = compiler.takePropertyCaches();
         }
         if (level() >= 2) {
             if (bytes)
