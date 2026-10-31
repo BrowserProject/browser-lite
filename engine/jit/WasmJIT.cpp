@@ -30,8 +30,8 @@ using namespace WasmJIT;
 
 namespace {
 
-// BL_JIT=1 turns it on (off by default while it grows), 2 also logs what it compiles: in the
-// engine's environment, or in node's for the jsc shell
+// BL_JIT=1 turns it on (off by default while it grows), 2 also logs what it compiles, 3 also
+// writes the modules to files (node): in the engine's environment, or in node's for the jsc shell
 EM_JS(int, wasmJITSwitch, (), {
     const value = (typeof ENV === 'object' && ENV.BL_JIT) || (typeof process === 'object' && process.env && process.env.BL_JIT);
     return Number(value) || 0;
@@ -56,9 +56,13 @@ HashMap<CodeBlock*, uint32_t>& compiledCode()
     return map;
 }
 
-EM_JS(uint32_t, wasmJITInstall, (const uint8_t* bytes, uint32_t size), {
+EM_JS(uint32_t, wasmJITInstall, (const uint8_t* bytes, uint32_t size, int dump), {
     try {
-        const module = new WebAssembly.Module(HEAPU8.slice(bytes, bytes + size));
+        const code = HEAPU8.slice(bytes, bytes + size);
+        // BL_JIT=3 in node: every module into the working directory, for wasm-dis
+        if (dump && typeof require === 'function')
+            require('fs').writeFileSync('jit-' + wasmTable.length + '.wasm', code);
+        const module = new WebAssembly.Module(code);
         const instance = new WebAssembly.Instance(module, { env: { memory: wasmMemory, table: wasmTable } });
         const index = wasmTable.grow(1);
         wasmTable.set(index, instance.exports.f);
@@ -886,7 +890,7 @@ void wasmJITTierUp(VM&, CodeBlock* codeBlock)
     Compiler compiler(codeBlock);
     auto bytes = compiler.compile();
     if (bytes)
-        function = wasmJITInstall(bytes->data(), bytes->size());
+        function = wasmJITInstall(bytes->data(), bytes->size(), level() >= 3);
     if (level() >= 2) {
         if (bytes)
             dataLogLn("[jit] ", *codeBlock, ": ", bytes->size(), " bytes, function ", function);

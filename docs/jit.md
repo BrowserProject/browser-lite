@@ -33,6 +33,12 @@ never baked into the code (the GC resets inline caches).
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
   them.
 
+## Measured
+
+Phase 1 in the `jsc` shell (node, 100 calls of a loop of 20000): an int32 loop 362 against
+35 ms, with `%` 404 against 21 ms, property reads and writes through the interpreter's caches 485
+against 53 ms.
+
 ## Phases
 
 1. Infrastructure: emitter, install, entry and tier-up hooks, functions without calls (loops,
