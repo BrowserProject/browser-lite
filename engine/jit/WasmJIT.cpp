@@ -112,7 +112,7 @@ int32_t runCompiled(uint32_t function, CallFrame* callFrame)
 }
 
 // A call from compiled code (op_call, op_call_ignore_result), with the signature of a slow path.
-// A compiled callee runs directly in the frame the bytecode prepared (callFrame - argv), a host
+// A compiled callee runs directly in the frame the bytecode prepared (argv slots below callFrame), a host
 // function like the interpreter calls it, everything else through JSC's generic call (bound
 // functions, proxies, interpreted functions, arity fixup, stack overflow).
 template<typename Bytecode>
