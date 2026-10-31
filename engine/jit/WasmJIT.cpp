@@ -21,7 +21,6 @@
 #include "DirectArguments.h"
 #include "Fits.h"
 #include "FrameTracers.h"
-#include "FunctionRareData.h"
 #include "IndexingType.h"
 #include "Interpreter.h"
 #include "InterpreterInlines.h"
@@ -36,7 +35,6 @@
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
 #include "SlowPathCall.h"
-#include "StackManager.h"
 #include "StackAlignment.h"
 #include "StructureChain.h"
 #include "VMTraps.h"
@@ -381,6 +379,40 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
 {
     constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
     auto bytecode = pc->as<Bytecode>();
+
+    // The common case first, without the tracer and scope of the general path: a compiled callee
+    // the cache knows, enough arguments, shallow nesting
+    JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
+    if (cache->executable && callee.isCell() && callee.asCell()->type() == JSFunctionType && bytecode.m_argc >= cache->numParameters && (depth < 64 || depth < roomyDepth + 8)) {
+        auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
+        VM& vm = cache->codeBlock->vm();
+        auto& space = vm.heap.objectSpace();
+        CallFrame* calleeFrame = callFrame - bytecode.m_argv;
+        auto* top = reinterpret_cast<Register*>(calleeFrame) - cache->numCalleeLocals;
+        if (function->executable() == cache->executable && cache->markingVersion == space.markingVersion() && cache->edenVersion == space.edenVersion() && top >= vm.cloopStackLimit()) {
+            callFrame->setCurrentVPC(pc);
+            calleeFrame->setCallerFrame(callFrame);
+            calleeFrame->setReturnPC(nullptr);
+            calleeFrame->setCodeBlock(cache->codeBlock);
+            calleeFrame->uncheckedR(VirtualRegister(CallFrameSlot::callee)) = callee;
+            calleeFrame->setArgumentCountIncludingThis(bytecode.m_argc);
+            for (int local = CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters(); local < static_cast<int>(cache->numVars); ++local)
+                calleeFrame->uncheckedR(virtualRegisterForLocal(local)) = jsUndefined();
+            vm.writeBarrier(cache->codeBlock);
+            calleeFrame->uncheckedR(cache->scopeRegister) = function->scope();
+            auto* previous = vm.cloopStack().currentStackPointer();
+            vm.cloopStack().setCurrentStackPointer(top);
+            auto status = runCompiled(cache->function, calleeFrame, 0);
+            vm.cloopStack().setCurrentStackPointer(previous);
+            vm.topCallFrame = callFrame;
+            if (status)
+                return encodeResult(exceptionInstructions(), callFrame);
+            if constexpr (requires { bytecode.m_dst; })
+                callFrame->uncheckedR(bytecode.m_dst) = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
+            return encodeResult(pc, callFrame);
+        }
+    }
+
     CodeBlock* codeBlock = callFrame->codeBlock();
     VM& vm = codeBlock->vm();
     SlowPathFrameTracer tracer(vm, callFrame);
@@ -539,6 +571,20 @@ UGPRPair iteratorNextFromCompiledCode(CallFrame* callFrame, const JSInstruction*
 // cached also into the property cache of the instruction
 UGPRPair getByIdFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, PropertyCache* cache)
 {
+    auto bytecode = pc->as<OpGetById>();
+    JSValue base = callFrame->r(bytecode.m_base).jsValue();
+    if (base.isObject()) {
+        auto& space = callFrame->codeBlock()->vm().heap.objectSpace();
+        if (cache->markingVersion == space.markingVersion() && cache->edenVersion == space.edenVersion()) {
+            auto* object = asObject(base);
+            for (unsigned i = 0; i < PropertyCache::size; ++i) {
+                if (cache->structures[i] == object->structureID()) {
+                    callFrame->uncheckedR(bytecode.m_dst) = object->getDirect(cache->offsets[i]);
+                    return encodeResult(pc, callFrame);
+                }
+            }
+        }
+    }
     auto result = llint_slow_path_get_by_id(callFrame, pc);
     auto& metadata = pc->as<OpGetById>().metadata(callFrame->codeBlock()).m_modeMetadata;
     if (metadata.mode != GetByIdMode::Default || !metadata.defaultMode.structureID)
@@ -727,9 +773,8 @@ private:
     // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
     // The same for a call (callFromCompiledCode, callVarargsFromCompiledCode), with a new cache of
-    // the call site; a compiled callee the cache knows straight from compiled code
+    // the call site
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
-    template<typename Bytecode> void emitDirectCall(const JSInstructionStream::Ref&, CallCache*);
     // After a helper's call: its result into m_next, an exception to the handler or out
     void checkException(const JSInstructionStream::Ref&);
     // There is an exception: to the instruction's handler or out
@@ -963,15 +1008,6 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
     m_callCaches.append(makeUnique<CallCache>());
     auto* cache = m_callCaches.last().get();
     constexpr bool isVarargs = requires(Bytecode bytecode) { bytecode.m_firstVarArg; };
-    if constexpr (!isVarargs)
-        emitDirectCall<Bytecode>(instruction, cache);
-    else {
-        m_body->i32Const(0);
-        m_body->localSet(m_next);
-    }
-    m_body->localGet(m_next);
-    m_body->op(Op::I32Eqz);
-    m_body->ifThen();
     m_body->localGet(cfr);
     m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
     m_body->i32Const(reinterpret_cast<uintptr_t>(cache));
@@ -981,208 +1017,6 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
         m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
     m_body->callIndirect(m_callType);
     checkException(instruction);
-    m_body->end();
-}
-
-// What callInFrame does for a compiled callee, when the call site's cache knows the callee's
-// executable (and no GC came since), there are enough arguments, the nesting is shallow and the
-// stack has room; sets m_next when it called, else the C++ call follows
-template<typename Bytecode>
-void Compiler::emitDirectCall(const JSInstructionStream::Ref& instruction, CallCache* cache)
-{
-    auto bytecode = instruction->as<Bytecode>();
-    VM& vm = m_codeBlock->vm();
-    auto cached = [&](const void* field) {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(field));
-        m_body->i32Load(0);
-    };
-    auto fromAddress = [&](const void* address) {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(address));
-        m_body->i32Load(0);
-    };
-    auto storeTo = [&](const void* address, uint32_t local) {
-        m_body->i32Const(reinterpret_cast<uintptr_t>(address));
-        m_body->localGet(local);
-        m_body->i32Store(0);
-    };
-    auto* space = reinterpret_cast<const uint8_t*>(&vm.heap.objectSpace());
-    auto* stackPointer = reinterpret_cast<const uint8_t*>(&vm.cloopStack()) + CLoopStack::offsetOfCurrentStackPointer();
-    auto* stackLimit = reinterpret_cast<const uint8_t*>(&vm.traps()) + VMTraps::offsetOfStackManager() + StackManager::offsetOfCLoopStackLimit();
-    constexpr int32_t slot = sizeof(Register);
-    unsigned argumentCount = bytecode.m_argc;
-
-    m_body->i32Const(0);
-    m_body->localSet(m_next);
-    load(bytecode.m_callee, m_t1, m_c);
-    m_body->block();
-    {
-        m_body->localGet(m_t1);
-        m_body->i32Const(cellTag);
-        m_body->op(Op::I32Ne);
-        m_body->brIf(0);
-        cellType(m_c);
-        m_body->i32Const(JSFunctionType);
-        m_body->op(Op::I32Ne);
-        m_body->brIf(0);
-        // The executable, maybe through the function's rare data
-        m_body->localGet(m_c);
-        m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
-        m_body->localTee(m_d);
-        m_body->i32Const(JSFunction::rareDataTag);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        m_body->localGet(m_d);
-        m_body->i32Const(~static_cast<int32_t>(JSFunction::rareDataTag));
-        m_body->op(Op::I32And);
-        m_body->i32Load(FunctionRareData::offsetOfExecutable());
-        m_body->localSet(m_d);
-        m_body->end();
-        m_body->localGet(m_d);
-        cached(&cache->executable);
-        m_body->op(Op::I32Ne);
-        fromAddress(space + MarkedSpace::offsetOfMarkingVersion());
-        cached(&cache->markingVersion);
-        m_body->op(Op::I32Ne);
-        m_body->op(Op::I32Or);
-        fromAddress(space + MarkedSpace::offsetOfEdenVersion());
-        cached(&cache->edenVersion);
-        m_body->op(Op::I32Ne);
-        m_body->op(Op::I32Or);
-        m_body->i32Const(argumentCount);
-        cached(&cache->numParameters);
-        m_body->op(Op::I32LtU);
-        m_body->op(Op::I32Or);
-        // Room on the machine stack as roomForCompiledCode knows it without a probe
-        fromAddress(&depth);
-        m_body->i32Const(64);
-        m_body->op(Op::I32GeU);
-        fromAddress(&depth);
-        fromAddress(&roomyDepth);
-        m_body->i32Const(8);
-        m_body->op(Op::I32Add);
-        m_body->op(Op::I32GeU);
-        m_body->op(Op::I32And);
-        m_body->op(Op::I32Or);
-        m_body->brIf(0);
-        // The callee frame and its top, within the interpreter's stack limit
-        m_body->localGet(cfr);
-        m_body->i32Const(-static_cast<int32_t>(bytecode.m_argv) * slot);
-        m_body->op(Op::I32Add);
-        m_body->localTee(m_a);
-        cached(&cache->numCalleeLocals);
-        m_body->i32Const(3);
-        m_body->op(Op::I32Shl);
-        m_body->op(Op::I32Sub);
-        m_body->localTee(m_b);
-        fromAddress(stackLimit);
-        m_body->op(Op::I32LtU);
-        m_body->brIf(0);
-
-        // This frame's bytecode offset (stack traces, handlers), the callee frame's header
-        m_body->localGet(cfr);
-        m_body->i32Const(instruction.offset());
-        m_body->i32Store(CallFrameSlot::argumentCountIncludingThis * slot + TagOffset);
-        m_body->localGet(m_a);
-        m_body->localGet(cfr);
-        m_body->i32Store(OBJECT_OFFSETOF(CallerFrameAndPC, callerFrame));
-        m_body->localGet(m_a);
-        m_body->i32Const(0);
-        m_body->i32Store(OBJECT_OFFSETOF(CallerFrameAndPC, returnPC));
-        m_body->localGet(m_a);
-        cached(&cache->codeBlock);
-        m_body->i32Store(CallFrameSlot::codeBlock * slot);
-        m_body->localGet(m_a);
-        m_body->i32Const(cellTag);
-        m_body->i32Store(CallFrameSlot::callee * slot + TagOffset);
-        m_body->localGet(m_a);
-        m_body->localGet(m_c);
-        m_body->i32Store(CallFrameSlot::callee * slot + PayloadOffset);
-        m_body->localGet(m_a);
-        m_body->i32Const(argumentCount);
-        m_body->i32Store(CallFrameSlot::argumentCountIncludingThis * slot + PayloadOffset);
-        // What op_enter does: the locals undefined
-        m_body->i32Const(CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters());
-        m_body->localSet(m_e);
-        m_body->block();
-        m_body->loop();
-        m_body->localGet(m_e);
-        cached(&cache->numVars);
-        m_body->op(Op::I32GeU);
-        m_body->brIf(1);
-        // Local i is (i + 1) * 8 bytes below the frame
-        m_body->localGet(m_a);
-        m_body->localGet(m_e);
-        m_body->i32Const(3);
-        m_body->op(Op::I32Shl);
-        m_body->op(Op::I32Sub);
-        m_body->i32Const(slot);
-        m_body->op(Op::I32Sub);
-        m_body->localTee(m_t1);
-        m_body->i32Const(static_cast<int32_t>(JSValue::UndefinedTag));
-        m_body->i32Store(TagOffset);
-        m_body->localGet(m_t1);
-        m_body->i32Const(0);
-        m_body->i32Store(PayloadOffset);
-        m_body->localGet(m_e);
-        m_body->i32Const(1);
-        m_body->op(Op::I32Add);
-        m_body->localSet(m_e);
-        m_body->br(0);
-        m_body->end();
-        m_body->end();
-        // What slow_path_enter does: the barrier of the CodeBlock, the scope
-        cached(&cache->codeBlock);
-        m_body->localSet(m_d);
-        writeBarrier(m_d);
-        m_body->localGet(m_a);
-        cached(&cache->scopeOffset);
-        m_body->op(Op::I32Add);
-        m_body->localTee(m_t1);
-        m_body->i32Const(cellTag);
-        m_body->i32Store(TagOffset);
-        m_body->localGet(m_t1);
-        m_body->localGet(m_c);
-        m_body->i32Load(JSCallee::offsetOfScopeChain());
-        m_body->i32Store(PayloadOffset);
-
-        // The call, with the interpreter's stack pointer at the callee frame's top
-        fromAddress(stackPointer);
-        m_body->localSet(m_t2);
-        storeTo(stackPointer, m_b);
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&depth));
-        fromAddress(&depth);
-        m_body->i32Const(1);
-        m_body->op(Op::I32Add);
-        m_body->i32Store(0);
-        m_body->localGet(m_a);
-        m_body->i32Const(0);
-        cached(&cache->function);
-        m_body->callIndirect(0);
-        m_body->localSet(m_e);
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&depth));
-        fromAddress(&depth);
-        m_body->i32Const(1);
-        m_body->op(Op::I32Sub);
-        m_body->i32Store(0);
-        storeTo(stackPointer, m_t2);
-        storeTo(&vm.topCallFrame, cfr);
-        m_body->localGet(m_e);
-        m_body->ifThen();
-        exceptionExit(instruction);
-        m_body->end();
-        if constexpr (requires { bytecode.m_dst; }) {
-            m_body->localGet(m_a);
-            m_body->i32Load(virtualRegisterForArgumentIncludingThis(0).offset() * slot + TagOffset);
-            m_body->localSet(m_t1);
-            m_body->localGet(m_a);
-            m_body->i32Load(virtualRegisterForArgumentIncludingThis(0).offset() * slot + PayloadOffset);
-            m_body->localSet(m_t2);
-            storeTagAndPayload(bytecode.m_dst, m_t1, m_t2);
-        }
-        m_body->i32Const(1);
-        m_body->localSet(m_next);
-    }
-    m_body->end();
 }
 
 void Compiler::checkException(const JSInstructionStream::Ref& instruction)
@@ -1191,6 +1025,11 @@ void Compiler::checkException(const JSInstructionStream::Ref& instruction)
     m_body->localTee(m_next);
     m_body->i32Const(reinterpret_cast<uintptr_t>(exceptionInstructions()));
     m_body->op(Op::I32Eq);
+    if (!m_codeBlock->handlerForBytecodeIndex(BytecodeIndex(instruction.offset()))) {
+        // Out through the block around everything, which returns 1
+        m_body->brIf(m_body->depth() - 1);
+        return;
+    }
     m_body->ifThen();
     exceptionExit(instruction);
     m_body->end();
@@ -1405,40 +1244,6 @@ void Compiler::emitGetById(const JSInstructionStream::Ref& instruction, SlowPath
         fastPathDone();
         m_body->end();
 
-        if (propertyCache) {
-            // The structures the interpreter's cache had before, while no GC came since
-            auto* space = reinterpret_cast<const uint8_t*>(&m_codeBlock->vm().heap.objectSpace());
-            m_body->localGet(m_next);
-            m_body->op(Op::I32Eqz);
-            m_body->i32Const(reinterpret_cast<uintptr_t>(space + MarkedSpace::offsetOfMarkingVersion()));
-            m_body->i32Load(0);
-            m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->markingVersion));
-            m_body->i32Load(0);
-            m_body->op(Op::I32Eq);
-            m_body->op(Op::I32And);
-            m_body->i32Const(reinterpret_cast<uintptr_t>(space + MarkedSpace::offsetOfEdenVersion()));
-            m_body->i32Load(0);
-            m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->edenVersion));
-            m_body->i32Load(0);
-            m_body->op(Op::I32Eq);
-            m_body->op(Op::I32And);
-            m_body->ifThen();
-            for (unsigned i = 0; i < PropertyCache::size; ++i) {
-                m_body->localGet(m_next);
-                m_body->op(Op::I32Eqz);
-                structureIs(&propertyCache->structures[i]);
-                m_body->op(Op::I32And);
-                m_body->ifThen();
-                m_body->i32Const(reinterpret_cast<uintptr_t>(&propertyCache->offsets[i]));
-                m_body->i32Load(0);
-                m_body->localSet(m_t2);
-                loadProperty(m_d, m_t2);
-                storeTagAndPayload(bytecode.m_dst, m_a, m_b);
-                fastPathDone();
-                m_body->end();
-            }
-            m_body->end();
-        }
     }
     m_body->end();
     if (propertyCache) {
@@ -3301,7 +3106,9 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_body->localSet(m_base);
     m_body->localGet(entry);
     m_body->localSet(m_block);
-    // loop { block * n { br_table } code 0 } code 1 ... } code n - 1 }
+    // block { loop { block * n { br_table } code 0 } code 1 ... } code n - 1 } } return 1: the outer
+    // block is the exit after an exception
+    m_body->block();
     m_body->loop();
     for (unsigned i = 0; i < m_blockCount; ++i)
         m_body->block();
@@ -3325,6 +3132,8 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     }
     m_body->end();
     m_body->unreachable();
+    m_body->end();
+    m_body->i32Const(1);
     return m_module.bytes();
 }
 
