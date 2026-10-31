@@ -49,15 +49,20 @@ using namespace WasmJIT;
 namespace {
 
 // BL_JIT=1 turns it on (off by default while it grows), 2 also logs what it compiles, 3 also
-// writes the modules to files (node): in the engine's environment, or in node's for the jsc shell
+// writes the modules to files (node)
 EM_JS(int, wasmJITSwitch, (), {
-    const value = (typeof ENV === 'object' && ENV.BL_JIT) || (typeof process === 'object' && process.env && process.env.BL_JIT);
+    const value = typeof process === 'object' && process.env && process.env.BL_JIT;
     return Number(value) || 0;
 });
 
 int level()
 {
-    static const int value = wasmJITSwitch();
+    static const int value = [] {
+        // The engine's environment (engine.env); node's for the jsc shell, whose getenv does not see it
+        if (const char* value = getenv("BL_JIT"))
+            return atoi(value);
+        return wasmJITSwitch();
+    }();
     return value;
 }
 
