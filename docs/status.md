@@ -271,7 +271,8 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   an engine worker loaded for about 60 s and then failed: the core's service worker waited in
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
   the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such
-  a worker (`[workers] engine worker did not load after ... ms`). Closing or reloading a tab right after a
+  a worker (`[workers] engine worker did not load after ... ms`), not seen in the 8 CI runs up to
+  2026-10-31. Closing or reloading a tab right after a
   change lost it in Firefox (#275, the engine cannot write while `pagehide` waits): commits now go
   to a commit log at once (#302), localStorage reaches SQLite 100 ms after a change (#303).
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
@@ -314,8 +315,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   `CoordinatedPlatformLayer::flushCompositingState` (in engine.wasm, no chunk to load, the step is
   inlined there). Nothing of ours can wait there. In Chromium `devices-test` now records a CPU
   profile of all threads when the engine logs the stall (`build/e2e-devices-stall.trace.json` in
-  the artifact `e2e-core-screenshots-chromium`). Not seen in the 6 CI runs since the new touch
-  fling and touch scrolling (#313, #314), which changed the scrolling it always followed.
+  the artifact `e2e-core-screenshots-chromium`). Not seen in the 14 CI runs since the new touch
+  fling and touch scrolling (#313, #314) up to 2026-10-31, which changed the scrolling it always
+  followed.
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
