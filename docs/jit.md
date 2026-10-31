@@ -37,6 +37,10 @@ never baked into the code (the GC resets inline caches).
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.
+- **Machine stack**: compiled calls nest on the host's stack, which JSC does not see and which V8
+  would stop halfway. Past 64 levels a WASM recursion of known frame size checks for about
+  200 KB of room at every 8 levels beyond the deepest checked one (per outermost run); without
+  room the interpreter takes the calls.
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
   them.

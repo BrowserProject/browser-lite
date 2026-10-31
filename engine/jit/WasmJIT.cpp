@@ -186,41 +186,58 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
 constexpr unsigned maximumDepth = 1000;
 thread_local unsigned depth;
 
-// Whether the machine stack has room for about 100 KB more: a WASM recursion with frames of known
-// size (eight values live across each call), which V8 stops with a RangeError where it would not
+// Whether the machine stack has room for about 200 KB more: a WASM recursion with frames of known
+// size (32 values live across each call), which V8 stops with a RangeError where it would not
 // fit, caught right there with nothing of the engine in between
 EM_JS(int, wasmJITStackHasRoom, (), {
     let probe = globalThis.blJitStackProbe;
     if (!probe) {
-        const body = [1, 8, 0x7e];
-        for (let k = 1; k <= 8; k++)
+        const values = 32;
+        const body = [1, values, 0x7e];
+        for (let k = 1; k <= values; k++)
             body.push(0x20, 0, 0xad, 0x42, k, 0x7c, 0x21, k);
         body.push(0x20, 0, 0x45, 0x04, 0x7f, 0x41, 0, 0x05, 0x20, 0, 0x41, 1, 0x6b, 0x10, 0, 0x0b, 0x20, 1);
-        for (let k = 2; k <= 8; k++)
+        for (let k = 2; k <= values; k++)
             body.push(0x20, k, 0x7c);
         body.push(0xa7, 0x6a, 0x0b);
-        const code = [1, body.length, ...body];
+        const leb = (n) => (n < 128 ? [n] : [(n & 0x7f) | 0x80, n >> 7]);
+        const code = [1, ...leb(body.length), ...body];
         const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 6, 1, 0x60, 1, 0x7f, 1, 0x7f, 3, 2, 1, 0,
-            7, 5, 1, 1, 0x70, 0, 0, 10, code.length, ...code]);
+            7, 5, 1, 1, 0x70, 0, 0, 10, ...leb(code.length), ...code]);
         probe = globalThis.blJitStackProbe = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.p;
     }
     try {
-        probe(1000);
+        probe(700);
         return 1;
     } catch (e) {
         return 0;
     }
 });
 
-// Room for one more level of compiled code: shallow nesting cannot run out, deeper the stack is
-// probed every 4 levels
+// Within one outermost run of compiled code (a script, an event handler): the deepest depth found
+// with room and the depth found without (0: none)
+thread_local unsigned roomyDepth;
+thread_local unsigned crampedDepth;
+
+// Room for one more level of compiled code: shallow nesting cannot run out; deeper, within one
+// outermost run, depths up to the deepest one with room are trusted and every 8 levels beyond it
+// probed, so code that recurses around one depth does not probe on every call
 bool roomForCompiledCode()
 {
+    if (!depth)
+        roomyDepth = crampedDepth = 0;
     if (depth >= maximumDepth)
         return false;
-    if (depth < 64 || (depth & 3))
+    if (depth < 64 || depth < roomyDepth + 8)
         return true;
-    return wasmJITStackHasRoom();
+    if (crampedDepth && depth >= crampedDepth)
+        return false;
+    if (!wasmJITStackHasRoom()) {
+        crampedDepth = depth;
+        return false;
+    }
+    roomyDepth = depth;
+    return true;
 }
 
 int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
