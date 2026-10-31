@@ -435,7 +435,9 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: e2e-core-screenshots-${{ matrix.browser }}
-          path: build/e2e-*.png
+          path: |
+            build/e2e-*.png
+            build/e2e-*.trace.json
           if-no-files-found: ignore
 
   e2e-demo:

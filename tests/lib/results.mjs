@@ -1,4 +1,5 @@
 // Reading the page under test: RESULT lines from the console, pixels of the view, waiting.
+import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { BROWSER } from './browser.mjs';
@@ -106,3 +107,29 @@ export async function waitFor(condition, ms = 20000, step = 100) {
 /** Screenshot of the window to build/e2e-<name>.png (CI artifact). */
 export const screenshot = (page, name) =>
   page.screenshot({ path: path.join(buildDir, `e2e-${name}.png`) }).catch(() => {});
+
+/**
+ * Chromium: CPU profile of all threads (also the engine's workers) for `ms` to
+ * build/e2e-<name>.trace.json (CI artifact, opens in the Performance panel of Chrome's DevTools).
+ */
+export async function traceCpu(page, name, ms = 3000) {
+  if (BROWSER !== 'chromium') return;
+  const cdp = await page.context().newCDPSession(page);
+  const events = [];
+  cdp.on('Tracing.dataCollected', (e) => events.push(...e.value));
+  await cdp.send('Tracing.start', {
+    traceConfig: {
+      includedCategories: ['disabled-by-default-v8.cpu_profiler', 'devtools.timeline'],
+    },
+    transferMode: 'ReportEvents',
+  });
+  await new Promise((resolve) => setTimeout(resolve, ms));
+  const done = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
+  await cdp.send('Tracing.end');
+  await done;
+  await cdp.detach().catch(() => {});
+  fs.writeFileSync(
+    path.join(buildDir, `e2e-${name}.trace.json`),
+    JSON.stringify({ traceEvents: events }),
+  );
+}

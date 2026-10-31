@@ -309,8 +309,9 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   now marks the call of the flush itself. 2026-10-31: phase 135 for 4 s at layer 6 of 8, step 0:
   the thread stopped between setting the phase and the first statement of
   `CoordinatedPlatformLayer::flushCompositingState` (in engine.wasm, no chunk to load, the step is
-  inlined there). Nothing of ours can wait there; next: a CPU profile of the compositor's worker
-  when the stall is detected.
+  inlined there). Nothing of ours can wait there. In Chromium `devices-test` now records a CPU
+  profile of all threads when the engine logs the stall (`build/e2e-devices-stall.trace.json` in
+  the artifact `e2e-core-screenshots-chromium`).
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.

@@ -29,6 +29,7 @@ export {
   screenPixel,
   screenshot,
   shownPixel,
+  traceCpu,
   waitFor,
 } from './results.mjs';
 export { buildDemo, coreSite, demoSite } from './site.mjs';

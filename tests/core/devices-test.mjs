@@ -23,6 +23,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  traceCpu,
   waitEvent,
   waitFor,
 } from '../lib/index.mjs';
@@ -305,11 +306,20 @@ const page = await context.newPage();
 const results = collect(page, /RESULT (\w+)=(.*?)(\s+\(|$)/);
 // The last engine log lines, for the rare stall below (CI runs without E2E_VERBOSE)
 const engineLog = [];
+let stallTraced = false;
 page.on('console', (message) => {
   const text = message.text();
   if (!text.includes('[engine]')) return;
   engineLog.push(text.slice(0, 400));
   if (engineLog.length > 40) engineLog.shift();
+  // Where the compositor's thread stands while the view gets no frames (CI artifact)
+  if (text.includes('no rendering update for') && !stallTraced) {
+    stallTraced = true;
+    traceCpu(page, 'devices-stall').then(
+      () => console.log('     CPU profile of the stall: build/e2e-devices-stall.trace.json'),
+      (e) => console.log('     CPU profile of the stall failed:', e.message),
+    );
+  }
 });
 const result = (key, timeout = 30000) => results.wait(key, timeout);
 async function at(x, y) {
