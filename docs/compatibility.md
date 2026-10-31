@@ -54,7 +54,9 @@ library, camera, files) through the sheet of #312. Also on Android: a DuckDuckGo
 on Wikipedia (before #313 one short swipe of the driver flung over 4000 px) and tabs; on the iPhone
 sbb.ch's timetable form (consent, typing into From and To with the suggestions above the keyboard,
 the location prompt of "Current location"). On an iPad (Safari reports a Mac) the date field's
-sheet appears as well and opens Safari's calendar popover.
+sheet appears as well and opens Safari's calendar popover. Google Maps on the iPhone: the app
+promo, panning; until #314 a swipe that began on its bottom sheet zoomed the map out (the page got
+wheel events). An Amazon search on Android (cookie sheet, search, results).
 
 ## State 2026-10-29 (local)
 
