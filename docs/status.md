@@ -169,9 +169,10 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 1. Compiling on first call (weather.com about 11 s parser and bytecode), also on repeat visits:
    a persistent bytecode cache hit but brought no measurable gain (#215).
-2. Interpreter time (15 to 21 % on JS-heavy sites, plain JS 20 to 40x slower than V8): a
-   tail-call interpreter brings nothing in V8 (#321), only a JIT to WASM would; small caches are
-   done (#143), polymorphic property caches are next.
+2. Interpreter time (15 to 21 % on JS-heavy sites, plain JS 20 to 40x slower than V8): the JIT to
+   WASM (#322, #324, [jit.md](jit.md)) runs Octane 2 to 4x faster than the interpreter but
+   call-heavy code like the TypeScript compiler only about 10 %; cheaper calls (inline in WASM)
+   and values in WASM locals are next, then polymorphic property caches.
 3. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas

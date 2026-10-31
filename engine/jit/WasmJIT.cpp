@@ -50,11 +50,11 @@ using namespace WasmJIT;
 
 namespace {
 
-// BL_JIT=1 turns it on (off by default while it grows), 2 also logs what it compiles, 3 also
-// writes the modules to files (node)
+// On by default: BL_JIT=0 turns it off, 2 also logs what it compiles, 3 also writes the modules
+// to files (node)
 EM_JS(int, wasmJITSwitch, (), {
-    const value = typeof process === 'object' && process.env && process.env.BL_JIT;
-    return Number(value) || 0;
+    const value = typeof process === 'object' && process.env ? process.env.BL_JIT : undefined;
+    return value === undefined || value === '' ? 1 : Number(value) || 0;
 });
 
 int level()

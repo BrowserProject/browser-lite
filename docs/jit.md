@@ -3,7 +3,7 @@
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`): plain JS is 20 to 40 times slower than in V8,
 about 55 cycles per bytecode, and neither a tail-call interpreter nor more inline caches change
 that (#321). The JIT compiles hot JSC bytecode into WebAssembly at runtime, in the thread of the
-VM. Status: in work (#322), off by default (`BL_JIT=1` turns it on).
+VM. On by default (#324), `BL_JIT=0` turns it off.
 
 ## Shape
 
