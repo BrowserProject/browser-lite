@@ -35,9 +35,11 @@ never baked into the code (the GC resets inline caches).
 
 ## Measured
 
-Phase 1 in the `jsc` shell (node, 100 calls of a loop of 20000): an int32 loop 362 against
-35 ms, with `%` 404 against 21 ms, property reads and writes through the interpreter's caches 485
-against 53 ms.
+In the `jsc` shell (node), interpreter against compiled: an int32 loop 352 against 28 ms, with
+`%` 494 against 18 ms, property reads and writes through the interpreter's caches 451 against
+41 ms; with calls (compiled callees directly, host functions like the interpreter, the rest
+generic) `fib(25)` 261 against 89 ms, a call in a loop 402 against 154 ms, `Math.max` in a loop
+326 against 114 ms.
 
 ## Phases
 

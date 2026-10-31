@@ -10,13 +10,20 @@
 
 #include "BytecodeGenerator.h"
 #include "BytecodeStructs.h"
+#include "CallData.h"
 #include "CellState.h"
 #include "CodeBlock.h"
 #include "CommonSlowPaths.h"
 #include "Fits.h"
+#include "FrameTracers.h"
+#include "JSCJSValueInlines.h"
+#include "JSFunction.h"
+#include "JSFunctionInlines.h"
+#include "JSLexicalEnvironment.h"
 #include "JSObject.h"
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
+#include "SlowPathCall.h"
 #include "VMTraps.h"
 #include "WasmModule.h"
 #include <emscripten.h>
@@ -88,6 +95,106 @@ const JSInstruction* returnInstruction()
     return reinterpret_cast<const JSInstruction*>(instruction);
 }
 
+uint32_t compiledFunction(CodeBlock*);
+
+// Compiled code nests on the host's machine stack (every JS call is a WASM call), which is much
+// smaller than the JS stack of the C loop: beyond this depth the interpreter takes the calls,
+// which nest only in the JS stack, until JSC's own limit throws a RangeError
+constexpr unsigned maximumDepth = 1000;
+thread_local unsigned depth;
+
+int32_t runCompiled(uint32_t function, CallFrame* callFrame)
+{
+    ++depth;
+    auto status = reinterpret_cast<CompiledFunction>(static_cast<uintptr_t>(function))(callFrame);
+    --depth;
+    return status;
+}
+
+// A call from compiled code (op_call, op_call_ignore_result), with the signature of a slow path.
+// A compiled callee runs directly in the frame the bytecode prepared (callFrame - argv), a host
+// function like the interpreter calls it, everything else through JSC's generic call (bound
+// functions, proxies, interpreted functions, arity fixup, stack overflow).
+template<typename Bytecode>
+UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
+{
+    auto bytecode = pc->as<Bytecode>();
+    CodeBlock* codeBlock = callFrame->codeBlock();
+    VM& vm = codeBlock->vm();
+    JSGlobalObject* globalObject = codeBlock->globalObject();
+    SlowPathFrameTracer tracer(vm, callFrame);
+    callFrame->setCurrentVPC(pc);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    CallFrame* calleeFrame = callFrame - bytecode.m_argv;
+    JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
+    unsigned argumentCount = bytecode.m_argc;
+    auto finish = [&](JSValue result) {
+        if (scope.exception()) [[unlikely]]
+            return encodeResult(exceptionInstructions(), callFrame);
+        if constexpr (requires { bytecode.m_dst; })
+            callFrame->uncheckedR(bytecode.m_dst) = result;
+        return encodeResult(pc, callFrame);
+    };
+    auto setUpFrame = [&](CodeBlock* calleeCodeBlock) {
+        calleeFrame->setCallerFrame(callFrame);
+        calleeFrame->setReturnPC(nullptr);
+        calleeFrame->setCodeBlock(calleeCodeBlock);
+        calleeFrame->uncheckedR(VirtualRegister(CallFrameSlot::callee)) = callee;
+        calleeFrame->setArgumentCountIncludingThis(argumentCount);
+    };
+
+    if (auto* function = dynamicDowncast<JSFunction>(callee); function && !function->isHostFunction() && depth < maximumDepth && vm.isSafeToRecurseSoft()) {
+        auto* calleeCodeBlock = function->jsExecutable()->codeBlockForCall();
+        uint32_t compiled = calleeCodeBlock ? compiledFunction(calleeCodeBlock) : 0;
+        auto* top = compiled ? reinterpret_cast<Register*>(calleeFrame) - calleeCodeBlock->numCalleeLocals() : nullptr;
+        if (compiled && argumentCount >= calleeCodeBlock->numParameters() && vm.cloopStack().ensureCapacityFor(top)) {
+            setUpFrame(calleeCodeBlock);
+            // What op_enter and slow_path_enter do
+            for (int local = CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters(); local < calleeCodeBlock->numVars(); ++local)
+                calleeFrame->uncheckedR(virtualRegisterForLocal(local)) = jsUndefined();
+            vm.writeBarrier(calleeCodeBlock);
+            calleeFrame->uncheckedR(calleeCodeBlock->scopeRegister()) = function->scope();
+            if (calleeCodeBlock->couldBeTainted()) [[unlikely]]
+                vm.setMightBeExecutingTaintedCode();
+            auto* previous = vm.cloopStack().currentStackPointer();
+            vm.cloopStack().setCurrentStackPointer(top);
+            auto status = runCompiled(compiled, calleeFrame);
+            vm.cloopStack().setCurrentStackPointer(previous);
+            vm.topCallFrame = callFrame;
+            if (status)
+                return encodeResult(exceptionInstructions(), callFrame);
+            return finish(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue());
+        }
+    }
+
+    auto callData = JSC::getCallData(callee);
+    if (callData.type == CallData::Type::Native && vm.isSafeToRecurseSoft()) {
+        setUpFrame(nullptr);
+        auto* previous = vm.cloopStack().currentStackPointer();
+        vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame) + CallerFrameAndPC::sizeInRegisters);
+        vm.topCallFrame = calleeFrame;
+        JSValue result = JSValue::decode(callData.native.function(globalObject, calleeFrame));
+        vm.cloopStack().setCurrentStackPointer(previous);
+        vm.topCallFrame = callFrame;
+        return finish(result);
+    }
+    if (callData.type == CallData::Type::None) {
+        throwException(globalObject, scope, createNotAFunctionError(globalObject, callee));
+        return encodeResult(exceptionInstructions(), callFrame);
+    }
+    MarkedArgumentBuffer arguments;
+    for (unsigned i = 1; i < argumentCount; ++i)
+        arguments.append(calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(i)).jsValue());
+    if (arguments.hasOverflowed()) [[unlikely]] {
+        throwOutOfMemoryError(globalObject, scope);
+        return encodeResult(exceptionInstructions(), callFrame);
+    }
+    JSValue thisValue = calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(0)).jsValue();
+    JSValue result = JSC::call(globalObject, callee, callData, thisValue, arguments);
+    return finish(result);
+}
+
 constexpr int32_t int32Tag = static_cast<int32_t>(JSValue::Int32Tag);
 constexpr int32_t booleanTag = static_cast<int32_t>(JSValue::BooleanTag);
 
@@ -137,6 +244,10 @@ private:
     void emitGetById(const JSInstructionStream::Ref&);
     void emitPutById(const JSInstructionStream::Ref&);
     void emitMod(const JSInstructionStream::Ref&);
+    void emitResolveScope(const JSInstructionStream::Ref&);
+    void emitGetFromScope(const JSInstructionStream::Ref&);
+    // Stores a cell (tag CellTag) from the local
+    void storeCell(VirtualRegister, uint32_t payloadLocal);
     // Address of a property at the offset in the local, of the object in the local: inline storage
     // or the butterfly's
     void propertyAddress(uint32_t objectLocal, uint32_t offsetLocal);
@@ -451,6 +562,209 @@ void Compiler::emitMod(const JSInstructionStream::Ref& instruction)
     m_body->end();
 }
 
+void Compiler::storeCell(VirtualRegister reg, uint32_t payloadLocal)
+{
+    address(reg);
+    m_body->i32Const(static_cast<int32_t>(JSValue::CellTag));
+    m_body->i32Store(TagOffset);
+    address(reg);
+    m_body->localGet(payloadLocal);
+    m_body->i32Store(PayloadOffset);
+}
+
+// Like the interpreter: by the resolve type in the cache, the constant scope or the scope some
+// levels up; dynamic cases and the ones with var injection checks in the slow path
+void Compiler::emitResolveScope(const JSInstructionStream::Ref& instruction)
+{
+    auto bytecode = instruction->as<OpResolveScope>();
+    auto& cache = bytecode.metadata(m_codeBlock);
+    auto resolveType = [&] {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_resolveType));
+        m_body->i32Load(0);
+    };
+    auto constantScope = [&] {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_constantScope));
+        m_body->i32Load(0);
+    };
+    m_body->i32Const(0);
+    m_body->localSet(m_next);
+
+    resolveType();
+    m_body->i32Const(GlobalProperty);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        // The global lexical bindings did not change since the cache was made
+        constantScope();
+        m_body->localTee(m_a);
+        m_body->i32Load(JSGlobalObject::offsetOfGlobalLexicalBindingEpoch());
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_globalLexicalBindingEpoch));
+        m_body->i32Load(0);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        storeCell(bytecode.m_dst, m_a);
+        m_body->i32Const(1);
+        m_body->localSet(m_next);
+        m_body->end();
+    }
+    m_body->end();
+
+    for (auto type : { GlobalVar, GlobalLexicalVar, ModuleVar }) {
+        resolveType();
+        m_body->i32Const(type);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        constantScope();
+        m_body->localSet(m_a);
+        storeCell(bytecode.m_dst, m_a);
+        m_body->i32Const(1);
+        m_body->localSet(m_next);
+        m_body->end();
+    }
+
+    resolveType();
+    m_body->i32Const(ClosureVar);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_scope);
+        m_body->localSet(m_a);
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_localScopeDepth));
+        m_body->i32Load(0);
+        m_body->localSet(m_b);
+        m_body->block();
+        m_body->loop();
+        m_body->localGet(m_b);
+        m_body->op(Op::I32Eqz);
+        m_body->brIf(1);
+        m_body->localGet(m_a);
+        m_body->i32Load(JSScope::offsetOfNext());
+        m_body->localSet(m_a);
+        m_body->localGet(m_b);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Sub);
+        m_body->localSet(m_b);
+        m_body->br(0);
+        m_body->end();
+        m_body->end();
+        storeCell(bytecode.m_dst, m_a);
+        m_body->i32Const(1);
+        m_body->localSet(m_next);
+    }
+    m_body->end();
+
+    m_body->localGet(m_next);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    callSlowPath(slow_path_resolve_scope, instruction);
+    m_body->end();
+}
+
+// Like the interpreter: a global property behind a structure check, a global variable through its
+// pointer (a lexical one not before its initialization), a closure variable in its environment
+void Compiler::emitGetFromScope(const JSInstructionStream::Ref& instruction)
+{
+    auto bytecode = instruction->as<OpGetFromScope>();
+    auto& cache = bytecode.metadata(m_codeBlock);
+    auto resolveType = [&] {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_getPutInfo));
+        m_body->i32Load(0);
+        m_body->i32Const(GetPutInfo::typeBits);
+        m_body->op(Op::I32And);
+    };
+    auto operand = [&] {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_operand));
+        m_body->i32Load(0);
+    };
+    auto finish = [&] {
+        storeTagAndPayload(bytecode.m_dst, m_a, m_b);
+        m_body->i32Const(1);
+        m_body->localSet(m_next);
+    };
+    m_body->i32Const(0);
+    m_body->localSet(m_next);
+
+    resolveType();
+    m_body->i32Const(GlobalProperty);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_scope);
+        m_body->localTee(m_a);
+        m_body->i32Load(JSCell::structureIDOffset());
+        m_body->i32Const(reinterpret_cast<uintptr_t>(&cache.m_structureID));
+        m_body->i32Load(0);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        operand();
+        m_body->localSet(m_b);
+        propertyAddress(m_a, m_b);
+        m_body->localSet(m_c);
+        m_body->localGet(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        finish();
+        m_body->end();
+    }
+    m_body->end();
+
+    for (auto type : { GlobalVar, GlobalLexicalVar }) {
+        resolveType();
+        m_body->i32Const(type);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        operand();
+        m_body->localTee(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        if (type == GlobalLexicalVar) {
+            // Not before its initialization (TDZ): the slow path throws
+            m_body->localGet(m_a);
+            m_body->i32Const(static_cast<int32_t>(JSValue::EmptyValueTag));
+            m_body->op(Op::I32Ne);
+            m_body->ifThen();
+            finish();
+            m_body->end();
+        } else
+            finish();
+        m_body->end();
+    }
+
+    resolveType();
+    m_body->i32Const(ClosureVar);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    {
+        loadPayload(bytecode.m_scope);
+        m_body->i32Const(JSLexicalEnvironment::offsetOfVariables());
+        m_body->op(Op::I32Add);
+        operand();
+        m_body->i32Const(3);
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Add);
+        m_body->localTee(m_c);
+        m_body->i32Load(TagOffset);
+        m_body->localSet(m_a);
+        m_body->localGet(m_c);
+        m_body->i32Load(PayloadOffset);
+        m_body->localSet(m_b);
+        finish();
+    }
+    m_body->end();
+
+    m_body->localGet(m_next);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    callSlowPath(llint_slow_path_get_from_scope, instruction);
+    m_body->end();
+}
+
 // Conditional jumps without a fast path: the slow path returns the target or the next instruction
 template<typename Bytecode>
 void Compiler::emitGenericJump(const JSInstructionStream::Ref& instruction, unsigned block, SlowPath slowPath)
@@ -680,7 +994,7 @@ bool Compiler::scan()
         case op_rshift: case op_urshift: case op_not: case op_to_number: case op_get_by_id: case op_put_by_id:
         case op_get_by_val: case op_put_by_val: case op_get_from_scope: case op_put_to_scope: case op_resolve_scope:
         case op_typeof: case op_new_object: case op_new_array: case op_get_length: case op_to_primitive:
-        case op_loop_hint: case op_check_traps:
+        case op_loop_hint: case op_check_traps: case op_call: case op_call_ignore_result:
             break;
         case op_ret:
             starts.add(next);
@@ -757,14 +1071,16 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_put_by_id: emitPutById(instruction); return;
     case op_get_by_val: emitGeneric(instruction, llint_slow_path_get_by_val); return;
     case op_put_by_val: emitGeneric(instruction, llint_slow_path_put_by_val); return;
-    case op_get_from_scope: emitGeneric(instruction, llint_slow_path_get_from_scope); return;
+    case op_get_from_scope: emitGetFromScope(instruction); return;
     case op_put_to_scope: emitGeneric(instruction, llint_slow_path_put_to_scope); return;
-    case op_resolve_scope: emitGeneric(instruction, slow_path_resolve_scope); return;
+    case op_resolve_scope: emitResolveScope(instruction); return;
     case op_typeof: emitGeneric(instruction, slow_path_typeof); return;
     case op_new_object: emitGeneric(instruction, llint_slow_path_new_object); return;
     case op_new_array: emitGeneric(instruction, llint_slow_path_new_array); return;
     case op_get_length: emitGeneric(instruction, llint_slow_path_get_length); return;
     case op_to_primitive: emitGeneric(instruction, slow_path_to_primitive); return;
+    case op_call: emitGeneric(instruction, callFromCompiledCode<OpCall>); return;
+    case op_call_ignore_result: emitGeneric(instruction, callFromCompiledCode<OpCallIgnoreResult>); return;
     case op_loop_hint:
         return;
     case op_check_traps: {
@@ -810,11 +1126,11 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_jlesseq: emitCompareJump<OpJlesseq>(instruction, block, Op::I32LeS, llint_slow_path_jlesseq); return;
     case op_jgreater: emitCompareJump<OpJgreater>(instruction, block, Op::I32GtS, llint_slow_path_jgreater); return;
     case op_jgreatereq: emitCompareJump<OpJgreatereq>(instruction, block, Op::I32GeS, llint_slow_path_jgreatereq); return;
-    // jn...: jump when the comparison is false (also for NaN), so int32 inline only as the inverse
-    case op_jnless: emitGenericJump<OpJnless>(instruction, block, llint_slow_path_jnless); return;
-    case op_jnlesseq: emitGenericJump<OpJnlesseq>(instruction, block, llint_slow_path_jnlesseq); return;
-    case op_jngreater: emitGenericJump<OpJngreater>(instruction, block, llint_slow_path_jngreater); return;
-    case op_jngreatereq: emitGenericJump<OpJngreatereq>(instruction, block, llint_slow_path_jngreatereq); return;
+    // jn...: jump when the comparison is false (also for NaN); int32 inline as the inverse
+    case op_jnless: emitCompareJump<OpJnless>(instruction, block, Op::I32GeS, llint_slow_path_jnless); return;
+    case op_jnlesseq: emitCompareJump<OpJnlesseq>(instruction, block, Op::I32GtS, llint_slow_path_jnlesseq); return;
+    case op_jngreater: emitCompareJump<OpJngreater>(instruction, block, Op::I32LeS, llint_slow_path_jngreater); return;
+    case op_jngreatereq: emitCompareJump<OpJngreatereq>(instruction, block, Op::I32LtS, llint_slow_path_jngreatereq); return;
     case op_jeq: emitGenericJump<OpJeq>(instruction, block, llint_slow_path_jeq); return;
     case op_jneq: emitGenericJump<OpJneq>(instruction, block, llint_slow_path_jneq); return;
     case op_jstricteq: emitGenericJump<OpJstricteq>(instruction, block, llint_slow_path_jstricteq); return;
@@ -869,6 +1185,11 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     return m_module.bytes();
 }
 
+uint32_t compiledFunction(CodeBlock* codeBlock)
+{
+    return compiledCode().get(codeBlock);
+}
+
 } // namespace
 
 const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
@@ -876,9 +1197,9 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
     if (!enabled())
         return nullptr;
     auto function = compiledCode().get(codeBlock);
-    if (!function)
+    if (!function || depth >= maximumDepth)
         return nullptr;
-    auto status = reinterpret_cast<CompiledFunction>(static_cast<uintptr_t>(function))(callFrame);
+    auto status = runCompiled(function, callFrame);
     return status ? exceptionInstructions() : returnInstruction();
 }
 

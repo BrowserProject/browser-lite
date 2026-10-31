@@ -24,9 +24,38 @@ function readX(o) { return o.x; }
 function writeX(o, v) { o.x = v; return o.x; }
 function remainder(a, b) { return a % b; }
 function manyProperties() { const o = {}; for (let i = 0; i < 80; i++) o["p" + i] = i; return o; }
+// Calls from compiled code: compiled callees, host functions, everything else generic
+function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+function maxOf(a, b) { return Math.max(a, b) + "abc".charCodeAt(1); }
+function pushTwice(list, v) { list.push(v); list.push(v); return list.length; }
+function add3(a, b, c) { return a + b + c; }
+function callBound(f) { return f(1); }
+function callShort() { return add3(1, 2); }
+function countArguments() { return arguments.length; }
+function callArguments() { return countArguments(1, 2, 3); }
+function thrower(x) { if (x > 0) throw new RangeError("x"); return x; }
+function callThrower(x) { return thrower(x); }
+function callNotAFunction(o) { return o.missing(); }
+function deep(n) { return n ? deep(n - 1) + 1 : 0; }
+// Scopes: closure variables some levels up, global let (also before its initialization), var
+function makeCounter() { let count = 0; return function outer() { return (function inner() { count++; return count; })(); }; }
+function readLate() { return lateLet; }
+var globalVar = 5;
+function readGlobalVar() { return globalVar; }
+globalThis.globalProperty = 1;
+function readGlobalProperty() { return globalProperty; }
 let captured = 0;
 function closure() { captured++; return captured; }
 
+const counter = makeCounter();
+let tdz = null;
+try {
+    readLate();
+} catch (e) {
+    tdz = e;
+}
+check("TDZ", tdz instanceof ReferenceError, true);
+let lateLet = "late";
 const o = { value: 21 };
 const array = [1, 2, 3];
 for (let round = 0; round < 300; round++) {
@@ -70,6 +99,42 @@ for (let round = 0; round < 300; round++) {
     check("% 0", remainder(5, 0), NaN);
     check("% min", remainder(-2147483648, -1), -0);
     check("% double", remainder(5.5, 2), 1.5);
+    check("closure levels", counter(), round + 1);
+    check("global let", readLate(), "late");
+    check("global var", readGlobalVar(), 5);
+    check("global property", readGlobalProperty(), round === 0 ? 1 : round);
+    globalThis.globalProperty = round + 1;
+    check("fib", fib(15), 610);
+    check("host functions", maxOf(3, 8), 8 + 98);
+    check("push", pushTwice([], round), 2);
+    check("bound", callBound(add3.bind(null, 10, 20)), 31);
+    check("arity", callShort(), NaN);
+    check("arguments", callArguments(), 3);
+    check("callee returns", callThrower(0), 0);
+    let calleeThrew = null;
+    try {
+        callThrower(1);
+    } catch (e) {
+        calleeThrew = e;
+    }
+    check("callee throws", calleeThrew instanceof RangeError, true);
+    let notFunction = null;
+    try {
+        callNotAFunction({});
+    } catch (e) {
+        notFunction = e;
+    }
+    check("not a function", notFunction instanceof TypeError, true);
+    let tooDeep = null;
+    if (round === 299) {
+        try {
+            deep(1e6);
+        } catch (e) {
+            tooDeep = e;
+        }
+        check("stack overflow", tooDeep instanceof RangeError, true);
+    }
+    check("deep enough", deep(500), 500);
     let caught = null;
     try {
         throws({});
