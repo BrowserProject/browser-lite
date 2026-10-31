@@ -45,7 +45,11 @@ and look right (Spotify asks for its app on mobile). Interactive on both phones 
 4f3ad4d): a Google search (tap into the field, type, Enter; before #309 the tap opened a
 suggestion), a Wikipedia search, filling GitHub's sign-in form (also the password field), a
 YouTube video that plays with sound after a tap; on the iPhone also swiping with momentum, a cookie
-dialog and a link on srf.ch, and tabs (new tab, address, switching back).
+dialog and a link on srf.ch, and tabs (new tab, address, switching back). Form controls on the
+iPhone: checkbox, `<select>` (our list), a date field through Safari's calendar (#310, #311: tap
+the field, then the input in the sheet, pick a day). On Android the tap on a date field opens
+Chrome's date dialog through `showPicker()` (it consumes the activation of the tap; the driver's
+screenshots do not show native dialogs).
 
 ## State 2026-10-29 (local)
 
