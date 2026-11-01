@@ -322,7 +322,12 @@ describe('queued client data', () => {
     let sent = 0;
     while (sent < 1024 && !client.packets.some((p) => p.type === CLOSE && p.streamId === 1)) {
       client.send(DATA, 1, chunk);
-      if (++sent % 16 === 0) await sleep(2);
+      // Count only what reached the socket: under load packets waited in the client's own
+      // WebSocket buffer and counted as sent (448 in a CI run)
+      if (++sent % 16 === 0) {
+        await sleep(2);
+        while (client.ws.bufferedAmount > 0) await sleep(2);
+      }
     }
     assert.equal(await client.closeReason(1), NETWORK_ERROR);
     // 16 MiB (2 * 128 packets) in the relay plus the socket buffers of the kernel
