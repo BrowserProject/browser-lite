@@ -181,7 +181,8 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
 2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
    saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
    about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
-   was busy.
+   was busy. On a Motorola Moto G71 (real GPU) a context with a few queries took 89 ms the first
+   time and 28 ms each after.
 3. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
