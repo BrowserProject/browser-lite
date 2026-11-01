@@ -273,8 +273,6 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   in already open documents or in `about:blank` frames.
 - Core API: no event for console messages without a view (service workers), no warning for
   skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait".
-- The test hooks `gpu()` are not gated by `BL_TEST_HOOKS` in the engine (only the host can call
-  them).
 
 ## Open: tests and operations
 

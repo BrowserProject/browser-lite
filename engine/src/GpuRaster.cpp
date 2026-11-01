@@ -291,8 +291,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl__gpu_context_restored_event()
 
 // For tests: lose and restore the context on purpose (WEBGL_lose_context),
 // with the compositor thread its context
+// Only with BL_TEST_HOOKS=1
 static void runOnGpuThreadForTesting(Function<void()>&& function)
 {
+    if (!BrowserLite::engineConfig().testHooks)
+        return;
     if (BrowserLite::Compositor::isRunning())
         BrowserLite::Compositor::dispatch(WTF::move(function));
     else

@@ -1032,11 +1032,14 @@ EMSCRIPTEN_KEEPALIVE void bl_crash_for_testing(int kind)
 }
 
 #if ENABLE(WEBGL)
-// For tests: lose the host WebGL contexts the WebGL canvases of the pages
-// draw on (ANGLEShimWasm.cpp)
+// For tests, only with BL_TEST_HOOKS=1: lose the host WebGL contexts the WebGL
+// canvases of the pages draw on (ANGLEShimWasm.cpp)
 EMSCRIPTEN_KEEPALIVE void bl_webgl_lose_context_for_testing()
 {
-    runOnEngineThread([] { WebCore::angleShimLoseHostContextsForTesting(); });
+    runOnEngineThread([] {
+        if (engineConfig().testHooks)
+            WebCore::angleShimLoseHostContextsForTesting();
+    });
 }
 #endif
 } // extern "C"
