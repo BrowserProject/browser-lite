@@ -40,6 +40,7 @@ import type {
   BrowserOptions,
   BrowserStorage,
   ColorScheme,
+  ConsoleMessage,
   Download,
   PermissionDecision,
   PermissionKind,
@@ -55,6 +56,22 @@ import { type ViewHost, ViewImpl } from './view.js';
 import { Watchdog } from './watchdog.js';
 
 const CONSOLE_LEVELS = ['log', 'warn', 'error', 'debug', 'info'] as const;
+
+// Payload of the engine events console and service-worker-console
+function consoleMessage(data: Record<string, unknown>): ConsoleMessage {
+  return {
+    level: CONSOLE_LEVELS[Number(data.level)] ?? 'log',
+    message: String(data.message ?? ''),
+    source: String(data.source ?? ''),
+    line: Number(data.line) || 0,
+  };
+}
+
+// The prefix first: the message is text, not a format string of the host console (the engine
+// formatted it)
+function logConsoleMessage(prefix: string, { level, message, source, line }: ConsoleMessage): void {
+  console[level](prefix, message, ...(source ? [`(${source}:${line})`] : []));
+}
 
 /** Longest crash reason in characters (message and stack). */
 const MAX_CRASH_REASON = 4096;
@@ -474,19 +491,14 @@ class BrowserImpl implements Browser, ViewHost {
       }
     });
     this.handle<Record<string, unknown>>('console', (data, view) => {
-      const level = CONSOLE_LEVELS[Number(data.level)] ?? 'log';
-      const message = String(data.message ?? '');
-      const source = String(data.source ?? '');
-      const line = Number(data.line) || 0;
-      view?.emit('console', { level, message, source, line });
-      // The prefix first: the message is text, not a format string of the host console (the
-      // engine formatted it)
-      if (this.config.debug)
-        console[level](
-          `[page ${view?.id ?? 0}]`,
-          message,
-          ...(source ? [`(${source}:${line})`] : []),
-        );
+      const entry = consoleMessage(data);
+      view?.emit('console', entry);
+      if (this.config.debug) logConsoleMessage(`[page ${view?.id ?? 0}]`, entry);
+    });
+    this.handle<Record<string, unknown>>('service-worker-console', (data) => {
+      const entry = consoleMessage(data);
+      this.events.emit('service-worker-console', entry);
+      if (this.config.debug) logConsoleMessage('[service worker]', entry);
     });
     this.handle<Record<string, unknown>>('extension-message', (data, view) => {
       void answerScriptMessage(this, this.extensions, data, view);

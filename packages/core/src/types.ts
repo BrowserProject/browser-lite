@@ -335,6 +335,17 @@ export interface BrowserEvents {
   network: { connected: boolean };
   /** Something works in a reduced way; also logged to the console. */
   warning: { code: WarningCode; message: string };
+  /** A console message of a service worker (it has no view): `source` is its script URL, `line` 0. */
+  'service-worker-console': ConsoleMessage;
+}
+
+/** A console message of a page ({@link ViewEvents}) or a service worker ({@link BrowserEvents}). */
+export interface ConsoleMessage {
+  level: 'log' | 'warn' | 'error' | 'debug' | 'info';
+  message: string;
+  /** Address of the script or document. */
+  source: string;
+  line: number;
 }
 
 /** Payload of the `memory-pressure` event of {@link Browser.on}, in bytes. */
@@ -482,12 +493,7 @@ export interface ViewEvents {
   /** First paint of a new document. */
   'first-paint': Record<string, never>;
   /** A console message of the page. */
-  console: {
-    level: 'log' | 'warn' | 'error' | 'debug' | 'info';
-    message: string;
-    source: string;
-    line: number;
-  };
+  console: ConsoleMessage;
   /** Favicon of the page, null when it has none. */
   icon: { blob: Blob | null };
   /** The pointer is over a link (its address) or left it (null). */

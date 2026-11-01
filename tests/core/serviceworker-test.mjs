@@ -161,6 +161,7 @@ let scriptPending = false;
 const sw = () => `const VERSION = ${swVersion};
 const TEXT = 'äöü';
 self.addEventListener('install', (e) => {
+  console.warn('sw install ' + VERSION);
   e.waitUntil(caches.open('v1').then((c) => c.put('/cached', new Response('cache-ok'))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
@@ -336,6 +337,14 @@ check(
   results.get('initialcontroller'),
 );
 check('page gets controlled (clients.claim)', (await result('controlled', 30000)) === '1');
+const swConsole = await page.evaluate(() =>
+  window.blHost.events.filter((e) => e.startsWith('sw-console:')),
+);
+check(
+  'console of the worker as a browser event (level, text, script URL)',
+  swConsole.some((e) => e.startsWith('sw-console:warn:sw install 1:') && e.endsWith('/sw.js')),
+  swConsole.join(' '),
+);
 check(
   'fetch answered by the worker',
   (await result('fetch', 30000)) === 'from-sw',

@@ -5,6 +5,7 @@
 #include "CookieJarWasm.h"
 #include "DeviceClients.h"
 #include "Engine.h"
+#include "Host.h"
 #include "HttpCache.h"
 #include "LoaderStrategy.h"
 #include "Storage.h"
@@ -520,9 +521,14 @@ private:
     bool isThrottleable() const final { return false; }
     PageIdentifier pageIdentifier() const final { return m_pageIdentifier; }
     void stop() final { }
-    void reportConsoleMessage(ServiceWorkerIdentifier, MessageSource, MessageLevel, const String& message, unsigned long) final
+    void reportConsoleMessage(ServiceWorkerIdentifier identifier, MessageSource, MessageLevel level, const String& message, unsigned long) final
     {
         debugLog("Service Worker: %s", message.utf8().data());
+        post([identifier, level, message = message.isolatedCopy()] {
+            RefPtr worker = SWServerWorker::existingWorkerForIdentifier(identifier);
+            String url = worker ? worker->scriptURL().string() : String { };
+            notifyHost(0, "service-worker-console", makeString("{\"level\":"_s, static_cast<int>(level), ",\"message\":\""_s, jsonEscape(message), "\",\"source\":\""_s, jsonEscape(url), "\",\"line\":0}"_s));
+        });
     }
     void removeNavigationFetch(SWServerConnectionIdentifier, FetchIdentifier) final { }
 

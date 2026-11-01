@@ -415,6 +415,9 @@ const host = {
     });
     browser.on('crash', ({ reason }) => host.events.push(`crash:${reason}`));
     browser.on('network', ({ connected }) => host.events.push(`network:${connected}`));
+    browser.on('service-worker-console', ({ level, message, source }) =>
+      host.events.push(`sw-console:${level}:${message}:${source}`),
+    );
     for (const type of ['unresponsive', 'responsive'])
       browser.on(type, () => host.events.push(type));
     browser.on('memory-pressure', (event) => {

@@ -103,6 +103,10 @@ what a browser UI has to do, and nothing happens without a listener:
 
 Without a `download` listener finished downloads are saved automatically.
 
+Console messages come as `console` of the view (`ConsoleMessage`: `level`, `message`, `source`,
+`line`); those of service workers, which have no view, as `service-worker-console` of the browser
+with the worker's script URL as `source`.
+
 `browser.preconnect(url)` opens the connection to the origin of an http(s) address ahead (TCP
 through the transport and TLS), for example while the user types it into an address bar; the
 engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down

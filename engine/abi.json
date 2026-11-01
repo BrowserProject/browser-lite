@@ -169,6 +169,7 @@
     { "type": "first-layout", "scope": "view", "payload": "empty" },
     { "type": "first-paint", "scope": "view", "payload": "empty" },
     { "type": "console", "scope": "view", "payload": "{level, message, source, line}; level 0 log, 1 warning, 2 error, 3 debug, 4 info" },
+    { "type": "service-worker-console", "scope": "global", "payload": "{level, message, source, line} like console; source is the worker's script URL, line 0" },
     { "type": "cursor", "scope": "view", "payload": "{cursor} (CSS cursor name)" },
     { "type": "hover", "scope": "view", "payload": "{link, tooltip}" },
     { "type": "caret", "scope": "view", "payload": "{x, y, height} (for the IME field)" },
