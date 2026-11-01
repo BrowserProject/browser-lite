@@ -25,7 +25,9 @@ never baked into the code (the GC resets inline caches).
   function and runs the rest of the call from the block after its `op_loop_hint`, then points the
   frame's bytecode offset (which the C loop reloads) at that `op_ret`.
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
-  `llint_loop_osr` at loops) call the compiler instead of giving up.
+  `llint_loop_osr` at loops) call the compiler instead of giving up, at their fourth firing
+  (about 200 calls or 2000 loop iterations): earlier, page loads compiled many functions that
+  ran only a few dozen times.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked

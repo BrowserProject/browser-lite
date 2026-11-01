@@ -34,6 +34,7 @@
 #include "JSString.h"
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
+#include "Options.h"
 #include "SlowPathCall.h"
 #include "StackAlignment.h"
 #include "StructureChain.h"
@@ -120,6 +121,18 @@ struct Compiled {
 HashMap<CodeBlock*, Compiled>& compiledCode()
 {
     static thread_local HashMap<CodeBlock*, Compiled> map;
+    return map;
+}
+
+// A CodeBlock compiles when the interpreter's counter fired this often (about 50 calls or 500
+// loop iterations each): page loads compiled 1700 functions on weather.com at 1 ms each, half of
+// them tiny ones that ran a few dozen times, and loaded 18 % slower than without the JIT
+constexpr unsigned warmUpFires = 4;
+
+// How often the counter fired for CodeBlocks not compiled yet
+HashMap<CodeBlock*, unsigned>& warmUp()
+{
+    static thread_local HashMap<CodeBlock*, unsigned> map;
     return map;
 }
 
@@ -3153,6 +3166,13 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
 void wasmJITTierUp(CodeBlock* codeBlock)
 {
     if (enabled() && !compiledCode().contains(codeBlock)) {
+        // Not yet hot enough: the interpreter's counter once more
+        auto& fires = warmUp().add(codeBlock, 0).iterator->value;
+        if (++fires < warmUpFires) {
+            codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
+            return;
+        }
+        warmUp().remove(codeBlock);
         Compiled compiled;
         Compiler compiler(codeBlock);
         auto bytes = compiler.compile();
@@ -3192,6 +3212,7 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
 
 void wasmJITForget(CodeBlock* codeBlock)
 {
+    warmUp().remove(codeBlock);
     auto it = compiledCode().find(codeBlock);
     if (it == compiledCode().end())
         return;
