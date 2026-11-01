@@ -1,0 +1,33 @@
+<!doctype html>
+<title>Computed style</title>
+<!-- getComputedStyle() of elements without a renderer (patch 0069: a selector filter of the
+     ancestors): descendant and child selectors still match exactly, also near rejected ones -->
+<style>
+  .outer .inner { color: rgb(1, 2, 3); }
+  #panel > span.leaf { color: rgb(4, 5, 6); }
+  .missing .inner { color: rgb(9, 9, 9) !important; }
+  [data-mode="x"] em { color: rgb(7, 8, 9); }
+  div:not(.outer) b { color: rgb(10, 11, 12); }
+</style>
+<div class="outer" style="display: none">
+  <p><span class="inner" id="a">a</span></p>
+  <div id="panel"><span class="leaf" id="b">b</span><i><span class="leaf" id="c">c</span></i></div>
+  <section data-mode="x"><em id="d">d</em></section>
+  <div><b id="e">e</b></div>
+</div>
+<div id="host"></div>
+<script>
+const color = (id, root = document) => getComputedStyle(root.getElementById(id)).color;
+const shadow = document.getElementById('host').attachShadow({ mode: 'open' });
+shadow.innerHTML = '<style>.box .deep { color: rgb(20, 21, 22); }</style><div class="box" style="display: none"><p><span class="deep" id="f">f</span></p></div>';
+const results = [
+  color('a') === 'rgb(1, 2, 3)',
+  color('b') === 'rgb(4, 5, 6)',
+  // Not a child of #panel: no match
+  color('c') !== 'rgb(4, 5, 6)',
+  color('d') === 'rgb(7, 8, 9)',
+  color('e') === 'rgb(10, 11, 12)',
+  color('f', shadow) === 'rgb(20, 21, 22)',
+];
+console.log('COMPUTED done=' + (results.every(Boolean) ? 'ok' : results.join('/')));
+</script>

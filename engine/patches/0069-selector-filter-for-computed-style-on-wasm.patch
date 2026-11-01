@@ -1,0 +1,31 @@
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index c27d8d47e4..e2af51448c 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -324,6 +324,7 @@
+ #include "StylePrimitiveNumericTypes+Evaluation.h"
+ #include "StyleProperties.h"
+ #include "StyleResolveForDocument.h"
++#include "SelectorMatchingState.h"
+ #include "StyleResolver.h"
+ #include "StyleSheetContents.h"
+ #include "StyleSheetList.h"
+@@ -3244,7 +3245,17 @@ std::unique_ptr<Style::ComputedStyle> Document::styleForElementIgnoringPendingSt
+     SetForScope change(m_ignorePendingStylesheets, true);
+     Ref resolver = element.styleResolver();
+ 
+-    auto elementStyle = resolver->styleForElement(element, { parentStyle.get() });
++    // browser-lite: the ancestors' identifiers in a selector filter, like the tree resolver has
++    // it, so descendant selectors that cannot match are rejected early. Without CSS JIT on WASM,
++    // getComputedStyle() of elements without a renderer (hidden ad slots) otherwise matched every
++    // rule completely. In shadow trees the tree resolver keeps one filter per scope: none there.
++    Style::SelectorMatchingState selectorMatchingState;
++    Style::ResolutionContext context { parentStyle.get() };
++    if (RefPtr parent = element.parentElement(); parent && !element.isInShadowTree()) {
++        selectorMatchingState.selectorFilter.pushParentInitializingIfNeeded(*parent);
++        context.selectorMatchingState = &selectorMatchingState;
++    }
++    auto elementStyle = resolver->styleForElement(element, context);
+     if (pseudoElementIdentifier) {
+         auto type = pseudoElementIdentifier->type;
+         if ((type == PseudoElementType::FirstLetter || type == PseudoElementType::FirstLine) && elementStyle.style && !Style::supportsFirstLineAndLetterPseudoElement(*elementStyle.style))
