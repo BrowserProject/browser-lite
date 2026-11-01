@@ -265,7 +265,9 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
 - Devices and identity: passkeys (WebAuthn has no authenticator, #298), password credentials,
   Payment Request, Web MIDI/USB/HID/Serial, WebXR.
 - Extensions: no blocking or observing of requests (an engine export for WebCore's content
-  extensions or a URL filter), no accessibility tree (an engine export), scripts not in workers,
+  extensions or a URL filter; for privacy, not speed: refusing the 3500 hosts of an ad server list
+  at the relay changed the load times of CNN, weather.com, Spiegel, NZZ, Yahoo and 20min by no
+  more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
 - Core API: no event for console messages without a view (service workers), no warning for
   skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait".
