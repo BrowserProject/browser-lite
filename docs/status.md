@@ -167,12 +167,17 @@ times earlier than the engine on the device (#224); the engine stays in the devi
 
 ## Open: performance (by value)
 
-1. Compiling on first call (weather.com about 11 s parser and bytecode), also on repeat visits:
-   a persistent bytecode cache hit but brought no measurable gain (#215).
-2. Interpreter time (15 to 21 % on JS-heavy sites, plain JS 20 to 40x slower than V8): the JIT to
-   WASM (#322, #324, [jit.md](jit.md)) runs Octane 2 to 4x faster than the interpreter but
-   call-heavy code like the TypeScript compiler only about 10 %; cheaper calls (inline in WASM)
-   and values in WASM locals are next, then polymorphic property caches.
+1. JavaScript of a page load, flat (2026-11-01, weather.com, 13 to 21 s of the engine thread):
+   parse and bytecode 1.5 to 1.9 s (8 to 11 %), JS runtime about 2 s, interpreter slow paths 1.2
+   to 1.5 s, interpreter 0.9 s, compiled code 0.9 s, no function above 0.2 s. A persistent
+   bytecode cache hit but brought no measurable gain (#215). The JIT (#322, #324,
+   [jit.md](jit.md)) runs Octane 2x faster in Chromium and 3 to 7x on an iPhone, the TypeScript
+   compiler 17 %; page loads gain nothing (their code runs once, #327). Compiled code calling
+   functions not compiled yet goes through JSC's generic call with a VM entry each time.
+2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
+   saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
+   about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
+   was busy.
 3. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
