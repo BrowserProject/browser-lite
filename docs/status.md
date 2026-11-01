@@ -165,6 +165,10 @@ under SwiftShader, no real GPU). S is a fast device with 2 cores, C a cheap Chro
 A native WPE WebKit on one server core showed the first picture of Wikipedia and GitHub 4 to 21
 times earlier than the engine on the device (#224); the engine stays in the device.
 
+On a real low-end phone (Motorola Moto G71, Android 11, BrowserStack, 2026-11-01), with the
+engine started, from the load of a page to first paint / loaded: Wikipedia (Switzerland) 5.6 /
+8.2 s, BBC News 4.9 / 13.3 s; with the JIT the same within the spread (one run each).
+
 ## Open: performance (by value)
 
 1. JavaScript of a page load, flat (2026-11-01, weather.com, 13 to 21 s of the engine thread):
