@@ -62,12 +62,8 @@ export const DEVICES: Record<string, DeviceProfile> = {
   },
 };
 
-/**
- * The device of the settings that matches the host: on an iPhone, iPad or Android device pages
- * get the mobile identity of that device by default (with the real screen, see
- * updateStartSettings), desktops the engine's own identity.
- */
-export function hostDevice(): string {
+/** The device of the settings the host is: iPhone, iPad, Android phone or tablet, else desktop. */
+function hostKind(): string {
   if (typeof navigator === 'undefined') return 'desktop';
   if (/iPhone|iPod/.test(navigator.userAgent)) return 'iphone';
   if (/Android/.test(navigator.userAgent)) {
@@ -81,6 +77,24 @@ export function hostDevice(): string {
   )
     return 'ipad';
   return 'desktop';
+}
+
+/**
+ * The default device of the settings: on an iPhone or iPad pages get the mobile identity of that
+ * device (with the real screen, see updateStartSettings), desktops the engine's own identity.
+ * Android hosts get the iPhone or iPad identity: sites know a WebKit browser on Android only as
+ * the old Android browser (Google Maps and Spotify refuse it, #332).
+ */
+export function hostDevice(): string {
+  const kind = hostKind();
+  if (kind === 'android') return 'iphone';
+  if (kind === 'android-tablet') return 'ipad';
+  return kind;
+}
+
+/** The device keeps the host's real screen: the host's default or what the host is. */
+function isHostDevice(device: string): boolean {
+  return device === hostDevice() || device === hostKind();
 }
 
 /** Size limits per database in the profile (KB). */
@@ -190,7 +204,7 @@ export function updateStartSettings(restarted: boolean): StartSettings {
   const maxPixelRatio = MAX_PIXEL_RATIO[current.resolution] ?? undefined;
   // The device the host is: its real screen instead of the emulated one, at the resolution of
   // the settings
-  const host = current.device === hostDevice();
+  const host = isHostDevice(current.device);
   const screen =
     device.screen && host
       ? {

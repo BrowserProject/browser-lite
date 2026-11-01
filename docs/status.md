@@ -65,7 +65,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
   Chrome (compact toolbar, tab overview, menu and panels as bottom sheets, touch targets of
   44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones; Android hosts
-  get an Android identity by default like iPhone and iPad hosts (#290).
+  get the iPhone or iPad identity by default (#332).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)

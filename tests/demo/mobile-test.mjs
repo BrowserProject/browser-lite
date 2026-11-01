@@ -2,7 +2,7 @@
 // compact toolbar fits and has touch targets of at least 44 px, the address entry navigates, the
 // tab overview shows the tabs, switches and closes one, the menu opens as a bottom sheet, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, and the desktop layout
-// comes back above the breakpoint. An Android phone as host gets the Android device by default.
+// comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
 //   node tests/demo/mobile-test.mjs [engine-dir]
@@ -110,12 +110,12 @@ check('first page', await loaded('Page one', TIMEOUT));
 const device = await tab.evaluate(() => window.blTest.settings().device);
 await tab.evaluate(() =>
   window.blTest.eval(
-    "console.log('RESULT identity=' + /Android.*Mobile/.test(navigator.userAgent) + ',' + !/Chrome/.test(navigator.userAgent) + ',' + screen.width + ',' + navigator.maxTouchPoints)",
+    "console.log('RESULT identity=' + /iPhone.*Mobile/.test(navigator.userAgent) + ',' + !/Chrome/.test(navigator.userAgent) + ',' + screen.width + ',' + navigator.maxTouchPoints)",
   ),
 );
 check(
-  'Android host: the Android phone by default, with the screen of the host',
-  device === 'android' &&
+  'Android host: the iPhone by default (#332), with the screen of the host',
+  device === 'iphone' &&
     (await results.wait('identity', 10000)) ===
       `true,true,${await tab.evaluate(() => screen.width)},5`,
   `${device} ${results.get('identity')}`,
