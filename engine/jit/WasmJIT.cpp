@@ -124,10 +124,16 @@ HashMap<CodeBlock*, Compiled>& compiledCode()
     return map;
 }
 
-// A CodeBlock compiles when the interpreter's counter fired this often (about 50 calls or 500
-// loop iterations each): page loads compiled 1700 functions on weather.com at 1 ms each, half of
-// them tiny ones that ran a few dozen times, and loaded 18 % slower than without the JIT
-constexpr unsigned warmUpFires = 4;
+// How often the interpreter's counter must fire (about 50 calls or 500 loop iterations each)
+// before a CodeBlock compiles: a compile costs about 1 ms whatever the size (our compiler, the
+// module's install, V8's compile at the first call), while a call saves more the larger the
+// function. Page loads compiled 1700 functions on weather.com, half of them tiny ones that ran a
+// few dozen times, and loaded 18 % slower than without the JIT.
+unsigned warmUpFires(CodeBlock* codeBlock)
+{
+    unsigned size = std::max(codeBlock->instructions().size(), static_cast<size_t>(1));
+    return std::clamp(4000 / size, 4u, 64u);
+}
 
 // How often the counter fired for CodeBlocks not compiled yet
 HashMap<CodeBlock*, unsigned>& warmUp()
@@ -3168,7 +3174,7 @@ void wasmJITTierUp(CodeBlock* codeBlock)
     if (enabled() && !compiledCode().contains(codeBlock)) {
         // Not yet hot enough: the interpreter's counter once more
         auto& fires = warmUp().add(codeBlock, 0).iterator->value;
-        if (++fires < warmUpFires) {
+        if (++fires < warmUpFires(codeBlock)) {
             codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
             return;
         }
