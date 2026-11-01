@@ -358,7 +358,7 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
 - reddit.com on an iPhone, once in two runs: `Element.clientWidth` lays out, the post layout tasks
   update the widget positions and lay out a frame again, whose `performLayout` aborts on its
   first release assert (the document is in a render tree update). Not reproduced in Chromium, not
-  in 3 runs on an iPhone 16 on 2026-11-01.
+  in 6 runs on an iPhone 16 on 2026-11-01 (3 of them with the JIT and the slabs, scrolling).
 - `background-test.mjs` in Firefox with the compositor: the frames per second of a visible view
   vary between CI runs (4, 13, 27, 37, 47; without the compositor about 50), once below the limit.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
