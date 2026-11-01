@@ -328,9 +328,11 @@ times earlier than the engine on the device (#224); the engine stays in the devi
   found yet.
 - `storage-test.mjs` in Firefox, twice on 2026-10-31: `localStorage` written 400 ms before a crash was
   gone (its 100 ms timer of the engine thread came later); the test waits 1.5 s now.
-- `profile-test.mjs` (demo) in Firefox, once on 2026-10-31: with the profile server unreachable
-  a `localStorage` value written seconds before was gone after the reload (cookies and IndexedDB
-  were there); the rerun passed. Its commit log (#302) would only drop it on a base mismatch.
+- `profile-test.mjs` (demo) in Firefox, on 2026-10-31 and 2026-11-01: with the profile server
+  unreachable a `localStorage` value written seconds before was gone after the reload (cookies
+  and IndexedDB were there); the reruns passed, 0 of 7 local runs (also on one core). Its commit
+  log (#302) would only drop it on a base mismatch; the test now lists the device's
+  `localstorage` files when it happens.
 - `settings-test.mjs` (demo), once on 2026-10-30: right after a restart `getFile()` of an OPFS
   file the page had written before failed with `NotFoundError`, although `getFileHandle()` found
   it (FileSystemStorageWasm.cpp); the next runs passed.

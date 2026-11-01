@@ -593,13 +593,17 @@ await one.page.selectOption('#setting-search', 'bing');
 await one.page.keyboard.press('Escape');
 await one.page.waitForTimeout(3000);
 const local = await reopen(one);
+const localKept =
+  local.lasting === 'yes' &&
+  local.local === 'yes' &&
+  local.small === 'value' &&
+  local.large === '600000';
 check(
   'without the server: data stays on the device',
-  local.lasting === 'yes' &&
-    local.local === 'yes' &&
-    local.small === 'value' &&
-    local.large === '600000',
-  JSON.stringify(local),
+  localKept,
+  // Rarely in Firefox the localStorage value was gone (status.md): which files the device had
+  JSON.stringify(local) +
+    (localKept ? '' : ` files ${JSON.stringify(await opfsFiles(one.page, 'localstorage'))}`),
 );
 check('without the server: the setting stays', (await searchEngine(one.page)) === 'bing');
 check(
