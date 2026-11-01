@@ -1,0 +1,57 @@
+diff --git a/Source/WebCore/workers/WorkerGlobalScope.cpp b/Source/WebCore/workers/WorkerGlobalScope.cpp
+index 60c6a032c3..eb3e6d1b1b 100644
+--- a/Source/WebCore/workers/WorkerGlobalScope.cpp
++++ b/Source/WebCore/workers/WorkerGlobalScope.cpp
+@@ -60,6 +60,10 @@
+ #include "ServiceWorker.h"
+ #include "ServiceWorkerClientData.h"
+ #include "ServiceWorkerGlobalScope.h"
++#if PLATFORM(WASM)
++#include "SWContextManager.h"
++#include "ServiceWorkerThread.h"
++#endif
+ #include "SocketProvider.h"
+ #include "TrustedType.h"
+ #include "URLKeepingBlobAlive.h"
+@@ -489,6 +493,21 @@ void WorkerGlobalScope::logExceptionToConsole(const String& errorMessage, const
+         workerReportingProxy->postExceptionToWorkerObject(errorMessage, lineNumber, columnNumber, sourceURL);
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: without an inspector the console messages of a service worker reached nobody; the
++// connection hands them to the host (engine/src/ServiceWorkerWasm.cpp)
++static void reportServiceWorkerConsoleMessage(WorkerGlobalScope& scope, const Inspector::ConsoleMessage& message)
++{
++    RefPtr serviceWorker = dynamicDowncast<ServiceWorkerGlobalScope>(scope);
++    if (!serviceWorker)
++        return;
++    callOnMainThread([identifier = serviceWorker->thread()->identifier(), source = message.source(), level = message.level(), text = message.message().isolatedCopy()] {
++        if (RefPtr connection = SWContextManager::singleton().connection())
++            connection->reportConsoleMessage(identifier, source, level, text, 0);
++    });
++}
++#endif
++
+ void WorkerGlobalScope::addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&& message)
+ {
+     if (!isContextThread()) {
+@@ -502,6 +521,9 @@ void WorkerGlobalScope::addConsoleMessage(std::unique_ptr<Inspector::ConsoleMess
+ 
+ #if ENABLE(WEBDRIVER_BIDI)
+     AutomationInstrumentation::addMessageToConsole(message);
++#endif
++#if PLATFORM(WASM)
++    reportServiceWorkerConsoleMessage(*this, *message);
+ #endif
+     InspectorInstrumentation::addMessageToConsole(*this, WTF::move(message));
+ }
+@@ -526,6 +548,9 @@ void WorkerGlobalScope::addMessage(MessageSource source, MessageLevel level, con
+ 
+ #if ENABLE(WEBDRIVER_BIDI)
+     AutomationInstrumentation::addMessageToConsole(message);
++#endif
++#if PLATFORM(WASM)
++    reportServiceWorkerConsoleMessage(*this, *message);
+ #endif
+     InspectorInstrumentation::addMessageToConsole(*this, WTF::move(message));
+ }
