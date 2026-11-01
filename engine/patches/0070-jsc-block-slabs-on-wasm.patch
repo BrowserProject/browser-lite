@@ -1,0 +1,183 @@
+diff --git a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
+index 4e5fed02c3..472dd6dcc4 100644
+--- a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
++++ b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.cpp
+@@ -28,8 +28,107 @@
+ 
+ #include <wtf/FastMalloc.h>
+ 
++#if OS(EMSCRIPTEN)
++#include "MarkedBlock.h"
++#include <bit>
++#include <wtf/Lock.h>
++#include <wtf/NeverDestroyed.h>
++#include <wtf/Vector.h>
++#endif
++
+ namespace JSC {
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: malloc cannot put a 64 KB block with 64 KB alignment into a
++// freed 64 KB gap (dlmalloc asks for twice the size, mimalloc takes such
++// alignments from the allocator below it), so a JS heap that shrank and grew
++// again left gaps behind and took new memory each time. MarkedBlocks come from
++// slabs instead: plain malloc blocks of one size with room to align, so a
++// released slab fits the next one. A slab that becomes empty is released once
++// another slab's worth of blocks is free.
++namespace {
++
++class BlockPool {
++public:
++    void* tryAllocate()
++    {
++        Locker locker { m_lock };
++        Slab* best = nullptr;
++        for (auto& slab : m_slabs) {
++            if (slab.freeMask && (!best || std::popcount(slab.freeMask) < std::popcount(best->freeMask)))
++                best = &slab;
++        }
++        if (!best) {
++            void* allocation;
++            if (!tryFastMalloc(slabSize + blockSize).getValue(allocation))
++                return nullptr;
++            auto start = roundUpToMultipleOf<blockSize>(reinterpret_cast<uintptr_t>(allocation));
++            m_slabs.append({ allocation, start, allFree });
++            m_freeBlocks += blocksPerSlab;
++            best = &m_slabs.last();
++        }
++        unsigned index = std::countr_zero(best->freeMask);
++        best->freeMask &= ~(1u << index);
++        m_freeBlocks--;
++        return reinterpret_cast<void*>(best->start + index * blockSize);
++    }
++
++    void free(void* block)
++    {
++        Locker locker { m_lock };
++        auto address = reinterpret_cast<uintptr_t>(block);
++        for (size_t i = 0; i < m_slabs.size(); ++i) {
++            auto& slab = m_slabs[i];
++            if (address - slab.start >= slabSize)
++                continue;
++            slab.freeMask |= 1u << ((address - slab.start) / blockSize);
++            m_freeBlocks++;
++            if (slab.freeMask == allFree && m_freeBlocks >= 2 * blocksPerSlab) {
++                fastFree(slab.allocation);
++                m_freeBlocks -= blocksPerSlab;
++                m_slabs.removeAt(i);
++            }
++            return;
++        }
++        RELEASE_ASSERT_NOT_REACHED();
++    }
++
++private:
++    static constexpr size_t blockSize = MarkedBlock::blockSize;
++    static constexpr unsigned blocksPerSlab = 32;
++    static constexpr size_t slabSize = blocksPerSlab * blockSize;
++    static constexpr uint32_t allFree = 0xffffffff;
++
++    struct Slab {
++        void* allocation;
++        uintptr_t start;
++        uint32_t freeMask;
++    };
++
++    Lock m_lock;
++    Vector<Slab> m_slabs WTF_GUARDED_BY_LOCK(m_lock);
++    size_t m_freeBlocks WTF_GUARDED_BY_LOCK(m_lock) { 0 };
++};
++
++static BlockPool& blockPool()
++{
++    static NeverDestroyed<BlockPool> pool;
++    return pool;
++}
++
++} // namespace
++
++void* FastMallocAlignedMemoryAllocator::tryAllocateBlock()
++{
++    return blockPool().tryAllocate();
++}
++
++void FastMallocAlignedMemoryAllocator::freeBlock(void* block)
++{
++    blockPool().free(block);
++}
++#endif
++
+ FastMallocAlignedMemoryAllocator::FastMallocAlignedMemoryAllocator()
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN)
+     : m_heap("WebKit FastMallocAlignedMemoryAllocator")
+@@ -44,6 +143,10 @@ void* FastMallocAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignmen
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN)
+     return m_heap.memalign(alignment, size, true);
+ #else
++#if OS(EMSCRIPTEN)
++    if (alignment == MarkedBlock::blockSize && size == MarkedBlock::blockSize)
++        return tryAllocateBlock();
++#endif
+     return tryFastCompactAlignedMalloc(alignment, size);
+ #endif
+ 
+@@ -53,6 +156,9 @@ void FastMallocAlignedMemoryAllocator::freeAlignedMemory(void* basePtr)
+ {
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN)
+     return m_heap.free(basePtr);
++#elif OS(EMSCRIPTEN)
++    // Only MarkedBlocks are aligned
++    freeBlock(basePtr);
+ #else
+     fastFree(basePtr);
+ #endif
+diff --git a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.h b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.h
+index a77adce12f..1adecbdef5 100644
+--- a/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.h
++++ b/Source/JavaScriptCore/heap/FastMallocAlignedMemoryAllocator.h
+@@ -47,6 +47,12 @@ public:
+     void freeMemory(void*) final;
+     void* tryReallocateMemory(void*, size_t) final;
+ 
++#if OS(EMSCRIPTEN)
++    // MarkedBlocks of all aligned memory allocators come from one pool of slabs
++    static void* tryAllocateBlock();
++    static void freeBlock(void*);
++#endif
++
+ #if ENABLE(MALLOC_HEAP_BREAKDOWN)
+ private:
+     WTF::DebugHeap m_heap;
+diff --git a/Source/JavaScriptCore/heap/StructureAlignedMemoryAllocator.cpp b/Source/JavaScriptCore/heap/StructureAlignedMemoryAllocator.cpp
+index 1494c4a2f5..85cfaa1033 100644
+--- a/Source/JavaScriptCore/heap/StructureAlignedMemoryAllocator.cpp
++++ b/Source/JavaScriptCore/heap/StructureAlignedMemoryAllocator.cpp
+@@ -26,6 +26,7 @@
+ #include "config.h"
+ #include "StructureAlignedMemoryAllocator.h"
+ 
++#include "FastMallocAlignedMemoryAllocator.h"
+ #include "JSCConfig.h"
+ #include "MarkedBlock.h"
+ #include "Options.h"
+@@ -313,12 +314,20 @@ void* StructureAlignedMemoryAllocator::tryAllocateAlignedMemory(size_t alignment
+ {
+     ASSERT_UNUSED(alignment, alignment == MarkedBlock::blockSize);
+     ASSERT_UNUSED(size, size == MarkedBlock::blockSize);
++#if OS(EMSCRIPTEN)
++    return FastMallocAlignedMemoryAllocator::tryAllocateBlock();
++#else
+     return tryFastCompactAlignedMalloc(MarkedBlock::blockSize, MarkedBlock::blockSize);
++#endif
+ }
+ 
+ void StructureAlignedMemoryAllocator::freeAlignedMemory(void* block)
+ {
++#if OS(EMSCRIPTEN)
++    FastMallocAlignedMemoryAllocator::freeBlock(block);
++#else
+     fastFree(block);
++#endif
+ }
+ 
+ #endif // CPU(ADDRESS64)
