@@ -344,7 +344,11 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   `localstorage` files when it happens.
 - `settings-test.mjs` (demo), once on 2026-10-30: right after a restart `getFile()` of an OPFS
   file the page had written before failed with `NotFoundError`, although `getFileHandle()` found
-  it (FileSystemStorageWasm.cpp); the next runs passed.
+  it (FileSystemStorageWasm.cpp); the next runs passed. `storage-test.mjs` in Chromium on
+  2026-11-01, "new profile": the OPFS part of the page failed with `NotFoundError` right after a
+  reload (0 of 6 local runs); its result now names the step. WebCore reports any file it cannot
+  size or open while reading a `File` as `NotFoundError`, and WasmFS reads through `getFile()`
+  of the host's OPFS, which fails while a sync access handle is open on that file.
 - reddit.com on an iPhone, once in two runs: `Element.clientWidth` lays out, the post layout tasks
   update the widget positions and lay out a frame again, whose `performLayout` aborts on its
   first release assert (the document is in a render tree update). Not reproduced in Chromium, not

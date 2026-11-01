@@ -77,27 +77,34 @@ const PAGE = `<!doctype html><title>Storage test</title><script>
     console.log('RESULT cachequota=' + quota + ',' + (await (await cache.match('/stored')).text()) + ',' + !!(await cache.match('/large')));
   }
   // Origin Private File System: read and write a file, folders, resolve()
+  // step: where an error came from (a rare NotFoundError right after a reload, status.md)
+  let step = 'root';
   try {
     const root = await navigator.storage.getDirectory();
     let text = 'empty';
     try {
       text = await (await (await root.getFileHandle('note.txt')).getFile()).text();
     } catch (e) {}
+    step = 'folder';
     const folder = await root.getDirectoryHandle('folder', { create: true });
     const inner = await folder.getFileHandle('note.txt', { create: true });
+    step = 'inner writable';
     const innerWriter = await inner.createWritable();
     await innerWriter.write('inside');
     await innerWriter.close();
+    step = 'top writable';
     const top = await root.getFileHandle('note.txt', { create: true });
     const writer = await top.createWritable();
     await writer.write('stored');
     await writer.close();
+    step = 'entries';
     const names = [];
     for await (const [name] of root.entries())
       names.push(name);
+    step = 'read inner';
     console.log('RESULT opfs=' + [text, names.sort().join('+'), (await root.resolve(inner)).join('/'), await (await inner.getFile()).text()].join(','));
   } catch (e) {
-    console.log('RESULT opfs=error:' + e.name);
+    console.log('RESULT opfs=error:' + e.name + ' at ' + step);
   }
   // The page chooses names in the OPFS, even one that looks like a copy of the engine stays
   try {
