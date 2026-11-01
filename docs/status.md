@@ -80,7 +80,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   sound after a tap, the on-screen keyboard with the field's input mode, 20min.ch with its consent
   dialog for two minutes), Samsung Galaxy S23 and Motorola Moto G71 Chrome, Windows 11 Firefox;
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
-  iPhone (#295). Firefox runs every suite in CI (open failures below).
+  iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
+  BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox
+  runs every suite in CI (open failures below).
 - **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
   #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
