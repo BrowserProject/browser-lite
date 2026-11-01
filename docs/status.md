@@ -271,8 +271,8 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   at the relay changed the load times of CNN, weather.com, Spiegel, NZZ, Yahoo and 20min by no
   more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
-- Core API: no event for console messages without a view (service workers), no warning for
-  skipped uploads (larger than 512 MB), no way to re-arm the watchdog after "wait".
+- Core API: no event for console messages without a view (service workers), no way to
+  re-arm the watchdog after "wait" (the demo asks again on its own timer).
 
 ## Open: tests and operations
 

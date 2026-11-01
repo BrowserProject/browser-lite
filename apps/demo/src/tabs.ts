@@ -1,4 +1,4 @@
-import type { SessionHistory, View, ViewEvents } from '@browser-lite/core';
+import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
 import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
 import { ui } from './extensions.js';
 import { showFindCount } from './find-bar.js';
@@ -168,6 +168,10 @@ export class Tab implements SessionTab {
     this.on('external-url', (event) => {
       window.open(event.url, '_blank', 'noopener');
       setStatus(`Opened externally: ${event.url}`);
+    });
+    // Files of an upload, drop or paste the page did not get
+    this.on('files-skipped', (event) => {
+      if (this.isActive) setStatus(skippedText(event.files));
     });
     // window.focus() or a click on a notification
     this.on('focus-request', () => {
@@ -366,6 +370,18 @@ export function restoredTab(entry: Omit<SessionEntry, 'active'>, before?: Tab): 
 }
 
 /** A view the engine opened (window.open, target=_blank) becomes the active tab. */
+const skipReasons: Record<SkippedFile['reason'], string> = {
+  'too-large': 'larger than 512 MB',
+  unreadable: 'could not be read',
+};
+
+function skippedText(files: SkippedFile[]): string {
+  const [first] = files;
+  if (files.length === 1 && first)
+    return `Not uploaded: ${first.name} (${skipReasons[first.reason]})`;
+  return `${files.length} files not uploaded: ${files.map((file) => `${file.name} (${skipReasons[file.reason]})`).join(', ')}`;
+}
+
 export function adoptView(view: View): void {
   view.attach(pages());
   if (view.zoom !== startSettings().zoom) view.setZoom(startSettings().zoom);
