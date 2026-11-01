@@ -203,7 +203,10 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
    of malloc inside the renderer that does not change with the number of workers (each spare
    worker about 4 MB) and is most likely V8's data of the 44 MB `engine.wasm` and the chunks,
    34 MB of compiled code; after bbc.com/news 720 MB, after CNN 960 MB. Smaller only with a
-   smaller module.
+   smaller module. After 12 heavy page loads in one tab (2026-11-01, `/proc/<pid>/smaps`) Chromium's
+   malloc grew from 290 to 590 MB and V8's code from 28 to 150 MB (with `BL_JIT=0` 530 and
+   110 MB); from the second round of six sites on, the renderer outside the engine memory stays at
+   0.9 to 1.1 GB, only the engine memory keeps growing (#329).
 8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
