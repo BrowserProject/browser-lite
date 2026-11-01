@@ -257,9 +257,10 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   extension order and point formats (JA3 and peetprint differ from Safari's), Safari's header order
   only approximated for header sets not measured (cross-origin GET, beacons); the TCP/IP
   fingerprint is the relay's.
-- Storage: localStorage reaches SQLite 1 s after a change and can miss the last change on close;
-  with `/data` in memory (second tab) uploads sit in WASM memory. WebKit's memory cache is shared
-  by all views of a running engine, only the HTTP cache is partitioned (#213).
+- Storage: localStorage reaches SQLite 100 ms after a change (#303), a change in the last 100 ms
+  before the tab closes can be lost; with `/data` in memory (second tab) uploads sit in WASM
+  memory. WebKit's memory cache is shared by all views of a running engine, only the HTTP cache
+  is partitioned (#213).
 - Measurement: layout shift and long animation frame entries, IdleDetector,
   `document.featurePolicy`.
 - UI: drag and drop outside a drop target opens nothing (#125; Chrome loads the link or file in
