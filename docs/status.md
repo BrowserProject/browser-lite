@@ -82,7 +82,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
   iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
   BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox
-  runs every suite in CI (open failures below).
+  runs every suite in CI (open failures below); the 54 real sites of `tests/compat` load in
+  Firefox 155 too (2026-11-01, locally under Xvfb, CNN 12.8 s, weather.com 5.0 s).
 - **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
   #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
