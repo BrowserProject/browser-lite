@@ -1,3 +1,4 @@
+import { showBoot } from './engine-message.js';
 import { relayUrl, setToken } from './params.js';
 import { reloadUI } from './reload.js';
 import { byId, element } from './util.js';
@@ -11,7 +12,6 @@ let shown = false;
 export function askForAccessCode(): void {
   if (shown) return;
   shown = true;
-  const box = byId('boot');
   const input = element('input', {
     type: 'password',
     id: 'access-code',
@@ -33,8 +33,9 @@ export function askForAccessCode(): void {
     setToken(relayUrl.host, code);
     reloadUI();
   });
-  box.replaceChildren(
-    element('p', { textContent: 'This server needs an access code' }),
+  byId('boot').dataset.access = 'ask';
+  showBoot(
+    element('p', { className: 'title', textContent: 'This server needs an access code' }),
     element('p', {
       className: 'detail',
       textContent:
@@ -42,7 +43,5 @@ export function askForAccessCode(): void {
     }),
     form,
   );
-  box.dataset.access = 'ask';
-  box.hidden = false;
   input.focus();
 }

@@ -51,22 +51,30 @@ new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addr
 
 ## Look and behaviour
 
-Vanilla TypeScript and one style sheet: colors are variables for light and dark mode, the icons
-are inline SVG of `icons.ts` (`currentColor`, one stroke width), hover styles only apply where
-the pointer can hover (`@media (hover: hover)`, a tap leaves no grey circle), keyboard focus
-shows a ring (`:focus-visible`), and menus, sheets and dialogs appear with short transitions
-that `prefers-reduced-motion` turns off.
+Vanilla TypeScript and one style sheet in the visual language of Material 3 (#345). Its design
+tokens at the top are the only place for colors (tonal surfaces, the blue accent, light and dark
+mode), the type scale of the system fonts (no font download), spacing, radii, three shadow levels
+and motion. Every button draws a state layer of `currentColor` (8% hover, 12% pressed) over its
+own color, the icons are inline SVG of `icons.ts` (`currentColor`, one stroke width), hover styles
+only apply where the pointer can hover (`@media (hover: hover)`, a tap leaves no grey circle),
+keyboard focus shows a ring (`:focus-visible`), and tabs, menus, sheets and dialogs appear with
+short transitions that `prefers-reduced-motion` turns off. No `backdrop-filter` and no animated
+shadows, for weak phones. The styles of `@browser-lite/ui` (prompts, dialogs, context menu,
+select popup) are in the same sheet.
 
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
   goes back to the page, the lock or "Not secure" hides while editing. The suggestions start
   with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343), then bookmarks
   and history with their icons; the arrow keys move.
 - **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
-  view (no request to the engine): a search field that hands over to the address bar and tiles
-  of the sites visited most often. The tab is called "New tab".
+  view (no request to the engine): a greeting by the time of day, a search field that hands over
+  to the address bar and tiles of the sites visited most often (the site's icon, else its first
+  letter on a color of its host). The tab is called "New tab".
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
-  Settings at the end; history, bookmarks and downloads open as a panel beside the page, below
-  the toolbar. History goes by day with the time of a visit, a page once per day.
+  Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
+  the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
+- **Settings**: a navigation with icons (chips on narrow screens) and the settings as cards of
+  rows, switches for on and off; start, errors and the access code are a card over the page.
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
   show the cross only on the active (and hovered) tab, on touch screens a little earlier.
 - **Dialogs**: alert, confirm, prompt and beforeunload are dialogs of `@browser-lite/ui` over the
@@ -80,16 +88,22 @@ that `prefers-reduced-motion` turns off.
 ## Phone layout
 
 Below 640 px of width or 500 px of height (a phone in portrait or landscape) `style.css` switches
-to a layout like mobile Chrome: the toolbar has back, the address, the tab count and the menu;
-forward, reload and the star move into a row of icons with labels at the top of the menu; the
-address shows only the host until it is tapped; the suggestions span the width; the tab count
-opens the tab overview (a card per tab with title, the site's icon and host: tap to switch, cross
-to close, new tab); menu and panels are bottom sheets over a backdrop, as high as the visible
-part at most and scrolling (in landscape the menu has two columns); JS dialogs are centered; find bar, permission prompt and sign-in dialog fit the width; touch
-targets are at least 44 px and fields have 16 px text (iOS zooms into smaller). The page uses
-`viewport-fit=cover` and keeps toolbar, page and sheets out of the notch and the home indicator
-(`env(safe-area-inset-*)`). While the iOS keyboard covers the page, `visual-viewport.ts` sets
-`--visible-height` and `--keyboard-height`, so sheets stay above it. An emulated device of the
+to a layout like mobile Chrome with the address bar at the bottom (#345): the toolbar at the
+bottom has back, the address, the tab count and the menu, and the page fills the room above it
+from the status bar; forward, reload and the star move into a row of tonal buttons with labels at
+the top of the menu; the address shows only the host until it is tapped, then it takes the whole
+bar; the suggestions span the width and open upwards above the toolbar; the tab count opens the
+tab overview (a card per tab with title, the site's icon and host: tap to switch, cross to close,
+new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the
+toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
+has two columns); the find bar sits at the bottom of the page; JS dialogs are centered and the
+sign-in dialog at the top; touch targets are at least 44 px and fields have 16 px text (iOS zooms
+into smaller). The page uses `viewport-fit=cover` and keeps toolbar, page and sheets out of the
+notch and the home indicator (`env(safe-area-inset-*)`). While the iOS keyboard covers the page,
+`visual-viewport.ts` sets `--visible-height` and `--keyboard-height`: the page gets as high as the
+visible part, so the toolbar sits on the keyboard (without the inset of the home indicator), and
+sheets and suggestions stay above it (`--chrome-height` of `main.ts` is the height of the toolbar;
+on Android the keyboard makes the page smaller anyway). An emulated device of the
 settings fills the page area there. The page is `100dvh` high, so it fills the screen also while
 the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android device the setting
 "Device" defaults to that device (an Android phone or tablet to the iPhone or iPad: sites refuse
@@ -118,7 +132,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
-| `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page; the SVG icons; icons of the visited sites |
+| `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library, the menu and the side panel (history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |

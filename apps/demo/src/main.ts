@@ -335,13 +335,14 @@ installShortcuts();
 fitVisualViewport();
 followRotation();
 renderIcons();
-// Where the chrome ends: the side panel and the menu start there
-new ResizeObserver(() =>
-  document.documentElement.style.setProperty(
-    '--chrome-bottom',
-    `${byId('chrome').getBoundingClientRect().bottom}px`,
-  ),
-).observe(byId('chrome'));
+// Where the chrome ends (side panel and menu start there) and how high it is (the sheets of the
+// phone layout sit on its bar at the bottom)
+new ResizeObserver(() => {
+  const rect = byId('chrome').getBoundingClientRect();
+  const root = document.documentElement.style;
+  root.setProperty('--chrome-bottom', `${rect.bottom}px`);
+  root.setProperty('--chrome-height', `${rect.height}px`);
+}).observe(byId('chrome'));
 renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 
