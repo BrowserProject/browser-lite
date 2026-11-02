@@ -97,16 +97,20 @@ function isHostDevice(device: string): boolean {
   return device === hostDevice() || device === hostKind();
 }
 
+/** True when the host's screen is in landscape (screen.orientation, else the window's shape). */
+export function hostLandscape(): boolean {
+  const type = window.screen.orientation?.type;
+  return type ? type.startsWith('landscape') : matchMedia('(orientation: landscape)').matches;
+}
+
 /**
- * The host's screen in its current orientation (iOS keeps screen.width and height of portrait
- * when rotated, Android swaps them).
+ * The host's screen in its current orientation: iOS keeps screen.width and height of portrait
+ * when rotated, Android swaps them.
  */
 export function hostScreenSize(): { width: number; height: number } {
   const short = Math.min(window.screen.width, window.screen.height);
   const long = Math.max(window.screen.width, window.screen.height);
-  return matchMedia('(orientation: landscape)').matches
-    ? { width: long, height: short }
-    : { width: short, height: long };
+  return hostLandscape() ? { width: long, height: short } : { width: short, height: long };
 }
 
 /** Size limits per database in the profile (KB). */

@@ -8,7 +8,7 @@ import { hostScreenSize, startSettings } from './settings.js';
  * another kind keeps its frame.
  */
 export function followRotation(): void {
-  matchMedia('(orientation: landscape)').addEventListener('change', () => {
+  const rotated = () => {
     const start = startSettings();
     const device = start.options.device;
     const browser = runtime.browser;
@@ -17,5 +17,7 @@ export function followRotation(): void {
     if (size.width === device.width && size.height === device.height) return;
     start.options.device = { ...device, ...size };
     browser.setDevice(start.options.device);
-  });
+  };
+  if (window.screen.orientation) window.screen.orientation.addEventListener('change', rotated);
+  else matchMedia('(orientation: landscape)').addEventListener('change', rotated);
 }
