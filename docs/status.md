@@ -38,7 +38,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   relay's reason and auto reload (#174, #175), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
   by old words on the C stack that the conservative GC scans (#296; soak test 0 of 15 local runs
-  with pages that stay, before about 1 in 5), JS heap blocks from slabs so that freed ones are
+  with pages that stay, before about 1 in 5; in CI 40 of 40 soak checks of 11 runs clean up to
+  2026-11-02), JS heap blocks from slabs so that freed ones are
   reused: after 48 heavy page loads in one tab 985 instead of 1235 MB of engine memory (#329).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
