@@ -292,7 +292,7 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
   the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such
   a worker (`[workers] engine worker did not load after ... ms`), not seen in the 8 CI runs up to
-  2026-10-31. Closing or reloading a tab right after a
+  2026-10-31 nor in 22 Firefox jobs of 11 main runs up to 2026-11-02. Closing or reloading a tab right after a
   change lost it in Firefox (#275, the engine cannot write while `pagehide` waits): commits now go
   to a commit log at once (#302), localStorage reaches SQLite 100 ms after a change (#303).
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
