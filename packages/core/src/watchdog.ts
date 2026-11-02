@@ -13,6 +13,8 @@ export class Watchdog {
   private inputMark = 0;
   private markAddress = 0;
   private hung = false;
+  // While hung: when to report unresponsive again (keepWaiting), 0 = not
+  private repeatAt = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -47,8 +49,14 @@ export class Watchdog {
     this.waitingSince = 0;
     if (this.hung && !this.inputSince) {
       this.hung = false;
+      this.repeatAt = 0;
       this.onChange(false);
     }
+  }
+
+  /** The host waits on after `unresponsive`: reported again after another 10 s of no answer. */
+  keepWaiting(): void {
+    if (this.hung) this.repeatAt = Date.now() + HANG_TIMEOUT;
   }
 
   /**
@@ -78,6 +86,10 @@ export class Watchdog {
     if (this.inputSince && this.handledMark() === this.inputMark) {
       this.inputSince = 0;
       if (!this.waitingSince) this.answered();
+    }
+    if (this.hung && this.repeatAt && Date.now() >= this.repeatAt) {
+      this.repeatAt = 0;
+      this.onChange(true);
     }
     const since = Math.min(this.waitingSince || Infinity, this.inputSince || Infinity);
     if (this.hung || since === Infinity || Date.now() - since < HANG_TIMEOUT) return;

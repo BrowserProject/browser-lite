@@ -276,8 +276,7 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   at the relay changed the load times of CNN, weather.com, Spiegel, NZZ, Yahoo and 20min by no
   more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
-- Core API: no way to re-arm the watchdog after "wait" (the demo asks again on its own timer);
-  console messages of shared workers reach no event.
+- Core API: console messages of shared workers reach no event.
 
 ## Open: tests and operations
 
@@ -288,7 +287,7 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   `ImageBitmap` (`transferToImageBitmap` of a 2D canvas, `createImageBitmap` of `ImageData`) nor
   the size handling changes that. With the compositor thread (the default) the screen shows the
   CPU frames after a loss; probably because there the worker that lost the WebGL context is not
-  the one that presents. A workaround would be a new view canvas from the main thread after the loss; `compositing-test` skips this check in Firefox. Now and then in CI (auth, clipboard, background tests)
+  the one that presents. Not worked around (#334); `compositing-test` skips this check in Firefox. Now and then in CI (auth, clipboard, background tests)
   an engine worker loaded for about 60 s and then failed: the core's service worker waited in
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
   the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such

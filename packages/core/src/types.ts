@@ -279,6 +279,12 @@ export interface Browser {
    * page. Writes the {@link PermissionStore} and applies at once; null means the page asks again.
    */
   setPermission(origin: string, kind: PermissionKind, decision: PermissionDecision | null): void;
+  /**
+   * After `unresponsive`, when the user chose to wait: the watchdog starts over, so
+   * `unresponsive` comes again if the engine still does not answer 10 s later. Does nothing
+   * while the engine answers.
+   */
+  keepWaiting(): void;
   readonly storage: BrowserStorage;
   /** Only with `debug: true`. */
   readonly debug?: DebugApi;

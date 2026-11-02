@@ -435,6 +435,9 @@ const host = {
     blTest.open(params.get('url'));
     return true;
   },
+  keepWaiting() {
+    browser?.keepWaiting();
+  },
   async stop() {
     await browser?.destroy();
     transport?.close();

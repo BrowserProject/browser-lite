@@ -694,6 +694,10 @@ class BrowserImpl implements Browser, ViewHost {
     if (this.ready) this.module._bl_set_preferences(preferenceFlags(merged));
   }
 
+  keepWaiting(): void {
+    this.watchdog.keepWaiting();
+  }
+
   setPermission(origin: string, kind: PermissionKind, decision: PermissionDecision | null): void {
     const [checkedOrigin, checkedKind] = permissionChange(origin, kind, decision);
     storePermission(this.config.permissions, checkedOrigin, checkedKind, decision);

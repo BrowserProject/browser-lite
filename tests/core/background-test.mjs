@@ -372,7 +372,7 @@ check(
 await app.context.close();
 
 // Hang after an input: the engine thread finishes no task any more
-const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '20' });
+const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '30' });
 await hang.wait('loaded', 'stuck');
 const origin = await canvasOrigin(hang.page);
 await hang.page.mouse.click(origin.x + 100, origin.y + 100);
@@ -390,6 +390,22 @@ check(
   'click into a hanging page: unresponsive after 10 s',
   !!shownHang && Date.now() - clicked >= 9500,
   `${Date.now() - clicked} ms`,
+);
+// The user waits: the browser reports the hang again 10 s later
+await hang.page.evaluate(() => window.blHost.keepWaiting());
+const waited = Date.now();
+await hang.page
+  .waitForFunction(
+    () => window.blHost.events.filter((e) => e === 'unresponsive').length >= 2,
+    null,
+    { timeout: 14000 },
+  )
+  .catch(() => {});
+const repeats = (await hostEvents(hang.page)).filter((e) => e === 'unresponsive').length;
+check(
+  'keepWaiting(): unresponsive again after another 10 s',
+  repeats === 2 && Date.now() - waited >= 9500,
+  `${repeats}x after ${Date.now() - waited} ms`,
 );
 const recovered = await waitEvent(hang.page, 'responsive', 15000);
 check('hang after a click: responsive as soon as the watchdog stops the script', !!recovered);

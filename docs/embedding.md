@@ -277,7 +277,8 @@ of `context.storage` (default in memory), for example in your user's profile.
   section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` events) to restore the session with
   `createView({ history })`.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
-  Offer to wait or to restart.
+  Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
+  comes again if the engine still does not answer 10 s later.
 - `memory-pressure` (`{footprint, limit}` in bytes): the engine memory runs short. Close or
   discard background views; when none is left, tell the user (the demo shows a message).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.

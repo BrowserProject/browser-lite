@@ -61,14 +61,10 @@ const CRASH_KEY = 'bl-crash-time';
 const SAFE_START_KEY = 'bl-safe-start';
 // Memory pressure and no background tab left to discard
 const MEMORY_FULL = 'Memory is almost full: close tabs, or the browser may crash and restart';
-// After "Wait" the hang message comes back while the engine still does not answer
-const HANG_REPEAT = 10000;
 
 const testState: TestState = { transport: null, options: null };
 /** Relay connection of the running browser: a restart closes it and opens a new one. */
 let transport: WispTransport | null = null;
-let hung = false;
-let hangTimer = 0;
 
 /** Status line text, also after the next load of the active tab. */
 function showNotice(text: string): void {
@@ -164,10 +160,8 @@ function showHang(): void {
         'Wait',
         () => {
           hideMessage();
-          clearTimeout(hangTimer);
-          hangTimer = window.setTimeout(() => {
-            if (hung && !runtime.stopped) showHang();
-          }, HANG_REPEAT);
+          // The question comes again if the engine still does not answer
+          runtime.browser?.keepWaiting();
         },
       ],
       ['Restart', () => void restart(true)],
@@ -202,8 +196,6 @@ async function restart(safe: boolean): Promise<void> {
   markRestart();
   history.replaceState(history.state, '', addressWithoutUrl());
   runtime.stopped = true;
-  hung = false;
-  clearTimeout(hangTimer);
   const browser = runtime.browser;
   runtime.browser = null;
   showMessage('Restarting…');
@@ -290,13 +282,8 @@ async function start(restarted: boolean): Promise<void> {
     if (!discardForMemory()) showNotice(MEMORY_FULL);
   });
   browser.on('crash', ({ reason }) => crashed(reason));
-  browser.on('unresponsive', () => {
-    hung = true;
-    showHang();
-  });
+  browser.on('unresponsive', () => showHang());
   browser.on('responsive', () => {
-    hung = false;
-    clearTimeout(hangTimer);
     if (!runtime.stopped) hideMessage();
   });
   browser.on('warning', ({ code }) => {
