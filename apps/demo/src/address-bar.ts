@@ -152,19 +152,35 @@ function showSuggestions(): void {
     box.append(rowElement(row, favicon(entry.url), entry.title || entry.url, entry.url));
   }
   select(0);
+  box.hidden = false;
+  placeSuggestions();
+}
+
+/**
+ * Under the address field; in the phone layout over the whole width above the toolbar at the
+ * bottom (and so above the on-screen keyboard), as high as the room up to the top.
+ */
+function placeSuggestions(): void {
+  if (box.hidden) return;
   if (compactLayout()) {
-    // Full width under the toolbar, like the suggestions of mobile browsers
     const toolbar = byId('toolbar').getBoundingClientRect();
-    Object.assign(box.style, { left: '0px', top: `${toolbar.bottom}px`, width: '100%' });
+    Object.assign(box.style, {
+      left: '0px',
+      top: '',
+      bottom: `${window.innerHeight - toolbar.top}px`,
+      width: '100%',
+      maxHeight: `${toolbar.top}px`,
+    });
   } else {
     const rect = form.getBoundingClientRect();
     Object.assign(box.style, {
       left: `${rect.left}px`,
-      top: `${rect.bottom + 4}px`,
+      top: `${rect.bottom + 6}px`,
+      bottom: '',
       width: `${rect.width}px`,
+      maxHeight: '',
     });
   }
-  box.hidden = false;
 }
 
 /** Opens url in the active tab, or after the start when the engine is not running yet. */
@@ -247,5 +263,11 @@ address.addEventListener('keydown', (e) => {
   select((selected + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
   address.value = rows[selected]?.text ?? address.value;
 });
-// The phone layout shows only the host: follow a change of the layout (rotation)
-addEventListener('resize', () => showAddress(current));
+// The phone layout shows only the host: follow a change of the layout (rotation); the
+// suggestions follow the toolbar when the on-screen keyboard comes or goes (after
+// visual-viewport.ts fitted the page)
+addEventListener('resize', () => {
+  showAddress(current);
+  requestAnimationFrame(placeSuggestions);
+});
+window.visualViewport?.addEventListener('resize', () => requestAnimationFrame(placeSuggestions));

@@ -1,6 +1,6 @@
 import { type LocalStats, type ProfileInfo, siteOfPath } from '@browser-lite/profile';
 import { renderExtensionSettings } from './extensions.js';
-import { icon } from './icons.js';
+import { type IconName, icon } from './icons.js';
 import { reloadUI, restartUI } from './reload.js';
 import { profile, runtime } from './runtime.js';
 import {
@@ -19,11 +19,11 @@ import { element, formatSize, formatTime } from './util.js';
 
 type Section = 'general' | 'profile' | 'device' | 'extensions';
 
-const SECTIONS: Record<Section, string> = {
-  general: 'General',
-  profile: 'Profile',
-  device: 'Device and browser',
-  extensions: 'Extensions',
+const SECTIONS: Record<Section, [title: string, icon: IconName]> = {
+  general: ['General', 'settings'],
+  profile: ['Profile', 'profile'],
+  device: ['Device and browser', 'device'],
+  extensions: ['Extensions', 'extension'],
 };
 /** Runs when the shown section goes away (sections of extensions). */
 let leaveSection: (() => void) | null = null;
@@ -32,8 +32,8 @@ let leaveSection: (() => void) | null = null;
 const page = element('dialog', { id: 'settings' });
 page.setAttribute('aria-label', 'Settings');
 const nav = element('nav', {}, element('h1', { textContent: 'Settings' }));
-for (const [key, title] of Object.entries(SECTIONS) as [Section, string][]) {
-  const button = element('button', { textContent: title });
+for (const [key, [title, name]] of Object.entries(SECTIONS) as [Section, [string, IconName]][]) {
+  const button = element('button', {}, icon(name), title);
   button.dataset.section = key;
   button.addEventListener('click', () => showSection(key));
   nav.append(button);
@@ -68,7 +68,7 @@ function showSection(name: Section): void {
     else button.removeAttribute('aria-current');
   }
   // New for every section: what comes later (profile info) checks section.isConnected
-  const section = element('section', {}, element('h2', { textContent: SECTIONS[name] }));
+  const section = element('section', {}, element('h2', { textContent: SECTIONS[name][0] }));
   leaveSection?.();
   leaveSection = null;
   content.replaceChildren(section);
@@ -77,6 +77,9 @@ function showSection(name: Section): void {
   else if (name === 'device') renderDevice(section);
   else leaveSection = renderExtensionSettings(section);
 }
+
+/** Rows of settings on one surface. */
+const card = (...rows: HTMLElement[]) => element('div', { className: 'settings-card' }, ...rows);
 
 function row(label: string, control: HTMLElement, hint = ''): HTMLElement {
   return element(
@@ -131,26 +134,28 @@ const save =
 function renderGeneral(section: HTMLElement): void {
   const current = settings();
   section.append(
-    row(
-      'Search engine',
-      choice(
-        'setting-search',
-        Object.entries(SEARCH_ENGINES).map(([key, engine]) => [key, engine.name]),
-        current.searchEngine,
-        save('searchEngine', String),
+    card(
+      row(
+        'Search engine',
+        choice(
+          'setting-search',
+          Object.entries(SEARCH_ENGINES).map(([key, engine]) => [key, engine.name]),
+          current.searchEngine,
+          save('searchEngine', String),
+        ),
       ),
-    ),
-    row(
-      'Restore tabs at start',
-      toggle('setting-restore', current.restoreSession, (value) =>
-        saveSettings({ restoreSession: value }),
+      row(
+        'Restore tabs at start',
+        toggle('setting-restore', current.restoreSession, (value) =>
+          saveSettings({ restoreSession: value }),
+        ),
+        'Also keeps the session cookies of websites',
       ),
-      'Also keeps the session cookies of websites',
-    ),
-    row(
-      'Home page for new tabs',
-      text('setting-home', current.homePage, 'empty = the new tab page', (value) =>
-        saveSettings({ homePage: value }),
+      row(
+        'Home page for new tabs',
+        text('setting-home', current.homePage, 'empty = the new tab page', (value) =>
+          saveSettings({ homePage: value }),
+        ),
       ),
     ),
   );
@@ -379,96 +384,98 @@ function renderDevice(section: HTMLElement): void {
     restartUI();
   });
   section.append(
-    row(
-      'Device',
-      choice(
-        'setting-device',
-        Object.entries(DEVICES).map(([key, device]) => [key, device.name]),
-        current.device,
-        save('device', String),
+    card(
+      row(
+        'Device',
+        choice(
+          'setting-device',
+          Object.entries(DEVICES).map(([key, device]) => [key, device.name]),
+          current.device,
+          save('device', String),
+        ),
+      ),
+      row(
+        'User agent',
+        text('setting-user-agent', current.userAgent, 'from the device', (value) =>
+          saveSettings({ userAgent: value }),
+        ),
+      ),
+      row(
+        'Languages of websites',
+        text('setting-languages', current.languages, hostLanguages().join(','), (value) =>
+          saveSettings({ languages: value }),
+        ),
+        'for example de-CH,de,en',
+      ),
+      row('Time zone', timeZone),
+      row(
+        'Color scheme',
+        choice(
+          'setting-color-scheme',
+          [
+            ['system', 'System'],
+            ['light', 'Light'],
+            ['dark', 'Dark'],
+          ],
+          current.colorScheme,
+          save('colorScheme', (value) => value as Settings['colorScheme']),
+        ),
+      ),
+      row(
+        'Default zoom',
+        choice(
+          'setting-zoom',
+          ZOOM_LEVELS.map((level) => [level, `${Math.round(level * 100)} %`]),
+          current.zoom,
+          save('zoom', Number),
+        ),
+      ),
+      row(
+        'JavaScript',
+        toggle('setting-javascript', current.javascript, (value) =>
+          saveSettings({ javascript: value }),
+        ),
+      ),
+      row(
+        'Images',
+        toggle('setting-images', current.images, (value) => saveSettings({ images: value })),
+      ),
+      row(
+        'Global Privacy Control',
+        toggle('setting-gpc', current.gpc, (value) => saveSettings({ gpc: value })),
+        'Asks websites not to share or sell your data',
+      ),
+      row(
+        'Data saver',
+        toggle('setting-save-data', current.saveData, (value) => saveSettings({ saveData: value })),
+        'Asks websites for lighter pages and images',
+      ),
+      row(
+        'Rendering resolution',
+        choice(
+          'setting-resolution',
+          [
+            ['full', 'Full'],
+            ['balanced', 'Balanced (at most 2x)'],
+            ['fast', 'Fast (1x)'],
+          ],
+          current.resolution,
+          save('resolution', (value) => value as Settings['resolution']),
+        ),
+        'Lower is faster on high resolution screens, text gets slightly softer',
+      ),
+      row(
+        'Limit per database in the profile',
+        choice(
+          'setting-db-limit',
+          DB_LIMITS.map((kb) => [kb, formatSize(kb * 1024)]),
+          current.dbLimit,
+          save('dbLimit', Number),
+        ),
+        'Larger databases stay on this device only',
       ),
     ),
-    row(
-      'User agent',
-      text('setting-user-agent', current.userAgent, 'from the device', (value) =>
-        saveSettings({ userAgent: value }),
-      ),
-    ),
-    row(
-      'Languages of websites',
-      text('setting-languages', current.languages, hostLanguages().join(','), (value) =>
-        saveSettings({ languages: value }),
-      ),
-      'for example de-CH,de,en',
-    ),
-    row('Time zone', timeZone),
     zones,
-    row(
-      'Color scheme',
-      choice(
-        'setting-color-scheme',
-        [
-          ['system', 'System'],
-          ['light', 'Light'],
-          ['dark', 'Dark'],
-        ],
-        current.colorScheme,
-        save('colorScheme', (value) => value as Settings['colorScheme']),
-      ),
-    ),
-    row(
-      'Default zoom',
-      choice(
-        'setting-zoom',
-        ZOOM_LEVELS.map((level) => [level, `${Math.round(level * 100)} %`]),
-        current.zoom,
-        save('zoom', Number),
-      ),
-    ),
-    row(
-      'JavaScript',
-      toggle('setting-javascript', current.javascript, (value) =>
-        saveSettings({ javascript: value }),
-      ),
-    ),
-    row(
-      'Images',
-      toggle('setting-images', current.images, (value) => saveSettings({ images: value })),
-    ),
-    row(
-      'Global Privacy Control',
-      toggle('setting-gpc', current.gpc, (value) => saveSettings({ gpc: value })),
-      'Asks websites not to share or sell your data',
-    ),
-    row(
-      'Data saver',
-      toggle('setting-save-data', current.saveData, (value) => saveSettings({ saveData: value })),
-      'Asks websites for lighter pages and images',
-    ),
-    row(
-      'Rendering resolution',
-      choice(
-        'setting-resolution',
-        [
-          ['full', 'Full'],
-          ['balanced', 'Balanced (at most 2x)'],
-          ['fast', 'Fast (1x)'],
-        ],
-        current.resolution,
-        save('resolution', (value) => value as Settings['resolution']),
-      ),
-      'Lower is faster on high resolution screens, text gets slightly softer',
-    ),
-    row(
-      'Limit per database in the profile',
-      choice(
-        'setting-db-limit',
-        DB_LIMITS.map((kb) => [kb, formatSize(kb * 1024)]),
-        current.dbLimit,
-        save('dbLimit', Number),
-      ),
-      'Larger databases stay on this device only',
-    ),
     element('p', {
       className: 'settings-hint',
       textContent:

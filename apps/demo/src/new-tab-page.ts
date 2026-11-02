@@ -7,6 +7,7 @@ import { byId, element } from './util.js';
 
 const page = byId('new-tab-page');
 const tiles = page.querySelector('.ntp-tiles') as HTMLElement;
+const greeting = page.querySelector('.ntp-greeting') as HTMLElement;
 const TILES = 8;
 
 /** The sites for the tiles: visited often and lately, bookmarks count as visits. */
@@ -26,11 +27,33 @@ export function frequentSites(limit = TILES): { url: string; title: string }[] {
   return [...sites.values()].sort((a, b) => b.points - a.points).slice(0, limit);
 }
 
+/** "Good morning", "Good afternoon" or "Good evening" at `hour`. */
+export function greetingFor(hour: number): string {
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/** The remembered icon of the site, else its first letter on a color of its host. */
+function tileIcon(url: string): Element {
+  const known = favicon(url);
+  if (known instanceof HTMLImageElement) return known;
+  const host = hostOf(url).replace(/^www\./, '');
+  let hue = 0;
+  for (const char of host) hue = (hue * 31 + char.charCodeAt(0)) % 360;
+  const letter = element('span', {
+    className: 'ntp-letter',
+    textContent: (host[0] ?? '?').toUpperCase(),
+  });
+  letter.style.setProperty('--hue', String(hue));
+  return letter;
+}
+
 function tile(site: { url: string; title: string }): HTMLElement {
   const link = element(
     'a',
     { className: 'ntp-tile', href: site.url, title: site.url },
-    element('span', { className: 'ntp-tile-icon' }, favicon(site.url)),
+    element('span', { className: 'ntp-tile-icon' }, tileIcon(site.url)),
     element('span', {
       className: 'ntp-tile-title',
       textContent: site.title || hostOf(site.url).replace(/^www\./, ''),
@@ -46,6 +69,7 @@ function tile(site: { url: string; title: string }): HTMLElement {
 }
 
 function render(): void {
+  greeting.textContent = greetingFor(new Date().getHours());
   const sites = frequentSites();
   tiles.replaceChildren(...sites.map(tile));
   tiles.hidden = !sites.length;
@@ -53,8 +77,8 @@ function render(): void {
 
 /**
  * The new tab page, drawn by the demo over the blank view of a new tab (no request to the
- * engine): a search field that hands over to the address bar like Chrome's, and tiles of the
- * sites visited most often.
+ * engine): a greeting, a search field that hands over to the address bar like Chrome's, and
+ * tiles of the sites visited most often (their icon, else their first letter).
  */
 export function initNewTabPage(): void {
   page.querySelector('.ntp-search')?.addEventListener('click', () => focusAddress());

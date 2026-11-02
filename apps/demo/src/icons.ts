@@ -34,6 +34,7 @@ const PATHS = {
     '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.5 3.5 5.5 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.5-3.5-8.5s1-6 3.5-8.5z"/>',
   extension: '<path d="M4.5 8.5h4a2.5 2.5 0 1 1 5 0h4v4a2.5 2.5 0 1 1 0 5v3h-13z"/>',
   tabs: '<rect x="4" y="4" width="16" height="16" rx="3"/>',
+  device: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/>',
 } as const;
 
 /** Name of an icon of {@link icon}. */

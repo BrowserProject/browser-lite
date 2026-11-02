@@ -2,7 +2,14 @@ import type { StartProgress } from '@browser-lite/core';
 import { byId } from './util.js';
 
 const box = byId('boot');
+const card = box.querySelector('.boot-card') as HTMLElement;
 let note = '';
+
+/** Replaces what the message over the page area shows and shows it. */
+export function showBoot(...nodes: Node[]): void {
+  card.replaceChildren(...nodes);
+  box.hidden = false;
+}
 
 /** The question for the access code (access.ts) stays until it is answered. */
 const asking = () => box.dataset.access === 'ask';
@@ -18,13 +25,14 @@ export function showMessage(
 ): void {
   if (asking()) return;
   const title = document.createElement('p');
+  title.className = 'title';
   title.textContent = text;
-  box.replaceChildren(title);
+  const nodes: Node[] = [title];
   for (const line of details) {
     const detail = document.createElement('p');
     detail.className = 'detail';
     detail.textContent = line;
-    box.append(detail);
+    nodes.push(detail);
   }
   if (actions.length) {
     const row = document.createElement('div');
@@ -36,9 +44,9 @@ export function showMessage(
       row.append(button);
     }
     (row.lastChild as HTMLElement).className = 'primary';
-    box.append(row);
+    nodes.push(row);
   }
-  box.hidden = false;
+  showBoot(...nodes);
 }
 
 /** Progress of the start: a bar while the engine downloads, then "Starting engine". */
@@ -55,7 +63,7 @@ export function showStartProgress({ phase, loaded, total }: StartProgress): void
       ...(note ? [note] : []),
     ]);
     bar = document.createElement('progress');
-    box.append(bar);
+    card.append(bar);
   }
   if (total > 0) bar.value = Math.min(loaded / total, 1);
   else bar.removeAttribute('value');
@@ -68,7 +76,7 @@ export function showStartNote(text: string): void {
   if (!line) {
     line = document.createElement('p');
     line.className = 'detail note';
-    box.querySelector('progress')?.before(line) ?? box.append(line);
+    card.querySelector('progress')?.before(line) ?? card.append(line);
   }
   line.textContent = text;
 }
