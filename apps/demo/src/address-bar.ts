@@ -34,7 +34,7 @@ export function takePendingAddress(): string {
 }
 
 function searchEngine() {
-  return SEARCH_ENGINES[settings().searchEngine] ?? SEARCH_ENGINES.duckduckgo;
+  return SEARCH_ENGINES[settings().searchEngine] ?? SEARCH_ENGINES.bing;
 }
 
 function searchURL(text: string): string {

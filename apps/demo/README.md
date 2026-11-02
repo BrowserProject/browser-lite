@@ -59,7 +59,7 @@ that `prefers-reduced-motion` turns off.
 
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
   goes back to the page, the lock or "Not secure" hides while editing. The suggestions start
-  with what Enter does (open the typed address, `Search DuckDuckGo for "weather"`), then bookmarks
+  with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343), then bookmarks
   and history with their icons; the arrow keys move.
 - **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
   view (no request to the engine): a search field that hands over to the address bar and tiles

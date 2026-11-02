@@ -560,8 +560,8 @@ check(
   JSON.stringify(cleared),
 );
 check(
-  'settings default again (DuckDuckGo, time zone and language of the host)',
-  (await searchEngine(one.page)) === 'duckduckgo',
+  'settings default again (Bing, time zone and language of the host)',
+  (await searchEngine(one.page)) === 'bing',
 );
 
 // 10) Server not reachable: a notice, everything stays on the device, also changed settings. At
@@ -591,7 +591,7 @@ check(
   localState,
 );
 await one.page.click('#settings nav button[data-section=general]');
-await one.page.selectOption('#setting-search', 'bing');
+await one.page.selectOption('#setting-search', 'startpage');
 await one.page.keyboard.press('Escape');
 await one.page.waitForTimeout(3000);
 const local = await reopen(one);
@@ -607,7 +607,7 @@ check(
   JSON.stringify(local) +
     (localKept ? '' : ` files ${JSON.stringify(await opfsFiles(one.page, 'localstorage'))}`),
 );
-check('without the server: the setting stays', (await searchEngine(one.page)) === 'bing');
+check('without the server: the setting stays', (await searchEngine(one.page)) === 'startpage');
 check(
   'without the server: nothing uploaded',
   (await info()).files.length === 0 && !serverPrefs('settings'),
@@ -622,7 +622,7 @@ check(
       return (
         paths(profile).includes('cookies.db') &&
         databases(profile, originA).length === 1 &&
-        serverPrefs('settings')?.searchEngine === 'bing'
+        serverPrefs('settings')?.searchEngine === 'startpage'
       );
     },
     20000,
@@ -630,7 +630,10 @@ check(
   ),
   `${JSON.stringify(paths(profile))} ${JSON.stringify(serverPrefs('settings'))}`,
 );
-check('with the server again: the setting from here', (await searchEngine(one.page)) === 'bing');
+check(
+  'with the server again: the setting from here',
+  (await searchEngine(one.page)) === 'startpage',
+);
 
 await one.context.close();
 finish();

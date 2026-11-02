@@ -144,7 +144,8 @@ export const MAX_PIXEL_RATIO: Record<Resolution, number | null> = {
 };
 
 const DEFAULTS: Settings = {
-  searchEngine: 'duckduckgo',
+  // Bing: DuckDuckGo answers repeated searches from a relay's datacenter address with no results (#343)
+  searchEngine: 'bing',
   restoreSession: true,
   homePage: '',
   device: hostDevice(),
