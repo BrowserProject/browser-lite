@@ -52,7 +52,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   5 Mbit/s, 150 ms starts after 15 s instead of 32 s (`tests/bench/slow-start.mjs`); after an
   engine update Chrome loads deltas against the old engine, ready after 2.5 instead of 15 s
   (#244).
-- **Weak devices**: render resolution limit for high pixel ratio screens, the demo renders at most
+- **Weak devices**: a page being left pauses until the next page answers, so a busy page no
+  longer holds up the next one on the shared engine thread (#337); render resolution limit for high pixel ratio screens, the demo renders at most
   2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
   after a browser restart the engine comes compiled from Chrome's code cache (#237); new threads get
   loaded web workers from a reserve that refills in the background, the engine thread no longer

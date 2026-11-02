@@ -1822,9 +1822,32 @@ void WebView::didStartLoading()
     notifyNavigationState();
 }
 
+// A navigation away from the page: its timers, animation frames and active DOM objects pause
+// until the response of the new page arrives or the navigation ends without it, so the new page
+// does not wait behind the old page's script work on the one engine thread (Chrome runs them in
+// different processes). On a weak phone a loading news page held the commit of the next page for
+// seconds. Resumed before the commit, so the back/forward cache suspends the old page itself.
+void WebView::pauseLeavingPage()
+{
+    if (m_leavingPagePaused)
+        return;
+    m_leavingPagePaused = true;
+    m_page->suspendActiveDOMObjectsAndAnimations();
+}
+
+void WebView::resumeLeavingPage()
+{
+    if (!m_leavingPagePaused)
+        return;
+    m_leavingPagePaused = false;
+    m_page->resumeActiveDOMObjectsAndAnimations();
+}
+
 void WebView::didCommitLoad()
 {
     debugLog("View %d: commit", m_id);
+    // A commit without a response (substitute data): the new document must not stay paused
+    resumeLeavingPage();
     m_firstPaint = FirstPaint::WaitingForLayout;
     // New page without pinch zoom (back/forward restores the remembered one)
     m_pinch = std::nullopt;

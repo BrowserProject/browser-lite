@@ -130,6 +130,19 @@ const pages = http.createServer((req, res) => {
       );
   if (url.pathname === '/more')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
+  // A page that keeps the engine thread busy, and answers that come only after 1.5 s
+  if (url.pathname === '/ticker')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html' })
+      .end(
+        "<title>tick:0</title><script>let n = 0; setInterval(() => { document.title = 'tick:' + ++n; }, 50);</script>",
+      );
+  if (url.pathname === '/late')
+    return setTimeout(
+      () => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>late</title>'),
+      1500,
+    );
+  if (url.pathname === '/late-empty') return setTimeout(() => res.writeHead(204).end(), 1500);
   if (url.pathname === '/features')
     return res
       .writeHead(200, { 'Content-Type': 'text/html' })
@@ -947,6 +960,53 @@ try {
   );
   await page.evaluate(() => window.blHost.stop());
   await page.close();
+
+  // Leaving a page: it pauses until the answer of the new page arrives (the commit does not wait
+  // behind its work), runs on when the navigation ends without a page, and comes back running
+  // from the back/forward cache
+  const leave = await context.newPage();
+  await leave.goto(stack.app({ url: `${PAGE_URL}ticker` }));
+  const tick = () => leave.evaluate(() => Number(window.blTest.view()?.title?.split(':')[1] ?? -1));
+  await leave.waitForFunction(() => window.blTest.view()?.title === 'tick:3', undefined, {
+    timeout: WAIT,
+  });
+  await leave.evaluate((url) => window.blTest.view().load(url), `${PAGE_URL}late-empty`);
+  await leave.waitForTimeout(300);
+  const pausedFrom = await tick();
+  await leave.waitForTimeout(800);
+  const pausedTo = await tick();
+  check('a page being left pauses', pausedTo === pausedFrom, `${pausedFrom} -> ${pausedTo}`);
+  await leave.waitForTimeout(1200);
+  const resumedFrom = await tick();
+  await leave.waitForTimeout(500);
+  check(
+    'it runs on when the navigation brings no page (204)',
+    (await tick()) > resumedFrom,
+    `${resumedFrom} -> ${await tick()}`,
+  );
+  await leave.evaluate((url) => window.blTest.view().load(url), `${PAGE_URL}late`);
+  check(
+    'the new page commits after its answer',
+    await leave
+      .waitForFunction(() => window.blTest.view()?.title === 'late', undefined, { timeout: WAIT })
+      .then(
+        () => true,
+        () => false,
+      ),
+  );
+  await leave.evaluate(() => window.blTest.view().back());
+  await leave.waitForFunction(() => window.blTest.view()?.title?.startsWith('tick:'), undefined, {
+    timeout: WAIT,
+  });
+  const backFrom = await tick();
+  await leave.waitForTimeout(500);
+  check(
+    'back from the cache: the page runs again',
+    (await tick()) > backFrom,
+    `${backFrom} -> ${await tick()}`,
+  );
+  await leave.evaluate(() => window.blHost.stop());
+  await leave.close();
 
   // Storage: OPFS namespace, Web Lock across tabs, beforeStart, clearStorage; device emulation
   const storageQuery = (extra) => stack.app({ url: PAGE_URL, persistent: '1', ...extra });

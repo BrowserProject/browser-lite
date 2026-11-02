@@ -623,6 +623,8 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
 
 void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest&, const String&, FramePolicyFunction&& function)
 {
+    if (isMainFrame())
+        m_view->resumeLeavingPage();
     // Download (Content-Disposition: attachment, unknown type): WebCore checks
     // sandbox and data:, then convertMainResourceLoadToDownload
     bool download = response.isAttachment() || !canShowMIMEType(response.mimeType());
@@ -752,8 +754,14 @@ void FrameLoaderClient::transitionToCommittedForNewPage(InitializingIframe)
 
 void FrameLoaderClient::dispatchDidStartProvisionalLoad()
 {
-    if (isMainFrame())
-        m_view->didStartLoading();
+    if (!isMainFrame())
+        return;
+    m_view->didStartLoading();
+    // Back/forward from the cache commits without a response: the old page must stay active
+    // until the cache suspends it
+    Ref frame = m_frameLoader->frame();
+    if (frame->document() && !isBackForwardLoadType(frame->loader().loadType()))
+        m_view->pauseLeavingPage();
 }
 
 void FrameLoaderClient::dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>)
@@ -832,6 +840,8 @@ void FrameLoaderClient::dispatchDidFailLoad(const ResourceError& error)
 // only continues if WebCore steps in itself (HTTPS first, then HTTP).
 void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& error, WillContinueLoading, WillInternallyHandleFailure willInternallyHandleFailure)
 {
+    if (isMainFrame())
+        m_view->resumeLeavingPage();
     if (willInternallyHandleFailure == WillInternallyHandleFailure::Yes)
         return;
     ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), false);

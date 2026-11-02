@@ -199,6 +199,8 @@ public:
 
     // For the clients
     void didStartLoading();
+    void pauseLeavingPage();
+    void resumeLeavingPage();
     // The next error page (ErrorPage.cpp) is because of an invalid certificate
     void willCommitErrorPage(bool certificate) { m_errorPageCertificate = certificate; }
     void didCommitLoad();
@@ -301,6 +303,7 @@ private:
     void loadFavicon();
 
     bool m_isLoading { false };
+    bool m_leavingPagePaused { false };
     URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;
 #if ENABLE(POINTER_LOCK)
