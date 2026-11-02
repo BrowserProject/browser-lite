@@ -185,6 +185,15 @@ On a real low-end phone (Motorola Moto G71, Android 11, BrowserStack, 2026-11-01
 engine started, from the load of a page to first paint / loaded: Wikipedia (Switzerland) 5.6 /
 8.2 s, BBC News 4.9 / 13.3 s; with the JIT the same within the spread (one run each).
 
+Through the public demo (2026-11-02, BrowserStack, Socrates tests T1 to T4): on the Moto G71 a
+cold start straight into BBC News showed its header after 16.4 s and the first headline after
+about 19 s; YouTube, opened while 20min.ch was still loading, committed after 3.9 s instead of
+about 17 s before #337; Big Buck Bunny played, Google Maps could be dragged. On an iPhone 15 the
+first start painted example.com within 12 s without waiting for a chunk (1.3 s before #342),
+Wikipedia after about 2 s, an article after 1 s, back at once; rotating re-laid out the page
+(#336). macOS Safari 26 and Windows 11 Firefox: tabs, find, zoom and downloads like a desktop
+browser (Safari keeps Cmd+L, T and W for itself).
+
 ## Open: performance (by value)
 
 1. JavaScript of a page load, flat (2026-11-01, weather.com, 13 to 21 s of the engine thread):
