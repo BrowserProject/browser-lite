@@ -1,9 +1,11 @@
+import { favicon, hostOf } from './favicons.js';
+import { icon } from './icons.js';
 import {
   activate,
   activeTab,
   allTabs,
   onTabsChange,
-  openURL,
+  openNewTab,
   requestClose,
   type Tab,
 } from './tabs.js';
@@ -24,7 +26,7 @@ export function initTabOverview(): void {
   overview.querySelector('.overview-done')?.addEventListener('click', () => toggleOverview(false));
   overview.querySelector('.overview-new')?.addEventListener('click', () => {
     toggleOverview(false);
-    openURL('', true);
+    openNewTab();
   });
   onTabsChange(() => {
     const tabs = allTabs().length;
@@ -45,30 +47,26 @@ export function toggleOverview(open: boolean): void {
   }
 }
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host || url;
-  } catch {
-    return url;
-  }
-}
-
 function card(tab: Tab): HTMLElement {
-  const icon = element('img', { className: 'overview-icon', alt: '' });
-  icon.hidden = !tab.iconUrl;
-  if (tab.iconUrl) icon.src = tab.iconUrl;
-  icon.onerror = () => {
-    icon.hidden = true;
-  };
+  // The engine's icon of the tab, else the remembered one of the site
+  let preview: Element = favicon(tab.url, 'overview-icon');
+  if (tab.iconUrl) {
+    const img = element('img', { className: 'overview-icon', alt: '', src: tab.iconUrl });
+    img.onerror = () => img.replaceWith(favicon(tab.url, 'overview-icon'));
+    preview = img;
+  } else if (tab.newTab) {
+    preview = icon('search');
+    preview.classList.add('overview-icon');
+  }
   const open = element(
     'button',
     { className: 'overview-open', type: 'button' },
-    icon,
+    element('span', { className: 'overview-title', textContent: tab.label }),
+    element('span', { className: 'overview-preview' }, preview),
     element('span', {
-      className: 'overview-title',
-      textContent: tab.title || tab.url || 'New tab',
+      className: 'overview-url',
+      textContent: hostOf(tab.url).replace(/^www[.]/, '') || (tab.newTab ? '' : tab.url),
     }),
-    element('span', { className: 'overview-url', textContent: hostOf(tab.url) }),
   );
   open.addEventListener('click', () => {
     toggleOverview(false);
@@ -78,8 +76,9 @@ function card(tab: Tab): HTMLElement {
     className: 'overview-close',
     type: 'button',
     title: 'Close tab',
-    textContent: '×',
   });
+  close.setAttribute('aria-label', `Close ${tab.label}`);
+  close.append(icon('close'));
   close.addEventListener('click', () => requestClose(tab));
   const node = element('div', { className: 'overview-card' }, open, close);
   node.classList.toggle('active', tab === activeTab());

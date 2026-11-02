@@ -415,7 +415,8 @@ await two.page.evaluate(() => {
   profile.savePrefs('settings', { ...profile.prefs('settings'), languages: 'it-CH' });
 });
 await waitFor(() => serverPrefs('settings')?.languages === 'it-CH', 10000);
-await two.page.click('#clear-data');
+await two.page.click('#menu-button');
+await two.page.click('#side-panel [data-item=profile]');
 const twoReloaded = two.page.waitForEvent('load', { timeout: 30000 }).then(
   () => true,
   () => false,
@@ -509,7 +510,8 @@ check(
 
 // 9) Reset the profile: server and device empty, settings default again
 const before = await info();
-await one.page.click('#clear-data');
+await one.page.click('#menu-button');
+await one.page.click('#side-panel [data-item=profile]');
 const table = await one.page
   .waitForSelector('#settings .settings-table table', { timeout: 20000 })
   .then(

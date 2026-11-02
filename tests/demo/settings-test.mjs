@@ -206,7 +206,8 @@ check(
 );
 
 // 3) Profile: what lives only on this device (as soon as the engine wrote the databases)
-await page.click('#clear-data');
+await page.click('#menu-button');
+await page.click('#side-panel [data-item=profile]');
 const expected = [
   `127.0.0.1:${new URL(siteA).port}: IndexedDB (over the limit)`,
   `127.0.0.1:${new URL(siteB).port}: localStorage (over the limit)`,
@@ -246,7 +247,8 @@ const second = await context.newPage();
 second.on('dialog', (dialog) => dialog.accept());
 await second.goto(stack.app({ url: 'about:blank' }));
 await booted(second);
-await second.click('#clear-data');
+await second.click('#menu-button');
+await second.click('#side-panel [data-item=profile]');
 const secondState = await second.locator('#profile-state').getAttribute('data-state');
 check(
   'second tab: no profile, deleting blocked',
@@ -408,7 +410,8 @@ check(
   keptA === 'kept,large,none' && keptB === 'none,none,large',
   `${keptA} / ${keptB}`,
 );
-await page.click('#clear-data');
+await page.click('#menu-button');
+await page.click('#side-panel [data-item=profile]');
 const clearReload = page.waitForEvent('load', { timeout: 30000 }).then(
   () => true,
   () => false,

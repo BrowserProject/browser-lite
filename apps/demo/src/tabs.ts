@@ -1,16 +1,20 @@
 import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
 import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
 import { ui } from './extensions.js';
+import { hostOf, rememberIcon } from './favicons.js';
 import { showFindCount } from './find-bar.js';
 import { recordVisit } from './history.js';
+import { icon, setIcon } from './icons.js';
+import { compactLayout } from './layout.js';
 import { debug } from './params.js';
 import { printing, showPreview } from './print-preview.js';
+import { focusPrompt, showPromptsOf } from './prompts.js';
 import { uiReloading } from './reload.js';
 import { runtime } from './runtime.js';
 import { type SessionEntry, type SessionTab, saveSession } from './session.js';
 import { settings, startSettings } from './settings.js';
 import { setProgress, setStatus, updateSecurity, updateStar, updateToolbar } from './toolbar.js';
-import { byId, element } from './util.js';
+import { byId, element, isBlank } from './util.js';
 import { sourcePage } from './view-source.js';
 
 const list: Tab[] = [];
@@ -50,6 +54,10 @@ export class Tab implements SessionTab {
   dialogSuppressed = false;
   lastActive = 0;
   iconUrl: string | null = null;
+  /** Host of the page the icon belongs to. */
+  private iconHost = '';
+  /** Shows the new tab page of the demo until the first address loads. */
+  newTab = false;
   private hideLinkStatus: (() => void) | null = null;
 
   constructor(view: View, init: { url?: string; title?: string; history?: SessionHistory | null }) {
@@ -59,11 +67,16 @@ export class Tab implements SessionTab {
     this.history = init.history ?? null;
     this.zoom = view.zoom;
     this.element = element('div', { className: 'tab' });
+    this.element.setAttribute('role', 'tab');
+    this.element.setAttribute('aria-selected', 'false');
     this.element.innerHTML =
       '<img class="icon" alt="" hidden><span class="title"></span>' +
-      '<span class="recording" title="Camera, microphone or screen in use" hidden>&#9679;</span>' +
-      '<span class="dialog-blocked" title="Dialog suppressed" hidden>&#8856;</span>' +
-      '<button class="audio" hidden></button><button class="close" title="Close tab">&#215;</button>';
+      '<span class="recording" title="Camera, microphone or screen in use" hidden></span>' +
+      '<span class="dialog-blocked" title="Dialog suppressed" hidden></span>' +
+      '<button type="button" class="audio" hidden></button>' +
+      '<button type="button" class="close" title="Close tab" aria-label="Close tab"></button>';
+    this.part('.dialog-blocked').append(icon('blocked'));
+    this.part('.close').append(icon('close'));
     this.part('.audio').addEventListener('click', () => {
       this.view.setMuted(!this.view.muted);
       this.updateAudio();
@@ -102,6 +115,12 @@ export class Tab implements SessionTab {
         const entry = event.history?.entries?.[event.history.index];
         recordVisit(event.url, entry && entry.url === event.url ? entry.title : '');
       }
+      if (!isBlank(event.url) && this.newTab) {
+        this.newTab = false;
+        this.updateTitle();
+      }
+      // The engine reports an icon only when its address changes: keep it within the site
+      if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.setIcon(null);
       this.url = event.url;
       this.canGoBack = event.canGoBack;
       this.canGoForward = event.canGoForward;
@@ -145,7 +164,11 @@ export class Tab implements SessionTab {
       if (this.isActive) setStatus(`Error: ${event.description}`);
       this.changed();
     });
-    this.on('icon', (event) => this.setIcon(event.blob));
+    this.on('icon', (event) => {
+      this.setIcon(event.blob);
+      this.iconHost = hostOf(this.url);
+      if (this.iconUrl) rememberIcon(this.url, this.iconUrl);
+    });
     this.on('media-state', () => this.updateAudio());
     this.on('capture-state', (event) => {
       this.capturing = event.active;
@@ -219,10 +242,15 @@ export class Tab implements SessionTab {
     if (this.isActive) updateToolbar(this);
   }
 
+  /** The title the tab shows: the page's, else its address, 'New tab' when blank. */
+  get label(): string {
+    return this.title || (isBlank(this.url) ? 'New tab' : this.url);
+  }
+
   updateTitle(): void {
-    this.part('.title').textContent = this.title || this.url || 'New tab';
+    this.part('.title').textContent = this.label;
     this.element.title = this.title;
-    if (this.isActive) document.title = `${this.title ? `${this.title} - ` : ''}browser-lite`;
+    if (this.isActive) document.title = `${this.label} - browser-lite`;
     tabsChanged();
   }
 
@@ -236,8 +264,9 @@ export class Tab implements SessionTab {
     const button = this.part<HTMLButtonElement>('.audio');
     const { audible, muted } = this.view;
     button.hidden = !audible && !muted;
-    button.textContent = muted ? '\u{1F507}' : '\u{1F50A}';
+    setIcon(button, muted ? 'speaker-off' : 'speaker-on');
     button.title = muted ? 'Unmute this tab' : 'Mute this tab';
+    button.setAttribute('aria-label', button.title);
     button.classList.toggle('muted', muted);
   }
 
@@ -262,6 +291,7 @@ export class Tab implements SessionTab {
   show(visible: boolean): void {
     this.view.setVisible(visible);
     this.element.classList.toggle('active', visible);
+    this.element.setAttribute('aria-selected', String(visible));
     this.hideLinkStatus?.();
     this.hideLinkStatus = visible ? linkStatus(this.view) : null;
   }
@@ -298,9 +328,20 @@ function tabsChanged(): void {
   for (const listener of changeListeners) listener();
 }
 
-/** Keyboard into the page of the active tab. */
+/** Keyboard into the page of the active tab, or into its dialog while the page waits for one. */
 export function focusPage(): void {
-  active?.view.focus();
+  if (!active || focusPrompt(active.view)) return;
+  if (!active.newTab) {
+    active.view.focus();
+    return;
+  }
+  // The new tab page: the address bar like Chrome, on a phone no keyboard until a tap
+  const address = byId<HTMLInputElement>('address');
+  if (compactLayout()) address.blur();
+  else {
+    address.focus();
+    address.select();
+  }
 }
 
 function add(tab: Tab, before?: Tab): Tab {
@@ -329,22 +370,38 @@ function createView(url?: string) {
 }
 
 /** A new tab in the foreground with url (empty: a blank tab). */
-export function openTab(url: string): Tab | null {
+export function openTab(url: string, newTab = false): Tab | null {
   const view = createView(url);
   if (!view) return null;
-  const tab = add(new Tab(view, { url }));
-  activate(tab);
+  const tab = new Tab(view, { url });
+  tab.newTab = newTab;
+  activate(add(tab));
   return tab;
 }
 
-/** Link or bookmark: in the active tab or a new one (empty url: home page). */
+/** A new tab in front: the home page of the settings, else the new tab page. */
+export function openNewTab(): Tab | null {
+  const home = settings().homePage;
+  return home ? openTab(home) : openTab('', true);
+}
+
+/** Link or bookmark: in the active tab or a new one (empty url: a new tab). */
 export function openURL(url: string, inNewTab: boolean): void {
   if (inNewTab || !active) {
-    openTab(url || settings().homePage || 'about:blank');
-    if (!url) byId('address').focus();
+    if (url) openTab(url);
+    else openNewTab();
     return;
   }
-  active.view.load(url);
+  loadInTab(active, url);
+}
+
+/** Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page. */
+export function loadInTab(tab: Tab, url: string): void {
+  if (tab.newTab) {
+    tab.newTab = false;
+    tab.updateTitle();
+  }
+  tab.view.load(url);
   focusPage();
 }
 
@@ -409,9 +466,13 @@ export function activate(tab: Tab): void {
   }
   persistSession();
   tab.show(true);
-  focusPage();
+  showPromptsOf(tab.view);
+  // The address bar shows the address of this tab
+  const address = byId('address');
+  if (document.activeElement === address) address.blur();
   updateToolbar(tab);
   tab.updateTitle();
+  focusPage();
 }
 
 /** Next (offset 1) or previous (-1) tab, wrapping around. */
@@ -455,7 +516,7 @@ function removeTab(tab: Tab): void {
   const back = tab.closeReturn;
   const next = back && list.includes(back) ? back : list.at(-1);
   if (next) activate(next);
-  else openTab('about:blank');
+  else openNewTab();
 }
 
 /**

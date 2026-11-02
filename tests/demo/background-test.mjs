@@ -9,6 +9,7 @@ import {
   SWIFTSHADER,
   TIMEOUT,
   VERBOSE,
+  answerPageDialogs,
   canvasOrigin,
   check,
   finish,
@@ -200,16 +201,16 @@ const recovered = await hang.page
 check('hang after a click: the message goes when the watchdog stops the script', recovered);
 await hang.context.close();
 
-// A dialog stops the main thread of the demo: the time until the answer does not count as a hang,
-// even when the input is still open
+// The time a dialog waits for the answer does not count as a hang, even when the input is still
+// open
 const dialog = await openApp({ url: `${siteURL}dialog` });
 await dialog.wait('loaded', 'dialog');
 let alerts = 0;
-dialog.page.on('dialog', async (d) => {
-  if (d.type() !== 'alert') return d.dismiss();
+await answerPageDialogs(dialog.page, async (type) => {
+  if (type !== 'alert') return 'dismiss';
   alerts++;
   await new Promise((r) => setTimeout(r, 12000));
-  await d.accept();
+  return 'accept';
 });
 await dialog.page.evaluate(() => {
   window.blHangSeen = 0;

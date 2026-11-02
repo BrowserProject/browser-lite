@@ -59,6 +59,9 @@ export function formatTime(time: number): string {
   return new Date(time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** No page yet: a new tab before its first address. */
+export const isBlank = (url: string | null | undefined): boolean => !url || url === 'about:blank';
+
 /** Internal pages that never go into history, session or bookmarks. */
 export const isInternal = (url: string | null | undefined): boolean =>
   !url || url === 'about:blank' || url.startsWith('data:') || url.startsWith('blob:');

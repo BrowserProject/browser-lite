@@ -88,3 +88,41 @@ export async function recordClip(browser, seconds = 3) {
   await recorder.close();
   return Buffer.from(bytes);
 }
+
+/**
+ * Answers the in-page dialogs of @browser-lite/ui (`.bl-page-dialog`) in page, also after a
+ * reload: `respond(type, text)` gets the type (`alert`, `confirm`, `prompt`, `beforeunload`,
+ * `many-dialogs`) and the title and message separated by an empty line (like the text of a native
+ * dialog) and returns, or resolves, 'accept', 'dismiss' or the text a prompt accepts.
+ */
+export async function answerPageDialogs(page, respond) {
+  await page.exposeBinding('blAnswerDialog', (_source, type, text) => respond(type, text));
+  const install = () => {
+    if (window.blDialogWatch) return;
+    window.blDialogWatch = true;
+    const seen = new WeakSet();
+    const check = () => {
+      for (const form of document.querySelectorAll('.bl-page-dialog')) {
+        if (seen.has(form)) continue;
+        seen.add(form);
+        const text = [form.querySelector('h2'), form.querySelector('.bl-message')]
+          .filter(Boolean)
+          .map((node) => node.textContent)
+          .join('\n\n');
+        window.blAnswerDialog(form.dataset.blType, text).then((answer) => {
+          if (!form.isConnected) return;
+          const input = form.querySelector('input');
+          if (input && typeof answer === 'string' && answer !== 'accept' && answer !== 'dismiss')
+            input.value = answer;
+          // An alert has only OK
+          const cancel = answer === 'dismiss' ? form.querySelector('.bl-cancel') : null;
+          (cancel ?? form.querySelector('.bl-ok'))?.click();
+        });
+      }
+    };
+    new MutationObserver(check).observe(document, { childList: true, subtree: true });
+    check();
+  };
+  await page.addInitScript(install);
+  await page.evaluate(install).catch(() => {});
+}
