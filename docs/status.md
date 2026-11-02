@@ -64,17 +64,21 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
-- **Demo UI** (refresh of 2026-11-02, #339 to #341): SVG icons, light and dark mode, a new tab
-  page with the sites visited most often, an address bar that selects the whole address on the
-  first click and restores it with Escape, suggestions with a search row and site icons, the menu
-  as a dropdown, history by day, dialogs of the pages in the page, hover only for real pointers,
-  short transitions (off with reduced motion). Checked in Chromium at 1366x800, 820x1180 touch,
-  390x844 and 844x390, light and dark; not yet on real devices.
+- **Demo UI** (Material redesign of 2026-11-02, #345, on the refresh #339 to #341): tonal
+  surfaces with a blue accent, design tokens in one place, state layers, tabs joined to the
+  toolbar, light and dark mode, SVG icons, a new tab page with a greeting and tiles of the sites
+  visited most often, an address bar that selects the whole address on the first click and
+  restores it with Escape, suggestions with a search row and site icons, the menu as a dropdown,
+  floating side panels, history by day, settings as cards with switches, dialogs of the pages in
+  the page, hover only for real pointers, short transitions (off with reduced motion). Checked in
+  Chromium at 1440x900, 1280x800, 820x1180 touch, 393x852 and 844x390, light and dark; not yet on
+  real devices.
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
-  Chrome (compact toolbar with only the host in the address, tab overview with cards, menu and
-  panels as bottom sheets with icon rows, touch targets of 44 px, safe areas, sheets above the iOS
-  keyboard), checked on emulated phones; Android hosts get the iPhone or iPad identity by default
-  (#332); rotating the phone rotates the pages (#336).
+  Chrome with the address bar at the bottom (back, only the host in the address, tab count, menu;
+  above the home indicator and the keyboard, suggestions upwards above it), tab overview with
+  cards, menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
+  areas, sheets above the iOS keyboard, checked on emulated phones; Android hosts get the iPhone
+  or iPad identity by default (#332); rotating the phone rotates the pages (#336).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)
