@@ -1,7 +1,7 @@
 # @browser-lite/ui
 
 Unstyled default UI for browser-lite: the select popup, color and date/time pickers, the
-permission prompt, the sign-in dialog, Chrome-like native dialogs, the context menu, the link
+permission prompt, the sign-in dialog, Chrome-like dialogs of the pages (in the page or native), the context menu, the link
 status bubble and the UI slots of extensions.
 The elements carry class names and `data-bl-*` attributes; only position and size are set
 inline, the page styles the rest.
@@ -30,13 +30,14 @@ const removeStatus = linkStatus(view);
 
 | Export | Purpose |
 | --- | --- |
-| `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>` (the file chooser stays with the core except on an iPhone or iPad). |
+| `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>`, the dialogs of the pages with `pageDialogs` (the file chooser stays with the core except on an iPhone or iPad). |
 | `selectPopup(o?)` | `<select>` list below or above the field. Keys: arrows, PageUp/PageDown, Home/End, typing jumps, Enter/Space choose, Escape/Tab cancel. Click outside, a change of the window width or window blur cancel (not a height change, like an on-screen keyboard going away). |
 | `colorPicker(o?)`, `dateTimePicker(o?)` | Native pickers of the host browser through a hidden input (`showPicker()`), with min, max and step of the field; on an iPhone or iPad, where Safari opens pickers only on a tap, the input is visible in a small sheet below the field with Cancel, the tap on it opens the picker; a host without month or week inputs (Firefox, Safari) shows its date picker for them. Every `input` event previews the value in the page (`request.preview`); resolve on change or on a click elsewhere. One picker per document, also when composed separately: a new one finishes the open one. |
 | `fileChooser(o?)` | On an iPhone or iPad, where Safari opens its file chooser only on a tap: a sheet at the top with a visible file input (multiple and accept of the page's field) and Cancel; resolves the chosen files, `null` on Cancel, a tap elsewhere or abort. Elsewhere an empty object, the core's default opens the chooser at once. |
-| `permissionPrompt(o?)` | "example.com wants to know your location" with Block and Allow; one at a time, queued. Only asks: remembering is the job of the `PermissionStore`. Allowing notifications also asks the host browser. |
+| `permissionPrompt(o?)` | "example.com wants to know your location" with Block and Allow; one at a time, queued. Only asks: remembering is the job of the `PermissionStore`. Allowing notifications also asks the host browser. Escape dismisses the shown prompt (not one that the page made `hidden`). |
 | `loginPrompt(o?)` | HTTP authentication like Chrome's sign-in dialog: "Sign in", the origin, for `http:` "Your connection to this site is not private", user name and password, Cancel and Sign in (Enter signs in, Escape cancels). Like Chrome without the realm, a text of the server. One at a time, queued. |
-| `nativeDialogs(o?)` | `alert`, `confirm`, `prompt` with "example.com says:", `beforeunload` as "Leave site?" or "Reload site?" with the standard sentence. A page showing dialogs in a fast loop is asked about once (`onBlocked(view)` when the user blocks); blocking lasts until the next document. |
+| `pageDialogs(o?)` | `alert`, `confirm`, `prompt` with "example.com says:", `beforeunload` as "Leave site?" or "Reload site?" with the standard sentence and Leave or Reload, as dialogs in the page: only the asking page waits. One per view at a time, queued per view; Enter accepts, Escape declines, the focus goes back to the view. A page showing dialogs in a fast loop is asked about once with Block and Allow (`onBlocked(view)` when the user blocks); blocking lasts until the next document. `DialogOptions`: `UiOptions` with `onBlocked` and `now`. |
+| `nativeDialogs(o?)` | The same texts and loop protection with the blocking dialogs of the host browser (`window.alert`, `confirm`, `prompt`). |
 | `showContextMenu(view, info, items, o?)` | Renders a menu at the position of a `context-menu` event; returns a close function. Escape, a click outside, window blur or closing the view close it. |
 | `defaultMenuItems(view, info, actions, o?)` | The standard items: open and copy link or image, copy, cut, paste, select all, back, forward, reload, print, view source. `actions.openTab(url)` is required; `reload`, `print`, `viewSource`, `copyText`, `readText` are optional overrides. |
 | `linkStatus(view, o?)` | Bubble with the URL under the mouse; returns a function that removes it. |
@@ -56,11 +57,12 @@ const handlers = defaultHandlers({ texts: { allow: 'Erlauben', block: 'Blockiere
 ```
 
 `nativeDialogs` uses the blocking dialogs of the host browser, so the host page and every view
-wait until the user answers (an own in-page dialog returning a promise only holds the asking
-page). To suppress dialogs of background views, wrap the handler:
+wait until the user answers; `pageDialogs` only holds the asking page. Dialogs of background views
+are the decision of the embedding page: hide their `.bl-page-dialog` until the view is shown, or
+wrap the handler to answer them at once:
 
 ```js
-const { dialog } = nativeDialogs({ onBlocked: (view) => markBlocked(view) });
+const { dialog } = pageDialogs({ onBlocked: (view) => markBlocked(view) });
 const handlers = {
   ...defaultHandlers(),
   dialog(r) {
@@ -86,6 +88,7 @@ runs first: register shortcut handlers in the bubble phase, or skip them while
 | `form.bl-picker-sheet.bl-file-sheet` | iPhone and iPad: the sheet of the file chooser (no inline position, place it with CSS). |
 | `form.bl-picker-sheet` | iPhone and iPad: the visible `input.bl-host-picker` and `button[data-bl-answer=cancel]`, inline `position: fixed` below the page field. |
 | `.bl-login-prompt` | `form` with `role=dialog`, `data-bl-view`; `h2`, `p.bl-origin`, `p.bl-not-private` (only `http:`), `label` with `input[name=username]` and `input[name=password]`, `button.bl-cancel` and `button.bl-sign-in` (`data-bl-answer`). Not positioned. |
+| `.bl-page-dialog` | `form` with `role=dialog` (alert) or `alertdialog`, `data-bl-view`, `data-bl-type` (`alert`, `confirm`, `prompt`, `beforeunload`, `many-dialogs`); `h2` (the first line, not for `many-dialogs`), `p.bl-message`, `input` (prompt), `div.bl-actions` with `button.bl-cancel` (not for alert) and `button.bl-ok` (`data-bl-answer=cancel\|ok`). Not positioned. |
 | `.bl-permission-prompt` | `role=dialog`, `data-bl-view`, `data-bl-kind`; `p`, `button.bl-block`, `button.bl-allow` (`data-bl-answer`). Not positioned. |
 | `.bl-context-menu` | `role=menu`, `data-bl-view`; `button.bl-menu-item` (`data-bl-item`, `disabled`), `hr.bl-separator`. Inline: `position: fixed`, `left`, `top`. |
 | `.bl-link-status` | `data-bl-view`, `hidden` without a link. Not positioned. |

@@ -15,6 +15,10 @@ export interface UiTexts {
   reloadSite: string;
   /** Second paragraph of the beforeunload question. */
   unsavedChanges: string;
+  /** Button that accepts alert, confirm and prompt. */
+  ok: string;
+  /** Button that leaves the page on beforeunload (`reload` when reloading). */
+  leave: string;
   /** Permission question per kind (geolocation, notifications, camera, microphone, ...). */
   permissions: Record<string, string>;
   /** Permission question for kinds without an entry in `permissions`. */
@@ -51,6 +55,8 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   leaveSite: 'Leave site?',
   reloadSite: 'Reload site?',
   unsavedChanges: 'Changes that you made may not be saved.',
+  ok: 'OK',
+  leave: 'Leave',
   permissions: Object.freeze({
     geolocation: '{host} wants to know your location',
     notifications: '{host} wants to show notifications',

@@ -20,7 +20,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167).
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
-  rendering (#258).
+  rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #335).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
   waiting scripts (#246), GPU blur and shadow, CSS Paint
