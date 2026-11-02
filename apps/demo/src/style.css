@@ -1426,7 +1426,8 @@ svg.favicon {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -1888,5 +1889,9 @@ svg.favicon {
   }
   #side-panel {
     padding-top: 16px;
+  }
+  .overview-preview {
+    aspect-ratio: auto;
+    height: 72px;
   }
 }

@@ -1198,7 +1198,7 @@ test('page dialogs: texts, keys, a queue per view, abort and focus', async () =>
     {
       type: 'alert',
       view: '9',
-      role: 'dialog',
+      role: 'alertdialog',
       title: 'example.com says:',
       message: 'Hi',
       buttons: ['ok:OK'],

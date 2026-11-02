@@ -203,7 +203,6 @@ function preconnectTyped(): void {
 function revert(): void {
   hideSuggestions();
   address.value = current;
-  address.select();
   focusPage();
 }
 

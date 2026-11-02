@@ -33,7 +33,7 @@ export function pageDialogs(options?: DialogOptions): Pick<RequestHandlers, 'dia
     const root = ui.root();
     const doc = root.ownerDocument;
     const form = element(root, 'form', 'page-dialog');
-    form.setAttribute('role', content.cancel ? 'alertdialog' : 'dialog');
+    form.setAttribute('role', 'alertdialog');
     form.setAttribute('aria-label', content.title || content.message.slice(0, 100));
     form.dataset.blView = String(request.view.id);
     form.dataset.blType = content.type;
