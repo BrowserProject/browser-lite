@@ -20,7 +20,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167).
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
-  rendering (#258).
+  rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
   waiting scripts (#246), GPU blur and shadow, CSS Paint
@@ -53,8 +53,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   engine update Chrome loads deltas against the old engine, ready after 2.5 instead of 15 s
   (#244).
 - **Weak devices**: a page being left pauses until the next page answers, so a busy page no
-  longer holds up the next one on the shared engine thread (#337); render resolution limit for high pixel ratio screens, the demo renders at most
-  2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
+  longer holds up the next one on the shared engine thread (#337); render resolution limit for
+  high pixel ratio screens, the demo renders at most 2x by default (#231); video plays in the host's own `<video>` behind the view canvas (#232);
   after a browser restart the engine comes compiled from Chrome's code cache (#237); new threads get
   loaded web workers from a reserve that refills in the background, the engine thread no longer
   waits 60 to 180 ms for a worker to load (#242); a JPEG drawn at half its size or smaller
@@ -64,10 +64,17 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
+- **Demo UI** (refresh of 2026-11-02, #339 to #341): SVG icons, light and dark mode, a new tab
+  page with the sites visited most often, an address bar that selects the whole address on the
+  first click and restores it with Escape, suggestions with a search row and site icons, the menu
+  as a dropdown, history by day, dialogs of the pages in the page, hover only for real pointers,
+  short transitions (off with reduced motion). Checked in Chromium at 1366x800, 820x1180 touch,
+  390x844 and 844x390, light and dark; not yet on real devices.
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
-  Chrome (compact toolbar, tab overview, menu and panels as bottom sheets, touch targets of
-  44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones; Android hosts
-  get the iPhone or iPad identity by default (#332); rotating the phone rotates the pages (#336).
+  Chrome (compact toolbar with only the host in the address, tab overview with cards, menu and
+  panels as bottom sheets with icon rows, touch targets of 44 px, safe areas, sheets above the iOS
+  keyboard), checked on emulated phones; Android hosts get the iPhone or iPad identity by default
+  (#332); rotating the phone rotates the pages (#336).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)

@@ -1084,6 +1084,157 @@ test('native dialogs show Chrome-like texts and protect against loops', async ()
   ]);
 });
 
+test('permission prompt: Escape dismisses, not while hidden', async () => {
+  const result = await page.evaluate(async () => {
+    const { permission } = ui.permissionPrompt();
+    const view = makeView(4);
+    const ask = () =>
+      permission({
+        view,
+        kind: 'camera',
+        origin: 'https://a.example',
+        signal: new AbortController().signal,
+      });
+    const first = ask();
+    const prompt = () => document.querySelector('.bl-permission-prompt');
+    prompt().hidden = true;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    const stillShown = !!prompt();
+    prompt().hidden = false;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return {
+      stillShown,
+      answer: await first,
+      left: document.querySelectorAll('.bl-permission-prompt').length,
+    };
+  });
+  assert.deepEqual(result, { stillShown: true, answer: 'dismiss', left: 0 });
+});
+
+test('page dialogs: texts, keys, a queue per view, abort and focus', async () => {
+  const result = await page.evaluate(async () => {
+    let now = 1e6;
+    const blocked = [];
+    const { dialog } = ui.pageDialogs({
+      now: () => now,
+      onBlocked: (view) => blocked.push(view.id),
+    });
+    const view = makeView(9);
+    const other = makeView(10);
+    const req = (type, extra = {}) => ({
+      view,
+      type,
+      origin: 'https://example.com',
+      message: 'Hi',
+      defaultValue: 'd',
+      reload: false,
+      signal: new AbortController().signal,
+      ...extra,
+    });
+    const forms = () => [...document.querySelectorAll('.bl-page-dialog')];
+    const describe = (form) => ({
+      type: form.dataset.blType,
+      view: form.dataset.blView,
+      role: form.getAttribute('role'),
+      title: form.querySelector('h2')?.textContent ?? '',
+      message: form.querySelector('.bl-message')?.textContent ?? '',
+      buttons: [...form.querySelectorAll('button')].map(
+        (b) => `${b.dataset.blAnswer}:${b.textContent}`,
+      ),
+      focus: document.activeElement === form.querySelector('input, .bl-ok'),
+    });
+    const out = {};
+    const alert = dialog(req('alert'));
+    const confirm = dialog(req('confirm'));
+    const otherPrompt = dialog({ ...req('prompt'), view: other });
+    out.first = forms().map(describe);
+    forms()[0].querySelector('.bl-ok').click();
+    out.alert = await alert;
+    now += 5000;
+    out.second = describe(forms().find((f) => f.dataset.blView === '9'));
+    window.key('Escape');
+    out.confirm = await confirm;
+    out.focusBack = view.calls.some(([name]) => name === 'focus');
+    const input = forms()[0].querySelector('input');
+    input.focus();
+    input.value = 'typed';
+    window.key('Escape');
+    out.declinedPrompt = await otherPrompt;
+    now += 5000;
+    const prompt = dialog(req('prompt'));
+    document.querySelector('.bl-page-dialog input').value = 'typed';
+    document.querySelector('.bl-page-dialog').requestSubmit();
+    out.prompt = await prompt;
+    now += 5000;
+    const leave = dialog(req('beforeunload', { reload: true }));
+    out.leave = describe(forms()[0]);
+    forms()[0].querySelector('.bl-ok').click();
+    out.leaveAnswer = await leave;
+    now += 5000;
+    const controller = new AbortController();
+    const aborted = dialog(req('confirm', { signal: controller.signal }));
+    controller.abort();
+    out.aborted = await aborted;
+    out.left = forms().length;
+    // A loop: the fourth dialog asks with Block and Allow; Block blocks the document
+    const loop = [];
+    while (!out.ask && loop.length < 10) {
+      now += 100;
+      const answer = dialog(req('alert'));
+      const form = forms()[0];
+      if (form.dataset.blType === 'many-dialogs') {
+        out.ask = describe(form);
+        form.querySelector('.bl-cancel').click();
+      } else {
+        form.querySelector('.bl-ok').click();
+      }
+      loop.push(await answer);
+    }
+    out.afterBlock = forms().length === 0 && (await dialog(req('confirm'))) === false;
+    out.blocked = blocked;
+    return out;
+  });
+  assert.deepEqual(result.first, [
+    {
+      type: 'alert',
+      view: '9',
+      role: 'alertdialog',
+      title: 'example.com says:',
+      message: 'Hi',
+      buttons: ['ok:OK'],
+      focus: false,
+    },
+    {
+      type: 'prompt',
+      view: '10',
+      role: 'alertdialog',
+      title: 'example.com says:',
+      message: 'Hi',
+      buttons: ['cancel:Cancel', 'ok:OK'],
+      focus: true,
+    },
+  ]);
+  assert.equal(result.alert, undefined);
+  assert.deepEqual(result.second.buttons, ['cancel:Cancel', 'ok:OK']);
+  assert.equal(result.second.type, 'confirm');
+  assert.equal(result.confirm, false);
+  assert.equal(result.declinedPrompt, null);
+  assert.equal(result.prompt, 'typed');
+  assert.deepEqual(result.leave.buttons, ['cancel:Cancel', 'ok:Reload']);
+  assert.equal(result.leave.title, 'Reload site?');
+  assert.equal(result.leave.message, 'Changes that you made may not be saved.');
+  assert.equal(result.leaveAnswer, true);
+  assert.equal(result.aborted, false);
+  assert.equal(result.left, 0);
+  assert.deepEqual(result.ask.buttons, ['cancel:Block', 'ok:Allow']);
+  assert.equal(
+    result.ask.message,
+    'example.com is showing many dialogs. Allow more dialogs from this site?',
+  );
+  assert.deepEqual(result.blocked, [9]);
+  assert.equal(result.afterBlock, true);
+});
+
 test('valueFromNumber converts through the host browser', async () => {
   const values = await page.evaluate(() => {
     const day = Date.UTC(2024, 1, 29);

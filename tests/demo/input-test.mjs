@@ -1,6 +1,6 @@
 // Input and page interaction in the demo UI (the engine side is tests/core/input-test.mjs): native
 // downloads and the status line of a failed one, mailto: to the host browser, popups as tabs,
-// dialogs with the origin, suppressed in background tabs and limited in bursts, the context menu
+// dialogs in the page with the origin, suppressed in background tabs and limited in bursts, the context menu
 // of the ui package, the <select> popup (mouse, keyboard, Esc), the link status bubble and the
 // tooltip, the hidden color and date inputs of the host, the find bar, zoom shortcuts, Ctrl +
 // mouse wheel with the zoom indicator and fullscreen of the page area.
@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   TIMEOUT,
+  answerPageDialogs,
   buildDir,
   canvasOrigin,
   check,
@@ -195,30 +196,59 @@ check(
 );
 await page.click('#tab-list .tab:first-child .title');
 
-// 5) Dialogs: with the origin of the page; from a background tab answered right away without a
-// dialog
-await page.evaluate(() => {
-  window.__dialogs = [];
-  window.confirm = (text) => {
-    window.__dialogs.push(text);
-    return true;
-  };
-  window.alert = (text) => {
-    window.__dialogs.push(text);
-  };
+// 5) Dialogs in the page area: with the origin of the page; from a background tab answered right
+// away without a dialog
+const shownDialogs = [];
+let dialogAnswer = (type, text) => (text.includes('many dialogs') ? 'dismiss' : 'accept');
+await answerPageDialogs(page, (type, text) => {
+  shownDialogs.push(`${type}:${text}`);
+  return dialogAnswer(type, text);
 });
 await page.evaluate(() =>
   window.blTest.eval('console.log("RESULT confirm=" + confirm("Really?"))'),
 );
 const confirmed = await result('confirm');
-const dialogs = await page.evaluate(() => window.__dialogs);
 check(
-  'confirm with the origin',
+  'confirm in the page with the origin',
   confirmed === 'true' &&
-    dialogs.length === 1 &&
-    dialogs[0] === `${new URL(siteURL).host} says:\n\nReally?`,
-  JSON.stringify(dialogs),
+    shownDialogs.length === 1 &&
+    shownDialogs[0] === `confirm:${new URL(siteURL).host} says:\n\nReally?`,
+  JSON.stringify(shownDialogs),
 );
+// The dialog holds only its tab: the demo goes on, a prompt gets the typed text
+dialogAnswer = () => new Promise((resolve) => setTimeout(() => resolve('typed'), 1500));
+await page.evaluate(() =>
+  window.blTest.eval('console.log("RESULT prompt=" + prompt("Name?", "x"))'),
+);
+const promptShown = await page
+  .waitForSelector('.bl-page-dialog[data-bl-type=prompt] input', { timeout: 10000 })
+  .then(
+    () => true,
+    () => false,
+  );
+const demoRuns = await page.evaluate(() => {
+  document.getElementById('menu-button').click();
+  const open = !document.getElementById('side-panel').hidden;
+  document.getElementById('menu-button').click();
+  return open;
+});
+check(
+  'prompt in the page: the demo answers meanwhile, the typed text reaches the page',
+  promptShown && demoRuns && (await result('prompt')) === 'typed',
+  `${promptShown} ${demoRuns} ${results.get('prompt')}`,
+);
+dialogAnswer = (type, text) => (text.includes('many dialogs') ? 'dismiss' : 'accept');
+// Escape declines (the helper leaves this one open)
+dialogAnswer = () => new Promise(() => {});
+await page.evaluate(() =>
+  window.blTest.eval('setTimeout(() => console.log("RESULT esc=" + confirm("Esc?")), 10)'),
+);
+await page.waitForSelector('.bl-page-dialog').catch(() => {});
+await page.keyboard.press('Escape');
+shownDialogs.length = 1;
+check('Escape declines a confirm', (await result('esc')) === 'false', results.get('esc'));
+dialogAnswer = (type, text) => (text.includes('many dialogs') ? 'dismiss' : 'accept');
+shownDialogs.length = 1;
 await page.evaluate(() =>
   window.blTest.eval(
     'setTimeout(() => console.log("RESULT bgalert=" + alert("Background")), 2000)',
@@ -228,7 +258,7 @@ await page.click('#tab-list .tab:nth-child(2) .title');
 const backgroundAlert = await result('bgalert');
 check(
   'alert from a background tab without a dialog',
-  backgroundAlert === 'undefined' && (await page.evaluate(() => window.__dialogs.length)) === 1,
+  backgroundAlert === 'undefined' && shownDialogs.length === 1,
   String(backgroundAlert),
 );
 // A marker at the tab until it is in front again
@@ -242,32 +272,22 @@ await page.click('#tab-list .tab:first-child .title');
 check('suppressed dialog: marker gone when the tab is in front', !(await dialogMarker(1)));
 
 // 6) Many dialogs in a short time: after three the demo asks once whether the page may show more.
-// No blocks the tab, a new page frees it again. In the popup tab, the page here stays.
+// Block blocks the tab, a new page frees it again. In the popup tab, the page here stays.
 await page.click('#tab-list .tab:nth-child(2) .title');
-await page.evaluate(() => {
-  window.__dialogs = [];
-  window.alert = (text) => {
-    window.__dialogs.push(text);
-  };
-  window.confirm = (text) => {
-    window.__dialogs.push(text);
-    return !text.includes('many dialogs');
-  };
-});
+shownDialogs.length = 0;
 await page.evaluate(() =>
   window.blTest.eval(
     'for (let i = 0; i < 6; i++) alert("Loop " + i); console.log("RESULT loopdone=1")',
   ),
 );
 await result('loopdone');
-const loopDialogs = await page.evaluate(() =>
-  window.__dialogs.map((text) => text.split('\n').pop()),
-);
+const loopDialogs = shownDialogs.map((text) => text.split('\n').pop());
 check(
   'dialog loop: three dialogs, one question, then blocked',
   loopDialogs.length === 4 &&
     loopDialogs[2] === 'Loop 2' &&
-    loopDialogs[3].includes('is showing many dialogs'),
+    loopDialogs[3].includes('is showing many dialogs') &&
+    shownDialogs[3].startsWith('many-dialogs:'),
   JSON.stringify(loopDialogs),
 );
 check('dialog loop: marker at the blocked tab', await dialogMarker(2));
@@ -280,8 +300,7 @@ await page.evaluate(() =>
 await result('reloaddone');
 check(
   'dialog loop: a new page frees the tab',
-  (await page.evaluate(() => window.__dialogs.at(-1))).endsWith('After the reload') &&
-    !(await dialogMarker(2)),
+  (shownDialogs.at(-1) ?? '').endsWith('After the reload') && !(await dialogMarker(2)),
 );
 await page.click('#tab-list .tab:first-child .title');
 

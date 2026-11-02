@@ -1,5 +1,5 @@
 import type { PermissionAnswer, PermissionRequest, RequestHandlers } from '@browser-lite/core';
-import { context, element, type UiOptions } from './options.js';
+import { context, element, listen, type UiOptions } from './options.js';
 import { format, hostOf } from './texts.js';
 
 interface Pending {
@@ -11,7 +11,8 @@ interface Pending {
 /**
  * Asks like Chrome: "<host> wants to know your location" with Block and Allow. One question at
  * a time, the others wait in order; an aborted request leaves the queue. Block and Allow are
- * remembered by the PermissionStore of the browser. Allowing notifications also asks the host
+ * remembered by the PermissionStore of the browser; Escape while the prompt is shown (not hidden) dismisses it.
+ * Allowing notifications also asks the host
  * browser (needs the click as user activation); when the host refuses, the answer is 'dismiss'
  * (nothing remembered, the page may ask again). Element: `.bl-permission-prompt` with `p` and
  * `button[data-bl-answer=block|allow]`.
@@ -19,7 +20,7 @@ interface Pending {
 export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'permission'> {
   const ui = context(options);
   const queue: Pending[] = [];
-  let shown: { pending: Pending; prompt: HTMLElement } | null = null;
+  let shown: { pending: Pending; prompt: HTMLElement; stop(): void } | null = null;
 
   const showNext = () => {
     const pending = queue[0];
@@ -41,11 +42,18 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
       node.type = 'button';
       node.dataset.blAnswer = answer;
       node.textContent = label;
-      node.addEventListener('click', () => answerShown(answer === 'allow'));
+      node.addEventListener('click', () => answerShown(answer === 'allow' ? 'grant' : 'deny'));
       return node;
     };
     prompt.append(text, button('block', ui.texts.block), button('allow', ui.texts.allow));
-    shown = { pending, prompt };
+    const onEscape = (event: Event) => {
+      const key = event as KeyboardEvent;
+      if (key.key !== 'Escape' || key.defaultPrevented || prompt.hidden) return;
+      key.preventDefault();
+      answerShown('dismiss');
+    };
+    const stop = listen([[root.ownerDocument.defaultView ?? window, 'keydown', onEscape]]);
+    shown = { pending, prompt, stop };
     root.append(prompt);
   };
 
@@ -53,18 +61,23 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
     const position = queue.indexOf(pending);
     if (position >= 0) queue.splice(position, 1);
     if (shown?.pending === pending) {
+      shown.stop();
       shown.prompt.remove();
       shown = null;
     }
   };
 
-  const answerShown = async (allow: boolean) => {
+  const answerShown = async (choice: PermissionAnswer) => {
     if (!shown) return;
     const { pending } = shown;
     remove(pending);
     pending.request.signal.removeEventListener('abort', pending.onAbort);
-    let answer: PermissionAnswer = allow ? 'grant' : 'deny';
-    if (allow && pending.request.kind === 'notifications' && !(await hostNotifications()))
+    let answer = choice;
+    if (
+      answer === 'grant' &&
+      pending.request.kind === 'notifications' &&
+      !(await hostNotifications())
+    )
       answer = 'dismiss';
     pending.resolve(answer);
     showNext();

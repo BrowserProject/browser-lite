@@ -10,7 +10,7 @@ export {
   launchProfile,
   permissions,
 } from './browser.mjs';
-export { recordClip, serve, serveBytes, wav } from './pages.mjs';
+export { answerPageDialogs, recordClip, serve, serveBytes, wav } from './pages.mjs';
 export {
   freePort,
   runProcess,

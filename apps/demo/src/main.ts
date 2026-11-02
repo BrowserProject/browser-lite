@@ -24,9 +24,12 @@ import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
+import { renderIcons } from './icons.js';
+import { initNewTabPage } from './new-tab-page.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
 import { profilePermissions } from './permissions.js';
 import { onPreviewClosed } from './print-preview.js';
+import { followShownView } from './prompts.js';
 import { addressWithoutUrl, markRestart, reloadUI, takeRestart } from './reload.js';
 import { followRotation } from './rotation.js';
 import { profile, runtime } from './runtime.js';
@@ -43,6 +46,7 @@ import {
   clearTabs,
   discardForMemory,
   focusPage,
+  openNewTab,
   openTab,
   openURL,
   printTab,
@@ -133,7 +137,8 @@ function openStartTabs(restarted: boolean): void {
   }
   const restored = session.map((entry) => restoredTab(entry));
   if (safe) {
-    openTab(typed || 'about:blank');
+    if (typed) openTab(typed);
+    else openNewTab();
     showNotice('After the restart the tabs load only when clicked');
     return;
   }
@@ -310,10 +315,12 @@ initSidePanel({
   openURL,
   find: openFind,
   print: () => printTab(activeTab()),
-  openSettings: () => openSettings(),
+  openSettings: (section) => openSettings(section),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
 initTabOverview();
+initNewTabPage();
+followShownView([document.body, byId('pages')]);
 onPreviewClosed(focusPage);
 onBookmarksChange(() => {
   const tab = activeTab();
@@ -322,6 +329,14 @@ onBookmarksChange(() => {
 installShortcuts();
 fitVisualViewport();
 followRotation();
+renderIcons();
+// Where the chrome ends: the side panel and the menu start there
+new ResizeObserver(() =>
+  document.documentElement.style.setProperty(
+    '--chrome-bottom',
+    `${byId('chrome').getBoundingClientRect().bottom}px`,
+  ),
+).observe(byId('chrome'));
 renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 
@@ -341,10 +356,11 @@ byId('zoom').addEventListener('click', () => {
   const tab = activeTab();
   if (tab) changeZoom(tab.view, 0);
 });
-byId('clear-data').addEventListener('click', () => {
-  togglePanel(null);
-  openSettings('profile');
+byId('menu-button').addEventListener('click', (e) => {
+  togglePanel(panelOpen() ? null : 'menu');
+  // Opened with the keyboard: into the menu, the arrow keys move on
+  if (e.detail === 0 && panelOpen())
+    byId('side-panel').querySelector<HTMLElement>('.panel-menu-item')?.focus();
 });
-byId('menu-button').addEventListener('click', () => togglePanel(panelOpen() ? null : 'menu'));
 
 void start(false);

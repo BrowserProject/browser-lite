@@ -79,7 +79,8 @@ iframe.browser-frame {
 /* @browser-lite/ui only positions its elements: the rest is up to the page */
 .bl-context-menu,
 .bl-select-popup,
-.bl-permission-prompt {
+.bl-permission-prompt,
+.bl-page-dialog {
   z-index: 10;
   border: 1px solid #aaa;
   border-radius: 6px;
@@ -120,6 +121,26 @@ iframe.browser-frame {
   top: 48px;
   left: 16px;
   padding: 12px;
+}
+.bl-page-dialog {
+  position: fixed;
+  top: 48px;
+  left: 50%;
+  width: min(360px, calc(100% - 32px));
+  padding: 12px;
+  transform: translateX(-50%);
+}
+.bl-page-dialog h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.bl-page-dialog .bl-message {
+  white-space: pre-wrap;
+}
+.bl-page-dialog .bl-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .bl-host-picker {
   position: fixed;

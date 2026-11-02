@@ -1,8 +1,8 @@
 # apps/demo/
 
 The full demo browser on browser-lite: tabs (with popups, restored tabs that load on the first
-click, discarding under memory pressure and a message when none is left), address bar with
-suggestions, history, bookmarks, downloads panel, settings page with profile, extensions and device
+click, discarding under memory pressure and a message when none is left), a new tab page,
+address bar with suggestions, history, bookmarks, downloads panel, dialogs of the pages in the page, settings page with profile, extensions and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
 handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
 runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
@@ -49,13 +49,43 @@ slots), `checkMemory()` (discards a background tab, returns the
 new view id or 0), `memoryUsed()`, `gpu(action)`, `profile`, `settings()`, `addressToURL(text)`,
 `transport`, `relay`, `options`.
 
+## Look and behaviour
+
+Vanilla TypeScript and one style sheet: colors are variables for light and dark mode, the icons
+are inline SVG of `icons.ts` (`currentColor`, one stroke width), hover styles only apply where
+the pointer can hover (`@media (hover: hover)`, a tap leaves no grey circle), keyboard focus
+shows a ring (`:focus-visible`), and menus, sheets and dialogs appear with short transitions
+that `prefers-reduced-motion` turns off.
+
+- **Address bar**: the first click or tap selects the whole address, Escape restores it and
+  goes back to the page, the lock or "Not secure" hides while editing. The suggestions start
+  with what Enter does (open the typed address, `Search DuckDuckGo for "weather"`), then bookmarks
+  and history with their icons; the arrow keys move.
+- **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
+  view (no request to the engine): a search field that hands over to the address bar and tiles
+  of the sites visited most often. The tab is called "New tab".
+- **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
+  Settings at the end; history, bookmarks and downloads open as a panel beside the page, below
+  the toolbar. History goes by day with the time of a visit, a page once per day.
+- **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
+  show the cross only on the active (and hovered) tab, on touch screens a little earlier.
+- **Dialogs**: alert, confirm, prompt and beforeunload are dialogs of `@browser-lite/ui` over the
+  page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
+  sign-in dialogs of a tab behind are hidden until it is in front. Escape dismisses the
+  permission prompt. Declining buttons come before accepting ones everywhere.
+- **Icons of sites**: the tab shows the icon the engine reports; it goes when the tab leaves the
+  site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
+  history) for suggestions, history, bookmarks, the new tab page and the tab overview.
+
 ## Phone layout
 
 Below 640 px of width or 500 px of height (a phone in portrait or landscape) `style.css` switches
 to a layout like mobile Chrome: the toolbar has back, the address, the tab count and the menu;
-forward, reload and the star move into a row at the top of the menu; the tab count opens the tab
-overview (a card per tab: tap to switch, cross to close, new tab); menu and panels are bottom
-sheets over a backdrop; find bar, permission prompt and sign-in dialog fit the width; touch
+forward, reload and the star move into a row of icons with labels at the top of the menu; the
+address shows only the host until it is tapped; the suggestions span the width; the tab count
+opens the tab overview (a card per tab with title, the site's icon and host: tap to switch, cross
+to close, new tab); menu and panels are bottom sheets over a backdrop, as high as the visible
+part at most and scrolling (in landscape the menu has two columns); JS dialogs are centered; find bar, permission prompt and sign-in dialog fit the width; touch
 targets are at least 44 px and fields have 16 px text (iOS zooms into smaller). The page uses
 `viewport-fit=cover` and keeps toolbar, page and sheets out of the notch and the home indicator
 (`env(safe-area-inset-*)`). While the iOS keyboard covers the page, `visual-viewport.ts` sets
@@ -65,7 +95,7 @@ the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android devic
 "Device" defaults to that device (an Android phone or tablet to the iPhone or iPad: sites refuse
 a WebKit user agent with "Android" as the old Android browser, #332) with the real screen of the
 host; the Android presets stay in the settings; then the page area keeps the whole
-window (only a device the host is not gets a frame of its size). Rotating the phone or tablet rotates the engine's screen too when the device is the host itself (`rotation.ts`, `Browser.setDevice`, #336): pages lay out again for landscape and get `screen.orientation`'s `change` event. Everything is CSS plus the tab overview; the media query of
+window (only a device the host is not gets a frame of its size). Rotating the phone or tablet rotates the engine's screen too when the device is the host itself (`rotation.ts`, `Browser.setDevice`, #336): pages lay out again for landscape and get `screen.orientation`'s `change` event. Everything is CSS plus the tab overview and the host in the address bar; the media query of
 `style.css` is the only breakpoint (`layout.ts` reads it through `--layout`).
 `tests/demo/mobile-test.mjs` checks it on an emulated phone.
 
@@ -88,9 +118,10 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
+| `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page; the SVG icons; icons of the visited sites |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview |
-| `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library and the side panel (menu, history, bookmarks, downloads) |
+| `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library, the menu and the side panel (history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
 | `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |
-| `dialogs.ts`, `permissions.ts` | native dialogs with background suppression; permission decisions in the profile |
+| `dialogs.ts`, `prompts.ts`, `permissions.ts` | dialogs of the pages in the page with background suppression; prompts only of the tab in front; permission decisions in the profile |
 | `shortcuts.ts`, `engine-message.ts`, `view-source.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, messages over the page area, page source, reloads, `window.blTest`, helpers |

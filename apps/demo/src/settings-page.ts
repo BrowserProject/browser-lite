@@ -1,5 +1,6 @@
 import { type LocalStats, type ProfileInfo, siteOfPath } from '@browser-lite/profile';
 import { renderExtensionSettings } from './extensions.js';
+import { icon } from './icons.js';
 import { reloadUI, restartUI } from './reload.js';
 import { profile, runtime } from './runtime.js';
 import {
@@ -38,8 +39,9 @@ for (const [key, title] of Object.entries(SECTIONS) as [Section, string][]) {
   nav.append(button);
 }
 const content = element('div', { className: 'settings-content' });
-const close = element('button', { className: 'settings-close', textContent: '×' });
+const close = element('button', { className: 'settings-close', type: 'button', title: 'Close' });
 close.setAttribute('aria-label', 'Close');
+close.append(icon('close'));
 close.addEventListener('click', () => page.close());
 page.append(nav, content, close);
 page.addEventListener('close', () => {
@@ -147,7 +149,7 @@ function renderGeneral(section: HTMLElement): void {
     ),
     row(
       'Home page for new tabs',
-      text('setting-home', current.homePage, 'empty = blank tab', (value) =>
+      text('setting-home', current.homePage, 'empty = the new tab page', (value) =>
         saveSettings({ homePage: value }),
       ),
     ),

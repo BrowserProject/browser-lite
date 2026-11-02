@@ -10,6 +10,7 @@
 import {
   TIMEOUT,
   VERBOSE,
+  answerPageDialogs,
   check,
   finish,
   launch,
@@ -96,6 +97,34 @@ await tab.goto(stack.app({ url: siteURL + 'one' }));
 check('first page', await waitLoaded('Page one', TIMEOUT));
 await go(siteURL + 'two');
 check('second page through the address bar', await waitLoaded('Page two'));
+// The first click selects the whole address, typing replaces it, Escape brings it back
+await tab.click('body', { position: { x: 600, y: 400 } });
+await tab.click('#address', { position: { x: 120, y: 10 } });
+const selection = await tab.evaluate(() => {
+  const field = document.getElementById('address');
+  return [field.selectionStart, field.selectionEnd, field.value.length];
+});
+check(
+  'address bar: the first click selects everything',
+  selection[0] === 0 && selection[1] === selection[2] && selection[2] > 0,
+  JSON.stringify(selection),
+);
+await tab.keyboard.type('typed');
+const typed = await tab.inputValue('#address');
+await tab.keyboard.press('Escape');
+const restored = await tab.evaluate(() => [
+  document.getElementById('address').value,
+  document.activeElement === document.getElementById('address'),
+  document.getElementById('suggestions').hidden,
+]);
+check(
+  'address bar: typing replaces, Escape restores the address and leaves the field',
+  typed === 'typed' &&
+    restored[0] === siteURL + 'two' &&
+    restored[1] === false &&
+    restored[2] === true,
+  `${typed} ${JSON.stringify(restored)}`,
+);
 // Back and forward (buttons of the demo)
 await tab
   .waitForFunction(() => !document.getElementById('back').disabled, null, { timeout: 10000 })
@@ -120,15 +149,15 @@ check(
   loaded.join('|'),
 );
 
-// History (Ctrl+H): both pages, newest first
+// History (Ctrl+H): both pages, newest first, grouped by day
 await tab.keyboard.press('Control+h');
 const history = await tab.locator('#side-panel .panel-title').allTextContents();
 // one, two, back to one, forward to two (newest first)
 check(
-  'history',
-  JSON.stringify(history.slice(0, 4)) ===
-    JSON.stringify(['Page two', 'Page one', 'Page two', 'Page one']),
-  JSON.stringify(history.slice(0, 4)),
+  'history: newest first, a page once per day',
+  JSON.stringify(history) === JSON.stringify(['Page two', 'Page one']) &&
+    (await tab.locator('#side-panel .panel-day').first().textContent()) === 'Today',
+  JSON.stringify(history),
 );
 await tab.keyboard.press('Escape');
 check(
@@ -189,8 +218,33 @@ check(
     ),
 );
 
-// Session: a second tab, then open the demo again without ?url=
+// New tab: the page of the demo with the address bar focused and the sites visited before
 await tab.click('#new-tab');
+const newTab = await tab.evaluate(() => ({
+  title: document.querySelector('#tab-list .tab.active .title')?.textContent,
+  shown: !document.getElementById('new-tab-page').hidden,
+  focused: document.activeElement === document.getElementById('address'),
+  address: document.getElementById('address').value,
+  tiles: [...document.querySelectorAll('#new-tab-page .ntp-tile-title')].map((t) => t.textContent),
+}));
+check(
+  'new tab page: "New tab", focused empty address, tiles of the visited pages',
+  newTab.title === 'New tab' &&
+    newTab.shown &&
+    newTab.focused &&
+    newTab.address === '' &&
+    newTab.tiles.includes('Page one') &&
+    newTab.tiles.includes('Page two'),
+  JSON.stringify(newTab),
+);
+loaded = [];
+await tab.locator('#new-tab-page .ntp-tile', { hasText: 'Page two' }).click();
+check(
+  'new tab page: a tile opens the site in the tab',
+  (await waitLoaded('Page two')) &&
+    (await tab.evaluate(() => document.getElementById('new-tab-page').hidden)),
+);
+// Session: a second tab, then open the demo again without ?url=
 await go(siteURL + 'three');
 check('third page in a new tab', await waitLoaded('Page three'));
 await tab.waitForTimeout(500);
@@ -786,7 +840,10 @@ const dialogTab = await (
 watchErrors(dialogTab);
 const dialogLines = [];
 dialogTab.on('console', (msg) => dialogLines.push(msg.text()));
-dialogTab.on('dialog', (dialog) => setTimeout(() => dialog.accept(), 3500));
+await answerPageDialogs(
+  dialogTab,
+  () => new Promise((resolve) => setTimeout(() => resolve('accept'), 3500)),
+);
 async function dialogLine(pattern, timeout) {
   for (
     const end = Date.now() + timeout;
@@ -846,6 +903,12 @@ unloadTab.on('console', (msg) => {
 });
 const unloadDialogs = [];
 let dialogAnswer = 'dismiss';
+// The dialogs of the pages in the page, the host's own (closing the host tab, deleting site data)
+// native
+await answerPageDialogs(unloadTab, (type, text) => {
+  unloadDialogs.push(`${type}:${text}`);
+  return dialogAnswer;
+});
 unloadTab.on('dialog', (dialog) => {
   unloadDialogs.push(dialog.type() + ':' + dialog.message());
   dialog[dialogAnswer]().catch(() => {});
@@ -897,7 +960,7 @@ await go(unloadURL + 'two', unloadTab);
 await unloadTab.waitForTimeout(2000);
 check(
   'beforeunload: navigating away asks, cancel stays',
-  JSON.stringify(unloadDialogs) === JSON.stringify(['confirm:Leave site?\n\n' + LEAVE]) &&
+  JSON.stringify(unloadDialogs) === JSON.stringify(['beforeunload:Leave site?\n\n' + LEAVE]) &&
     !unloadLoaded.includes('Page two') &&
     !unloadLoads.has('two'),
   JSON.stringify(unloadDialogs),
@@ -907,7 +970,7 @@ await unloadTab.click('#reload');
 await unloadTab.waitForTimeout(2000);
 check(
   'beforeunload: reload asks, cancel stays',
-  unloadDialogs[1] === 'confirm:Reload site?\n\n' + LEAVE &&
+  unloadDialogs[1] === 'beforeunload:Reload site?\n\n' + LEAVE &&
     unloadLoads.get('unload') === unloadCount,
   JSON.stringify(unloadDialogs),
 );
@@ -944,7 +1007,7 @@ await unloadTab.click('#tab-list .tab:nth-child(2) .close');
 await unloadTab.waitForTimeout(1500);
 check(
   'beforeunload: closing asks, the tab in front and stays',
-  unloadDialogs[2] === 'confirm:Leave site?\n\n' + LEAVE &&
+  unloadDialogs[2] === 'beforeunload:Leave site?\n\n' + LEAVE &&
     JSON.stringify(await tabTitles()) === JSON.stringify(['Page three', '*Page unload']),
   `${JSON.stringify(unloadDialogs)} ${JSON.stringify(await tabTitles())}`,
 );
@@ -1076,7 +1139,8 @@ const clearReload = unloadTab.waitForEvent('load', { timeout: 30000 }).then(
   () => true,
   () => false,
 );
-await unloadTab.click('#clear-data');
+await unloadTab.click('#menu-button');
+await unloadTab.click('#side-panel [data-item=profile]');
 await unloadTab.click('#settings-clear-site-data');
 check(
   'beforeunload: clearing site data reloads without a question of the host',

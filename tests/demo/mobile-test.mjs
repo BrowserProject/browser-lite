@@ -50,6 +50,8 @@ const context = await browser.newContext({
   hasTouch: true,
   // Playwright has no isMobile in Firefox
   ...(BROWSER === 'chromium' ? { isMobile: true } : {}),
+  // Sheets are measured where they end up, without their short slide-in
+  reducedMotion: 'reduce',
   geolocation: { latitude: 46.948, longitude: 7.447 },
   permissions: permissions(['geolocation']),
 });
@@ -130,7 +132,7 @@ check(
 
 // Portrait: back, address, tab count and menu; the rest moved into the menu
 const visible = await tab.evaluate(() =>
-  ['tabs', 'back', 'forward', 'reload', 'bookmark', 'clear-data', 'tab-count', 'menu-button']
+  ['tabs', 'back', 'forward', 'reload', 'bookmark', 'tab-count', 'menu-button']
     .filter((id) => document.getElementById(id).getClientRects().length)
     .join(','),
 );
@@ -151,10 +153,24 @@ check(
   'portrait: 16 px text in the address (no zoom on focus in iOS)',
   (await tab.$eval('#address', (node) => getComputedStyle(node).fontSize)) === '16px',
 );
+check(
+  'portrait: the address bar shows only the host',
+  (await tab.inputValue('#address')) === new URL(siteURL).host,
+  await tab.inputValue('#address'),
+);
 await screenshot(tab, 'mobile-portrait');
 
-// Address entry
+// Address entry: the tap shows the whole address, selected
 await tab.tap('#address');
+const tapped = await tab.evaluate(() => {
+  const field = document.getElementById('address');
+  return [field.value, field.selectionStart, field.selectionEnd];
+});
+check(
+  'address tap: the whole address, selected',
+  tapped[0] === `${siteURL}one` && tapped[1] === 0 && tapped[2] === tapped[0].length,
+  JSON.stringify(tapped),
+);
 await tab.fill('#address', `${siteURL}two`);
 await tab.press('#address', 'Enter');
 check('address entry navigates', await loaded('Page two'));
@@ -165,8 +181,13 @@ check('tab overview opens', await shown('#tab-overview'));
 check('tab overview: one card', (await tab.locator('.overview-card').count()) === 1);
 await tab.tap('#tab-overview .overview-new');
 check(
-  'new tab from the overview',
-  await tab.evaluate(() => document.getElementById('tab-overview').hidden),
+  'new tab from the overview: the new tab page, no keyboard',
+  await tab.evaluate(
+    () =>
+      document.getElementById('tab-overview').hidden &&
+      !document.getElementById('new-tab-page').hidden &&
+      document.activeElement !== document.getElementById('address'),
+  ),
 );
 await tab.fill('#address', `${siteURL}three`);
 await tab.press('#address', 'Enter');
@@ -234,9 +255,12 @@ check(
   'menu: items of 44 px',
   ...(await touchSize('#side-panel .panel-menu-item, #side-panel .panel-icon')),
 );
+const quick = await tab.locator('#side-panel .panel-icon').allTextContents();
 check(
-  'menu: forward, reload and bookmark',
-  (await tab.locator('#side-panel .panel-icon').count()) === 3,
+  'menu: forward, reload and bookmark with icon and label',
+  JSON.stringify(quick) === JSON.stringify(['Forward', 'Reload', 'Bookmark']) &&
+    (await tab.locator('#side-panel .panel-icon svg').count()) === 3,
+  JSON.stringify(quick),
 );
 await screenshot(tab, 'mobile-menu');
 await tab.touchscreen.tap(PORTRAIT.width / 2, 20);

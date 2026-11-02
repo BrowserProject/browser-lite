@@ -1,3 +1,4 @@
+import { clearIcons } from './favicons.js';
 import { isInternal, readJSON } from './util.js';
 
 /** A visited page; only on this device (localStorage), never in the profile. */
@@ -42,7 +43,9 @@ export function recordVisit(url: string, title: string): void {
   write(history.slice(-MAX_ENTRIES));
 }
 
+/** Clears the history and the remembered icons of the sites. */
 export function clearHistory(): void {
+  clearIcons();
   write([]);
 }
 
