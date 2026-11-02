@@ -66,7 +66,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Demo on phones**: a phone layout below 640 px of width or 500 px of height like mobile
   Chrome (compact toolbar, tab overview, menu and panels as bottom sheets, touch targets of
   44 px, safe areas, sheets above the iOS keyboard), checked on emulated phones; Android hosts
-  get the iPhone or iPad identity by default (#332).
+  get the iPhone or iPad identity by default (#332); rotating the phone rotates the pages (#336).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)
@@ -228,8 +228,8 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
 
 ## Open: features
 
-- `device` and `timeZone` apply only at `createBrowser` (the demo restarts the engine for all its
-  settings); emulated mobile devices do not rotate.
+- `timeZone` applies only at `createBrowser`; the demo restarts the engine for a changed device
+  too, although `Browser.setDevice()` could apply it (it uses that only for the rotation, #336).
 - Pinch zoom: `visualViewport` events only at the end of the gesture; two fingers wait for the
   page's touchstart answer even without blocking listeners.
 - Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; video

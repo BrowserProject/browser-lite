@@ -2,6 +2,7 @@ import { trackClipboardWrite, writeHostClipboard } from './clipboard.js';
 import {
   type Config,
   colorScheme,
+  device,
   engineEnv,
   languages,
   maxPixelRatio,
@@ -41,6 +42,7 @@ import type {
   BrowserStorage,
   ColorScheme,
   ConsoleMessage,
+  DeviceOptions,
   Download,
   PermissionDecision,
   PermissionKind,
@@ -667,6 +669,16 @@ class BrowserImpl implements Browser, ViewHost {
 
   setMaxPixelRatio(limit: number | null): void {
     this.screen.setMaxPixelRatio(maxPixelRatio(limit));
+  }
+
+  setDevice(options: DeviceOptions | null): void {
+    const checked = device(options === null ? undefined : options);
+    this.config.device = checked;
+    for (const view of this.views.values()) {
+      view.limitToDevice(checked);
+      view.measure(true);
+    }
+    if (this.ready) this.screen.send();
   }
 
   preconnect(url: string): void {

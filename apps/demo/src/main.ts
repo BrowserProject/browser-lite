@@ -28,6 +28,7 @@ import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js'
 import { profilePermissions } from './permissions.js';
 import { onPreviewClosed } from './print-preview.js';
 import { addressWithoutUrl, markRestart, reloadUI, takeRestart } from './reload.js';
+import { followRotation } from './rotation.js';
 import { profile, runtime } from './runtime.js';
 import { sessionToRestore } from './session.js';
 import { needsNewEngine, type StartSettings, updateStartSettings } from './settings.js';
@@ -320,6 +321,7 @@ onBookmarksChange(() => {
 });
 installShortcuts();
 fitVisualViewport();
+followRotation();
 renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 

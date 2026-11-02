@@ -118,8 +118,9 @@ export function checkNamespace(namespace: unknown): string {
   return namespace;
 }
 
-function device(value: unknown): Required<DeviceOptions> | null {
-  if (value === undefined) return null;
+/** Checks an emulated device (null: the host screen). */
+export function device(value: unknown): Required<DeviceOptions> | null {
+  if (value === undefined || value === null) return null;
   if (!isObject(value)) return invalid('device must be an object');
   for (const key of ['width', 'height', 'pixelRatio'] as const) {
     const number = value[key];

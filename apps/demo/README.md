@@ -65,7 +65,7 @@ the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android devic
 "Device" defaults to that device (an Android phone or tablet to the iPhone or iPad: sites refuse
 a WebKit user agent with "Android" as the old Android browser, #332) with the real screen of the
 host; the Android presets stay in the settings; then the page area keeps the whole
-window (only a device the host is not gets a frame of its size). Everything is CSS plus the tab overview; the media query of
+window (only a device the host is not gets a frame of its size). Rotating the phone or tablet rotates the engine's screen too when the device is the host itself (`rotation.ts`, `Browser.setDevice`, #336): pages lay out again for landscape and get `screen.orientation`'s `change` event. Everything is CSS plus the tab overview; the media query of
 `style.css` is the only breakpoint (`layout.ts` reads it through `--layout`).
 `tests/demo/mobile-test.mjs` checks it on an emulated phone.
 

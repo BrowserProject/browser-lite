@@ -83,9 +83,9 @@ export class ViewImpl implements View {
     this.canvas = document.createElement('canvas');
     this.canvas.setAttribute('data-bl-view', String(id));
     // position:relative: video overlays (#232) lie before the canvas, underneath it
-    this.canvas.style.cssText = `display:block;position:relative;width:100%;height:100%;outline:none;touch-action:none;${
-      device ? `max-width:${device.width}px;max-height:${device.height}px;margin:0 auto;` : ''
-    }`;
+    this.canvas.style.cssText =
+      'display:block;position:relative;width:100%;height:100%;outline:none;touch-action:none;';
+    this.limitToDevice(device);
     // The canvas goes to the worker that paints (compositor or engine thread); only where
     // that is impossible the pixels are copied here (presentFrame)
     const worker =
@@ -198,6 +198,14 @@ export class ViewImpl implements View {
     const width = Math.max(1, Math.round(Math.min(rect.width, device?.width ?? Infinity)));
     const height = Math.max(1, Math.round(Math.min(rect.height, device?.height ?? Infinity)));
     return { width, height };
+  }
+
+  /** @internal The canvas keeps at most the emulated device's screen size, centered. */
+  limitToDevice(device: { width: number; height: number } | null): void {
+    const style = this.canvas.style;
+    style.maxWidth = device ? `${device.width}px` : '';
+    style.maxHeight = device ? `${device.height}px` : '';
+    style.margin = device ? '0 auto' : '';
   }
 
   /** @internal Sends the current size (resize, pixel ratio change). */

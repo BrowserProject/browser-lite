@@ -97,6 +97,18 @@ function isHostDevice(device: string): boolean {
   return device === hostDevice() || device === hostKind();
 }
 
+/**
+ * The host's screen in its current orientation (iOS keeps screen.width and height of portrait
+ * when rotated, Android swaps them).
+ */
+export function hostScreenSize(): { width: number; height: number } {
+  const short = Math.min(window.screen.width, window.screen.height);
+  const long = Math.max(window.screen.width, window.screen.height);
+  return matchMedia('(orientation: landscape)').matches
+    ? { width: long, height: short }
+    : { width: short, height: long };
+}
+
 /** Size limits per database in the profile (KB). */
 export const DB_LIMITS = [128, 256, 512, 1024, 4096];
 
@@ -208,8 +220,7 @@ export function updateStartSettings(restarted: boolean): StartSettings {
   const screen =
     device.screen && host
       ? {
-          width: window.screen.width,
-          height: window.screen.height,
+          ...hostScreenSize(),
           pixelRatio: Math.min(devicePixelRatio || 1, maxPixelRatio ?? Infinity),
         }
       : device.screen;
@@ -246,10 +257,19 @@ export function updateStartSettings(restarted: boolean): StartSettings {
 
 /**
  * True when `next` needs another engine than `running`: the time zone, the emulated device and
- * keeping session cookies only apply at the start of the engine.
+ * keeping session cookies only apply at the start of the engine (the device's orientation does not).
  */
 export function needsNewEngine(running: StartSettings, next: StartSettings): boolean {
-  const fixed = ({ options }: StartSettings) =>
-    JSON.stringify([options.timeZone, options.device ?? null, options.keepSessionCookies]);
+  // The orientation of the host screen does not count: a running engine follows it (rotation.ts)
+  const fixed = ({ options: { device, timeZone, keepSessionCookies } }: StartSettings) =>
+    JSON.stringify([
+      timeZone,
+      device && {
+        ...device,
+        width: Math.min(device.width, device.height),
+        height: Math.max(device.width, device.height),
+      },
+      keepSessionCookies,
+    ]);
   return fixed(running) !== fixed(next);
 }

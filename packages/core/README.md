@@ -53,7 +53,7 @@ them or load `media-sw.js` into the site's own worker:
 | `languages` | host languages | `navigator.languages` and Accept-Language |
 | `timeZone` | host time zone | IANA name |
 | `colorScheme` | `system` | `light`, `dark` or `system` (follows the host) |
-| `device` | host screen | `{ width, height, pixelRatio, touch?, mobile? }` emulated device |
+| `device` | host screen | `{ width, height, pixelRatio, touch?, mobile? }` emulated device; `browser.setDevice()` changes it at runtime (a rotated phone: the views keep at most the new size, `screen`, `screen.orientation` and its `change` event follow) |
 | `maxPixelRatio` | no limit | Highest pixel ratio the pages render at on the host screen (at least 1, `browser.setMaxPixelRatio()` changes it; an emulated `device` keeps its own); above it the host scales the views up, the engine paints fewer pixels |
 | `preferences` | all on, GPC and data saver off | `{ javascript, images, globalPrivacyControl, saveData }` (`saveData`: `Save-Data: on` on every request, `navigator.connection.saveData`) |
 | `keepSessionCookies` | `false` | Session cookies survive a restart |

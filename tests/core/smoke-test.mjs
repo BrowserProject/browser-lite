@@ -126,7 +126,7 @@ const pages = http.createServer((req, res) => {
     return res
       .writeHead(200, { 'Content-Type': 'text/html' })
       .end(
-        "<title>device</title><script>document.title = [screen.width, screen.height, devicePixelRatio, matchMedia('(pointer: coarse)').matches, innerWidth, innerHeight, navigator.maxTouchPoints > 0].join(':');</script>",
+        "<title>device</title><script>const show = (prefix) => { document.title = prefix + [screen.width, screen.height, devicePixelRatio, matchMedia('(pointer: coarse)').matches, innerWidth, innerHeight, navigator.maxTouchPoints > 0, screen.orientation.type].join(':'); }; show(''); screen.orientation.addEventListener('change', () => setTimeout(() => show('rotated:'), 100));</script>",
       );
   if (url.pathname === '/more')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
@@ -988,6 +988,30 @@ try {
     return `${rect.width}x${rect.height}`;
   });
   check('device emulation limits the canvas', canvasSize === '400x300', canvasSize);
+  // Rotated at runtime (Browser.setDevice): screen, orientation event, layout and canvas follow
+  await first.evaluate(() =>
+    window.blTest.browser.setDevice({ width: 300, height: 400, pixelRatio: 2 }),
+  );
+  check(
+    'setDevice rotates screen, orientation and layout',
+    await first
+      .waitForFunction(
+        () =>
+          window.blTest.view()?.title?.startsWith('rotated:300:400:2:true:300:400:true:portrait'),
+        undefined,
+        { timeout: WAIT },
+      )
+      .then(
+        () => true,
+        () => false,
+      ),
+    await first.evaluate(() => window.blTest.view()?.title),
+  );
+  const rotatedCanvas = await first.evaluate(() => {
+    const rect = window.blTest.view().canvas.getBoundingClientRect();
+    return `${rect.width}x${rect.height}`;
+  });
+  check('setDevice limits the canvas to the new size', rotatedCanvas === '300x400', rotatedCanvas);
   const secondTab = await context.newPage();
   await secondTab.goto(storageQuery({ url: PAGE_URL }));
   check('second tab starts', (await secondTab.evaluate(() => window.blHost.ready)) === true);

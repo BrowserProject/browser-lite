@@ -103,7 +103,7 @@ export interface Rect {
 
 /** Emulated device screen. */
 export interface DeviceOptions {
-  /** Screen size in CSS pixels; the view keeps at most this size. */
+  /** Screen size in CSS pixels; the view keeps at most this size ({@link Browser.setDevice} changes it). */
   width: number;
   height: number;
   pixelRatio: number;
@@ -270,6 +270,13 @@ export interface Browser {
    * limit 1), and pages pick smaller images.
    */
   setMaxPixelRatio(limit: number | null): void;
+  /**
+   * Changes the emulated device at runtime (null: the host screen), for example its size after
+   * the phone was rotated: the views keep at most the new size and lay out again, `screen`,
+   * `screen.orientation` (with its `change` event) and the media queries of size, pointer and
+   * hover follow. The pixel ratio follows too; the user agent stays (see {@link setUserAgent}).
+   */
+  setDevice(device: DeviceOptions | null): void;
   /** navigator.userAgent and navigator.platform; empty strings mean the engine default. */
   setUserAgent(userAgent: string, platform?: string): void;
   /** Changes some preferences; the others keep their value. */
