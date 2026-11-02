@@ -162,16 +162,24 @@ function showSuggestions(): void {
  */
 function placeSuggestions(): void {
   if (box.hidden) return;
+  const chrome = byId('chrome');
   if (compactLayout()) {
+    // Inside the toolbar's container, right above it: iOS moves the visual viewport under the
+    // keyboard, so coordinates of the window would point behind the keyboard or the bar
+    if (box.parentElement !== chrome) chrome.append(box);
     const toolbar = byId('toolbar').getBoundingClientRect();
+    const top = window.visualViewport?.offsetTop ?? 0;
     Object.assign(box.style, {
+      position: 'absolute',
       left: '0px',
       top: '',
-      bottom: `${window.innerHeight - toolbar.top}px`,
+      bottom: '100%',
       width: '100%',
-      maxHeight: `${toolbar.top}px`,
+      maxHeight: `${Math.max(120, toolbar.top - top)}px`,
     });
   } else {
+    if (box.parentElement === chrome) document.body.append(box);
+    box.style.position = '';
     const rect = form.getBoundingClientRect();
     Object.assign(box.style, {
       left: `${rect.left}px`,
