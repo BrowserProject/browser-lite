@@ -1,6 +1,8 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
-// compact toolbar fits and has touch targets of at least 44 px, the address entry navigates, the
-// tab overview shows the tabs, switches and closes one, the menu opens as a bottom sheet, the find
+// compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
+// entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
+// page smaller), the tab overview shows the tabs, switches and closes one, the menu opens as a
+// bottom sheet on the toolbar, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, and the desktop layout
 // comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
@@ -158,6 +160,17 @@ check(
   (await tab.inputValue('#address')) === new URL(siteURL).host,
   await tab.inputValue('#address'),
 );
+const bar = async () => (await boxes('#chrome')).list[0];
+const portraitBar = await bar();
+const area = (await boxes('#viewport')).list[0];
+check(
+  'portrait: the toolbar at the bottom, the page above it from the top',
+  !!portraitBar &&
+    Math.abs(portraitBar.bottom - PORTRAIT.height) < 1 &&
+    Math.abs(area.top) < 1 &&
+    Math.abs(area.bottom - portraitBar.top) < 1,
+  JSON.stringify([portraitBar, area]),
+);
 await screenshot(tab, 'mobile-portrait');
 
 // Address entry: the tap shows the whole address, selected
@@ -172,6 +185,26 @@ check(
   JSON.stringify(tapped),
 );
 await tab.fill('#address', `${siteURL}two`);
+const above = async () => {
+  const [list, toolbar] = [(await boxes('#suggestions')).list[0], await bar()];
+  return [
+    !!list && !!toolbar && Math.abs(list.bottom - toolbar.top) < 1 && list.top >= 0,
+    JSON.stringify([list, toolbar]),
+  ];
+};
+check('address entry: the suggestions open upwards above the toolbar', ...(await above()));
+// An on-screen keyboard that makes the page smaller (Chrome on Android): the toolbar and the
+// suggestions stay above it
+await tab.setViewportSize({ width: PORTRAIT.width, height: 520 });
+await tab.waitForTimeout(300);
+const raised = await bar();
+check(
+  'address entry: the toolbar above the keyboard',
+  !!raised && Math.abs(raised.bottom - 520) < 1,
+  JSON.stringify(raised),
+);
+check('address entry: the suggestions above the toolbar with the keyboard', ...(await above()));
+await tab.setViewportSize(PORTRAIT);
 await tab.press('#address', 'Enter');
 check('address entry navigates', await loaded('Page two'));
 
@@ -242,13 +275,14 @@ await tab.tap('#tab-overview .overview-done');
 await tab.tap('#menu-button');
 check('menu opens', await shown('#side-panel'));
 const sheet = (await boxes('#side-panel')).list[0];
+const sheetBar = await bar();
 check(
-  'menu: a sheet at the bottom over the whole width',
+  'menu: a sheet on the toolbar over the whole width',
   !!sheet &&
-    Math.abs(sheet.bottom - PORTRAIT.height) < 1 &&
+    Math.abs(sheet.bottom - sheetBar.top) < 1 &&
     sheet.width === PORTRAIT.width &&
     sheet.top > 0,
-  JSON.stringify(sheet),
+  JSON.stringify([sheet, sheetBar]),
 );
 check('menu inside the window', ...(await inside('#side-panel button')));
 check(
@@ -324,10 +358,14 @@ await screenshot(tab, 'mobile-landscape');
 await tab.tap('#menu-button');
 await shown('#side-panel');
 const low = (await boxes('#side-panel')).list[0];
+const lowBar = await bar();
 check(
-  'landscape: the menu sheet fits the height and scrolls',
-  !!low && low.top >= 0 && Math.abs(low.bottom - LANDSCAPE.height) < 1,
-  JSON.stringify(low),
+  'landscape: the menu sheet fits the height on the toolbar at the bottom',
+  !!low &&
+    low.top >= 0 &&
+    Math.abs(low.bottom - lowBar.top) < 1 &&
+    Math.abs(lowBar.bottom - LANDSCAPE.height) < 1,
+  JSON.stringify([low, lowBar]),
 );
 await screenshot(tab, 'mobile-landscape-menu');
 await tab.touchscreen.tap(20, 20);
