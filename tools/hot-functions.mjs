@@ -7,6 +7,8 @@
 // much engine code (a WebKit update), or when tests/core/deferred-test.mjs finds the start
 // needing a chunk: functions newer than the list stay in engine.wasm. The start includes a page
 // with text in other scripts whose fonts are held back (#255: the text goes on without them).
+// Each part also runs on an emulated iPhone (touch, mobile pages, the demo's iPhone identity),
+// whose code a desktop never runs: without it an iPhone's first start waited 1.3 s for a chunk (#342).
 // --add runs only that page and the given urls and marks what ran as hot in the existing list.
 //
 //   node tools/hot-functions.mjs <engine-dir> [--seconds 25] [--out engine/hot-functions.txt] [--add] [url...]
@@ -103,17 +105,35 @@ const fontsPage = new URL('fonts', local.url).href;
 
 const seconds = Number(options.seconds) * 1000;
 
+// An iPhone 15 with Safari: the demo takes the iPhone as its device (settings.ts)
+const PHONE = {
+  viewport: { width: 393, height: 852 },
+  deviceScaleFactor: 3,
+  isMobile: true,
+  hasTouch: true,
+  userAgent:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1',
+};
+
 /**
  * One start of Chromium with the app, then the pages one after the other; resolves what ran
  * (function index -> ran on the page main thread). holdFonts: the lazy fallback fonts never
- * arrive.
+ * arrive. phone: an emulated iPhone that scrolls with touch gestures.
  */
-async function scenario(stack, profile, pages, { holdFonts = false } = {}) {
+async function scenario(stack, profile, pages, options = {}) {
   const context = await launchProfile({
     dir: profile,
     args: SWIFTSHADER,
-    viewport: { width: 1280, height: 860 },
+    ...(options.phone ? PHONE : { viewport: { width: 1280, height: 860 } }),
   });
+  try {
+    return await record(context, stack, pages, options);
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+async function record(context, stack, pages, { holdFonts = false, phone = false }) {
   if (holdFonts) await context.route(/\/lazy\/fonts\/(scripts|cjk|emoji)\//, () => {});
   const page = context.pages()[0] || (await context.newPage());
   const cdp = await context.newCDPSession(page);
@@ -136,18 +156,30 @@ async function scenario(stack, profile, pages, { holdFonts = false } = {}) {
   for (const [index, url] of pages.entries()) {
     if (index) await page.evaluate((address) => window.blTest.load(address), url);
     await page.waitForTimeout(seconds / 2);
-    // Scrolling runs the code of lazy content and of the scrolling thread
-    await page.mouse.move(640, 500);
-    for (let step = 0; step < 6; step++) {
-      await page.mouse.wheel(0, 600);
-      await page.waitForTimeout(seconds / 12);
+    // Scrolling runs the code of lazy content and of the scrolling thread; a tap the touch code
+    if (phone) {
+      await page.touchscreen.tap(196, 500);
+      for (let step = 0; step < 6; step++) {
+        await cdp.send('Input.synthesizeScrollGesture', {
+          x: 196,
+          y: 600,
+          yDistance: -500,
+          gestureSourceType: 'touch',
+        });
+        await page.waitForTimeout(seconds / 12);
+      }
+    } else {
+      await page.mouse.move(640, 500);
+      for (let step = 0; step < 6; step++) {
+        await page.mouse.wheel(0, 600);
+        await page.waitForTimeout(seconds / 12);
+      }
     }
     console.log(`${url}: ${await page.evaluate(() => document.title)}`);
   }
   const complete = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve));
   await cdp.send('Tracing.end');
   await complete;
-  await context.close();
   return new Map(
     [...ran].map(([index, tids]) => [
       index,
@@ -165,23 +197,35 @@ const merge = (into, ran) => {
 // before their fonts are there
 const start = new Map();
 const demo = await startStack({ app: 'demo', engine });
-merge(start, await scenario(demo, tempDir('hot-profile'), [fontsPage], { holdFonts: true }));
-if (!options.add) {
+const core = options.add ? null : await startStack({ engine });
+for (const phone of [false, true]) {
+  merge(
+    start,
+    await scenario(demo, tempDir('hot-profile'), [fontsPage], { holdFonts: true, phone }),
+  );
+  if (options.add) continue;
   const profile = tempDir('hot-profile');
-  merge(start, await scenario(demo, profile, [local.url]));
-  merge(start, await scenario(demo, profile, [local.url]));
-  const core = await startStack({ engine });
-  merge(start, await scenario(core, tempDir('hot-profile'), [local.url]));
+  merge(start, await scenario(demo, profile, [local.url], { phone }));
+  merge(start, await scenario(demo, profile, [local.url], { phone }));
+  merge(start, await scenario(core, tempDir('hot-profile'), [local.url], { phone }));
 }
 
 // Each site in a fresh Chromium (V8 compiles a function once per process), to count the sites
 const counts = new Map();
 const main = new Map(start);
-for (const url of sites) {
-  const ran = await scenario(demo, tempDir('hot-profile'), [url]);
-  for (const index of ran.keys()) counts.set(index, (counts.get(index) ?? 0) + 1);
-  merge(main, ran);
-}
+for (const phone of [false, true])
+  for (const url of sites) {
+    // A renderer that crashes (memory of the unsplit engine with tracing) gets one more try
+    const attempt = () => scenario(demo, tempDir('hot-profile'), [url], { phone });
+    const ran = await attempt()
+      .catch(attempt)
+      .catch((error) => {
+        console.log(`${url}${phone ? ' (phone)' : ''}: skipped, ${error.message.split('\n')[0]}`);
+        return new Map();
+      });
+    for (const index of ran.keys()) counts.set(index, (counts.get(index) ?? 0) + 1);
+    merge(main, ran);
+  }
 
 // Hot: what the start or MIN_SITES sites ran, and what ran on the page main thread; the other
 // functions of this build are cold. Names that share a hash: hot wins.
