@@ -337,7 +337,7 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   profile of all threads when the engine logs the stall (`build/e2e-devices-stall.trace.json` in
   the artifact `e2e-core-screenshots-chromium`). Not seen in the 14 CI runs since the new touch
   fling and touch scrolling (#313, #314) up to 2026-10-31, which changed the scrolling it always
-  followed.
+  followed, nor in 44 end-to-end jobs of 11 main runs up to 2026-11-02.
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.
