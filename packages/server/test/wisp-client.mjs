@@ -32,7 +32,7 @@ export const withToken = (token) => [
   `bl-token.${Buffer.from(token).toString('base64url')}`,
 ];
 
-/** Upgrade result: { status } for a refused upgrade, or a connected RawWisp. */
+/** Upgrade result: { status } for a refused upgrade (HTTP status or close code 4401), or a connected RawWisp. */
 export async function open(url, { protocols = [], ...options } = {}) {
   const ws = new WebSocket(url, protocols, options);
   const result = await new Promise((resolve) => {
@@ -41,6 +41,8 @@ export async function open(url, { protocols = [], ...options } = {}) {
       ws.terminate();
     });
     ws.once('error', (error) => resolve({ status: 0, error }));
+    // Refused after the upgrade (a wrong token): the close code
+    ws.once('close', (code) => resolve({ status: code }));
     ws.once('message', (data) => resolve({ client: new RawWisp(ws, data) }));
   });
   if (result.client) return result.client;

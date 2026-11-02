@@ -11,10 +11,10 @@ One WebSocket per client, binary messages only. Each message is exactly one pack
 a token offers the subprotocols `wisp` and `bl-token.<token as base64url without padding>`
 (extra: never in the URL, which ends up in proxy logs); the server answers with `wisp` and never
 echoes the token. Non-browser clients may send `Authorization: Bearer <token>` instead. A refused
-upgrade is an HTTP status: 403 (token, origin or host name), 429 (too many connections from one
-client address), 503 (relay shutting down). A page cannot read that status: a server may
-instead complete the upgrade and close at once with WebSocket close code 4401 (token) or 4403
-(origin), which the client reports as `unauthorized` (extra).
+upgrade is an HTTP status: 403 (origin or host name), 429 (too many connections from one client
+address), 503 (relay shutting down). A page cannot read that status, so a wrong or missing token
+completes the upgrade and closes at once with WebSocket close code 4401 (a server may do the same
+with 4403 for the origin), which the client reports as `unauthorized` (extra).
 
 ## Packets
 

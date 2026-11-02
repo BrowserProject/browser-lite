@@ -43,9 +43,9 @@ describe('tokens', () => {
     const cli = await startCli({ RELAY_TOKEN: TOKEN });
     try {
       const url = `ws://127.0.0.1:${cli.port}/wisp/`;
-      assert.equal((await open(url, { protocols: withToken('wrong') })).status, 403);
-      assert.equal((await open(url)).status, 403);
-      assert.equal((await open(`${url}?token=${TOKEN}`)).status, 403, 'never in the URL');
+      assert.equal((await open(url, { protocols: withToken('wrong') })).status, 4401);
+      assert.equal((await open(url)).status, 4401);
+      assert.equal((await open(`${url}?token=${TOKEN}`)).status, 4401, 'never in the URL');
       const client = await open(url, { protocols: withToken(TOKEN) });
       assert.ok(client.ws);
       assert.equal(client.ws.protocol, 'wisp', 'the token is never echoed');
@@ -85,10 +85,10 @@ describe('tokens', () => {
       const client = await open(url, { protocols: withToken(sign('relay')) });
       assert.ok(client.ws);
       await client.close();
-      assert.equal((await open(url, { protocols: withToken(sign('profile')) })).status, 403);
+      assert.equal((await open(url, { protocols: withToken(sign('profile')) })).status, 4401);
       const foreign = sign('relay', `${SECRET}x`);
-      assert.equal((await open(url, { protocols: withToken(foreign) })).status, 403);
-      assert.equal((await open(url)).status, 403);
+      assert.equal((await open(url, { protocols: withToken(foreign) })).status, 4401);
+      assert.equal((await open(url)).status, 4401);
       const info = (token) =>
         request(cli.port, '/profile/info', { headers: { authorization: `Bearer ${token}` } });
       assert.equal((await info(sign('profile'))).status, 200);

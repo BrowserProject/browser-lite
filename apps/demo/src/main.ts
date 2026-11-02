@@ -7,7 +7,7 @@ import {
   defaultServices,
   webrtc,
 } from '@browser-lite/core';
-import { WispTransport } from '@browser-lite/transport-wisp';
+import { type WispErrorEvent, WispTransport } from '@browser-lite/transport-wisp';
 import {
   colorPicker,
   dateTimePicker,
@@ -17,6 +17,7 @@ import {
   renderToolbar,
   selectPopup,
 } from '@browser-lite/ui';
+import { askForAccessCode } from './access.js';
 import { takePendingAddress } from './address-bar.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
@@ -221,6 +222,10 @@ async function launch(
 ): Promise<Browser | null> {
   const token = tokenFor(relayUrl.host);
   transport = new WispTransport({ url: relayUrl, ...(token ? { token } : {}) });
+  // A missing or old token is no lost connection: ask for the access code
+  transport.addEventListener('error', (event) => {
+    if ((event as WispErrorEvent).reason === 'unauthorized') askForAccessCode();
+  });
   testState.transport = transport;
   const options = browserOptions(settings, transport, openProfile);
   testState.options = options;

@@ -483,6 +483,30 @@ check(
   await waitLoaded('Page with-token', TIMEOUT),
   loaded.join('|'),
 );
+// A wrong token: the relay closes with 4401 and the demo asks for the access code (not "No
+// connection"); the code entered there is stored and the page loads
+await tab.goto(
+  `${stack.origin}/?debug=1&relay=${encodeURIComponent(stack.relayURL)}&token=wrong-token-0123456789&url=${encodeURIComponent(siteURL + 'with-token')}`,
+);
+check(
+  'a wrong token asks for the access code',
+  await tab.waitForSelector('#access-code', { timeout: TIMEOUT }).then(
+    () => true,
+    () => false,
+  ),
+);
+check(
+  'the token leaves the address bar',
+  !(await tab.evaluate(() => new URLSearchParams(location.search).has('token'))),
+);
+loaded = [];
+await tab.fill('#access-code', stack.token);
+await tab.click('.access-form button');
+check(
+  'the access code entered opens the relay',
+  await waitLoaded('Page with-token', TIMEOUT),
+  loaded.join('|'),
+);
 // ?env= goes unchanged to engine.env: createBrowser refuses switches the core owns (so a link
 // never sets BL_EXTRA_CA) and foreign variables, the demo shows why
 for (const [env, key] of [

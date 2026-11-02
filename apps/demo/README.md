@@ -29,7 +29,7 @@ the engine in `engine/<hash>/`. The engine is never bundled; the core loads it a
 | Parameter | |
 | --- | --- |
 | `url` | opens this address instead of the last session |
-| `token` | access token, stored per relay host in localStorage (relay and profile of that host) |
+| `token` | access token, stored per relay host in localStorage (relay and profile of that host) and removed from the address; when the relay refuses the stored one (missing or old), the demo asks for the access code instead of showing lost connections (`access.ts`, #344) |
 | `log=1` | engine log in the console |
 | `gpu=0`, `compositing=0`, `safepointgc=0\|debug`, `httpcache=0`, `scripttimeout=<s>`, `fcdebug=<level>` | engine switches for debugging |
 | `debug=1` | `browser.debug`, the engine test hooks and `window.blTest` |

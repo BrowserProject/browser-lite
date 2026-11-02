@@ -4,6 +4,9 @@ import { byId } from './util.js';
 const box = byId('boot');
 let note = '';
 
+/** The question for the access code (access.ts) stays until it is answered. */
+const asking = () => box.dataset.access === 'ask';
+
 /**
  * Message over the page area: loading, errors at the start, crash and hang of the engine.
  * The last action is the primary one.
@@ -13,6 +16,7 @@ export function showMessage(
   details: string[] = [],
   actions: [label: string, action: () => void][] = [],
 ): void {
+  if (asking()) return;
   const title = document.createElement('p');
   title.textContent = text;
   box.replaceChildren(title);
@@ -39,6 +43,7 @@ export function showMessage(
 
 /** Progress of the start: a bar while the engine downloads, then "Starting engine". */
 export function showStartProgress({ phase, loaded, total }: StartProgress): void {
+  if (asking()) return;
   if (phase === 'start') {
     showMessage('Starting engine…', note ? [note] : []);
     return;
@@ -69,5 +74,6 @@ export function showStartNote(text: string): void {
 }
 
 export function hideMessage(): void {
+  if (asking()) return;
   box.hidden = true;
 }

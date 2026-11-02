@@ -465,10 +465,21 @@ svg.favicon {
   width: min(320px, 80%);
   accent-color: var(--accent);
 }
-#boot .actions {
+#boot .actions,
+#boot .access-form {
   display: flex;
   gap: 8px;
   margin-top: 6px;
+}
+#boot .access-form input {
+  width: min(260px, 60vw);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+  background: var(--bg);
 }
 
 /* Text buttons: messages, prompts, dialogs, settings, print preview, panels (no specificity, so

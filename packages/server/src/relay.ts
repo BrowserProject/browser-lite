@@ -140,9 +140,12 @@ export function createRelay(options: RelayOptions): Relay {
     } catch (error) {
       logger.error('relay: authorize failed', error);
     }
-    if (!allowed || closed)
-      return refuse(socket, closed ? '503 Service Unavailable' : '403 Forbidden');
+    if (closed) return refuse(socket, '503 Service Unavailable');
     if (socket.destroyed) return;
+    // A page cannot read the HTTP status of a refused upgrade: a wrong or missing token completes
+    // it and closes at once with 4401, which WispTransport reports as unauthorized (PROTOCOL.md)
+    if (!allowed)
+      return sockets.handleUpgrade(req, socket, head, (ws) => ws.close(4401, 'unauthorized'));
     sockets.handleUpgrade(req, socket, head, (ws) => {
       const connection = new WispConnection(ws, { policy, allowAddress, logger });
       connections.add(connection);

@@ -82,9 +82,9 @@ describe('upgrade', () => {
       assert.equal(yes.bufferSize, 128);
       assert.deepEqual(seen, ['abc']);
       await yes.close();
-      assert.equal((await open(stack.url('/no/'))).status, 403);
-      assert.equal((await open(stack.url('/truthy/'))).status, 403, 'only true authorizes');
-      assert.equal((await open(stack.url('/throws/'))).status, 403);
+      assert.equal((await open(stack.url('/no/'))).status, 4401);
+      assert.equal((await open(stack.url('/truthy/'))).status, 4401, 'only true authorizes');
+      assert.equal((await open(stack.url('/throws/'))).status, 4401);
       assert.equal(calls, 1);
     } finally {
       await stack.close();

@@ -15,6 +15,11 @@ const tokenKey = (host: string) => `bl-relay-token ${host}`;
 /** Access token for the server at `host`, null without one. */
 export const tokenFor = (host: string): string | null => storage(tokenKey(host));
 
+/** Stores the access token for the server at `host`. */
+export const setToken = (host: string, value: string): void => {
+  storage(tokenKey(host), value);
+};
+
 /**
  * Relay of this page: `/wisp/` of the own server. `?relay=` (only with `?debug=1`) takes another
  * one for this load only; it is never stored, so a link cannot redirect the traffic for good.
@@ -26,7 +31,13 @@ export const relayUrl = new URL(
 
 // `?token=` belongs to exactly the relay it came with: another relay never sees it
 const token = params.get('token');
-if (token) storage(tokenKey(relayUrl.host), token);
+if (token) {
+  setToken(relayUrl.host, token);
+  // Out of the address bar, the history and bookmarks
+  const clean = new URL(location.href);
+  clean.searchParams.delete('token');
+  history.replaceState(history.state, '', clean);
+}
 
 /**
  * Engine options from the URL: `?log=1`, `?gpu=0`, `?compositing=0`, `?safepointgc=0|debug`,
