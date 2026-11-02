@@ -7,7 +7,7 @@
 #   executable shell scripts use set -euo pipefail
 #   versions.env only KEY=VALUE, images with tag also by digest, full commits and SHA256
 #   npm dependencies pinned exactly, all workspace packages share one version
-#   actions pinned by commit SHA, only GitHub-hosted runners, the tailnet only in job deploy
+#   actions pinned by commit SHA, only GitHub-hosted runners, the server key only in job deploy
 # In engine/patches/ only added lines are checked. Exceptions: tools/check-style.allow.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -138,8 +138,8 @@ while IFS=: read -r file line text; do
         error "$file:$line: action not pinned (uses: <action>@<commit> # <version>)"
 done < <(grep -H -n -E '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows/*.yml)
 
-# Only GitHub-hosted runners. The job deploy of deploy.yml alone joins the tailnet (OIDC token,
-# TS_ secrets), and that workflow never runs for pull requests.
+# Only GitHub-hosted runners. The job deploy of deploy.yml alone reaches the server (DEPLOY_
+# secrets: its SSH key), and that workflow never runs for pull requests.
 for workflow in .github/workflows/*.yml; do
     while IFS= read -r message; do error "$message"; done < <(awk -v file="$workflow" '
         /^jobs:/ { injobs = 1; next }
@@ -148,12 +148,12 @@ for workflow in .github/workflows/*.yml; do
         injobs && /runs-on:/ && !/runs-on:[[:space:]]*(ubuntu|windows|macos)-[0-9a-z.-]+[[:space:]]*$/ {
             print file ":" FNR ": runs-on must be a GitHub-hosted runner (ubuntu-..., windows-..., macos-...)"
         }
-        injobs && (/id-token:[[:space:]]*write/ || /secrets\.TS_/) {
-            tailnet++
+        injobs && /secrets\.DEPLOY_/ {
+            server++
             if (file != ".github/workflows/deploy.yml" || job != "deploy")
-                print file ":" FNR ": only the job deploy in deploy.yml may join the tailnet"
+                print file ":" FNR ": only the job deploy in deploy.yml may use the DEPLOY_ secrets"
         }
-        END { if (tailnet && pr) print file ": a workflow that joins the tailnet must not run on pull_request" }' "$workflow")
+        END { if (server && pr) print file ": a workflow that reaches the server must not run on pull_request" }' "$workflow")
 done
 
 if [ "$errors" -gt 0 ]; then

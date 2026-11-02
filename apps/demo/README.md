@@ -6,7 +6,7 @@ suggestions, history, bookmarks, downloads panel, settings page with profile, ex
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
 handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
 runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
-`@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the home server:
+`@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the public server:
 [deploy/](deploy/README.md).
 
 ## Run

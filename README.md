@@ -112,7 +112,7 @@ time): [docs/build.md](docs/build.md).
 ```
 engine/        WebKit embedder (C++ and JS), patches/ for WebKit, abi.json (contract with the core)
 packages/      npm packages: core, transport-wisp, ui, profile, server
-apps/demo/     the demo browser (Vite) and deploy/ for the home server
+apps/demo/     the demo browser (Vite) and deploy/ for the public demo server
 examples/      copyable embedding templates: minimal (own route) and existing-site
 tests/         contract, engine, JSC and browser suites (tests/README.md)
 tools/         build, patch, packaging and style scripts

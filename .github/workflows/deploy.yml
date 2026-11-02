@@ -1,9 +1,9 @@
 name: Deploy
 
 # After a green CI on main (or by hand): build and test the images (tools/build-images.sh), push
-# the demo image to ghcr.io and restart it on the server. The job deploy joins the tailnet for
-# that (OIDC, ephemeral node with tag:browser-lite-ci) and logs in to the server through Tailscale
-# SSH as deploy, whose login shell only restarts the demo (apps/demo/deploy/deploy-shell.sh).
+# the demo image to ghcr.io and restart it on the server. The job deploy logs in to the server over
+# SSH as deploy with a key of its own (secrets DEPLOY_HOST, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS),
+# whose login shell only restarts the demo (apps/demo/deploy/deploy-shell.sh).
 
 on:
   workflow_run:
@@ -114,28 +114,22 @@ jobs:
     permissions:
       contents: read
       packages: read
-      id-token: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          ref: ${{ needs.image.outputs.sha }}
-          sparse-checkout: versions.env
-          sparse-checkout-cone-mode: false
-      - name: Tailscale version from versions.env
-        run: grep -E '^TAILSCALE_(VERSION|SHA256)=' versions.env >> "$GITHUB_ENV"
-      - name: Join the tailnet
-        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
-        with:
-          oauth-client-id: ${{ secrets.TS_OIDC_CLIENT_ID }}
-          audience: ${{ secrets.TS_OIDC_AUDIENCE }}
-          tags: tag:browser-lite-ci
-          version: ${{ env.TAILSCALE_VERSION }}
-          sha256sum: ${{ env.TAILSCALE_SHA256 }}
       - name: Restart
         env:
           TOKEN: ${{ github.token }}
           IMAGE: ${{ needs.image.outputs.image }}
           SHA: ${{ needs.image.outputs.sha }}
           ACTOR: ${{ github.actor }}
-        # The token only on stdin: deploy-shell.sh fetches compose.yml with it and pulls the image
-        run: printf '%s\n' "$TOKEN" | tailscale ssh deploy@browser-lite "$IMAGE $SHA $ACTOR"
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # The token only on stdin: deploy-shell.sh fetches the deploy files with it and pulls the image
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy' EXIT
+          printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes "deploy@$HOST" "$IMAGE $SHA $ACTOR"

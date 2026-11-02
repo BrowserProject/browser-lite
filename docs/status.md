@@ -92,8 +92,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of
   it runs.
 - **Yardstick**: 257 of 280 checks like Chromium.
-- **CI and deploy**: every push to `main` builds, tests and deploys the demo to the home server;
-  all jobs on GitHub-hosted runners, the deploy reaches the server through Tailscale SSH (#307).
+- **CI and deploy**: every push to `main` builds, tests and deploys the public demo;
+  all jobs on GitHub-hosted runners, the deploy logs in to the public server over SSH with a key
+  of its own, Caddy serves HTTPS and HTTP/3 in front (#335).
 
 ## Measurements (local, first visit)
 

@@ -73,13 +73,14 @@ with the same version.
 ## Secrets and security
 
 The repo is public: never commit secrets, tokens, server IPs or names from the home network.
-Never log tokens. The demo server runs internally without a relay token; never expose it
-publicly (for example Tailscale Funnel) without setting `RELAY_TOKEN` or `RELAY_SECRET` first.
+Never log tokens. The public demo server runs with `RELAY_TOKEN` (only in `server.env` on the
+server); never run a reachable server without `RELAY_TOKEN` or `RELAY_SECRET`.
 Threat model: [docs/security.md](docs/security.md).
 
 All jobs run on GitHub-hosted runners, never a self-hosted one. Only the job `deploy` in
-`deploy.yml` joins the tailnet (OIDC, Tailscale SSH to the server as `deploy`), never a job that
-runs for pull requests or forks. Actions are pinned by commit SHA.
+`deploy.yml` gets the `DEPLOY_` secrets (SSH to the server as `deploy`, whose login shell only
+restarts the demo), never a job that runs for pull requests or forks. Actions are pinned by commit
+SHA.
 
 ## Checks
 

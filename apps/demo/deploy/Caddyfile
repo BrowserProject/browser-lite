@@ -1,0 +1,12 @@
+# HTTPS in front of browser-lite-server (compose.yml). The server compresses and sets its own
+# headers (COOP/COEP, caching), so Caddy only terminates TLS and passes everything through,
+# WebSockets of the relay included.
+{
+	admin off
+}
+
+{$DOMAIN} {
+	reverse_proxy browser-lite:8080 {
+		flush_interval -1
+	}
+}
