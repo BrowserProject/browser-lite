@@ -28,7 +28,7 @@ import { RED_PAGE, rendersRed } from './screen.mjs';
 const WAIT = TIMEOUT;
 timeLimit();
 
-/** Status of a WebSocket upgrade: 101 or the HTTP status of the refusal. */
+/** Status of a WebSocket upgrade: 101, the HTTP status of a refusal, or 4401 for a refused token. */
 function upgradeStatus(url, origin, token) {
   return new Promise((resolve) => {
     const request = http.get(url, {
@@ -46,9 +46,20 @@ function upgradeStatus(url, origin, token) {
           : {}),
       },
     });
-    request.on('upgrade', (response, socket) => {
-      socket.destroy();
-      resolve(response.statusCode);
+    // Upgraded: a close frame right away is a refused token (close code 4401), else 101
+    request.on('upgrade', (response, socket, head) => {
+      const first = (frame) => {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(
+          (frame[0] & 0x0f) === 8 && frame.length >= 4
+            ? frame.readUInt16BE(2)
+            : response.statusCode,
+        );
+      };
+      const timer = setTimeout(() => first(Buffer.alloc(0)), 2000);
+      if (head.length) first(head);
+      else socket.once('data', first);
     });
     request.on('response', (response) => {
       response.resume();
@@ -162,18 +173,18 @@ try {
     String(tokenResponse.status),
   );
   const wisp = `${SITE}/app/wisp/`;
-  check('existing-site: relay without token is 403', (await upgradeStatus(wisp, SITE)) === 403);
+  check('existing-site: relay without token is 4401', (await upgradeStatus(wisp, SITE)) === 4401);
   check(
-    'existing-site: relay with a wrong token is 403',
-    (await upgradeStatus(wisp, SITE, 'x.y')) === 403,
+    'existing-site: relay with a wrong token is 4401',
+    (await upgradeStatus(wisp, SITE, 'x.y')) === 4401,
   );
   check(
     'existing-site: relay from another origin is 403',
     (await upgradeStatus(wisp, 'http://evil.example', token)) === 403,
   );
   check(
-    'existing-site: relay with the token in the URL is 403',
-    (await upgradeStatus(`${wisp}?token=${token}`, SITE)) === 403,
+    'existing-site: relay with the token in the URL is 4401',
+    (await upgradeStatus(`${wisp}?token=${token}`, SITE)) === 4401,
   );
   check('existing-site: relay with token is 101', (await upgradeStatus(wisp, SITE, token)) === 101);
 
