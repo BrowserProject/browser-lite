@@ -99,7 +99,7 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
             choose(entry ? entry.index : -1);
           } else if (e.key === 'Escape' || e.key === 'Tab') {
             choose(-1);
-          } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          } else if (e.key?.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
             const match = typeahead.type(
               e.key,
               entries.map((entry) => entry.text),

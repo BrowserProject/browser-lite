@@ -76,7 +76,9 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     listener: (event: HTMLElementEventMap[K]) => void,
   ) => ime.addEventListener(type, (event) => view.alive && listener(event), { signal });
 
+  // Autofill and some on-screen keyboards send key events without a key: no key to forward
   on('keydown', (e) => {
+    if (typeof e.key !== 'string') return;
     // Paste: wait for the paste event, it carries the content
     if (isPasteShortcut(e) || isTextInput(e)) return;
     view.userInput(false);
@@ -85,7 +87,7 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     if (e.key !== 'F5' && e.key !== 'F12') e.preventDefault();
   });
   on('keyup', (e) => {
-    if (isPasteShortcut(e) || isTextInput(e)) return;
+    if (typeof e.key !== 'string' || isPasteShortcut(e) || isTextInput(e)) return;
     sendKey(view, 1, e);
     e.preventDefault();
   });

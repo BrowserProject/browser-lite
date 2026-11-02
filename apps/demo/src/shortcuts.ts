@@ -21,7 +21,8 @@ import { changeZoom } from './zoom.js';
 // are always the browser's.
 function shortcut(e: KeyboardEvent): boolean {
   // The settings are modal (Esc closes them itself)
-  if (settingsOpen()) return false;
+  // Autofill and some on-screen keyboards send key events without a key
+  if (settingsOpen() || typeof e.key !== 'string') return false;
   const ctrl = e.ctrlKey || e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   const tab = activeTab();
