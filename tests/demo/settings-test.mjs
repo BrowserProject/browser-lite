@@ -58,7 +58,14 @@ Promise.all([idb, opfs]).then(() => console.log('RESULT written=1'), (e) => cons
   stored: () => `<title>Stored</title><script>
 (async () => {
   const root = await navigator.storage.getDirectory();
-  const file = await root.getFileHandle('kept.txt').then(async (h) => (await h.getFile()).text(), () => 'none');
+  // The step in an error: a rare NotFoundError right after a restart reading a file that exists (status.md)
+  const file = await root.getFileHandle('kept.txt').then(
+    async (h) => {
+      const blob = await h.getFile().catch((e) => { throw new Error('getFile ' + e.name + ' ' + e.message); });
+      return blob.text().catch((e) => { throw new Error('text ' + e.name + ' ' + e.message); });
+    },
+    () => 'none',
+  );
   const idb = await new Promise((resolve) => {
     const open = indexedDB.open('large');
     open.onupgradeneeded = () => { open.transaction.abort(); resolve('none'); };
@@ -67,7 +74,7 @@ Promise.all([idb, opfs]).then(() => console.log('RESULT written=1'), (e) => cons
   });
   const local = localStorage.getItem('large') ? 'large' : 'none';
   console.log('RESULT stored=' + [file, idb, local].join(','));
-})().catch((e) => console.log('RESULT stored=error:' + e.name));
+})().catch((e) => console.log('RESULT stored=error:' + e.name + ' ' + e.message));
 </script>`,
   large: () =>
     `<title>Large</title><script>localStorage.setItem('large', 'x'.repeat(200000)); console.log('RESULT largewritten=1');</script>`,
