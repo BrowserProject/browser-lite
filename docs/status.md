@@ -363,6 +363,8 @@ engine started, from the load of a page to first paint / loaded: Wikipedia (Swit
   in 6 runs on an iPhone 16 on 2026-11-01 (3 of them with the JIT and the slabs, scrolling).
 - `background-test.mjs` in Firefox with the compositor: the frames per second of a visible view
   vary between CI runs (4, 13, 27, 37, 47; without the compositor about 50), once below the limit.
+  Locally (Firefox 155 under Xvfb, 2026-11-02) 39, 56, 59 and 58 with the compositor against 46 to
+  59 without, 4 of 4 runs passed: the low values come from the loaded CI runner.
 - Flaky under load: `cache-test.mjs` (small quota cleanup), `mediastream-test.mjs` (recording
   sometimes short), in Firefox once a white
   view in `paintworklet-test.mjs` without compositing, the memory check of `wasm-test.mjs`, "animation runs while JS blocks" in
