@@ -245,6 +245,8 @@ address.addEventListener('focus', () => {
   address.select();
 });
 address.addEventListener('input', () => {
+  // Only while editing: text set from outside (autofill, test drivers) opens no suggestions
+  if (document.activeElement !== address) return;
   showSuggestions();
   preconnectTyped();
 });
@@ -300,9 +302,10 @@ let lastInnerHeight = window.innerHeight;
 document.addEventListener(
   'pointerdown',
   (e) => {
-    if (document.activeElement !== address) return;
     const target = e.target as Node;
-    if (!form.contains(target) && !box.contains(target)) address.blur();
+    if (form.contains(target) || box.contains(target)) return;
+    if (document.activeElement === address) address.blur();
+    else if (!box.hidden) hideSuggestions();
   },
   { capture: true },
 );
