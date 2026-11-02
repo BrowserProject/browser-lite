@@ -279,3 +279,30 @@ addEventListener('resize', () => {
   requestAnimationFrame(placeSuggestions);
 });
 window.visualViewport?.addEventListener('resize', () => requestAnimationFrame(placeSuggestions));
+// Editing ends like in Chrome on Android when the on-screen keyboard goes away (its back button
+// closes it without a blur) or a tap lands outside the address and its suggestions
+let keyboardHeight = 0;
+window.visualViewport?.addEventListener('resize', () => {
+  const visual = window.visualViewport;
+  if (!visual) return;
+  const covered =
+    Math.max(window.innerHeight, document.documentElement.clientHeight) - visual.height;
+  if (compactLayout() && document.activeElement === address && keyboardHeight > 120 && covered < 60)
+    address.blur();
+  keyboardHeight = covered;
+});
+addEventListener('resize', () => {
+  const grew = window.innerHeight - lastInnerHeight;
+  lastInnerHeight = window.innerHeight;
+  if (compactLayout() && document.activeElement === address && grew > 120) address.blur();
+});
+let lastInnerHeight = window.innerHeight;
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (document.activeElement !== address) return;
+    const target = e.target as Node;
+    if (!form.contains(target) && !box.contains(target)) address.blur();
+  },
+  { capture: true },
+);

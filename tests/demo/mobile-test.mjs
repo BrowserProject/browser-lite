@@ -204,7 +204,18 @@ check(
   JSON.stringify(raised),
 );
 check('address entry: the suggestions above the toolbar with the keyboard', ...(await above()));
+const typed = await tab.inputValue('#address');
+// The keyboard goes away without a blur (the back button of Android): editing ends
 await tab.setViewportSize(PORTRAIT);
+await tab.waitForTimeout(300);
+check(
+  'keyboard closed: editing ends, no suggestions left over',
+  await tab.evaluate(
+    () => document.activeElement?.id !== 'address' && document.getElementById('suggestions').hidden,
+  ),
+);
+await tab.tap('#address');
+await tab.fill('#address', typed);
 await tab.press('#address', 'Enter');
 check('address entry navigates', await loaded('Page two'));
 
