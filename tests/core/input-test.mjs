@@ -324,6 +324,9 @@ async function downloadByClick(x, y) {
   );
   return host((i) => window.blHost.downloads[i], before);
 }
+// The page has loaded first: a navigation that turns into a download stops the loads of the page
+// in WebKit, and input now runs before their queued network work
+await result('objects');
 const httpDownload = await downloadByClick(40, 178);
 check(
   'download (Content-Disposition: attachment)',

@@ -131,6 +131,12 @@ static void withInput(int id, Function&& function)
 
 static void moveMouse(int id, const MoveValues& values)
 {
+    // With a button pressed every move counts (dragging, selecting, drag and drop fires dragover
+    // per move): only hovering coalesces
+    if (values.button != -1) {
+        withInput(id, [values](WebView& view) { view.mouseEvent(2, values.button, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY); });
+        return;
+    }
     Ref move = adoptRef(*new PendingMove(values));
     {
         Locker locker { s_movesLock };
