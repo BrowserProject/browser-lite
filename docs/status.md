@@ -318,8 +318,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
 - Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (the page keeps 221 of
   303 px on a Pixel 9; hiding it while scrolling needs a scroll event of the page and a viewport
-  that does not lay out again); on iOS the sheet of a date picker shows an empty field until it is
-  tapped; on Android the print preview shows Chrome's PDF placeholder with the blob's name.
+  that does not lay out again); on Android the print preview shows Chrome's PDF placeholder with
+  the blob's name.
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
   C++ now gives the page a RangeError (#354); whether the page then works is open.

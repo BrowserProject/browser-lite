@@ -12,15 +12,24 @@ export function needsTap(doc: Document): boolean {
 
 /**
  * A small sheet (`form.bl-picker-sheet`, inline `position: fixed`) with the visible input whose
- * tap opens the host's own picker or file chooser, and `button[data-bl-answer=cancel]`.
+ * tap opens the host's own picker or file chooser, and `button[data-bl-answer=cancel]`. With a
+ * hint, `span.bl-picker-hint` stands before the input until it gets a value: Safari shows an
+ * empty date field as an empty box.
  */
 export function tapSheet(
   ui: UiContext,
   input: HTMLInputElement,
   onCancel: () => void,
+  hint?: string,
 ): HTMLFormElement {
   const root = ui.root();
   const sheet = element(root, 'form', 'picker-sheet');
+  if (hint) {
+    const label = element(root, 'span', 'picker-hint');
+    label.textContent = hint;
+    sheet.append(label);
+    for (const type of ['input', 'change']) input.addEventListener(type, () => label.remove());
+  }
   sheet.style.position = 'fixed';
   const cancel = element(root, 'button', 'cancel');
   cancel.type = 'button';

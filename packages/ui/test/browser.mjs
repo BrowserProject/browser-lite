@@ -969,6 +969,7 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
       const sheet = document.querySelector('form.bl-picker-sheet');
       const input = sheet?.querySelector('input.bl-host-picker');
       out.sheet = [!!sheet, input?.type, input?.value, input?.style.opacity, sheet?.style.top];
+      out.hintWithValue = !!sheet?.querySelector('.bl-picker-hint');
       sheet.querySelector('button[data-bl-answer=cancel]').click();
       out.cancelled = await promise;
       out.removed = !document.querySelector('form.bl-picker-sheet');
@@ -992,8 +993,10 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
         signal: new AbortController().signal,
       });
       const empty = document.querySelector('form.bl-picker-sheet input');
+      out.hint = document.querySelector('form.bl-picker-sheet .bl-picker-hint')?.textContent;
       empty.value = '2024-05-06';
       empty.dispatchEvent(new Event('change'));
+      out.hintAfterChange = !!document.querySelector('.bl-picker-hint');
       out.openAfterOpeningChange = !!document.querySelector('form.bl-picker-sheet');
       empty.value = '2024-05-15';
       empty.dispatchEvent(new Event('change'));
@@ -1005,10 +1008,13 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
   });
   assert.deepEqual(result, {
     sheet: [true, 'date', '2024-03-05', '', '92px'],
+    hintWithValue: false,
     cancelled: null,
     removed: true,
     stillOpen: true,
     chosen: '2024-04-01',
+    hint: 'Tap the field to choose',
+    hintAfterChange: false,
     openAfterOpeningChange: true,
     chosenFromEmpty: '2024-05-15',
   });

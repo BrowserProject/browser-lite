@@ -49,7 +49,9 @@ function openHostPicker(
     const input = element(root, 'input', 'host-picker');
     input.type = type;
     const anchor = viewportRect(request.view, request.rect);
-    const sheet = needsTap(doc) ? tapSheet(ui, input, () => finish(null)) : null;
+    const sheet = needsTap(doc)
+      ? tapSheet(ui, input, () => finish(null), value ? undefined : ui.texts.tapToChoose)
+      : null;
     if (sheet) {
       sheet.style.left = `${anchor.x}px`;
       sheet.style.top = `${anchor.y + anchor.height + 4}px`;
@@ -116,7 +118,13 @@ function openHostPicker(
     ]);
     request.signal.addEventListener('abort', onAbort);
     root.append(sheet ?? input);
-    if (sheet) return;
+    if (sheet) {
+      // Within the window, also when the field is at its right edge
+      const right = doc.documentElement.clientWidth - 8;
+      const width = sheet.getBoundingClientRect().width;
+      sheet.style.left = `${Math.max(8, Math.min(anchor.x, right - width))}px`;
+      return;
+    }
     try {
       input.showPicker();
     } catch {
