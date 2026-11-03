@@ -18,6 +18,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167).
+  Input runs before the engine's queued work (#347), waiting mouse moves coalesce (#350), the
+  parser yields after 50 ms (#349): on 20min.ch locally the 90th percentile of input latency
+  during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
@@ -207,6 +210,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    [jit.md](jit.md)) runs Octane 2x faster in Chromium and 3 to 7x on an iPhone, the TypeScript
    compiler 17 %; page loads gain nothing (their code runs once, #327). Compiled code calling
    functions not compiled yet goes through JSC's generic call with a VM entry each time.
+   20min.ch (2026-11-03, profiled with consent): forced flex/grid layout from scripts 21 %,
+   regexps 15 % (now in the host's RegExp when expensive, #348), 75 % of the JS in the
+   interpreter, ads about 38 % (no ad blocker: owner decision 2026-11-03). What is left of the
+   input latency are single long entries (a script, a microtask checkpoint, the load event with
+   its forced layouts); yield points between deferred and async scripts would split some.
 2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
    saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
    about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
