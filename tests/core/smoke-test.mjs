@@ -656,18 +656,18 @@ try {
 
   // The loading progress belongs to the page: an iframe that navigates after the load does not
   // show it again
+  const before = await page.evaluate(() => window.blHost.events.length);
   await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}late-frame`);
   check(
     'progress only for the page load',
     await waitFor(() => window.blTest.view()?.title === 'late-frame:done'),
     await page.evaluate(() => window.blTest.view()?.title),
   );
-  const progress = await page.evaluate(() => {
-    const events = window.blHost.events;
-    const start = events.lastIndexOf('title:late-frame');
-    const load = events.indexOf('load', start);
-    return { during: events.slice(start, load), after: events.slice(load) };
-  });
+  const progress = await page.evaluate((start) => {
+    const events = window.blHost.events.slice(start);
+    const load = events.indexOf('load');
+    return { during: events.slice(0, load), after: events.slice(load + 1) };
+  }, before);
   check(
     'progress: page load reaches 1, the late iframe reports none',
     progress.during.includes('progress:1') &&
