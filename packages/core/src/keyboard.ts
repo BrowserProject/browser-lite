@@ -17,11 +17,10 @@ interface KeyLike {
 /**
  * Chrome's VirtualKeyboard API: Chrome opens the on-screen keyboard at a tap only when the focused
  * field wants one at that moment, but the page's field comes from the engine only after the tap.
- * With it the core opens and closes the keyboard itself (IME field `virtualkeyboardpolicy=manual`).
+ * With it the core opens the keyboard itself (ViewImpl.updateKeyboard).
  */
 interface VirtualKeyboardApi {
   show(): void;
-  hide(): void;
 }
 /** @internal The VirtualKeyboard API where the browser has it (Chrome), else null. */
 export function virtualKeyboard(): VirtualKeyboardApi | null {
@@ -74,8 +73,6 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
   ime.spellcheck = false;
   // On-screen keyboards only while the page has an editable element focused ("text-input")
   ime.inputMode = 'none';
-  // Chrome: the core opens and closes it (ViewImpl.updateKeyboard)
-  if (virtualKeyboard()) ime.setAttribute('virtualkeyboardpolicy', 'manual');
   ime.tabIndex = -1;
   // 16px: iOS zooms the page into fields with a smaller font
   ime.style.cssText =

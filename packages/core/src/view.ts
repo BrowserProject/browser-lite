@@ -291,14 +291,17 @@ export class ViewImpl implements View {
   }
 
   /**
-   * Opens or closes the on-screen keyboard with the VirtualKeyboard API (Chrome): open only while
-   * the user's tap still counts (transient activation), so a page cannot open it by itself.
+   * Opens the on-screen keyboard for the page's field with the VirtualKeyboard API (Chrome), only
+   * while the user's tap still counts (transient activation), so a page cannot open it by itself.
+   * The manual policy stays while the field is focused (show() takes effect later); without a
+   * field the automatic policy closes the keyboard (hide() did nothing on a Pixel 9).
    */
   private updateKeyboard(): void {
     const keyboard = virtualKeyboard();
-    if (!keyboard || document.activeElement !== this.ime) return;
-    if (this.ime.inputMode === 'none') keyboard.hide();
-    else if (navigator.userActivation?.isActive) keyboard.show();
+    if (!keyboard || document.activeElement !== this.ime || this.ime.inputMode === 'none') return;
+    if (!navigator.userActivation?.isActive) return;
+    this.ime.setAttribute('virtualkeyboardpolicy', 'manual');
+    keyboard.show();
   }
 
   focus(): void {
@@ -587,6 +590,8 @@ export class ViewImpl implements View {
         const enterKeyHint = String(data.enterKeyHint ?? '');
         clearTimeout(this.imeModeTimer);
         const apply = () => {
+          // Without a field Chrome closes the keyboard itself (automatic policy), not with hide()
+          if (mode === 'none') this.ime.removeAttribute('virtualkeyboardpolicy');
           this.ime.inputMode = mode;
           this.ime.enterKeyHint = enterKeyHint;
           this.updateKeyboard();
