@@ -277,7 +277,14 @@ that fails, the current size is the limit. From then on, or above 3 GB, it repor
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
 mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
-brought no measurable gain and was removed (#215). A JIT to WebAssembly is in work: [jit.md](jit.md).
+brought no measurable gain and was removed (#215). A JIT to WebAssembly compiles hot functions
+(on by default, [jit.md](jit.md)).
 Regular expressions have no JIT here: the Yarr interpreter measures each pattern and hands those
 that cost much per character of their input to a RegExp of the host's worker (patch 0073,
 `HostRegExp.cpp`, `BL_HOST_REGEXP`, #348).
+WASM frames nest on two stacks: the shadow stack in linear memory, which JSC's limits measure,
+and the browser's machine stack (about 500 KB left in a Chromium worker when a script runs), which
+the browser stops in the middle of the engine's C++ when it is full. Deep recursion through C++ (getters calling getters,
+proxies, `toString`, `JSON.stringify`) fills the machine stack long before the shadow stack, so
+JSC's recursion checks also probe the machine stack (patch 0075, `engine/jit/MachineStack.cpp`,
+#354): the page gets a RangeError instead of the engine crashing.

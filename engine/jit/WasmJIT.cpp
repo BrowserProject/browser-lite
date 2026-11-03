@@ -8,6 +8,7 @@
 // safepoint inside sees every value like in the interpreter.
 #include "config.h"
 #include "LLIntWasmJIT.h"
+#include "MachineStack.h"
 
 #include "ArrayStorage.h"
 #include "BytecodeGenerator.h"
@@ -221,34 +222,6 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
 constexpr unsigned maximumDepth = 1000;
 thread_local unsigned depth;
 
-// Whether the machine stack has room for about 200 KB more: a WASM recursion with frames of known
-// size (32 values live across each call), which V8 stops with a RangeError where it would not
-// fit, caught right there with nothing of the engine in between
-EM_JS(int, wasmJITStackHasRoom, (), {
-    let probe = globalThis.blJitStackProbe;
-    if (!probe) {
-        const values = 32;
-        const body = [1, values, 0x7e];
-        for (let k = 1; k <= values; k++)
-            body.push(0x20, 0, 0xad, 0x42, k, 0x7c, 0x21, k);
-        body.push(0x20, 0, 0x45, 0x04, 0x7f, 0x41, 0, 0x05, 0x20, 0, 0x41, 1, 0x6b, 0x10, 0, 0x0b, 0x20, 1);
-        for (let k = 2; k <= values; k++)
-            body.push(0x20, k, 0x7c);
-        body.push(0xa7, 0x6a, 0x0b);
-        const leb = (n) => (n < 128 ? [n] : [(n & 0x7f) | 0x80, n >> 7]);
-        const code = [1, ...leb(body.length), ...body];
-        const bytes = new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 1, 6, 1, 0x60, 1, 0x7f, 1, 0x7f, 3, 2, 1, 0,
-            7, 5, 1, 1, 0x70, 0, 0, 10, ...leb(code.length), ...code]);
-        probe = globalThis.blJitStackProbe = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports.p;
-    }
-    try {
-        probe(700);
-        return 1;
-    } catch (e) {
-        return 0;
-    }
-});
-
 // Within one outermost run of compiled code (a script, an event handler): the deepest depth found
 // with room and the depth found without (0: none)
 thread_local unsigned roomyDepth;
@@ -267,7 +240,7 @@ bool roomForCompiledCode()
         return true;
     if (crampedDepth && depth >= crampedDepth)
         return false;
-    if (!wasmJITStackHasRoom()) {
+    if (!machineStackHasRoom()) {
         crampedDepth = depth;
         return false;
     }

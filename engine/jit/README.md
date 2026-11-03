@@ -8,4 +8,5 @@ it through `LLIntWasmJIT.h`. On unless `BL_JIT=0`.
 | File | |
 |---|---|
 | `WasmJIT.cpp` | Hooks of the C loop (entry at `op_enter`, tier-up at `llint_replace` and `llint_loop_osr`), calls from compiled code and the compiler of a `CodeBlock` |
+| `MachineStack.cpp` | Probe of the browser's machine stack for the JIT and for JSC's recursion checks (patch 0075) |
 | `WasmModule.cpp` | Writes the WASM module of one function |

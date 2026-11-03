@@ -321,8 +321,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   that does not lay out again); on iOS the sheet of a date picker shows an empty field until it is
   tapped; on Android the print preview shows Chrome's PDF placeholder with the blob's name.
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
-  call stack size exceeded" in the engine, "Page crashed"); 9 local runs clean, loads now 5 to
-  10 s instead of 45 to 117 s.
+  call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
+  C++ now gives the page a RangeError (#354); whether the page then works is open.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU

@@ -1,0 +1,84 @@
+diff --git a/Source/JavaScriptCore/runtime/VM.h b/Source/JavaScriptCore/runtime/VM.h
+index b0b4ce7572..0ee26977a2 100644
+--- a/Source/JavaScriptCore/runtime/VM.h
++++ b/Source/JavaScriptCore/runtime/VM.h
+@@ -98,6 +98,13 @@ using WTF::StackTrace;
+ 
+ namespace JSC {
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite (engine/jit/MachineStack.cpp): WASM frames also nest on the browser's machine stack,
++// which JSC's limits do not see and which deep C++ recursion fills long before the shadow stack
++bool machineStackAllowsRecursion(void* stackPointer);
++void machineStackEnteredVM();
++#endif
++
+ class ArgList;
+ class BuiltinExecutables;
+ class BytecodeIntrinsicRegistry;
+@@ -1166,7 +1173,11 @@ private:
+     bool isSafeToRecurse(void* stackLimit) const
+     {
+         void* curr = currentStackPointer();
++#if OS(EMSCRIPTEN)
++        return curr >= stackLimit && machineStackAllowsRecursion(curr);
++#else
+         return curr >= stackLimit;
++#endif
+     }
+ 
+     Exception* exception() const
+diff --git a/Source/JavaScriptCore/runtime/VMEntryScope.cpp b/Source/JavaScriptCore/runtime/VMEntryScope.cpp
+index 7d7085990f..1980ea980c 100644
+--- a/Source/JavaScriptCore/runtime/VMEntryScope.cpp
++++ b/Source/JavaScriptCore/runtime/VMEntryScope.cpp
+@@ -39,6 +39,9 @@ namespace JSC {
+ void VMEntryScope::setUpSlow()
+ {
+     m_vm.entryScope = this;
++#if OS(EMSCRIPTEN)
++    machineStackEnteredVM();
++#endif
+ 
+     auto& thread = Thread::currentSingleton();
+     if (!thread.isJSThread()) [[unlikely]] {
+diff --git a/Source/JavaScriptCore/runtime/JSONObject.cpp b/Source/JavaScriptCore/runtime/JSONObject.cpp
+index 3cbcf195c5..5c749db2db 100644
+--- a/Source/JavaScriptCore/runtime/JSONObject.cpp
++++ b/Source/JavaScriptCore/runtime/JSONObject.cpp
+@@ -40,6 +40,7 @@
+ #include "PropertyNameArray.h"
+ #include "VMInlines.h"
+ #include <charconv>
++#include <wtf/SetForScope.h>
+ #include <wtf/dragonbox/dragonbox_to_chars.h>
+ #include <wtf/text/EscapedFormsForJSON.h>
+ #include <wtf/text/MakeString.h>
+@@ -754,6 +755,9 @@ private:
+     std::optional<FailureReason> m_failureReason;
+     Vector<CharType, dynamicBufferInlineCapacity, CrashOnOverflow, 16, WTF::StringImplMalloc> m_dynamicBuffer;
+     uint8_t* m_stackLimit { nullptr };
++#if OS(EMSCRIPTEN)
++    unsigned m_nesting { 0 };
++#endif
+ 
+     CharType m_buffer[staticBufferSize];
+ };
+@@ -1311,6 +1315,17 @@ void FastStringifier<CharType, bufferMode>::append(JSValue value)
+     }
+     auto& cell = *value.asCell();
+ 
++#if OS(EMSCRIPTEN)
++    // browser-lite: objects and arrays recurse here with hardly anything on the shadow stack, so
++    // JSC's limits do not see the machine stack fill up (engine/jit/MachineStack.cpp). Deeper
++    // ones go to the slow path, which does not recurse.
++    SetForScope nesting { m_nesting, m_nesting + 1 };
++    if (m_nesting > 256) [[unlikely]] {
++        recordFailure(FailureReason::StackOverflow, "nested too deeply"_s);
++        return;
++    }
++#endif
++
+     switch (cell.type()) {
+     case StringType: {
+         auto string = asString(&cell)->tryGetValue();
