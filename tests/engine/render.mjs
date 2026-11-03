@@ -33,8 +33,10 @@ const timeout = setTimeout(() => {
   process.exit(1);
 }, seconds * 1000);
 
-function savePPM({ engine, ptr, width, height }) {
-  const rgba = engine.HEAPU8.subarray(ptr, ptr + width * height * 4);
+// The last frame before the load ended: with nothing changed afterwards no new frame comes
+let lastFrame = null;
+
+function savePPM({ rgba, width, height }) {
   const rgb = Buffer.alloc(width * height * 3);
   for (let i = 0, j = 0; i < rgba.length; i += 4, j += 3) {
     rgb[j] = rgba[i];
@@ -64,16 +66,25 @@ await runEngine({
   onLoad({ engine, viewId }) {
     loaded = true;
     engine._bl_frame(viewId);
+    // The page painted before its load ended and has not changed since
+    setTimeout(() => {
+      if (!waited || !lastFrame) return;
+      savePPM(lastFrame);
+      clearTimeout(timeout);
+      process.exit(0);
+    }, 3000);
   },
   onFrame(frame) {
-    const { engine, viewId } = frame;
+    const { engine, viewId, ptr, width, height } = frame;
+    const rgba = Buffer.from(engine.HEAPU8.subarray(ptr, ptr + width * height * 4));
     if (!loaded || !waited) {
-      // Not done yet: drop the frame, continue with the next one
+      // Not done yet: keep the frame, continue with the next one
+      lastFrame = { rgba, width, height };
       if (loaded) pendingFrame = () => engine._bl_frame(viewId);
       engine._bl_frame_presented(viewId);
       return;
     }
-    savePPM(frame);
+    savePPM({ rgba, width, height });
     clearTimeout(timeout);
     process.exit(0);
   },
