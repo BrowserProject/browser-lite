@@ -60,6 +60,7 @@ export class ViewImpl implements View {
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
   private readonly ime: HTMLTextAreaElement;
+  private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly lifetime = new AbortController();
   private readonly resizeObserver: ResizeObserver;
@@ -375,6 +376,7 @@ export class ViewImpl implements View {
     if (this.closed) return;
     const alive = this.alive;
     this.closed = true;
+    clearTimeout(this.imeModeTimer);
     this.lifetime.abort();
     this.host.requests.closeView(this);
     this.host.fullscreen.setFullscreen(this, false);
@@ -561,11 +563,23 @@ export class ViewImpl implements View {
         this.caret = data as unknown as Caret;
         this.placeIme();
         return;
-      case 'text-input':
-        // The on-screen keyboard follows the focused field of the page, none without one
-        this.ime.inputMode = String(data.mode ?? '') || 'none';
-        this.ime.enterKeyHint = String(data.enterKeyHint ?? '');
+      case 'text-input': {
+        // The on-screen keyboard follows the focused field of the page, none without one. A page
+        // that moves the focus from one field to another (Google's search box opens an overlay
+        // with its own field) passes through none: Android would close the keyboard and not open
+        // it again without a new tap, so none applies only when no field follows soon
+        const mode = String(data.mode ?? '') || 'none';
+        const enterKeyHint = String(data.enterKeyHint ?? '');
+        clearTimeout(this.imeModeTimer);
+        const apply = () => {
+          this.ime.inputMode = mode;
+          this.ime.enterKeyHint = enterKeyHint;
+        };
+        if (mode === 'none' && this.ime.inputMode !== 'none')
+          this.imeModeTimer = setTimeout(apply, 300);
+        else apply();
         return;
+      }
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);
         return;

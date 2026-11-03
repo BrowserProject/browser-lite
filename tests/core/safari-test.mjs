@@ -40,9 +40,13 @@ const PAGE = `<!doctype html><title>Safari paths</title>
 <div id="editable" contenteditable style="position: absolute; left: 20px; top: 170px; width: 200px; height: 30px; border: 1px solid"></div>
 <button id="plain" style="top: 220px">plain</button>
 <button id="mic" style="top: 270px">microphone</button>
+<input id="jump" style="top: 320px">
+<input id="overlay" style="top: 370px">
 <video id="video" muted playsinline style="position:absolute;left:300px;top:20px;width:320px;height:240px"></video>
 <script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
+// Like Google's search box: focusing it opens an overlay with another field that takes the focus
+document.getElementById('jump').addEventListener('focus', (e) => setTimeout(() => { e.target.blur(); setTimeout(() => document.getElementById('overlay').focus(), 20); }, 10));
 document.getElementById('text').addEventListener('keydown', (e) => { if (e.key === 'Enter') location.href = '/next'; });
 const type = 'video/webm; codecs="vp8"';
 result('msesupported', MediaSource.isTypeSupported(type));
@@ -161,6 +165,25 @@ mode = await tapAndMode(185, 'text/');
 check('keyboard: contenteditable', mode === 'text/', mode);
 mode = await tapAndMode(235, 'none/');
 check('keyboard: none after a button', mode === 'none/', mode);
+
+// Focus that moves from one field to another passes through none: the keyboard stays (Android
+// would close it and not open it again without a new tap)
+await page.evaluate(() => {
+  const ime = document.querySelector('[data-bl-ime]');
+  window.imeModes = [];
+  new MutationObserver(() => window.imeModes.push(ime.inputMode)).observe(ime, {
+    attributeFilter: ['inputmode'],
+  });
+});
+mode = await tapAndMode(335, 'text/');
+await page.waitForTimeout(1000);
+const modes = await page.evaluate(() => window.imeModes);
+check(
+  'keyboard: stays open while the focus moves to another field',
+  mode === 'text/' && modes.length > 0 && !modes.includes('none') && (await imeMode()) === 'text/',
+  JSON.stringify(modes),
+);
+mode = await tapAndMode(235, 'none/');
 
 // Microphone without MediaStreamTrackProcessor and AudioData: AudioWorklet to the engine
 await page.mouse.click(box.x + 120, box.y + 285);
