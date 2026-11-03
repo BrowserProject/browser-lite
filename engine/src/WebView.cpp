@@ -278,6 +278,9 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
 
     auto& settings = m_page->settings();
     auto& config = engineConfig();
+    // The HTML parser works up to 500 ms in one go (WebKit's default, made for native speed), here
+    // 5 to 10 times as much work: parser chunks with their inline scripts blocked taps and frames
+    settings.setMaxParseDuration(0.05);
     // Also without our compositor: in Firefox without WebGL some pages still got layers, whose
     // tiles asked for the display and ended the engine (codepen.io, airbnb.com, soundcloud.com)
     LayerTreeHostWasm::ensureDisplay();

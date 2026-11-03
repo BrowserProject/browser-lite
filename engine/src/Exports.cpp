@@ -32,6 +32,10 @@
 #include <JavaScriptCore/HeapInlines.h>
 #include <JavaScriptCore/HeapSnapshotBuilder.h>
 #include <JavaScriptCore/JSLock.h>
+#include <wtf/HashMap.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/ThreadSafeRefCounted.h>
 #include <JavaScriptCore/MarkedVector.h>
 #include <JavaScriptCore/Options.h>
 #include <WebCore/ANGLEShimWasm.h>
@@ -81,13 +85,73 @@ static void withView(int id, Function&& function)
     });
 }
 
+// A mouse move the engine has not handled yet; a newer one replaces it (Blink sends one per
+// frame). Each move hit tests the page, which lays it out first: while a page loads that took
+// 300 ms and more, and a hovering mouse queued moves faster than they ran. Only on the host's
+// main thread (the bl_* calls) and in the task that handles it.
+struct MoveValues {
+    double x { 0 };
+    double y { 0 };
+    double movementX { 0 };
+    double movementY { 0 };
+    int button { -1 };
+    int modifiers { 0 };
+};
+struct PendingMove : ThreadSafeRefCounted<PendingMove> {
+    explicit PendingMove(const MoveValues& values)
+        : values(values)
+    {
+    }
+    MoveValues values;
+};
+static Lock s_movesLock;
+static HashMap<int, Ref<PendingMove>>& openMoves() WTF_REQUIRES_LOCK(s_movesLock)
+{
+    static NeverDestroyed<HashMap<int, Ref<PendingMove>>> moves;
+    return moves;
+}
+
+// Other input of the view comes after the waiting move: later moves must not join it
+static void closeMove(int id)
+{
+    Locker locker { s_movesLock };
+    openMoves().remove(id);
+}
+
 // Input for a view: dropped while a dialog of its page group is open, like Chrome
 template<typename Function>
 static void withInput(int id, Function&& function)
 {
+    closeMove(id);
     runInputOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
         if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
             function(*view);
+    });
+}
+
+static void moveMouse(int id, const MoveValues& values)
+{
+    Ref move = adoptRef(*new PendingMove(values));
+    {
+        Locker locker { s_movesLock };
+        if (auto it = openMoves().find(id); it != openMoves().end()) {
+            auto& open = it->value->values;
+            open = { values.x, values.y, open.movementX + values.movementX, open.movementY + values.movementY, values.button, values.modifiers };
+            return;
+        }
+        openMoves().set(id, move.copyRef());
+    }
+    runInputOnEngineThread([id, move = WTF::move(move)] {
+        MoveValues values;
+        {
+            Locker locker { s_movesLock };
+            // Still open: closed now, the next move queues anew
+            if (auto it = openMoves().find(id); it != openMoves().end() && it->value.ptr() == move.ptr())
+                openMoves().remove(it);
+            values = move->values;
+        }
+        if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
+            view->mouseEvent(2, values.button, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY);
     });
 }
 
@@ -237,7 +301,7 @@ EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, double x, doubl
 // button like in bl_mouse (-1 = none), otherwise there is no dragging/selecting
 EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int button, int modifiers)
 {
-    withInput(id, [=](WebView& view) { view.mouseEvent(2, button, x, y, 0, modifiers, movementX, movementY); });
+    moveMouse(id, { x, y, movementX, movementY, button, modifiers });
 }
 
 // Dragging from the host over the page: phase 0 = over, 1 = left, 2 = dropped.

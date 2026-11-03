@@ -119,7 +119,8 @@ Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` ex
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
 the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. On the
 engine thread the host's calls run in their order before the engine's own waiting work, and
-input also makes WTF's RunLoop return between two of its functions (patch 0072, #347).
+input also makes WTF's RunLoop return between two of its functions (patch 0072, #347). Waiting
+mouse moves coalesce (#350).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 
