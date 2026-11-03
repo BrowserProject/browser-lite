@@ -10,40 +10,43 @@ const tiles = page.querySelector('.ntp-tiles') as HTMLElement;
 const greeting = page.querySelector('.ntp-greeting') as HTMLElement;
 const TILES = 8;
 
-/**
- * The sites for the tiles: visited often and lately, bookmarks count as visits. One tile per host
- * (google.com and a search there are one site), with its address used most.
- */
+/** One tile per page: an address with or without `www.`, query or fragment counts as the same. */
+function pageKey(url: string): string {
+  const host = hostOf(url).replace(/^www\./, '');
+  return host && host + new URL(url).pathname;
+}
+
+/** The sites for the tiles: visited often and lately, bookmarks count as visits. */
 export function frequentSites(limit = TILES): { url: string; title: string }[] {
   const now = Date.now();
-  const hosts = new Map<
+  const pages = new Map<
     string,
-    { points: number; pages: Map<string, { title: string; points: number }> }
+    { points: number; addresses: Map<string, { title: string; points: number }> }
   >();
   const add = (url: string, title: string, points: number) => {
-    const host = hostOf(url).replace(/^www\./, '');
-    if (!host) return;
-    const site = hosts.get(host) ?? { points: 0, pages: new Map() };
-    const page = site.pages.get(url) ?? { title, points: 0 };
-    site.points += points;
+    const key = pageKey(url);
+    if (!key) return;
+    const page = pages.get(key) ?? { points: 0, addresses: new Map() };
+    const address = page.addresses.get(url) ?? { title, points: 0 };
     page.points += points;
-    if (title) page.title = title;
-    site.pages.set(url, page);
-    hosts.set(host, site);
+    address.points += points;
+    if (title) address.title = title;
+    page.addresses.set(url, address);
+    pages.set(key, page);
   };
   for (const visit of readHistory())
     add(visit.url, visit.title, 1 + Math.max(0, 1 - (now - visit.time) / (30 * 86400000)));
   for (const bookmark of bookmarks()) add(bookmark.url, bookmark.title, 3);
-  return [...hosts.values()]
+  return [...pages.values()]
     .sort((a, b) => b.points - a.points)
     .slice(0, limit)
-    .map((site) => {
-      // Every host has at least one page
-      const [url, page] = [...site.pages].sort((a, b) => b[1].points - a[1].points)[0] as [
+    .map((page) => {
+      // The address used most; every page has at least one
+      const [url, address] = [...page.addresses].sort((a, b) => b[1].points - a[1].points)[0] as [
         string,
         { title: string },
       ];
-      return { url, title: page.title };
+      return { url, title: address.title };
     });
 }
 
