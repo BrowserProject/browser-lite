@@ -36,7 +36,8 @@ patches from `patches/`.
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
     (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
-    `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure)
+    `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure),
+    `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`

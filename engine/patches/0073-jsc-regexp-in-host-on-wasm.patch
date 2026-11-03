@@ -1,0 +1,224 @@
+diff --git a/Source/JavaScriptCore/runtime/RegExp.cpp b/Source/JavaScriptCore/runtime/RegExp.cpp
+index 343724f3cb..0813515f8d 100644
+--- a/Source/JavaScriptCore/runtime/RegExp.cpp
++++ b/Source/JavaScriptCore/runtime/RegExp.cpp
+@@ -34,6 +34,15 @@
+ 
+ namespace JSC {
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: the interpreter may run a pattern in the host's regular expressions; it needs the
++// source and flags of each bytecode while it lives (YarrInterpreter.cpp)
++namespace Yarr {
++void registerHostPattern(const BytecodePattern*, const String& source, OptionSet<Flags>);
++void unregisterHostPattern(const BytecodePattern*);
++}
++#endif
++
+ const ClassInfo RegExp::s_info = { "RegExp"_s, nullptr, nullptr, nullptr, CREATE_METHOD_TABLE(RegExp) };
+ 
+ #if REGEXP_FUNC_TEST_DATA_GEN
+@@ -199,6 +208,9 @@ void RegExp::destroy(JSCell* cell)
+     RegExp* thisObject = static_cast<RegExp*>(cell);
+ #if REGEXP_FUNC_TEST_DATA_GEN
+     RegExpFunctionalTestCollector::get()->clearRegExp(this);
++#endif
++#if OS(EMSCRIPTEN)
++    Yarr::unregisterHostPattern(thisObject->m_regExpBytecode.get());
+ #endif
+     thisObject->RegExp::~RegExp();
+ }
+@@ -274,6 +286,15 @@ static std::unique_ptr<Yarr::BytecodePattern> byteCodeCompilePattern(VM* vm, Yar
+     return Yarr::byteCompile(pattern, &vm->m_regExpAllocator, errorCode, &vm->m_regExpAllocatorLock);
+ }
+ 
++static void setBytecode(std::unique_ptr<Yarr::BytecodePattern>& slot, std::unique_ptr<Yarr::BytecodePattern>&& bytecode, [[maybe_unused]] const String& source, [[maybe_unused]] OptionSet<Yarr::Flags> flags)
++{
++#if OS(EMSCRIPTEN)
++    Yarr::unregisterHostPattern(slot.get());
++    Yarr::registerHostPattern(bytecode.get(), source, flags);
++#endif
++    slot = WTF::move(bytecode);
++}
++
+ void RegExp::byteCodeCompileIfNecessary(VM* vm)
+ {
+     Locker locker { cellLock() };
+@@ -288,7 +309,7 @@ void RegExp::byteCodeCompileIfNecessary(VM* vm)
+     }
+     updateMetadataFromPattern(pattern);
+ 
+-    m_regExpBytecode = byteCodeCompilePattern(vm, pattern, m_constructionErrorCode);
++    setBytecode(m_regExpBytecode, byteCodeCompilePattern(vm, pattern, m_constructionErrorCode), m_patternString, m_flags);
+     if (!m_regExpBytecode) {
+         m_state = ParseError;
+         return;
+@@ -334,7 +355,7 @@ void RegExp::compile(VM* vm, Yarr::CharSize charSize, std::optional<StringView>
+     dataLogLnIf(Options::dumpCompiledRegExpPatterns(), "Can't JIT this regular expression: \"/", m_patternString, "/\"");
+ 
+     m_state = ByteCode;
+-    m_regExpBytecode = byteCodeCompilePattern(vm, pattern, m_constructionErrorCode);
++    setBytecode(m_regExpBytecode, byteCodeCompilePattern(vm, pattern, m_constructionErrorCode), m_patternString, m_flags);
+     if (!m_regExpBytecode) {
+         m_state = ParseError;
+         return;
+@@ -410,7 +431,7 @@ void RegExp::compileMatchOnly(VM* vm, Yarr::CharSize charSize, std::optional<Str
+         m_state = ParseError;
+         return;
+     }
+-    m_regExpBytecode = byteCodeCompilePattern(vm, bytecodePattern, m_constructionErrorCode);
++    setBytecode(m_regExpBytecode, byteCodeCompilePattern(vm, bytecodePattern, m_constructionErrorCode), m_patternString, m_flags);
+     if (!m_regExpBytecode) {
+         m_state = ParseError;
+         return;
+@@ -448,7 +469,7 @@ void RegExp::deleteCode()
+     if (m_regExpJITCode)
+         m_regExpJITCode->clear(locker);
+ #endif
+-    m_regExpBytecode = nullptr;
++    setBytecode(m_regExpBytecode, nullptr, String(), { });
+ }
+ 
+ #if ENABLE(YARR_JIT_DEBUG)
+diff --git a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
+index 7ff667c607..55ddc91279 100644
+--- a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
++++ b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
+@@ -3233,7 +3233,7 @@ std::unique_ptr<BytecodePattern> byteCompile(YarrPattern& pattern, BumpPointerAl
+     return ByteCompiler(pattern).compile(allocator, lock, errorCode);
+ }
+ 
+-unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start, unsigned* output)
++static unsigned interpretBytecode(BytecodePattern* bytecode, StringView input, unsigned start, unsigned* output)
+ {
+     SuperSamplerScope superSamplerScope(false);
+     if (input.is8Bit())
+@@ -3241,6 +3241,128 @@ unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start,
+     return Interpreter<char16_t>(bytecode, output, input.span16(), start).interpret();
+ }
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: without a JIT for regular expressions a pattern that backtracks a lot costs 10 to
++// 30 times more here than in the regular expressions of the host browser (the engine runs in a
++// worker of it). The embedder can run a pattern there (setHostMatch). A pattern of a RegExp goes
++// there when its measured interpretation costs much per character of the input; everything else
++// (cheap patterns, loops over long strings) stays in this interpreter.
++using HostMatch = unsigned (*)(unsigned id, const String& source, unsigned flags, StringView input, unsigned start, unsigned* output, unsigned outputSize);
++static constexpr unsigned HostMatchDeclined = offsetNoMatch - 1;
++
++struct HostPattern {
++    String source;
++    OptionSet<Flags> flags;
++    unsigned id { 0 };
++    double nanosPerCharacter { 0 };
++    unsigned calls { 0 };
++    bool interpretOnly { false };
++};
++
++static Lock s_hostPatternsLock;
++static HashMap<const BytecodePattern*, HostPattern>& hostPatterns() WTF_REQUIRES_LOCK(s_hostPatternsLock)
++{
++    static NeverDestroyed<HashMap<const BytecodePattern*, HostPattern>> patterns;
++    return patterns;
++}
++static HostMatch s_hostMatch;
++static bool s_hostMatchAlways;
++static unsigned s_lastHostPatternId;
++
++// always: every pattern goes there, not only those measured expensive (tests)
++void setHostMatch(HostMatch, bool always);
++void setHostMatch(HostMatch match, bool always)
++{
++    s_hostMatch = match;
++    s_hostMatchAlways = always;
++}
++
++void registerHostPattern(const BytecodePattern*, const String& source, OptionSet<Flags>);
++void registerHostPattern(const BytecodePattern* bytecode, const String& source, OptionSet<Flags> flags)
++{
++    // Duplicate named groups use extra output slots the host does not fill
++    if (!s_hostMatch || !bytecode || bytecode->hasDuplicateNamedCaptureGroups())
++        return;
++    Locker locker { s_hostPatternsLock };
++    hostPatterns().set(bytecode, HostPattern { source.isolatedCopy(), flags, ++s_lastHostPatternId });
++}
++
++void unregisterHostPattern(const BytecodePattern*);
++void unregisterHostPattern(const BytecodePattern* bytecode)
++{
++    if (!bytecode)
++        return;
++    Locker locker { s_hostPatternsLock };
++    hostPatterns().remove(bytecode);
++}
++
++// Measured calls before the first decision (their cheapest counts: the first call can wait for
++// code), then every 32nd call measures again, also of a pattern that runs in the host
++static constexpr unsigned hostSampleCalls = 4;
++static constexpr unsigned hostSampleInterval = 32;
++// The host costs a call into JS and a copy of the input: only patterns that cost far more per
++// character, and only inputs where it adds up
++static constexpr double hostNanosPerCharacter = 40;
++static constexpr double hostMinimumNanos = 30000;
++static constexpr unsigned hostMaximumLength = 256 * 1024;
++
++unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start, unsigned* output)
++{
++    if (!s_hostMatch || input.length() > hostMaximumLength)
++        return interpretBytecode(bytecode, input, start, output);
++    unsigned id = 0;
++    unsigned call = 0;
++    String source;
++    OptionSet<Flags> flags;
++    {
++        Locker locker { s_hostPatternsLock };
++        auto it = hostPatterns().find(bytecode);
++        if (it == hostPatterns().end() || it->value.interpretOnly)
++            return interpretBytecode(bytecode, input, start, output);
++        auto& pattern = it->value;
++        call = pattern.calls++;
++        bool measure = call < hostSampleCalls || !(call % hostSampleInterval);
++        bool expensive = call >= hostSampleCalls && pattern.nanosPerCharacter >= hostNanosPerCharacter && pattern.nanosPerCharacter * input.length() >= hostMinimumNanos;
++        if (s_hostMatchAlways || (expensive && !measure)) {
++            id = pattern.id;
++            source = pattern.source;
++            flags = pattern.flags;
++        } else if (!measure || !input.length())
++            call = std::numeric_limits<unsigned>::max();
++    }
++    if (id) {
++        auto result = s_hostMatch(id, source, static_cast<unsigned>(flags.toRaw()), input, start, output, bytecode->m_offsetsSize);
++        if (result != HostMatchDeclined)
++            return result;
++        Locker locker { s_hostPatternsLock };
++        if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end())
++            it->value.interpretOnly = true;
++        return interpretBytecode(bytecode, input, start, output);
++    }
++    if (call == std::numeric_limits<unsigned>::max())
++        return interpretBytecode(bytecode, input, start, output);
++    auto begin = MonotonicTime::now();
++    auto result = interpretBytecode(bytecode, input, start, output);
++    double nanosPerCharacter = (MonotonicTime::now() - begin).nanoseconds() / input.length();
++    Locker locker { s_hostPatternsLock };
++    if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end()) {
++        auto& pattern = it->value;
++        if (!call)
++            pattern.nanosPerCharacter = nanosPerCharacter;
++        else if (call < hostSampleCalls)
++            pattern.nanosPerCharacter = std::min(pattern.nanosPerCharacter, nanosPerCharacter);
++        else
++            pattern.nanosPerCharacter = (pattern.nanosPerCharacter * 3 + nanosPerCharacter) / 4;
++    }
++    return result;
++}
++#else
++unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start, unsigned* output)
++{
++    return interpretBytecode(bytecode, input, start, output);
++}
++#endif
++
+ // These should be the same for both char16_t & Latin1Character.
+ static_assert(sizeof(BackTrackInfoPatternCharacter) == (YarrStackSpaceForBackTrackInfoPatternCharacter * sizeof(uintptr_t)));
+ static_assert(sizeof(BackTrackInfoCharacterClass) == (YarrStackSpaceForBackTrackInfoCharacterClass * sizeof(uintptr_t)));

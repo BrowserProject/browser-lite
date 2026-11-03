@@ -166,6 +166,8 @@ int main(int, char**)
     setenv("WEBKIT_CURL_MAX_TOTAL_CONNECTIONS", "64", 0);
 
     JSC::initialize();
+    // Before the first RegExp: expensive patterns may run in the host (HostRegExp.cpp)
+    installHostRegExp();
     WTF::initializeMainThread();
     // Its WebGL context comes while the rest starts (Compositor::start below waits for it)
     Compositor::begin();

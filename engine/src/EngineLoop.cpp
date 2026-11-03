@@ -197,12 +197,13 @@ static Deque<Function<void()>*>& localTasks()
     return tasks;
 }
 
-// Input of the user (mouse, keys, touch) runs before the other waiting work: a busy page queues
-// timers, messages and network work for seconds (a news page with ads on a weak phone) and a tap
-// waited behind all of it. Counted from the host thread when sent, so the engine thread also
-// sees input that still sits in its mailbox and returns from long work (RunLoop functions,
-// patch 0072) to take it in.
-static Deque<Function<void()>*>& inputTasks()
+// Calls of the host (input of the user, commands) run in their order before the engine's own
+// waiting work: a busy page queues timers, messages and network work for seconds (a news page
+// with ads on a weak phone) and a tap waited behind all of it. They keep their order among each
+// other (the clipboard is set before the Ctrl+V that pastes it). Input is also counted from the
+// host thread when sent, so the engine thread sees input that still sits in its mailbox and
+// returns from long work (RunLoop functions, patch 0072) to take it in.
+static Deque<Function<void()>*>& hostTasks()
 {
     static NeverDestroyed<Deque<Function<void()>*>> tasks;
     return tasks;
@@ -236,12 +237,11 @@ static void scheduleLocalDrain()
     bl_schedule_local_drain();
 }
 
-static void runInputTasks()
+static void runHostTasks()
 {
-    auto& tasks = inputTasks();
+    auto& tasks = hostTasks();
     while (!tasks.isEmpty()) {
         auto* function = tasks.takeFirst();
-        s_inputWaiting.fetch_sub(1, std::memory_order_relaxed);
         runWithGCAfterwards([&] {
             (*function)();
         });
@@ -249,21 +249,21 @@ static void runInputTasks()
     }
 }
 
-// Input in the mailbox comes in now (the mailbox only queues work here) and runs first
-static void takeInput()
+// Input in the mailbox comes in now (the mailbox only queues work here), the host's calls run first
+static void takeHostTasks()
 {
     if (inputWaiting())
         _emscripten_check_mailbox();
-    runInputTasks();
+    runHostTasks();
 }
 
-// One pass: only what was waiting at the start, input first
+// One pass: only what was waiting at the start, the host's calls first
 static void runLocalTasks()
 {
     auto& tasks = localTasks();
-    takeInput();
+    takeHostTasks();
     for (size_t count = tasks.size(); count && !tasks.isEmpty(); --count) {
-        takeInput();
+        takeHostTasks();
         if (tasks.isEmpty())
             break;
         auto* function = tasks.takeFirst();
@@ -279,7 +279,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
     clearStackBelow();
     s_localDrainScheduled = false;
     runLocalTasks();
-    if (!localTasks().isEmpty() || !inputTasks().isEmpty())
+    if (!localTasks().isEmpty() || !hostTasks().isEmpty())
         scheduleLocalDrain();
 }
 
@@ -289,35 +289,37 @@ static void runFunction(void* arg)
     scheduleLocalDrain();
 }
 
-static void runInputFunction(void* arg)
+static void runHostFunction(void* arg)
 {
-    inputTasks().append(static_cast<Function<void()>*>(arg));
+    hostTasks().append(static_cast<Function<void()>*>(arg));
     scheduleLocalDrain();
+}
+
+static void proxyToEngineThread(void (*run)(void*), Function<void()>&& function)
+{
+    RELEASE_ASSERT(s_engineThreadSet.load(std::memory_order_acquire));
+    auto* heapFunction = new Function<void()>(WTF::move(function));
+    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), s_engineThread, run, heapFunction)) {
+        delete heapFunction;
+        log("runOnEngineThread: proxy_async failed");
+    }
 }
 
 void runInputOnEngineThread(Function<void()>&& function)
 {
-    RELEASE_ASSERT(s_engineThreadSet.load(std::memory_order_acquire));
-    auto* heapFunction = new Function<void()>(WTF::move(function));
-    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), s_engineThread, runInputFunction, heapFunction)) {
-        delete heapFunction;
-        log("runInputOnEngineThread: proxy_async failed");
-        return;
-    }
-    // After the queueing: the count may lag behind, never stay above what is queued
+    // Counted before the queueing and uncounted when it runs: the count never stays above what waits
     s_inputWaiting.fetch_add(1, std::memory_order_relaxed);
+    proxyToEngineThread(runHostFunction, [function = WTF::move(function)] {
+        s_inputWaiting.fetch_sub(1, std::memory_order_relaxed);
+        function();
+    });
 }
 
 void runOnEngineThread(Function<void()>&& function)
 {
-    RELEASE_ASSERT(s_engineThreadSet.load(std::memory_order_acquire));
-    auto* heapFunction = new Function<void()>(WTF::move(function));
     // Also allowed from the engine thread itself: then it runs on the next pass
     // through the JS event loop (like a setTimeout(0), but without throttling).
-    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), s_engineThread, runFunction, heapFunction)) {
-        delete heapFunction;
-        log("runOnEngineThread: proxy_async failed");
-    }
+    proxyToEngineThread(emscripten_is_main_browser_thread() ? runHostFunction : runFunction, WTF::move(function));
 }
 
 void runNextOnEngineThread(Function<void()>&& function)
@@ -481,7 +483,7 @@ void runNestedEventLoop(const Function<bool()>& done)
     pthread_t self = pthread_self();
     while (!done()) {
         _emscripten_check_mailbox();
-        if (!localTasks().isEmpty() || !inputTasks().isEmpty()) {
+        if (!localTasks().isEmpty() || !hostTasks().isEmpty()) {
             runNestedWork(vm, [] { runLocalTasks(); });
             continue;
         }
@@ -507,7 +509,7 @@ void runNestedEventLoop(const Function<bool()>& done)
     threadData.setCurrentState(scriptState);
     restartScriptWatchdog();
     // What is left runs from the JS event loop again
-    if (!localTasks().isEmpty() || !inputTasks().isEmpty())
+    if (!localTasks().isEmpty() || !hostTasks().isEmpty())
         scheduleLocalDrain();
     armTimerForNextScheduledTask();
 }

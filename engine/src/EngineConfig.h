@@ -68,6 +68,10 @@ struct EngineConfig {
     uint64_t databaseMaxMB { 512 }; // BL_DATABASE_MAX_MB
     uint64_t httpCacheMB { 400 }; // BL_HTTP_CACHE_MB
     bool fontconfigEarly { true }; // BL_FONTCONFIG_EARLY
+    // BL_HOST_REGEXP: regular expressions that backtrack a lot run in the host (HostRegExp.cpp):
+    // "auto" (default) those measured expensive, "all" every one (tests), "off" none
+    enum class HostRegExp : uint8_t { Off, Auto, All };
+    HostRegExp hostRegExp { HostRegExp::Auto };
     int spareWorkers { 4 }; // BL_SPARE_WORKERS
 };
 

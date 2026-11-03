@@ -230,6 +230,7 @@ check(
 const engineInternal = new Set([
   'blCanvases',
   'blTaskChannel',
+  'blHostRegExps',
   'blGpuCanvas',
   'blGpuRestoreForTesting',
   'ENV',

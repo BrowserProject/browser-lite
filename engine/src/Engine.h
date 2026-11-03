@@ -20,14 +20,18 @@ bool isEngineThread();
 pthread_t engineThread();
 
 // Runs a function on the engine thread (callable from any thread).
-// Runs asynchronously as soon as the engine thread is back in the event loop.
+// Runs asynchronously as soon as the engine thread is back in the event loop. Calls from the
+// host's main thread run in their order before the engine's own waiting work.
 void runOnEngineThread(Function<void()>&&);
-// Input of the user (callable from any thread): runs before the other waiting work of the
-// engine thread, which also returns from a long RunLoop pass to take it in.
+// Input of the user from the host's main thread: like runOnEngineThread, and the engine thread
+// also returns from a long RunLoop pass to take it in.
 void runInputOnEngineThread(Function<void()>&&);
 // On the engine thread: runs `function` before the other waiting tasks of the engine thread,
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);
+
+// Regular expressions that backtrack a lot run in the host (HostRegExp.cpp, patch 0073)
+void installHostRegExp();
 
 // Event loop (EngineLoop.cpp)
 void initializeEngineLoop();

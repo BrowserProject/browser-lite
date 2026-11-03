@@ -155,6 +155,14 @@ void loadEngineConfig()
     config.gpu = flag("BL_GPU", true);
     config.compositing = flag("BL_COMPOSITING", true);
     config.asyncScrolling = flag("BL_ASYNC_SCROLLING", true);
+    if (const char* mode = value("BL_HOST_REGEXP")) {
+        if (!strcmp(mode, "off"))
+            config.hostRegExp = EngineConfig::HostRegExp::Off;
+        else if (!strcmp(mode, "all"))
+            config.hostRegExp = EngineConfig::HostRegExp::All;
+        else if (strcmp(mode, "auto"))
+            log("BL_HOST_REGEXP: unknown value %s, auto", mode);
+    }
     config.skipUnchangedFrames = !config.testHooks || flag("BL_DAMAGE", true);
     config.videoOverlay = flag("BL_VIDEO_OVERLAY", true);
     config.asyncImageDecoding = flag("BL_ASYNC_IMAGE_DECODING", true);

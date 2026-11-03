@@ -118,8 +118,8 @@ pixels with `readPixels` into the page or, with compositing, into a layer. A los
 Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` exports
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
 the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. On the
-engine thread input runs before other waiting work: the engine loop takes it in between its tasks
-and WTF's RunLoop returns between two of its functions when input waits (patch 0072, #347).
+engine thread the host's calls run in their order before the engine's own waiting work, and
+input also makes WTF's RunLoop return between two of its functions (patch 0072, #347).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 
@@ -275,3 +275,6 @@ JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpre
 caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
 mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
 brought no measurable gain and was removed (#215). A JIT to WebAssembly is in work: [jit.md](jit.md).
+Regular expressions have no JIT here: the Yarr interpreter measures each pattern and hands those
+that cost much per character of their input to a RegExp of the host's worker (patch 0073,
+`HostRegExp.cpp`, `BL_HOST_REGEXP`, #348).
