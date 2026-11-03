@@ -10,21 +10,41 @@ const tiles = page.querySelector('.ntp-tiles') as HTMLElement;
 const greeting = page.querySelector('.ntp-greeting') as HTMLElement;
 const TILES = 8;
 
-/** The sites for the tiles: visited often and lately, bookmarks count as visits. */
+/**
+ * The sites for the tiles: visited often and lately, bookmarks count as visits. One tile per host
+ * (google.com and a search there are one site), with its address used most.
+ */
 export function frequentSites(limit = TILES): { url: string; title: string }[] {
   const now = Date.now();
-  const sites = new Map<string, { url: string; title: string; points: number }>();
+  const hosts = new Map<
+    string,
+    { points: number; pages: Map<string, { title: string; points: number }> }
+  >();
   const add = (url: string, title: string, points: number) => {
-    if (!hostOf(url)) return;
-    const site = sites.get(url) ?? { url, title, points: 0 };
+    const host = hostOf(url).replace(/^www\./, '');
+    if (!host) return;
+    const site = hosts.get(host) ?? { points: 0, pages: new Map() };
+    const page = site.pages.get(url) ?? { title, points: 0 };
     site.points += points;
-    if (title) site.title = title;
-    sites.set(url, site);
+    page.points += points;
+    if (title) page.title = title;
+    site.pages.set(url, page);
+    hosts.set(host, site);
   };
   for (const visit of readHistory())
     add(visit.url, visit.title, 1 + Math.max(0, 1 - (now - visit.time) / (30 * 86400000)));
   for (const bookmark of bookmarks()) add(bookmark.url, bookmark.title, 3);
-  return [...sites.values()].sort((a, b) => b.points - a.points).slice(0, limit);
+  return [...hosts.values()]
+    .sort((a, b) => b.points - a.points)
+    .slice(0, limit)
+    .map((site) => {
+      // Every host has at least one page
+      const [url, page] = [...site.pages].sort((a, b) => b[1].points - a[1].points)[0] as [
+        string,
+        { title: string },
+      ];
+      return { url, title: page.title };
+    });
 }
 
 /** "Good morning", "Good afternoon" or "Good evening" at `hour`. */
