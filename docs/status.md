@@ -310,6 +310,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: tests and operations
 
+- Real devices 2026-11-03 (BrowserStack): on a Moto G71 one Chrome tab crash during a reload of
+  20min.ch (not again in 3 heavy and 5 light reloads; the renderer holds about 0.9 GB with such a
+  page); after three fast flings in a row on 20min.ch (Pixel 9) the new area stays empty for 1 to
+  2 s until the busy engine records its tiles (one fling is painted at once; tiles cover half a
+  viewport above and below). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
+  of that device's network fails the handshake (an IP address works), not a browser-lite fault.
+- Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
+  timeout check (3 of 3 local runs and the rerun clean).
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
   loss without the compositor thread (only with `compositing=0`, an expert setting): the engine
   presents the right CPU frame at once (checked in the worker: the scratch canvas has the new
