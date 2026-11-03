@@ -61,6 +61,7 @@ export class ViewImpl implements View {
   /** @internal */ userActivated = false;
   private readonly ime: HTMLTextAreaElement;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
+  private keyboardPolicyTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly lifetime = new AbortController();
   private readonly resizeObserver: ResizeObserver;
@@ -293,8 +294,8 @@ export class ViewImpl implements View {
   /**
    * Opens the on-screen keyboard for the page's field with the VirtualKeyboard API (Chrome), only
    * while the user's tap still counts (transient activation), so a page cannot open it by itself.
-   * The manual policy stays while the field is focused (show() takes effect later); without a
-   * field the automatic policy closes the keyboard (hide() did nothing on a Pixel 9).
+   * show() needs the manual policy and takes effect later: the automatic one comes back after a
+   * second, under which the open keyboard stays and Chrome closes it for none.
    */
   private updateKeyboard(): void {
     const keyboard = virtualKeyboard();
@@ -302,6 +303,13 @@ export class ViewImpl implements View {
     if (!navigator.userActivation?.isActive) return;
     this.ime.setAttribute('virtualkeyboardpolicy', 'manual');
     keyboard.show();
+    clearTimeout(this.keyboardPolicyTimer);
+    this.keyboardPolicyTimer = setTimeout(() => this.automaticKeyboard(), 1000);
+  }
+
+  private automaticKeyboard(): void {
+    clearTimeout(this.keyboardPolicyTimer);
+    this.ime.removeAttribute('virtualkeyboardpolicy');
   }
 
   focus(): void {
@@ -395,6 +403,7 @@ export class ViewImpl implements View {
     const alive = this.alive;
     this.closed = true;
     clearTimeout(this.imeModeTimer);
+    clearTimeout(this.keyboardPolicyTimer);
     this.lifetime.abort();
     this.host.requests.closeView(this);
     this.host.fullscreen.setFullscreen(this, false);
@@ -590,15 +599,16 @@ export class ViewImpl implements View {
         const enterKeyHint = String(data.enterKeyHint ?? '');
         clearTimeout(this.imeModeTimer);
         const apply = () => {
-          // Without a field Chrome closes the keyboard itself (automatic policy), not with hide()
-          if (mode === 'none') this.ime.removeAttribute('virtualkeyboardpolicy');
           this.ime.inputMode = mode;
           this.ime.enterKeyHint = enterKeyHint;
           this.updateKeyboard();
         };
-        if (mode === 'none' && this.ime.inputMode !== 'none')
+        if (mode === 'none' && this.ime.inputMode !== 'none') {
+          // Chrome closes the keyboard for none only with the automatic policy, set in an
+          // earlier task (hide() needs the user's activation)
+          this.automaticKeyboard();
           this.imeModeTimer = setTimeout(apply, 300);
-        else apply();
+        } else apply();
         return;
       }
       case 'wheel-result':
