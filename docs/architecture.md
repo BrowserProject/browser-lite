@@ -117,7 +117,8 @@ pixels with `readPixels` into the page or, with compositing, into a layer. A los
 
 Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` exports
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
-the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. On the
+the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text; in Chrome
+the core opens and closes the on-screen keyboard itself (VirtualKeyboard API, #352). On the
 engine thread the host's calls run in their order before the engine's own waiting work, and
 input also makes WTF's RunLoop return between two of its functions (patch 0072, #347) and
 WebCore's loops of deferred and async scripts and of the page's event loop return after one item

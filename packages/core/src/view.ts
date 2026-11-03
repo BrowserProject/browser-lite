@@ -3,7 +3,7 @@ import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
-import { createImeField } from './keyboard.js';
+import { createImeField, virtualKeyboard } from './keyboard.js';
 import type { Requests } from './requests.js';
 import type {
   ContextMenuInfo,
@@ -144,7 +144,11 @@ export class ViewImpl implements View {
 
   /** @internal Click, key or text into the page. */
   userInput(focus = true): void {
-    if (focus) this.focus();
+    if (focus) {
+      this.focus();
+      // A tap into the page's field that is focused already: its keyboard again, like Chrome
+      this.updateKeyboard();
+    }
     this.host.gesture();
     if (!this.userActivated) {
       this.userActivated = true;
@@ -284,6 +288,17 @@ export class ViewImpl implements View {
     this.canvas.style.display = visible ? 'block' : 'none';
     this.updateVisibility();
     if (visible) this.measure();
+  }
+
+  /**
+   * Opens or closes the on-screen keyboard with the VirtualKeyboard API (Chrome): open only while
+   * the user's tap still counts (transient activation), so a page cannot open it by itself.
+   */
+  private updateKeyboard(): void {
+    const keyboard = virtualKeyboard();
+    if (!keyboard || document.activeElement !== this.ime) return;
+    if (this.ime.inputMode === 'none') keyboard.hide();
+    else if (navigator.userActivation?.isActive) keyboard.show();
   }
 
   focus(): void {
@@ -574,6 +589,7 @@ export class ViewImpl implements View {
         const apply = () => {
           this.ime.inputMode = mode;
           this.ime.enterKeyHint = enterKeyHint;
+          this.updateKeyboard();
         };
         if (mode === 'none' && this.ime.inputMode !== 'none')
           this.imeModeTimer = setTimeout(apply, 300);
