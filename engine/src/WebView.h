@@ -304,6 +304,10 @@ private:
 
     bool m_isLoading { false };
     bool m_progressShown { false };
+    // The finger that is down
+    std::optional<WebCore::PointerID> m_touchPointer;
+    // Where a long press asked for the context menu; it opens when the finger lifts
+    std::optional<WebCore::DoublePoint> m_longPressMenu;
     bool m_leavingPagePaused { false };
     URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;

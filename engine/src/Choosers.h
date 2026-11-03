@@ -25,6 +25,8 @@ RefPtr<WebCore::PopupMenu> createPopupMenu(WebView&, WebCore::PopupMenuClient&);
 RefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebView&, WebCore::PopupMenuClient&);
 RefPtr<WebCore::ColorChooser> createColorChooser(WebView&, WebCore::ColorChooserClient&, const WebCore::Color&);
 RefPtr<WebCore::DateTimeChooser> createDateTimeChooser(WebView&, WebCore::DateTimeChooserClient&);
+// Whether the view shows a date or time picker (the click on the field opened it already)
+bool hasDateTimeChooser(int viewId);
 
 // Answers of the host (engine thread). index -1 / empty value = cancelled
 void choosePopupItem(int viewId, int index);

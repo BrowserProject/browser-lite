@@ -1386,9 +1386,13 @@ TouchActions touchActionAt(LocalFrame& frame, DoublePoint point)
 #if ENABLE(TOUCH_EVENTS)
 // A tap anywhere in a date or time field opens its picker, like in mobile browsers. WebKit opens
 // it only on a click on the field itself, a tap on one of its parts (day, month, ...) just selects
-// that part: without a keyboard there was no way to enter a date
-static void showPickerOfTappedField(LocalFrame& frame)
+// that part: without a keyboard there was no way to enter a date. When the click opened it
+// already, a second request replaced the first in the host, used up the tap's user activation
+// and no picker came (Pixel 9)
+static void showPickerOfTappedField(int viewId, LocalFrame& frame)
 {
+    if (hasDateTimeChooser(viewId))
+        return;
     RefPtr page = frame.page();
     RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
     RefPtr document = focused ? focused->document() : nullptr;
@@ -1435,6 +1439,10 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
             { point->getDouble("rx"_s).value_or(1), point->getDouble("ry"_s).value_or(1) },
             static_cast<float>(point->getDouble("force"_s).value_or(0))));
         auto pointerId = PointerEvent::pointerIdForTouchPoint(points.last());
+        if (state == PlatformTouchPoint::State::TouchPressed)
+            m_touchPointer = pointerId;
+        else if ((state == PlatformTouchPoint::State::TouchReleased || state == PlatformTouchPoint::State::TouchCancelled) && m_touchPointer == pointerId)
+            m_touchPointer = std::nullopt;
         if (state == PlatformTouchPoint::State::TouchReleased) {
             released = position;
             releasedPointer = pointerId;
@@ -1455,11 +1463,17 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
         mouseEvent(2, -1, released->x(), released->y(), 0, modifiers, 0, 0, releasedPointer);
         mouseEvent(0, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
         mouseEvent(1, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
-        showPickerOfTappedField(*frame);
+        showPickerOfTappedField(m_id, *frame);
     }
     // The pointer of a finger that lifted is gone (its state would stay forever otherwise)
     for (auto id : ended)
         frame->page()->pointerCaptureController().touchWithIdentifierWasRemoved(id);
+    // The menu of a long press, once its finger lifted
+    if (!m_touchPointer && m_longPressMenu) {
+        auto position = *std::exchange(m_longPressMenu, std::nullopt);
+        if (type == 2)
+            contextMenu(position.x(), position.y());
+    }
 #else
     UNUSED_PARAM(type);
     UNUSED_PARAM(json);
@@ -1541,6 +1555,17 @@ void WebView::contextMenu(double x, double y)
     if (!frame || !view)
         return;
     DoublePoint position { x, y };
+    // A long press: like Chrome on phones the word under the finger is selected at once (not on a
+    // link or image), and the menu, which then offers to copy it, opens when the finger lifts:
+    // WebKit dispatches no contextmenu while a touch pointer is down
+    if (m_touchPointer) {
+        constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent };
+        auto hit = frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(position))), hitType);
+        if (!hit.URLElement() && !hit.image())
+            frame->eventHandler().selectClosestContextualWordOrLinkFromHitTestResult(hit, DontAppendTrailingWhitespace);
+        m_longPressMenu = position;
+        return;
+    }
     PlatformMouseEvent event { position, position, MouseButton::Right, PlatformEvent::Type::MousePressed, 1, { }, MonotonicTime::now(), 0, SyntheticClickType::NoTap, MouseEventInputSource::UserDriven };
     // Like in WebKit2: if the page does not handle the contextmenu event,
     // WebCore's ContextMenuController builds a menu. Only then we show ours.

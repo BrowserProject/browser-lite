@@ -454,6 +454,35 @@ check(
   dateRequest?.type === 'date' && dateRequest?.value === '2026-10-30',
   JSON.stringify(dateRequest),
 );
+// A tap on the field itself (behind its parts): WebKit's click opens the picker, the tap must not
+// ask a second time (the second request replaced the first and the phone showed none)
+const requestsBefore = await page.evaluate(() => window.blHost.dateRequests.length);
+await page.touchscreen.tap(...(await at(200, 300)));
+await page.waitForTimeout(2000);
+const newRequests = (await page.evaluate(() => window.blHost.dateRequests.length)) - requestsBefore;
+check('tap on a date field asks for one picker', newRequests === 1, String(newRequests));
+
+// A long press on text selects the word under the finger and opens the menu when the finger
+// lifts (WebKit dispatches no contextmenu while a touch pointer is down)
+if (chromiumOnly('long press (CDP Input.dispatchTouchEvent)')) {
+  const cdp = await context.newCDPSession(page);
+  const [x, y] = await at(35, 42);
+  const menusBefore = await page.evaluate(() => window.blHost.contextMenus.length);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(1000);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await waitFor(
+    () => page.evaluate((n) => window.blHost.contextMenus.length > n, menusBefore),
+    5000,
+  );
+  const menu = await page.evaluate((n) => window.blHost.contextMenus[n] ?? null, menusBefore);
+  check(
+    'long press on text: word selected, menu after the finger lifts',
+    menu?.selection === 'This',
+    JSON.stringify(menu && { selection: menu.selection, link: menu.link }),
+  );
+  await cdp.detach();
+}
 
 // 3) Swiping scrolls the page (CDP: drag the finger up)
 if (chromiumOnly('swiping scrolls (CDP Input.dispatchTouchEvent)')) {

@@ -306,6 +306,11 @@ RefPtr<DateTimeChooser> createDateTimeChooser(WebView& view, DateTimeChooserClie
     return chooser;
 }
 
+bool hasDateTimeChooser(int viewId)
+{
+    return openChoosers<DateTimeChooserWasm>().contains(viewId);
+}
+
 void chooseDateTime(int viewId, const String& value, bool done)
 {
     RefPtr<DateTimeChooserWasm> chooser;
