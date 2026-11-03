@@ -68,6 +68,7 @@
 #include <WebCore/PlatformMouseEvent.h>
 #include <WebCore/PlatformWheelEvent.h>
 #include <WebCore/PointerLockController.h>
+#include <WebCore/ProgressTracker.h>
 #include <WebCore/PlatformTouchEvent.h>
 #include <WebCore/PlatformTouchPoint.h>
 #include <WebCore/WasmPlatform.h>
@@ -1820,6 +1821,7 @@ void WebView::didStartLoading()
     debugLog("View %d: loading starts", m_id);
     m_isLoading = true;
     notifyNavigationState();
+    didChangeProgress(std::max(m_page->progress().estimatedProgress(), 0.1));
 }
 
 // A navigation away from the page: its timers, animation frames and active DOM objects pause
@@ -1873,6 +1875,7 @@ void WebView::didStopLoading()
 {
     debugLog("View %d: loading cancelled", m_id);
     m_isLoading = false;
+    didChangeProgress(1);
     notifyNavigationState();
 }
 
@@ -1880,6 +1883,7 @@ void WebView::didFinishLoading()
 {
     debugLog("View %d: finished loading", m_id);
     m_isLoading = false;
+    didChangeProgress(1);
     notifyNavigationState();
     notifyHost(m_id, "load");
     loadFavicon();
@@ -1954,6 +1958,7 @@ void WebView::loadFavicon()
 void WebView::didFailLoading(const String& url, const String& description)
 {
     m_isLoading = false;
+    didChangeProgress(1);
     notifyNavigationState();
     notifyHost(m_id, "error", makeString("{\"url\":\""_s, jsonEscape(url), "\",\"description\":\""_s, jsonEscape(description), "\"}"_s));
 }
@@ -1964,8 +1969,18 @@ void WebView::didChangeTitle(const String& title)
     notifyHost(m_id, "title", makeString("{\"title\":\""_s, jsonEscape(title), "\",\"url\":\""_s, jsonEscape(currentURL()), "\"}"_s));
 }
 
+// Only for loads of the main frame like other browsers: an iframe that navigates after the page
+// loaded (ads, embeds) would otherwise show the bar again every few seconds
 void WebView::didChangeProgress(double progress)
 {
+    if (!m_isLoading && progress < 1)
+        return;
+    if (progress >= 1) {
+        if (!m_progressShown)
+            return;
+        m_progressShown = false;
+    } else
+        m_progressShown = true;
     notifyHost(m_id, "progress", makeString("{\"progress\":"_s, progress, '}'));
 }
 

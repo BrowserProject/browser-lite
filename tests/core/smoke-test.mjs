@@ -130,6 +130,13 @@ const pages = http.createServer((req, res) => {
       );
   if (url.pathname === '/more')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
+  // An iframe that navigates after the page loaded (like an ad that rotates)
+  if (url.pathname === '/late-frame')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html' })
+      .end(
+        "<title>late-frame</title><iframe id=f></iframe><script>onload = () => setTimeout(() => { const f = document.getElementById('f'); f.onload = () => { document.title = 'late-frame:done'; }; f.src = '/file.txt'; }, 300);</script>",
+      );
   // A page that keeps the engine thread busy, and answers that come only after 1.5 s
   if (url.pathname === '/ticker')
     return res
@@ -645,6 +652,27 @@ try {
         'features:function:function:true:function:geolocation:object',
     ),
     await page.evaluate(() => window.blTest.view()?.title),
+  );
+
+  // The loading progress belongs to the page: an iframe that navigates after the load does not
+  // show it again
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}late-frame`);
+  check(
+    'progress only for the page load',
+    await waitFor(() => window.blTest.view()?.title === 'late-frame:done'),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+  const progress = await page.evaluate(() => {
+    const events = window.blHost.events;
+    const start = events.lastIndexOf('title:late-frame');
+    const load = events.indexOf('load', start);
+    return { during: events.slice(start, load), after: events.slice(load) };
+  });
+  check(
+    'progress: page load reaches 1, the late iframe reports none',
+    progress.during.includes('progress:1') &&
+      !progress.after.some((e) => e.startsWith('progress:')),
+    JSON.stringify(progress),
   );
 
   // Error page of the engine (English default template) for a host that does not exist

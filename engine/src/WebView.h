@@ -303,6 +303,7 @@ private:
     void loadFavicon();
 
     bool m_isLoading { false };
+    bool m_progressShown { false };
     bool m_leavingPagePaused { false };
     URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;

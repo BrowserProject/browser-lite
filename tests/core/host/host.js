@@ -121,6 +121,7 @@ function track(view, prefix) {
   view.on('console', ({ level, message }) => record(`console:${level}:${message}`));
   view.on('find', ({ matches }) => record(`find:${matches}`));
   view.on('zoom', ({ zoom }) => record(`zoom:${zoom}`));
+  view.on('progress', ({ value }) => record(`progress:${value}`));
   view.on('hover', ({ url }) => record(`hover:${url ?? ''}`));
   view.on('context-menu', (info) => {
     record(`context-menu:${info.x},${info.y},${info.editable}`);

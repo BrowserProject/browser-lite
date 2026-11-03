@@ -488,7 +488,7 @@ export interface ViewEvents {
   };
   /** The title of the page changed; `url` is the page it belongs to. */
   title: { title: string; url: string };
-  /** Load progress from 0 to 1 (1 when done). */
+  /** Load progress of the page (its main frame) from 0 to 1, 1 when done; iframes that navigate later do not report. */
   progress: { value: number };
   /** The zoom changed (setZoom or Ctrl + mouse wheel over the page). */
   zoom: { zoom: number };
