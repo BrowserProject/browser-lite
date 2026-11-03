@@ -883,6 +883,27 @@ svg.favicon {
 }
 
 /* Find bar: a floating card at the top right of the page */
+/* Messages of the status line in the phone layout, for a few seconds above the bottom bar */
+#snackbar {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4);
+  z-index: 8;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--space-4));
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--on-surface);
+  color: var(--surface);
+  box-shadow: var(--elev-2);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+#snackbar[hidden] {
+  display: none;
+}
 #find-bar {
   position: absolute;
   top: var(--space-2);

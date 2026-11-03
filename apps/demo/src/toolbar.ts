@@ -1,13 +1,27 @@
 import { showAddress } from './address-bar.js';
 import { isBookmarked } from './bookmarks.js';
 import { setIcon } from './icons.js';
+import { compactLayout } from './layout.js';
 import { startSettings } from './settings.js';
 import type { Tab } from './tabs.js';
 import { byId, element, isInternal } from './util.js';
 
-/** Text in the status line of the toolbar. */
+let snackbarTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Text in the status line of the toolbar. The phone layout has none: there a message shows for a
+ * few seconds above the bottom bar (downloads, links opened outside, files a page did not get).
+ */
 export function setStatus(text: string): void {
   byId('status').textContent = text;
+  if (!text || !compactLayout()) return;
+  const snackbar = byId('snackbar');
+  snackbar.textContent = text;
+  snackbar.hidden = false;
+  clearTimeout(snackbarTimer);
+  snackbarTimer = setTimeout(() => {
+    snackbar.hidden = true;
+  }, 4000);
 }
 
 /** Loading progress of the active tab (0..1); the bar fades out at 1. */
