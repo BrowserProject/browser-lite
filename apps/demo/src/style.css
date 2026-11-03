@@ -696,6 +696,7 @@ svg.favicon {
   box-shadow: var(--elev-1);
   color: var(--on-surface-variant);
   text-align: center;
+  overflow-wrap: anywhere;
 }
 /* The mark of the browser: a globe on the accent */
 .boot-card::before {

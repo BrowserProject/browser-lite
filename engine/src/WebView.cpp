@@ -1863,6 +1863,10 @@ void WebView::didCommitLoad()
     else
         notifyHost(m_id, "commit");
     notifyNavigationState();
+    // The title of the new document: empty until its <title> arrives (the tab showed the last
+    // page's title for a page without one), the remembered one from the back/forward cache
+    RefPtr document = frame ? frame->document() : nullptr;
+    didChangeTitle(document ? document->title() : emptyString());
 }
 
 void WebView::didNavigateWithinPage()

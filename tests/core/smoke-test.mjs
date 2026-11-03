@@ -137,6 +137,8 @@ const pages = http.createServer((req, res) => {
       .end(
         "<title>busy-input</title><button id=b style='position:absolute;left:0;top:0;width:300px;height:100px'>b</button><script>let done = 0; let clicked = -1; const spin = (ms) => { const end = performance.now() + ms; while (performance.now() < end); }; document.getElementById('b').onclick = () => { clicked = done; document.title = 'clicked:' + done; }; for (let i = 0; i < 40; i++) { const x = new XMLHttpRequest(); x.onload = () => { spin(100); done++; if (clicked < 0) document.title = 'busy:' + done; }; x.open('GET', '/file.txt?' + i); x.send(); }</script>",
       );
+  if (url.pathname === '/untitled')
+    return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p>no title</p>');
   // An iframe that navigates after the page loaded (like an ad that rotates)
   if (url.pathname === '/late-frame')
     return res
@@ -381,7 +383,11 @@ try {
   );
 
   await page.evaluate(() => window.blTest.view().find('findme'));
-  check('find event', await waitFor(() => window.blHost.events.includes('find:3')));
+  check(
+    'find event',
+    await waitFor(() => window.blHost.events.includes('find:3')),
+    await page.evaluate(() => window.blHost.events.filter((e) => e.startsWith('find')).join()),
+  );
   await page.evaluate(() => window.blTest.view().stopFind());
 
   await page.evaluate(() => window.blTest.view().print());
@@ -680,6 +686,18 @@ try {
     progress.during.includes('progress:1') &&
       !progress.after.some((e) => e.startsWith('progress:')),
     JSON.stringify(progress),
+  );
+
+  // A page without <title> after one with a title: the title is empty, not the last page's
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}untitled`);
+  check(
+    'page without a title: empty title',
+    await waitFor(
+      (url) => window.blTest.view()?.url === url && window.blTest.view().title === '',
+      `${PAGE_URL}untitled`,
+      15000,
+    ),
+    await page.evaluate(() => window.blTest.view()?.title),
   );
 
   // Input before queued work: a click while load events of 100 ms each wait runs after one or two

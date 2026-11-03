@@ -181,13 +181,17 @@ function crashed(reason: string): void {
   const now = Date.now();
   const repeated = now - (Number(storage(CRASH_KEY, undefined, true)) || 0) < REPEAT_WINDOW;
   storage(CRASH_KEY, String(now), true);
+  // The reason can carry the whole stack of the engine: only its first line on the card, the
+  // rest in the console
+  console.error(`Engine crash: ${reason}`);
+  const summary = reason.split('\n')[0] ?? '';
   showMessage(
     'The engine crashed.',
     [
       repeated
         ? 'It crashed again soon after the last crash: after the restart the tabs load only when clicked.'
         : 'After the restart all tabs are back.',
-      reason,
+      summary.length > 160 ? `${summary.slice(0, 160)}…` : summary,
     ],
     [['Restart', () => void restart(repeated)]],
   );
