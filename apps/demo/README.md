@@ -96,7 +96,7 @@ bar; the suggestions span the width and open upwards above the toolbar; the tab 
 tab overview (a card per tab with title, the site's icon and host: tap to switch, cross to close,
 new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the
 toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
-has two columns); the find bar sits at the bottom of the page; JS dialogs are centered and the
+has two columns and the toolbar is 44 px high); the find bar sits at the bottom of the page; JS dialogs are centered and the
 sign-in dialog at the top; touch targets are at least 44 px and fields have 16 px text (iOS zooms
 into smaller). The page uses `viewport-fit=cover` and keeps toolbar, page and sheets out of the
 notch and the home indicator (`env(safe-area-inset-*)`). While the iOS keyboard covers the page,

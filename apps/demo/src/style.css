@@ -2333,8 +2333,17 @@ svg.favicon {
     font-size: var(--text-lg);
   }
 }
-/* A phone in landscape: low, so the menu shows its items in two columns */
+/* A phone in landscape: low, so the toolbar is slimmer and the menu shows its items in two columns */
 @media (max-height: 500px) {
+  #toolbar {
+    padding: 2px var(--space-1);
+  }
+  #toolbar > button {
+    height: 40px;
+  }
+  #address-form {
+    height: 38px;
+  }
   .panel-menu {
     display: grid;
     grid-template-columns: 1fr 1fr;

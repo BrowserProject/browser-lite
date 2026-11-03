@@ -316,9 +316,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   2 s until the busy engine records its tiles (one fling is painted at once; tiles cover half a
   viewport above and below). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
-- Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (the page keeps 221 of
-  303 px on a Pixel 9; hiding it while scrolling needs a scroll event of the page and a viewport
-  that does not lay out again); on Android the print preview shows Chrome's PDF placeholder with
+- Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (44 px since #356; the
+  page kept 221 of 303 px on a Pixel 9 with the old 58 px bar; hiding it while scrolling needs a
+  scroll event of the page and a viewport that does not lay out again); on Android the print preview shows Chrome's PDF placeholder with
   the blob's name.
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through

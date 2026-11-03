@@ -363,6 +363,8 @@ check(
   await tab.evaluate(() => !document.getElementById('tabs').getClientRects().length),
 );
 check('landscape: toolbar inside the window', ...(await inside(TOOLBAR)));
+const barHeight = await tab.evaluate(() => document.getElementById('toolbar').offsetHeight);
+check('landscape: slim toolbar', barHeight <= 46, `${barHeight} px`);
 // The view paints in the new size after a moment
 await tab.waitForTimeout(1500);
 await screenshot(tab, 'mobile-landscape');
