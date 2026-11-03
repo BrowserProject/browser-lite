@@ -32,8 +32,9 @@ EM_JS(int, bl_host_regexp_exec, (unsigned id, const void* source, unsigned sourc
         pointer >>>= 0;
         var view = latin1 ? HEAPU8.subarray(pointer, pointer + size) : HEAPU16.subarray(pointer >>> 1, (pointer >>> 1) + size);
         var parts = [];
-        for (var i = 0; i < size; i += 8192)
-            parts.push(String.fromCharCode.apply(null, view.subarray(i, Math.min(size, i + 8192))));
+        // Small pieces: apply puts each character on the stack, and this can run deep in the stack
+        for (var i = 0; i < size; i += 1024)
+            parts.push(String.fromCharCode.apply(null, view.subarray(i, Math.min(size, i + 1024))));
         return parts.join("");
     };
     var cache = Module.blHostRegExps || (Module.blHostRegExps = new Map());
