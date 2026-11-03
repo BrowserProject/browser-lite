@@ -1,0 +1,192 @@
+diff --git a/Source/WTF/wtf/RunLoop.cpp b/Source/WTF/wtf/RunLoop.cpp
+index b17de171db..6c4a276b28 100644
+--- a/Source/WTF/wtf/RunLoop.cpp
++++ b/Source/WTF/wtf/RunLoop.cpp
+@@ -131,6 +131,13 @@ extern "C" void bl_wtf_set_run_loop_yield_check(bool (*check)())
+ {
+     s_shouldYieldForInput = check;
+ }
++
++// For WebCore's own loops (scripts after parsing, async scripts, the event loop of a page)
++extern "C" bool bl_wtf_input_waiting();
++extern "C" bool bl_wtf_input_waiting()
++{
++    return s_shouldYieldForInput && s_shouldYieldForInput();
++}
+ #endif
+ 
+ void RunLoop::performWork()
+diff --git a/Source/WebCore/dom/EventLoop.cpp b/Source/WebCore/dom/EventLoop.cpp
+index 3abc026892..aa1b385c88 100644
+--- a/Source/WebCore/dom/EventLoop.cpp
++++ b/Source/WebCore/dom/EventLoop.cpp
+@@ -318,6 +318,10 @@ void EventLoop::scheduleToRunIfNeeded()
+     scheduleToRun();
+ }
+ 
++#if OS(EMSCRIPTEN)
++extern "C" bool bl_wtf_input_waiting();
++#endif
++
+ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
+ {
+ #if PLATFORM(WPE)
+@@ -332,6 +336,7 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
+         m_groupsWithSuspendedTasks.clear();
+         TaskVector remainingTasks;
+         bool hasReachedDeadline = false;
++        bool ranTask = false;
+         for (auto& task : tasks) {
+             {
+                 CheckedPtr group = task->group();
+@@ -339,6 +344,10 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
+                     continue;
+ 
+                 hasReachedDeadline = hasReachedDeadline || (deadline && ApproximateTime::now() > *deadline);
++#if OS(EMSCRIPTEN)
++                // browser-lite: input waits, the rest runs after it (at least one task per run)
++                hasReachedDeadline = hasReachedDeadline || (ranTask && deadline && bl_wtf_input_waiting());
++#endif
+                 if (group->isSuspended() || hasReachedDeadline) {
+                     m_groupsWithSuspendedTasks.add(*group);
+                     remainingTasks.append(WTF::move(task));
+@@ -347,6 +356,7 @@ void EventLoop::run(JSC::VM& vm, std::optional<ApproximateTime> deadline)
+             }
+ 
+             task->execute();
++            ranTask = true;
+             didPerformMicrotaskCheckpoint = true;
+             performMicrotaskCheckpoint(vm);
+         }
+diff --git a/Source/WebCore/dom/ScriptRunner.cpp b/Source/WebCore/dom/ScriptRunner.cpp
+index d9201fde64..c3f6d694f3 100644
+--- a/Source/WebCore/dom/ScriptRunner.cpp
++++ b/Source/WebCore/dom/ScriptRunner.cpp
+@@ -31,6 +31,7 @@
+ #include "Element.h"
+ #include "PendingScript.h"
+ #include "ScriptElement.h"
++#include <wtf/HashSet.h>
+ #include <wtf/TZoneMallocInlines.h>
+ 
+ namespace WebCore {
+@@ -119,6 +120,10 @@ void ScriptRunner::notifyFinished(PendingScript& pendingScript)
+         m_timer.startOneShot(0_s);
+ }
+ 
++#if OS(EMSCRIPTEN)
++extern "C" bool bl_wtf_input_waiting();
++#endif
++
+ void ScriptRunner::timerFired()
+ {
+     Ref document = m_document.get();
+@@ -137,10 +142,33 @@ void ScriptRunner::timerFired()
+     } else
+         scripts.swap(m_scriptsToExecuteSoon);
+ 
+-    while (!m_scriptsToExecuteInOrder.isEmpty() && Ref { m_scriptsToExecuteInOrder.first() }->isLoaded())
++#if OS(EMSCRIPTEN)
++    HashSet<PendingScript*> inOrder;
++#endif
++    while (!m_scriptsToExecuteInOrder.isEmpty() && Ref { m_scriptsToExecuteInOrder.first() }->isLoaded()) {
++#if OS(EMSCRIPTEN)
++        inOrder.add(m_scriptsToExecuteInOrder.first().ptr());
++#endif
+         scripts.append(m_scriptsToExecuteInOrder.takeFirst());
++    }
+ 
+-    for (Ref script : scripts) {
++    for (size_t i = 0; i < scripts.size(); ++i) {
++#if OS(EMSCRIPTEN)
++        // browser-lite: scripts ran back to back for seconds while input waited; the rest goes
++        // back in its order and runs from the timer after the input
++        if (i && bl_wtf_input_waiting()) {
++            for (size_t j = scripts.size(); j > i; --j) {
++                Ref script = scripts[j - 1].copyRef();
++                if (inOrder.contains(script.ptr()))
++                    m_scriptsToExecuteInOrder.prepend(WTF::move(script));
++                else
++                    m_scriptsToExecuteSoon.insert(0, WTF::move(script));
++            }
++            m_timer.startOneShot(0_s);
++            return;
++        }
++#endif
++        Ref script = scripts[i].copyRef();
+         ASSERT(script->needsLoading());
+         script->element().executePendingScript(script);
+         document->decrementLoadEventDelayCount();
+diff --git a/Source/WebCore/html/parser/HTMLDocumentParser.cpp b/Source/WebCore/html/parser/HTMLDocumentParser.cpp
+index 6b769b0753..f231f4d493 100644
+--- a/Source/WebCore/html/parser/HTMLDocumentParser.cpp
++++ b/Source/WebCore/html/parser/HTMLDocumentParser.cpp
+@@ -471,8 +471,17 @@ void HTMLDocumentParser::attemptToRunDeferredScriptsAndEnd()
+ {
+     ASSERT(isStopping());
+     ASSERT(!hasInsertionPoint());
+-    if (m_scriptRunner && !m_scriptRunner->executeScriptsWaitingForParsing())
++    bool yieldedForInput = false;
++    if (m_scriptRunner && !m_scriptRunner->executeScriptsWaitingForParsing(&yieldedForInput)) {
++        // browser-lite: input waits, the remaining deferred scripts run from a task after it
++        if (yieldedForInput) {
++            protect(document())->eventLoop().queueTask(TaskSource::InternalAsyncTask, [protectedThis = Ref { *this }] {
++                if (!protectedThis->isStopped())
++                    protectedThis->attemptToRunDeferredScriptsAndEnd();
++            });
++        }
+         return;
++    }
+     end();
+ }
+ 
+diff --git a/Source/WebCore/html/parser/HTMLScriptRunner.cpp b/Source/WebCore/html/parser/HTMLScriptRunner.cpp
+index 19f13bdca2..1d10d43b62 100644
+--- a/Source/WebCore/html/parser/HTMLScriptRunner.cpp
++++ b/Source/WebCore/html/parser/HTMLScriptRunner.cpp
+@@ -191,9 +191,21 @@ void HTMLScriptRunner::executeScriptsWaitingForStylesheets()
+     executeParsingBlockingScripts();
+ }
+ 
+-bool HTMLScriptRunner::executeScriptsWaitingForParsing()
++#if OS(EMSCRIPTEN)
++extern "C" bool bl_wtf_input_waiting();
++#endif
++
++bool HTMLScriptRunner::executeScriptsWaitingForParsing([[maybe_unused]] bool* yieldedForInput)
+ {
++    bool ranScript = false;
+     while (!m_scriptsToExecuteAfterParsing.isEmpty()) {
++#if OS(EMSCRIPTEN)
++        // browser-lite: deferred scripts ran back to back for seconds, input waited behind them
++        if (ranScript && yieldedForInput && bl_wtf_input_waiting()) {
++            *yieldedForInput = true;
++            return false;
++        }
++#endif
+         ASSERT(!isExecutingScript());
+         ASSERT(!hasParserBlockingScript());
+         ASSERT(m_scriptsToExecuteAfterParsing.first()->needsLoading());
+@@ -202,6 +214,7 @@ bool HTMLScriptRunner::executeScriptsWaitingForParsing()
+             return false;
+         }
+         executePendingScriptAndDispatchEvent(m_scriptsToExecuteAfterParsing.takeFirst().get());
++        ranScript = true;
+         // FIXME: What is this m_document check for?
+         if (!m_document)
+             return false;
+diff --git a/Source/WebCore/html/parser/HTMLScriptRunner.h b/Source/WebCore/html/parser/HTMLScriptRunner.h
+index 8e1a7e0901..bad38d7c24 100644
+--- a/Source/WebCore/html/parser/HTMLScriptRunner.h
++++ b/Source/WebCore/html/parser/HTMLScriptRunner.h
+@@ -54,7 +54,9 @@ public:
+     void executeScriptsWaitingForLoad(PendingScript&);
+     bool hasScriptsWaitingForStylesheets() const { return m_hasScriptsWaitingForStylesheets; }
+     void executeScriptsWaitingForStylesheets();
+-    bool executeScriptsWaitingForParsing();
++    // yieldedForInput: false returned because input waits (browser-lite, WebAssembly), the rest
++    // runs from a task
++    bool executeScriptsWaitingForParsing(bool* yieldedForInput = nullptr);
+ 
+     bool NODELETE hasParserBlockingScript() const;
+     bool isExecutingScript() const { return !!m_scriptNestingLevel; }

@@ -137,6 +137,19 @@ const pages = http.createServer((req, res) => {
       .end(
         "<title>busy-input</title><button id=b style='position:absolute;left:0;top:0;width:300px;height:100px'>b</button><script>let done = 0; let clicked = -1; const spin = (ms) => { const end = performance.now() + ms; while (performance.now() < end); }; document.getElementById('b').onclick = () => { clicked = done; document.title = 'clicked:' + done; }; for (let i = 0; i < 40; i++) { const x = new XMLHttpRequest(); x.onload = () => { spin(100); done++; if (clicked < 0) document.title = 'busy:' + done; }; x.open('GET', '/file.txt?' + i); x.send(); }</script>",
       );
+  // Deferred and async scripts of 100 ms each: their order holds while input makes them yield
+  if (url.pathname === '/script-order')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html' })
+      .end(
+        `<title>scripts</title><script>window.order = []; document.addEventListener('DOMContentLoaded', () => order.push('dcl')); onload = () => { document.title = 'order:' + order.join(); };</script>${[0, 1, 2, 3, 4].map((i) => `<script defer src="/order.js?d${i}"></script>`).join('')}<script async src="/order.js?a"></script><p>scripts</p>`,
+      );
+  if (url.pathname === '/order.js')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/javascript' })
+      .end(
+        `{ const end = performance.now() + 100; while (performance.now() < end); } order.push(${JSON.stringify(url.search.slice(1))});`,
+      );
   if (url.pathname === '/untitled')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p>no title</p>');
   // An iframe that navigates after the page loaded (like an ad that rotates)
@@ -698,6 +711,27 @@ try {
       15000,
     ),
     await page.evaluate(() => window.blTest.view()?.title),
+  );
+
+  // Deferred scripts keep their order and run before DOMContentLoaded while input waits
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}script-order`);
+  const moving = (async () => {
+    for (let i = 0; i < 60; i++) {
+      await page.mouse.move(100 + (i % 50), 300);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  })();
+  const ordered = await waitFor(() => window.blTest.view()?.title?.startsWith('order:'));
+  await moving;
+  const order = (await page.evaluate(() => window.blTest.view()?.title)).slice(6).split(',');
+  const deferred = order.filter((name) => /^d\d$/.test(name));
+  check(
+    'deferred scripts in order before DOMContentLoaded while input waits',
+    ordered &&
+      deferred.join() === 'd0,d1,d2,d3,d4' &&
+      order.indexOf('dcl') > order.indexOf('d4') &&
+      order.includes('a'),
+    `${ordered} ${order.join()}`,
   );
 
   // Input before queued work: a click while load events of 100 ms each wait runs after one or two
