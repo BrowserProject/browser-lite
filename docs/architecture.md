@@ -117,8 +117,10 @@ pixels with `readPixels` into the page or, with compositing, into a layer. A los
 
 Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` exports
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
-the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. Ctrl +
-wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
+the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. On the
+engine thread input runs before other waiting work: the engine loop takes it in between its tasks
+and WTF's RunLoop returns between two of its functions when input waits (patch 0072, #347).
+Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 
 ## Network

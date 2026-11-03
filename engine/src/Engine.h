@@ -22,6 +22,9 @@ pthread_t engineThread();
 // Runs a function on the engine thread (callable from any thread).
 // Runs asynchronously as soon as the engine thread is back in the event loop.
 void runOnEngineThread(Function<void()>&&);
+// Input of the user (callable from any thread): runs before the other waiting work of the
+// engine thread, which also returns from a long RunLoop pass to take it in.
+void runInputOnEngineThread(Function<void()>&&);
 // On the engine thread: runs `function` before the other waiting tasks of the engine thread,
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);

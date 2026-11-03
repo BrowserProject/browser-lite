@@ -197,6 +197,28 @@ static Deque<Function<void()>*>& localTasks()
     return tasks;
 }
 
+// Input of the user (mouse, keys, touch) runs before the other waiting work: a busy page queues
+// timers, messages and network work for seconds (a news page with ads on a weak phone) and a tap
+// waited behind all of it. Counted from the host thread when sent, so the engine thread also
+// sees input that still sits in its mailbox and returns from long work (RunLoop functions,
+// patch 0072) to take it in.
+static Deque<Function<void()>*>& inputTasks()
+{
+    static NeverDestroyed<Deque<Function<void()>*>> tasks;
+    return tasks;
+}
+
+static std::atomic<int> s_inputWaiting;
+
+static bool inputWaiting()
+{
+    return s_inputWaiting.load(std::memory_order_relaxed) > 0 && isEngineThread();
+}
+
+// From Emscripten (system/lib/pthread/thread_mailbox.c): runs the work other
+// threads sent to this one, what the JS event loop does on a notification
+extern "C" void _emscripten_check_mailbox();
+
 static bool s_localDrainScheduled;
 
 EM_JS(void, bl_schedule_local_drain, (), {
@@ -214,11 +236,36 @@ static void scheduleLocalDrain()
     bl_schedule_local_drain();
 }
 
-// One pass: only what was waiting at the start
+static void runInputTasks()
+{
+    auto& tasks = inputTasks();
+    while (!tasks.isEmpty()) {
+        auto* function = tasks.takeFirst();
+        s_inputWaiting.fetch_sub(1, std::memory_order_relaxed);
+        runWithGCAfterwards([&] {
+            (*function)();
+        });
+        delete function;
+    }
+}
+
+// Input in the mailbox comes in now (the mailbox only queues work here) and runs first
+static void takeInput()
+{
+    if (inputWaiting())
+        _emscripten_check_mailbox();
+    runInputTasks();
+}
+
+// One pass: only what was waiting at the start, input first
 static void runLocalTasks()
 {
     auto& tasks = localTasks();
+    takeInput();
     for (size_t count = tasks.size(); count && !tasks.isEmpty(); --count) {
+        takeInput();
+        if (tasks.isEmpty())
+            break;
         auto* function = tasks.takeFirst();
         runWithGCAfterwards([&] {
             (*function)();
@@ -232,7 +279,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
     clearStackBelow();
     s_localDrainScheduled = false;
     runLocalTasks();
-    if (!localTasks().isEmpty())
+    if (!localTasks().isEmpty() || !inputTasks().isEmpty())
         scheduleLocalDrain();
 }
 
@@ -240,6 +287,25 @@ static void runFunction(void* arg)
 {
     localTasks().append(static_cast<Function<void()>*>(arg));
     scheduleLocalDrain();
+}
+
+static void runInputFunction(void* arg)
+{
+    inputTasks().append(static_cast<Function<void()>*>(arg));
+    scheduleLocalDrain();
+}
+
+void runInputOnEngineThread(Function<void()>&& function)
+{
+    RELEASE_ASSERT(s_engineThreadSet.load(std::memory_order_acquire));
+    auto* heapFunction = new Function<void()>(WTF::move(function));
+    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), s_engineThread, runInputFunction, heapFunction)) {
+        delete heapFunction;
+        log("runInputOnEngineThread: proxy_async failed");
+        return;
+    }
+    // After the queueing: the count may lag behind, never stay above what is queued
+    s_inputWaiting.fetch_add(1, std::memory_order_relaxed);
 }
 
 void runOnEngineThread(Function<void()>&& function)
@@ -371,10 +437,6 @@ static void restartScriptWatchdog()
     }
 }
 
-// From Emscripten (system/lib/pthread/thread_mailbox.c): runs the work other
-// threads sent to this one, what the JS event loop does on a notification
-extern "C" void _emscripten_check_mailbox();
-
 // A work item of the nested event loop. The script watchdog restarts, so its
 // limit applies to each item and not to the dialog's script below. A script
 // it stopped leaves a termination request until the outermost VM entry ends,
@@ -419,7 +481,7 @@ void runNestedEventLoop(const Function<bool()>& done)
     pthread_t self = pthread_self();
     while (!done()) {
         _emscripten_check_mailbox();
-        if (!localTasks().isEmpty()) {
+        if (!localTasks().isEmpty() || !inputTasks().isEmpty()) {
             runNestedWork(vm, [] { runLocalTasks(); });
             continue;
         }
@@ -445,15 +507,19 @@ void runNestedEventLoop(const Function<bool()>& done)
     threadData.setCurrentState(scriptState);
     restartScriptWatchdog();
     // What is left runs from the JS event loop again
-    if (!localTasks().isEmpty())
+    if (!localTasks().isEmpty() || !inputTasks().isEmpty())
         scheduleLocalDrain();
     armTimerForNextScheduledTask();
 }
+
+// WTF RunLoop (patch 0072): returns between two of its functions while input waits
+extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
 void initializeEngineLoop()
 {
     RELEASE_ASSERT(isEngineThread());
     installScriptWatchdog();
+    bl_wtf_set_run_loop_yield_check(inputWaiting);
     // Called while the RunLoop holds its lock, possibly from another thread:
     // only schedule here, never work directly.
     WTF::RunLoop::setWakeUpCallback([] {

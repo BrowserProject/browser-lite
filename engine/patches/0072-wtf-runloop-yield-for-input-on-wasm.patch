@@ -1,0 +1,37 @@
+diff --git a/Source/WTF/wtf/RunLoop.cpp b/Source/WTF/wtf/RunLoop.cpp
+index 8cd99245f7..b17de171db 100644
+--- a/Source/WTF/wtf/RunLoop.cpp
++++ b/Source/WTF/wtf/RunLoop.cpp
+@@ -122,6 +122,17 @@ bool RunLoop::isCurrent() const
+     return runLoopHolder().isSet() && this == &RunLoop::currentSingleton();
+ }
+ 
++#if OS(EMSCRIPTEN)
++// browser-lite: the embedder tells whether this thread should return to its event loop between
++// two functions (input of the user waits). Set at run time, so RunLoop.h stays unchanged.
++static bool (*s_shouldYieldForInput)();
++extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
++extern "C" void bl_wtf_set_run_loop_yield_check(bool (*check)())
++{
++    s_shouldYieldForInput = check;
++}
++#endif
++
+ void RunLoop::performWork()
+ {
+     bool didSuspendFunctions = false;
+@@ -144,6 +155,14 @@ void RunLoop::performWork()
+ 
+         auto function = m_currentIteration.takeFirst();
+         function();
++#if OS(EMSCRIPTEN)
++        // The rest runs in order in the next cycle, after the input (at least one function
++        // per cycle, so continuous input does not starve the others)
++        if (!m_currentIteration.isEmpty() && s_shouldYieldForInput && s_shouldYieldForInput()) {
++            didSuspendFunctions = true;
++            break;
++        }
++#endif
+     }
+ 
+     // Suspend only for a single cycle.

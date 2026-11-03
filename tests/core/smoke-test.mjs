@@ -130,6 +130,13 @@ const pages = http.createServer((req, res) => {
       );
   if (url.pathname === '/more')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end(MORE);
+  // Work queued behind each other: 40 loads whose load events each take 100 ms, and a button
+  if (url.pathname === '/busy-input')
+    return res
+      .writeHead(200, { 'Content-Type': 'text/html' })
+      .end(
+        "<title>busy-input</title><button id=b style='position:absolute;left:0;top:0;width:300px;height:100px'>b</button><script>let done = 0; let clicked = -1; const spin = (ms) => { const end = performance.now() + ms; while (performance.now() < end); }; document.getElementById('b').onclick = () => { clicked = done; document.title = 'clicked:' + done; }; for (let i = 0; i < 40; i++) { const x = new XMLHttpRequest(); x.onload = () => { spin(100); done++; if (clicked < 0) document.title = 'busy:' + done; }; x.open('GET', '/file.txt?' + i); x.send(); }</script>",
+      );
   // An iframe that navigates after the page loaded (like an ad that rotates)
   if (url.pathname === '/late-frame')
     return res
@@ -673,6 +680,24 @@ try {
     progress.during.includes('progress:1') &&
       !progress.after.some((e) => e.startsWith('progress:')),
     JSON.stringify(progress),
+  );
+
+  // Input before queued work: a click while load events of 100 ms each wait runs after one or two
+  // of them, not after the whole queue (about 10 locally before)
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}busy-input`);
+  const busyStarted = await waitFor(() => /^busy:[2-9]$/.test(window.blTest.view()?.title ?? ''));
+  const doneAtClick = Number(
+    (await page.evaluate(() => window.blTest.view()?.title)).split(':')[1],
+  );
+  await page.mouse.click(150, 50);
+  await waitFor(() => /^clicked:/.test(window.blTest.view()?.title ?? ''));
+  const clickedAfter = await page.evaluate(() => window.blTest.view()?.title);
+  check(
+    'input runs before queued work',
+    busyStarted &&
+      /^clicked:\d+$/.test(clickedAfter) &&
+      Number(clickedAfter.split(':')[1]) - doneAtClick <= 4,
+    `${doneAtClick} -> ${clickedAfter}`,
   );
 
   // Error page of the engine (English default template) for a host that does not exist

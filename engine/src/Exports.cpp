@@ -85,7 +85,7 @@ static void withView(int id, Function&& function)
 template<typename Function>
 static void withInput(int id, Function&& function)
 {
-    runOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
+    runInputOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
         if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
             function(*view);
     });
