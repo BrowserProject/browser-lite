@@ -58,6 +58,10 @@ const context = await browser.newContext({
   permissions: permissions(['geolocation']),
 });
 await emulateTouchPoints(context);
+// Chrome on Android shows no PDF in a frame
+await context.addInitScript(() =>
+  Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { get: () => false }),
+);
 const tab = await context.newPage();
 const results = collect(tab, /RESULT (\w+)=(.*?)(\s+\(|$)/);
 async function loaded(title, ms = 30000) {
@@ -388,6 +392,27 @@ check(
   ...(await inside('.overview-card, #tab-overview header button')),
 );
 await tab.tap('#tab-overview .overview-done');
+
+// Print without a PDF viewer in the host: a message and Save as PDF instead of a placeholder
+await tab.evaluate(() => window.blTest.eval('window.print()'));
+const printMessage = await tab
+  .locator('#print-preview:not([hidden]) .print-message')
+  .waitFor({ timeout: 20000 })
+  .then(
+    () => true,
+    () => false,
+  );
+const printButtons = await tab.evaluate(() =>
+  ['.print-now', '.print-save', 'iframe']
+    .map((s) => !!document.querySelector(`#print-preview ${s}`)?.getClientRects().length)
+    .join(','),
+);
+check(
+  'print without a PDF viewer: message and Save as PDF only',
+  printMessage && printButtons === 'false,true,false',
+  printButtons,
+);
+await tab.tap('#print-preview .print-close');
 
 // Above the breakpoint the desktop layout comes back
 await tab.setViewportSize({ width: 1100, height: 700 });

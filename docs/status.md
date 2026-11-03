@@ -318,11 +318,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
 - Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (44 px since #356; the
   page kept 221 of 303 px on a Pixel 9 with the old 58 px bar; hiding it while scrolling needs a
-  scroll event of the page and a viewport that does not lay out again); on Android the print preview shows Chrome's PDF placeholder with
-  the blob's name.
+  scroll event of the page and a viewport that does not lay out again).
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
-  C++ now gives the page a RangeError (#354); whether the page then works is open.
+  C++ now gives the page a RangeError (#354), CI green since. Its load event comes after 93 s on
+  the CI runners (US) and after 6.8 s from Switzerland (2026-11-03), probably other content there.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU

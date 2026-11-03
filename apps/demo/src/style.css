@@ -1425,6 +1425,20 @@ svg.favicon {
   font-size: var(--text-lg);
   font-weight: 500;
 }
+#print-preview .print-message {
+  flex: 1;
+  margin: 0;
+  padding: var(--space-5);
+  color: var(--on-surface-variant);
+}
+#print-preview.no-pdf-viewer .print-now {
+  display: none;
+}
+#print-preview.no-pdf-viewer .print-save {
+  border-color: transparent;
+  background-color: var(--primary);
+  color: var(--on-primary);
+}
 #print-preview iframe {
   flex: 1;
   width: 100%;

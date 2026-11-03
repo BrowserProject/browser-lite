@@ -23,7 +23,7 @@ export function printing(): void {
 export function closePreview(): void {
   if (preview.hidden) return;
   preview.hidden = true;
-  preview.querySelector('iframe')?.remove();
+  preview.querySelector(':scope > :is(iframe, .print-message)')?.remove();
   if (pdfUrl) URL.revokeObjectURL(pdfUrl);
   pdfUrl = null;
   afterClose();
@@ -43,12 +43,24 @@ export function showPreview(pdf: Blob, title: string): void {
   fileName = `${(title || 'Page').replace(/[\\/:*?"<>|]+/g, ' ').trim()}.pdf`;
   const heading = preview.querySelector('.print-title');
   if (heading) heading.textContent = title || 'Print';
-  const frame = document.createElement('iframe');
-  frame.title = 'Print preview';
-  frame.src = pdfUrl;
-  // Like window.print() in Chrome: the print dialog comes at once
-  frame.addEventListener('load', () => print(frame), { once: true });
-  preview.append(frame);
+  // Chrome on Android shows no PDF in a frame (only a placeholder, which it would also print):
+  // there the saved PDF opens in the system's viewer, which prints
+  const inline = navigator.pdfViewerEnabled !== false;
+  preview.classList.toggle('no-pdf-viewer', !inline);
+  if (inline) {
+    const frame = document.createElement('iframe');
+    frame.title = 'Print preview';
+    frame.src = pdfUrl;
+    // Like window.print() in Chrome: the print dialog comes at once
+    frame.addEventListener('load', () => print(frame), { once: true });
+    preview.append(frame);
+  } else {
+    const message = document.createElement('p');
+    message.className = 'print-message';
+    message.textContent =
+      'This browser cannot show the PDF here. Save it and print it from the PDF viewer.';
+    preview.append(message);
+  }
   preview.hidden = false;
 }
 

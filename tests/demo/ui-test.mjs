@@ -64,6 +64,10 @@ const { url: siteURL } = await serve((req, res) => {
 const stack = await startStack({ app: 'demo', token: 'ui-token-0123456789abcdef' });
 const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1100, height: 700 } });
+// Like desktop Chrome and Firefox, which show a PDF in a frame (headless Chromium has no viewer)
+await context.addInitScript(() =>
+  Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', { get: () => true }),
+);
 const tab = await context.newPage();
 const stopWatchingTab = watchErrors(tab);
 let loaded = [];
