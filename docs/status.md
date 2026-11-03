@@ -316,6 +316,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
   2 s until the busy engine records its tiles (one fling is painted at once; tiles cover half a
   viewport above and below). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
+- Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (the page keeps 221 of
+  303 px on a Pixel 9; hiding it while scrolling needs a scroll event of the page and a viewport
+  that does not lay out again); on iOS the sheet of a date picker shows an empty field until it is
+  tapped; on Android the print preview shows Chrome's PDF placeholder with the blob's name.
+- weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
+  call stack size exceeded" in the engine, "Page crashed"); 9 local runs clean, loads now 5 to
+  10 s instead of 45 to 117 s.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
