@@ -906,6 +906,55 @@ test('color and date/time pickers', async () => {
   });
 });
 
+test('host pickers open once the input is laid out at the field', async () => {
+  // Chromium draws the picker at the window's corner when showPicker() comes before the first
+  // layout of the input
+  const result = await page.evaluate(async () => {
+    const { colorPicker, dateTimePicker } = ui.defaultHandlers();
+    const view = makeView(8);
+    const rect = { x: 5, y: 6, width: 70, height: 22 };
+    const showPicker = HTMLInputElement.prototype.showPicker;
+    const measure = Element.prototype.getBoundingClientRect;
+    const measured = new Set();
+    const opened = [];
+    Element.prototype.getBoundingClientRect = function () {
+      measured.add(this);
+      return measure.call(this);
+    };
+    HTMLInputElement.prototype.showPicker = function () {
+      opened.push([this.type, this.isConnected, measured.has(this)]);
+    };
+    try {
+      for (const open of [
+        () => colorPicker({ view, rect, value: '#ff0000', signal: new AbortController().signal }),
+        () =>
+          dateTimePicker({
+            view,
+            rect,
+            type: 'date',
+            value: '',
+            min: 0,
+            max: 0,
+            step: 0,
+            signal: new AbortController().signal,
+          }),
+      ]) {
+        const promise = open();
+        pointerdown(document.body);
+        await promise;
+      }
+    } finally {
+      HTMLInputElement.prototype.showPicker = showPicker;
+      Element.prototype.getBoundingClientRect = measure;
+    }
+    return opened;
+  });
+  assert.deepEqual(result, [
+    ['color', true, true],
+    ['date', true, true],
+  ]);
+});
+
 test('file chooser: core default on desktop, a sheet on an iPhone', async () => {
   const result = await page.evaluate(async () => {
     const out = { desktop: Object.keys(ui.fileChooser()) };

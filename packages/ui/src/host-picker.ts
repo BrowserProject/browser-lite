@@ -125,6 +125,9 @@ function openHostPicker(
       sheet.style.left = `${Math.max(8, Math.min(anchor.x, right - width))}px`;
       return;
     }
+    // Chromium places its picker at the input's laid out box, at the window's corner before
+    // the first layout
+    input.getBoundingClientRect();
     try {
       input.showPicker();
     } catch {
