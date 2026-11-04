@@ -133,6 +133,9 @@ private:
     RefPtr<WebCore::LocalFrame> createFrame(const AtomString& name, WebCore::HTMLFrameOwnerElement&) final;
     WebCore::LocalFrame* dispatchCreatePage(const WebCore::NavigationAction&, WebCore::NewFrameOpenerPolicy, const String& openedMainFrameName) final;
     void transitionToCommittedForNewPage(InitializingIframe) final;
+    // Back/forward cache: the commit comes before the cached document is back in the frame
+    void transitionToCommittedFromCachedFrame(WebCore::CachedFrame*) final;
+    void didRestoreFromBackForwardCache() final;
 
     void dispatchDidStartProvisionalLoad() final;
     void dispatchDidCommitLoad(std::optional<WebCore::HasInsecureContent>, std::optional<WebCore::UsedLegacyTLS>, std::optional<WebCore::WasPrivateRelayed>) final;

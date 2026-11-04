@@ -39,7 +39,8 @@ generic code paths the port takes, for example formatting of UI strings) comes a
     (event loop: the host's calls and the compositor's answers before the page's work, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
-  - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
+  - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
+    restore), `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in a visible one)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`

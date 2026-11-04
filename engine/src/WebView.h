@@ -208,6 +208,9 @@ public:
     // The next error page (ErrorPage.cpp) is because of an invalid certificate
     void willCommitErrorPage(bool certificate) { m_errorPageCertificate = certificate; }
     void didCommitLoad();
+    // Back/forward cache: the commit of a cached page, then the page back in the frame
+    void willRestoreFromCache() { m_restoringFromCache = true; }
+    void didRestoreFromCache();
     // Anchor, pushState/replaceState, popstate: new address without a new document
     void didNavigateWithinPage();
     void didFinishLoading();
@@ -306,6 +309,7 @@ private:
     bool m_inRenderingUpdate { false };
     bool m_errorPageCertificate { false };
     void loadFavicon();
+    void notifyDocumentState();
 
     bool m_isLoading { false };
     bool m_progressShown { false };
@@ -314,6 +318,7 @@ private:
     // Where a long press asked for the context menu; it opens when the finger lifts
     std::optional<WebCore::DoublePoint> m_longPressMenu;
     bool m_leavingPagePaused { false };
+    bool m_restoringFromCache { false };
     URL m_faviconURL;
     RefPtr<WebCore::FileChooser> m_fileChooser;
 #if ENABLE(POINTER_LOCK)

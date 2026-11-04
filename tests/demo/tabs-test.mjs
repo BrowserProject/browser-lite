@@ -1,6 +1,7 @@
 // The tab strip and the toolbar of the demo (the engine side is in tests/core): the speaker in the
 // tab appears with sound and mutes the tab on a click, one prompt for camera and microphone, the
-// recording indicator follows the camera, the favicon of the page in the tab, the address bar
+// recording indicator follows the camera, the favicon of the page in the tab, its title or address
+// after back and forward (also from the back/forward cache), the address bar
 // keeps an address that failed, the security indicator ("Not secure" for a certificate error,
 // nothing on other error pages) and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
@@ -74,6 +75,8 @@ document.addEventListener('click', async () => {
 });
 </script>`,
   '/opened': `<!doctype html><title>Opened</title><p>Opened`,
+  '/plain-a': `<!doctype html><p>A<script>console.log('RESULT ready=plain-a')</script>`,
+  '/plain-b': `<!doctype html><p>B<script>console.log('RESULT ready=plain-b')</script>`,
 };
 const SW = `self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
@@ -230,6 +233,59 @@ const icon = await page
   );
 check('favicon in the tab', icon > 0, `(width ${icon})`);
 await screenshot(page, 'demo-tabs');
+
+// 3b) Back and forward: the tab and the window show the page's title, without one its address
+const shows = (label) =>
+  page
+    .waitForFunction(
+      (label) =>
+        document.getElementById('address').value === label.address &&
+        document.querySelector('#tab-list .tab.active .title')?.textContent === label.text &&
+        document.title.startsWith(`${label.text} - `),
+      label,
+      { timeout: 15000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+const labels = () =>
+  page.evaluate(() =>
+    JSON.stringify({
+      address: document.getElementById('address').value,
+      tab: document.querySelector('#tab-list .tab.active .title')?.textContent,
+      window: document.title,
+    }),
+  );
+for (const name of ['plain-a', 'plain-b']) {
+  results.delete('ready');
+  await go(`${siteURL}${name}`);
+  await result('ready');
+}
+await page.click('#back');
+check(
+  'back between pages without a title: the address',
+  await shows({ address: `${siteURL}plain-a`, text: `${siteURL}plain-a` }),
+  await labels(),
+);
+await page.click('#back');
+check(
+  'back to a page with a title: its title',
+  await shows({ address: `${siteURL}icon`, text: 'Icon' }),
+  await labels(),
+);
+await page.click('#forward');
+check(
+  'forward from a title to a page without one: the address',
+  await shows({ address: `${siteURL}plain-a`, text: `${siteURL}plain-a` }),
+  await labels(),
+);
+await page.click('#forward');
+check(
+  'forward between pages without a title: the address',
+  await shows({ address: `${siteURL}plain-b`, text: `${siteURL}plain-b` }),
+  await labels(),
+);
 
 // 4) Failing navigations: the address bar keeps the address, the security indicator says
 // "Not secure" only for a certificate error

@@ -752,6 +752,18 @@ void FrameLoaderClient::transitionToCommittedForNewPage(InitializingIframe)
         m_view->addDamage(IntRect { { }, m_view->size() });
 }
 
+void FrameLoaderClient::transitionToCommittedFromCachedFrame(CachedFrame*)
+{
+    if (isMainFrame())
+        m_view->willRestoreFromCache();
+}
+
+void FrameLoaderClient::didRestoreFromBackForwardCache()
+{
+    if (isMainFrame())
+        m_view->didRestoreFromCache();
+}
+
 void FrameLoaderClient::dispatchDidStartProvisionalLoad()
 {
     if (!isMainFrame())

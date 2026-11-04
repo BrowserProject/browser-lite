@@ -152,6 +152,8 @@ const pages = http.createServer((req, res) => {
       );
   if (url.pathname === '/untitled')
     return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p>no title</p>');
+  if (url.pathname === '/titled')
+    return res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>titled</title>');
   // An iframe that navigates after the page loaded (like an ad that rotates)
   if (url.pathname === '/late-frame')
     return res
@@ -708,6 +710,44 @@ try {
     await waitFor(
       (url) => window.blTest.view()?.url === url && window.blTest.view().title === '',
       `${PAGE_URL}untitled`,
+      15000,
+    ),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+
+  // Back from the back/forward cache to it: its address, then its empty title, never the title of
+  // the page being left
+  await page.evaluate((url) => window.blTest.load(url), `${PAGE_URL}titled`);
+  await waitFor(() => window.blTest.view()?.title === 'titled');
+  const backStart = await page.evaluate(() => window.blHost.events.length);
+  await page.evaluate(() => window.blTest.view().back());
+  check(
+    'back to a page without a title: empty title',
+    await waitFor(
+      (url) => window.blTest.view()?.url === url && window.blTest.view().title === '',
+      `${PAGE_URL}untitled`,
+      15000,
+    ),
+    await page.evaluate(() => window.blTest.view()?.title),
+  );
+  const backEvents = await page.evaluate(
+    (start) => window.blHost.events.slice(start).filter((e) => /^(navigation|title):/.test(e)),
+    backStart,
+  );
+  const arrived = backEvents.indexOf(`navigation:${PAGE_URL}untitled`);
+  check(
+    'back: title events only after the address of the restored page',
+    arrived >= 0 &&
+      backEvents.slice(arrived).includes('title:') &&
+      !backEvents.slice(0, arrived).some((e) => e.startsWith('title:')),
+    JSON.stringify(backEvents),
+  );
+  await page.evaluate(() => window.blTest.view().forward());
+  check(
+    'forward to a page with a title: its title',
+    await waitFor(
+      (url) => window.blTest.view()?.url === url && window.blTest.view().title === 'titled',
+      `${PAGE_URL}titled`,
       15000,
     ),
     await page.evaluate(() => window.blTest.view()?.title),

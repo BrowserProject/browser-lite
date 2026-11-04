@@ -52,6 +52,11 @@ messages, the file input's "2 files", time labels of media controls) are formatt
 `StringPrintStream` (`vsnprintf`, also positional `%1$d`) and take the same UTF-8 texts as the
 GLib ports (patch 0076, #363).
 
+The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`): `commit`,
+then `navigation` and `title` of the new document. A page from the back/forward cache commits
+while the frame still holds the page being left, so its `navigation` and `title` follow once it is
+back in the frame (`didRestoreFromBackForwardCache`, #367).
+
 ## Threads
 
 Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation

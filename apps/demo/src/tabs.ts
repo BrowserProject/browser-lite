@@ -111,14 +111,13 @@ export class Tab implements SessionTab {
   private listen(): void {
     const view = this.view;
     this.on('navigation', (event) => {
-      if (event.url !== this.url) {
+      const moved = event.url !== this.url;
+      if (moved) {
         const entry = event.history?.entries?.[event.history.index];
         recordVisit(event.url, entry && entry.url === event.url ? entry.title : '');
       }
-      if (!isBlank(event.url) && this.newTab) {
-        this.newTab = false;
-        this.updateTitle();
-      }
+      const leftNewTab = this.newTab && !isBlank(event.url);
+      if (leftNewTab) this.newTab = false;
       // The engine reports an icon only when its address changes: keep it within the site
       if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.setIcon(null);
       this.url = event.url;
@@ -126,6 +125,8 @@ export class Tab implements SessionTab {
       this.canGoForward = event.canGoForward;
       this.loading = event.loading;
       if (event.history) this.history = event.history;
+      // Without a title the label is the address
+      if (moved || leftNewTab) this.updateTitle();
       if (this.isActive) updateStar(this.url);
       persistSession();
       this.changed();

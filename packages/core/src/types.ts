@@ -478,6 +478,7 @@ export interface SkippedFile {
 export interface ViewEvents {
   /**
    * The address or back/forward state changed: at the start of a navigation (`loading` true),
+   * for the new document (also one from the back/forward cache, followed by its `title`),
    * same-document navigations, and when loading ends.
    */
   navigation: {
@@ -487,7 +488,7 @@ export interface ViewEvents {
     loading: boolean;
     history: SessionHistory | null;
   };
-  /** The title of the page changed; `url` is the page it belongs to. */
+  /** The title of the page changed, '' for a document without one; `url` is the page it belongs to. */
   title: { title: string; url: string };
   /** Load progress of the page (its main frame) from 0 to 1, 1 when done; iframes that navigate later do not report. */
   progress: { value: number };

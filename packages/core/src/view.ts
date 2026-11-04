@@ -478,14 +478,6 @@ export class ViewImpl implements View {
       case 'navigation': {
         const url = String(data.url ?? '');
         const history = (data.history as SessionHistory | undefined) ?? null;
-        // The title of a page from the back/forward cache comes before this message
-        if (url !== this.url) {
-          const entry = history?.entries?.[history.index];
-          if (entry?.title && entry.url === url && entry.title !== this.title) {
-            this.title = entry.title;
-            this.emit('title', { title: entry.title, url });
-          }
-        }
         this.url = url;
         this.canGoBack = !!data.canGoBack;
         this.canGoForward = !!data.canGoForward;

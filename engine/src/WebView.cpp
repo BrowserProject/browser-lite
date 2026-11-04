@@ -1911,9 +1911,24 @@ void WebView::didCommitLoad()
         notifyHost(m_id, "commit", m_errorPageCertificate ? "{\"errorPage\":\"certificate\"}"_s : "{\"errorPage\":\"network\"}"_s);
     else
         notifyHost(m_id, "commit");
+    // A page from the back/forward cache commits while the frame still holds the page being
+    // left: its address and title follow in didRestoreFromCache
+    if (std::exchange(m_restoringFromCache, false))
+        return;
+    notifyDocumentState();
+}
+
+void WebView::didRestoreFromCache()
+{
+    notifyDocumentState();
+}
+
+// Address and title of the new document. The title is empty until its <title> arrives (the tab
+// showed the last page's title for a page without one)
+void WebView::notifyDocumentState()
+{
     notifyNavigationState();
-    // The title of the new document: empty until its <title> arrives (the tab showed the last
-    // page's title for a page without one), the remembered one from the back/forward cache
+    RefPtr frame = mainFrame();
     RefPtr document = frame ? frame->document() : nullptr;
     didChangeTitle(document ? document->title() : emptyString());
 }
