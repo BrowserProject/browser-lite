@@ -305,4 +305,6 @@ and the browser's machine stack (about 500 KB left in a Chromium worker when a s
 the browser stops in the middle of the engine's C++ when it is full. Deep recursion through C++ (getters calling getters,
 proxies, `toString`, `JSON.stringify`) fills the machine stack long before the shadow stack, so
 JSC's recursion checks also probe the machine stack (patch 0075, `engine/jit/MachineStack.cpp`,
-#354): the page gets a RangeError instead of the engine crashing.
+#354): the page gets a RangeError instead of the engine crashing. A one-character `replace` on a
+deep rope string (a string built by appending) probes too and then replaces in the resolved string
+(#368).

@@ -82,3 +82,20 @@ index 3cbcf195c5..5c749db2db 100644
      switch (cell.type()) {
      case StringType: {
          auto string = asString(&cell)->tryGetValue();
+diff --git a/Source/JavaScriptCore/runtime/JSStringInlines.h b/Source/JavaScriptCore/runtime/JSStringInlines.h
+index f7d947e83f..d4c3356e67 100644
+--- a/Source/JavaScriptCore/runtime/JSStringInlines.h
++++ b/Source/JavaScriptCore/runtime/JSStringInlines.h
+@@ -84,6 +84,12 @@ JSString* JSString::tryReplaceOneCharImpl(JSGlobalObject* globalObject, char16_t
+ 
+     if (std::bit_cast<uint8_t*>(currentStackPointer()) < stackLimit) [[unlikely]]
+         return nullptr; // Stack overflow
++#if OS(EMSCRIPTEN)
++    // browser-lite: each level of a deep rope takes far more machine stack than shadow stack
++    // (patch 0075); the caller then replaces in the resolved string
++    if (!machineStackAllowsRecursion(currentStackPointer())) [[unlikely]]
++        return nullptr;
++#endif
+ 
+     if (this->isNonSubstringRope()) {
+         JSRopeString* rope = static_cast<JSRopeString*>(this);

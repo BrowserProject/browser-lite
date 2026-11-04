@@ -1,7 +1,8 @@
 // Deep recursion through C++ (patch 0075, engine/jit/MachineStack.cpp): chains of proxies, getters,
 // toString and nested objects for JSON.stringify fill the browser's machine stack long before
 // JSC's own limit; the page gets a RangeError it can catch like in Chromium, the engine keeps
-// running. Shallow chains still work.
+// running. A one-character replace on a deep rope string and JSON.parse of deep arrays give the
+// same result as in Chromium (#368). Shallow chains still work.
 //
 //   node tests/core/stack-test.mjs [engine-dir]
 import {
@@ -47,6 +48,22 @@ function stackCases() {
     for (let i = 0; i < n; i++) o = o.a = {};
     return JSON.stringify(root).length;
   };
+  // A rope string of n appended characters; a one-character replace walks it recursively
+  const ropeReplace = (n, search) => {
+    let s = 'b';
+    for (let i = 0; i < n; i++) s = s + String.fromCharCode(97 + (i % 20));
+    const r = s.replace(search, 'Y');
+    return `${r.length}${r.slice(0, 2)}${r.slice(-2)}`;
+  };
+  const parse = (n) => {
+    let a = JSON.parse('['.repeat(n) + ']'.repeat(n));
+    let depth = 0;
+    while (a.length) {
+      a = a[0];
+      depth++;
+    }
+    return depth;
+  };
   const out = [];
   const run = (name, fn) => {
     try {
@@ -59,10 +76,15 @@ function stackCases() {
   run('getter100', () => getter(100));
   run('toString100', () => toString(100));
   run('stringify1000', () => stringify(1000));
+  run('ropeReplace100', () => ropeReplace(100, 'c'));
+  run('parse1000', () => parse(1000));
   run('proxyDeep', () => proxy(200000));
   run('getterDeep', () => getter(100000));
   run('toStringDeep', () => toString(100000));
   run('stringifyDeep', () => stringify(300000));
+  run('ropeReplaceDeep', () => ropeReplace(100000, 'z'));
+  run('ropeReplaceDeepFound', () => ropeReplace(100000, 'b'));
+  run('parseDeep', () => parse(100000));
   // The same again: the checks still hold after a RangeError
   run('getterAgain', () => getter(100000));
   run('after', () => getter(100));
