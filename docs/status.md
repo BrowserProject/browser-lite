@@ -295,7 +295,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   allocation bigger than the 128 MB reserve can still crash the engine (#147, #216). On iPhone
   and iPad iOS ends the whole host page instead (all tabs lost); the 512 MB budget there (#358)
   discards background tabs early, but a single page far above it is not stopped. Android Chrome
-  has no budget yet (no kill seen so far). A silent freeze of the engine on spiegel.de at
+  has no budget yet (no kill seen so far). With no background tab left to discard the demo says
+  that the page uses the memory (#373), again at every growth by 32 MB. A silent freeze of the engine on spiegel.de at
   1.1 GB on an iPhone (no output, Reload dead, 2026-11-03) did not come again and is most likely
   the same memory exhaustion.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its

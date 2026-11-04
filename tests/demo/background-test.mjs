@@ -1,8 +1,8 @@
 // Background tabs in the demo UI (the engine side is tests/core/background-test.mjs): under memory
 // pressure the demo discards the least recently used background tab (titles stay, a discarded
-// tab loads again when clicked), never a tab with a picture-in-picture window; the hang message
-// after an input without an answer for 10 s goes away when the watchdog stops the script; a long
-// alert does not count as a hang.
+// tab loads again when clicked, with none left to discard the message names the page), never a
+// tab with a picture-in-picture window; the hang message after an input without an answer for
+// 10 s goes away when the watchdog stops the script; a long alert does not count as a hang.
 //
 //   node tests/demo/background-test.mjs [engine-dir]
 import {
@@ -155,6 +155,13 @@ check(
   'memory pressure: the active tab stays, the titles of the discarded ones stay',
   !(await app.wait('gone', null, 500)) && titles.join() === 'memory,memory,memory',
   titles.join(),
+);
+// Discarded tabs hold no page: closing them would free nothing, so the message names the page
+const status = await app.page.evaluate(() => document.getElementById('status').textContent);
+check(
+  'memory pressure with only discarded background tabs: the message names the page',
+  /Memory is almost full: this page/.test(status),
+  status,
 );
 await app.selectTab(1);
 check('memory pressure: a discarded tab loads when clicked', !!(await app.wait('loaded', 'one')));

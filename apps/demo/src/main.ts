@@ -44,6 +44,7 @@ import {
   activate,
   activeTab,
   adoptView,
+  backgroundPageLoaded,
   clearTabs,
   discardForMemory,
   focusPage,
@@ -65,8 +66,11 @@ const DEFAULT_URL = 'https://example.com/';
 const REPEAT_WINDOW = 60000;
 const CRASH_KEY = 'bl-crash-time';
 const SAFE_START_KEY = 'bl-safe-start';
-// Memory pressure and no background tab left to discard
+// Memory pressure and no background tab left to discard, but loaded ones that stay (sound,
+// camera); without them closing tabs frees nothing (discarded tabs hold no page)
 const MEMORY_FULL = 'Memory is almost full: close tabs, or the browser may crash and restart';
+const MEMORY_FULL_PAGE =
+  'Memory is almost full: this page uses most of it, the browser may crash and restart';
 
 const testState: TestState = { transport: null, options: null };
 /** Relay connection of the running browser: a restart closes it and opens a new one. */
@@ -294,7 +298,8 @@ async function start(restarted: boolean): Promise<void> {
   browser.on('new-view', ({ view }) => adoptView(view));
   browser.on('download', ({ download }) => addDownload(download));
   browser.on('memory-pressure', () => {
-    if (!discardForMemory()) showNotice(MEMORY_FULL);
+    if (discardForMemory()) return;
+    showNotice(backgroundPageLoaded() ? MEMORY_FULL : MEMORY_FULL_PAGE);
   });
   browser.on('crash', ({ reason }) => crashed(reason));
   browser.on('unresponsive', () => showHang());

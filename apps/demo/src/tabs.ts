@@ -520,6 +520,17 @@ function removeTab(tab: Tab): void {
   else openNewTab();
 }
 
+// A background tab whose page takes memory: not one that loads on the next click, not an empty
+// new tab
+function holdsPage(tab: Tab): boolean {
+  return tab !== active && !tab.pending && !tab.newTab;
+}
+
+/** Whether closing a background tab frees memory: one of them holds a page. */
+export function backgroundPageLoaded(): boolean {
+  return list.some(holdsPage);
+}
+
 /**
  * Like Chrome with little memory: all tabs share the memory of the engine. On 'memory-pressure'
  * the background tab unused for the longest time becomes one that loads on the next click.
@@ -529,8 +540,7 @@ function removeTab(tab: Tab): void {
 export function discardForMemory(): Tab | null {
   const candidates = list.filter(
     (tab) =>
-      tab !== active &&
-      !tab.pending &&
+      holdsPage(tab) &&
       !tab.view.audible &&
       !tab.capturing &&
       /^(https?|file):/.test(tab.url || ''),

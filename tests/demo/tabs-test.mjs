@@ -405,7 +405,8 @@ check(
 );
 
 // 6) Memory pressure with a limit like a 32 bit browser (debug memoryLimit): the background tab
-// is discarded, then with no background tab left the status line says that memory is full, and
+// is discarded, then with no loaded background tab left the status line says that the page uses
+// the memory, and
 // the engine does not crash
 const viewIds = () => page.evaluate(() => window.blTest.views().map((view) => view.id));
 const idsBefore = await viewIds();
@@ -441,8 +442,8 @@ check(
   `${await activeTitle()}, ${await tabCount()} tabs`,
 );
 check(
-  'memory pressure without a background tab: message in the status line',
-  /Memory is almost full/.test(await statusText()),
+  'memory pressure with only a discarded background tab: the message names the page',
+  /Memory is almost full: this page/.test(await statusText()),
   `${await statusText()} (after ${allocated * 16} MB)`,
 );
 check(

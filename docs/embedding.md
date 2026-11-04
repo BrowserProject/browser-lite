@@ -280,7 +280,9 @@ of `context.storage` (default in memory), for example in your user's profile.
   Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
   comes again if the engine still does not answer 10 s later.
 - `memory-pressure` (`{footprint, limit}` in bytes): the engine memory runs short. Close or
-  discard background views; when none is left, tell the user (the demo shows a message).
+  discard background views; when none is left, tell the user (the demo shows a message). Ask to
+  close tabs only while a background view still holds a page: a discarded one frees nothing, and
+  the event comes again at every further growth, as WASM memory never shrinks.
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left for good (`pagehide` without the back-forward cache) the browser ends
   like `destroy()`, without events: the page can no longer react. In the back-forward cache it
