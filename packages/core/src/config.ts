@@ -17,10 +17,17 @@ import type {
   StorageOptions,
   Transport,
 } from './types.js';
-import { hostLanguages, hostTimeZone } from './util.js';
+import { appleMobileHost, hostLanguages, hostTimeZone } from './util.js';
 
 const NAMESPACE = /^[a-z0-9_]{1,32}$/;
 const EXPERT_ENV = /^(BL|JSC|FC)_[A-Za-z0-9_]+$/;
+
+/**
+ * Memory budget of the engine on iPhone and iPad in MB of malloc footprint (#358). There a growth
+ * of the WASM memory never fails: iOS ends the whole web content process instead (with three heavy
+ * tabs at 0.9 to 1.1 GB of engine memory), so the engine cannot find its limit at runtime.
+ */
+const APPLE_MOBILE_MEMORY_PRESSURE_MB = 512;
 
 /**
  * Engine switches the core sets from typed options; `engine.env` must not set them. Equal to the
@@ -65,6 +72,8 @@ export interface Config {
   maxPixelRatio: number;
   preferences: Required<Preferences>;
   keepSessionCookies: boolean;
+  /** `BL_MEMORY_PRESSURE_MB` of the host, undefined for the engine default; `env` overrides it. */
+  memoryPressureMB: number | undefined;
   gpu: boolean | undefined;
   compositing: boolean | undefined;
   safepointGC: boolean | 'debug' | undefined;
@@ -333,6 +342,7 @@ export function resolveConfig(options: BrowserOptions, pageUrl: string): Config 
     maxPixelRatio: maxPixelRatio(options.maxPixelRatio),
     preferences: preferences(options.preferences),
     keepSessionCookies: optionalBoolean(options.keepSessionCookies, 'keepSessionCookies') ?? false,
+    memoryPressureMB: appleMobileHost() ? APPLE_MOBILE_MEMORY_PRESSURE_MB : undefined,
     gpu: optionalBoolean(engine.gpu, 'engine.gpu'),
     compositing: optionalBoolean(engine.compositing, 'engine.compositing'),
     safepointGC: safepointGC as Config['safepointGC'],
@@ -358,6 +368,9 @@ export function engineEnv(
   persistent: boolean,
 ): Record<string, string> {
   const result: Record<string, string> = {
+    ...(config.memoryPressureMB !== undefined && {
+      BL_MEMORY_PRESSURE_MB: String(config.memoryPressureMB),
+    }),
     ...config.env,
     BL_FEATURES: features.join(','),
     BL_STORAGE_NAMESPACE: config.namespace,

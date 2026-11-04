@@ -311,7 +311,8 @@ folder. Stored data in OPFS and the HTTP cache stay.
 - Memory: one WebAssembly memory of 256 MB that grows up to 4 GB (about 1 GB in a 32 bit browser)
   and never shrinks; the engine releases caches above 192 MB, from 384 MB keeps 128 MB free ahead
   and reports `memory-pressure` when less is left below the limit it found at runtime, or above
-  3 GB.
+  3 GB (512 MB on iPhone and iPad: iOS ends the whole page instead of failing a growth, at about
+  1 GB of engine memory with three heavy tabs).
 - Threads: at least 12 Web Workers (a pool of 8 plus 4 spare), more when pages start workers.
 - CPU: JavaScript runs in an interpreter; large news sites take 10 to 60 s to load
   ([status.md](status.md)).

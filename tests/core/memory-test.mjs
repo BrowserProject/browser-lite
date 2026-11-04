@@ -2,7 +2,8 @@
 // malloc fails there like at the limit of a 32 bit browser) the engine reports memory-pressure
 // with footprint and limit while every allocation still succeeds, then at every further growth;
 // beyond the limit the page gets a RangeError and the engine keeps running. Without the limit the
-// memory grows on without an event.
+// memory grows on without an event. On an iPhone host the core sets a budget of 512 MB: iOS ends
+// the whole page before a growth fails (#358).
 //
 //   node tests/core/memory-test.mjs [engine-dir]
 import {
@@ -124,6 +125,29 @@ check(
   'debug memoryPressure() with footprint and limit',
   simulated?.footprint > 0 && simulated.footprint === simulated.limit,
   JSON.stringify(simulated),
+);
+
+// iPhone host: memory-pressure from 512 MB of footprint on, without a limit and without a switch
+const IPHONE_UA =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1';
+const phone = await (await browser.newContext({ userAgent: IPHONE_UA })).newPage();
+const phoneResults = collect(phone);
+check('iPhone host page starts', await openHost(phone, stack.app({ url: siteURL })));
+check('iPhone page loaded', (await phoneResults.wait('loaded')) === '1');
+const phoneEvents = () => phone.evaluate(() => window.blHost.memoryPressure);
+let phoneResult = 'ok';
+for (let step = 1; step <= 40 && phoneResult === 'ok' && !(await phoneEvents()).length; step++) {
+  await phone.evaluate((mb) => window.blTest.eval(`allocate(${mb})`), STEP_MB);
+  phoneResult = await phoneResults.wait(`allocated${step}`, 20000);
+}
+const [phoneFirst] = await phoneEvents();
+check(
+  'iPhone host: memory-pressure from 512 MB on, far below the limit',
+  !!phoneFirst &&
+    phoneFirst.footprint >= 512 * MB &&
+    phoneFirst.footprint < 640 * MB &&
+    phoneFirst.limit > 2048 * MB,
+  JSON.stringify(phoneFirst ?? null),
 );
 
 await browser.close();

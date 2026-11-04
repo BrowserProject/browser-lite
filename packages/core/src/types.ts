@@ -329,8 +329,9 @@ export interface BrowserEvents {
   download: { download: Download };
   /**
    * The engine's memory runs short: close or discard background views. Reported at every further
-   * growth of malloc by 32 MB while less than a reserve is left below `limit` (or above the
-   * expert switch `BL_MEMORY_PRESSURE_MB`).
+   * growth of malloc by 32 MB while less than a reserve is left below `limit`, or above the expert
+   * switch `BL_MEMORY_PRESSURE_MB` (3 GB, on iPhone and iPad 512 MB, where iOS ends the whole page
+   * before the memory stops growing).
    */
   'memory-pressure': MemoryPressureEvent;
   /** No answer from the engine for 10 s after input (the time of a page dialog does not count). */

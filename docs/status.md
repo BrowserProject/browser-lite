@@ -37,7 +37,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (206, media pieces) like Chrome's sparse entries (#222).
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
-  runtime, also in 32 bit browsers with about 1 GB (#171, #216), error pages with the
+  runtime, also in 32 bit browsers with about 1 GB (#171, #216), from 512 MB on iPhone and
+  iPad (#358), error pages with the
   relay's reason and auto reload (#174, #175), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
   by old words on the C stack that the conservative GC scans (#296; soak test 0 of 15 local runs
@@ -265,7 +266,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
   without an audio track pauses when hidden like Chrome (not after PiP, #170); discarding under
   memory pressure does not spare tabs with beforeunload listeners and input.
 - Memory: a single page that needs more than the limit (about 1 GB in a 32 bit browser) or one
-  allocation bigger than the 128 MB reserve can still crash the engine (#147, #216).
+  allocation bigger than the 128 MB reserve can still crash the engine (#147, #216). On iPhone
+  and iPad iOS ends the whole host page instead (all tabs lost); the 512 MB budget there (#358)
+  discards background tabs early, but a single page far above it is not stopped. Android Chrome
+  has no budget yet (no kill seen so far). A silent freeze of the engine on spiegel.de at
+  1.1 GB on an iPhone (no output, Reload dead, 2026-11-03) did not come again and is most likely
+  the same memory exhaustion.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.
 - WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take

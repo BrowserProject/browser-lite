@@ -174,6 +174,35 @@ test('engine environment', () => {
       assert.ok(CORE_ENV.includes(key), key);
 });
 
+// iOS ends the web content process before a growth of the WASM memory fails (#358)
+test('memory budget on iPhone and iPad', () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const envOn = (host, options = base) => {
+    Object.defineProperty(globalThis, 'navigator', {
+      value: { languages: ['en'], language: 'en', maxTouchPoints: 0, ...host },
+      configurable: true,
+    });
+    try {
+      return engineEnv(resolveConfig(options, PAGE), [], true);
+    } finally {
+      Object.defineProperty(globalThis, 'navigator', real);
+    }
+  };
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) Mobile/15E148';
+  const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.6 Safari/605.1.15';
+  assert.equal(envOn({ userAgent: iphone, platform: 'iPhone' }).BL_MEMORY_PRESSURE_MB, '512');
+  assert.equal(
+    envOn({ userAgent: mac, platform: 'MacIntel', maxTouchPoints: 5 }).BL_MEMORY_PRESSURE_MB,
+    '512',
+  );
+  assert.equal(envOn({ userAgent: mac, platform: 'MacIntel' }).BL_MEMORY_PRESSURE_MB, undefined);
+  const expert = { ...base, engine: { env: { BL_MEMORY_PRESSURE_MB: '700' } } };
+  assert.equal(
+    envOn({ userAgent: iphone, platform: 'iPhone' }, expert).BL_MEMORY_PRESSURE_MB,
+    '700',
+  );
+});
+
 test('storage and HTTP cache switches', () => {
   const memory = engineEnv(
     resolveConfig({ ...base, storage: { persistent: false } }, PAGE),

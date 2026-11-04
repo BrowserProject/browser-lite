@@ -37,3 +37,11 @@ export function hostLanguages(): string[] {
 }
 
 export const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** The host runs on an iPhone, iPod or iPad (iPadOS reports a Mac, but with touch). */
+export function appleMobileHost(): boolean {
+  return (
+    /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+    (/Mac/.test(navigator.platform ?? '') && navigator.maxTouchPoints > 1)
+  );
+}
