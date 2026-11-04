@@ -3,8 +3,8 @@
 // mailto: and tel: (external-url), sandbox (tel:, download), <a ping> with cookie, CSP report
 // without redirect, sendBeacon (preflight, CORS and CSP on redirects), favicon behind a redirect,
 // dialogs with the origin, context menu requests, <select>, color and date through the request
-// handlers, hover and tooltip, find, zoom, <object>/<embed>, file upload through the native file
-// dialog of the host and fullscreen. The test page reports results with console.log
+// handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links, <object>/<embed>, file
+// upload through the native file dialog of the host and fullscreen. The test page reports results with console.log
 // ("RESULT name=value"), the host page forwards the console of the view.
 //
 //   node tests/core/input-test.mjs [engine-dir]
@@ -765,6 +765,17 @@ check(
   pageDown > 100 && end >= pageDown && Number(await result('keyhome')) === 0,
   `${pageDown}, ${end}, ${results.get('keyhome')}`,
 );
+
+// 6c) Tab reaches links like in Chrome and Firefox, not only form controls (Safari's default)
+await evalPage(page, 'document.getElementById("button").focus()');
+for (let i = 1; i <= 3; i++) {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(300);
+  await evalPage(page, `console.log("RESULT tab${i}=" + document.activeElement?.id)`);
+}
+const tabOrder = [await result('tab1'), await result('tab2'), await result('tab3')].join();
+check('Tab focuses links', tabOrder === 'popup,download,file', tabOrder);
+await evalPage(page, 'document.activeElement?.blur()');
 
 // 7) Fullscreen: the page requests it, the core makes the view container fullscreen; when the
 // host ends it (like with Esc), the page notices too

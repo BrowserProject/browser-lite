@@ -42,6 +42,9 @@ private:
     bool canTakeFocus(WebCore::FocusDirection) const final { return true; }
     void takeFocus(WebCore::FocusDirection) final;
     void focusedElementChanged(WebCore::Element*, WebCore::LocalFrame*, WebCore::FocusOptions, WebCore::BroadcastFocusedElement) final;
+    // Tab reaches links like in Chrome and Firefox (EmptyChromeClient: form controls only,
+    // Safari's default); outside Cocoa WebCore always includes all form controls
+    WebCore::KeyboardUIMode keyboardUIMode() final { return WebCore::KeyboardAccessTabsToLinks; }
 
     void invalidateRootView(const WebCore::IntRect&) final;
     void invalidateContentsAndRootView(const WebCore::IntRect&) final;
