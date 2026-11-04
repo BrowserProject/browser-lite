@@ -141,6 +141,9 @@ static void compositeScene(CompositorScene& scene)
         scene.waitingForTiles = false;
         reasons = std::exchange(scene.reasons, { });
         notify = std::exchange(scene.notifyEngine, false);
+        // Every way out of this frame below answers
+        if (notify)
+            ++scene.answersOnTheWay;
         // Report the first paint with the rendering update that brings it: its
         // tiles are in the frame
         if (reasons.contains(CompositionReason::RenderingUpdate)) {
@@ -168,11 +171,13 @@ static void compositeScene(CompositorScene& scene)
     if (pinching && !reasons.isEmpty())
         reasons.add(CompositionReason::AsyncScrolling);
 
+    // The next rendering update waits for this answer: not behind the page's work (Engine.h)
     auto notifyEngine = [&] {
         if (!notify)
             return;
-        runOnEngineThread([viewId = scene.viewId] {
-            if (auto* view = WebView::fromID(viewId))
+        runUrgentOnEngineThread([scene = Ref { scene }] {
+            --scene->answersOnTheWay;
+            if (auto* view = WebView::fromID(scene->viewId))
                 view->didComposite();
         });
     };
@@ -620,7 +625,7 @@ String LayerTreeHostWasm::stallState() const
     Locker locker { m_scene->lock };
     auto flag = [](bool value) { return value ? '1' : '0'; };
     return makeString("waiting "_s, flag(m_waitingForCompositor), ", frame scheduled "_s, flag(m_scene->frameScheduled), ", waiting for tiles "_s, flag(m_scene->waitingForTiles),
-        " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine),
+        " ("_s, m_scene->pendingTiles.load(), "), hidden "_s, flag(m_scene->hidden), ", reasons "_s, m_scene->reasons.toRaw(), ", notify "_s, flag(m_scene->notifyEngine), ", answers on the way "_s, m_scene->answersOnTheWay.load(),
         ", compositor phase "_s, static_cast<unsigned>(m_scene->framePhase.load()), " for "_s, static_cast<int>(MonotonicTime::now().secondsSinceEpoch().value() - m_scene->framePhaseSince.load()), " s, layer "_s,
         m_scene->flushingLayer.load(), " of "_s, m_scene->committedLayers.size(), " at step "_s,
         CoordinatedPlatformLayer::flushStepForDiagnostics().load(std::memory_order_relaxed));
@@ -628,7 +633,7 @@ String LayerTreeHostWasm::stallState() const
 
 bool LayerTreeHostWasm::compositorIdleWhileWaiting() const
 {
-    if (!m_waitingForCompositor || m_scene->framePhase.load())
+    if (!m_waitingForCompositor || m_scene->framePhase.load() || m_scene->answersOnTheWay.load())
         return false;
     Locker locker { m_scene->lock };
     return !m_scene->frameScheduled && !m_scene->notifyEngine && !m_scene->waitingForTiles && m_scene->reasons.isEmpty() && !m_scene->hidden;

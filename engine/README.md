@@ -35,7 +35,7 @@ patches from `patches/`.
   - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
-    (event loop, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
+    (event loop: the host's calls and the compositor's answers before the page's work, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,

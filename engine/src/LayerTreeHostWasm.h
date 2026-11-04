@@ -72,6 +72,8 @@ public:
     // the next frame
     bool waitingForTiles WTF_GUARDED_BY_LOCK(lock) { false };
     bool notifyEngine WTF_GUARDED_BY_LOCK(lock) { false };
+    // Answers (didComposite) sent and not yet taken by the engine thread
+    std::atomic<unsigned> answersOnTheWay { 0 };
     // Report "first paint" with this state (WebView::firstPaintShown)
     bool firstPaint WTF_GUARDED_BY_LOCK(lock) { false };
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
@@ -165,8 +167,8 @@ public:
     void didComposite() { m_waitingForCompositor = false; }
     // State of the frame pipeline for the log of a view that stopped rendering
     String stallState() const;
-    // Waiting for the compositor while it has no frame of ours scheduled, running or to report:
-    // its answer got lost (WebView::checkRenderingStall goes on without it)
+    // Waiting for the compositor while it has no frame of ours scheduled, running, to report or
+    // reported: its answer got lost (WebView::checkRenderingStall goes on without it)
     bool compositorIdleWhileWaiting() const;
     // Show everything again (e.g. new canvas)
     void forceRepaint();

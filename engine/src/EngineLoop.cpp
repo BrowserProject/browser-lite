@@ -197,23 +197,25 @@ static Deque<Function<void()>*>& localTasks()
     return tasks;
 }
 
-// Calls of the host (input of the user, commands) run in their order before the engine's own
-// waiting work: a busy page queues timers, messages and network work for seconds (a news page
-// with ads on a weak phone) and a tap waited behind all of it. They keep their order among each
-// other (the clipboard is set before the Ctrl+V that pastes it). Input is also counted from the
-// host thread when sent, so the engine thread sees input that still sits in its mailbox and
-// returns from long work (RunLoop functions, patch 0072) to take it in.
-static Deque<Function<void()>*>& hostTasks()
+// Calls of the host (input of the user, commands, frames) and the compositor's answers run in
+// their order before the engine's own waiting work: a busy page queues timers, messages and
+// network work for seconds (a news page with ads on a weak phone) and a tap waited behind all of
+// it, the next rendering update behind the answer for the last one. They keep their order among
+// each other (the clipboard is set before the Ctrl+V that pastes it).
+static Deque<Function<void()>*>& priorityTasks()
 {
     static NeverDestroyed<Deque<Function<void()>*>> tasks;
     return tasks;
 }
 
-static std::atomic<int> s_inputWaiting;
+// Input and the compositor's answers are also counted from the sending thread, so the engine
+// thread sees them while they still sit in its mailbox: it takes them in between two of its tasks
+// and returns from long work (RunLoop functions, patch 0072) for them.
+static std::atomic<int> s_urgentWaiting;
 
-static bool inputWaiting()
+static bool urgentWorkWaiting()
 {
-    return s_inputWaiting.load(std::memory_order_relaxed) > 0 && isEngineThread();
+    return s_urgentWaiting.load(std::memory_order_relaxed) > 0 && isEngineThread();
 }
 
 // From Emscripten (system/lib/pthread/thread_mailbox.c): runs the work other
@@ -237,9 +239,9 @@ static void scheduleLocalDrain()
     bl_schedule_local_drain();
 }
 
-static void runHostTasks()
+static void runPriorityTasks()
 {
-    auto& tasks = hostTasks();
+    auto& tasks = priorityTasks();
     while (!tasks.isEmpty()) {
         auto* function = tasks.takeFirst();
         runWithGCAfterwards([&] {
@@ -249,21 +251,22 @@ static void runHostTasks()
     }
 }
 
-// Input in the mailbox comes in now (the mailbox only queues work here), the host's calls run first
-static void takeHostTasks()
+// Urgent work in the mailbox comes in now with all that waits there (the mailbox only queues work
+// here), the priority tasks run first
+static void takePriorityTasks()
 {
-    if (inputWaiting())
+    if (urgentWorkWaiting())
         _emscripten_check_mailbox();
-    runHostTasks();
+    runPriorityTasks();
 }
 
-// One pass: only what was waiting at the start, the host's calls first
+// One pass: only what was waiting at the start, the priority tasks first
 static void runLocalTasks()
 {
     auto& tasks = localTasks();
-    takeHostTasks();
+    takePriorityTasks();
     for (size_t count = tasks.size(); count && !tasks.isEmpty(); --count) {
-        takeHostTasks();
+        takePriorityTasks();
         if (tasks.isEmpty())
             break;
         auto* function = tasks.takeFirst();
@@ -279,7 +282,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl__run_local_tasks()
     clearStackBelow();
     s_localDrainScheduled = false;
     runLocalTasks();
-    if (!localTasks().isEmpty() || !hostTasks().isEmpty())
+    if (!localTasks().isEmpty() || !priorityTasks().isEmpty())
         scheduleLocalDrain();
 }
 
@@ -289,9 +292,9 @@ static void runFunction(void* arg)
     scheduleLocalDrain();
 }
 
-static void runHostFunction(void* arg)
+static void runPriorityFunction(void* arg)
 {
-    hostTasks().append(static_cast<Function<void()>*>(arg));
+    priorityTasks().append(static_cast<Function<void()>*>(arg));
     scheduleLocalDrain();
 }
 
@@ -305,12 +308,12 @@ static void proxyToEngineThread(void (*run)(void*), Function<void()>&& function)
     }
 }
 
-void runInputOnEngineThread(Function<void()>&& function)
+void runUrgentOnEngineThread(Function<void()>&& function)
 {
     // Counted before the queueing and uncounted when it runs: the count never stays above what waits
-    s_inputWaiting.fetch_add(1, std::memory_order_relaxed);
-    proxyToEngineThread(runHostFunction, [function = WTF::move(function)] {
-        s_inputWaiting.fetch_sub(1, std::memory_order_relaxed);
+    s_urgentWaiting.fetch_add(1, std::memory_order_relaxed);
+    proxyToEngineThread(runPriorityFunction, [function = WTF::move(function)] {
+        s_urgentWaiting.fetch_sub(1, std::memory_order_relaxed);
         function();
     });
 }
@@ -319,7 +322,7 @@ void runOnEngineThread(Function<void()>&& function)
 {
     // Also allowed from the engine thread itself: then it runs on the next pass
     // through the JS event loop (like a setTimeout(0), but without throttling).
-    proxyToEngineThread(emscripten_is_main_browser_thread() ? runHostFunction : runFunction, WTF::move(function));
+    proxyToEngineThread(emscripten_is_main_browser_thread() ? runPriorityFunction : runFunction, WTF::move(function));
 }
 
 void runNextOnEngineThread(Function<void()>&& function)
@@ -483,7 +486,7 @@ void runNestedEventLoop(const Function<bool()>& done)
     pthread_t self = pthread_self();
     while (!done()) {
         _emscripten_check_mailbox();
-        if (!localTasks().isEmpty() || !hostTasks().isEmpty()) {
+        if (!localTasks().isEmpty() || !priorityTasks().isEmpty()) {
             runNestedWork(vm, [] { runLocalTasks(); });
             continue;
         }
@@ -509,19 +512,20 @@ void runNestedEventLoop(const Function<bool()>& done)
     threadData.setCurrentState(scriptState);
     restartScriptWatchdog();
     // What is left runs from the JS event loop again
-    if (!localTasks().isEmpty() || !hostTasks().isEmpty())
+    if (!localTasks().isEmpty() || !priorityTasks().isEmpty())
         scheduleLocalDrain();
     armTimerForNextScheduledTask();
 }
 
-// WTF RunLoop (patch 0072): returns between two of its functions while input waits
+// WTF RunLoop (patch 0072) and WebCore's loops (patch 0074): return between two of their items
+// while urgent work waits
 extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
 void initializeEngineLoop()
 {
     RELEASE_ASSERT(isEngineThread());
     installScriptWatchdog();
-    bl_wtf_set_run_loop_yield_check(inputWaiting);
+    bl_wtf_set_run_loop_yield_check(urgentWorkWaiting);
     // Called while the RunLoop holds its lock, possibly from another thread:
     // only schedule here, never work directly.
     WTF::RunLoop::setWakeUpCallback([] {

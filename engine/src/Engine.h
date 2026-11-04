@@ -23,9 +23,11 @@ pthread_t engineThread();
 // Runs asynchronously as soon as the engine thread is back in the event loop. Calls from the
 // host's main thread run in their order before the engine's own waiting work.
 void runOnEngineThread(Function<void()>&&);
-// Input of the user from the host's main thread: like runOnEngineThread, and the engine thread
-// also returns from a long RunLoop pass to take it in.
-void runInputOnEngineThread(Function<void()>&&);
+// Input of the user from the host's main thread, and the compositor's answers that the next
+// rendering update waits for (a frame composited or presented): before the engine's own waiting
+// work like a call from the host, and the engine thread also takes it in between two of its
+// tasks and returns from a long RunLoop pass for it.
+void runUrgentOnEngineThread(Function<void()>&&);
 // On the engine thread: runs `function` before the other waiting tasks of the engine thread,
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);

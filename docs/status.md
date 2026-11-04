@@ -26,7 +26,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads,
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
-  waiting scripts (#246), GPU blur and shadow, CSS Paint
+  waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
+  33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
   Worklet, WebGL 1 and 2, recovery after GPU loss.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.

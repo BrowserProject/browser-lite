@@ -93,7 +93,9 @@ the GPU with cached filtered layers (#156); `url()` and SVG filters on the CPU. 
 like WPE (`ENABLE_DAMAGE_TRACKING`, #220): the layers report what changed, a frame without a
 visible change is neither composited nor shown, otherwise the compositor composites the whole view
 (compositing only the damage would need a copy of the view per frame, which costs more under
-SwiftShader). Pinch zoom scales the shown tiles on the compositor and commits once at the end
+SwiftShader). The compositor's answer that a rendering update is shown (and the presenter's that
+a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
+a frame every task or two (#359). Pinch zoom scales the shown tiles on the compositor and commits once at the end
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
@@ -120,9 +122,9 @@ Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` ex
 the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text; in Chrome
 the core opens and closes the on-screen keyboard itself (VirtualKeyboard API, #352). On the
 engine thread the host's calls run in their order before the engine's own waiting work, and
-input also makes WTF's RunLoop return between two of its functions (patch 0072, #347) and
-WebCore's loops of deferred and async scripts and of the page's event loop return after one item
-(patch 0074, #351). Waiting mouse moves coalesce (#350).
+input (like the compositor's answers, #359) is taken in between two of its tasks, makes WTF's
+RunLoop return between two of its functions (patch 0072, #347) and WebCore's loops of deferred
+and async scripts and of the page's event loop return after one item (patch 0074, #351). Waiting mouse moves coalesce (#350).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 

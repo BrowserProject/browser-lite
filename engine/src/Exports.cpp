@@ -123,7 +123,7 @@ template<typename Function>
 static void withInput(int id, Function&& function)
 {
     closeMove(id);
-    runInputOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
+    runUrgentOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
         if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
             function(*view);
     });
@@ -147,7 +147,7 @@ static void moveMouse(int id, const MoveValues& values)
         }
         openMoves().set(id, move.copyRef());
     }
-    runInputOnEngineThread([id, move = WTF::move(move)] {
+    runUrgentOnEngineThread([id, move = WTF::move(move)] {
         MoveValues values;
         {
             Locker locker { s_movesLock };
