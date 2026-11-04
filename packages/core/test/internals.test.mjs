@@ -89,13 +89,45 @@ const tick = () => new Promise((resolve) => setTimeout(resolve));
 test('dialogs: defaults without a handler', () => {
   const { requests, module } = requestsWith({});
   const view = fakeView();
-  for (let type = 0; type <= 4; type++) requests.dialog(type + 1, view, type, 'o', 'm', 'd');
+  for (let type = 0; type <= 5; type++) requests.dialog(type + 1, view, type, 'o', 'm', 'd');
   assert.deepEqual(module.calls, [
     ['dialog', 1, 0, 0],
     ['dialog', 2, 0, 0],
     ['dialog', 3, 0, 0],
     ['dialog', 4, 1, 0],
     ['dialog', 5, 1, 0],
+    ['dialog', 6, 0, 0],
+  ]);
+});
+
+test('dialogs: resubmit sends the form again only on true, the engine may withdraw it', async () => {
+  const seen = [];
+  const answers = [true, 'yes', undefined];
+  const { requests, module, watchdog } = requestsWith({
+    dialog(request) {
+      seen.push(request);
+      if (!answers.length) return new Promise(() => {});
+      return answers.shift();
+    },
+  });
+  const view = fakeView();
+  for (let id = 1; id <= 4; id++) requests.dialog(id, view, 5, 'https://a.example', '', '');
+  assert.deepEqual(
+    seen.map((request) => request.type),
+    ['resubmit', 'resubmit', 'resubmit', 'resubmit'],
+  );
+  assert.equal(seen[0].reload, false);
+  assert.equal(requests.hasDialog(view), true);
+  // The page navigated meanwhile ('dialog-cancel'): aborted, no answer to the engine
+  requests.cancelDialog(4);
+  requests.cancelDialog(4);
+  assert.equal(seen[3].signal.aborted, true);
+  assert.equal(requests.hasDialog(view), false);
+  assert.equal(watchdog.closed, 4);
+  assert.deepEqual(module.calls, [
+    ['dialog', 1, 1, 0],
+    ['dialog', 2, 0, 0],
+    ['dialog', 3, 0, 0],
   ]);
 });
 

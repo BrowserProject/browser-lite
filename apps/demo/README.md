@@ -78,7 +78,8 @@ select popup) are in the same sheet.
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
   show the cross only on the active (and hovered) tab, on touch screens a little earlier. A tab
   and the window are named after the page's title, without one after its address (#367).
-- **Dialogs**: alert, confirm, prompt and beforeunload are dialogs of `@browser-lite/ui` over the
+- **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
+  (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
   sign-in dialogs of a tab behind are hidden until it is in front. Escape dismisses the
   permission prompt. Declining buttons come before accepting ones everywhere.

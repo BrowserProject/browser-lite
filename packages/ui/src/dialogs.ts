@@ -49,6 +49,15 @@ function after(
 
 /** The content of a page's dialog: "<host> says:" and the message, Chrome's buttons. */
 function contentOf(request: DialogRequest, texts: UiTexts): DialogContent {
+  if (request.type === 'resubmit')
+    return {
+      type: 'resubmit',
+      title: texts.resubmitForm,
+      message: texts.resubmitWarning,
+      defaultValue: '',
+      ok: texts.resend,
+      cancel: texts.cancel,
+    };
   if (request.type === 'beforeunload')
     return {
       type: 'beforeunload',
@@ -72,6 +81,7 @@ function contentOf(request: DialogRequest, texts: UiTexts): DialogContent {
  * The dialog handler around `show` with Chrome's texts and the protection against loops: when a
  * page shows dialogs in a fast loop, it asks once whether the page may show more (blocking lasts
  * until the view gets a new document); beforeunload in a navigation loop leaves without asking.
+ * resubmit is the browser's own question and always shows.
  */
 export function guardedDialogs(
   options: DialogOptions | undefined,
@@ -97,8 +107,9 @@ export function guardedDialogs(
       const showPage = () =>
         after(show(contentOf(request, texts), request), (answer) => {
           state.last = now();
-          return request.type === 'beforeunload' ? !!answer : answer;
+          return request.type === 'beforeunload' || request.type === 'resubmit' ? !!answer : answer;
         });
+      if (request.type === 'resubmit') return showPage();
       if (request.type === 'beforeunload')
         return skipBeforeUnload(state, now()) ? true : showPage();
       const decision = decideDialog(state, now());
@@ -125,9 +136,10 @@ export function guardedDialogs(
 }
 
 /**
- * alert, confirm, prompt and beforeunload with the native dialogs of the host browser, like
- * Chrome: "<host> says:" before the message, beforeunload as "Leave site?" or "Reload site?"
- * with the standard sentence (never the text of the page) and the protection against loops of
+ * alert, confirm, prompt, beforeunload and resubmit with the native dialogs of the host browser,
+ * like Chrome: "<host> says:" before the message, beforeunload as "Leave site?" or "Reload site?"
+ * with the standard sentence (never the text of the page), resubmit as "Confirm form
+ * resubmission" and the protection against loops of
  * {@link guardedDialogs}. A native dialog stops the host page and so every view until the user
  * answers. Showing dialogs of background views is the decision of the caller (wrap the handler).
  */

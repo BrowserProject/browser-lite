@@ -75,7 +75,8 @@ The full list is `abi.json`; the rules behind it:
   may be called from any thread and run asynchronously on the engine thread, unless
   `abi.json` marks them synchronous. Hooks run on the main thread of the page.
   `engineDialog` returns at once; only the asking page waits for `bl_dialog_answer`, the
-  engine thread runs the other views meanwhile (#258).
+  engine thread runs the other views meanwhile (#258). For `resubmit` (a form sent again) only
+  the navigation waits; `dialog-cancel` withdraws it (#369).
 - Frames: the host transfers each view canvas with `transferControlToOffscreen` to
   `Module.blPresenterWorker()` (`{ blCanvas, viewId }`); the engine paints into it, on the
   compositor thread when compositing with WebGL 2. Without that canvas, `onEngineFrame` hands

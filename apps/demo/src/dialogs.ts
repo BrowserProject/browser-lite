@@ -4,10 +4,11 @@ import { activate, activeTab, tabOf } from './tabs.js';
 import { byId } from './util.js';
 
 /**
- * alert, confirm, prompt and beforeunload as in-page dialogs of the ui package over the page
- * area (only the asking tab waits). Only the tab in front asks (#149): background tabs get the
- * default answer at once and a marker; a beforeunload of a background tab leaves without
- * asking, unless the tab is being closed (then it comes to the front first).
+ * alert, confirm, prompt, beforeunload and resubmit as in-page dialogs of the ui package over the
+ * page area (only the asking tab waits). Only the tab in front asks (#149): background tabs get
+ * the default answer at once (a form is not sent again) and a marker; a beforeunload of a
+ * background tab leaves without asking, unless the tab is being closed (then it comes to the
+ * front first).
  */
 export function dialogHandler(): Pick<RequestHandlers, 'dialog'> {
   const inPage = pageDialogs({
@@ -32,7 +33,7 @@ export function dialogHandler(): Pick<RequestHandlers, 'dialog'> {
           tab.dialogSuppressed = true;
           tab.updateDialogMarker();
         }
-        return request.type === 'confirm' ? false : null;
+        return request.type === 'confirm' || request.type === 'resubmit' ? false : null;
       }
       return inPage.dialog(request);
     },

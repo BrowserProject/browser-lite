@@ -14,9 +14,9 @@ const declined = (content: DialogContent): DialogAnswer =>
   content.type === 'alert' ? undefined : content.type === 'prompt' ? null : false;
 
 /**
- * alert, confirm, prompt and beforeunload as dialogs in the page of the host, with the texts and
- * the protection against loops of {@link nativeDialogs}. Only the asking page waits for the
- * answer (the core runs the other views meanwhile). One dialog per view at a time, the others of
+ * alert, confirm, prompt, beforeunload and resubmit as dialogs in the page of the host, with the
+ * texts and the protection against loops of {@link nativeDialogs}. Only the asking page waits for
+ * the answer (the core runs the other views meanwhile). One dialog per view at a time, the others of
  * that view wait in order; an aborted request (navigation, closing) removes its dialog. Enter
  * accepts, Escape declines; the focus goes to the field or the accepting button and back to the
  * view afterwards. Element: `.bl-page-dialog` (a form) with `data-bl-view` and `data-bl-type`,

@@ -16,7 +16,14 @@ import type {
 import type { ViewImpl } from './view.js';
 import type { Watchdog } from './watchdog.js';
 
-const DIALOG_TYPES = ['alert', 'confirm', 'prompt', 'beforeunload', 'beforeunload'] as const;
+const DIALOG_TYPES = [
+  'alert',
+  'confirm',
+  'prompt',
+  'beforeunload',
+  'beforeunload',
+  'resubmit',
+] as const;
 
 /** Default file chooser: the native file dialog of the host browser. */
 export function nativeFileChooser(request: FileChooserRequest): Promise<File[] | null> {
@@ -97,8 +104,9 @@ export class Requests {
   }
 
   /**
-   * alert/confirm/prompt/beforeunload (Module.engineDialog). The asking page waits until
-   * bl_dialog_answer, the other views go on; the handler may answer later (a promise).
+   * alert/confirm/prompt/beforeunload/resubmit (Module.engineDialog). The asking page (for
+   * resubmit its navigation) waits until bl_dialog_answer, the other views go on; the handler
+   * may answer later (a promise).
    */
   dialog(
     id: number,
@@ -151,7 +159,8 @@ export class Requests {
     this.answerDialog(id, dialog.type, answer);
   }
 
-  // Missing or unexpected answers count like the defaults: confirm false, prompt null, leave
+  // Missing or unexpected answers count like the defaults: confirm false, prompt null, leave,
+  // do not send the form again
   private answerDialog(id: number, type: DialogRequest['type'], answer: DialogAnswer): void {
     const { module, ready } = this.host;
     if (!ready) return;
@@ -160,11 +169,21 @@ export class Requests {
     else
       module._bl_dialog_answer(
         id,
-        (type === 'confirm' && answer === true) || (type === 'beforeunload' && answer !== false)
+        ((type === 'confirm' || type === 'resubmit') && answer === true) ||
+          (type === 'beforeunload' && answer !== false)
           ? 1
           : 0,
         0,
       );
+  }
+
+  /** The engine no longer waits for the answer ('dialog-cancel'): the request aborts. */
+  cancelDialog(id: number): void {
+    const dialog = this.dialogs.get(id);
+    if (!dialog) return;
+    this.dialogs.delete(id);
+    dialog.controller.abort();
+    this.host.watchdog.dialogClosed();
   }
 
   /** Whether a dialog of the view is open: its page waits and runs the view's calls afterwards. */

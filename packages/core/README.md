@@ -72,7 +72,7 @@ any number of listeners.
 
 | Handler | Default |
 |---|---|
-| `dialog` | alert ignored, confirm `false`, prompt `null`, beforeunload `true` (leave) |
+| `dialog` | alert ignored, confirm `false`, prompt `null`, beforeunload `true` (leave), resubmit `false` (the form is not sent again, the page stays) |
 | `permission` | denied without remembering; grant `notifications` only after the host allowed them (`Notification.requestPermission`) |
 | `authenticate` | `null`: the page shows the 401 response. Called for a 401 with Basic or Digest of the main frame or a same origin load without stored credentials, with `url`, `origin`, `realm`, `scheme` and `retry` (the last credentials were refused); resolve `{ username, password }` to sign in. The engine keeps them for the session per realm |
 | `fileChooser` | native file dialog of the host |
@@ -86,7 +86,10 @@ asking page waits meanwhile, together with popups it shares script with: it gets
 view runs calls afterwards and shows its last frame. All other views go on. Navigating the view
 (`load`, `reload`, `back`, `forward`, `restoreHistory`) first answers its open dialogs with the
 default and aborts their signal. A native dialog of the host page (`window.alert`) stops the host
-page itself and with it every view.
+page itself and with it every view. `resubmit` comes before a reload or back/forward would send a
+form (POST) again (from the back/forward cache nothing is sent): `true` sends it, otherwise the
+page stays. Only that navigation waits, the page runs on; when it navigates or stops meanwhile
+the signal aborts.
 
 The events are listed with their payloads in `BrowserEvents` and `ViewEvents` of
 [src/types.ts](src/types.ts) (a `Download` has `progress`, `done` and `error`). Some only report

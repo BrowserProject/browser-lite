@@ -567,7 +567,10 @@ export interface ContextMenuInfo {
   canGoForward: boolean;
 }
 
-/** Answer of a dialog handler: confirm boolean, prompt string or null, beforeunload true to leave. */
+/**
+ * Answer of a dialog handler: confirm boolean, prompt string or null, beforeunload true to leave,
+ * resubmit true to send the form again.
+ */
 export type DialogAnswer = boolean | string | null | undefined;
 
 /**
@@ -576,14 +579,17 @@ export type DialogAnswer = boolean | string | null | undefined;
  */
 export interface RequestHandlers {
   /**
-   * alert, confirm, prompt and beforeunload, answered directly or with a promise (an in-page
-   * dialog). Answer: confirm true for OK, prompt the text or null, beforeunload false to stay.
-   * Like in Chrome only the asking page waits for the answer (with the popups it shares script
-   * with): it gets no input and holds back the view's calls, its last frame stays. All other
-   * views go on. A navigation of the view (`load`, `reload`, `back`, ...) answers its open
-   * dialogs with the default first. The signal aborts then, when the view closes or the engine
-   * ends. A native dialog of the host page (`window.alert`) still stops the host page and so
-   * all views. Default: alert ignored, confirm false, prompt null, beforeunload true.
+   * alert, confirm, prompt, beforeunload and resubmit, answered directly or with a promise (an
+   * in-page dialog). Answer: confirm true for OK, prompt the text or null, beforeunload false to
+   * stay, resubmit true to send the form again. Like in Chrome only the asking page waits for the
+   * answer (with the popups it shares script with): it gets no input and holds back the view's
+   * calls, its last frame stays. All other views go on. resubmit comes before a reload or
+   * back/forward would send a form (POST) again, only its navigation waits; when the page
+   * navigates or stops meanwhile, the signal aborts. A navigation of the view (`load`,
+   * `reload`, `back`, ...) answers its open dialogs with the default first. The signal aborts
+   * then, when the view closes or the engine ends. A native dialog of the host page
+   * (`window.alert`) still stops the host page and so all views. Default: alert ignored,
+   * confirm false, prompt null, beforeunload true, resubmit false (the page stays).
    */
   dialog(request: DialogRequest): DialogAnswer | Promise<DialogAnswer>;
   /**
@@ -619,10 +625,11 @@ export interface RequestHandlers {
 /** A page dialog (handler `dialog`). */
 export interface DialogRequest {
   view: View;
-  type: 'alert' | 'confirm' | 'prompt' | 'beforeunload';
+  /** resubmit: a reload or back/forward would send a form (POST) again. */
+  type: 'alert' | 'confirm' | 'prompt' | 'beforeunload' | 'resubmit';
   /** Origin of the asking frame (for "<host> says"). */
   origin: string;
-  /** Text of the page; empty for beforeunload (like Chrome, never shown). */
+  /** Text of the page; empty for beforeunload (like Chrome, never shown) and resubmit. */
   message: string;
   /** Default text of a prompt. */
   defaultValue: string;

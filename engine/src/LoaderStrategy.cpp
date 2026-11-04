@@ -206,6 +206,18 @@ public:
                     return;
                 if (lookup.fresh)
                     return serveFromCache(WTF::move(lookup.entry), ResourceResponse::Source::DiskCache);
+                // Only from the cache: fetch's only-if-cached, and the first try
+                // of back/forward to a form result, which must not send the form
+                // again by itself (WebCore asks again with FormResubmitted). In
+                // a later task like a failure from the network: the lookup may
+                // answer within start(), before WebCore knows the loader.
+                if (m_loader->request().cachePolicy() == ResourceRequestCachePolicy::ReturnCacheDataDontLoad) {
+                    runOnEngineThread([this, protectedThis = Ref { *this }] {
+                        if (m_loader)
+                            fail(ResourceError(errorDomain, 0, m_loader->request().url(), "Not in the cache"_s));
+                    });
+                    return;
+                }
                 m_cachedEntry = WTF::move(lookup.entry);
                 startNetwork(WTF::move(lookup.request));
             });

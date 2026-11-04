@@ -178,9 +178,9 @@ void WebView::close(int id)
 {
     // Its open dialogs end with the default answer; until their script is
     // done the dialog keeps the view and closes its choosers (Clients.cpp)
+    dismissDialogs(id);
     if (auto* view = fromID(id); !view || !view->isBlockedByDialog())
         closeChoosers(id);
-    dismissDialogs(id);
     openViews().remove(id);
     detachDeviceClients(id);
 }

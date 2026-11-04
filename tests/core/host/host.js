@@ -196,7 +196,7 @@ const blTest = {
 
 // Native dialogs of the host page block its main thread like a real embedding would
 function nativeDialog(request) {
-  if (request.type === 'confirm' || request.type === 'beforeunload')
+  if (request.type === 'confirm' || request.type === 'beforeunload' || request.type === 'resubmit')
     return confirm(request.message);
   if (request.type === 'prompt') return prompt(request.message, request.defaultValue);
   alert(request.message);

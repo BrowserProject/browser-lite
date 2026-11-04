@@ -115,6 +115,22 @@ test('beforeunload asks with the standard texts and never shows the page text', 
   ]);
 });
 
+test('resubmit asks with the standard texts every time and answers a boolean', () => {
+  const answers = [true, false, 'x'];
+  const { dialog, shown } = setup({ confirm: () => answers.shift() });
+  const view = fakeView();
+  const results = [];
+  for (let i = 0; i < 3; i++) results.push(dialog(request(view, 'resubmit', { message: '' })));
+  assert.deepEqual(results, [true, false, true]);
+  const text =
+    'Confirm form resubmission\n\nThis page uses information that you entered. Sending it again may repeat an action, such as an order or a payment.';
+  assert.deepEqual(shown, [
+    ['confirm', text],
+    ['confirm', text],
+    ['confirm', text],
+  ]);
+});
+
 test('beforeunload in a navigation loop leaves without asking', () => {
   const { dialog, shown, tick } = setup({ confirm: () => false });
   const view = fakeView();

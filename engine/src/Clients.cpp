@@ -212,12 +212,14 @@ void ChromeClient::addMessageToConsole(JSC::MessageSource, JSC::MessageLevel lev
 // Dialogs (#258): Module.engineDialog(dialogId, viewId, type, origin, message,
 // default) shows the dialog on the main thread, the host answers later with
 // bl_dialog_answer. type: alert (0), confirm (1), prompt (2), beforeunload when
-// leaving (3) or reloading (4). origin is the origin of the asking frame (like
-// "<host> says" in Chrome). Until the answer the asking script waits in a
-// nested event loop of the engine thread (runNestedEventLoop): WebCore defers
-// the dialog's page group (Chrome::runJavaScriptAlert and the others), its
-// views hold back input and commands (WebView::blockForDialog), all other
-// views go on.
+// leaving (3) or reloading (4), resubmitting a form (5). origin is the origin of
+// the asking frame (like "<host> says" in Chrome). Until the answer of a page
+// dialog the asking script waits in a nested event loop of the engine thread
+// (runNestedEventLoop): WebCore defers the dialog's page group
+// (Chrome::runJavaScriptAlert and the others), its views hold back input and
+// commands (WebView::blockForDialog), all other views go on. Questions of the
+// engine itself (resubmitting) stop no script: the answer goes to a function,
+// meanwhile only the view holds back input and commands.
 namespace {
 struct DialogRequest {
     int id;
@@ -234,13 +236,25 @@ struct OpenDialog {
     bool accepted { false };
     String text;
 };
+
+struct HostQuestion {
+    WeakPtr<WebView> view;
+    int viewId { 0 };
+    CompletionHandler<void(bool)> answer;
+};
 }
 
-// Open dialogs by id (engine thread)
+// Open dialogs and questions by id (engine thread)
 static HashMap<int, OpenDialog*>& openDialogs()
 {
     static NeverDestroyed<HashMap<int, OpenDialog*>> dialogs;
     return dialogs;
+}
+
+static HashMap<int, HostQuestion>& hostQuestions()
+{
+    static NeverDestroyed<HashMap<int, HostQuestion>> questions;
+    return questions;
 }
 
 static void showDialogOnMainThread(void* argument)
@@ -261,12 +275,70 @@ static void showDialogOnMainThread(void* argument)
         bl_dialog_answer(request->id, 0, nullptr);
 }
 
+static void answerQuestion(int id, bool accepted)
+{
+    auto question = hostQuestions().take(id);
+    if (!question.answer)
+        return;
+    if (RefPtr view = question.view.get())
+        view->unblockAfterDialog();
+    question.answer(accepted);
+}
+
 void dismissDialogs(int viewId)
 {
     for (auto* dialog : openDialogs().values()) {
         if (dialog->viewId == viewId)
             dialog->answered = true;
     }
+    Vector<int> questions;
+    for (auto& [id, question] : hostQuestions()) {
+        if (question.viewId == viewId)
+            questions.append(id);
+    }
+    for (int id : questions)
+        answerQuestion(id, false);
+}
+
+static int nextDialogID()
+{
+    static int nextID = 1;
+    return nextID++;
+}
+
+// To the host on the main thread; false when that is not possible
+static bool showDialog(int id, WebView& view, LocalFrame& frame, int type, const String& message, const String& defaultValue)
+{
+    RefPtr document = frame.document();
+    auto* request = new DialogRequest { id, view.id(), type, (document ? document->securityOrigin().toString() : String { }).utf8(), message.utf8(), defaultValue.utf8() };
+    if (emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), showDialogOnMainThread, request))
+        return true;
+    delete request;
+    return false;
+}
+
+// Asks the host without waiting; answer gets true when the user accepted.
+// Returns the id for withdrawQuestion, 0 when answered at once (with false).
+static int askHost(WebView& view, LocalFrame& frame, int type, CompletionHandler<void(bool)>&& answer)
+{
+    int id = nextDialogID();
+    if (!view.isOpen() || !showDialog(id, view, frame, type, { }, { })) {
+        answer(false);
+        return 0;
+    }
+    view.blockForDialog();
+    hostQuestions().add(id, HostQuestion { WeakPtr { view }, view.id(), WTF::move(answer) });
+    return id;
+}
+
+// The engine no longer needs the answer: the host closes the question
+static void withdrawQuestion(int id)
+{
+    auto entry = hostQuestions().find(id);
+    if (entry == hostQuestions().end())
+        return;
+    notifyHost(entry->value.viewId, "dialog-cancel", makeString("{\"id\":"_s, id, '}'));
+    answerQuestion(id, false);
 }
 
 // Returns whether the user accepted; text gets the answer of a prompt
@@ -275,16 +347,11 @@ static bool runDialog(WebView& view, LocalFrame& frame, int type, const String& 
     // Closed during an earlier dialog of the same script
     if (!view.isOpen())
         return false;
-    static int nextID = 1;
-    int id = nextID++;
+    int id = nextDialogID();
     OpenDialog dialog { view.id() };
     openDialogs().add(id, &dialog);
-    RefPtr document = frame.document();
-    auto* request = new DialogRequest { id, view.id(), type, (document ? document->securityOrigin().toString() : String { }).utf8(), message.utf8(), defaultValue.utf8() };
-    if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), emscripten_main_runtime_thread_id(), showDialogOnMainThread, request)) {
-        delete request;
+    if (!showDialog(id, view, frame, type, message, defaultValue))
         dialog.answered = true;
-    }
     // Views of the page group (popups with their opener) share script with
     // the waiting one. They stay alive until it is done, also when closed.
     Vector<Ref<WebView>> views;
@@ -595,7 +662,7 @@ static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxF
     notifyHost(viewId, "external-url", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
 }
 
-void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse&, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags sandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
+void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse& redirectResponse, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags sandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
 {
     if (isExternalURL(request.url())) {
         openExternalURL(m_view->id(), m_frameLoader->frame(), sandboxFlags, action, request.url());
@@ -606,6 +673,16 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
     // first (WebCore checks sandbox, then calls startDownload)
     if (!action.downloadAttribute().isNull()) {
         function(PolicyAction::Download);
+        return;
+    }
+    // A form sent again (reload, or back/forward to a form result that is not
+    // in a cache): like Chrome and Safari the user confirms first, otherwise
+    // the page stays. Redirects of the confirmed request do not ask again.
+    if (action.type() == NavigationType::FormResubmitted && redirectResponse.isNull()) {
+        withdrawQuestion(std::exchange(m_resubmitQuestion, 0));
+        m_resubmitQuestion = askHost(m_view.get(), m_frameLoader->frame(), 5, [function = WTF::move(function)](bool resend) mutable {
+            function(resend ? PolicyAction::Use : PolicyAction::Ignore);
+        });
         return;
     }
     // Ctrl/Cmd+click or middle click on a link: like Chrome in a new
@@ -619,6 +696,13 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
         }
     }
     function(PolicyAction::Use);
+}
+
+// A new load or stop ends the open question, like WebKit's
+// WebFrame::invalidatePolicyListeners (the check ends with Ignore)
+void FrameLoaderClient::cancelPolicyCheck()
+{
+    withdrawQuestion(std::exchange(m_resubmitQuestion, 0));
 }
 
 void FrameLoaderClient::dispatchDecidePolicyForResponse(const ResourceResponse& response, const ResourceRequest&, const String&, FramePolicyFunction&& function)
@@ -919,7 +1003,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE void bl_dialog_answer(int id, int accepted, char
     free(text);
     BrowserLite::runOnEngineThread([id, accepted, answer = WTF::move(answer)]() mutable {
         auto* dialog = BrowserLite::openDialogs().get(id);
-        if (!dialog || dialog->answered)
+        if (!dialog) {
+            BrowserLite::answerQuestion(id, accepted);
+            return;
+        }
+        if (dialog->answered)
             return;
         dialog->answered = true;
         dialog->accepted = accepted;

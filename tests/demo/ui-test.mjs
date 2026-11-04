@@ -4,7 +4,7 @@
 // the URL, a hanging engine (message, the JSC watchdog stops the script, the time in a dialog
 // does not count), a real crash (abort, WASM trap) with a restart in the page (also from the
 // hang), back/forward that fails and stop, beforeunload (navigation, reload, closing a tab and
-// the host tab, loop) and window.focus().
+// the host tab, loop), window.focus() and the question before a form is sent again.
 //
 //   node tests/demo/ui-test.mjs [engine-dir]
 import {
@@ -1176,6 +1176,65 @@ check(
     unloadDialogs.slice(dialogsBeforeClear).length === 1 &&
     unloadDialogs[dialogsBeforeClear].startsWith('confirm:Delete site data?'),
   JSON.stringify(unloadDialogs.slice(dialogsBeforeClear)),
+);
+
+// Sending a form again (#369): F5 and the reload button ask "Confirm form resubmission" in the
+// page; Cancel keeps the page and sends nothing, Continue sends the form again
+const orders = [];
+const { url: orderURL } = await serve((req, res) => {
+  const html = (body) =>
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(body);
+  if (req.method !== 'POST')
+    return html(
+      '<!doctype html><title>Order form</title><form method="post" action="/order"><input name="item" value="pizza"><button>Order</button></form><script>console.log("RESULT loaded=Order form")</script>',
+    );
+  let body = '';
+  req.on('data', (chunk) => {
+    body += chunk;
+  });
+  req.on('end', () => {
+    orders.push(body);
+    html(
+      `<!doctype html><title>Order ${orders.length}</title><p>Order placed #${orders.length}</p><script>console.log("RESULT loaded=Order ${orders.length}")</script>`,
+    );
+  });
+});
+const orderTab = await (
+  await browser.newContext({ viewport: { width: 1100, height: 700 } })
+).newPage();
+watchErrors(orderTab);
+const orderLoaded = [];
+orderTab.on('console', (msg) => {
+  const match = loadedPattern.exec(msg.text());
+  if (match) orderLoaded.push(match[1].trim());
+});
+const orderDialogs = [];
+let orderAnswer = 'dismiss';
+await answerPageDialogs(orderTab, (type, text) => {
+  orderDialogs.push(`${type}:${text.split('\n')[0]}`);
+  return orderAnswer;
+});
+await orderTab.goto(stack.app({ url: orderURL + 'form' }));
+check('resubmit: form loaded', await waitLoaded('Order form', TIMEOUT, orderLoaded));
+await orderTab.evaluate(() => window.blTest.eval('document.forms[0].submit()'));
+check('resubmit: form sent once', await waitLoaded('Order 1', 30000, orderLoaded));
+await orderTab.keyboard.press('F5');
+await orderTab.waitForTimeout(2000);
+check(
+  'resubmit: F5 asks, Cancel keeps the page and sends nothing',
+  JSON.stringify(orderDialogs) === JSON.stringify(['resubmit:Confirm form resubmission']) &&
+    orders.length === 1 &&
+    !orderLoaded.includes('Order 2'),
+  `${JSON.stringify(orderDialogs)} ${orders.length}`,
+);
+orderAnswer = 'accept';
+await orderTab.click('#reload');
+check(
+  'resubmit: the reload button asks, Continue sends the form again',
+  (await waitLoaded('Order 2', 30000, orderLoaded)) &&
+    orderDialogs.length === 2 &&
+    orders.at(-1) === 'item=pizza',
+  `${JSON.stringify(orderDialogs)} ${orders.join()}`,
 );
 
 await browser.close();

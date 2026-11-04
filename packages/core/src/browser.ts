@@ -530,6 +530,9 @@ class BrowserImpl implements Browser, ViewHost {
     this.handle<{ id?: number }>('auth-cancel', (data) =>
       this.requests.cancelAuth(Number(data.id)),
     );
+    this.handle<{ id?: number }>('dialog-cancel', (data) =>
+      this.requests.cancelDialog(Number(data.id)),
+    );
     this.handle(
       'file-chooser',
       withView((view, data) => {

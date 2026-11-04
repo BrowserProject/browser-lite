@@ -15,6 +15,12 @@ export interface UiTexts {
   reloadSite: string;
   /** Second paragraph of the beforeunload question. */
   unsavedChanges: string;
+  /** Before a reload or back/forward sends a form again. */
+  resubmitForm: string;
+  /** Second paragraph of the question before sending a form again. */
+  resubmitWarning: string;
+  /** Button that sends the form again. */
+  resend: string;
   /** Button that accepts alert, confirm and prompt. */
   ok: string;
   /** Button that leaves the page on beforeunload (`reload` when reloading). */
@@ -57,6 +63,10 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   leaveSite: 'Leave site?',
   reloadSite: 'Reload site?',
   unsavedChanges: 'Changes that you made may not be saved.',
+  resubmitForm: 'Confirm form resubmission',
+  resubmitWarning:
+    'This page uses information that you entered. Sending it again may repeat an action, such as an order or a payment.',
+  resend: 'Continue',
   ok: 'OK',
   leave: 'Leave',
   permissions: Object.freeze({

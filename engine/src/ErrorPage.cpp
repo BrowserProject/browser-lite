@@ -5,9 +5,9 @@
 // back/forward work with that address. When the connection is back (online),
 // the engine reloads it unless the view already loads something else. A form
 // (POST) is not submitted again by itself: the request keeps its method and
-// body, only the retry button sends it again. The button calls
-// FrameLoader::reload for that: location.reload() always loads with GET in
-// WebCore.
+// body, only the retry button sends it again (after the question every
+// resubmission asks, #369). The button calls FrameLoader::reload for that:
+// location.reload() always loads with GET in WebCore.
 //
 // The host may replace the template (BL_ERROR_PAGE) with placeholders
 // {{lang}} {{kind}} {{title}} {{heading}} {{message}} {{code}} {{url}}

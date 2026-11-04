@@ -117,6 +117,7 @@ private:
     void dispatchDecidePolicyForNavigationAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&, WebCore::FormState*, const String&, std::optional<WebCore::NavigationIdentifier>, std::optional<WebCore::HitTestResult>&&, bool, WebCore::NavigationUpgradeToHTTPSBehavior, WebCore::SandboxFlags, WebCore::PolicyDecisionMode, WebCore::FramePolicyFunction&&) final;
     void dispatchDecidePolicyForResponse(const WebCore::ResourceResponse&, const WebCore::ResourceRequest&, const String&, WebCore::FramePolicyFunction&&) final;
     void dispatchDecidePolicyForNewWindowAction(const WebCore::NavigationAction&, const WebCore::ResourceRequest&, WebCore::FormState*, const String&, std::optional<WebCore::HitTestResult>&&, WebCore::FramePolicyFunction&&) final;
+    void cancelPolicyCheck() final;
 
     bool canHandleRequest(const WebCore::ResourceRequest&) const final { return true; }
     // Like WebKit2: otherwise PingLoader sends <a ping> and CSP reports without cookies
@@ -162,6 +163,8 @@ private:
 
     WeakRef<WebCore::FrameLoader> m_frameLoader;
     WeakRef<WebView> m_view;
+    // Open question whether to send a form again (dispatchDecidePolicyForNavigationAction)
+    int m_resubmitQuestion { 0 };
 };
 
 class ProgressTrackerClient final : public WebCore::ProgressTrackerClient {

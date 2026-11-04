@@ -30,6 +30,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
+  Reload and back/forward ask before they send a form (POST) again, cancel keeps the page (#369).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
