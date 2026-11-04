@@ -40,7 +40,8 @@ generic code paths the port takes, for example formatting of UI strings) comes a
     `MemoryWatch.cpp` (releases caches, finds the memory limit, memory pressure),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp`, `EditorClient.cpp`, `BackForwardList.cpp`,
-    `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`
+    `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
+    the user works in a visible one)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread)
   - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with

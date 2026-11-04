@@ -12,6 +12,7 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "Gamepad.h"
+#include "HiddenViews.h"
 #include "Host.h"
 #include "HttpAuth.h"
 #include "Preconnect.h"
@@ -118,14 +119,19 @@ static void closeMove(int id)
     openMoves().remove(id);
 }
 
-// Input for a view: dropped while a dialog of its page group is open, like Chrome
+// Input for a view: dropped while a dialog of its page group is open, like Chrome. Hidden views
+// wait while the user works in a visible one (HiddenViews.h).
 template<typename Function>
 static void withInput(int id, Function&& function)
 {
     closeMove(id);
     runUrgentOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
-        if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
-            function(*view);
+        auto* view = WebView::fromID(id);
+        if (!view || view->isBlockedByDialog())
+            return;
+        if (view->isVisible())
+            userWorksInVisibleView();
+        function(*view);
     });
 }
 

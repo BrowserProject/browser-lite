@@ -82,7 +82,10 @@ core reports it as the reason of `crash` (#218).
 All views share one engine thread. A JS entry may run at most 30 s (`scriptTimeoutSeconds`,
 #146). The core watchdog emits `unresponsive` when input or an expected answer gets no reply
 within 10 s (#147, #172). A page dialog holds only its page: until the answer the engine thread
-runs the other views in a nested event loop (`runNestedEventLoop`, #258).
+runs the other views in a nested event loop (`runNestedEventLoop`, #258). Input to a visible view
+makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,
+parser and loads held) until no input came for 1 s (`HiddenViews.cpp`, #364), so a heavy page
+loading in a background tab does not hold up typing in the front one.
 
 ## Frames
 
@@ -126,9 +129,11 @@ the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finishe
 the core opens the on-screen keyboard after a tap by focusing that field again once it has the
 page field's input mode, and Chrome closes it for none (#360). On the
 engine thread the host's calls run in their order before the engine's own waiting work, and
-input (like the compositor's answers, #359) is taken in between two of its tasks, makes WTF's
+input (like the compositor's answers, #359) is taken in between two of its tasks and before
+WebCore's timers (#365), makes WTF's
 RunLoop return between two of its functions (patch 0072, #347) and WebCore's loops of deferred
-and async scripts and of the page's event loop return after one item (patch 0074, #351). Waiting mouse moves coalesce (#350).
+and async scripts and of the page's event loop return after one item (patch 0074, #351). Hidden
+views wait while the user works in a visible one (#364, see Threads). Waiting mouse moves coalesce (#350).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 

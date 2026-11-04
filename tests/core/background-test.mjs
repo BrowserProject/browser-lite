@@ -1,6 +1,7 @@
 // Background views through @browser-lite/core (WebView::setVisible, View.setVisible): hidden pages
 // see visibilityState 'hidden', rAF and CSS animations stop, setInterval runs at most about once
-// per second, the engine does not paint; with sound, sound and timers go on. With and without the
+// per second, the engine does not paint; with sound, sound and timers go on. While the user types
+// in the front view a busy hidden view waits. With and without the
 // compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive) and no hang during a long native dialog of the host page, a
 // muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
@@ -92,6 +93,14 @@ audio.onpause = () => console.log('RESULT pause=audio');
 Promise.all([video.play(), audio.play()]).then(() => console.log('RESULT playing=stream'), (e) => console.log('RESULT playing=' + e.name));
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + video.paused + ':' + audio.paused));
 </script>`,
+  // Long tasks one after the other (not throttled like timers), for typing in another view
+  busy: `<!doctype html><title>busy</title><p>busy<script>const channel = new MessageChannel();
+channel.port1.onmessage = () => { const end = Date.now() + 500; while (Date.now() < end); console.log('RESULT chunk=' + Date.now()); channel.port2.postMessage(0); };
+channel.port2.postMessage(0);
+console.log('RESULT loaded=busy')</script>`,
+  typing: `<!doctype html><title>typing</title><body style="margin:0"><input style="position:absolute;left:10px;top:10px;width:300px;height:30px">
+<script>document.querySelector('input').onkeydown = (e) => console.log('RESULT keydown=' + e.key + ':' + Date.now());
+console.log('RESULT loaded=typing')</script>`,
   // For memory pressure: reports when the view goes away
   memory: `<!doctype html><title>memory</title><p>memory<script>const name = location.search.slice(1);
 addEventListener('pagehide', () => console.log('RESULT gone=' + name));
@@ -321,6 +330,57 @@ async function visibility(label, params) {
 
 await visibility('compositor', {});
 await visibility('without compositor', { compositing: '0' });
+
+// Typing in the front view while a hidden view runs long tasks: the hidden view waits until the
+// user pauses (engine/src/HiddenViews.cpp), the keys do not wait for its tasks
+const typing = await openApp({ url: `${siteURL}busy` });
+await typing.wait('loaded', 'busy');
+await typing.newTab(`${siteURL}typing`);
+await typing.wait('loaded', 'typing');
+const typingOrigin = await canvasOrigin(typing.page);
+await typing.page.mouse.click(typingOrigin.x + 100, typingOrigin.y + 25);
+// The click is input too: after the pause the hidden view is busy again
+await typing.page.waitForTimeout(2500);
+const chunkTimes = () => typing.results.filter((r) => r[1] === 'chunk').map((r) => Number(r[2]));
+check(
+  'typing: the hidden view is busy before',
+  chunkTimes().some((time) => time > Date.now() - 1500),
+);
+const keys = 'abcdefghijkl';
+const sent = [];
+for (const key of keys) {
+  sent.push(Date.now());
+  await typing.page.keyboard.press(key);
+  await typing.page.waitForTimeout(150);
+}
+const typed = Date.now();
+await typing.page.waitForTimeout(3000);
+const keydowns = typing.results.filter((r) => r[1] === 'keydown').map((r) => r[2].split(':'));
+check(
+  'typing: every key arrives in order',
+  keydowns.map(([key]) => key).join('') === keys,
+  keydowns.map(([key]) => key).join(''),
+);
+// The first key may wait for the task that runs when it comes
+const latencies = keydowns
+  .slice(1)
+  .map(([, time], i) => Number(time) - sent[i + 1])
+  .sort((a, b) => a - b);
+const medianLatency = latencies[Math.floor(latencies.length / 2)];
+check(
+  'typing: keys do not wait for the hidden view',
+  medianLatency < 120,
+  `median ${medianLatency} ms: ${latencies.join(' ')}`,
+);
+const whileTyping = chunkTimes().filter((time) => time > sent[1] && time <= typed).length;
+check(
+  'typing: the hidden view waits while the user types',
+  whileTyping <= 1,
+  `${whileTyping} tasks`,
+);
+const afterTyping = chunkTimes().filter((time) => time > typed).length;
+check('typing: the hidden view goes on after a pause', afterTyping >= 2, `${afterTyping} tasks`);
+await typing.context.close();
 
 // Memory pressure: over the limit the engine reports at every growth by 32 MB. The limit is just
 // above the memory of the same session without pressure.

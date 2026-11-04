@@ -342,6 +342,10 @@ static void timerFired(void*)
 {
     s_timerId = 0;
     s_timerDeadline = 0;
+    // The JS event loop may run this timer before the message that brings waiting input from the
+    // mailbox: the input comes first here too, like before a local task (a key waited for two
+    // tasks of a busy page instead of one)
+    takePriorityTasks();
     pumpRunLoop();
 }
 

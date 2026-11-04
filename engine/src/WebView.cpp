@@ -12,6 +12,7 @@
 #include "Compositor.h"
 #include "CookieJarWasm.h"
 #include "GpuRaster.h"
+#include "HiddenViews.h"
 #include "LayerTreeHostWasm.h"
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
@@ -221,6 +222,7 @@ void WebView::runHeldCommands()
     // A command may open a dialog again, then the rest waits once more
     while (!m_dialogBlocks && !m_heldCommands.isEmpty())
         m_heldCommands.takeFirst()(*this);
+    updateWaitForUser();
     // A frame wanted while blocked
     if (!m_dialogBlocks && m_frameRequested && m_visible)
         requestFrameFromHost(m_id);
@@ -1678,6 +1680,7 @@ void WebView::setVisible(bool visible)
         return;
     m_visible = visible;
     updateActivityState();
+    updateWaitForUser();
     if (m_layerTreeHost)
         m_layerTreeHost->setVisible(visible);
     if (visible && m_frameRequested)
@@ -1688,6 +1691,24 @@ void WebView::setAudible(bool audible)
 {
     m_audible = audible;
     updateActivityState();
+    // The page's own script may have paused the sound: it waits only after that task
+    runOnEngineThread([weakThis = WeakPtr { *this }] {
+        if (RefPtr view = weakThis.get())
+            view->updateWaitForUser();
+    });
+}
+
+void WebView::updateWaitForUser()
+{
+    // Below a dialog the page waits anyway (PageGroupLoadDeferrer) or its script is on the stack;
+    // runHeldCommands asks again. A closed view may still report media while it is torn down.
+    if (!m_page || m_dialogBlocks || !isOpen())
+        return;
+    bool wait = !m_visible && !m_audible && hiddenViewsWaitForUser();
+    if (wait == m_waitsForUser || (wait && m_page->defersLoading()))
+        return;
+    m_waitsForUser = wait;
+    setPageWaits(*m_page, wait);
 }
 
 void WebView::updateActivityState()

@@ -175,8 +175,12 @@ public:
     // Background view or host tab hidden: the page is hidden
     // (visibilityState, no rAF, timers throttled) and does not paint
     void setVisible(bool);
+    bool isVisible() const { return m_visible; }
     // The page plays sound: hidden, its timers are not throttled (like Chrome)
     void setAudible(bool);
+    // Hidden and without sound, the page waits while the user works in a visible view
+    // (HiddenViews.h); a dialog of its page group decides while it is open
+    void updateWaitForUser();
     void focusInitial(bool forward);
     void setZoom(float);
     // Pinch zoom (PinchZoom.h): only scale the view, the layout stays. pinch()
@@ -276,6 +280,7 @@ private:
     bool m_visible { true };
     bool m_audible { false };
     void updateActivityState();
+    bool m_waitsForUser { false };
     bool m_frameInFlight { false };
     bool m_needsFullPresent { false };
     bool m_compositedFrameMissed { false };

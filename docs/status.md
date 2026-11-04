@@ -22,6 +22,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Input runs before the engine's queued work (#347), waiting mouse moves coalesce (#350), the
   parser yields after 50 ms (#349): on 20min.ch locally the 90th percentile of input latency
   during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.
+  Hidden views wait while the user types or taps in a visible one (#364): with weather.com loading
+  in a background tab, typing in the front tab went from median 0.46 s (90th percentile 1.5 s, on
+  screen up to 6 s) to 2 ms (frame 36 ms); only the first key of a burst can still wait for a task
+  that already runs.
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
@@ -267,6 +271,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the median of a fetch stayed at 2 to 3 ms, the 90th percentile went from 3 to 5 ms up to 82 ms
    and the mean from 2.2 to 11.8 ms: only packets that meet a long task wait for it. A transport in
    a worker pays off for hosts with long tasks of their own, not for the demo.
+10. SQLite files go to the OPFS from the engine thread, which waits for each write
+   (`flushAll` of `MemoryVFS.cpp` through WasmFS): with weather.com loading on a busy machine
+   (2026-11-04, load about 15 on 10 cores) single flushes held the engine thread 1 to 2 s, 4 s of
+   35 s in all. Writing from another thread would free it.
 
 ## Open: features
 
