@@ -190,7 +190,12 @@ void ScrollingCoordinatorWasm::hasNodeWithAnimatedScrollChanged(bool hasAnimated
         if (it != entries().end())
             it->value.animatedScroll = hasAnimatedScroll;
     }
-    // Schedules a rendering update, afterwards the compositor drives the animation
+    // The compositor's ticks drive the animation (displayDidRefresh), and every tick asks for the
+    // next while it runs. WebKit only schedules a rendering update here, which makes no frame and
+    // so no first tick when nothing changed on screen yet: a scroll animation the page started
+    // (scrollTo with behavior smooth) would wait for the next wheel event.
+    if (hasAnimatedScroll)
+        requestTick(m_viewId);
     ThreadedScrollingCoordinator::hasNodeWithAnimatedScrollChanged(hasAnimatedScroll);
 }
 

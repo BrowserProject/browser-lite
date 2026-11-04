@@ -43,7 +43,8 @@ generic code paths the port takes, for example formatting of UI strings) comes a
     `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in a visible one)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
-    (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread)
+    (layers on the compositor thread), `ScrollingWasm.cpp` (scrolling thread: wheel, swipe and
+    scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
     Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,
     `ErrorPage.cpp`
