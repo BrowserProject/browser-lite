@@ -2205,10 +2205,6 @@ svg.favicon {
     max-height: calc(100% - 16px);
     font-size: var(--text-lg);
   }
-  .bl-context-menu {
-    max-height: calc(var(--visible-height, 100dvh) - 8px);
-    overflow-y: auto;
-  }
   .bl-context-menu .bl-menu-item {
     min-height: 48px;
     padding: 0 var(--space-5);

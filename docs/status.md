@@ -82,8 +82,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Chrome with the address bar at the bottom (back, only the host in the address, tab count, menu;
   above the home indicator and the keyboard, suggestions upwards above it), tab overview with
   cards, menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
-  areas, sheets above the iOS keyboard, checked on emulated phones; Android hosts get the iPhone
-  or iPad identity by default (#332); rotating the phone rotates the pages (#336).
+  areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
+  checked on emulated phones; Android hosts get the iPhone or iPad identity by default (#332);
+  rotating the phone rotates the pages (#336).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)

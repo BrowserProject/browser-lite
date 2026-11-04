@@ -634,10 +634,24 @@ test('context menu with the default items', async () => {
     ui.showContextMenu(view, info, items);
     window.dispatchEvent(new Event('blur'));
     out.blur = !document.querySelector('.bl-context-menu');
-    const edge = ui.showContextMenu(view, { ...info, x: 740, y: 530 }, items);
+    // Near the corner of the canvas: moved back into it, not over what lies below or beside it
+    // (the toolbar at the bottom of a phone)
+    const edge = ui.showContextMenu(view, { ...info, x: 390, y: 290 }, items);
     const box = document.querySelector('.bl-context-menu').getBoundingClientRect();
-    out.inside = box.right <= 800 && box.bottom <= 600;
+    out.inside = [box.left >= 50, box.right <= 450, box.top >= 60, box.bottom <= 360];
     edge();
+    // A canvas lower than the menu: it keeps inside and scrolls
+    view.canvas.style.height = '40px';
+    const short = ui.showContextMenu(view, { ...info, y: 30 }, items);
+    const scroller = document.querySelector('.bl-context-menu');
+    const shortBox = scroller.getBoundingClientRect();
+    out.short = [
+      shortBox.top >= 60,
+      shortBox.bottom <= 100,
+      scroller.scrollHeight > scroller.clientHeight,
+    ];
+    short();
+    view.canvas.style.height = '300px';
     ui.showContextMenu(view, info, [
       { label: 'Broken', action: () => Promise.reject(new Error('no')) },
       { separator: true },
@@ -674,7 +688,8 @@ test('context menu with the default items', async () => {
     single: 1,
     viewClosed: true,
     blur: true,
-    inside: true,
+    inside: [true, true, true, true],
+    short: [true, true, true],
     custom: ['BUTTON'],
     afterError: true,
   });

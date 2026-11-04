@@ -42,10 +42,11 @@ export function normalizeMenu(items: readonly MenuItem[]): MenuItem[] {
 let closeOpen: (() => void) | null = null;
 
 /**
- * Shows a context menu at the position of `info` (relative to the view canvas), kept inside
- * the window. A click on a command closes the menu, runs it and gives the keyboard back to the
- * page. Escape, a click outside, losing the window focus or closing the view close it. Only one
- * menu is open at a time. Returns a function that closes the menu.
+ * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
+ * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
+ * menu, runs it and gives the keyboard back to the page. Escape, a click outside, losing the
+ * window focus or closing the view close it. Only one menu is open at a time. Returns a function
+ * that closes the menu.
  * Element: `.bl-context-menu` with `button.bl-menu-item` and `hr.bl-separator`.
  */
 export function showContextMenu(
@@ -117,9 +118,39 @@ export function showContextMenu(
   const stopViewClose = view.on('close', close);
 
   root.append(menu);
-  const canvas = view.canvas.getBoundingClientRect();
-  menu.style.position = 'fixed';
-  menu.style.left = `${Math.max(0, Math.min(canvas.left + info.x, win.innerWidth - menu.offsetWidth - 4))}px`;
-  menu.style.top = `${Math.max(0, Math.min(canvas.top + info.y, win.innerHeight - menu.offsetHeight - 4))}px`;
+  place(menu, view.canvas.getBoundingClientRect(), info, win);
   return close;
+}
+
+/** Room kept between the menu and the edge of the area it may cover. */
+const MARGIN = 4;
+
+/**
+ * At the position of `info`, moved and if needed shortened (it scrolls then) to stay inside the
+ * visible part of the view canvas: what the app puts beside the view (a toolbar at the bottom on
+ * a phone) or the on-screen keyboard may be in front of the menu.
+ */
+function place(
+  menu: HTMLElement,
+  canvas: DOMRectReadOnly,
+  info: ContextMenuInfo,
+  win: Window,
+): void {
+  const visual = win.visualViewport;
+  const top = Math.max(canvas.top, 0, visual?.offsetTop ?? 0);
+  const bottom = Math.min(
+    canvas.bottom,
+    win.innerHeight,
+    visual ? visual.offsetTop + visual.height : Number.POSITIVE_INFINITY,
+  );
+  const left = Math.max(canvas.left, 0);
+  const right = Math.min(canvas.right, win.innerWidth);
+  const style = menu.style;
+  style.position = 'fixed';
+  style.maxHeight = `${Math.max(0, bottom - top - 2 * MARGIN)}px`;
+  style.overflowY = 'auto';
+  const x = canvas.left + info.x;
+  const y = canvas.top + info.y;
+  style.left = `${Math.max(left, Math.min(x, right - menu.offsetWidth - MARGIN))}px`;
+  style.top = `${Math.max(top + MARGIN, Math.min(y, bottom - menu.offsetHeight - MARGIN))}px`;
 }
