@@ -3,7 +3,7 @@ import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
-import { createImeField, virtualKeyboard } from './keyboard.js';
+import { createImeField, focusOpensKeyboard } from './keyboard.js';
 import type { Requests } from './requests.js';
 import type {
   ContextMenuInfo,
@@ -61,7 +61,6 @@ export class ViewImpl implements View {
   /** @internal */ userActivated = false;
   private readonly ime: HTMLTextAreaElement;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
-  private keyboardPolicyTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly lifetime = new AbortController();
   private readonly resizeObserver: ResizeObserver;
@@ -145,11 +144,7 @@ export class ViewImpl implements View {
 
   /** @internal Click, key or text into the page. */
   userInput(focus = true): void {
-    if (focus) {
-      this.focus();
-      // A tap into the page's field that is focused already: its keyboard again, like Chrome
-      this.updateKeyboard();
-    }
+    if (focus) this.focus();
     this.host.gesture();
     if (!this.userActivated) {
       this.userActivated = true;
@@ -292,24 +287,18 @@ export class ViewImpl implements View {
   }
 
   /**
-   * Opens the on-screen keyboard for the page's field with the VirtualKeyboard API (Chrome), only
-   * while the user's tap still counts (transient activation), so a page cannot open it by itself.
-   * show() needs the manual policy and takes effect later: the automatic one comes back after a
-   * second, under which the open keyboard stays and Chrome closes it for none.
+   * Opens the on-screen keyboard for the page's field that just got an input mode, only while the
+   * user's tap still counts (transient activation), so a page cannot open it by itself. Chrome opens
+   * it at a tap only when the focused element wants one at that moment, but the page's field comes
+   * from the engine after the tap; a focus by script after a tap opens it too, and Chrome closes
+   * such a keyboard for none. (One from VirtualKeyboard.show() stayed open after none and blur().)
+   * A later tap while the mode is set opens it again without help.
    */
-  private updateKeyboard(): void {
-    const keyboard = virtualKeyboard();
-    if (!keyboard || document.activeElement !== this.ime || this.ime.inputMode === 'none') return;
+  private showKeyboard(): void {
+    if (!focusOpensKeyboard() || document.activeElement !== this.ime) return;
     if (!navigator.userActivation?.isActive) return;
-    this.ime.setAttribute('virtualkeyboardpolicy', 'manual');
-    keyboard.show();
-    clearTimeout(this.keyboardPolicyTimer);
-    this.keyboardPolicyTimer = setTimeout(() => this.automaticKeyboard(), 1000);
-  }
-
-  private automaticKeyboard(): void {
-    clearTimeout(this.keyboardPolicyTimer);
-    this.ime.removeAttribute('virtualkeyboardpolicy');
+    this.ime.blur();
+    this.ime.focus({ preventScroll: true });
   }
 
   focus(): void {
@@ -403,7 +392,6 @@ export class ViewImpl implements View {
     const alive = this.alive;
     this.closed = true;
     clearTimeout(this.imeModeTimer);
-    clearTimeout(this.keyboardPolicyTimer);
     this.lifetime.abort();
     this.host.requests.closeView(this);
     this.host.fullscreen.setFullscreen(this, false);
@@ -599,16 +587,14 @@ export class ViewImpl implements View {
         const enterKeyHint = String(data.enterKeyHint ?? '');
         clearTimeout(this.imeModeTimer);
         const apply = () => {
+          const opens = mode !== 'none' && this.ime.inputMode === 'none';
           this.ime.inputMode = mode;
           this.ime.enterKeyHint = enterKeyHint;
-          this.updateKeyboard();
+          if (opens) this.showKeyboard();
         };
-        if (mode === 'none' && this.ime.inputMode !== 'none') {
-          // Chrome closes the keyboard for none only with the automatic policy, set in an
-          // earlier task (hide() needs the user's activation)
-          this.automaticKeyboard();
+        if (mode === 'none' && this.ime.inputMode !== 'none')
           this.imeModeTimer = setTimeout(apply, 300);
-        } else apply();
+        else apply();
         return;
       }
       case 'wheel-result':

@@ -97,6 +97,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (incl. profile sync), iPhone 16 and iPad Air 13 on iOS 18 (Wikipedia mobile, YouTube, MP4 with
   sound after a tap, the on-screen keyboard with the field's input mode, 20min.ch with its consent
   dialog for two minutes), Samsung Galaxy S23 and Motorola Moto G71 Chrome, Windows 11 Firefox;
+  on a Pixel 9 (2026-11-04) Chrome's on-screen keyboard opens at a tap into a field and closes
+  when the field loses the focus (#360);
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
   iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
   BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox

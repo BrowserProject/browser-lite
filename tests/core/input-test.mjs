@@ -15,6 +15,7 @@ import {
   buildDir,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   evalPage,
   finish,
@@ -305,6 +306,34 @@ await page.keyboard.type('!');
 await page.keyboard.press('Enter');
 const typed = await result('text');
 check('typing including umlauts', typed === 'Hello world Grüezi äöü !', JSON.stringify(typed));
+
+// 2b) On-screen keyboard (Chromium): a click into a field after a click beside it focuses the
+// IME field again once it has the field's input mode, which is what opens Chrome's keyboard after
+// the tap; no VirtualKeyboard.show() with the manual policy, whose keyboard stayed open after the
+// field lost the focus (Pixel 9)
+if (chromiumOnly('on-screen keyboard through a focus of the IME field')) {
+  const imeMode = () => host(() => document.querySelector('[data-bl-ime]').inputMode);
+  await page.mouse.click(...(await at(500, 520)));
+  const blurred = await waitFor(async () => (await imeMode()) === 'none', 5000);
+  await host(() => {
+    const ime = document.querySelector('[data-bl-ime]');
+    window.imeLog = [];
+    ime.addEventListener('focus', () => window.imeLog.push(`focus:${ime.inputMode}`));
+    new MutationObserver(() =>
+      window.imeLog.push(`policy:${ime.getAttribute('virtualkeyboardpolicy')}`),
+    ).observe(ime, { attributeFilter: ['virtualkeyboardpolicy'] });
+  });
+  await page.mouse.click(...(await at(100, 35)));
+  const focused = await waitFor(async () => (await imeMode()) === 'text', 5000);
+  await page.mouse.click(...(await at(500, 520)));
+  await waitFor(async () => (await imeMode()) === 'none', 5000);
+  const log = await host(() => window.imeLog);
+  check(
+    'on-screen keyboard: the IME field is focused again with the mode, no manual policy',
+    blurred && focused && log.includes('focus:text') && !log.some((x) => x.startsWith('policy')),
+    JSON.stringify(log),
+  );
+}
 
 // 3) Downloads through the download event of the browser
 const hostIndex = () => host(() => window.blHost.downloads.length);

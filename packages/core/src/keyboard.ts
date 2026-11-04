@@ -15,18 +15,11 @@ interface KeyLike {
 }
 
 /**
- * Chrome's VirtualKeyboard API: Chrome opens the on-screen keyboard at a tap only when the focused
- * field wants one at that moment, but the page's field comes from the engine only after the tap.
- * With it the core opens the keyboard itself (ViewImpl.updateKeyboard).
+ * @internal True in Chromium (detected by its VirtualKeyboard API, which the core does not call):
+ * there a focus by script after the user's tap opens the on-screen keyboard (ViewImpl.showKeyboard).
  */
-interface VirtualKeyboardApi {
-  show(): void;
-}
-/** @internal The VirtualKeyboard API where the browser has it (Chrome), else null. */
-export function virtualKeyboard(): VirtualKeyboardApi | null {
-  return (
-    (navigator as Navigator & { virtualKeyboard?: VirtualKeyboardApi }).virtualKeyboard ?? null
-  );
+export function focusOpensKeyboard(): boolean {
+  return 'virtualKeyboard' in navigator;
 }
 
 function keyText(e: KeyLike): string {
