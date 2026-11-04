@@ -5,8 +5,9 @@ The browser engine: WebCore, JavaScriptCore and our embedder compiled to `engine
 common pages do not run, which the host loads after the start, and `lazy/` with files it loads on
 first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
-WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`) comes as
-patches from `patches/`.
+WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`, the
+generic code paths the port takes, for example formatting of UI strings) comes as patches from
+`patches/`.
 
 ## Folders
 

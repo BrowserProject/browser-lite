@@ -1,0 +1,23 @@
+<!doctype html>
+<title>Localized strings</title>
+<!-- WebKit UI strings with placeholders get their values (patch 0076): numbers and UTF-8 text -->
+<input id="short" minlength="5">
+<input id="pattern" pattern="[0-9]+" title="Digits only, é">
+<input id="low" type="number" min="10" value="3">
+<input id="high" type="number" max="10" value="30">
+<script>
+const field = (id) => document.getElementById(id);
+field('short').focus();
+document.execCommand('insertText', false, 'ab');
+field('pattern').value = 'x';
+const messages = ['short', 'pattern', 'low', 'high'].map((id) => field(id).validationMessage);
+console.log('L10N messages=' + JSON.stringify(messages));
+const expected = [
+  'Use at least 5 characters',
+  'Match the requested format: Digits only, é',
+  'Value must be greater than or equal to 10',
+  'Value must be less than or equal to 10',
+];
+const results = expected.map((text, i) => messages[i] === text);
+console.log('L10N done=' + (results.every(Boolean) ? 'ok' : results.join('/')));
+</script>

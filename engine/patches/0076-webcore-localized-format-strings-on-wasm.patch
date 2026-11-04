@@ -1,0 +1,79 @@
+diff --git a/Source/WebCore/platform/LocalizedStrings.cpp b/Source/WebCore/platform/LocalizedStrings.cpp
+index a46b5878ee..c7460e96c2 100644
+--- a/Source/WebCore/platform/LocalizedStrings.cpp
++++ b/Source/WebCore/platform/LocalizedStrings.cpp
+@@ -41,6 +41,8 @@
+ 
+ #if USE(GLIB)
+ #include <wtf/glib/GUniquePtr.h>
++#elif !PLATFORM(COCOA) && !PLATFORM(WIN)
++#include <wtf/StringPrintStream.h>
+ #endif
+ 
+ namespace WebCore {
+@@ -83,8 +85,12 @@ String formatLocalizedString(const char* format, ...)
+     va_end(arguments);
+     return String::fromUTF8(result.get());
+ #else
+-    notImplemented();
+-    return String::fromUTF8(format);
++    va_list arguments;
++    va_start(arguments, format);
++    StringPrintStream stream;
++    stream.vprintf(format, arguments);
++    va_end(arguments);
++    return stream.toString();
+ #endif
+ }
+ #endif
+@@ -1077,10 +1083,8 @@ String imageTitle(const String& filename, const IntSize& size)
+     return WEB_UI_FORMAT_CFSTRING("%@ %@×%@ pixels", "window title for a standalone image (uses multiplication symbol, not x)", filename.createCFString().get(), widthString.get(), heightString.get());
+ #elif PLATFORM(WIN)
+     return WEB_UI_FORMAT_STRING("%s %d×%d pixels", "window title for a standalone image (uses multiplication symbol, not x)", filename.wideCharacters().span().data(), size.width(), size.height());
+-#elif USE(GLIB)
+-    return WEB_UI_FORMAT_STRING("%s %d×%d pixels", "window title for a standalone image (uses multiplication symbol, not x)", filename.utf8().data(), size.width(), size.height());
+ #else
+-    return makeStringByReplacingAll(WEB_UI_FORMAT_STRING("<filename> %d×%d pixels", "window title for a standalone image (uses multiplication symbol, not x)", size.width(), size.height()), "<filename>"_s, filename);
++    return WEB_UI_FORMAT_STRING("%s %d×%d pixels", "window title for a standalone image (uses multiplication symbol, not x)", filename.utf8().data(), size.width(), size.height());
+ #endif
+ }
+ 
+@@ -1274,11 +1278,8 @@ String validationMessagePatternMismatchText(const String& title)
+ {
+ #if PLATFORM(COCOA)
+     return WEB_UI_FORMAT_CFSTRING("Match the requested format: %@", "Validation message for input form controls requiring a constrained value according to pattern followed by a website-provided description of the pattern", title.createCFString().get());
+-#elif USE(GLIB)
+-    return WEB_UI_FORMAT_STRING("Match the requested format: %s", "Validation message for input form controls requiring a constrained value according to pattern followed by a website-provided description of the pattern", title.utf8().data());
+ #else
+-    UNUSED_PARAM(title);
+-    return validationMessagePatternMismatchText();
++    return WEB_UI_FORMAT_STRING("Match the requested format: %s", "Validation message for input form controls requiring a constrained value according to pattern followed by a website-provided description of the pattern", title.utf8().data());
+ #endif
+ }
+ 
+@@ -1300,11 +1301,8 @@ String validationMessageRangeUnderflowText(const String& minimum)
+ {
+ #if PLATFORM(COCOA)
+     return WEB_UI_FORMAT_CFSTRING("Value must be greater than or equal to %@", "Validation message for input form controls with value lower than allowed minimum", minimum.createCFString().get());
+-#elif USE(GLIB)
+-    return WEB_UI_FORMAT_STRING("Value must be greater than or equal to %s", "Validation message for input form controls with value lower than allowed minimum", minimum.utf8().data());
+ #else
+-    UNUSED_PARAM(minimum);
+-    return WEB_UI_STRING("range underflow", "Validation message for input form controls with value lower than allowed minimum");
++    return WEB_UI_FORMAT_STRING("Value must be greater than or equal to %s", "Validation message for input form controls with value lower than allowed minimum", minimum.utf8().data());
+ #endif
+ }
+ 
+@@ -1312,11 +1310,8 @@ String validationMessageRangeOverflowText(const String& maximum)
+ {
+ #if PLATFORM(COCOA)
+     return WEB_UI_FORMAT_CFSTRING("Value must be less than or equal to %@", "Validation message for input form controls with value higher than allowed maximum", maximum.createCFString().get());
+-#elif USE(GLIB)
+-    return WEB_UI_FORMAT_STRING("Value must be less than or equal to %s", "Validation message for input form controls with value higher than allowed maximum", maximum.utf8().data());
+ #else
+-    UNUSED_PARAM(maximum);
+-    return WEB_UI_STRING("range overflow", "Validation message for input form controls with value higher than allowed maximum");
++    return WEB_UI_FORMAT_STRING("Value must be less than or equal to %s", "Validation message for input form controls with value higher than allowed maximum", maximum.utf8().data());
+ #endif
+ }
+ 

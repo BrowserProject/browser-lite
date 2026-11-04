@@ -14,7 +14,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Browsing**: views with popups (opener, name, sandbox), history incl. back/forward cache,
   downloads, uploads, find, zoom, pinch zoom on the compositor (#150), print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
-  HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257).
+  HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
+  validation messages and the file input's label with their numbers and texts (#363).
 - **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167).

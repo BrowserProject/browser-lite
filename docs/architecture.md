@@ -47,7 +47,10 @@ WebKit2: `WebCore::Page` is driven directly (like WebKitLegacy), and what WebKit
 network process (service workers, Cache API, OPFS, downloads) runs on the engine thread
 (`engine/src/`). A new port needs an entry in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake` and
 a `PlatformWasm.cmake` per project (patch 0006). All WebKit changes are patches in
-`engine/patches/` ([build.md](build.md)).
+`engine/patches/` ([build.md](build.md)). WebKit's UI strings with placeholders (validation
+messages, the file input's "2 files", time labels of media controls) are formatted with WTF's
+`StringPrintStream` (`vsnprintf`, also positional `%1$d`) and take the same UTF-8 texts as the
+GLib ports (patch 0076, #363).
 
 ## Threads
 

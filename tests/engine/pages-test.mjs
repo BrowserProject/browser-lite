@@ -9,6 +9,7 @@
 //   svg-use.html   load events of <use> elements of an external sprite (patch 0051)
 //   font-stacks.html  unknown families skipped in a stack, Apple and system names mapped
 //   computed-style.html  getComputedStyle() without a renderer: selectors match exactly (patch 0069)
+//   localized-strings.html  UI strings with placeholders filled: validation messages (patch 0076)
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -31,6 +32,7 @@ const CASES = [
   { name: 'svg-use', size: [400, 40], wait: 'SVGUSE done' },
   { name: 'font-stacks', wait: 'FONTS done' },
   { name: 'computed-style', wait: 'COMPUTED done' },
+  { name: 'localized-strings', wait: 'L10N done' },
   {
     name: 'bridges',
     label: 'bridges (no features)',
