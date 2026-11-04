@@ -56,6 +56,7 @@ const PAGE = `<!doctype html>
   #sandboxed, #sandboxed-tel { position: absolute; left: 600px; top: 230px; width: 160px; height: 40px; border: 0; }
   #sandboxed-tel { top: 280px; }
   #objects { position: absolute; left: 20px; top: 1200px; }
+  #pad { position: absolute; left: 330px; top: 100px; width: 220px; height: 160px; background: #cde; }
 </style></head>
 <body>
 <input id="text" autocomplete="off">
@@ -76,6 +77,7 @@ const PAGE = `<!doctype html>
 <a id="pinglink" href="#pinged" ping="/ping">Ping</a>
 <iframe id="sandboxed" sandbox="allow-scripts" srcdoc="<body style='margin:0'><a href='tel:+41111111111' style='position:absolute;left:0;top:0;width:70px;height:40px'>tel</a><a download href='data:text/plain,x' style='position:absolute;left:80px;top:0;width:70px;height:40px'>dl</a>"></iframe>
 <iframe id="sandboxed-tel" sandbox="allow-scripts allow-top-navigation-to-custom-protocols" srcdoc="<body style='margin:0'><a href='tel:+41222222222' style='display:block;height:40px'>tel</a>"></iframe>
+<div id="pad"></div>
 <div id="objects">
   <object id="o-svg" data="/image.svg" type="image/svg+xml"></object>
   <embed id="o-embed" src="/image.svg">
@@ -106,6 +108,18 @@ const PAGE = `<!doctype html>
   text.addEventListener('change', () => console.log('RESULT text=' + text.value));
   text.addEventListener('keydown', (e) => { if (e.key === 'Enter') console.log('RESULT text=' + text.value); });
   document.getElementById('button').addEventListener('click', () => console.log('RESULT click=1'));
+  // type:button:buttons(:pressure) of the mouse and pointer events, repeated moves once;
+  // the mouseup of the right button with none left pressed reports them
+  const pad = document.getElementById('pad');
+  const padLog = [];
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup']) {
+    pad.addEventListener(type, (e) => {
+      const entry = type + ':' + e.button + ':' + e.buttons + (e.pressure === undefined ? '' : ':p' + e.pressure);
+      if (padLog.at(-1) !== entry && padLog.at(-2) !== entry) padLog.push(entry);
+      if (type === 'mouseup' && e.button === 2 && !e.buttons) console.log('RESULT buttons=' + padLog.join(' '));
+    });
+  }
+  pad.addEventListener('contextmenu', (e) => e.preventDefault());
   let scrolled = false;
   window.addEventListener('wheel', (e) => console.log('RESULT wheeldelta=' + e.deltaY + ',' + e.wheelDeltaY), { once: true, passive: true });
   window.addEventListener('scroll', () => {
@@ -296,6 +310,28 @@ async function at(x, y) {
 // 1) Click
 await page.mouse.click(...(await at(80, 90)));
 check('click on a button', (await result('click')) === '1');
+
+// 1b) Pressed buttons: MouseEvent.buttons and PointerEvent.pressure while a button is held
+// (drag code checks them), also for a second button pressed while the first is held (chorded:
+// pointermove instead of pointerdown and pointerup), then a right click
+await page.mouse.move(...(await at(400, 150)));
+await page.waitForTimeout(300);
+await page.mouse.down();
+await page.mouse.move(...(await at(450, 170)), { steps: 2 });
+await page.mouse.down({ button: 'right' });
+await page.mouse.up({ button: 'right' });
+await page.mouse.up();
+await page.mouse.click(...(await at(450, 170)), { button: 'right' });
+const buttons = (await result('buttons')) ?? '';
+check(
+  'pressed buttons and pressure in mouse and pointer events',
+  [
+    'pointerdown:0:1:p0.5 mousedown:0:1 pointermove:-1:1:p0.5 mousemove:0:1',
+    'pointermove:2:3:p0.5 mousedown:2:3 pointermove:2:1:p0.5 mouseup:2:1 pointerup:0:0:p0 mouseup:0:0',
+    'pointerdown:2:2:p0.5 mousedown:2:2 pointerup:2:0:p0 mouseup:2:0',
+  ].every((part) => buttons.includes(part)),
+  buttons,
+);
 
 // 2) Typing: normal keys (keydown) and text without a key (insertText, like an IME)
 await page.mouse.click(...(await at(100, 35)));

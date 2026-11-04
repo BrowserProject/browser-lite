@@ -34,6 +34,9 @@ export function modifierBits(e: {
   );
 }
 
+// MouseEvent.buttons bit of each MouseEvent.button (left, middle, right, back, forward)
+const BUTTON_BITS: Record<number, number> = { 0: 1, 1: 4, 2: 2, 3: 8, 4: 16 };
+
 interface Pinch {
   x: number;
   y: number;
@@ -144,7 +147,7 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
         button: e.button,
         count: repeated ? lastDown.count + 1 : 1,
       };
-      module._bl_mouse(view.id, 0, e.button, x, y, lastDown.count, modifierBits(e));
+      module._bl_mouse(view.id, 0, e.button, e.buttons, x, y, lastDown.count, modifierBits(e));
       view.host.watchdog.inputSent();
       e.preventDefault();
     },
@@ -154,19 +157,34 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
     endPinch();
     const [x, y] = view.position(e);
     const count = e.button === lastDown.button ? lastDown.count : 1;
-    module._bl_mouse(view.id, 1, e.button, x, y, count, modifierBits(e));
+    module._bl_mouse(view.id, 1, e.button, e.buttons, x, y, count, modifierBits(e));
   });
   on('pointermove', (e) => {
-    // Pressed button (e.buttons: 1 left, 2 right, 4 middle), otherwise no dragging
-    const button = e.buttons & 1 ? 0 : e.buttons & 4 ? 1 : e.buttons & 2 ? 2 : -1;
     const [x, y] = view.position(e);
+    // A further button pressed or released while another one is held comes as a pointermove
+    // with that button (chorded buttons, no pointerdown or pointerup): for the page a mousedown
+    // or mouseup
+    const bit = BUTTON_BITS[e.button];
+    if (bit !== undefined) {
+      module._bl_mouse(
+        view.id,
+        e.buttons & bit ? 0 : 1,
+        e.button,
+        e.buttons,
+        x,
+        y,
+        1,
+        modifierBits(e),
+      );
+      return;
+    }
     module._bl_mouse_move(
       view.id,
       x,
       y,
       e.movementX || 0,
       e.movementY || 0,
-      button,
+      e.buttons,
       modifierBits(e),
     );
   });

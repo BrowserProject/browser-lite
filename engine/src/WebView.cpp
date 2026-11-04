@@ -1027,12 +1027,14 @@ static OptionSet<PlatformEvent::Modifier> modifiersFromBits(int bits)
 }
 
 namespace {
-// movementX/Y come from the host (with pointer lock the only movement)
+// buttons (MouseEvent.buttons, also PointerEvent.pressure) and movementX/Y come from the host
+// (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
-    MouseEventWasm(const DoublePoint& position, MouseButton button, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt)
+    MouseEventWasm(const DoublePoint& position, MouseButton button, unsigned short buttons, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt)
         : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
     {
+        m_buttons = buttons;
         m_movementDelta = movement;
         if (tapPointer)
             m_pointerType = touchPointerEventType();
@@ -1040,7 +1042,7 @@ public:
 };
 }
 
-void WebView::mouseEvent(int type, int button, double x, double y, int clickCount, int modifiers, double movementX, double movementY, std::optional<PointerID> tapPointer)
+void WebView::mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX, double movementY, std::optional<PointerID> tapPointer)
 {
     RefPtr frame = mainFrame();
     if (!frame)
@@ -1068,7 +1070,7 @@ void WebView::mouseEvent(int type, int button, double x, double y, int clickCoun
     }
 
     DoublePoint position { x, y };
-    MouseEventWasm event { position, mouseButton, eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
+    MouseEventWasm event { position, mouseButton, static_cast<unsigned short>(buttons), eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
 
     auto& handler = frame->eventHandler();
     switch (eventType) {
@@ -1137,7 +1139,7 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
     m_page->dragController().dragEnded();
     if (session.fromPage) {
         // dragend to the source, with the result (dropEffect)
-        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
+        MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, 0, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
         frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
     }
 }
@@ -1462,9 +1464,9 @@ void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
     notifyHost(m_id, "touch-result", makeString("{\"type\":"_s, type, ",\"consumed\":"_s, flag(consumed),
         ",\"pinch\":"_s, flag(allowed.pinchZoom), ",\"panX\":"_s, flag(allowed.panX), ",\"panY\":"_s, flag(allowed.panY), '}'));
     if (tap && type == 2 && released && !consumed && !std::exchange(m_touchStartConsumed, false)) {
-        mouseEvent(2, -1, released->x(), released->y(), 0, modifiers, 0, 0, releasedPointer);
-        mouseEvent(0, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
-        mouseEvent(1, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
+        mouseEvent(2, -1, 0, released->x(), released->y(), 0, modifiers, 0, 0, releasedPointer);
+        mouseEvent(0, 0, 1, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
+        mouseEvent(1, 0, 0, released->x(), released->y(), 1, modifiers, 0, 0, releasedPointer);
         showPickerOfTappedField(m_id, *frame);
     }
     // The pointer of a finger that lifted is gone (its state would stay forever otherwise)

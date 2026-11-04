@@ -95,7 +95,7 @@ struct MoveValues {
     double y { 0 };
     double movementX { 0 };
     double movementY { 0 };
-    int button { -1 };
+    int buttons { 0 };
     int modifiers { 0 };
 };
 struct PendingMove : ThreadSafeRefCounted<PendingMove> {
@@ -135,12 +135,18 @@ static void withInput(int id, Function&& function)
     });
 }
 
+// The button a move drags or selects with (like MouseEvent.button, -1 = none)
+static int dragButton(int buttons)
+{
+    return buttons & 1 ? 0 : buttons & 4 ? 1 : buttons & 2 ? 2 : -1;
+}
+
 static void moveMouse(int id, const MoveValues& values)
 {
     // With a button pressed every move counts (dragging, selecting, drag and drop fires dragover
     // per move): only hovering coalesces
-    if (values.button != -1) {
-        withInput(id, [values](WebView& view) { view.mouseEvent(2, values.button, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY); });
+    if (values.buttons) {
+        withInput(id, [values](WebView& view) { view.mouseEvent(2, dragButton(values.buttons), values.buttons, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY); });
         return;
     }
     Ref move = adoptRef(*new PendingMove(values));
@@ -148,7 +154,7 @@ static void moveMouse(int id, const MoveValues& values)
         Locker locker { s_movesLock };
         if (auto it = openMoves().find(id); it != openMoves().end()) {
             auto& open = it->value->values;
-            open = { values.x, values.y, open.movementX + values.movementX, open.movementY + values.movementY, values.button, values.modifiers };
+            open = { values.x, values.y, open.movementX + values.movementX, open.movementY + values.movementY, values.buttons, values.modifiers };
             return;
         }
         openMoves().set(id, move.copyRef());
@@ -163,7 +169,7 @@ static void moveMouse(int id, const MoveValues& values)
             values = move->values;
         }
         if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
-            view->mouseEvent(2, values.button, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY);
+            view->mouseEvent(2, dragButton(values.buttons), values.buttons, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY);
     });
 }
 
@@ -304,16 +310,17 @@ EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
     });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, double x, double y, int clickCount, int modifiers)
+// buttons: the pressed buttons after the event, like MouseEvent.buttons
+EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, int buttons, double x, double y, int clickCount, int modifiers)
 {
-    withInput(id, [=](WebView& view) { view.mouseEvent(type, button, x, y, clickCount, modifiers); });
+    withInput(id, [=](WebView& view) { view.mouseEvent(type, button, buttons, x, y, clickCount, modifiers); });
 }
 
-// Mouse move with movementX/Y (also with pointer lock). button: pressed
-// button like in bl_mouse (-1 = none), otherwise there is no dragging/selecting
-EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int button, int modifiers)
+// Mouse move with movementX/Y (also with pointer lock). buttons: the pressed
+// buttons like in bl_mouse, without one there is no dragging/selecting
+EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int buttons, int modifiers)
 {
-    moveMouse(id, { x, y, movementX, movementY, button, modifiers });
+    moveMouse(id, { x, y, movementX, movementY, buttons, modifiers });
 }
 
 // Dragging from the host over the page: phase 0 = over, 1 = left, 2 = dropped.
