@@ -81,10 +81,26 @@ index 343724f3cb..0813515f8d 100644
  
  #if ENABLE(YARR_JIT_DEBUG)
 diff --git a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
-index 7ff667c607..55ddc91279 100644
+index 7ff667c607..3f720ba31e 100644
 --- a/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
 +++ b/Source/JavaScriptCore/yarr/YarrInterpreter.cpp
-@@ -3233,7 +3233,7 @@ std::unique_ptr<BytecodePattern> byteCompile(YarrPattern& pattern, BumpPointerAl
+@@ -29,6 +29,7 @@
+ 
+ #include "ConcurrentJSLock.h"
+ #include "Options.h"
++#include "RegExpKey.h"
+ #include "SuperSampler.h"
+ #include "Yarr.h"
+ #include "YarrCanonicalize.h"
+@@ -39,6 +40,7 @@
+ #include <wtf/DataLog.h>
+ #include <wtf/StackCheck.h>
+ #include <wtf/TZoneMallocInlines.h>
++#include <wtf/ThreadSafeRefCounted.h>
+ 
+ WTF_ALLOW_UNSAFE_BUFFER_USAGE_BEGIN
+ 
+@@ -3233,7 +3235,7 @@ std::unique_ptr<BytecodePattern> byteCompile(YarrPattern& pattern, BumpPointerAl
      return ByteCompiler(pattern).compile(allocator, lock, errorCode);
  }
  
@@ -93,7 +109,7 @@ index 7ff667c607..55ddc91279 100644
  {
      SuperSamplerScope superSamplerScope(false);
      if (input.is8Bit())
-@@ -3241,6 +3241,128 @@ unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start,
+@@ -3241,6 +3243,170 @@ unsigned interpret(BytecodePattern* bytecode, StringView input, unsigned start,
      return Interpreter<char16_t>(bytecode, output, input.span16(), start).interpret();
  }
  
@@ -106,13 +122,30 @@ index 7ff667c607..55ddc91279 100644
 +using HostMatch = unsigned (*)(unsigned id, const String& source, unsigned flags, StringView input, unsigned start, unsigned* output, unsigned outputSize);
 +static constexpr unsigned HostMatchDeclined = offsetNoMatch - 1;
 +
-+struct HostPattern {
-+    String source;
-+    OptionSet<Flags> flags;
-+    unsigned id { 0 };
++// What the measurements found out about a pattern (its source and flags). It outlives the
++// bytecode that measured it: a RegExp the GC collected or whose code a memory release deleted
++// compiles again with the same pattern, and its first calls then go on where the last ones
++// stopped instead of being measured in the interpreter again.
++struct HostPatternCost : ThreadSafeRefCounted<HostPatternCost> {
++    WTF_MAKE_STRUCT_TZONE_ALLOCATED(HostPatternCost);
++    explicit HostPatternCost(unsigned id)
++        : id(id)
++    {
++    }
++    unsigned id;
 +    double nanosPerCharacter { 0 };
 +    unsigned calls { 0 };
 +    bool interpretOnly { false };
++};
++
++WTF_MAKE_TZONE_ALLOCATED_IMPL(HostPatternCost);
++
++struct HostPattern {
++    // This thread's copy for the host. The cost's key has its own copy, touched only under the
++    // lock: the patterns of all threads share the costs.
++    String source;
++    OptionSet<Flags> flags;
++    RefPtr<HostPatternCost> cost;
 +};
 +
 +static Lock s_hostPatternsLock;
@@ -121,9 +154,17 @@ index 7ff667c607..55ddc91279 100644
 +    static NeverDestroyed<HashMap<const BytecodePattern*, HostPattern>> patterns;
 +    return patterns;
 +}
++static HashMap<RegExpKey, RefPtr<HostPatternCost>>& hostPatternCosts() WTF_REQUIRES_LOCK(s_hostPatternsLock)
++{
++    static NeverDestroyed<HashMap<RegExpKey, RefPtr<HostPatternCost>>> costs;
++    return costs;
++}
++// Costs of patterns without bytecode are kept until there are this many, then dropped
++static constexpr unsigned hostPatternCostsKept = 1024;
++static unsigned s_pruneHostPatternCostsAt WTF_GUARDED_BY_LOCK(s_hostPatternsLock) = hostPatternCostsKept;
 +static HostMatch s_hostMatch;
 +static bool s_hostMatchAlways;
-+static unsigned s_lastHostPatternId;
++static unsigned s_lastHostPatternId WTF_GUARDED_BY_LOCK(s_hostPatternsLock);
 +
 +// always: every pattern goes there, not only those measured expensive (tests)
 +void setHostMatch(HostMatch, bool always);
@@ -133,6 +174,22 @@ index 7ff667c607..55ddc91279 100644
 +    s_hostMatchAlways = always;
 +}
 +
++static Ref<HostPatternCost> hostPatternCost(const String& source, OptionSet<Flags> flags) WTF_REQUIRES_LOCK(s_hostPatternsLock)
++{
++    auto& costs = hostPatternCosts();
++    if (auto it = costs.find(RegExpKey(flags, source)); it != costs.end())
++        return *it->value;
++    if (costs.size() >= s_pruneHostPatternCostsAt) {
++        costs.removeIf([](auto& entry) {
++            return entry.value->hasOneRef();
++        });
++        s_pruneHostPatternCostsAt = std::max<unsigned>(hostPatternCostsKept, costs.size() * 2);
++    }
++    Ref cost = adoptRef(*new HostPatternCost(++s_lastHostPatternId));
++    costs.add(RegExpKey(flags, source.isolatedCopy()), cost.copyRef());
++    return cost;
++}
++
 +void registerHostPattern(const BytecodePattern*, const String& source, OptionSet<Flags>);
 +void registerHostPattern(const BytecodePattern* bytecode, const String& source, OptionSet<Flags> flags)
 +{
@@ -140,7 +197,7 @@ index 7ff667c607..55ddc91279 100644
 +    if (!s_hostMatch || !bytecode || bytecode->hasDuplicateNamedCaptureGroups())
 +        return;
 +    Locker locker { s_hostPatternsLock };
-+    hostPatterns().set(bytecode, HostPattern { source.isolatedCopy(), flags, ++s_lastHostPatternId });
++    hostPatterns().set(bytecode, HostPattern { source.isolatedCopy(), flags, hostPatternCost(source, flags) });
 +}
 +
 +void unregisterHostPattern(const BytecodePattern*);
@@ -173,14 +230,15 @@ index 7ff667c607..55ddc91279 100644
 +    {
 +        Locker locker { s_hostPatternsLock };
 +        auto it = hostPatterns().find(bytecode);
-+        if (it == hostPatterns().end() || it->value.interpretOnly)
++        if (it == hostPatterns().end() || it->value.cost->interpretOnly)
 +            return interpretBytecode(bytecode, input, start, output);
 +        auto& pattern = it->value;
-+        call = pattern.calls++;
++        auto& cost = *pattern.cost;
++        call = cost.calls++;
 +        bool measure = call < hostSampleCalls || !(call % hostSampleInterval);
-+        bool expensive = call >= hostSampleCalls && pattern.nanosPerCharacter >= hostNanosPerCharacter && pattern.nanosPerCharacter * input.length() >= hostMinimumNanos;
++        bool expensive = call >= hostSampleCalls && cost.nanosPerCharacter >= hostNanosPerCharacter && cost.nanosPerCharacter * input.length() >= hostMinimumNanos;
 +        if (s_hostMatchAlways || (expensive && !measure)) {
-+            id = pattern.id;
++            id = cost.id;
 +            source = pattern.source;
 +            flags = pattern.flags;
 +        } else if (!measure || !input.length())
@@ -192,7 +250,7 @@ index 7ff667c607..55ddc91279 100644
 +            return result;
 +        Locker locker { s_hostPatternsLock };
 +        if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end())
-+            it->value.interpretOnly = true;
++            it->value.cost->interpretOnly = true;
 +        return interpretBytecode(bytecode, input, start, output);
 +    }
 +    if (call == std::numeric_limits<unsigned>::max())
@@ -202,13 +260,13 @@ index 7ff667c607..55ddc91279 100644
 +    double nanosPerCharacter = (MonotonicTime::now() - begin).nanoseconds() / input.length();
 +    Locker locker { s_hostPatternsLock };
 +    if (auto it = hostPatterns().find(bytecode); it != hostPatterns().end()) {
-+        auto& pattern = it->value;
++        auto& cost = *it->value.cost;
 +        if (!call)
-+            pattern.nanosPerCharacter = nanosPerCharacter;
++            cost.nanosPerCharacter = nanosPerCharacter;
 +        else if (call < hostSampleCalls)
-+            pattern.nanosPerCharacter = std::min(pattern.nanosPerCharacter, nanosPerCharacter);
++            cost.nanosPerCharacter = std::min(cost.nanosPerCharacter, nanosPerCharacter);
 +        else
-+            pattern.nanosPerCharacter = (pattern.nanosPerCharacter * 3 + nanosPerCharacter) / 4;
++            cost.nanosPerCharacter = (cost.nanosPerCharacter * 3 + nanosPerCharacter) / 4;
 +    }
 +    return result;
 +}

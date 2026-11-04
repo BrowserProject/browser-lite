@@ -2,7 +2,9 @@
 // every pattern of the page runs in a RegExp of the host's worker, with the default (auto) only
 // those measured expensive. Both give the same results as Chromium for captures, named groups,
 // indices, the flags g, y, m, s, u, v and i, lookbehind, Latin-1 and UTF-16 input, replace,
-// split and a cookie regexp that backtracks a lot (20min.ch).
+// split and a cookie regexp that backtracks a lot (20min.ch). A pattern measured expensive keeps
+// running in the host after a memory release deleted its bytecode (its cost belongs to its source
+// and flags), instead of being measured in the interpreter again.
 //
 //   node tests/core/regexp-test.mjs [engine-dir]
 import {
@@ -109,5 +111,45 @@ for (const mode of ['all', 'auto']) {
   );
   await page.close();
 }
+
+// Times of 4 calls of the cookie regexp: the first (measured in the interpreter), after 8 more
+// (in the host) and right after a memory release that deleted all compiled code
+const RELEASE_PAGE = `<!doctype html><meta charset="utf-8"><title>Release</title><script>
+const cookie = Array.from({ length: 100 }, (_, i) => 'c' + i + '=' + 'x'.repeat(40)).join('; ') + '; dataLayerLogger=on';
+const calls = (n) => {
+  const start = performance.now();
+  for (let i = 0; i < n; i++) cookie.match(/(^|[^;]+)\\s*dataLayerLogger\\s*=\\s*([^;]+)/);
+  return Math.round(performance.now() - start);
+};
+const measured = calls(4);
+calls(8);
+console.log('RESULT before=' + measured + ',' + calls(4));
+window.after = () => console.log('RESULT after=' + calls(4));
+</script>`;
+const { url: releaseURL } = await serve((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(RELEASE_PAGE);
+});
+{
+  const page = await browser.newPage();
+  const results = collect(page);
+  await openHost(page, stack.app({ url: releaseURL }));
+  const [measured, hosted] = ((await results.wait('before')) ?? '').split(',').map(Number);
+  check(
+    'measured calls cost more than calls in the host',
+    measured > hosted * 3,
+    `${measured} ${hosted}`,
+  );
+  // Like under memory pressure: WebCore::releaseMemory, which deletes the code of every RegExp
+  await page.evaluate(() => window.blTest.memory(3));
+  await page.evaluate(() => window.blTest.eval('after()'));
+  const after = Number(await results.wait('after'));
+  check(
+    'after a memory release it runs in the host at once',
+    after <= hosted * 2 + 3,
+    `${measured} ${hosted} ${after}`,
+  );
+  await page.close();
+}
+
 await browser.close();
 finish();

@@ -217,7 +217,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
    functions not compiled yet goes through JSC's generic call with a VM entry each time.
    20min.ch (2026-11-03, profiled with consent): forced flex/grid layout from scripts 21 %,
    regexps 15 % (now in the host's RegExp when expensive, #348), 75 % of the JS in the
-   interpreter, ads about 38 % (no ad blocker: owner decision 2026-11-03). What is left of the
+   interpreter, ads about 38 % (no ad blocker: owner decision 2026-11-03). Tapping an article
+   there (a `pushState` route change of React) keeps the engine thread busy for about 10 s
+   locally (2026-11-04; Pixel 9 about 13 s, iPhone 16 4 to 5 s): the URL changes after 1.5 to 2 s,
+   the article shows after 9 to 11 s, in tasks of up to 2 s. Profile: lazy compiling of functions
+   10 %, regexps 10 %, forced layout 17 %, the rest JS in the interpreter and the JIT. Expensive
+   regexps were measured in the interpreter again after every GC or memory release, now their
+   decision stays (#362). The memory releases above 192 MB also delete all compiled code; keeping
+   it cost 75 MB more on 20min and did not make the tap measurably faster (#362). What is left of the
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
 2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
