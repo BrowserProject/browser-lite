@@ -58,33 +58,53 @@ export function wav(seconds, { rate = 22050, frequency = 440, amplitude = 8000 }
   return buffer;
 }
 
-/** WebM (VP8, no sound) of a red canvas, recorded in the Chromium of the test. */
-export async function recordClip(browser, seconds = 3) {
+/**
+ * WebM (VP8) of a red canvas, recorded in the browser of the test; with `audio` also a quiet sine
+ * (Opus), otherwise without an audio track.
+ */
+export async function recordClip(browser, seconds = 3, { audio = false } = {}) {
   const recorder = await browser.newPage();
   await recorder.goto('about:blank');
-  const bytes = await recorder.evaluate(async (ms) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 320;
-    canvas.height = 240;
-    const ctx = canvas.getContext('2d');
-    const media = new MediaRecorder(canvas.captureStream(25), {
-      mimeType: 'video/webm;codecs=vp8',
-    });
-    const chunks = [];
-    media.ondataavailable = (e) => chunks.push(e.data);
-    const timer = setInterval(() => {
-      ctx.fillStyle = '#e00000';
-      ctx.fillRect(0, 0, 320, 240);
-    }, 40);
-    media.start(500);
-    await new Promise((r) => setTimeout(r, ms));
-    await new Promise((r) => {
-      media.onstop = r;
-      media.stop();
-    });
-    clearInterval(timer);
-    return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
-  }, seconds * 1000);
+  const bytes = await recorder.evaluate(
+    async ([ms, withAudio]) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 320;
+      canvas.height = 240;
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream(25);
+      const sound = withAudio ? new AudioContext() : null;
+      if (sound) {
+        // Without an audio device (Firefox under Xvfb) it never resumes; the track exists anyway
+        sound.resume();
+        const oscillator = sound.createOscillator();
+        const gain = sound.createGain();
+        const target = sound.createMediaStreamDestination();
+        gain.gain.value = 0.05;
+        oscillator.connect(gain).connect(target);
+        oscillator.start();
+        stream.addTrack(target.stream.getAudioTracks()[0]);
+      }
+      const media = new MediaRecorder(stream, {
+        mimeType: withAudio ? 'video/webm;codecs=vp8,opus' : 'video/webm;codecs=vp8',
+      });
+      const chunks = [];
+      media.ondataavailable = (e) => chunks.push(e.data);
+      const timer = setInterval(() => {
+        ctx.fillStyle = '#e00000';
+        ctx.fillRect(0, 0, 320, 240);
+      }, 40);
+      media.start(500);
+      await new Promise((r) => setTimeout(r, ms));
+      await new Promise((r) => {
+        media.onstop = r;
+        media.stop();
+      });
+      clearInterval(timer);
+      sound?.close();
+      return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    },
+    [seconds * 1000, audio],
+  );
   await recorder.close();
   return Buffer.from(bytes);
 }

@@ -312,8 +312,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - Pinch zoom: `visualViewport` events only at the end of the gesture; two fingers wait for the
   page's touchstart answer even without blocking listeners.
 - Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; video
-  without an audio track pauses when hidden like Chrome (not after PiP, #170); discarding under
-  memory pressure does not spare tabs with beforeunload listeners and input.
+  without an audio track pauses when hidden like Chrome (not after PiP, #170, #386), but only when
+  the view becomes hidden: video a page starts in a view that is hidden from the start (a tab
+  opened in the background) or starts again while hidden plays on, and the host decodes it
+  (WebKit acts only on the change of visibility, needs a patch next to 0042). Muted video with an
+  audio track plays on hidden (#170) and the host decodes its picture too (CNN: two such loops);
+  discarding under memory pressure does not spare tabs with beforeunload listeners and input.
 - Memory: a single page that needs more than the limit (about 1 GB in a 32 bit browser) or one
   allocation bigger than the 128 MB reserve can still crash the engine (#147, #216). On iPhone
   and iPad iOS ends the whole host page instead (all tabs lost); the 512 MB budget there (#358)

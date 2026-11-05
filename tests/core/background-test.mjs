@@ -5,7 +5,8 @@
 // compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive) and no hang during a long native dialog of the host page, a
 // muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
-// muted sound.
+// muted sound. Hidden, a video without an audio track pauses (in the host too), a muted one with
+// an audio track goes on.
 //
 //   node tests/core/background-test.mjs [engine-dir]
 import {
@@ -93,6 +94,16 @@ audio.onpause = () => console.log('RESULT pause=audio');
 Promise.all([video.play(), audio.play()]).then(() => console.log('RESULT playing=stream'), (e) => console.log('RESULT playing=' + e.name));
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + video.paused + ':' + audio.paused));
 </script>`,
+  // Muted autoplay: a video without an audio track and one with
+  videos: `<!doctype html><title>videos</title><video id="silent" src="/clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
+<video id="sound" src="/sound-clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
+<script>const videos = [...document.querySelectorAll('video')];
+for (const video of videos) {
+  video.onplaying = () => console.log('RESULT playing=' + video.id);
+  video.onpause = () => console.log('RESULT pause=' + video.id);
+}
+document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + videos.map((v) => v.paused).join(':')));
+console.log('RESULT loaded=videos')</script>`,
   // Long tasks one after the other (not throttled like timers), for typing in another view
   busy: `<!doctype html><title>busy</title><p>busy<script>const channel = new MessageChannel();
 channel.port1.onmessage = () => { const end = Date.now() + 500; while (Date.now() < end); console.log('RESULT chunk=' + Date.now()); channel.port2.postMessage(0); };
@@ -112,6 +123,7 @@ const browser = await launch({
 const MEDIA = {
   '/tone.wav': [TONE, 'audio/wav'],
   '/clip.webm': [await recordClip(browser, 4), 'video/webm'],
+  '/sound-clip.webm': [await recordClip(browser, 4, { audio: true }), 'video/webm'],
 };
 const { url: siteURL } = await serve((req, res) => {
   if (MEDIA[req.url]) return serveBytes(req, res, ...MEDIA[req.url]);
@@ -498,6 +510,48 @@ check(
   `${alerts} dialogs, unresponsive ${hangSeen}x`,
 );
 await dialog.context.close();
+
+// Hidden like Chrome: only the video without an audio track pauses, in the host too (it stops
+// decoding); the host tells which one has an audio track. Visible again, it plays on.
+const silent = await openApp({ url: `${siteURL}videos` });
+await silent.wait('loaded', 'videos');
+const bothPlaying =
+  !!(await silent.wait('playing', 'silent')) && !!(await silent.wait('playing', 'sound'));
+check('videos: both muted videos play', bothPlaying);
+// Only what comes from here on (at the start muted playback briefly reports pause)
+await silent.page.waitForTimeout(1000);
+silent.results.length = 0;
+await silent.newTab(`${siteURL}empty`);
+const silentHidden = await silent.wait('state');
+const hostVideos = () =>
+  silent.page.evaluate(() =>
+    window.blTest
+      .mediaState()
+      .map((p) => [p.time, p.paused])
+      .sort((a, b) => Number(b[1]) - Number(a[1])),
+  );
+await silent.page.waitForTimeout(500);
+const hostBefore = await hostVideos();
+await silent.page.waitForTimeout(2000);
+const hostAfter = await hostVideos();
+const silentPaused = silent.results.filter((r) => r[1] === 'pause').map((r) => r[2]);
+check(
+  'videos: hidden, only the video without an audio track pauses',
+  silentHidden?.[2] === 'hidden:true:false' && silentPaused.join() === 'silent',
+  `${JSON.stringify(silentHidden)} paused: ${silentPaused}`,
+);
+check(
+  'videos: hidden, the host stops that video and plays the other',
+  hostAfter.length === 2 &&
+    hostAfter[0][1] &&
+    hostAfter[0][0] === hostBefore[0][0] &&
+    !hostAfter[1][1] &&
+    hostAfter[1][0] !== hostBefore[1][0],
+  `${JSON.stringify(hostBefore)} -> ${JSON.stringify(hostAfter)}`,
+);
+await silent.selectTab(1);
+check('videos: visible again, the video plays on', !!(await silent.wait('playing', 'silent')));
+await silent.context.close();
 
 // Muted in the background like Chrome: a srcObject stream and muted sound go on (only video
 // without an audio track is paused)

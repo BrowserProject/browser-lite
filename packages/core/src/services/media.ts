@@ -38,6 +38,27 @@ interface PlayerOptions {
 
 type Operation = (() => void) & { retry?: boolean };
 
+/** The parts of a host <video> that tell whether it has sound; only some browsers have each. */
+interface AudioProbe {
+  audioTracks?: { length: number };
+  mozHasAudio?: boolean;
+  webkitAudioDecodedByteCount?: number;
+}
+
+// Whether the host found an audio track. WebKit pauses video without one when its page is hidden
+// (patch 0042), so a guess must err towards sound. audioTracks: Safari; mozHasAudio: Firefox;
+// Chrome has only the decoded audio bytes, from the first data on: until then media without a
+// picture counts as sound.
+function hasAudioTrack(video: HTMLVideoElement): boolean {
+  if (video.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+  const probe = video as HTMLVideoElement & AudioProbe;
+  if (probe.audioTracks) return probe.audioTracks.length > 0;
+  if (typeof probe.mozHasAudio === 'boolean') return probe.mozHasAudio;
+  if (typeof probe.webkitAudioDecodedByteCount === 'number')
+    return probe.webkitAudioDecodedByteCount > 0 || !video.videoWidth;
+  return true;
+}
+
 /** Media of the browser instance: hidden <video> elements of the host, one per engine player. */
 export interface MediaHost {
   readonly ctx: ServiceContext;
@@ -178,7 +199,7 @@ export class Player {
       width: video.videoWidth,
       height: video.videoHeight,
       hasVideo: video.videoWidth > 0,
-      hasAudio: video.readyState >= 1,
+      hasAudio: hasAudioTrack(video),
       paused: video.paused,
       ended: video.ended,
       readyState: this.readyState(),
