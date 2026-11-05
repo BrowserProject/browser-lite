@@ -8,7 +8,8 @@ transport for TCP connections and drives it through the C exports. What has to c
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`, the
 generic code paths the port takes, for example formatting of UI strings, and what changes when
 all sites share one process, for example the microtasks of a site that was left, and WebKit bugs
-that real sites hit, for example the hovered element a page from the back/forward cache forgot)
+that real sites hit, for example the hovered element a page from the back/forward cache forgot
+or the policy a typed `data:` address took over from the page before)
 comes as patches from `patches/`.
 
 ## Folders

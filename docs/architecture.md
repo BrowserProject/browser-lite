@@ -185,6 +185,10 @@ refuses before any request (restricted port, address of only zeros, `refusedReas
 redirects) skip such an address too, and an error page loads no favicon (#400). Redirects the
 engine stops (more than 20, or to a `file:` address) carry their own codes and get the page under
 the address that redirected (#406).
+An address the host loads (`bl_load_url`, typed by the user) has no initiator document: a
+`data:` or `about:` document from it starts with an empty policy container (CSP, referrer
+policy) like in Chrome, while one a page navigates to inherits the page's policy (HTML spec,
+patch 0080, #408).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch

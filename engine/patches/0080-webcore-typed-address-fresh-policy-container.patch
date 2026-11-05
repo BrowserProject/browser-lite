@@ -1,0 +1,15 @@
+diff --git a/Source/WebCore/loader/DocumentWriter.cpp b/Source/WebCore/loader/DocumentWriter.cpp
+index 1aa34953b6..99dce37090 100644
+--- a/Source/WebCore/loader/DocumentWriter.cpp
++++ b/Source/WebCore/loader/DocumentWriter.cpp
+@@ -239,7 +239,9 @@ bool DocumentWriter::begin(const URL& urlReference, bool dispatch, Document* own
+                 document->inheritPolicyContainerFrom(parentFrame->document()->policyContainer());
+                 protect(document->contentSecurityPolicy())->updateSourceSelf(protect(protect(parentFrame->document())->securityOrigin()));
+             }
+-        } else if (triggeringAction && triggeringAction->requester() && !isLoadingBrowserControlledHTML()) {
++        } else if (triggeringAction && triggeringAction->requester() && !triggeringAction->isRequestFromClientOrUserInput() && !isLoadingBrowserControlledHTML()) {
++            // An address the user typed has no initiator document: it starts with a fresh
++            // policy container instead of the one of the page shown before (like Chrome).
+             document->inheritPolicyContainerFrom(triggeringAction->requester()->policyContainer);
+             protect(document->contentSecurityPolicy())->updateSourceSelf(triggeringAction->requester()->securityOrigin);
+         }

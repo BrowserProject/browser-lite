@@ -4,7 +4,7 @@
 |---|---|---|---|
 | `contract/` | `engine/abi.json` against the engine sources, dependency direction of the packages | node | js |
 | `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache keys, cache names, cleanup and ranges | node | js (`npm test`) |
-| `engine/` | the engine in node without a browser: test pages (`pages/`), error page, GC stress, native WTF tests (`wtf-tests.cpp`, built with the engine as `wtf-tests.js`) | engine build | engine |
+| `engine/` | the engine in node without a browser: test pages (`pages/`), error page, the policy of a typed `data:` or `about:` address, GC stress, native WTF tests (`wtf-tests.cpp`, built with the engine as `wtf-tests.js`) | engine build | engine |
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
 | `packages` | DOM tests of the packages in Chromium and Firefox (`packages/*/test/browser.mjs`: ui popups, prompts and dialogs, profile sync with the real OPFS, engine deltas of the server) | packages, Playwright | e2e-core |
 | `core/` | `@browser-lite/core` in Chromium and Firefox through the test host page `core/host/`: every engine feature | engine build, packages, Playwright | e2e-core |
