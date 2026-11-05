@@ -334,6 +334,14 @@ if (menuShown) {
     'link opened in a new tab',
     (await page.evaluate(() => document.querySelectorAll('#tab-list .tab').length)) === 3,
   );
+  const selected = await page.evaluate(() =>
+    [...document.querySelectorAll('#tab-list .tab')].map((tab) => tab.ariaSelected),
+  );
+  check(
+    'link from the menu opened in the background like Chrome',
+    selected.join() === 'true,false,false',
+    selected.join(),
+  );
   await page.click('#tab-list .tab:first-child .title');
 }
 

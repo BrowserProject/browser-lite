@@ -15,14 +15,33 @@ let snackbarTimer: ReturnType<typeof setTimeout> | undefined;
  */
 export function setStatus(text: string): void {
   byId('status').textContent = text;
-  if (!text || !compactLayout()) return;
+  if (text && compactLayout()) showSnackbar(text);
+}
+
+/** Button of a snackbar message, like Switch for a tab opened in the background. */
+export interface SnackbarAction {
+  label: string;
+  run(): void;
+}
+
+/** A message for a few seconds above the bottom bar of the phone layout. */
+export function showSnackbar(text: string, action?: SnackbarAction): void {
   const snackbar = byId('snackbar');
-  snackbar.textContent = text;
+  const hide = () => {
+    snackbar.hidden = true;
+  };
+  snackbar.replaceChildren(text);
+  if (action) {
+    const button = element('button', { type: 'button', textContent: action.label });
+    button.addEventListener('click', () => {
+      hide();
+      action.run();
+    });
+    snackbar.append(button);
+  }
   snackbar.hidden = false;
   clearTimeout(snackbarTimer);
-  snackbarTimer = setTimeout(() => {
-    snackbar.hidden = true;
-  }, 4000);
+  snackbarTimer = setTimeout(hide, action ? 6000 : 4000);
 }
 
 /** Loading progress of the active tab (0..1); the bar fades out at 1. */

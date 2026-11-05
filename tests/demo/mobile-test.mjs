@@ -1,7 +1,8 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
 // compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
-// page smaller), the tab overview shows the tabs, switches and closes one, the menu opens as a
+// page smaller), the tab overview shows the tabs, switches and closes one, Open link in new tab
+// opens it in the background with a message to switch to it, the menu opens as a
 // bottom sheet on the toolbar, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, the close button of the
 // settings stays at the top while they scroll, and the desktop layout
@@ -12,6 +13,7 @@
 import {
   BROWSER,
   TIMEOUT,
+  canvasOrigin,
   check,
   collect,
   emulateTouchPoints,
@@ -304,6 +306,58 @@ check(
   'tab overview: the cross closes a tab',
   closed && (await tab.textContent('#tab-count')).trim() === '1',
 );
+await tab.tap('#tab-overview .overview-done');
+
+// Open link in new tab of the context menu: in the background, a message offers to switch to it
+await tab.evaluate(() =>
+  window.blTest.eval(
+    `document.body.insertAdjacentHTML('beforeend', '<a href="four" style="position:fixed;left:0;top:200px;width:200px;height:60px;background:#cde">Four</a>'); console.log('RESULT link=1')`,
+  ),
+);
+await results.wait('link', 10000);
+const origin = await canvasOrigin(tab);
+await tab.mouse.click(origin.x + 100, origin.y + 230, { button: 'right' });
+const openLink = tab.locator('.bl-context-menu button[data-bl-item=open-link]');
+await openLink.waitFor({ timeout: 10000 }).catch(() => {});
+await openLink.tap();
+const snackbarShown = await shown('#snackbar button');
+const menuTab = await tab.evaluate(() => ({
+  count: document.getElementById('tab-count').textContent.trim(),
+  url: window.blTest.view()?.url,
+  text: document.getElementById('snackbar').textContent,
+}));
+check(
+  'link from the menu: a background tab and a message to switch',
+  snackbarShown &&
+    menuTab.count === '2' &&
+    menuTab.url.endsWith('/two') &&
+    menuTab.text === 'Opened in a new tabSwitch',
+  JSON.stringify(menuTab),
+);
+check('link from the menu: Switch has 44 px', ...(await touchSize('#snackbar button')));
+await screenshot(tab, 'mobile-snackbar');
+if (snackbarShown) await tab.tap('#snackbar button');
+check(
+  'link from the menu: Switch brings the new tab to the front',
+  await tab
+    .waitForFunction(
+      () =>
+        window.blTest.view()?.url.endsWith('/four') && document.getElementById('snackbar').hidden,
+      null,
+      { timeout: 10000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    ),
+);
+await tab.tap('#tab-count');
+await tab.locator('.overview-card.active .overview-close').tap();
+await tab
+  .waitForFunction(() => document.querySelectorAll('.overview-card').length === 1, null, {
+    timeout: 10000,
+  })
+  .catch(() => {});
 await tab.tap('#tab-overview .overview-done');
 
 // Menu as a bottom sheet with the hidden toolbar buttons

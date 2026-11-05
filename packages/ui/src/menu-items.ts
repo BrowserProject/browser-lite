@@ -5,7 +5,7 @@ import { resolveTexts } from './texts.js';
 
 /** Actions of the standard menu that need the app; the optional ones default to the view. */
 export interface MenuActions {
-  /** Opens a link or image in a new tab. */
+  /** Opens a link or image in a new tab; Chrome opens it in the background. */
   openTab(url: string): void;
   /** Default `view.reload()`. */
   reload?(): void;

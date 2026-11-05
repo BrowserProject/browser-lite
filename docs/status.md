@@ -91,7 +91,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   surfaces with a blue accent, design tokens in one place, state layers, tabs joined to the
   toolbar, light and dark mode, SVG icons, a new tab page with a greeting and tiles of the sites
   visited most often, an address bar that selects the whole address on the first click and
-  restores it with Escape, keeps an address that is still loading (a slow server, a sign in prompt) in the bar and the tab until its page commits (#382), a find bar that Escape closes also after a click on its buttons (#376), one find bar per tab that a navigation closes (#390), Ctrl+Shift+T for the tab closed last (#377), tabs reordered by dragging with the mouse and Ctrl+Shift+PageUp/PageDown (#383), suggestions with a search row and site icons, the menu as a dropdown,
+  restores it with Escape, keeps an address that is still loading (a slow server, a sign in prompt) in the bar and the tab until its page commits (#382), a find bar that Escape closes also after a click on its buttons (#376), one find bar per tab that a navigation closes (#390), Open link or image in new tab of the context menu in the background like Chrome (#391), Ctrl+Shift+T for the tab closed last (#377), tabs reordered by dragging with the mouse and Ctrl+Shift+PageUp/PageDown (#383), suggestions with a search row and site icons, the menu as a dropdown,
   floating side panels, history by day, settings as cards with switches, dialogs of the pages in
   the page, hover only for real pointers, short transitions (off with reduced motion). Checked in
   Chromium at 1440x900, 1280x800, 820x1180 touch, 393x852 and 844x390, light and dark; not yet on
@@ -101,6 +101,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   above the home indicator and the keyboard, suggestions upwards above it), tab overview with
   cards, menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
   areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
+  a link opened from the context menu with a message that offers to switch to it (#391),
   the settings' close button at the top while they scroll (#379),
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336).

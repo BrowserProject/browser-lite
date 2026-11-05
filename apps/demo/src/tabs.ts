@@ -15,7 +15,14 @@ import { uiReloading } from './reload.js';
 import { runtime } from './runtime.js';
 import { type SessionEntry, type SessionTab, saveSession, sessionEntry } from './session.js';
 import { settings, startSettings } from './settings.js';
-import { setProgress, setStatus, updateSecurity, updateStar, updateToolbar } from './toolbar.js';
+import {
+  setProgress,
+  setStatus,
+  showSnackbar,
+  updateSecurity,
+  updateStar,
+  updateToolbar,
+} from './toolbar.js';
 import { byId, element, isBlank, isInternal } from './util.js';
 import { sourcePage } from './view-source.js';
 import { rememberSiteZoom, siteZoom, zoomHost } from './zoom.js';
@@ -234,7 +241,7 @@ export class Tab implements SessionTab {
     this.on('find', (event) => showFindCount(view, event.matches, event.index));
     this.on('context-menu', (info) => {
       const items = defaultMenuItems(view, info, {
-        openTab: (url) => openTab(url),
+        openTab: (url) => openMenuTab(url),
         print: () => printTab(this),
       });
       showContextMenu(view, info, [...items, ...slotMenuItems(ui, view, info)]);
@@ -456,6 +463,16 @@ export function openBackgroundTab(url: string): Tab | null {
   const tab = add(new Tab(view, { url }));
   persistSession();
   return tab;
+}
+
+/**
+ * Open link or image in new tab of the context menu: in the background like Chrome. The phone
+ * layout shows no tab strip, so like Chrome on Android a message offers to switch to it.
+ */
+function openMenuTab(url: string): void {
+  const tab = openBackgroundTab(url);
+  if (tab && compactLayout())
+    showSnackbar('Opened in a new tab', { label: 'Switch', run: () => activate(tab) });
 }
 
 /** Tab of the session that loads only on the first click; `before` keeps its place. */
