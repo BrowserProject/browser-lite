@@ -1904,6 +1904,7 @@ void WebView::didCommitLoad()
     // A commit without a response (substitute data): the new document must not stay paused
     resumeLeavingPage();
     m_firstPaint = FirstPaint::WaitingForLayout;
+    m_faviconLoading = { };
     // New page without pinch zoom (back/forward restores the remembered one)
     m_pinch = std::nullopt;
     if (m_page->pageScaleFactor() != 1)
@@ -2003,6 +2004,7 @@ void WebView::exitFullscreen()
 
 // Best icon from <link rel=icon> (closest to 32 px, SVG always fits),
 // otherwise /favicon.ico. The engine loads it itself, the host has no network.
+// Reported for every loaded page, also when the last page had the same icon
 void WebView::loadFavicon()
 {
     RefPtr frame = mainFrame();
@@ -2021,10 +2023,21 @@ void WebView::loadFavicon()
     }
     if (best.isEmpty())
         best = URL(document->url(), "/favicon.ico"_s);
-    if (best == m_faviconURL)
+    if (m_favicon && m_favicon->url == best) {
+        sendIconData(m_id, best.string(), m_favicon->mimeType, m_favicon->data.span());
         return;
-    m_faviconURL = best;
-    loadIcon(m_id, best);
+    }
+    m_faviconLoading = best;
+    loadIcon(best, [id = m_id, url = best](const String& mimeType, Vector<uint8_t>&& data) {
+        auto* view = fromID(id);
+        // Another document came meanwhile: the icon is not its icon
+        if (!view || view->m_faviconLoading != url)
+            return;
+        view->m_faviconLoading = { };
+        // Also without an icon (empty data), so the host removes the old one
+        sendIconData(id, url.string(), mimeType, data.span());
+        view->m_favicon = Favicon { url, mimeType, WTF::move(data) };
+    });
 }
 
 void WebView::didFailLoading(const String& url, const String& description)

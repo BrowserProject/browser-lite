@@ -128,7 +128,8 @@ export class Tab implements SessionTab {
       }
       const leftNewTab = this.newTab && !isBlank(event.url);
       if (leftNewTab) this.newTab = false;
-      // The engine reports an icon only when its address changes: keep it within the site
+      // The engine reports the icon of every page once it has loaded: until then the last one
+      // stays within the site
       if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.setIcon(null);
       this.url = event.url;
       this.canGoBack = event.canGoBack;

@@ -522,7 +522,10 @@ export interface ViewEvents {
   'first-paint': Record<string, never>;
   /** A console message of the page. */
   console: ConsoleMessage;
-  /** Favicon of the page, null when it has none. */
+  /**
+   * Favicon of the page, null when it has none. Reported for every http(s) page once it has
+   * loaded, also when the page before had the same icon.
+   */
   icon: { blob: Blob | null };
   /** The pointer is over a link (its address) or left it (null). */
   hover: { url: string | null };

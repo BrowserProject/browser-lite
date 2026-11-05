@@ -108,8 +108,8 @@ select popup) are in the same sheet.
   tab that shows another host gets that host's zoom, else the default zoom of the settings. The
   zoom of a page without a host (new tab page, `data:`, `file:`) stays with its tab. The zoom
   applies when the new page has committed, so its first layout can still have the old one (#385).
-- **Icons of sites**: the tab shows the icon the engine reports; it goes when the tab leaves the
-  site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
+- **Icons of sites**: the tab shows the icon the engine reports for every page once it has
+  loaded; until then the last one stays within the site, it goes when the tab leaves the site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
   history) for suggestions, history, bookmarks, the new tab page and the tab overview, drawn
   on a CPU canvas (`willReadFrequently`, see [embedding](../../docs/embedding.md#resource-use)).
 

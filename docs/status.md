@@ -13,7 +13,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   our own Wisp relay that connects only to public addresses and web ports (#159, #178, #201).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
-  (address and title of the restored page, #367),
+  (address and title of the restored page, #367), favicons for every loaded page (also after a
+  page without one or back to a page whose next page never loaded, #389),
   downloads, uploads, find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
   print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,

@@ -195,6 +195,12 @@ resource; another version replaces the ranges. `MediaFetch` looks up in the part
 element's document. A 304 only updates the headers of the stored entry, its body stays in the
 Cache API.
 
+The favicon of a page is loaded by the engine itself (`WebView::loadFavicon`, `IconLoad` in
+`LoaderStrategy.cpp`) once an http(s) page has loaded: the best `<link rel=icon>`, else
+`/favicon.ico`. It goes to the host (`icon`) for every such page; the view keeps the last icon, so
+a page with the same icon address gets it without a new request, and an icon that arrives after
+its page was left is dropped (#389).
+
 ## Storage
 
 The engine uses WasmFS. `/data` is the OPFS directory `<namespace>` of the host origin

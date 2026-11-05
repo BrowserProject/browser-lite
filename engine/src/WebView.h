@@ -320,7 +320,15 @@ private:
     std::optional<WebCore::DoublePoint> m_longPressMenu;
     bool m_leavingPagePaused { false };
     bool m_restoringFromCache { false };
-    URL m_faviconURL;
+    // The last icon loaded: a page with the same icon address gets it without a new load
+    struct Favicon {
+        URL url;
+        String mimeType;
+        Vector<uint8_t> data;
+    };
+    std::optional<Favicon> m_favicon;
+    // Icon address of the current document while it loads
+    URL m_faviconLoading;
     RefPtr<WebCore::FileChooser> m_fileChooser;
 #if ENABLE(POINTER_LOCK)
     CompletionHandler<void(WebCore::PointerLockRequestResult)> m_pointerLockHandler;

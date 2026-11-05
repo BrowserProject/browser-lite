@@ -824,15 +824,17 @@ void startViewSource(int viewId, const URL& url)
     Download::start(viewId, WTF::move(request), { }, true);
 }
 
-// Favicon for the view: small, entirely in memory, goes to the host as a whole
+// Favicon: small, entirely in memory, goes to the caller as a whole
 class IconLoad final : public RefCounted<IconLoad>, public CurlRequestClient {
 public:
-    static void start(int viewId, const URL& url)
+    using Handler = CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>;
+
+    static void start(const URL& url, Handler&& handler)
     {
         ResourceRequest request(URL { url });
         request.setHTTPHeaderField(HTTPHeaderName::Accept, "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"_s);
         request.setFirstPartyForCookies(url);
-        Ref load = adoptRef(*new IconLoad(viewId, url));
+        Ref load = adoptRef(*new IconLoad(WTF::move(handler)));
         load->m_self = load.ptr();
         load->m_request = createCurlRequest(WTF::move(request), load.get());
         load->m_request->resume();
@@ -844,18 +846,16 @@ public:
 private:
     static constexpr size_t maxSize = 512 * 1024;
 
-    IconLoad(int viewId, const URL& url)
-        : m_viewId(viewId)
-        , m_url(url)
+    explicit IconLoad(Handler&& handler)
+        : m_handler(WTF::move(handler))
     {
     }
 
     void done(bool success)
     {
-        // Report even without an icon, so the host removes the old icon
         if (!success)
             m_data.clear();
-        sendIconData(m_viewId, m_url.string(), m_mimeType, m_data.span());
+        m_handler(m_mimeType, WTF::move(m_data));
         if (auto request = std::exchange(m_request, nullptr)) {
             request->cancel();
             request->invalidateClient();
@@ -898,8 +898,7 @@ private:
         done(false);
     }
 
-    int m_viewId;
-    URL m_url;
+    Handler m_handler;
     String m_mimeType;
     bool m_ok { false };
     unsigned m_redirectCount { 0 };
@@ -908,9 +907,9 @@ private:
     RefPtr<IconLoad> m_self;
 };
 
-void loadIcon(int viewId, const URL& url)
+void loadIcon(const URL& url, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&& handler)
 {
-    IconLoad::start(viewId, url);
+    IconLoad::start(url, WTF::move(handler));
 }
 
 class WasmLoaderStrategy final : public LoaderStrategy {

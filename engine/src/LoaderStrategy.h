@@ -1,5 +1,6 @@
 #pragma once
 
+#include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
@@ -41,7 +42,7 @@ bool isRedirect(const WebCore::ResourceResponse&);
 // 20). An error means it does not continue.
 WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::CurlRequestClient&, const WebCore::ResourceRequest& current, const WebCore::ResourceResponse&, unsigned& redirectCount);
 
-// Loads a favicon and hands it to the host (Module.onEngineIcon)
-void loadIcon(int viewId, const URL&);
+// Loads a favicon (small, entirely in memory). Empty data when there is none
+void loadIcon(const URL&, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&&);
 
 } // namespace BrowserLite
