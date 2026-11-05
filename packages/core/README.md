@@ -28,6 +28,8 @@ view.on('title', ({ title }) => console.log(title));
 The container needs a size (for example `height: 100vh`); the view fills it and follows its size.
 The view puts its canvas (`position: relative`) and a hidden text field into the container; a
 playing video goes before the canvas, underneath it (the engine leaves its rect transparent).
+The canvas shows the page's frames pixel for pixel from its top left (its box is the pixel ratio
+times the container, scaled back with `transform`), so size the container, not the canvas.
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it
 moves onto one or out of the canvas (mouseleave, no more `:hover`). The hidden text field takes the
 focus for the page and carries the input mode and enter key hint of the page's focused field, so

@@ -48,7 +48,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
   waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
   33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
-  Worklet, WebGL 1 and 2, recovery after GPU loss.
+  Worklet, WebGL 1 and 2, recovery after GPU loss. After a rotation or an on-screen keyboard the
+  last frame stays unscaled until the page painted the new size (#404; before, it was stretched
+  or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
+  WebKit.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to

@@ -249,7 +249,7 @@ async function visibility(label, params) {
       ctx.drawImage(canvas, 0, 0);
       const data = ctx.getImageData(
         0,
-        Math.round((50 * canvas.height) / canvas.clientHeight),
+        Math.round((50 * canvas.height) / canvas.getBoundingClientRect().height),
         canvas.width,
         1,
       ).data;

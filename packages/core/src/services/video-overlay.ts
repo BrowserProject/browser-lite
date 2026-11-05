@@ -29,9 +29,9 @@ export function placeVideo(
   // Out of the flow before it goes next to the canvas, which it would push down otherwise
   video.style.position = 'absolute';
   if (video.nextElementSibling !== canvas) canvas.before(video);
-  // Device pixels of the engine to CSS pixels of the canvas
-  const devicePixels = view.viewSize.width * view.host.pixelRatio();
-  const s = devicePixels > 0 ? canvas.clientWidth / devicePixels : 1;
+  // Device pixels of the engine to CSS pixels: the canvas shows a frame pixel per 1/ratio CSS
+  // pixel (view.ts)
+  const s = 1 / view.host.pixelRatio();
   const [a, b, c, d, e, f] = matrix;
   const [x, y, width, height] = rect;
   const transform = [a * s, b * s, c * s, d * s, (a * x + c * y + e) * s, (b * x + d * y + f) * s];

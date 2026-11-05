@@ -118,6 +118,10 @@ compositor's phase and how long it lasts, since the scene started if it never ra
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 Without a transferable canvas the engine hands pixels in shared memory (`onEngineFrame`).
+The core shows a frame pixel for pixel at the view's pixel ratio from the top left of the canvas
+(`object-fit: none` in a box of ratio times the view, scaled back with a transform, `view.ts`):
+after a rotation or an on-screen keyboard the last frame stays unscaled, cut off or with an empty
+rest, until the engine shows one of the new size, like Chrome (#404).
 
 ## WebGL
 

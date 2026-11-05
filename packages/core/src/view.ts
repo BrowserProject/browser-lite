@@ -76,6 +76,8 @@ export class ViewImpl implements View {
   private visible: boolean;
   private engineVisible: boolean;
   private size = { width: 0, height: 0 };
+  private device: { width: number; height: number } | null = null;
+  private canvasRatio = 0;
   private frameRequested = false;
   private caret: Caret | null = null;
   private closing: Promise<boolean> | null = null;
@@ -93,7 +95,8 @@ export class ViewImpl implements View {
     this.canvas.setAttribute('data-bl-view', String(id));
     // position:relative: video overlays (#232) lie before the canvas, underneath it
     this.canvas.style.cssText =
-      'display:block;position:relative;width:100%;height:100%;outline:none;touch-action:none;';
+      'display:block;position:relative;outline:none;touch-action:none;' +
+      'object-fit:none;object-position:0 0;transform-origin:0 0;';
     this.limitToDevice(device);
     // The canvas goes to the worker that paints (compositor or engine thread); only where
     // that is impossible the pixels are copied here (presentFrame)
@@ -212,14 +215,35 @@ export class ViewImpl implements View {
 
   /** @internal The canvas keeps at most the emulated device's screen size, centered. */
   limitToDevice(device: { width: number; height: number } | null): void {
+    this.device = device;
+    this.canvasRatio = 0;
+    this.fitCanvas();
+  }
+
+  /**
+   * The canvas shows its frame pixel for pixel at the view's pixel ratio, anchored at the top
+   * left: its box is `ratio` times the view, shrunk back with a transform, and the frame keeps
+   * its natural size in it (`object-fit: none`). A frame of another size (after a rotation or
+   * an on-screen keyboard, until the engine painted the new size) is cut off or leaves the rest
+   * empty instead of being stretched, like Chrome.
+   */
+  private fitCanvas(): void {
+    const ratio = this.host.pixelRatio();
+    if (ratio === this.canvasRatio) return;
+    this.canvasRatio = ratio;
+    const device = this.device;
     const style = this.canvas.style;
-    style.maxWidth = device ? `${device.width}px` : '';
-    style.maxHeight = device ? `${device.height}px` : '';
-    style.margin = device ? '0 auto' : '';
+    style.width = `${ratio * 100}%`;
+    style.height = `${ratio * 100}%`;
+    style.transform = `scale(${1 / ratio})`;
+    style.maxWidth = device ? `${device.width * ratio}px` : '';
+    style.maxHeight = device ? `${device.height * ratio}px` : '';
+    style.marginLeft = device ? `max(0px, (100% - ${device.width}px) / 2)` : '';
   }
 
   /** @internal Sends the current size (resize, pixel ratio change). */
   measure(force = false): void {
+    this.fitCanvas();
     const size = this.measureNow();
     if (!size || !this.alive) return;
     if (!force && size.width === this.size.width && size.height === this.size.height) return;

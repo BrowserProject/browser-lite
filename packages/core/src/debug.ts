@@ -7,10 +7,12 @@ interface DebugHost {
   text(value: string): number;
   debugState(name: 'audio' | 'media' | 'rtc'): unknown;
   memoryPressure(): void;
+  pixelRatio(): number;
 }
 
-// The canvas usually belongs to the engine worker: read it through drawImage
-function snapshot(view: View, rows?: { y: number }): ImageData | null {
+// The canvas usually belongs to the engine worker: read it through drawImage, like it is shown
+// (a frame pixel per 1/ratio CSS pixel from the top left, view.ts)
+function snapshot(view: View, ratio: number, rows?: { y: number }): ImageData | null {
   const rect = view.canvas.getBoundingClientRect();
   const width = Math.ceil(rect.width);
   const height = Math.ceil(rect.height);
@@ -21,7 +23,7 @@ function snapshot(view: View, rows?: { y: number }): ImageData | null {
   const context = probe.getContext('2d', { willReadFrequently: true });
   if (!context) return null;
   context.imageSmoothingEnabled = false;
-  context.drawImage(view.canvas, 0, 0, width, height);
+  context.drawImage(view.canvas, 0, 0, view.canvas.width / ratio, view.canvas.height / ratio);
   return rows
     ? context.getImageData(0, Math.round(rows.y), width, 1)
     : context.getImageData(0, 0, width, height);
@@ -51,7 +53,7 @@ export class Debug implements DebugApi {
   }
 
   pagePixel(view: View, x: number, y: number): [number, number, number] {
-    const image = snapshot(view);
+    const image = snapshot(view, this.host.pixelRatio());
     if (!image) return [0, 0, 0];
     const px = Math.min(Math.max(Math.round(x), 0), image.width - 1);
     const py = Math.min(Math.max(Math.round(y), 0), image.height - 1);
@@ -61,7 +63,7 @@ export class Debug implements DebugApi {
   }
 
   pageRow(view: View, y: number): [number, number, number][] {
-    const image = snapshot(view, { y });
+    const image = snapshot(view, this.host.pixelRatio(), { y });
     const row: [number, number, number][] = [];
     if (!image) return row;
     const d = image.data;
