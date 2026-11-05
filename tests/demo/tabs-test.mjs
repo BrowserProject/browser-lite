@@ -1,9 +1,9 @@
 // The tab strip and the toolbar of the demo (the engine side is in tests/core): the speaker in the
 // tab appears with sound and mutes the tab on a click, one prompt for camera and microphone, the
 // recording indicator follows the camera, the favicon of the page in the tab, its title or address
-// after back and forward (also from the back/forward cache), the address bar
-// keeps an address that failed, the security indicator ("Not secure" for a certificate error,
-// nothing on other error pages) and the back button. A click on a notification of a service
+// after back and forward (also from the back/forward cache), the find bar of each tab that a
+// navigation closes, the address bar keeps an address that failed, the security indicator ("Not
+// secure" for a certificate error, nothing on other error pages) and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
 // the status line says that memory is full. Ctrl+Shift+T brings the closed tab back. An address
@@ -327,6 +327,55 @@ check(
   await shows({ address: `${siteURL}plain-b`, text: `${siteURL}plain-b` }),
   await labels(),
 );
+
+// 3c) Find bar like Chrome: each tab has its own, a new document (navigation, reload) closes it
+const findState = () =>
+  page.evaluate(() =>
+    JSON.stringify({
+      hidden: document.getElementById('find-bar').hidden,
+      text: document.getElementById('find-input').value,
+      count: document.getElementById('find-count').textContent,
+    }),
+  );
+const findIs = (state) =>
+  page
+    .waitForFunction(
+      (state) =>
+        document.getElementById('find-bar').hidden === state.hidden &&
+        (state.count === undefined ||
+          document.getElementById('find-count').textContent === state.count),
+      state,
+      { timeout: 10000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+await clickPage();
+await page.keyboard.press('Control+f');
+await page.keyboard.type('B');
+check(
+  'find: a match on the page',
+  await findIs({ hidden: false, count: '1 of 1' }),
+  await findState(),
+);
+await page.keyboard.press('Control+t');
+check('find: a new tab has no find bar', await findIs({ hidden: true }), await findState());
+await page.keyboard.press('Control+Shift+Tab');
+check(
+  'find: back in the tab its find bar with text and result',
+  (await findIs({ hidden: false, count: '1 of 1' })) && JSON.parse(await findState()).text === 'B',
+  await findState(),
+);
+results.delete('ready');
+await page.click('#back');
+await result('ready');
+check('find: a navigation closes the find bar', await findIs({ hidden: true }), await findState());
+await page.keyboard.press('Control+Tab');
+await page.keyboard.press('Control+w');
+results.delete('ready');
+await page.click('#forward');
+await result('ready');
 
 // 4) Failing navigations: the address bar keeps the address, the security indicator says
 // "Not secure" only for a certificate error

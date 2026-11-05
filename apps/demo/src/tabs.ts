@@ -4,7 +4,7 @@ import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocke
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
 import { hostOf, rememberIcon } from './favicons.js';
-import { showFindCount } from './find-bar.js';
+import { endFind, showFindCount, showFindOf } from './find-bar.js';
 import { recordVisit } from './history.js';
 import { icon, setIcon } from './icons.js';
 import { compactLayout } from './layout.js';
@@ -173,6 +173,7 @@ export class Tab implements SessionTab {
       if (this.isActive) updatePopupsButton(this);
       this.userActivated = false;
       updateHostBeforeUnload();
+      endFind(view);
     });
     this.on('load', () => {
       this.loading = false;
@@ -230,9 +231,7 @@ export class Tab implements SessionTab {
       address.focus();
       address.select();
     });
-    this.on('find', (event) => {
-      if (this.isActive) showFindCount(event.matches, event.index);
-    });
+    this.on('find', (event) => showFindCount(view, event.matches, event.index));
     this.on('context-menu', (info) => {
       const items = defaultMenuItems(view, info, {
         openTab: (url) => openTab(url),
@@ -512,6 +511,7 @@ export function activate(tab: Tab): void {
   persistSession();
   tab.show(true);
   showPromptsOf(tab.view);
+  showFindOf(tab.view);
   // The address bar shows the address of this tab
   const address = byId('address');
   if (document.activeElement === address) address.blur();
