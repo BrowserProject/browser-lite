@@ -251,6 +251,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    it cost 75 MB more on 20min and did not make the tap measurably faster (#362). What is left of the
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
+   Long single tasks of a page become many times longer here, so they block all views and can
+   reach the script watchdog (#146). Cloudflare Turnstile on kaufland.de (2026-11-05, local,
+   Chromium host): the challenge iframe blocks the engine thread in single entries of 10 to 30 s
+   (about 90 s within 2 minutes), the one that reaches 30 s is terminated and the widget stays at
+   "Verifying". Plain Chromium with a desktop user agent on the same machine: the challenge's
+   renderer is busy 3.2 s, its longest tasks take 0.8, 0.55 and 0.34 s, so about 35x faster. The
+   profile of a block has no single cause: about half compiled code, 15 % interpreter and its
+   slow paths, the rest JS runtime (arrays, `apply` with spread arguments, `Reflect.construct`,
+   bound functions), WebGL fingerprinting 3 %, ICU data loaded lazily 3 %, forced layout 2.5 %.
+   With `?scripttimeout=600` the challenge passes after about 40 s of blocks. Only faster JS
+   fixes it ([jit.md](jit.md)). Not done either: the demo's "Wait" after `unresponsive` does not
+   move the watchdog's deadline, so waiting cannot save such a script.
 2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
    saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
    about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
