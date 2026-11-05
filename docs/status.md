@@ -282,7 +282,23 @@ browser (Safari keeps Cmd+L, T and W for itself).
    about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
    was busy. On a Motorola Moto G71 (real GPU) a context with a few queries took 89 ms the first
    time and 28 ms each after.
-3. Forced flex/grid layout from JS (20min about 6.5 s, #141): no cheap fix found.
+3. Forced flex/grid layout from JS (20min about 6.5 s, #141) and after a resize or rotation
+   (#405): no cheap fix found. On 20min.ch (2026-11-05, local, idle machine) a resize keeps the
+   page's thread busy about 1 s in 3 to 4 tasks (the largest 0.55 to 0.95 s, the first frame
+   after 40 to 50 ms), native WebKit (Playwright) 0.5 s, Chromium 0.1 s. One forced relayout
+   costs 65 to 70 ms here, 43 to 50 ms in native WebKit and 3 ms in Chromium: WASM adds 1.5 to
+   2x, the rest is WebKit's layout. The content column there is a stretched flex item (a row
+   flex in a column flex) with 294 `height: 100%` descendants. WebKit lays such an item out once
+   without and once with its final size, and every layout of a block dirties all of its
+   percentage height descendants (`RenderBlockFlow::layoutBlock`,
+   `RenderFlexibleBox::flexItemHasPercentHeightDescendants`, FIXME webkit.org/b/204318), so
+   each pass lays the whole content out four times, grids inside again for their row sizes.
+   Without the stretch, the column flex and the percentages one relayout costs 11 ms in native
+   WebKit. Even a 3 px wider leaf in the header lays the whole content out (native WebKit 35 ms,
+   Chromium 0.1 ms), which is why the forced layouts while loading cost that much. Chromium
+   caches layout results per constraint; in WebKit that is a rework of block, flex and grid
+   layout. The blocks of 2 s and more first reported came from a machine with a load of 55 to
+   72 on 10 cores. A window drag is coalesced: 3 resize events for 20 steps (native WebKit 20).
 4. GC 5 to 7 % on JS-heavy sites (#60, #122).
 5. Video and animations: with compositing Chromium shows the video itself behind the view canvas
    (#232); videos with opacity, blend modes, filters or 3D transforms keep frames painted into the
