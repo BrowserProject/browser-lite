@@ -1,8 +1,9 @@
-// The paths of the core for Safari 18, forced in Chromium: before the start the test removes
-// what Safari lacks on the main thread (MediaSource, which iPhone Safari has only as
-// ManagedMediaSource, MediaStreamTrackProcessor, requestIdleCallback). Checks MSE through the
-// ManagedMediaSource path, the microphone through the AudioWorklet of the capture (no
-// AudioData), and the on-screen keyboard modes of the IME field ("text-input"). Video capture
+// The paths of the core for iPhone Safari 18, forced in Chromium: before the start the test gives
+// the host an iPhone user agent and removes what Safari lacks on the main thread (MediaSource,
+// which iPhone Safari has only as ManagedMediaSource, MediaStreamTrackProcessor,
+// requestIdleCallback, navigator.virtualKeyboard). Checks MSE through the ManagedMediaSource path,
+// the microphone through the AudioWorklet of the capture (no AudioData), and the on-screen keyboard
+// modes and enter key hints of the IME field ("text-input"). Video capture
 // without a main thread processor transfers the track to the engine worker, which Chromium
 // cannot; that path is checked on devices (docs/status.md).
 //
@@ -112,6 +113,11 @@ await context.addInitScript(() => {
   delete scope.MediaSource;
   delete scope.MediaStreamTrackProcessor;
   delete scope.requestIdleCallback;
+  delete Object.getPrototypeOf(navigator).virtualKeyboard;
+  Object.defineProperty(navigator, 'userAgent', {
+    value:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1',
+  });
 });
 const page = await context.newPage();
 const results = collect(page);
@@ -154,13 +160,49 @@ const tapAndMode = async (y, expected) => {
   await waitFor(async () => (mode = await imeMode()) === expected, 10000);
   return mode;
 };
+// iOS gives the keyboard the enter key hint only at a focus: the IME field, focused since the
+// tap, is focused again once the page field's hint differs from the one of its last focus
+const imeFocus = () =>
+  page.evaluate(() => {
+    const ime = document.querySelector('[data-bl-ime]');
+    const focus = window.imeFocus;
+    window.imeFocus = [];
+    return {
+      focus,
+      active: document.activeElement === ime,
+      fields: document.querySelectorAll('textarea').length,
+    };
+  });
+await page.evaluate(() => {
+  const ime = document.querySelector('[data-bl-ime]');
+  window.imeFocus = [];
+  ime.addEventListener('focus', () => window.imeFocus.push(`${ime.inputMode}/${ime.enterKeyHint}`));
+});
 check('keyboard: none before a field', (await imeMode()) === 'none/', await imeMode());
 let mode = await tapAndMode(35, 'text/send');
 check('keyboard: text field with enterkeyhint', mode === 'text/send', mode);
+let focus = await imeFocus();
+check(
+  'keyboard (iOS): the IME field is focused again with the enter key hint',
+  focus.focus.at(-1) === 'text/send' && focus.active && focus.fields === 1,
+  JSON.stringify(focus),
+);
 mode = await tapAndMode(85, 'decimal/');
 check('keyboard: number field', mode === 'decimal/', mode);
+focus = await imeFocus();
+check(
+  'keyboard (iOS): focused again for a field without a hint after one with a hint',
+  focus.focus.at(-1) === 'decimal/' && focus.active,
+  JSON.stringify(focus),
+);
 mode = await tapAndMode(135, 'numeric/');
 check('keyboard: inputmode numeric', mode === 'numeric/', mode);
+focus = await imeFocus();
+check(
+  'keyboard (iOS): not focused again while the hint stays',
+  focus.focus.length === 0 && focus.active,
+  JSON.stringify(focus),
+);
 mode = await tapAndMode(185, 'text/');
 check('keyboard: contenteditable', mode === 'text/', mode);
 mode = await tapAndMode(235, 'none/');

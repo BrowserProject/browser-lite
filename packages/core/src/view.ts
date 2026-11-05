@@ -3,7 +3,7 @@ import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
-import { createImeField, focusOpensKeyboard } from './keyboard.js';
+import { createImeField, enterKeyHintSetter, focusOpensKeyboard } from './keyboard.js';
 import { loadedAddress, PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
@@ -65,6 +65,7 @@ export class ViewImpl implements View {
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
   private readonly ime: HTMLTextAreaElement;
+  private readonly setEnterKeyHint: (hint: string) => void;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly pending = new PendingNavigation();
@@ -105,6 +106,7 @@ export class ViewImpl implements View {
       this.context2d = this.canvas.getContext('2d', { alpha: false });
     }
     this.ime = createImeField(this, this.lifetime.signal);
+    this.setEnterKeyHint = enterKeyHintSetter(this.ime, this.lifetime.signal);
     attachPointerInput(this, this.lifetime.signal);
     this.resizeObserver = new ResizeObserver(() => this.measure());
 
@@ -636,7 +638,7 @@ export class ViewImpl implements View {
         const apply = () => {
           const opens = mode !== 'none' && this.ime.inputMode === 'none';
           this.ime.inputMode = mode;
-          this.ime.enterKeyHint = enterKeyHint;
+          this.setEnterKeyHint(enterKeyHint);
           if (opens) this.showKeyboard();
         };
         if (mode === 'none' && this.ime.inputMode !== 'none')

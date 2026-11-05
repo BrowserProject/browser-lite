@@ -1,5 +1,6 @@
 import { pendingClipboardWrite } from './clipboard.js';
 import { modifierBits } from './input.js';
+import { appleMobileHost } from './util.js';
 import type { ViewImpl } from './view.js';
 
 interface KeyLike {
@@ -20,6 +21,47 @@ interface KeyLike {
  */
 export function focusOpensKeyboard(): boolean {
   return 'virtualKeyboard' in navigator;
+}
+
+/**
+ * @internal Setter for the enter key hint of the IME field (the `enterkeyhint` of the page's
+ * focused field). iOS gives its on-screen keyboard the hint only when an element gains focus, but
+ * the IME field has the focus since the user's tap and gets the page field's hint after it
+ * ("text-input"): the keyboard showed return instead of search in Google's search box. A blur and
+ * focus of the same field in one task is no new focus there, so on iPhone and iPad the focus moves
+ * through a second field and back when the hint differs from the one of the last focus. WebKit
+ * then starts a new input session with the hint and keeps the keyboard open, as the focus only
+ * moves from one field to another.
+ */
+export function enterKeyHintSetter(
+  ime: HTMLTextAreaElement,
+  signal: AbortSignal,
+): (hint: string) => void {
+  if (!appleMobileHost())
+    return (hint) => {
+      ime.enterKeyHint = hint;
+    };
+  let focusedHint = ime.enterKeyHint;
+  ime.addEventListener(
+    'focus',
+    () => {
+      focusedHint = ime.enterKeyHint;
+    },
+    { signal },
+  );
+  return (hint) => {
+    ime.enterKeyHint = hint;
+    if (hint === focusedHint || ime.inputMode === 'none' || document.activeElement !== ime) return;
+    const relay = document.createElement('textarea');
+    relay.setAttribute('aria-hidden', 'true');
+    relay.inputMode = 'none';
+    relay.tabIndex = -1;
+    relay.style.cssText = ime.style.cssText;
+    ime.after(relay);
+    relay.focus({ preventScroll: true });
+    ime.focus({ preventScroll: true });
+    relay.remove();
+  };
 }
 
 function keyText(e: KeyLike): string {
