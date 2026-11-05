@@ -18,6 +18,7 @@ import { settings, startSettings } from './settings.js';
 import { setProgress, setStatus, updateSecurity, updateStar, updateToolbar } from './toolbar.js';
 import { byId, element, isBlank, isInternal } from './util.js';
 import { sourcePage } from './view-source.js';
+import { rememberSiteZoom, siteZoom, zoomHost } from './zoom.js';
 
 const list: Tab[] = [];
 let active: Tab | null = null;
@@ -39,6 +40,8 @@ export class Tab implements SessionTab {
   canGoForward = false;
   loading = false;
   zoom: number;
+  /** Host the zoom of the tab belongs to (see zoom.ts), null before the first address. */
+  zoomHost: string | null = null;
   /** Kind of error page of the current document (for example 'certificate'), null without. */
   errorPage: string | null = null;
   /** Shown in the status line after the next load. */
@@ -135,6 +138,7 @@ export class Tab implements SessionTab {
       // Without a title the label is the address, also a pending one
       if (this.label !== label) this.updateTitle();
       if (this.isActive) updateStar(this.url);
+      this.followSiteZoom();
       persistSession();
       this.changed();
     });
@@ -151,6 +155,12 @@ export class Tab implements SessionTab {
     this.on('zoom', (event) => {
       this.zoom = event.zoom;
       this.changed();
+      if (!this.zoomHost) return;
+      // Like Chrome the zoom of a site applies to all its tabs
+      rememberSiteZoom(this.zoomHost, event.zoom);
+      for (const tab of list)
+        if (tab.zoomHost === this.zoomHost && tab.view.zoom !== event.zoom)
+          tab.view.setZoom(event.zoom);
     });
     this.on('commit', (event) => {
       this.errorPage = event.errorPage;
@@ -246,6 +256,18 @@ export class Tab implements SessionTab {
         );
       });
     this.on('close', () => removeTab(this));
+  }
+
+  /**
+   * Zoom per site like Chrome: a document of another host gets the zoom remembered for it. The
+   * new document commits before, so its first layout may still use the zoom of the last one.
+   */
+  private followSiteZoom(): void {
+    const host = zoomHost(this.url);
+    if (host === this.zoomHost) return;
+    this.zoomHost = host;
+    const zoom = siteZoom(host);
+    if (zoom !== this.view.zoom) this.view.setZoom(zoom);
   }
 
   /** Toolbar update after a change of the active tab. */

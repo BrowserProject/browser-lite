@@ -215,7 +215,7 @@ function renderProfile(section: HTMLElement): void {
     element('p', {
       className: 'settings-hint',
       textContent:
-        'Delete site data: cookies, storage of websites and permissions; you are signed out everywhere. Reset profile: also settings and bookmarks.',
+        'Delete site data: cookies, storage of websites, permissions and zoom levels; you are signed out everywhere. Reset profile: also settings and bookmarks.',
     }),
   );
   void profile.info().then((info) => {
@@ -333,8 +333,8 @@ function fillLocal(stats: LocalStats, list: HTMLElement): void {
 
 async function resetData(all: boolean, message: HTMLElement): Promise<void> {
   const question = all
-    ? 'Reset profile? Everything is deleted: cookies, storage of websites, permissions, settings and bookmarks.'
-    : 'Delete site data? Cookies, storage of websites and permissions are deleted; you are signed out everywhere. Settings and bookmarks stay.';
+    ? 'Reset profile? Everything is deleted: cookies, storage of websites, permissions, zoom levels, settings and bookmarks.'
+    : 'Delete site data? Cookies, storage of websites, permissions and zoom levels are deleted; you are signed out everywhere. Settings and bookmarks stay.';
   const local =
     profile.status === 'local'
       ? '\n\nThe profile server cannot be reached: only this device is cleared.'

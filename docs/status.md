@@ -14,7 +14,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
   (address and title of the restored page, #367),
-  downloads, uploads, find, zoom, pinch zoom on the compositor (#150), print to PDF, view source,
+  downloads, uploads, find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
+  print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
   validation messages and the file input's label with their numbers and texts (#363).

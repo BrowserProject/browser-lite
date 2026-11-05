@@ -103,6 +103,11 @@ select popup) are in the same sheet.
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
   sign-in dialogs of a tab behind are hidden until it is in front. Escape dismisses the
   permission prompt. Declining buttons come before accepting ones everywhere.
+- **Zoom**: per site like Chrome (`zoom.ts`): Ctrl +/-, Ctrl + mouse wheel and Ctrl+0 change
+  the zoom of the host (the host name of an http(s) address, without the port) in all its tabs; a
+  tab that shows another host gets that host's zoom, else the default zoom of the settings. The
+  zoom of a page without a host (new tab page, `data:`, `file:`) stays with its tab. The zoom
+  applies when the new page has committed, so its first layout can still have the old one (#385).
 - **Icons of sites**: the tab shows the icon the engine reports; it goes when the tab leaves the
   site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
   history) for suggestions, history, bookmarks, the new tab page and the tab overview, drawn
@@ -138,8 +143,10 @@ window (only a device the host is not gets a frame of its size). Rotating the ph
 
 ## Storage
 
-Settings, bookmarks, permission decisions and the extensions' data are prefs of the profile on the server
-(`@browser-lite/profile`, so they follow to other devices); history, the session and the access
+Settings, bookmarks, permission decisions, the zoom per site (pref `site-zoom`, only hosts off the
+default zoom) and the extensions' data are prefs of the profile on the server
+(`@browser-lite/profile`, so they follow to other devices; "Delete site data" also clears the
+permissions and the zoom per site); history, the session and the access
 tokens stay in localStorage of this device. Pages store in the OPFS namespace `browserlite`.
 
 The prefs of the server only arrive in `storage.beforeStart`, after the engine options are fixed:
@@ -158,7 +165,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |
-| `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |
+| `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps and zoom per site, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `closed-tabs.ts`, `downloads.ts`, `side-panel.ts` | library, the closed tabs for Ctrl+Shift+T, the menu and the side panel (history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
 | `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |

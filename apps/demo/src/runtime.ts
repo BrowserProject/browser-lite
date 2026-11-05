@@ -11,7 +11,8 @@ export const runtime: {
 
 /**
  * Browser profile on the own server (`profile/`): cookies, site storage and the prefs settings,
- * bookmarks and permissions. Authorized with the token of this host.
+ * bookmarks, permissions and the zoom per site; "Delete site data" also clears the last two.
+ * Authorized with the token of this host.
  */
 export const profile: Profile = createProfile({
   url: new URL('profile/', location.href),
@@ -22,6 +23,7 @@ export const profile: Profile = createProfile({
     headers.set('Authorization', `Bearer ${token}`);
     return fetch(input, { ...init, headers });
   },
+  sitePrefs: ['permissions', 'site-zoom'],
   dbLimitKB: () => {
     const settings = profile.prefs<{ dbLimit?: number }>('settings');
     return settings?.dbLimit ?? DEFAULT_DB_LIMIT_KB;
