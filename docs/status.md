@@ -252,6 +252,23 @@ browser (Safari keeps Cmd+L, T and W for itself).
    animation outside the view took all CPU of the device before, now 0.03 CPU seconds per second
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
+   A small visible animation therefore costs a whole view per frame, and the cost follows the
+   view's area, not the change (2026-11-05, local, Chromium headless with SwiftShader): one
+   44 px CSS spinner keeps the GPU process at about 2 cores, 60 frames per second at 640x480,
+   13 at 1920x1080 (165 ms of GPU process CPU per frame); Chromium itself shows it with 7 %
+   CPU. On weather.com 46 pulsing skeleton boxes kept 4 cores busy after the load event. Most
+   of it is the host showing a new view sized canvas, which no engine side change avoids.
+   Measured in plain Chromium at 1920x1080, GPU process CPU per frame: a WebGL frame that is
+   only cleared and shown with `transferToImageBitmap` 94 to 105 ms; the same with
+   `preserveDrawingBuffer` and only a 52 px square drawn (compositing just the damage into a
+   kept framebuffer) 117 to 119 ms; a whole view textured quad 181 to 183 ms; even Chromium's
+   own 2D canvas in the page with a 52 px `fillRect` per frame 49 ms; a separate 64 px canvas
+   element 1.9 ms. So compositing only the damage would gain at most about a third on frames
+   with a small change and cost a copy of the view on every other frame (scrolling), as #220
+   found. Cheap small animations need the host browser to composite them: layers with running
+   animations as their own host elements, moved by the host's compositor. That is a new
+   compositor architecture, not done; on devices with a real GPU a whole view frame costs far
+   less (not measured).
 
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
