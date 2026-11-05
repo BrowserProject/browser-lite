@@ -542,6 +542,12 @@ export interface ViewEvents {
   'user-activation': Record<string, never>;
   /** Ctrl/middle click on a link. */
   'open-tab': { url: string };
+  /**
+   * A window.open, target=_blank link or form without a user gesture was not opened, like in
+   * Chrome. `url` is its address ('' for window.open without one), `origin` the origin of the
+   * page in the view: `setPermission(origin, 'popups', 'grant')` lets its pages open windows.
+   */
+  'popup-blocked': { url: string; origin: string };
   /** mailto:, tel: and app links. */
   'external-url': { url: string };
   /** window.focus() */
@@ -649,13 +655,17 @@ export interface DialogRequest {
   signal: AbortSignal;
 }
 
-/** Permissions the pages ask for. 'camera-microphone' is one question for both. */
+/**
+ * Permissions of a site. 'camera-microphone' is one question for both. 'popups' is never asked:
+ * granted, the pages of the origin open windows without a user gesture (`popup-blocked`).
+ */
 export type PermissionKind =
   | 'geolocation'
   | 'notifications'
   | 'camera'
   | 'microphone'
-  | 'camera-microphone';
+  | 'camera-microphone'
+  | 'popups';
 
 /** A decision remembered in the {@link PermissionStore}. */
 export type PermissionDecision = 'grant' | 'deny';

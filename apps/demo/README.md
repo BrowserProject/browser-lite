@@ -4,7 +4,8 @@ The full demo browser on browser-lite: tabs (with popups, restored tabs that loa
 click, discarding under memory pressure and a message when none is left: close tabs while a
 loaded background tab stays, else that the page uses the memory), a new tab page,
 address bar with suggestions, history, bookmarks, downloads panel, dialogs of the pages in the page, settings page with profile, extensions and device
-emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, crash and hang
+emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, pop-up blocker
+icon (open a blocked popup, always allow the site), crash and hang
 handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
 runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
 `@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the public server:
@@ -156,6 +157,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tab-drag.ts` | reordering tabs by dragging them in the strip |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
+| `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |
 | `history.ts`, `bookmarks.ts`, `session.ts`, `closed-tabs.ts`, `downloads.ts`, `side-panel.ts` | library, the closed tabs for Ctrl+Shift+T, the menu and the side panel (history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |

@@ -112,6 +112,11 @@ test('setPermission arguments', () => {
     'camera-microphone',
     null,
   ]);
+  assert.deepEqual(permissionChange('https://a.example', 'popups', 'grant'), [
+    'https://a.example',
+    'popups',
+    'grant',
+  ]);
   for (const args of [
     ['', 'camera', 'grant'],
     ['https://a.example', 'midi', 'grant'],

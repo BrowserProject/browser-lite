@@ -19,6 +19,7 @@ import {
 } from '@browser-lite/ui';
 import { askForAccessCode } from './access.js';
 import { takePendingAddress } from './address-bar.js';
+import { initBlockedPopups } from './blocked-popups.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
@@ -333,6 +334,7 @@ initSidePanel({
   openSettings: (section) => openSettings(section),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
+initBlockedPopups((url) => openURL(url, true));
 initTabOverview();
 initTabDrag();
 initNewTabPage();

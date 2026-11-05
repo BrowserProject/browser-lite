@@ -10,6 +10,7 @@
 #include "Printing.h"
 #include "BackForwardList.h"
 #include "Choosers.h"
+#include "DeviceClients.h"
 
 #include "Engine.h"
 #include "ErrorPage.h"
@@ -70,6 +71,7 @@
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StringWithDirection.h>
 #include <WebCore/UserAgent.h>
+#include <WebCore/UserGestureIndicator.h>
 #include <WebCore/WindowFeatures.h>
 #include <emscripten/emscripten.h>
 #include <emscripten/proxying.h>
@@ -444,9 +446,20 @@ void ChromeClient::focus()
 }
 
 // New view for window.open / target=_blank. Like WebChromeClient in
-// WebKitLegacy: opener (except noopener), name and sandbox of the window
-RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedMainFrameName, const WindowFeatures& features, const NavigationAction&)
+// WebKitLegacy: opener (except noopener), name and sandbox of the window.
+// The popup blocker is here, not in WebCore (javaScriptCanOpenWindowsAutomatically,
+// WebView.cpp), so that the host learns of a blocked popup: like WebCore's own
+// check it needs a user gesture, unless the top site has the permission 'popups'.
+RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedMainFrameName, const WindowFeatures& features, const NavigationAction& action)
 {
+    if (!UserGestureIndicator::processingUserGesture()) {
+        RefPtr document = frame.document();
+        auto top = document ? document->topOrigin().toString() : String();
+        if (storedPermission("popups"_s, top) != PermissionDecision::Granted) {
+            notifyHost(m_view->id(), "popup-blocked", makeString("{\"url\":\""_s, jsonEscape(action.url().string()), "\",\"origin\":\""_s, jsonEscape(top), "\"}"_s));
+            return nullptr;
+        }
+    }
     auto& popup = WebView::openFromEngine(m_view->id(), m_view->size(), m_view->deviceScaleFactor());
     Ref mainFrame = popup.page().mainFrame();
     if (!features.wantsNoOpener()) {

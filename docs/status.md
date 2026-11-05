@@ -11,7 +11,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   [examples/](../examples/README.md) (own route, existing site with its own service worker and CSP).
 - **Engine**: WebKit (WebCore + JavaScriptCore C loop) as WebAssembly, TLS inside, network through
   our own Wisp relay that connects only to public addresses and web ports (#159, #178, #201).
-- **Browsing**: views with popups (opener, name, sandbox), history incl. back/forward cache
+- **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
+  icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
   (address and title of the restored page, #367),
   downloads, uploads, find, zoom, pinch zoom on the compositor (#150), print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,

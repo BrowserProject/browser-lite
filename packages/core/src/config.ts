@@ -277,6 +277,7 @@ export const PERMISSION_KINDS: readonly PermissionKind[] = [
   'camera',
   'microphone',
   'camera-microphone',
+  'popups',
 ];
 
 /** Checks the arguments of setPermission. */

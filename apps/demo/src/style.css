@@ -206,6 +206,7 @@ svg.favicon {
 #extension-buttons > button,
 #new-tab,
 #bookmark,
+#popups,
 .panel-close,
 .panel-remove,
 #find-bar button,
@@ -231,6 +232,7 @@ svg.favicon {
 :where(
   #boot button,
   .bl-permission-prompt button,
+  #popup-bubble .popup-actions button,
   .bl-login-prompt button,
   .bl-page-dialog button,
   .bl-picker-sheet button,
@@ -259,6 +261,7 @@ svg.favicon {
 :where(
   #boot button.primary,
   .bl-permission-prompt .bl-allow,
+  #popup-bubble .popup-allow,
   .bl-login-prompt .bl-sign-in,
   .bl-page-dialog .bl-ok,
   .settings-actions button.primary,
@@ -603,6 +606,56 @@ svg.favicon {
 }
 #bookmark.active {
   color: var(--primary);
+}
+#popups {
+  width: 32px;
+  height: 32px;
+}
+#popups .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+/* Bubble of the blocked popups (a popover: light dismiss and Escape by the browser), placed by
+   blocked-popups.ts at the icon */
+#popup-bubble {
+  position: fixed;
+  inset: auto;
+  width: min(360px, calc(100vw - 16px));
+  margin: 0;
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+  border: none;
+  border-radius: var(--radius-lg);
+  background: var(--surface-menu);
+  color: var(--on-surface);
+  box-shadow: var(--elev-3);
+}
+#popup-bubble .popup-title {
+  margin: 0 0 var(--space-2);
+  font-weight: 500;
+}
+#popup-bubble .popup-list {
+  max-height: 40vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+#popup-bubble .popup-entry {
+  display: block;
+  width: 100%;
+  padding: 6px 0;
+  overflow: hidden;
+  color: var(--primary);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#popup-bubble .popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 #status {
   max-width: 30%;

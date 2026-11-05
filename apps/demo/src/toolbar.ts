@@ -1,4 +1,5 @@
 import { showAddress } from './address-bar.js';
+import { updatePopupsButton } from './blocked-popups.js';
 import { isBookmarked } from './bookmarks.js';
 import { setIcon } from './icons.js';
 import { compactLayout } from './layout.js';
@@ -73,7 +74,7 @@ export function updateSecurity(tab: Tab): void {
   form.classList.toggle('insecure', insecure);
 }
 
-/** Buttons, zoom, address and security of the toolbar for the active tab. */
+/** Buttons, zoom, address, security and blocked popups of the toolbar for the active tab. */
 export function updateToolbar(tab: Tab): void {
   byId<HTMLButtonElement>('back').disabled = !tab.canGoBack;
   byId<HTMLButtonElement>('forward').disabled = !tab.canGoForward;
@@ -86,4 +87,5 @@ export function updateToolbar(tab: Tab): void {
   zoom.textContent = `${Math.round(tab.zoom * 100)} %`;
   showAddress(tab.address);
   updateSecurity(tab);
+  updatePopupsButton(tab);
 }

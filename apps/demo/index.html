@@ -20,6 +20,7 @@
       <form id="address-form">
         <span id="security" hidden></span>
         <input id="address" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" enterkeyhint="go" placeholder="Search or enter address" aria-label="Address and search bar">
+        <button type="button" id="popups" aria-haspopup="dialog" aria-expanded="false" aria-controls="popup-bubble" hidden data-icon="popup-blocked"></button>
         <button type="button" id="bookmark" title="Bookmark this page (Ctrl+D)" aria-label="Bookmark this page" disabled data-icon="star"></button>
       </form>
       <span id="status"></span>
@@ -56,6 +57,7 @@
     <header><button type="button" class="overview-new" data-icon="plus">New tab</button><span class="overview-count"></span><button type="button" class="overview-done">Done</button></header>
     <div class="overview-grid"></div>
   </section>
+  <div id="popup-bubble" popover role="dialog" aria-label="Pop-ups blocked"></div>
   <div id="suggestions" role="listbox" aria-label="Suggestions" hidden></div>
   <div id="print-preview" role="dialog" aria-label="Print preview" hidden>
     <header><span class="print-title"></span><button type="button" class="print-now primary">Print</button><button type="button" class="print-save">Save as PDF</button><button type="button" class="print-close" aria-label="Close" data-icon="close"></button></header>

@@ -587,6 +587,9 @@ export class ViewImpl implements View {
       case 'open-tab':
         this.emit(type, { url: String(data.url ?? '') });
         return;
+      case 'popup-blocked':
+        this.emit(type, { url: String(data.url ?? ''), origin: String(data.origin ?? '') });
+        return;
       case 'focus':
         this.emit('focus-request', {});
         return;

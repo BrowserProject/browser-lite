@@ -283,6 +283,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // The HTML parser works up to 500 ms in one go (WebKit's default, made for native speed), here
     // 5 to 10 times as much work: parser chunks with their inline scripts blocked taps and frames
     settings.setMaxParseDuration(0.05);
+    // Popups are blocked in ChromeClient::createWindow, which tells the host
+    settings.setJavaScriptCanOpenWindowsAutomatically(true);
     // Also without our compositor: in Firefox without WebGL some pages still got layers, whose
     // tiles asked for the display and ended the engine (codepen.io, airbnb.com, soundcloud.com)
     LayerTreeHostWasm::ensureDisplay();

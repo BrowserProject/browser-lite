@@ -1,5 +1,6 @@
 import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
 import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
+import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
 import { hostOf, rememberIcon } from './favicons.js';
@@ -55,6 +56,8 @@ export class Tab implements SessionTab {
   /** Dialogs of the current document blocked by the user, or skipped in the background. */
   dialogsBlocked = false;
   dialogSuppressed = false;
+  /** Popups the current document could not open (no user gesture). */
+  blockedPopups: BlockedPopup[] = [];
   lastActive = 0;
   iconUrl: string | null = null;
   /** Host of the page the icon belongs to. */
@@ -155,6 +158,8 @@ export class Tab implements SessionTab {
       // A new document: dialogs allowed again, no user activation yet
       this.dialogsBlocked = false;
       this.updateDialogMarker();
+      this.blockedPopups = [];
+      if (this.isActive) updatePopupsButton(this);
       this.userActivated = false;
       updateHostBeforeUnload();
     });
@@ -190,6 +195,7 @@ export class Tab implements SessionTab {
       this.userActivated = true;
       updateHostBeforeUnload();
     });
+    this.on('popup-blocked', (event) => addBlockedPopup(this, event));
     // Ctrl/Cmd click or middle click on a link: a new tab in the background
     this.on('open-tab', (event) => openBackgroundTab(event.url));
     // mailto:, tel:, app links: the host browser hands them to the system (with its question)

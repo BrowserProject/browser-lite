@@ -213,6 +213,11 @@ origin, once for all pages inside browser-lite. The engine then asks per page or
 pass (default: in memory). Grant `notifications` only after `Notification.requestPermission()`
 of the host succeeded (the `@browser-lite/ui` prompt does this).
 
+Popups (`window.open`, `target=_blank`) open only after a user gesture, like in every browser.
+A blocked one sends the view event `popup-blocked` with its `url` and the page's `origin`;
+`setPermission(origin, 'popups', 'grant')` lets that site open popups from then on. The engine
+never asks for this kind, the browser UI offers it (the demo: an icon in the address bar).
+
 HTTP authentication (401 with Basic or Digest) goes to the `authenticate` handler (default:
 cancel, the page shows the 401 response), like Chrome only for the main frame and same origin
 loads, never for workers, `credentials: 'omit'` or requests with their own `Authorization`

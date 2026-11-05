@@ -30,6 +30,8 @@ const PATHS = {
     '<path d="M11 5L6.5 9H3.5v6h3l4.5 4z"/><path d="M15.5 9a4.5 4.5 0 0 1 0 6M18.5 6a8.5 8.5 0 0 1 0 12"/>',
   'speaker-off': '<path d="M11 5L6.5 9H3.5v6h3l4.5 4z"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5"/>',
   blocked: '<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
+  'popup-blocked':
+    '<rect x="3.5" y="5.5" width="13" height="11" rx="2"/><path d="M3.5 9h13"/><circle cx="17.5" cy="17.5" r="3.5"/><path d="M15 15l5 5"/>',
   globe:
     '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.5 3.5 5.5 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.5-3.5-8.5s1-6 3.5-8.5z"/>',
   extension: '<path d="M4.5 8.5h4a2.5 2.5 0 1 1 5 0h4v4a2.5 2.5 0 1 1 0 5v3h-13z"/>',
