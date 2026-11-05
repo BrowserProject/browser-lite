@@ -7,8 +7,9 @@ first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page,
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`, the
 generic code paths the port takes, for example formatting of UI strings, and what changes when
-all sites share one process, for example the microtasks of a site that was left) comes as
-patches from `patches/`.
+all sites share one process, for example the microtasks of a site that was left, and WebKit bugs
+that real sites hit, for example the hovered element a page from the back/forward cache forgot)
+comes as patches from `patches/`.
 
 ## Folders
 

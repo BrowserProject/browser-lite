@@ -151,7 +151,9 @@ Mouse events carry the host's pressed buttons (`MouseEvent.buttons`, which also 
 `pointermove` with a `button`) becomes a mousedown or mouseup (#370).
 When the mouse leaves the canvas (to the host UI or an overlay) the core sends a move one pixel
 outside the view, like WebKitGTK: the page gets mouseout and mouseleave and loses `:hover` and
-the hovered link; a finger keeps its hover (#381).
+the hovered link; a finger keeps its hover (#381). A page from the back/forward cache still knows
+the element (and iframe) the mouse was over when it was left, so the first move out of it fires
+mouseout and mouseleave like in Chrome (patch 0079, #398).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine

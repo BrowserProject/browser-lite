@@ -1,0 +1,108 @@
+diff --git a/Source/WebCore/history/CachedFrame.cpp b/Source/WebCore/history/CachedFrame.cpp
+index c44d8b153f..d4c7273f78 100644
+--- a/Source/WebCore/history/CachedFrame.cpp
++++ b/Source/WebCore/history/CachedFrame.cpp
+@@ -34,6 +34,7 @@
+ #include "DocumentPage.h"
+ #include "DocumentView.h"
+ #include "DocumentWindow.h"
++#include "EventHandler.h"
+ #include "FrameDestructionObserverInlines.h"
+ #include "FrameLoader.h"
+ #include "LocalDOMWindow.h"
+@@ -153,8 +154,10 @@ void CachedFrameBase::restore()
+     }
+ #endif
+ 
+-    if (localFrame)
++    if (localFrame) {
++        localFrame->eventHandler().restoreMouseBoundaryState(m_lastElementUnderMouse.get(), m_lastMouseMoveEventSubframe.get());
+         protect(localFrame->view())->didRestoreFromBackForwardCache();
++    }
+ }
+ 
+ CachedFrame::CachedFrame(Frame& frame)
+@@ -192,6 +195,10 @@ CachedFrame::CachedFrame(Frame& frame)
+ 
+     // The main frame is reused for the navigation and the opener link to its should thus persist.
+     if (localFrame) {
++        CheckedRef eventHandler = localFrame->eventHandler();
++        m_lastElementUnderMouse = eventHandler->lastElementUnderMouse();
++        m_lastMouseMoveEventSubframe = eventHandler->lastMouseMoveEventSubframe();
++
+         Ref frameLoader = localFrame->loader();
+         if (!frame.isMainFrame())
+             localFrame->detachFromAllOpenedFrames();
+@@ -271,6 +278,8 @@ void CachedFrame::clear()
+     m_document = nullptr;
+     m_view = nullptr;
+     m_url = URL();
++    m_lastElementUnderMouse = nullptr;
++    m_lastMouseMoveEventSubframe = nullptr;
+ 
+     m_cachedFramePlatformData = nullptr;
+     m_cachedFrameScriptData = nullptr;
+diff --git a/Source/WebCore/history/CachedFrame.h b/Source/WebCore/history/CachedFrame.h
+index 205fd8d4e8..9202eb97fb 100644
+--- a/Source/WebCore/history/CachedFrame.h
++++ b/Source/WebCore/history/CachedFrame.h
+@@ -38,7 +38,9 @@ class CachedFrame;
+ class CachedFramePlatformData;
+ class Document;
+ class DocumentLoader;
++class Element;
+ class FrameView;
++class LocalFrame;
+ class LocalFrameView;
+ class Node;
+ enum class HasInsecureContent : bool;
+@@ -67,6 +69,8 @@ protected:
+     std::unique_ptr<ScriptCachedFrameData> m_cachedFrameScriptData;
+     std::unique_ptr<CachedFramePlatformData> m_cachedFramePlatformData;
+     bool m_isMainFrame;
++    RefPtr<Element> m_lastElementUnderMouse;
++    RefPtr<LocalFrame> m_lastMouseMoveEventSubframe;
+ 
+     Vector<UniqueRef<CachedFrame>> m_childFrames;
+ 
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 0ba0b61e3a..33a66d16c3 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -513,6 +513,19 @@ void EventHandler::clear()
+     m_didStartDrag = false;
+ }
+ 
++void EventHandler::restoreMouseBoundaryState(Element* lastElementUnderMouse, LocalFrame* lastMouseMoveEventSubframe)
++{
++    Ref frame = m_frame.get();
++    if (lastElementUnderMouse && lastElementUnderMouse->isConnected() && &lastElementUnderMouse->document() == frame->document()) {
++        m_lastElementUnderMouse = lastElementUnderMouse;
++        m_ancestorsOfLastElementUnderMouse.clear();
++        for (RefPtr element = lastElementUnderMouse->parentElementInComposedTree(); element; element = element->parentElementInComposedTree())
++            m_ancestorsOfLastElementUnderMouse.append(element);
++    }
++    if (lastMouseMoveEventSubframe && lastMouseMoveEventSubframe->tree().isDescendantOf(frame.ptr()))
++        m_lastMouseMoveEventSubframe = lastMouseMoveEventSubframe;
++}
++
+ void EventHandler::nodeWillBeRemoved(Node& nodeToBeRemoved)
+ {
+     if (nodeToBeRemoved.isShadowIncludingInclusiveAncestorOf(m_clickNode.get()))
+diff --git a/Source/WebCore/page/EventHandler.h b/Source/WebCore/page/EventHandler.h
+index 8c70d81cf6..078cc3ccee 100644
+--- a/Source/WebCore/page/EventHandler.h
++++ b/Source/WebCore/page/EventHandler.h
+@@ -163,6 +163,12 @@ public:
+     void clear();
+     void nodeWillBeRemoved(Node&);
+ 
++    // A document in the back/forward cache keeps the element and subframe of the last mouse move,
++    // so that the first mouse move after its restore dispatches mouseout and mouseleave there.
++    Element* lastElementUnderMouse() const { return m_lastElementUnderMouse.get(); }
++    LocalFrame* lastMouseMoveEventSubframe() const { return m_lastMouseMoveEventSubframe.get(); }
++    void restoreMouseBoundaryState(Element* lastElementUnderMouse, LocalFrame* lastMouseMoveEventSubframe);
++
+     WEBCORE_EXPORT VisiblePosition selectionExtentRespectingEditingBoundary(const VisibleSelection&, const LayoutPoint&, Node*);
+ 
+ #if ENABLE(DRAG_SUPPORT)
