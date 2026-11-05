@@ -430,7 +430,10 @@ export interface View {
   attach(container: HTMLElement): void;
   /** Removes the canvas from the page; the view keeps running hidden. */
   detach(): void;
-  /** Loads an address like typed into an address bar (https:// added without a scheme). */
+  /**
+   * Loads an address like typed into an address bar (https:// added without a scheme). Like Chrome,
+   * an invalid address (for example a port above 65535) loads nothing.
+   */
   load(url: string): void;
   /** Loads an HTML string under a base URL. */
   loadHTML(html: string, baseURL: string): void;

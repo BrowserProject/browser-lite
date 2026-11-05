@@ -122,6 +122,10 @@ Console messages come as `console` of the view (`ConsoleMessage`: `level`, `mess
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.
 
+`view.load(url)` reads `url` like an address bar: `https://` in front without a scheme. An
+address that is invalid also then (a port above 65535) loads nothing, like in Chrome; check typed
+text with `URL.canParse` first and search for it instead.
+
 `view.pendingURL` is the address of a navigation the host started (`load`, `back`, `forward`,
 `restoreHistory`) until its document commits or the navigation ends (stop, failure, download,
 the page stays on its beforeunload question); every `navigation` event carries it. Like Chrome's

@@ -508,15 +508,34 @@ bool WebView::gpuRestored()
     return !!m_gpuSurface;
 }
 
+// The text begins with a scheme and its colon, like "http:" (URL standard)
+static bool hasScheme(StringView text)
+{
+    if (text.isEmpty() || !isASCIIAlpha(text[0]))
+        return false;
+    for (auto character : text.codeUnits()) {
+        if (character == ':')
+            return true;
+        if (!isASCIIAlphanumeric(character) && character != '+' && character != '-' && character != '.')
+            return false;
+    }
+    return false;
+}
+
 void WebView::loadURL(const String& urlString)
 {
     RefPtr frame = mainFrame();
     if (!frame)
         return;
     URL url { urlString };
-    if (!url.isValid()) {
-        // Without a scheme: https:// in front like in every browser
+    // Without a scheme: https:// in front like in every browser. With one the
+    // prefix would make the scheme the host (https://http//...).
+    if (!url.isValid() && !hasScheme(urlString))
         url = URL { makeString("https://"_s, urlString) };
+    // Like Chrome, an invalid address (a port above 65535) loads nothing
+    if (!url.isValid()) {
+        debugLog("loadURL: invalid address ignored");
+        return;
     }
     // Input in the address bar: like in other browsers this may also be a
     // data: URL (pages themselves may not navigate there)

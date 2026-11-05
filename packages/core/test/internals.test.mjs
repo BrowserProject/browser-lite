@@ -122,7 +122,16 @@ test('pending navigation: the address the engine loads, until it arrives or load
   assert.equal(loadedAddress('https://a.example'), 'https://a.example/');
   assert.equal(loadedAddress('a.example/x?y'), 'https://a.example/x?y');
   assert.equal(loadedAddress('about:blank'), 'about:blank');
-  for (const text of ['mailto:a@b.example', 'javascript:alert(1)', 'zoommtg://x', 'a b', ''])
+  // Invalid with a scheme: no https:// in front, which would make the scheme the host
+  for (const text of [
+    'mailto:a@b.example',
+    'javascript:alert(1)',
+    'zoommtg://x',
+    'a b',
+    '',
+    'http://example.com:99999/',
+    'https://a b.example/',
+  ])
     assert.equal(loadedAddress(text), '', text);
   const pending = new PendingNavigation();
   pending.start('https://b.example/slow');

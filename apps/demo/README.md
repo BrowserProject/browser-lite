@@ -30,7 +30,7 @@ the engine in `engine/<hash>/`. The engine is never bundled; the core loads it a
 
 | Parameter | |
 | --- | --- |
-| `url` | opens this address instead of the last session |
+| `url` | opens this address instead of the last session, read like text typed into the address bar |
 | `token` | access token, stored per relay host in localStorage (relay and profile of that host) and removed from the address; when the relay refuses the stored one (missing or old), the demo asks for the access code instead of showing lost connections (`access.ts`, #344) |
 | `log=1` | engine log in the console |
 | `gpu=0`, `compositing=0`, `safepointgc=0\|debug`, `httpcache=0`, `scripttimeout=<s>`, `fcdebug=<level>` | engine switches for debugging |
@@ -72,7 +72,8 @@ select popup) are in the same sheet.
   loading (a slow server, a sign in prompt) stays in the bar and names a tab without a title
   until its page commits, without the indicator of the page being left; Stop goes back to the
   page's address (the view's `pendingURL`, #382). The suggestions start
-  with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343), then bookmarks
+  with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343; like Chrome
+  an invalid address such as a port above 65535 is a search, #407), then bookmarks
   and history with their icons; the arrow keys move.
 - **Find bar** (Ctrl+F): Enter and Shift+Enter in the field and the up and down buttons go to
   the next and previous match, F3 and Ctrl+G too; Escape closes it from anywhere in the bar, also

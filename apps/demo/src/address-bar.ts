@@ -41,13 +41,19 @@ function searchURL(text: string): string {
   return (searchEngine()?.url ?? '').replace('%s', encodeURIComponent(text.trim()));
 }
 
-/** Text of the address bar as URL: an address, or a search with the search engine. */
+/**
+ * Text of the address bar as URL: an address, or a search with the search engine. Like Chrome an
+ * address that is invalid (a port above 65535) is a search.
+ */
 export function addressToURL(text: string): string {
   const value = text.trim();
   if (!value) return '';
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value)) return value;
-  if (/^(localhost|[^\s/]+\.[^\s/]+|\[[0-9a-f:]+\])(:\d+)?(\/\S*)?$/i.test(value))
-    return `https://${value}`;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value))
+    return URL.canParse(value) ? value : searchURL(value);
+  if (/^(localhost|[^\s/]+\.[^\s/]+|\[[0-9a-f:]+\])(:\d+)?(\/\S*)?$/i.test(value)) {
+    const url = `https://${value}`;
+    if (URL.canParse(url)) return url;
+  }
   return searchURL(value);
 }
 

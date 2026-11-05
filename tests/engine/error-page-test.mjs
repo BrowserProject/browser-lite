@@ -4,7 +4,7 @@
 // 'title' events, the retry through [data-bl-retry], the close reason 'name-not-resolved'
 // of a transport, the page for a file: address without a file and for an about: address
 // WebCore does not load, for a restricted port or an address of only zeros, and for redirects
-// the engine stops (a loop, a redirect to file:).
+// the engine stops (a loop, a redirect to file:). An invalid address loads nothing.
 //
 //   node tests/engine/error-page-test.mjs [engine-dir]
 import { enginePath as resolveEngine, runEngine } from './engine-node.mjs';
@@ -325,6 +325,35 @@ for (const [url, code, named, expected] of [
   check(`${url} gives ${code}`, shown.code === code, shown.code);
   check(`${url} names ${named}`, shown.message.includes(named), shown.message);
 }
+
+// 7. An invalid address is not loaded, like in Chrome. With a scheme it never gets https:// in
+// front, which made the scheme the host (https://http//example.com:99999/, #407).
+for (const url of ['http://example.com:99999/', 'https://a b.test/']) {
+  // The report of the beforeunload listener comes a step after the last page
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const before = { events: events.length, requests: requests.length };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const after = events
+    .slice(before.events)
+    .map((event) => (event.type === 'error' ? `error ${event.payload}` : event.type));
+  check(`${url} is not loaded`, after.length === 0, after.join(' | '));
+  check(
+    `${url} opens no connection`,
+    requests.length === before.requests,
+    requests.slice(before.requests).join(),
+  );
+}
+// Without a scheme the address still gets https:// in front
+const beforePrefix = { commit: count('commit'), load: count('load'), error: count('error') };
+engine._bl_load_url(1, engine.stringToNewUTF8('loop.test/r/20'));
+await settled(() => count('commit') > beforePrefix.commit && count('load') > beforePrefix.load);
+const prefixed = events.filter((event) => event.type === 'error').slice(beforePrefix.error);
+check(
+  'an address without a scheme gets https:// in front',
+  prefixed.length === 1 && JSON.parse(prefixed[0].payload).url === 'https://loop.test/r/20',
+  JSON.stringify(prefixed),
+);
 
 check(
   'no script of the template ran',

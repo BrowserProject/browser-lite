@@ -4,15 +4,15 @@ const LOADS = new Set(['http:', 'https:', 'file:', 'about:', 'data:']);
 
 /**
  * The address the engine loads for text given to `load` (https:// in front without a scheme, like
- * the engine), '' when it is no address that loads a document in the view.
+ * the engine), '' when it is no address that loads a document in the view or an invalid one, which
+ * the engine does not load.
  */
 export function loadedAddress(text: string): string {
-  for (const candidate of [text, `https://${text}`]) {
-    if (!URL.canParse(candidate)) continue;
-    const url = new URL(candidate);
-    return LOADS.has(url.protocol) ? url.href : '';
-  }
-  return '';
+  const candidate =
+    URL.canParse(text) || /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;
+  if (!URL.canParse(candidate)) return '';
+  const url = new URL(candidate);
+  return LOADS.has(url.protocol) ? url.href : '';
 }
 
 /**

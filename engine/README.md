@@ -103,6 +103,8 @@ The full list is `abi.json`; the rules behind it:
   a disabled feature looks like a browser without it, and no `__bl*` global is ever visible to
   page scripts. `BL_STORAGE_NAMESPACE` selects the OPFS directory of `/data` and the prefix of
   the Cache API names. `BL_ERROR_PAGE` replaces the error page template (below).
+- `bl_load_url` puts `https://` in front of an address without a scheme; an address that is
+  still invalid (a port above 65535, a space in the host) loads nothing, like in Chrome.
 - Error page: shown under the failed address when a main frame navigation does not arrive:
   a web address that curl cannot load, a `file:` address without a file in the engine file
   system (`ERR_FILE_NOT_FOUND`), an `about:` address WebCore does not load (`ERR_INVALID_URL`),
