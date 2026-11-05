@@ -5,6 +5,8 @@
 #include "config.h"
 #include "Preconnect.h"
 
+#include "LoaderStrategy.h"
+
 #include <WebCore/CurlContext.h>
 #include <WebCore/CurlRequestScheduler.h>
 #include <WebCore/CurlRequestSchedulerClient.h>
@@ -55,7 +57,7 @@ private:
 void preconnect(const URL& url)
 {
     ASSERT(isMainThread());
-    if (!url.protocolIsInHTTPFamily())
+    if (!url.protocolIsInHTTPFamily() || refusedReason(url))
         return;
     static NeverDestroyed<HashMap<String, MonotonicTime>> recent;
     auto origin = SecurityOriginData::fromURL(url).toString();

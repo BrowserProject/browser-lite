@@ -970,7 +970,7 @@ void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& erro
 // Cancelling (stop, new navigation, download) is no error, loading just ended
 void FrameLoaderClient::didEndLoadWithError(const ResourceError& error)
 {
-    if (error.isCancellation())
+    if (error.isCancellation() && !isRefusedAddress(error))
         m_view->didStopLoading();
     else
         m_view->didFailLoading(error.failingURL().string(), error.localizedDescription());

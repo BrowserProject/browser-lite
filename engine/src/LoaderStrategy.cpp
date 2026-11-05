@@ -30,6 +30,7 @@
 #include <WebCore/CurlRequest.h>
 #include <WebCore/CurlRequestClient.h>
 #include <WebCore/CurlResponse.h>
+#include <WebCore/DNS.h>
 #include <WebCore/DataURLDecoder.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentPage.h>
@@ -113,6 +114,27 @@ ResourceResponse networkResponse(CurlResponse& curlResponse)
     return response;
 }
 
+std::optional<LoadErrorCode> refusedReason(const URL& url)
+{
+    if (!ResourceLoader::isPortAllowed(url))
+        return LoadErrorCode::UnsafePort;
+    if (isIPAddressDisallowed(url))
+        return LoadErrorCode::AddressInvalid;
+    return std::nullopt;
+}
+
+static ResourceError refusedError(const URL& url, LoadErrorCode reason)
+{
+    auto message = reason == LoadErrorCode::UnsafePort ? "Restricted network port"_s : "Address not allowed"_s;
+    return ResourceError(loadErrorDomain, static_cast<int>(reason), url, message, ResourceError::Type::AccessControl);
+}
+
+bool isRefusedAddress(const ResourceError& error)
+{
+    auto code = static_cast<LoadErrorCode>(error.errorCode());
+    return error.domain() == loadErrorDomain && (code == LoadErrorCode::UnsafePort || code == LoadErrorCode::AddressInvalid);
+}
+
 bool isRedirect(const ResourceResponse& response)
 {
     int status = response.httpStatusCode();
@@ -143,6 +165,8 @@ static Expected<ResourceRequest, ResourceError> redirectedRequest(const Resource
     // A web page may never redirect to local files in the WASM file system
     if (target.protocolIsFile())
         return makeUnexpected(ResourceError(loadErrorDomain, 0, response.url(), "Redirect to file: blocked"_s));
+    if (auto reason = refusedReason(target))
+        return makeUnexpected(refusedError(target, *reason));
 
     ResourceRequest request = current;
     if (!target.hasFragmentIdentifier() && request.url().hasFragmentIdentifier())
@@ -917,6 +941,8 @@ private:
 
 void loadIcon(const URL& url, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&& handler)
 {
+    if (refusedReason(url))
+        return handler({ }, { });
     IconLoad::start(url, WTF::move(handler));
 }
 
@@ -1023,8 +1049,16 @@ private:
     }
 
     ResourceError cancelledError(const ResourceRequest& r) const final { return makeError(r.url(), "Load cancelled"_s, ResourceError::Type::Cancellation); }
-    ResourceError blockedError(const ResourceRequest& r) const final { return makeError(r.url(), "Load blocked"_s, ResourceError::Type::AccessControl); }
-    bool isBlockedError(const ResourceError& e) const final { return e.domain() == loadErrorDomain && e.localizedDescription() == "Load blocked"_s; }
+    ResourceError blockedError(const ResourceRequest& r) const final
+    {
+        if (auto reason = refusedReason(r.url()))
+            return refusedError(r.url(), *reason);
+        return makeError(r.url(), "Load blocked"_s, ResourceError::Type::AccessControl, LoadErrorCode::Blocked);
+    }
+    bool isBlockedError(const ResourceError& e) const final
+    {
+        return isRefusedAddress(e) || (e.domain() == loadErrorDomain && e.errorCode() == static_cast<int>(LoadErrorCode::Blocked));
+    }
     ResourceError blockedByContentBlockerError(const ResourceRequest& r) const final { return makeError(r.url(), "Blocked by content blocker"_s, ResourceError::Type::AccessControl); }
     ResourceError cannotShowURLError(const ResourceRequest& r) const final { return makeError(r.url(), "Cannot show URL"_s, ResourceError::Type::AccessControl, LoadErrorCode::CannotShowURL); }
     ResourceError interruptedForPolicyChangeError(const ResourceRequest& r) const final { return makeError(r.url(), "Interrupted for policy change"_s); }

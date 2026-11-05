@@ -20,7 +20,8 @@
 // transport is turned back into a code by CurlRequest (patch 0039) from the
 // socket error (Sockets.cpp). Other addresses get a page for the engine's own
 // codes (LoadErrorCode): a file: address without a file, an about: address
-// WebCore does not load.
+// WebCore does not load. Any address gets one when WebCore refuses it before
+// the request (restricted port, address of only zeros).
 
 #include "config.h"
 #include "ErrorPage.h"
@@ -58,6 +59,7 @@ struct Reason {
     ASCIILiteral after;
     ASCIILiteral code;
     bool withDetail { false }; // curl's message too, helps when searching
+    bool refused { false }; // names host:port of the address WebCore refused, maybe a redirect target
 };
 
 constexpr auto notReachable = "This site can't be reached"_s;
@@ -97,6 +99,11 @@ Reason reasonForCurl(int curlCode)
 // None: no error page (cancelled, blocked, a download, ...)
 std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
 {
+    if (isRefusedAddress(error)) {
+        if (static_cast<LoadErrorCode>(error.errorCode()) == LoadErrorCode::UnsafePort)
+            return Reason { notReachable, "The webpage at "_s, " uses a network port that browsers block for safety."_s, "ERR_UNSAFE_PORT"_s, false, true };
+        return Reason { notReachable, ""_s, " is not an address a browser can connect to."_s, "ERR_ADDRESS_INVALID"_s, false, true };
+    }
     if (error.isCancellation())
         return std::nullopt;
     if (error.domain() == "CurlErrorDomain"_s && url.protocolIsInHTTPFamily())
@@ -109,6 +116,9 @@ std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
     case LoadErrorCode::CannotShowURL:
         return Reason { notReachable, "The webpage at "_s, " could not be shown."_s, "ERR_INVALID_URL"_s };
     case LoadErrorCode::Other:
+    case LoadErrorCode::Blocked:
+    case LoadErrorCode::UnsafePort:
+    case LoadErrorCode::AddressInvalid:
         break;
     }
     return std::nullopt;
@@ -198,7 +208,7 @@ String withSecurityPolicy(const String& page)
 
 String html(const Reason& reason, const URL& url, const ResourceError& error, Kind kind, bool resubmit)
 {
-    auto host = url.host().isEmpty() ? url.string() : url.host().toString();
+    auto host = reason.refused ? error.failingURL().hostAndPort() : url.host().isEmpty() ? url.string() : url.host().toString();
     auto code = reason.withDetail ? makeString(reason.code, " ("_s, error.localizedDescription(), ')') : String { reason.code };
     auto message = makeString(reason.before, host, reason.after);
     if (resubmit)

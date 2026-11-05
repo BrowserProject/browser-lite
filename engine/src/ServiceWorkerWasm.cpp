@@ -302,7 +302,7 @@ static RefPtr<SWServerToContextConnection> contextConnectionFor(ServiceWorkerIde
 
 // WindowClient.navigate() (WebPage::navigateServiceWorkerClient in WebKit2).
 // Done when the new document in the frame registers as a client (on commit)
-// or loading of the frame ends (frameLoadEnded).
+// or loading of the frame ends (frameLoadEnded). An error page fails it.
 struct PendingNavigation {
     ClientOrigin workerOrigin;
     SWContextManager::Connection::NavigateCallback callback;
@@ -327,6 +327,12 @@ static void finishNavigation(FrameIdentifier frame, ExceptionOr<std::optional<Se
 static Exception navigateFailed()
 {
     return Exception { ExceptionCode::TypeError, "navigate failed"_s };
+}
+
+// The engine's error page (ErrorPage.cpp): a navigation that ends there failed, like in Chrome
+static bool isErrorPage(const DocumentLoader* loader)
+{
+    return loader && !loader->unreachableURL().isEmpty();
 }
 
 // Foreign origin: null instead of the client (specification)
@@ -355,7 +361,11 @@ static void navigateClient(ScriptExecutionContextIdentifier client, ServiceWorke
         case ScheduleLocationChangeResult::Started:
             break;
         }
-        if (!frame->loader().provisionalDocumentLoader() && !frame->loader().policyDocumentLoader())
+        // Failed already (blocked port): nothing loads, or the error page does
+        RefPtr loader = frame->loader().provisionalDocumentLoader();
+        if (!loader)
+            loader = frame->loader().policyDocumentLoader();
+        if (!loader || isErrorPage(loader.get()))
             return callback(navigateFailed());
         // Not HTTP (data: etc.): certainly a foreign origin
         if (!url.protocolIsInHTTPFamily())
@@ -1074,8 +1084,13 @@ void ServerConnection::postMessageToServiceWorker(ServiceWorkerIdentifier destin
 void ServerConnection::registerClient(ClientOrigin&& clientOrigin, ServiceWorkerClientData&& data, const std::optional<ServiceWorkerRegistrationIdentifier>& controllingRegistration, String&& userAgent, SWServer::IsBeingCreatedClient isBeingCreated)
 {
     if (isBeingCreated == SWServer::IsBeingCreatedClient::No && data.frameIdentifier) {
-        if (auto it = pendingNavigations().find(*data.frameIdentifier); it != pendingNavigations().end())
-            finishNavigation(*data.frameIdentifier, clientIfSameOrigin(ServiceWorkerClientData { data }, clientOrigin, it->value.workerOrigin));
+        if (auto it = pendingNavigations().find(*data.frameIdentifier); it != pendingNavigations().end()) {
+            RefPtr document = Document::allDocumentsMap().get(data.identifier);
+            if (document && isErrorPage(document->loader()))
+                finishNavigation(*data.frameIdentifier, navigateFailed());
+            else
+                finishNavigation(*data.frameIdentifier, clientIfSameOrigin(ServiceWorkerClientData { data }, clientOrigin, it->value.workerOrigin));
+        }
     }
     auto& contextOrigin = clientOrigin.clientOrigin;
     // Like WebKit2: no sandboxed documents
@@ -2128,6 +2143,7 @@ void frameLoadEnded(LocalFrame& localFrame, bool committed)
     auto frame = localFrame.frameID();
     if (!pendingNavigations().contains(frame))
         return;
+    committed = committed && !isErrorPage(localFrame.loader().documentLoader());
     // The new document registers as a client through the RunLoop, so afterwards.
     // If it has not done that, it is none (specification: null)
     post([frame, committed] {

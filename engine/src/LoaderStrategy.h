@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
 #include <wtf/text/ASCIILiteral.h>
@@ -24,7 +25,18 @@ enum class LoadErrorCode : int {
     Other,
     CannotShowURL, // an address WebCore does not load, like about:foo
     FileNotFound, // a file: address that is no file in the engine file system
+    Blocked, // blockedError for any other reason, like a redirect to data:
+    UnsafePort, // blockedError: a port no browser connects to (portAllowed)
+    AddressInvalid, // blockedError: an address of only zeros (isIPAddressDisallowed)
 };
+
+// Why WebCore never loads an address: a restricted port (UnsafePort) or an address
+// of only zeros (AddressInvalid). The engine's own requests (icons, preconnect, the
+// redirects they follow) skip it the same way.
+std::optional<LoadErrorCode> refusedReason(const URL&);
+// A load refused for refusedReason. FrameLoader::blockedError marks it as
+// cancelled, but like in Chrome a navigation gets an error and the error page.
+bool isRefusedAddress(const WebCore::ResourceError&);
 
 // Downloads the file and hands it to the host (events download-start /
 // download-done, data through Module.onEngineDownloadData). data: and blob:

@@ -2014,6 +2014,12 @@ void WebView::loadFavicon()
     RefPtr document = frame ? frame->document() : nullptr;
     if (!document || !document->url().protocolIsInHTTPFamily())
         return;
+    // The error page has no icon and does not ask the site that failed, like Chrome
+    if (RefPtr loader = frame->loader().documentLoader(); loader && !loader->unreachableURL().isEmpty()) {
+        m_faviconLoading = { };
+        sendIconData(m_id, { }, { }, { });
+        return;
+    }
     URL best;
     unsigned bestScore = std::numeric_limits<unsigned>::max();
     for (auto& icon : LinkIconCollector(*document).iconsOfTypes({ LinkIconType::Favicon })) {

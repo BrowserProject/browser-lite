@@ -5,9 +5,10 @@
 // The test server delivers a page through a redirect, sets a cookie, loads a script and a gzip
 // response with fetch(); the script writes everything into the title. Then the failures: bad
 // certificates (self-signed, wrong name, expired), refused connection, unknown name, failing
-// navigations (error page with reason, reload, back, the view keeps the address), Safari's HTTP/2
-// settings and request headers (#283), a request again on a new connection when a pooled one dies
-// under it, many hanging connections (limit of curl) and a relay that restarts during the session
+// navigations (error page with reason, reload, back, the view keeps the address, a redirect to a
+// restricted port), Safari's HTTP/2 settings and request headers (#283), a request again on a new
+// connection when a pooled one dies under it, many hanging connections (limit of curl) and a
+// relay that restarts during the session
 // (also navigator.onLine and the error page "No connection" that reloads itself, a form only after
 // "Resend"). Last, reasons only a stand-in relay delivers reliably (no answer, blocked, address
 // unreachable). Also the favicon (icon event) and the GPU context loss of the engine.
@@ -148,6 +149,9 @@ const { server: site, url: siteRoot } = await serve((req, res) => {
   switch (req.url) {
     case '/start':
       res.writeHead(302, { Location: '/page' }).end();
+      break;
+    case '/unsafe-port':
+      res.writeHead(302, { Location: 'http://127.0.0.1:6000/' }).end();
       break;
     case '/page':
       res
@@ -594,6 +598,16 @@ check(
   'error page: back to the address before',
   backAgain.code === 'ERR_NAME_NOT_RESOLVED' && (await address()) === 'http://nonexistent.invalid/',
   await address(),
+);
+
+// A redirect to a port browsers block: no request, the page names the target (ERR_UNSAFE_PORT)
+await go(`${siteURL}/unsafe-port`);
+const unsafePort = await errorPage('ERR_UNSAFE_PORT');
+check(
+  'error page: redirect to a restricted port',
+  unsafePort.text ===
+    'The webpage at 127.0.0.1:6000 uses a network port that browsers block for safety.',
+  JSON.stringify(unsafePort),
 );
 
 // The relay fails and comes back: the next page loads over a new connection

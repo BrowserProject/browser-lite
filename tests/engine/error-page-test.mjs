@@ -2,8 +2,8 @@
 // the view shows the error page from a custom BL_ERROR_PAGE. Checks the placeholders and their
 // escaping, the CSP after the doctype (no script of the template runs), the 'commit' and
 // 'title' events, the retry through [data-bl-retry], the close reason 'name-not-resolved'
-// of a transport, and the page for a file: address without a file and for an about: address
-// WebCore does not load.
+// of a transport, the page for a file: address without a file and for an about: address
+// WebCore does not load, and for a restricted port or an address of only zeros.
 //
 //   node tests/engine/error-page-test.mjs [engine-dir]
 import { enginePath as resolveEngine, runEngine } from './engine-node.mjs';
@@ -235,6 +235,41 @@ check(
     (await evaluate('location.href + " " + document.contentType')) === `${image} image/png`,
   JSON.stringify(imageCommit),
 );
+
+// 5. Addresses WebCore refuses before the request (FrameLoader::blockedError, marked as a
+// cancellation) still get an error event and the page, like Chrome. Neither the preconnect of
+// the address bar nor the favicon of the error page connects there.
+for (const [url, code, named] of [
+  ['http://example.com:6000/', 'ERR_UNSAFE_PORT', 'example.com:6000'],
+  ['https://127.0.0.1:1/x', 'ERR_UNSAFE_PORT', '127.0.0.1:1'],
+  ['http://0.0.0.0/', 'ERR_ADDRESS_INVALID', '0.0.0.0'],
+]) {
+  const before = { commit: count('commit'), load: count('load'), error: count('error') };
+  const asked = opened.length;
+  engine._bl_preconnect(engine.stringToNewUTF8(url));
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  const failures = events.filter((event) => event.type === 'error').slice(before.error);
+  check(
+    `${url} reports an error event`,
+    failures.length === 1 && JSON.parse(failures[0].payload).url === url,
+    JSON.stringify(failures),
+  );
+  const committed = events.filter((event) => event.type === 'commit').slice(before.commit);
+  check(
+    `${url} commits an error page`,
+    committed.length === 1 && committed[0].payload === '{"errorPage":"network"}',
+    JSON.stringify(committed),
+  );
+  if (committed.length) {
+    const shown = JSON.parse(await evaluate(pageState));
+    check(`${url} keeps its address`, shown.url === url, shown.url);
+    check(`${url} gives ${code}`, shown.code === code, shown.code);
+    check(`${url} names ${named}`, shown.message.includes(named), shown.message);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  check(`${url} opens no connection`, opened.length === asked, opened.slice(asked).join());
+}
 
 check(
   'no script of the template ran',

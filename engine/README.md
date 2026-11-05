@@ -101,7 +101,10 @@ The full list is `abi.json`; the rules behind it:
   the Cache API names. `BL_ERROR_PAGE` replaces the error page template (below).
 - Error page: shown under the failed address when a main frame navigation does not arrive:
   a web address that curl cannot load, a `file:` address without a file in the engine file
-  system (`ERR_FILE_NOT_FOUND`) or an `about:` address WebCore does not load (`ERR_INVALID_URL`).
+  system (`ERR_FILE_NOT_FOUND`), an `about:` address WebCore does not load (`ERR_INVALID_URL`),
+  or an address WebCore refuses before the request, also as a redirect target: a restricted
+  port (`ERR_UNSAFE_PORT`) or an address of only zeros (`ERR_ADDRESS_INVALID`). The engine's
+  own requests (favicon, preconnect) never connect there; the error page loads no favicon.
   A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
   `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host), `{{heading}}`,
   `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and `{{retryLabel}}`.

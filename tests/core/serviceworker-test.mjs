@@ -20,10 +20,12 @@ import {
   collect,
   finish,
   launch,
+  load,
   openHost,
   serve,
   startStack,
   timeLimit,
+  waitFor,
 } from '../lib/index.mjs';
 
 timeLimit();
@@ -92,7 +94,6 @@ const UPDATE_PAGE = `<!doctype html><title>Update</title><body><script>
   const reg = await navigator.serviceWorker.getRegistration();
   await reg.update();
   console.log('RESULT pageupdate=ok');
-  navigator.serviceWorker.addEventListener('message', (e) => console.log('RESULT blocked=' + e.data));
   navigator.serviceWorker.controller.postMessage('navigate-blocked');
 })().catch((e) => console.log('RESULT pageupdate=' + e));
 </script>`;
@@ -203,7 +204,7 @@ self.addEventListener('message', (e) => {
   else if (e.data === 'navigate')
     e.source.navigate('/navigated').then((client) => client.postMessage('client:' + new URL(client.url).pathname), (error) => console.log('RESULT navigate=' + error.name));
   else if (e.data === 'navigate-blocked')
-    e.source.navigate('http://127.0.0.1:1/').then((client) => e.source.postMessage('resolved:' + client), (error) => e.source.postMessage(error.name));
+    e.source.navigate('http://127.0.0.1:1/').then((client) => 'resolved:' + client, (error) => error.name).then((outcome) => fetch('/report?' + outcome));
   else if (e.data === 'focus-without-click')
     e.source.focus().then(() => e.source.postMessage('focus:focused'), (error) => e.source.postMessage('focus:' + error.name));
   else if (e.data === 'open-without-click')
@@ -222,6 +223,8 @@ onconnect = (e) => {
 };
 `;
 
+// What the worker reports with fetch('/report?...')
+const reports = [];
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/shared.js')
     return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SHARED);
@@ -236,6 +239,10 @@ const { url: siteURL } = await serve((req, res) => {
       scriptPending = false;
       reply();
     }, 3000);
+  }
+  if (req.url.startsWith('/report?')) {
+    reports.push(req.url.slice('/report?'.length));
+    return res.writeHead(204).end();
   }
   if (req.url === '/sw-pending')
     return res.writeHead(200, { 'Content-Type': 'text/plain' }).end(scriptPending ? 'yes' : 'no');
@@ -569,18 +576,27 @@ check(
   results.get('pageupdate'),
 );
 
-// Blocked port: loading ends before a request starts
+// Blocked port: loading ends before a request starts and the window shows the error page (like
+// Chrome), so the worker reports to the server
+await waitFor(() => reports.length > 0, 30000);
 check(
   'WindowClient.navigate to a blocked target fails',
-  (await result('blocked', 30000)) === 'TypeError',
-  results.get('blocked'),
+  reports[0] === 'TypeError',
+  reports.join(),
+);
+check(
+  'WindowClient.navigate to a blocked target: error page under the address',
+  await waitFor(
+    () => page.evaluate(() => window.blTest.view().url === 'http://127.0.0.1:1/'),
+    10000,
+  ),
 );
 
 // A notification from showNotification(): its click goes to the worker as notificationclick,
 // which may then open a view with clients.openWindow()
 const tabCount = () => page.evaluate(() => window.blTest.views().length);
 const tabsBefore = await tabCount();
-await page.evaluate(() => window.blTest.eval('location.href = "/notify"'));
+await load(page, `${siteURL}notify`);
 check('page for notifications loaded', (await result('notifyready', 30000)) === '1');
 await page.evaluate(() => {
   window.blHost.permissionAnswer = 'grant';

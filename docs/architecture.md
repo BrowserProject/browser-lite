@@ -173,7 +173,10 @@ connection when the pooled connection it took (kept alive, HTTP/2, preconnected)
 response byte, at most twice, also with a body; one that fails on a new connection is final (patch
 0078, #397). `file:` addresses read the engine file system; one without a file
 and an `about:` address WebCore does not load get the error page too, from the engine's own
-error codes (`LoadErrorCode` in `engine/src/LoaderStrategy.h`, #395).
+error codes (`LoadErrorCode` in `engine/src/LoaderStrategy.h`, #395), as does an address WebCore
+refuses before any request (restricted port, address of only zeros, `refusedReason`), which
+`blockedError` marks with its reason. The engine's own requests (icons, preconnect, their
+redirects) skip such an address too, and an error page loads no favicon (#400).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch
