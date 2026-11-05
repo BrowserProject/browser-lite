@@ -9,7 +9,7 @@ interface Effect {
   weakMagnitude?: number;
 }
 
-/** Gamepads: polled once per frame while a page listens (engine Gamepad.cpp). */
+/** Gamepads: polled once per frame while a page uses them (engine Gamepad.cpp). */
 export function installGamepad(ctx: ServiceContext): void {
   let monitoring = false;
   let frame = 0;
@@ -42,11 +42,22 @@ export function installGamepad(ctx: ServiceContext): void {
     });
   };
 
+  // Chromium polls the devices at about 250 Hz from the first getGamepads() on until the last
+  // gamepad event listener of the document goes away, so the listener exists only while monitoring.
+  const stop = () => {
+    removeEventListener('gamepadconnected', poll);
+    cancelAnimationFrame(frame);
+    frame = 0;
+  };
   ctx.on<{ on?: boolean }>('gamepad-monitor', (data) => {
-    monitoring = !!data.on;
-    if (monitoring) poll();
+    monitoring = !!data.on && !ctx.signal.aborted;
+    if (monitoring) {
+      addEventListener('gamepadconnected', poll);
+      poll();
+    } else stop();
   });
   ctx.on<Effect>('gamepad-effect', (data) => {
+    if (!monitoring) return;
     const actuator = navigator.getGamepads?.()[data.index]?.vibrationActuator;
     if (!actuator) return;
     if (data.type === 'stop') actuator.reset?.();
@@ -60,6 +71,5 @@ export function installGamepad(ctx: ServiceContext): void {
         })
         .catch(() => {});
   });
-  addEventListener('gamepadconnected', poll, { signal: ctx.signal });
-  ctx.signal.addEventListener('abort', () => cancelAnimationFrame(frame));
+  ctx.signal.addEventListener('abort', stop);
 }

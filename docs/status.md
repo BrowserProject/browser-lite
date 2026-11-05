@@ -75,7 +75,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   loaded web workers from a reserve that refills in the background, the engine thread no longer
   waits 60 to 180 ms for a worker to load (#242); a JPEG drawn at half its size or smaller
   decodes smaller, a 4000 x 3000 photo shown at 400 x 300 takes 0.7 instead of 46 MB of pixels
-  (#270).
+  (#270); the host polls gamepads only while a page uses them, so the idle demo no longer keeps
+  Chromium's gamepad thread at 220 wakeups/s, a quarter of its idle CPU (#380).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the

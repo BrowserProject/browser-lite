@@ -324,3 +324,7 @@ folder. Stored data in OPFS and the HTTP cache stay.
   its long tasks. Read canvases back (`toDataURL`, `getImageData`, for example to keep favicons)
   only from a 2D context with `willReadFrequently: true`: the readback of a GPU canvas waits for
   the GL work of the engine's views, up to seconds.
+- Gamepads: Chromium polls the devices at about 250 Hz from the first `navigator.getGamepads()`
+  until the last `gamepadconnected` or `gamepaddisconnected` listener of your window goes away. The
+  core listens only while a page uses gamepads, until WebKit has collected that page (after it
+  left the back/forward cache); a gamepad listener of your own keeps the polling running.

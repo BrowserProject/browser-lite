@@ -3,7 +3,8 @@
 // notifications and speech recognition through the permission handler, File System Access,
 // orientation and motion, platform features of the polyfills, an open permission request when
 // the view closes (aborted, not stored), permissions.query with the stored decisions, answers of
-// the host bridge on a quiet and on an abandoned page.
+// the host bridge on a quiet and on an abandoned page, the gamepad listener of the host only while
+// a page uses gamepads.
 //
 //   node tests/core/devices-test.mjs [engine-dir]
 import {
@@ -209,6 +210,8 @@ const HOST_PAGES = {
   '/away': `<!doctype html><title>Away</title><script>ImageDecoder.isTypeSupported('image/x-slow')
   .then(() => console.log('RESULT stale=called'), () => console.log('RESULT stale=rejected')); location.href = '/after'</script>`,
   '/after': `<!doctype html><title>After</title><script>console.log('RESULT after=1')</script>`,
+  '/gamepad': `<!doctype html><title>Gamepad</title><script>addEventListener('gamepadconnected', () => {});
+  console.log('RESULT gamepads=' + navigator.getGamepads().length)</script>`,
 };
 const { url: siteURL } = await serve((req, res) =>
   res
@@ -227,6 +230,22 @@ const context = await browser.newContext({
 });
 await emulateTouchPoints(context);
 // Speech recognition of the host as a stand-in (headless has no microphone)
+// Gamepad connection listeners of the host window: Chromium polls the devices at about 250 Hz
+// while there is one (after getGamepads())
+await context.addInitScript(() => {
+  const listeners = new Set();
+  window.__gamepadListeners = listeners;
+  const add = window.addEventListener;
+  const remove = window.removeEventListener;
+  window.addEventListener = function (type, listener, options) {
+    if (this === window && type === 'gamepadconnected') listeners.add(listener);
+    return add.call(this, type, listener, options);
+  };
+  window.removeEventListener = function (type, listener, options) {
+    if (this === window && type === 'gamepadconnected') listeners.delete(listener);
+    return remove.call(this, type, listener, options);
+  };
+});
 await context.addInitScript(() => {
   class FakeRecognition extends EventTarget {
     start() {
@@ -720,6 +739,36 @@ check(
     !results.has('stale') &&
     !lateLines.length,
   lateLines.join(' | '),
+);
+
+// 13) Gamepads (core services/devices/gamepad.ts): the host listens for gamepads only while a
+// page uses them, otherwise Chromium polls the devices for the whole session
+const gamepadListeners = () => page.evaluate(() => window.__gamepadListeners.size);
+check('gamepad: no host listener while no page uses gamepads', (await gamepadListeners()) === 0);
+await load(page, `${siteURL}gamepad`);
+check('gamepad: the page sees the gamepad list', (await result('gamepads', 15000)) !== undefined);
+const listening = await page
+  .waitForFunction(() => window.__gamepadListeners.size === 1, null, { timeout: 10000 })
+  .then(
+    () => true,
+    () => false,
+  );
+check('gamepad: host listener while the page uses gamepads', listening);
+results.delete('after');
+await load(page, `${siteURL}after`);
+await result('after', 15000);
+// WebKit stops monitoring once the window of the page is gone (page cache released, collected)
+await page.evaluate(() => window.blTest.memory(3));
+const stopped = await page
+  .waitForFunction(() => window.__gamepadListeners.size === 0, null, { timeout: 10000 })
+  .then(
+    () => true,
+    () => false,
+  );
+check(
+  'gamepad: host listener gone after the page was collected',
+  stopped,
+  String(await gamepadListeners()),
 );
 
 await browser.close();

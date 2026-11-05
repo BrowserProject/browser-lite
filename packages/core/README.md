@@ -151,6 +151,8 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   clipboard, eyedropper, battery, keyboard, networkInfo, imageDecoder, touch (all on by default).
   The `clipboard` switch covers the `navigator.clipboard` API of the pages; copy and cut in a page
   always reach the clipboard of the host.
+  Gamepads are read once per frame only while a page uses them; only then does the core listen
+  for `gamepadconnected` on your window ([Resource use](../../docs/embedding.md#resource-use)).
 
 A feature without its service is missing for the pages, like in a browser without it.
 
