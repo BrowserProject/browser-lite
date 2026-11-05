@@ -277,7 +277,10 @@ offscreen surface of an effect) is refused and that player goes back to copied f
 into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Sound
 comes straight from the host element. A hidden page pauses video without an audio track (#170),
 so the host reports whether its element has one: `audioTracks` (Safari), `mozHasAudio` (Firefox),
-decoded audio bytes (Chrome, #386). WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
+decoded audio bytes (Chrome, #386). Muted or silent `autoplay` video plays only while it is in
+the view (WebCore's `InvisibleAutoplayNotPermitted`, like Chrome and Safari on iOS): one below the
+fold waits, one scrolled out pauses and plays on when back; `play()` from a script and a start
+during user activation lift the rule for that element (#399). WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 Where the host has no `MediaStreamTrackProcessor` (Firefox), camera, microphone and screen reach
 the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `VideoFrame`s, an

@@ -50,6 +50,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Worklet, WebGL 1 and 2, recovery after GPU loss.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
+  Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
+  29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),

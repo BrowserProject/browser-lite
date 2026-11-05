@@ -2,7 +2,7 @@
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
 // has video-overlay-test.mjs). Also MSE, blob:, data:, preload,
-// picture-in-picture and the range special cases of media-sw.js.
+// picture-in-picture, muted autoplay only in the view and the range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -206,6 +206,35 @@ document.addEventListener('click', () => {
 });
 </script>`;
 
+// Muted autoplay plays only while the video is in the view, like Chrome (#399): "far" waits
+// below the fold until the page scrolls to it and pauses when it leaves the view again. step()
+// reports the state and scrolls on (to "far", then back to the top); the test calls it through
+// blTest.eval, as a click would give the page user activation, after which WebKit lifts the rule
+// for a video that starts.
+const AUTOPLAY_PAGE = `<!doctype html><title>Autoplay</title><body style="margin:0;background:#fff;height:5000px">
+<video id="near" src="/clip.webm" muted loop autoplay playsinline style="position:absolute;left:20px;top:20px;width:160px;height:120px"></video>
+<video id="far" src="/clip.webm" muted loop autoplay playsinline style="position:absolute;left:20px;top:3000px;width:160px;height:120px"></video>
+<script>
+const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const near = document.getElementById('near');
+const far = document.getElementById('far');
+const state = (video) => video.paused + ',' + (video.currentTime > 0);
+near.addEventListener('playing', () => result('nearplaying', scrollY), { once: true });
+far.addEventListener('playing', () => result('farplaying', scrollY));
+far.addEventListener('pause', () => steps === 2 && result('farpause', scrollY));
+let steps = 0;
+function step() {
+  steps++;
+  if (steps === 1) {
+    result('farbefore', state(far));
+    scrollTo(0, 2800);
+  } else if (steps === 2) {
+    near.addEventListener('playing', () => result('nearagain', scrollY), { once: true });
+    scrollTo(0, 0);
+  }
+}
+</script>`;
+
 // Servers with range quirks: /star.wav without a known length (bytes a-b/*), /short.wav with an
 // empty 206 from 2 MB on (file shorter than announced)
 const RANGE_PAGE = (file) =>
@@ -259,6 +288,7 @@ const { url: siteURL } = await serve((req, res) => {
     '/mse.html': MSE_PAGE,
     '/blob.html': BLOB_PAGE,
     '/controls.html': CONTROLS_PAGE,
+    '/autoplay.html': AUTOPLAY_PAGE,
   }[req.url];
   if (html) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
@@ -506,6 +536,41 @@ const barShown = await waitFor(
   250,
 );
 check('controls: <audio controls> shows its bar', barShown, JSON.stringify(barPixels.slice(0, 4)));
+
+// ------------------------------------------------------------- autoplay
+const earlier = new Set((await players()).map((p) => p.id));
+await load(page, `${siteURL}autoplay.html`);
+check('autoplay: the video in the view plays', (await result('nearplaying')) === '0');
+// Long enough for "far" to load and, without the visibility rule, to play
+await page.waitForTimeout(3000);
+const playingHosts = async () =>
+  (await players()).filter((p) => !earlier.has(p.id) && !p.paused).length;
+const hostsBefore = await playingHosts();
+await page.evaluate(() => window.blTest.eval('step()'));
+check(
+  'autoplay: a muted video below the fold waits (paused, at the start)',
+  (await result('farbefore')) === 'true,false' && hostsBefore === 1,
+  `${results.get('farbefore')}, ${hostsBefore} host videos playing`,
+);
+check(
+  'autoplay: it plays once scrolled into the view',
+  (await result('farplaying', 20000)) === '2800',
+  results.get('farplaying'),
+);
+await page.evaluate(() => window.blTest.eval('step()'));
+check(
+  'autoplay: it pauses when scrolled out of the view',
+  (await result('farpause', 20000)) === '0',
+  results.get('farpause'),
+);
+check(
+  'autoplay: the video back in the view plays again',
+  (await result('nearagain', 20000)) === '0',
+  results.get('nearagain'),
+);
+let hostsAfter = 0;
+await waitFor(async () => (hostsAfter = await playingHosts()) === 1, 10000, 250);
+check('autoplay: the host plays only the visible video', hostsAfter === 1, `${hostsAfter} playing`);
 
 // ------------------------------------------- range special cases (media-sw.js of the core)
 // The answer of the service worker must end instead of loading forever. We read
