@@ -1,0 +1,28 @@
+diff --git a/Source/WebCore/dom/EventLoop.cpp b/Source/WebCore/dom/EventLoop.cpp
+index aa1b385c88..4519d31a3e 100644
+--- a/Source/WebCore/dom/EventLoop.cpp
++++ b/Source/WebCore/dom/EventLoop.cpp
+@@ -455,13 +455,21 @@ void EventLoopTaskGroup::stopAndDiscardAllTasks()
+ {
+     ASSERT(isReadyToStop());
+     m_state = State::Stopped;
+-    if (RefPtr context = m_context.get()) {
++    RefPtr context = m_context.get();
++    if (context) {
+         context->forEachMicrotaskGlobalObject([](auto& globalObject) {
+             globalObject.setMicrotaskRunnability(JSC::QueuedTaskResult::Discard);
+         });
+     }
+-    if (RefPtr eventLoop = m_eventLoop.get())
++    if (RefPtr eventLoop = m_eventLoop.get()) {
+         eventLoop->stopGroup(*this);
++        // browser-lite: the discarded microtasks only leave the queue at the next checkpoint of
++        // the loop. In one process the loop of a site that was left may never run again, and its
++        // queue is a GC root: a waiting microtask kept the window, its document and the loop alive
++        // for good. A checkpoint soon drops them.
++        if (context && context->isDocument() && !eventLoop->microtaskQueue().isEmpty())
++            eventLoop->scheduleToRunIfNeeded();
++    }
+ }
+ 
+ void EventLoopTaskGroup::markAsReadyToStop()

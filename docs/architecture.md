@@ -293,6 +293,11 @@ engine task runs under `DeferGC`, and explicit requests wait for the outermost o
 boundaries where all values are in memory (#60, #72, `engine.safepointGC`). Proof:
 `tests/engine/gc-test.mjs` with `JSC_slowPathAllocsBetweenGCs=10`.
 
+All sites share one process, so a site's event loop may never run again once the user left it.
+JSC's microtask queues are GC roots and WebCore drops a stopped document's microtasks only at its
+loop's next checkpoint: when a document's task group stops with microtasks waiting, the loop runs
+once more and drops them (patch 0077, #388, `tests/core/page-left-test.mjs`).
+
 WASM memory never shrinks and grows up to 4 GB, in a 32 bit browser only to about 1 GB. One build
 serves both: `engine/src/MemoryWatch.cpp` runs after every engine task and acts when malloc's
 footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64). Once the

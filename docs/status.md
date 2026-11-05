@@ -59,7 +59,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
   by old words on the C stack that the conservative GC scans (#296; soak test 0 of 15 local runs
   with pages that stay, before about 1 in 5; in CI 40 of 40 soak checks of 11 runs clean up to
-  2026-11-02), JS heap blocks from slabs so that freed ones are
+  2026-11-02), and no longer by microtasks that waited when the page was left (#388: spiegel.de
+  left after 4 s stayed within 1 to 10 visits in each of 9 runs, now in none of 25 visits), JS heap blocks from slabs so that freed ones are
   reused: after 48 heavy page loads in one tab 985 instead of 1235 MB of engine memory (#329).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
@@ -288,7 +289,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    smaller module. After 12 heavy page loads in one tab (2026-11-01, `/proc/<pid>/smaps`) Chromium's
    malloc grew from 290 to 590 MB and V8's code from 28 to 150 MB (with `BL_JIT=0` 530 and
    110 MB); from the second round of six sites on, the renderer outside the engine memory stays at
-   0.9 to 1.1 GB, only the engine memory keeps growing (#329).
+   0.9 to 1.1 GB, only the engine memory keeps growing (#329). In use after releasing everything
+   and a full GC, 5 rounds through 8 heavy sites in one tab (2026-11-05, with #388): 48, 153,
+   161, 158, 171, 178 MB of malloc, not yet broken down (caches outside `releaseMemory`, compiled
+   code, the SQLite files of the visited sites); a document can stay until the next round while
+   a load of it ends.
 8. Split engine (#238): a site outside `engine/hot-functions.txt` nearly always needs deferred
    code on its first load and waits for those chunks while the others download too; one that
    needs many paints a little later than with one module (python.org 27.9 against 27.0 s). Renew
