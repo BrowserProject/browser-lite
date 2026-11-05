@@ -1,8 +1,8 @@
 // Background views through @browser-lite/core (WebView::setVisible, View.setVisible): hidden pages
 // see visibilityState 'hidden', rAF and CSS animations stop, setInterval runs at most about once
 // per second, the engine does not paint; with sound, sound and timers go on. While the user types
-// in the front view a busy hidden view waits. With and without the
-// compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
+// in the front view (also through pauses while the focus stays in the field) or the front view
+// loads a page, a busy hidden view waits. With and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive) and no hang during a long native dialog of the host page, a
 // muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
 // muted sound. Hidden, a video without an audio track pauses (in the host too), a muted one with
@@ -125,8 +125,18 @@ const MEDIA = {
   '/clip.webm': [await recordClip(browser, 4), 'video/webm'],
   '/sound-clip.webm': [await recordClip(browser, 4, { audio: true }), 'video/webm'],
 };
+// A page whose server takes 1.5 s to answer: the hidden views wait until it commits
+const SLOW_PAGE = `<!doctype html><title>slow</title><p>slow<script>console.log('RESULT loaded=slow:' + Date.now())</script>`;
 const { url: siteURL } = await serve((req, res) => {
   if (MEDIA[req.url]) return serveBytes(req, res, ...MEDIA[req.url]);
+  if (req.url.startsWith('/slow')) {
+    setTimeout(() => {
+      res
+        .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+        .end(SLOW_PAGE);
+    }, 1500);
+    return;
+  }
   const page = PAGES[new URL(req.url, siteURL).pathname.slice(1)];
   if (!page) return res.writeHead(404).end();
   res
@@ -354,29 +364,36 @@ await typing.page.mouse.click(typingOrigin.x + 100, typingOrigin.y + 25);
 // The click is input too: after the pause the hidden view is busy again
 await typing.page.waitForTimeout(2500);
 const chunkTimes = () => typing.results.filter((r) => r[1] === 'chunk').map((r) => Number(r[2]));
+const chunksBetween = (from, to) => chunkTimes().filter((time) => time > from && time <= to).length;
 check(
   'typing: the hidden view is busy before',
   chunkTimes().some((time) => time > Date.now() - 1500),
 );
-const keys = 'abcdefghijkl';
-const sent = [];
-for (const key of keys) {
-  sent.push(Date.now());
-  await typing.page.keyboard.press(key);
-  await typing.page.waitForTimeout(150);
-}
+// Two bursts of keys with a pause like someone who thinks, the focus stays in the field
+const typeBurst = async (keys) => {
+  const sent = [];
+  for (const key of keys) {
+    sent.push(Date.now());
+    await typing.page.keyboard.press(key);
+    await typing.page.waitForTimeout(150);
+  }
+  return sent;
+};
+const sent = await typeBurst('abcdefghijkl');
 const typed = Date.now();
-await typing.page.waitForTimeout(3000);
+await typing.page.waitForTimeout(2500);
+const paused = Date.now();
+const sentAgain = await typeBurst('mnop');
+await typing.page.waitForTimeout(1000);
 const keydowns = typing.results.filter((r) => r[1] === 'keydown').map((r) => r[2].split(':'));
 check(
   'typing: every key arrives in order',
-  keydowns.map(([key]) => key).join('') === keys,
+  keydowns.map(([key]) => key).join('') === 'abcdefghijklmnop',
   keydowns.map(([key]) => key).join(''),
 );
 // The first key may wait for the task that runs when it comes
-const latencies = keydowns
-  .slice(1)
-  .map(([, time], i) => Number(time) - sent[i + 1])
+const latencies = [...sent.slice(1), ...sentAgain]
+  .map((time, i) => Number(keydowns[i + 1]?.[1]) - time)
   .sort((a, b) => a - b);
 const medianLatency = latencies[Math.floor(latencies.length / 2)];
 check(
@@ -384,14 +401,50 @@ check(
   medianLatency < 120,
   `median ${medianLatency} ms: ${latencies.join(' ')}`,
 );
-const whileTyping = chunkTimes().filter((time) => time > sent[1] && time <= typed).length;
+const whileTyping = chunksBetween(sent[1], typed);
 check(
   'typing: the hidden view waits while the user types',
   whileTyping <= 1,
   `${whileTyping} tasks`,
 );
-const afterTyping = chunkTimes().filter((time) => time > typed).length;
-check('typing: the hidden view goes on after a pause', afterTyping >= 2, `${afterTyping} tasks`);
+const inPause = chunksBetween(typed, Date.now());
+const afterPause = Number(keydowns[sent.length]?.[1]) - sentAgain[0];
+check(
+  'typing: with the focus in the field the hidden view waits through a pause of 2.5 s',
+  inPause === 0 && afterPause < 120,
+  `${inPause} tasks, first key after the pause ${afterPause} ms (pause ended ${paused - typed} ms after typing)`,
+);
+// The focus leaves the field: the hidden view goes on after the quiet time of the click
+await typing.page.mouse.click(typingOrigin.x + 100, typingOrigin.y + 300);
+const clickedAway = Date.now();
+await typing.page.waitForTimeout(3000);
+const afterTyping = chunksBetween(clickedAway, Date.now());
+check(
+  'typing: the hidden view goes on when the focus left the field',
+  afterTyping >= 2,
+  `${afterTyping} tasks`,
+);
+
+// The front view loads a page (1.5 s until the response): the hidden view waits until it
+// commits. The load is no input: it may still come after the running task and the one that task
+// queued (500 ms each)
+const loadInFront = async (label, start) => {
+  const started = Date.now();
+  await start();
+  const loaded = await typing.wait('loaded', null, 15000);
+  const committed = Number(loaded?.[2].split(':')[1]);
+  const during = chunksBetween(started + 1100, committed);
+  check(
+    `${label}: the hidden view waits while the visible view loads`,
+    loaded?.[2].startsWith('slow:') && during === 0,
+    `${during} tasks in ${committed - started} ms`,
+  );
+  await typing.page.waitForTimeout(3000);
+  const after = chunksBetween(committed, Date.now());
+  check(`${label}: the hidden view goes on after the commit`, after >= 2, `${after} tasks`);
+};
+await loadInFront('navigation', () => typing.go(`${siteURL}slow?front`));
+await loadInFront('new tab', () => typing.newTab(`${siteURL}slow?tab`));
 await typing.context.close();
 
 // Memory pressure: over the limit the engine reports at every growth by 32 MB. The limit is just

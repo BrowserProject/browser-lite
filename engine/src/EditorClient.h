@@ -10,7 +10,15 @@
 #include <WebCore/UndoStep.h>
 #include <wtf/Vector.h>
 
+namespace WebCore {
+class Page;
+}
+
 namespace BrowserLite {
+
+// Whether the focused element of the page takes text: a text field or text area that is not read
+// only or disabled, or an editable element
+bool takesTextInput(WebCore::Page&);
 
 class EditorClient final : public WebCore::EditorClient {
     WTF_MAKE_TZONE_ALLOCATED(EditorClient);

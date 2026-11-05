@@ -63,10 +63,9 @@ static String inputModeOf(Element* element)
 // is not read only or disabled, or an editable element. Not the root of the selection: in a
 // text field that is the inner element of its shadow tree, and the selection stays in a field
 // when the focus moves to a button.
-static RefPtr<Element> focusedTextInput(LocalFrame& frame)
+static RefPtr<Element> focusedTextInput(Page& page)
 {
-    RefPtr page = frame.page();
-    RefPtr focused = page ? page->focusController().focusedOrMainFrame() : nullptr;
+    RefPtr focused = page.focusController().focusedOrMainFrame();
     RefPtr document = focused ? focused->document() : nullptr;
     RefPtr element = document ? document->focusedElement() : nullptr;
     if (!element)
@@ -84,12 +83,18 @@ static RefPtr<Element> focusedTextInput(LocalFrame& frame)
 // host shows no on-screen keyboard
 static String textInputState(LocalFrame& frame)
 {
-    RefPtr element = focusedTextInput(frame);
+    RefPtr page = frame.page();
+    RefPtr element = page ? focusedTextInput(*page) : nullptr;
     if (!element)
         return "{\"mode\":\"\"}"_s;
     RefPtr html = dynamicDowncast<HTMLElement>(*element);
     String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
     return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+}
+
+bool takesTextInput(Page& page)
+{
+    return !!focusedTextInput(page);
 }
 
 void EditorClient::updateTextInput(LocalFrame& frame)

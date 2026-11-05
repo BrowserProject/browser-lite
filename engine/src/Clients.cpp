@@ -14,6 +14,7 @@
 
 #include "Engine.h"
 #include "ErrorPage.h"
+#include "HiddenViews.h"
 #include "Host.h"
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
@@ -866,6 +867,7 @@ void FrameLoaderClient::dispatchDidStartProvisionalLoad()
     if (!isMainFrame())
         return;
     m_view->didStartLoading();
+    visibleViewMayNavigate(m_view.get());
     // Back/forward from the cache commits without a response: the old page must stay active
     // until the cache suspends it
     Ref frame = m_frameLoader->frame();
@@ -878,6 +880,9 @@ void FrameLoaderClient::dispatchDidCommitLoad(std::optional<HasInsecureContent>,
     if (isMainFrame()) {
         m_view->didCommitLoad();
         ChromeClient::reportBeforeUnload(m_view.get());
+        // The new page gets a moment for its first parsing and layout (HiddenViews.h)
+        if (m_view->isVisible())
+            userWorksInVisibleView();
     }
     // The focused field left with the old document without a focus change: the on-screen
     // keyboard of the host closes like in a browser after a search

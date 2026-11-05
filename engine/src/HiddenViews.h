@@ -7,9 +7,18 @@ class Page;
 
 namespace BrowserLite {
 
-// On the engine thread, before the input runs: the user works in a visible view. Hidden views
-// wait until no input came for a moment (WebView::updateWaitForUser).
-void userWorksInVisibleView();
+class WebView;
+
+enum class UserInput : bool { Other, Typing };
+
+// On the engine thread, before the input runs: the user works in a visible view, Typing for keys
+// and text. Hidden views wait until no input came for a moment, after typing while the focus
+// stays in a text field a little longer (WebView::updateWaitForUser).
+void userWorksInVisibleView(UserInput = UserInput::Other);
+
+// A view started to load a new page or became visible: when it is visible and loads, hidden views
+// wait until the new page commits
+void visibleViewMayNavigate(WebView&);
 
 // Whether hidden views wait for the user right now
 bool hiddenViewsWaitForUser();

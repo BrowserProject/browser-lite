@@ -28,10 +28,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Input runs before the engine's queued work (#347), waiting mouse moves coalesce (#350), the
   parser yields after 50 ms (#349): on 20min.ch locally the 90th percentile of input latency
   during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.
-  Hidden views wait while the user types or taps in a visible one (#364): with weather.com loading
-  in a background tab, typing in the front tab went from median 0.46 s (90th percentile 1.5 s, on
-  screen up to 6 s) to 2 ms (frame 36 ms); only the first key of a burst can still wait for a task
-  that already runs.
+  Hidden views wait while the user types or taps in a visible one (#364), through the pauses of a
+  writer while the focus stays in a text field and while a visible view loads a new page until it
+  commits (#394): with weather.com loading in a background tab, typing in bursts with 2.5 s pauses
+  went from median 0.42 s (90th percentile 1.1 s, up to 7.5 s) to 2 ms (frame 32 ms), a new tab
+  next to two loading heavy tabs commits in 0.3 to 2 s instead of 11 to 17 s. After a pause of
+  more than 10 s (or 1 s outside a text field) a key can still wait for a task that already runs.
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).

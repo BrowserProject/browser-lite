@@ -86,6 +86,21 @@ static void withView(int id, Function&& function)
     });
 }
 
+// A navigation of the host (address bar, new tab, back, forward, reload): the user waits for it.
+// Like input, hidden views wait from the end of the running task on, not only once the command
+// runs after a long pass of the engine (HiddenViews.h). A view the host has not created yet will
+// be created visible.
+template<typename Function>
+static void withNavigation(int id, Function&& function)
+{
+    runUrgentOnEngineThread([id] {
+        auto* view = WebView::fromID(id);
+        if (!view || view->isVisible())
+            userWorksInVisibleView();
+    });
+    withView(id, std::forward<Function>(function));
+}
+
 // A mouse move the engine has not handled yet; a newer one replaces it (Blink sends one per
 // frame). Each move hit tests the page, which lays it out first: while a page loads that took
 // 300 ms and more, and a hovering mouse queued moves faster than they ran. Only on the host's
@@ -122,15 +137,15 @@ static void closeMove(int id)
 // Input for a view: dropped while a dialog of its page group is open, like Chrome. Hidden views
 // wait while the user works in a visible one (HiddenViews.h).
 template<typename Function>
-static void withInput(int id, Function&& function)
+static void withInput(int id, Function&& function, UserInput input = UserInput::Other)
 {
     closeMove(id);
-    runUrgentOnEngineThread([id, function = std::forward<Function>(function)]() mutable {
+    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function)]() mutable {
         auto* view = WebView::fromID(id);
         if (!view || view->isBlockedByDialog())
             return;
         if (view->isVisible())
-            userWorksInVisibleView();
+            userWorksInVisibleView(input);
         function(*view);
     });
 }
@@ -191,7 +206,7 @@ EMSCRIPTEN_KEEPALIVE void bl_destroy_view(int id)
 
 EMSCRIPTEN_KEEPALIVE void bl_load_url(int id, char* url)
 {
-    withView(id, [url = takeString(url)](WebView& view) {
+    withNavigation(id, [url = takeString(url)](WebView& view) {
         debugLog("bl_load_url %s", url.utf8().data());
         view.loadURL(url);
     });
@@ -217,9 +232,9 @@ EMSCRIPTEN_KEEPALIVE void bl_restore_history(int id, char* data)
     withView(id, [data = takeString(data)](WebView& view) { view.restoreHistory(data); });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_go_back(int id) { withView(id, [](WebView& view) { view.goBack(); }); }
-EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withView(id, [](WebView& view) { view.goForward(); }); }
-EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withView(id, [](WebView& view) { view.reload(); }); }
+EMSCRIPTEN_KEEPALIVE void bl_go_back(int id) { withNavigation(id, [](WebView& view) { view.goBack(); }); }
+EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withNavigation(id, [](WebView& view) { view.goForward(); }); }
+EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withNavigation(id, [](WebView& view) { view.reload(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_stop(int id) { withView(id, [](WebView& view) { view.stop(); }); }
 
 // Close a view: first the page's beforeunload (with a prompt), the answer
@@ -398,23 +413,23 @@ EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* 
 {
     withInput(id, [=, key = takeString(key), code = takeString(code), text = takeString(text)](WebView& view) {
         view.keyEvent(type, key, code, text, keyCode, repeat, modifiers);
-    });
+    }, UserInput::Typing);
 }
 
 // Preview during text input (compositionupdate) and completion (compositionend)
 EMSCRIPTEN_KEEPALIVE void bl_set_composition(int id, char* text, int selectionStart, int selectionEnd)
 {
-    withInput(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); });
+    withInput(id, [=, text = takeString(text)](WebView& view) { view.setComposition(text, std::max(selectionStart, 0), std::max(selectionEnd, 0)); }, UserInput::Typing);
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_confirm_composition(int id, char* text)
 {
-    withInput(id, [text = takeString(text)](WebView& view) { view.confirmComposition(text); });
+    withInput(id, [text = takeString(text)](WebView& view) { view.confirmComposition(text); }, UserInput::Typing);
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_insert_text(int id, char* text)
 {
-    withInput(id, [text = takeString(text)](WebView& view) { view.insertText(text); });
+    withInput(id, [text = takeString(text)](WebView& view) { view.insertText(text); }, UserInput::Typing);
 }
 
 // paths: paths in the virtual file system, separated by newlines. Empty = cancelled.
@@ -557,7 +572,10 @@ EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
 // View visible (1) or hidden (0): in the background or the host tab is hidden
 EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
 {
-    withView(id, [=](WebView& view) { view.setVisible(visible); });
+    withView(id, [=](WebView& view) {
+        view.setVisible(visible);
+        visibleViewMayNavigate(view);
+    });
 }
 
 // flags: 1 = dark color scheme (prefers-color-scheme), 2 = touch screen,

@@ -92,8 +92,10 @@ within 10 s (#147, #172). A page dialog holds only its page: until the answer th
 runs the other views in a nested event loop (`runNestedEventLoop`, #258). The question before a
 form is sent again waits without a nested loop: the navigation policy answers later (#369). Input to a visible view
 makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,
-parser and loads held) until no input came for 1 s (`HiddenViews.cpp`, #364), so a heavy page
-loading in a background tab does not hold up typing in the front one.
+parser and loads held) until no input came for 1 s, after keys or text while the focus stays in a
+text field for up to 10 s, and while a visible view loads a new page until it commits
+(`HiddenViews.cpp`, #364, #394), so a heavy page loading in a background tab does not hold up
+typing in or loading the front one.
 
 ## Frames
 
