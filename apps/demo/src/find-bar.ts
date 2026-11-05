@@ -53,7 +53,11 @@ input.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     run(e.shiftKey, true);
     e.preventDefault();
-  } else if (e.key === 'Escape') {
+  }
+});
+// On the whole bar: a click on a button moves the focus there (Chromium, Firefox)
+bar.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
     closeFind();
     e.preventDefault();
   }

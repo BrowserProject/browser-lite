@@ -460,7 +460,7 @@ if (datePicker) {
   check('date reaches the page', (await result('date')) === '2027-03-04', results.get('date'));
 }
 
-// 13) Find in the page (Ctrl+F): count matches, Esc closes
+// 13) Find in the page (Ctrl+F): count matches, Esc closes (also from the buttons of the bar)
 await page.mouse.click(...(await at(600, 600)));
 await page.keyboard.press('Control+f');
 const findOpen = await page.waitForSelector('#find-bar:not([hidden])', { timeout: 5000 }).then(
@@ -479,6 +479,16 @@ const findCount = await page
 check('find in the page', findOpen && findCount === '1 of 1', String(findCount));
 await page.keyboard.press('Escape');
 check('close find', await page.evaluate(() => document.getElementById('find-bar').hidden));
+// Esc also closes it after a click on a button of the bar (the button has the focus)
+await page.keyboard.press('Control+f');
+await page.click('#find-next');
+const buttonFocused = await page.evaluate(() => document.activeElement?.id);
+await page.keyboard.press('Escape');
+check(
+  'close find from its buttons',
+  await page.evaluate(() => document.getElementById('find-bar').hidden),
+  String(buttonFocused),
+);
 
 // 14) Zoom (Ctrl +): the page gets narrower in CSS pixels, indicator 110 %
 results.delete('width');
