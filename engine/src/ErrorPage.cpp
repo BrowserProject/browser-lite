@@ -16,13 +16,17 @@
 // engine installs in the window (installRetry), so the page needs no script and
 // no global.
 //
-// The curl codes are the reasons. What fails at the transport is turned back
-// into a code by CurlRequest (patch 0039) from the socket error (Sockets.cpp).
+// The curl codes are the reasons for web addresses. What fails at the
+// transport is turned back into a code by CurlRequest (patch 0039) from the
+// socket error (Sockets.cpp). Other addresses get a page for the engine's own
+// codes (LoadErrorCode): a file: address without a file, an about: address
+// WebCore does not load.
 
 #include "config.h"
 #include "ErrorPage.h"
 
 #include "EngineConfig.h"
+#include "LoaderStrategy.h"
 #include "WebPlatformExtras.h"
 
 #include <JavaScriptCore/JSCInlines.h>
@@ -58,7 +62,7 @@ struct Reason {
 
 constexpr auto notReachable = "This site can't be reached"_s;
 
-Reason reasonFor(int curlCode)
+Reason reasonForCurl(int curlCode)
 {
     switch (curlCode) {
     case CURLE_COULDNT_RESOLVE_HOST:
@@ -88,6 +92,26 @@ Reason reasonFor(int curlCode)
     default:
         return { notReachable, ""_s, " could not be loaded."_s, "ERR_FAILED"_s, true };
     }
+}
+
+// None: no error page (cancelled, blocked, a download, ...)
+std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
+{
+    if (error.isCancellation())
+        return std::nullopt;
+    if (error.domain() == "CurlErrorDomain"_s && url.protocolIsInHTTPFamily())
+        return reasonForCurl(error.errorCode());
+    if (error.domain() != loadErrorDomain || url.protocolIsInHTTPFamily())
+        return std::nullopt;
+    switch (static_cast<LoadErrorCode>(error.errorCode())) {
+    case LoadErrorCode::FileNotFound:
+        return Reason { "Your file couldn't be accessed"_s, ""_s, " may have been moved, edited or deleted."_s, "ERR_FILE_NOT_FOUND"_s };
+    case LoadErrorCode::CannotShowURL:
+        return Reason { notReachable, "The webpage at "_s, " could not be shown."_s, "ERR_INVALID_URL"_s };
+    case LoadErrorCode::Other:
+        break;
+    }
+    return std::nullopt;
 }
 
 constexpr auto defaultTemplate = R"(<!doctype html>
@@ -203,7 +227,7 @@ void reloadAfterReconnect(bool onLine)
             return;
         auto& loader = frame->loader();
         RefPtr documentLoader = loader.documentLoader();
-        if (documentLoader && !documentLoader->unreachableURL().isEmpty() && !loader.provisionalDocumentLoader()
+        if (documentLoader && documentLoader->unreachableURL().protocolIsInHTTPFamily() && !loader.provisionalDocumentLoader()
             && documentLoader->request().httpMethod() == "GET"_s)
             loader.reload();
     });
@@ -239,13 +263,11 @@ void installRetry(LocalFrame& frame, JSC::JSGlobalObject& globalObject)
 
 std::optional<Kind> show(LocalFrame& frame, const ResourceError& error)
 {
-    // Errors from curl, not cancellation, blocking or download (those come from the LoaderStrategy)
-    if (error.domain() != "CurlErrorDomain"_s || error.isCancellation())
-        return std::nullopt;
     URL url = frame.loader().provisionalLoadErrorBeingHandledURL();
     if (url.isEmpty())
         url = error.failingURL();
-    if (!url.protocolIsInHTTPFamily())
+    auto reason = reasonFor(url, error);
+    if (!reason)
         return std::nullopt;
     static bool listening = false;
     if (!std::exchange(listening, true))
@@ -256,11 +278,14 @@ std::optional<Kind> show(LocalFrame& frame, const ResourceError& error)
         request = failed->request();
         request.setURL(URL { url });
     }
-    auto kind = error.errorCode() == CURLE_PEER_FAILED_VERIFICATION ? Kind::Certificate : Kind::Network;
-    auto page = html(reasonFor(error.errorCode()), url, error, kind, request.httpMethod() != "GET"_s).utf8();
+    auto kind = error.domain() == "CurlErrorDomain"_s && error.errorCode() == CURLE_PEER_FAILED_VERIFICATION ? Kind::Certificate : Kind::Network;
+    auto page = html(*reason, url, error, kind, request.httpMethod() != "GET"_s).utf8();
     ResourceResponse response { URL { url }, "text/html"_s, static_cast<long long>(page.length()), "UTF-8"_s };
     SubstituteData data { SharedBuffer::create(page.span()), URL { url }, WTF::move(response), SubstituteData::SessionHistoryVisibility::Hidden };
-    frame.loader().load(FrameLoadRequest { frame, WTF::move(request), WTF::move(data) });
+    FrameLoadRequest load { frame, WTF::move(request), WTF::move(data) };
+    // Otherwise WebCore cancels an about: address it does not know (about:foo) again
+    load.setIsHandledByAboutSchemeHandler(url.protocolIsAbout());
+    frame.loader().load(WTF::move(load));
     return kind;
 }
 

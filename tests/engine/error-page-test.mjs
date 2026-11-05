@@ -1,8 +1,9 @@
 // Error page in node without a browser. Without Module.blTransport every navigation fails, so
 // the view shows the error page from a custom BL_ERROR_PAGE. Checks the placeholders and their
 // escaping, the CSP after the doctype (no script of the template runs), the 'commit' and
-// 'title' events, the retry through [data-bl-retry] and the close reason 'name-not-resolved'
-// of a transport.
+// 'title' events, the retry through [data-bl-retry], the close reason 'name-not-resolved'
+// of a transport, and the page for a file: address without a file and for an about: address
+// WebCore does not load.
 //
 //   node tests/engine/error-page-test.mjs [engine-dir]
 import { enginePath as resolveEngine, runEngine } from './engine-node.mjs';
@@ -191,6 +192,48 @@ check(
   'name-not-resolved gives ERR_NAME_NOT_RESOLVED',
   resolved.code === 'ERR_NAME_NOT_RESOLVED',
   resolved.code,
+);
+
+// 4. Addresses that are no web addresses keep the address and show the page instead of an
+// empty download (file:) or nothing (about:). A file that exists still loads.
+const settled = (predicate) =>
+  Promise.race([waitFor(predicate), new Promise((resolve) => setTimeout(resolve, 15000))]);
+for (const [url, code] of [
+  ['file:///no/such/page.html', 'ERR_FILE_NOT_FOUND'],
+  ['file:///usr/share/webkit/', 'ERR_FILE_NOT_FOUND'],
+  ['about:foo', 'ERR_INVALID_URL'],
+]) {
+  const before = {
+    commit: count('commit'),
+    load: count('load'),
+    downloads: count('download-start'),
+  };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  const committed = events.filter((event) => event.type === 'commit').slice(before.commit);
+  check(
+    `${url} commits an error page`,
+    committed.length === 1 && committed[0].payload === '{"errorPage":"network"}',
+    JSON.stringify(committed),
+  );
+  check(`${url} starts no download`, count('download-start') === before.downloads);
+  if (!committed.length) continue;
+  const shown = JSON.parse(await evaluate(pageState));
+  check(`${url} keeps its address`, shown.url === url, shown.url);
+  check(`${url} gives ${code}`, shown.code === code, shown.code);
+  check(`${url} names the address`, shown.message.includes(url), shown.message);
+}
+const image = 'file:///usr/share/webkit/images/missingImage.png';
+const beforeImage = { commit: count('commit'), load: count('load') };
+engine._bl_load_url(1, engine.stringToNewUTF8(image));
+await settled(() => count('commit') > beforeImage.commit && count('load') > beforeImage.load);
+const imageCommit = events.filter((event) => event.type === 'commit').slice(beforeImage.commit);
+check(
+  'an existing file: address still loads',
+  imageCommit.length === 1 &&
+    imageCommit[0].payload === '' &&
+    (await evaluate('location.href + " " + document.contentType')) === `${image} image/png`,
+  JSON.stringify(imageCommit),
 );
 
 check(

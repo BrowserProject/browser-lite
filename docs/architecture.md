@@ -166,7 +166,9 @@ the main thread (`engine/js/sockets.js`), which calls `Module.blTransport` (the 
 passed to `createBrowser`). Incoming data is written straight into the buffer; at most 8 MB are
 in flight and `onsent` gives backpressure. `getaddrinfo` returns placeholders, the relay
 resolves names. A `CloseReason` becomes an errno and then a curl code (patch 0039), which picks
-the error page (#174, #175).
+the error page (#174, #175). `file:` addresses read the engine file system; one without a file
+and an `about:` address WebCore does not load get the error page too, from the engine's own
+error codes (`LoadErrorCode` in `engine/src/LoaderStrategy.h`, #395).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch

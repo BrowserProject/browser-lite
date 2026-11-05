@@ -2,6 +2,7 @@
 
 #include <wtf/CompletionHandler.h>
 #include <wtf/Forward.h>
+#include <wtf/text/ASCIILiteral.h>
 
 namespace WebCore {
 class CurlRequest;
@@ -16,6 +17,14 @@ class ResourceResponse;
 namespace BrowserLite {
 
 WebCore::LoaderStrategy& loaderStrategy();
+
+// Load errors of the engine itself (not from curl); the error page knows these codes
+constexpr auto loadErrorDomain = "BrowserLite"_s;
+enum class LoadErrorCode : int {
+    Other,
+    CannotShowURL, // an address WebCore does not load, like about:foo
+    FileNotFound, // a file: address that is no file in the engine file system
+};
 
 // Downloads the file and hands it to the host (events download-start /
 // download-done, data through Module.onEngineDownloadData). data: and blob:

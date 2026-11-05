@@ -96,7 +96,9 @@ The full list is `abi.json`; the rules behind it:
   a disabled feature looks like a browser without it, and no `__bl*` global is ever visible to
   page scripts. `BL_STORAGE_NAMESPACE` selects the OPFS directory of `/data` and the prefix of
   the Cache API names. `BL_ERROR_PAGE` replaces the error page template (below).
-- Error page: shown under the failed address when a main frame navigation does not arrive.
+- Error page: shown under the failed address when a main frame navigation does not arrive:
+  a web address that curl cannot load, a `file:` address without a file in the engine file
+  system (`ERR_FILE_NOT_FOUND`) or an `about:` address WebCore does not load (`ERR_INVALID_URL`).
   A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
   `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host), `{{heading}}`,
   `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and `{{retryLabel}}`.

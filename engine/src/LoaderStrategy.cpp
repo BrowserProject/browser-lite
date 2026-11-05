@@ -54,6 +54,7 @@
 #include <WebCore/UserAgent.h>
 #include <wtf/Deque.h>
 #include <wtf/Expected.h>
+#include <wtf/FileSystem.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
@@ -61,8 +62,6 @@
 namespace BrowserLite {
 
 using namespace WebCore;
-
-static constexpr auto errorDomain = "BrowserLite"_s;
 
 static void addCookieHeader(ResourceRequest& request)
 {
@@ -138,12 +137,12 @@ static bool redirectAsGET(const ResourceRequest& request, const ResourceResponse
 static Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
 {
     if (redirectCount > 20)
-        return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Too many redirects"_s));
+        return makeUnexpected(ResourceError(loadErrorDomain, 0, response.url(), "Too many redirects"_s));
 
     URL target { response.url(), response.httpHeaderField(HTTPHeaderName::Location) };
     // A web page may never redirect to local files in the WASM file system
     if (target.protocolIsFile())
-        return makeUnexpected(ResourceError(errorDomain, 0, response.url(), "Redirect to file: blocked"_s));
+        return makeUnexpected(ResourceError(loadErrorDomain, 0, response.url(), "Redirect to file: blocked"_s));
 
     ResourceRequest request = current;
     if (!target.hasFragmentIdentifier() && request.url().hasFragmentIdentifier())
@@ -176,7 +175,7 @@ ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient
     if (!next)
         return next.error();
     if (!next->url().protocolIsInHTTPFamily())
-        return ResourceError(errorDomain, 0, response.url(), "Redirect to unsupported URL"_s);
+        return ResourceError(loadErrorDomain, 0, response.url(), "Redirect to unsupported URL"_s);
     curlRequest = createCurlRequest(WTF::move(*next), client);
     curlRequest->resume();
     return { };
@@ -211,13 +210,14 @@ public:
                 // again by itself (WebCore asks again with FormResubmitted). In
                 // a later task like a failure from the network: the lookup may
                 // answer within start(), before WebCore knows the loader.
-                if (m_loader->request().cachePolicy() == ResourceRequestCachePolicy::ReturnCacheDataDontLoad) {
-                    runOnEngineThread([this, protectedThis = Ref { *this }] {
-                        if (m_loader)
-                            fail(ResourceError(errorDomain, 0, m_loader->request().url(), "Not in the cache"_s));
-                    });
-                    return;
-                }
+                if (m_loader->request().cachePolicy() == ResourceRequestCachePolicy::ReturnCacheDataDontLoad)
+                    return failLater(ResourceError(loadErrorDomain, 0, m_loader->request().url(), "Not in the cache"_s));
+                // curl reports a response for file: before it opens the file
+                // (CurlRequest::invokeDidReceiveResponseForFile), so a missing
+                // file would become an empty download instead of an error
+                const auto& url = lookup.request.url();
+                if (url.protocolIsFile() && FileSystem::fileTypeFollowingSymlinks(url.fileSystemPath()) != FileSystem::FileType::Regular)
+                    return failLater(ResourceError(loadErrorDomain, static_cast<int>(LoadErrorCode::FileNotFound), url, "File not found"_s));
                 m_cachedEntry = WTF::move(lookup.entry);
                 startNetwork(WTF::move(lookup.request));
             });
@@ -260,6 +260,14 @@ private:
             return;
         }
         callback();
+    }
+
+    void failLater(ResourceError&& error)
+    {
+        runOnEngineThread([this, protectedThis = Ref { *this }, error = WTF::move(error)] {
+            if (m_loader)
+                fail(error);
+        });
     }
 
     void startNetwork(ResourceRequest&& request)
@@ -602,7 +610,7 @@ private:
 
     void fail(String&& message)
     {
-        done(ResourceError(errorDomain, 0, m_response.url(), WTF::move(message), ResourceError::Type::AccessControl));
+        done(ResourceError(loadErrorDomain, 0, m_response.url(), WTF::move(message), ResourceError::Type::AccessControl));
     }
 
     void done(const ResourceError& error)
@@ -711,7 +719,7 @@ private:
                 response = ResourceResponse { URL { url }, WTF::move(result->mimeType), static_cast<long long>(result->data.size()), WTF::move(result->charset) };
                 data = WTF::move(result->data);
             } else
-                error = ResourceError(errorDomain, 0, url, "Invalid data: URL"_s);
+                error = ResourceError(loadErrorDomain, 0, url, "Invalid data: URL"_s);
         } else {
             RefPtr blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(url);
             BlobResourceHandle::loadResourceSynchronously(blob.get(), ResourceRequest { URL { url } }, error, response, data);
@@ -952,7 +960,7 @@ private:
     {
         // Synchronous XHR would block the only engine thread, while the response
         // would have to be processed on exactly this thread.
-        error = ResourceError(errorDomain, 0, request.url(), "Synchronous loads are not supported"_s);
+        error = ResourceError(loadErrorDomain, 0, request.url(), "Synchronous loads are not supported"_s);
     }
 
     void pageLoadCompleted(Page&) final { }
@@ -1009,22 +1017,22 @@ private:
         callback(!loader || (!m_loads.contains(loader.get()) && !ServiceWorkers::isFetching(*loader)));
     }
 
-    ResourceError makeError(const URL& url, ASCIILiteral message, ResourceError::Type type = ResourceError::Type::General) const
+    ResourceError makeError(const URL& url, ASCIILiteral message, ResourceError::Type type = ResourceError::Type::General, LoadErrorCode code = LoadErrorCode::Other) const
     {
-        return ResourceError(errorDomain, 0, url, String { message }, type);
+        return ResourceError(loadErrorDomain, static_cast<int>(code), url, String { message }, type);
     }
 
     ResourceError cancelledError(const ResourceRequest& r) const final { return makeError(r.url(), "Load cancelled"_s, ResourceError::Type::Cancellation); }
     ResourceError blockedError(const ResourceRequest& r) const final { return makeError(r.url(), "Load blocked"_s, ResourceError::Type::AccessControl); }
-    bool isBlockedError(const ResourceError& e) const final { return e.domain() == errorDomain && e.localizedDescription() == "Load blocked"_s; }
+    bool isBlockedError(const ResourceError& e) const final { return e.domain() == loadErrorDomain && e.localizedDescription() == "Load blocked"_s; }
     ResourceError blockedByContentBlockerError(const ResourceRequest& r) const final { return makeError(r.url(), "Blocked by content blocker"_s, ResourceError::Type::AccessControl); }
-    ResourceError cannotShowURLError(const ResourceRequest& r) const final { return makeError(r.url(), "Cannot show URL"_s, ResourceError::Type::AccessControl); }
+    ResourceError cannotShowURLError(const ResourceRequest& r) const final { return makeError(r.url(), "Cannot show URL"_s, ResourceError::Type::AccessControl, LoadErrorCode::CannotShowURL); }
     ResourceError interruptedForPolicyChangeError(const ResourceRequest& r) const final { return makeError(r.url(), "Interrupted for policy change"_s); }
     ResourceError cannotShowMIMETypeError(const ResourceResponse& r) const final { return makeError(r.url(), "Cannot show MIME type"_s); }
     ResourceError fileDoesNotExistError(const ResourceResponse& r) const final { return makeError(r.url(), "File does not exist"_s); }
     ResourceError httpsUpgradeRedirectLoopError(const ResourceRequest& r) const final { return makeError(r.url(), "HTTPS upgrade redirect loop"_s); }
     ResourceError httpNavigationWithHTTPSOnlyError(const ResourceRequest& r) const final { return makeError(r.url(), "HTTP navigation with HTTPS-only"_s); }
-    bool isHttpNavigationWithHTTPSOnlyError(const ResourceError& e) const final { return e.domain() == errorDomain && e.localizedDescription() == "HTTP navigation with HTTPS-only"_s; }
+    bool isHttpNavigationWithHTTPSOnlyError(const ResourceError& e) const final { return e.domain() == loadErrorDomain && e.localizedDescription() == "HTTP navigation with HTTPS-only"_s; }
     ResourceError pluginWillHandleLoadError(const ResourceResponse& r) const final { return makeError(r.url(), "Plugin will handle load"_s); }
 
     HashMap<ResourceLoader*, Ref<ResourceLoad>> m_loads;
