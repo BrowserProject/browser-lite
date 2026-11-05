@@ -3,7 +3,8 @@
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
 // page smaller), the tab overview shows the tabs, switches and closes one, the menu opens as a
 // bottom sheet on the toolbar, the find
-// bar, the permission prompt and the sign-in dialog are fully visible, and the desktop layout
+// bar, the permission prompt and the sign-in dialog are fully visible, the close button of the
+// settings stays at the top while they scroll, and the desktop layout
 // comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
@@ -378,6 +379,40 @@ await tab.fill('.bl-login-prompt input[name=username]', 'user');
 await tab.fill('.bl-login-prompt input[name=password]', 'secret');
 await tab.locator('.bl-login-prompt .bl-sign-in').tap();
 check('sign-in dialog: signed in', await loaded('Page auth'));
+
+// Settings as a full screen sheet: the close button stays at the top while the sheet scrolls
+await tab.tap('#menu-button');
+await tab.locator('#side-panel .panel-menu-item', { hasText: 'Settings' }).tap();
+check('settings open', await shown('#settings'));
+await tab.tap('#settings nav button[data-section=device]');
+const scrolled = await tab.evaluate(() => {
+  const sheet = document.getElementById('settings');
+  sheet.scrollTop = sheet.scrollHeight;
+  return sheet.scrollTop;
+});
+const closeBox = (await boxes('#settings .settings-close')).list[0];
+const onTop = await tab.evaluate(({ left, top, width, height }) => {
+  const hit = document.elementFromPoint(left + width / 2, top + height / 2);
+  return !!hit?.closest('.settings-close');
+}, closeBox);
+check(
+  'settings scrolled: the close button stays at the top and is what a tap there hits',
+  scrolled > 100 && closeBox.top >= 0 && closeBox.top < 20 && onTop,
+  JSON.stringify([scrolled, closeBox, onTop]),
+);
+check('settings: close button of 44 px', ...(await touchSize('#settings .settings-close')));
+await screenshot(tab, 'mobile-settings');
+await tab.touchscreen.tap(closeBox.left + closeBox.width / 2, closeBox.top + closeBox.height / 2);
+check(
+  'settings scrolled: a tap on the close button closes them',
+  await tab
+    .waitForFunction(() => !document.getElementById('settings').open, null, { timeout: 5000 })
+    .then(
+      () => true,
+      () => false,
+    ),
+);
+await tab.evaluate(() => document.getElementById('settings').close());
 
 // Landscape: still the compact toolbar, sheets fit the low window
 await tab.setViewportSize(LANDSCAPE);

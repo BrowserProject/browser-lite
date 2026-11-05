@@ -94,6 +94,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   above the home indicator and the keyboard, suggestions upwards above it), tab overview with
   cards, menu and panels as bottom sheets on the bar with icon rows, touch targets of 44 px, safe
   areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
+  the settings' close button at the top while they scroll (#379),
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,

@@ -43,7 +43,7 @@ const close = element('button', { className: 'settings-close', type: 'button', t
 close.setAttribute('aria-label', 'Close');
 close.append(icon('close'));
 close.addEventListener('click', () => page.close());
-page.append(nav, content, close);
+page.append(close, nav, content);
 page.addEventListener('close', () => {
   leaveSection?.();
   leaveSection = null;
