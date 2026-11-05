@@ -1,5 +1,6 @@
 import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
 import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
+import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
 import { hostOf, rememberIcon } from './favicons.js';
 import { showFindCount } from './find-bar.js';
@@ -11,10 +12,10 @@ import { printing, showPreview } from './print-preview.js';
 import { focusPrompt, showPromptsOf } from './prompts.js';
 import { uiReloading } from './reload.js';
 import { runtime } from './runtime.js';
-import { type SessionEntry, type SessionTab, saveSession } from './session.js';
+import { type SessionEntry, type SessionTab, saveSession, sessionEntry } from './session.js';
 import { settings, startSettings } from './settings.js';
 import { setProgress, setStatus, updateSecurity, updateStar, updateToolbar } from './toolbar.js';
-import { byId, element, isBlank } from './util.js';
+import { byId, element, isBlank, isInternal } from './util.js';
 import { sourcePage } from './view-source.js';
 
 const list: Tab[] = [];
@@ -49,6 +50,8 @@ export class Tab implements SessionTab {
   /** Closing waits for the beforeunload answer; afterwards closeReturn becomes active. */
   closing = false;
   closeReturn: Tab | null = null;
+  /** Discarded: a tab in its place took over, closing the view is no closing by the user. */
+  replaced = false;
   /** Dialogs of the current document blocked by the user, or skipped in the background. */
   dialogsBlocked = false;
   dialogSuppressed = false;
@@ -510,6 +513,7 @@ function removeTab(tab: Tab): void {
   tab.dispose();
   tabsChanged();
   if (runtime.stopped) return;
+  if (!tab.replaced && !isInternal(tab.url)) rememberClosed({ entry: sessionEntry(tab), index });
   setTimeout(persistSession);
   updateHostBeforeUnload();
   if (active !== tab) return;
@@ -518,6 +522,17 @@ function removeTab(tab: Tab): void {
   const next = back && list.includes(back) ? back : list.at(-1);
   if (next) activate(next);
   else openNewTab();
+}
+
+/**
+ * Ctrl+Shift+T like Chrome: the tab closed last comes back in front at its place, with back and
+ * forward. Nothing happens when no closed tab is left.
+ */
+export function reopenClosedTab(): void {
+  const closed = takeClosed();
+  if (!closed) return;
+  const tab = restoredTab(closed.entry, list[closed.index]);
+  if (tab) activate(tab);
 }
 
 // A background tab whose page takes memory: not one that loads on the next click, not an empty
@@ -560,6 +575,7 @@ export function discardForMemory(): Tab | null {
   fresh.iconUrl = tab.iconUrl;
   tab.iconUrl = null;
   fresh.showIcon();
+  tab.replaced = true;
   void tab.view.close({ force: true });
   return fresh;
 }

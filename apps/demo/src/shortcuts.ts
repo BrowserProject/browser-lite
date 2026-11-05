@@ -12,6 +12,7 @@ import {
   allTabs,
   openURL,
   printTab,
+  reopenClosedTab,
   requestClose,
   switchTab,
 } from './tabs.js';
@@ -45,7 +46,8 @@ function shortcut(e: KeyboardEvent): boolean {
   if (ctrl && !e.altKey) {
     switch (key) {
       case 't':
-        openURL('', true);
+        if (e.shiftKey) reopenClosedTab();
+        else openURL('', true);
         return true;
       case 'h':
         togglePanel('history');

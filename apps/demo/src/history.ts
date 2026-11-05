@@ -1,3 +1,4 @@
+import { clearClosed } from './closed-tabs.js';
 import { clearIcons } from './favicons.js';
 import { isInternal, readJSON } from './util.js';
 
@@ -43,8 +44,9 @@ export function recordVisit(url: string, title: string): void {
   write(history.slice(-MAX_ENTRIES));
 }
 
-/** Clears the history and the remembered icons of the sites. */
+/** Clears the history, the closed tabs and the remembered icons of the sites. */
 export function clearHistory(): void {
+  clearClosed();
   clearIcons();
   write([]);
 }

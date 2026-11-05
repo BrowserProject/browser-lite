@@ -82,6 +82,9 @@ select popup) are in the same sheet.
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
   show the cross only on the active (and hovered) tab, on touch screens a little earlier. A tab
   and the window are named after the page's title, without one after its address (#367).
+  Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
+  like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
+  tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
 - **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
   (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
@@ -141,7 +144,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |
-| `history.ts`, `bookmarks.ts`, `session.ts`, `downloads.ts`, `side-panel.ts` | library, the menu and the side panel (history, bookmarks, downloads) |
+| `history.ts`, `bookmarks.ts`, `session.ts`, `closed-tabs.ts`, `downloads.ts`, `side-panel.ts` | library, the closed tabs for Ctrl+Shift+T, the menu and the side panel (history, bookmarks, downloads) |
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
 | `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |
 | `dialogs.ts`, `prompts.ts`, `permissions.ts` | dialogs of the pages in the page with background suppression; prompts only of the tab in front; permission decisions in the profile |

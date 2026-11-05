@@ -35,10 +35,15 @@ function trim(tab: SessionTab): SessionHistory | undefined {
   return { entries, index };
 }
 
+/** What brings a tab back: its address, title and back/forward list. */
+export function sessionEntry(tab: SessionTab): Omit<SessionEntry, 'active'> {
+  return { url: tab.url, title: tab.title, history: trim(tab) };
+}
+
 export function saveSession(tabs: readonly SessionTab[], active: SessionTab | null): void {
   const list: SessionEntry[] = tabs
     .filter((tab) => !isInternal(tab.url))
-    .map((tab) => ({ url: tab.url, title: tab.title, active: tab === active, history: trim(tab) }));
+    .map((tab) => ({ ...sessionEntry(tab), active: tab === active }));
   try {
     localStorage.setItem(KEY, JSON.stringify({ tabs: list, time: Date.now() }));
   } catch {}

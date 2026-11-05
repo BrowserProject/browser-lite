@@ -6,8 +6,8 @@
 // nothing on other error pages) and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
-// the status line says that memory is full. An address typed while the engine downloads opens
-// once it runs.
+// the status line says that memory is full. Ctrl+Shift+T brings the closed tab back. An address
+// typed while the engine downloads opens once it runs.
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -482,6 +482,57 @@ check(
   await page.evaluate(() => document.getElementById('boot').hidden && !!window.blTest.view()),
 );
 await page.evaluate(() => window.blTest.memoryLimit(0));
+
+// 7) Ctrl+Shift+T like Chrome: the tab closed last comes back at its place with back and forward;
+// a discarded tab was never closed, with none left nothing happens
+const activeIndex = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('#tab-list .tab')].findIndex((tab) =>
+      tab.classList.contains('active'),
+    ),
+  );
+const tabsNow = await tabCount();
+await page.keyboard.press('Control+Shift+T');
+await page.waitForTimeout(1000);
+check(
+  'Ctrl+Shift+T with no closed tab: nothing opens',
+  (await tabCount()) === tabsNow,
+  `${tabsNow} -> ${await tabCount()} tabs`,
+);
+await page.keyboard.press('Control+t');
+results.delete('ready');
+await go(`${siteURL}plain-a`);
+await result('ready');
+results.delete('ready');
+await go(`${siteURL}plain-b`);
+check('reopen: page loaded', (await result('ready')) === 'plain-b', results.get('ready'));
+const closedIndex = await activeIndex();
+// Not the last tab: a new tab after it, then back to it and close it
+await page.keyboard.press('Control+t');
+await page.keyboard.press('Control+Shift+Tab');
+await activeIs(`${siteURL}plain-b`);
+await page.keyboard.press('Control+w');
+await page.waitForFunction(
+  (count) => document.querySelectorAll('#tab-list .tab').length === count,
+  tabsNow + 1,
+);
+results.delete('ready');
+await page.keyboard.press('Control+Shift+T');
+check(
+  'Ctrl+Shift+T: the closed tab comes back in front at its place',
+  (await activeIs(`${siteURL}plain-b`)) &&
+    (await tabCount()) === tabsNow + 2 &&
+    (await activeIndex()) === closedIndex,
+  `${await activeTitle()}, ${await tabCount()} tabs, at ${await activeIndex()} (was ${closedIndex})`,
+);
+check('Ctrl+Shift+T: its page loads', (await result('ready')) === 'plain-b', results.get('ready'));
+results.delete('ready');
+await page.click('#back');
+check(
+  'Ctrl+Shift+T: back goes to the page before',
+  (await result('ready')) === 'plain-a',
+  results.get('ready'),
+);
 
 // An address typed while the engine still downloads opens as soon as it runs
 {
