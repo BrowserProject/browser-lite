@@ -276,7 +276,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
    With the main thread busy 80 ms of every 100 ms (2026-10-29, local, 60 small fetches in a row)
    the median of a fetch stayed at 2 to 3 ms, the 90th percentile went from 3 to 5 ms up to 82 ms
    and the mean from 2.2 to 11.8 ms: only packets that meet a long task wait for it. A transport in
-   a worker pays off for hosts with long tasks of their own, not for the demo.
+   a worker pays off for hosts with long tasks of their own, not for the demo. The demo's own
+   biggest long task, the favicon readback from a GPU canvas (0.03 to 3 s per new site in
+   headless Chromium), reads back on the CPU since 2026-11-05 (1 ms, #375).
 10. SQLite files go to the OPFS from the engine thread, which waits for each write
    (`flushAll` of `MemoryVFS.cpp` through WasmFS): with weather.com loading on a busy machine
    (2026-11-04, load about 15 on 10 cores) single flushes held the engine thread 1 to 2 s, 4 s of

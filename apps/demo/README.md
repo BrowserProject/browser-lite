@@ -86,7 +86,8 @@ select popup) are in the same sheet.
   permission prompt. Declining buttons come before accepting ones everywhere.
 - **Icons of sites**: the tab shows the icon the engine reports; it goes when the tab leaves the
   site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
-  history) for suggestions, history, bookmarks, the new tab page and the tab overview.
+  history) for suggestions, history, bookmarks, the new tab page and the tab overview, drawn
+  on a CPU canvas (`willReadFrequently`, see [embedding](../../docs/embedding.md#resource-use)).
 
 ## Phone layout
 

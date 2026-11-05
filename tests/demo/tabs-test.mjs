@@ -115,8 +115,22 @@ const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
   permissions: permissions(['camera', 'microphone']),
 });
-// Host notifications: headless has none, a stand-in records them so the test can click them
+// Host notifications: headless has none, a stand-in records them so the test can click them.
+// Every toDataURL of the host records whether its 2D context reads frequently: a GPU canvas
+// waits for the compositor's queued GL work there and blocks the host main thread.
 await context.addInitScript(() => {
+  const options = new WeakMap();
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type, attributes) {
+    if (type === '2d') options.set(this, attributes ?? {});
+    return getContext.call(this, type, attributes);
+  };
+  const toDataURL = HTMLCanvasElement.prototype.toDataURL;
+  window.__blReadbacks = [];
+  HTMLCanvasElement.prototype.toDataURL = function (...args) {
+    window.__blReadbacks.push({ cpu: options.get(this)?.willReadFrequently === true });
+    return toDataURL.apply(this, args);
+  };
   window.__blNotifications = [];
   window.Notification = class extends EventTarget {
     static permission = 'granted';
@@ -232,6 +246,23 @@ const icon = await page
     () => 0,
   );
 check('favicon in the tab', icon > 0, `(width ${icon})`);
+// The demo remembers the icon of the host for history and bookmarks, read back on the CPU
+const remembered = await page
+  .waitForFunction(
+    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}')[host]?.icon,
+    new URL(siteURL).host,
+    { timeout: 10000 },
+  )
+  .then(
+    () => true,
+    () => false,
+  );
+const readbacks = await page.evaluate(() => window.__blReadbacks);
+check(
+  'favicon remembered with a CPU readback',
+  remembered && readbacks.length > 0 && readbacks.every((r) => r.cpu),
+  JSON.stringify({ remembered, readbacks }),
+);
 await screenshot(page, 'demo-tabs');
 
 // 3b) Back and forward: the tab and the window show the page's title, without one its address

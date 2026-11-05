@@ -320,3 +320,7 @@ folder. Stored data in OPFS and the HTTP cache stay.
   ([status.md](status.md)).
 - Disk: the OPFS namespace plus the HTTP cache (at most 400 MB or a quarter of the quota).
 - Network: everything of the pages goes through the relay as TLS.
+- Your page's main thread: the relay transport runs there, every packet of the engine waits for
+  its long tasks. Read canvases back (`toDataURL`, `getImageData`, for example to keep favicons)
+  only from a 2D context with `willReadFrequently: true`: the readback of a GPU canvas waits for
+  the GL work of the engine's views, up to seconds.

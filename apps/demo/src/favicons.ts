@@ -40,7 +40,9 @@ export function rememberIcon(url: string, src: string): void {
     .decode()
     .then(() => {
       const canvas = element('canvas', { width: SIZE, height: SIZE });
-      canvas.getContext('2d')?.drawImage(image, 0, 0, SIZE, SIZE);
+      // A CPU canvas: the readback of a GPU one waits for the GL work of the engine's view and
+      // blocks the host main thread (UI and network) for up to seconds
+      canvas.getContext('2d', { willReadFrequently: true })?.drawImage(image, 0, 0, SIZE, SIZE);
       const entries = load();
       entries[host] = { icon: canvas.toDataURL('image/png'), time: Date.now() };
       const hosts = Object.keys(entries);
