@@ -480,6 +480,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   the artifact `e2e-core-screenshots-chromium`). Not seen in the 14 CI runs since the new touch
   fling and touch scrolling (#313, #314) up to 2026-10-31, which changed the scrolling it always
   followed, nor in 44 end-to-end jobs of 11 main runs up to 2026-11-02.
+- The stall log of a view whose compositor never ran (in sweeps a popup of yahoo.com and new
+  tabs the host gave no frames) printed the seconds of the monotonic clock as the phase's duration, about
+  1.79e9 s; it now counts from the start of the view's scene (#402, `frames-busy-test`).
 - Firefox without WebGL: some pages get layers although the view paints without them (#306): no
   longer a crash or a white view, they are painted flattened (the engine logs it). Cause not
   found yet.

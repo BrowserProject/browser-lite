@@ -410,6 +410,7 @@ CompositorScene::CompositorScene(int viewId, std::optional<Damage::Mode> damageM
     : viewId(viewId)
     , rootLayer(CoordinatedPlatformLayer::create())
     , damageMode(damageMode)
+    , framePhaseSince(MonotonicTime::now().secondsSinceEpoch().value())
 {
 }
 

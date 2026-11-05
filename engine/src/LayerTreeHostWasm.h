@@ -87,7 +87,8 @@ public:
     // Where the compositor thread is in a frame (stall diagnostics, stallState): 0 idle, 1 frame
     // state taken, 2 layers flushed, 3 painting, 4 GPU submit, 5 showing
     std::atomic<uint8_t> framePhase { 0 };
-    std::atomic<double> framePhaseSince { 0 };
+    // MonotonicTime seconds of the last phase change, else of the creation of the scene
+    std::atomic<double> framePhaseSince;
     // Phase 13: index of the layer being flushed, -1 the root layer
     std::atomic<int> flushingLayer { -1 };
     // View of the last rendering update (pinch zoom): the layer the main frame

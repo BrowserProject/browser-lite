@@ -111,7 +111,9 @@ visible change is neither composited nor shown, otherwise the compositor composi
 (compositing only the damage would need a copy of the view per frame, which costs more under
 SwiftShader). The compositor's answer that a rendering update is shown (and the presenter's that
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
-a frame every task or two (#359). Pinch zoom scales the shown tiles on the compositor and commits once at the end
+a frame every task or two (#359). A view without a rendering update for two stall checks (2 s
+apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
+compositor's phase and how long it lasts, since the scene started if it never ran (#402). Pinch zoom scales the shown tiles on the compositor and commits once at the end
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).

@@ -2,6 +2,8 @@
 // compositor's answer for the last rendering update is urgent work (engine/src/EngineLoop.cpp),
 // taken in between two tasks of the page, so the page gets a frame every task or two. Before,
 // the answer waited behind all of the page's queued tasks and the page got one frame per batch.
+// Also the stall diagnostic of a view the host gives no frames: its compositor never ran, so
+// the log tells the time since the view started (before: seconds since the clock's epoch).
 //
 //   node tests/core/frames-busy-test.mjs [engine-dir]
 import {
@@ -11,9 +13,11 @@ import {
   finish,
   launch,
   openHost,
+  openView,
   serve,
   startStack,
   timeLimit,
+  waitFor,
   watchErrors,
 } from '../lib/index.mjs';
 
@@ -57,6 +61,8 @@ window.run = () => {
 console.log('RESULT ready=1');
 </script>`;
 const { url: siteURL } = await serve((req, res) => {
+  // Never answers: the page stays empty, no first paint
+  if (req.url === '/hang') return;
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
 });
 
@@ -65,8 +71,11 @@ const browser = await launch({ args: SWIFTSHADER });
 const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
 watchErrors(page);
 const lost = [];
+const stalls = [];
 page.on('console', (message) => {
-  if (/answer got lost/.test(message.text())) lost.push(message.text());
+  const text = message.text();
+  if (/answer got lost/.test(text)) lost.push(text);
+  if (/no rendering update for/.test(text)) stalls.push(text);
 });
 const results = collect(page);
 check('page loaded', await openHost(page, stack.app({ url: siteURL, compositing: '1', log: '1' })));
@@ -84,5 +93,26 @@ check(
   `${count} frames, longest gaps ${longest} ms`,
 );
 check('no compositor answer counted as lost', lost.length === 0, lost.join(' | '));
+
+// The host drops its display refresh callbacks and the page never arrives (no early first
+// paint): a new view requests frames and gets none, its compositor never runs. After two stall
+// checks (2 s apart) the engine logs where the view stands.
+await page.evaluate(() => {
+  window.requestAnimationFrame = () => 0;
+});
+const started = Date.now();
+const stalledView = await openView(page, new URL('/hang', siteURL).href);
+const pattern = new RegExp(
+  `View ${stalledView}: no rendering update for .*compositor phase (\\d+) for (-?\\d+) s`,
+);
+const stallLine = () => stalls.map((text) => text.match(pattern)).find(Boolean);
+await waitFor(stallLine, 30000);
+const stall = stallLine();
+const since = Math.round((Date.now() - started) / 1000);
+check(
+  "stall log of a view whose compositor never ran: idle for the view's lifetime",
+  stall && stall[1] === '0' && Number(stall[2]) >= 0 && Number(stall[2]) <= since + 1,
+  stall ? `${stall.input} (view open ${since} s)` : `no stall log: ${stalls.join(' | ')}`,
+);
 await browser.close();
 finish();
