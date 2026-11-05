@@ -28,6 +28,8 @@ enum class LoadErrorCode : int {
     Blocked, // blockedError for any other reason, like a redirect to data:
     UnsafePort, // blockedError: a port no browser connects to (portAllowed)
     AddressInvalid, // blockedError: an address of only zeros (isIPAddressDisallowed)
+    TooManyRedirects, // more than 20 redirects, like in Chrome
+    UnsafeRedirect, // a redirect to a file: address
 };
 
 // Why WebCore never loads an address: a restricted port (UnsafePort) or an address

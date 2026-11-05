@@ -182,7 +182,9 @@ and an `about:` address WebCore does not load get the error page too, from the e
 error codes (`LoadErrorCode` in `engine/src/LoaderStrategy.h`, #395), as does an address WebCore
 refuses before any request (restricted port, address of only zeros, `refusedReason`), which
 `blockedError` marks with its reason. The engine's own requests (icons, preconnect, their
-redirects) skip such an address too, and an error page loads no favicon (#400).
+redirects) skip such an address too, and an error page loads no favicon (#400). Redirects the
+engine stops (more than 20, or to a `file:` address) carry their own codes and get the page under
+the address that redirected (#406).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch

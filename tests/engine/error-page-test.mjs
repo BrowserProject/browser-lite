@@ -3,7 +3,8 @@
 // escaping, the CSP after the doctype (no script of the template runs), the 'commit' and
 // 'title' events, the retry through [data-bl-retry], the close reason 'name-not-resolved'
 // of a transport, the page for a file: address without a file and for an about: address
-// WebCore does not load, and for a restricted port or an address of only zeros.
+// WebCore does not load, for a restricted port or an address of only zeros, and for redirects
+// the engine stops (a loop, a redirect to file:).
 //
 //   node tests/engine/error-page-test.mjs [engine-dir]
 import { enginePath as resolveEngine, runEngine } from './engine-node.mjs';
@@ -269,6 +270,60 @@ for (const [url, code, named] of [
   }
   await new Promise((resolve) => setTimeout(resolve, 1000));
   check(`${url} opens no connection`, opened.length === asked, opened.slice(asked).join());
+}
+
+// 6. Redirects the engine stops get the page like in Chrome, under the address that redirected:
+// more than 20 (a loop) and a redirect to a file: address (whose file is not loaded).
+const requests = [];
+engine.blTransport = {
+  openTCP(targetHost, port) {
+    const stream = { close() {}, onopen: null, ondata: null, onsent: null, onclose: null };
+    let received = '';
+    stream.send = (data) => {
+      setTimeout(() => stream.onsent?.(data.length), 0);
+      received += new TextDecoder().decode(data);
+      if (!received.includes('\r\n\r\n')) return;
+      const path = received.split(' ')[1];
+      received = '';
+      requests.push(`${targetHost}${path}`);
+      const step = Number(path.split('/').pop()) || 0;
+      const location =
+        targetHost === 'loop.test'
+          ? `/r/${step + 1}`
+          : 'file:///usr/share/webkit/images/missingImage.png';
+      const response = `HTTP/1.1 302 Found\r\nLocation: ${location}\r\nContent-Length: 0\r\n\r\n`;
+      setTimeout(() => stream.ondata?.(new TextEncoder().encode(response)), 0);
+    };
+    setTimeout(() => (port === 80 ? stream.onopen?.() : stream.onclose?.('refused')), 0);
+    return stream;
+  },
+};
+for (const [url, code, named, expected] of [
+  ['http://loop.test/r/0', 'ERR_TOO_MANY_REDIRECTS', 'loop.test', 21],
+  ['http://file.test/', 'ERR_UNSAFE_REDIRECT', 'file.test', 1],
+]) {
+  const redirectHost = new URL(url).host;
+  const before = { commit: count('commit'), load: count('load'), error: count('error') };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  const asked = requests.filter((request) => request.startsWith(redirectHost));
+  check(`${url} sends ${expected} requests`, asked.length === expected, asked.join());
+  check(`${url} reports an error event`, count('error') === before.error + 1);
+  const committed = events.filter((event) => event.type === 'commit').slice(before.commit);
+  check(
+    `${url} commits an error page`,
+    committed.length === 1 && committed[0].payload === '{"errorPage":"network"}',
+    JSON.stringify(committed),
+  );
+  if (!committed.length) continue;
+  const shown = JSON.parse(await evaluate(pageState));
+  check(
+    `${url} keeps the address that redirected`,
+    shown.url === `http://${asked.at(-1)}`,
+    shown.url,
+  );
+  check(`${url} gives ${code}`, shown.code === code, shown.code);
+  check(`${url} names ${named}`, shown.message.includes(named), shown.message);
 }
 
 check(

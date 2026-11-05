@@ -159,12 +159,12 @@ static bool redirectAsGET(const ResourceRequest& request, const ResourceResponse
 static Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
 {
     if (redirectCount > 20)
-        return makeUnexpected(ResourceError(loadErrorDomain, 0, response.url(), "Too many redirects"_s));
+        return makeUnexpected(ResourceError(loadErrorDomain, static_cast<int>(LoadErrorCode::TooManyRedirects), response.url(), "Too many redirects"_s));
 
     URL target { response.url(), response.httpHeaderField(HTTPHeaderName::Location) };
     // A web page may never redirect to local files in the WASM file system
     if (target.protocolIsFile())
-        return makeUnexpected(ResourceError(loadErrorDomain, 0, response.url(), "Redirect to file: blocked"_s));
+        return makeUnexpected(ResourceError(loadErrorDomain, static_cast<int>(LoadErrorCode::UnsafeRedirect), response.url(), "Redirect to file: blocked"_s));
     if (auto reason = refusedReason(target))
         return makeUnexpected(refusedError(target, *reason));
 

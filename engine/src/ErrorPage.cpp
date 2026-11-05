@@ -21,7 +21,8 @@
 // socket error (Sockets.cpp). Other addresses get a page for the engine's own
 // codes (LoadErrorCode): a file: address without a file, an about: address
 // WebCore does not load. Any address gets one when WebCore refuses it before
-// the request (restricted port, address of only zeros).
+// the request (restricted port, address of only zeros) and when the engine
+// stops its redirects (more than 20, or to a file: address).
 
 #include "config.h"
 #include "ErrorPage.h"
@@ -108,12 +109,20 @@ std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
         return std::nullopt;
     if (error.domain() == "CurlErrorDomain"_s && url.protocolIsInHTTPFamily())
         return reasonForCurl(error.errorCode());
-    if (error.domain() != loadErrorDomain || url.protocolIsInHTTPFamily())
+    if (error.domain() != loadErrorDomain)
         return std::nullopt;
     switch (static_cast<LoadErrorCode>(error.errorCode())) {
+    case LoadErrorCode::TooManyRedirects:
+        return Reason { "This page isn't working"_s, ""_s, " redirected you too many times. Try deleting your cookies."_s, "ERR_TOO_MANY_REDIRECTS"_s };
+    case LoadErrorCode::UnsafeRedirect:
+        return Reason { notReachable, "The webpage at "_s, " might be temporarily down or it may have moved permanently to a new web address."_s, "ERR_UNSAFE_REDIRECT"_s };
     case LoadErrorCode::FileNotFound:
+        if (url.protocolIsInHTTPFamily())
+            break;
         return Reason { "Your file couldn't be accessed"_s, ""_s, " may have been moved, edited or deleted."_s, "ERR_FILE_NOT_FOUND"_s };
     case LoadErrorCode::CannotShowURL:
+        if (url.protocolIsInHTTPFamily())
+            break;
         return Reason { notReachable, "The webpage at "_s, " could not be shown."_s, "ERR_INVALID_URL"_s };
     case LoadErrorCode::Other:
     case LoadErrorCode::Blocked:

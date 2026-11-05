@@ -109,6 +109,8 @@ The full list is `abi.json`; the rules behind it:
   or an address WebCore refuses before the request, also as a redirect target: a restricted
   port (`ERR_UNSAFE_PORT`) or an address of only zeros (`ERR_ADDRESS_INVALID`). The engine's
   own requests (favicon, preconnect) never connect there; the error page loads no favicon.
+  Redirects the engine stops get it under the address that redirected: more than 20
+  (`ERR_TOO_MANY_REDIRECTS`) or one to a `file:` address (`ERR_UNSAFE_REDIRECT`).
   A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
   `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host), `{{heading}}`,
   `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and `{{retryLabel}}`.
