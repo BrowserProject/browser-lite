@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BrowserLiteError, checkSupport, createBrowser, defaultServices } from '../dist/index.js';
-import { zoomStep } from '../dist/input.js';
+import { outside, zoomStep } from '../dist/input.js';
 import { MemoryPermissionStore, storePermission } from '../dist/permissions.js';
 
 test('checkSupport outside a browser', () => {
@@ -86,4 +86,11 @@ test('zoom steps like Chrome', () => {
   assert.equal(zoomStep(1.05, 1), 1.1);
   assert.equal(zoomStep(5, 1), 5);
   assert.equal(zoomStep(0.25, -1), 0.25);
+});
+
+test('mouse leave point: a whole pixel outside the view', () => {
+  assert.deepEqual(outside([25.2, -0.9], 100, 50), [25.2, -1]);
+  assert.deepEqual(outside([99.5, 20], 100, 50), [101, 20]);
+  assert.deepEqual(outside([30, 45], 100, 50), [30, 51]);
+  assert.deepEqual(outside([-5, 20], 100, 50), [-5, 20]);
 });

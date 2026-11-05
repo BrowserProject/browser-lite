@@ -143,6 +143,9 @@ views wait while the user works in a visible one (#364, see Threads). Waiting mo
 Mouse events carry the host's pressed buttons (`MouseEvent.buttons`, which also gives
 `PointerEvent.pressure`); a further button pressed or released while one is held (a host
 `pointermove` with a `button`) becomes a mousedown or mouseup (#370).
+When the mouse leaves the canvas (to the host UI or an overlay) the core sends a move one pixel
+outside the view, like WebKitGTK: the page gets mouseout and mouseleave and loses `:hover` and
+the hovered link; a finger keeps its hover (#381).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine

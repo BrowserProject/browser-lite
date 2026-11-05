@@ -240,6 +240,14 @@ function attachTouch(
     const page = engineFlingVelocity({ x: g.panX ? -finger.x : 0, y: g.panY ? -finger.y : 0 });
     touchScroll(g, 3, page.x, page.y);
   };
+  // A finger (also an emulated one) leaves the screen, not the view: no mouse leave for the page
+  canvas.addEventListener(
+    'pointerleave',
+    (e) => {
+      if (isTouch(e)) e.stopImmediatePropagation();
+    },
+    options,
+  );
   canvas.addEventListener('pointerup', (e) => end(e, false), options);
   canvas.addEventListener('pointercancel', (e) => end(e, true), options);
   signal.addEventListener('abort', () => {

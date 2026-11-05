@@ -34,6 +34,19 @@ export function modifierBits(e: {
   );
 }
 
+/**
+ * A point outside a view of width x height near [x, y]: unchanged when already a whole pixel
+ * outside, otherwise one pixel beyond the nearest edge.
+ */
+export function outside([x, y]: [number, number], width: number, height: number): [number, number] {
+  if (x <= -1 || y <= -1 || x >= width + 1 || y >= height + 1) return [x, y];
+  const nearest = Math.min(x, width - x, y, height - y);
+  if (nearest === x) return [-1, y];
+  if (nearest === width - x) return [width + 1, y];
+  if (nearest === y) return [x, -1];
+  return [x, height + 1];
+}
+
 // MouseEvent.buttons bit of each MouseEvent.button (left, middle, right, back, forward)
 const BUTTON_BITS: Record<number, number> = { 0: 1, 1: 4, 2: 2, 3: 8, 4: 16 };
 
@@ -187,6 +200,17 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
       e.buttons,
       modifierBits(e),
     );
+  });
+  // The mouse left the view (to the UI around it or an overlay above it): a move just outside
+  // the view, so the page gets mouseout and mouseleave and loses :hover and the hovered link
+  // like in Chrome (WebKitGTK does the same). The leave point can lie inside the view (an
+  // overlay) or on its edge. Fingers leave the screen, not the view: the tapped element keeps
+  // :hover.
+  on('pointerleave', (e) => {
+    if (e.pointerType === 'touch') return;
+    const rect = canvas.getBoundingClientRect();
+    const [x, y] = outside(view.position(e), rect.width, rect.height);
+    module._bl_mouse_move(view.id, x, y, 0, 0, e.buttons, modifierBits(e));
   });
   on(
     'contextmenu',

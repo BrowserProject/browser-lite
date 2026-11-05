@@ -28,7 +28,8 @@ view.on('title', ({ title }) => console.log(title));
 The container needs a size (for example `height: 100vh`); the view fills it and follows its size.
 The view puts its canvas (`position: relative`) and a hidden text field into the container; a
 playing video goes before the canvas, underneath it (the engine leaves its rect transparent).
-Overlays of your own inside the container need a `z-index`. The hidden text field takes the
+Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it
+moves onto one or out of the canvas (mouseleave, no more `:hover`). The hidden text field takes the
 focus for the page and carries the input mode of the page's focused field, so phones show the
 fitting on-screen keyboard; in Chrome the view focuses it once more after a tap into a field,
 which opens the keyboard there ([architecture, Input](../../docs/architecture.md#input)).

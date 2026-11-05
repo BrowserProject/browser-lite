@@ -151,6 +151,9 @@ const PAGE = `<!doctype html>
   });
   const sel = document.getElementById('sel');
   sel.addEventListener('change', () => console.log('RESULT select=' + sel.value));
+  const hoverlink = document.getElementById('hoverlink');
+  hoverlink.addEventListener('mouseleave', (e) =>
+    console.log('RESULT hoverleave=' + (e.relatedTarget === null) + ',' + hoverlink.matches(':hover')));
   const color = document.getElementById('color');
   color.addEventListener('change', () => console.log('RESULT color=' + color.value));
   const date = document.getElementById('date');
@@ -674,6 +677,30 @@ check(
     10000,
   ),
 );
+
+// 5e2) The mouse leaves the view onto host UI above it (a toolbar): the page gets mouseleave
+// without a related target, loses :hover and the link address goes away, like in Chrome
+const lastHover = async () => (await hostEvents(page)).filter((e) => e.startsWith('hover')).at(-1);
+await page.mouse.move(...(await at(40, 352)));
+await waitFor(async () => (await lastHover())?.endsWith('/target'), 10000);
+results.delete('hoverleave');
+await host(() => {
+  const bar = document.createElement('div');
+  bar.id = 'test-toolbar';
+  bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:20px;z-index:10';
+  document.body.append(bar);
+});
+await page.mouse.move(...(await at(40, 10)));
+check(
+  'mouse leaves the view: mouseleave, no :hover',
+  (await result('hoverleave', 10000)) === 'true,false',
+  results.get('hoverleave'),
+);
+check(
+  'mouse leaves the view: link address goes away',
+  await waitFor(async () => (await lastHover()) === 'hover:', 10000),
+);
+await host(() => document.getElementById('test-toolbar').remove());
 
 // 5f) Color: colorPicker handler with the value, the answer goes to the page
 await host(() => {

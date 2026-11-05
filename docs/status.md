@@ -21,7 +21,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
-  Tab to links (#372).
+  Tab to links (#372), mouse leave of the view (`:hover` and link address go away, #381).
   Input runs before the engine's queued work (#347), waiting mouse moves coalesce (#350), the
   parser yields after 50 ms (#349): on 20min.ch locally the 90th percentile of input latency
   during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.
