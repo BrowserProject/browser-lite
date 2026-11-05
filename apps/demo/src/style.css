@@ -146,6 +146,10 @@ body {
   font: inherit;
   color: inherit;
 }
+/* Safari 18 aligns the content of buttons at the start, the other browsers stretch it */
+:where(button) {
+  align-items: normal;
+}
 h1,
 h2,
 h3,

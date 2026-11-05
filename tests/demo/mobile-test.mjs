@@ -258,6 +258,25 @@ check(
   ...(await inside('.overview-card, #tab-overview header button')),
 );
 check('tab overview: close buttons of 44 px', ...(await touchSize('.overview-close')));
+// Safari 18 aligns the content of buttons at the start in its own style sheet; a layer stands in
+// for it here, below the demo's unlayered rules like a browser style sheet
+const safariButtons = await tab.addStyleTag({
+  content: '@layer safari18 { button { align-items: flex-start } }',
+});
+const previews = await tab.evaluate(() =>
+  [...document.querySelectorAll('.overview-open')].map((open) => {
+    const preview = open.querySelector('.overview-preview').getBoundingClientRect();
+    const style = getComputedStyle(open);
+    const inner = open.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return { preview: preview.width, inner };
+  }),
+);
+check(
+  'tab overview: the preview fills the card, also with the button alignment of Safari 18',
+  previews.length === 2 && previews.every(({ preview, inner }) => Math.abs(preview - inner) < 1),
+  JSON.stringify(previews),
+);
+await safariButtons.evaluate((node) => node.remove());
 await screenshot(tab, 'mobile-tabs');
 await tab.locator('.overview-card', { hasText: 'Page two' }).locator('.overview-open').tap();
 const switched = await tab

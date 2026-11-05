@@ -60,7 +60,10 @@ own color, the icons are inline SVG of `icons.ts` (`currentColor`, one stroke wi
 only apply where the pointer can hover (`@media (hover: hover)`, a tap leaves no grey circle),
 keyboard focus shows a ring (`:focus-visible`), and tabs, menus, sheets and dialogs appear with
 short transitions that `prefers-reduced-motion` turns off. No `backdrop-filter` and no animated
-shadows, for weak phones. The styles of `@browser-lite/ui` (prompts, dialogs, context menu,
+shadows, for weak phones. The base rules set what Safari 18's own style sheet sets differently
+from the other browsers, so the layout does not depend on it: buttons stretch their content like
+in Chrome (`align-items: normal`; Safari 18 aligns it at the start, which shrank the preview of
+the tab overview cards to the icon, #378). The styles of `@browser-lite/ui` (prompts, dialogs, context menu,
 select popup) are in the same sheet.
 
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
