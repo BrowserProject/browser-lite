@@ -9,7 +9,8 @@ WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wa
 generic code paths the port takes, for example formatting of UI strings, and what changes when
 all sites share one process, for example the microtasks of a site that was left, and WebKit bugs
 that real sites hit, for example the hovered element a page from the back/forward cache forgot
-or the policy a typed `data:` address took over from the page before)
+or the policy a typed `data:` address took over from the page before, or the missing tiles of
+content more than 16.7 million px down a page)
 comes as patches from `patches/`.
 
 ## Folders

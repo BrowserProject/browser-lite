@@ -1,0 +1,85 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedAnimatedBackingStoreClient.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedAnimatedBackingStoreClient.cpp
+index 8146c2ae55..b0bd91012b 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedAnimatedBackingStoreClient.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedAnimatedBackingStoreClient.cpp
+@@ -86,9 +86,7 @@ void CoordinatedAnimatedBackingStoreClient::requestBackingStoreUpdateIfNeeded(co
+         TransformationMatrix inverse = unscaledTransform->scale(m_contentsScale);
+ 
+         // Apply the inverse transform to the visible rectangle, so we have the visible rectangle in layer coordinates.
+-        FloatRect rect = inverse.clampedBoundsOfProjectedQuad(FloatQuad(m_visibleRect));
+-        GraphicsLayerCoordinated::clampToSizeIfRectIsInfinite(rect, m_size);
+-        FloatRect transformedVisibleRect = enclosingIntRect(rect);
++        FloatRect transformedVisibleRect = enclosingIntRect(GraphicsLayerCoordinated::projectedVisibleRect(inverse, m_visibleRect, m_size));
+ 
+         // Convert the calculated visible rectangle to backingStore coordinates.
+         transformedVisibleRect.scale(m_contentsScale);
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+index 5aa9b03f77..edbd588109 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+@@ -936,17 +936,30 @@ void GraphicsLayerCoordinated::computeLayerTransformIfNeeded(bool affectedByTran
+     m_platformLayer->didUpdateLayerTransform();
+ }
+ 
+-void GraphicsLayerCoordinated::clampToSizeIfRectIsInfinite(FloatRect& rect, const FloatSize& contentsSize)
+-{
+-    if (rect.width() >= LayoutUnit::nearlyMax() || rect.width() <= LayoutUnit::nearlyMin()) {
+-        rect.setX(0);
+-        rect.setWidth(contentsSize.width());
++FloatRect GraphicsLayerCoordinated::projectedVisibleRect(const TransformationMatrix& inverse, const FloatRect& rect, const FloatSize& layerSize)
++{
++    // A layer reaches as far as layout does (LayoutUnit::max()). TransformationMatrix::clampedBoundsOfProjectedQuad()
++    // clamps to half of that (2^24), which left the content of a layer below about 16.7 million px without tiles.
++    const float limit = LayoutUnit::max().toFloat();
++    auto quad = inverse.projectQuad(FloatQuad(rect));
++    auto clampEdge = [&](float value) {
++        return std::clamp(value, -limit, limit);
++    };
++    float left = clampEdge(std::floor(std::min({ quad.p1().x(), quad.p2().x(), quad.p3().x(), quad.p4().x() })));
++    float right = clampEdge(std::ceil(std::max({ quad.p1().x(), quad.p2().x(), quad.p3().x(), quad.p4().x() })));
++    float top = clampEdge(std::floor(std::min({ quad.p1().y(), quad.p2().y(), quad.p3().y(), quad.p4().y() })));
++    float bottom = clampEdge(std::ceil(std::max({ quad.p1().y(), quad.p2().y(), quad.p3().y(), quad.p4().y() })));
++
++    // A projection that goes to infinity in both directions of an axis covers the whole layer on it
++    if (left <= -limit && right >= limit) {
++        left = 0;
++        right = layerSize.width();
+     }
+-
+-    if (rect.height() >= LayoutUnit::nearlyMax() || rect.height() <= LayoutUnit::nearlyMin()) {
+-        rect.setY(0);
+-        rect.setHeight(contentsSize.height());
++    if (top <= -limit && bottom >= limit) {
++        top = 0;
++        bottom = layerSize.height();
+     }
++    return { left, top, right - left, bottom - top };
+ }
+ 
+ void GraphicsLayerCoordinated::updateVisibleRect(const FloatRect& rect)
+@@ -965,9 +978,7 @@ void GraphicsLayerCoordinated::updateVisibleRect(const FloatRect& rect)
+     // so it might spread further than the real visible area (and then even more amplified by the cover rect multiplier).
+     ASSERT(m_layerTransform.cachedInverse == m_layerTransform.current.combined().inverse());
+     auto transformedRect = [&](const TransformationMatrix& matrix) -> IntRect {
+-        FloatRect result = matrix.clampedBoundsOfProjectedQuad(FloatQuad(rect));
+-        clampToSizeIfRectIsInfinite(result, m_size);
+-        return enclosingIntRect(result);
++        return enclosingIntRect(projectedVisibleRect(matrix, rect, m_size));
+     };
+     auto visibleRect = transformedRect(*m_layerTransform.cachedInverse);
+     if (m_layerTransform.cachedFutureInverse && m_layerTransform.cachedInverse != m_layerTransform.cachedFutureInverse)
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+index 0f347698f2..732fbabe6a 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+@@ -46,7 +46,9 @@ public:
+ 
+     CoordinatedPlatformLayer& coordinatedPlatformLayer() const { return m_platformLayer.get(); }
+ 
+-    static void clampToSizeIfRectIsInfinite(FloatRect&, const FloatSize&);
++    // The bounds of rect (surface coordinates) projected onto the plane of a layer of layerSize
++    // with the inverse of its transform (layer coordinates)
++    static FloatRect projectedVisibleRect(const TransformationMatrix& inverse, const FloatRect&, const FloatSize& layerSize);
+ 
+ private:
+     bool isGraphicsLayerCoordinated() const override { return true; }

@@ -52,7 +52,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Worklet, WebGL 1 and 2, recovery after GPU loss. After a rotation or an on-screen keyboard the
   last frame stays unscaled until the page painted the new size (#404; before, it was stretched
   or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
-  WebKit.
+  WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all
+  below about 16.7 million px was blank).
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
