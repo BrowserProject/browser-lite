@@ -1,11 +1,14 @@
 #include "config.h"
 #include "Choosers.h"
 
+#include "Engine.h"
 #include "Host.h"
 #include "WebView.h"
 #include <WebCore/Color.h>
 #include <WebCore/ColorChooserClient.h>
 #include <WebCore/ColorSerialization.h>
+#include <WebCore/DataListSuggestionInformation.h>
+#include <WebCore/DataListSuggestionsClient.h>
 #include <WebCore/DateTimeChooserClient.h>
 #include <WebCore/DateTimeChooserParameters.h>
 #include <WebCore/LocalFrameView.h>
@@ -30,6 +33,7 @@ static String rectJSON(const IntRect& rect)
 class PopupMenuWasm;
 class ColorChooserWasm;
 class DateTimeChooserWasm;
+class DataListPickerWasm;
 
 // At most one open chooser of each kind per view
 template<typename T> static HashMap<int, RefPtr<T>>& openChoosers()
@@ -322,11 +326,140 @@ void chooseDateTime(int viewId, const String& value, bool done)
         chooser->choose(value, done);
 }
 
+// Suggestions of <input list>. The field keeps the focus and the keys: Up and
+// Down move the highlight here, Enter takes it, Escape closes. The host only
+// shows the list and answers a click on an entry.
+class DataListPickerWasm final : public DataListSuggestionPicker, public RefCounted<DataListPickerWasm> {
+    WTF_MAKE_TZONE_ALLOCATED_INLINE(DataListPickerWasm);
+public:
+    static Ref<DataListPickerWasm> create(WebView& view, DataListSuggestionsClient& client) { return adoptRef(*new DataListPickerWasm(view, client)); }
+
+    void ref() const final { RefCounted::ref(); }
+    void deref() const final { RefCounted::deref(); }
+
+    // The value is taken first: its input event may close the list or replace the field type
+    void choose(const String& value)
+    {
+        Ref protectedThis { *this };
+        if (m_client && !value.isNull())
+            m_client->didSelectDataListOption(value);
+        if (m_client)
+            m_client->didCloseSuggestions();
+        else
+            hideList();
+    }
+
+private:
+    DataListPickerWasm(WebView& view, DataListSuggestionsClient& client)
+        : m_viewId(view.id())
+        , m_client(&client)
+    {
+    }
+
+    void displayWithActivationType(DataListSuggestionActivationType type) final
+    {
+        if (!m_client)
+            return;
+        auto suggestions = m_client->suggestions();
+        if (suggestions.isEmpty()) {
+            close();
+            return;
+        }
+        if (type == DataListSuggestionActivationType::TextChanged || m_highlighted >= static_cast<int>(suggestions.size()))
+            m_highlighted = -1;
+        m_suggestions = WTF::move(suggestions);
+        m_closing = false;
+        m_shown = true;
+        openChoosers<DataListPickerWasm>().set(m_viewId, this);
+        send();
+    }
+
+    void handleKeydownWithIdentifier(const String& key) final
+    {
+        if (!m_shown)
+            return;
+        int count = m_suggestions.size();
+        if (key == "Down"_s)
+            m_highlighted = m_highlighted + 1 < count ? m_highlighted + 1 : 0;
+        else if (key == "Up"_s)
+            m_highlighted = m_highlighted > 0 ? m_highlighted - 1 : count - 1;
+        else if (key == "Enter"_s && m_highlighted >= 0 && m_highlighted < count) {
+            choose(m_suggestions[m_highlighted].value);
+            return;
+        } else {
+            close();
+            return;
+        }
+        send();
+    }
+
+    // Like in WebKit's UI process the field learns later that the list closed:
+    // close() also comes from its destructor
+    void close() final
+    {
+        hideList();
+        if (!m_client || m_closing)
+            return;
+        m_closing = true;
+        runOnEngineThread([protectedThis = Ref { *this }] {
+            if (protectedThis->m_closing && protectedThis->m_client)
+                protectedThis->m_client->didCloseSuggestions();
+        });
+    }
+
+    void detach() final
+    {
+        m_client = nullptr;
+        hideList();
+    }
+
+    void hideList()
+    {
+        if (!m_shown)
+            return;
+        m_shown = false;
+        Ref protectedThis { *this };
+        forgetChooser(m_viewId, *this);
+        notifyHost(m_viewId, "datalist-hide");
+    }
+
+    void send()
+    {
+        StringBuilder items;
+        for (auto& suggestion : m_suggestions) {
+            if (!items.isEmpty())
+                items.append(',');
+            items.append("{\"value\":\""_s, jsonEscape(suggestion.value), "\",\"label\":\""_s, jsonEscape(suggestion.label), "\"}"_s);
+        }
+        notifyHost(m_viewId, "datalist", makeString('{', rectJSON(m_client->elementRectInRootViewCoordinates()),
+            ",\"highlightedIndex\":"_s, m_highlighted, ",\"suggestions\":["_s, items.toString(), "]}"_s));
+    }
+
+    int m_viewId;
+    DataListSuggestionsClient* m_client;
+    Vector<DataListSuggestion> m_suggestions;
+    int m_highlighted { -1 };
+    bool m_shown { false };
+    bool m_closing { false };
+};
+
+RefPtr<DataListSuggestionPicker> createDataListSuggestionPicker(WebView& view, DataListSuggestionsClient& client)
+{
+    return DataListPickerWasm::create(view, client);
+}
+
+void chooseDataListSuggestion(int viewId, const String& value)
+{
+    if (RefPtr picker = openChoosers<DataListPickerWasm>().get(viewId))
+        picker->choose(value);
+}
+
 void closeChoosers(int viewId)
 {
     choosePopupItem(viewId, -1);
     chooseColor(viewId, { }, true);
     chooseDateTime(viewId, { }, true);
+    chooseDataListSuggestion(viewId, { });
 }
 
 } // namespace BrowserLite

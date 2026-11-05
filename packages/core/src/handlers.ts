@@ -14,6 +14,7 @@ const DEFAULTS: RequestHandlers = {
   selectPopup: async () => -1,
   colorPicker: async () => null,
   dateTimePicker: async () => null,
+  dataListPopup: async () => -1,
   clipboardWrite: writeHostClipboard,
 };
 

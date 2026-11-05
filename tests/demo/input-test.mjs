@@ -1,9 +1,9 @@
 // Input and page interaction in the demo UI (the engine side is tests/core/input-test.mjs): native
 // downloads and the status line of a failed one, mailto: to the host browser, popups as tabs,
 // dialogs in the page with the origin, suppressed in background tabs and limited in bursts, the context menu
-// of the ui package, the <select> popup (mouse, keyboard, Esc), the link status bubble and the
-// tooltip, the hidden color and date inputs of the host, the find bar, zoom shortcuts, Ctrl +
-// mouse wheel with the zoom indicator and fullscreen of the page area.
+// of the ui package, the <select> popup (mouse, keyboard, Esc), the suggestions of a datalist,
+// the link status bubble and the tooltip, the hidden color and date inputs of the host, the find
+// bar, zoom shortcuts, Ctrl + mouse wheel with the zoom indicator and fullscreen of the page area.
 //
 //   node tests/demo/input-test.mjs [engine-dir]
 import { readFileSync } from 'node:fs';
@@ -36,6 +36,7 @@ const PAGE = `<!doctype html>
   #hoverlink { position: absolute; left: 20px; top: 345px; }
   #color { position: absolute; left: 20px; top: 380px; width: 60px; height: 30px; }
   #date { position: absolute; left: 20px; top: 430px; width: 160px; height: 26px; }
+  #city { position: absolute; left: 20px; top: 480px; width: 200px; height: 26px; }
   #missing { position: absolute; left: 600px; top: 110px; }
   #mail { position: absolute; left: 600px; top: 150px; }
   #map { position: absolute; left: 600px; top: 400px; width: 150px; height: 100px; background: rgb(255, 160, 0); }
@@ -48,6 +49,8 @@ const PAGE = `<!doctype html>
 <a id="hoverlink" href="/target" title="A tip">Hover here</a>
 <input id="color" type="color" value="#112233">
 <input id="date" type="date" value="2026-10-12">
+<input id="city" list="cities" autocomplete="off">
+<datalist id="cities"><option value="Zurich"><option value="Zug" label="Canton Zug"><option value="Bern"></datalist>
 <div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">own menu</div>
 <a id="missing" download href="/missing.txt">404</a>
 <a id="mail" href="mailto:info@example.com?subject=Hello">Mail</a>
@@ -69,6 +72,8 @@ const PAGE = `<!doctype html>
   color.addEventListener('change', () => console.log('RESULT color=' + color.value));
   const date = document.getElementById('date');
   date.addEventListener('change', () => console.log('RESULT date=' + date.value));
+  const city = document.getElementById('city');
+  city.addEventListener('input', () => console.log('RESULT city=' + city.value));
   window.addEventListener('resize', () => console.log('RESULT width=' + window.innerWidth));
   // A "map" zooms itself with Ctrl + wheel
   let mapZooms = 0;
@@ -387,6 +392,68 @@ check(
     !results.has('select') &&
     (await page.evaluate(() => !document.querySelector('.bl-select-popup'))),
 );
+
+// 9b) <input list>: typing shows the suggestions below the field, Down and Enter in the field
+// take one, a click on an entry too, the field keeps the focus
+const cityList = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.bl-datalist-popup .bl-option')]
+      .map((row) => (row.dataset.blHighlighted === undefined ? '' : '>') + row.textContent)
+      .join('|'),
+  );
+const cityListIs = (text) =>
+  page
+    .waitForFunction(
+      (text) =>
+        [...document.querySelectorAll('.bl-datalist-popup .bl-option')]
+          .map((row) => (row.dataset.blHighlighted === undefined ? '' : '>') + row.textContent)
+          .join('|') === text,
+      text,
+      { timeout: 10000 },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+const cityValue = async (value) => {
+  const end = Date.now() + 10000;
+  while (Date.now() < end && results.get('city') !== value) await page.waitForTimeout(100);
+  return results.get('city');
+};
+await page.mouse.click(...(await at(100, 493)));
+await page.keyboard.type('Z');
+check(
+  'datalist: typing shows the suggestions',
+  await cityListIs('Zurich|ZugCanton Zug'),
+  await cityList(),
+);
+await page.keyboard.press('ArrowDown');
+await page.keyboard.press('ArrowDown');
+check('datalist: Down highlights', await cityListIs('Zurich|>ZugCanton Zug'), await cityList());
+await page.keyboard.press('Enter');
+check(
+  'datalist: Enter takes the highlighted one',
+  (await cityValue('Zug')) === 'Zug',
+  results.get('city'),
+);
+check('datalist: the list closes', await cityListIs(''), await cityList());
+await page.keyboard.press('ControlOrMeta+A');
+await page.keyboard.type('er');
+check('datalist: the list follows the text', await cityListIs('Bern'), await cityList());
+await page.locator('.bl-datalist-popup .bl-option', { hasText: 'Bern' }).click();
+check(
+  'datalist: a click takes the entry',
+  (await cityValue('Bern')) === 'Bern',
+  results.get('city'),
+);
+await page.keyboard.type('!');
+check(
+  'datalist: the field keeps the focus after the click',
+  (await cityValue('Bern!')) === 'Bern!',
+  results.get('city'),
+);
+await page.keyboard.press('Escape');
+await page.mouse.click(...(await at(600, 650)));
 
 // 10) Link under the mouse: address bottom left, title as the tooltip
 await page.mouse.move(...(await at(40, 352)));

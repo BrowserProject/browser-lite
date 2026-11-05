@@ -10,6 +10,7 @@ import {
 import { type WispErrorEvent, WispTransport } from '@browser-lite/transport-wisp';
 import {
   colorPicker,
+  dataListPopup,
   dateTimePicker,
   fileChooser,
   loginPrompt,
@@ -113,6 +114,7 @@ function browserOptions(
     services: [...defaultServices(), webrtc()],
     handlers: {
       ...selectPopup(),
+      ...dataListPopup(),
       ...colorPicker(),
       ...dateTimePicker(),
       ...fileChooser(),

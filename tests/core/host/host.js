@@ -261,6 +261,17 @@ const host = {
   selectRequests: [],
   colorRequests: [],
   dateRequests: [],
+  /**
+   * Requests of the dataListPopup handler: {suggestions: ['value|label'], highlightedIndex,
+   * rect, open} (open until the next request or the list closes). answerDataList(index) answers
+   * the open one.
+   */
+  dataListRequests: [],
+  answerDataList(index) {
+    const open = host.dataListRequests.findLast((request) => request.open);
+    open?.answer(index);
+    return !!open;
+  },
   permissionRequests: [],
   authRequests: [],
   /** Answers of the authenticate handler in turn: {username, password}, null or 'wait'. */
@@ -338,6 +349,24 @@ const host = {
             rect: request.rect,
           });
           return Promise.resolve(host.selectAnswer);
+        },
+        dataListPopup(request) {
+          return new Promise((resolve) => {
+            const entry = {
+              suggestions: request.suggestions.map((s) =>
+                s.label ? `${s.value}|${s.label}` : s.value,
+              ),
+              highlightedIndex: request.highlightedIndex,
+              rect: request.rect,
+              open: true,
+              answer(index) {
+                entry.open = false;
+                resolve(index);
+              },
+            };
+            host.dataListRequests.push(entry);
+            request.signal.addEventListener('abort', () => entry.answer(-1));
+          });
         },
         colorPicker(request) {
           host.colorRequests.push({ value: request.value, rect: request.rect });

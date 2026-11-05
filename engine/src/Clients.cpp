@@ -517,6 +517,11 @@ RefPtr<DateTimeChooser> ChromeClient::createDateTimeChooser(DateTimeChooserClien
     return BrowserLite::createDateTimeChooser(m_view.get(), client);
 }
 
+RefPtr<DataListSuggestionPicker> ChromeClient::createDataListSuggestionPicker(DataListSuggestionsClient& client)
+{
+    return BrowserLite::createDataListSuggestionPicker(m_view.get(), client);
+}
+
 #if ENABLE(POINTER_LOCK)
 void ChromeClient::requestPointerLock(CompletionHandler<void(PointerLockRequestResult)>&& completionHandler)
 {

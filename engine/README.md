@@ -43,7 +43,8 @@ comes as patches from `patches/`.
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker), `EditorClient.cpp`, `BackForwardList.cpp`,
-    `Choosers.cpp`, `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
+    `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
+    suggestions of `<input list>`), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in, types in or waits for a visible one)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state), `ScrollingWasm.cpp` (scrolling thread: wheel, swipe and

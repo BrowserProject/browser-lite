@@ -638,6 +638,14 @@ export interface RequestHandlers {
   /** Date and time inputs; resolves the value string or null. Default null. */
   dateTimePicker(request: DateTimeRequest): Promise<string | null>;
   /**
+   * Suggestions of an `<input list>` (a datalist) below the field, like the dropdown of Chrome.
+   * Shown while the user types: the field keeps the focus and the keys. Every change of the
+   * suggestions or of the highlighted one (Up and Down in the field) is a new request, the
+   * signal of the old one aborts; Enter in the field takes the highlighted one, Escape closes.
+   * Resolves the chosen index, -1 closes the list. Default -1 (no list).
+   */
+  dataListPopup(request: DataListRequest): Promise<number>;
+  /**
    * Copy and cut in a page: puts the text (and HTML) on a clipboard. Default: the clipboard of
    * the host (`navigator.clipboard`, with HTML when ClipboardItem exists).
    */
@@ -747,6 +755,26 @@ export interface SelectRequest {
   items: SelectItem[];
   selectedIndex: number;
   /** Aborted when the page hides the popup, the view closes or the engine stops. */
+  signal: AbortSignal;
+}
+
+/** A suggestion of a datalist. */
+export interface DataListSuggestion {
+  value: string;
+  /** Label of the option, '' when it has none or the same text as the value. */
+  label: string;
+}
+
+/** Suggestions for the text in an `<input list>` of a page (handler `dataListPopup`). */
+export interface DataListRequest {
+  view: View;
+  /** The field. */
+  rect: Rect;
+  /** Options starting with the typed text first, then those containing it. */
+  suggestions: DataListSuggestion[];
+  /** Entry highlighted with the keys in the field, -1 for none. */
+  highlightedIndex: number;
+  /** Aborted by the next request of the field, when the list closes, the view closes or the engine stops. */
   signal: AbortSignal;
 }
 

@@ -41,7 +41,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Reload and back/forward ask before they send a form (POST) again, cancel keeps the page (#369).
   Closing a view waits at most 500 ms for a busy page's beforeunload, like Chrome (#387): Ctrl+W
   in a row while heavy tabs load closes a tab per press. The host browser's color and date pickers open at the field
-  (#371).
+  (#371). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
+  Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
   no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
@@ -402,6 +403,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
 - Core API: console messages of shared workers reach no event.
+- Forms: Down in an `<input list>` without an open list does not open it (Chrome does; WebKit
+  passes the key only to an open list), and Enter while the list is open without a highlighted
+  entry closes it instead of sending the form (like Safari, #403).
 
 ## Open: tests and operations
 

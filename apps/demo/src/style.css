@@ -1254,7 +1254,8 @@ svg.favicon {
 
 /* Elements of @browser-lite/ui */
 .bl-context-menu,
-.bl-select-popup {
+.bl-select-popup,
+.bl-datalist-popup {
   position: fixed;
   z-index: 11;
   border-radius: var(--radius-md);
@@ -1282,19 +1283,30 @@ svg.favicon {
   border: none;
   border-top: 1px solid var(--outline-variant);
 }
-.bl-select-popup {
+.bl-select-popup,
+.bl-datalist-popup {
   overflow-y: auto;
   padding: 6px 0;
   font-size: var(--text-md);
 }
-.bl-select-popup .bl-option {
+.bl-select-popup .bl-option,
+.bl-datalist-popup .bl-option {
   padding: 6px var(--space-4);
   white-space: pre;
   cursor: default;
 }
-.bl-select-popup .bl-option.bl-highlighted {
+.bl-select-popup .bl-option.bl-highlighted,
+.bl-datalist-popup .bl-option.bl-highlighted {
   background: var(--primary-container);
   color: var(--on-primary-container);
+}
+.bl-datalist-popup .bl-option:hover:not(.bl-highlighted) {
+  background: var(--state-hover);
+}
+.bl-datalist-popup .bl-label {
+  margin-left: var(--space-4);
+  color: var(--on-surface-variant);
+  font-size: var(--text-sm);
 }
 .bl-select-popup .bl-option[aria-selected="true"] {
   font-weight: 600;
@@ -2288,7 +2300,8 @@ svg.favicon {
     font-size: var(--text-lg);
   }
   .bl-select-popup .bl-option,
-  .bl-select-popup .bl-group {
+  .bl-select-popup .bl-group,
+  .bl-datalist-popup .bl-option {
     padding: 12px var(--space-4);
     font-size: var(--text-lg);
     line-height: 20px;

@@ -421,6 +421,84 @@ test('select popup with real keyboard and mouse input', async () => {
   assert.equal(await page.evaluate(() => pending), -1);
 });
 
+test('datalist popup: rows, highlight, click, keys stay with the page, closing', async () => {
+  const result = await page.evaluate(async () => {
+    const { dataListPopup } = ui.dataListPopup();
+    const view = makeView();
+    const suggestions = [
+      { value: 'Zurich', label: '' },
+      { value: 'Zug', label: 'Canton Zug' },
+    ];
+    const open = (highlightedIndex = -1, signal = new AbortController().signal) =>
+      dataListPopup({
+        view,
+        rect: { x: 10, y: 20, width: 120, height: 24 },
+        suggestions,
+        highlightedIndex,
+        signal,
+      });
+    const out = {};
+    let promise = open(1);
+    const popup = document.querySelector('.bl-datalist-popup');
+    out.rows = [...popup.querySelectorAll('.bl-option')].map((row) =>
+      [...row.children].map((part) => `${part.className}:${part.textContent}`).join(' '),
+    );
+    out.highlighted = popup.querySelector('[data-bl-highlighted]')?.dataset.blIndex;
+    const box = popup.getBoundingClientRect();
+    out.position = [box.left, box.top, box.width >= 120];
+    // Keys go on to the page (the engine moves the highlight), a press keeps the focus
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    out.keyPrevented = !key('ArrowDown');
+    const down = new PointerEvent('pointerdown', { bubbles: true, cancelable: true });
+    popup.querySelector('.bl-option').dispatchEvent(down);
+    out.pressPrevented = down.defaultPrevented;
+    out.focusKept = document.activeElement === input;
+    input.remove();
+    popup.querySelectorAll('.bl-option')[1].click();
+    out.click = await promise;
+    out.removed = !document.querySelector('.bl-datalist-popup');
+    // A press in the view is the engine's, one outside closes
+    promise = open();
+    pointerdown(view.canvas);
+    out.openAfterView = !!document.querySelector('.bl-datalist-popup');
+    pointerdown(document.body);
+    out.outside = await promise;
+    // The next request of the field replaces the list, an abort closes it
+    const first = open();
+    const controller = new AbortController();
+    const second = open(0, controller.signal);
+    out.replaced = await first;
+    out.count = document.querySelectorAll('.bl-datalist-popup').length;
+    controller.abort();
+    out.aborted = await second;
+    promise = open();
+    window.dispatchEvent(new Event('blur'));
+    out.blur = await promise;
+    out.left = document.querySelectorAll('.bl-datalist-popup').length;
+    view.canvas.remove();
+    return out;
+  });
+  assert.deepEqual(result, {
+    rows: ['bl-value:Zurich', 'bl-value:Zug bl-label:Canton Zug'],
+    highlighted: '1',
+    position: [60, 104, true],
+    keyPrevented: false,
+    pressPrevented: true,
+    focusKept: true,
+    click: 1,
+    removed: true,
+    openAfterView: true,
+    outside: -1,
+    replaced: -1,
+    count: 1,
+    aborted: -1,
+    blur: -1,
+    left: 0,
+  });
+});
+
 test('permission prompt: queue, answers, abort, texts and notifications', async () => {
   const result = await page.evaluate(async () => {
     const { permission } = ui.permissionPrompt({ texts: { allow: 'Yes' } });

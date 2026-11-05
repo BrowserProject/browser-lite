@@ -8,7 +8,7 @@ How browser-lite is built, from the engine artifact up to the demo. Numbers like
 ```
  your page / apps/demo          tabs, address bar, settings (only public package APIs)
    |
-   |  @browser-lite/ui          unstyled handlers: select popup, pickers, prompts, dialogs, menus
+   |  @browser-lite/ui          unstyled handlers: select and datalist lists, pickers, prompts, menus
    |  @browser-lite/profile     optional: server-side profile into the storage namespace
    v
  @browser-lite/core             createBrowser, Browser, View, services, media service worker

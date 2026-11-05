@@ -1,8 +1,9 @@
 # @browser-lite/ui
 
-Unstyled default UI for browser-lite: the select popup, color and date/time pickers, the
-permission prompt, the sign-in dialog, Chrome-like dialogs of the pages (in the page or native), the context menu, the link
-status bubble and the UI slots of extensions.
+Unstyled default UI for browser-lite: the select popup, the suggestions of `<input list>`, color
+and date/time pickers, the permission prompt, the sign-in dialog, Chrome-like dialogs of the
+pages (in the page or native), the context menu, the link status bubble and the UI slots of
+extensions.
 The elements carry class names and `data-bl-*` attributes; only position and size are set
 inline, the page styles the rest.
 
@@ -32,6 +33,7 @@ const removeStatus = linkStatus(view);
 | --- | --- |
 | `defaultHandlers(o?)` | All handlers below as `Partial<RequestHandlers>`, the dialogs of the pages with `pageDialogs` (the file chooser stays with the core except on an iPhone or iPad). |
 | `selectPopup(o?)` | `<select>` list below or above the field. Keys: arrows, PageUp/PageDown, Home/End, typing jumps, Enter/Space choose, Escape/Tab cancel. Click outside, a change of the window width or window blur cancel (not a height change, like an on-screen keyboard going away). |
+| `dataListPopup(o?)` | Suggestions of an `<input list>` below or above the field, like Chrome's dropdown: the value and, when the option has one, its label. Takes no keys and a press on it does not move the focus, so the user types on; the engine moves the highlight (Up, Down) and sends a new request. A click on an entry chooses it; a click outside the list and the view, a change of the window width or window blur close it. |
 | `colorPicker(o?)`, `dateTimePicker(o?)` | Native pickers of the host browser through a hidden input laid out at the field (`showPicker()` opens the picker there), with min, max and step of the field; on an iPhone or iPad, where Safari opens pickers only on a tap, the input is visible in a small sheet below the field with Cancel, the tap on it opens the picker; a host without month or week inputs (Firefox, Safari) shows its date picker for them. Every `input` event previews the value in the page (`request.preview`); resolve on change or on a click elsewhere. One picker per document, also when composed separately: a new one finishes the open one. |
 | `fileChooser(o?)` | On an iPhone or iPad, where Safari opens its file chooser only on a tap: a sheet at the top with a visible file input (multiple and accept of the page's field) and Cancel; resolves the chosen files, `null` on Cancel, a tap elsewhere or abort. Elsewhere an empty object, the core's default opens the chooser at once. |
 | `permissionPrompt(o?)` | "example.com wants to know your location" with Block and Allow; one at a time, queued. Only asks: remembering is the job of the `PermissionStore`. Allowing notifications also asks the host browser. Escape dismisses the shown prompt (not one that the page made `hidden`). |
@@ -84,6 +86,7 @@ runs first: register shortcut handlers in the bubble phase, or skip them while
 | Selector | Notes |
 | --- | --- |
 | `.bl-select-popup` | `role=listbox`, `data-bl-view`; rows `.bl-option` (`data-bl-index`, `data-bl-highlighted` and `.bl-highlighted`, `aria-selected`, `aria-disabled`), `.bl-group`, `hr.bl-separator`. Inline: `position: fixed`, `top`, `left`, `min-width`, `max-height`, `overflow-y: auto`. |
+| `.bl-datalist-popup` | `role=listbox`, `data-bl-view`; rows `.bl-option` (`data-bl-index`, `data-bl-highlighted`, `.bl-highlighted` and `aria-selected` on the highlighted one) with `span.bl-value` and `span.bl-label`. Inline like `.bl-select-popup`. |
 | `input.bl-host-picker` | Hidden field at the place of the page field (inline `opacity: 0`, `pointer-events: none`). |
 | `form.bl-picker-sheet.bl-file-sheet` | iPhone and iPad: the sheet of the file chooser (no inline position, place it with CSS). |
 | `form.bl-picker-sheet` | iPhone and iPad: the visible `input.bl-host-picker` and `button[data-bl-answer=cancel]`, inline `position: fixed` below the page field (moved left to stay in the window); for an empty field `span.bl-picker-hint` (`texts.tapToChoose`) before the input until it gets a value. |

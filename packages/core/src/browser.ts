@@ -562,6 +562,16 @@ class BrowserImpl implements Browser, ViewHost {
       }),
     );
     this.handle(
+      'datalist',
+      withView((view, data) => {
+        this.requests.dataListPopup(view, data);
+      }),
+    );
+    this.handle(
+      'datalist-hide',
+      withView((view) => this.requests.hidePicker(view, 'datalist')),
+    );
+    this.handle(
       'picker-hide',
       withView((view) => {
         this.requests.hidePicker(view, 'color');

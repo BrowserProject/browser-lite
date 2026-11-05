@@ -441,7 +441,8 @@ EMSCRIPTEN_KEEPALIVE void bl_choose_files(int id, char* paths)
 }
 
 // Answers of the choosers (Choosers.h): list item (-1 = cancelled), color
-// "#rrggbb", date/time as the value of the input field. done = chooser closed
+// "#rrggbb", date/time as the value of the input field, datalist suggestion
+// (null = closed without a choice). done = chooser closed
 EMSCRIPTEN_KEEPALIVE void bl_popup_choose(int id, int index)
 {
     withView(id, [=](WebView&) { choosePopupItem(id, index); });
@@ -455,6 +456,11 @@ EMSCRIPTEN_KEEPALIVE void bl_color_chosen(int id, char* color, int done)
 EMSCRIPTEN_KEEPALIVE void bl_datetime_chosen(int id, char* value, int done)
 {
     withView(id, [id, value = takeString(value), done](WebView&) { chooseDateTime(id, value, done); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_datalist_choose(int id, char* value)
+{
+    withView(id, [id, value = takeString(value)](WebView&) { chooseDataListSuggestion(id, value); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_focus_initial(int id, int forward)

@@ -79,6 +79,7 @@ any number of listeners.
 | `authenticate` | `null`: the page shows the 401 response. Called for a 401 with Basic or Digest of the main frame or a same origin load without stored credentials, with `url`, `origin`, `realm`, `scheme` and `retry` (the last credentials were refused); resolve `{ username, password }` to sign in. The engine keeps them for the session per realm |
 | `fileChooser` | native file dialog of the host |
 | `selectPopup`, `colorPicker`, `dateTimePicker` | cancel |
+| `dataListPopup` | `-1`: no suggestion list. The suggestions of an `<input list>` while the user types (`suggestions` with `value` and `label`, `highlightedIndex`); the field keeps the focus and the keys: Up and Down move the highlight in the engine, which sends a new request (the old signal aborts), Enter takes it, Escape closes. Resolve the index of a clicked entry or `-1` to close |
 
 Every request carries an `AbortSignal` that aborts when the page hides the popup, the view closes,
 the engine ends or the page opens the same popup again (the old answer is then ignored).

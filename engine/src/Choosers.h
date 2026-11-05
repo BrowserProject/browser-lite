@@ -1,10 +1,12 @@
 // Choosers the browser shows itself: the list of a <select>, color
-// (<input type=color>) and date/time (<input type=date> etc.). The engine
-// sends the data to the host, which shows its own chooser and returns the
-// result through bl_popup_choose / bl_color_chosen / bl_datetime_chosen.
+// (<input type=color>), date/time (<input type=date> etc.) and the suggestions
+// of <input list>. The engine sends the data to the host, which shows its own
+// chooser and returns the result through bl_popup_choose / bl_color_chosen /
+// bl_datetime_chosen / bl_datalist_choose.
 #pragma once
 
 #include <WebCore/ColorChooser.h>
+#include <WebCore/DataListSuggestionPicker.h>
 #include <WebCore/DateTimeChooser.h>
 #include <WebCore/PopupMenu.h>
 #include <WebCore/SearchPopupMenu.h>
@@ -13,6 +15,7 @@
 namespace WebCore {
 class Color;
 class ColorChooserClient;
+class DataListSuggestionsClient;
 class DateTimeChooserClient;
 class PopupMenuClient;
 }
@@ -25,6 +28,7 @@ RefPtr<WebCore::PopupMenu> createPopupMenu(WebView&, WebCore::PopupMenuClient&);
 RefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebView&, WebCore::PopupMenuClient&);
 RefPtr<WebCore::ColorChooser> createColorChooser(WebView&, WebCore::ColorChooserClient&, const WebCore::Color&);
 RefPtr<WebCore::DateTimeChooser> createDateTimeChooser(WebView&, WebCore::DateTimeChooserClient&);
+RefPtr<WebCore::DataListSuggestionPicker> createDataListSuggestionPicker(WebView&, WebCore::DataListSuggestionsClient&);
 // Whether the view shows a date or time picker (the click on the field opened it already)
 bool hasDateTimeChooser(int viewId);
 
@@ -32,6 +36,8 @@ bool hasDateTimeChooser(int viewId);
 void choosePopupItem(int viewId, int index);
 void chooseColor(int viewId, const String& color, bool done);
 void chooseDateTime(int viewId, const String& value, bool done);
+// null value = the list closed without a choice
+void chooseDataListSuggestion(int viewId, const String& value);
 
 // Closes everything, e.g. when the view closes
 void closeChoosers(int viewId);

@@ -1,5 +1,6 @@
 import type { RequestHandlers, SelectRequest } from '@browser-lite/core';
 import { context, element, listen, type UiOptions, viewportRect } from './options.js';
+import { placeAtField } from './popup-place.js';
 import { createTypeahead, moveHighlight } from './select-keys.js';
 
 interface Entry {
@@ -128,7 +129,7 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
         request.signal.addEventListener('abort', onAbort);
 
         root.append(popup);
-        place(popup, viewportRect(request.view, request.rect), win);
+        placeAtField(popup, viewportRect(request.view, request.rect), win);
         highlight(
           Math.max(
             0,
@@ -138,28 +139,4 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
       });
     },
   };
-}
-
-/** Below the field, else above; never beyond the window edge. */
-function place(
-  popup: HTMLElement,
-  anchor: { x: number; y: number; width: number; height: number },
-  win: Window,
-) {
-  const style = popup.style;
-  style.position = 'fixed';
-  style.minWidth = `${anchor.width}px`;
-  style.maxHeight = '';
-  style.overflowY = 'auto';
-  const below = win.innerHeight - (anchor.y + anchor.height) - 8;
-  const above = anchor.y - 8;
-  const height = popup.offsetHeight;
-  if (height <= below || below >= above) {
-    style.top = `${anchor.y + anchor.height}px`;
-    style.maxHeight = `${Math.max(below, 80)}px`;
-  } else {
-    style.maxHeight = `${above}px`;
-    style.top = `${anchor.y - Math.min(height, above)}px`;
-  }
-  style.left = `${Math.max(4, Math.min(anchor.x, win.innerWidth - popup.offsetWidth - 4))}px`;
 }

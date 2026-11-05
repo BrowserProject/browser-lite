@@ -4,6 +4,7 @@ import { storePermission } from './permissions.js';
 import type {
   AuthCredentials,
   AuthRequest,
+  DataListSuggestion,
   DialogAnswer,
   DialogRequest,
   FileChooserRequest,
@@ -64,7 +65,7 @@ const report = (error: unknown) =>
     throw error;
   });
 
-type Picker = 'select' | 'color' | 'datetime';
+type Picker = 'select' | 'color' | 'datetime' | 'datalist';
 
 const rectOf = (data: Record<string, unknown>): Rect => ({
   x: Number(data.x) || 0,
@@ -423,6 +424,37 @@ export class Requests {
     }
     if (this.finishPicker(view, 'datetime', controller))
       module._bl_datetime_chosen(view.id, typeof value === 'string' ? this.host.text(value) : 0, 1);
+  }
+
+  async dataListPopup(view: ViewImpl, data: Record<string, unknown>): Promise<void> {
+    const controller = this.openPicker(view, 'datalist');
+    const suggestions = ((data.suggestions as Partial<DataListSuggestion>[] | undefined) ?? []).map(
+      (suggestion) => ({
+        value: String(suggestion.value ?? ''),
+        label: String(suggestion.label ?? ''),
+      }),
+    );
+    let index = -1;
+    const handler = this.host.handler('dataListPopup');
+    if (handler) {
+      try {
+        const chosen = await handler({
+          view,
+          rect: rectOf(data),
+          suggestions,
+          highlightedIndex: Number(data.highlightedIndex ?? -1),
+          signal: controller.signal,
+        });
+        if (Number.isInteger(chosen) && chosen >= -1 && chosen < suggestions.length) index = chosen;
+      } catch {}
+    }
+    if (this.finishPicker(view, 'datalist', controller)) {
+      const value = suggestions[index]?.value;
+      this.host.module._bl_datalist_choose(
+        view.id,
+        value === undefined ? 0 : this.host.text(value),
+      );
+    }
   }
 
   /** The view closes: abort its requests; open dialogs and permission questions count as dismissed. */

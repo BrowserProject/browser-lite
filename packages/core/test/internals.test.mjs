@@ -35,6 +35,7 @@ function fakeModule() {
     _bl_auth_answer: record('auth'),
     _bl_download_cancel: record('cancel'),
     _bl_remove_path: record('remove'),
+    _bl_datalist_choose: record('datalist'),
   };
 }
 
@@ -220,6 +221,45 @@ test('dialogs and selects: handlers of extensions run before the own handler', a
     ['dialog', 2, 1, 'own'],
     ['popup', 1, 1],
   ]);
+});
+
+test('datalist: the chosen value goes to the engine, a superseded or hidden list answers nothing', async () => {
+  const pending = [];
+  const { requests, module } = requestsWith({
+    dataListPopup: (request) =>
+      new Promise((resolve) => {
+        pending.push({ request, resolve });
+        request.signal.addEventListener('abort', () => resolve(-1));
+      }),
+  });
+  const view = fakeView();
+  const suggestions = [{ value: 'Zurich' }, { value: 'Zug', label: 'Canton Zug' }];
+  const first = requests.dataListPopup(view, { x: 1, y: 2, width: 3, height: 4, suggestions });
+  const second = requests.dataListPopup(view, { suggestions, highlightedIndex: 1 });
+  await first;
+  assert.equal(pending[0].request.signal.aborted, true);
+  assert.deepEqual(pending[0].request.rect, { x: 1, y: 2, width: 3, height: 4 });
+  assert.deepEqual(pending[1].request.suggestions, [
+    { value: 'Zurich', label: '' },
+    { value: 'Zug', label: 'Canton Zug' },
+  ]);
+  assert.equal(pending[1].request.highlightedIndex, 1);
+  pending[1].resolve(1);
+  await second;
+  const third = requests.dataListPopup(view, { suggestions });
+  pending[2].resolve(-1);
+  await third;
+  const fourth = requests.dataListPopup(view, { suggestions });
+  requests.hidePicker(view, 'datalist');
+  await fourth;
+  // Without a handler the list closes at once
+  const bare = requestsWith({});
+  await bare.requests.dataListPopup(view, { suggestions });
+  assert.deepEqual(module.calls, [
+    ['datalist', 1, 'Zug'],
+    ['datalist', 1, 0],
+  ]);
+  assert.deepEqual(bare.module.calls, [['datalist', 1, 0]]);
 });
 
 test('dialogs: closing the view answers with the default and aborts the request', async () => {

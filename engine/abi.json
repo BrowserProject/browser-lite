@@ -1,5 +1,5 @@
 {
-  "abiVersion": 20,
+  "abiVersion": 21,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -35,6 +35,7 @@
     { "name": "bl_popup_choose", "returns": "void", "args": "int id, int index", "doc": "Answer to 'popup': item index, -1 = cancelled." },
     { "name": "bl_color_chosen", "returns": "void", "args": "int id, char* color, int done", "doc": "Answer to 'color-picker': \"#rrggbb\", done 1 closes the chooser." },
     { "name": "bl_datetime_chosen", "returns": "void", "args": "int id, char* value, int done", "doc": "Answer to 'date-time-picker': input value, empty = cancelled." },
+    { "name": "bl_datalist_choose", "returns": "void", "args": "int id, char* value", "doc": "Answer to 'datalist': value of the chosen suggestion, null = closed without a choice." },
     { "name": "bl_focus_initial", "returns": "void", "args": "int id, int forward", "doc": "Tab from outside into the page: focus the first (1) or last (0) element." },
     { "name": "bl_set_zoom", "returns": "void", "args": "int id, float factor", "doc": "Page zoom (like Ctrl +/-)." },
     { "name": "bl_pinch", "returns": "void", "args": "int id, int phase, double factor, double x, double y", "thread": "Goes to the compositor directly when compositing.", "doc": "Pinch zoom: phase 0 begin, 1 step (factor relative to the last), 2 end, 3 cancel; x/y focus point." },
@@ -194,6 +195,8 @@
     { "type": "popup-hide", "scope": "view", "payload": "empty" },
     { "type": "color-picker", "scope": "view", "payload": "{x, y, width, height, value}; answer bl_color_chosen" },
     { "type": "date-time-picker", "scope": "view", "payload": "{x, y, width, height, type, value, min, max, step}; answer bl_datetime_chosen" },
+    { "type": "datalist", "scope": "view", "payload": "{x, y, width, height, highlightedIndex, suggestions: [{value, label}]}; sent again as the typed text or the highlight (Up, Down in the field) changes; answer bl_datalist_choose" },
+    { "type": "datalist-hide", "scope": "view", "payload": "empty" },
     { "type": "picker-hide", "scope": "view", "payload": "empty" },
     { "type": "wheel-result", "scope": "view", "payload": "{consumed}" },
     { "type": "touch-result", "scope": "view", "payload": "{type, consumed, pinch, panX, panY} (pinch, panX, panY: CSS touch-action at the points that start touching allows zooming, scrolling along x, along y)" },
