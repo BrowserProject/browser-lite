@@ -7,8 +7,7 @@ namespace BrowserLite {
 // files the rendered text of the open pages needs, unless an earlier scan foresaw `path`.
 void prefetchFontsOfRenderedText(const char* path);
 
-// The lazy fonts the text went on without arrived (setLazyWaitLimit): the pages look up their
-// fonts again and lay out anew.
-void lazyFontsArrived();
+// Whether the character is outside the fonts of engine.data, so its font loads on demand
+bool needsLazyFont(char32_t);
 
 } // namespace BrowserLite

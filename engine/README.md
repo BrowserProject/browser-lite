@@ -54,7 +54,10 @@ comes as patches from `patches/`.
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CookieJarWasm.cpp` (Cookie Store API),
     `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
-    (files of `lazy/` mounted read only at `/lazy`, fetched on first read)
+    (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`
+    (the fonts and dictionaries the rendered text needs, fetched side by side), `FontArrival.cpp`
+    (fallback fonts the text went on without arrived: only the text that may take them is laid
+    out again)
   - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
     `UserContent.cpp` (scripts and CSS of the host's extensions, isolated worlds),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,

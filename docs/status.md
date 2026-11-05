@@ -199,6 +199,10 @@ controls came after the first paint (#253), and restarted with Wikipedia as addr
 instead of 2.82 s once curl, the cookie database and our page extensions were set up ahead
 (#254). bbc.com, whose language menu needs 13 fonts of other scripts, painted after 4.4 instead
 of 5.7 s once those fonts no longer held up the text (#255).
+The HTML standard (one page of 16 MB, local copy) kept the engine thread busy for 38 to 47 s of its
+load and host commands waited up to 18 s: every burst of late fallback fonts rebuilt the style of
+the whole page. Now only the elements with such text are laid out again: 22 to 35 s, waits of
+about 9 s, the rest is WebKit's own layout and style of the long document (#401, #349).
 A warm start (same profile, local) on 2 cores painted a small page after a median 1.70 instead
 of 2.06 s once the compositor's WebGL context came during the start and the worker reserve waited
 3 s (#249, #242); the demo, where the profile and the engine now load side by side (#248), after

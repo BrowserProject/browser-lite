@@ -8,6 +8,7 @@
 #include "Compositor.h"
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "FontArrival.h"
 #include "FontPrefetch.h"
 #include "Gamepad.h"
 #include "Host.h"
