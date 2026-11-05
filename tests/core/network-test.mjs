@@ -282,7 +282,7 @@ h2Server.on('stream', (stream, headers, flags, rawHeaders) => {
   if (path.startsWith('/drop')) {
     h2Drops.push(path);
     if (path === '/drop' || h2Drops.filter((p) => p === path).length === 1) {
-      stream.session.socket.destroy();
+      stream.session.destroy();
       return;
     }
     let body = '';
