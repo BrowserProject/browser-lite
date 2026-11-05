@@ -74,6 +74,8 @@ function stackCases() {
   };
   run('proxy100', () => proxy(100));
   run('getter100', () => getter(100));
+  // Deep but legal: the check must not stop it early (in Chromium about 285 levels fit)
+  run('getter250', () => getter(250));
   run('toString100', () => toString(100));
   run('stringify1000', () => stringify(1000));
   run('ropeReplace100', () => ropeReplace(100, 'c'));

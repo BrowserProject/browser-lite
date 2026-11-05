@@ -48,10 +48,16 @@ bool machineStackHasRoom()
 
 // A probe holds while the shadow stack grows by less than this: deep C++ recursion took up to
 // 2.5 times as much machine stack as shadow stack in Chromium (getters calling getters), so
-// about 10 KB of the 200 KB a probe found. Unwound by more than reset, the stack may have grown
-// again along another path: probe again.
+// about 10 KB. Unwound by more than reset, the stack may have grown again along another path:
+// probe again.
 constexpr uintptr_t shadowStep = 4 * 1024;
 constexpr uintptr_t reset = 64 * 1024;
+
+// Room a recursion check asks for: about 87 KB, for the step above and the RangeError JSC then
+// builds. Measured in Chromium: getters calling getters crashed the engine with 150 frames and
+// were safe with 200; 700 (the JIT's 200 KB) stopped Instagram, Twitch and Walmart, whose
+// scripts recurse that deep, with a RangeError.
+constexpr int reserveFrames = 300;
 
 // Shadow stack pointer of the last probe with room since the VM was entered (0: none)
 static thread_local uintptr_t probedAt;
@@ -61,7 +67,7 @@ bool machineStackAllowsRecursion(void* stackPointer)
     auto pointer = reinterpret_cast<uintptr_t>(stackPointer);
     if (probedAt && pointer + shadowStep >= probedAt && pointer < probedAt + reset)
         return true;
-    if (!machineStackHasRoom())
+    if (!probeMachineStack(reserveFrames))
         return false;
     probedAt = pointer;
     return true;

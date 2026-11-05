@@ -354,7 +354,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   scroll event of the page and a viewport that does not lay out again).
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
-  C++ now gives the page a RangeError (#354), CI green since. A one-character `replace` on a
+  C++ now gives the page a RangeError (#354), CI green since; its first reserve of 200 KB stopped
+  Instagram, Twitch, Walmart and Facebook scripts early, 87 KB since #374. A one-character `replace` on a
   string built by 100000 appends crashed the engine the same way (Temu's bot check), fixed (#368). Its load event comes after 93 s on
   the CI runners (US) and after 6.8 s from Switzerland (2026-11-03), probably other content there.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
