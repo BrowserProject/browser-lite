@@ -39,6 +39,7 @@ import { needsNewEngine, type StartSettings, updateStartSettings } from './setti
 import { openSettings } from './settings-page.js';
 import { installShortcuts } from './shortcuts.js';
 import { initSidePanel, panelOpen, togglePanel } from './side-panel.js';
+import { initTabDrag } from './tab-drag.js';
 import { initTabOverview } from './tab-overview.js';
 import {
   activate,
@@ -333,6 +334,7 @@ initSidePanel({
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
 initTabOverview();
+initTabDrag();
 initNewTabPage();
 followShownView([document.body, byId('pages')]);
 onPreviewClosed(focusPage);

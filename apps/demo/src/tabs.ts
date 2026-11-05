@@ -332,7 +332,10 @@ export function onTabCreated(listener: (tab: Tab) => void): void {
   created.add(listener);
 }
 
-/** Calls listener after a tab was added, removed or activated, or its title or icon changed. */
+/**
+ * Calls listener after a tab was added, removed, moved or activated, or its title or icon
+ * changed.
+ */
 export function onTabsChange(listener: () => void): void {
   changeListeners.add(listener);
 }
@@ -486,6 +489,20 @@ export function activate(tab: Tab): void {
   updateToolbar(tab);
   tab.updateTitle();
   focusPage();
+}
+
+/** Moves tab to index of the strip (clamped to its ends), like dragging it in Chrome. */
+export function moveTab(tab: Tab, index: number): void {
+  const from = list.indexOf(tab);
+  const to = Math.max(0, Math.min(index, list.length - 1));
+  if (from < 0 || to === from) return;
+  list.splice(from, 1);
+  list.splice(to, 0, tab);
+  const next = list[to + 1];
+  if (next) next.element.before(tab.element);
+  else byId('tab-list').append(tab.element);
+  persistSession();
+  tabsChanged();
 }
 
 /** Next (offset 1) or previous (-1) tab, wrapping around. */

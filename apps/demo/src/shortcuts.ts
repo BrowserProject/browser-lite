@@ -10,6 +10,7 @@ import {
   activate,
   activeTab,
   allTabs,
+  moveTab,
   openURL,
   printTab,
   reopenClosedTab,
@@ -94,11 +95,13 @@ function shortcut(e: KeyboardEvent): boolean {
         switchTab(e.shiftKey ? -1 : 1);
         return true;
       case 'PageDown':
-        switchTab(1);
+      case 'PageUp': {
+        const offset = key === 'PageDown' ? 1 : -1;
+        // With Shift the tab moves, like Chrome
+        if (!e.shiftKey) switchTab(offset);
+        else if (tab) moveTab(tab, allTabs().indexOf(tab) + offset);
         return true;
-      case 'PageUp':
-        switchTab(-1);
-        return true;
+      }
     }
     if (/^[1-9]$/.test(key)) {
       const tabs = allTabs();

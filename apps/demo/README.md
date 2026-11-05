@@ -92,6 +92,11 @@ select popup) are in the same sheet.
   Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
+  Dragging a tab with the mouse or a pen moves it along the strip like in Chrome and Firefox
+  (`tab-drag.ts`): past 5 px it follows the pointer, takes the place of a neighbour once it
+  covers half of it and slides into its place when released; a click only activates, the cross
+  never drags, a finger keeps scrolling the strip. Ctrl+Shift+PageUp and PageDown move the
+  active tab; the session keeps the order (#383).
 - **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
   (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
@@ -148,6 +153,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
+| `tab-drag.ts` | reordering tabs by dragging them in the strip |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |

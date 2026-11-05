@@ -398,6 +398,10 @@ svg.favicon {
   background: var(--surface);
   color: var(--on-surface);
 }
+/* A tab being dragged stays over its neighbours */
+.tab.dragging {
+  z-index: 2;
+}
 /* The curves that join the active tab to the toolbar */
 .tab.active::after {
   content: "";
@@ -1871,7 +1875,11 @@ svg.favicon {
     transition:
       width var(--medium) var(--ease),
       min-width var(--medium) var(--ease),
-      background-color var(--fast) var(--ease);
+      background-color var(--fast) var(--ease),
+      translate var(--fast) var(--ease);
+  }
+  .tab.dragging {
+    transition: none;
   }
   #side-panel,
   #suggestions,

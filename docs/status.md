@@ -85,7 +85,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   surfaces with a blue accent, design tokens in one place, state layers, tabs joined to the
   toolbar, light and dark mode, SVG icons, a new tab page with a greeting and tiles of the sites
   visited most often, an address bar that selects the whole address on the first click and
-  restores it with Escape, keeps an address that is still loading (a slow server, a sign in prompt) in the bar and the tab until its page commits (#382), a find bar that Escape closes also after a click on its buttons (#376), Ctrl+Shift+T for the tab closed last (#377), suggestions with a search row and site icons, the menu as a dropdown,
+  restores it with Escape, keeps an address that is still loading (a slow server, a sign in prompt) in the bar and the tab until its page commits (#382), a find bar that Escape closes also after a click on its buttons (#376), Ctrl+Shift+T for the tab closed last (#377), tabs reordered by dragging with the mouse and Ctrl+Shift+PageUp/PageDown (#383), suggestions with a search row and site icons, the menu as a dropdown,
   floating side panels, history by day, settings as cards with switches, dialogs of the pages in
   the page, hover only for real pointers, short transitions (off with reduced motion). Checked in
   Chromium at 1440x900, 1280x800, 820x1180 touch, 393x852 and 844x390, light and dark; not yet on
