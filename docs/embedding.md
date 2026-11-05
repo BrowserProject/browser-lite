@@ -288,6 +288,9 @@ of `context.storage` (default in memory), for example in your user's profile.
   discard background views; when none is left, tell the user (the demo shows a message). Ask to
   close tabs only while a background view still holds a page: a discarded one frees nothing, and
   the event comes again at every further growth, as WASM memory never shrinks.
+- `view.close()` runs the page's beforeunload first and resolves `false` when the user stays.
+  Like Chrome it does not wait longer than 500 ms for a busy page (all views share the engine
+  thread), so closing tabs in a row never stalls behind a heavy page (#387).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left for good (`pagehide` without the back-forward cache) the browser ends
   like `destroy()`, without events: the page can no longer react. In the back-forward cache it

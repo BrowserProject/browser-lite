@@ -2,7 +2,9 @@
 // view B loads, runs timers, requestAnimationFrame and fetch, and renders; A's timers and
 // animation frames do not run inside its script and input to A is dropped. confirm and prompt
 // return the answers afterwards, closing A during its alert ends the dialog, two dialogs of
-// different views can be open at once, and the watchdog reports no hang.
+// different views can be open at once, and the watchdog reports no hang. Closing a view with a
+// beforeunload listener does not wait for a busy page (like Chrome), but waits for an open
+// beforeunload question.
 //
 //   node tests/core/dialogs-test.mjs [engine-dir]
 import {
@@ -49,6 +51,12 @@ fetch('/data').then((r) => r.text()).then((t) => console.log('RESULT bFetch=' + 
 setTimeout(() => console.log('RESULT bRun=' + ticks + ':' + frames), 1500);
 console.log('RESULT bLoaded=1')</script>`,
   data: 'ok',
+  // beforeunload listener; busy() blocks the engine thread for 5 s from a timer
+  c: `<!doctype html><title>c</title><body style="margin:0;background:#888"><script>
+addEventListener('beforeunload', (e) => e.preventDefault());
+document.onmousedown = () => console.log('RESULT cClick=1');
+window.busy = () => setTimeout(() => { console.log('RESULT cBusy=1'); const t = Date.now(); while (Date.now() - t < 5000); }, 0);
+console.log('RESULT cLoaded=1')</script>`,
 };
 
 const { url: siteURL } = await serve((req, res) => {
@@ -163,6 +171,57 @@ check('closing A aborts its dialog', !!(await waitEvent(page, 'dialog-aborted:la
 results.delete('bRun');
 await run(b, "setTimeout(() => console.log('RESULT bRun=' + ticks + ':' + frames), 300)");
 check('B runs after A closed', !!(await results.wait('bRun', 20000)));
+
+// A view with a beforeunload listener and a busy page closes without waiting for the page
+const openListening = async () => {
+  results.delete('cLoaded');
+  const id = await page.evaluate((url) => window.blTest.open(url).id, `${siteURL}c`);
+  await results.wait('cLoaded', 30000);
+  await page.waitForFunction(
+    (id) => window.blTest.views().find((view) => view.id === id)?.hasBeforeUnload,
+    id,
+    { timeout: 10000 },
+  );
+  return id;
+};
+const busy = await openListening();
+await run(busy, 'busy()');
+await results.wait('cBusy', 20000);
+const [busyClosed, busyMs] = await page.evaluate(async (id) => {
+  const start = performance.now();
+  const closed = await window.blTest
+    .views()
+    .find((view) => view.id === id)
+    .close();
+  return [closed, performance.now() - start];
+}, busy);
+check(
+  'busy view with beforeunload closes without waiting for the page',
+  busyClosed === true && busyMs < 2500,
+  `${busyClosed} after ${Math.round(busyMs)} ms`,
+);
+
+// After a click the page asks: the open question keeps the view until it is answered
+const asking = await openListening();
+await page.mouse.click(origin.x + 50, origin.y + 50);
+await results.wait('cClick', 20000);
+await page.evaluate((id) => {
+  window.closeResult = window.blTest
+    .views()
+    .find((view) => view.id === id)
+    .close();
+}, asking);
+check('closing after a click asks', !!(await dialogOpen('')));
+await page.waitForTimeout(1500);
+check(
+  'the view stays while its question is open',
+  await page.evaluate(
+    (id) => window.blTest.views().some((view) => view.id === id && !view.closed),
+    asking,
+  ),
+);
+await answer('', true);
+check('leave closes the view', (await page.evaluate(() => window.closeResult)) === true);
 await page.waitForTimeout(1000);
 const events = await hostEvents(page);
 check(

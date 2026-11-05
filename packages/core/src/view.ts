@@ -18,6 +18,10 @@ import type {
 import { type Uploads, uploadDirectory } from './uploads.js';
 import type { Watchdog } from './watchdog.js';
 
+// Like Chrome: a page that does not answer beforeunload in time (its engine thread is busy)
+// closes without asking, so that closing a tab never waits on a busy page
+const BEFOREUNLOAD_TIMEOUT_MS = 500;
+
 /** What a view needs from its browser. */
 export interface ViewHost {
   readonly module: EngineModule;
@@ -75,6 +79,7 @@ export class ViewImpl implements View {
   private caret: Caret | null = null;
   private closing: Promise<boolean> | null = null;
   private resolveClosing: ((closed: boolean) => void) | null = null;
+  private closeTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     /** @internal */ readonly host: ViewHost,
@@ -423,6 +428,10 @@ export class ViewImpl implements View {
         this.resolveClosing = resolve;
       });
       this.call((m) => m._bl_try_close(this.id), true);
+      // An open beforeunload question waits for the user, the answer comes as 'try-close'
+      this.closeTimer = setTimeout(() => {
+        if (!this.host.requests.hasDialog(this, 'beforeunload')) this.dispose();
+      }, BEFOREUNLOAD_TIMEOUT_MS);
     }
     return this.closing;
   }
@@ -433,6 +442,7 @@ export class ViewImpl implements View {
     const alive = this.alive;
     this.closed = true;
     clearTimeout(this.imeModeTimer);
+    clearTimeout(this.closeTimer);
     this.lifetime.abort();
     this.host.requests.closeView(this);
     this.host.fullscreen.setFullscreen(this, false);
@@ -638,6 +648,7 @@ export class ViewImpl implements View {
         this.onWheelResult?.(!!data.consumed);
         return;
       case 'try-close': {
+        clearTimeout(this.closeTimer);
         const resolve = this.resolveClosing;
         this.closing = null;
         this.resolveClosing = null;

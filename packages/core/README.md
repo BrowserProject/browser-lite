@@ -90,7 +90,9 @@ default and aborts their signal. A native dialog of the host page (`window.alert
 page itself and with it every view. `resubmit` comes before a reload or back/forward would send a
 form (POST) again (from the back/forward cache nothing is sent): `true` sends it, otherwise the
 page stays. Only that navigation waits, the page runs on; when it navigates or stops meanwhile
-the signal aborts.
+the signal aborts. `view.close()` of a page with a beforeunload listener asks it first, but like
+Chrome a page that does not answer within 500 ms (it or another view keeps the engine thread busy)
+closes without asking; an open beforeunload question waits for its answer.
 
 The events are listed with their payloads in `BrowserEvents` and `ViewEvents` of
 [src/types.ts](src/types.ts) (a `Download` has `progress`, `done` and `error`). Some only report

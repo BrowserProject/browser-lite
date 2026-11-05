@@ -468,7 +468,10 @@ export interface View {
   paste(text: string): void;
   /** Ends fullscreen of the page (also ends host fullscreen). */
   exitFullscreen(): void;
-  /** Runs beforeunload unless `force`; resolves true when the view closed. */
+  /**
+   * Runs beforeunload unless `force`; resolves true when the view closed. Like Chrome, a page
+   * that does not answer within 500 ms (busy) closes without asking.
+   */
   close(options?: { force?: boolean }): Promise<boolean>;
 }
 

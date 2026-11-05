@@ -188,9 +188,13 @@ export class Requests {
     this.host.watchdog.dialogClosed();
   }
 
-  /** Whether a dialog of the view is open: its page waits and runs the view's calls afterwards. */
-  hasDialog(view: ViewImpl): boolean {
-    for (const dialog of this.dialogs.values()) if (dialog.view === view) return true;
+  /**
+   * Whether a dialog of the view (of this type) is open: its page waits and runs the view's calls
+   * afterwards.
+   */
+  hasDialog(view: ViewImpl, type?: DialogRequest['type']): boolean {
+    for (const dialog of this.dialogs.values())
+      if (dialog.view === view && (!type || dialog.type === type)) return true;
     return false;
   }
 
