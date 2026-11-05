@@ -14,7 +14,7 @@ export function redirectPopup(popup: ViewImpl, opener: ViewImpl | null): void {
     off();
     clearTimeout(timer);
     void popup.close({ force: true });
-    if (opener && !opener.closed) opener.load(url);
+    if (opener && !opener.closed) opener.loadFromPage(url);
   });
   popup.on('close', () => clearTimeout(timer));
 }

@@ -993,6 +993,11 @@ check(
     !unloadLoads.has('two'),
   JSON.stringify(unloadDialogs),
 );
+check(
+  'beforeunload: after staying the address bar shows the page again',
+  (await unloadTab.inputValue('#address')) === `${unloadURL}unload`,
+  await unloadTab.inputValue('#address'),
+);
 const unloadCount = unloadLoads.get('unload');
 await unloadTab.click('#reload');
 await unloadTab.waitForTimeout(2000);

@@ -401,6 +401,14 @@ export interface View {
   readonly id: number;
   /** Address of the main frame ('' before the first navigation). */
   readonly url: string;
+  /**
+   * Address of a navigation the host started (`load`, `back`, `forward`, `restoreHistory`) until
+   * its document commits or it ends without one ('' otherwise). An address bar shows it instead of
+   * `url` meanwhile, like Chrome: a slow server or an authentication prompt keeps the typed address
+   * in view. Navigations of the page itself never set it, so a page cannot make the bar show an
+   * address it is not on.
+   */
+  readonly pendingURL: string;
   readonly title: string;
   /** True from the start of a navigation until `load` or `error`. */
   readonly loading: boolean;
@@ -483,6 +491,8 @@ export interface ViewEvents {
    */
   navigation: {
     url: string;
+    /** {@link View.pendingURL}; also emitted when only it ends (stop, the page stays). */
+    pendingURL: string;
     canGoBack: boolean;
     canGoForward: boolean;
     loading: boolean;

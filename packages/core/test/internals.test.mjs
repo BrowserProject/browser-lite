@@ -1,11 +1,13 @@
 // Parts of the core that need no browser: page dialogs, permission and HTTP authentication
 // answers (Requests), the
-// downloads, the upload limit, popups without a new-view listener and the engine check.
+// downloads, the upload limit, popups without a new-view listener, the pending navigation and the
+// engine check.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
+import { loadedAddress, PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
 import { Requests } from '../dist/requests.js';
@@ -58,8 +60,12 @@ function fakeView(id = 1) {
       this.emitted.push([type, event]);
       for (const listener of listeners.get(type) ?? []) listener(event);
     },
-    load(url) {
+    loadFromPage(url) {
       this.loaded.push(url);
+    },
+    pendingEnded: 0,
+    endPending() {
+      this.pendingEnded++;
     },
     async close() {
       this.closed = true;
@@ -98,6 +104,40 @@ test('dialogs: defaults without a handler', () => {
     ['dialog', 5, 1, 0],
     ['dialog', 6, 0, 0],
   ]);
+});
+
+test('dialogs: staying on beforeunload ends the pending navigation, leaving does not', () => {
+  const answers = [false, true, false];
+  const { requests } = requestsWith({ dialog: () => answers.shift() });
+  const view = fakeView();
+  requests.dialog(1, view, 3, 'o', '', '');
+  assert.equal(view.pendingEnded, 1);
+  requests.dialog(2, view, 3, 'o', '', '');
+  requests.dialog(3, view, 1, 'o', 'm', '');
+  assert.equal(view.pendingEnded, 1);
+});
+
+test('pending navigation: the address the engine loads, until it arrives or loading ends', () => {
+  assert.equal(loadedAddress('https://a.example'), 'https://a.example/');
+  assert.equal(loadedAddress('a.example/x?y'), 'https://a.example/x?y');
+  assert.equal(loadedAddress('about:blank'), 'about:blank');
+  for (const text of ['mailto:a@b.example', 'javascript:alert(1)', 'zoommtg://x', 'a b', ''])
+    assert.equal(loadedAddress(text), '', text);
+  const pending = new PendingNavigation();
+  pending.start('https://b.example/slow');
+  // The engine reports the start with the address of the document being left
+  pending.update('https://a.example/', true);
+  assert.equal(pending.url, 'https://b.example/slow');
+  pending.update('https://b.example/slow', true);
+  assert.equal(pending.url, '');
+  // Stopped, failed or a download: loading ends with the old document
+  pending.start('https://b.example/file.zip');
+  pending.update('https://a.example/', false);
+  assert.equal(pending.url, '');
+  // A document committed, the page stayed or another app took the address
+  pending.start('https://b.example/');
+  assert.equal(pending.end(), true);
+  assert.equal(pending.end(), false);
 });
 
 test('dialogs: resubmit sends the form again only on true, the engine may withdraw it', async () => {

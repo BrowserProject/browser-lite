@@ -67,7 +67,10 @@ the tab overview cards to the icon, #378). The styles of `@browser-lite/ui` (pro
 select popup) are in the same sheet.
 
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
-  goes back to the page, the lock or "Not secure" hides while editing. The suggestions start
+  goes back to the page, the lock or "Not secure" hides while editing. An address that is still
+  loading (a slow server, a sign in prompt) stays in the bar and names a tab without a title
+  until its page commits, without the indicator of the page being left; Stop goes back to the
+  page's address (the view's `pendingURL`, #382). The suggestions start
   with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343), then bookmarks
   and history with their icons; the arrow keys move.
 - **Find bar** (Ctrl+F): Enter and Shift+Enter in the field and the up and down buttons go to

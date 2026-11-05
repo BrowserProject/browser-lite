@@ -54,8 +54,9 @@ async function start(): Promise<void> {
       view.load(url);
     });
   });
-  view.on('navigation', ({ url }) => {
-    if (document.activeElement !== address) address.value = url;
+  // While a typed address loads, the bar keeps it (pendingURL) until the new page commits
+  view.on('navigation', ({ url, pendingURL }) => {
+    if (document.activeElement !== address) address.value = pendingURL || url;
   });
   view.on('title', ({ title }) => {
     document.title = title || 'browser-lite';

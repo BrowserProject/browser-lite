@@ -7,7 +7,8 @@
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
 // the status line says that memory is full. Ctrl+Shift+T brings the closed tab back. An address
-// typed while the engine downloads opens once it runs.
+// typed while the engine downloads opens once it runs. An address that loads slowly or asks to
+// sign in stays in the address bar and the tab until its page commits, Stop goes back.
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -95,6 +96,15 @@ const { url: siteURL } = await serve((req, res) => {
       );
   if (req.url === '/sw.js')
     return res.writeHead(200, { 'Content-Type': 'text/javascript' }).end(SW);
+  if (req.url === '/slow') {
+    const answer = () =>
+      res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>Slow</title>');
+    return void setTimeout(answer, 4000);
+  }
+  if (req.url === '/auth')
+    return res
+      .writeHead(401, { 'Content-Type': 'text/html', 'WWW-Authenticate': 'Basic realm="Tabs"' })
+      .end('<title>Denied</title>');
   const page = PAGES[req.url];
   if (!page) return res.writeHead(404).end();
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page);
@@ -532,6 +542,60 @@ check(
   'Ctrl+Shift+T: back goes to the page before',
   (await result('ready')) === 'plain-a',
   results.get('ready'),
+);
+
+// 8) An address that waits (a slow server, a sign in prompt): like Chrome the address bar and the
+// tab show it until its page commits, the security indicator of the page being left hides, Stop
+// goes back to the address of the page
+const addressIs = (url) =>
+  page
+    .waitForFunction((url) => document.getElementById('address').value === url, url, {
+      timeout: 10000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+await page.keyboard.press('Control+t');
+await go(`${siteURL}slow`);
+await page.waitForTimeout(1500);
+check(
+  'slow address in a new tab: the address bar and the tab show it',
+  (await address()) === `${siteURL}slow` && (await activeTitle()) === `${siteURL}slow`,
+  `${await address()}, ${await activeTitle()}`,
+);
+check('slow address: its page follows', await activeIs('Slow'));
+await go(`${siteURL}auth`);
+const loginPrompt = page.locator('.bl-login-prompt');
+check(
+  'sign in prompt for an address',
+  await loginPrompt.waitFor({ timeout: 15000 }).then(
+    () => true,
+    () => false,
+  ),
+);
+check(
+  'sign in prompt: the address bar keeps the address, no indicator of the page before',
+  (await address()) === `${siteURL}auth` && (await security()).hidden,
+  `${await address()}, ${JSON.stringify(await security())}`,
+);
+await loginPrompt.locator('button[data-bl-answer=cancel]').click();
+check(
+  'sign in cancelled: the 401 page under its address',
+  (await activeIs('Denied')) && (await address()) === `${siteURL}auth`,
+  `${await activeTitle()}, ${await address()}`,
+);
+await go(`${siteURL}slow`);
+check('slow address again: shown while it loads', await addressIs(`${siteURL}slow`));
+await page.waitForTimeout(500);
+await page.click('#reload');
+const stopped = await addressIs(`${siteURL}auth`);
+// Past the server's answer: the stopped address never commits
+await page.waitForTimeout(4000);
+check(
+  'Stop: the address of the page again',
+  stopped && (await address()) === `${siteURL}auth` && (await activeTitle()) === 'Denied',
+  `${await address()}, ${await activeTitle()}`,
 );
 
 // An address typed while the engine still downloads opens as soon as it runs

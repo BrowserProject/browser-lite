@@ -4,6 +4,7 @@ import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
 import { createImeField, focusOpensKeyboard } from './keyboard.js';
+import { loadedAddress, PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
   ContextMenuInfo,
@@ -62,6 +63,7 @@ export class ViewImpl implements View {
   private readonly ime: HTMLTextAreaElement;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
+  private readonly pending = new PendingNavigation();
   private readonly lifetime = new AbortController();
   private readonly resizeObserver: ResizeObserver;
   private readonly context2d: CanvasRenderingContext2D | null = null;
@@ -245,7 +247,17 @@ export class ViewImpl implements View {
     this.call(fn, expectAnswer);
   }
 
+  get pendingURL(): string {
+    return this.pending.url;
+  }
+
   load(url: string): void {
+    this.pending.start(loadedAddress(url));
+    this.loadFromPage(url);
+  }
+
+  /** @internal An address a page asked for (a popup nobody shows): no pending address. */
+  loadFromPage(url: string): void {
     this.navigate((m) => m._bl_load_url(this.id, this.host.text(url)), true);
   }
 
@@ -262,17 +274,46 @@ export class ViewImpl implements View {
 
   stop(): void {
     this.call((m) => m._bl_stop(this.id));
+    this.endPending();
   }
 
   back(): void {
+    this.pending.start(this.historyEntry(-1));
     this.navigate((m) => m._bl_go_back(this.id));
   }
 
   forward(): void {
+    this.pending.start(this.historyEntry(1));
     this.navigate((m) => m._bl_go_forward(this.id));
   }
 
+  // Address of the back/forward entry at offset from the current one, '' when unknown
+  private historyEntry(offset: number): string {
+    const history = this.history;
+    return history ? loadedAddress(history.entries[history.index + offset]?.url ?? '') : '';
+  }
+
+  /** @internal The pending navigation ended without an engine event (stop, beforeunload stays). */
+  endPending(): void {
+    if (this.pending.end()) this.emitNavigation();
+  }
+
+  private emitNavigation(): void {
+    this.emit('navigation', {
+      url: this.url,
+      pendingURL: this.pending.url,
+      canGoBack: this.canGoBack,
+      canGoForward: this.canGoForward,
+      loading: this.loading,
+      history: this.history,
+    });
+  }
+
   restoreHistory(history: SessionHistory): void {
+    const { entries, index } = history;
+    this.pending.start(
+      loadedAddress(entries[Math.min(Math.max(index, 0), entries.length - 1)]?.url ?? ''),
+    );
     this.navigate(
       (m) => m._bl_restore_history(this.id, this.host.text(JSON.stringify(history))),
       true,
@@ -483,13 +524,8 @@ export class ViewImpl implements View {
         this.canGoForward = !!data.canGoForward;
         this.loading = !!data.loading;
         if (history) this.history = history;
-        this.emit('navigation', {
-          url,
-          canGoBack: this.canGoBack,
-          canGoForward: this.canGoForward,
-          loading: this.loading,
-          history: this.history,
-        });
+        this.pending.update(url, this.loading);
+        this.emitNavigation();
         return;
       }
       case 'title':
@@ -500,7 +536,8 @@ export class ViewImpl implements View {
         this.emit('progress', { value: Number(data.progress) || 0 });
         return;
       case 'commit':
-        // A new document: no user activation yet
+        // A new document (its navigation event follows): no user activation yet
+        this.pending.end();
         this.userActivated = false;
         this.emit('commit', { errorPage: (data.errorPage as string | undefined) || null });
         return;
@@ -514,6 +551,7 @@ export class ViewImpl implements View {
         return;
       case 'error':
         this.loading = false;
+        this.pending.end();
         this.emit('error', { description: String(data.description ?? '') });
         return;
       case 'hover':
@@ -541,8 +579,12 @@ export class ViewImpl implements View {
         this.hasBeforeUnload = !!data.listener;
         this.emit('beforeunload-state', { hasListener: this.hasBeforeUnload });
         return;
-      case 'open-tab':
       case 'external-url':
+        // A navigation went to another app (also after a redirect): the view stays where it is
+        this.endPending();
+        this.emit(type, { url: String(data.url ?? '') });
+        return;
+      case 'open-tab':
         this.emit(type, { url: String(data.url ?? '') });
         return;
       case 'focus':

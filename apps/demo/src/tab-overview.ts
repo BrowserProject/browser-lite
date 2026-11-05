@@ -65,7 +65,7 @@ function card(tab: Tab): HTMLElement {
     element('span', { className: 'overview-preview' }, preview),
     element('span', {
       className: 'overview-url',
-      textContent: hostOf(tab.url).replace(/^www[.]/, '') || (tab.newTab ? '' : tab.url),
+      textContent: hostOf(tab.address).replace(/^www[.]/, '') || (tab.newTab ? '' : tab.address),
     }),
   );
   open.addEventListener('click', () => {

@@ -157,6 +157,8 @@ export class Requests {
     this.done(dialog.view, dialog.controller);
     this.host.watchdog.dialogClosed();
     this.answerDialog(id, dialog.type, answer);
+    // The page stays: no navigation follows
+    if (dialog.type === 'beforeunload' && answer === false) dialog.view.endPending();
   }
 
   // Missing or unexpected answers count like the defaults: confirm false, prompt null, leave,

@@ -51,8 +51,9 @@ export function updateStar(url: string): void {
 export function updateSecurity(tab: Tab): void {
   const security = byId('security');
   const form = byId('address-form');
-  const url = tab.url || '';
-  const certificate = tab.errorPage === 'certificate';
+  // Nothing for an address still loading: the state belongs to the page being left
+  const url = tab.view.pendingURL ? '' : tab.url || '';
+  const certificate = !tab.view.pendingURL && tab.errorPage === 'certificate';
   const https = !tab.errorPage && /^https:/.test(url);
   const insecure = certificate || (!tab.errorPage && /^http:/.test(url));
   security.hidden = !https && !insecure;
@@ -83,6 +84,6 @@ export function updateToolbar(tab: Tab): void {
   const zoom = byId('zoom');
   zoom.hidden = tab.zoom === startSettings().zoom;
   zoom.textContent = `${Math.round(tab.zoom * 100)} %`;
-  showAddress(tab.url);
+  showAddress(tab.address);
   updateSecurity(tab);
 }

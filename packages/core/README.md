@@ -115,6 +115,13 @@ Console messages come as `console` of the view (`ConsoleMessage`: `level`, `mess
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.
 
+`view.pendingURL` is the address of a navigation the host started (`load`, `back`, `forward`,
+`restoreHistory`) until its document commits or the navigation ends (stop, failure, download,
+the page stays on its beforeunload question); every `navigation` event carries it. Like Chrome's
+address bar, show it instead of `url` meanwhile, so a slow server or a sign in prompt does not
+leave the bar on the page being left. Navigations of the page never set it, so a page cannot
+make the bar show an address it is not on.
+
 `browser.preconnect(url)` opens the connection to the origin of an http(s) address ahead (TCP
 through the transport and TLS), for example while the user types it into an address bar; the
 engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down

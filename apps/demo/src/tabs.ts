@@ -114,6 +114,7 @@ export class Tab implements SessionTab {
   private listen(): void {
     const view = this.view;
     this.on('navigation', (event) => {
+      const label = this.label;
       const moved = event.url !== this.url;
       if (moved) {
         const entry = event.history?.entries?.[event.history.index];
@@ -128,8 +129,8 @@ export class Tab implements SessionTab {
       this.canGoForward = event.canGoForward;
       this.loading = event.loading;
       if (event.history) this.history = event.history;
-      // Without a title the label is the address
-      if (moved || leftNewTab) this.updateTitle();
+      // Without a title the label is the address, also a pending one
+      if (this.label !== label) this.updateTitle();
       if (this.isActive) updateStar(this.url);
       persistSession();
       this.changed();
@@ -246,9 +247,17 @@ export class Tab implements SessionTab {
     if (this.isActive) updateToolbar(this);
   }
 
+  /**
+   * What the address bar shows: the address a load from the browser goes to until its page
+   * commits (a slow server, a sign in prompt), else the address of the page.
+   */
+  get address(): string {
+    return this.view.pendingURL || this.url;
+  }
+
   /** The title the tab shows: the page's, else its address, 'New tab' when blank. */
   get label(): string {
-    return this.title || (isBlank(this.url) ? 'New tab' : this.url);
+    return this.title || (isBlank(this.address) ? 'New tab' : this.address);
   }
 
   updateTitle(): void {
@@ -401,11 +410,11 @@ export function openURL(url: string, inNewTab: boolean): void {
 
 /** Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page. */
 export function loadInTab(tab: Tab, url: string): void {
-  if (tab.newTab) {
-    tab.newTab = false;
-    tab.updateTitle();
-  }
+  tab.newTab = false;
   tab.view.load(url);
+  // The address shows right away (pending until the page commits)
+  tab.updateTitle();
+  if (tab.isActive) updateToolbar(tab);
   focusPage();
 }
 
