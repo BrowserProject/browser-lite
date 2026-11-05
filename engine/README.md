@@ -90,7 +90,8 @@ The full list is `abi.json`; the rules behind it:
   and the heartbeat. After `'close'` the host frees the ring with `_free`.
 - Network: every TCP connection is `Module.blTransport.openTCP(host, port)`, TLS happens inside
   the engine. `onclose(reason)` gets a `CloseReason` string; `Sockets.cpp` maps it to the
-  socket error that picks the error page.
+  socket error that picks the error page. A request whose pooled connection closes before any
+  response byte goes again on a new connection (patch 0078).
 - Configuration: the environment (`Module.ENV` in `preRun`) is read once at the start of
   `main()` (`EngineConfig.cpp`). `BL_FEATURES` lists the host services a page may reach;
   a disabled feature looks like a browser without it, and no `__bl*` global is ever visible to

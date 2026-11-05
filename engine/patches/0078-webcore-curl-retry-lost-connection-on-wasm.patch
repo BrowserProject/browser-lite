@@ -1,0 +1,121 @@
+diff --git a/Source/WebCore/platform/network/curl/CurlFormDataStream.cpp b/Source/WebCore/platform/network/curl/CurlFormDataStream.cpp
+index 8f3a145618..94c3317588 100644
+--- a/Source/WebCore/platform/network/curl/CurlFormDataStream.cpp
++++ b/Source/WebCore/platform/network/curl/CurlFormDataStream.cpp
+@@ -63,6 +63,17 @@ void CurlFormDataStream::clean()
+     m_fileHandle = { };
+ }
+ 
++#if PLATFORM(WASM)
++// Back to the first byte, for sending the same body again
++void CurlFormDataStream::rewind()
++{
++    clean();
++    m_totalReadSize = 0;
++    m_elementPosition = 0;
++    m_dataOffset = 0;
++}
++#endif
++
+ const Vector<uint8_t>* CurlFormDataStream::getPostData()
+ {
+     if (!m_formData)
+diff --git a/Source/WebCore/platform/network/curl/CurlFormDataStream.h b/Source/WebCore/platform/network/curl/CurlFormDataStream.h
+index c8ff425b1f..fe5cd7f4a1 100644
+--- a/Source/WebCore/platform/network/curl/CurlFormDataStream.h
++++ b/Source/WebCore/platform/network/curl/CurlFormDataStream.h
+@@ -38,6 +38,9 @@ public:
+     WEBCORE_EXPORT ~CurlFormDataStream();
+ 
+     void clean();
++#if PLATFORM(WASM)
++    void rewind();
++#endif
+ 
+     const Vector<uint8_t>* getPostData();
+     unsigned long long totalSize();
+diff --git a/Source/WebCore/platform/network/curl/CurlRequest.cpp b/Source/WebCore/platform/network/curl/CurlRequest.cpp
+index 117eb632ab..8b435a1e65 100644
+--- a/Source/WebCore/platform/network/curl/CurlRequest.cpp
++++ b/Source/WebCore/platform/network/curl/CurlRequest.cpp
+@@ -529,6 +529,8 @@ void CurlRequest::didCompleteTransfer(CURLcode result)
+         long socketError = 0;
+         if (!m_response.statusCode && m_curlHandle && curl_easy_getinfo(m_curlHandle->handle(), CURLINFO_OS_ERRNO, &socketError) == CURLE_OK)
+             result = connectionErrorOnWasm(result, socketError);
++        if (retryOnNewConnection(result))
++            return;
+ #endif
+         auto type = (result == CURLE_OPERATION_TIMEDOUT && timeoutInterval()) ? ResourceError::Type::Timeout : ResourceError::Type::General;
+         auto resourceError = ResourceError(result, m_request.url(), type);
+@@ -549,6 +551,47 @@ void CurlRequest::didCompleteTransfer(CURLcode result)
+     }
+ }
+ 
++#if PLATFORM(WASM)
++// Like other browsers: a connection from the pool (kept alive, HTTP/2, preconnected) can die
++// while the request is on its way, the server closed it in the meantime. When that happens before
++// any response byte, the request is sent again on a new connection. curl itself only does this
++// for some HTTP/1.1 cases, not for a lost HTTP/2 connection. Not repeated: a request on a new
++// connection and a stream the server reset (CURLE_HTTP2_STREAM), there the server refused it.
++bool CurlRequest::retryOnNewConnection(CURLcode result)
++{
++    static constexpr unsigned maxRetries = 2;
++
++    switch (result) {
++    case CURLE_SEND_ERROR:
++    case CURLE_RECV_ERROR:
++    case CURLE_GOT_NOTHING:
++    case CURLE_HTTP2:
++        break;
++    default:
++        return false;
++    }
++
++    long newConnections = 0;
++    if (m_connectionRetries >= maxRetries || !m_response.headers.isEmpty() || m_totalReceivedSize || !m_curlHandle
++        || curl_easy_getinfo(m_curlHandle->handle(), CURLINFO_NUM_CONNECTS, &newConnections) != CURLE_OK || newConnections)
++        return false;
++
++    ++m_connectionRetries;
++    finalizeTransfer();
++    m_formDataStream.rewind();
++    m_response = CurlResponse { };
++    m_didReceiveResponse = false;
++    m_requestHeaders.clear();
++    m_requestHeaderSize = 0;
++
++    runOnMainThread([this, protectedThis = Ref { *this }] {
++        if (!isCancelled())
++            startWithJobManager();
++    });
++    return true;
++}
++#endif
++
+ void CurlRequest::didCancelTransfer()
+ {
+     finalizeTransfer();
+diff --git a/Source/WebCore/platform/network/curl/CurlRequest.h b/Source/WebCore/platform/network/curl/CurlRequest.h
+index a90eec38e1..db2c452315 100644
+--- a/Source/WebCore/platform/network/curl/CurlRequest.h
++++ b/Source/WebCore/platform/network/curl/CurlRequest.h
+@@ -113,6 +113,9 @@ private:
+     void didCompleteTransfer(CURLcode) override;
+     void didCancelTransfer() override;
+     void finalizeTransfer();
++#if PLATFORM(WASM)
++    bool retryOnNewConnection(CURLcode);
++#endif
+ 
+     int didReceiveDebugInfo(curl_infotype, std::span<const char>);
+ 
+@@ -166,6 +169,9 @@ private:
+     HTTPHeaderMap m_requestHeaders;
+     MonotonicTime m_performStartTime;
+     size_t m_totalReceivedSize { 0 };
++#if PLATFORM(WASM)
++    unsigned m_connectionRetries { 0 };
++#endif
+ };
+ 
+ } // namespace WebCore

@@ -6,9 +6,9 @@
 // response with fetch(); the script writes everything into the title. Then the failures: bad
 // certificates (self-signed, wrong name, expired), refused connection, unknown name, failing
 // navigations (error page with reason, reload, back, the view keeps the address), Safari's HTTP/2
-// settings and request headers (#283), many hanging
-// connections (limit of curl) and a relay that restarts during the session (also
-// navigator.onLine and the error page "No connection" that reloads itself, a form only after
+// settings and request headers (#283), a request again on a new connection when a pooled one dies
+// under it, many hanging connections (limit of curl) and a relay that restarts during the session
+// (also navigator.onLine and the error page "No connection" that reloads itself, a form only after
 // "Resend"). Last, reasons only a stand-in relay delivers reliably (no answer, blocked, address
 // unreachable). Also the favicon (icon event) and the GPU context loss of the engine.
 //
@@ -275,8 +275,28 @@ h2Server.on('session', (session) =>
     h2.settings ??= settings;
   }),
 );
+// /drop-once/*: the first request drops its connection before any response byte, /drop: every one
+const h2Drops = [];
 h2Server.on('stream', (stream, headers, flags, rawHeaders) => {
-  if (headers[':path'] === '/fingerprint') h2.headers = rawHeaders;
+  const path = headers[':path'];
+  if (path.startsWith('/drop')) {
+    h2Drops.push(path);
+    if (path === '/drop' || h2Drops.filter((p) => p === path).length === 1) {
+      stream.session.socket.destroy();
+      return;
+    }
+    let body = '';
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk) => {
+      body += chunk;
+    });
+    stream.on('end', () => {
+      stream.respond({ ':status': 200, 'content-type': 'text/plain' });
+      stream.end(`${path}:${body}`);
+    });
+    return;
+  }
+  if (path === '/fingerprint') h2.headers = rawHeaders;
   stream.respond({ ':status': 200, 'content-type': 'text/html' });
   stream.end('<!doctype html><title>H2</title>');
 });
@@ -416,6 +436,34 @@ check(
     h2Value('accept-encoding') === 'gzip, deflate, br, zstd' &&
     /^[a-zA-Z-]+(,[a-zA-Z-]+;q=0\.[1-9])*$/.test(h2Value('accept-language') ?? ''),
   `${h2Value('priority')} / ${h2Value('accept-encoding')} / ${h2Value('accept-language')}`,
+);
+
+// A pooled connection that dies under a request before any response byte (seen on DuckDuckGo): the
+// request goes again on a new connection like in other browsers, also a POST with its body. Not
+// repeated on that new connection.
+await page.evaluate(() =>
+  window.blTest.eval(`(async () => {
+    const text = (response) => response.text();
+    const failed = () => 'failed';
+    const get = await fetch('/drop-once/get').then(text, failed);
+    const post = await fetch('/drop-once/post', { method: 'POST', body: 'form-body' }).then(text, failed);
+    const always = await fetch('/drop').then(text, failed);
+    document.title = ['RETRY', get, post, always].join('|');
+  })()`),
+);
+const retried = await waitTitle('RETRY|', 60000);
+const drops = (path) => h2Drops.filter((p) => p === path).length;
+check(
+  'lost pooled connection: GET and POST sent again on a new connection',
+  retried.startsWith('RETRY|/drop-once/get:|/drop-once/post:form-body|') &&
+    drops('/drop-once/get') === 2 &&
+    drops('/drop-once/post') === 2,
+  `${retried} ${JSON.stringify(h2Drops)}`,
+);
+check(
+  'request dropped on a new connection is not repeated',
+  retried.endsWith('|failed') && drops('/drop') === 2,
+  `${retried} ${JSON.stringify(h2Drops)}`,
 );
 h2Server.close();
 

@@ -166,7 +166,10 @@ the main thread (`engine/js/sockets.js`), which calls `Module.blTransport` (the 
 passed to `createBrowser`). Incoming data is written straight into the buffer; at most 8 MB are
 in flight and `onsent` gives backpressure. `getaddrinfo` returns placeholders, the relay
 resolves names. A `CloseReason` becomes an errno and then a curl code (patch 0039), which picks
-the error page (#174, #175). `file:` addresses read the engine file system; one without a file
+the error page (#174, #175). Like other browsers, `CurlRequest` sends a request again on a new
+connection when the pooled connection it took (kept alive, HTTP/2, preconnected) dies before any
+response byte, at most twice, also with a body; one that fails on a new connection is final (patch
+0078, #397). `file:` addresses read the engine file system; one without a file
 and an `about:` address WebCore does not load get the error page too, from the engine's own
 error codes (`LoadErrorCode` in `engine/src/LoaderStrategy.h`, #395).
 
