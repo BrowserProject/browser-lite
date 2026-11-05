@@ -130,7 +130,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   runs every suite in CI (open failures below); the 54 real sites of `tests/compat` load in
   Firefox 155 too (2026-11-01, locally under Xvfb, CNN 12.8 s, weather.com 5.0 s), and on
   macOS Safari 18 CNN, The New York Times, Amazon, Google search and Maps (WebGL), Reddit,
-  Spiegel and SBB one after the other in one tab (2026-11-01).
+  Spiegel and SBB one after the other in one tab (2026-11-01). The compatibility run goes on
+  when its host browser dies during a site (#396).
 - **Extensions**: a plugin system for integrators ([extensions.md](extensions.md), #280 to
   #282): request handler chain, scripts (isolated worlds) and CSS in pages by match patterns,
   messages, storage, UI slots rendered by the demo; no extensions yet, and without one nothing of

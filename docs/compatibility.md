@@ -3,6 +3,8 @@
 The site list is `tests/compat/sites.txt`. CI loads it in the job `compat` (informational, foreign
 servers fail now and then) and writes a table into the run summary. Screenshots are in the
 artifact `compat`, named by host and path (`build/sites/<host>_<path>.png`).
+When the host browser dies during a site (a crash, the kernel's out of memory killer), that site
+reports `host browser died` and the run goes on in a new host browser (#396).
 
 ## State 2026-10-30 (local)
 

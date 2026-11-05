@@ -44,6 +44,13 @@ const within = (promise, ms, what) =>
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(what)), ms)),
   ]);
+// A new host browser for the rest of the run: one host crash (for example under memory pressure)
+// must not end the run
+async function relaunch(reason) {
+  console.log(`  (${reason}: a new host browser for the rest)`);
+  await within(browser.close(), 10000, 'browser.close').catch(() => {});
+  browser = await launch();
+}
 
 let failed = 0;
 const rows = [];
@@ -183,6 +190,8 @@ async function mainThreadStack(cdp) {
 }
 
 for (const site of sites) {
+  // A closed page resolves page.close() even when the browser died with it, so look here
+  if (!browser.isConnected()) await relaunch('the host browser died');
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   // The main thread's stack of a hanging page: only Chromium has CDP
   const cdp = BROWSER === 'chromium' ? await page.context().newCDPSession(page) : null;
@@ -193,14 +202,15 @@ for (const site of sites) {
     // A hard limit per site: a blocked page must not hold up the whole run
     outcome = await within(checkSite(site, page, log), TIMEOUT + 90000, 'page hangs');
   } catch (e) {
+    const died = !browser.isConnected();
     outcome = {
-      result: `hangs (${e.message})`,
+      result: died ? `host browser died (${e.message})` : `hangs (${e.message})`,
       seconds: '-',
       title: '',
       firstLayout: '-',
       firstPaint: '-',
     };
-    if (cdp) log.push('Stack of the main thread:', ...(await mainThreadStack(cdp)));
+    if (cdp && !died) log.push('Stack of the main thread:', ...(await mainThreadStack(cdp)));
   }
   const { result, seconds, title, firstLayout, firstPaint } = outcome;
   if (result !== 'ok') failed++;
@@ -220,9 +230,7 @@ for (const site of sites) {
   try {
     await within(page.close(), 10000, 'close');
   } catch {
-    // The page no longer reacts: a new browser for the rest
-    await within(browser.close(), 10000, 'browser.close').catch(() => {});
-    browser = await launch();
+    await relaunch('the page no longer reacts');
   }
 }
 
