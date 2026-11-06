@@ -5,6 +5,9 @@ servers fail now and then) and writes a table into the run summary. Screenshots 
 artifact `compat`, named by host and path (`build/sites/<host>_<path>.png`).
 When the host browser dies during a site (a crash, the kernel's out of memory killer), that site
 reports `host browser died` and the run goes on in a new host browser (#396).
+A failure of the test's own host page is not the site's: `host page failed` (its load failed, for
+example `ERR_NETWORK_CHANGED`), `host page did not start` (its scripts did not run within 30 s) or
+`engine did not start`, each at once instead of after the time limit (#430).
 
 ## State 2026-10-30 (local)
 
