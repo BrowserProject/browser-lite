@@ -107,7 +107,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | Event | What the host does |
 |---|---|
 | `new-view` (browser) | `window.open` or `target=_blank`: the view runs but has no container, so it cannot be seen. `view.attach(element)` it (for example in a new tab), or `view.close()` it |
-| `open-tab` | Ctrl or middle click on a link: open `url` in a new view, or ignore it |
+| `open-tab` | Ctrl/Cmd or middle click on a link, also one with `target=_blank`: open `url` in a new view, or ignore it |
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
 | `context-menu` | Show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |

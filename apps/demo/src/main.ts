@@ -300,7 +300,7 @@ async function start(restarted: boolean): Promise<void> {
   runtime.browser = browser;
   runtime.stopped = false;
   profile.attach(browser);
-  browser.on('new-view', ({ view }) => adoptView(view));
+  browser.on('new-view', ({ view, opener }) => adoptView(view, opener));
   browser.on('download', ({ download }) => addDownload(download));
   browser.on('memory-pressure', () => {
     if (discardForMemory()) return;

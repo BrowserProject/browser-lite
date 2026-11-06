@@ -682,6 +682,20 @@ static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxF
     notifyHost(viewId, "external-url", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
 }
 
+// Ctrl/Cmd+click or middle click on a link, also one with target=_blank: like
+// Chrome a new tab in the background, the page stays. A click by a script
+// without a user gesture navigates as usual (or meets the popup blocker).
+static bool openTabForModifiedClick(int viewId, const NavigationAction& action, const URL& url)
+{
+    if (action.type() != NavigationType::LinkClicked || !url.protocolIsInHTTPFamily() || !action.processingUserGesture())
+        return false;
+    auto& mouse = action.mouseEventData();
+    if (!mouse || !(mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle))
+        return false;
+    notifyHost(viewId, "open-tab", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
+    return true;
+}
+
 void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const NavigationAction& action, const ResourceRequest& request, const ResourceResponse& redirectResponse, FormState*, const String&, std::optional<NavigationIdentifier>, std::optional<HitTestResult>&&, bool, NavigationUpgradeToHTTPSBehavior, SandboxFlags sandboxFlags, PolicyDecisionMode, FramePolicyFunction&& function)
 {
     if (isExternalURL(request.url())) {
@@ -705,15 +719,9 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
         });
         return;
     }
-    // Ctrl/Cmd+click or middle click on a link: like Chrome in a new
-    // background view, the page stays
-    if (action.type() == NavigationType::LinkClicked && request.url().protocolIsInHTTPFamily()) {
-        auto& mouse = action.mouseEventData();
-        if (mouse && (mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle)) {
-            notifyHost(m_view->id(), "open-tab", makeString("{\"url\":\""_s, jsonEscape(request.url().string()), "\"}"_s));
-            function(PolicyAction::Ignore);
-            return;
-        }
+    if (openTabForModifiedClick(m_view->id(), action, request.url())) {
+        function(PolicyAction::Ignore);
+        return;
     }
     function(PolicyAction::Use);
 }
@@ -774,6 +782,10 @@ void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationA
     if (isExternalURL(request.url())) {
         Ref frame = m_frameLoader->frame();
         openExternalURL(m_view->id(), frame, frame->effectiveSandboxFlags(), action, request.url());
+        function(PolicyAction::Ignore);
+        return;
+    }
+    if (openTabForModifiedClick(m_view->id(), action, request.url())) {
         function(PolicyAction::Ignore);
         return;
     }

@@ -185,7 +185,7 @@
     { "type": "close", "scope": "view", "payload": "empty (window.close())" },
     { "type": "focus", "scope": "view", "payload": "empty (window.focus())" },
     { "type": "take-focus", "scope": "view", "payload": "{forward} (Tab past the last element)" },
-    { "type": "open-tab", "scope": "view", "payload": "{url} (ctrl/middle click on a link)" },
+    { "type": "open-tab", "scope": "view", "payload": "{url} (ctrl/meta/middle click with a user gesture on an http(s) link, also one with target=_blank, which then opens no view)" },
     { "type": "external-url", "scope": "view", "payload": "{url} (mailto:, tel:, app links)" },
     { "type": "new-view", "scope": "view", "payload": "{opener} (view id of the opener, 0 = none); the view id is the new view" },
     { "type": "popup-blocked", "scope": "view", "payload": "{url, origin}: a window.open, target=_blank link or form without a user gesture was not opened; url is its address (empty for window.open without one), origin the top page's. The permission 'popups' (bl_set_permission) of that origin lets them open" },

@@ -93,8 +93,12 @@ select popup) are in the same sheet.
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
   show the cross only on the active (and hovered) tab, on touch screens a little earlier. A tab
   and the window are named after the page's title, without one after its address (#367).
-  Ctrl/Cmd+click, middle click and Open link or image in new tab of the context menu open a
-  background tab like Chrome; in the phone layout a message offers to switch to it (#391).
+  Ctrl/Cmd+click, middle click (also on a `target=_blank` link) and Open link or image in new
+  tab of the context menu open a background tab like Chrome; in the phone layout a message
+  offers to switch to it (#391). Like Chrome a tab opened from a link goes right after its page:
+  in the background after the tabs that page opened before, so they keep the order of the
+  clicks, in front (`target=_blank`, `window.open`) directly after it; an address loaded from
+  the address bar or a panel starts over next to the page (`openedBy`, #416).
   Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).

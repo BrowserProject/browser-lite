@@ -67,6 +67,11 @@ export class Tab implements SessionTab {
    * active returns to it, like Chrome and Firefox.
    */
   opener: Tab | null = null;
+  /**
+   * Tab whose link opened this one; the next tabs it opens from links come after this one, like
+   * Chrome. Forgotten when an address is loaded from the address bar or a panel.
+   */
+  openedBy: Tab | null = null;
   /** Discarded: a tab in its place took over, closing the view is no closing by the user. */
   replaced = false;
   /** Dialogs of the current document blocked by the user, or skipped in the background. */
@@ -223,7 +228,7 @@ export class Tab implements SessionTab {
     });
     this.on('popup-blocked', (event) => addBlockedPopup(this, event));
     // Ctrl/Cmd click or middle click on a link: a new tab in the background
-    this.on('open-tab', (event) => openBackgroundTab(event.url));
+    this.on('open-tab', (event) => openBackgroundTab(event.url, this));
     // mailto:, tel:, app links: the host browser hands them to the system (with its question)
     this.on('external-url', (event) => {
       window.open(event.url, '_blank', 'noopener');
@@ -248,7 +253,7 @@ export class Tab implements SessionTab {
     this.on('find', (event) => showFindCount(view, event.matches, event.index));
     this.on('context-menu', (info) => {
       const items = defaultMenuItems(view, info, {
-        openTab: (url) => openMenuTab(url),
+        openTab: (url) => openMenuTab(url, this),
         print: () => printTab(this),
       });
       showContextMenu(view, info, [...items, ...slotMenuItems(ui, view, info)]);
@@ -416,6 +421,18 @@ function add(tab: Tab, before?: Tab): Tab {
   return tab;
 }
 
+/**
+ * Like Chrome, a tab opened from a link of opener goes right after it; in the background after
+ * the last tab opener opened before, so they keep the order of the clicks. Returns the tab to
+ * insert before, undefined for the end of the strip.
+ */
+function linkTabPlace(opener: Tab | null, foreground: boolean): Tab | undefined {
+  const at = opener ? list.indexOf(opener) : -1;
+  if (at < 0) return undefined;
+  const opened = foreground ? -1 : list.findLastIndex((tab) => tab.openedBy === opener);
+  return list[Math.max(at, opened) + 1];
+}
+
 function createView(url?: string) {
   const browser = runtime.browser;
   if (browser?.state !== 'ready') return null;
@@ -457,6 +474,8 @@ export function openURL(url: string, inNewTab: boolean): void {
 /** Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page. */
 export function loadInTab(tab: Tab, url: string): void {
   tab.newTab = false;
+  // Like Chrome after a typed address: the next tabs from links go next to their opener again
+  for (const other of list) other.openedBy = null;
   tab.view.load(url);
   // The address shows right away (pending until the page commits)
   tab.updateTitle();
@@ -464,11 +483,13 @@ export function loadInTab(tab: Tab, url: string): void {
   focusPage();
 }
 
-/** A new tab in the background (Ctrl click on a link). */
-export function openBackgroundTab(url: string): Tab | null {
+/** A new tab in the background from a link of opener (Ctrl click), placed after it. */
+export function openBackgroundTab(url: string, opener: Tab | null): Tab | null {
   const view = createView(url);
   if (!view) return null;
-  const tab = add(new Tab(view, { url }));
+  const tab = new Tab(view, { url });
+  tab.openedBy = opener;
+  add(tab, linkTabPlace(opener, false));
   persistSession();
   return tab;
 }
@@ -477,8 +498,8 @@ export function openBackgroundTab(url: string): Tab | null {
  * Open link or image in new tab of the context menu: in the background like Chrome. The phone
  * layout shows no tab strip, so like Chrome on Android a message offers to switch to it.
  */
-function openMenuTab(url: string): void {
-  const tab = openBackgroundTab(url);
+function openMenuTab(url: string, opener: Tab): void {
+  const tab = openBackgroundTab(url, opener);
   if (tab && compactLayout())
     showSnackbar('Opened in a new tab', { label: 'Switch', run: () => activate(tab) });
 }
@@ -495,7 +516,6 @@ export function restoredTab(entry: Omit<SessionEntry, 'active'>, before?: Tab): 
   return add(tab, before);
 }
 
-/** A view the engine opened (window.open, target=_blank) becomes the active tab. */
 const skipReasons: Record<SkippedFile['reason'], string> = {
   'too-large': 'larger than 512 MB',
   unreadable: 'could not be read',
@@ -508,12 +528,17 @@ function skippedText(files: SkippedFile[]): string {
   return `${files.length} files not uploaded: ${files.map((file) => `${file.name} (${skipReasons[file.reason]})`).join(', ')}`;
 }
 
-export function adoptView(view: View): void {
+/**
+ * A view the engine opened (window.open, target=_blank) becomes the active tab, right after the
+ * tab of opener (without one the active tab).
+ */
+export function adoptView(view: View, opener: View | null): void {
   view.attach(pages());
   if (view.zoom !== startSettings().zoom) view.setZoom(startSettings().zoom);
   const tab = new Tab(view, {});
   tab.opener = active;
-  activate(add(tab));
+  tab.openedBy = (opener && tabOf(opener)) ?? active;
+  activate(add(tab, linkTabPlace(tab.openedBy, true)));
 }
 
 export function activate(tab: Tab): void {
@@ -594,6 +619,7 @@ function removeTab(tab: Tab): void {
   const index = list.indexOf(tab);
   if (index < 0) return;
   list.splice(index, 1);
+  for (const other of list) if (other.openedBy === tab) other.openedBy = null;
   tab.dispose();
   tabsChanged();
   if (runtime.stopped) return;
@@ -658,6 +684,8 @@ export function discardForMemory(): Tab | null {
   );
   if (!fresh) return null;
   fresh.lastActive = tab.lastActive;
+  fresh.openedBy = tab.openedBy;
+  for (const other of list) if (other.openedBy === tab) other.openedBy = fresh;
   // The icon now belongs to the new tab
   fresh.iconUrl = tab.iconUrl;
   tab.iconUrl = null;

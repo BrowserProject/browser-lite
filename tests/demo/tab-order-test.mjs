@@ -2,7 +2,10 @@
 // dropped at and slides into it, a click without movement only activates it, a press on its cross
 // never drags, Ctrl+Shift+PageDown and PageUp move the active tab, and the session keeps the new
 // order after the demo opens again. Closing the active tab activates its right neighbour (the left
-// one at the end), or the tab it was opened from while no other tab was active in between.
+// one at the end), or the tab it was opened from while no other tab was active in between. Tabs
+// opened from links come right after their page like in Chrome: in the background (Ctrl+click,
+// middle click, also on a target=_blank link) after the ones it opened before, in front
+// (target=_blank) directly after it; an address typed into the page starts over.
 //
 //   node tests/demo/tab-order-test.mjs [engine-dir]
 import {
@@ -19,13 +22,16 @@ import {
 
 timeLimit();
 
+// L: a link to /a and a target=_blank link to /d, 60 px high each
+const LINKS =
+  '<style>body{margin:0}a{display:block;width:300px;height:60px}</style><a href="/a">A</a><a href="/d" target="_blank">D</a>';
 const { url: siteURL } = await serve((req, res) => {
   const name = req.url.slice(1).toUpperCase();
-  if (!/^[A-D]$/.test(name)) return res.writeHead(404).end();
+  if (!/^[A-DL]$/.test(name)) return res.writeHead(404).end();
   res
     .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     .end(
-      `<!doctype html><title>${name}</title><p>${name}<script>console.log('RESULT ready=${name}')</script>`,
+      `<!doctype html><title>${name}</title>${name === 'L' ? LINKS : `<p>${name}`}<script>console.log('RESULT ready=${name}')</script>`,
     );
 });
 
@@ -189,6 +195,55 @@ check(
   (await activeTitle()) === 'C',
   await activeTitle(),
 );
+
+// Tabs from links of L, opened in B before C (B, restored by the session, loads on the click)
+results.delete('ready');
+await page.locator('#tab-list .tab').first().click();
+await results.wait('ready');
+const typeL = async () => {
+  results.delete('ready');
+  await page.click('#address');
+  await page.fill('#address', `${siteURL}l`);
+  await page.press('#address', 'Enter');
+  return results.wait('ready');
+};
+check('links page', (await typeL()) === 'L' && (await orderIs('LC')), await order());
+const view = await page.locator('canvas[data-bl-view]:visible').boundingBox();
+const plainLink = { x: view.x + 100, y: view.y + 30 };
+const blankLink = { x: view.x + 100, y: view.y + 90 };
+const ctrlClick = async ({ x, y }) => {
+  await page.keyboard.down('Control');
+  await page.mouse.click(x, y);
+  await page.keyboard.up('Control');
+};
+await ctrlClick(plainLink);
+check('Ctrl+click: right after the page', await orderIs('LAC'), await order());
+await page.mouse.click(blankLink.x, blankLink.y, { button: 'middle' });
+check(
+  'middle click on a target=_blank link: after the tab opened before',
+  await orderIs('LADC'),
+  await order(),
+);
+await ctrlClick(plainLink);
+check('Ctrl+click again: in the order of the clicks', await orderIs('LADAC'), await order());
+check('link tabs open in the background', (await activeTitle()) === 'L', await activeTitle());
+await ctrlClick(blankLink);
+check(
+  'Ctrl+click on a target=_blank link: in the background too',
+  (await orderIs('LADADC')) && (await activeTitle()) === 'L',
+  `${await order()}, ${await activeTitle()}`,
+);
+await page.mouse.click(blankLink.x, blankLink.y);
+check(
+  'target=_blank link: in front, directly after the page',
+  (await orderIs('LDADADC')) && (await activeTitle()) === 'D',
+  `${await order()}, ${await activeTitle()}`,
+);
+await page.keyboard.press('Control+w');
+check('closed: back to the page', (await orderIs('LADADC')) && (await activeTitle()) === 'L');
+await typeL();
+await ctrlClick(plainLink);
+check('after a typed address: right after the page again', await orderIs('LAADADC'), await order());
 
 await browser.close();
 finish();

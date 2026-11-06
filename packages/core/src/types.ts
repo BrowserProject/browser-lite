@@ -549,7 +549,7 @@ export interface ViewEvents {
   'beforeunload-state': { hasListener: boolean };
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
-  /** Ctrl/middle click on a link. */
+  /** Ctrl/Cmd or middle click on a link, also one with target=_blank (no `new-view` then). */
   'open-tab': { url: string };
   /**
    * A window.open, target=_blank link or form without a user gesture was not opened, like in
