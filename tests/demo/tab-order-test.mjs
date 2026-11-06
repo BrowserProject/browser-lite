@@ -1,7 +1,8 @@
 // Reordering tabs like Chrome and Firefox: a tab dragged with the mouse takes the place it is
 // dropped at and slides into it, a click without movement only activates it, a press on its cross
 // never drags, Ctrl+Shift+PageDown and PageUp move the active tab, and the session keeps the new
-// order after the demo opens again.
+// order after the demo opens again. Closing the active tab activates its right neighbour (the left
+// one at the end), or the tab it was opened from while no other tab was active in between.
 //
 //   node tests/demo/tab-order-test.mjs [engine-dir]
 import {
@@ -144,6 +145,50 @@ results.delete('ready');
 await page.goto(stack.app());
 await results.wait('ready', TIMEOUT);
 check('session: the restored tabs keep the order', await orderIs('BDCA'), await order());
+
+// Closing the active tab like Chrome and Firefox
+const tabCount = (count) =>
+  page
+    .waitForFunction(
+      (count) => document.querySelectorAll('#tab-list .tab').length === count,
+      count,
+      {
+        timeout: 10000,
+      },
+    )
+    .then(
+      () => true,
+      () => false,
+    );
+await page.locator('#tab-list .tab').nth(1).click();
+await page.locator('#tab-list .tab.active .close').click();
+check('close: the order', await orderIs('BCA'), await order());
+check(
+  'close: the right neighbour becomes active',
+  (await activeTitle()) === 'C',
+  await activeTitle(),
+);
+await page.locator('#tab-list .tab').nth(2).click();
+await page.keyboard.press('Control+w');
+check('close the last tab: the order', await orderIs('BC'), await order());
+check('close the last tab: the left neighbour', (await activeTitle()) === 'C', await activeTitle());
+await page.locator('#tab-list .tab').first().click();
+await page.keyboard.press('Control+t');
+await tabCount(3);
+await page.keyboard.press('Control+w');
+await tabCount(2);
+check('Ctrl+T, Ctrl+W: back to the opener', (await activeTitle()) === 'B', await activeTitle());
+await page.keyboard.press('Control+t');
+await tabCount(3);
+await page.locator('#tab-list .tab').nth(1).click();
+await page.locator('#tab-list .tab').nth(2).click();
+await page.keyboard.press('Control+w');
+await tabCount(2);
+check(
+  'after switching tabs the opener is forgotten: the left neighbour',
+  (await activeTitle()) === 'C',
+  await activeTitle(),
+);
 
 await browser.close();
 finish();

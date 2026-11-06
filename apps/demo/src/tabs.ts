@@ -61,6 +61,11 @@ export class Tab implements SessionTab {
   /** Closing waits for the beforeunload answer; afterwards closeReturn becomes active. */
   closing = false;
   closeReturn: Tab | null = null;
+  /**
+   * Tab that was active when this one opened in front; closing this tab before another tab was
+   * active returns to it, like Chrome and Firefox.
+   */
+  opener: Tab | null = null;
   /** Discarded: a tab in its place took over, closing the view is no closing by the user. */
   replaced = false;
   /** Dialogs of the current document blocked by the user, or skipped in the background. */
@@ -426,6 +431,7 @@ export function openTab(url: string, newTab = false): Tab | null {
   if (!view) return null;
   const tab = new Tab(view, { url });
   tab.newTab = newTab;
+  tab.opener = active;
   activate(add(tab));
   return tab;
 }
@@ -503,7 +509,9 @@ function skippedText(files: SkippedFile[]): string {
 export function adoptView(view: View): void {
   view.attach(pages());
   if (view.zoom !== startSettings().zoom) view.setZoom(startSettings().zoom);
-  activate(add(new Tab(view, {})));
+  const tab = new Tab(view, {});
+  tab.opener = active;
+  activate(add(tab));
 }
 
 export function activate(tab: Tab): void {
@@ -512,6 +520,7 @@ export function activate(tab: Tab): void {
   tab.lastActive = now;
   if (active) {
     active.lastActive = now;
+    active.opener = null;
     active.show(false);
   }
   active = tab;
@@ -590,8 +599,11 @@ function removeTab(tab: Tab): void {
   updateHostBeforeUnload();
   if (active !== tab) return;
   active = null;
-  const back = tab.closeReturn;
-  const next = back && list.includes(back) ? back : list.at(-1);
+  // Like Chrome and Firefox: back to the tab it came from, else the right neighbour, else the left
+  const next =
+    [tab.closeReturn, tab.opener].find((back) => back && list.includes(back)) ??
+    list[index] ??
+    list[index - 1];
   if (next) activate(next);
   else openNewTab();
 }

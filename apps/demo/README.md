@@ -102,7 +102,9 @@ select popup) are in the same sheet.
   (`tab-drag.ts`): past 5 px it follows the pointer, takes the place of a neighbour once it
   covers half of it and slides into its place when released; a click only activates, the cross
   never drags, a finger keeps scrolling the strip. Ctrl+Shift+PageUp and PageDown move the
-  active tab; the session keeps the order (#383).
+  active tab; the session keeps the order (#383). Closing the active tab activates the tab it
+  was opened from in front (Ctrl+T, a link or a popup) as long as no other tab was active in
+  between, else its right neighbour, the left one at the end, like Chrome and Firefox (#410).
 - **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
   (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
