@@ -290,7 +290,9 @@ the ICU groups of the user's languages in the background (#240). The first read 
 for scans the rendered text and fetches the fonts and dictionaries it needs side by side (#252);
 fonts only reached as a fallback for characters (scripts, CJK, emoji) hold up the engine thread at
 most 300 ms, the text is laid out again once they are there (#255), only the elements with text
-outside the fonts of `engine.data` (#401).
+outside the fonts of `engine.data` (#401). The fonts of a cascade keep every fallback font their
+cached shaped text points to, also the one for an emoji cluster, so a purge of WebKit's font
+cache never deletes a font that text still paints with (patch 0087, #434).
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
 file with the WAL folded in, about 1 s after a change and on page hide (#180). Every commit also

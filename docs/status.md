@@ -119,7 +119,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   and every layer update decoded it again (vimeo.com: 39 to 53 % of the engine thread in WebP
   decoding after the load, now none, #432).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
-  (COLRv1), loaded on demand in small slices (#229).
+  (COLRv1), loaded on demand in small slices (#229). Text with an emoji and VS16 keeps its font
+  when the font cache is purged under memory pressure, before the next paint of it could abort
+  the engine (github.com/lovasoa after an emoji page, #434).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
   last device writes (#188 to #191, #197).
 - **Demo UI** (Material redesign of 2026-11-02, #345, on the refresh #339 to #341): tonal

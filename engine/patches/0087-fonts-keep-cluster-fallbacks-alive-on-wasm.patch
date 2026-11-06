@@ -1,0 +1,48 @@
+diff --git a/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp b/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
+index cb5818e711..b483ad0a05 100644
+--- a/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
++++ b/Source/WebCore/platform/graphics/skia/FontCascadeSkia.cpp
+@@ -72,6 +72,22 @@ ResolvedEmojiPolicy FontCascade::resolveEmojiPolicy(FontVariantEmoji fontVariant
+     return ResolvedEmojiPolicy::NoPreference;
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: the fonts of the cascade keep the system fallback for a cluster alive, like the one
++// for a character (FontCascadeFonts::glyphDataForSystemFallback). Their shaped text cache points
++// to it, and a FontCache purge deletes a font that only the FontCache holds. The purge clears the
++// shaped text only of the fonts in the FontCascadeCache, fonts that left it stay in use
++// (SVGTextMetricsBuilder invalidates it), so their next paint of that text would read a deleted
++// font.
++static RefPtr<const Font> keepSystemFallbackAlive(FontCascadeFonts* fonts, Ref<Font>&& font)
++{
++    Ref<const Font> result = font.copyRef();
++    if (fonts)
++        fonts->addSystemFallbackFont(WTF::move(font));
++    return result;
++}
++#endif
++
+ RefPtr<const Font> FontCascade::fontForCombiningCharacterSequence(StringView stringView) const
+ {
+     ASSERT(!stringView.isEmpty());
+@@ -101,7 +117,7 @@ RefPtr<const Font> FontCascade::fontForCombiningCharacterSequence(StringView str
+     if (shouldForceEmojiFont) {
+         if (RefPtr systemFallback = FontCache::forCurrentThread().systemFallbackForCharacterCluster(m_fontDescription, fallbackRangesAt(0).fontForFirstRange(), IsForPlatformFont::No, FontCache::PreferColoredFont::Yes, stringView)) {
+             if (systemFallback->canRenderCombiningCharacterSequence(stringView))
+-                return systemFallback.get();
++                return keepSystemFallbackAlive(fonts(), systemFallback.releaseNonNull());
+         }
+     }
+ #endif
+@@ -175,7 +191,11 @@ RefPtr<const Font> FontCascade::fontForCombiningCharacterSequence(StringView str
+         auto preferColoredFont = emojiPolicy == ResolvedEmojiPolicy::RequireEmoji ? FontCache::PreferColoredFont::Yes : FontCache::PreferColoredFont::No;
+         if (auto systemFallback = FontCache::forCurrentThread().systemFallbackForCharacterCluster(m_fontDescription, fallbackRangesAt(0).fontForFirstRange(), IsForPlatformFont::No, preferColoredFont, stringView)) {
+             if (systemFallback->canRenderCombiningCharacterSequence(stringView))
++#if PLATFORM(WASM)
++                return keepSystemFallbackAlive(fonts(), systemFallback.releaseNonNull());
++#else
+                 return systemFallback.get();
++#endif
+         }
+     }
+ 
