@@ -1,20 +1,3 @@
-// Schemes whose addresses load a document in the view; others (mailto:, javascript:, app links)
-// never commit there
-const LOADS = new Set(['http:', 'https:', 'file:', 'about:', 'data:']);
-
-/**
- * The address the engine loads for text given to `load` (https:// in front without a scheme, like
- * the engine), '' when it is no address that loads a document in the view or an invalid one, which
- * the engine does not load.
- */
-export function loadedAddress(text: string): string {
-  const candidate =
-    URL.canParse(text) || /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : `https://${text}`;
-  if (!URL.canParse(candidate)) return '';
-  const url = new URL(candidate);
-  return LOADS.has(url.protocol) ? url.href : '';
-}
-
 /**
  * Address of a navigation the host started (load, back, forward, restore) until its document
  * commits or the navigation ends without one, like Chrome's pending entry: an address bar shows

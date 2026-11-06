@@ -1,7 +1,9 @@
 // Typing in the address bar like Chrome: a visited site completes inline as soon as the typed text
 // starts its host (selected, so typing goes on over it, Backspace removes it) and Enter opens it
 // with the scheme it was visited with; Alt+Enter opens the address in a new tab in front,
-// Ctrl+Enter makes a name without a dot a .com site with www. The address and the find text stay
+// Ctrl+Enter makes a name without a dot a .com site with www. Like Chrome localhost and IP
+// addresses without a scheme load over http://, other sites over https:// with a fallback to
+// http:// (unit tests of the core). The address and the find text stay
 // when Safari brings the demo back from its page cache (WebKit resets fields with autocomplete=off).
 //
 //   node tests/demo/address-bar-test.mjs [engine-dir]
@@ -135,6 +137,24 @@ check(
 );
 await page.keyboard.press('Escape');
 
+// Without a scheme localhost and IP addresses load over http:// like in Chrome (the test server
+// has no https://, which ended on the error page)
+for (const [name, typed] of [
+  ['four', `${host}/four`],
+  ['five', `localhost:${new URL(siteURL).port}/five`],
+]) {
+  results.delete('ready');
+  await typeIn(typed);
+  await page.keyboard.press('Enter');
+  const loaded = await results.wait('ready', TIMEOUT);
+  const shown = await page.evaluate(() => document.getElementById('address').value);
+  check(
+    `${typed} without a scheme loads over http://`,
+    loaded === name && shown === `http://${typed}`,
+    `${loaded} ${shown}`,
+  );
+}
+
 // Ctrl+Enter: www. and .com around a name, without the inline completion. The view of the tab
 // only records the address (no load into the internet)
 await page.evaluate(() => {
@@ -149,17 +169,13 @@ async function ctrlEnter(text) {
   return page.evaluate(() => window.loadedAddress);
 }
 const dotCom = await ctrlEnter('wikipedia');
-check(
-  'Ctrl+Enter: wikipedia opens www.wikipedia.com',
-  dotCom === 'https://www.wikipedia.com',
-  dotCom,
-);
+check('Ctrl+Enter: wikipedia opens www.wikipedia.com', dotCom === 'www.wikipedia.com', dotCom);
 const withPath = await ctrlEnter('example:8080/path');
-check('Ctrl+Enter: with port and path', withPath === 'https://www.example.com:8080/path', withPath);
+check('Ctrl+Enter: with port and path', withPath === 'www.example.com:8080/path', withPath);
 const withDot = await ctrlEnter(prefix);
 check(
   'Ctrl+Enter: the typed text without the completion, a name with a dot stays',
-  withDot === `https://${prefix}`,
+  withDot === prefix,
   withDot,
 );
 

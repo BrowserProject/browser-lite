@@ -1,3 +1,4 @@
+export { typedAddress } from './address.js';
 export { createBrowser } from './browser.js';
 export { BrowserLiteError } from './errors.js';
 export { createExtensionHost } from './extensions/host.js';

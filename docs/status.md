@@ -23,7 +23,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
   validation messages and the file input's label with their numbers and texts (#363), a typed
-  `data:` or `about:` address without the Content-Security-Policy of the page before (#408).
+  `data:` or `about:` address without the Content-Security-Policy of the page before (#408),
+  an address typed without a scheme over `https://` with a fallback to `http://` when the site
+  has no working `https://`, and localhost, IP addresses and ports over `http://` like Chrome
+  (httpforever.com, 127.0.0.1:7650 and localhost:7650 ended on ERR_SSL_PROTOCOL_ERROR, #435).
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
   Android keyboards after typing (#411), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
@@ -409,6 +412,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- Typed addresses (#435): the engine commits its error page of the failed `https://` load before
+  the core falls back to `http://`, so the page shows for a moment and the failed address stays in
+  back/forward before the `http://` page (Chrome keeps one entry). Falling back in the engine's
+  `dispatchDidFailProvisionalLoad` instead of showing the error page would avoid both. No
+  fallback timer: a host that drops connections to port 443 falls back only after the connection
+  timeout.
 - Touch selection: a long press selects the word, but there are no selection handles to extend
   it like Chrome and Safari on phones (needs the selection bounds from the engine and commands
   that move either end).

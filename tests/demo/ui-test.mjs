@@ -217,19 +217,20 @@ check(
   ),
 );
 await tab.selectOption('#setting-search', 'google');
-const searchURL = await tab.evaluate(() => window.blTest.addressToURL('weather bern'));
+const searchURL = await tab.evaluate(() => window.blTest.addressToLoad('weather bern'));
 check('search engine', searchURL === 'https://www.google.com/search?q=weather%20bern', searchURL);
-// An invalid address is a search like in Chrome, never https:// in front of its scheme
+// An invalid address is a search like in Chrome, never https:// in front of its scheme; a valid
+// one without a scheme stays without (the core adds it)
 const invalidAddresses = await tab.evaluate(() =>
   ['http://example.com:99999/', 'example.com:99999', 'example.com:8080/x'].map((text) =>
-    window.blTest.addressToURL(text),
+    window.blTest.addressToLoad(text),
   ),
 );
 check(
   'an invalid address is a search',
   invalidAddresses.join(' ') ===
     'https://www.google.com/search?q=http%3A%2F%2Fexample.com%3A99999%2F ' +
-      'https://www.google.com/search?q=example.com%3A99999 https://example.com:8080/x',
+      'https://www.google.com/search?q=example.com%3A99999 example.com:8080/x',
   invalidAddresses.join(' '),
 );
 await tab.keyboard.press('Escape');

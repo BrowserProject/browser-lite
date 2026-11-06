@@ -1,14 +1,15 @@
 // Parts of the core that need no browser: page dialogs, permission and HTTP authentication
 // answers (Requests), the
-// downloads, the upload limit, popups without a new-view listener, the pending navigation, the
-// engine check and the edits of the IME field.
+// downloads, the upload limit, popups without a new-view listener, typed addresses and their
+// fallback to http://, the pending navigation, the engine check and the edits of the IME field.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
 import { textEdit } from '../dist/keyboard.js';
-import { loadedAddress, PendingNavigation } from '../dist/pending.js';
+import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
 import { Requests } from '../dist/requests.js';
@@ -119,10 +120,33 @@ test('dialogs: staying on beforeunload ends the pending navigation, leaving does
   assert.equal(view.pendingEnded, 1);
 });
 
-test('pending navigation: the address the engine loads, until it arrives or loading ends', () => {
-  assert.equal(loadedAddress('https://a.example'), 'https://a.example/');
-  assert.equal(loadedAddress('a.example/x?y'), 'https://a.example/x?y');
-  assert.equal(loadedAddress('about:blank'), 'about:blank');
+test('typed addresses: https:// with an http:// fallback, local ones http:// like Chrome', () => {
+  assert.equal(typedAddress('https://a.example'), 'https://a.example/');
+  assert.equal(typedAddress('http://a.example/x'), 'http://a.example/x');
+  assert.equal(typedAddress('a.example/x?y'), 'https://a.example/x?y');
+  assert.equal(typedAddress(' a.example '), 'https://a.example/');
+  assert.equal(typedAddress('about:blank'), 'about:blank');
+  // Port 80 is http's own: upgraded like the address without it
+  assert.equal(typedAddress('neverssl.example:80'), 'https://neverssl.example/');
+  for (const [text, url] of [
+    ['localhost:8080/links', 'http://localhost:8080/links'],
+    ['localhost', 'http://localhost/'],
+    ['app.localhost', 'http://app.localhost/'],
+    ['127.0.0.1:7650/links', 'http://127.0.0.1:7650/links'],
+    ['192.168.1.1', 'http://192.168.1.1/'],
+    ['[::1]:8080', 'http://[::1]:8080/'],
+    ['intranet/wiki', 'http://intranet/wiki'],
+    ['portquiz.example:8080', 'http://portquiz.example:8080/'],
+    ['a.example:443', 'http://a.example:443/'],
+  ]) {
+    assert.equal(typedAddress(text), url, text);
+    assert.equal(httpFallback(text), '', text);
+  }
+  assert.equal(httpFallback('httpforever.example'), 'http://httpforever.example/');
+  assert.equal(httpFallback('a.example/x?y'), 'http://a.example/x?y');
+  // Typed with a scheme: that scheme, no fallback
+  for (const text of ['https://a.example/', 'http://a.example/', 'about:blank', 'a b'])
+    assert.equal(httpFallback(text), '', text);
   // Invalid with a scheme: no https:// in front, which would make the scheme the host
   for (const text of [
     'mailto:a@b.example',
@@ -131,9 +155,43 @@ test('pending navigation: the address the engine loads, until it arrives or load
     'a b',
     '',
     'http://example.com:99999/',
+    'example.com:99999',
     'https://a b.example/',
   ])
-    assert.equal(loadedAddress(text), '', text);
+    assert.equal(typedAddress(text), '', text);
+});
+
+test('typed addresses: http:// after the error page of a failed connection or TLS', () => {
+  const fallback = new HttpFallback();
+  // No connection: error, network error page, its load
+  fallback.start('http://a.example/');
+  fallback.error();
+  fallback.commit('network');
+  assert.equal(fallback.load(), 'http://a.example/');
+  assert.equal(fallback.load(), '');
+  fallback.start('http://a.example/');
+  fallback.error();
+  fallback.commit('certificate');
+  assert.equal(fallback.load(), 'http://a.example/');
+  // An HTTP error is the answer of the https:// site
+  fallback.start('http://a.example/');
+  fallback.error();
+  fallback.commit('http');
+  assert.equal(fallback.load(), '');
+  // The https:// page loads, or another navigation of the host replaces the typed one
+  fallback.start('http://a.example/');
+  fallback.commit(null);
+  fallback.error();
+  fallback.commit('network');
+  assert.equal(fallback.load(), '');
+  fallback.start('http://a.example/');
+  fallback.start('');
+  fallback.error();
+  fallback.commit('network');
+  assert.equal(fallback.load(), '');
+});
+
+test('pending navigation: the address the engine loads, until it arrives or loading ends', () => {
   const pending = new PendingNavigation();
   pending.start('https://b.example/slow');
   // The engine reports the start with the address of the document being left

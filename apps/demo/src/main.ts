@@ -19,7 +19,7 @@ import {
   selectPopup,
 } from '@browser-lite/ui';
 import { askForAccessCode } from './access.js';
-import { addressToURL, takePendingAddress } from './address-bar.js';
+import { addressToLoad, takePendingAddress } from './address-bar.js';
 import { initBlockedPopups } from './blocked-popups.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
@@ -137,7 +137,7 @@ function browserOptions(
 function openStartTabs(restarted: boolean): void {
   // An address typed while the engine started opens in front of a restored session
   const typed = takePendingAddress();
-  const url = typed || (restarted || !startUrl ? null : addressToURL(startUrl));
+  const url = typed || (restarted || !startUrl ? null : addressToLoad(startUrl));
   const safe = !!storage(SAFE_START_KEY, undefined, true);
   storage(SAFE_START_KEY, null, true);
   const session = url && !typed ? null : sessionToRestore();

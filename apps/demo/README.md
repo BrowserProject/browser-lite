@@ -79,7 +79,9 @@ select popup) are in the same sheet.
   `b.com` selected, the first row; Enter opens it with the scheme it was visited with, typing
   goes on over it, Backspace removes it; text with a path completes nothing), Alt+Enter opens
   the address in a new tab in front and Ctrl+Enter makes a name without a dot a `.com` site
-  (`wikipedia` opens `https://www.wikipedia.com`, #420). The address and the find text are also
+  (`wikipedia` opens `www.wikipedia.com`, #420). A typed address without a scheme goes to
+  the core as typed, which loads it like Chrome: `https://` with a fallback to `http://`,
+  localhost, IP addresses and ports over `http://` (#435). The address and the find text are also
   the fields' default values, so they stay when Safari brings the demo back from its page cache
   (#422).
 - **Find bar** (Ctrl+F): Enter and Shift+Enter in the field and the up and down buttons go to

@@ -381,7 +381,7 @@ export type WarningCode = 'storage-locked' | 'media-sw-missing';
 
 /** Options of {@link Browser.createView}. */
 export interface ViewOptions {
-  /** First address (like typed into an address bar: without a scheme https:// is added). */
+  /** First address, like typed into an address bar (see {@link View.load}). */
   url?: string;
   /** First page as an HTML string under a base URL (instead of `url`). */
   html?: { html: string; baseURL: string };
@@ -431,8 +431,11 @@ export interface View {
   /** Removes the canvas from the page; the view keeps running hidden. */
   detach(): void;
   /**
-   * Loads an address like typed into an address bar (https:// added without a scheme). Like Chrome,
-   * an invalid address (for example a port above 65535) loads nothing.
+   * Loads an address like typed into an address bar. Without a scheme it gets https:// and, when
+   * that fails without an answer of the site (no connection, no valid TLS), http:// after the
+   * error page, like Chrome; localhost, IP addresses, names without a dot and addresses with a
+   * port other than 80 get http:// right away (`typedAddress`). Like Chrome, an invalid
+   * address (for example a port above 65535) loads nothing.
    */
   load(url: string): void;
   /** Loads an HTML string under a base URL. */

@@ -57,7 +57,11 @@ then `navigation` and `title` of the new document. A page from the back/forward 
 while the frame still holds the page being left, so its `navigation` and `title` follow once it is
 back in the frame (`didRestoreFromBackForwardCache`, #367). Until the commit the engine reports
 the address of the document being left; the address a navigation of the host goes to is kept by
-the core (`View.pendingURL`, `packages/core/src/pending.ts`, #382).
+the core (`View.pendingURL`, `packages/core/src/pending.ts`, #382). The core also reads typed
+text like Chrome (`typedAddress`, `packages/core/src/address.ts`, #435): without a scheme
+`https://`, after a `network` or `certificate` error page of that load `http://`, and `http://`
+right away for localhost, IP addresses, names without a dot and other ports; the engine gets the
+full address.
 
 ## Threads
 

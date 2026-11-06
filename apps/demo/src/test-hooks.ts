@@ -1,5 +1,5 @@
 import type { Browser, BrowserOptions, DebugApi, Transport, View } from '@browser-lite/core';
-import { addressToURL } from './address-bar.js';
+import { addressToLoad } from './address-bar.js';
 import { extensions, installExtension, ui } from './extensions.js';
 import { relayUrl, tokenFor } from './params.js';
 import { profile, runtime } from './runtime.js';
@@ -64,7 +64,7 @@ export function withTestOptions(options: BrowserOptions): BrowserOptions {
 
 /**
  * window.blTest for the e2e tests (tests/core and tests/demo): the browser, its views and the debug API,
- * plus hooks of the demo (checkMemory, memoryUsed, gpu, profile, settings, addressToURL, transport, relay,
+ * plus hooks of the demo (checkMemory, memoryUsed, gpu, profile, settings, addressToLoad, transport, relay,
  * options, extensions, installExtension, ui).
  */
 export function installTestHooks(state: TestState): void {
@@ -105,7 +105,7 @@ export function installTestHooks(state: TestState): void {
     gpu: (action: 'lose' | 'restore' | 'lose-webgl') => debugApi().gpu(action),
     profile,
     settings,
-    addressToURL,
+    addressToLoad,
     get transport() {
       return state.transport;
     },

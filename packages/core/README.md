@@ -132,9 +132,13 @@ Console messages come as `console` of the view (`ConsoleMessage`: `level`, `mess
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.
 
-`view.load(url)` reads `url` like an address bar: `https://` in front without a scheme. An
-address that is invalid also then (a port above 65535) loads nothing, like in Chrome; check typed
-text with `URL.canParse` first and search for it instead.
+`view.load(url)` reads `url` like Chrome's address bar, so pass typed text as it is. Without a
+scheme it loads `https://` and, when that fails without an answer of the site (no connection, no
+valid TLS), `http://` once the error page has loaded; localhost, IP addresses, names without a dot
+and a port other than 80 load over `http://` right away. `typedAddress(text)` returns the address
+a load of text starts with ('' for none). An address that is invalid also then (a port above
+65535) loads nothing, like in Chrome; check typed text with `typedAddress` first and search for it
+instead.
 
 `view.pendingURL` is the address of a navigation the host started (`load`, `back`, `forward`,
 `restoreHistory`) until its document commits or the navigation ends (stop, failure, download,

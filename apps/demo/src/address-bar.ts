@@ -1,3 +1,4 @@
+import { typedAddress } from '@browser-lite/core';
 import { bookmarks } from './bookmarks.js';
 import { showStartNote } from './engine-message.js';
 import { favicon, hostOf } from './favicons.js';
@@ -46,18 +47,21 @@ function searchURL(text: string): string {
 }
 
 /**
- * Text of the address bar as URL: an address, or a search with the search engine. Like Chrome an
- * address that is invalid (a port above 65535) is a search.
+ * What Enter opens for the text of the address bar: an address, or a search with the search
+ * engine. An address without a scheme stays without one: `View.load` gives it https:// with a
+ * fallback to http:// like Chrome, or http:// for a local one (`typedAddress` names where it
+ * starts). Like Chrome an address that is invalid (a port above 65535) is a search.
  */
-export function addressToURL(text: string): string {
+export function addressToLoad(text: string): string {
   const value = text.trim();
   if (!value) return '';
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value))
     return URL.canParse(value) ? value : searchURL(value);
-  if (/^(localhost|[^\s/]+\.[^\s/]+|\[[0-9a-f:]+\])(:\d+)?(\/\S*)?$/i.test(value)) {
-    const url = `https://${value}`;
-    if (URL.canParse(url)) return url;
-  }
+  if (
+    /^(localhost|[^\s/]+\.[^\s/]+|\[[0-9a-f:]+\])(:\d+)?(\/\S*)?$/i.test(value) &&
+    typedAddress(value)
+  )
+    return value;
   return searchURL(value);
 }
 
@@ -207,12 +211,13 @@ function showSuggestions(complete: boolean): void {
     address.setSelectionRange(typed.length, inline.text.length, 'backward');
   }
   // Then what Enter does with the text alone: open it as an address, and always a search
-  const asAddress = addressToURL(text);
+  const asAddress = addressToLoad(text);
+  const shownAddress = typedAddress(asAddress) || asAddress;
   const search = searchURL(text);
-  if (asAddress !== search && asAddress !== inline?.url) {
+  if (asAddress !== search && shownAddress !== typedAddress(inline?.url ?? '')) {
     const row = { url: asAddress, text };
     rows.push(row);
-    box.append(rowElement(row, icon('globe'), asAddress));
+    box.append(rowElement(row, icon('globe'), shownAddress));
   }
   const searchRow = { url: search, text };
   rows.push(searchRow);
@@ -220,7 +225,7 @@ function showSuggestions(complete: boolean): void {
     rowElement(searchRow, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${text}"`),
   );
   for (const entry of suggestions(text)) {
-    if (entry.url === asAddress || entry.url === inline?.url) continue;
+    if (entry.url === shownAddress || entry.url === inline?.url) continue;
     const row = { url: entry.url, text: entry.url };
     rows.push(row);
     box.append(rowElement(row, favicon(entry.url), entry.title || entry.url, entry.url));
@@ -297,8 +302,8 @@ function go(url: string, inNewTab = false): void {
 function submit({ ctrlKey = false, altKey = false } = {}): void {
   const row = rows[selected];
   const shown = row && address.value === row.text;
-  let url = shown ? row.url : addressToURL(address.value);
-  if (ctrlKey) url = addressToURL(withDotCom(shown && row === inline ? typed : address.value));
+  let url = shown ? row.url : addressToLoad(address.value);
+  if (ctrlKey) url = addressToLoad(withDotCom(shown && row === inline ? typed : address.value));
   go(url, altKey);
 }
 
@@ -312,7 +317,7 @@ form.addEventListener('submit', (e) => {
 function preconnectTyped(): void {
   clearTimeout(preconnectTimer);
   preconnectTimer = setTimeout(() => {
-    const url = inline?.url ?? suggestions(typed, 1)[0]?.url ?? addressToURL(typed);
+    const url = inline?.url ?? suggestions(typed, 1)[0]?.url ?? typedAddress(addressToLoad(typed));
     if (url) runtime.browser?.preconnect(url);
   }, 300);
 }

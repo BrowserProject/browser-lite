@@ -1,3 +1,4 @@
+import { HttpFallback, httpFallback, typedAddress } from './address.js';
 import type { Config } from './config.js';
 import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
@@ -9,7 +10,7 @@ import {
   enterKeyHintSetter,
   focusOpensKeyboard,
 } from './keyboard.js';
-import { loadedAddress, PendingNavigation } from './pending.js';
+import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
   ContextMenuInfo,
@@ -81,6 +82,7 @@ export class ViewImpl implements View {
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly pending = new PendingNavigation();
+  private readonly fallback = new HttpFallback();
   private readonly lifetime = new AbortController();
   private readonly resizeObserver: ResizeObserver;
   private readonly context2d: CanvasRenderingContext2D | null = null;
@@ -300,6 +302,7 @@ export class ViewImpl implements View {
   // Like Chrome, a navigation first ends the open dialogs of the view with their default answer
   private navigate(fn: (module: EngineModule) => void, expectAnswer = false): void {
     if (!this.alive) return;
+    this.fallback.start('');
     this.host.requests.closeDialogs(this);
     this.call(fn, expectAnswer);
   }
@@ -309,8 +312,11 @@ export class ViewImpl implements View {
   }
 
   load(url: string): void {
-    this.pending.start(loadedAddress(url));
-    this.loadFromPage(url);
+    const address = typedAddress(url);
+    this.pending.start(address);
+    // Without a document address (mailto:, an invalid one) the engine decides as for a link
+    this.loadFromPage(address || url);
+    this.fallback.start(httpFallback(url));
   }
 
   /** @internal An address a page asked for (a popup nobody shows): no pending address. */
@@ -330,6 +336,7 @@ export class ViewImpl implements View {
   }
 
   stop(): void {
+    this.fallback.start('');
     this.call((m) => m._bl_stop(this.id));
     this.endPending();
   }
@@ -347,7 +354,7 @@ export class ViewImpl implements View {
   // Address of the back/forward entry at offset from the current one, '' when unknown
   private historyEntry(offset: number): string {
     const history = this.history;
-    return history ? loadedAddress(history.entries[history.index + offset]?.url ?? '') : '';
+    return history ? typedAddress(history.entries[history.index + offset]?.url ?? '') : '';
   }
 
   /** @internal The pending navigation ended without an engine event (stop, beforeunload stays). */
@@ -369,7 +376,7 @@ export class ViewImpl implements View {
   restoreHistory(history: SessionHistory): void {
     const { entries, index } = history;
     this.pending.start(
-      loadedAddress(entries[Math.min(Math.max(index, 0), entries.length - 1)]?.url ?? ''),
+      typedAddress(entries[Math.min(Math.max(index, 0), entries.length - 1)]?.url ?? ''),
     );
     this.navigate(
       (m) => m._bl_restore_history(this.id, this.host.text(JSON.stringify(history))),
@@ -598,22 +605,29 @@ export class ViewImpl implements View {
       case 'progress':
         this.emit('progress', { value: Number(data.progress) || 0 });
         return;
-      case 'commit':
+      case 'commit': {
         // A new document (its navigation event follows): no user activation yet
+        const errorPage = (data.errorPage as string | undefined) || null;
         this.pending.end();
+        this.fallback.commit(errorPage);
         this.userActivated = false;
-        this.emit('commit', { errorPage: (data.errorPage as string | undefined) || null });
+        this.emit('commit', { errorPage });
         return;
+      }
       case 'first-layout':
       case 'first-paint':
         this.emit(type, {});
         return;
-      case 'load':
+      case 'load': {
         this.loading = false;
         this.emit('load', {});
+        const fallback = this.fallback.load();
+        if (fallback) this.load(fallback);
         return;
+      }
       case 'error':
         this.loading = false;
+        this.fallback.error();
         this.pending.end();
         this.emit('error', { description: String(data.description ?? '') });
         return;
@@ -644,6 +658,7 @@ export class ViewImpl implements View {
         return;
       case 'external-url':
         // A navigation went to another app (also after a redirect): the view stays where it is
+        this.fallback.start('');
         this.endPending();
         this.emit(type, { url: String(data.url ?? '') });
         return;
