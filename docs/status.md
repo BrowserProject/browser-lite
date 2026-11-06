@@ -30,7 +30,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
   Android keyboards after typing (#411), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
-  without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436),
+  without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
   Tab to links (#372), mouse leave of the view (`:hover` and link address go away, #381),
   mouseout and mouseleave on the first move after back or forward to a cached page (#398),

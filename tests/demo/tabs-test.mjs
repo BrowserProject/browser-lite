@@ -9,7 +9,8 @@
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
 // the status line says that memory is full. Ctrl+Shift+T brings the closed tab back. An address
 // typed while the engine downloads opens once it runs. An address that loads slowly or asks to
-// sign in stays in the address bar and the tab until its page commits, Stop goes back.
+// sign in stays in the address bar and the tab until its page commits, Stop goes back, and so
+// does Esc in the page unless the page takes the key.
 //
 //   node tests/demo/tabs-test.mjs [engine-dir]
 import https from 'node:https';
@@ -663,6 +664,49 @@ check(
   'Stop: the address of the page again',
   stopped && (await address()) === `${siteURL}auth` && (await activeTitle()) === 'Denied',
   `${await address()}, ${await activeTitle()}`,
+);
+// Esc in the page is Stop like in Chrome, but only when the page does not take the key itself
+const reloadTitle = () => page.evaluate(() => document.getElementById('reload').title);
+await go(`${siteURL}slow`);
+await addressIs(`${siteURL}slow`);
+await clickPage();
+await page.keyboard.press('Escape');
+const escStopped = await addressIs(`${siteURL}auth`);
+await page.waitForTimeout(4000);
+check(
+  'Esc in the page stops loading',
+  escStopped &&
+    (await reloadTitle()) === 'Reload' &&
+    (await address()) === `${siteURL}auth` &&
+    (await activeTitle()) === 'Denied',
+  `${await reloadTitle()}, ${await address()}, ${await activeTitle()}`,
+);
+// Also with the focus on no field (the address bar takes Esc itself and restores the address)
+await go(`${siteURL}slow`);
+await addressIs(`${siteURL}slow`);
+await page.evaluate(() => document.activeElement.blur());
+await page.keyboard.press('Escape');
+const escOutside = await addressIs(`${siteURL}auth`);
+check(
+  'Esc outside the page and fields stops loading',
+  escOutside && (await reloadTitle()) === 'Reload',
+  `${await reloadTitle()}, ${await address()}`,
+);
+await page.evaluate(() =>
+  window.blTest.eval(
+    `document.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.preventDefault(); })`,
+  ),
+);
+await go(`${siteURL}slow`);
+await addressIs(`${siteURL}slow`);
+await clickPage();
+await page.keyboard.press('Escape');
+await page.waitForTimeout(1000);
+const escKept = await reloadTitle();
+check(
+  'Esc the page takes: the page loads on',
+  escKept === 'Stop' && (await activeIs('Slow')),
+  `${escKept}, ${await activeTitle()}`,
 );
 
 // An address typed while the engine still downloads opens as soon as it runs

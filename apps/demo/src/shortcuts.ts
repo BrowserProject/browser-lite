@@ -22,10 +22,14 @@ import { changeZoom } from './zoom.js';
 
 type Key = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'>;
 
-/** A shortcut: its action, `reserved` when the page never gets the key. */
+/**
+ * A shortcut: its action, `reserved` when the page never gets the key, `last` when also the
+ * demo's fields and bars get it first (Escape restores the address, closes the find bar).
+ */
 interface Shortcut {
   run: () => void;
   reserved: boolean;
+  last: boolean;
 }
 
 // Like Chrome, which reserves only the shortcuts that leave or switch the tab (Ctrl+T/W/N/Tab,
@@ -35,22 +39,33 @@ interface Shortcut {
 // browser's: the engine would type the letter of Alt+D into a field, as it cannot tell Alt+D on
 // Linux and Windows from an Option character on macOS.
 function shortcut(e: Key): Shortcut | null {
+  // The settings are modal (Esc closes them itself)
+  if (settingsOpen()) return null;
   const run = shortcutAction(e);
-  if (!run) return null;
+  if (!run) {
+    const stop = stopAction(e);
+    return stop && { run: stop, reserved: false, last: true };
+  }
   const ctrl = e.ctrlKey || e.metaKey;
   const reserved =
     e.altKey ||
     (ctrl &&
       (['t', 'w', 'Tab'].includes(keyName(e)) ||
         (!e.shiftKey && ['PageUp', 'PageDown'].includes(e.key))));
-  return { run, reserved };
+  return { run, reserved, last: false };
+}
+
+// Escape is Stop like in Chrome, when nothing else takes the key
+function stopAction(e: Key): (() => void) | null {
+  const tab = activeTab();
+  if (e.key !== 'Escape' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || !tab?.loading)
+    return null;
+  return () => tab.view.stop();
 }
 
 const keyName = (e: Key) => (e.key.length === 1 ? e.key.toLowerCase() : e.key);
 
 function shortcutAction(e: Key): (() => void) | null {
-  // The settings are modal (Esc closes them itself)
-  if (settingsOpen()) return null;
   const ctrl = e.ctrlKey || e.metaKey;
   const key = keyName(e);
   const tab = activeTab();
@@ -133,8 +148,8 @@ const ready = () => runtime.browser?.state === 'ready' && !uiPopupOpen();
 
 /**
  * Keyboard shortcuts of the browser, skipped while a popup of the ui package is open. In the
- * capture phase of the window, before the demo's fields; a key for the page of the active tab
- * goes to the page first unless the shortcut is reserved.
+ * capture phase of the window, before the demo's fields, except the ones that run last; a key for
+ * the page of the active tab goes to the page first unless the shortcut is reserved.
  */
 export function installShortcuts(): void {
   let swallowKeyUp: string | null = null;
@@ -144,7 +159,7 @@ export function installShortcuts(): void {
       // Autofill and some on-screen keyboards send key events without a key
       if (!ready() || e.isComposing || typeof e.key !== 'string') return;
       const found = shortcut(e);
-      if (!found) return;
+      if (!found || found.last) return;
       // Not the host browser's own action (F5 would reload the demo)
       e.preventDefault();
       if (!found.reserved && activeTab()?.view.focused) return;
@@ -154,6 +169,12 @@ export function installShortcuts(): void {
     },
     true,
   );
+  window.addEventListener('keydown', (e) => {
+    if (!ready() || e.defaultPrevented || e.isComposing || typeof e.key !== 'string') return;
+    if (activeTab()?.view.focused) return;
+    const found = shortcut(e);
+    if (found?.last) found.run();
+  });
   onTabCreated((tab) =>
     tab.view.on('unhandled-key', (key) => {
       if (ready() && tab.isActive) shortcut(key)?.run();
