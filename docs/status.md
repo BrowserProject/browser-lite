@@ -300,8 +300,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the article shows after 9 to 11 s, in tasks of up to 2 s. Profile: lazy compiling of functions
    10 %, regexps 10 %, forced layout 17 %, the rest JS in the interpreter and the JIT. Expensive
    regexps were measured in the interpreter again after every GC or memory release, now their
-   decision stays (#362). The memory releases above 192 MB also delete all compiled code; keeping
-   it cost 75 MB more on 20min and did not make the tap measurably faster (#362). What is left of the
+   decision stays (#362). The memory releases above 192 MB deleted all compiled JS of the page,
+   on 20min 8 to 10 times in the first 2.5 minutes (up to 5 within 10 s after the consent), and
+   the page parsed, built and compiled it again; they now keep it until memory is short (#441).
+   2026-11-06, local, 4 runs each: the new title after 9.3 to 11.3 s instead of 11.2 to 12.4 s
+   (the URL after 1.0 to 2.2 instead of 2.1 to 3.3 s), back after 7.5 to 11.9 instead of 8.4 to
+   18.3 s. Plain Chromium on the same machine: the title after 0.8 s, the article within 1 to 2 s,
+   back after 2 s; 20min shows no pressed state there either. The rest of the gap is JS (the
+   interpreter and its slow paths 24 %, compiled code 8 %, built-ins 7 %, parse and bytecode 6 %)
+   and style and layout (22 %) of React, ads and analytics. Even with no input the page keeps the
+   engine thread busy a third to half of the time in entries of 0.2 to 1.4 s (idle callbacks,
+   intersection observers, timers of ads), so a tap often waits behind one. What is left of the
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
    Long single tasks of a page become many times longer here, so they block all views and can

@@ -1,0 +1,70 @@
+diff --git a/Source/WebCore/page/MemoryRelease.cpp b/Source/WebCore/page/MemoryRelease.cpp
+index 3def801240..ef1df6081e 100644
+--- a/Source/WebCore/page/MemoryRelease.cpp
++++ b/Source/WebCore/page/MemoryRelease.cpp
+@@ -119,7 +119,7 @@ static void releaseNoncriticalMemory(MaintainMemoryCache maintainMemoryCache)
+ #endif
+ }
+ 
+-static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCache maintainBackForwardCache, MaintainMemoryCache maintainMemoryCache)
++static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCache maintainBackForwardCache, MaintainMemoryCache maintainMemoryCache, MaintainJSCode maintainJSCode)
+ {
+     // Right now, the only reason we call release critical memory while not under memory pressure is if the process is about to be suspended.
+     if (maintainBackForwardCache == MaintainBackForwardCache::No) {
+@@ -160,10 +160,12 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
+             protect(localFrame->editor())->releaseMemory();
+     }
+ 
+-    if (synchronous == Synchronous::Yes)
+-        GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
+-    else
+-        GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
++    if (maintainJSCode == MaintainJSCode::No) {
++        if (synchronous == Synchronous::Yes)
++            GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
++        else
++            GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
++    }
+ 
+ #if ENABLE(VIDEO)
+     for (auto& mediaElement : HTMLMediaElement::allMediaElements())
+@@ -183,7 +185,7 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
+     WorkerGlobalScope::releaseMemoryInWorkers(synchronous);
+ }
+ 
+-void releaseMemory(Critical critical, Synchronous synchronous, MaintainBackForwardCache maintainBackForwardCache, MaintainMemoryCache maintainMemoryCache)
++void releaseMemory(Critical critical, Synchronous synchronous, MaintainBackForwardCache maintainBackForwardCache, MaintainMemoryCache maintainMemoryCache, MaintainJSCode maintainJSCode)
+ {
+     TraceScope scope(MemoryPressureHandlerStart, MemoryPressureHandlerEnd, static_cast<uint64_t>(critical), static_cast<uint64_t>(synchronous));
+ 
+@@ -195,7 +197,7 @@ void releaseMemory(Critical critical, Synchronous synchronous, MaintainBackForwa
+     if (critical == Critical::Yes) {
+         // Return unused pages back to the OS now as this will likely give us a little memory to work with.
+         WTF::releaseFastMallocFreeMemory();
+-        releaseCriticalMemory(synchronous, maintainBackForwardCache, maintainMemoryCache);
++        releaseCriticalMemory(synchronous, maintainBackForwardCache, maintainMemoryCache, maintainJSCode);
+     }
+ 
+     releaseNoncriticalMemory(maintainMemoryCache);
+diff --git a/Source/WebCore/page/MemoryRelease.h b/Source/WebCore/page/MemoryRelease.h
+index 8c9d85fbd8..18637d4ec1 100644
+--- a/Source/WebCore/page/MemoryRelease.h
++++ b/Source/WebCore/page/MemoryRelease.h
+@@ -31,6 +31,8 @@ namespace WebCore {
+ 
+ enum class MaintainBackForwardCache : bool { No, Yes };
+ enum class MaintainMemoryCache : bool { No, Yes };
++// browser-lite: a release without memory pressure keeps the compiled JS of the pages
++enum class MaintainJSCode : bool { No, Yes };
+ enum class LogMemoryStatisticsReason : uint8_t {
+     DebugNotification,
+     WarningMemoryPressureNotification,
+@@ -38,7 +40,7 @@ enum class LogMemoryStatisticsReason : uint8_t {
+     OutOfMemoryDeath
+ };
+ 
+-WEBCORE_EXPORT void releaseMemory(Critical, Synchronous, MaintainBackForwardCache = MaintainBackForwardCache::No, MaintainMemoryCache = MaintainMemoryCache::No);
++WEBCORE_EXPORT void releaseMemory(Critical, Synchronous, MaintainBackForwardCache = MaintainBackForwardCache::No, MaintainMemoryCache = MaintainMemoryCache::No, MaintainJSCode = MaintainJSCode::No);
+ void platformReleaseMemory(Critical);
+ WEBCORE_EXPORT void releaseGraphicsMemory(Critical, Synchronous);
+ void platformReleaseGraphicsMemory(Critical);

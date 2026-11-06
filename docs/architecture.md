@@ -376,12 +376,15 @@ once more and drops them (patch 0077, #388, `tests/core/page-left-test.mjs`).
 
 WASM memory never shrinks and grows up to 4 GB, in a 32 bit browser only to about 1 GB. One build
 serves both: `engine/src/MemoryWatch.cpp` runs after every engine task and acts when malloc's
-footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64). Once the
-malloc area ends above 384 MB it grows the memory ahead so that 128 MB stay free above it; when
-that fails, the current size is the limit. From then on, or above 3 GB, it reports
-`memory-pressure` `{footprint, limit}` at every growth, and the host discards background views
-(#128, #171, #216). On iPhone and iPad a growth never fails, iOS ends the whole web content
-process instead, so the core sets the 3 GB of `BL_MEMORY_PRESSURE_MB` to 512 MB there (#358).
+footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64), which keeps
+the compiled JS of the pages (bytecode and JIT code, patch 0088, #441) unless memory is short
+(the condition of `memory-pressure` below): building it again blocked the pages for seconds, and
+the GC ages out code that no longer runs. Once the malloc area ends above 384 MB it grows the
+memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
+From then on, or above 3 GB, it reports `memory-pressure` `{footprint, limit}` at every growth,
+and the host discards background views (#128, #171, #216). On iPhone and iPad a growth never
+fails, iOS ends the whole web content process instead, so the core sets the 3 GB of
+`BL_MEMORY_PRESSURE_MB` to 512 MB there (#358).
 
 ## JavaScript
 

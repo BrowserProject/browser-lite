@@ -3,9 +3,11 @@
 // serves both, so the engine finds the limit at runtime instead of guessing it
 // from the user agent. After every engine task it
 // - releases what WebKit otherwise only releases under memory pressure
-//   (caches, decoded images, back/forward cache, compiled code) above
-//   BL_MEMORY_RELEASE_MB at every growth of malloc by 32 MB, so free space is
-//   reused first
+//   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB at
+//   every growth of malloc by 32 MB, so free space is reused first. The
+//   compiled JS of the pages (bytecode and JIT code) goes too only once memory
+//   is short: rebuilding it blocked the pages for seconds, and the GC already
+//   ages out the code that does not run
 // - at every growth of malloc by 32 MB, once the malloc area ends above
 //   reserveFrom, grows the memory ahead so that a reserve stays free above the
 //   malloc area; when that fails, the current size is the limit
@@ -84,6 +86,13 @@ static uint64_t mallocEnd()
 // time (engine/engine.cmake), the engine never calls it itself.
 static pthread_mutex_t s_growLock = PTHREAD_MUTEX_INITIALIZER;
 
+// Above BL_MEMORY_PRESSURE_MB, or less than the reserve left below the limit
+static bool memoryIsShort(uint64_t footprint)
+{
+    uint64_t pressureThreshold = static_cast<uint64_t>(engineConfig().memoryPressureMB) << 20;
+    return footprint >= pressureThreshold || (s_limit && mallocEnd() + memoryReserve > s_limit);
+}
+
 static void releaseCaches(uint64_t footprint)
 {
     uint64_t threshold = static_cast<uint64_t>(engineConfig().memoryReleaseMB) << 20;
@@ -92,10 +101,12 @@ static void releaseCaches(uint64_t footprint)
     s_footprintAtRelease = footprint;
     auto start = WTF::MonotonicTime::now();
     size_t usedBefore = debugEnabled() ? mallinfo().uordblks : 0;
-    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes);
+    bool deleteCode = memoryIsShort(footprint);
+    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes, WebCore::MaintainBackForwardCache::No, WebCore::MaintainMemoryCache::No,
+        deleteCode ? WebCore::MaintainJSCode::No : WebCore::MaintainJSCode::Yes);
     if (debugEnabled()) {
-        debugLog("Memory released (malloc area %llu MB, memory %llu MB): used %zu -> %zu MB in %.0f ms", mb(footprint),
-            mb(emscripten_get_heap_size()), usedBefore >> 20, static_cast<size_t>(mallinfo().uordblks) >> 20,
+        debugLog("Memory released%s (malloc area %llu MB, memory %llu MB): used %zu -> %zu MB in %.0f ms", deleteCode ? " with the JS code" : "",
+            mb(footprint), mb(emscripten_get_heap_size()), usedBefore >> 20, static_cast<size_t>(mallinfo().uordblks) >> 20,
             (WTF::MonotonicTime::now() - start).milliseconds());
     }
 }
@@ -134,8 +145,7 @@ void checkMemory(ReleaseCaches release)
         return;
     s_footprintAtCheck = footprint;
     keepReserve();
-    uint64_t pressureThreshold = static_cast<uint64_t>(engineConfig().memoryPressureMB) << 20;
-    if (footprint < pressureThreshold && !(s_limit && mallocEnd() + memoryReserve > s_limit))
+    if (!memoryIsShort(footprint))
         return;
     uint64_t limit = s_limit ? s_limit : emscripten_get_heap_max();
     debugLog("Memory pressure: malloc area %llu MB, limit %llu MB", mb(footprint), mb(limit));
