@@ -91,13 +91,59 @@ export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
 const isPasteShortcut = (e: KeyboardEvent) =>
   (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
 
+const key = (name: string, code: string, keyCode: number, ctrlKey = false): KeyLike => ({
+  key: name,
+  code,
+  keyCode,
+  repeat: false,
+  ctrlKey,
+  shiftKey: false,
+  altKey: false,
+  metaKey: false,
+});
+const BACKSPACE = key('Backspace', 'Backspace', 8);
+const PASTE = key('v', 'KeyV', 86, true);
+
+function pressKey(view: ViewImpl, e: KeyLike): void {
+  sendKey(view, 0, e);
+  sendKey(view, 1, e);
+}
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * @internal How the page's text before the caret goes from `from` to `to`: the number of
+ * Backspaces and the text inserted after them. A Backspace in the engine deletes one grapheme
+ * cluster, so the change starts at the last cluster boundary before the first difference.
+ */
+export function textEdit(from: string, to: string): { backspaces: number; insert: string } {
+  let same = 0;
+  while (same < from.length && same < to.length && from[same] === to[same]) same++;
+  let start = 0;
+  let backspaces = 0;
+  for (const { index, segment } of graphemes.segment(from)) {
+    if (index + segment.length <= same) start = index + segment.length;
+    else backspaces++;
+  }
+  return { backspaces, insert: to.slice(start) };
+}
+
 /**
  * Keyboard of a view: an invisible text field has the focus, not the canvas. Plain keys go
  * straight to the engine as keydown/keyup. Composed text (dead keys, IME for Chinese or
  * Japanese, on-screen keyboards) comes through the input and composition events and is
  * inserted as finished text; the composition preview is shown underlined in the page.
+ *
+ * The field keeps the text the input method entered since the page's caret last moved
+ * otherwise, like the text before the caret of a real field: an on-screen keyboard deletes and
+ * replaces within it (Gboard's Backspace after typing, a suggestion that replaces the word), and
+ * every change of the field reaches the page as Backspaces and inserted text. In an emptied
+ * field Gboard's Backspace changed nothing, so it never reached the page.
  */
-export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAreaElement {
+export function createImeField(
+  view: ViewImpl,
+  signal: AbortSignal,
+): { field: HTMLTextAreaElement; forget: () => void } {
   const ime = document.createElement('textarea');
   ime.setAttribute('data-bl-ime', '');
   ime.setAttribute('aria-hidden', 'true');
@@ -114,6 +160,10 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     'position:fixed;left:-1000px;top:0;width:1px;height:10px;opacity:0;pointer-events:none;resize:none;border:0;padding:0;margin:0;overflow:hidden;font-size:16px';
   const { host } = view;
   let composing = false;
+  // Text of the field that the page has before its caret
+  let entered = '';
+  // Entered text when the composition began: the engine shows the composition after it
+  let compositionBase: string | null = null;
   const isTextInput = (e: KeyboardEvent) =>
     e.isComposing ||
     composing ||
@@ -125,6 +175,21 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     type: K,
     listener: (event: HTMLElementEventMap[K]) => void,
   ) => ime.addEventListener(type, (event) => view.alive && listener(event), { signal });
+  // The page's caret moved without the field (a key, a tap, another field): start empty, which
+  // also tells the input method that there is no text before the caret
+  const forget = () => {
+    if (composing) return;
+    entered = '';
+    if (ime.value) ime.value = '';
+  };
+  const sync = () => {
+    const { backspaces, insert } = textEdit(entered, ime.value);
+    entered = ime.value;
+    if (!backspaces && !insert) return;
+    view.userInput(false);
+    for (let i = 0; i < backspaces; i++) pressKey(view, BACKSPACE);
+    if (insert) host.module._bl_insert_text(view.id, host.text(insert));
+  };
 
   // Autofill and some on-screen keyboards send key events without a key: no key to forward
   on('keydown', (e) => {
@@ -132,6 +197,7 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     // Paste: wait for the paste event, it carries the content
     if (isPasteShortcut(e) || isTextInput(e)) return;
     view.userInput(false);
+    forget();
     sendKey(view, 0, e);
     // Browser shortcuts like Tab, Backspace and Space stay in the page
     if (e.key !== 'F5' && e.key !== 'F12') e.preventDefault();
@@ -144,33 +210,32 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
   on('compositionstart', () => {
     composing = true;
   });
+  // A composition can also begin on text before the caret without compositionstart (Android
+  // keyboards compose the word again on Backspace): the end corrects the text
   on('compositionupdate', (e) => {
+    compositionBase ??= entered;
     const text = e.data || '';
     host.module._bl_set_composition(view.id, host.text(text), text.length, text.length);
   });
   on('compositionend', (e) => {
     composing = false;
     view.userInput(false);
-    host.module._bl_confirm_composition(view.id, host.text(e.data || ''));
-    ime.value = '';
+    const text = e.data || '';
+    host.module._bl_confirm_composition(view.id, host.text(text));
+    entered = (compositionBase ?? entered) + text;
+    compositionBase = null;
+    sync();
   });
   on('input', (e) => {
-    const event = e as InputEvent;
-    if (composing || event.isComposing) return;
-    if (
-      event.data &&
-      (event.inputType === 'insertText' || event.inputType === 'insertReplacementText')
-    ) {
-      view.userInput(false);
-      host.module._bl_insert_text(view.id, host.text(event.data));
-    }
-    ime.value = '';
+    if (composing || (e as InputEvent).isComposing) return;
+    sync();
   });
   // Paste: text, HTML and files (for example a screenshot) like Chrome. Files go into the
   // engine file system like uploads; the page gets them in clipboardData.files.
   on('paste', async (e) => {
     e.preventDefault();
     view.userInput(false);
+    forget();
     const clipboardData = e.clipboardData;
     // Right after a copy of a page the host clipboard may still have the old content
     const pending = pendingClipboardWrite();
@@ -184,18 +249,7 @@ export function createImeField(view: ViewImpl, signal: AbortSignal): HTMLTextAre
     data.files = await host.uploads.write(view, files);
     if (!view.alive) return;
     host.module._bl_set_clipboard(host.text(JSON.stringify(data)));
-    const shortcut: KeyLike = {
-      key: 'v',
-      code: 'KeyV',
-      keyCode: 86,
-      repeat: false,
-      ctrlKey: true,
-      shiftKey: false,
-      altKey: false,
-      metaKey: false,
-    };
-    sendKey(view, 0, shortcut);
-    sendKey(view, 1, shortcut);
+    pressKey(view, PASTE);
   });
-  return ime;
+  return { field: ime, forget };
 }

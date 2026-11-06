@@ -35,7 +35,9 @@ moves onto one or out of the canvas (mouseleave, no more `:hover`). The hidden t
 focus for the page and carries the input mode and enter key hint of the page's focused field, so
 phones show the fitting on-screen keyboard; in Chrome the view focuses it once more after a tap
 into a field, which opens the keyboard there, on iPhone and iPad when the hint changes, which
-gives the keyboard the hint ([architecture, Input](../../docs/architecture.md#input)).
+gives the keyboard the hint. It keeps the text an input method entered until the caret moves
+otherwise, so an on-screen keyboard's Backspace and suggestions after typing reach the page
+([architecture, Input](../../docs/architecture.md#input)).
 `sw.js` and `media-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
 `@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them; how to serve
 them or load `media-sw.js` into the site's own worker:

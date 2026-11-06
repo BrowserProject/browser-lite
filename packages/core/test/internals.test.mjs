@@ -1,12 +1,13 @@
 // Parts of the core that need no browser: page dialogs, permission and HTTP authentication
 // answers (Requests), the
-// downloads, the upload limit, popups without a new-view listener, the pending navigation and the
-// engine check.
+// downloads, the upload limit, popups without a new-view listener, the pending navigation, the
+// engine check and the edits of the IME field.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
+import { textEdit } from '../dist/keyboard.js';
 import { loadedAddress, PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
@@ -510,4 +511,19 @@ test('crash reason: name and message before the stack, also where the stack lack
   const bare = new Error('gone');
   bare.stack = undefined;
   assert.equal(errorText(bare), 'Error: gone');
+});
+
+test('IME field edits: Backspaces per grapheme cluster, then the new text', () => {
+  assert.deepEqual(textEdit('', 'x'), { backspaces: 0, insert: 'x' });
+  assert.deepEqual(textEdit('xy', 'x'), { backspaces: 1, insert: '' });
+  assert.deepEqual(textEdit('xy', ''), { backspaces: 2, insert: '' });
+  // A suggestion replaces the word
+  assert.deepEqual(textEdit('a helo', 'a hello '), { backspaces: 1, insert: 'lo ' });
+  // An emoji sequence and a vowel sign go with one Backspace like in the engine
+  assert.deepEqual(textEdit('a\u{1F468}\u200D\u{1F469}\u200D\u{1F467}', 'a'), {
+    backspaces: 1,
+    insert: '',
+  });
+  assert.deepEqual(textEdit('\u0915\u093F', '\u0915'), { backspaces: 1, insert: '\u0915' });
+  assert.deepEqual(textEdit('same', 'same'), { backspaces: 0, insert: '' });
 });

@@ -65,6 +65,7 @@ export class ViewImpl implements View {
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
   private readonly ime: HTMLTextAreaElement;
+  private readonly forgetImeText: () => void;
   private readonly setEnterKeyHint: (hint: string) => void;
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
@@ -108,7 +109,9 @@ export class ViewImpl implements View {
     } else {
       this.context2d = this.canvas.getContext('2d', { alpha: false });
     }
-    this.ime = createImeField(this, this.lifetime.signal);
+    const ime = createImeField(this, this.lifetime.signal);
+    this.ime = ime.field;
+    this.forgetImeText = ime.forget;
     this.setEnterKeyHint = enterKeyHintSetter(this.ime, this.lifetime.signal);
     attachPointerInput(this, this.lifetime.signal);
     this.resizeObserver = new ResizeObserver(() => this.measure());
@@ -156,7 +159,11 @@ export class ViewImpl implements View {
 
   /** @internal Click, key or text into the page. */
   userInput(focus = true): void {
-    if (focus) this.focus();
+    if (focus) {
+      // A click or tap can move the caret
+      this.forgetImeText();
+      this.focus();
+    }
     this.host.gesture();
     if (!this.userActivated) {
       this.userActivated = true;
@@ -658,6 +665,7 @@ export class ViewImpl implements View {
         // it again without a new tap, so none applies only when no field follows soon
         const mode = String(data.mode ?? '') || 'none';
         const enterKeyHint = String(data.enterKeyHint ?? '');
+        this.forgetImeText();
         clearTimeout(this.imeModeTimer);
         const apply = () => {
           const opens = mode !== 'none' && this.ime.inputMode === 'none';

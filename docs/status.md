@@ -21,7 +21,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
   validation messages and the file input's label with their numbers and texts (#363), a typed
   `data:` or `about:` address without the Content-Security-Policy of the page before (#408).
-- **Input**: keyboard incl. dead keys and IME preview (#127), clipboard with HTML and files
+- **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
+  Android keyboards after typing (#411), clipboard with HTML and files
   (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
@@ -135,7 +136,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   dialog for two minutes), Samsung Galaxy S23 and Motorola Moto G71 Chrome, Windows 11 Firefox;
   on a Pixel 9 (2026-11-04) Chrome's on-screen keyboard opens at a tap into a field and closes
   when the field loses the focus (#360); on an iPhone 16 (2026-11-05) the keyboard shows the
-  page field's enter key, search in Google's search box (#392);
+  page field's enter key, search in Google's search box (#392); on a Pixel 9 (2026-11-06)
+  Gboard's Backspace deletes after typing and its suggestion replaces the typed word (#411);
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
   iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
   BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox

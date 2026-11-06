@@ -143,7 +143,10 @@ pixels with `readPixels` into the page or, with compositing, into a layer. A los
 
 Mouse, wheel, touch, touchpad pinch and keyboard go from the canvas to `bl_*` exports
 (`packages/core/src/input.ts`, `keyboard.ts`). Text arrives through a hidden IME field placed at
-the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text; in Chrome
+the caret (#31, #127), so dead keys, IME and on-screen keyboards deliver finished text. The field
+keeps the text the input method entered since the caret last moved otherwise (a key, a click, a
+new field), and every change of it reaches the page as Backspaces and inserted text, so an
+Android keyboard's Backspace and suggestions, which edit that text, work after typing (#411). In Chrome
 the core opens the on-screen keyboard after a tap by focusing that field again once it has the
 page field's input mode, and Chrome closes it for none (#360). iOS gives its keyboard the
 field's enter key hint only at a focus, so on iPhone and iPad the core moves the focus through a
