@@ -165,6 +165,10 @@ outside the view, like WebKitGTK: the page gets mouseout and mouseleave and lose
 the hovered link; a finger keeps its hover (#381). A page from the back/forward cache still knows
 the element (and iframe) the mouse was over when it was left, so the first move out of it fires
 mouseout and mouseleave like in Chrome (patch 0079, #398).
+On a mobile device (`device.mobile`) the overlay scrollbars of the page and of scrolling boxes
+only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
+touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with
+a touch screen, they take the press and drag (patch 0082, #413).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`).
 Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine

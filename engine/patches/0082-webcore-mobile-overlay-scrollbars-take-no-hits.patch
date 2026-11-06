@@ -1,0 +1,90 @@
+diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
+index 187f47bc15..09d232a63b 100644
+--- a/Source/WebCore/PlatformWasm.cmake
++++ b/Source/WebCore/PlatformWasm.cmake
+@@ -71,6 +71,7 @@ list(APPEND WebCore_SOURCES
+     platform/wasm/PlatformPasteboardWasm.cpp
+     platform/wasm/PlatformScreenWasm.cpp
+     platform/wasm/PlatformSpeechSynthesizerWasm.cpp
++    platform/wasm/ScrollbarsControllerWasm.cpp
+     platform/wasm/SystemFontDatabaseWasm.cpp
+     platform/wasm/UserAgentWasm.cpp
+     platform/wasm/WasmPlatform.cpp
+diff --git a/Source/WebCore/platform/ScrollbarsController.cpp b/Source/WebCore/platform/ScrollbarsController.cpp
+index a160424a2c..f9c7378281 100644
+--- a/Source/WebCore/platform/ScrollbarsController.cpp
++++ b/Source/WebCore/platform/ScrollbarsController.cpp
+@@ -36,11 +36,14 @@ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(ScrollbarsController);
+ 
++// PORT=Wasm has its own in platform/wasm/ScrollbarsControllerWasm.cpp
++#if !PLATFORM(WASM)
+ std::unique_ptr<ScrollbarsController> ScrollbarsController::create(ScrollableArea& scrollableArea)
+ {
+     return makeUnique<ScrollbarsController>(scrollableArea);
+ }
+ #endif
++#endif
+ 
+ ScrollbarsController::ScrollbarsController(ScrollableArea& scrollableArea)
+     : m_scrollableArea(scrollableArea)
+diff --git a/Source/WebCore/platform/wasm/ScrollbarsControllerWasm.cpp b/Source/WebCore/platform/wasm/ScrollbarsControllerWasm.cpp
+new file mode 100644
+index 0000000000..2dc3089da5
+--- /dev/null
++++ b/Source/WebCore/platform/wasm/ScrollbarsControllerWasm.cpp
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2026 browser-lite contributors
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
++ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ * THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include "config.h"
++#include "ScrollbarsController.h"
++
++#include "WasmPlatform.h"
++
++namespace WebCore {
++
++namespace {
++
++// On a mobile device (coarse primary pointer without hover) overlay scrollbars only show the
++// position, like in mobile Chrome and Safari: they take no hit tests, so taps, touches and
++// elementFromPoint reach the content below them. With a mouse they can be dragged.
++class ScrollbarsControllerWasm final : public ScrollbarsController {
++    WTF_DEPRECATED_MAKE_FAST_ALLOCATED(ScrollbarsControllerWasm);
++public:
++    using ScrollbarsController::ScrollbarsController;
++
++    bool shouldScrollbarParticipateInHitTesting(Scrollbar*) final { return !WasmPlatform::screenInfo().mobile; }
++};
++
++} // namespace
++
++std::unique_ptr<ScrollbarsController> ScrollbarsController::create(ScrollableArea& scrollableArea)
++{
++    return makeUnique<ScrollbarsControllerWasm>(scrollableArea);
++}
++
++} // namespace WebCore
