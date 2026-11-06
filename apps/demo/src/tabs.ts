@@ -6,6 +6,7 @@ import { ui } from './extensions.js';
 import { hostOf, rememberIcon } from './favicons.js';
 import { endFind, showFindCount, showFindOf } from './find-bar.js';
 import { recordVisit } from './history.js';
+import { syncHostHistory } from './host-history.js';
 import { icon, setIcon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { debug } from './params.js';
@@ -154,6 +155,7 @@ export class Tab implements SessionTab {
       this.followSiteZoom();
       persistSession();
       this.changed();
+      if (this.isActive) syncHostHistory();
     });
     this.on('title', (event) => {
       this.title = event.title;
@@ -542,6 +544,7 @@ export function activate(tab: Tab): void {
   const address = byId('address');
   if (document.activeElement === address) address.blur();
   updateToolbar(tab);
+  syncHostHistory();
   tab.updateTitle();
   focusPage();
 }
@@ -694,5 +697,6 @@ export function clearTabs(): void {
   for (const tab of list.splice(0)) tab.dispose();
   active = null;
   tabsChanged();
+  syncHostHistory();
   window.onbeforeunload = null;
 }

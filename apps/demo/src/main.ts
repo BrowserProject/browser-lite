@@ -27,6 +27,7 @@ import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
+import { followHostHistory } from './host-history.js';
 import { renderIcons } from './icons.js';
 import { initNewTabPage } from './new-tab-page.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
@@ -336,6 +337,17 @@ initSidePanel({
   openSettings: (section) => openSettings(section),
 });
 initFindBar({ view: () => activeTab()?.view ?? null, focusPage });
+followHostHistory(() => {
+  const tab = activeTab();
+  return (
+    tab && {
+      canGoBack: tab.canGoBack,
+      canGoForward: tab.canGoForward,
+      back: () => tab.view.back(),
+      forward: () => tab.view.forward(),
+    }
+  );
+});
 initBlockedPopups((url) => openURL(url, true));
 initTabOverview();
 initTabDrag();

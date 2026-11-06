@@ -8,7 +8,7 @@
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`) | JSC build | jsc |
 | `packages` | DOM tests of the packages in Chromium and Firefox (`packages/*/test/browser.mjs`: ui popups, prompts and dialogs, profile sync with the real OPFS, engine deltas of the server) | packages, Playwright | e2e-core |
 | `core/` | `@browser-lite/core` in Chromium and Firefox through the test host page `core/host/`: every engine feature | engine build, packages, Playwright | e2e-core |
-| `demo/` | the demo UI (`apps/demo`) in Chromium and Firefox: tabs, prompts, dialogs, settings, profile, code cache after a restart | engine build, packages, Playwright | e2e-demo |
+| `demo/` | the demo UI (`apps/demo`) in Chromium and Firefox: tabs, prompts, dialogs, settings, profile, the host's back and forward, code cache after a restart | engine build, packages, Playwright | e2e-demo |
 | `examples/` | both [examples](../examples/README.md) in Chromium and Firefox: rendering, relay tokens, own service worker, iframe, strict CSP, Vite build, `npm run relay` | engine build, packages, Playwright | e2e-core |
 | `compat/` | real sites of `sites.txt`, informational; `host-crash-test.mjs`: the run goes on after its host browser died | engine build, internet | compat |
 | `bench/` | benchmarks to run by hand: pages for `engine/render.mjs`, `slow-start.mjs` (first and second start of the packaged demo behind a slow link, `shaper.mjs`) | engine build, Playwright | none |

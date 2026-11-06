@@ -291,6 +291,10 @@ of `context.storage` (default in memory), for example in your user's profile.
 - `view.close()` runs the page's beforeunload first and resolves `false` when the user stays.
   Like Chrome it does not wait longer than 500 ms for a busy page (all views share the engine
   thread), so closing tabs in a row never stalls behind a heavy page (#387).
+- The back of the host browser (the phone's back gesture, Safari's edge swipe) leaves your page,
+  as views keep their history inside the engine. To make it go back in the view in front, keep
+  an entry of your own above the page's with `history.pushState` in a user action and map
+  `popstate` to `view.back()` and `view.forward()`; the demo's `host-history.ts` does this (#414).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left for good (`pagehide` without the back-forward cache) the browser ends
   like `destroy()`, without events: the page can no longer react. In the back-forward cache it

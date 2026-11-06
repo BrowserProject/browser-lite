@@ -105,6 +105,14 @@ select popup) are in the same sheet.
   active tab; the session keeps the order (#383). Closing the active tab activates the tab it
   was opened from in front (Ctrl+T, a link or a popup) as long as no other tab was active in
   between, else its right neighbour, the left one at the end, like Chrome and Firefox (#410).
+- **Host back and forward**: the back of the host browser (its button, the iOS edge swipe, the
+  Android back gesture) goes back in the tab in front while it has a back entry, only then the
+  host leaves the demo; its forward goes forward in the tab after a back to the tab's first
+  entry (the demo's own forward button always does). `host-history.ts`
+  keeps two host entries of the demo, the one it loaded at and one above it that the first user
+  action pushes, and moves between them with `history.back()` and `history.forward()` (#414).
+  Before the first user action (a restored session) the host back still leaves the demo: Chrome
+  and Safari skip host entries a page added without one.
 - **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
   (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and
@@ -168,6 +176,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
+| `host-history.ts` | the back and forward of the host browser act on the tab in front |
 | `tab-drag.ts` | reordering tabs by dragging them in the strip |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
