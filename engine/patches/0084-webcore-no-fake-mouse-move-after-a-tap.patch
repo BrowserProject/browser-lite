@@ -1,0 +1,15 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 33a66d16c3..f52f173b71 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -4049,6 +4049,10 @@ void EventHandler::dispatchFakeMouseMoveEventSoon()
+     if (!m_lastKnownMousePosition)
+         return;
+ 
++    // A tap leaves no pointer over the page: a scroll must not hover what is now under the finger
++    if (m_lastKnownMousePositionSource == LastKnownMousePositionSource::Touch)
++        return;
++
+     if (RefPtr page = m_frame->page()) {
+         if (!page->chrome().client().shouldDispatchFakeMouseMoveEvents())
+             return;

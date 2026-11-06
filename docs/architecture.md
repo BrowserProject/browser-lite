@@ -167,9 +167,11 @@ Mouse events carry the host's pressed buttons (`MouseEvent.buttons`, which also 
 `pointermove` with a `button`) becomes a mousedown or mouseup (#370).
 When the mouse leaves the canvas (to the host UI or an overlay) the core sends a move one pixel
 outside the view, like WebKitGTK: the page gets mouseout and mouseleave and loses `:hover` and
-the hovered link; a finger keeps its hover (#381). A page from the back/forward cache still knows
-the element (and iframe) the mouse was over when it was left, so the first move out of it fires
-mouseout and mouseleave like in Chrome (patch 0079, #398).
+the hovered link; a finger keeps its hover (#381). A scroll after a tap hovers nothing new under
+the old tap point, like in mobile Chrome and Safari: WebCore leaves out its mouse move after a
+scroll while the last pointer position comes from a tap (patch 0084, #426). A page from the
+back/forward cache still knows the element (and iframe) the mouse was over when it was left, so
+the first move out of it fires mouseout and mouseleave like in Chrome (patch 0079, #398).
 On a mobile device (`device.mobile`) the overlay scrollbars of the page and of scrolling boxes
 only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
 touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with
