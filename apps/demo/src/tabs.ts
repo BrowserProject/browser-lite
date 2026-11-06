@@ -109,9 +109,18 @@ export class Tab implements SessionTab {
       this.updateAudio();
     });
     this.element.addEventListener('mousedown', (e) => {
+      // The middle button closes the tab on release, without autoscroll
+      if (e.button === 1) e.preventDefault();
+      if (e.button !== 0) return;
       const target = e.target as HTMLElement;
       if (!target.classList.contains('close') && !target.classList.contains('audio'))
         activate(this);
+    });
+    // Like Chrome and Firefox, also on the tab's buttons
+    this.element.addEventListener('auxclick', (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      requestClose(this);
     });
     this.part('.close').addEventListener('click', () => requestClose(this));
     this.updateTitle();

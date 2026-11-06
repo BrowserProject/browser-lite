@@ -5,7 +5,8 @@
 // one at the end), or the tab it was opened from while no other tab was active in between. Tabs
 // opened from links come right after their page like in Chrome: in the background (Ctrl+click,
 // middle click, also on a target=_blank link) after the ones it opened before, in front
-// (target=_blank) directly after it; an address typed into the page starts over.
+// (target=_blank) directly after it; an address typed into the page starts over. A middle click on
+// a tab closes it.
 //
 //   node tests/demo/tab-order-test.mjs [engine-dir]
 import {
@@ -244,6 +245,15 @@ check('closed: back to the page', (await orderIs('LADADC')) && (await activeTitl
 await typeL();
 await ctrlClick(plainLink);
 check('after a typed address: right after the page again', await orderIs('LAADADC'), await order());
+
+// A middle click on a tab closes it without activating it, like Chrome and Firefox
+const last = await box('C');
+await page.mouse.click(last.x + last.width / 3, last.y + last.height / 2, { button: 'middle' });
+check(
+  'middle click on a background tab: closes it, the active tab stays',
+  (await orderIs('LAADAD')) && (await activeTitle()) === 'L',
+  `${await order()}, ${await activeTitle()}`,
+);
 
 await browser.close();
 finish();
