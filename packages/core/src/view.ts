@@ -7,6 +7,7 @@ import { attachPointerInput } from './input.js';
 import {
   attachFieldArrows,
   createImeField,
+  enterKeyHintOf,
   enterKeyHintSetter,
   focusOpensKeyboard,
   unhandledKey,
@@ -716,7 +717,7 @@ export class ViewImpl implements View {
         // with its own field) passes through none: Android would close the keyboard and not open
         // it again without a new tap, so none applies only when no field follows soon
         const mode = String(data.mode ?? '') || 'none';
-        const enterKeyHint = String(data.enterKeyHint ?? '');
+        const enterKeyHint = enterKeyHintOf(mode, String(data.enterKeyHint ?? ''));
         this.forgetImeText();
         clearTimeout(this.imeModeTimer);
         const apply = () => {

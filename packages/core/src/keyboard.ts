@@ -25,6 +25,16 @@ export function focusOpensKeyboard(): boolean {
 }
 
 /**
+ * @internal Enter key hint of the IME field for the page's focused field: its `enterkeyhint`,
+ * else the key Chrome and Safari give a field of that input mode. A search field (type or
+ * `inputmode` search) gets the search key: for the IME field, a textarea, input mode search
+ * alone gives the return key in Gboard and "go" on iOS, the hint search gives the search key.
+ */
+export function enterKeyHintOf(mode: string, hint: string): string {
+  return hint || (mode === 'search' ? 'search' : '');
+}
+
+/**
  * @internal Setter for the enter key hint of the IME field (the `enterkeyhint` of the page's
  * focused field). iOS gives its on-screen keyboard the hint only when an element gains focus, but
  * the IME field has the focus since the user's tap and gets the page field's hint after it

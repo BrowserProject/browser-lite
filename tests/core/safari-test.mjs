@@ -45,6 +45,7 @@ const PAGE = `<!doctype html><title>Safari paths</title>
 <button id="mic" style="top: 270px">microphone</button>
 <input id="jump" style="top: 320px">
 <input id="overlay" style="top: 370px">
+<form><input id="search" type="search" name="search" style="top: 420px"></form>
 <video id="video" muted playsinline style="position:absolute;left:300px;top:20px;width:320px;height:240px"></video>
 <script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
@@ -207,6 +208,16 @@ check(
 );
 mode = await tapAndMode(185, 'text/');
 check('keyboard: contenteditable', mode === 'text/', mode);
+// A search field without enterkeyhint gets the search key like in Chrome and Safari: the IME
+// field, a textarea, showed return (Gboard) or "go" (iOS) for input mode search alone
+mode = await tapAndMode(435, 'search/search');
+check('keyboard: search field gets the search key', mode === 'search/search', mode);
+focus = await imeFocus();
+check(
+  'keyboard (iOS): focused again with the search key',
+  focus.focus.at(-1) === 'search/search' && focus.active,
+  JSON.stringify(focus),
+);
 mode = await tapAndMode(235, 'none/');
 check('keyboard: none after a button', mode === 'none/', mode);
 

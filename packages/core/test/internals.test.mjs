@@ -8,7 +8,7 @@ import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
-import { textEdit } from '../dist/keyboard.js';
+import { enterKeyHintOf, textEdit } from '../dist/keyboard.js';
 import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
@@ -584,4 +584,13 @@ test('IME field edits: Backspaces per grapheme cluster, then the new text', () =
   });
   assert.deepEqual(textEdit('\u0915\u093F', '\u0915'), { backspaces: 1, insert: '\u0915' });
   assert.deepEqual(textEdit('same', 'same'), { backspaces: 0, insert: '' });
+});
+
+test('IME field enter key: the page field hint, else search for a search field', () => {
+  assert.equal(enterKeyHintOf('search', ''), 'search');
+  assert.equal(enterKeyHintOf('search', 'go'), 'go');
+  assert.equal(enterKeyHintOf('search', 'enter'), 'enter');
+  assert.equal(enterKeyHintOf('text', ''), '');
+  assert.equal(enterKeyHintOf('text', 'send'), 'send');
+  assert.equal(enterKeyHintOf('none', ''), '');
 });

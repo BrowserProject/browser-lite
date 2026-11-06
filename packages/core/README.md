@@ -32,8 +32,9 @@ The canvas shows the page's frames pixel for pixel from its top left (its box is
 times the container, scaled back with `transform`), so size the container, not the canvas.
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it
 moves onto one or out of the canvas (mouseleave, no more `:hover`). The hidden text field takes the
-focus for the page and carries the input mode and enter key hint of the page's focused field, so
-phones show the fitting on-screen keyboard; in Chrome the view focuses it once more after a tap
+focus for the page and carries the input mode and enter key hint of the page's focused field (a
+search field without a hint gets the search key, like in Chrome and Safari), so phones show the
+fitting on-screen keyboard; in Chrome the view focuses it once more after a tap
 into a field, which opens the keyboard there, on iPhone and iPad when the hint changes, which
 gives the keyboard the hint. It keeps the text an input method entered until the caret moves
 otherwise, so an on-screen keyboard's Backspace and suggestions after typing reach the page.

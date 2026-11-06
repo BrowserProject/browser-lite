@@ -170,7 +170,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   dialog for two minutes), Samsung Galaxy S23 and Motorola Moto G71 Chrome, Windows 11 Firefox;
   on a Pixel 9 (2026-11-04) Chrome's on-screen keyboard opens at a tap into a field and closes
   when the field loses the focus (#360); on an iPhone 16 (2026-11-05) the keyboard shows the
-  page field's enter key, search in Google's search box (#392); on a Pixel 9 (2026-11-06)
+  page field's enter key, search in Google's search box (#392), and search fields without
+  `enterkeyhint` (Wikipedia) get the search key (#443; on a Pixel 9 on 2026-11-06 Gboard shows
+  it for a textarea with that hint like the IME field); on a Pixel 9 (2026-11-06)
   Gboard's Backspace deletes after typing and its suggestion replaces the typed word (#411); on an
   iPhone 16 (2026-11-06) the keyboard's previous and next field arrows step through the page's
   fields instead of reaching the address bar (#423);
