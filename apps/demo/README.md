@@ -180,7 +180,11 @@ notch and the home indicator (`env(safe-area-inset-*)`). While the iOS keyboard 
 `visual-viewport.ts` sets `--visible-height` and `--keyboard-height`: the page gets as high as the
 visible part, so the toolbar sits on the keyboard (without the inset of the home indicator), and
 sheets and suggestions stay above it (`--chrome-height` of `main.ts` is the height of the toolbar;
-on Android the keyboard makes the page smaller anyway). An emulated device of the
+on Android the keyboard makes the page smaller anyway). Like Chrome only a field in the page area
+(a page's field, the find bar) makes the page smaller: while a field of the demo has the focus
+(address bar, panels, dialogs) the page area keeps the height it had and the keyboard covers its
+bottom, so the page is not laid out again when the keyboard opens and closes (`page-size.ts`; a
+rotation gives the size free). An emulated device of the
 settings fills the page area there. The page is `100dvh` high, so it fills the screen also while
 the toolbar of the mobile browser is hidden. On an iPhone, iPad or Android device the setting
 "Device" defaults to that device (an Android phone or tablet to the iPhone or iPad: sites refuse
@@ -212,7 +216,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts` | the back and forward of the host browser act on the tab in front |
 | `tab-drag.ts` | reordering tabs by dragging them in the strip |
-| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard |
+| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps and zoom per site, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |

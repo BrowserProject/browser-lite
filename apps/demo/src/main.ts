@@ -30,6 +30,7 @@ import { initFindBar, openFind } from './find-bar.js';
 import { followHostHistory } from './host-history.js';
 import { renderIcons } from './icons.js';
 import { initNewTabPage } from './new-tab-page.js';
+import { keepPageSizeWhileEditing } from './page-size.js';
 import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js';
 import { profilePermissions } from './permissions.js';
 import { onPreviewClosed } from './print-preview.js';
@@ -360,6 +361,7 @@ onBookmarksChange(() => {
 });
 installShortcuts();
 fitVisualViewport();
+keepPageSizeWhileEditing(byId('pages'));
 followRotation();
 renderIcons();
 // Where the chrome ends (side panel and menu start there) and how high it is (the sheets of the

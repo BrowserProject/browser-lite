@@ -1,7 +1,8 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
 // compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
-// page smaller), the tab overview shows the tabs, switches and closes one, a long press on a
+// window smaller, while the page keeps its size like in Chrome; a field in the page area makes
+// it smaller), the tab overview shows the tabs, switches and closes one, a long press on a
 // link shows its address and only its commands, Open link in new tab
 // opens it in the background with a message to switch to it, the menu opens as a
 // bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
@@ -182,6 +183,14 @@ check(
 );
 await screenshot(tab, 'mobile-portrait');
 
+/** The height of the page as the engine lays it out (its innerHeight). */
+async function pageHeight() {
+  results.delete('height');
+  await tab.evaluate(() => window.blTest.eval('console.log("RESULT height=" + innerHeight)'));
+  return Number(await results.wait('height', 10000));
+}
+const fullHeight = await pageHeight();
+
 // Address entry: the tap shows the whole address, selected
 await tab.tap('#address');
 const tapped = await tab.evaluate(() => {
@@ -213,6 +222,15 @@ check(
   JSON.stringify(raised),
 );
 check('address entry: the suggestions above the toolbar with the keyboard', ...(await above()));
+// Like Chrome the keyboard of the address bar covers the page instead of making it smaller, so
+// the page is not laid out again
+await tab.waitForTimeout(700);
+const coveredHeight = await pageHeight();
+check(
+  'address entry: the page keeps its size under the keyboard',
+  fullHeight > 520 && coveredHeight === fullHeight,
+  `${fullHeight} -> ${coveredHeight}`,
+);
 const typed = await tab.inputValue('#address');
 // The keyboard goes away without a blur (the back button of Android): editing ends
 await tab.setViewportSize(PORTRAIT);
@@ -222,6 +240,26 @@ check(
   await tab.evaluate(
     () => document.activeElement?.id !== 'address' && document.getElementById('suggestions').hidden,
   ),
+);
+// A keyboard for a field in the page area (like the text field of a view that a page field
+// focuses) still makes the page smaller, so the engine keeps the field visible
+await tab.evaluate(() => {
+  const field = document.createElement('input');
+  document.getElementById('pages').append(field);
+  field.focus();
+  window.blTestField = field;
+});
+await tab.setViewportSize({ width: PORTRAIT.width, height: 520 });
+await tab.waitForTimeout(700);
+const pageFieldHeight = await pageHeight();
+await tab.evaluate(() => window.blTestField.remove());
+await tab.setViewportSize(PORTRAIT);
+await tab.waitForTimeout(700);
+const backHeight = await pageHeight();
+check(
+  'page field: the keyboard makes the page smaller, afterwards it is whole again',
+  pageFieldHeight < 520 && backHeight === fullHeight,
+  `${pageFieldHeight}, ${backHeight}`,
 );
 await tab.tap('#address');
 await tab.fill('#address', typed);

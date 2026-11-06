@@ -134,7 +134,9 @@ Without a transferable canvas the engine hands pixels in shared memory (`onEngin
 The core shows a frame pixel for pixel at the view's pixel ratio from the top left of the canvas
 (`object-fit: none` in a box of ratio times the view, scaled back with a transform, `view.ts`):
 after a rotation or an on-screen keyboard the last frame stays unscaled, cut off or with an empty
-rest, until the engine shows one of the new size, like Chrome (#404).
+rest, until the engine shows one of the new size, like Chrome (#404). A view takes the size of its
+container; the demo keeps its page area's size while one of its own fields has the on-screen
+keyboard, so only a page field makes the page smaller and gets laid out again (#444).
 
 ## WebGL
 

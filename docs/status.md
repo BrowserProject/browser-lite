@@ -150,7 +150,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the settings' close button at the top while they scroll (#379),
   the empty bookmarks sheet names the menu's Bookmark button, not the hidden star (#428),
   a long press shows the address of the pressed link or image and only its commands, no page
-  commands (#429),
+  commands (#429), the page keeps its size under the keyboard of the address bar and the demo's
+  other fields instead of being laid out again, like Chrome (#444),
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
   Android's back gesture) goes back in the tab and leaves the demo only at the tab's first entry
