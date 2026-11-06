@@ -120,6 +120,9 @@ A layer gets tiles as far down as layout reaches (LayoutUnit, about 33.5 million
 rect is no longer clamped to 2^24 px (patch 0081, #409).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
+The decoded frame of an image that is the contents of a compositing layer stays while the layer
+holds it: the memory cache's pruning skips it, as dropping it frees nothing and the layer's next
+update would decode it again on the engine thread (patch 0086, #432).
 Without a transferable canvas the engine hands pixels in shared memory (`onEngineFrame`).
 The core shows a frame pixel for pixel at the view's pixel ratio from the top left of the canvas
 (`object-fit: none` in a box of ratio times the view, scaled back with a transform, `view.ts`):

@@ -114,7 +114,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   waits 60 to 180 ms for a worker to load (#242); a JPEG drawn at half its size or smaller
   decodes smaller, a 4000 x 3000 photo shown at 400 x 300 takes 0.7 instead of 46 MB of pixels
   (#270); the host polls gamepads only while a page uses them, so the idle demo no longer keeps
-  Chromium's gamepad thread at 220 wakeups/s, a quarter of its idle CPU (#380).
+  Chromium's gamepad thread at 220 wakeups/s, a quarter of its idle CPU (#380); an image that is
+  the contents of a compositing layer keeps its decoded frame, before the memory cache dropped it
+  and every layer update decoded it again (vimeo.com: 39 to 53 % of the engine thread in WebP
+  decoding after the load, now none, #432).
 - **Fonts**: Noto for about 20 scripts, symbols, Chinese, Japanese, Korean and color emoji
   (COLRv1), loaded on demand in small slices (#229).
 - **Profile on the server**: cookies, localStorage and small IndexedDBs plus app prefs, only the
@@ -366,6 +369,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
    decodes at full size for `img.decode()`, WebGL, `createImageBitmap`, `createPattern` and
    repeated CSS backgrounds, and keeps that frame for later small draws (like Safari).
+   libwebp is built without SIMD (`-DWEBP_ENABLE_SIMD=OFF` in `deps/recipes/libwebp.sh`), so
+   every WebP decoding runs its scalar code; its SSE2 paths with Emscripten's mapping to WASM
+   SIMD are not tried yet (a deps change, to batch with the next one). vimeo.com still keeps the
+   engine thread busy 30 s after the load without the decoding (#432): about 88 % of it JS
+   (scripts, module evaluation, microtasks), not analysed further.
 7. Memory of the host tab: with a trivial page the renderer of Chromium holds about 480 MB
    (2026-10-27, local): the engine memory (256 MB reserved, about 90 MB touched), about 220 MB
    of malloc inside the renderer that does not change with the number of workers (each spare

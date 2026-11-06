@@ -1,0 +1,22 @@
+diff --git a/Source/WebCore/platform/graphics/BitmapImageSource.cpp b/Source/WebCore/platform/graphics/BitmapImageSource.cpp
+index e4fd045758..41f4d36e84 100644
+--- a/Source/WebCore/platform/graphics/BitmapImageSource.cpp
++++ b/Source/WebCore/platform/graphics/BitmapImageSource.cpp
+@@ -138,6 +138,17 @@ void BitmapImageSource::destroyDecodedFrames(bool destroyAll)
+         if (!destroyAll && index > currentFrameIndex)
+             break;
+ 
++#if PLATFORM(WASM)
++        // browser-lite: a frame whose decoded image is still held elsewhere (the contents
++        // of a compositing layer) stays. Dropping it frees no memory, and the layer's next
++        // configuration update would decode it again on the main thread (patch 0086).
++        bool isInUseElsewhere = false;
++        for (auto& destination : m_frames[index].m_destinations)
++            isInUseElsewhere |= destination.nativeImage && !destination.nativeImage->hasOneRef();
++        if (isInUseElsewhere)
++            continue;
++#endif
++
+         decodedSize += m_frames[index].clearImage();
+     }
+ 
