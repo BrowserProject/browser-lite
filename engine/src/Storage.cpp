@@ -129,11 +129,6 @@ void FileReplacement::write(std::span<const uint8_t> data, uint64_t offset)
     }
 }
 
-void FileReplacement::truncate(uint64_t size)
-{
-    m_ok = m_ok && !ftruncate(m_fd, size);
-}
-
 bool FileReplacement::commit(const char* path)
 {
     if (m_fd < 0)

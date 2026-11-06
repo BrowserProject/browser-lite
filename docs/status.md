@@ -424,10 +424,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
    a worker pays off for hosts with long tasks of their own, not for the demo. The demo's own
    biggest long task, the favicon readback from a GPU canvas (0.03 to 3 s per new site in
    headless Chromium), reads back on the CPU since 2026-11-05 (1 ms, #375).
-10. SQLite files go to the OPFS from the engine thread, which waits for each write
-   (`flushAll` of `MemoryVFS.cpp` through WasmFS): with weather.com loading on a busy machine
-   (2026-11-04, load about 15 on 10 cores) single flushes held the engine thread 1 to 2 s, 4 s of
-   35 s in all. Writing from another thread would free it.
+10. Every SQLite commit still appends its record to the commit log on the committing thread
+   (#302), for cookies the engine thread: one OPFS write per commit, so a slow disk still costs
+   the engine thread one write for each cookie a page sets. The full writes of the databases no
+   longer do (#446): on edition.cnn.com (2026-11-06, loaded machine) the engine thread had
+   stood still for 3 to 13 s writing a 24 KB cookie database frame by frame, now no pointer move
+   waits longer than about 1 s.
 
 ## Open: features
 

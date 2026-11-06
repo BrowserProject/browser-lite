@@ -11,11 +11,11 @@ namespace BrowserLite {
 void registerMemoryVFS();
 
 // Writes changed databases to the file system now (all that are not in the
-// middle of a write transaction). On the engine thread or another worker
-// thread.
+// middle of a write transaction), on the storage thread. From any thread, does
+// not wait.
 void flushMemoryVFS();
 
-// Main thread of the host (pagehide): let the engine thread write and wait at
+// Main thread of the host (pagehide): let the storage thread write and wait at
 // most timeout for it. false: not finished in time
 bool flushMemoryVFSAndWait(Seconds timeout);
 

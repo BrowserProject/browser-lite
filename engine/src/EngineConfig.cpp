@@ -136,6 +136,8 @@ void loadEngineConfig()
     auto& config = mutableConfig();
     config.debug = flag("BL_DEBUG", false);
     config.testHooks = flag("BL_TEST_HOOKS", false);
+    if (config.testHooks)
+        config.opfsWriteDelayMs = number("BL_OPFS_WRITE_DELAY_MS", 0);
     config.features = parseFeatures(getenv("BL_FEATURES"));
     config.opfs = flag("BL_OPFS", true);
     config.httpCache = flag("BL_HTTP_CACHE", true);
@@ -189,6 +191,12 @@ void loadEngineConfig()
 extern "C" EMSCRIPTEN_KEEPALIVE const char* bl__storage_namespace()
 {
     return BrowserLite::engineConfig().storageNamespace.data();
+}
+
+// BL_OPFS_WRITE_DELAY_MS for the OPFS worker (engine/js/wasmfs-opfs.js)
+extern "C" EMSCRIPTEN_KEEPALIVE double bl__opfs_write_delay_ms()
+{
+    return BrowserLite::engineConfig().opfsWriteDelayMs;
 }
 
 // Limit of the HTTP cache in the host's Cache API (engine/js/http-cache.js)

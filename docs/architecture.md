@@ -310,7 +310,8 @@ cached shaped text points to, also the one for an emoji cluster, so a purge of W
 cache never deletes a font that text still paints with (patch 0087, #434).
 
 SQLite databases live in WASM memory (MemoryVFS, 64 KB blocks) and are written to disk as one
-file with the WAL folded in, about 1 s after a change and on page hide (#180). Every commit also
+file with the WAL folded in, about 1 s after a change and on page hide (#180), on a storage thread
+from a copy on write of the database, so the engine thread never waits for the OPFS (#446). Every commit also
 appends its new WAL pages to a hidden log next to it (`.<database>-bllog`) at once; opening
 applies them if the log goes on from that very database file (hash), the next full write empties
 the log (#302). IndexedDB is

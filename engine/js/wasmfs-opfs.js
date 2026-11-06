@@ -21,8 +21,11 @@ addToLibrary({
   // "No space" in the host's OPFS arrives as ENOSPC instead of EIO or EBADF.
   // The pages then get QuotaExceededError (engine/src/FileSystemStorageWasm.cpp).
   _wasmfs_opfs_write_access__i53abi: true,
-  _wasmfs_opfs_write_access__deps: ['$wasmfsOPFSAccessHandles'],
+  _wasmfs_opfs_write_access__deps: ['$wasmfsOPFSAccessHandles', 'bl__opfs_write_delay_ms'],
   _wasmfs_opfs_write_access: (accessID, bufPtr, len, pos) => {
+    // Tests: a slow disk (BL_OPFS_WRITE_DELAY_MS with BL_TEST_HOOKS=1)
+    var delay = _bl__opfs_write_delay_ms();
+    for (var end = performance.now() + delay; performance.now() < end; );
     var data = HEAPU8.subarray(bufPtr, bufPtr + len);
     var written;
     try {

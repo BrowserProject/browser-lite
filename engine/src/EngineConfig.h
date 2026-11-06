@@ -35,6 +35,9 @@ enum class Feature : uint32_t {
 struct EngineConfig {
     bool debug { false }; // BL_DEBUG
     bool testHooks { false }; // BL_TEST_HOOKS
+    // BL_OPFS_WRITE_DELAY_MS, only with test hooks: every write to the OPFS takes this long more,
+    // like a slow disk (engine/js/wasmfs-opfs.js)
+    double opfsWriteDelayMs { 0 };
     OptionSet<Feature> features; // BL_FEATURES, unset = all
     bool opfs { true }; // BL_OPFS
     CString storageNamespace; // BL_STORAGE_NAMESPACE

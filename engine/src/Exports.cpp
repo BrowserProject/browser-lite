@@ -837,17 +837,14 @@ EMSCRIPTEN_KEEPALIVE void bl_remove_path(char* path)
 }
 
 // Writes databases from memory into the file system (MemoryVFS.cpp), on the
-// engine thread (writing to OPFS). The host waits at most waitMilliseconds
-// for it (when the page is hidden).
+// storage thread (writing to OPFS), even while the engine thread is busy. The
+// host waits at most waitMilliseconds for it (when the page is hidden).
 EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
 {
     if (waitMilliseconds > 0)
         flushMemoryVFSAndWait(Seconds::fromMilliseconds(waitMilliseconds));
-    else {
-        runOnEngineThread([] {
-            flushMemoryVFS();
-        });
-    }
+    else
+        flushMemoryVFS();
 }
 
 // Allocated memory (malloc) for tests. mallinfo walks the whole heap (about

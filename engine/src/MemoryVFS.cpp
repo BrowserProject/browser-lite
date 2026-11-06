@@ -7,20 +7,23 @@
 // So database, -journal and -wal live here in memory (in blocks, Content), as
 // does the shared memory (shm) for WAL mode. Only the database goes to disk,
 // as a whole and with all committed pages from the WAL like after a checkpoint
-// (writeFamily), through a copy and a rename (FileReplacement in Storage.h).
+// (flushFamily), through a copy and a rename (FileReplacement in Storage.h).
 // Replacing database and WAL separately would not be atomic: if it breaks off
 // in between, SQLite replays an old WAL into a new database.
 //
 // Writing happens when no write transaction is running:
-// - shortly after a change (flushDelay, a big database less often),
+// - shortly after a change (flushDelay, a big database less often), on the
+//   storage thread (storageQueue), never on the engine thread,
 // - when the host asks for it (bl_storage_flush; when the page is hidden it
-//   waits for it),
+//   waits for it), also on the storage thread,
 // - when the last connection to a database closes. Afterwards everything is
 //   read from disk again, so it is right even when WebKit deletes the files
 //   itself (e.g. indexedDB.deleteDatabase).
+// A full write takes a copy of the database under its lock (copy on write,
+// Content::share) and writes it without the lock, in pieces of 1 MB.
 //
-// Rule against deadlocks: file accesses under the lock of a database only
-// with ioMutex.
+// Lock order: the I/O lock of a database (IOLock), then its lock. File
+// accesses never under the lock of a database.
 
 #include "config.h"
 #include "MemoryVFS.h"
@@ -40,6 +43,7 @@
 #include <fcntl.h>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <sqlite3.h>
 #include <string>
@@ -49,7 +53,8 @@
 #include <vector>
 #include <wtf/FileSystem.h>
 #include <wtf/MonotonicTime.h>
-#include <wtf/RunLoop.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/WorkQueue.h>
 #include <wtf/text/WTFString.h>
 
 namespace BrowserLite {
@@ -70,7 +75,10 @@ uint64_t maximumFileSize()
 // Content of a file in blocks of fixed size. Growing copies nothing (a
 // std::vector needs old and new space for that, with doubling up to three
 // times the file), and when memory is missing SQLite gets SQLITE_FULL instead
-// of the engine crashing.
+// of the engine crashing. share() gives a copy that shares the blocks: a block
+// that more than one content holds is copied before it is written (copy on
+// write), so a full write (flushFamily) works on a copy without the lock of the
+// database and costs memory only for the blocks changed meanwhile.
 class Content {
 public:
     Content() = default;
@@ -90,6 +98,17 @@ public:
 
     uint64_t size() const { return m_size; }
 
+    // Under the lock of the database, like every change of this content
+    Content share() const
+    {
+        Content copy;
+        copy.m_blocks = m_blocks;
+        copy.m_size = m_size;
+        for (auto* block : m_blocks)
+            block->references.fetch_add(1, std::memory_order_relaxed);
+        return copy;
+    }
+
     // false: too big or no memory, then everything stays as it was
     bool resize(uint64_t size)
     {
@@ -98,24 +117,26 @@ public:
         size_t count = (size + blockSize - 1) / blockSize;
         size_t before = m_blocks.size();
         while (m_blocks.size() < count) {
-            auto* block = static_cast<uint8_t*>(calloc(1, blockSize));
+            auto* block = Block::create(nullptr);
             if (!block) {
                 while (m_blocks.size() > before) {
-                    free(m_blocks.back());
+                    Block::release(m_blocks.back());
                     m_blocks.pop_back();
                 }
                 return false;
             }
             m_blocks.push_back(block);
         }
-        while (m_blocks.size() > count) {
-            free(m_blocks.back());
-            m_blocks.pop_back();
-        }
         // Behind the end there are always zeros: if the file grows again,
         // SQLite reads nothing old there
+        if (size < m_size && size % blockSize && !own(count - 1))
+            return false;
+        while (m_blocks.size() > count) {
+            Block::release(m_blocks.back());
+            m_blocks.pop_back();
+        }
         if (size < m_size && size % blockSize)
-            memset(m_blocks.back() + size % blockSize, 0, blockSize - size % blockSize);
+            memset(m_blocks.back()->data + size % blockSize, 0, blockSize - size % blockSize);
         m_size = size;
         return true;
     }
@@ -124,10 +145,19 @@ public:
     {
         if (offset + length > m_size && !resize(offset + length))
             return false;
-        forEach(offset, length, [&](uint8_t* block, size_t part) {
-            memcpy(block, data, part);
+        // All blocks first: on a missing block nothing is written
+        for (uint64_t index = offset / blockSize; length && index <= (offset + length - 1) / blockSize; ++index) {
+            if (!own(index))
+                return false;
+        }
+        while (length) {
+            size_t start = offset % blockSize;
+            size_t part = std::min<uint64_t>(length, blockSize - start);
+            memcpy(m_blocks[offset / blockSize]->data + start, data, part);
             data += part;
-        });
+            offset += part;
+            length -= part;
+        }
         return true;
     }
 
@@ -152,7 +182,7 @@ public:
         while (length) {
             size_t start = offset % blockSize;
             size_t part = std::min<uint64_t>(length, blockSize - start);
-            function(m_blocks[offset / blockSize] + start, part);
+            function(static_cast<const uint8_t*>(m_blocks[offset / blockSize]->data) + start, part);
             offset += part;
             length -= part;
         }
@@ -160,7 +190,49 @@ public:
 
 private:
     static constexpr size_t blockSize = 64 << 10;
-    std::vector<uint8_t*> m_blocks;
+
+    struct Block {
+        std::atomic<uint32_t> references { 1 };
+        uint8_t data[blockSize];
+
+        // Zeros, or a copy of from. nullptr: no memory
+        static Block* create(const Block* from)
+        {
+            void* memory = from ? malloc(sizeof(Block)) : calloc(1, sizeof(Block));
+            if (!memory)
+                return nullptr;
+            auto* block = new (memory) Block;
+            if (from)
+                memcpy(block->data, from->data, blockSize);
+            return block;
+        }
+
+        // The last release frees it. Acquire and release: the reads of a
+        // shared copy are done before its former sharer writes in place
+        static void release(Block* block)
+        {
+            if (block->references.fetch_sub(1, std::memory_order_acq_rel) != 1)
+                return;
+            block->~Block();
+            free(block);
+        }
+    };
+
+    // The block at index belongs to this content alone. false: no memory
+    bool own(size_t index)
+    {
+        auto* block = m_blocks[index];
+        if (block->references.load(std::memory_order_acquire) == 1)
+            return true;
+        auto* copy = Block::create(block);
+        if (!copy)
+            return false;
+        Block::release(block);
+        m_blocks[index] = copy;
+        return true;
+    }
+
+    std::vector<Block*> m_blocks;
     uint64_t m_size { 0 };
 };
 
@@ -184,9 +256,12 @@ struct Node {
 struct Family {
     std::string name; // path of the database
     std::mutex mutex;
+    // The file accesses of the family one after the other (IOLock), taken before mutex
+    std::mutex ioMutex;
     std::vector<std::unique_ptr<Node>> nodes; // database, -journal, -wal
     int openCount { 0 };
-    bool dirty { false }; // changed since the last write
+    bool dirty { false }; // changed since the last full write began
+    bool writing { false }; // a full write is under way (flushFamily)
     // Do not rewrite a big database completely all the time (flushFamily)
     MonotonicTime nextWrite;
     // Commit log (logPath): the committed WAL frames already in a record, the records not yet
@@ -251,8 +326,6 @@ sqlite3_vfs* baseVFS;
 sqlite3_vfs memoryVFS;
 std::mutex registryMutex;
 std::unordered_map<std::string, std::shared_ptr<Family>>* families;
-// Only one writes to the file system at a time
-std::mutex ioMutex;
 
 bool inMemoryDomain(const char* path)
 {
@@ -361,61 +434,6 @@ WalFrames committedFrames(const Content& wal, const WalFrames& from = { })
     return result;
 }
 
-// The database as SQLite would have it after a full checkpoint: first the
-// content of the file, on top the committed pages from the WAL in order (a
-// later version of a page overwrites the earlier one)
-uint64_t checkpointHash(const Content& database, const Content* wal, const WalFrames& frames, uint64_t size);
-
-// Returns the hash of the written file (StreamHash)
-uint64_t writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
-{
-    auto frames = wal ? committedFrames(*wal) : WalFrames { };
-    uint64_t size = frames.count ? static_cast<uint64_t>(frames.databasePages) * frames.pageSize : database.size();
-    uint64_t offset = 0;
-    database.forEach(0, std::min(size, database.size()), [&](const uint8_t* data, size_t length) {
-        file.write({ data, length }, offset);
-        offset += length;
-    });
-    for (uint64_t index = 0; index < frames.count; ++index) {
-        uint64_t frame = walHeaderSize + index * (walFrameHeaderSize + frames.pageSize);
-        uint8_t header[walFrameHeaderSize];
-        wal->read(header, sizeof(header), frame);
-        uint32_t page = get32(header);
-        if (page > frames.databasePages)
-            continue;
-        uint64_t target = static_cast<uint64_t>(page - 1) * frames.pageSize;
-        wal->forEach(frame + walFrameHeaderSize, frames.pageSize, [&](const uint8_t* data, size_t length) {
-            file.write({ data, length }, target);
-            target += length;
-        });
-    }
-    file.truncate(size);
-    return checkpointHash(database, wal, frames, size);
-}
-
-// ---------------------------------------------------------------- Commit log
-
-// The whole database goes to disk only some time after a change (flushDelay): a tab closed or
-// reloaded meanwhile lost the change, in Firefox also because the engine cannot write while the
-// page goes away. So every commit appends its new WAL frames as a record to the log of the
-// database right away (on the committing thread); opening the database applies the valid records,
-// the next full write empties the file. The log is hidden (.<name>-bllog, not part of a synced
-// profile) and starts with "BLLF", 4 zero bytes and the hash of the database file it goes on from
-// (uint64 little endian): a log whose database was replaced or deleted without it does not apply.
-// Record: "BLL1", page size, frame count, pages of the database after the commit (all uint32
-// little endian), the frames (page number, page), then FNV-1a 64 of all before.
-constexpr char logSuffix[] = "-bllog";
-constexpr uint8_t logFileMagic[4] = { 'B', 'L', 'L', 'F' };
-constexpr size_t logFileHeaderSize = 16;
-constexpr uint8_t logMagic[4] = { 'B', 'L', 'L', '1' };
-constexpr size_t logHeaderSize = 16;
-
-std::string logPath(const std::string& database)
-{
-    auto slash = database.rfind('/') + 1;
-    return database.substr(0, slash) + '.' + database.substr(slash) + logSuffix;
-}
-
 // 64-bit hash of a byte stream taken in words, whatever the pieces: tells whether the database
 // file is the one a commit log goes on from
 class StreamHash {
@@ -473,15 +491,16 @@ uint64_t contentHash(const Content& content)
     return hash.finish();
 }
 
-// Hash of the file writeDatabase writes, page by page from memory
-uint64_t checkpointHash(const Content& database, const Content* wal, const WalFrames& frames, uint64_t size)
+// The pieces of the database as SQLite would have it after a full checkpoint,
+// in order: every page in its latest committed version from the WAL, otherwise
+// from the file (zeros behind its end). size: frames.databasePages pages, or
+// the file without a committed WAL
+template<typename Function>
+void forEachCheckpointPiece(const Content& database, const Content* wal, const WalFrames& frames, uint64_t size, Function&& function)
 {
     if (!frames.count) {
-        StreamHash hash;
-        database.forEach(0, size, [&](const uint8_t* data, size_t length) {
-            hash.add(data, length);
-        });
-        return hash.finish();
+        database.forEach(0, size, function);
+        return;
     }
     // Frame of the latest version of each page, 0: none
     std::vector<uint32_t> latest(frames.databasePages);
@@ -493,22 +512,77 @@ uint64_t checkpointHash(const Content& database, const Content* wal, const WalFr
         if (page && page <= frames.databasePages)
             latest[page - 1] = index + 1;
     }
-    StreamHash hash;
-    auto add = [&](const uint8_t* data, size_t length) {
-        hash.add(data, length);
-    };
     std::vector<uint8_t> zeros(frames.pageSize);
     for (uint32_t page = 0; page < frames.databasePages; ++page) {
         if (latest[page]) {
-            wal->forEach(walHeaderSize + (latest[page] - 1) * frameSize + walFrameHeaderSize, frames.pageSize, add);
+            wal->forEach(walHeaderSize + (latest[page] - 1) * frameSize + walFrameHeaderSize, frames.pageSize, function);
             continue;
         }
         uint64_t start = static_cast<uint64_t>(page) * frames.pageSize;
         uint64_t available = start < database.size() ? std::min<uint64_t>(frames.pageSize, database.size() - start) : 0;
-        database.forEach(start, available, add);
-        hash.add(zeros.data(), frames.pageSize - available);
+        database.forEach(start, available, function);
+        if (available < frames.pageSize)
+            function(static_cast<const uint8_t*>(zeros.data()), frames.pageSize - available);
     }
+}
+
+// Every write to the OPFS is a round trip to its worker (in Chrome's incognito
+// an IPC to the browser process): the file goes out in pieces this big, not page
+// by page (a WAL of 1000 frames of a 24 KB cookie database took 1000 writes)
+constexpr size_t writePieceSize = 1 << 20;
+
+// Writes the database after a full checkpoint (forEachCheckpointPiece) into the
+// new file, returns the hash of what it wrote (StreamHash)
+uint64_t writeDatabase(FileReplacement& file, const Content& database, const Content* wal)
+{
+    auto frames = wal ? committedFrames(*wal) : WalFrames { };
+    uint64_t size = frames.count ? static_cast<uint64_t>(frames.databasePages) * frames.pageSize : database.size();
+    StreamHash hash;
+    std::vector<uint8_t> piece;
+    piece.reserve(std::min<uint64_t>(size, writePieceSize));
+    uint64_t offset = 0;
+    auto writePiece = [&] {
+        file.write(piece, offset);
+        offset += piece.size();
+        piece.clear();
+    };
+    forEachCheckpointPiece(database, wal, frames, size, [&](const uint8_t* data, size_t length) {
+        hash.add(data, length);
+        while (length) {
+            size_t part = std::min(length, writePieceSize - piece.size());
+            piece.insert(piece.end(), data, data + part);
+            data += part;
+            length -= part;
+            if (piece.size() == writePieceSize)
+                writePiece();
+        }
+    });
+    if (!piece.empty())
+        writePiece();
     return hash.finish();
+}
+
+// ---------------------------------------------------------------- Commit log
+
+// The whole database goes to disk only some time after a change (flushDelay): a tab closed or
+// reloaded meanwhile lost the change, in Firefox also because the engine cannot write while the
+// page goes away. So every commit appends its new WAL frames as a record to the log of the
+// database right away (on the committing thread); opening the database applies the valid records,
+// the next full write empties the file. The log is hidden (.<name>-bllog, not part of a synced
+// profile) and starts with "BLLF", 4 zero bytes and the hash of the database file it goes on from
+// (uint64 little endian): a log whose database was replaced or deleted without it does not apply.
+// Record: "BLL1", page size, frame count, pages of the database after the commit (all uint32
+// little endian), the frames (page number, page), then FNV-1a 64 of all before.
+constexpr char logSuffix[] = "-bllog";
+constexpr uint8_t logFileMagic[4] = { 'B', 'L', 'L', 'F' };
+constexpr size_t logFileHeaderSize = 16;
+constexpr uint8_t logMagic[4] = { 'B', 'L', 'L', '1' };
+constexpr size_t logHeaderSize = 16;
+
+std::string logPath(const std::string& database)
+{
+    auto slash = database.rfind('/') + 1;
+    return database.substr(0, slash) + '.' + database.substr(slash) + logSuffix;
 }
 
 uint64_t fnv1a(std::span<const uint8_t> data)
@@ -570,41 +644,84 @@ void captureCommit(Family& family)
     family.pendingLog.push_back(WTF::move(record));
 }
 
-// Without the lock of the family: appends its waiting records in the order of the commits. If
-// that fails, the full write later still has them (the family stays dirty)
-void drainLog(Family& family)
+// With the I/O lock of the family, without its lock: appends its waiting records in the order of
+// the commits, all in one write (every write is a round trip to the OPFS worker). If that fails,
+// the full write later still has them (the family stays dirty)
+void appendLog(Family& family)
 {
-    std::lock_guard ioLock(ioMutex);
-    std::vector<std::vector<uint8_t>> records;
-    // The first records on top of a database file start the log anew, with its hash
-    uint8_t fileHeader[logFileHeaderSize] { };
+    std::vector<uint8_t> data;
     bool fresh;
     {
         std::lock_guard lock(family.mutex);
-        records = std::exchange(family.pendingLog, { });
-        if (records.empty())
+        if (family.pendingLog.empty())
             return;
+        // The first records on top of a database file start the log anew, with its hash
         fresh = !std::exchange(family.logOnDisk, true);
-        memcpy(fileHeader, logFileMagic, 4);
-        memcpy(fileHeader + 8, &family.logBase, 8);
+        if (fresh) {
+            data.resize(logFileHeaderSize);
+            memcpy(data.data(), logFileMagic, 4);
+            memcpy(data.data() + 8, &family.logBase, 8);
+        }
+        for (auto& record : family.pendingLog)
+            data.insert(data.end(), record.begin(), record.end());
+        family.pendingLog.clear();
     }
-    if (fresh)
-        records.insert(records.begin(), std::vector<uint8_t>(fileHeader, fileHeader + logFileHeaderSize));
     int fd = open(logPath(family.name).c_str(), O_WRONLY | O_CREAT | (fresh ? O_TRUNC : O_APPEND), 0644);
     if (fd < 0)
         return;
-    for (auto& record : records) {
-        size_t written = 0;
-        while (written < record.size()) {
-            ssize_t result = ::write(fd, record.data() + written, record.size() - written);
-            if (result <= 0)
-                break;
-            written += result;
-        }
-        if (written < record.size())
+    for (size_t written = 0; written < data.size();) {
+        ssize_t result = ::write(fd, data.data() + written, data.size() - written);
+        if (result <= 0)
             break;
+        written += result;
     }
     close(fd);
+}
+
+// The I/O lock of a family (ioMutex): its file accesses one after the other. A commit does not
+// wait for it (drainLog): whoever holds it appends the records waiting meanwhile before letting go
+class IOLock {
+public:
+    explicit IOLock(Family& family)
+        : m_family(family)
+        , m_locked(true)
+    {
+        family.ioMutex.lock();
+    }
+    IOLock(Family& family, std::try_to_lock_t)
+        : m_family(family)
+        , m_locked(family.ioMutex.try_lock())
+    {
+    }
+    IOLock(const IOLock&) = delete;
+    IOLock& operator=(const IOLock&) = delete;
+
+    ~IOLock()
+    {
+        if (!m_locked)
+            return;
+        for (;;) {
+            appendLog(m_family);
+            // Let go under the lock of the family: a record queued after this check finds the
+            // I/O lock free and is appended by its own commit
+            std::lock_guard lock(m_family.mutex);
+            if (m_family.pendingLog.empty()) {
+                m_family.ioMutex.unlock();
+                return;
+            }
+        }
+    }
+
+private:
+    Family& m_family;
+    bool m_locked;
+};
+
+// After a commit, on the committing thread: its record goes to disk now, or right after the
+// full write under way
+void drainLog(Family& family)
+{
+    IOLock io(family, std::try_to_lock);
 }
 
 // Whether the log goes on from the database file with this hash
@@ -647,68 +764,100 @@ bool applyLog(Content& database, std::span<const uint8_t> log, bool& applied)
     return true;
 }
 
-// Under the lock of the family and ioMutex. The copy replaces the database in
-// one step
-bool writeFamily(Family& family)
+// What a full write puts on disk, taken under the lock of the family: the database (if it
+// exists) and its WAL share their blocks with the open database (Content::share), records: the
+// waiting records of the commit log it contains
+struct Snapshot {
+    bool exists { false };
+    Content database;
+    std::optional<Content> wal;
+    size_t records { 0 };
+};
+
+Snapshot takeSnapshot(Family& family)
 {
-    Node* database = nullptr;
-    Node* wal = nullptr;
+    Snapshot snapshot;
     for (auto& node : family.nodes) {
-        if (node->path == family.name)
-            database = node.get();
-        else if (endsWith(node->path, "-wal") && node->exists)
-            wal = node.get();
+        if (node->path == family.name && node->exists) {
+            snapshot.exists = true;
+            snapshot.database = node->content.share();
+        } else if (endsWith(node->path, "-wal") && node->exists)
+            snapshot.wal = node->content.share();
     }
-    std::optional<FileReplacement> file;
-    uint64_t hash = 0;
-    if (database && database->exists) {
-        file.emplace();
-        hash = writeDatabase(*file, database->content, wal ? &wal->content : nullptr);
-        if (!file->ok())
+    snapshot.records = family.pendingLog.size();
+    return snapshot;
+}
+
+// With the I/O lock of the family, without its lock: the copy replaces the database in one step.
+// The hash of the new database file, nullopt: not written
+std::optional<uint64_t> writeSnapshot(const std::string& path, const Snapshot& snapshot)
+{
+    if (!snapshot.exists) {
+        if (unlink(path.c_str()) && errno != ENOENT)
+            return std::nullopt;
+        return 0;
+    }
+    FileReplacement file;
+    uint64_t hash = writeDatabase(file, snapshot.database, snapshot.wal ? &*snapshot.wal : nullptr);
+    if (!file.commit(path.c_str()))
+        return std::nullopt;
+    return hash;
+}
+
+enum class Flush : uint8_t { Scheduled, Now };
+
+void markDirty(Family&);
+
+// One database to disk. The lock of the family is only held to take the snapshot and to note the
+// result: SQLite goes on reading and committing while the file is written. false: not yet (write
+// transaction, too early or error)
+bool flushFamily(Family& family, Flush mode)
+{
+    IOLock io(family);
+    Snapshot snapshot;
+    {
+        std::lock_guard lock(family.mutex);
+        if (!family.dirty)
+            return true;
+        if (family.writeLocked())
             return false;
+        if (mode == Flush::Scheduled && MonotonicTime::now() < family.nextWrite)
+            return false;
+        snapshot = takeSnapshot(family);
+        // A change from now on makes it dirty again and schedules the next write
+        family.dirty = false;
+        family.writing = true;
     }
-    bool written = file ? file->commit(family.name.c_str()) : !unlink(family.name.c_str()) || errno == ENOENT;
-    if (!written)
-        return false;
-    family.logBase = hash;
-    // The database now holds every commit of the log: records still waiting are done too. The log
-    // is emptied rather than deleted (deleting a file runs code the start otherwise never needs,
-    // split engine #238), it goes with its database
-    family.pendingLog.clear();
-    if (!file)
+    auto start = MonotonicTime::now();
+    auto hash = writeSnapshot(family.name, snapshot);
+    auto end = MonotonicTime::now();
+    bool emptyLog;
+    {
+        std::lock_guard lock(family.mutex);
+        family.writing = false;
+        // Spend at most a fifth of the time writing, even if it keeps failing
+        // (e.g. OPFS full)
+        family.nextWrite = end + (end - start) * 4;
+        if (!hash) {
+            markDirty(family);
+            return false;
+        }
+        // The database on disk now holds the records of the snapshot. Later ones start a new log
+        // on top of it (IOLock appends them)
+        family.logBase = *hash;
+        family.pendingLog.erase(family.pendingLog.begin(), family.pendingLog.begin() + snapshot.records);
+        emptyLog = std::exchange(family.logOnDisk, false);
+    }
+    // The log is emptied rather than deleted (deleting a file runs code the start otherwise never
+    // needs, split engine #238), it goes with its database
+    if (!snapshot.exists)
         unlink(logPath(family.name).c_str());
-    else if (std::exchange(family.logOnDisk, false)) {
+    else if (emptyLog) {
         int fd = open(logPath(family.name).c_str(), O_WRONLY | O_TRUNC);
         if (fd >= 0)
             close(fd);
     }
     return true;
-}
-
-enum class Flush : uint8_t { Scheduled, Now };
-
-// One database to disk. false: not yet (write transaction, ioMutex taken, too
-// early or error)
-bool flushFamily(Family& family, Flush mode)
-{
-    std::lock_guard ioLock(ioMutex);
-    // Under the lock without a copy: meanwhile nobody writes into the database
-    std::lock_guard lock(family.mutex);
-    if (!family.dirty)
-        return true;
-    if (family.writeLocked())
-        return false;
-    auto start = MonotonicTime::now();
-    if (mode == Flush::Scheduled && start < family.nextWrite)
-        return false;
-    bool written = writeFamily(family);
-    // Spend at most a fifth of the time writing, even if it keeps failing
-    // (e.g. OPFS full)
-    auto end = MonotonicTime::now();
-    family.nextWrite = end + (end - start) * 4;
-    if (written)
-        family.dirty = false;
-    return written;
 }
 
 std::vector<std::shared_ptr<Family>> listFamilies()
@@ -732,7 +881,16 @@ bool flushAll(Flush mode)
     return complete;
 }
 
-// Write shortly after a change, on the engine thread
+// Full writes run on a thread of their own, shortly after a change: every access to the OPFS
+// waits for its worker (in Chrome's incognito for an IPC to the browser process), the engine
+// thread with input, layout and JS must never wait for that. Created with the VFS on the engine
+// thread (a new thread may need the host's main thread to start its worker)
+WorkQueue& storageQueue()
+{
+    static NeverDestroyed<Ref<WorkQueue>> queue = WorkQueue::create("Storage"_s);
+    return queue.get();
+}
+
 constexpr Seconds flushDelay = 1_s;
 std::atomic<bool> flushScheduled;
 
@@ -740,12 +898,10 @@ void scheduleFlush()
 {
     if (flushScheduled.exchange(true))
         return;
-    runOnEngineThread([] {
-        RunLoop::mainSingleton().dispatchAfter(flushDelay, [] {
-            flushScheduled = false;
-            if (!flushAll(Flush::Scheduled))
-                scheduleFlush();
-        });
+    storageQueue().dispatchAfter(flushDelay, [] {
+        flushScheduled = false;
+        if (!flushAll(Flush::Scheduled))
+            scheduleFlush();
     });
 }
 
@@ -774,7 +930,7 @@ void dropIfUnused(Family* family)
 {
     std::lock_guard registryLock(registryMutex);
     std::lock_guard lock(family->mutex);
-    if (family->openCount || family->dirty)
+    if (family->openCount || family->dirty || family->writing)
         return;
     for (auto it = families->begin(); it != families->end(); ++it) {
         if (it->second.get() == family) {
@@ -981,7 +1137,7 @@ int memoryShmLock(sqlite3_file* file, int offset, int count, int flags)
     uint16_t mask = (1 << (offset + count)) - (1 << offset);
     if (flags & SQLITE_SHM_UNLOCK) {
         // The end of a write transaction (WAL_WRITE_LOCK, slot 0 in wal.c): log its commit, appended
-        // without the lock of the family (file accesses need ioMutex first)
+        // without the lock of the family (file accesses need the I/O lock first)
         bool endsWrite;
         {
             std::lock_guard lock(family.mutex);
@@ -1097,7 +1253,7 @@ int memoryOpen(sqlite3_vfs*, const char* name, sqlite3_file* file, int flags, in
         loaded = family->find(path)->loaded;
     }
     if (!loaded && path != family->name) {
-        // -journal and -wal only live in memory (writeFamily)
+        // -journal and -wal only live in memory (flushFamily)
         std::lock_guard lock(family->mutex);
         auto* node = family->find(path);
         node->loaded = true;
@@ -1213,7 +1369,7 @@ int memoryAccess(sqlite3_vfs*, const char* name, int flags, int* result)
             return SQLITE_OK;
         }
     }
-    // -journal and -wal only live in memory (writeFamily)
+    // -journal and -wal only live in memory (flushFamily)
     if (path != databaseName) {
         *result = 0;
         return SQLITE_OK;
@@ -1331,6 +1487,7 @@ void registerMemoryVFS()
     if (!baseVFS)
         return;
     families = new std::unordered_map<std::string, std::shared_ptr<Family>>;
+    storageQueue();
     memoryVFS = { };
     memoryVFS.iVersion = 2;
     memoryVFS.szOsFile = std::max<int>(sizeof(MemoryFile), baseVFS->szOsFile);
@@ -1350,13 +1507,19 @@ void registerMemoryVFS()
 
 void flushMemoryVFS()
 {
-    flushAll(Flush::Now);
+    if (!families)
+        return;
+    storageQueue().dispatch([] {
+        flushAll(Flush::Now);
+    });
 }
 
 bool flushMemoryVFSAndWait(Seconds timeout)
 {
+    if (!families)
+        return true;
     auto done = std::make_shared<std::atomic<uint32_t>>(0);
-    runOnEngineThread([done] {
+    storageQueue().dispatch([done] {
         flushAll(Flush::Now);
         done->store(1);
         emscripten_futex_wake(done.get(), INT_MAX);

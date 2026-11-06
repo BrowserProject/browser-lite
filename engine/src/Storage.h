@@ -42,9 +42,8 @@ public:
     FileReplacement(const FileReplacement&) = delete;
     FileReplacement& operator=(const FileReplacement&) = delete;
 
-    // Write at a position of the copy or set its length
+    // Write at a position of the copy
     void write(std::span<const uint8_t>, uint64_t offset);
-    void truncate(uint64_t size);
     // false: something already went wrong while writing
     bool ok() const { return m_fd >= 0 && m_ok; }
     // The copy replaces path. false: something went wrong, path is as before
