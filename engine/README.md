@@ -11,7 +11,8 @@ all sites share one process, for example the microtasks of a site that was left,
 that real sites hit, for example the hovered element a page from the back/forward cache forgot
 or the policy a typed `data:` address took over from the page before, or the missing tiles of
 content more than 16.7 million px down a page, or the overlay scrollbars that took the taps at
-the right edge of a phone, or the hover a scroll moved to the element under the last tap)
+the right edge of a phone, or the hover a scroll moved to the element under the last tap, or
+an interpreter cache that took the missing export of one module for all modules)
 comes as patches from `patches/`.
 
 ## Folders

@@ -11,6 +11,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   [examples/](../examples/README.md) (own route, existing site with its own service worker and CSP).
 - **Engine**: WebKit (WebCore + JavaScriptCore C loop) as WebAssembly, TLS inside, network through
   our own Wisp relay that connects only to public addresses and web ports (#159, #178, #201).
+  React Router's `<Meta>` keeps the tab title after an in-site navigation (nzz.ch: the title
+  stayed empty, the interpreter cached a missing `meta` export for all modules, #431).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
   (address and title of the restored page, #367), favicons for every loaded page (also after a

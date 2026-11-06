@@ -1,0 +1,19 @@
+diff --git a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+index 4aae8c17b4..66f72cb18f 100644
+--- a/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
++++ b/Source/JavaScriptCore/llint/LLIntSlowPaths.cpp
+@@ -815,6 +815,14 @@ static void setupGetByIdPrototypeCache(JSGlobalObject* globalObject, VM& vm, Cod
+     if (structure->needImpurePropertyWatchpoint())
+         return;
+ 
++#if OS(EMSCRIPTEN)
++    // A miss is only cacheable when the structure lists all own properties (like
++    // tryCacheGetBy in Repatch.cpp): all module namespace objects share one structure,
++    // their exports are not in it
++    if (slot.isUnset() && !structure->propertyAccessesAreCacheableForAbsence())
++        return;
++#endif
++
+     if (structure->isDictionary()) {
+         if (structure->hasBeenFlattenedBefore())
+             return;

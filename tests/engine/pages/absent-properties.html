@@ -1,0 +1,50 @@
+<!doctype html>
+<title>Absent properties</title>
+<!-- The interpreter's cache for missing properties (patch 0031) must not cache them on objects
+     whose own properties are not described by their structure: module namespace objects share
+     one structure (React Router reads route.meta of modules with and without that export), named
+     properties of document and forms appear without a structure change -->
+<form id="form"></form>
+<script>
+// A new function per case: each read site caches at most once
+const reader = () => new Function('o', 'return o.later;');
+function missingThenPresent(missing, present, expected) {
+  const read = reader();
+  for (let i = 0; i < 100; i++) {
+    if (read(missing) !== undefined) return false;
+  }
+  return read(present) === expected;
+}
+function addThenPresent(object, add) {
+  const read = reader();
+  for (let i = 0; i < 100; i++) {
+    if (read(object) !== undefined) return false;
+  }
+  const added = add();
+  return read(object) === added;
+}
+
+(async () => {
+  const without = await import('data:text/javascript,export const other = 1;');
+  const withLater = await import('data:text/javascript,export const later = 42;');
+  const results = [
+    missingThenPresent(without, withLater, 42),
+    addThenPresent(document, () => {
+      const image = document.createElement('img');
+      image.name = 'later';
+      document.body.append(image);
+      return image;
+    }),
+  ];
+  const form = document.getElementById('form');
+  const input = document.createElement('input');
+  results.push(
+    addThenPresent(form, () => {
+      input.name = 'later';
+      form.append(input);
+      return input;
+    }),
+  );
+  console.log('ABSENT done=' + (results.every(Boolean) ? 'ok' : results.join('/')));
+})().catch((error) => console.log('ABSENT done=error:' + error));
+</script>

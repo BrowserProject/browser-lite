@@ -373,7 +373,8 @@ process instead, so the core sets the 3 GB of `BL_MEMORY_PRESSURE_MB` to 512 MB 
 ## JavaScript
 
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call
-caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143) and leave mini
+caches on 32 bit (#62), add caches for `instanceof` and missing properties (#143; not on objects
+whose structure does not list all own properties, such as module namespaces, #431) and leave mini
 mode off (#122). Scripts are compiled to bytecode on every visit: a persistent bytecode cache
 brought no measurable gain and was removed (#215). A JIT to WebAssembly compiles hot functions
 (on by default, [jit.md](jit.md)).

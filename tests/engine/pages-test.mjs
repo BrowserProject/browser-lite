@@ -10,6 +10,8 @@
 //   font-stacks.html  unknown families skipped in a stack, Apple and system names mapped
 //   computed-style.html  getComputedStyle() without a renderer: selectors match exactly (patch 0069)
 //   localized-strings.html  UI strings with placeholders filled: validation messages (patch 0076)
+//   absent-properties.html  missing properties of module namespaces and named properties are not
+//                  cached as absent (patch 0085), with the JIT and in the interpreter alone
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -33,6 +35,13 @@ const CASES = [
   { name: 'font-stacks', wait: 'FONTS done' },
   { name: 'computed-style', wait: 'COMPUTED done' },
   { name: 'localized-strings', wait: 'L10N done' },
+  { name: 'absent-properties', wait: 'ABSENT done' },
+  {
+    name: 'absent-properties',
+    label: 'absent-properties (interpreter)',
+    wait: 'ABSENT done',
+    env: { BL_JIT: '0' },
+  },
   {
     name: 'bridges',
     label: 'bridges (no features)',
