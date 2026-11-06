@@ -133,6 +133,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
   a link opened from the context menu with a message that offers to switch to it (#391),
   the settings' close button at the top while they scroll (#379),
+  the empty bookmarks sheet names the menu's Bookmark button, not the hidden star (#428),
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
   Android's back gesture) goes back in the tab and leaves the demo only at the tab's first entry

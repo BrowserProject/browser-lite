@@ -150,7 +150,7 @@ Below 640 px of width or 500 px of height (a phone in portrait or landscape) `st
 to a layout like mobile Chrome with the address bar at the bottom (#345): the toolbar at the
 bottom has back, the address, the tab count and the menu, and the page fills the room above it
 from the status bar; forward, reload and the star move into a row of tonal buttons with labels at
-the top of the menu; the address shows only the host until it is tapped, then it takes the whole
+the top of the menu (so the empty bookmarks sheet names the Bookmark button there, #428); the address shows only the host until it is tapped, then it takes the whole
 bar; the suggestions span the width and open upwards above the toolbar; the tab count opens the
 tab overview (a card per tab with title, the site's icon and host: tap to switch, cross to close,
 new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the

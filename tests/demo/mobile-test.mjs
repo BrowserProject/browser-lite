@@ -3,7 +3,7 @@
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
 // page smaller), the tab overview shows the tabs, switches and closes one, Open link in new tab
 // opens it in the background with a message to switch to it, the menu opens as a
-// bottom sheet on the toolbar, the find
+// bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, the close button of the
 // settings stays at the top while they scroll, and the desktop layout
 // comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
@@ -391,6 +391,17 @@ check(
   'menu: a tap outside closes it',
   await tab.evaluate(() => document.getElementById('side-panel').hidden),
 );
+
+// Without the star in the address bar the empty bookmarks sheet points to the menu
+await tab.tap('#menu-button');
+await tab.locator('#side-panel .panel-menu-item', { hasText: 'Bookmarks' }).tap();
+const emptyBookmarks = await tab.locator('#side-panel .panel-empty').textContent();
+check(
+  'bookmarks: the empty sheet names the Bookmark button in the menu',
+  emptyBookmarks === 'No bookmarks yet. The Bookmark button in the menu adds one.',
+  String(emptyBookmarks),
+);
+await tab.touchscreen.tap(PORTRAIT.width / 2, 20);
 
 // Find bar over the whole width
 await tab.tap('#menu-button');

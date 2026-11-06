@@ -291,7 +291,9 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
             ? 'Nothing found.'
             : name === 'history'
               ? 'No history yet.'
-              : 'No bookmarks yet. The star in the address bar adds one.',
+              : compactLayout()
+                ? 'No bookmarks yet. The Bookmark button in the menu adds one.'
+                : 'No bookmarks yet. The star in the address bar adds one.',
         }),
       );
   };

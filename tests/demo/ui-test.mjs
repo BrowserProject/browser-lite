@@ -170,6 +170,14 @@ check(
 );
 
 // Bookmarks (star), panel Ctrl+Shift+O
+await tab.keyboard.press('Control+Shift+O');
+const emptyBookmarks = await tab.locator('#side-panel .panel-empty').textContent();
+check(
+  'bookmarks: the empty panel names the star in the address bar',
+  emptyBookmarks === 'No bookmarks yet. The star in the address bar adds one.',
+  String(emptyBookmarks),
+);
+await tab.keyboard.press('Escape');
 await tab.click('#bookmark');
 check(
   'star active',
