@@ -5,8 +5,8 @@
 // one at the end), or the tab it was opened from while no other tab was active in between. Tabs
 // opened from links come right after their page like in Chrome: in the background (Ctrl+click,
 // middle click, also on a target=_blank link) after the ones it opened before, in front
-// (target=_blank) directly after it; an address typed into the page starts over. A middle click on
-// a tab closes it.
+// (target=_blank, Shift+click, Ctrl+Shift+click) directly after it; an address typed into the page
+// starts over. A middle click on a tab closes it.
 //
 //   node tests/demo/tab-order-test.mjs [engine-dir]
 import {
@@ -245,6 +245,29 @@ check('closed: back to the page', (await orderIs('LADADC')) && (await activeTitl
 await typeL();
 await ctrlClick(plainLink);
 check('after a typed address: right after the page again', await orderIs('LAADADC'), await order());
+
+// Shift+click (a new window in Chrome, the demo has none) and Ctrl+Shift+click: in front, directly
+// after the page, which stays
+const modifiedClick = async (keys, { x, y }) => {
+  for (const key of keys) await page.keyboard.down(key);
+  await page.mouse.click(x, y);
+  for (const key of keys.toReversed()) await page.keyboard.up(key);
+};
+for (const keys of [['Shift'], ['Control', 'Shift']]) {
+  const name = keys.join('+');
+  await modifiedClick(keys, plainLink);
+  check(
+    `${name}+click: in front, directly after the page`,
+    (await orderIs('LAAADADC')) && (await activeTitle()) === 'A',
+    `${await order()}, ${await activeTitle()}`,
+  );
+  await page.keyboard.press('Control+w');
+  check(
+    `${name}+click: the page stays`,
+    (await orderIs('LAADADC')) && (await activeTitle()) === 'L',
+    `${await order()}, ${await activeTitle()}`,
+  );
+}
 
 // A middle click on a tab closes it without activating it, like Chrome and Firefox
 const last = await box('C');

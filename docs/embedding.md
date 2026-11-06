@@ -218,6 +218,11 @@ A blocked one sends the view event `popup-blocked` with its `url` and the page's
 `setPermission(origin, 'popups', 'grant')` lets that site open popups from then on. The engine
 never asks for this kind, the browser UI offers it (the demo: an icon in the address bar).
 
+A link clicked with Ctrl/Cmd, the middle button or Shift (with a user gesture) leaves the page
+where it is and sends the view event `open-tab` with its `url` and a `disposition` like Chrome's:
+`background` (Ctrl/Cmd or middle), `foreground` (with Shift as well) or `window` (Shift alone).
+The host opens it; without windows, a tab in front fits `window` (the demo does this).
+
 HTTP authentication (401 with Basic or Digest) goes to the `authenticate` handler (default:
 cancel, the page shows the 401 response), like Chrome only for the main frame and same origin
 loads, never for workers, `credentials: 'omit'` or requests with their own `Authorization`

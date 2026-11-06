@@ -229,8 +229,12 @@ export class Tab implements SessionTab {
       updateHostBeforeUnload();
     });
     this.on('popup-blocked', (event) => addBlockedPopup(this, event));
-    // Ctrl/Cmd click or middle click on a link: a new tab in the background
-    this.on('open-tab', (event) => openBackgroundTab(event.url, this));
+    // Ctrl/Cmd click or middle click on a link: a new tab in the background, with Shift in front.
+    // The demo has no windows, so Shift alone (a new window in Chrome) opens a tab in front too.
+    this.on('open-tab', (event) => {
+      if (event.disposition === 'background') openBackgroundTab(event.url, this);
+      else openLinkTab(event.url, this);
+    });
     // mailto:, tel:, app links: the host browser hands them to the system (with its question)
     this.on('external-url', (event) => {
       window.open(event.url, '_blank', 'noopener');
@@ -502,6 +506,16 @@ export function openBackgroundTab(url: string, opener: Tab | null): Tab | null {
   add(tab, linkTabPlace(opener, false));
   persistSession();
   return tab;
+}
+
+/** A new tab in front from a link of opener (Shift click), directly after it. */
+function openLinkTab(url: string, opener: Tab): void {
+  const view = createView(url);
+  if (!view) return;
+  const tab = new Tab(view, { url });
+  tab.opener = active;
+  tab.openedBy = opener;
+  activate(add(tab, linkTabPlace(opener, true)));
 }
 
 /**

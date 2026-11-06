@@ -682,17 +682,23 @@ static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxF
     notifyHost(viewId, "external-url", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
 }
 
-// Ctrl/Cmd+click or middle click on a link, also one with target=_blank: like
-// Chrome a new tab in the background, the page stays. A click by a script
-// without a user gesture navigates as usual (or meets the popup blocker).
+// Ctrl/Cmd+click, middle click or Shift+click on a link, also one with
+// target=_blank: the page stays and the host opens the link, like Chrome's
+// DispositionFromClick a tab in the background, with Shift in the foreground,
+// Shift alone a new window. A click by a script without a user gesture
+// navigates as usual (or meets the popup blocker).
 static bool openTabForModifiedClick(int viewId, const NavigationAction& action, const URL& url)
 {
     if (action.type() != NavigationType::LinkClicked || !url.protocolIsInHTTPFamily() || !action.processingUserGesture())
         return false;
     auto& mouse = action.mouseEventData();
-    if (!mouse || !(mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle))
+    if (!mouse)
         return false;
-    notifyHost(viewId, "open-tab", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
+    bool tab = mouse->ctrlKey || mouse->metaKey || mouse->button == MouseButton::Middle;
+    if (!tab && !mouse->shiftKey)
+        return false;
+    auto disposition = !tab ? "window"_s : mouse->shiftKey ? "foreground"_s : "background"_s;
+    notifyHost(viewId, "open-tab", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\",\"disposition\":\""_s, disposition, "\"}"_s));
     return true;
 }
 

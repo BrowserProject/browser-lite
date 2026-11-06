@@ -668,7 +668,13 @@ export class ViewImpl implements View {
         this.emit(type, { url: String(data.url ?? '') });
         return;
       case 'open-tab':
-        this.emit(type, { url: String(data.url ?? '') });
+        this.emit(type, {
+          url: String(data.url ?? ''),
+          disposition:
+            data.disposition === 'foreground' || data.disposition === 'window'
+              ? data.disposition
+              : 'background',
+        });
         return;
       case 'popup-blocked':
         this.emit(type, { url: String(data.url ?? ''), origin: String(data.origin ?? '') });

@@ -117,7 +117,9 @@ select popup) are in the same sheet.
   offers to switch to it (#391). Like Chrome a tab opened from a link goes right after its page:
   in the background after the tabs that page opened before, so they keep the order of the
   clicks, in front (`target=_blank`, `window.open`) directly after it; an address loaded from
-  the address bar or a panel starts over next to the page (`openedBy`, #416).
+  the address bar or a panel starts over next to the page (`openedBy`, #416). Shift+click and
+  Ctrl/Cmd+Shift+click open the link in front directly after its page; Chrome opens a window
+  for Shift+click, the demo has none (#438).
   Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).

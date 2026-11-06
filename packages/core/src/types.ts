@@ -562,8 +562,11 @@ export interface ViewEvents {
   'beforeunload-state': { hasListener: boolean };
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
-  /** Ctrl/Cmd or middle click on a link, also one with target=_blank (no `new-view` then). */
-  'open-tab': { url: string };
+  /**
+   * Ctrl/Cmd, middle or Shift click on a link, also one with target=_blank (no `new-view` then):
+   * the page stays, the host opens `url` as `disposition` says.
+   */
+  'open-tab': { url: string; disposition: LinkDisposition };
   /**
    * A window.open, target=_blank link or form without a user gesture was not opened, like in
    * Chrome. `url` is its address ('' for window.open without one), `origin` the origin of the
@@ -593,6 +596,13 @@ export interface ViewEvents {
   /** The view closed (close(), window.close() or the end of the browser). */
   close: Record<string, never>;
 }
+
+/**
+ * Where a link clicked with modifiers should open, like Chrome: `background` a tab behind the
+ * current one (Ctrl/Cmd or middle click), `foreground` a tab in front (with Shift as well),
+ * `window` a new window (Shift alone; a host without windows opens a tab in front).
+ */
+export type LinkDisposition = 'background' | 'foreground' | 'window';
 
 /** A key of the event `unhandled-key`, with the fields of a KeyboardEvent. */
 export interface UnhandledKey {
