@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { runtime } from './runtime.js';
 import { SEARCH_ENGINES, settings } from './settings.js';
-import { activeTab, focusPage, loadInTab } from './tabs.js';
+import { activeTab, focusPage, loadInTab, openTab } from './tabs.js';
 import { byId, element, isBlank } from './util.js';
 
 const form = byId<HTMLFormElement>('address-form');
@@ -19,6 +19,10 @@ interface Row {
 }
 let rows: Row[] = [];
 let selected = -1;
+/** The text the user typed; the field shows more while a site is completed inline. */
+let typed = '';
+/** The site that completes the typed text inline (the first row), if any. */
+let inline: Row | null = null;
 let pending = '';
 /** Address of the active tab; the field shows it while it is not being edited. */
 let current = '';
@@ -57,29 +61,74 @@ export function addressToURL(text: string): string {
   return searchURL(value);
 }
 
+/** Bookmarks and visited pages, weighted: a bookmark much, a visit more the more recent it is. */
+function weightedPages(): { url: string; title: string; points: number }[] {
+  const now = Date.now();
+  return [
+    ...bookmarks().map(({ url, title }) => ({ url, title, points: 50 })),
+    ...readHistory().map(({ url, title, time }) => ({
+      url,
+      title,
+      points: 1 + Math.max(0, 10 - (now - time) / 86400000),
+    })),
+  ];
+}
+
 /** Suggestions like Chrome: bookmarks first, then pages visited often and recently. */
 export function suggestions(text: string, limit = 8): { url: string; title: string }[] {
   const query = text.trim().toLowerCase();
   if (!query) return [];
   const score = new Map<string, { url: string; title: string; points: number }>();
-  const add = (url: string, title: string, points: number) => {
-    const entry = score.get(url) ?? { url, title, points: 0 };
-    entry.points += points;
-    if (title) entry.title = title;
-    score.set(url, entry);
-  };
   const matches = (url: string, title: string) =>
     url
       .toLowerCase()
       .replace(/^https?:\/\/(www\.)?/, '')
       .includes(query) || (title || '').toLowerCase().includes(query);
-  for (const bookmark of bookmarks())
-    if (matches(bookmark.url, bookmark.title)) add(bookmark.url, bookmark.title, 50);
-  const now = Date.now();
-  for (const visit of readHistory())
-    if (matches(visit.url, visit.title))
-      add(visit.url, visit.title, 1 + Math.max(0, 10 - (now - visit.time) / 86400000));
+  for (const page of weightedPages()) {
+    if (!matches(page.url, page.title)) continue;
+    const entry = score.get(page.url) ?? { url: page.url, title: page.title, points: 0 };
+    entry.points += page.points;
+    if (page.title) entry.title = page.title;
+    score.set(page.url, entry);
+  }
   return [...score.values()].sort((a, b) => b.points - a.points).slice(0, limit);
+}
+
+/** How a site can be typed, shortest first: without scheme and www., without scheme, whole. */
+function typedForms(origin: string): string[] {
+  const host = origin.replace(/^https?:\/\//, '');
+  return [host.replace(/^www\./, ''), host, origin];
+}
+
+/**
+ * Inline completion like Chrome: the bookmarked or visited site whose host starts with text, the
+ * one with the most weight. The row shows text completed to the host and opens the site with the
+ * scheme it was visited with. Only sites: text with a path completes nothing.
+ */
+function inlineCompletion(text: string): Row | null {
+  const query = text.toLowerCase();
+  if (!query || /\s/.test(query) || /^(?:[a-z][a-z0-9+.-]*:\/\/)?[^/]*\//.test(query)) return null;
+  const weight = new Map<string, number>();
+  for (const page of weightedPages()) {
+    if (!/^https?:\/\//i.test(page.url) || !URL.canParse(page.url)) continue;
+    const { origin } = new URL(page.url);
+    if (typedForms(origin).some((form) => form.startsWith(query)))
+      weight.set(origin, (weight.get(origin) ?? 0) + page.points);
+  }
+  let best = '';
+  for (const [origin, points] of weight) if (points > (weight.get(best) ?? 0)) best = origin;
+  const form = typedForms(best).find((form) => form.startsWith(query));
+  return best && form ? { url: `${best}/`, text: text + form.slice(text.length) } : null;
+}
+
+/**
+ * Chrome's Ctrl+Enter: a name without a dot becomes a .com site with www. (wikipedia opens
+ * www.wikipedia.com), with its port and path. Chrome also completes names with a dot but no known
+ * top level domain (mail.yahoo); without the list of those domains only names without a dot.
+ */
+function withDotCom(text: string): string {
+  const match = /^([a-z0-9-]+)(:\d+)?([/?#]\S*)?$/i.exec(text.trim());
+  return match ? `www.${match[1]}.com${match[2] ?? ''}${match[3] ?? ''}` : text;
 }
 
 /** What the field shows for url when not focused: on a phone only the host, like mobile browsers. */
@@ -105,6 +154,7 @@ function hideSuggestions(): void {
   box.hidden = true;
   rows = [];
   selected = -1;
+  inline = null;
 }
 
 function select(index: number): void {
@@ -129,22 +179,35 @@ function rowElement(row: Row, start: Node, title: string, url = ''): HTMLElement
   return node;
 }
 
-function showSuggestions(): void {
-  const text = address.value.trim();
+/**
+ * The rows for the text in the field. With complete (the user typed at the end) a visited site
+ * that starts with the text completes it inline, selected so that typing goes on over it.
+ */
+function showSuggestions(complete: boolean): void {
+  typed = address.value;
+  const text = typed.trim();
   box.textContent = '';
-  rows = [];
-  selected = -1;
   if (!text) {
     hideSuggestions();
     return;
   }
-  // First what Enter does with the text: open it as an address, and always a search
-  const typed = addressToURL(text);
+  rows = [];
+  selected = -1;
+  const atEnd = address.selectionStart === typed.length && address.selectionEnd === typed.length;
+  inline = complete && atEnd ? inlineCompletion(typed) : null;
+  if (inline) {
+    rows.push(inline);
+    box.append(rowElement(inline, favicon(inline.url), inline.text, inline.url));
+    address.value = inline.text;
+    address.setSelectionRange(typed.length, inline.text.length, 'backward');
+  }
+  // Then what Enter does with the text alone: open it as an address, and always a search
+  const asAddress = addressToURL(text);
   const search = searchURL(text);
-  if (typed !== search) {
-    const row = { url: typed, text };
+  if (asAddress !== search && asAddress !== inline?.url) {
+    const row = { url: asAddress, text };
     rows.push(row);
-    box.append(rowElement(row, icon('globe'), typed));
+    box.append(rowElement(row, icon('globe'), asAddress));
   }
   const searchRow = { url: search, text };
   rows.push(searchRow);
@@ -152,7 +215,7 @@ function showSuggestions(): void {
     rowElement(searchRow, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${text}"`),
   );
   for (const entry of suggestions(text)) {
-    if (entry.url === typed) continue;
+    if (entry.url === asAddress || entry.url === inline?.url) continue;
     const row = { url: entry.url, text: entry.url };
     rows.push(row);
     box.append(rowElement(row, favicon(entry.url), entry.title || entry.url, entry.url));
@@ -197,8 +260,11 @@ function placeSuggestions(): void {
   }
 }
 
-/** Opens url in the active tab, or after the start when the engine is not running yet. */
-function go(url: string): void {
+/**
+ * Opens url in the active tab (with inNewTab in a new tab in front), or after the start when the
+ * engine is not running yet.
+ */
+function go(url: string, inNewTab = false): void {
   hideSuggestions();
   if (!url) return;
   const tab = activeTab();
@@ -208,23 +274,40 @@ function go(url: string): void {
     address.blur();
     return;
   }
+  if (inNewTab) {
+    // The tab left behind shows its own address again
+    address.value = current;
+    openTab(url);
+    return;
+  }
   address.value = url;
   loadInTab(tab, url);
 }
 
+/**
+ * Enter: the row chosen with the arrow keys or completed inline while the field shows it, else
+ * the text as address. Like Chrome Ctrl+Enter makes the typed name a .com site (without the
+ * inline completion) and Alt+Enter opens a new tab in front.
+ */
+function submit({ ctrlKey = false, altKey = false } = {}): void {
+  const row = rows[selected];
+  const shown = row && address.value === row.text;
+  let url = shown ? row.url : addressToURL(address.value);
+  if (ctrlKey) url = addressToURL(withDotCom(shown && row === inline ? typed : address.value));
+  go(url, altKey);
+}
+
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  // A row chosen with the arrow keys, else what the text means
-  const row = selected > 0 ? rows[selected] : undefined;
-  go(row ? row.url : addressToURL(address.value));
+  submit();
 });
-// While the user still types, connect to where Enter most likely goes, like Chrome: the first
-// suggestion, else the typed address or the search engine (saves the round trips of TCP and TLS
-// on a slow link)
+// While the user still types, connect to where Enter most likely goes, like Chrome: the site
+// completed inline, else the first suggestion, else the typed address or the search engine
+// (saves the round trips of TCP and TLS on a slow link)
 function preconnectTyped(): void {
   clearTimeout(preconnectTimer);
   preconnectTimer = setTimeout(() => {
-    const url = suggestions(address.value, 1)[0]?.url ?? addressToURL(address.value);
+    const url = inline?.url ?? suggestions(typed, 1)[0]?.url ?? addressToURL(typed);
     if (url) runtime.browser?.preconnect(url);
   }, 300);
 }
@@ -250,14 +333,18 @@ address.addEventListener('focus', () => {
   if (address.value === shownText(current)) address.value = isBlank(current) ? '' : current;
   address.select();
 });
-address.addEventListener('input', () => {
+address.addEventListener('input', (e) => {
   // Only while editing: text set from outside (autofill, test drivers) opens no suggestions
   if (document.activeElement !== address) return;
-  showSuggestions();
+  // Only typing completes: after a deletion the completion stays away, like in Chrome
+  showSuggestions((e as InputEvent).inputType === 'insertText');
   preconnectTyped();
 });
 address.addEventListener('blur', () => {
-  setTimeout(hideSuggestions, 100);
+  // Unless the user is back in the field and typing again (rows of the new text)
+  setTimeout(() => {
+    if (document.activeElement !== address) hideSuggestions();
+  }, 100);
   if (compactLayout() || address.value === current) address.value = shownText(current);
 });
 address.addEventListener('keydown', (e) => {
@@ -272,6 +359,12 @@ address.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.preventDefault();
     revert();
+    return;
+  }
+  // Browsers submit the form only on Enter without Ctrl and Alt
+  if (e.key === 'Enter' && (e.ctrlKey || e.altKey) && !e.isComposing) {
+    e.preventDefault();
+    submit(e);
     return;
   }
   if (box.hidden || !['ArrowDown', 'ArrowUp'].includes(e.key)) return;

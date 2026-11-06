@@ -74,7 +74,12 @@ select popup) are in the same sheet.
   page's address (the view's `pendingURL`, #382). The suggestions start
   with what Enter does (open the typed address, `Search Bing for "weather"`; Bing is the default search, #343; like Chrome
   an invalid address such as a port above 65535 is a search, #407), then bookmarks
-  and history with their icons; the arrow keys move.
+  and history with their icons; the arrow keys move. Like Chrome a bookmarked or visited site
+  whose host starts with the typed text completes it inline (`githu` shows `github.com` with
+  `b.com` selected, the first row; Enter opens it with the scheme it was visited with, typing
+  goes on over it, Backspace removes it; text with a path completes nothing), Alt+Enter opens
+  the address in a new tab in front and Ctrl+Enter makes a name without a dot a `.com` site
+  (`wikipedia` opens `https://www.wikipedia.com`, #420).
 - **Find bar** (Ctrl+F): Enter and Shift+Enter in the field and the up and down buttons go to
   the next and previous match, F3 and Ctrl+G too; Escape closes it from anywhere in the bar, also
   after a click on a button took the focus (#376). Like Chrome each tab has its own: switching
