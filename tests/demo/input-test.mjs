@@ -2,8 +2,9 @@
 // downloads and the status line of a failed one, mailto: to the host browser, popups as tabs,
 // dialogs in the page with the origin, suppressed in background tabs and limited in bursts, the context menu
 // of the ui package, the <select> popup (mouse, keyboard, Esc), the suggestions of a datalist,
-// the link status bubble and the tooltip, the hidden color and date inputs of the host, the find
-// bar, zoom shortcuts, Ctrl + mouse wheel with the zoom indicator and fullscreen of the page area.
+// the link status bubble and the tooltip, the hidden color and date inputs of the host (closed
+// when the page removes the field), the find bar, zoom shortcuts, Ctrl + mouse wheel with the zoom
+// indicator and fullscreen of the page area.
 //
 //   node tests/demo/input-test.mjs [engine-dir]
 import { readFileSync } from 'node:fs';
@@ -36,6 +37,8 @@ const PAGE = `<!doctype html>
   #hoverlink { position: absolute; left: 20px; top: 345px; }
   #color { position: absolute; left: 20px; top: 380px; width: 60px; height: 30px; }
   #date { position: absolute; left: 20px; top: 430px; width: 160px; height: 26px; }
+  #gone { position: absolute; left: 250px; top: 430px; width: 160px; height: 26px; }
+  #under { position: absolute; left: 250px; top: 520px; width: 200px; height: 60px; background: #cde; }
   #city { position: absolute; left: 20px; top: 480px; width: 200px; height: 26px; }
   #missing { position: absolute; left: 600px; top: 110px; }
   #mail { position: absolute; left: 600px; top: 150px; }
@@ -49,6 +52,8 @@ const PAGE = `<!doctype html>
 <a id="hoverlink" href="/target" title="A tip">Hover here</a>
 <input id="color" type="color" value="#112233">
 <input id="date" type="date" value="2026-10-12">
+<input id="gone" type="date">
+<div id="under"></div>
 <input id="city" list="cities" autocomplete="off">
 <datalist id="cities"><option value="Zurich"><option value="Zug" label="Canton Zug"><option value="Bern"></datalist>
 <div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">own menu</div>
@@ -72,6 +77,13 @@ const PAGE = `<!doctype html>
   color.addEventListener('change', () => console.log('RESULT color=' + color.value));
   const date = document.getElementById('date');
   date.addEventListener('change', () => console.log('RESULT date=' + date.value));
+  // A field that goes away while its picker is open, the area below it takes the next click
+  const gone = document.getElementById('gone');
+  gone.addEventListener('focus', () => setTimeout(() => {
+    gone.remove();
+    console.log('RESULT gone=1');
+  }, 1500));
+  document.getElementById('under').addEventListener('pointerdown', () => console.log('RESULT under=1'));
   const city = document.getElementById('city');
   city.addEventListener('input', () => console.log('RESULT city=' + city.value));
   window.addEventListener('resize', () => console.log('RESULT width=' + window.innerWidth));
@@ -490,7 +502,31 @@ check(
     ),
 );
 
-// 11) Color: a hidden color input of the host browser, the value goes to the page
+// 11) A field removed while its host date picker is open: the picker closes, no orphaned panel
+// of the host (Firefox kept it) swallows the next click below the field
+await page.mouse.click(...(await at(395, 443)));
+const gonePicker = await page
+  .waitForSelector('input.bl-host-picker[type=date]', { state: 'attached', timeout: 10000 })
+  .then(
+    () => true,
+    () => false,
+  );
+await result('gone', 10000);
+const goneClosed = await page
+  .waitForSelector('input.bl-host-picker', { state: 'detached', timeout: 10000 })
+  .then(
+    () => true,
+    () => false,
+  );
+await page.waitForTimeout(500);
+await page.mouse.click(...(await at(350, 550)));
+check(
+  'the date picker of a removed field closes',
+  gonePicker && goneClosed && (await result('under', 5000)) === '1',
+  `opened ${gonePicker}, input removed ${goneClosed}, click below ${results.get('under')}`,
+);
+
+// 12) Color: a hidden color input of the host browser, the value goes to the page
 await page.mouse.click(...(await at(50, 395)));
 const colorPicker = await page
   .waitForSelector('input.bl-host-picker[type=color]', { state: 'attached', timeout: 10000 })
@@ -516,7 +552,7 @@ if (colorPicker) {
   );
 }
 
-// 12) Date: a hidden date input of the host browser
+// 13) Date: a hidden date input of the host browser
 await page.mouse.click(...(await at(165, 443)));
 const datePicker = await page
   .waitForSelector('input.bl-host-picker[type=date]', { state: 'attached', timeout: 10000 })
@@ -535,7 +571,7 @@ if (datePicker) {
   check('date reaches the page', (await result('date')) === '2027-03-04', results.get('date'));
 }
 
-// 13) Find in the page (Ctrl+F): count matches, Esc closes (also from the buttons of the bar)
+// 14) Find in the page (Ctrl+F): count matches, Esc closes (also from the buttons of the bar)
 await page.mouse.click(...(await at(600, 600)));
 await page.keyboard.press('Control+f');
 const findOpen = await page.waitForSelector('#find-bar:not([hidden])', { timeout: 5000 }).then(
@@ -565,7 +601,7 @@ check(
   String(buttonFocused),
 );
 
-// 14) Zoom (Ctrl +): the page gets narrower in CSS pixels, indicator 110 %
+// 15) Zoom (Ctrl +): the page gets narrower in CSS pixels, indicator 110 %
 results.delete('width');
 await page.keyboard.press('Control+=');
 const zoomWidth = await result('width', 10000);
@@ -584,7 +620,7 @@ check(
   String(resetWidth),
 );
 
-// 15) Ctrl + mouse wheel: page zoom with the indicator, a click on it resets; on the "map" the
+// 16) Ctrl + mouse wheel: page zoom with the indicator, a click on it resets; on the "map" the
 // page zooms itself and the zoom stays
 const ctrlWheelAt = ([x, y]) =>
   page.evaluate(
@@ -633,7 +669,7 @@ check(
   await zoomText(),
 );
 
-// 16) Fullscreen: the page requests it, the demo makes the page area large; when the host browser
+// 17) Fullscreen: the page requests it, the demo makes the page area large; when the host browser
 // ends it (like with Esc), the page notices too
 await page.mouse.click(...(await at(60, 265)));
 const fullscreen = await result('fs');

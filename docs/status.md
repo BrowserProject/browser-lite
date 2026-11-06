@@ -51,7 +51,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Reload and back/forward ask before they send a form (POST) again, cancel keeps the page (#369).
   Closing a view waits at most 500 ms for a busy page's beforeunload, like Chrome (#387): Ctrl+W
   in a row while heavy tabs load closes a tab per press. The host browser's color and date pickers open at the field
-  (#371). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
+  (#371) and close when the page removes the field or navigates (#421). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),

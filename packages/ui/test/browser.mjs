@@ -984,6 +984,47 @@ test('color and date/time pickers', async () => {
   });
 });
 
+test('an aborted host picker closes and gives the focus back', async () => {
+  // Firefox keeps the panel of a picker opened with showPicker() when its input is removed; only
+  // a focus and blur of the input close it
+  const result = await page.evaluate(async () => {
+    const { dateTimePicker } = ui.defaultHandlers();
+    const view = makeView(9);
+    const rect = { x: 5, y: 6, width: 70, height: 22 };
+    const button = document.createElement('button');
+    document.body.append(button);
+    button.focus();
+    const events = [];
+    const showPicker = HTMLInputElement.prototype.showPicker;
+    HTMLInputElement.prototype.showPicker = function () {
+      for (const type of ['focus', 'blur']) this.addEventListener(type, () => events.push(type));
+    };
+    const request = (signal) =>
+      dateTimePicker({ view, rect, type: 'date', value: '', min: 0, max: 0, step: 0, signal });
+    const out = {};
+    try {
+      const controller = new AbortController();
+      const promise = request(controller.signal);
+      controller.abort();
+      out.aborted = [await promise, events.splice(0), document.activeElement === button];
+      // A choice closes the picker itself: the focus stays where it is
+      const chosen = request(new AbortController().signal);
+      const input = document.querySelector('input.bl-host-picker');
+      input.value = '2024-05-06';
+      input.dispatchEvent(new Event('change'));
+      out.chosen = [await chosen, events.splice(0), document.activeElement === button];
+    } finally {
+      HTMLInputElement.prototype.showPicker = showPicker;
+      button.remove();
+    }
+    return out;
+  });
+  assert.deepEqual(result, {
+    aborted: [null, ['focus', 'blur'], true],
+    chosen: ['2024-05-06', [], true],
+  });
+});
+
 test('host pickers open once the input is laid out at the field', async () => {
   // Chromium draws the picker at the window's corner when showPicker() comes before the first
   // layout of the input

@@ -21,14 +21,28 @@ interface PickerRequest {
 const openPickers = new WeakMap<Document, () => void>();
 
 /**
+ * Closes the native picker of an input that may still be open. Firefox keeps the panel of a
+ * picker opened with showPicker() when its input is removed, hidden, disabled or blurred without
+ * focus; it closes when the input loses the focus. The focus goes back where it was.
+ */
+function closeNativePicker(input: HTMLInputElement): void {
+  const doc = input.ownerDocument;
+  const previous = doc.activeElement;
+  if (previous !== input) input.focus({ preventScroll: true });
+  input.blur();
+  if (previous !== input && previous instanceof HTMLElement && previous !== doc.body)
+    previous.focus({ preventScroll: true });
+}
+
+/**
  * Shows the native picker of the host browser: a hidden input at the place of the field of the
  * page, opened with showPicker(). Where pickers open only on a tap (needsTap) the input is
  * visible in a small sheet below the field (`.bl-picker-sheet` with the input and
  * `button[data-bl-answer=cancel]`), the tap on it opens the picker. Every input event previews
  * the value in the page. Resolves its value (read from the input) on change (in the sheet not on
  * the change Safari reports when its picker opens on an empty field) or when the user clicks
- * elsewhere, null when aborted or cancelled. A new
- * picker in the same document finishes the open one.
+ * elsewhere, null when aborted or cancelled. An abort (the field went away, the page navigated)
+ * also closes the host's picker. A new picker in the same document finishes the open one.
  */
 function openHostPicker(
   ui: UiContext,
@@ -70,17 +84,18 @@ function openHostPicker(
     setup?.(input);
     input.value = value;
 
-    const finish = (result: string | null) => {
+    const finish = (result: string | null, aborted = false) => {
       if (openPickers.get(doc) !== done) return;
       openPickers.delete(doc);
       clearTimeout(blurTimer);
       stopListening();
       request.signal.removeEventListener('abort', onAbort);
+      if (aborted) closeNativePicker(input);
       (sheet ?? input).remove();
       resolve(result);
     };
     const done = () => finish(read(input) || null);
-    const onAbort = () => finish(null);
+    const onAbort = () => finish(null, true);
     openPickers.set(doc, done);
     const preview = () => request.preview?.(read(input));
     // In the sheet Safari reports a change already when its picker opens on an empty field (it
