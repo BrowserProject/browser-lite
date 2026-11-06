@@ -389,9 +389,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
   and iPad iOS ends the whole host page instead (all tabs lost); the 512 MB budget there (#358)
   discards background tabs early, but a single page far above it is not stopped. Android Chrome
   has no budget yet (no kill seen so far). With no background tab left to discard the demo says
-  that the page uses the memory (#373), again at every growth by 32 MB. A silent freeze of the engine on spiegel.de at
-  1.1 GB on an iPhone (no output, Reload dead, 2026-11-03) did not come again and is most likely
-  the same memory exhaustion.
+  that the page uses the memory (#373), again at every growth by 32 MB.
+  News sites with their ads reach the budget with two tabs (#417): on an iPhone 16 with the
+  shared profile (consent given, so all ads load) nzz.ch alone holds 331 MB of malloc in use (JS
+  heap 59 MB), The Guardian 267 MB after releasing everything, so nzz.ch plus one more page
+  passes 512 MB with the area about as full as it is big (no leak, no fragmentation worth
+  speaking of). Without the budget the engine froze silently at 775 MB of engine memory after
+  three such tabs (2026-11-06; earlier iOS ended the page at 1.15 and 1.36 GB, and a freeze on
+  spiegel.de at 1.1 GB on 2026-11-03), so the budget stays. Lower only with lighter pages: most
+  of the malloc in use is many small blocks of DOM, style and JS of the page and its ad frames,
+  JS heap slabs and decoded images; tile buffers waiting for the compositor add up to 20 MB at a
+  phone size while a page paints. After a crash the restart on an iPhone failed twice with
+  `Engine start failed: RangeError: Out of memory` until Safari was restarted.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.
 - WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take
