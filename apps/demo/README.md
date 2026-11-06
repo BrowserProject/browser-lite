@@ -79,7 +79,9 @@ select popup) are in the same sheet.
   `b.com` selected, the first row; Enter opens it with the scheme it was visited with, typing
   goes on over it, Backspace removes it; text with a path completes nothing), Alt+Enter opens
   the address in a new tab in front and Ctrl+Enter makes a name without a dot a `.com` site
-  (`wikipedia` opens `https://www.wikipedia.com`, #420).
+  (`wikipedia` opens `https://www.wikipedia.com`, #420). The address and the find text are also
+  the fields' default values, so they stay when Safari brings the demo back from its page cache
+  (#422).
 - **Find bar** (Ctrl+F): Enter and Shift+Enter in the field and the up and down buttons go to
   the next and previous match, F3 and Ctrl+G too; Escape closes it from anywhere in the bar, also
   after a click on a button took the focus (#376). Like Chrome each tab has its own: switching

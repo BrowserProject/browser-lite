@@ -78,6 +78,7 @@ export function showFindOf(view: View): void {
     return;
   }
   input.value = session.text;
+  input.defaultValue = session.text;
   count.textContent = session.count;
   bar.hidden = false;
 }
@@ -101,6 +102,8 @@ export function showFindCount(view: View, matches: number, index: number): void 
 }
 
 input.addEventListener('input', () => {
+  // The text survives a return from the page cache like the address bar's (showAddress)
+  input.defaultValue = input.value;
   clearTimeout(timer);
   timer = setTimeout(() => run(false, false), 150);
 });

@@ -1,7 +1,8 @@
 // Typing in the address bar like Chrome: a visited site completes inline as soon as the typed text
 // starts its host (selected, so typing goes on over it, Backspace removes it) and Enter opens it
 // with the scheme it was visited with; Alt+Enter opens the address in a new tab in front,
-// Ctrl+Enter makes a name without a dot a .com site with www.
+// Ctrl+Enter makes a name without a dot a .com site with www. The address and the find text stay
+// when Safari brings the demo back from its page cache (WebKit resets fields with autocomplete=off).
 //
 //   node tests/demo/address-bar-test.mjs [engine-dir]
 import {
@@ -109,6 +110,30 @@ check(
   (await titles()).join() === 'start,three' && (await activeTitle()) === 'three',
   `${await titles()} ${await activeTitle()}`,
 );
+
+// Back from the page cache WebKit resets fields with autocomplete=off (reset() of the form
+// control, after pageshow): the address bar and the find text keep what they show
+await page.keyboard.press('Control+f');
+await page.keyboard.type('three');
+await page.evaluate(() => {
+  document.getElementById('address-form').reset();
+  const find = document.getElementById('find-input');
+  const form = document.createElement('form');
+  find.replaceWith(form);
+  form.append(find);
+  form.reset();
+  form.replaceWith(find);
+});
+const restored = await page.evaluate(() => [
+  document.getElementById('address').value,
+  document.getElementById('find-input').value,
+]);
+check(
+  'reset as after a return from the page cache: the address and the find text stay',
+  restored.join() === `${siteURL}three,three`,
+  JSON.stringify(restored),
+);
+await page.keyboard.press('Escape');
 
 // Ctrl+Enter: www. and .com around a name, without the inline completion. The view of the tab
 // only records the address (no load into the internet)

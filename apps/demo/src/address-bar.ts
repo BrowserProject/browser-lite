@@ -138,9 +138,14 @@ function shownText(url: string): string {
   return hostOf(url).replace(/^www\./, '') || url;
 }
 
-/** The address of the active tab changed; the field follows unless it is being edited. */
+/**
+ * The address of the active tab changed; the field follows unless it is being edited. Its default
+ * value follows too: WebKit resets a field with autocomplete=off to it when the demo comes back
+ * from the page cache (Safari's Back and Forward), which would otherwise empty it.
+ */
 export function showAddress(url: string): void {
   current = url;
+  address.defaultValue = shownText(url);
   if (document.activeElement !== address) address.value = shownText(url);
 }
 
