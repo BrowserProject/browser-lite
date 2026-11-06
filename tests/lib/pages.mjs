@@ -60,13 +60,18 @@ export function wav(seconds, { rate = 22050, frequency = 440, amplitude = 8000 }
 
 /**
  * WebM (VP8) of a red canvas, recorded in the browser of the test; with `audio` also a quiet sine
- * (Opus), otherwise without an audio track.
+ * (Opus), otherwise without an audio track; with `transparent` the right half is transparent (VP8
+ * with alpha where the browser records it).
  */
-export async function recordClip(browser, seconds = 3, { audio = false } = {}) {
+export async function recordClip(
+  browser,
+  seconds = 3,
+  { audio = false, transparent = false } = {},
+) {
   const recorder = await browser.newPage();
   await recorder.goto('about:blank');
   const bytes = await recorder.evaluate(
-    async ([ms, withAudio]) => {
+    async ([ms, withAudio, withAlpha]) => {
       const canvas = document.createElement('canvas');
       canvas.width = 320;
       canvas.height = 240;
@@ -90,8 +95,9 @@ export async function recordClip(browser, seconds = 3, { audio = false } = {}) {
       const chunks = [];
       media.ondataavailable = (e) => chunks.push(e.data);
       const timer = setInterval(() => {
+        ctx.clearRect(0, 0, 320, 240);
         ctx.fillStyle = '#e00000';
-        ctx.fillRect(0, 0, 320, 240);
+        ctx.fillRect(0, 0, withAlpha ? 160 : 320, 240);
       }, 40);
       media.start(500);
       await new Promise((r) => setTimeout(r, ms));
@@ -103,7 +109,7 @@ export async function recordClip(browser, seconds = 3, { audio = false } = {}) {
       sound?.close();
       return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
     },
-    [seconds * 1000, audio],
+    [seconds * 1000, audio, transparent],
   );
   await recorder.close();
   return Buffer.from(bytes);

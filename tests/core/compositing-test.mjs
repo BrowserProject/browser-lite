@@ -1,7 +1,7 @@
 // Compositing with layers (engine.compositing: true): colors of the tiles, CSS animation
-// (transform) without new painting, a fixed bar while scrolling, blur filter and a WebGL canvas
-// in a layer. Animation and scrolling go on while the JS of the page blocks (compositor and
-// scroll thread). After a GPU loss without layers, after the restore new views with layers.
+// (transform) without new painting, a fixed bar while scrolling, blur filter, shadows of the
+// contents of a filtered layer and a WebGL canvas in a layer. Animation and scrolling go on while
+// the JS of the page blocks (compositor and scroll thread). After a GPU loss without layers, after the restore new views with layers.
 // Without the compositor (compositing: false) the engine worker paints on the GPU itself, and
 // there again after loss and restore. CSS filters: reuse, frame rate, comparison with the CPU.
 //
@@ -50,6 +50,8 @@ const PAGE = `<!doctype html><title>Compositing test</title>
 <div id="blur"></div>
 <div class="box" id="fade"></div>
 <canvas id="gl" width="80" height="80"></canvas>
+<div style="position:absolute;top:420px;left:600px;filter:blur(0px)"><div style="width:60px;height:30px;box-shadow:0 50px 0 rgb(255,0,0)"></div></div>
+<div style="position:absolute;top:420px;left:800px;filter:blur(2px)"><div style="width:60px;height:30px;box-shadow:0 50px 0 rgb(255,0,0)"></div></div>
 <div id="late" style="position:absolute;top:1000px;left:20px;width:60px;height:60px;background:rgb(0,128,0)"></div>
 <div id="trap" style="position:absolute;top:1200px;left:20px;width:300px;height:200px;background:rgb(200,200,200)"></div>
 <div id="box" style="position:absolute;top:1200px;left:400px;width:200px;height:200px;overflow:auto"><div style="height:300px;background:rgb(255,0,255)"></div><div style="height:700px;background:rgb(0,255,255)"></div></div>
@@ -142,6 +144,15 @@ check(
   'blur filter',
   near(blurCenter, [0, 0, 255], 60) && blurEdge[2] > 60 && blurEdge[0] > 60,
   JSON.stringify({ blurCenter, blurEdge }),
+);
+// A filtered layer holds what its contents paint outside its box (here a shadow), also when the
+// filter has no outsets (blur(0px), the text of zoo.ch) or smaller ones
+const shadowSharp = await pixelAt(630, 485),
+  shadowBlurred = await pixelAt(830, 485);
+check(
+  'filtered layer keeps the shadow of its contents',
+  near(shadowSharp, [255, 0, 0]) && near(shadowBlurred, [255, 0, 0], 60),
+  JSON.stringify({ shadowSharp, shadowBlurred }),
 );
 let yellow = null;
 await waitFor(async () => near((yellow = await pixelAt(540, 280)), [255, 255, 0]), 10000);

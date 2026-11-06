@@ -726,7 +726,7 @@ RefPtr<VideoFrame> MediaPlayerPrivateWasm::videoFrameForCurrentTime()
     SkPixmap pixmap;
     if (!m_frame || !m_frame->platformImage()->peekPixels(&pixmap))
         return nullptr;
-    return VideoFrameWasm::createRGBA(pixmap.addr8(), pixmap.rowBytes(), pixmap.width(), pixmap.height(), true, MediaTime::createWithDouble(m_frameMediaTime));
+    return VideoFrameWasm::createRGBA(pixmap.addr8(), pixmap.rowBytes(), pixmap.width(), pixmap.height(), m_frame->platformImage()->isOpaque(), MediaTime::createWithDouble(m_frameMediaTime));
 }
 
 DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
@@ -734,6 +734,7 @@ DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
     return DestinationColorSpace::SRGB();
 }
 
+// RGBA with alpha that is not premultiplied (transparent VP9 and HEVC videos).
 // The buffer (malloc) belongs to the frame from now on, the host never writes
 // into it again. It is freed only when the last recording of the tiles lets go
 // of the frame. The host sends the next frame only after "frame": never more
@@ -741,7 +742,7 @@ DestinationColorSpace MediaPlayerPrivateWasm::colorSpace()
 void MediaPlayerPrivateWasm::hostFrame(uint8_t* pixels, int width, int height)
 {
     size_t rowBytes = static_cast<size_t>(width) * 4;
-    auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kOpaque_SkAlphaType);
+    auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
     m_frame = NativeImage::create(SkImages::RasterFromData(info, SkData::MakeFromMalloc(pixels, rowBytes * height), rowBytes));
     send("frame"_s);
     // Overlay: frames only for their readers, the host shows the video itself

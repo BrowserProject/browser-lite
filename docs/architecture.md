@@ -122,6 +122,9 @@ compositor's phase and how long it lasts, since the scene started if it never ra
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
 A layer gets tiles as far down as layout reaches (LayoutUnit, about 33.5 million px): its visible
 rect is no longer clamped to 2^24 px (patch 0081, #409).
+A layer whose filter the compositor applies leaves the filter outsets out of its bounds only when
+nothing of its contents reaches further: what the contents paint outside the box (text-shadow,
+shadows and outlines of children) stays in the layer (patch 0089, #442).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 The decoded frame of an image that is the contents of a compositing layer stays while the layer
@@ -330,7 +333,8 @@ while the page reads them (`drawImage`, WebGL, `VideoFrame`), `requestVideoFrame
 the presented frames of the host (`bl_media_presented`). A hole the compositor cannot punch
 straight into the framebuffer (opacity, blend mode, color filter, perspective, inside the
 offscreen surface of an effect) is refused and that player goes back to copied frames painted
-into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Sound
+into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Copied
+frames keep the alpha of transparent VP8, VP9 and HEVC videos (RGBA, not premultiplied, #442). Sound
 comes straight from the host element. A hidden page pauses video without an audio track (#170),
 so the host reports whether its element has one: `audioTracks` (Safari), `mozHasAudio` (Firefox),
 decoded audio bytes (Chrome, #386). Muted or silent `autoplay` video plays only while it is in

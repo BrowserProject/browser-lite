@@ -46,7 +46,7 @@
     { "name": "bl_context_menu", "returns": "void", "args": "int id, double x, double y", "doc": "Right click: page contextmenu event first, then 'context-menu' unless the page handled it." },
     { "name": "bl_command", "returns": "void", "args": "int id, char* name", "doc": "Editor command (Copy, Cut, Paste, SelectAll, Undo, Redo, ...)." },
     { "name": "bl_media_event", "returns": "void", "args": "int playerId, char* json", "doc": "State of the host <video> of a player (answer to onEngineMedia commands)." },
-    { "name": "bl_media_frame", "returns": "void", "args": "int playerId, uint8_t* pixels, int width, int height", "doc": "New RGBA frame of a host <video> (malloc, the engine takes it over)." },
+    { "name": "bl_media_frame", "returns": "void", "args": "int playerId, uint8_t* pixels, int width, int height", "doc": "New RGBA frame of a host <video>, alpha not premultiplied (malloc, the engine takes it over)." },
     { "name": "bl_media_presented", "returns": "void", "args": "int playerId, double mediaTime", "doc": "Video overlay: the host <video> showed a frame at mediaTime (seconds), for requestVideoFrameCallback." },
     { "name": "bl_media_fetch", "returns": "void", "args": "int playerId, int fetchId, double start, double end", "doc": "The media service worker asks for bytes [start, end) of a player's file, results through onEngineMediaFetch." },
     { "name": "bl_media_fetch_cancel", "returns": "void", "args": "int fetchId", "doc": "Cancels a media fetch." },

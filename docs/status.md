@@ -70,11 +70,14 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   last frame stays unscaled until the page painted the new size (#404; before, it was stretched
   or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
   WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all
-  below about 16.7 million px was blank).
+  below about 16.7 million px was blank). A filtered layer keeps the text shadow of its contents
+  (#442; zoo.ch had hard dark boxes behind its headline with `filter: blur(0px)`).
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
-  29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399).
+  29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Transparent videos (VP8,
+  VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
+  zoo.ch covered the photo with opaque green).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
@@ -465,7 +468,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take
   their variant without); cycles between page and module are freed only with the page or worker.
 - CSS: `url(#...)` and SVG filters on the CPU; filtered layers with children, masks or video
-  recompute every frame; `interpolate-size`; Paint Worklet scripts are classic (no
+  recompute every frame; a layer with a blur or drop-shadow filter whose contents paint nowhere
+  beyond the filter's outsets still cuts their shadows off at its box (WebKit keeps no visual
+  overflow without the outsets, #442); `interpolate-size`; Paint Worklet scripts are classic (no
   `import`/`export`) and runtime errors reject differently than in Chromium.
 - Graphics: WebGL frames through `readPixels` instead of a texture (a GPU path was slower under
   SwiftShader, #221), tiles painted on the CPU (Skia's GPU painting exists upstream, but
@@ -478,7 +483,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
   the relay (TURN), insertable streams. A sent track's engine sink stays until `stop()` or until
   its source ends; MediaRecorder errors while fetching data do not reach the page as an event. A
   muted autoplay video briefly reports `pause` and `playing` again right after loading (Chrome
-  does not).
+  does not). A transparent video the host shows behind the view canvas (overlay, #232) shows the
+  host page through its clear parts instead of the page content under it; only copied frames
+  keep the alpha (#442). A fix would find the alpha in a decoded frame and refuse the overlay;
+  no media API tells it.
 - Service workers: Push, Background Sync, Background Fetch.
 - Network: WebTransport, streams as request body, Storage Buckets,
   WebSocketStream without read backpressure (#120). Fingerprint (#283): no GREASE, OpenSSL's

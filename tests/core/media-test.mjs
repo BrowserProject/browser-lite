@@ -38,6 +38,8 @@ const browser = await launch();
 
 // WebM: 3 s, the canvas always red (the color is checked by "video: frame painted in the page")
 const CLIP = await recordClip(browser, 3);
+// WebM with alpha: the left half red, the right half transparent
+const ALPHA_CLIP = await recordClip(browser, 2, { transparent: true });
 console.log(
   `Test files: WAV ${(TONE.length / 1e6).toFixed(1)} MB, WebM ${(CLIP.length / 1e3).toFixed(0)} kB`,
 );
@@ -107,6 +109,29 @@ audio.addEventListener('playing', () => {
   }, 1500);
 }, { once: true });
 audio.play().then(() => result('audioplay', 'ok'), (e) => result('audioplay', e.name));
+</script>`;
+
+// A transparent video over a blue page, filtered like the hero of zoo.ch (a filter refuses the
+// overlay, so its frames are copied); drawImage(video) keeps the alpha too
+const ALPHA_PAGE = `<!doctype html><title>Alpha</title><body style="margin:0;background:rgb(0,0,255)">
+<video id="video" src="/alpha.webm" muted loop playsinline autoplay style="position:absolute;left:20px;top:20px;width:320px;height:240px;filter:saturate(1)"></video>
+<script>
+const video = document.getElementById('video');
+const canvas = document.createElement('canvas');
+canvas.width = 320;
+canvas.height = 240;
+const context = canvas.getContext('2d');
+const draw = setInterval(() => {
+  if (video.readyState < 2)
+    return;
+  context.clearRect(0, 0, 320, 240);
+  context.drawImage(video, 0, 0, 320, 240);
+  const left = context.getImageData(80, 120, 1, 1).data, right = context.getImageData(240, 120, 1, 1).data;
+  if (left[3] < 200)
+    return;
+  clearInterval(draw);
+  console.log('RESULT alphadraw=' + left[3] + ',' + right[3]);
+}, 100);
 </script>`;
 
 // MSE: append the clip in two odd parts (also checks the parser with half elements)
@@ -281,11 +306,13 @@ const { url: siteURL } = await serve((req, res) => {
   const files = {
     '/clip.webm': [CLIP, 'video/webm'],
     '/clip.mov': [CLIP, 'video/quicktime'],
+    '/alpha.webm': [ALPHA_CLIP, 'video/webm'],
     '/tone.wav': [TONE, 'audio/wav'],
   };
   const html = {
     '/': PAGE,
     '/mse.html': MSE_PAGE,
+    '/alpha.html': ALPHA_PAGE,
     '/blob.html': BLOB_PAGE,
     '/controls.html': CONTROLS_PAGE,
     '/autoplay.html': AUTOPLAY_PAGE,
@@ -443,6 +470,39 @@ check(
   hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.7,
   JSON.stringify(hostBuffered),
 );
+
+// ------------------------------------------------------ transparent video
+// Only where the host's own <video> shows the alpha (Chromium records and decodes VP8 alpha)
+const hostAlpha = await page.evaluate(async (bytes) => {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.src = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'video/webm' }));
+  await video.play().catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const context = new OffscreenCanvas(320, 240).getContext('2d');
+  context.drawImage(video, 0, 0);
+  const alpha = context.getImageData(240, 120, 1, 1).data[3];
+  URL.revokeObjectURL(video.src);
+  return video.readyState >= 2 && alpha === 0;
+}, Array.from(ALPHA_CLIP));
+if (hostAlpha) {
+  await load(page, `${siteURL}alpha.html`);
+  const isBlue = (p) => !!p && p.r < 60 && p.g < 60 && p.b > 180;
+  const opaquePart = await waitForPixel(100, 140, isRed);
+  const clearPart = await waitForPixel(260, 140, isBlue);
+  check(
+    'transparent video: the page shows through (filter, copied frames)',
+    isRed(opaquePart) && isBlue(clearPart),
+    JSON.stringify({ opaquePart, clearPart }),
+  );
+  const alphaDraw = String(await result('alphadraw'));
+  const [leftAlpha, rightAlpha] = alphaDraw.split(',').map(Number);
+  check(
+    'transparent video: drawImage(video) keeps the alpha',
+    leftAlpha > 200 && rightAlpha < 30,
+    alphaDraw,
+  );
+} else console.log('skip transparent video (the host shows no VP8 alpha)');
 
 // ------------------------------------------------------ blob:, data:, preload
 const players = () => page.evaluate(() => window.blTest.mediaState());

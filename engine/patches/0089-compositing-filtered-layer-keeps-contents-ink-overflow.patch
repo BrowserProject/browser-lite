@@ -1,0 +1,21 @@
+diff --git a/Source/WebCore/rendering/RenderLayer.cpp b/Source/WebCore/rendering/RenderLayer.cpp
+index 6b0ac84aee..4c06f80b9b 100644
+--- a/Source/WebCore/rendering/RenderLayer.cpp
++++ b/Source/WebCore/rendering/RenderLayer.cpp
+@@ -5536,9 +5536,14 @@ LayoutRect RenderLayer::localBoundingBox(OptionSet<CalculateLayerBoundsFlag> fla
+         if (!(flags & DontConstrainForMask) && box->hasMask()) {
+             result = box->maskClipRect(LayoutPoint());
+             box->flipForWritingMode(result); // The mask clip rect is in physical coordinates, so we have to flip, since localBoundingBox is not.
+-        } else if (flags.contains(ExcludeFilterOutsetsFromSelfBounds) && !box->hasLayoutOverflow()) {
++        } else if (flags.contains(ExcludeFilterOutsetsFromSelfBounds)) {
+             ASSERT(box->hasFilter());
+-            result = box->applyVisualEffectOverflow(box->borderBoxRect(), { RenderBox::VisualEffectOverflowOption::ExcludeFilterOutsets });
++            // The visual overflow also holds what the contents paint outside the box (text-shadow, outlines and
++            // shadows of children), which layout overflow does not see. Leave the filter outsets out only when
++            // the visual overflow reaches no further than the box effects with those outsets.
++            result = box->visualOverflowRect();
++            if (!box->hasLayoutOverflow() && box->applyVisualEffectOverflow(box->borderBoxRect()).contains(result))
++                result = box->applyVisualEffectOverflow(box->borderBoxRect(), { RenderBox::VisualEffectOverflowOption::ExcludeFilterOutsets });
+         } else
+             result = box->visualOverflowRect();
+ 

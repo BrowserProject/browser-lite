@@ -433,14 +433,16 @@ export class Player {
     this.copyFrame();
   }
 
-  // Every frame into its own buffer; the engine takes it over and frees it
+  // Every frame into its own buffer, RGBA not premultiplied; the engine takes it over and frees it
   // (MediaPlayerPrivateWasm::hostFrame). We never touch it again.
   private copyFrame(): void {
     const { module } = this.host.ctx;
     const [width, height] = this.frameSize();
     if (!this.canvas || this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas = new OffscreenCanvas(width, height);
-      this.context2d = this.canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+      // With alpha: VP9 and HEVC videos can be transparent. Each frame replaces the last one.
+      this.context2d = this.canvas.getContext('2d', { willReadFrequently: true });
+      if (this.context2d) this.context2d.globalCompositeOperation = 'copy';
     }
     const context = this.context2d;
     if (!context) return;
