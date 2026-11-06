@@ -93,9 +93,10 @@ runs the other views in a nested event loop (`runNestedEventLoop`, #258). The qu
 form is sent again waits without a nested loop: the navigation policy answers later (#369). Input to a visible view
 makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,
 parser and loads held) until no input came for 1 s, after keys or text while the focus stays in a
-text field for up to 10 s, and while a visible view loads a new page until it commits
-(`HiddenViews.cpp`, #364, #394), so a heavy page loading in a background tab does not hold up
-typing in or loading the front one.
+text field for up to 10 s, while a visible view loads a new page until it commits, and after a
+view became visible (a switch of tabs, urgent like input) until it made the frame that was due,
+which comes before its own waiting tasks (`HiddenViews.cpp`, #364, #394, #419), so a heavy page
+loading in a background tab does not hold up typing in, loading or switching to the front one.
 
 ## Frames
 

@@ -177,6 +177,10 @@ public:
     // (visibilityState, no rAF, timers throttled) and does not paint
     void setVisible(bool);
     bool isVisible() const { return m_visible; }
+    // Became visible with a frame due (a page that changed or loaded while hidden) and has not
+    // made it yet (with layers: the compositor has not shown it yet); hidden views wait for it
+    // (HiddenViews.h). Not below a dialog, which shows nothing new until it closes.
+    bool waitsForFrameSinceShown() const { return m_frameDueSinceShown && m_visible && !m_dialogBlocks; }
     // The page plays sound: hidden, its timers are not throttled (like Chrome)
     void setAudible(bool);
     // Hidden and without sound, the page waits while the user works in a visible view
@@ -282,6 +286,7 @@ private:
     bool m_frameRequested { false };
     void requestFrame();
     bool m_visible { true };
+    bool m_frameDueSinceShown { false };
     bool m_audible { false };
     void updateActivityState();
     bool m_waitsForUser { false };

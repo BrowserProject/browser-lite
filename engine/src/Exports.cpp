@@ -575,12 +575,20 @@ EMSCRIPTEN_KEEPALIVE void bl_focus(int id, int focused)
     withView(id, [=](WebView& view) { view.setFocused(focused); });
 }
 
-// View visible (1) or hidden (0): in the background or the host tab is hidden
+// View visible (1) or hidden (0): in the background or the host tab is hidden. The user waits for
+// a view that becomes visible: the command comes in between two tasks like input (urgent, in its
+// order with the other commands), and hidden views wait for its first frame (HiddenViews.h).
 EMSCRIPTEN_KEEPALIVE void bl_set_visible(int id, int visible)
 {
-    withView(id, [=](WebView& view) {
-        view.setVisible(visible);
-        visibleViewMayNavigate(view);
+    runUrgentOnEngineThread([=] {
+        if (auto* view = WebView::fromID(id)) {
+            view->runWhenNotBlocked([=](WebView& view) {
+                bool shown = visible && !view.isVisible();
+                view.setVisible(visible);
+                if (shown)
+                    visibleViewShown(view);
+            });
+        }
     });
 }
 

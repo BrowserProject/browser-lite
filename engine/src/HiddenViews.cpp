@@ -14,6 +14,11 @@
 // - a visible view loads a new page: until it commits (at most navigationWait), then quietTime
 //   for its first parsing and layout. A navigation of the host (withNavigation in Exports.cpp)
 //   counts as input as soon as the running task ends.
+// - a view becomes visible (a switch of tabs, bl_set_visible): like input from the end of the
+//   running task on, and until it made the frame that was due, at most firstFrameWait. A tab that
+//   loaded in the background never painted, its first layout and paint come with that frame,
+//   and the user looks at an empty page until then; meanwhile hidden tabs (also the one just
+//   left) started tasks of seconds between its steps.
 #include "config.h"
 #include "HiddenViews.h"
 
@@ -44,6 +49,9 @@ static constexpr Seconds quietTime = 1_s;
 static constexpr Seconds typingQuietTime = 10_s;
 // A visible page that does not answer does not stop the background tabs for longer
 static constexpr Seconds navigationWait = 10_s;
+// The first frame of a view just shown, also a page that loaded in the background (its first
+// layout and paint), needs no longer than this
+static constexpr Seconds firstFrameWait = 5_s;
 // How often the holds of the visible views (focus, navigation) are checked while hidden views wait
 static constexpr Seconds checkInterval = 250_ms;
 
@@ -52,6 +60,7 @@ static MonotonicTime s_lastInput;
 // NaN until the first time: no comparison holds
 static MonotonicTime s_lastTyping = MonotonicTime::nan();
 static MonotonicTime s_navigationStart = MonotonicTime::nan();
+static MonotonicTime s_shownAt = MonotonicTime::nan();
 
 static void updateViews()
 {
@@ -88,11 +97,12 @@ static bool visibleViewHolds(MonotonicTime now)
 {
     bool typing = now < s_lastTyping + typingQuietTime;
     bool navigation = now < s_navigationStart + navigationWait;
+    bool shown = now < s_shownAt + firstFrameWait;
     bool holds = false;
     WebView::forEach([&](WebView& view) {
         if (holds || !view.isVisible() || !view.mainFrame())
             return;
-        holds = (navigation && navigates(view)) || (typing && takesTextInput(view.page()));
+        holds = (navigation && navigates(view)) || (typing && takesTextInput(view.page())) || (shown && view.waitsForFrameSinceShown());
     });
     return holds;
 }
@@ -128,6 +138,16 @@ void visibleViewMayNavigate(WebView& view)
         return;
     s_navigationStart = MonotonicTime::now();
     startWaiting(checkInterval);
+}
+
+void visibleViewShown(WebView& view)
+{
+    if (!view.isVisible())
+        return;
+    if (view.waitsForFrameSinceShown())
+        s_shownAt = MonotonicTime::now();
+    userWorksInVisibleView();
+    visibleViewMayNavigate(view);
 }
 
 bool hiddenViewsWaitForUser()

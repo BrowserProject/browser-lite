@@ -1,8 +1,9 @@
 // Background views through @browser-lite/core (WebView::setVisible, View.setVisible): hidden pages
 // see visibilityState 'hidden', rAF and CSS animations stop, setInterval runs at most about once
 // per second, the engine does not paint; with sound, sound and timers go on. While the user types
-// in the front view (also through pauses while the focus stays in the field) or the front view
-// loads a page, a busy hidden view waits. With and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
+// in the front view (also through pauses while the focus stays in the field), the front view
+// loads a page or a view was just shown (until its first frame), a busy hidden view waits. With
+// and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive) and no hang during a long native dialog of the host page, a
 // muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
 // muted sound. Hidden, a video without an audio track pauses (in the host too), a muted one with
@@ -36,11 +37,12 @@ timeLimit(TIMEOUT + 300000);
 
 const TONE = wav(60, { amplitude: 4000 });
 
-// Counts rAF and a timer (10 ms); hiding and showing report what ran in between. The CSS
+// Counts rAF while hidden and a timer (10 ms); hiding and showing report what ran in between
+// (the first frame after showing may come before the queued visibilitychange event). The CSS
 // animation runs with layers in the compositor.
 const VISIBILITY_SCRIPT = `
 let raf = 0, ticks = 0, mark = null;
-const loop = () => { raf++; requestAnimationFrame(loop); };
+const loop = () => { if (document.hidden) raf++; requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
 setInterval(() => ticks++, 10);
 document.addEventListener('visibilitychange', () => {
@@ -109,6 +111,36 @@ console.log('RESULT loaded=videos')</script>`,
 channel.port1.onmessage = () => { const end = Date.now() + 500; while (Date.now() < end); console.log('RESULT chunk=' + Date.now()); channel.port2.postMessage(0); };
 channel.port2.postMessage(0);
 console.log('RESULT loaded=busy')</script>`,
+  // Four tasks of 250 ms queued at once, like the many callbacks of a heavy page loading; the
+  // engine runs them in one pass unless urgent work waits
+  batches: `<!doctype html><title>batches</title><p>batches<script>const channel = new MessageChannel();
+let left = 0;
+channel.port1.onmessage = () => {
+  const start = Date.now();
+  while (Date.now() < start + 250);
+  console.log('RESULT task=' + start + ':' + Date.now());
+  if (--left <= 0) { left = 4; for (let i = 0; i < 4; i++) channel.port2.postMessage(0); }
+};
+channel.port2.postMessage(0);
+console.log('RESULT loaded=batches')</script>`,
+  // Busy itself (tasks of 100 ms, four at a time) and changes while hidden, so a frame is due
+  // when it is shown again; the first rAF after that (in the first rendering update) reports when
+  // it ran
+  shown: `<!doctype html><title>shown</title><p id="n">0</p><script>let n = 0;
+setInterval(() => { document.getElementById('n').textContent = ++n; }, 200);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) requestAnimationFrame(() => console.log('RESULT frame=' + Date.now()));
+});
+const channel = new MessageChannel();
+let left = 0;
+channel.port1.onmessage = () => {
+  const start = Date.now();
+  while (Date.now() < start + 100);
+  console.log('RESULT own=' + start + ':' + Date.now());
+  if (--left <= 0) { left = 4; for (let i = 0; i < 4; i++) channel.port2.postMessage(0); }
+};
+channel.port2.postMessage(0);
+console.log('RESULT loaded=shown')</script>`,
   typing: `<!doctype html><title>typing</title><body style="margin:0"><input style="position:absolute;left:10px;top:10px;width:300px;height:30px">
 <script>document.querySelector('input').onkeydown = (e) => console.log('RESULT keydown=' + e.key + ':' + Date.now());
 console.log('RESULT loaded=typing')</script>`,
@@ -446,6 +478,52 @@ const loadInFront = async (label, start) => {
 await loadInFront('navigation', () => typing.go(`${siteURL}slow?front`));
 await loadInFront('new tab', () => typing.newTab(`${siteURL}slow?tab`));
 await typing.context.close();
+
+// Switching to a view that changed in the background: hidden views wait from the end of the
+// running task on (urgent, like input) until the shown view made its first frame, which comes
+// before the shown view's own waiting tasks. With layers the compositor may first have to show the
+// frame from before the view was hidden: one task of the view can run meanwhile.
+async function tabSwitch(label, params) {
+  const app = await openApp({ url: `${siteURL}batches`, ...params });
+  await app.wait('loaded', 'batches');
+  await app.newTab(`${siteURL}shown`);
+  await app.wait('loaded', 'shown');
+  await app.newTab(`${siteURL}empty`);
+  await app.wait('loaded', 'empty');
+  await app.page.waitForTimeout(3000);
+  const tasks = (key) =>
+    app.results.filter((r) => r[1] === key).map((r) => r[2].split(':').map(Number));
+  const switched = await app.page.evaluate(() => {
+    const time = Date.now();
+    window.blHost.select(1);
+    return time;
+  });
+  const frame = Number((await app.wait('frame', null, 15000))?.[2]);
+  const before = (key) =>
+    tasks(key).filter(([start, end]) => start > switched && end <= frame).length;
+  const hidden = before('task');
+  check(
+    `${label}: tab switch: the hidden view starts no task before the first frame of the shown view`,
+    frame > 0 && hidden === 0,
+    `${hidden} tasks, frame ${frame - switched} ms after the switch`,
+  );
+  const own = before('own');
+  check(
+    `${label}: tab switch: the frame of the shown view comes before its own waiting tasks`,
+    frame > 0 && own <= (params.compositing === '0' ? 0 : 1),
+    `${own} tasks`,
+  );
+  await app.page.waitForTimeout(3000);
+  const after = tasks('task').filter(([start]) => start > frame).length;
+  check(
+    `${label}: tab switch: the hidden view goes on after the frame`,
+    after >= 4,
+    `${after} tasks`,
+  );
+  await app.context.close();
+}
+await tabSwitch('compositor', {});
+await tabSwitch('without compositor', { compositing: '0' });
 
 // Memory pressure: over the limit the engine reports at every growth by 32 MB. The limit is just
 // above the memory of the same session without pressure.

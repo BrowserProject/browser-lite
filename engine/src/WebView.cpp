@@ -865,6 +865,7 @@ bool WebView::renderCompositedFrame(IntRect*)
 
 void WebView::didComposite()
 {
+    m_frameDueSinceShown = false;
     if (m_layerTreeHost)
         m_layerTreeHost->didComposite();
     m_page->didCompleteRenderingUpdateDisplay();
@@ -997,7 +998,11 @@ void WebView::presentIfNeeded()
     if (m_gpuSurface && !Gpu::context())
         dropGpuSurface();
     IntRect dirty;
-    if (!renderFrame(&dirty))
+    bool painted = renderFrame(&dirty);
+    // Made, or nothing to make; with layers once the compositor has shown it (didComposite)
+    if (!m_compositing || !m_layerTreeHost->isWaitingForCompositor())
+        m_frameDueSinceShown = false;
+    if (!painted)
         return;
     if (m_gpuSurface) {
         auto start = MonotonicTime::now();
@@ -1705,12 +1710,21 @@ void WebView::setVisible(bool visible)
     if (visible == m_visible)
         return;
     m_visible = visible;
+    m_frameDueSinceShown = visible && m_frameRequested;
     updateActivityState();
     updateWaitForUser();
     if (m_layerTreeHost)
         m_layerTreeHost->setVisible(visible);
-    if (visible && m_frameRequested)
-        requestFrameFromHost(m_id);
+    if (!m_frameDueSinceShown)
+        return;
+    // The frame that was due comes before the page's waiting tasks (loads and scripts it held
+    // while hidden), like the first paint (didReachLayoutMilestone): otherwise they ran first while
+    // the frame of the host waited behind them
+    requestFrameFromHost(m_id);
+    runNextOnEngineThread([id = m_id] {
+        if (auto* view = fromID(id))
+            view->presentIfNeeded();
+    });
 }
 
 void WebView::setAudible(bool audible)

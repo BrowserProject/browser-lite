@@ -39,6 +39,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   went from median 0.42 s (90th percentile 1.1 s, up to 7.5 s) to 2 ms (frame 32 ms), a new tab
   next to two loading heavy tabs commits in 0.3 to 2 s instead of 11 to 17 s. After a pause of
   more than 10 s (or 1 s outside a text field) a key can still wait for a task that already runs.
+  A switch to a tab that loaded or changed in the background is urgent like input, its due frame
+  comes before its own waiting tasks and hidden views wait for that frame (#419): with Wikipedia,
+  20min.ch and weather.com opened by Ctrl+click, the page area stayed white for 0.9 to 14.9 s
+  (median about 3 s) after the click, now 0.35 to 1.7 s (median 0.9 s). What remains is a hidden
+  task that already runs at the click and the page's own first layout and paint. The core still
+  shows an empty view canvas until that first frame instead of the last tab's frame.
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
