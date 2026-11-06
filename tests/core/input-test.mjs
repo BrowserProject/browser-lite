@@ -1,5 +1,5 @@
 // Input and page interaction through @browser-lite/core in a real Chromium: typing (also umlauts),
-// click, scrolling, popup as a new view, downloads (HTTP, blob:, data:, 404, by extension),
+// click, scrolling, popup as a new view, downloads (HTTP, POST, blob:, data:, 404, by extension),
 // mailto: and tel: (external-url), sandbox (tel:, download), <a ping> with cookie, CSP report
 // without redirect, sendBeacon (preflight, CORS and CSP on redirects), favicon behind a redirect,
 // dialogs with the origin, context menu requests, <select>, color and date through the request
@@ -171,6 +171,9 @@ const pingArrived = new Promise((resolve) => {
   resolvePing = resolve;
 });
 const cspRequests = [];
+// Requests of the downloads: a navigation that becomes a download asks the server once
+let fileRequests = 0;
+const exportBodies = [];
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
@@ -225,12 +228,27 @@ const { url: siteURL } = await serve((req, res) => {
     resolveOwnBeacon();
     res.writeHead(204).end();
   } else if (req.url === '/file.txt') {
+    fileRequests++;
     res
       .writeHead(200, {
         'Content-Type': 'text/plain',
         'Content-Disposition': 'attachment; filename="greeting.txt"',
       })
       .end('Content of the download\n');
+  } else if (req.url === '/export' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => {
+      body += c;
+    });
+    req.on('end', () => {
+      exportBodies.push(body);
+      res
+        .writeHead(200, {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': 'attachment; filename="export.csv"',
+        })
+        .end('a,b\n1,2\n');
+    });
   } else if (req.url === '/archive.zip') {
     res.writeHead(200).end('PK');
   } else if (req.url === '/upload' && req.method === 'POST') {
@@ -400,8 +418,9 @@ check(
   'download (Content-Disposition: attachment)',
   httpDownload?.filename === 'greeting.txt' &&
     httpDownload.state === 'done' &&
-    httpDownload.text === 'Content of the download\n',
-  JSON.stringify(httpDownload),
+    httpDownload.text === 'Content of the download\n' &&
+    fileRequests === 1,
+  `${JSON.stringify(httpDownload)} requests=${fileRequests}`,
 );
 
 // 3b) Downloads without the network: blob: (revoked right away) and data: with download=
@@ -437,6 +456,31 @@ check(
   'without Content-Type: .zip becomes a download',
   zipDownload?.filename === 'archive.zip',
   JSON.stringify(zipDownload),
+);
+
+// 3c3) A form POST answered with an attachment: the load of the form becomes the download, the
+// form is sent once
+const beforeExport = await hostIndex();
+await evalPage(
+  page,
+  `(() => {
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/export';
+    form.innerHTML = '<input name="q" value="abc">';
+    document.body.append(form);
+    form.submit();
+  })()`,
+);
+await waitFor(() => host((i) => window.blHost.downloads[i]?.text != null, beforeExport), 30000);
+const exportDownload = await host((i) => window.blHost.downloads[i] ?? null, beforeExport);
+await page.waitForTimeout(500);
+check(
+  'form POST download: sent once',
+  exportDownload?.filename === 'export.csv' &&
+    exportDownload.text === 'a,b\n1,2\n' &&
+    JSON.stringify(exportBodies) === '["q=abc"]',
+  `${JSON.stringify(exportDownload)} ${JSON.stringify(exportBodies)}`,
 );
 
 // 3d) mailto: goes to the host (external-url), the page stays and shows no load error. Without a

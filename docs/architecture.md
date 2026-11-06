@@ -193,7 +193,13 @@ the address that redirected (#406).
 An address the host loads (`bl_load_url`, typed by the user) has no initiator document: a
 `data:` or `about:` document from it starts with an empty policy container (CSP, referrer
 policy) like in Chrome, while one a page navigates to inherits the page's policy (HTML spec,
-patch 0080, #408).
+patch 0080, #408). A navigation whose response becomes a download (`attachment`, a type the
+engine does not show) continues as the download (`continueAsDownload`, like WebKit2's
+`NetworkResourceLoader::convertToDownload`): the paused request is taken from the
+`ResourceLoader` before WebCore cancels it, or the body comes from the HTTP cache, so a one-time
+link or a form POST reaches the server once. `<a download>`, view source and a navigation the
+engine has no load for (answered by a service worker or WebKit's memory cache) send a request of
+their own (#412).
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch

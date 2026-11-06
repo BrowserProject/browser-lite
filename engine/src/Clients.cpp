@@ -71,6 +71,7 @@
 #include <WebCore/SandboxFlags.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/StringWithDirection.h>
+#include <WebCore/SubresourceLoader.h>
 #include <WebCore/UserAgent.h>
 #include <WebCore/UserGestureIndicator.h>
 #include <WebCore/WindowFeatures.h>
@@ -739,10 +740,13 @@ void FrameLoaderClient::startDownload(const ResourceRequest& request, const Stri
     BrowserLite::startDownload(m_view->id(), request, suggestedName);
 }
 
-// Loads the file again with its own request (docs/decisions.md #33). The URL
-// of the response is already the target after all redirects.
-void FrameLoaderClient::convertMainResourceLoadToDownload(DocumentLoader*, const ResourceRequest& request, const ResourceResponse& response)
+// The running load becomes the download, so a one-time link or a form POST
+// goes to the server once. Without one a request of its own; the URL of the
+// response is already the target after all redirects.
+void FrameLoaderClient::convertMainResourceLoadToDownload(DocumentLoader* documentLoader, const ResourceRequest& request, const ResourceResponse& response)
 {
+    if (RefPtr loader = documentLoader ? documentLoader->mainResourceLoader() : nullptr; loader && BrowserLite::continueAsDownload(m_view->id(), *loader, response))
+        return;
     auto downloadRequest = request;
     downloadRequest.setURL(URL { response.url() });
     BrowserLite::startDownload(m_view->id(), downloadRequest, { });

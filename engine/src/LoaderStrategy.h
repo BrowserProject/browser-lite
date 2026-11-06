@@ -11,6 +11,7 @@ class CurlRequestClient;
 class CurlResponse;
 class LoaderStrategy;
 class ResourceError;
+class ResourceLoader;
 class ResourceRequest;
 class ResourceResponse;
 }
@@ -44,6 +45,10 @@ bool isRefusedAddress(const WebCore::ResourceError&);
 // download-done, data through Module.onEngineDownloadData). data: and blob:
 // come from the engine itself, otherwise an own request.
 void startDownload(int viewId, const WebCore::ResourceRequest&, const String& suggestedFilename);
+// A navigation whose response became a download: its running load continues
+// as the download, nothing is requested again. False if the engine has no such
+// load (WebCore memory cache, answered by a service worker).
+bool continueAsDownload(int viewId, WebCore::ResourceLoader&, const WebCore::ResourceResponse&);
 // Stops a running download, which ends with download-done (error "Cancelled")
 void cancelDownload(int id);
 // Loads the source of an address (like a download, flagged viewSource)

@@ -260,6 +260,28 @@ public:
         }
     }
 
+    // A navigation that became a download (convertMainResourceLoadToDownload)
+    struct HandOver {
+        // The running request, paused after the response
+        RefPtr<CurlRequest> request;
+        // Or the whole body, from the HTTP cache
+        RefPtr<FragmentedSharedBuffer> body;
+    };
+    // Lets the ResourceLoader go without stopping the request: its further
+    // callbacks go to download. Nothing (and no change) before the response.
+    HandOver handOver(CurlRequestClient& download)
+    {
+        if (!m_loader || !m_responseDelivered || (!m_curlRequest && !m_cachedBody))
+            return { };
+        m_loader = nullptr;
+        m_done = nullptr;
+        m_deferred.clear();
+        if (auto body = std::exchange(m_cachedBody, nullptr))
+            return { nullptr, WTF::move(body) };
+        m_download = &download;
+        return { std::exchange(m_curlRequest, nullptr), nullptr };
+    }
+
     // The page defers loading while one of its dialogs is open (#258,
     // Page::setDefersLoading): what arrives waits and comes in order afterwards
     void runDeferred()
@@ -305,12 +327,15 @@ private:
         debugLog("from the cache %s", m_loader->request().url().string().utf8().data());
         m_response = entry->response;
         m_response.setSource(source);
-        m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }, body = WTF::move(entry->body)] {
-            if (!m_loader)
+        m_cachedBody = entry->body.copyRef();
+        m_responseDelivered = true;
+        m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }] {
+            RefPtr body = std::exchange(m_cachedBody, nullptr);
+            if (!m_loader || !body)
                 return;
             RefPtr loader = m_loader;
             if (body->size())
-                loader->didReceiveBuffer(body.get(), body->size(), DataPayloadBytes);
+                loader->didReceiveBuffer(*body, body->size(), DataPayloadBytes);
             if (!m_loader)
                 return;
             finish();
@@ -363,6 +388,8 @@ private:
     // CurlRequestClient (calls arrive on the engine thread)
     void curlDidSendData(CurlRequest&, unsigned long long sent, unsigned long long total) final
     {
+        if (m_download)
+            return;
         deliver([this, protectedThis = Ref { *this }, sent, total] {
             if (m_loader)
                 m_loader->didSendData(sent, total);
@@ -371,6 +398,9 @@ private:
 
     void curlDidReceiveResponse(CurlRequest& request, CurlResponse&& curlResponse) final
     {
+        // The next part of a multipart response: the download takes it as more data
+        if (m_download)
+            return request.completeDidReceiveResponse();
         deliver([this, protectedThis = Ref { *this }, request = Ref { request }, curlResponse = WTF::move(curlResponse)]() mutable {
             receiveResponse(request, WTF::move(curlResponse));
         });
@@ -467,6 +497,7 @@ private:
         m_partition = HttpCache::partition(*m_loader);
         m_cacheWriter.start(m_partition, m_loader->request(), m_response);
 
+        m_responseDelivered = true;
         m_loader->didReceiveResponse(ResourceResponse { m_response }, [this, protectedThis = Ref { *this }] {
             if (m_curlRequest && m_loader)
                 m_curlRequest->completeDidReceiveResponse();
@@ -475,6 +506,8 @@ private:
 
     void curlDidReceiveData(CurlRequest& request, Ref<SharedBuffer>&& buffer) final
     {
+        if (RefPtr download = m_download)
+            return download->curlDidReceiveData(request, WTF::move(buffer));
         deliver([this, protectedThis = Ref { *this }, request = Ref { request }, buffer = WTF::move(buffer)] {
             if (!m_loader || m_curlRequest != request.ptr())
                 return;
@@ -485,6 +518,8 @@ private:
 
     void curlDidComplete(CurlRequest& request, NetworkLoadMetrics&& metrics) final
     {
+        if (RefPtr download = m_download)
+            return download->curlDidComplete(request, WTF::move(metrics));
         deliver([this, protectedThis = Ref { *this }, request = Ref { request }, metrics = WTF::move(metrics)] {
             if (!m_loader || m_curlRequest != request.ptr())
                 return;
@@ -496,8 +531,10 @@ private:
         });
     }
 
-    void curlDidFailWithError(CurlRequest& request, ResourceError&& error, CertificateInfo&&) final
+    void curlDidFailWithError(CurlRequest& request, ResourceError&& error, CertificateInfo&& certificate) final
     {
+        if (RefPtr download = m_download)
+            return download->curlDidFailWithError(request, WTF::move(error), WTF::move(certificate));
         log("Load failed (%d): %s %s", error.errorCode(), error.failingURL().string().utf8().data(), error.localizedDescription().utf8().data());
         deliver([this, protectedThis = Ref { *this }, request = Ref { request }, error = WTF::move(error)] {
             if (!m_loader || m_curlRequest != request.ptr())
@@ -518,6 +555,11 @@ private:
     String m_partition;
     std::unique_ptr<HttpCache::Entry> m_cachedEntry;
     HttpCache::Writer m_cacheWriter;
+    // From the cache: the body until the ResourceLoader takes the response
+    RefPtr<FragmentedSharedBuffer> m_cachedBody;
+    bool m_responseDelivered { false };
+    // After handOver: the download that gets the callbacks of the request
+    RefPtr<CurlRequestClient> m_download;
     Deque<Function<void()>> m_deferred;
 };
 
@@ -689,15 +731,16 @@ private:
     unsigned m_redirectCount { 0 };
 };
 
-// Download: own CurlRequest, the data goes piece by piece to the host, which
-// makes a file (Blob) from it. The engine already has data: and blob: itself,
-// those need no network.
+// Download: the data goes piece by piece to the host, which makes a file (Blob)
+// from it. A navigation that became a download continues with its load (one
+// request, like NetworkResourceLoader::convertToDownload in WebKit2), <a download>
+// and view source have a CurlRequest of their own. The engine already has data:
+// and blob: itself, those need no network.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
     static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
     {
-        static int nextID = 1;
-        Ref download = adoptRef(*new Download(nextID++, viewId, suggestedFilename, viewSource));
+        Ref download = create(viewId, suggestedFilename, viewSource);
         if (request.url().protocolIsData() || request.url().protocolIsBlob()) {
             download->loadLocally(request.url());
             return;
@@ -706,6 +749,32 @@ public:
         running().add(download->m_id, download.ptr());
         download->m_request = createCurlRequest(WTF::move(request), download.get());
         download->m_request->resume();
+    }
+
+    // The load of a navigation after its response: false if it cannot continue (no response yet)
+    static bool takeOver(int viewId, ResourceLoad& load, const ResourceResponse& response)
+    {
+        Ref download = create(viewId, { }, false);
+        auto handOver = load.handOver(download.get());
+        if (handOver.body) {
+            download->announce(response);
+            if (download->acceptsResponse(response)) {
+                handOver.body->forEachSegment([&](std::span<const uint8_t> segment) { sendDownloadData(download->m_id, segment); });
+                download->finish({ });
+            }
+            return true;
+        }
+        if (!handOver.request)
+            return false;
+        download->m_self = download.ptr();
+        running().add(download->m_id, download.ptr());
+        // The request has the load as its client, which passes everything on
+        download->m_request = WTF::move(handOver.request);
+        download->m_relay = &load;
+        download->announce(response);
+        if (download->acceptsResponse(response))
+            download->m_request->completeDidReceiveResponse();
+        return true;
     }
 
     static void cancel(int id)
@@ -723,6 +792,12 @@ private:
     {
         static NeverDestroyed<HashMap<int, Download*>> downloads;
         return downloads;
+    }
+
+    static Ref<Download> create(int viewId, const String& suggestedFilename, bool viewSource)
+    {
+        static int nextID = 1;
+        return adoptRef(*new Download(nextID++, viewId, suggestedFilename, viewSource));
     }
 
     Download(int id, int viewId, const String& suggestedFilename, bool viewSource)
@@ -781,6 +856,15 @@ private:
         return error.localizedDescription().isEmpty() ? "Error"_s : error.localizedDescription();
     }
 
+    // Like Chrome: an error page is no file (view source shows it though)
+    bool acceptsResponse(const ResourceResponse& response)
+    {
+        if (m_viewSource || response.httpStatusCode() < 400)
+            return true;
+        finish(makeString("HTTP "_s, response.httpStatusCode()));
+        return false;
+    }
+
     void finish(const String& error)
     {
         running().remove(m_id);
@@ -789,6 +873,7 @@ private:
             request->cancel();
             request->invalidateClient();
         }
+        m_relay = nullptr;
         m_self = nullptr; // releases us
     }
 
@@ -806,12 +891,8 @@ private:
             return;
         }
         announce(response);
-        // Like Chrome: an error page is no file (view source shows it though)
-        if (!m_viewSource && response.httpStatusCode() >= 400) {
-            finish(makeString("HTTP "_s, response.httpStatusCode()));
-            return;
-        }
-        request.completeDidReceiveResponse();
+        if (acceptsResponse(response))
+            request.completeDidReceiveResponse();
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
     {
@@ -835,6 +916,8 @@ private:
     bool m_viewSource { false };
     unsigned m_redirectCount { 0 };
     RefPtr<CurlRequest> m_request;
+    // The client of a request taken over from a ResourceLoad
+    RefPtr<CurlRequestClient> m_relay;
     RefPtr<Download> m_self;
 };
 
@@ -947,6 +1030,17 @@ void loadIcon(const URL& url, CompletionHandler<void(const String& mimeType, Vec
 }
 
 class WasmLoaderStrategy final : public LoaderStrategy {
+public:
+    bool continueAsDownload(int viewId, ResourceLoader& loader, const ResourceResponse& response)
+    {
+        RefPtr load = m_loads.get(&loader);
+        if (!load || !Download::takeOver(viewId, *load, response))
+            return false;
+        // WebCore cancels the loader next; the request is no longer its
+        m_loads.remove(&loader);
+        return true;
+    }
+
 private:
     void schedule(ResourceLoader& loader)
     {
@@ -1072,10 +1166,20 @@ private:
     HashMap<ResourceLoader*, Ref<ResourceLoad>> m_loads;
 };
 
-LoaderStrategy& loaderStrategy()
+static WasmLoaderStrategy& wasmLoaderStrategy()
 {
     static NeverDestroyed<WasmLoaderStrategy> strategy;
     return strategy.get();
+}
+
+LoaderStrategy& loaderStrategy()
+{
+    return wasmLoaderStrategy();
+}
+
+bool continueAsDownload(int viewId, ResourceLoader& loader, const ResourceResponse& response)
+{
+    return wasmLoaderStrategy().continueAsDownload(viewId, loader, response);
 }
 
 } // namespace BrowserLite

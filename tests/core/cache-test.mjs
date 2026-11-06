@@ -14,6 +14,8 @@
 // sandboxed frame is not cached. Opening the HTTP cache deletes other formats,
 // browser.storage.clearCaches() all of them.
 //
+// A navigation whose answer becomes a download takes the stored body.
+//
 // Range requests (206) like Chrome's sparse entries: ranges with a strong validator are stored,
 // a range request hits only once the ranges cover the whole resource, a changed resource
 // (other ETag after revalidation) replaces the old ranges, no validator, a weak ETag or a
@@ -199,7 +201,7 @@ audio.addEventListener('loadedmetadata', () => console.log('RESULT media=' + Mat
 audio.addEventListener('error', () => console.log('RESULT media=error ' + (audio.error && audio.error.code)));
 </script>`;
 
-const requests = { fresh: 0, etag: 0, etag304: 0, nostore: 0, umlaut: 0, cut: 0 };
+const requests = { fresh: 0, etag: 0, etag304: 0, nostore: 0, umlaut: 0, cut: 0, download: 0 };
 // Partitions: requests per path, the worker script with its If-None-Match (none: '-'), the
 // navigation with its preload header
 const partitionRequests = {
@@ -413,6 +415,22 @@ const { url: siteURL } = await serve((req, res) => {
           'X-Umlaut': 'grün',
         })
         .end('u');
+    case '/download':
+      return res
+        .writeHead(200, html)
+        .end(
+          "<!doctype html><script>fetch('/download.csv').then((r) => r.text()).then(() => setTimeout(() => { location.href = '/download.csv'; }, 1000));</script>",
+        );
+    case '/download.csv':
+      requests.download++;
+      return res
+        .writeHead(200, {
+          'Content-Type': 'text/csv',
+          'Content-Disposition': 'attachment',
+          'Cache-Control': 'max-age=3600',
+          'Content-Length': '4',
+        })
+        .end('c,d\n');
     case '/cut':
       return res
         .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
@@ -887,6 +905,19 @@ check(
   'cut answer not in the cache',
   (await result('cut')) === 'ok:whole' && requests.cut === 2,
   `${results.get('cut')} ${requests.cut} requests`,
+);
+
+// A navigation whose answer becomes a download takes the body from the cache (fetch() stored it
+// a moment before) instead of asking the server again
+await openHost(page, appURL(`${siteURL}download`));
+await waitFor(() => page.evaluate(() => window.blHost.downloads[0]?.text != null), 30000);
+const cachedDownload = await page.evaluate(() => window.blHost.downloads[0] ?? null);
+check(
+  'download from the cache: no second request',
+  cachedDownload?.filename === 'download.csv' &&
+    cachedDownload.text === 'c,d\n' &&
+    requests.download === 1,
+  `${JSON.stringify(cachedDownload)} ${requests.download} requests`,
 );
 
 // Cleanup: with a limit of 10 MB (BL_HTTP_CACHE_MB) eight answers of 2 MB do not all fit, the

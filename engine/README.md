@@ -51,7 +51,8 @@ comes as patches from `patches/`.
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state), `ScrollingWasm.cpp` (scrolling thread: wheel, swipe and
     scroll animations on the compositor's ticks)
-  - Network: `LoaderStrategy.cpp`, `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
+  - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
+    keeps its request), `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
     Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,
     `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite), `CookieJarWasm.cpp` (Cookie Store API),
