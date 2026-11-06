@@ -1,5 +1,6 @@
 export {
   type MenuAction,
+  type MenuHeader,
   type MenuItem,
   type MenuSeparator,
   showContextMenu,

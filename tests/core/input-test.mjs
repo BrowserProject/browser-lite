@@ -677,7 +677,7 @@ await waitFor(
 const menu = await host(() => window.blHost.contextMenus.at(-1));
 check(
   'right click on a link: context-menu event with the link',
-  menu?.link === `${siteURL}popup.html` && !menu.editable,
+  menu?.link === `${siteURL}popup.html` && !menu.editable && menu.touch === false,
   JSON.stringify(menu),
 );
 

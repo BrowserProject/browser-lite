@@ -1,7 +1,8 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
 // compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
-// page smaller), the tab overview shows the tabs, switches and closes one, Open link in new tab
+// page smaller), the tab overview shows the tabs, switches and closes one, a long press on a
+// link shows its address and only its commands, Open link in new tab
 // opens it in the background with a message to switch to it, the menu opens as a
 // bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, the close button of the
@@ -15,6 +16,7 @@ import {
   TIMEOUT,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   emulateTouchPoints,
   finish,
@@ -316,6 +318,31 @@ await tab.evaluate(() =>
 );
 await results.wait('link', 10000);
 const origin = await canvasOrigin(tab);
+// A long press on the link: like Chrome on a phone its address as header and only its commands
+if (chromiumOnly('long press on a link (CDP Input.dispatchTouchEvent)')) {
+  const cdp = await tab.context().newCDPSession(tab);
+  const point = { x: origin.x + 100, y: origin.y + 230 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+  await tab.waitForTimeout(1000);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+  const touchMenu = tab.locator('.bl-context-menu[data-bl-touch]');
+  await touchMenu.waitFor({ timeout: 10000 }).catch(() => {});
+  const rows = await touchMenu
+    .locator('.bl-menu-header, .bl-menu-item')
+    .evaluateAll((nodes) => nodes.map((node) => node.dataset.blItem ?? node.textContent))
+    .catch(() => []);
+  check(
+    'long press on a link: its address as header, no page commands',
+    rows.length === 3 &&
+      rows[0] === new URL('four', siteURL).href &&
+      rows[1] === 'open-link' &&
+      rows[2] === 'copy-link',
+    JSON.stringify(rows),
+  );
+  await screenshot(tab, 'mobile-link-menu');
+  await tab.keyboard.press('Escape');
+}
 await tab.mouse.click(origin.x + 100, origin.y + 230, { button: 'right' });
 const openLink = tab.locator('.bl-context-menu button[data-bl-item=open-link]');
 await openLink.waitFor({ timeout: 10000 }).catch(() => {});

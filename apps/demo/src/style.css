@@ -1277,6 +1277,15 @@ svg.favicon {
 .bl-context-menu .bl-menu-item:disabled {
   opacity: 0.38;
 }
+.bl-context-menu .bl-menu-header {
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--space-2) var(--space-4);
+  overflow: hidden;
+  color: var(--on-surface-variant);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .bl-context-menu .bl-separator,
 .bl-select-popup .bl-separator {
   margin: 6px 0;
@@ -2298,6 +2307,9 @@ svg.favicon {
     min-height: 48px;
     padding: 0 var(--space-5);
     font-size: var(--text-lg);
+  }
+  .bl-context-menu .bl-menu-header {
+    padding: var(--space-2) var(--space-5);
   }
   .bl-select-popup .bl-option,
   .bl-select-popup .bl-group,

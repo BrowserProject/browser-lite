@@ -25,8 +25,10 @@ function clipboard(): Clipboard | undefined {
 
 /**
  * The standard items of a context menu like Chrome: open and copy link or image, copy, cut,
- * paste, select all, back, forward, reload, print and view source. Pass them to
- * {@link showContextMenu}, possibly with own items added.
+ * paste, select all, back, forward, reload, print and view source. After a long press
+ * (`info.touch`) like Chrome on phones only what was pressed: the address of the link or image
+ * as a header and its commands, copy, cut, paste and select all for text, nothing else (no
+ * menu on plain page). Pass them to {@link showContextMenu}, possibly with own items added.
  */
 export function defaultMenuItems(
   view: View,
@@ -46,6 +48,8 @@ export function defaultMenuItems(
   const items: MenuItem[] = [];
   const separator = () => items.push({ separator: true });
 
+  const pressed = info.link || info.image;
+  if (info.touch && pressed) items.push({ header: pressed });
   if (info.link) {
     items.push(
       { id: 'open-link', label: texts.openLinkInNewTab, action: () => actions.openTab(info.link) },
@@ -85,7 +89,13 @@ export function defaultMenuItems(
       },
     );
   }
-  items.push({ id: 'select-all', label: texts.selectAll, action: () => view.command('SelectAll') });
+  if (!info.touch || info.selection || info.editable)
+    items.push({
+      id: 'select-all',
+      label: texts.selectAll,
+      action: () => view.command('SelectAll'),
+    });
+  if (info.touch) return items;
   separator();
   items.push(
     { id: 'back', label: texts.back, action: () => view.back(), enabled: info.canGoBack },

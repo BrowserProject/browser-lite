@@ -500,6 +500,7 @@ if (chromiumOnly('long press (CDP Input.dispatchTouchEvent)')) {
     menu?.selection === 'This',
     JSON.stringify(menu && { selection: menu.selection, link: menu.link }),
   );
+  check('long press: the menu says it came from a finger', menu?.touch === true);
   await cdp.detach();
 }
 

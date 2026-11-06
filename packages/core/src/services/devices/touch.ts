@@ -158,7 +158,7 @@ function attachTouch(
         current.timer = setTimeout(() => {
           if (gesture === current && !current.moved && !current.consumed && view.alive) {
             current.longPress = true;
-            module._bl_context_menu(view.id, x, y);
+            view.requestContextMenu(x, y, true);
           }
         }, LONG_PRESS);
         current.velocity.add(e.timeStamp, x, y);

@@ -113,7 +113,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `open-tab` | Ctrl/Cmd or middle click on a link, also one with `target=_blank`: open `url` in a new view, or ignore it |
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
-| `context-menu` | Show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
+| `context-menu` | A right click or long press (`touch` true, the menu comes when the finger lifts) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `source` | `view.viewSource()`: show the text |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |

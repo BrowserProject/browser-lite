@@ -218,7 +218,8 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
       e.preventDefault();
       endPinch();
       const [x, y] = view.position(e);
-      module._bl_context_menu(view.id, x, y);
+      // Chrome on Android sends the long press of a finger as contextmenu too
+      view.requestContextMenu(x, y, (e as PointerEvent).pointerType === 'touch');
     },
     false,
   );

@@ -680,6 +680,7 @@ test('context menu with the default items', async () => {
       editable: false,
       canGoBack: false,
       canGoForward: true,
+      touch: false,
     };
     const items = ui.defaultMenuItems(view, info, { openTab: (url) => opened.push(url) });
     const close = ui.showContextMenu(view, info, items);
@@ -770,6 +771,45 @@ test('context menu with the default items', async () => {
     short: [true, true, true],
     custom: ['BUTTON'],
     afterError: true,
+  });
+});
+
+test('context menu of a long press', async () => {
+  const result = await page.evaluate(() => {
+    const view = makeView(6);
+    const info = {
+      x: 30,
+      y: 40,
+      link: 'https://l.test/a/long/path',
+      image: '',
+      selection: '',
+      editable: false,
+      canGoBack: true,
+      canGoForward: false,
+      touch: true,
+    };
+    const items = ui.defaultMenuItems(view, info, { openTab() {} });
+    const close = ui.showContextMenu(view, info, items);
+    const menu = document.querySelector('.bl-context-menu');
+    const out = {
+      touch: menu.hasAttribute('data-bl-touch'),
+      rows: [...menu.children].map((node) => `${node.className}: ${node.textContent}`),
+    };
+    close();
+    // Plain page: nothing to offer, no menu
+    const plain = { ...info, link: '' };
+    ui.showContextMenu(view, plain, ui.defaultMenuItems(view, plain, { openTab() {} }));
+    out.plain = document.querySelectorAll('.bl-context-menu').length;
+    return out;
+  });
+  assert.deepEqual(result, {
+    touch: true,
+    rows: [
+      'bl-menu-header: https://l.test/a/long/path',
+      'bl-menu-item: Open link in new tab',
+      'bl-menu-item: Copy link address',
+    ],
+    plain: 0,
   });
 });
 

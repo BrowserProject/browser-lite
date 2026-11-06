@@ -16,12 +16,22 @@ export interface MenuSeparator {
   separator: true;
 }
 
+/** A line of text that names what the menu is for, like the address of a pressed link. */
+export interface MenuHeader {
+  header: string;
+}
+
 /** An entry of the context menu. */
-export type MenuItem = MenuAction | MenuSeparator;
+export type MenuItem = MenuAction | MenuSeparator | MenuHeader;
 
 /** True for a separator item. */
 export function isSeparator(item: MenuItem): item is MenuSeparator {
   return 'separator' in item && item.separator;
+}
+
+/** True for a header item. */
+export function isHeader(item: MenuItem): item is MenuHeader {
+  return 'header' in item;
 }
 
 /** Items without separators at the start, at the end or next to each other. */
@@ -45,9 +55,10 @@ let closeOpen: (() => void) | null = null;
  * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
  * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
  * menu, runs it and gives the keyboard back to the page. Escape, a click outside, losing the
- * window focus or closing the view close it. Only one menu is open at a time. Returns a function
- * that closes the menu.
- * Element: `.bl-context-menu` with `button.bl-menu-item` and `hr.bl-separator`.
+ * window focus or closing the view close it. Only one menu is open at a time; without any command
+ * none opens. Returns a function that closes the menu.
+ * Element: `.bl-context-menu` (with `data-bl-touch` for a long press) with `div.bl-menu-header`,
+ * `button.bl-menu-item` and `hr.bl-separator`.
  */
 export function showContextMenu(
   view: View,
@@ -56,12 +67,15 @@ export function showContextMenu(
   options?: UiOptions,
 ): () => void {
   closeOpen?.();
+  const entries = normalizeMenu(items);
+  if (!entries.some((item) => !isSeparator(item) && !isHeader(item))) return () => {};
   const root = context(options).root();
   const doc = root.ownerDocument;
   const win = doc.defaultView ?? window;
   const menu = element(root, 'div', 'context-menu');
   menu.setAttribute('role', 'menu');
   menu.dataset.blView = String(view.id);
+  if (info.touch) menu.dataset.blTouch = '';
 
   const close = () => {
     if (closeOpen !== close) return;
@@ -72,9 +86,17 @@ export function showContextMenu(
   };
   closeOpen = close;
 
-  for (const item of normalizeMenu(items)) {
+  for (const item of entries) {
     if (isSeparator(item)) {
       menu.append(element(root, 'hr', 'separator'));
+      continue;
+    }
+    if (isHeader(item)) {
+      const header = element(root, 'div', 'menu-header');
+      header.setAttribute('role', 'presentation');
+      header.textContent = item.header;
+      header.title = item.header;
+      menu.append(header);
       continue;
     }
     const button = element(root, 'button', 'menu-item');

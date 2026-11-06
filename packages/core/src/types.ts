@@ -568,7 +568,7 @@ export interface ViewEvents {
   'focus-request': Record<string, never>;
   /** Tab moved focus past the first or last element of the page (not for the iOS keyboard's field arrows). */
   'take-focus': { forward: boolean };
-  /** Right click the page did not handle itself: show a context menu. */
+  /** Right click or long press the page did not handle itself: show a context menu. */
   'context-menu': ContextMenuInfo;
   /** A PDF of the page from {@link View.print} or window.print(). */
   print: { pdf: Blob; title: string };
@@ -580,7 +580,10 @@ export interface ViewEvents {
   close: Record<string, never>;
 }
 
-/** Where the user right clicked; empty strings when there is no link, image or selection. */
+/**
+ * Where the user right clicked or long pressed; empty strings when there is no link, image or
+ * selection.
+ */
 export interface ContextMenuInfo {
   /** Position in CSS pixels relative to the view canvas. */
   x: number;
@@ -595,6 +598,11 @@ export interface ContextMenuInfo {
   editable: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /**
+   * A long press of a finger (also of an emulated touch device) opened the menu, not a right
+   * click: phones show a shorter menu for what was pressed, without the page commands.
+   */
+  touch: boolean;
 }
 
 /**

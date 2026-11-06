@@ -71,6 +71,9 @@ export class ViewImpl implements View {
   /** @internal */ userActivated = false;
   /** @internal The last key sent was the Tab of a field arrow (attachFieldArrows). */
   tabFromFieldArrow = false;
+  // The last context menu request came from a finger (long press), not a right click: the
+  // engine answers the latest request, a long press only once the finger lifts
+  private menuByTouch = false;
   private readonly ime: HTMLTextAreaElement;
   private readonly forgetImeText: () => void;
   private readonly setEnterKeyHint: (hint: string) => void;
@@ -164,6 +167,12 @@ export class ViewImpl implements View {
   position(e: { clientX: number; clientY: number }): [number, number] {
     const rect = this.canvas.getBoundingClientRect();
     return [e.clientX - rect.left, e.clientY - rect.top];
+  }
+
+  /** @internal A right click (touch false) or long press (touch true) asks for the context menu. */
+  requestContextMenu(x: number, y: number, touch: boolean): void {
+    this.menuByTouch = touch;
+    this.host.module._bl_context_menu(this.id, x, y);
   }
 
   /** @internal Click, key or text into the page. */
@@ -661,6 +670,7 @@ export class ViewImpl implements View {
           editable: !!data.editable,
           canGoBack: !!data.canGoBack,
           canGoForward: !!data.canGoForward,
+          touch: this.menuByTouch,
         } satisfies ContextMenuInfo);
         return;
       case 'cursor':

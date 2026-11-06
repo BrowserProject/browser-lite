@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isSeparator, normalizeMenu } from '../dist/context-menu.js';
+import { isHeader, isSeparator, normalizeMenu } from '../dist/context-menu.js';
 import { defaultMenuItems } from '../dist/index.js';
 import { fakeView } from './fake-view.mjs';
 
@@ -13,9 +13,11 @@ const info = (extra = {}) => ({
   editable: false,
   canGoBack: false,
   canGoForward: false,
+  touch: false,
   ...extra,
 });
-const ids = (items) => items.map((item) => (isSeparator(item) ? '-' : item.id));
+const ids = (items) =>
+  items.map((item) => (isSeparator(item) ? '-' : isHeader(item) ? `# ${item.header}` : item.id));
 
 test('normalizeMenu drops leading, trailing and double separators', () => {
   const a = { label: 'a', action() {} };
@@ -146,4 +148,45 @@ test('app actions replace reload, print and view source; texts are replaceable',
   assert.deepEqual(used, ['reload', 'print', 'source']);
   assert.deepEqual(view.calls, []);
   assert.equal(items.find((item) => item.id === 'reload').label, 'Neu laden');
+});
+
+test('long press on a link: its address as header and only its commands', () => {
+  const items = defaultMenuItems(
+    fakeView(),
+    info({ touch: true, link: 'https://l.test/a', canGoBack: true }),
+    { openTab() {} },
+  );
+  assert.deepEqual(ids(normalizeMenu(items)), ['# https://l.test/a', 'open-link', 'copy-link']);
+});
+
+test('long press on an image: its address as header; on a linked image the link', () => {
+  const image = defaultMenuItems(fakeView(), info({ touch: true, image: 'https://i.test/x.png' }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(image)), [
+    '# https://i.test/x.png',
+    'open-image',
+    'copy-image',
+  ]);
+  const linked = defaultMenuItems(
+    fakeView(),
+    info({ touch: true, link: 'https://l.test/', image: 'https://i.test/x.png' }),
+    { openTab() {} },
+  );
+  assert.equal(normalizeMenu(linked)[0].header, 'https://l.test/');
+});
+
+test('long press on text: copy and select all; on plain page and in fields', () => {
+  const word = defaultMenuItems(fakeView(), info({ touch: true, selection: 'in' }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(word)), ['copy', 'select-all']);
+  const field = defaultMenuItems(fakeView(), info({ touch: true, editable: true }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(field)), ['cut', 'paste', 'select-all']);
+  assert.deepEqual(
+    normalizeMenu(defaultMenuItems(fakeView(), info({ touch: true }), { openTab() {} })),
+    [],
+  );
 });
