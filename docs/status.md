@@ -447,6 +447,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
   at the relay changed the load times of CNN, weather.com, Spiegel, NZZ, Yahoo and 20min by no
   more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
+- Session restore: restored tabs open at the top, the scroll position of the current entry is
+  lost (Chrome keeps it; back/forward within a session keeps it). Nothing on the path carries it:
+  the engine's `navigation` history JSON has only `url` and `title` per entry, `restoreHistory`
+  creates bare `HistoryItem`s, `SessionHistory` and the demo's `bl-session` keep url and title. A
+  fix needs the engine: `scrollX`/`scrollY` per entry (live position for the committed item), a
+  throttled history update after main frame scrolls (`didChangeScrollOffset`, like Chrome's page
+  state updates) and `HistoryItem::setScrollPosition` on restore, then the field in `SessionHistory`
+  and the demo's `trim()`.
 - Core API: console messages of shared workers reach no event.
 - Forms: Down in an `<input list>` without an open list does not open it (Chrome does; WebKit
   passes the key only to an open list), and Enter while the list is open without a highlighted
