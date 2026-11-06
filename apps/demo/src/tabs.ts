@@ -203,17 +203,10 @@ export class Tab implements SessionTab {
       updateHostBeforeUnload();
       endFind(view);
     });
-    this.on('load', () => {
-      this.loading = false;
-      if (this.isActive) setStatus(this.notice ?? '');
-      this.notice = null;
-      this.changed();
-    });
-    this.on('error', (event) => {
-      this.loading = false;
-      if (this.isActive) setStatus(`Error: ${event.description}`);
-      this.changed();
-    });
+    this.on('load', () => this.loadEnded());
+    // Like Chrome the engine's error page is the only message: the network layer's text would
+    // repeat it in words that mean nothing to users
+    this.on('error', () => this.loadEnded());
     this.on('icon', (event) => {
       this.setIcon(event.blob);
       this.iconHost = hostOf(this.url);
@@ -296,6 +289,14 @@ export class Tab implements SessionTab {
     this.zoomHost = host;
     const zoom = siteZoom(host);
     if (zoom !== this.view.zoom) this.view.setZoom(zoom);
+  }
+
+  /** The page finished loading or its navigation failed: the notice waiting for it shows. */
+  private loadEnded(): void {
+    this.loading = false;
+    if (this.isActive) setStatus(this.notice ?? '');
+    this.notice = null;
+    this.changed();
   }
 
   /** Toolbar update after a change of the active tab. */

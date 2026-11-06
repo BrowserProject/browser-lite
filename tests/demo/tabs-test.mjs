@@ -3,7 +3,8 @@
 // recording indicator follows the camera, the favicon of the page in the tab, its title or address
 // after back and forward (also from the back/forward cache), the find bar of each tab that a
 // navigation closes, the address bar keeps an address that failed, the security indicator ("Not
-// secure" for a certificate error, nothing on other error pages) and the back button. A click on a notification of a service
+// secure" for a certificate error, nothing on other error pages), no network error text in the
+// status line next to an error page and the back button. A click on a notification of a service
 // worker opens a tab (clients.openWindow) or activates the tab of its page (WindowClient.focus).
 // Under memory pressure near a limit like in a 32 bit browser a background tab is discarded, then
 // the status line says that memory is full. Ctrl+Shift+T brings the closed tab back. An address
@@ -378,8 +379,18 @@ await page.click('#forward');
 await result('ready');
 
 // 4) Failing navigations: the address bar keeps the address, the security indicator says
-// "Not secure" only for a certificate error
+// "Not secure" only for a certificate error, the error page is the only message (no raw
+// network layer text in the status line or the phone layout's snackbar)
 const address = () => page.inputValue('#address');
+await page.evaluate(() => {
+  const status = document.getElementById('status');
+  window.statusTexts = [];
+  new MutationObserver(() => window.statusTexts.push(status.textContent)).observe(status, {
+    childList: true,
+    characterData: true,
+    subtree: true,
+  });
+});
 const security = () =>
   page.evaluate(() => ({
     text: document.getElementById('security').textContent,
@@ -414,6 +425,13 @@ check(
   'certificate error page: address bar "Not secure"',
   notSecure,
   JSON.stringify(await security()),
+);
+await page.waitForTimeout(1000);
+const statusTexts = await page.evaluate(() => window.statusTexts);
+check(
+  'error pages: no network error text in the status line',
+  !statusTexts.some((text) => /error|SSL|resolve/i.test(text)),
+  JSON.stringify(statusTexts),
 );
 await page.click('#back');
 const backAgain = await page

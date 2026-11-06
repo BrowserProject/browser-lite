@@ -519,7 +519,9 @@ export interface ViewEvents {
   load: Record<string, never>;
   /**
    * The main frame navigation failed; `description` is the error of the network layer in
-   * English (for example a host that cannot be resolved). An error page follows (`commit`).
+   * English for logs (for example "Could not resolve hostname"), not a text for users. A failure
+   * before the new page committed usually gets the engine's error page next (`commit` with
+   * `errorPage`), which tells the user like in Chrome.
    */
   error: { description: string };
   /** First layout of a new document. */

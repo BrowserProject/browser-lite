@@ -87,6 +87,9 @@ select popup) are in the same sheet.
   after a click on a button took the focus (#376). Like Chrome each tab has its own: switching
   tabs shows the bar of the tab with its text and result or none, and a new document in the tab
   (a navigation or reload) closes it (#390).
+- **Failed navigations**: like Chrome the engine's error page is the only message; the status
+  line and the phone layout's message stay empty instead of repeating it with the network
+  layer's text (#427).
 - **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
   view (no request to the engine): a greeting by the time of day, a search field that hands over
   to the address bar and tiles of the sites visited most often (the site's icon, else its first

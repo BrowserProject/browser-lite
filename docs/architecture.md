@@ -203,7 +203,9 @@ engine stops (more than 20, or to a `file:` address) carry their own codes and g
 the address that redirected (#406). Like in Chrome, a main frame navigation answered with an HTTP
 error status (400 or more) and an empty body fails instead of committing an empty document:
 `DocumentLoader::finishedLoading` asks the port (`LoaderStrategy::httpErrorWithoutBodyError`,
-patch 0083), and the page of kind `http` says `HTTP ERROR 500` (#425).
+patch 0083), and the page of kind `http` says `HTTP ERROR 500` (#425). The view reports the
+failure first (`error` with curl's English text, for logs), then the page commits with
+`errorPage`; the page is the only message users get, the demo shows no other (#427).
 An address the host loads (`bl_load_url`, typed by the user) has no initiator document: a
 `data:` or `about:` document from it starts with an empty policy container (CSP, referrer
 policy) like in Chrome, while one a page navigates to inherits the page's policy (HTML spec,

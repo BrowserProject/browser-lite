@@ -123,6 +123,11 @@ what a browser UI has to do, and nothing happens without a listener:
 
 Without a `download` listener finished downloads are saved automatically.
 
+A failed navigation comes as `error` with the network layer's English text (`description`, for
+logs), then usually the engine's error page commits (`commit` with `errorPage`). Like in Chrome
+that page is the message for users; showing `description` as well only repeats it in words they
+do not understand.
+
 Console messages come as `console` of the view (`ConsoleMessage`: `level`, `message`, `source`,
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.
