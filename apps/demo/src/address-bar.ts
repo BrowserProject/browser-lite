@@ -7,7 +7,7 @@ import { icon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { runtime } from './runtime.js';
 import { SEARCH_ENGINES, settings } from './settings.js';
-import { activeTab, focusPage, loadInTab, openTab } from './tabs.js';
+import { activeTab, focusPage, loadInTab, openTab, type Tab } from './tabs.js';
 import { byId, element, isBlank } from './util.js';
 
 const form = byId<HTMLFormElement>('address-form');
@@ -27,6 +27,18 @@ let inline: Row | null = null;
 let pending = '';
 /** Address of the active tab; the field shows it while it is not being edited. */
 let current = '';
+/** The field shows text of the user (typed, a row chosen) instead of current. */
+let edited = false;
+/**
+ * What the address bar of a tab in the background keeps, like Chrome: the edit (null without
+ * one), whether the field had the keyboard and the selection in it.
+ */
+interface KeptEdit {
+  text: string | null;
+  focused: boolean;
+  selection: [number, number];
+}
+const keptEdits = new WeakMap<Tab, KeptEdit>();
 /** The pointer went down while the field was not focused: the click selects everything. */
 let selectOnClick = false;
 let preconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -143,14 +155,54 @@ function shownText(url: string): string {
 }
 
 /**
- * The address of the active tab changed; the field follows unless it is being edited. Its default
- * value follows too: WebKit resets a field with autocomplete=off to it when the demo comes back
- * from the page cache (Safari's Back and Forward), which would otherwise empty it.
+ * The address of the active tab changed; the field follows unless it is being edited. Like Chrome
+ * an edit outside the field ends when the tab goes to another address. The default value follows
+ * too: WebKit resets a field with autocomplete=off to it when the demo comes back from the page
+ * cache (Safari's Back and Forward), which would otherwise empty it.
  */
 export function showAddress(url: string): void {
+  const focused = document.activeElement === address;
+  if (url !== current && !focused) edited = false;
   current = url;
   address.defaultValue = shownText(url);
-  if (document.activeElement !== address) address.value = shownText(url);
+  if (!focused && !edited) address.value = shownText(url);
+}
+
+/**
+ * Another tab becomes active: tab keeps the edit of the address bar and whether the field had the
+ * keyboard, like Chrome (the phone layout ends an edit when the field loses the keyboard).
+ */
+export function leaveAddress(tab: Tab): void {
+  const focused = document.activeElement === address;
+  hideSuggestions();
+  keptEdits.delete(tab);
+  if (!compactLayout() && (edited || focused))
+    keptEdits.set(tab, {
+      text: edited ? address.value : null,
+      focused,
+      selection: [address.selectionStart ?? 0, address.selectionEnd ?? 0],
+    });
+  edited = false;
+  if (focused) address.blur();
+}
+
+/**
+ * The active tab became tab (after showAddress showed its address): its kept edit comes back.
+ * True when the field took the keyboard again.
+ */
+export function enterAddress(tab: Tab): boolean {
+  const kept = keptEdits.get(tab);
+  keptEdits.delete(tab);
+  if (!kept) return false;
+  if (kept.text !== null) {
+    edited = true;
+    typed = kept.text;
+    address.value = kept.text;
+  }
+  if (!kept.focused) return false;
+  address.focus();
+  if (edited) address.setSelectionRange(...kept.selection);
+  return true;
 }
 
 /** Moves the keyboard to the address bar and selects it (Ctrl+L, F6). */
@@ -284,14 +336,12 @@ function go(url: string, inNewTab = false): void {
     address.blur();
     return;
   }
-  if (inNewTab) {
-    // The tab left behind shows its own address again
-    address.value = current;
-    openTab(url);
-    return;
-  }
-  address.value = url;
-  loadInTab(tab, url);
+  // The edit ends: the field shows the address of the tab again, the one that loads (pending
+  // until its page commits) or, for a javascript: address, the page's
+  edited = false;
+  address.blur();
+  if (inNewTab) openTab(url);
+  else loadInTab(tab, url);
 }
 
 /**
@@ -325,8 +375,23 @@ function preconnectTyped(): void {
 /** Back to the address of the tab and out of the field. */
 function revert(): void {
   hideSuggestions();
+  edited = false;
   address.value = current;
   focusPage();
+}
+
+/**
+ * Escape: like Chrome first back from a row chosen with the arrow keys to the typed text (the
+ * suggestions close), else back to the address of the tab.
+ */
+function onEscape(): void {
+  if (box.hidden || selected <= 0) {
+    revert();
+    return;
+  }
+  hideSuggestions();
+  address.value = typed;
+  address.setSelectionRange(typed.length, typed.length);
 }
 
 // The first click or tap selects the whole address, so typing replaces it (Chrome, Safari);
@@ -340,12 +405,13 @@ address.addEventListener('click', () => {
 });
 address.addEventListener('focus', () => {
   // The full address while editing (the phone layout shows only the host)
-  if (address.value === shownText(current)) address.value = isBlank(current) ? '' : current;
+  if (!edited) address.value = isBlank(current) ? '' : current;
   address.select();
 });
 address.addEventListener('input', (e) => {
   // Only while editing: text set from outside (autofill, test drivers) opens no suggestions
   if (document.activeElement !== address) return;
+  edited = true;
   // Only typing completes: after a deletion the completion stays away, like in Chrome
   showSuggestions((e as InputEvent).inputType === 'insertText');
   preconnectTyped();
@@ -355,7 +421,9 @@ address.addEventListener('blur', () => {
   setTimeout(() => {
     if (document.activeElement !== address) hideSuggestions();
   }, 100);
-  if (compactLayout() || address.value === current) address.value = shownText(current);
+  // Like Chrome the edit stays outside the field, unless it is empty or the address again
+  if (compactLayout() || !address.value.trim() || address.value === current) edited = false;
+  if (!edited) address.value = shownText(current);
 });
 address.addEventListener('keydown', (e) => {
   // Tab in the address bar: into the page (first or last element)
@@ -368,7 +436,7 @@ address.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     e.preventDefault();
-    revert();
+    onEscape();
     return;
   }
   // Browsers submit the form only on Enter without Ctrl and Alt

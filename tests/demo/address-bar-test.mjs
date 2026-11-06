@@ -5,6 +5,9 @@
 // addresses without a scheme load over http://, other sites over https:// with a fallback to
 // http:// (unit tests of the core). The address and the find text stay
 // when Safari brings the demo back from its page cache (WebKit resets fields with autocomplete=off).
+// Every tab keeps an unfinished edit across a tab switch, the first Escape after choosing a row
+// with the arrow keys returns to the typed text, and after a javascript: address the field shows
+// the page's address again.
 //
 //   node tests/demo/address-bar-test.mjs [engine-dir]
 import {
@@ -154,6 +157,74 @@ for (const [name, typed] of [
     `${loaded} ${shown}`,
   );
 }
+
+// Like Chrome every tab keeps an unfinished edit and the keyboard in the field across a switch
+const fiveURL = `http://localhost:${new URL(siteURL).port}/five`;
+const state = () =>
+  page.evaluate(() => {
+    const address = document.getElementById('address');
+    return {
+      value: address.value,
+      focused: document.activeElement === address,
+      open: !document.getElementById('suggestions').hidden,
+    };
+  });
+await typeIn('half typed');
+await page.keyboard.press('Control+1');
+const other = await state();
+check('the other tab shows its own address', other.value === siteURL, JSON.stringify(other));
+await page.keyboard.press('Control+2');
+const back = await state();
+check(
+  'back on the tab its edit is still in the focused field',
+  back.value === 'half typed' && back.focused && !back.open,
+  JSON.stringify(back),
+);
+await page.keyboard.press('Escape');
+const reverted = await state();
+check(
+  'Escape goes back to the address',
+  reverted.value === fiveURL && !reverted.focused,
+  JSON.stringify(reverted),
+);
+
+// The first Escape after choosing a row with the arrow keys returns to the typed text, the
+// second to the address
+await typeIn('five');
+await page.keyboard.press('ArrowDown');
+const chosen = await state();
+await page.keyboard.press('Escape');
+const firstEscape = await state();
+check(
+  'first Escape: the typed text, the suggestions closed, still editing',
+  chosen.value === fiveURL &&
+    firstEscape.value === 'five' &&
+    firstEscape.focused &&
+    !firstEscape.open,
+  JSON.stringify([chosen, firstEscape]),
+);
+await page.keyboard.press('Escape');
+const secondEscape = await state();
+check(
+  'second Escape: the address',
+  secondEscape.value === fiveURL && !secondEscape.focused,
+  JSON.stringify(secondEscape),
+);
+
+// A javascript: address runs in the page; the field shows the page's address again
+await typeIn("javascript:void(document.title='X')");
+await page.keyboard.press('Enter');
+await page.waitForFunction(
+  () => document.querySelector('#tab-list .tab.active .title')?.textContent === 'X',
+  null,
+  { timeout: TIMEOUT },
+);
+const afterScript = await state();
+check(
+  'after a javascript: address the field shows the page address',
+  afterScript.value === fiveURL,
+  JSON.stringify(afterScript),
+);
 
 // Ctrl+Enter: www. and .com around a name, without the inline completion. The view of the tab
 // only records the address (no load into the internet)

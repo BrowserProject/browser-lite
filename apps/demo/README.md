@@ -68,7 +68,12 @@ the tab overview cards to the icon, #378). The styles of `@browser-lite/ui` (pro
 select popup) are in the same sheet.
 
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
-  goes back to the page, the lock or "Not secure" hides while editing. An address that is still
+  goes back to the page (like Chrome the first Escape after choosing a row with the arrow keys
+  only returns to the typed text), the lock or "Not secure" hides while editing. Like Chrome
+  every tab keeps an unfinished edit and whether the field had the keyboard across a tab switch,
+  an edit stays when the field loses the keyboard until the tab goes to another address, and
+  after Enter the field shows the tab's address (a `javascript:` address leaves the page's, #439;
+  the phone layout ends an edit with the keyboard). An address that is still
   loading (a slow server, a sign in prompt) stays in the bar and names a tab without a title
   until its page commits, without the indicator of the page being left; Stop goes back to the
   page's address (the view's `pendingURL`, #382). The suggestions start

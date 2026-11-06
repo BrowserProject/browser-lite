@@ -1,5 +1,6 @@
 import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
 import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
+import { enterAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
@@ -572,6 +573,7 @@ export function activate(tab: Tab): void {
   if (active) {
     active.lastActive = now;
     active.opener = null;
+    leaveAddress(active);
     active.show(false);
   }
   active = tab;
@@ -589,13 +591,13 @@ export function activate(tab: Tab): void {
   tab.show(true);
   showPromptsOf(tab.view);
   showFindOf(tab.view);
-  // The address bar shows the address of this tab
+  // The address bar shows the address of this tab, or the edit it kept
   const address = byId('address');
   if (document.activeElement === address) address.blur();
   updateToolbar(tab);
   syncHostHistory();
   tab.updateTitle();
-  focusPage();
+  if (!enterAddress(tab)) focusPage();
 }
 
 /** Moves tab to index of the strip (clamped to its ends), like dragging it in Chrome. */
