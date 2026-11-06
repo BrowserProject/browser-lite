@@ -117,8 +117,9 @@ Threat model and production checklist: [docs/security.md](../../docs/security.md
 
 - Only global unicast addresses unless `allowPrivateAddresses` (IPv4-mapped IPv6 is converted
   first, so `::ffff:127.0.0.1`, `fd00::/8`, NAT64 and link-local are blocked). The relay resolves
-  the name itself and connects only to the checked addresses (no DNS rebinding), IPv6 and IPv4
-  interleaved like a browser.
+  the name itself and connects only to the checked addresses (no DNS rebinding) with Happy
+  Eyeballs like a browser (RFC 8305): families interleaved, the next address after 250 ms or as
+  soon as an attempt fails, earlier attempts keep running.
 - Only TCP streams and allowed ports; reasons for failed streams are sent to the client
   ([PROTOCOL.md](../transport-wisp/PROTOCOL.md)).
 - The origin check protects against cross-site WebSocket hijacking, not against DNS rebinding

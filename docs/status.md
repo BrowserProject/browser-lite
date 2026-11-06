@@ -74,7 +74,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   `about:` address (#395) and for a restricted port or the address 0.0.0.0, typed or as a
   redirect target, where the view stayed blank before (#400), and for a redirect loop (more
   than 20 redirects) or a redirect to `file:` (#406), a request whose pooled connection dies before any response byte
-  goes again on a new connection like in Chrome (#397), dead relay detection (#177), fix of a WTF timer
+  goes again on a new connection like in Chrome (#397), the relay connects with Happy Eyeballs
+  like a browser, so a site with IPv4 and IPv6 addresses whose IPv4 handshake is slow or loses a
+  packet no longer fails after 0.25 to 0.5 s on a relay without IPv6 (neverssl.com, #415), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
   by old words on the C stack that the conservative GC scans (#296; soak test 0 of 15 local runs
   with pages that stay, before about 1 in 5; in CI 40 of 40 soak checks of 11 runs clean up to

@@ -16,7 +16,7 @@ import {
   Reason,
   STREAM_TCP,
 } from './protocol.js';
-import { allowedAddresses, ConnectError, connectSocket, reasonForError } from './target.js';
+import { allowedAddresses, ConnectError, connectSocket } from './target.js';
 import { DeliveryWindow } from './window.js';
 
 /** Without other traffic, a CONTINUE on stream 0 at least this often while streams are open. */
@@ -47,11 +47,12 @@ const validHostname = (hostname: string) =>
   hostname.length <= 253 && /^[\x21-\x7e]+$/.test(hostname);
 
 class Stream {
+  /** The connected socket to the target. */
   socket: net.Socket | null = null;
-  connected = false;
+  /** Aborts resolving and connecting when the stream closes before. */
+  readonly connecting = new AbortController();
   /** The client closed the stream, or the relay sent CLOSE. */
   closed = false;
-  failure: number = Reason.networkError;
   /** Client packets not yet handed to the operating system. */
   queued = 0;
   /** Bytes of these packets. */
@@ -238,39 +239,36 @@ export class WispConnection {
   private async open(stream: Stream, hostname: string, port: number): Promise<void> {
     const { allowAddress } = this.options;
     const addresses = await allowedAddresses(hostname, allowAddress);
-    // Closed while the name was resolved: connecting now would hold a socket outside every limit
-    if (stream.closed) return;
-    const socket = connectSocket(hostname, port, addresses);
+    // Rejects at once when the stream closed while the name was resolved
+    const socket = await connectSocket(port, addresses, stream.connecting.signal);
+    if (stream.closed) {
+      socket.destroy();
+      return;
+    }
+    // Defense in depth: only checked addresses were tried
+    if (!allowAddress(socket.remoteAddress ?? '')) {
+      socket.destroy();
+      throw new ConnectError(Reason.blocked, 'address not allowed');
+    }
     stream.socket = socket;
-    socket.on('connect', () => {
-      // Defense in depth: the lookup only returned checked addresses
-      if (!allowAddress(socket.remoteAddress ?? '')) {
-        stream.failure = Reason.blocked;
-        socket.destroy();
-        return;
-      }
-      stream.connected = true;
-      const pending = stream.pending;
-      stream.pending = [];
-      for (const data of pending) this.writeSocket(stream, data);
-    });
     socket.on('data', (data: Buffer) => {
       if (stream.closed) return;
       this.touch(stream);
       this.send(dataPacket(stream.id, data));
       this.holdIfBehind(stream);
     });
-    socket.on('error', (error) => {
-      if (!stream.connected) stream.failure = reasonForError(error);
-    });
-    // Once connected every end is voluntary, a reset after data too: the engine reads it as end
-    // of stream, which responses delimited by the connection close rely on
+    // Every end is voluntary, a reset after data too: the engine reads it as end of stream, which
+    // responses delimited by the connection close rely on. An error is always followed by close.
+    socket.on('error', () => {});
     socket.on('close', () => {
       stream.socket = null;
       this.draining.delete(stream);
       if (stream.closed) return;
-      this.fail(stream, stream.connected ? Reason.voluntary : stream.failure);
+      this.fail(stream, Reason.voluntary);
     });
+    const pending = stream.pending;
+    stream.pending = [];
+    for (const data of pending) this.writeSocket(stream, data);
   }
 
   private write(stream: Stream, data: Buffer): void {
@@ -285,7 +283,7 @@ export class WispConnection {
       this.fail(stream, Reason.networkError);
       return;
     }
-    if (stream.connected) this.writeSocket(stream, data);
+    if (stream.socket) this.writeSocket(stream, data);
     else stream.pending.push(data);
   }
 
@@ -333,10 +331,6 @@ export class WispConnection {
   private shutdown(stream: Stream): void {
     const socket = stream.socket;
     if (!socket) return;
-    if (!stream.connected) {
-      socket.destroy();
-      return;
-    }
     // Counts against the limits until the socket is gone
     this.draining.add(stream);
     socket.end(() => socket.destroy());
@@ -346,6 +340,7 @@ export class WispConnection {
   private release(stream: Stream): void {
     this.held.delete(stream);
     stream.closed = true;
+    stream.connecting.abort();
     stream.pending = [];
     if (stream.idleTimer) clearTimeout(stream.idleTimer);
     this.streams.delete(stream.id);

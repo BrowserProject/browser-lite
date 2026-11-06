@@ -4,6 +4,7 @@ import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 import { createRelay } from '../dist/index.js';
 
 export const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,6 +54,40 @@ export async function closedPort() {
   const { server, port } = await tcpServer(() => {});
   await new Promise((resolve) => server.close(resolve));
   return port;
+}
+
+/**
+ * TCP server on 127.0.0.1 whose next handshake takes about a second or more, like a far or lossy
+ * server: its accept queue is full while its thread sleeps for `ms`, so the kernel drops the
+ * handshake and the client retransmits. Resolves with { port, close }.
+ */
+export async function slowHandshakeServer(ms = 1000) {
+  const worker = new Worker(
+    `const { parentPort } = require('node:worker_threads');
+    const server = require('node:net').createServer((socket) => socket.on('error', () => {}));
+    server.listen({ host: '127.0.0.1', port: 0, backlog: 1 }, () =>
+      parentPort.postMessage(server.address().port));
+    parentPort.once('message', (ms) => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    });`,
+    { eval: true },
+  );
+  const port = await new Promise((resolve) => worker.once('message', resolve));
+  worker.postMessage(ms);
+  const fillers = [];
+  for (let i = 0; i < 4; i++) {
+    const socket = net.connect(port, '127.0.0.1');
+    socket.on('error', () => {});
+    fillers.push(socket);
+  }
+  await sleep(100);
+  return {
+    port,
+    async close() {
+      for (const socket of fillers) socket.destroy();
+      await worker.terminate();
+    },
+  };
 }
 
 /** True if this machine fails fast to reach 2001:db8::1 (documentation prefix, no route). */
