@@ -6,8 +6,9 @@
 // link shows its address and only its commands, Open link in new tab
 // opens it in the background with a message to switch to it, the menu opens as a
 // bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
-// bar, the permission prompt and the sign-in dialog are fully visible, the close button of the
-// settings stays at the top while they scroll, and the desktop layout
+// bar, the permission prompt and the sign-in dialog are fully visible, the section names of the
+// settings stay on one line at 390 and 360 px, the close button of the settings stays at the top
+// while they scroll, and the desktop layout
 // comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
@@ -514,6 +515,26 @@ check('sign-in dialog: signed in', await loaded('Page auth'));
 await tab.tap('#menu-button');
 await tab.locator('#side-panel .panel-menu-item', { hasText: 'Settings' }).tap();
 check('settings open', await shown('#settings'));
+// Every section chip shows its whole name on one line, also on a 360 px phone
+const chipLabels = () =>
+  tab.evaluate(() =>
+    [...document.querySelectorAll('#settings nav button')].map((button) => {
+      const label = button.lastChild;
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const lines = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+      const cut = label.nodeType === 1 && label.scrollWidth > label.clientWidth;
+      return lines.size === 1 && !cut
+        ? ''
+        : `${button.textContent}: ${lines.size} lines${cut ? ', cut' : ''}`;
+    }),
+  );
+for (const width of [PORTRAIT.width, 360]) {
+  await tab.setViewportSize({ width, height: PORTRAIT.height });
+  const wrapped = (await chipLabels()).filter(Boolean);
+  check(`settings at ${width} px: section names on one line`, !wrapped.length, wrapped.join());
+}
+await tab.setViewportSize(PORTRAIT);
 await tab.tap('#settings nav button[data-section=device]');
 const scrolled = await tab.evaluate(() => {
   const sheet = document.getElementById('settings');

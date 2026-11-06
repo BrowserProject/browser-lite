@@ -33,7 +33,7 @@ const page = element('dialog', { id: 'settings' });
 page.setAttribute('aria-label', 'Settings');
 const nav = element('nav', {}, element('h1', { textContent: 'Settings' }));
 for (const [key, [title, name]] of Object.entries(SECTIONS) as [Section, [string, IconName]][]) {
-  const button = element('button', {}, icon(name), title);
+  const button = element('button', {}, icon(name), element('span', { textContent: title }));
   button.dataset.section = key;
   button.addEventListener('click', () => showSection(key));
   nav.append(button);

@@ -2390,7 +2390,8 @@ svg.favicon {
     }
   }
 }
-/* Settings on a narrow screen: the sections as chips above the content */
+/* Settings on a narrow screen: the sections as chips above the content, each as wide as its
+   name, rows filled and stretched, so no name breaks onto a second line */
 @media (max-width: 760px) {
   #settings[open] {
     flex-direction: column;
@@ -2398,17 +2399,18 @@ svg.favicon {
   }
   #settings nav {
     width: auto;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    flex-flow: row wrap;
     gap: var(--space-2);
     padding: var(--space-4) var(--space-4) var(--space-2);
   }
   #settings nav h1 {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
     margin: 0 48px var(--space-2) var(--space-1);
     font-size: 24px;
   }
   #settings nav button {
+    flex: 1 1 auto;
+    min-width: 0;
     min-height: 40px;
     padding: 0 var(--space-4) 0 var(--space-3);
     background-color: var(--surface);
@@ -2421,6 +2423,11 @@ svg.favicon {
   #settings nav button .ui-icon {
     width: 18px;
     height: 18px;
+  }
+  #settings nav button span {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   #settings .settings-content {
     overflow-y: visible;

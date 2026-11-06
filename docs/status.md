@@ -148,6 +148,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   areas, sheets above the iOS keyboard, the context menu inside the page above the bar (#361),
   a link opened from the context menu with a message that offers to switch to it (#391),
   the settings' close button at the top while they scroll (#379),
+  settings section chips as wide as their names, so "Device and browser" stays on one line on
+  an iPhone (#445),
   the empty bookmarks sheet names the menu's Bookmark button, not the hidden star (#428),
   a long press shows the address of the pressed link or image and only its commands, no page
   commands (#429), the page keeps its size under the keyboard of the address bar and the demo's

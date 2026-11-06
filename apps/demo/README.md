@@ -111,7 +111,8 @@ select popup) are in the same sheet.
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
   Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
   the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
-- **Settings**: a navigation with icons (chips on narrow screens) and the settings as cards of
+- **Settings**: a navigation with icons (on narrow screens chips as wide as their names that fill
+  their rows, a name never breaks, #445) and the settings as cards of
   rows, switches for on and off; start, errors and the access code are a card over the page. On
   narrow screens the whole sheet scrolls and the close button sticks to its top (#379).
 - **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
