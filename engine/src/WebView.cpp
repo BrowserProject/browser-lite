@@ -1949,7 +1949,7 @@ void WebView::didCommitLoad()
     RefPtr frame = mainFrame();
     RefPtr loader = frame ? frame->loader().documentLoader() : nullptr;
     if (loader && !loader->unreachableURL().isEmpty())
-        notifyHost(m_id, "commit", m_errorPageCertificate ? "{\"errorPage\":\"certificate\"}"_s : "{\"errorPage\":\"network\"}"_s);
+        notifyHost(m_id, "commit", makeString("{\"errorPage\":\""_s, ErrorPage::name(m_errorPageKind), "\"}"_s));
     else
         notifyHost(m_id, "commit");
     // A page from the back/forward cache commits while the frame still holds the page being

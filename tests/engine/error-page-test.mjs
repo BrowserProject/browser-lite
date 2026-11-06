@@ -3,8 +3,9 @@
 // escaping, the CSP after the doctype (no script of the template runs), the 'commit' and
 // 'title' events, the retry through [data-bl-retry], the close reason 'name-not-resolved'
 // of a transport, the page for a file: address without a file and for an about: address
-// WebCore does not load, for a restricted port or an address of only zeros, and for redirects
-// the engine stops (a loop, a redirect to file:). An invalid address loads nothing.
+// WebCore does not load, for a restricted port or an address of only zeros, for redirects
+// the engine stops (a loop, a redirect to file:) and for an HTTP error status without a body
+// (kind http, like Chrome). An invalid address loads nothing.
 //
 //   node tests/engine/error-page-test.mjs [engine-dir]
 import { enginePath as resolveEngine, runEngine } from './engine-node.mjs';
@@ -275,6 +276,15 @@ for (const [url, code, named] of [
 // 6. Redirects the engine stops get the page like in Chrome, under the address that redirected:
 // more than 20 (a loop) and a redirect to a file: address (whose file is not loaded).
 const requests = [];
+// Answers of status.test for section 8
+const statusResponses = {
+  '/500': 'HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n',
+  '/404': 'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n',
+  '/403': 'HTTP/1.1 403 Forbidden\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n',
+  '/404body':
+    'HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 21\r\n\r\n<title>nf</title>gone',
+  '/204': 'HTTP/1.1 204 No Content\r\n\r\n',
+};
 engine.blTransport = {
   openTCP(targetHost, port) {
     const stream = { close() {}, onopen: null, ondata: null, onsent: null, onclose: null };
@@ -286,6 +296,10 @@ engine.blTransport = {
       const path = received.split(' ')[1];
       received = '';
       requests.push(`${targetHost}${path}`);
+      if (targetHost === 'status.test') {
+        setTimeout(() => stream.ondata?.(new TextEncoder().encode(statusResponses[path])), 0);
+        return;
+      }
       const step = Number(path.split('/').pop()) || 0;
       const location =
         targetHost === 'loop.test'
@@ -354,6 +368,58 @@ check(
   prefixed.length === 1 && JSON.parse(prefixed[0].payload).url === 'https://loop.test/r/20',
   JSON.stringify(prefixed),
 );
+
+// 8. An HTTP error status without a body gets the page like in Chrome (kind http, "HTTP ERROR
+// 500"), also when the length is not known before (chunked). With a body the page of the server
+// shows; 204 stays on the page shown.
+for (const [path, code, heading, named] of [
+  ['/500', 'HTTP ERROR 500', "This page isn't working", 'status.test is currently unable'],
+  ['/404', 'HTTP ERROR 404', "This page can't be found", 'http://status.test/404'],
+  ['/403', 'HTTP ERROR 403', "This page isn't working", 'status.test'],
+]) {
+  const url = `http://status.test${path}`;
+  const before = { commit: count('commit'), load: count('load'), error: count('error') };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  check(`${url} reports an error event`, count('error') === before.error + 1);
+  const committed = events.filter((event) => event.type === 'commit').slice(before.commit);
+  check(
+    `${url} commits an error page of kind http`,
+    committed.length === 1 && committed[0].payload === '{"errorPage":"http"}',
+    JSON.stringify(committed),
+  );
+  if (committed[0]?.payload !== '{"errorPage":"http"}') continue;
+  const shown = JSON.parse(await evaluate(pageState));
+  check(`${url} keeps the address`, shown.url === url, shown.url);
+  check(`${url} {{kind}} is http`, shown.kind === 'http', shown.kind);
+  check(`${url} gives ${code}`, shown.code === code, shown.code);
+  check(`${url} says ${heading}`, shown.heading === heading, shown.heading);
+  check(`${url} names ${named}`, shown.message.includes(named), shown.message);
+}
+{
+  const url = 'http://status.test/404body';
+  const before = { commit: count('commit'), load: count('load'), error: count('error') };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  const committed = events.filter((event) => event.type === 'commit').slice(before.commit);
+  check(
+    `${url} commits the page of the server`,
+    committed.length === 1 && !committed[0].payload && count('error') === before.error,
+    JSON.stringify(committed),
+  );
+  const shown = JSON.parse(
+    await evaluate('JSON.stringify({ url: location.href, text: document.body.textContent })'),
+  );
+  check(`${url} shows its body`, shown.url === url && shown.text === 'gone', JSON.stringify(shown));
+}
+{
+  const before = { events: events.length, requests: requests.length };
+  engine._bl_load_url(1, engine.stringToNewUTF8('http://status.test/204'));
+  await waitFor(() => requests.length > before.requests);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const after = events.slice(before.events).map((event) => event.type);
+  check('204 commits nothing', !after.includes('commit') && !after.includes('error'), after.join());
+}
 
 check(
   'no script of the template ran',

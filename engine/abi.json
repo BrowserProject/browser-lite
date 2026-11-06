@@ -164,7 +164,7 @@
     { "type": "navigation", "scope": "view", "payload": "{url, canGoBack, canGoForward, loading, history: {entries: [{url, title}], index} | null}" },
     { "type": "title", "scope": "view", "payload": "{title, url}" },
     { "type": "progress", "scope": "view", "payload": "{progress} (0 to 1)" },
-    { "type": "commit", "scope": "view", "payload": "empty, or {errorPage: 'network' | 'certificate'} for an error page" },
+    { "type": "commit", "scope": "view", "payload": "empty, or {errorPage: 'network' | 'certificate' | 'http'} for an error page" },
     { "type": "load", "scope": "view", "payload": "empty" },
     { "type": "error", "scope": "view", "payload": "{url, description}" },
     { "type": "first-layout", "scope": "view", "payload": "empty" },

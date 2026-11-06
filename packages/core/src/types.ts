@@ -192,10 +192,10 @@ export interface BrowserOptions {
   permissions?: PermissionStore;
   /**
    * HTML template of the error page shown for a failed main frame navigation. Placeholders, all
-   * HTML-escaped: `{{lang}}`, `{{kind}}` (`network` or `certificate`), `{{title}}` (the host),
-   * `{{heading}}`, `{{message}}`, `{{code}}` (for example `ERR_NAME_NOT_RESOLVED`), `{{url}}`
-   * and `{{retryLabel}}`. A click on a `[data-bl-retry]` element retries. The page runs without
-   * scripts and external resources (inline styles and `data:` images only).
+   * HTML-escaped: `{{lang}}`, `{{kind}}` (`network`, `certificate` or `http`), `{{title}}`
+   * (the host), `{{heading}}`, `{{message}}`, `{{code}}` (for example `ERR_NAME_NOT_RESOLVED`),
+   * `{{url}}` and `{{retryLabel}}`. A click on a `[data-bl-retry]` element retries. The page
+   * runs without scripts and external resources (inline styles and `data:` images only).
    */
   errorPage?: string;
   userAgent?: string;
@@ -510,7 +510,10 @@ export interface ViewEvents {
   progress: { value: number };
   /** The zoom changed (setZoom or Ctrl + mouse wheel over the page). */
   zoom: { zoom: number };
-  /** A new document; `errorPage` is the kind of error page (for example 'certificate') or null. */
+  /**
+   * A new document; `errorPage` is the kind of error page ('network', 'certificate', or 'http' for
+   * an HTTP error status without a body) or null.
+   */
   commit: { errorPage: string | null };
   /** The main frame finished loading (window load event); `loading` is false from here on. */
   load: Record<string, never>;

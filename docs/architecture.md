@@ -198,7 +198,10 @@ refuses before any request (restricted port, address of only zeros, `refusedReas
 `blockedError` marks with its reason. The engine's own requests (icons, preconnect, their
 redirects) skip such an address too, and an error page loads no favicon (#400). Redirects the
 engine stops (more than 20, or to a `file:` address) carry their own codes and get the page under
-the address that redirected (#406).
+the address that redirected (#406). Like in Chrome, a main frame navigation answered with an HTTP
+error status (400 or more) and an empty body fails instead of committing an empty document:
+`DocumentLoader::finishedLoading` asks the port (`LoaderStrategy::httpErrorWithoutBodyError`,
+patch 0083), and the page of kind `http` says `HTTP ERROR 500` (#425).
 An address the host loads (`bl_load_url`, typed by the user) has no initiator document: a
 `data:` or `about:` document from it starts with an empty policy container (CSP, referrer
 policy) like in Chrome, while one a page navigates to inherits the page's policy (HTML spec,

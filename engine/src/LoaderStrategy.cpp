@@ -1162,6 +1162,11 @@ private:
     ResourceError httpNavigationWithHTTPSOnlyError(const ResourceRequest& r) const final { return makeError(r.url(), "HTTP navigation with HTTPS-only"_s); }
     bool isHttpNavigationWithHTTPSOnlyError(const ResourceError& e) const final { return e.domain() == loadErrorDomain && e.localizedDescription() == "HTTP navigation with HTTPS-only"_s; }
     ResourceError pluginWillHandleLoadError(const ResourceResponse& r) const final { return makeError(r.url(), "Plugin will handle load"_s); }
+    // Like Chrome: the navigation fails and gets the error page (ErrorPage.cpp)
+    ResourceError httpErrorWithoutBodyError(const ResourceResponse& r) const final
+    {
+        return ResourceError(loadErrorDomain, static_cast<int>(LoadErrorCode::HttpErrorWithoutBody), r.url(), makeString("HTTP error "_s, r.httpStatusCode()));
+    }
 
     HashMap<ResourceLoader*, Ref<ResourceLoad>> m_loads;
 };

@@ -984,7 +984,7 @@ void FrameLoaderClient::dispatchDidFailProvisionalLoad(const ResourceError& erro
         didEndLoadWithError(error);
         // An error page like Chrome, right here: that way WebCore takes it for the address
         if (auto kind = ErrorPage::show(m_frameLoader->frame(), error))
-            m_view->willCommitErrorPage(*kind == ErrorPage::Kind::Certificate);
+            m_view->willCommitErrorPage(*kind);
     }
 }
 

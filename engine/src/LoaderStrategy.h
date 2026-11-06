@@ -31,6 +31,7 @@ enum class LoadErrorCode : int {
     AddressInvalid, // blockedError: an address of only zeros (isIPAddressDisallowed)
     TooManyRedirects, // more than 20 redirects, like in Chrome
     UnsafeRedirect, // a redirect to a file: address
+    HttpErrorWithoutBody, // a navigation answered with status 400 or more and no body
 };
 
 // Why WebCore never loads an address: a restricted port (UnsafePort) or an address

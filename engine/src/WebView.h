@@ -2,6 +2,7 @@
 // buffer and input events.
 #pragma once
 
+#include "ErrorPage.h"
 #include "PinchZoom.h"
 #include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
@@ -210,8 +211,8 @@ public:
     void didStartLoading();
     void pauseLeavingPage();
     void resumeLeavingPage();
-    // The next error page (ErrorPage.cpp) is because of an invalid certificate
-    void willCommitErrorPage(bool certificate) { m_errorPageCertificate = certificate; }
+    // The kind of the next error page (ErrorPage.cpp)
+    void willCommitErrorPage(ErrorPage::Kind kind) { m_errorPageKind = kind; }
     void didCommitLoad();
     // Back/forward cache: the commit of a cached page, then the page back in the frame
     void willRestoreFromCache() { m_restoringFromCache = true; }
@@ -313,7 +314,7 @@ private:
     String m_hoveredLink;
     // In Page::updateRendering (for the debug log of the first layout)
     bool m_inRenderingUpdate { false };
-    bool m_errorPageCertificate { false };
+    ErrorPage::Kind m_errorPageKind { ErrorPage::Kind::Network };
     void loadFavicon();
     void notifyDocumentState();
 

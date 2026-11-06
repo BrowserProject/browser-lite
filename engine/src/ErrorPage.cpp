@@ -22,7 +22,11 @@
 // codes (LoadErrorCode): a file: address without a file, an about: address
 // WebCore does not load. Any address gets one when WebCore refuses it before
 // the request (restricted port, address of only zeros) and when the engine
-// stops its redirects (more than 20, or to a file: address).
+// stops its redirects (more than 20, or to a file: address). Like Chrome, an
+// answer with an HTTP error status (400 or more) and an empty body gets a page
+// too ("HTTP ERROR 500", kind http): WebCore lets the navigation fail with
+// LoadErrorCode::HttpErrorWithoutBody (patch 0083). An error answer with a body
+// shows that body.
 
 #include "config.h"
 #include "ErrorPage.h"
@@ -58,9 +62,10 @@ struct Reason {
     ASCIILiteral heading;
     ASCIILiteral before; // before and after the host
     ASCIILiteral after;
-    ASCIILiteral code;
+    String code;
     bool withDetail { false }; // curl's message too, helps when searching
     bool refused { false }; // names host:port of the address WebCore refused, maybe a redirect target
+    bool withURL { false }; // names the whole address instead of the host
 };
 
 constexpr auto notReachable = "This site can't be reached"_s;
@@ -97,8 +102,19 @@ Reason reasonForCurl(int curlCode)
     }
 }
 
-// None: no error page (cancelled, blocked, a download, ...)
-std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
+// The texts of Chrome for an HTTP error without a body
+Reason reasonForHTTPStatus(int status)
+{
+    auto code = makeString("HTTP ERROR "_s, status);
+    if (status == 404 || status == 410)
+        return { "This page can't be found"_s, "No webpage was found for the web address: "_s, ""_s, WTF::move(code), false, false, true };
+    if (status >= 500)
+        return { "This page isn't working"_s, ""_s, " is currently unable to handle this request."_s, WTF::move(code) };
+    return { "This page isn't working"_s, ""_s, " can't show this page. If the problem continues, contact the site owner."_s, WTF::move(code) };
+}
+
+// None: no error page (cancelled, blocked, a download, ...). status: of the response, if any
+std::optional<Reason> reasonFor(const URL& url, const ResourceError& error, int status)
 {
     if (isRefusedAddress(error)) {
         if (static_cast<LoadErrorCode>(error.errorCode()) == LoadErrorCode::UnsafePort)
@@ -124,6 +140,8 @@ std::optional<Reason> reasonFor(const URL& url, const ResourceError& error)
         if (url.protocolIsInHTTPFamily())
             break;
         return Reason { notReachable, "The webpage at "_s, " could not be shown."_s, "ERR_INVALID_URL"_s };
+    case LoadErrorCode::HttpErrorWithoutBody:
+        return reasonForHTTPStatus(status);
     case LoadErrorCode::Other:
     case LoadErrorCode::Blocked:
     case LoadErrorCode::UnsafePort:
@@ -218,14 +236,14 @@ String withSecurityPolicy(const String& page)
 String html(const Reason& reason, const URL& url, const ResourceError& error, Kind kind, bool resubmit)
 {
     auto host = reason.refused ? error.failingURL().hostAndPort() : url.host().isEmpty() ? url.string() : url.host().toString();
-    auto code = reason.withDetail ? makeString(reason.code, " ("_s, error.localizedDescription(), ')') : String { reason.code };
-    auto message = makeString(reason.before, host, reason.after);
+    auto code = reason.withDetail ? makeString(reason.code, " ("_s, error.localizedDescription(), ')') : reason.code;
+    auto message = makeString(reason.before, reason.withURL ? url.string() : host, reason.after);
     if (resubmit)
         message = makeString(message, " Resend submits the form data to the site again."_s);
     auto& custom = engineConfig().errorPage;
     auto page = fill(custom.isNull() ? String { defaultTemplate } : custom, {
         { "lang"_s, "en"_s },
-        { "kind"_s, kind == Kind::Certificate ? "certificate"_s : "network"_s },
+        { "kind"_s, name(kind) },
         { "title"_s, host },
         { "heading"_s, reason.heading },
         { "message"_s, message },
@@ -261,6 +279,19 @@ constexpr auto retrySource = R"((reload) => {
 
 } // namespace
 
+ASCIILiteral name(Kind kind)
+{
+    switch (kind) {
+    case Kind::Network:
+        return "network"_s;
+    case Kind::Certificate:
+        return "certificate"_s;
+    case Kind::Http:
+        return "http"_s;
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
 void installRetry(LocalFrame& frame, JSC::JSGlobalObject& globalObject)
 {
     RefPtr documentLoader = frame.loader().documentLoader();
@@ -285,19 +316,24 @@ std::optional<Kind> show(LocalFrame& frame, const ResourceError& error)
     URL url = frame.loader().provisionalLoadErrorBeingHandledURL();
     if (url.isEmpty())
         url = error.failingURL();
-    auto reason = reasonFor(url, error);
+    // The request that failed (still the provisional one here): reload takes it again
+    RefPtr failed = frame.loader().provisionalDocumentLoader();
+    auto reason = reasonFor(url, error, failed ? failed->response().httpStatusCode() : 0);
     if (!reason)
         return std::nullopt;
     static bool listening = false;
     if (!std::exchange(listening, true))
         NetworkStateNotifier::singleton().addListener(reloadAfterReconnect);
-    // The request that failed (still the provisional one here): reload takes it again
     ResourceRequest request { URL { url } };
-    if (RefPtr failed = frame.loader().provisionalDocumentLoader()) {
+    if (failed) {
         request = failed->request();
         request.setURL(URL { url });
     }
-    auto kind = error.domain() == "CurlErrorDomain"_s && error.errorCode() == CURLE_PEER_FAILED_VERIFICATION ? Kind::Certificate : Kind::Network;
+    auto kind = Kind::Network;
+    if (error.domain() == "CurlErrorDomain"_s && error.errorCode() == CURLE_PEER_FAILED_VERIFICATION)
+        kind = Kind::Certificate;
+    else if (error.domain() == loadErrorDomain && static_cast<LoadErrorCode>(error.errorCode()) == LoadErrorCode::HttpErrorWithoutBody)
+        kind = Kind::Http;
     auto page = html(*reason, url, error, kind, request.httpMethod() != "GET"_s).utf8();
     ResourceResponse response { URL { url }, "text/html"_s, static_cast<long long>(page.length()), "UTF-8"_s };
     SubstituteData data { SharedBuffer::create(page.span()), URL { url }, WTF::move(response), SubstituteData::SessionHistoryVisibility::Hidden };

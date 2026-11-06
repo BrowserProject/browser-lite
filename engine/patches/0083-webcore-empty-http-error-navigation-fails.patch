@@ -1,0 +1,61 @@
+diff --git a/Source/WebCore/loader/DocumentLoader.cpp b/Source/WebCore/loader/DocumentLoader.cpp
+index 41badde9eb..c6bc13f7ff 100644
+--- a/Source/WebCore/loader/DocumentLoader.cpp
++++ b/Source/WebCore/loader/DocumentLoader.cpp
+@@ -518,7 +518,18 @@ void DocumentLoader::finishedLoading()
+     maybeFinishLoadingMultipartContent();
+ 
+     timing().markEndTime();
+-    
++
++    // An HTTP error without a body: the port may let the navigation fail instead of showing
++    // an empty document (LoaderStrategy::httpErrorWithoutBodyError)
++    if (!m_committed && !m_gotFirstByte && !m_substituteData.isValid() && m_response.httpStatusCode() >= 400) {
++        if (RefPtr frame = m_frame.get(); frame && frame->isMainFrame()) {
++            if (auto error = platformStrategies()->loaderStrategy()->httpErrorWithoutBodyError(m_response); !error.isNull()) {
++                mainReceivedError(error);
++                return;
++            }
++        }
++    }
++
+     commitIfReady();
+     RefPtr frameLoader = this->frameLoader();
+     if (!frameLoader)
+diff --git a/Source/WebCore/loader/LoaderStrategy.cpp b/Source/WebCore/loader/LoaderStrategy.cpp
+index c425af38d9..1d9e9558f9 100644
+--- a/Source/WebCore/loader/LoaderStrategy.cpp
++++ b/Source/WebCore/loader/LoaderStrategy.cpp
+@@ -27,6 +27,7 @@
+ #include "LoaderStrategy.h"
+ 
+ #include "NetworkLoadInformation.h"
++#include "ResourceError.h"
+ #include <wtf/TZoneMallocInlines.h>
+ 
+ namespace WebCore {
+@@ -59,4 +60,9 @@ Vector<NetworkTransactionInformation> LoaderStrategy::intermediateLoadInformatio
+     return { };
+ }
+ 
++ResourceError LoaderStrategy::httpErrorWithoutBodyError(const ResourceResponse&) const
++{
++    return { };
++}
++
+ } // namespace WebCore
+diff --git a/Source/WebCore/loader/LoaderStrategy.h b/Source/WebCore/loader/LoaderStrategy.h
+index 19abf74e5f..1dc70355bf 100644
+--- a/Source/WebCore/loader/LoaderStrategy.h
++++ b/Source/WebCore/loader/LoaderStrategy.h
+@@ -117,6 +117,10 @@ public:
+     virtual ResourceError httpNavigationWithHTTPSOnlyError(const ResourceRequest&) const = 0;
+     virtual bool isHttpNavigationWithHTTPSOnlyError(const ResourceError&) const = 0;
+     virtual ResourceError pluginWillHandleLoadError(const ResourceResponse&) const = 0;
++    // A main frame navigation answered with an HTTP error status (400 or more) and an empty
++    // body: a port that returns an error lets the navigation fail with it (and shows its own
++    // error page, like Chrome). The default, a null error, shows the empty document.
++    virtual ResourceError httpErrorWithoutBodyError(const ResourceResponse&) const;
+ 
+ protected:
+     virtual ~LoaderStrategy();

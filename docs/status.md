@@ -79,7 +79,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   relay's reason and auto reload (#174, #175), also for a missing `file:` and an unknown
   `about:` address (#395) and for a restricted port or the address 0.0.0.0, typed or as a
   redirect target, where the view stayed blank before (#400), and for a redirect loop (more
-  than 20 redirects) or a redirect to `file:` (#406), a request whose pooled connection dies before any response byte
+  than 20 redirects) or a redirect to `file:` (#406), and like Chrome for an HTTP error status
+  without a body (`HTTP ERROR 500`, before a blank page, #425), a request whose pooled connection dies before any response byte
   goes again on a new connection like in Chrome (#397), the relay connects with Happy Eyeballs
   like a browser, so a site with IPv4 and IPv6 addresses whose IPv4 handshake is slow or loses a
   packet no longer fails after 0.25 to 0.5 s on a relay without IPv6 (neverssl.com, #415), dead relay detection (#177), fix of a WTF timer

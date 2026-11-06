@@ -6,9 +6,9 @@
 // response with fetch(); the script writes everything into the title. Then the failures: bad
 // certificates (self-signed, wrong name, expired), refused connection, unknown name, failing
 // navigations (error page with reason, reload, back, the view keeps the address, a redirect to a
-// restricted port), Safari's HTTP/2 settings and request headers (#283), a request again on a new
-// connection when a pooled one dies under it, many hanging connections (limit of curl) and a
-// relay that restarts during the session
+// restricted port, HTTP 500 and 404 without a body), Safari's HTTP/2 settings and request
+// headers (#283), a request again on a new connection when a pooled one dies under it, many
+// hanging connections (limit of curl) and a relay that restarts during the session
 // (also navigator.onLine and the error page "No connection" that reloads itself, a form only after
 // "Resend"). Last, reasons only a stand-in relay delivers reliably (no answer, blocked, address
 // unreachable). Also the favicon (icon event) and the GPU context loss of the engine.
@@ -229,6 +229,9 @@ const { server: site, url: siteRoot } = await serve((req, res) => {
       res.end(gz ? zlib.gzipSync(body) : body);
       break;
     }
+    case '/server-error':
+      res.writeHead(500).end();
+      break;
     default:
       res.writeHead(404).end();
   }
@@ -608,6 +611,28 @@ check(
   unsafePort.text ===
     'The webpage at 127.0.0.1:6000 uses a network port that browsers block for safety.',
   JSON.stringify(unsafePort),
+);
+
+// An HTTP error status without a body: Chrome's page instead of an empty one (kind http)
+await go(`${siteURL}/server-error`);
+const serverError = await errorPage('HTTP ERROR 500');
+check(
+  'error page: HTTP 500 without a body',
+  serverError.title === "This page isn't working" &&
+    serverError.text === '127.0.0.1 is currently unable to handle this request.',
+  JSON.stringify(serverError),
+);
+check(
+  'error page: commit event with the kind http',
+  !!(await waitEvent(page, 'commit:http', 5000)),
+);
+await go(`${siteURL}/no-such-page`);
+const notFound = await errorPage('HTTP ERROR 404');
+check(
+  'error page: HTTP 404 without a body',
+  notFound.title === "This page can't be found" &&
+    notFound.text?.endsWith(`${siteURL}/no-such-page`),
+  JSON.stringify(notFound),
 );
 
 // The relay fails and comes back: the next page loads over a new connection
