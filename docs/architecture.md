@@ -151,7 +151,11 @@ Android keyboard's Backspace and suggestions, which edit that text, work after t
 the core opens the on-screen keyboard after a tap by focusing that field again once it has the
 page field's input mode, and Chrome closes it for none (#360). iOS gives its keyboard the
 field's enter key hint only at a focus, so on iPhone and iPad the core moves the focus through a
-second hidden field and back when the hint changes (#392). On the
+second hidden field and back when the hint changes (#392). Its keyboard's previous and next field
+arrows step through the host page's fields in tab order and cannot see the page's: two hidden
+fields right before and after the focused IME field catch them, and the core sends Shift+Tab or
+Tab into the page; past the page's first or last element the page keeps no focus and the
+host gets no `take-focus` (#423). On the
 engine thread the host's calls run in their order before the engine's own waiting work, and
 input (like the compositor's answers, #359) is taken in between two of its tasks and before
 WebCore's timers (#365), makes WTF's

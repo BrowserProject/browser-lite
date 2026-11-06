@@ -3,7 +3,12 @@ import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
-import { createImeField, enterKeyHintSetter, focusOpensKeyboard } from './keyboard.js';
+import {
+  attachFieldArrows,
+  createImeField,
+  enterKeyHintSetter,
+  focusOpensKeyboard,
+} from './keyboard.js';
 import { loadedAddress, PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
@@ -64,9 +69,12 @@ export class ViewImpl implements View {
   /** @internal */ onWheelResult: ((consumed: boolean) => void) | null = null;
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
+  /** @internal The last key sent was the Tab of a field arrow (attachFieldArrows). */
+  tabFromFieldArrow = false;
   private readonly ime: HTMLTextAreaElement;
   private readonly forgetImeText: () => void;
   private readonly setEnterKeyHint: (hint: string) => void;
+  private readonly fieldArrows: { place: () => void; remove: () => void };
   private imeModeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly events = new Emitter<ViewEvents>();
   private readonly pending = new PendingNavigation();
@@ -113,6 +121,7 @@ export class ViewImpl implements View {
     this.ime = ime.field;
     this.forgetImeText = ime.forget;
     this.setEnterKeyHint = enterKeyHintSetter(this.ime, this.lifetime.signal);
+    this.fieldArrows = attachFieldArrows(this, this.ime, this.lifetime.signal);
     attachPointerInput(this, this.lifetime.signal);
     this.resizeObserver = new ResizeObserver(() => this.measure());
 
@@ -192,6 +201,7 @@ export class ViewImpl implements View {
     this.resizeObserver.disconnect();
     this.canvas.remove();
     this.ime.remove();
+    this.fieldArrows.remove();
     this.container = null;
     this.updateVisibility();
   }
@@ -554,6 +564,7 @@ export class ViewImpl implements View {
     this.ime.style.left = `${rect.left + caret.x}px`;
     this.ime.style.top = `${rect.top + caret.y}px`;
     this.ime.style.height = `${Math.max(caret.height, 10)}px`;
+    this.fieldArrows.place();
   }
 
   /** @internal Engine event of this view (other types are ignored). */
@@ -637,6 +648,7 @@ export class ViewImpl implements View {
         this.emit('focus-request', {});
         return;
       case 'take-focus':
+        if (this.tabFromFieldArrow) return;
         this.emit('take-focus', { forward: data.forward !== false });
         return;
       case 'context-menu':

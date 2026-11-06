@@ -149,7 +149,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   on a Pixel 9 (2026-11-04) Chrome's on-screen keyboard opens at a tap into a field and closes
   when the field loses the focus (#360); on an iPhone 16 (2026-11-05) the keyboard shows the
   page field's enter key, search in Google's search box (#392); on a Pixel 9 (2026-11-06)
-  Gboard's Backspace deletes after typing and its suggestion replaces the typed word (#411);
+  Gboard's Backspace deletes after typing and its suggestion replaces the typed word (#411); on an
+  iPhone 16 (2026-11-06) the keyboard's previous and next field arrows step through the page's
+  fields instead of reaching the address bar (#423);
   muted autoplay video on iPhone, Galaxy S23 and macOS Safari, video with sound after a tap on
   iPhone (#295); on 2026-11-01 with the JIT and the slabs of #329 two rounds of YouTube, GitHub,
   BBC, Stack Overflow and Wikipedia in one tab on an iPhone 16 without a crash or restart. Firefox

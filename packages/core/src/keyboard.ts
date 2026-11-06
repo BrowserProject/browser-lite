@@ -64,6 +64,73 @@ export function enterKeyHintSetter(
   };
 }
 
+/**
+ * @internal Previous and next field arrows of iOS (the bar above its on-screen keyboard) for the
+ * fields of the page. iOS steps from the focused element to the host page's previous or next field
+ * in tab order and cannot see the page's fields: the arrows took the focus to the host's address
+ * bar. While the IME field has the focus, a field lies right before and one right after it; the
+ * arrow that focuses one of them gives the focus back to the IME field and moves the page's focus
+ * like Shift+Tab or Tab (`pressFieldArrow`). iOS skips fields that something covers at their
+ * centre, so they lie side by side on the top left pixels of the view, over the canvas: `place`
+ * puts them there again after the layout changed, `remove` takes them out of the document (the
+ * IME field leaves it without a blur).
+ */
+export function attachFieldArrows(
+  view: ViewImpl,
+  ime: HTMLTextAreaElement,
+  signal: AbortSignal,
+): { place: () => void; remove: () => void } {
+  if (!appleMobileHost()) return { place: () => {}, remove: () => {} };
+  const arrow = (forward: boolean) => {
+    const field = document.createElement('input');
+    field.setAttribute('data-bl-field-arrow', forward ? 'next' : 'previous');
+    field.setAttribute('aria-hidden', 'true');
+    field.autocomplete = 'off';
+    field.inputMode = 'none';
+    field.style.cssText =
+      'position:fixed;width:2px;height:2px;opacity:0;border:0;padding:0;margin:0;z-index:2147483647;font-size:16px';
+    field.addEventListener(
+      'focus',
+      () => {
+        ime.focus({ preventScroll: true });
+        if (view.alive) pressFieldArrow(view, forward);
+      },
+      { signal },
+    );
+    return field;
+  };
+  const previous = arrow(false);
+  const next = arrow(true);
+  const remove = () => {
+    previous.remove();
+    next.remove();
+  };
+  const place = () => {
+    const rect = view.canvas.getBoundingClientRect();
+    previous.style.left = `${rect.left}px`;
+    next.style.left = `${rect.left + 2}px`;
+    for (const field of [previous, next]) field.style.top = `${rect.top}px`;
+  };
+  ime.addEventListener(
+    'focus',
+    () => {
+      place();
+      ime.before(previous);
+      ime.after(next);
+    },
+    { signal },
+  );
+  ime.addEventListener(
+    'blur',
+    (e) => {
+      if (e.relatedTarget !== previous && e.relatedTarget !== next) remove();
+    },
+    { signal },
+  );
+  signal.addEventListener('abort', remove);
+  return { place, remove };
+}
+
 function keyText(e: KeyLike): string {
   if (e.ctrlKey || e.metaKey) return '';
   if (e.key.length === 1) return e.key;
@@ -75,6 +142,7 @@ function keyText(e: KeyLike): string {
 /** Sends a key event (type 0 down, 1 up) to the view. */
 export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
   const { host } = view;
+  if (type === 0) view.tabFromFieldArrow = false;
   host.module._bl_key(
     view.id,
     type,
@@ -91,22 +159,40 @@ export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
 const isPasteShortcut = (e: KeyboardEvent) =>
   (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v';
 
-const key = (name: string, code: string, keyCode: number, ctrlKey = false): KeyLike => ({
+const key = (
+  name: string,
+  code: string,
+  keyCode: number,
+  { ctrlKey = false, shiftKey = false } = {},
+): KeyLike => ({
   key: name,
   code,
   keyCode,
   repeat: false,
   ctrlKey,
-  shiftKey: false,
+  shiftKey,
   altKey: false,
   metaKey: false,
 });
 const BACKSPACE = key('Backspace', 'Backspace', 8);
-const PASTE = key('v', 'KeyV', 86, true);
+const PASTE = key('v', 'KeyV', 86, { ctrlKey: true });
+const TAB = key('Tab', 'Tab', 9);
+const SHIFT_TAB = key('Tab', 'Tab', 9, { shiftKey: true });
 
 function pressKey(view: ViewImpl, e: KeyLike): void {
   sendKey(view, 0, e);
   sendKey(view, 1, e);
+}
+
+/**
+ * @internal Previous (false) or next (true) field arrow of the on-screen keyboard: Shift+Tab or
+ * Tab in the page. Past the page's first or last element the page keeps no focus and the keyboard
+ * closes; the arrows never take the focus to the host ('take-focus' is not emitted for them).
+ */
+export function pressFieldArrow(view: ViewImpl, forward: boolean): void {
+  view.userInput(false);
+  pressKey(view, forward ? TAB : SHIFT_TAB);
+  view.tabFromFieldArrow = true;
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });

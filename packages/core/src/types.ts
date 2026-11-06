@@ -561,7 +561,7 @@ export interface ViewEvents {
   'external-url': { url: string };
   /** window.focus() */
   'focus-request': Record<string, never>;
-  /** Tab moved focus past the first or last element of the page. */
+  /** Tab moved focus past the first or last element of the page (not for the iOS keyboard's field arrows). */
   'take-focus': { forward: boolean };
   /** Right click the page did not handle itself: show a context menu. */
   'context-menu': ContextMenuInfo;

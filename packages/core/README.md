@@ -36,8 +36,11 @@ focus for the page and carries the input mode and enter key hint of the page's f
 phones show the fitting on-screen keyboard; in Chrome the view focuses it once more after a tap
 into a field, which opens the keyboard there, on iPhone and iPad when the hint changes, which
 gives the keyboard the hint. It keeps the text an input method entered until the caret moves
-otherwise, so an on-screen keyboard's Backspace and suggestions after typing reach the page
-([architecture, Input](../../docs/architecture.md#input)).
+otherwise, so an on-screen keyboard's Backspace and suggestions after typing reach the page.
+On iPhone and iPad two more hidden fields lie right before and after it while it has the focus,
+on the top left pixels of the view: the keyboard's previous and next field arrows focus them,
+and the view turns that into Shift+Tab or Tab in the page instead of leaving it for your own
+fields ([architecture, Input](../../docs/architecture.md#input)).
 `sw.js` and `media-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
 `@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them; how to serve
 them or load `media-sw.js` into the site's own worker:

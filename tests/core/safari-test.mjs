@@ -3,7 +3,8 @@
 // which iPhone Safari has only as ManagedMediaSource, MediaStreamTrackProcessor,
 // requestIdleCallback, navigator.virtualKeyboard). Checks MSE through the ManagedMediaSource path,
 // the microphone through the AudioWorklet of the capture (no AudioData), and the on-screen keyboard
-// modes and enter key hints of the IME field ("text-input"). Video capture
+// modes and enter key hints of the IME field ("text-input") and the keyboard's previous and next
+// field arrows (iOS focuses the host field before or after the IME field). Video capture
 // without a main thread processor transfers the track to the engine worker, which Chromium
 // cannot; that path is checked on devices (docs/status.md).
 //
@@ -16,6 +17,7 @@ import {
   check,
   collect,
   finish,
+  hostEvents,
   launch,
   openHost,
   recordClip,
@@ -224,6 +226,69 @@ check(
   'keyboard: stays open while the focus moves to another field',
   mode === 'text/' && modes.length > 0 && !modes.includes('none') && (await imeMode()) === 'text/',
   JSON.stringify(modes),
+);
+mode = await tapAndMode(235, 'none/');
+
+// Previous and next field arrows of the iOS keyboard: iOS focuses the host's field before or after
+// the IME field in tab order (it skips one that something covers at its centre). Before the fix
+// that was the host's address bar; now fields next to the IME field move the page's focus.
+mode = await tapAndMode(85, 'decimal/');
+const arrows = await page.evaluate(() => {
+  const ime = document.querySelector('[data-bl-ime]');
+  const shown = (field) => {
+    if (!field || field.tabIndex < 0) return false;
+    const rect = field.getBoundingClientRect();
+    return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === field;
+  };
+  const before = ime.previousElementSibling;
+  const after = ime.nextElementSibling;
+  return {
+    previous: before?.getAttribute('data-bl-field-arrow') === 'previous' && shown(before),
+    next: after?.getAttribute('data-bl-field-arrow') === 'next' && shown(after),
+  };
+});
+check(
+  'field arrows (iOS): focusable, uncovered fields right before and after the IME field',
+  arrows.previous && arrows.next,
+  JSON.stringify(arrows),
+);
+const arrow = (which) =>
+  page.evaluate((which) => {
+    document.querySelector(`[data-bl-field-arrow=${which}]`)?.focus();
+    return document.activeElement === document.querySelector('[data-bl-ime]');
+  }, which);
+let imeActive = await arrow('previous');
+await waitFor(async () => (mode = await imeMode()) === 'text/send', 10000);
+check(
+  'field arrows (iOS): previous moves the page to its previous field, the IME field keeps the focus',
+  mode === 'text/send' && imeActive,
+  `${mode} ${imeActive}`,
+);
+imeActive = await arrow('next');
+await waitFor(async () => (mode = await imeMode()) === 'decimal/', 10000);
+check(
+  'field arrows (iOS): next moves the page to its next field',
+  mode === 'decimal/' && imeActive,
+  `${mode} ${imeActive}`,
+);
+await tapAndMode(35, 'text/send');
+await arrow('previous');
+await waitFor(async () => (mode = await imeMode()) === 'none/', 10000);
+const takeFocusEvents = async () =>
+  (await hostEvents(page)).filter((event) => event.includes('take-focus'));
+let takeFocus = await takeFocusEvents();
+check(
+  'field arrows (iOS): previous on the first field leaves the page without a focus, not to the host',
+  mode === 'none/' && takeFocus.length === 0,
+  `${mode} ${JSON.stringify(takeFocus)}`,
+);
+await tapAndMode(35, 'text/send');
+await page.keyboard.press('Shift+Tab');
+await waitFor(async () => (takeFocus = await takeFocusEvents()).length > 0, 10000);
+check(
+  'field arrows (iOS): Shift+Tab of a keyboard on the first field still goes to the host',
+  takeFocus.length === 1 && takeFocus[0].endsWith('take-focus:false'),
+  JSON.stringify(takeFocus),
 );
 mode = await tapAndMode(235, 'none/');
 
