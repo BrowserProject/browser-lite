@@ -89,6 +89,11 @@ select popup) are in the same sheet.
   after a click on a button took the focus (#376). Like Chrome each tab has its own: switching
   tabs shows the bar of the tab with its text and result or none, and a new document in the tab
   (a navigation or reload) closes it (#390).
+- **Keyboard shortcuts** (`shortcuts.ts`): like Chrome the page of the focused tab gets them
+  first and they run only when it does not handle the key (`unhandled-key` of the core), so an
+  editor keeps its own Ctrl+F, Ctrl+L or Ctrl+P and Ctrl+U underlines in rich text. Only the ones
+  that leave or switch the tab (Ctrl+T, Ctrl+Shift+T, Ctrl+W, Ctrl+Tab, Ctrl+PageUp and PageDown)
+  and the Alt ones (Alt+Left, Alt+Right, Alt+D) never reach the page (#436).
 - **Failed navigations**: like Chrome the engine's error page is the only message; the status
   line and the phone layout's message stay empty instead of repeating it with the network
   layer's text (#427).

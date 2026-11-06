@@ -114,6 +114,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
 | `context-menu` | A right click or long press (`touch` true, the menu comes when the finger lifts) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
+| `unhandled-key` | A keydown into the page (while `view.focused`) that the page did not handle (no `preventDefault`, editing command or default action): run your keyboard shortcut for it, like Chrome, where the page gets Ctrl+F or Ctrl+U first. Call `preventDefault` on the host keydown of such a shortcut and let it through to the view; run the ones the page must never get (Ctrl+T, Ctrl+W) on the host keydown right away |
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `source` | `view.viewSource()`: show the text |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |

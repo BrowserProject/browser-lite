@@ -11,6 +11,7 @@ import {
   activeTab,
   allTabs,
   moveTab,
+  onTabCreated,
   openURL,
   printTab,
   reopenClosedTab,
@@ -19,148 +20,144 @@ import {
 } from './tabs.js';
 import { changeZoom } from './zoom.js';
 
-// Like Chrome. Some (Ctrl+T/W/N/Tab) Chrome passes to pages only in an app window; here they
-// are always the browser's.
-function shortcut(e: KeyboardEvent): boolean {
-  // The settings are modal (Esc closes them itself)
-  // Autofill and some on-screen keyboards send key events without a key
-  if (settingsOpen() || typeof e.key !== 'string') return false;
+type Key = Pick<KeyboardEvent, 'key' | 'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey'>;
+
+/** A shortcut: its action, `reserved` when the page never gets the key. */
+interface Shortcut {
+  run: () => void;
+  reserved: boolean;
+}
+
+// Like Chrome, which reserves only the shortcuts that leave or switch the tab (Ctrl+T/W/N/Tab,
+// Ctrl+PageUp/PageDown; it passes them to pages only in an app window). The others reach the page
+// first when it has the focus and run only when it does not handle the key (`unhandled-key`):
+// Ctrl+F in an editor with its own find, Ctrl+U in a rich text field. Alt combinations stay the
+// browser's: the engine would type the letter of Alt+D into a field, as it cannot tell Alt+D on
+// Linux and Windows from an Option character on macOS.
+function shortcut(e: Key): Shortcut | null {
+  const run = shortcutAction(e);
+  if (!run) return null;
   const ctrl = e.ctrlKey || e.metaKey;
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const reserved =
+    e.altKey ||
+    (ctrl &&
+      (['t', 'w', 'Tab'].includes(keyName(e)) ||
+        (!e.shiftKey && ['PageUp', 'PageDown'].includes(e.key))));
+  return { run, reserved };
+}
+
+const keyName = (e: Key) => (e.key.length === 1 ? e.key.toLowerCase() : e.key);
+
+function shortcutAction(e: Key): (() => void) | null {
+  // The settings are modal (Esc closes them itself)
+  if (settingsOpen()) return null;
+  const ctrl = e.ctrlKey || e.metaKey;
+  const key = keyName(e);
   const tab = activeTab();
-  if (key === 'Escape' && previewOpen()) {
-    closePreview();
-    return true;
-  }
-  if (ctrl && e.shiftKey && key === 'o') {
-    togglePanel('bookmarks');
-    return true;
-  }
-  if (key === 'Escape' && panelOpen()) {
-    togglePanel(null);
-    return true;
-  }
-  if (key === 'Escape' && overviewOpen()) {
-    toggleOverview(false);
-    return true;
-  }
+  if (key === 'Escape' && previewOpen()) return closePreview;
+  if (ctrl && e.shiftKey && key === 'o') return () => togglePanel('bookmarks');
+  if (key === 'Escape' && panelOpen()) return () => togglePanel(null);
+  if (key === 'Escape' && overviewOpen()) return () => toggleOverview(false);
   if (ctrl && !e.altKey) {
     switch (key) {
       case 't':
-        if (e.shiftKey) reopenClosedTab();
-        else openURL('', true);
-        return true;
+        return e.shiftKey ? reopenClosedTab : () => openURL('', true);
       case 'h':
-        togglePanel('history');
-        return true;
+        return () => togglePanel('history');
       case 'j':
-        togglePanel('downloads');
-        return true;
+        return () => togglePanel('downloads');
       case 'd':
-        if (tab) toggleBookmark(tab.url, tab.title);
-        return true;
+        return () => tab && toggleBookmark(tab.url, tab.title);
       case 'w':
-        if (tab) requestClose(tab);
-        return true;
+        return () => tab && requestClose(tab);
       case 'l':
-        focusAddress();
-        return true;
+        return focusAddress;
       case 'f':
-        openFind();
-        return true;
+        return openFind;
       case 'g':
-        if (findOpen()) findAgain(e.shiftKey);
-        else openFind();
-        return true;
+        return () => (findOpen() ? findAgain(e.shiftKey) : openFind());
       case 'r':
-        tab?.view.reload();
-        return true;
+        return () => tab?.view.reload();
       case 'u':
-        tab?.view.viewSource();
-        return true;
+        return () => tab?.view.viewSource();
       case 'p':
-        printTab(tab);
-        return true;
+        return () => printTab(tab);
       case '+':
       case '=':
-        if (tab) changeZoom(tab.view, 1);
-        return true;
+        return () => tab && changeZoom(tab.view, 1);
       case '-':
-        if (tab) changeZoom(tab.view, -1);
-        return true;
+        return () => tab && changeZoom(tab.view, -1);
       case '0':
-        if (tab) changeZoom(tab.view, 0);
-        return true;
+        return () => tab && changeZoom(tab.view, 0);
       case 'Tab':
-        switchTab(e.shiftKey ? -1 : 1);
-        return true;
+        return () => switchTab(e.shiftKey ? -1 : 1);
       case 'PageDown':
       case 'PageUp': {
         const offset = key === 'PageDown' ? 1 : -1;
         // With Shift the tab moves, like Chrome
-        if (!e.shiftKey) switchTab(offset);
-        else if (tab) moveTab(tab, allTabs().indexOf(tab) + offset);
-        return true;
+        if (!e.shiftKey) return () => switchTab(offset);
+        return () => tab && moveTab(tab, allTabs().indexOf(tab) + offset);
       }
     }
     if (/^[1-9]$/.test(key)) {
-      const tabs = allTabs();
-      const target = key === '9' ? tabs.at(-1) : tabs[Number(key) - 1];
-      if (target) activate(target);
-      return true;
+      return () => {
+        const tabs = allTabs();
+        const target = key === '9' ? tabs.at(-1) : tabs[Number(key) - 1];
+        if (target) activate(target);
+      };
     }
-    return false;
+    return null;
   }
   if (e.altKey && !ctrl && tab) {
-    if (key === 'ArrowLeft') {
-      tab.view.back();
-      return true;
-    }
-    if (key === 'ArrowRight') {
-      tab.view.forward();
-      return true;
-    }
-    if (key === 'd') {
-      focusAddress();
-      return true;
-    }
+    if (key === 'ArrowLeft') return () => tab.view.back();
+    if (key === 'ArrowRight') return () => tab.view.forward();
+    if (key === 'd') return focusAddress;
   }
   if (!ctrl && !e.altKey) {
     switch (key) {
       case 'F5':
-        tab?.view.reload();
-        return true;
+        return () => tab?.view.reload();
       case 'F6':
-        focusAddress();
-        return true;
+        return focusAddress;
       case 'F3':
-        findAgain(e.shiftKey);
-        return true;
+        return () => findAgain(e.shiftKey);
     }
   }
-  return false;
+  return null;
 }
 
 // An open select popup or context menu of the ui package takes its keys itself
 const uiPopupOpen = () => !!document.querySelector('.bl-select-popup, .bl-context-menu');
 
+const ready = () => runtime.browser?.state === 'ready' && !uiPopupOpen();
+
 /**
- * Keyboard shortcuts of the browser. In the capture phase of the window, so they never reach the
- * page; skipped while a popup of the ui package is open.
+ * Keyboard shortcuts of the browser, skipped while a popup of the ui package is open. In the
+ * capture phase of the window, before the demo's fields; a key for the page of the active tab
+ * goes to the page first unless the shortcut is reserved.
  */
 export function installShortcuts(): void {
   let swallowKeyUp: string | null = null;
   window.addEventListener(
     'keydown',
     (e) => {
-      if (runtime.browser?.state !== 'ready' || e.isComposing || uiPopupOpen()) return;
-      if (shortcut(e)) {
-        swallowKeyUp = e.code;
-        e.preventDefault();
-        e.stopImmediatePropagation();
-      }
+      // Autofill and some on-screen keyboards send key events without a key
+      if (!ready() || e.isComposing || typeof e.key !== 'string') return;
+      const found = shortcut(e);
+      if (!found) return;
+      // Not the host browser's own action (F5 would reload the demo)
+      e.preventDefault();
+      if (!found.reserved && activeTab()?.view.focused) return;
+      swallowKeyUp = e.code;
+      e.stopImmediatePropagation();
+      found.run();
     },
     true,
+  );
+  onTabCreated((tab) =>
+    tab.view.on('unhandled-key', (key) => {
+      if (ready() && tab.isActive) shortcut(key)?.run();
+    }),
   );
   window.addEventListener(
     'keyup',

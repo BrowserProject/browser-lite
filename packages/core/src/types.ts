@@ -425,6 +425,11 @@ export interface View {
   readonly closed: boolean;
   /** The canvas the page is painted into (inside the container while attached). */
   readonly canvas: HTMLCanvasElement;
+  /**
+   * The keyboard focus is in the page. Its keys go to the page first; a keydown it does not handle
+   * comes back as `unhandled-key`, where browser shortcuts run like in Chrome.
+   */
+  readonly focused: boolean;
   on<K extends keyof ViewEvents>(type: K, listener: (event: ViewEvents[K]) => void): Unsubscribe;
   /** Shows the view in `container` (moves it from an earlier one); it follows its size. */
   attach(container: HTMLElement): void;
@@ -571,6 +576,12 @@ export interface ViewEvents {
   'focus-request': Record<string, never>;
   /** Tab moved focus past the first or last element of the page (not for the iOS keyboard's field arrows). */
   'take-focus': { forward: boolean };
+  /**
+   * A keydown the page did not handle: no preventDefault, editing command or default action like
+   * scrolling. Like Chrome, a browser runs its shortcuts here (Ctrl+F, Ctrl+P, F5), so a page
+   * that uses the key itself (its own find, Ctrl+U in a rich text editor) keeps it.
+   */
+  'unhandled-key': UnhandledKey;
   /** Right click or long press the page did not handle itself: show a context menu. */
   'context-menu': ContextMenuInfo;
   /** A PDF of the page from {@link View.print} or window.print(). */
@@ -581,6 +592,16 @@ export interface ViewEvents {
   'files-skipped': { files: SkippedFile[] };
   /** The view closed (close(), window.close() or the end of the browser). */
   close: Record<string, never>;
+}
+
+/** A key of the event `unhandled-key`, with the fields of a KeyboardEvent. */
+export interface UnhandledKey {
+  key: string;
+  code: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
 }
 
 /**

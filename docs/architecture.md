@@ -185,7 +185,10 @@ touches and `elementFromPoint` reach the content under their 21 px. On a desktop
 a touch screen, they take the press and drag (patch 0082, #413).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`).
-Ctrl + wheel first reaches the page (#167). Paste, drag and drop and uploads write files into the engine
+Ctrl + wheel first reaches the page (#167), and so do keys: a keydown the page does not handle
+(no `preventDefault`, editing command or default action, `EventHandler::keyEvent` false) comes
+back as `unhandled-key`, where the demo runs its shortcuts like Chrome; only the ones that leave or
+switch the tab skip the page (#436). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181).
 
 ## Network

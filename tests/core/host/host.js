@@ -142,6 +142,10 @@ function track(view, prefix) {
   view.on('external-url', ({ url }) => record(`external-url:${url}`));
   view.on('open-tab', ({ url }) => record(`open-tab:${url}`));
   view.on('take-focus', ({ forward }) => record(`take-focus:${forward}`));
+  view.on('unhandled-key', (e) => {
+    const modifiers = `${e.ctrlKey ? 'C-' : ''}${e.shiftKey ? 'S-' : ''}${e.altKey ? 'A-' : ''}${e.metaKey ? 'M-' : ''}`;
+    record(`unhandled-key:${modifiers}${e.key}:${e.code}`);
+  });
   view.on('fullscreen', ({ active: on }) => record(`fullscreen:${on}`));
   view.on('media-state', ({ audible }) => record(`media-state:${audible}`));
   view.on('capture-state', ({ active: on }) => record(`capture-state:${on}`));

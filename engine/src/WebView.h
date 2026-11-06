@@ -163,7 +163,9 @@ public:
     void pointerLockResult(bool locked);
 #endif
     void touchEvent(int type, const String& pointsJSON, int modifiers, bool tap);
-    bool keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
+    // A keydown the page does not handle (no preventDefault, no editing command, no default
+    // action like scrolling) goes back to the host as "unhandled-key": its browser shortcuts
+    void keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     void insertText(const String&);
     // Text input with preview (IME, dead keys): underlined text in the page
     void setComposition(const String&, unsigned selectionStart, unsigned selectionEnd);
@@ -245,6 +247,8 @@ private:
     };
     void updateDrag(WebCore::IntPoint, int modifiers);
     void endDrag(WebCore::IntPoint, bool drop, int modifiers);
+    // True when the page handled the key (also when it called preventDefault)
+    bool dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     std::optional<DragSession> m_drag;
     std::optional<PinchZoom> m_pinch;
 

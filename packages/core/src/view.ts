@@ -9,6 +9,7 @@ import {
   createImeField,
   enterKeyHintSetter,
   focusOpensKeyboard,
+  unhandledKey,
 } from './keyboard.js';
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
@@ -406,6 +407,10 @@ export class ViewImpl implements View {
     this.ime.focus({ preventScroll: true });
   }
 
+  get focused(): boolean {
+    return this.alive && document.activeElement === this.ime;
+  }
+
   focus(): void {
     if (!this.alive) return;
     this.host.focusView(this);
@@ -715,6 +720,9 @@ export class ViewImpl implements View {
         else apply();
         return;
       }
+      case 'unhandled-key':
+        this.emit('unhandled-key', unhandledKey(data));
+        return;
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);
         return;

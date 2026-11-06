@@ -1,5 +1,6 @@
 import { pendingClipboardWrite } from './clipboard.js';
 import { modifierBits } from './input.js';
+import type { UnhandledKey } from './types.js';
 import { appleMobileHost } from './util.js';
 import type { ViewImpl } from './view.js';
 
@@ -154,6 +155,19 @@ export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
     modifierBits(e),
   );
   if (type === 0) host.watchdog.inputSent();
+}
+
+/** @internal The key of the engine event `unhandled-key` ({key, code, modifiers}). */
+export function unhandledKey(data: Record<string, unknown>): UnhandledKey {
+  const bits = Number(data.modifiers) || 0;
+  return {
+    key: String(data.key ?? ''),
+    code: String(data.code ?? ''),
+    shiftKey: !!(bits & 1),
+    ctrlKey: !!(bits & 2),
+    altKey: !!(bits & 4),
+    metaKey: !!(bits & 8),
+  };
 }
 
 const isPasteShortcut = (e: KeyboardEvent) =>

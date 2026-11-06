@@ -43,6 +43,7 @@ const PAGE = `<!doctype html>
   #missing { position: absolute; left: 600px; top: 110px; }
   #mail { position: absolute; left: 600px; top: 150px; }
   #map { position: absolute; left: 600px; top: 400px; width: 150px; height: 100px; background: rgb(255, 160, 0); }
+  #rich { position: absolute; left: 250px; top: 300px; width: 250px; height: 40px; }
 </style></head>
 <body>
 <a id="popup" href="/popup.html" target="_blank">Popup</a>
@@ -60,6 +61,7 @@ const PAGE = `<!doctype html>
 <a id="missing" download href="/missing.txt">404</a>
 <a id="mail" href="mailto:info@example.com?subject=Hello">Mail</a>
 <div id="map"></div>
+<div id="rich" contenteditable>rich text</div>
 <script>
   document.getElementById('own-menu').addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -95,6 +97,15 @@ const PAGE = `<!doctype html>
       console.log('RESULT mapzoom=' + ++mapZooms);
     }
   }, { passive: false });
+  // An editor with its own find, Ctrl+L and Ctrl+D (like Google Docs or Monaco)
+  const rich = document.getElementById('rich');
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && ['f', 'l', 'd'].includes(e.key) && document.activeElement === rich) {
+      e.preventDefault();
+      console.log('RESULT own' + e.key + '=1');
+    }
+  }, true);
+  rich.addEventListener('input', () => console.log('RESULT underline=' + document.queryCommandState('underline')));
   console.log('RESULT ready=1');
 </script>
 </body></html>`;
@@ -570,6 +581,32 @@ if (datePicker) {
   });
   check('date reaches the page', (await result('date')) === '2027-03-04', results.get('date'));
 }
+
+// 13b) Like Chrome, shortcuts that are not reserved reach the page first: an editor that calls
+// preventDefault keeps Ctrl+F, Ctrl+L and Ctrl+D, and Ctrl+U underlines in rich text instead of
+// opening the page source (the browser runs a shortcut only on unhandled-key, section 14)
+const tabsBefore = await page.evaluate(() => document.querySelectorAll('#tab-list .tab').length);
+await page.mouse.click(...(await at(300, 320)));
+for (const key of ['f', 'l', 'd']) await page.keyboard.press(`Control+${key}`);
+const ownKeys = [await result('ownf', 10000), await result('ownl'), await result('ownd')];
+await page.keyboard.press('Control+a');
+await page.keyboard.press('Control+u');
+const underline = await result('underline', 10000);
+await page.waitForTimeout(1000);
+const afterOwnKeys = await page.evaluate(() => ({
+  find: !document.getElementById('find-bar').hidden,
+  address: document.activeElement?.id === 'address',
+  tabs: document.querySelectorAll('#tab-list .tab').length,
+}));
+check(
+  'the page keeps the shortcuts it handles (Ctrl+F, Ctrl+L, Ctrl+D, Ctrl+U)',
+  ownKeys.join() === '1,1,1' &&
+    underline === 'true' &&
+    !afterOwnKeys.find &&
+    !afterOwnKeys.address &&
+    afterOwnKeys.tabs === tabsBefore,
+  JSON.stringify({ ownKeys, underline, ...afterOwnKeys, tabsBefore }),
+);
 
 // 14) Find in the page (Ctrl+F): count matches, Esc closes (also from the buttons of the bar)
 await page.mouse.click(...(await at(600, 600)));

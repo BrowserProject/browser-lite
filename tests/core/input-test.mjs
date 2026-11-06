@@ -57,6 +57,7 @@ const PAGE = `<!doctype html>
   #sandboxed-tel { top: 280px; }
   #objects { position: absolute; left: 20px; top: 1200px; }
   #pad { position: absolute; left: 330px; top: 100px; width: 220px; height: 160px; background: #cde; }
+  #rich { position: absolute; left: 330px; top: 280px; width: 220px; height: 30px; }
 </style></head>
 <body>
 <input id="text" autocomplete="off">
@@ -78,6 +79,7 @@ const PAGE = `<!doctype html>
 <iframe id="sandboxed" sandbox="allow-scripts" srcdoc="<body style='margin:0'><a href='tel:+41111111111' style='position:absolute;left:0;top:0;width:70px;height:40px'>tel</a><a download href='data:text/plain,x' style='position:absolute;left:80px;top:0;width:70px;height:40px'>dl</a>"></iframe>
 <iframe id="sandboxed-tel" sandbox="allow-scripts allow-top-navigation-to-custom-protocols" srcdoc="<body style='margin:0'><a href='tel:+41222222222' style='display:block;height:40px'>tel</a>"></iframe>
 <div id="pad"></div>
+<div id="rich" contenteditable>rich text</div>
 <div id="objects">
   <object id="o-svg" data="/image.svg" type="image/svg+xml"></object>
   <embed id="o-embed" src="/image.svg">
@@ -120,6 +122,15 @@ const PAGE = `<!doctype html>
     });
   }
   pad.addEventListener('contextmenu', (e) => e.preventDefault());
+  // The page's own Ctrl+G (like its own find next)
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'g') {
+      e.preventDefault();
+      console.log('RESULT ctrlg=1');
+    }
+  }, true);
+  const rich = document.getElementById('rich');
+  rich.addEventListener('input', () => console.log('RESULT underline=' + document.queryCommandState('underline')));
   let scrolled = false;
   window.addEventListener('wheel', (e) => console.log('RESULT wheeldelta=' + e.deltaY + ',' + e.wheelDeltaY), { once: true, passive: true });
   window.addEventListener('scroll', () => {
@@ -846,6 +857,33 @@ for (let i = 1; i <= 3; i++) {
 }
 const tabOrder = [await result('tab1'), await result('tab2'), await result('tab3')].join();
 check('Tab focuses links', tabOrder === 'popup,download,file', tabOrder);
+await evalPage(page, 'document.activeElement?.blur()');
+
+// 6d) A keydown the page does not handle comes back as unhandled-key, where a browser runs its
+// shortcuts like Chrome; not one the page calls preventDefault for (Ctrl+G), nor an editing
+// command (Ctrl+A, Ctrl+U underlines in rich text), nor one with a default action (Tab)
+const eventsBefore = (await hostEvents(page)).length;
+await page.keyboard.press('Control+g');
+const ownCtrlG = await result('ctrlg', 10000);
+await page.keyboard.press('Control+f');
+await page.mouse.click(...(await at(400, 295)));
+await page.keyboard.press('Control+a');
+await page.keyboard.press('Control+u');
+const underline = await result('underline', 10000);
+await page.keyboard.press('Tab');
+await page.keyboard.press('F3');
+await waitEvent(page, /^unhandled-key:F3:/, 10000);
+const unhandledKeys = (await hostEvents(page))
+  .slice(eventsBefore)
+  .filter((event) => event.startsWith('unhandled-key:') && !/-?(Control|Shift):/.test(event))
+  .join();
+check(
+  'unhandled keys go back to the host, handled ones not',
+  ownCtrlG === '1' &&
+    underline === 'true' &&
+    unhandledKeys === 'unhandled-key:C-f:KeyF,unhandled-key:F3:F3',
+  `${ownCtrlG}, ${underline}, ${unhandledKeys}`,
+);
 await evalPage(page, 'document.activeElement?.blur()');
 
 // 7) Fullscreen: the page requests it, the core makes the view container fullscreen; when the

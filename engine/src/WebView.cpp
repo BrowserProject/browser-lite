@@ -1564,7 +1564,14 @@ static String keyIdentifierForKey(const String& key)
     return key; // Enter, Home, End, PageUp, PageDown, F1, ... have the same names
 }
 
-bool WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
+void WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
+{
+    if (dispatchKeyEvent(type, key, code, text, keyCode, repeat, modifiers) || type)
+        return;
+    notifyHost(m_id, "unhandled-key", makeString("{\"key\":\""_s, jsonEscape(key), "\",\"code\":\""_s, jsonEscape(code), "\",\"modifiers\":"_s, modifiers, '}'));
+}
+
+bool WebView::dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
 {
     // Escape cancels a drag from the page (like in Chrome, dragend with dropEffect "none")
     if (m_drag && m_drag->fromPage && key == "Escape"_s) {
