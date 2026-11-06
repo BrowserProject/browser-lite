@@ -19,12 +19,15 @@
 #include "CodeBlock.h"
 #include "CodeSpecializationKind.h"
 #include "CommonSlowPaths.h"
+#include "DeferGC.h"
 #include "DirectArguments.h"
 #include "Fits.h"
 #include "FrameTracers.h"
+#include "FunctionRareData.h"
 #include "IndexingType.h"
 #include "Interpreter.h"
 #include "InterpreterInlines.h"
+#include "JSArrayBufferView.h"
 #include "JSCJSValueInlines.h"
 #include "JSFunction.h"
 #include "JSFunctionInlines.h"
@@ -35,6 +38,8 @@
 #include "JSString.h"
 #include "LLIntData.h"
 #include "LLIntSlowPaths.h"
+#include "MathObjectInlines.h"
+#include "NativeExecutable.h"
 #include "Options.h"
 #include "SlowPathCall.h"
 #include "StackAlignment.h"
@@ -78,15 +83,16 @@ bool enabled()
 
 using OffsetMap = HashMap<unsigned, unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
 
-// A call site's last compiled callee by its executable, and what its frame needs, so a call
-// neither looks up the map nor reads the executable and its CodeBlock. Valid until the next GC
-// (which may throw the code away).
+// A call site's last compiled or host callee by its executable, and what its frame needs, so a
+// call neither looks up the map nor reads the executable and its CodeBlock. Valid until the next
+// GC (which may throw the code away).
 struct CallCache {
     WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(CallCache);
     ExecutableBase* executable { nullptr };
     HeapVersion markingVersion { 0 };
     HeapVersion edenVersion { 0 };
     CodeBlock* codeBlock { nullptr };
+    // The compiled function, 0 for a host function
     uint32_t function { 0 };
     unsigned numParameters { 0 };
     unsigned numCalleeLocals { 0 };
@@ -94,6 +100,8 @@ struct CallCache {
     VirtualRegister scopeRegister;
     // The scope register's offset in the frame, for calls in compiled code
     int32_t scopeOffset { 0 };
+    // A host function (`function` is 0), called without the generic path
+    TaggedNativeFunction hostFunction { };
 };
 
 // More own properties of a get_by_id than the interpreter's cache holds (it keeps one structure):
@@ -203,7 +211,7 @@ const JSInstruction* instructionAt(const JSInstruction* pc, int offset)
     v(get_by_val_with_this) v(get_property_enumerator) v(is_callable) v(is_constructor) v(new_array_buffer) \
     v(new_array_with_species) v(new_array_with_spread) v(new_async_function_generator) v(new_generator) \
     v(new_promise) v(push_with_scope) v(put_by_id_with_this) v(put_by_val_with_this) v(spread) v(strcat) \
-    v(throw_static_error) v(typeof_is_function) v(typeof_is_object) v(unsigned) v(get_prototype_of) v(pow) \
+    v(throw_static_error) v(typeof_is_function) v(typeof_is_object) v(get_prototype_of) v(pow) \
     v(enumerator_get_by_val) v(enumerator_in_by_val) v(enumerator_put_by_val)
 #define BL_JIT_LLINT_SLOW_PATH_OPS(v) \
     v(create_cloned_arguments) v(create_direct_arguments) v(create_lexical_environment) \
@@ -256,6 +264,35 @@ int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
     return status;
 }
 
+// Math.imul's host function, which compiled code computes inline: static in JSC, so taken once
+// from a Math object of the JIT's own (pages may replace the global one)
+uintptr_t imulHostFunction(JSGlobalObject* globalObject)
+{
+    static const uintptr_t function = [globalObject] {
+        VM& vm = globalObject->vm();
+        // The compiler runs without collections
+        DeferGC deferGC(vm);
+        auto* math = MathObject::create(vm, globalObject, MathObject::createStructure(vm, globalObject, globalObject->objectPrototype()));
+        auto* imul = dynamicDowncast<JSFunction>(math->getDirect(vm, Identifier::fromString(vm, "imul"_s)));
+        if (!imul || !imul->isHostFunction())
+            return uintptr_t { 0 };
+        return reinterpret_cast<uintptr_t>(uncheckedDowncast<NativeExecutable>(imul->executable())->function().taggedPtr());
+    }();
+    return function;
+}
+
+// A call site's host function, so its next calls skip the generic path
+void cacheHostFunction(VM& vm, JSFunction* function, CallCache* cache)
+{
+    auto* executable = uncheckedDowncast<NativeExecutable>(function->executable());
+    auto& space = vm.heap.objectSpace();
+    *cache = { };
+    cache->executable = executable;
+    cache->markingVersion = space.markingVersion();
+    cache->edenVersion = space.edenVersion();
+    cache->hostFunction = executable->function();
+}
+
 // Calls the callee in its frame below callFrame, where `this` (new.target for a construct) and
 // the arguments already are: a compiled callee directly in that frame, a host function like the
 // interpreter calls it, everything else through JSC's generic call or construct (bound functions,
@@ -285,7 +322,7 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
                     calleeCodeBlock->scopeRegister().offset() * static_cast<int32_t>(sizeof(Register)) };
             }
         }
-        if (cache->executable == executable) {
+        if (cache->executable == executable && cache->function) {
             // Too few arguments: like the interpreter's arity fixup, the frame moves down (by a
             // multiple of the stack alignment) and the missing parameters are undefined
             unsigned padding = argumentCount < cache->numParameters ? WTF::roundUpToMultipleOf(stackAlignmentRegisters(), cache->numParameters - argumentCount) : 0;
@@ -342,13 +379,20 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
     } else {
         auto callData = JSC::getCallData(callee);
         if (callData.type == CallData::Type::Native && vm.isSafeToRecurseSoft()) {
+            // A host function runs in its realm, like the interpreter calls it
+            JSGlobalObject* calleeGlobalObject = globalObject;
+            if (callee.asCell()->type() == JSFunctionType) {
+                auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
+                cacheHostFunction(vm, function, cache);
+                calleeGlobalObject = function->realm();
+            }
             setUpFrame(nullptr);
             // The whole frame is in use, its caller and return pc too: a host function that enters
             // the VM again puts its entry frame below
             auto* previous = vm.cloopStack().currentStackPointer();
             vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
             vm.topCallFrame = calleeFrame;
-            JSValue result = JSValue::decode(callData.native.function(globalObject, calleeFrame));
+            JSValue result = JSValue::decode(callData.native.function(calleeGlobalObject, calleeFrame));
             vm.cloopStack().setCurrentStackPointer(previous);
             vm.topCallFrame = callFrame;
             return result;
@@ -377,11 +421,33 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
     JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
     if (cache->executable && callee.isCell() && callee.asCell()->type() == JSFunctionType && bytecode.m_argc >= cache->numParameters && (depth < 64 || depth < roomyDepth + 8)) {
         auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
-        VM& vm = cache->codeBlock->vm();
+        VM& vm = callFrame->codeBlock()->vm();
         auto& space = vm.heap.objectSpace();
         CallFrame* calleeFrame = callFrame - bytecode.m_argv;
         auto* top = reinterpret_cast<Register*>(calleeFrame) - cache->numCalleeLocals;
-        if (function->executable() == cache->executable && cache->markingVersion == space.markingVersion() && cache->edenVersion == space.edenVersion() && top >= vm.cloopStackLimit()) {
+        bool cached = function->executable() == cache->executable && cache->markingVersion == space.markingVersion() && cache->edenVersion == space.edenVersion() && top >= vm.cloopStackLimit();
+        if (cached && !cache->function && vm.isSafeToRecurseSoft()) {
+            // A host function, like the interpreter calls it
+            callFrame->setCurrentVPC(pc);
+            calleeFrame->setCallerFrame(callFrame);
+            calleeFrame->setReturnPC(nullptr);
+            calleeFrame->setCodeBlock(nullptr);
+            calleeFrame->uncheckedR(VirtualRegister(CallFrameSlot::callee)) = callee;
+            calleeFrame->setArgumentCountIncludingThis(bytecode.m_argc);
+            auto scope = DECLARE_THROW_SCOPE(vm);
+            auto* previous = vm.cloopStack().currentStackPointer();
+            vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
+            vm.topCallFrame = calleeFrame;
+            JSValue result = JSValue::decode(cache->hostFunction(function->realm(), calleeFrame));
+            vm.cloopStack().setCurrentStackPointer(previous);
+            vm.topCallFrame = callFrame;
+            if (scope.exception()) [[unlikely]]
+                return encodeResult(exceptionInstructions(), callFrame);
+            if constexpr (requires { bytecode.m_dst; })
+                callFrame->uncheckedR(bytecode.m_dst) = result;
+            return encodeResult(pc, callFrame);
+        }
+        if (cached && cache->function) {
             callFrame->setCurrentVPC(pc);
             calleeFrame->setCallerFrame(callFrame);
             calleeFrame->setReturnPC(nullptr);
@@ -767,6 +833,7 @@ private:
     // The same for a call (callFromCompiledCode, callVarargsFromCompiledCode), with a new cache of
     // the call site
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
+    void emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst);
     // After a helper's call: its result into m_next, an exception to the handler or out
     void checkException(const JSInstructionStream::Ref&);
     // There is an exception: to the instruction's handler or out
@@ -782,7 +849,9 @@ private:
 
     template<typename Bytecode> void emitArithmetic(const JSInstructionStream::Ref&, uint8_t i64Op, uint8_t f64Op, SlowPath);
     void emitDivide(const JSInstructionStream::Ref&);
-    template<typename Bytecode> void emitBitOp(const JSInstructionStream::Ref&, uint8_t i32Op, SlowPath, bool unsignedResult = false);
+    // ToInt32 of a number register inline: pushes whether it converts, the int32 in `resultLocal`
+    void toInt32(VirtualRegister, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal);
+    template<typename Bytecode> void emitBitOp(const JSInstructionStream::Ref&, uint8_t i32Op, SlowPath);
     template<typename Bytecode> void emitCompare(const JSInstructionStream::Ref&, unsigned block, uint8_t i32Op, uint8_t f64Op, bool negate, SlowPath);
     template<typename Bytecode> void emitEquality(const JSInstructionStream::Ref&, unsigned block, bool strict, bool negate, SlowPath);
     template<typename Bytecode> void emitConditionJump(const JSInstructionStream::Ref&, unsigned block, bool jumpIfTrue, SlowPath);
@@ -801,6 +870,7 @@ private:
     void emitPutById(const JSInstructionStream::Ref&);
     void emitGetByVal(const JSInstructionStream::Ref&);
     void emitPutByVal(const JSInstructionStream::Ref&);
+    template<typename Access> void typedArrayElement(uint32_t viewLocal, uint32_t indexLocal, const Access&);
     void emitResolveScope(const JSInstructionStream::Ref&);
     void emitGetFromScope(const JSInstructionStream::Ref&);
     void emitPutToScope(const JSInstructionStream::Ref&);
@@ -1000,6 +1070,22 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
     m_callCaches.append(makeUnique<CallCache>());
     auto* cache = m_callCaches.last().get();
     constexpr bool isVarargs = requires(Bytecode bytecode) { bytecode.m_firstVarArg; };
+    // Math.imul has two arguments and `this`
+    bool inlineHostCall = false;
+    if constexpr (std::is_same_v<Bytecode, OpCall> || std::is_same_v<Bytecode, OpCallIgnoreResult> || std::is_same_v<Bytecode, OpTailCall>) {
+        auto bytecode = instruction->as<Bytecode>();
+        inlineHostCall = bytecode.m_argc == 3 && imulHostFunction(m_codeBlock->globalObject());
+        if (inlineHostCall) {
+            emitInlineHostCall(bytecode.m_callee, bytecode.m_argv, [&] {
+                if constexpr (requires { bytecode.m_dst; })
+                    return bytecode.m_dst;
+                return VirtualRegister();
+            }());
+            m_body->localGet(m_next);
+            m_body->op(Op::I32Eqz);
+            m_body->ifThen();
+        }
+    }
     m_body->localGet(cfr);
     m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
     m_body->i32Const(reinterpret_cast<uintptr_t>(cache));
@@ -1009,6 +1095,68 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
         m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
     m_body->callIndirect(m_callType);
     checkException(instruction);
+    if (inlineHostCall)
+        m_body->end();
+}
+
+// Math.imul(a, b) of two numbers inline: sets m_next when it did the call
+void Compiler::emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst)
+{
+    uintptr_t imul = imulHostFunction(m_codeBlock->globalObject());
+    auto argument = [&](int index) {
+        return virtualRegisterForArgumentIncludingThis(index, -static_cast<int>(argv));
+    };
+    beginFastPaths();
+    m_body->block();
+    loadTag(callee);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Ne);
+    m_body->brIf(0);
+    loadPayload(callee);
+    m_body->localTee(m_d);
+    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+    m_body->i32Const(JSFunctionType);
+    m_body->op(Op::I32Ne);
+    m_body->brIf(0);
+    // The executable, also through the function's rare data
+    m_body->localGet(m_d);
+    m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
+    m_body->localTee(m_e);
+    m_body->i32Const(JSFunction::rareDataTag);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    m_body->localGet(m_e);
+    m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
+    m_body->localSet(m_e);
+    m_body->end();
+    m_body->localGet(m_e);
+    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+    m_body->i32Const(NativeExecutableType);
+    m_body->op(Op::I32Ne);
+    m_body->brIf(0);
+    m_body->localGet(m_e);
+    m_body->i32Load(NativeExecutable::offsetOfNativeFunctionFor(CodeSpecializationKind::CodeForCall));
+    m_body->i32Const(imul);
+    m_body->op(Op::I32Ne);
+    m_body->brIf(0);
+    // Numbers through ToInt32, hashes multiply uint32 values above 2^31
+    loadTag(argument(1));
+    m_body->localSet(m_t1);
+    loadTag(argument(2));
+    m_body->localSet(m_t2);
+    toInt32(argument(1), m_t1, m_a, m_x);
+    toInt32(argument(2), m_t2, m_b, m_y);
+    m_body->op(Op::I32And);
+    m_body->op(Op::I32Eqz);
+    m_body->brIf(0);
+    m_body->localGet(m_a);
+    m_body->localGet(m_b);
+    m_body->op(Op::I32Mul);
+    m_body->localSet(m_c);
+    if (dst.isValid())
+        storeInt32(dst, m_c);
+    fastPathDone();
+    m_body->end();
 }
 
 void Compiler::checkException(const JSInstructionStream::Ref& instruction)
@@ -1465,9 +1613,97 @@ void Compiler::emitGetByVal(const JSInstructionStream::Ref& instruction)
         storeUnlessHole();
         m_body->end();
         m_body->end();
+
+        // Typed arrays like the interpreter, also a Uint32 above 2^31 (a double) and Float32
+        typedArrayElement(m_d, m_b, [&](JSType type) {
+            switch (type) {
+            case Int8ArrayType: m_body->i32Load8S(0); break;
+            case Uint8ArrayType: case Uint8ClampedArrayType: m_body->i32Load8U(0); break;
+            case Int16ArrayType: m_body->i32Load16S(0); break;
+            case Uint16ArrayType: m_body->i32Load16U(0); break;
+            case Int32ArrayType: case Uint32ArrayType: m_body->i32Load(0); break;
+            case Float32ArrayType:
+                m_body->f32Load(0);
+                m_body->op(Op::F64PromoteF32);
+                break;
+            case Float64ArrayType: m_body->f64Load(0); break;
+            default: RELEASE_ASSERT_NOT_REACHED();
+            }
+            if (type == Float32ArrayType || type == Float64ArrayType) {
+                // A NaN of other bits could look like a tag
+                m_body->localTee(m_x);
+                m_body->f64Const(PNaN);
+                m_body->localGet(m_x);
+                m_body->localGet(m_x);
+                m_body->op(Op::F64Eq);
+                m_body->select();
+                m_body->localSet(m_x);
+                storeDouble(bytecode.m_dst, m_x);
+                return;
+            }
+            m_body->localSet(m_c);
+            if (type == Uint32ArrayType) {
+                m_body->localGet(m_c);
+                m_body->i32Const(0);
+                m_body->op(Op::I32LtS);
+                m_body->ifThen();
+                m_body->localGet(m_c);
+                m_body->op(Op::F64ConvertI32U);
+                m_body->localSet(m_x);
+                storeDouble(bytecode.m_dst, m_x);
+                m_body->elseThen();
+                storeInt32(bytecode.m_dst, m_c);
+                m_body->end();
+                return;
+            }
+            storeInt32(bytecode.m_dst, m_c);
+        });
     }
     m_body->end();
     endFastPaths(llint_slow_path_get_by_val, instruction);
+}
+
+// For an element of a typed array (not Float16, BigInt or resizable) at an index within its
+// length: `access(type)` with the element's address pushed, then the fast path is done. Uses m_t1.
+template<typename Access>
+void Compiler::typedArrayElement(uint32_t viewLocal, uint32_t indexLocal, const Access& access)
+{
+    cellType(viewLocal);
+    m_body->i32Const(FirstTypedArrayType);
+    m_body->op(Op::I32Sub);
+    m_body->localTee(m_t1);
+    m_body->i32Const(NumberOfTypedArrayTypesExcludingBigIntArraysAndDataView);
+    m_body->op(Op::I32LtU);
+    m_body->ifThen();
+    m_body->localGet(viewLocal);
+    m_body->i32Load8U(JSArrayBufferView::offsetOfMode());
+    m_body->i32Const(isResizableOrGrowableSharedMode);
+    m_body->op(Op::I32And);
+    m_body->op(Op::I32Eqz);
+    m_body->localGet(indexLocal);
+    m_body->localGet(viewLocal);
+    m_body->i32Load(JSArrayBufferView::offsetOfLength());
+    m_body->op(Op::I32LtU);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    for (JSType type : { Uint8ArrayType, Int32ArrayType, Float64ArrayType, Uint32ArrayType, Float32ArrayType, Int8ArrayType,
+             Uint8ClampedArrayType, Int16ArrayType, Uint16ArrayType }) {
+        m_body->localGet(m_t1);
+        m_body->i32Const(type - FirstTypedArrayType);
+        m_body->op(Op::I32Eq);
+        m_body->ifThen();
+        m_body->localGet(viewLocal);
+        m_body->i32Load(JSArrayBufferView::offsetOfVector());
+        m_body->localGet(indexLocal);
+        m_body->i32Const(WTF::fastLog2(static_cast<unsigned>(elementSize(typedArrayType(type)))));
+        m_body->op(Op::I32Shl);
+        m_body->op(Op::I32Add);
+        access(type);
+        fastPathDone();
+        m_body->end();
+    }
+    m_body->end();
+    m_body->end();
 }
 
 // Like the interpreter: an int32 index into an int32 (an int32 value), double (a number, not
@@ -1585,6 +1821,62 @@ void Compiler::emitPutByVal(const JSInstructionStream::Ref& instruction)
             m_body->end();
         }
         m_body->end();
+
+        // A number into a typed array, converted like the interpreter does: ToInt32 (inline when
+        // it converts), clamped and rounded to even for Uint8Clamped, rounded for Float32
+        m_body->localGet(m_next);
+        m_body->op(Op::I32Eqz);
+        isNumberTag(m_a);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        toInt32(bytecode.m_value, m_a, m_e, m_x);
+        m_body->localSet(m_c);
+        loadPayload(bytecode.m_property);
+        m_body->localSet(m_b);
+        typedArrayElement(m_d, m_b, [&](JSType type) {
+            m_body->localSet(m_t2);
+            switch (type) {
+            case Float32ArrayType:
+                m_body->localGet(m_t2);
+                m_body->localGet(m_x);
+                m_body->op(Op::F32DemoteF64);
+                m_body->f32Store(0);
+                return;
+            case Float64ArrayType:
+                m_body->localGet(m_t2);
+                m_body->localGet(m_x);
+                m_body->f64Store(0);
+                return;
+            case Uint8ClampedArrayType:
+                m_body->localGet(m_t2);
+                m_body->localGet(m_x);
+                m_body->op(Op::F64Nearest);
+                m_body->prefixedOp(Op::I32TruncSatF64U);
+                m_body->localTee(m_e);
+                m_body->i32Const(255);
+                m_body->localGet(m_e);
+                m_body->i32Const(255);
+                m_body->op(Op::I32LeU);
+                m_body->select();
+                m_body->i32Store8(0);
+                return;
+            default:
+                break;
+            }
+            // The other conversions need the int32, else the slow path
+            m_body->localGet(m_c);
+            m_body->op(Op::I32Eqz);
+            m_body->brIf(0);
+            m_body->localGet(m_t2);
+            m_body->localGet(m_e);
+            switch (type) {
+            case Int8ArrayType: case Uint8ArrayType: m_body->i32Store8(0); break;
+            case Int16ArrayType: case Uint16ArrayType: m_body->i32Store16(0); break;
+            case Int32ArrayType: case Uint32ArrayType: m_body->i32Store(0); break;
+            default: RELEASE_ASSERT_NOT_REACHED();
+            }
+        });
+        m_body->end();
     }
     m_body->end();
     endFastPaths(llint_slow_path_put_by_val, instruction);
@@ -1701,35 +1993,76 @@ void Compiler::emitDivide(const JSInstructionStream::Ref& instruction)
     endFastPaths(slow_path_div, instruction);
 }
 
-// bitand, bitor, bitxor, lshift, rshift of two int32; urshift when the result fits an int32
+// ToInt32 of a number register (its tag in the local): pushes whether it converts inline (an int32,
+// NaN or a double of less than 2^63 in magnitude, which i64.trunc_sat makes exact), the int32 into
+// `resultLocal`, the register as f64 through `doubleLocal`
+void Compiler::toInt32(VirtualRegister reg, uint32_t tagLocal, uint32_t resultLocal, uint32_t doubleLocal)
+{
+    if (reg.isConstant() && m_codeBlock->getConstant(reg).isNumber()) {
+        double value = m_codeBlock->getConstant(reg).asNumber();
+        m_body->f64Const(value);
+        m_body->localSet(doubleLocal);
+        m_body->i32Const(JSC::toInt32(value));
+        m_body->localSet(resultLocal);
+        m_body->i32Const(1);
+        return;
+    }
+    loadNumber(reg, tagLocal);
+    m_body->localTee(doubleLocal);
+    m_body->prefixedOp(Op::I64TruncSatF64S);
+    m_body->op(Op::I32WrapI64);
+    m_body->localSet(resultLocal);
+    isNumberTag(tagLocal);
+    m_body->localGet(doubleLocal);
+    m_body->op(Op::F64Abs);
+    m_body->f64Const(0x1p63);
+    m_body->op(Op::F64Ge);
+    m_body->op(Op::I32Eqz);
+    m_body->op(Op::I32And);
+}
+
+// bitand, bitor, bitxor, lshift, rshift, urshift: two int32, or other numbers through ToInt32 (hashes
+// mix in uint32 values above 2^31, which are doubles). urshift's result is the int32 of its bits
+// like in the interpreter, op_unsigned after it makes the number.
 template<typename Bytecode>
-void Compiler::emitBitOp(const JSInstructionStream::Ref& instruction, uint8_t i32Op, SlowPath slowPath, bool unsignedResult)
+void Compiler::emitBitOp(const JSInstructionStream::Ref& instruction, uint8_t i32Op, SlowPath slowPath)
 {
     auto bytecode = instruction->as<Bytecode>();
-    beginFastPaths();
     loadTag(bytecode.m_lhs);
+    m_body->localSet(m_t1);
+    loadTag(bytecode.m_rhs);
+    m_body->localSet(m_t2);
+    beginFastPaths();
+    m_body->localGet(m_t1);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
-    loadTag(bytecode.m_rhs);
+    m_body->localGet(m_t2);
     m_body->i32Const(int32Tag);
     m_body->op(Op::I32Eq);
     m_body->op(Op::I32And);
     m_body->ifThen();
-    loadPayload(bytecode.m_lhs);
-    loadPayload(bytecode.m_rhs);
-    m_body->op(i32Op);
-    m_body->localTee(m_c);
-    if (unsignedResult) {
-        m_body->i32Const(0);
-        m_body->op(Op::I32GeS);
-    } else {
-        m_body->drop();
-        m_body->i32Const(1);
+    {
+        loadPayload(bytecode.m_lhs);
+        loadPayload(bytecode.m_rhs);
+        m_body->op(i32Op);
+        m_body->localSet(m_c);
+        storeInt32(bytecode.m_dst, m_c);
+        fastPathDone();
     }
-    m_body->ifThen();
-    storeInt32(bytecode.m_dst, m_c);
-    fastPathDone();
-    m_body->end();
+    m_body->elseThen();
+    {
+        toInt32(bytecode.m_lhs, m_t1, m_a, m_x);
+        toInt32(bytecode.m_rhs, m_t2, m_b, m_y);
+        m_body->op(Op::I32And);
+        m_body->ifThen();
+        m_body->localGet(m_a);
+        m_body->localGet(m_b);
+        m_body->op(i32Op);
+        m_body->localSet(m_c);
+        storeInt32(bytecode.m_dst, m_c);
+        fastPathDone();
+        m_body->end();
+    }
     m_body->end();
     endFastPaths(slowPath, instruction);
 }
@@ -2547,7 +2880,7 @@ bool Compiler::scan()
         case op_is_undefined_or_null: case op_is_boolean: case op_is_number: case op_is_cell_with_type:
         case op_is_object: case op_typeof_is_undefined: case op_catch: case op_bitnot: case op_get_parent_scope:
         case op_get_internal_field: case op_put_internal_field: case op_iterator_open: case op_iterator_next:
-        case op_get_from_arguments: case op_put_to_arguments:
+        case op_get_from_arguments: case op_put_to_arguments: case op_unsigned:
 #define BL_JIT_CASE(name) case op_##name:
         BL_JIT_COMMON_SLOW_PATH_OPS(BL_JIT_CASE)
         BL_JIT_LLINT_SLOW_PATH_OPS(BL_JIT_CASE)
@@ -2681,7 +3014,7 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     case op_bitxor: emitBitOp<OpBitxor>(instruction, Op::I32Xor, slow_path_bitxor); return;
     case op_lshift: emitBitOp<OpLshift>(instruction, Op::I32Shl, slow_path_lshift); return;
     case op_rshift: emitBitOp<OpRshift>(instruction, Op::I32ShrS, slow_path_rshift); return;
-    case op_urshift: emitBitOp<OpUrshift>(instruction, Op::I32ShrU, slow_path_urshift, true); return;
+    case op_urshift: emitBitOp<OpUrshift>(instruction, Op::I32ShrU, slow_path_urshift); return;
     case op_not: emitNot(instruction); return;
     case op_to_number: {
         auto bytecode = instruction->as<OpToNumber>();
@@ -2735,8 +3068,9 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
     }
     case op_bitnot: {
         auto bytecode = instruction->as<OpBitnot>();
-        load(bytecode.m_operand, m_t1, m_a);
-        tagIs(int32Tag);
+        loadTag(bytecode.m_operand);
+        m_body->localSet(m_t1);
+        toInt32(bytecode.m_operand, m_t1, m_a, m_x);
         m_body->ifThen();
         m_body->localGet(m_a);
         m_body->i32Const(-1);
@@ -2745,6 +3079,28 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
         storeInt32(bytecode.m_dst, m_c);
         m_body->elseThen();
         callSlowPath(slow_path_bitnot, instruction);
+        m_body->end();
+        return;
+    }
+    // The uint32 of urshift's int32: as it is when it fits, else as a double
+    case op_unsigned: {
+        auto bytecode = instruction->as<OpUnsigned>();
+        load(bytecode.m_operand, m_t1, m_a);
+        tagIs(int32Tag);
+        m_body->ifThen();
+        m_body->localGet(m_a);
+        m_body->i32Const(0);
+        m_body->op(Op::I32GeS);
+        m_body->ifThen();
+        storeInt32(bytecode.m_dst, m_a);
+        m_body->elseThen();
+        m_body->localGet(m_a);
+        m_body->op(Op::F64ConvertI32U);
+        m_body->localSet(m_x);
+        storeDouble(bytecode.m_dst, m_x);
+        m_body->end();
+        m_body->elseThen();
+        callSlowPath(slow_path_unsigned, instruction);
         m_body->end();
         return;
     }

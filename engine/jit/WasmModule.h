@@ -24,9 +24,16 @@ public:
     void i64Const(int64_t);
     void f64Const(double);
     void i32Load(uint32_t offset);
+    void i32Load8S(uint32_t offset);
     void i32Load8U(uint32_t offset);
+    void i32Load16S(uint32_t offset);
+    void i32Load16U(uint32_t offset);
     void i32Store(uint32_t offset);
     void i32Store8(uint32_t offset);
+    void i32Store16(uint32_t offset);
+    // f32 values convert on the stack (f64.promote_f32, f32.demote_f64)
+    void f32Load(uint32_t offset);
+    void f32Store(uint32_t offset);
     void f64Load(uint32_t offset);
     void f64Store(uint32_t offset);
     // Numeric instructions without immediates (i32.add, i64.shr_u, ...)
@@ -80,11 +87,12 @@ constexpr uint8_t I32Eqz = 0x45, I32Eq = 0x46, I32Ne = 0x47, I32LtS = 0x48, I32L
     I32GtU = 0x4b, I32LeS = 0x4c, I32LeU = 0x4d, I32GeS = 0x4e, I32GeU = 0x4f, I64Eq = 0x51, I64Ne = 0x52,
     F64Eq = 0x61, F64Ne = 0x62, F64Lt = 0x63, F64Gt = 0x64, F64Le = 0x65, F64Ge = 0x66, I32Add = 0x6a,
     I32Sub = 0x6b, I32Mul = 0x6c, I32RemS = 0x6f, I32And = 0x71, I32Or = 0x72, I32Xor = 0x73, I32Shl = 0x74,
-    I32ShrS = 0x75, I32ShrU = 0x76, I64Add = 0x7c, I64Sub = 0x7d, I64Mul = 0x7e, I64ShrU = 0x88, F64Neg = 0x9a,
-    F64Add = 0xa0, F64Sub = 0xa1, F64Mul = 0xa2, F64Div = 0xa3, I32WrapI64 = 0xa7, I64ExtendI32S = 0xac,
-    I64ExtendI32U = 0xad, F64ConvertI32S = 0xb7;
+    I32ShrS = 0x75, I32ShrU = 0x76, I64Add = 0x7c, I64Sub = 0x7d, I64Mul = 0x7e, I64ShrU = 0x88, F64Abs = 0x99,
+    F64Neg = 0x9a, F64Nearest = 0x9e, F64Add = 0xa0, F64Sub = 0xa1, F64Mul = 0xa2, F64Div = 0xa3, I32WrapI64 = 0xa7,
+    I64ExtendI32S = 0xac, I64ExtendI32U = 0xad, F32DemoteF64 = 0xb6, F64ConvertI32S = 0xb7, F64ConvertI32U = 0xb8,
+    F64PromoteF32 = 0xbb;
 // After the prefix 0xfc
-constexpr uint8_t I32TruncSatF64S = 0x02;
+constexpr uint8_t I32TruncSatF64S = 0x02, I32TruncSatF64U = 0x03, I64TruncSatF64S = 0x06;
 }
 
 } // namespace JSC::LLInt::WasmJIT

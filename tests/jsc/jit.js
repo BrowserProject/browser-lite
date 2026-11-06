@@ -147,6 +147,42 @@ function sumKinds(n) { let s = 0; for (let i = 0; i < n; i++) s += readKind(shap
 function longLoop(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i * 3) % 1000003; return s; }
 function longLoopThrows(n) { for (let i = 0; i < n; i++) { if (i === n - 1) throw new Error("end"); } }
 function longLoopCalls(n) { let s = 0; for (let i = 0; i < n; i++) s += add3(i, 1, 2) & 7; return s; }
+// Hashes: bit operations on doubles (uint32 values above 2^31), >>> 0, typed arrays, Math.imul
+const show = (v) => (Object.is(v, -0) ? "-0" : String(v));
+function bitsOf(a, b) { return [a & b, a | b, a ^ b, a << b, a >> b, a >>> b, ~a, a >>> 0].map(show).join(); }
+const bitCases = [
+    [2 ** 32 + 5, 0xedb88320, "0,-306674907,-306674907,5,5,5,-6,5"],
+    [-1.5, 7.9, "7,-1,-8,-128,-1,33554431,0,4294967295"],
+    [NaN, Infinity, "0,0,0,0,0,0,-1,0"],
+    [2 ** 63, -(2 ** 70), "0,0,0,0,0,0,-1,0"],
+    [1e300, 3, "0,3,3,0,0,0,-1,0"],
+    [-0, 5, "0,5,5,0,0,0,-1,0"],
+    [0x80000000, 1, "0,-2147483647,-2147483647,0,-1073741824,1073741824,2147483647,2147483648"],
+    [-2147483649, 33, "33,2147483647,2147483614,-2,1073741823,1073741823,-2147483648,2147483647"],
+    [4294967295.75, 0, "0,-1,-1,-1,-1,4294967295,0,4294967295"],
+];
+function mix(h, k) { h ^= k; h = (h << 13) | (h >>> 19); return (h + 0xe6546b64) >>> 0; }
+function imulOf(a, b) { return Math.imul(a, b); }
+function callTwo(f, a, b) { return f(a, b); }
+const typedValues = [-1.5, 300, 2 ** 32 + 7, NaN, 2.5, 0x80000001, -0, Infinity, 1e20, 0.5, 254.5, -3];
+function storeAll(array) { for (let i = 0; i <= typedValues.length; i++) array[i] = typedValues[i]; }
+function loadAll(array) { let out = ""; for (let i = 0; i <= array.length; i++) out += show(array[i]) + ","; return out; }
+const typedCases = [
+    [Int8Array, "-1,44,7,0,2,1,0,0,0,0,-2,-3"],
+    [Uint8Array, "255,44,7,0,2,1,0,0,0,0,254,253"],
+    [Uint8ClampedArray, "0,255,255,0,2,255,0,255,255,0,254,0"],
+    [Int16Array, "-1,300,7,0,2,1,0,0,0,0,254,-3"],
+    [Uint16Array, "65535,300,7,0,2,1,0,0,0,0,254,65533"],
+    [Int32Array, "-1,300,7,0,2,-2147483647,0,0,1661992960,0,254,-3"],
+    [Uint32Array, "4294967295,300,7,0,2,2147483649,0,0,1661992960,0,254,4294967293"],
+    [Float32Array, "-1.5,300,4294967296,NaN,2.5,2147483648,-0,Infinity,100000002004087730000,0.5,254.5,-3"],
+    [Float64Array, "-1.5,300,4294967303,NaN,2.5,2147483649,-0,Infinity,100000000000000000000,0.5,254.5,-3"],
+];
+if (typeof Float16Array === "function")
+    typedCases.push([Float16Array, "-1.5,300,Infinity,NaN,2.5,Infinity,-0,Infinity,Infinity,0.5,254.5,-3"]);
+function first(array) { return array[0]; }
+function storeConstants(array) { array[0] = 1.5; array[1] = 300.7; array[2] = -2; return [array[0], array[1], array[2]].join(); }
+function parse(text) { return JSON.parse(text); }
 
 const loops = 200000;
 check("loop entry", longLoop(loops), (3 * loops * (loops - 1) / 2) % 1000003);
@@ -417,6 +453,45 @@ for (let round = 0; round < 300; round++) {
         check("stack overflow through a host function", viaHost instanceof RangeError, true);
         check("deep through a host function", throughMap(2000), 2000);
     }
+    for (const [a, b, expected] of bitCases)
+        check("bits " + a + " " + b, bitsOf(a, b), expected);
+    check("mix", mix(0x9747b28c, 0xcc9e2d51), 441456351);
+    check("mix negative", mix(5, -7), 3864267619);
+    check("imul", imulOf(0x7fffffff, 3), 2147483645);
+    check("imul doubles", imulOf(2 ** 32 + 3, -5.5), -15);
+    check("imul as a value", callTwo(Math.imul, -7, 0x10000001), -1879048199);
+    check("other callee", callTwo((a, b) => a + b, 2, 3), 5);
+    check("host call", parse("[" + round + "]")[0], round);
+    if (round % 50 === 49) {
+        let syntax = null;
+        try {
+            parse("{");
+        } catch (e) {
+            syntax = e;
+        }
+        check("host call throws", syntax instanceof SyntaxError, true);
+    }
+    for (const [Type, expected] of typedCases) {
+        const array = new Type(typedValues.length);
+        storeAll(array);
+        check(Type.name, loadAll(array), expected + ",undefined,");
+        check(Type.name + " first", first(array), array[0]);
+    }
+    check("constants Float32Array", storeConstants(new Float32Array(3)), "1.5,300.70001220703125,-2");
+    check("constants Uint8ClampedArray", storeConstants(new Uint8ClampedArray(3)), "2,255,0");
+    check("constants Int16Array", storeConstants(new Int16Array(3)), "1,300,-2");
+    const buffer = new ArrayBuffer(8);
+    const view = new Uint8Array(buffer);
+    view[0] = 7;
+    check("before detach", first(view), 7);
+    buffer.transfer();
+    check("detached", first(view), undefined);
+    const resizable = new ArrayBuffer(4, { maxByteLength: 8 });
+    const growing = new Uint8Array(resizable);
+    storeAll(growing);
+    check("resizable", loadAll(growing), "255,44,7,0,undefined,");
+    resizable.resize(8);
+    check("resized", first(growing) + growing.length, 263);
     check("~", complement(5), -6);
     check("~ double", complement(1.5), -2);
     check("**", power(2, 10), 1024);

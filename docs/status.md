@@ -51,7 +51,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Reload and back/forward ask before they send a form (POST) again, cancel keeps the page (#369).
   Closing a view waits at most 500 ms for a busy page's beforeunload, like Chrome (#387): Ctrl+W
   in a row while heavy tabs load closes a tab per press. The host browser's color and date pickers open at the field
-  (#371) and close when the page removes the field or navigates (#421). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
+  (#371) and close when the page removes the field or navigates (#424). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
@@ -295,7 +295,15 @@ browser (Safari keeps Cmd+L, T and W for itself).
    bound functions), WebGL fingerprinting 3 %, ICU data loaded lazily 3 %, forced layout 2.5 %.
    With `?scripttimeout=600` the challenge passes after about 40 s of blocks. Only faster JS
    fixes it ([jit.md](jit.md)). Not done either: the demo's "Wait" after `unresponsive` does not
-   move the watchdog's deadline, so waiting cannot save such a script.
+   move the watchdog's deadline, so waiting cannot save such a script. LinkedIn Learning
+   (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
+   Chromium also loads, its main thread 10 % busy): after the load the engine thread answers no
+   eval for up to 10 s, about 35 s in all, then recovers. Its hashing loops (bit operations on
+   uint32 values, typed arrays, `Math.imul`) fell to slow paths: they now run inline and such
+   loops 2 to 5 times faster (#424), but the block stayed as long. Its profile is the script's
+   obfuscated VM calling small functions: the C++ path of calls from compiled code 15 % of the
+   engine thread (self time), entries through the interpreter 8 %, compiled code half. Cheaper
+   calls (in WASM, values in locals, phase 4 of [jit.md](jit.md)) are what is left.
 2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
    saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
    about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process

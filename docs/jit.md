@@ -33,13 +33,20 @@ never baked into the code (the GC resets inline caches).
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
   up in C++ after the inline cache missed),
   array elements (int32, double, contiguous, array storage), scopes (closure, global), `switch`.
+  Beyond the interpreter, for hashing code (bot checks, fingerprinting, #424): bit operations
+  and `~` also on doubles (ToInt32 inline, `i64.trunc_sat` below 2^63, so uint32 values above
+  2^31 stay inline), `op_unsigned` (`x >>> 0`) and `>>>` with any result, elements of typed
+  arrays (all but Float16, BigInt and resizable ones; a Uint32 above 2^31 and Float32 too, NaN
+  made pure) read and written with the conversions of the spec, and `Math.imul(a, b)` inline
+  (its host function, which JSC keeps static, taken from a Math object of the JIT's own).
 - **Calls**: to a compiled function directly in the frame the bytecode prepared, found through a
   cache per call site (the callee's executable, valid until the next GC); a short path in C++
   takes the common case (enough arguments, shallow nesting), the general one the rest (also
   moving the frame down for missing arguments, like the interpreter's arity fixup); to a host
-  function like the interpreter;
-  else JSC's generic call or construct. Varargs (`apply`, spread) get a frame like the
-  interpreter's and then the same call, tail calls are ordinary calls.
+  function like the interpreter, in the callee's realm, and through the same cache and short
+  path once the site has seen it (`Math.max`, `charCodeAt`, DataView getters); else JSC's
+  generic call or construct. Varargs (`apply`, spread) get a frame like the interpreter's and
+  then the same call, tail calls are ordinary calls.
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.
@@ -69,6 +76,12 @@ slower, #327). The
 modules of the TypeScript compiler (1772 functions) are 11.9 MB of WASM; functions with more than
 100 KB of bytecode stay interpreted (YouTube's bundles gave modules of 19 and 102 MB). With
 YouTube open the engine's memory is the same as without the JIT, the renderer about 25 MB more.
+
+Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
+typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
+an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
+`bench.js` of the LinkedIn report (#424) ran 2 to 4 times faster (murmur 4.4 to 6.0 s against 1.7
+to 2.7 s, Chromium 24 to 44 ms).
 
 ## Phases
 
