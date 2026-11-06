@@ -27,7 +27,7 @@ function trim(tab: SessionTab): SessionHistory | undefined {
   const start = Math.max(0, history.index - 20);
   const entries = history.entries
     .slice(start, start + 25)
-    .map((entry) => ({ url: entry.url, title: entry.title }));
+    .map(({ url, title, scrollX, scrollY }) => ({ url, title, scrollX, scrollY }));
   const index = Math.min(history.index - start, entries.length - 1);
   // The title often comes after the navigation
   const current = entries[index];

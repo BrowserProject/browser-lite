@@ -151,6 +151,7 @@ private:
     void dispatchDidNavigateWithinPage() final;
     void dispatchDidPushStateWithinPage() final;
     void dispatchDidReplaceStateWithinPage() final;
+    void didChangeScrollOffset() final;
     void dispatchDidFinishLoad() final;
     void dispatchDidReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>) final;
     void dispatchDidFailLoad(const WebCore::ResourceError&) final;

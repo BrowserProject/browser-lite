@@ -172,6 +172,11 @@ export class Tab implements SessionTab {
       this.changed();
       if (this.isActive) syncHostHistory();
     });
+    // The scroll position of the current entry, for a discarded tab and the session
+    this.on('history', (event) => {
+      this.history = event.history;
+      persistSession();
+    });
     this.on('title', (event) => {
       this.title = event.title;
       this.updateTitle();

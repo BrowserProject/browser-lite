@@ -90,7 +90,11 @@ export interface HostService {
 export interface SessionHistory {
   /** Position of the current entry in `entries` (from 0). */
   index: number;
-  entries: { url: string; title: string }[];
+  /**
+   * `scrollX`/`scrollY`: where the page of the entry was scrolled to (main frame, in pixels),
+   * where it comes back to after `restoreHistory`; 0 when absent.
+   */
+  entries: { url: string; title: string; scrollX?: number; scrollY?: number }[];
 }
 
 /** Rectangle in CSS pixels relative to the view canvas. */
@@ -512,6 +516,11 @@ export interface ViewEvents {
     loading: boolean;
     history: SessionHistory | null;
   };
+  /**
+   * The back/forward list changed without a navigation: the scroll position of the current entry
+   * (at most once a second while the page scrolls), so {@link View.history} restores it.
+   */
+  history: { history: SessionHistory };
   /** The title of the page changed, '' for a document without one; `url` is the page it belongs to. */
   title: { title: string; url: string };
   /** Load progress of the page (its main frame) from 0 to 1, 1 when done; iframes that navigate later do not report. */

@@ -221,6 +221,8 @@ public:
     void didRestoreFromCache();
     // Anchor, pushState/replaceState, popstate: new address without a new document
     void didNavigateWithinPage();
+    // The main frame scrolled: event history with the new position, at most once a second
+    void didScrollMainFrame();
     void didFinishLoading();
     // Cancelled (stop, new navigation, download): no error, not finished
     void didStopLoading();
@@ -255,6 +257,11 @@ private:
     WebView(int id, WebCore::IntSize, float deviceScaleFactor);
     void createSurface();
     void notifyNavigationState();
+    String sessionHistory() const;
+    void notifyHistoryIfChanged();
+    // The last history the host got (event navigation or history)
+    String m_sentHistory;
+    bool m_historyUpdatePending { false };
 
     int m_id;
     unsigned m_dialogBlocks { 0 };

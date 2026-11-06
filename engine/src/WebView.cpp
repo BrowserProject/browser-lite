@@ -42,6 +42,7 @@
 #include <WebCore/FileChooser.h>
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HitTestResult.h>
+#include <WebCore/HistoryController.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameInlines.h>
 #include <WebCore/FrameLoadRequest.h>
@@ -1866,22 +1867,64 @@ void WebView::stopFind()
     m_page->unmarkAllTextMatches();
 }
 
-void WebView::notifyNavigationState()
+// History for the session (back/forward after a restart or discard). Each entry has the scroll
+// position it comes back to: WebKit saves it into the item when the page is left, for the page
+// shown it is the live one, except while an earlier position waits for the end of the load to be
+// restored (HistoryController::restoreScrollPositionAndViewState).
+String WebView::sessionHistory() const
 {
-    auto& backForward = m_page->backForward();
-    // History for the session (back/forward after a restart or discard)
-    auto& list = static_cast<BackForwardList&>(backForward.client());
+    auto& list = static_cast<BackForwardList&>(m_page->backForward().client());
+    RefPtr frame = mainFrame();
+    RefPtr view = frame ? frame->view() : nullptr;
+    RefPtr shown = frame ? frame->loader().history().currentItem() : nullptr;
+    if (shown && view) {
+        auto state = frame->loader().state();
+        if (state == FrameState::Provisional || (state != FrameState::Complete && !shown->scrollPosition().isZero()))
+            shown = nullptr;
+    }
     StringBuilder history;
     history.append("{\"index\":"_s, list.currentIndex().value_or(0), ",\"entries\":["_s);
     bool first = true;
     for (auto& item : list.entries()) {
-        history.append(first ? ""_s : ","_s, "{\"url\":\""_s, jsonEscape(item->urlString()), "\",\"title\":\""_s, jsonEscape(item->title()), "\"}"_s);
+        auto scroll = view && item.ptr() == shown.get() ? view->scrollPosition() : item->scrollPosition();
+        history.append(first ? ""_s : ","_s, "{\"url\":\""_s, jsonEscape(item->urlString()), "\",\"title\":\""_s, jsonEscape(item->title()),
+            "\",\"scrollX\":"_s, scroll.x(), ",\"scrollY\":"_s, scroll.y(), '}');
         first = false;
     }
     history.append("]}"_s);
+    return history.toString();
+}
+
+void WebView::notifyNavigationState()
+{
+    auto& backForward = m_page->backForward();
+    m_sentHistory = sessionHistory();
     notifyHost(m_id, "navigation", makeString("{\"url\":\""_s, jsonEscape(currentURL()), "\",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
         ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, ",\"loading\":"_s, m_isLoading ? "true"_s : "false"_s,
-        ",\"history\":"_s, history.toString(), '}'));
+        ",\"history\":"_s, m_sentHistory, '}'));
+}
+
+// Like Chrome's page state updates: the scroll position of the current entry reaches the host
+// without an event for every scrolled pixel
+void WebView::didScrollMainFrame()
+{
+    if (std::exchange(m_historyUpdatePending, true))
+        return;
+    RunLoop::mainSingleton().dispatchAfter(1_s, [id = m_id] {
+        if (auto* view = fromID(id)) {
+            view->m_historyUpdatePending = false;
+            view->notifyHistoryIfChanged();
+        }
+    });
+}
+
+void WebView::notifyHistoryIfChanged()
+{
+    auto history = sessionHistory();
+    if (history == m_sentHistory)
+        return;
+    m_sentHistory = history;
+    notifyHost(m_id, "history", history);
 }
 
 void WebView::restoreHistory(const String& data)
@@ -1901,7 +1944,10 @@ void WebView::restoreHistory(const String& data)
         // Only addresses one could also type
         if (!url.isValid() || !(url.protocolIsInHTTPFamily() || url.protocolIsFile() || url.protocolIsAbout()))
             continue;
-        items.append(HistoryItem::create(m_page->historyItemClient(), url.string(), item->getString("title"_s)));
+        Ref historyItem = HistoryItem::create(m_page->historyItemClient(), url.string(), item->getString("title"_s));
+        // Restored when the page of the entry has loaded, like after back and forward
+        historyItem->setScrollPosition({ item->getInteger("scrollX"_s).value_or(0), item->getInteger("scrollY"_s).value_or(0) });
+        items.append(WTF::move(historyItem));
     }
     if (items.isEmpty())
         return;

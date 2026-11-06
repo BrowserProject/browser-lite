@@ -129,6 +129,11 @@ logs), then usually the engine's error page commits (`commit` with `errorPage`).
 that page is the message for users; showing `description` as well only repeats it in words they
 do not understand.
 
+`view.history` holds the back/forward list with the scroll position of every entry; for the
+page shown it follows the `history` event (at most once a second while it scrolls).
+`restoreHistory(history)` and `createView({ history })` bring the page back at that position, like
+back and forward.
+
 Console messages come as `console` of the view (`ConsoleMessage`: `level`, `message`, `source`,
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.

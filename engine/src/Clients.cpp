@@ -957,6 +957,12 @@ void FrameLoaderClient::dispatchDidReplaceStateWithinPage()
     m_view->didNavigateWithinPage();
 }
 
+void FrameLoaderClient::didChangeScrollOffset()
+{
+    if (isMainFrame())
+        m_view->didScrollMainFrame();
+}
+
 void FrameLoaderClient::dispatchDidFinishLoad()
 {
     ServiceWorkers::frameLoadEnded(m_frameLoader->frame(), true);

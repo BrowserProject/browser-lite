@@ -284,8 +284,9 @@ of `context.storage` (default in memory), for example in your user's profile.
 - `crash` (with `reason`) means the engine is gone (`state === 'crashed'`): destroy it and create a
   new browser. `reason` holds the error (a trap or `abort()`) with the stack of the thread, at most
   4096 characters; WebAssembly frames show function names only with an engine that keeps its name
-  section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` events) to restore the session with
-  `createView({ history })`.
+  section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` and `history`
+  events; the latter brings the scroll position of the current entry, at most once a second) to
+  restore the session with `createView({ history })`: the page comes back where it was scrolled to.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
   comes again if the engine still does not answer 10 s later.

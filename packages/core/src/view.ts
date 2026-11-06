@@ -603,6 +603,10 @@ export class ViewImpl implements View {
         this.emitNavigation();
         return;
       }
+      case 'history':
+        this.history = data as unknown as SessionHistory;
+        this.emit('history', { history: this.history });
+        return;
       case 'title':
         this.title = String(data.title ?? '');
         this.emit('title', { title: this.title, url: String(data.url ?? this.url) });

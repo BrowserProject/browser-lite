@@ -1,7 +1,7 @@
 // Background tabs in the demo UI (the engine side is tests/core/background-test.mjs): under memory
 // pressure the demo discards the least recently used background tab (titles stay, a discarded
-// tab loads again when clicked, with none left to discard the message names the page), never a
-// tab with a picture-in-picture window; the hang message after an input without an answer for
+// tab loads again when clicked at its scroll position, also a reopened one, with none left to
+// discard the message names the page), never a tab with a picture-in-picture window; the hang message after an input without an answer for
 // 10 s goes away when the watchdog stops the script; a long alert does not count as a hang.
 //
 //   node tests/demo/background-test.mjs [engine-dir]
@@ -46,6 +46,12 @@ console.log('RESULT loaded=pip')</script>`,
   memory: `<!doctype html><title>memory</title><p>memory<script>const name = location.search.slice(1);
 addEventListener('pagehide', () => console.log('RESULT gone=' + name));
 console.log('RESULT loaded=' + name)</script>`,
+  // Reports where it stops after a scroll and where it is a second after loading
+  long: `<!doctype html><title>long</title><body style="margin:0"><div style="height:20000px;background:linear-gradient(#fff,#36c)"></div>
+<script>let timer;
+addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(() => console.log('RESULT scrolled=' + Math.round(scrollY)), 300); });
+addEventListener('load', () => setTimeout(() => console.log('RESULT at=' + Math.round(scrollY)), 1000));
+console.log('RESULT loaded=long')</script>`,
 };
 const browser = await launch({
   args: [...SWIFTSHADER, '--autoplay-policy=no-user-gesture-required'],
@@ -166,6 +172,39 @@ check(
 await app.selectTab(1);
 check('memory pressure: a discarded tab loads when clicked', !!(await app.wait('loaded', 'one')));
 await app.context.close();
+
+// Like Chrome a discarded tab and a reopened one (Ctrl+Shift+T) come back at their scroll position
+const long = await openApp({ url: `${siteURL}long` });
+await long.wait('at', '0');
+const longOrigin = await canvasOrigin(long.page);
+await long.page.mouse.move(longOrigin.x + 300, longOrigin.y + 300);
+for (let i = 0; i < 10; i++) await long.page.mouse.wheel(0, 300);
+const scrolled = Number((await long.wait('scrolled'))?.[2]);
+// The engine reports the position at most once a second
+await long.page.waitForTimeout(1500);
+await long.newTab(`${siteURL}empty`);
+await long.wait('loaded', 'empty');
+const discardedLong = await long.page.evaluate(() => window.blTest.checkMemory());
+await long.selectTab(1);
+await long.wait('loaded', 'long');
+const restoredAt = (await long.wait('at'))?.[2];
+check(
+  'memory pressure: a discarded tab comes back at its scroll position',
+  discardedLong > 0 && scrolled > 1000 && Number(restoredAt) === scrolled,
+  `discarded ${discardedLong}, scrolled to ${scrolled}, back at ${restoredAt}`,
+);
+await long.page.click('#address');
+await long.page.keyboard.press('Control+w');
+await long.page.waitForFunction(() => document.querySelectorAll('#tab-list .tab').length === 1);
+await long.page.keyboard.press('Control+Shift+T');
+await long.wait('loaded', 'long');
+const reopenedAt = (await long.wait('at'))?.[2];
+check(
+  'Ctrl+Shift+T: the reopened tab comes back at its scroll position',
+  Number(reopenedAt) === scrolled,
+  `scrolled to ${scrolled}, back at ${reopenedAt}`,
+);
+await long.context.close();
 
 // A hang after an input: the engine thread finishes no task any more
 const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '20' });

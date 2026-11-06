@@ -19,6 +19,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   page without one or back to a page whose next page never loaded, #389),
   downloads (a link or form whose answer becomes a download asks the server once, #412), uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
+  a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
+  at the scroll position of its page like Chrome (#440),
   print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
@@ -489,16 +491,6 @@ browser (Safari keeps Cmd+L, T and W for itself).
   at the relay changed the load times of CNN, weather.com, Spiegel, NZZ, Yahoo and 20min by no
   more than their spread, 2026-11-01), no accessibility tree (an engine export), scripts not in workers,
   in already open documents or in `about:blank` frames.
-- Session restore and reopening a closed tab (Ctrl+Shift+T): the tab comes back with its
-  back/forward list but at the top, the scroll position of the current entry is lost (Chrome
-  keeps it; back/forward within a session keeps it). Both go through `SessionHistory` and
-  `restoreHistory` (the demo's closed tab record is a session entry). Nothing on the path carries it:
-  the engine's `navigation` history JSON has only `url` and `title` per entry, `restoreHistory`
-  creates bare `HistoryItem`s, `SessionHistory` and the demo's `bl-session` keep url and title. A
-  fix needs the engine: `scrollX`/`scrollY` per entry (live position for the committed item), a
-  throttled history update after main frame scrolls (`didChangeScrollOffset`, like Chrome's page
-  state updates) and `HistoryItem::setScrollPosition` on restore, then the field in `SessionHistory`
-  and the demo's `trim()`; one fix covers both paths.
 - Core API: console messages of shared workers reach no event.
 - Forms: Down in an `<input list>` without an open list does not open it (Chrome does; WebKit
   passes the key only to an open list), and Enter while the list is open without a highlighted
