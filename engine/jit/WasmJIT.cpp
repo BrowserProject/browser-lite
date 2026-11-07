@@ -256,6 +256,15 @@ bool roomForCompiledCode()
     return true;
 }
 
+// VM entries that compiled code has open through JSC's generic call or construct of a JS function
+// (wasmJITGenericEntries)
+thread_local unsigned genericEntries;
+
+struct GenericEntry {
+    GenericEntry() { ++genericEntries; }
+    ~GenericEntry() { --genericEntries; }
+};
+
 int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
 {
     ++depth;
@@ -375,6 +384,9 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
         }
         if (!collectArguments())
             return JSValue();
+        if (constructData.type != CallData::Type::JS)
+            return JSC::construct(globalObject, callee, constructData, arguments, thisValue);
+        GenericEntry entry;
         return JSC::construct(globalObject, callee, constructData, arguments, thisValue);
     } else {
         auto callData = JSC::getCallData(callee);
@@ -403,6 +415,9 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
         }
         if (!collectArguments())
             return JSValue();
+        if (callData.type != CallData::Type::JS)
+            return JSC::call(globalObject, callee, callData, thisValue, arguments);
+        GenericEntry entry;
         return JSC::call(globalObject, callee, callData, thisValue, arguments);
     }
 }
@@ -3543,6 +3558,11 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
     auto* next = status ? exceptionInstructions() : returnInstruction();
     uintptr_t offset = reinterpret_cast<uintptr_t>(next) - reinterpret_cast<uintptr_t>(codeBlock->instructions().at(0).ptr()) - pc->size();
     reinterpret_cast<Register*>(callFrame)[static_cast<int>(CallFrameSlot::argumentCountIncludingThis)].tag() = static_cast<int32_t>(offset);
+}
+
+unsigned wasmJITGenericEntries()
+{
+    return genericEntries;
 }
 
 void wasmJITForget(CodeBlock* codeBlock)

@@ -57,7 +57,11 @@ never baked into the code (the GC resets inline caches).
   probe too (patch 0075, [architecture](architecture.md#javascript)).
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
-  them.
+  them. JSC's generic call to a callee that is not compiled yet enters the VM again; between that
+  entry and the compiled caller C++ holds no JS values outside the frames, so the safepoint GC
+  looks through these entries (the JIT counts them, `wasmJITGenericEntries`, patch 0090, #448).
+  Before, the GC waited inside them until the task ended: Cloudflare's Turnstile piled up 0.5 to
+  1.5 GB of garbage that way, which the WASM memory kept for good.
 
 ## Measured
 

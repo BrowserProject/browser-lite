@@ -107,7 +107,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   with pages that stay, before about 1 in 5; in CI 40 of 40 soak checks of 11 runs clean up to
   2026-11-02), and no longer by microtasks that waited when the page was left (#388: spiegel.de
   left after 4 s stayed within 1 to 10 visits in each of 9 runs, now in none of 25 visits), JS heap blocks from slabs so that freed ones are
-  reused: after 48 heavy page loads in one tab 985 instead of 1235 MB of engine memory (#329).
+  reused: after 48 heavy page loads in one tab 985 instead of 1235 MB of engine memory (#329),
+  and the garbage of a long script is collected while it runs, also inside the generic calls of
+  compiled code and without JSC's 256 MB bursts (#448): Cloudflare's Turnstile on kaufland.de no
+  longer grows the WASM memory to 0.75 to 1.9 GB but to 440 to 550 MB with the page (3 local
+  runs), a loop of 6 s full of garbage keeps the 256 MB it started with (before 369 MB).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
@@ -336,7 +340,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
    slow paths, the rest JS runtime (arrays, `apply` with spread arguments, `Reflect.construct`,
    bound functions), WebGL fingerprinting 3 %, ICU data loaded lazily 3 %, forced layout 2.5 %.
    With `?scripttimeout=600` the challenge passes after about 40 s of blocks. Only faster JS
-   fixes it ([jit.md](jit.md)). Not done either: the demo's "Wait" after `unresponsive` does not
+   fixes it ([jit.md](jit.md)). Its garbage no longer stays (#448), but while the challenge runs
+   malloc's use still rises by about 3 MB/s with a JS heap of about 25 MB (2026-11-07, not
+   found yet). Not done either: the demo's "Wait" after `unresponsive` does not
    move the watchdog's deadline, so waiting cannot save such a script. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy): after the load the engine thread answers no

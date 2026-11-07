@@ -1,0 +1,76 @@
+diff --git a/Source/JavaScriptCore/heap/Heap.cpp b/Source/JavaScriptCore/heap/Heap.cpp
+index b6eacda269..7a358f84d8 100644
+--- a/Source/JavaScriptCore/heap/Heap.cpp
++++ b/Source/JavaScriptCore/heap/Heap.cpp
+@@ -124,6 +124,7 @@
+ #endif
+ 
+ #if OS(EMSCRIPTEN)
++#include "LLIntWasmJIT.h"
+ #include "VMEntryRecord.h"
+ #include "VMTrapsInlines.h"
+ #include <cstdlib>
+@@ -1371,7 +1372,8 @@ static void deferUntilTopLevel(GCRequest request)
+ // WASM memory never shrinks afterwards). Hence: GC also in the middle of JS,
+ // but only at instruction boundaries in the interpreter (op_check_traps and on
+ // function entry, LLIntSlowPaths.cpp) and only if
+-// - JS was not called nested through C++ (exactly one VM entry),
++// - JS was not called nested through C++ (exactly one VM entry, apart from the
++//   entries of the JIT's calls, LLIntWasmJIT.h),
+ // - nothing but the DeferGC of the embedder defers the GC.
+ // Turn off with BL_SAFEPOINT_GC=0.
+ static bool safepointGCEnabled()
+@@ -1399,14 +1401,24 @@ void Heap::requestSafepointGC()
+         vm().traps().fireTrap(VMTraps::NeedSafepointGC);
+ }
+ 
++// VM entries below the outermost one, -1 without any
++static int nestedEntries(EntryFrame* entryFrame)
++{
++    int count = -1;
++    for (; entryFrame; entryFrame = vmEntryRecord(entryFrame)->prevTopEntryFrame())
++        ++count;
++    return count;
++}
++
+ void Heap::collectAtSafepoint()
+ {
+     VM& vm = this->vm();
+-    EntryFrame* entryFrame = vm.topEntryFrame;
++    int nested = nestedEntries(vm.topEntryFrame);
++    int throughJIT = static_cast<int>(LLInt::wasmJITGenericEntries());
+     if (safepointGCDebug()) {
+-        emscripten_log(EM_LOG_CONSOLE, "[safepoint-gc] depth=%u safe=%d state=%d deferredWork=%d request=%d nested=%d heap=%zuMB",
++        emscripten_log(EM_LOG_CONSOLE, "[safepoint-gc] depth=%u safe=%d state=%d deferredWork=%d request=%d nested=%d jit=%d heap=%zuMB",
+             m_deferralDepth, m_isSafeToCollect, static_cast<int>(mutatorState()), m_didDeferGCWork, !!s_requestDeferredUntilTopLevel,
+-            entryFrame ? !!vmEntryRecord(entryFrame)->prevTopEntryFrame() : -1, size() >> 20);
++            nested, throughJIT, size() >> 20);
+     }
+     if (m_deferralDepth != 1 || !m_isSafeToCollect)
+         return;
+@@ -1414,7 +1426,7 @@ void Heap::collectAtSafepoint()
+         return;
+     if (!m_didDeferGCWork && !s_requestDeferredUntilTopLevel)
+         return;
+-    if (!entryFrame || vmEntryRecord(entryFrame)->prevTopEntryFrame())
++    if (nested < 0 || nested != throughJIT)
+         return;
+     if (safepointGCDebug())
+         emscripten_log(EM_LOG_CONSOLE | EM_LOG_C_STACK, "[safepoint-gc] collecting");
+diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+index d5a535115d..683e5d39ec 100644
+--- a/Source/JavaScriptCore/llint/LLIntWasmJIT.h
++++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+@@ -26,6 +26,12 @@ void wasmJITTierUp(CodeBlock*);
+ // the C loop reloads) at the instruction to go on with.
+ void wasmJITLoop(CallFrame*, CodeBlock*, const JSInstruction* pc);
+ 
++// VM entries that compiled code has open through JSC's generic call or construct of a JS function
++// (a callee that is not compiled yet). Between such an entry and its compiled caller there are only
++// frames and C++ that holds no JS values outside them, like a call of the interpreter, so the GC
++// at a safepoint looks through them (Heap::collectAtSafepoint).
++unsigned wasmJITGenericEntries();
++
+ // The CodeBlock goes away (~CodeBlock): its compiled code too.
+ void wasmJITForget(CodeBlock*);
+ 

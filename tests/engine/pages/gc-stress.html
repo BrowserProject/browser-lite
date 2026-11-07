@@ -47,6 +47,27 @@ function check(entry) {
   return null;
 }
 
+// Garbage inside a call that compiled code (the JIT, docs/jit.md) makes to a function that never
+// ran: JSC's generic call enters the VM again, and the GC has to run in there too, while values
+// live in the frames of both functions. About 300 MB of garbage in one task.
+function nestedGarbage(seed) {
+  const local = makeGraph(seed);
+  let garbage = null;
+  for (let i = 0; i < 2500000; i++)
+    garbage = { a: i, b: [i, i + 1], c: 'nested' + i };
+  return garbage.b[1] === 2500000 ? check(local) : 'garbage';
+}
+
+function nestedRound() {
+  const live = makeGraph(-1);
+  let error = 'not called';
+  // Hot enough to run compiled before the last iteration calls nestedGarbage
+  for (let i = 0; i < 200000; i++)
+    if (i === 199999)
+      error = nestedGarbage(-2);
+  return error || check(live);
+}
+
 function step() {
   // Garbage: about 5 MB per round
   let garbage = [];
@@ -67,8 +88,11 @@ function step() {
   round++;
   if (round < ROUNDS)
     setTimeout(step, 0);
-  else
-    console.log('GC-TEST ok ' + ROUNDS + ' rounds');
+  else {
+    console.log('GC-TEST nested round');
+    const error = nestedRound();
+    console.log(error ? 'GC-TEST ERROR nested call: ' + error : 'GC-TEST ok ' + ROUNDS + ' rounds and a nested call');
+  }
 }
 setTimeout(step, 0);
 </script>
