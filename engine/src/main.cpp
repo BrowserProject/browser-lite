@@ -245,8 +245,9 @@ int main(int, char**)
     // The WebCore default is 8 MB, a modern page evicts everything with that
     WebCore::MemoryCache::singleton().setCapacities(0, 16 * 1024 * 1024, 64 * 1024 * 1024);
     // Back/forward without reloading like in Chrome (back/forward cache): the last
-    // pages stay suspended in memory. Under memory pressure releaseMemory
-    // (EngineLoop.cpp) frees them. The WebCore default is 0.
+    // pages stay suspended in memory. The automatic memory releases
+    // (MemoryWatch.cpp) keep only the page left last, none once memory is
+    // short. The WebCore default is 0.
     WebCore::BackForwardCache::singleton().setMaxSize(3);
 
 #if ENABLE(WEBGL)

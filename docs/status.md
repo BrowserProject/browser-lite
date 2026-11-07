@@ -15,7 +15,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   stayed empty, the interpreter cached a missing `meta` export for all modules, #431).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
-  (address and title of the restored page, #367), favicons for every loaded page (also after a
+  (address and title of the restored page, #367; the page left last stays through the automatic
+  memory releases, so back shows it at once where it was scrolled to, #451), favicons for every loaded page (also after a
   page without one or back to a page whose next page never loaded, #389),
   downloads (a link or form whose answer becomes a download asks the server once, #412), uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),

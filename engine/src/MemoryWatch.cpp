@@ -5,9 +5,11 @@
 // - releases what WebKit otherwise only releases under memory pressure
 //   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB at
 //   every growth of malloc by 32 MB, so free space is reused first. The
-//   compiled JS of the pages (bytecode and JIT code) goes too only once memory
-//   is short: rebuilding it blocked the pages for seconds, and the GC already
-//   ages out the code that does not run
+//   compiled JS of the pages (bytecode and JIT code) and the page left last
+//   (kept in the back/forward cache) go too only once memory is short:
+//   rebuilding the code blocked the pages for seconds, the GC already ages out
+//   the code that does not run, and a page loaded again on back shows its top
+//   until the load is complete
 // - at every growth of malloc by 32 MB, once the malloc area ends above
 //   reserveFrom, grows the memory ahead so that a reserve stays free above the
 //   malloc area; when that fails, the current size is the limit
@@ -33,6 +35,7 @@
 #include <emscripten/heap.h>
 #include <malloc.h>
 #include <pthread.h>
+#include <WebCore/BackForwardCache.h>
 #include <WebCore/MemoryRelease.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/text/MakeString.h>
@@ -101,11 +104,13 @@ static void releaseCaches(uint64_t footprint)
     s_footprintAtRelease = footprint;
     auto start = WTF::MonotonicTime::now();
     size_t usedBefore = debugEnabled() ? mallinfo().uordblks : 0;
-    bool deleteCode = memoryIsShort(footprint);
-    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes, WebCore::MaintainBackForwardCache::No, WebCore::MaintainMemoryCache::No,
-        deleteCode ? WebCore::MaintainJSCode::No : WebCore::MaintainJSCode::Yes);
+    bool memoryShort = memoryIsShort(footprint);
+    // Before the release, so that its GC collects the pruned pages
+    WebCore::BackForwardCache::singleton().pruneToSizeNow(memoryShort ? 0 : 1, WebCore::PruningReason::MemoryPressure);
+    WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes, WebCore::MaintainBackForwardCache::Yes, WebCore::MaintainMemoryCache::No,
+        memoryShort ? WebCore::MaintainJSCode::No : WebCore::MaintainJSCode::Yes);
     if (debugEnabled()) {
-        debugLog("Memory released%s (malloc area %llu MB, memory %llu MB): used %zu -> %zu MB in %.0f ms", deleteCode ? " with the JS code" : "",
+        debugLog("Memory released%s (malloc area %llu MB, memory %llu MB): used %zu -> %zu MB in %.0f ms", memoryShort ? " with the JS code and the back/forward cache" : "",
             mb(footprint), mb(emscripten_get_heap_size()), usedBefore >> 20, static_cast<size_t>(mallinfo().uordblks) >> 20,
             (WTF::MonotonicTime::now() - start).milliseconds());
     }
