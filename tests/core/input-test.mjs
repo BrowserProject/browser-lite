@@ -3,9 +3,10 @@
 // mailto: and tel: (external-url), sandbox (tel:, download), <a ping> with cookie, CSP report
 // without redirect, sendBeacon (preflight, CORS and CSP on redirects), favicon behind a redirect,
 // dialogs with the origin, context menu requests, <select>, color and date through the request
-// handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links, <object>/<embed>, file
-// upload through the native file dialog of the host and fullscreen. The test page reports results with console.log
-// ("RESULT name=value"), the host page forwards the console of the view.
+// handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links, focus on click,
+// <object>/<embed>, file upload through the native file dialog of the host and fullscreen. The
+// test page reports results with console.log ("RESULT name=value"), the host page forwards the
+// console of the view.
 //
 //   node tests/core/input-test.mjs [engine-dir]
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -58,6 +59,8 @@ const PAGE = `<!doctype html>
   #objects { position: absolute; left: 20px; top: 1200px; }
   #pad { position: absolute; left: 330px; top: 100px; width: 220px; height: 160px; background: #cde; }
   #rich { position: absolute; left: 330px; top: 280px; width: 220px; height: 30px; }
+  #check { position: absolute; left: 180px; top: 80px; width: 20px; height: 20px; margin: 0; }
+  #focuslink { position: absolute; left: 220px; top: 80px; }
 </style></head>
 <body>
 <input id="text" autocomplete="off">
@@ -80,6 +83,8 @@ const PAGE = `<!doctype html>
 <iframe id="sandboxed-tel" sandbox="allow-scripts allow-top-navigation-to-custom-protocols" srcdoc="<body style='margin:0'><a href='tel:+41222222222' style='display:block;height:40px'>tel</a>"></iframe>
 <div id="pad"></div>
 <div id="rich" contenteditable>rich text</div>
+<input id="check" type="checkbox">
+<a id="focuslink" href="/nowhere" onclick="event.preventDefault()">Focus</a>
 <div id="objects">
   <object id="o-svg" data="/image.svg" type="image/svg+xml"></object>
   <embed id="o-embed" src="/image.svg">
@@ -859,7 +864,45 @@ const tabOrder = [await result('tab1'), await result('tab2'), await result('tab3
 check('Tab focuses links', tabOrder === 'popup,download,file', tabOrder);
 await evalPage(page, 'document.activeElement?.blur()');
 
-// 6d) A keydown the page does not handle comes back as unhandled-key, where a browser runs its
+// 6d) A click focuses checkboxes, buttons and links like in Chrome and Firefox on Linux, without
+// :focus-visible (Safari on macOS focuses none of them, patch 0093): Space then toggles the
+// checkbox (a key shows the focus ring, as the spec suggests), Tab goes on from the button
+const focusState = (name) =>
+  evalPage(
+    page,
+    `console.log("RESULT ${name}=" + [document.activeElement?.id || document.activeElement?.localName, document.activeElement?.matches(":focus-visible"), document.getElementById("check").checked].join())`,
+  );
+await page.mouse.click(...(await at(190, 90)));
+await page.waitForTimeout(300);
+await focusState('clickcheck');
+await page.keyboard.press('Space');
+await page.waitForTimeout(300);
+await focusState('spacecheck');
+await page.mouse.click(...(await at(80, 90)));
+await page.waitForTimeout(300);
+await focusState('clickbutton');
+await page.keyboard.press('Tab');
+await page.waitForTimeout(300);
+await focusState('tabbutton');
+await page.mouse.click(...(await at(235, 88)));
+await page.waitForTimeout(300);
+await focusState('clicklink');
+const clickFocus = [
+  await result('clickcheck'),
+  await result('spacecheck'),
+  await result('clickbutton'),
+  await result('tabbutton'),
+  await result('clicklink'),
+].join(' ');
+check(
+  'a click focuses checkbox, button and link',
+  clickFocus ===
+    'check,false,true check,true,false button,false,false popup,true,false focuslink,false,false',
+  clickFocus,
+);
+await evalPage(page, 'document.activeElement?.blur()');
+
+// 6e) A keydown the page does not handle comes back as unhandled-key, where a browser runs its
 // shortcuts like Chrome; not one the page calls preventDefault for (Ctrl+G), nor an editing
 // command (Ctrl+A, Ctrl+U underlines in rich text), nor one with a default action (Tab)
 const eventsBefore = (await hostEvents(page)).length;

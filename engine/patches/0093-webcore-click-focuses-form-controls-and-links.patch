@@ -1,0 +1,39 @@
+diff --git a/Source/WebCore/html/HTMLAnchorElement.cpp b/Source/WebCore/html/HTMLAnchorElement.cpp
+index e5289a52a1..7641a7c028 100644
+--- a/Source/WebCore/html/HTMLAnchorElement.cpp
++++ b/Source/WebCore/html/HTMLAnchorElement.cpp
+@@ -110,7 +110,7 @@ bool HTMLAnchorElement::supportsFocus() const
+ 
+ bool HTMLAnchorElement::isMouseFocusable() const
+ {
+-#if !(PLATFORM(GTK) || PLATFORM(WPE))
++#if !(PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM))
+     // Only allow links with tabIndex or contentEditable to be mouse focusable.
+     if (isLink() && !protect(document())->quirks().needsAnchorToBeMouseFocusable())
+         return HTMLElement::supportsFocus();
+diff --git a/Source/WebCore/html/HTMLFormControlElement.cpp b/Source/WebCore/html/HTMLFormControlElement.cpp
+index 616976772c..26b0e246b4 100644
+--- a/Source/WebCore/html/HTMLFormControlElement.cpp
++++ b/Source/WebCore/html/HTMLFormControlElement.cpp
+@@ -228,7 +228,7 @@ bool HTMLFormControlElement::isKeyboardFocusable(const FocusEventData& focusEven
+ 
+ bool HTMLFormControlElement::isMouseFocusable() const
+ {
+-#if (PLATFORM(GTK) || PLATFORM(WPE))
++#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     return HTMLElement::isMouseFocusable();
+ #else
+     // FIXME: We can remove needsFormControlToBeMouseFocusable if there are no more quirks
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index f52f173b71..592f9e66d6 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3417,7 +3417,7 @@ bool EventHandler::dispatchMouseEvent(const AtomString& eventType, Node* targetN
+     if (!element && m_lastScrollbarUnderMouse)
+         return false;
+ 
+-#if (!PLATFORM(GTK) && !PLATFORM(WPE))
++#if !PLATFORM(GTK) && !PLATFORM(WPE) && !PLATFORM(WASM)
+     // This is a workaround related to :focus-visible (see webkit.org/b/236782).
+     // Form control elements are not mouse focusable on some platforms (see HTMLFormControlElement::isMouseFocusable())
+     // which makes us behave differently than other browsers when a button is clicked,

@@ -6,7 +6,8 @@ common pages do not run, which the host loads after the start, and `lazy/` with 
 first use (ICU data, fonts). A host (`@browser-lite/core`) loads it into a page, gives it a
 transport for TCP connections and drives it through the C exports. What has to change inside
 WebKit itself (port `PORT=Wasm`, platform code under `Source/WebCore/platform/wasm/`, the
-generic code paths the port takes, for example formatting of UI strings, and what changes when
+generic code paths the port takes, for example formatting of UI strings or the focus a click
+gives buttons, checkboxes and links like Chrome on Linux, and what changes when
 all sites share one process, for example the microtasks of a site that was left, and WebKit bugs
 that real sites hit, for example the hovered element a page from the back/forward cache forgot
 or the policy a typed `data:` address took over from the page before, or the missing tiles of

@@ -195,6 +195,9 @@ the old tap point, like in mobile Chrome and Safari: WebCore leaves out its mous
 scroll while the last pointer position comes from a tap (patch 0084, #426). A page from the
 back/forward cache still knows the element (and iframe) the mouse was over when it was left, so
 the first move out of it fires mouseout and mouseleave like in Chrome (patch 0079, #398).
+A click focuses the button, checkbox, radio button or link under it, like Chrome and Firefox and
+WebKitGTK, not like Safari on macOS, which leaves them unfocused: Space toggles a checkbox just
+clicked and the page gets focus and blur (patch 0093, #450).
 On a mobile device (`device.mobile`) the overlay scrollbars of the page and of scrolling boxes
 only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
 touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with
