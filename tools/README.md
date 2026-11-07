@@ -14,7 +14,7 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `fetch-webkit.sh` | fetches the pinned WebKit commit into `third_party/WebKit` (shallow, sparse) |
 | `apply-patches.sh` | resets WebKit and applies `engine/patches/`, `--check` only checks and leaves WebKit unpatched |
 | `export-patch.sh` | saves new changes in `third_party/WebKit` as a patch |
-| `gen-angle-shim.py` | generates the ANGLE replacement for WebGL (output goes into patch 0016) |
+| `gen-angle-shim.py` | generates the ANGLE replacement for WebGL (output in patch 0016, later changes in their own patches, 0092) |
 | `build-jsc.sh` | JavaScriptCore and the `jsc` shell into `build/jsc/bin/` |
 | `build-webcore.sh` | WebCore, the engine and its WTF tests (`tests/engine/wtf-tests.cpp`) into `build/webcore/bin/` |
 | `package-engine.sh` | engine for delivery: `engine/<hash>/` with .br/.gz, `manifest.json`, notices |

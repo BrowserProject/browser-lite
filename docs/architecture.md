@@ -148,10 +148,15 @@ ANGLE is not built: a small shim in `platform/wasm/angle/` (patch 0016, generate
 `tools/gen-angle-shim.py`) forwards WebKit's ANGLE calls to Emscripten's GLES, a real host WebGL
 on an OffscreenCanvas in the engine worker (#51, #53). WebGL 1 pages get a WebGL 1 context, WebGL 2
 pages a WebGL 2 context; the host browser validates the shaders. Chrome allows only 4 active
-contexts per worker, so all contexts share one host context per WebGL version and
-`ANGLEShimWasm.cpp` saves and restores the GL state on every switch (#54, #115). Each context has
-its own default VAO and transform feedback object, and texture units a context never used are
-cleared, so no page sees another page's data. After each frame `GraphicsContextGLWasm` reads the
+contexts per worker, so all contexts share one host context per WebGL version (#54). Every query of
+the host context is a synchronous round trip to the GPU process, so `ANGLEShimWasm.cpp` never
+reads the state back: wrappers of the host context's setters record what each context sets
+(slots: what it sets and the call that sets it again, per draw buffer values of
+`OES_draw_buffers_indexed` apart, a deleted object leaves its bindings). A switch replays the
+slots of the other context and sets the initial value of every slot only the previous one had
+(texture units, constant vertex attributes, uniform buffer bindings, extension switches); it asks
+the host only for the pending errors (#115, #449). Each context has its own default VAO and
+transform feedback object, so no page sees another page's data. After each frame `GraphicsContextGLWasm` reads the
 pixels with `readPixels` into the page or, with compositing, into a layer. A lost context reports
 `webglcontextlost` at its next `clear` or draw, never synchronously from `makeContextCurrent`
 (WebGL often holds `objectGraphLock` there, #157).

@@ -352,11 +352,20 @@ browser (Safari keeps Cmd+L, T and W for itself).
    obfuscated VM calling small functions: the C++ path of calls from compiled code 15 % of the
    engine thread (self time), entries through the interpreter 8 %, compiled code half. Cheaper
    calls (in WASM, values in locals, phase 4 of [jit.md](jit.md)) are what is left.
-2. WebGL contexts of page scripts (feature checks, fingerprinting): creating and destroying one
-   saves the shared host context's state with synchronous `getParameter` calls (patch 0016),
-   about 60 ms on weather.com locally, but 1.7 and 2.4 s in a profiled run, when the GPU process
-   was busy. On a Motorola Moto G71 (real GPU) a context with a few queries took 89 ms the first
-   time and 28 ms each after.
+2. WebGL contexts of page scripts (feature checks, fingerprinting): every synchronous query of the
+   shared host context waits for the GPU process, which is slow while it is busy (a live video,
+   compositing). A switch between contexts read the whole GL state back (about 100 queries, more
+   with texture units in use); on twitch.tv (Kasada's fingerprinting next to the autoplaying
+   stream) that was about half of the engine thread in the first 40 s, a context creation took
+   0.8 to 3.9 s. The state is now tracked instead (#449): 2 queries per switch (the errors), on
+   twitch.tv (2026-11-07, local, 25 s profile while scrolling) the creation of contexts went from
+   10.1 to 2.9 s of the engine thread and all host GL queries from about 10 to 4 s. What is left
+   are WebKit's own queries while it sets up a context (`GraphicsContextGLANGLE::reshape`: clear
+   values, masks, framebuffer status) and its `getError` after calls such as
+   `getInternalformatParameter`, cheap with the in process ANGLE of native WebKit. The stalls of
+   up to 10 s in twitch.tv's first 30 s stay, now mostly JS (the Kasada scripts in the interpreter
+   and the JIT, see 1.). On a Motorola Moto G71 (real GPU) a context with a few queries took 89 ms
+   the first time and 28 ms each after (before #449).
 3. Forced flex/grid layout from JS (20min about 6.5 s, #141) and after a resize or rotation
    (#405): no cheap fix found. On 20min.ch (2026-11-05, local, idle machine) a resize keeps the
    page's thread busy about 1 s in 3 to 4 tasks (the largest 0.55 to 0.95 s, the first frame

@@ -6,8 +6,8 @@
 # (the WebGL of the host browser in the engine worker). This script writes:
 #   platform/wasm/angle/ANGLE/entry_points_*.h   declarations GL_*/EGL_*
 #   platform/wasm/angle/ANGLEShimForwardWasm.cpp GL_Xxx -> glXxx (generated)
-# Everything in CUSTOM is written by hand in ANGLEShimWasm.cpp. The output goes into
-# patch 0016.
+# Everything in CUSTOM is written by hand in ANGLEShimWasm.cpp. The output went into
+# patch 0016, later changes go into patches of their own (0092).
 #
 #   tools/gen-angle-shim.py [webkit-dir]
 import glob
@@ -24,8 +24,8 @@ out_dir = os.path.join(webcore, 'platform', 'wasm', 'angle')
 CUSTOM = {
     # Extensions and strings
     'GL_GetString', 'GL_RequestExtensionANGLE', 'GL_GetTranslatedShaderSourceANGLE',
-    # Shared host context: errors, texture units, own default VAO/TF
-    'GL_GetError', 'GL_ActiveTexture', 'GL_BindVertexArray', 'GL_BindVertexArrayOES',
+    # Shared host context: errors, own default VAO/TF
+    'GL_GetError', 'GL_BindVertexArray', 'GL_BindVertexArrayOES',
     'GL_DeleteVertexArrays', 'GL_DeleteVertexArraysOES', 'GL_BindTransformFeedback', 'GL_DeleteTransformFeedbacks',
     # Emscripten cannot read when mapping
     'GL_MapBufferRange', 'GL_UnmapBuffer',

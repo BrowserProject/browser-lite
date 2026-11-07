@@ -1,0 +1,756 @@
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
+index e3fbf6e442..5a6058f9f1 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimForwardWasm.cpp
+@@ -8,6 +8,7 @@
+ 
+ extern "C" {
+ 
++void GL_APIENTRY glActiveTexture(GLenum texture);
+ void GL_APIENTRY glAttachShader(GLuint program, GLuint shader);
+ void GL_APIENTRY glBeginQuery(GLenum target, GLuint id);
+ void GL_APIENTRY glBeginQueryEXT(GLenum target, GLuint id);
+@@ -246,6 +247,7 @@ void GL_APIENTRY glVertexAttribPointer(GLuint index, GLint size, GLenum type, GL
+ void GL_APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height);
+ void GL_APIENTRY glWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout);
+ 
++void GL_APIENTRY GL_ActiveTexture(GLenum texture) { glActiveTexture(texture); }
+ void GL_APIENTRY GL_AttachShader(GLuint program, GLuint shader) { glAttachShader(program, shader); }
+ void GL_APIENTRY GL_BeginQuery(GLenum target, GLuint id) { glBeginQuery(target, id); }
+ void GL_APIENTRY GL_BeginQueryEXT(GLenum target, GLuint id) { glBeginQueryEXT(target, id); }
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+index 260ad49538..07c2fb8a9e 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+@@ -34,9 +34,9 @@
+ //
+ // Chrome allows only 4 active WebGL contexts in a worker, after that the
+ // oldest one is lost. So all contexts of a thread share one host context
+-// per WebGL version (like the virtualized contexts of ANGLE):
+-// on a switch the GL state is saved and that of the other context is
+-// restored. Each context has its own "default" VAO and transform feedback
++// per WebGL version (like the virtualized contexts of ANGLE): the GL state
++// each context sets is tracked, on a switch that of the other context is
++// set again. Each context has its own "default" VAO and transform feedback
+ // object, because those of the host context would otherwise be shared.
+ 
+ #include "config.h"
+@@ -63,7 +63,6 @@ void GL_APIENTRY glEnable(GLenum);
+ void GL_APIENTRY glDisable(GLenum);
+ GLboolean GL_APIENTRY glIsEnabled(GLenum);
+ GLenum GL_APIENTRY glGetError();
+-void GL_APIENTRY glActiveTexture(GLenum);
+ void GL_APIENTRY glGenVertexArrays(GLsizei, GLuint*);
+ void GL_APIENTRY glBindVertexArray(GLuint);
+ void GL_APIENTRY glDeleteVertexArrays(GLsizei, const GLuint*);
+@@ -82,8 +81,6 @@ struct HostContext {
+     int users { 0 };
+     // Context whose state is currently in the host context
+     int stateOwner { 0 };
+-    // Highest texture unit any context has used
+-    int maxTextureUnit { 0 };
+ };
+ 
+ // A context of WebKit (virtual, shares the host context)
+@@ -104,8 +101,6 @@ struct ShimContext {
+     GLuint boundVertexArray { 0 };
+     GLuint defaultTransformFeedback { 0 };
+     GLuint boundTransformFeedback { 0 };
+-    // Highest texture unit used (only that many are saved)
+-    int maxTextureUnit { 0 };
+ };
+ 
+ thread_local std::unordered_map<int, ShimContext>* contextMap;
+@@ -205,6 +200,14 @@ void updateStrings(ShimContext& context)
+ 
+ // Host context in the engine worker on its own OffscreenCanvas. Drawing only
+ // goes into framebuffers of WebKit, so no depth/stencil/antialiasing.
++//
++// Every query of the host context is a synchronous call to the GPU process,
++// which waits for all GL work of the browser before it (on twitch.tv seconds
++// per switch, when the state was read back). So the host context gets a
++// state tracker: the setters of the context state are wrapped and write what
++// they set into "slots" (key: what it sets, value: the setter call that sets
++// it again). A switch saves nothing and replays the slots of the other
++// context, plus the defaults of slots that only the previous one had set.
+ EM_JS(int, blCreateGLContext, (int webgl2), {
+     if (typeof OffscreenCanvas === "undefined")
+         return 0;
+@@ -214,52 +217,331 @@ EM_JS(int, blCreateGLContext, (int webgl2), {
+         antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false,
+         powerPreference: "default", failIfMajorPerformanceCaveat: false, enableExtensionsByDefault: 1
+     };
++    var handle;
+     try {
+-        var handle = GL.createContext(canvas, attributes) || 0;
+-        // Sharing does not work without vertex arrays (always there in Chrome)
+-        if (handle && !GL.getContext(handle).GLctx.createVertexArray) {
+-            GL.deleteContext(handle);
+-            return 0;
+-        }
+-        // On a switch the state must be saved, and every query is a
+-        // synchronous call to the GPU process. So we remember whether uniform
+-        // buffers or vertex attributes were set at all since the last restore;
+-        // otherwise the restored values still apply.
+-        if (handle) {
+-            var gl = GL.getContext(handle).GLctx;
+-            gl.blTouched = {};
+-            var track = function (names, flag) {
+-                names.forEach(function (name) {
+-                    var original = gl[name];
+-                    if (typeof original !== "function")
+-                        return;
+-                    gl[name] = function () {
+-                        gl.blTouched[flag] = true;
+-                        return original.apply(gl, arguments);
+-                    };
+-                });
+-            };
+-            track(["bindBufferBase", "bindBufferRange"], "ubo");
+-            track(["vertexAttrib1f", "vertexAttrib1fv", "vertexAttrib2f", "vertexAttrib2fv", "vertexAttrib3f", "vertexAttrib3fv",
+-                "vertexAttrib4f", "vertexAttrib4fv", "vertexAttribI4i", "vertexAttribI4iv", "vertexAttribI4ui", "vertexAttribI4uiv"], "attrib");
+-            // Extensions and limits do not change: query them only once
+-            gl.blExtensions = {};
+-            gl.blExtension = function (name) {
+-                if (!(name in gl.blExtensions))
+-                    gl.blExtensions[name] = gl.getExtension(name);
+-                return gl.blExtensions[name];
+-            };
+-            gl.blLimits = {};
+-            gl.blLimit = function (name) {
+-                if (!(name in gl.blLimits))
+-                    gl.blLimits[name] = gl.getParameter(name);
+-                return gl.blLimits[name];
+-            };
+-        }
+-        return handle;
++        handle = GL.createContext(canvas, attributes) || 0;
+     } catch (e) {
+         return 0;
+     }
++    if (!handle)
++        return 0;
++    var gl = GL.getContext(handle).GLctx;
++    // Sharing does not work without vertex arrays (always there in Chrome)
++    if (!gl.createVertexArray) {
++        GL.deleteContext(handle);
++        return 0;
++    }
++
++    var BLEND = 0x0BE2;
++    var UNIFORM_BUFFER = 0x8A11;
++    var TRANSFORM_FEEDBACK_BUFFER = 0x8C8E;
++    var TEXTURE0 = 0x84C0;
++    var FRONT = 0x0404;
++    var BACK = 0x0405;
++    // Switches with their initial value (only DITHER is on)
++    var caps = { 0x0BE2: 0, 0x0B44: 0, 0x0B71: 0, 0x0BD0: 1, 0x8037: 0, 0x809E: 0, 0x80A0: 0, 0x0C11: 0, 0x0B90: 0,
++        0x8C89: 0, 0x864F: 0, 0x2A02: 0 };
++    for (var d = 0; d < 8; d++)
++        caps[0x3000 + d] = 0;
++    var pixelStore = { 0x0D05: 4, 0x0CF5: 4, 0x9240: 0, 0x9241: 0, 0x9243: 0x9244, 0x0D02: 0, 0x0D03: 0, 0x0D04: 0,
++        0x0CF2: 0, 0x806E: 0, 0x0CF3: 0, 0x0CF4: 0, 0x806D: 0 };
++    var hints = { 0x8192: 1, 0x8B8B: 1 };
++    // ELEMENT_ARRAY_BUFFER is missing on purpose: it belongs to the VAO
++    var bufferTargets = { 0x8892: 1, 0x8F36: 1, 0x8F37: 1, 0x88EB: 1, 0x88EC: 1, 0x8A11: 1, 0x8C8E: 1 };
++    var textureTargets = { 0x0DE1: 1, 0x8513: 1, 0x806F: 1, 0x8C1A: 1 };
++
++    // The initial state of a WebGL context; viewport and scissor box are
++    // the size of the 1x1 canvas, WebKit sets its own
++    var initial = {
++        blendColor: ["blendColor", 0, 0, 0, 0],
++        blendEquation: ["blendEquationSeparate", 0x8006, 0x8006],
++        blendFunc: ["blendFuncSeparate", 1, 0, 1, 0],
++        clearColor: ["clearColor", 0, 0, 0, 0],
++        colorMask: ["colorMask", true, true, true, true],
++        clearDepth: ["clearDepth", 1],
++        clearStencil: ["clearStencil", 0],
++        cullFace: ["cullFace", BACK],
++        depthFunc: ["depthFunc", 0x0201],
++        depthMask: ["depthMask", true],
++        depthRange: ["depthRange", 0, 1],
++        frontFace: ["frontFace", 0x0901],
++        lineWidth: ["lineWidth", 1],
++        polygonOffset: ["polygonOffset", 0, 0],
++        sampleCoverage: ["sampleCoverage", 1, false],
++        scissor: ["scissor", 0, 0, 1, 1],
++        viewport: ["viewport", 0, 0, 1, 1],
++        useProgram: ["useProgram", null],
++        bindRenderbuffer: ["bindRenderbuffer", 0x8D41, null],
++        activeTexture: ["activeTexture", TEXTURE0],
++        bindVertexArray: ["bindVertexArray", null]
++    };
++    [FRONT, BACK].forEach(function (face) {
++        initial["stencilFunc:" + face] = ["stencilFuncSeparate", face, 0x0207, 0, 0xFFFFFFFF];
++        initial["stencilOp:" + face] = ["stencilOpSeparate", face, 0x1E00, 0x1E00, 0x1E00];
++        initial["stencilMask:" + face] = ["stencilMaskSeparate", face, 0xFFFFFFFF];
++    });
++    [0x0BE2, 0x0B44, 0x0B71, 0x0BD0, 0x8037, 0x809E, 0x80A0, 0x0C11, 0x0B90].concat(webgl2 ? [0x8C89] : []).forEach(function (cap) {
++        initial["cap:" + cap] = [caps[cap] ? "enable" : "disable", cap];
++    });
++    if (webgl2) {
++        initial["bindFramebuffer:" + 0x8CA8] = ["bindFramebuffer", 0x8CA8, null];
++        initial["bindFramebuffer:" + 0x8CA9] = ["bindFramebuffer", 0x8CA9, null];
++        initial.bindTransformFeedback = ["bindTransformFeedback", 0x8E22, null];
++    } else
++        initial["bindFramebuffer:" + 0x8D40] = ["bindFramebuffer", 0x8D40, null];
++
++    // Value of a slot that a context has never set
++    var defaultSlot = function (key) {
++        if (key in initial)
++            return initial[key];
++        var parts = key.split(":");
++        var n = +parts[1];
++        switch (parts[0]) {
++        case "cap": return [caps[n] ? "enable" : "disable", n];
++        case "hint": return ["hint", n, 0x1100];
++        case "pixelStorei": return ["pixelStorei", n, pixelStore[n]];
++        case "bindBuffer": return ["bindBuffer", n, null];
++        case "ubo": return ["bindBufferBase", UNIFORM_BUFFER, n, null];
++        case "attrib": return ["vertexAttrib4f", n, 0, 0, 0, 1];
++        case "tex": return ["bindTextureUnit", n, +parts[2], null];
++        case "sampler": return ["bindSampler", n, null];
++        case "polygonMode": return ["polygonModeWEBGL", 0x0408, 0x1B02];
++        case "clipControl": return ["clipControlEXT", 0x8CA1, 0x935E];
++        case "provokingVertex": return ["provokingVertexWEBGL", 0x8E4E];
++        }
++        return null;
++    };
++
++    // What the GL layer of Emscripten keeps itself (see blSaveState)
++    var initialCache = [gl.currentArrayBufferBinding, 0, gl.currentPixelPackBufferBinding,
++        gl.currentPixelUnpackBufferBinding, gl.currentProgram, GL.unpackAlignment, GL.unpackRowLength];
++    var tracker = gl.blTracker = {
++        // The setters without tracking, by slot value name
++        raw: {},
++        defaultSlot: defaultSlot,
++        // State of a new context; "indexed" holds the per draw buffer
++        // values of OES_draw_buffers_indexed by kind
++        create: function () {
++            return { slots: Object.assign({}, initial), indexed: {}, cache: initialCache };
++        },
++        // The state that is in the host context right now
++        live: null
++    };
++    tracker.live = tracker.create();
++    var raw = tracker.raw;
++    raw.bindTextureUnit = function (unit, target, texture) {
++        raw.activeTexture(TEXTURE0 + unit);
++        raw.bindTexture(target, texture);
++    };
++    var set = function (key, slot) {
++        tracker.live.slots[key] = slot;
++    };
++    // The non indexed setter sets all draw buffers
++    var setAll = function (kind, key, slot) {
++        delete tracker.live.indexed[kind];
++        set(key, slot);
++    };
++    var setIndexed = function (kind, index, slot) {
++        var indexed = tracker.live.indexed;
++        (indexed[kind] || (indexed[kind] = {}))[index] = slot;
++    };
++    var faces = function (face) {
++        return face === 0x0408 ? [FRONT, BACK] : [face];
++    };
++    var wrap = function (object, name, record) {
++        var original = object && object[name];
++        if (typeof original !== "function")
++            return;
++        raw[name] = function () {
++            return original.apply(object, arguments);
++        };
++        object[name] = function () {
++            record.apply(null, arguments);
++            return original.apply(object, arguments);
++        };
++    };
++    // Setters whose arguments are the slot
++    ["blendColor", "clearColor", "clearDepth", "clearStencil", "cullFace", "depthFunc", "depthMask", "depthRange",
++        "frontFace", "lineWidth", "polygonOffset", "sampleCoverage", "scissor", "viewport", "useProgram",
++        "bindRenderbuffer", "activeTexture", "bindVertexArray", "bindTransformFeedback"].forEach(function (name) {
++        wrap(gl, name, function () {
++            set(name, [name].concat(Array.prototype.slice.call(arguments)));
++        });
++    });
++    ["enable", "disable"].forEach(function (name) {
++        wrap(gl, name, function (cap) {
++            if (!(cap in caps))
++                return;
++            if (cap === BLEND)
++                delete tracker.live.indexed.blend;
++            set("cap:" + cap, [name, cap]);
++        });
++    });
++    wrap(gl, "blendEquation", function (mode) {
++        setAll("blendEquation", "blendEquation", ["blendEquationSeparate", mode, mode]);
++    });
++    wrap(gl, "blendEquationSeparate", function (rgb, alpha) {
++        setAll("blendEquation", "blendEquation", ["blendEquationSeparate", rgb, alpha]);
++    });
++    wrap(gl, "blendFunc", function (source, destination) {
++        setAll("blendFunc", "blendFunc", ["blendFuncSeparate", source, destination, source, destination]);
++    });
++    wrap(gl, "blendFuncSeparate", function (sourceRGB, destinationRGB, sourceAlpha, destinationAlpha) {
++        setAll("blendFunc", "blendFunc", ["blendFuncSeparate", sourceRGB, destinationRGB, sourceAlpha, destinationAlpha]);
++    });
++    wrap(gl, "colorMask", function (r, g, b, a) {
++        setAll("colorMask", "colorMask", ["colorMask", r, g, b, a]);
++    });
++    wrap(gl, "stencilFunc", function (func, ref, mask) {
++        faces(0x0408).forEach(function (face) {
++            set("stencilFunc:" + face, ["stencilFuncSeparate", face, func, ref, mask]);
++        });
++    });
++    wrap(gl, "stencilFuncSeparate", function (which, func, ref, mask) {
++        faces(which).forEach(function (face) {
++            set("stencilFunc:" + face, ["stencilFuncSeparate", face, func, ref, mask]);
++        });
++    });
++    wrap(gl, "stencilOp", function (fail, zfail, zpass) {
++        faces(0x0408).forEach(function (face) {
++            set("stencilOp:" + face, ["stencilOpSeparate", face, fail, zfail, zpass]);
++        });
++    });
++    wrap(gl, "stencilOpSeparate", function (which, fail, zfail, zpass) {
++        faces(which).forEach(function (face) {
++            set("stencilOp:" + face, ["stencilOpSeparate", face, fail, zfail, zpass]);
++        });
++    });
++    wrap(gl, "stencilMask", function (mask) {
++        faces(0x0408).forEach(function (face) {
++            set("stencilMask:" + face, ["stencilMaskSeparate", face, mask]);
++        });
++    });
++    wrap(gl, "stencilMaskSeparate", function (which, mask) {
++        faces(which).forEach(function (face) {
++            set("stencilMask:" + face, ["stencilMaskSeparate", face, mask]);
++        });
++    });
++    wrap(gl, "hint", function (target, mode) {
++        if (target in hints)
++            set("hint:" + target, ["hint", target, mode]);
++    });
++    wrap(gl, "pixelStorei", function (name, value) {
++        if (name in pixelStore)
++            set("pixelStorei:" + name, ["pixelStorei", name, value]);
++    });
++    wrap(gl, "bindBuffer", function (target, buffer) {
++        if (target in bufferTargets)
++            set("bindBuffer:" + target, ["bindBuffer", target, buffer]);
++    });
++    // Also set the generic binding. The indexed transform feedback
++    // bindings belong to the transform feedback object.
++    wrap(gl, "bindBufferBase", function (target, index, buffer) {
++        if (target === UNIFORM_BUFFER)
++            set("ubo:" + index, ["bindBufferBase", target, index, buffer]);
++        if (target === UNIFORM_BUFFER || target === TRANSFORM_FEEDBACK_BUFFER)
++            set("bindBuffer:" + target, ["bindBuffer", target, buffer]);
++    });
++    wrap(gl, "bindBufferRange", function (target, index, buffer, offset, size) {
++        if (target === UNIFORM_BUFFER)
++            set("ubo:" + index, ["bindBufferRange", target, index, buffer, offset, size]);
++        if (target === UNIFORM_BUFFER || target === TRANSFORM_FEEDBACK_BUFFER)
++            set("bindBuffer:" + target, ["bindBuffer", target, buffer]);
++    });
++    wrap(gl, "bindFramebuffer", function (target, framebuffer) {
++        if (!webgl2)
++            set("bindFramebuffer:" + target, ["bindFramebuffer", target, framebuffer]);
++        else {
++            if (target === 0x8D40 || target === 0x8CA8)
++                set("bindFramebuffer:" + 0x8CA8, ["bindFramebuffer", 0x8CA8, framebuffer]);
++            if (target === 0x8D40 || target === 0x8CA9)
++                set("bindFramebuffer:" + 0x8CA9, ["bindFramebuffer", 0x8CA9, framebuffer]);
++        }
++    });
++    wrap(gl, "bindTexture", function (target, texture) {
++        if (!(target in textureTargets))
++            return;
++        var unit = tracker.live.slots.activeTexture[1] - TEXTURE0;
++        set("tex:" + unit + ":" + target, ["bindTextureUnit", unit, target, texture]);
++    });
++    wrap(gl, "bindSampler", function (unit, sampler) {
++        set("sampler:" + unit, ["bindSampler", unit, sampler]);
++    });
++    // Constant vertex attributes, kept as the four values
++    var attrib = function (name, size, vector, kind) {
++        wrap(gl, name, function (index) {
++            var values = vector ? arguments[1] : Array.prototype.slice.call(arguments, 1);
++            var four = [0, 0, 0, 1];
++            for (var i = 0; i < size; i++)
++                four[i] = values[i];
++            set("attrib:" + index, [kind, index].concat(four));
++        });
++    };
++    for (var size = 1; size <= 4; size++) {
++        attrib("vertexAttrib" + size + "f", size, false, "vertexAttrib4f");
++        attrib("vertexAttrib" + size + "fv", size, true, "vertexAttrib4f");
++    }
++    attrib("vertexAttribI4i", 4, false, "vertexAttribI4i");
++    attrib("vertexAttribI4iv", 4, true, "vertexAttribI4i");
++    attrib("vertexAttribI4ui", 4, false, "vertexAttribI4ui");
++    attrib("vertexAttribI4uiv", 4, true, "vertexAttribI4ui");
++    // A deleted object is no longer bound anywhere in the context
++    ["deleteBuffer", "deleteTexture", "deleteFramebuffer", "deleteRenderbuffer", "deleteSampler", "deleteVertexArray",
++        "deleteTransformFeedback", "deleteProgram"].forEach(function (name) {
++        wrap(gl, name, function (object) {
++            if (!object)
++                return;
++            var slots = tracker.live.slots;
++            for (var key in slots) {
++                if (slots[key].indexOf(object, 1) > 0)
++                    slots[key] = defaultSlot(key);
++            }
++        });
++    });
++    // Extensions return the same object on every getExtension
++    var extension = function (name) {
++        return gl.getExtension(name);
++    };
++    var polygonOffsetClamp = extension("EXT_polygon_offset_clamp");
++    wrap(polygonOffsetClamp, "polygonOffsetClampEXT", function (factor, units, clamp) {
++        set("polygonOffset", ["polygonOffsetClampEXT", factor, units, clamp]);
++    });
++    wrap(extension("WEBGL_polygon_mode"), "polygonModeWEBGL", function (face, mode) {
++        set("polygonMode", ["polygonModeWEBGL", face, mode]);
++    });
++    wrap(extension("EXT_clip_control"), "clipControlEXT", function (origin, depth) {
++        set("clipControl", ["clipControlEXT", origin, depth]);
++    });
++    if (webgl2) {
++        wrap(extension("WEBGL_provoking_vertex"), "provokingVertexWEBGL", function (mode) {
++            set("provokingVertex", ["provokingVertexWEBGL", mode]);
++        });
++    }
++    var indexed = webgl2 && extension("OES_draw_buffers_indexed");
++    wrap(indexed, "enableiOES", function (target, index) {
++        if (target === BLEND)
++            setIndexed("blend", index, ["enableiOES", target, index]);
++    });
++    wrap(indexed, "disableiOES", function (target, index) {
++        if (target === BLEND)
++            setIndexed("blend", index, ["disableiOES", target, index]);
++    });
++    wrap(indexed, "blendEquationiOES", function (index, mode) {
++        setIndexed("blendEquation", index, ["blendEquationSeparateiOES", index, mode, mode]);
++    });
++    wrap(indexed, "blendEquationSeparateiOES", function (index, rgb, alpha) {
++        setIndexed("blendEquation", index, ["blendEquationSeparateiOES", index, rgb, alpha]);
++    });
++    wrap(indexed, "blendFunciOES", function (index, source, destination) {
++        setIndexed("blendFunc", index, ["blendFuncSeparateiOES", index, source, destination, source, destination]);
++    });
++    wrap(indexed, "blendFuncSeparateiOES", function (index, sourceRGB, destinationRGB, sourceAlpha, destinationAlpha) {
++        setIndexed("blendFunc", index, ["blendFuncSeparateiOES", index, sourceRGB, destinationRGB, sourceAlpha, destinationAlpha]);
++    });
++    wrap(indexed, "colorMaskiOES", function (index, r, g, b, a) {
++        setIndexed("colorMask", index, ["colorMaskiOES", index, r, g, b, a]);
++    });
++    return handle;
+ });
+ 
+ EM_JS(int, blIsContextLost, (int handle), {
+@@ -267,192 +549,70 @@ EM_JS(int, blIsContextLost, (int handle), {
+     return !context || context.GLctx.isContextLost() ? 1 : 0;
+ });
+ 
+-// Saves the state of the current host context under "key". It saves
+-// everything that belongs to the context in WebGL and is not held in an object
+-// (VAO, framebuffer, program, transform feedback hold their own state).
+-// Plus the values that the GL layer of Emscripten keeps itself.
+-EM_JS(void, blSaveState, (int key, int webgl2, int units), {
++// Keeps the values that the GL layer of Emscripten holds itself for the
++// context whose state is in the host context. The GL state itself is
++// already in its tracked slots.
++EM_JS(void, blSaveState, (int key), {
++    var s = GL.blStates && GL.blStates[key];
++    if (!s)
++        return;
+     var gl = GLctx;
+-    var s = { caps: [], params: {}, units: [], attribs: [] };
+-    var caps = [0x0BE2, 0x0B44, 0x0B71, 0x0BD0, 0x8037, 0x809E, 0x80A0, 0x0C11, 0x0B90];
+-    if (webgl2)
+-        caps.push(0x8C89);
+-    // Switches and values from extensions, only if the browser has them
+-    var extensionNames = [];
+-    if (gl.blExtension("EXT_depth_clamp"))
+-        caps.push(0x864F);
+-    if (gl.blExtension("WEBGL_polygon_mode")) {
+-        caps.push(0x2A02);
+-        extensionNames.push(0x0B40);
+-    }
+-    if (gl.blExtension("EXT_polygon_offset_clamp"))
+-        extensionNames.push(0x8E1B);
+-    if (gl.blExtension("EXT_clip_control"))
+-        extensionNames.push(0x935C, 0x935D);
+-    if (webgl2 && gl.blExtension("WEBGL_provoking_vertex"))
+-        extensionNames.push(0x8E4F);
+-    if (webgl2 && gl.blExtension("WEBGL_clip_cull_distance")) {
+-        for (var d = 0; d < gl.blLimit(0x0D32); d++)
+-            caps.push(0x3000 + d);
+-    }
+-    // What nobody has set since the restore is still as restored
+-    var restored = gl.blRestored;
+-    var touched = gl.blTouched;
+-    s.capList = caps;
+-    for (var i = 0; i < caps.length; i++)
+-        s.caps.push(gl.isEnabled(caps[i]));
+-    var names = [0x8005, 0x8009, 0x883D, 0x80C9, 0x80C8, 0x80CB, 0x80CA, 0x0C22, 0x0C23, 0x0B73, 0x0B91,
+-        0x0B45, 0x0B74, 0x0B72, 0x0B70, 0x0B46, 0x0B21, 0x8038, 0x2A00, 0x80AA, 0x80AB, 0x0C10, 0x0BA2,
+-        0x0B92, 0x0B97, 0x0B93, 0x0B94, 0x0B95, 0x0B96, 0x0B98, 0x8800, 0x8CA3, 0x8CA4, 0x8801, 0x8802,
+-        0x8803, 0x8CA5, 0x8192, 0x0D05, 0x0CF5, 0x9240, 0x9241, 0x9243, 0x8B8D, 0x8894, 0x8CA6, 0x8CA7,
+-        0x84E0, 0x85B5];
+-    if (webgl2)
+-        names = names.concat([0x8CAA, 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x806E, 0x0CF3, 0x0CF4, 0x806D,
+-            0x8F36, 0x8F37, 0x88ED, 0x88EF, 0x8E25, 0x8A28, 0x8C8F, 0x8B8B]);
+-    names = names.concat(extensionNames);
+-    for (var i = 0; i < names.length; i++)
+-        s.params[names[i]] = gl.getParameter(names[i]);
+-    for (var u = 0; u <= units; u++) {
+-        gl.activeTexture(0x84C0 + u);
+-        var unit = [gl.getParameter(0x8069), gl.getParameter(0x8514)];
+-        if (webgl2)
+-            unit.push(gl.getParameter(0x806A), gl.getParameter(0x8C1D), gl.getParameter(0x8919));
+-        s.units.push(unit);
+-    }
+-    gl.activeTexture(s.params[0x84E0]);
+-    if (restored && !touched.attrib)
+-        s.attribs = restored.attribs;
+-    else {
+-        var attribs = gl.blLimit(0x8869);
+-        for (var a = 0; a < attribs; a++)
+-            s.attribs.push(gl.getVertexAttrib(a, 0x8626));
+-    }
+-    if (webgl2) {
+-        if (restored && !touched.ubo)
+-            s.uniformBuffers = restored.uniformBuffers;
+-        else {
+-            s.uniformBuffers = [];
+-            var count = gl.blLimit(0x8A2F);
+-            for (var b = 0; b < count; b++)
+-                s.uniformBuffers.push([gl.getIndexedParameter(0x8A28, b), gl.getIndexedParameter(0x8A29, b), gl.getIndexedParameter(0x8A2A, b)]);
+-        }
+-    }
+     s.cache = [gl.currentArrayBufferBinding, gl.currentElementArrayBufferBinding, gl.currentPixelPackBufferBinding,
+         gl.currentPixelUnpackBufferBinding, gl.currentProgram, GL.unpackAlignment, GL.unpackRowLength];
+-    (GL.blStates || (GL.blStates = {}))[key] = s;
+ });
+ 
+-// Loads state "key" into the current host context. A new context gets the
+-// initial state of the host context (defaultKey) with its own VAO/TF.
+-// "units" texture units are set, also those this context has never used,
+-// so that no textures of another context remain visible.
+-EM_JS(void, blRestoreState, (int key, int defaultKey, int vertexArray, int transformFeedback, int webgl2, int units), {
++// Loads the state of context "key" into the current host context. A new
++// context starts with the initial state and its own VAO/TF. Slots that only
++// the state in the host context has (texture units, vertex attributes,
++// switches of extensions ...) get their initial value.
++EM_JS(void, blRestoreState, (int key, int vertexArray, int transformFeedback), {
+     var gl = GLctx;
+-    var saved = GL.blStates[key];
+-    var s = saved || GL.blStates[defaultKey];
+-    var p = s.params;
+-    gl.bindVertexArray(saved ? p[0x85B5] : GL.vaos[vertexArray]);
+-    if (webgl2)
+-        gl.bindTransformFeedback(0x8E22, saved ? p[0x8E25] : GL.transformFeedbacks[transformFeedback]);
+-    for (var i = 0; i < s.capList.length; i++) {
+-        if (s.caps[i])
+-            gl.enable(s.capList[i]);
+-        else
+-            gl.disable(s.capList[i]);
++    var tracker = gl.blTracker;
++    var states = GL.blStates || (GL.blStates = {});
++    var s = states[key];
++    if (!s) {
++        s = states[key] = tracker.create();
++        s.slots.bindVertexArray = ["bindVertexArray", GL.vaos[vertexArray]];
++        if (transformFeedback)
++            s.slots.bindTransformFeedback = ["bindTransformFeedback", 0x8E22, GL.transformFeedbacks[transformFeedback]];
+     }
+-    gl.blendColor(p[0x8005][0], p[0x8005][1], p[0x8005][2], p[0x8005][3]);
+-    gl.blendEquationSeparate(p[0x8009], p[0x883D]);
+-    gl.blendFuncSeparate(p[0x80C9], p[0x80C8], p[0x80CB], p[0x80CA]);
+-    gl.clearColor(p[0x0C22][0], p[0x0C22][1], p[0x0C22][2], p[0x0C22][3]);
+-    gl.colorMask(p[0x0C23][0], p[0x0C23][1], p[0x0C23][2], p[0x0C23][3]);
+-    gl.clearDepth(p[0x0B73]);
+-    gl.clearStencil(p[0x0B91]);
+-    gl.cullFace(p[0x0B45]);
+-    gl.depthFunc(p[0x0B74]);
+-    gl.depthMask(p[0x0B72]);
+-    gl.depthRange(p[0x0B70][0], p[0x0B70][1]);
+-    gl.frontFace(p[0x0B46]);
+-    gl.lineWidth(p[0x0B21]);
+-    if (p[0x8E1B] !== undefined)
+-        gl.blExtension("EXT_polygon_offset_clamp").polygonOffsetClampEXT(p[0x8038], p[0x2A00], p[0x8E1B]);
+-    else
+-        gl.polygonOffset(p[0x8038], p[0x2A00]);
+-    if (p[0x0B40] !== undefined)
+-        gl.blExtension("WEBGL_polygon_mode").polygonModeWEBGL(0x0408, p[0x0B40]);
+-    if (p[0x935C] !== undefined)
+-        gl.blExtension("EXT_clip_control").clipControlEXT(p[0x935C], p[0x935D]);
+-    if (p[0x8E4F] !== undefined)
+-        gl.blExtension("WEBGL_provoking_vertex").provokingVertexWEBGL(p[0x8E4F]);
+-    gl.sampleCoverage(p[0x80AA], p[0x80AB]);
+-    gl.scissor(p[0x0C10][0], p[0x0C10][1], p[0x0C10][2], p[0x0C10][3]);
+-    gl.viewport(p[0x0BA2][0], p[0x0BA2][1], p[0x0BA2][2], p[0x0BA2][3]);
+-    gl.stencilFuncSeparate(0x0404, p[0x0B92], p[0x0B97], p[0x0B93]);
+-    gl.stencilFuncSeparate(0x0405, p[0x8800], p[0x8CA3], p[0x8CA4]);
+-    gl.stencilOpSeparate(0x0404, p[0x0B94], p[0x0B95], p[0x0B96]);
+-    gl.stencilOpSeparate(0x0405, p[0x8801], p[0x8802], p[0x8803]);
+-    gl.stencilMaskSeparate(0x0404, p[0x0B98]);
+-    gl.stencilMaskSeparate(0x0405, p[0x8CA5]);
+-    gl.hint(0x8192, p[0x8192]);
+-    var pixelStore = [0x0D05, 0x0CF5, 0x9240, 0x9241, 0x9243];
+-    if (webgl2)
+-        pixelStore = pixelStore.concat([0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x806E, 0x0CF3, 0x0CF4, 0x806D]);
+-    for (var i = 0; i < pixelStore.length; i++)
+-        gl.pixelStorei(pixelStore[i], p[pixelStore[i]]);
+-    gl.useProgram(p[0x8B8D]);
+-    gl.bindBuffer(0x8892, p[0x8894]);
+-    gl.bindRenderbuffer(0x8D41, p[0x8CA7]);
+-    if (webgl2) {
+-        gl.bindFramebuffer(0x8CA9, p[0x8CA6]);
+-        gl.bindFramebuffer(0x8CA8, p[0x8CAA]);
+-        gl.bindBuffer(0x8F36, p[0x8F36]);
+-        gl.bindBuffer(0x8F37, p[0x8F37]);
+-        gl.bindBuffer(0x88EB, p[0x88ED]);
+-        gl.bindBuffer(0x88EC, p[0x88EF]);
+-        gl.hint(0x8B8B, p[0x8B8B]);
+-        for (var b = 0; b < s.uniformBuffers.length; b++) {
+-            var binding = s.uniformBuffers[b];
+-            if (binding[0] && binding[2] > 0)
+-                gl.bindBufferRange(0x8A11, b, binding[0], binding[1], binding[2]);
+-            else
+-                gl.bindBufferBase(0x8A11, b, binding[0]);
+-        }
+-        // bindBufferBase/Range also set the generic binding
+-        gl.bindBuffer(0x8A11, p[0x8A28]);
+-        gl.bindBuffer(0x8C8E, p[0x8C8F]);
+-    } else
+-        gl.bindFramebuffer(0x8D40, p[0x8CA6]);
+-    for (var u = 0; u <= units; u++) {
+-        var unit = s.units[u] || [null, null, null, null, null];
+-        gl.activeTexture(0x84C0 + u);
+-        gl.bindTexture(0x0DE1, unit[0]);
+-        gl.bindTexture(0x8513, unit[1]);
+-        if (webgl2) {
+-            gl.bindTexture(0x806F, unit[2]);
+-            gl.bindTexture(0x8C1A, unit[3]);
+-            gl.bindSampler(u, unit[4]);
+-        }
++    var raw = tracker.raw;
++    var apply = function (slot) {
++        if (slot)
++            raw[slot[0]].apply(null, slot.slice(1));
++    };
++    var previous = tracker.live.slots;
++    var keys = Object.keys(s.slots);
++    for (var key in previous) {
++        if (!(key in s.slots))
++            keys.push(key);
+     }
+-    gl.activeTexture(p[0x84E0]);
+-    for (var a = 0; a < s.attribs.length; a++) {
+-        var value = s.attribs[a];
+-        if (value instanceof Int32Array)
+-            gl.vertexAttribI4iv(a, value);
+-        else if (value instanceof Uint32Array)
+-            gl.vertexAttribI4uiv(a, value);
++    // Generic buffer bindings after the indexed ones (they also set the
++    // generic one), the active texture unit after the texture bindings
++    var last = [];
++    for (var i = 0; i < keys.length; i++) {
++        var k = keys[i];
++        if (k === "activeTexture" || k.indexOf("bindBuffer:") === 0)
++            last.push(k);
+         else
+-            gl.vertexAttrib4fv(a, value);
++            apply(s.slots[k] || tracker.defaultSlot(k));
++    }
++    for (var i = 0; i < last.length; i++)
++        apply(s.slots[last[i]] || tracker.defaultSlot(last[i]));
++    // Per draw buffer values after the values for all draw buffers
++    for (var kind in s.indexed) {
++        for (var index in s.indexed[kind])
++            apply(s.indexed[kind][index]);
+     }
+     var cache = s.cache;
+     gl.currentArrayBufferBinding = cache[0];
+-    gl.currentElementArrayBufferBinding = saved ? cache[1] : 0;
++    gl.currentElementArrayBufferBinding = cache[1];
+     gl.currentPixelPackBufferBinding = cache[2];
+     gl.currentPixelUnpackBufferBinding = cache[3];
+     gl.currentProgram = cache[4];
+     GL.unpackAlignment = cache[5];
+     GL.unpackRowLength = cache[6];
+-    // From here on, only what the context sets itself counts
+-    gl.blRestored = s;
+-    gl.blTouched = {};
++    tracker.live = s;
+ });
+ 
+ EM_JS(void, blForgetState, (int key), {
+@@ -462,12 +622,6 @@ EM_JS(void, blForgetState, (int key), {
+ 
+ namespace {
+ 
+-// Key for the initial state of a host context (context IDs are positive)
+-int defaultStateKey(bool webgl2)
+-{
+-    return webgl2 ? -2 : -1;
+-}
+-
+ bool makeHostCurrent(HostContext& host)
+ {
+     return EM_ASM_INT({
+@@ -500,9 +654,6 @@ HostContext* ensureHost(bool webgl2)
+         if (!handle)
+             return nullptr;
+         host = new HostContext { handle };
+-        if (!makeHostCurrent(*host))
+-            return nullptr;
+-        blSaveState(defaultStateKey(webgl2), webgl2, 0);
+     }
+     return host;
+ }
+@@ -525,8 +676,8 @@ namespace WebCore {
+ 
+ void angleShimPrewarm()
+ {
+-    // The first creation queries extensions and state synchronously from the
+-    // GPU process. In the middle of a page load (fingerprinting scripts nearly
++    // The first creation queries extensions synchronously from the GPU
++    // process. In the middle of a page load (fingerprinting scripts nearly
+     // always create a WebGL context) this waited on weather.com for
+     // seconds, because the GPU was busy painting.
+     ensureHost(false);
+@@ -610,10 +761,10 @@ bool angleShimMakeCurrent(int id)
+         auto owner = contexts().find(host.stateOwner);
+         if (owner != contexts().end()) {
+             drainErrors(&owner->second.pendingErrors);
+-            blSaveState(owner->first, owner->second.webgl2, owner->second.maxTextureUnit);
++            blSaveState(owner->first);
+         } else
+             drainErrors(nullptr);
+-        blRestoreState(id, defaultStateKey(context.webgl2), context.defaultVertexArray, context.defaultTransformFeedback, context.webgl2, host.maxTextureUnit);
++        blRestoreState(id, context.defaultVertexArray, context.defaultTransformFeedback);
+         // Errors here would come from the restore, not from the page
+         drainErrors(nullptr);
+         host.stateOwner = id;
+@@ -706,16 +857,6 @@ GLenum GL_APIENTRY GL_GetError()
+     return glGetError();
+ }
+ 
+-void GL_APIENTRY GL_ActiveTexture(GLenum texture)
+-{
+-    if (current && texture >= GL_TEXTURE0 && texture < GL_TEXTURE0 + 256) {
+-        int unit = texture - GL_TEXTURE0;
+-        current->maxTextureUnit = std::max(current->maxTextureUnit, unit);
+-        current->host->maxTextureUnit = std::max(current->host->maxTextureUnit, unit);
+-    }
+-    glActiveTexture(texture);
+-}
+-
+ // VAO 0 is the context's own default VAO
+ void GL_APIENTRY GL_BindVertexArray(GLuint array)
+ {

@@ -263,6 +263,152 @@ function sharing() {
   return failed.length ? failed.join('+') : 'ok';
 }
 
+// The state of a context survives switches to another context, also state set in less common
+// ways (non separate setters, extensions, deleted bound objects), and the other one keeps the
+// defaults. Each check compares getParameter after the switch with the expected value.
+function contextState(version) {
+  const failed = [];
+  const make = () => document.createElement('canvas').getContext(version === 2 ? 'webgl2' : 'webgl');
+  const [a, b] = [make(), make()];
+  const C = a;
+  a.blendColor(0.25, 0.5, 0.75, 1);
+  a.blendEquation(C.FUNC_SUBTRACT);
+  a.blendFunc(C.SRC_ALPHA, C.ONE_MINUS_SRC_ALPHA);
+  a.colorMask(true, false, true, false);
+  a.clearDepth(0.5);
+  a.clearStencil(3);
+  a.cullFace(C.FRONT);
+  a.depthFunc(C.GREATER);
+  a.depthMask(false);
+  a.depthRange(0.25, 0.75);
+  a.frontFace(C.CW);
+  a.polygonOffset(1, 2);
+  a.sampleCoverage(0.5, true);
+  a.stencilFunc(C.EQUAL, 1, 0xff);
+  a.stencilOpSeparate(C.BACK, C.INCR, C.DECR, C.INVERT);
+  a.stencilMask(0x0f);
+  a.hint(C.GENERATE_MIPMAP_HINT, C.NICEST);
+  a.pixelStorei(C.UNPACK_FLIP_Y_WEBGL, true);
+  a.pixelStorei(C.PACK_ALIGNMENT, 1);
+  a.enable(C.CULL_FACE);
+  a.enable(C.DEPTH_TEST);
+  a.disable(C.DITHER);
+  a.viewport(1, 2, 3, 4);
+  a.scissor(4, 3, 2, 1);
+  const renderbuffer = a.createRenderbuffer();
+  a.bindRenderbuffer(C.RENDERBUFFER, renderbuffer);
+  // Deleting a bound object unbinds it
+  const deleted = a.createBuffer();
+  a.bindBuffer(C.ARRAY_BUFFER, deleted);
+  a.deleteBuffer(deleted);
+  const texture = a.createTexture();
+  a.activeTexture(C.TEXTURE3);
+  a.bindTexture(C.TEXTURE_2D, texture);
+  a.activeTexture(C.TEXTURE1);
+  a.vertexAttrib2f(1, 0.5, 0.25);
+  const expectA = [
+    ['BLEND_COLOR', '0.25,0.5,0.75,1'], ['BLEND_EQUATION_RGB', C.FUNC_SUBTRACT], ['BLEND_EQUATION_ALPHA', C.FUNC_SUBTRACT],
+    ['BLEND_SRC_RGB', C.SRC_ALPHA], ['BLEND_DST_ALPHA', C.ONE_MINUS_SRC_ALPHA], ['COLOR_WRITEMASK', 'true,false,true,false'],
+    ['DEPTH_CLEAR_VALUE', 0.5], ['STENCIL_CLEAR_VALUE', 3], ['CULL_FACE_MODE', C.FRONT], ['DEPTH_FUNC', C.GREATER],
+    ['DEPTH_WRITEMASK', false], ['DEPTH_RANGE', '0.25,0.75'], ['FRONT_FACE', C.CW], ['POLYGON_OFFSET_FACTOR', 1],
+    ['POLYGON_OFFSET_UNITS', 2], ['SAMPLE_COVERAGE_VALUE', 0.5], ['SAMPLE_COVERAGE_INVERT', true],
+    ['STENCIL_FUNC', C.EQUAL], ['STENCIL_BACK_FUNC', C.EQUAL], ['STENCIL_BACK_VALUE_MASK', 0xff], ['STENCIL_VALUE_MASK', 0xff],
+    ['STENCIL_FAIL', C.KEEP], ['STENCIL_BACK_FAIL', C.INCR], ['STENCIL_BACK_PASS_DEPTH_PASS', C.INVERT],
+    ['STENCIL_WRITEMASK', 0x0f], ['STENCIL_BACK_WRITEMASK', 0x0f], ['GENERATE_MIPMAP_HINT', C.NICEST],
+    ['UNPACK_FLIP_Y_WEBGL', true], ['PACK_ALIGNMENT', 1], ['UNPACK_ALIGNMENT', 4], ['CULL_FACE', true],
+    ['DEPTH_TEST', true], ['DITHER', false], ['BLEND', false], ['VIEWPORT', '1,2,3,4'], ['SCISSOR_BOX', '4,3,2,1'],
+    ['RENDERBUFFER_BINDING', renderbuffer], ['ARRAY_BUFFER_BINDING', null], ['ACTIVE_TEXTURE', C.TEXTURE1],
+  ];
+  const expectB = [
+    ['BLEND_COLOR', '0,0,0,0'], ['BLEND_EQUATION_RGB', C.FUNC_ADD], ['BLEND_SRC_RGB', C.ONE], ['BLEND_DST_ALPHA', C.ZERO],
+    ['COLOR_WRITEMASK', 'true,true,true,true'], ['DEPTH_CLEAR_VALUE', 1], ['CULL_FACE_MODE', C.BACK],
+    ['DEPTH_FUNC', C.LESS], ['DEPTH_WRITEMASK', true], ['DEPTH_RANGE', '0,1'], ['FRONT_FACE', C.CCW],
+    ['POLYGON_OFFSET_FACTOR', 0], ['STENCIL_FUNC', C.ALWAYS], ['STENCIL_BACK_FAIL', C.KEEP],
+    ['STENCIL_WRITEMASK', 0xffffffff], ['GENERATE_MIPMAP_HINT', C.DONT_CARE], ['UNPACK_FLIP_Y_WEBGL', false],
+    ['PACK_ALIGNMENT', 4], ['CULL_FACE', false], ['DEPTH_TEST', false], ['DITHER', true],
+    ['RENDERBUFFER_BINDING', null], ['ACTIVE_TEXTURE', C.TEXTURE0],
+  ];
+  if (version === 2) {
+    const sampler = a.createSampler();
+    a.bindSampler(3, sampler);
+    a.pixelStorei(C.UNPACK_ROW_LENGTH, 4);
+    const copy = a.createBuffer();
+    a.bindBuffer(C.COPY_READ_BUFFER, copy);
+    const ubo = a.createBuffer();
+    a.bindBuffer(C.UNIFORM_BUFFER, ubo);
+    a.bufferData(C.UNIFORM_BUFFER, 256, C.STATIC_DRAW);
+    a.bindBufferBase(C.UNIFORM_BUFFER, 1, ubo);
+    a.bindBuffer(C.UNIFORM_BUFFER, null);
+    const framebuffer = a.createFramebuffer();
+    a.bindFramebuffer(C.READ_FRAMEBUFFER, framebuffer);
+    a.vertexAttribI4i(2, 1, 2, 3, 4);
+    expectA.push(['UNPACK_ROW_LENGTH', 4], ['COPY_READ_BUFFER_BINDING', copy], ['UNIFORM_BUFFER_BINDING', null],
+      ['READ_FRAMEBUFFER_BINDING', framebuffer], ['DRAW_FRAMEBUFFER_BINDING', null], ['SAMPLER_BINDING', null]);
+    expectB.push(['UNPACK_ROW_LENGTH', 0], ['COPY_READ_BUFFER_BINDING', null], ['READ_FRAMEBUFFER_BINDING', null]);
+    // Blend function of one draw buffer (OES_draw_buffers_indexed), where the host has it
+    const indexed = a.getExtension('OES_draw_buffers_indexed');
+    b.getExtension('OES_draw_buffers_indexed');
+    indexed?.blendFunciOES(1, C.DST_COLOR, C.ZERO);
+    const blendSource = (gl) => (indexed ? gl.getIndexedParameter(C.BLEND_SRC_RGB, 1) : null);
+    a.extra = () => {
+      const ok = a.getIndexedParameter(C.UNIFORM_BUFFER_BINDING, 1) === ubo
+        && Array.from(a.getVertexAttrib(2, C.CURRENT_VERTEX_ATTRIB)).join() === '1,2,3,4'
+        && blendSource(a) === (indexed ? C.DST_COLOR : null) && a.getParameter(C.BLEND_SRC_RGB) === C.SRC_ALPHA;
+      a.activeTexture(C.TEXTURE3);
+      const unit = a.getParameter(C.SAMPLER_BINDING) === sampler && a.getParameter(C.TEXTURE_BINDING_2D) === texture;
+      a.activeTexture(C.TEXTURE1);
+      return ok && unit;
+    };
+    b.extra = () => b.getIndexedParameter(C.UNIFORM_BUFFER_BINDING, 1) === null
+      && Array.from(b.getVertexAttrib(2, C.CURRENT_VERTEX_ATTRIB)).join() === '0,0,0,1'
+      && blendSource(b) === (indexed ? C.ONE : null);
+  } else {
+    a.extra = () => {
+      a.activeTexture(C.TEXTURE3);
+      const unit = a.getParameter(C.TEXTURE_BINDING_2D) === texture;
+      a.activeTexture(C.TEXTURE1);
+      return unit && Array.from(a.getVertexAttrib(1, C.CURRENT_VERTEX_ATTRIB)).join() === '0.5,0.25,0,1';
+    };
+    b.extra = () => Array.from(b.getVertexAttrib(1, C.CURRENT_VERTEX_ATTRIB)).join() === '0,0,0,1';
+  }
+  const value = (v) => (v && typeof v === 'object' && 'length' in v ? Array.from(v).join() : v);
+  const compare = (gl, name, list) => {
+    for (const [pname, expected] of list) {
+      const actual = value(gl.getParameter(C[pname]));
+      if (actual !== expected)
+        failed.push(name + ':' + pname + '=' + actual);
+    }
+    if (!gl.extra())
+      failed.push(name + ':extra');
+  };
+  // Several switches in both directions
+  for (let round = 0; round < 2; round++) {
+    b.clear(C.COLOR_BUFFER_BIT);
+    compare(a, 'a', expectA);
+    compare(b, 'b', expectB);
+  }
+  for (const [name, gl] of [['a', a], ['b', b]]) {
+    const error = gl.getError();
+    if (error)
+      failed.push('getError-' + name + '=' + error);
+  }
+  return failed.length ? failed.join('+') : 'ok';
+}
+
+// Switches between two contexts, the test counts the synchronous GL queries in the engine worker
+let switchContexts;
+function prepareSwitches() {
+  switchContexts = [1, 2].map(() => document.createElement('canvas').getContext('webgl2'));
+  switchContexts.forEach((gl) => gl.clear(gl.COLOR_BUFFER_BIT));
+  result('switchready', 'ok');
+}
+
+function runSwitches(count) {
+  for (let i = 0; i < count; i++)
+    switchContexts[i % 2].clear(switchContexts[0].COLOR_BUFFER_BIT);
+  result('switches', count);
+}
+
 // Host context lost (GPU reset): the page gets webglcontextlost, after preventDefault
 // webglcontextrestored and then draws again. A quiet context only draws again when a new host
 // context is already there (quietDraw), and must still be lost.
@@ -312,6 +458,13 @@ try {
   result('sharing', 'error:' + String(e.message).replace(/\\s+/g, '_'));
 }
 result('dataurl', dataURLs());
+for (const version of [1, 2]) {
+  try {
+    result('state' + version, contextState(version));
+  } catch (e) {
+    result('state' + version, 'error:' + String(e.message).replace(/\\s+/g, '_'));
+  }
+}
 
 for (const version of [1, 2]) {
   try {
@@ -363,6 +516,70 @@ for (const version of [1, 2]) {
 }
 const sharing = await result('sharing');
 check('many contexts (shared host context)', sharing === 'ok', sharing);
+for (const version of [1, 2]) {
+  const state = await result('state' + version);
+  check(
+    `WebGL ${version}: context state survives a switch, the other has the defaults`,
+    state === 'ok',
+    state,
+  );
+}
+
+// A switch between contexts must not read the GL state back from the host: every query there is a
+// synchronous round trip to the GPU process, on twitch.tv (Kasada fingerprinting next to a live
+// video) hundreds of them per switch froze the engine for seconds. Only the errors of the
+// contexts may be asked for.
+const SWITCHES = 40;
+await page.evaluate(() => window.blTest.eval('prepareSwitches()'));
+check('switch contexts ready', (await result('switchready')) === 'ok');
+// Counts the queries in every worker that answers (threads of the engine that wait do not), the
+// first call installs the counters
+function countQueries() {
+  if (typeof WebGLRenderingContext === 'undefined') return 0;
+  if (self.blHostQueries === undefined) {
+    self.blHostQueries = 0;
+    const names = [
+      'getParameter',
+      'getIndexedParameter',
+      'getVertexAttrib',
+      'isEnabled',
+      'getError',
+    ];
+    for (const type of [self.WebGLRenderingContext, self.WebGL2RenderingContext]) {
+      for (const name of names) {
+        const original = type?.prototype[name];
+        if (!original) continue;
+        type.prototype[name] = function (...args) {
+          self.blHostQueries++;
+          return original.apply(this, args);
+        };
+      }
+    }
+  }
+  return self.blHostQueries;
+}
+const hostQueries = async () => {
+  const counts = await Promise.all(
+    page
+      .workers()
+      .map((worker) =>
+        Promise.race([
+          worker.evaluate(countQueries).catch(() => 0),
+          new Promise((resolve) => setTimeout(() => resolve(0), 3000)),
+        ]),
+      ),
+  );
+  return counts.reduce((sum, count) => sum + count, 0);
+};
+const queriesBefore = await hostQueries();
+await page.evaluate((count) => window.blTest.eval(`runSwitches(${count})`), SWITCHES);
+check('switches done', (await result('switches')) === String(SWITCHES));
+const perSwitch = ((await hostQueries()) - queriesBefore) / SWITCHES;
+check(
+  'context switch without reading the state back from the host',
+  perSwitch > 0 && perSwitch <= 4,
+  `${perSwitch.toFixed(1)} host queries per switch`,
+);
 const dataURL = await result('dataurl');
 check(
   'toDataURL (PNG, JPEG, WebP)',
