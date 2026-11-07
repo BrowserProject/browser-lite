@@ -72,6 +72,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all
   below about 16.7 million px was blank). A filtered layer keeps the text shadow of its contents
   (#442; zoo.ch had hard dark boxes behind its headline with `filter: blur(0px)`).
+  AVIF images decode (libavif with dav1d, also 10 bit, alpha and animated, #447): the engine sends
+  Safari's user agent, so AliExpress sent its product pictures as AVIF, which showed as broken
+  icons. A 1600 x 1067 picture decodes in about the time of the same WebP (46 against 47 ms,
+  JPEG 30 ms, locally). Sites of the hot functions profile now send AVIF too (Accept), so the
+  decoder's common paths are in `engine.wasm`: 90 KB more gzip for the start, 230 KB deferred.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to

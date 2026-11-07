@@ -1,8 +1,8 @@
 # deps/
 
 The engine's libraries (zlib, ICU, freetype, harfbuzz, fontconfig, libxml2, sqlite, OpenSSL,
-nghttp2, libcurl, ...) built for WASM, plus runtime files (Noto fonts, fontconfig config and
-cache, CA certificates). Skia comes with WebKit.
+nghttp2, libcurl, libavif with dav1d, ...) built for WASM, plus runtime files (Noto fonts,
+fontconfig config and cache, CA certificates). Skia comes with WebKit.
 
 - `sources.txt`: source of each lib with version and SHA256 (or git commit). The only place
   where their versions live.

@@ -33,6 +33,8 @@ ORDER=(
     openssl
     nghttp2
     curl
+    dav1d
+    libavif
     notosans
     lazyfonts
     cacert

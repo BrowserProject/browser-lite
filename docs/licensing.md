@@ -23,7 +23,7 @@ fonttools that keep the copyright and license in their name table, as the OFL al
 
 Further licenses inside the engine, among others: OpenSSL (Apache-2.0), curl, nghttp2, zlib,
 brotli, zstd, libpng, libjpeg-turbo, libwebp, expat, libxml2, libxslt, SQLite (public domain),
-FreeType, HarfBuzz, fontconfig, woff2, libpsl, Skia (bundled with WebKit), and the Emscripten
+FreeType, HarfBuzz, fontconfig, woff2, libpsl, libavif, dav1d, Skia (bundled with WebKit), and the Emscripten
 runtime (libc, libc++, dlmalloc). Versions and sources: `deps/sources.txt`, `versions.env`.
 
 ### When you distribute the engine

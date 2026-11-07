@@ -27,6 +27,8 @@ libpsl          MIT AND MPL-2.0                       LICENSE,list/public_suffix
 openssl         Apache-2.0                            LICENSE.txt
 nghttp2         MIT                                   COPYING
 curl            curl                                  COPYING
+dav1d           BSD-2-Clause                          COPYING,doc/PATENTS
+libavif         BSD-2-Clause AND BSD-3-Clause         LICENSE
 notosans        OFL-1.1                               OFL.txt
 notoserif       OFL-1.1                               OFL.txt
 notosansmono    OFL-1.1                               OFL.txt

@@ -70,7 +70,8 @@ function gitSource(url, ref, expected) {
       if (attempt === 4) fail(`git fetch ${url} ${ref} failed: ${error.stderr ?? error}`);
     }
   }
-  const actual = git('rev-parse', 'FETCH_HEAD').trim();
+  // The commit, also behind an annotated tag (like deps/lib.sh)
+  const actual = git('rev-parse', 'FETCH_HEAD^{commit}').trim();
   if (actual !== expected) fail(`${url}: commit ${actual} instead of ${expected}`);
   return (file) => git('show', `${expected}:${file}`);
 }

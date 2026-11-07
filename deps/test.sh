@@ -7,7 +7,7 @@ source "$(dirname "$0")/lib.sh"
 out="$BL_DEPS_BUILD/smoke"
 mkdir -p "$out"
 
-pkgs="libcurl libpsl harfbuzz-icu harfbuzz fontconfig freetype2 icu-i18n icu-uc libxslt libxml-2.0 sqlite3 libwebpdemux libwebp libjpeg libpng zlib libzstd libbrotlidec libwoff2dec libnghttp2 openssl expat"
+pkgs="libcurl libpsl harfbuzz-icu harfbuzz fontconfig freetype2 icu-i18n icu-uc libxslt libxml-2.0 sqlite3 libavif dav1d libwebpdemux libwebp libjpeg libpng zlib libzstd libbrotlidec libwoff2dec libnghttp2 openssl expat"
 # shellcheck disable=SC2046,SC2086
 em++ $BL_CXXFLAGS -o "$out/smoke.js" "$BL_DEPS_DIR/tests/smoke.cpp" \
     $(pkg-config --cflags --static $pkgs) \

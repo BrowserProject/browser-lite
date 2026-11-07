@@ -4,8 +4,10 @@
 #include <cstring>
 #include <string>
 
+#include <avif/avif.h>
 #include <brotli/decode.h>
 #include <curl/curl.h>
+#include <dav1d/dav1d.h>
 #include <expat.h>
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
@@ -168,6 +170,13 @@ int main()
             && (info->features & CURL_VERSION_PSL);
         check("curl", ok, std::string(info->version) + " " + info->ssl_version);
         curl_global_cleanup();
+    }
+
+    {
+        // libavif decodes AV1 with dav1d
+        const char* codec = avifCodecName(AVIF_CODEC_CHOICE_AUTO, AVIF_CODEC_FLAG_CAN_DECODE);
+        bool ok = codec && !std::strcmp(codec, "dav1d");
+        check("libavif", ok, std::string(avifVersion()) + ", dav1d " + dav1d_version());
     }
 
     std::printf("%s\n", failures ? "SMOKE TEST FAILED" : "all libs ok");

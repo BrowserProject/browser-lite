@@ -14,7 +14,8 @@
 | `bench/` | benchmarks to run by hand: pages for `engine/render.mjs`, `slow-start.mjs` (first and second start of the packaged demo behind a slow link, `shaper.mjs`) | engine build, Playwright | none |
 
 `lib/` is the shared harness of the browser suites, `fixtures/` holds shared test data (WebAssembly
-modules with `wasm/build.sh`, `wasm-bytes.mjs`, `certs.mjs`, `features.html` for the parity test).
+modules with `wasm/build.sh`, `wasm-bytes.mjs`, `certs.mjs`, `features.html` for the parity test,
+the `avif-*.avif` pictures of `core/avif-test.mjs`).
 
 ## Run
 

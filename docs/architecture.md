@@ -125,6 +125,10 @@ rect is no longer clamped to 2^24 px (patch 0081, #409).
 A layer whose filter the compositor applies leaves the filter outsets out of its bounds only when
 nothing of its contents reaches further: what the contents paint outside the box (text-shadow,
 shadows and outlines of children) stays in the layer (patch 0089, #442).
+Images decode with WebKit's own decoders: PNG, JPEG, GIF, WebP, BMP, ICO and AVIF (libavif with
+dav1d, on one thread and without assembly). AVIF matters because the engine sends Safari's user
+agent and Safari has taken AVIF since version 16: sites that choose the format by user agent send
+it (AliExpress), and images are requested with `image/avif` in Accept like Safari (#447).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 The decoded frame of an image that is the contents of a compositing layer stays while the layer

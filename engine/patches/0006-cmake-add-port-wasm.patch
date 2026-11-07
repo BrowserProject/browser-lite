@@ -161,10 +161,10 @@ index 0000000000..5ab728a8d3
 +endif ()
 diff --git a/Source/cmake/OptionsWasm.cmake b/Source/cmake/OptionsWasm.cmake
 new file mode 100644
-index 0000000000..0cb9cc98e1
+index 0000000000..e9c7d7f2c5
 --- /dev/null
 +++ b/Source/cmake/OptionsWasm.cmake
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,185 @@
 +# PORT=Wasm (browser-lite): WebCore + JavaScriptCore to WebAssembly with Emscripten.
 +#
 +# - Single process: no WebKit2/IPC, no WebKitLegacy. The embedder (browser-lite
@@ -221,7 +221,8 @@ index 0000000000..0cb9cc98e1
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_SKIA_ENCODERS PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_WOFF2 PRIVATE ON)
-+WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_AVIF PRIVATE OFF)
++# AVIF like Safari, whose user agent the engine sends (libavif with dav1d)
++WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_AVIF PRIVATE ON)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_JPEGXL PRIVATE OFF)
 +WEBKIT_OPTION_DEFAULT_PORT_VALUE(USE_LCMS PRIVATE OFF)
 +
@@ -326,6 +327,17 @@ index 0000000000..0cb9cc98e1
 +    if (NOT WOFF2_FOUND)
 +        message(FATAL_ERROR "libwoff2dec is missing from the sysroot")
 +    endif ()
++endif ()
++
++if (USE_AVIF)
++    find_package(AVIF 0.9.0)
++    if (NOT AVIF_FOUND)
++        message(FATAL_ERROR "libavif is missing from the sysroot")
++    endif ()
++    # The static libavif needs its AV1 decoder. Not through pkg-config: dav1d.pc would bring
++    # Emscripten link options (PTHREAD_POOL_SIZE) of its own.
++    find_library(DAV1D_LIBRARY NAMES dav1d REQUIRED)
++    set_property(TARGET AVIF::AVIF APPEND PROPERTY INTERFACE_LINK_LIBRARIES "${DAV1D_LIBRARY}")
 +endif ()
 +
 +# EGL and GLES2 come from Emscripten itself (headers in the Emscripten sysroot,
