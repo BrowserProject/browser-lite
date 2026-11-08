@@ -1,0 +1,31 @@
+diff --git a/Source/JavaScriptCore/interpreter/CLoopStack.h b/Source/JavaScriptCore/interpreter/CLoopStack.h
+index 5d04f98578..74f264f3dc 100644
+--- a/Source/JavaScriptCore/interpreter/CLoopStack.h
++++ b/Source/JavaScriptCore/interpreter/CLoopStack.h
+@@ -73,6 +73,9 @@ namespace JSC {
+         }
+         void setCurrentStackPointer(void* sp) { m_currentStackPointer = sp; }
+ 
++        // browser-lite: for the JIT to WebAssembly, whose calls move the stack pointer
++        static constexpr ptrdiff_t offsetOfCurrentStackPointer() { return OBJECT_OFFSETOF(CLoopStack, m_currentStackPointer); }
++
+         size_t size() const { return highAddress() - lowAddress(); }
+ 
+         void setSoftReservedZoneSize(size_t);
+diff --git a/Source/JavaScriptCore/runtime/StackManager.h b/Source/JavaScriptCore/runtime/StackManager.h
+index 4d094e0f11..d7cf414328 100644
+--- a/Source/JavaScriptCore/runtime/StackManager.h
++++ b/Source/JavaScriptCore/runtime/StackManager.h
+@@ -88,6 +88,12 @@ public:
+     {
+         return OBJECT_OFFSETOF(StackManager, m_cloopStack);
+     }
++
++    // browser-lite: for the JIT to WebAssembly, whose calls check the limit
++    static constexpr ptrdiff_t offsetOfCLoopStackLimit()
++    {
++        return OBJECT_OFFSETOF(StackManager, m_cloopStackLimit);
++    }
+ #endif
+ 
+     VM& vm();

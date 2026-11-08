@@ -56,18 +56,28 @@ never baked into the code (the GC resets inline caches).
   arrays (all but Float16, BigInt and resizable ones; a Uint32 above 2^31 and Float32 too, NaN
   made pure) read and written with the conversions of the spec, and `Math.imul(a, b)` inline
   (its host function, which JSC keeps static, taken from a Math object of the JIT's own).
-- **Calls**: to a compiled function directly in the frame the bytecode prepared, found through a
-  cache per call site (the callee's executable, valid until the next GC); a short path in C++
-  takes the common case (enough arguments, shallow nesting), the general one the rest (also
-  moving the frame down for missing arguments, like the interpreter's arity fixup); to a host
-  function like the interpreter, in the callee's realm, and through the same cache and short
-  path once the site has seen it (`Math.max`, `charCodeAt`, DataView getters); else JSC's
-  generic call or construct. Varargs (`apply`, spread) get a frame like the interpreter's and
-  then the same call, tail calls are ordinary calls. `Function.prototype.call` (a builtin in JS,
-  which obfuscated code reaches as `f["call"](a, b)` and the bytecode's own shortcut for `f.call`
-  does not catch) and bound functions without arguments of their own give way to the call they
-  make: `this` and the arguments move in the frame and the target is called like any callee,
-  where each of them had made a VM entry of the generic call (2 to 3 times faster).
+- **Calls**: to a compiled function directly in the frame the bytecode prepared. The VM's callee
+  table (direct mapped by the callee's executable, 2048 entries) holds what a call needs of a
+  compiled or host callee: its `CodeBlock`, table index and frame sizes, or its host function. One
+  table serves every call site, so a site that calls many functions (an obfuscated VM that calls
+  its handlers from one site) hits it like a site with one. Its epoch moves at the start and the
+  end of every GC (a `HeapObserver`), which empties it; it lives while the VM has compiled code. A
+  call of a compiled callee in the table with enough arguments and shallow nesting runs in WASM,
+  without a call into C++: the callee's frame like `op_enter`, the C loop's stack pointer below it
+  (patch 0096 gives its offset and that of the stack's limit), `call_indirect` of the callee and
+  its calls again after a loop's return (see below). That work is a second function of the module,
+  which the sites call with their operands (done at every site instead, it made compiled code 20 to
+  40 % larger and a large VM function slower). Everything else goes through C++: host functions
+  like the interpreter calls them, in the callee's realm (`Math.max`, `charCodeAt`, DataView
+  getters), and the general path, which fills the table, moves the frame down for missing arguments
+  (like the interpreter's arity fixup) and leaves the rest to JSC's generic call or construct.
+  Varargs (`apply`, spread) get a frame like the interpreter's and then the same call, tail calls
+  are ordinary calls. `Function.prototype.call` (a builtin in JS, which obfuscated code reaches as
+  `f["call"](a, b)` and the bytecode's own shortcut for `f.call` does not catch) and bound
+  functions without arguments of their own give way to the call they make: `this` and the arguments
+  move in the frame and the target is called like any callee, where each of them had made a VM
+  entry of the generic call (2 to 3 times faster); they stay out of the table. The interpreter's
+  calls of compiled functions (`slow_path_enter`) find them in the same table.
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.
@@ -108,6 +118,14 @@ modules of the TypeScript compiler (1772 functions) are 11.9 MB of WASM; functio
 100 KB of bytecode stay interpreted (YouTube's bundles gave modules of 19 and 102 MB). With
 YouTube open the engine's memory is the same as without the JIT, the renderer about 25 MB more.
 
+Calls (#459, jsc shell, 2 million calls each, fastest of 3): one callee 84 against 62 ms, 16
+callees at one site 232 against 116 ms, 2 alternating 219 against 100 ms, a VM of 8 handlers 235
+against 130 ms, `fib(30)` 159 against 148 ms; in the engine 16 callees 216 against 126 ms, 2
+alternating 190 against 115 ms, the VM 226 against 145 ms. Octane in the jsc shell: Richards 859
+to 916 against 961 to 977, DeltaBlue 864 to 883 against 945 to 952, the score 1446 to 1491
+against 1510 to 1517. A VM function of 45 KB of bytecode with 800 call sites: 988 against 1058 KB
+of WASM, 40 runs 1033 against 863 ms (with the call's work at every site 1.4 MB and slower).
+
 Hashing code (#424, `tests/jsc/jit-hash.js`, jsc shell): bit operations on uint32 values 5x and
 typed array elements 3x the time of their int32 twins before, now 1.8x and 1.3x; `Math.imul` 6.5x
 an addition before, 2x now; a host call about 20 % cheaper. In the engine, the loops of
@@ -121,7 +139,8 @@ to 2.7 s, Chromium 24 to 44 ms).
 2. Calls between compiled and interpreted functions, exceptions, entry into running loops.
 3. Coverage of the remaining bytecodes; on by default when the suites and real sites pass.
 4. Speed: values in WASM locals between safepoints, type checks folded, inlining of small
-   functions; less code per bytecode. Obfuscated VMs (Cloudflare's Turnstile) bring functions of
+   functions; less code per bytecode. Calls of compiled functions run in WASM through the
+   callee table (#459). Obfuscated VMs (Cloudflare's Turnstile) bring functions of
    40 to 90 KB of bytecode, which become about 17 times that in WASM (54 KB: 0.9 MB), and V8 runs
    such a function in Liftoff for seconds while it optimizes it (`jsc` shell: 470 ms a run in
    Liftoff, 240 ms once optimized after about 2.5 s).

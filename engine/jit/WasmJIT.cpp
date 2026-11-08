@@ -27,6 +27,7 @@
 #include "FrameTracers.h"
 #include "FunctionExecutable.h"
 #include "FunctionRareData.h"
+#include "HeapObserver.h"
 #include "IndexingType.h"
 #include "Interpreter.h"
 #include "InterpreterInlines.h"
@@ -89,14 +90,13 @@ bool enabled()
 
 using OffsetMap = HashMap<unsigned, unsigned, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
 
-// A call site's last compiled or host callee by its executable, and what its frame needs, so a
-// call neither looks up the map nor reads the executable and its CodeBlock. Valid until the next
-// GC (which may throw the code away).
-struct CallCache {
-    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(CallCache);
-    ExecutableBase* executable { nullptr };
-    HeapVersion markingVersion { 0 };
-    HeapVersion edenVersion { 0 };
+// What a call from compiled code needs of a compiled or host callee, so it neither reads the
+// executable and its CodeBlock nor looks up the map. Valid within one GC epoch (a collection may
+// throw the code away, and a new executable may take the address of one that went away).
+struct CallTarget {
+    // The executable, with 1 added for a construct (executables are cells, aligned); 0: empty
+    uintptr_t key { 0 };
+    uint32_t epoch { 0 };
     CodeBlock* codeBlock { nullptr };
     // The compiled function, 0 for a host function
     uint32_t function { 0 };
@@ -104,11 +104,77 @@ struct CallCache {
     unsigned numCalleeLocals { 0 };
     unsigned numVars { 0 };
     VirtualRegister scopeRegister;
-    // The scope register's offset in the frame, for calls in compiled code
-    int32_t scopeOffset { 0 };
     // A host function (`function` is 0), called without the generic path
     TaggedNativeFunction hostFunction { };
 };
+
+// The callees of a VM's compiled code, direct mapped by key. One table for all call sites: an
+// obfuscated VM's dispatch (handlers[op](state)) calls dozens of functions from one site, which a
+// cache per site missed on every call (2.5 times the time of a call that hit). The epoch moves at
+// the start and the end of every collection, which empties the table at once. Compiled code
+// reads it at fixed addresses (emitCompiledCall), so it lives as long as the VM has compiled code.
+struct CallTargets final : HeapObserver {
+    WTF_DEPRECATED_MAKE_STRUCT_FAST_ALLOCATED(CallTargets);
+    static constexpr unsigned count = 2048;
+
+    explicit CallTargets(VM& vm)
+        : vm(vm)
+    {
+        vm.heap.addObserver(this);
+    }
+    ~CallTargets() { vm.heap.removeObserver(this); }
+    void willGarbageCollect() final { ++epoch; }
+    void didGarbageCollect(CollectionScope) final { ++epoch; }
+
+    static uintptr_t key(ExecutableBase* executable, bool isConstruct)
+    {
+        return reinterpret_cast<uintptr_t>(executable) + isConstruct;
+    }
+    static unsigned index(uintptr_t key) { return ((key >> 4) ^ (key >> 15)) & (count - 1); }
+    CallTarget& slot(uintptr_t key) { return targets[index(key)]; }
+
+    VM& vm;
+    // Starts above 0, the epoch of empty entries
+    uint32_t epoch { 1 };
+    // CodeBlocks with compiled code: the table goes with the last one (at the latest when the VM
+    // ends, which finalizes every CodeBlock)
+    unsigned compiledCodeBlocks { 0 };
+    CallTarget targets[count];
+};
+
+// Compiled code runs on the thread of its VM (WASM tables are per thread), one VM per thread
+// (wasmJITTierUp). A pooled thread may run another VM after the last one ended.
+std::unique_ptr<CallTargets>& threadCallTargets()
+{
+    static thread_local std::unique_ptr<CallTargets> table;
+    return table;
+}
+
+// The table of a VM that has compiled code on this thread, or null
+CallTargets* existingCallTargets(VM& vm)
+{
+    auto* table = threadCallTargets().get();
+    return table && &table->vm == &vm ? table : nullptr;
+}
+
+// The table of the VM of the compiled code that runs or compiles
+CallTargets& callTargets(VM& vm)
+{
+    auto* table = existingCallTargets(vm);
+    RELEASE_ASSERT(table);
+    return *table;
+}
+
+// The entry of a callee from this epoch, or null
+CallTarget* cachedCallTarget(VM& vm, ExecutableBase* executable, bool isConstruct)
+{
+    auto& table = callTargets(vm);
+    uintptr_t key = CallTargets::key(executable, isConstruct);
+    auto& target = table.slot(key);
+    if (target.key != key || target.epoch != table.epoch)
+        return nullptr;
+    return &target;
+}
 
 // More own properties of a get_by_id than the interpreter's cache holds (it keeps one structure):
 // the structures and offsets it had before, valid until the next GC
@@ -123,12 +189,10 @@ struct PropertyCache {
 };
 
 // A CodeBlock the compiler saw: the table index of its function (0 when it cannot be compiled),
-// by bytecode offset the blocks that start after its loop hints, the caches of its calls and
-// property reads
+// by bytecode offset the blocks that start after its loop hints, the caches of its property reads
 struct Compiled {
     uint32_t function { 0 };
     OffsetMap loops;
-    Vector<std::unique_ptr<CallCache>> callCaches;
     Vector<std::unique_ptr<PropertyCache>> propertyCaches;
 };
 
@@ -170,6 +234,24 @@ uint32_t compiledFunction(CodeBlock* codeBlock)
 {
     auto it = compiledCode().find(codeBlock);
     return it == compiledCode().end() ? 0 : it->value.function;
+}
+
+bool isFunctionPrototypeCall(VM& vm, FunctionExecutable* executable)
+{
+    return executable->isBuiltinFunction() && executable->unlinkedExecutable() == vm.builtinExecutables()->functionPrototypeCallCodeExecutable();
+}
+
+// The entry of a callee's CodeBlock with its compiled function, filled now. Not for
+// Function.prototype.call, whose calls give way to the call it makes (callInFrame).
+CallTarget* fillCallTarget(VM& vm, FunctionExecutable* executable, CodeBlock* codeBlock, uint32_t function, bool isConstruct)
+{
+    if (isFunctionPrototypeCall(vm, executable))
+        return nullptr;
+    auto& table = callTargets(vm);
+    uintptr_t key = CallTargets::key(executable, isConstruct);
+    auto& target = table.slot(key);
+    target = { key, table.epoch, codeBlock, function, codeBlock->numParameters(), codeBlock->numCalleeLocals(), codeBlock->numVars(), codeBlock->scopeRegister() };
+    return &target;
 }
 
 EM_JS(uint32_t, wasmJITInstall, (const uint8_t* bytes, uint32_t size, int dump), {
@@ -317,26 +399,39 @@ uintptr_t imulHostFunction(JSGlobalObject* globalObject)
     return function;
 }
 
-// A call site's host function, so its next calls skip the generic path
-void cacheHostFunction(VM& vm, JSFunction* function, CallCache* cache)
+// What compiled calls move and check of the C loop's stack (patch 0096)
+void* cloopStackPointerAddress(VM& vm)
 {
+    return reinterpret_cast<char*>(&vm.cloopStack()) + CLoopStack::offsetOfCurrentStackPointer();
+}
+
+void* cloopStackLimitAddress(VM& vm)
+{
+    return reinterpret_cast<char*>(&vm.traps()) + VMTraps::offsetOfStackManager() + StackManager::offsetOfCLoopStackLimit();
+}
+
+// A host function's entry, so its next calls skip the generic path. Not for bound functions: all
+// of a kind share their executable, and those without arguments of their own give way to the call
+// they make (callInFrame).
+void cacheHostFunction(VM& vm, JSFunction* function)
+{
+    if (function->inherits<JSBoundFunction>())
+        return;
     auto* executable = uncheckedDowncast<NativeExecutable>(function->executable());
-    auto& space = vm.heap.objectSpace();
-    *cache = { };
-    cache->executable = executable;
-    cache->markingVersion = space.markingVersion();
-    cache->edenVersion = space.edenVersion();
-    cache->hostFunction = executable->function();
+    auto& table = callTargets(vm);
+    uintptr_t key = CallTargets::key(executable, false);
+    auto& target = table.slot(key);
+    target = { };
+    target.key = key;
+    target.epoch = table.epoch;
+    target.hostFunction = executable->function();
 }
 
 // The builtin Function.prototype.call (FunctionPrototype.js), which calls its `this` through
 // Function.prototype.apply
 bool isFunctionPrototypeCall(VM& vm, JSFunction* function)
 {
-    if (function->isHostFunction())
-        return false;
-    auto* executable = function->jsExecutable();
-    return executable->isBuiltinFunction() && executable->unlinkedExecutable() == vm.builtinExecutables()->functionPrototypeCallCodeExecutable();
+    return !function->isHostFunction() && isFunctionPrototypeCall(vm, function->jsExecutable());
 }
 
 // The call that Function.prototype.call (fn.call(thisArgument, a, b), which obfuscated code also
@@ -383,7 +478,7 @@ JSValue unwrapForwardingCall(VM& vm, CallFrame* calleeFrame, JSValue callee, uns
 // bound functions without arguments of their own give way to the call they make. Returns the
 // result, empty after an exception.
 template<bool isConstruct>
-JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, CallFrame* callFrame, CallFrame* calleeFrame, JSValue callee, unsigned argumentCount, CallCache* cache)
+JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, CallFrame* callFrame, CallFrame* calleeFrame, JSValue callee, unsigned argumentCount)
 {
     if constexpr (!isConstruct)
         callee = unwrapForwardingCall(vm, calleeFrame, callee, argumentCount);
@@ -398,18 +493,13 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
     if (callee.isCell() && callee.asCell()->type() == JSFunctionType && vm.isSafeToRecurseSoft() && roomForCompiledCode()) {
         auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
         auto* executable = function->executable();
-        auto& space = vm.heap.objectSpace();
-        if (cache->executable != executable || cache->markingVersion != space.markingVersion() || cache->edenVersion != space.edenVersion()) {
-            cache->executable = nullptr;
-            CodeBlock* calleeCodeBlock = function->isHostFunction() ? nullptr : function->jsExecutable()->codeBlockFor(isConstruct ? CodeSpecializationKind::CodeForConstruct : CodeSpecializationKind::CodeForCall);
-            uint32_t compiled = calleeCodeBlock && !calleeCodeBlock->couldBeTainted() ? compiledFunction(calleeCodeBlock) : 0;
-            if (compiled) {
-                *cache = { executable, space.markingVersion(), space.edenVersion(), calleeCodeBlock, compiled,
-                    calleeCodeBlock->numParameters(), calleeCodeBlock->numCalleeLocals(), calleeCodeBlock->numVars(), calleeCodeBlock->scopeRegister(),
-                    calleeCodeBlock->scopeRegister().offset() * static_cast<int32_t>(sizeof(Register)) };
-            }
+        auto* cache = cachedCallTarget(vm, executable, isConstruct);
+        if (!cache && !function->isHostFunction()) {
+            CodeBlock* calleeCodeBlock = function->jsExecutable()->codeBlockFor(isConstruct ? CodeSpecializationKind::CodeForConstruct : CodeSpecializationKind::CodeForCall);
+            if (uint32_t compiled = calleeCodeBlock && !calleeCodeBlock->couldBeTainted() ? compiledFunction(calleeCodeBlock) : 0)
+                cache = fillCallTarget(vm, function->jsExecutable(), calleeCodeBlock, compiled, isConstruct);
         }
-        if (cache->executable == executable && cache->function) {
+        if (cache && cache->function) {
             // Too few arguments: like the interpreter's arity fixup, the frame moves down (by a
             // multiple of the stack alignment) and the missing parameters are undefined
             unsigned padding = argumentCount < cache->numParameters ? WTF::roundUpToMultipleOf(stackAlignmentRegisters(), cache->numParameters - argumentCount) : 0;
@@ -473,7 +563,7 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
             JSGlobalObject* calleeGlobalObject = globalObject;
             if (callee.asCell()->type() == JSFunctionType) {
                 auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
-                cacheHostFunction(vm, function, cache);
+                cacheHostFunction(vm, function);
                 calleeGlobalObject = function->realm();
             }
             setUpFrame(nullptr);
@@ -501,24 +591,28 @@ JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, Cal
 }
 
 // A call from compiled code (op_call, op_call_ignore_result, op_tail_call, op_construct,
-// op_super_construct), with the signature of a slow path and a cache of the call site: in the
-// frame the bytecode prepared (argv slots below callFrame). A tail call is an ordinary call here.
+// op_super_construct), with the signature of a slow path: in the frame the bytecode prepared (argv
+// slots below callFrame). A tail call is an ordinary call here.
 template<typename Bytecode>
-UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
+UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
 {
     constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
     auto bytecode = pc->as<Bytecode>();
 
-    // The common case first, without the tracer and scope of the general path: a compiled callee
-    // the cache knows, enough arguments, shallow nesting
+    // The common case first, without the tracer and scope of the general path: a compiled or host
+    // callee in the table (also the one Function.prototype.call or a bound function calls), enough
+    // arguments, shallow nesting
+    VM& vm = callFrame->codeBlock()->vm();
+    CallFrame* calleeFrame = callFrame - bytecode.m_argv;
     JSValue callee = callFrame->r(bytecode.m_callee).jsValue();
-    if (cache->executable && callee.isCell() && callee.asCell()->type() == JSFunctionType && bytecode.m_argc >= cache->numParameters && (depth < 64 || depth < roomyDepth + 8)) {
+    unsigned argumentCount = bytecode.m_argc;
+    if constexpr (!isConstruct)
+        callee = unwrapForwardingCall(vm, calleeFrame, callee, argumentCount);
+    if (callee.isCell() && callee.asCell()->type() == JSFunctionType && (depth < 64 || depth < roomyDepth + 8)) {
         auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
-        VM& vm = callFrame->codeBlock()->vm();
-        auto& space = vm.heap.objectSpace();
-        CallFrame* calleeFrame = callFrame - bytecode.m_argv;
-        auto* top = reinterpret_cast<Register*>(calleeFrame) - cache->numCalleeLocals;
-        bool cached = function->executable() == cache->executable && cache->markingVersion == space.markingVersion() && cache->edenVersion == space.edenVersion() && top >= vm.cloopStackLimit();
+        auto* cache = cachedCallTarget(vm, function->executable(), isConstruct);
+        auto* top = cache ? reinterpret_cast<Register*>(calleeFrame) - cache->numCalleeLocals : nullptr;
+        bool cached = cache && argumentCount >= cache->numParameters && top >= vm.cloopStackLimit();
         if (cached && !cache->function && vm.isSafeToRecurseSoft()) {
             // A host function, like the interpreter calls it
             callFrame->setCurrentVPC(pc);
@@ -526,7 +620,7 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
             calleeFrame->setReturnPC(nullptr);
             calleeFrame->setCodeBlock(nullptr);
             calleeFrame->uncheckedR(VirtualRegister(CallFrameSlot::callee)) = callee;
-            calleeFrame->setArgumentCountIncludingThis(bytecode.m_argc);
+            calleeFrame->setArgumentCountIncludingThis(argumentCount);
             auto scope = DECLARE_THROW_SCOPE(vm);
             auto* previous = vm.cloopStack().currentStackPointer();
             vm.cloopStack().setCurrentStackPointer(reinterpret_cast<Register*>(calleeFrame));
@@ -546,7 +640,7 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
             calleeFrame->setReturnPC(nullptr);
             calleeFrame->setCodeBlock(cache->codeBlock);
             calleeFrame->uncheckedR(VirtualRegister(CallFrameSlot::callee)) = callee;
-            calleeFrame->setArgumentCountIncludingThis(bytecode.m_argc);
+            calleeFrame->setArgumentCountIncludingThis(argumentCount);
             for (int local = CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters(); local < static_cast<int>(cache->numVars); ++local)
                 calleeFrame->uncheckedR(virtualRegisterForLocal(local)) = jsUndefined();
             vm.writeBarrier(cache->codeBlock);
@@ -564,12 +658,10 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
         }
     }
 
-    CodeBlock* codeBlock = callFrame->codeBlock();
-    VM& vm = codeBlock->vm();
     SlowPathFrameTracer tracer(vm, callFrame);
     callFrame->setCurrentVPC(pc);
     auto scope = DECLARE_THROW_SCOPE(vm);
-    JSValue result = callInFrame<isConstruct>(vm, codeBlock->globalObject(), scope, callFrame, callFrame - bytecode.m_argv, callFrame->r(bytecode.m_callee).jsValue(), bytecode.m_argc, cache);
+    JSValue result = callInFrame<isConstruct>(vm, callFrame->codeBlock()->globalObject(), scope, callFrame, calleeFrame, callee, argumentCount);
     if (scope.exception()) [[unlikely]]
         return encodeResult(exceptionInstructions(), callFrame);
     if constexpr (requires { bytecode.m_dst; })
@@ -582,7 +674,7 @@ UGPRPair callFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, Cal
 // registers in use with the arguments of the array-like (the stack pointer covers it while they
 // load), then the call in that frame
 template<typename Bytecode>
-UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc, CallCache* cache)
+UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
 {
     constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstructVarargs> || std::is_same_v<Bytecode, OpSuperConstructVarargs>;
     auto bytecode = pc->as<Bytecode>();
@@ -604,7 +696,7 @@ UGPRPair callVarargsFromCompiledCode(CallFrame* callFrame, const JSInstruction* 
     setupVarargsFrameAndSetThis(globalObject, callFrame, calleeFrame, callFrame->r(bytecode.m_thisValue).jsValue(), source, bytecode.m_firstVarArg, length);
     JSValue result;
     if (!scope.exception())
-        result = callInFrame<isConstruct>(vm, globalObject, scope, callFrame, calleeFrame, callFrame->r(bytecode.m_callee).jsValue(), length + 1, cache);
+        result = callInFrame<isConstruct>(vm, globalObject, scope, callFrame, calleeFrame, callFrame->r(bytecode.m_callee).jsValue(), length + 1);
     vm.cloopStack().setCurrentStackPointer(previous);
     if (scope.exception())
         return encodeResult(exceptionInstructions(), callFrame);
@@ -876,7 +968,6 @@ public:
     bool tooLarge() const { return m_tooLarge; }
     // Blocks after loop hints, by bytecode offset
     OffsetMap takeLoops() { return WTF::move(m_loops); }
-    Vector<std::unique_ptr<CallCache>> takeCallCaches() { return WTF::move(m_callCaches); }
     Vector<std::unique_ptr<PropertyCache>> takePropertyCaches() { return WTF::move(m_propertyCaches); }
 
 private:
@@ -925,10 +1016,16 @@ private:
     // pointer in m_next, and on an exception goes to the instruction's handler (a try around it)
     // or returns 1
     void callSlowPath(SlowPath, const JSInstructionStream::Ref&);
-    // The same for a call (callFromCompiledCode, callVarargsFromCompiledCode), with a new cache of
-    // the call site
+    // The same for a call: compiled callees in WASM (emitCompiledCall), the rest through
+    // callFromCompiledCode or callVarargsFromCompiledCode
     template<typename Bytecode> void emitCall(const JSInstructionStream::Ref&);
     void emitInlineHostCall(VirtualRegister callee, unsigned argv, VirtualRegister dst);
+    void emitCompiledCall(const JSInstructionStream::Ref&, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct);
+    void emitCompiledCallFunction();
+    // The function of the module that emitCompiledCall calls, emitted when a site needs it
+    static constexpr uint32_t compiledCallFunction = 1;
+    static constexpr int32_t compiledCallNotDone = 2;
+    bool m_usesCompiledCall { false };
     // After a helper's call: its result into m_next, an exception to the handler or out
     void checkException(const JSInstructionStream::Ref&);
     // There is an exception: to the instruction's handler or out
@@ -986,7 +1083,6 @@ private:
     uint32_t m_barrierType { 0 };
     uint32_t m_checkType { 0 };
     uint32_t m_callType { 0 };
-    Vector<std::unique_ptr<CallCache>> m_callCaches;
     Vector<std::unique_ptr<PropertyCache>> m_propertyCaches;
     // Parameters: the frame and the block to start with
     static constexpr uint32_t cfr = 0;
@@ -994,7 +1090,7 @@ private:
     // cfr minus m_baseBias, below every local
     uint32_t m_base { 0 };
     uint32_t m_baseBias { 0 };
-    uint32_t m_block { 0 }, m_a { 0 }, m_b { 0 }, m_c { 0 }, m_d { 0 }, m_e { 0 }, m_t1 { 0 }, m_t2 { 0 }, m_next { 0 }, m_wide { 0 }, m_x { 0 }, m_y { 0 };
+    uint32_t m_block { 0 }, m_a { 0 }, m_b { 0 }, m_c { 0 }, m_d { 0 }, m_e { 0 }, m_g { 0 }, m_t1 { 0 }, m_t2 { 0 }, m_next { 0 }, m_wide { 0 }, m_x { 0 }, m_y { 0 };
     // Loop iterations left before the function returns to be called again (runCompiled)
     uint32_t m_iterations { 0 };
     // Basic blocks: bytecode offset of each start, and the block of an offset
@@ -1165,8 +1261,6 @@ void Compiler::callSlowPath(SlowPath slowPath, const JSInstructionStream::Ref& i
 template<typename Bytecode>
 void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
 {
-    m_callCaches.append(makeUnique<CallCache>());
-    auto* cache = m_callCaches.last().get();
     constexpr bool isVarargs = requires(Bytecode bytecode) { bytecode.m_firstVarArg; };
     // Math.imul has two arguments and `this`
     bool inlineHostCall = false;
@@ -1184,17 +1278,298 @@ void Compiler::emitCall(const JSInstructionStream::Ref& instruction)
             m_body->ifThen();
         }
     }
-    m_body->localGet(cfr);
-    m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
-    m_body->i32Const(reinterpret_cast<uintptr_t>(cache));
     if constexpr (isVarargs)
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&callVarargsFromCompiledCode<Bytecode>));
-    else
-        m_body->i32Const(reinterpret_cast<uintptr_t>(&callFromCompiledCode<Bytecode>));
-    m_body->callIndirect(m_callType);
-    checkException(instruction);
+        callSlowPath(callVarargsFromCompiledCode<Bytecode>, instruction);
+    else {
+        constexpr bool isConstruct = std::is_same_v<Bytecode, OpConstruct> || std::is_same_v<Bytecode, OpSuperConstruct>;
+        auto bytecode = instruction->as<Bytecode>();
+        VirtualRegister dst;
+        if constexpr (requires { bytecode.m_dst; })
+            dst = bytecode.m_dst;
+        emitCompiledCall(instruction, bytecode.m_callee, bytecode.m_argc, bytecode.m_argv, dst, isConstruct);
+        endFastPaths(callFromCompiledCode<Bytecode>, instruction);
+    }
     if (inlineHostCall)
         m_body->end();
+}
+
+// A call of a compiled callee in the callee table, in WASM: what callFromCompiledCode does for it
+// without the call into C++, which took about a third of the time of a call. The work is in a
+// function of the module (emitCompiledCallFunction), so a site costs a few instructions: with the
+// work at every site, compiled code grew by 20 to 40 % and a large VM function ran slower, also
+// once V8 had optimized it. Sets m_next when it did the call; everything else (host functions,
+// other callees, too few arguments, deep nesting, a full stack) is left to callFromCompiledCode.
+void Compiler::emitCompiledCall(const JSInstructionStream::Ref& instruction, VirtualRegister callee, unsigned argc, unsigned argv, VirtualRegister dst, bool isConstruct)
+{
+    m_usesCompiledCall = true;
+    beginFastPaths();
+    m_body->localGet(cfr);
+    loadTag(callee);
+    loadPayload(callee);
+    m_body->i32Const(argv * sizeof(Register));
+    m_body->i32Const(argc);
+    m_body->i32Const(CallSiteIndex(BytecodeIndex(instruction.offset())).bits());
+    m_body->i32Const(isConstruct);
+    m_body->call(compiledCallFunction);
+    m_body->localTee(m_g);
+    m_body->i32Const(compiledCallNotDone);
+    m_body->op(Op::I32Ne);
+    m_body->ifThen();
+    m_body->localGet(m_g);
+    m_body->ifThen();
+    exceptionExit(instruction);
+    m_body->end();
+    if (dst.isValid()) {
+        // The result in the `this` slot of the callee's frame
+        m_body->localGet(cfr);
+        m_body->i32Const(argv * sizeof(Register));
+        m_body->op(Op::I32Sub);
+        m_body->localTee(m_b);
+        m_body->i32Load(static_cast<uint32_t>(static_cast<int>(CallFrameSlot::thisArgument) * sizeof(Register) + TagOffset));
+        m_body->localSet(m_t1);
+        m_body->localGet(m_b);
+        m_body->i32Load(static_cast<uint32_t>(static_cast<int>(CallFrameSlot::thisArgument) * sizeof(Register) + PayloadOffset));
+        m_body->localSet(m_t2);
+        storeTagAndPayload(dst, m_t1, m_t2);
+    }
+    fastPathDone();
+    m_body->end();
+}
+
+// The function of emitCompiledCall: (cfr, callee tag, callee payload, argv in bytes, argc, the
+// call site's bits, construct) -> 0 when it called (the result in the `this` slot of the callee's
+// frame), 1 after an exception, compiledCallNotDone when the callee is not a compiled one in the
+// table or the call needs C++
+void Compiler::emitCompiledCallFunction()
+{
+    VM& vm = m_codeBlock->vm();
+    auto& table = callTargets(vm);
+    const ValueType parameters[] = { ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32, ValueType::I32 };
+    const ValueType status[] = { ValueType::I32 };
+    auto* main = m_body;
+    m_body = &m_module.addFunction(m_module.addType(parameters, status), std::size(parameters));
+    constexpr uint32_t calleeTag = 1, callee = 2, argvBytes = 3, argc = 4, callSite = 5, isConstruct = 6;
+    uint32_t key = m_body->addLocal(ValueType::I32);
+    uint32_t entry = m_body->addLocal(ValueType::I32);
+    uint32_t function = m_body->addLocal(ValueType::I32);
+    uint32_t frame = m_body->addLocal(ValueType::I32);
+    uint32_t top = m_body->addLocal(ValueType::I32);
+    uint32_t saved = m_body->addLocal(ValueType::I32);
+    uint32_t result = m_body->addLocal(ValueType::I32);
+    uint32_t temporary = m_body->addLocal(ValueType::I32);
+    uint32_t end = m_body->addLocal(ValueType::I32);
+    auto field = [](ptrdiff_t offset) { return static_cast<uint32_t>(offset); };
+    auto header = [](CallFrameSlot slot, int32_t part) { return static_cast<uint32_t>(static_cast<int>(slot) * sizeof(Register) + part); };
+    auto loadAddress = [&](const void* address) {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(address));
+        m_body->i32Load(0);
+    };
+    auto storeAddress = [&](const void* address, uint32_t local) {
+        m_body->i32Const(reinterpret_cast<uintptr_t>(address));
+        m_body->localGet(local);
+        m_body->i32Store(0);
+    };
+    auto notDoneIf = [&] {
+        m_body->ifThen();
+        m_body->i32Const(compiledCallNotDone);
+        m_body->returnValue();
+        m_body->end();
+    };
+
+    // A JSFunction, its executable (also through its rare data) and the key
+    m_body->localGet(calleeTag);
+    m_body->i32Const(cellTag);
+    m_body->op(Op::I32Ne);
+    notDoneIf();
+    m_body->localGet(callee);
+    m_body->i32Load8U(JSCell::typeInfoTypeOffset());
+    m_body->i32Const(JSFunctionType);
+    m_body->op(Op::I32Ne);
+    notDoneIf();
+    m_body->localGet(callee);
+    m_body->i32Load(JSFunction::offsetOfExecutableOrRareData());
+    m_body->localTee(key);
+    m_body->i32Const(JSFunction::rareDataTag);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    m_body->localGet(key);
+    m_body->i32Load(FunctionRareData::offsetOfExecutable() - JSFunction::rareDataTag);
+    m_body->localSet(key);
+    m_body->end();
+    m_body->localGet(key);
+    m_body->localGet(isConstruct);
+    m_body->op(Op::I32Add);
+    m_body->localSet(key);
+    // Its entry (CallTargets::index): from this epoch, a compiled function, enough arguments
+    m_body->localGet(key);
+    m_body->i32Const(4);
+    m_body->op(Op::I32ShrU);
+    m_body->localGet(key);
+    m_body->i32Const(15);
+    m_body->op(Op::I32ShrU);
+    m_body->op(Op::I32Xor);
+    m_body->i32Const(CallTargets::count - 1);
+    m_body->op(Op::I32And);
+    m_body->i32Const(sizeof(CallTarget));
+    m_body->op(Op::I32Mul);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(&table.targets[0]));
+    m_body->op(Op::I32Add);
+    m_body->localTee(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, key)));
+    m_body->localGet(key);
+    m_body->op(Op::I32Ne);
+    notDoneIf();
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, epoch)));
+    loadAddress(&table.epoch);
+    m_body->op(Op::I32Ne);
+    notDoneIf();
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, function)));
+    m_body->localTee(function);
+    m_body->op(Op::I32Eqz);
+    notDoneIf();
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numParameters)));
+    m_body->localGet(argc);
+    m_body->op(Op::I32GtU);
+    notDoneIf();
+    // Shallow nesting (roomForCompiledCode without a probe)
+    loadAddress(&depth);
+    m_body->localTee(temporary);
+    m_body->i32Const(64);
+    m_body->op(Op::I32GeU);
+    m_body->localGet(temporary);
+    loadAddress(&roomyDepth);
+    m_body->i32Const(8);
+    m_body->op(Op::I32Add);
+    m_body->op(Op::I32GeU);
+    m_body->op(Op::I32And);
+    notDoneIf();
+    // Room in the JS stack
+    m_body->localGet(cfr);
+    m_body->localGet(argvBytes);
+    m_body->op(Op::I32Sub);
+    m_body->localTee(frame);
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numCalleeLocals)));
+    m_body->i32Const(3);
+    m_body->op(Op::I32Shl);
+    m_body->op(Op::I32Sub);
+    m_body->localTee(top);
+    loadAddress(cloopStackLimitAddress(vm));
+    m_body->op(Op::I32LtU);
+    notDoneIf();
+
+    // The call: the caller's bytecode offset, the callee's frame like op_enter and slow_path_enter
+    m_body->localGet(cfr);
+    m_body->localGet(callSite);
+    m_body->i32Store(header(CallFrameSlot::argumentCountIncludingThis, TagOffset));
+    m_body->localGet(frame);
+    m_body->localGet(cfr);
+    m_body->i32Store(field(CallFrame::callerFrameOffset()));
+    m_body->localGet(frame);
+    m_body->i32Const(0);
+    m_body->i32Store(field(CallFrame::returnPCOffset()));
+    m_body->localGet(frame);
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, codeBlock)));
+    m_body->localTee(temporary);
+    m_body->i32Store(header(CallFrameSlot::codeBlock, 0));
+    m_body->localGet(frame);
+    m_body->i32Const(cellTag);
+    m_body->i32Store(header(CallFrameSlot::callee, TagOffset));
+    m_body->localGet(frame);
+    m_body->localGet(callee);
+    m_body->i32Store(header(CallFrameSlot::callee, PayloadOffset));
+    m_body->localGet(frame);
+    m_body->localGet(argc);
+    m_body->i32Store(header(CallFrameSlot::argumentCountIncludingThis, PayloadOffset));
+    writeBarrier(temporary);
+    // Its variables undefined: locals from the callee save space up to numVars, downwards
+    m_body->localGet(frame);
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, numVars)));
+    m_body->i32Const(3);
+    m_body->op(Op::I32Shl);
+    m_body->op(Op::I32Sub);
+    m_body->localSet(end);
+    m_body->localGet(frame);
+    m_body->i32Const((CodeBlock::llintBaselineCalleeSaveSpaceAsVirtualRegisters() + 1) * sizeof(Register));
+    m_body->op(Op::I32Sub);
+    m_body->localSet(temporary);
+    m_body->block();
+    m_body->loop();
+    m_body->localGet(temporary);
+    m_body->localGet(end);
+    m_body->op(Op::I32LtU);
+    m_body->brIf(1);
+    m_body->localGet(temporary);
+    m_body->i32Const(static_cast<int32_t>(JSValue::UndefinedTag));
+    m_body->i32Store(TagOffset);
+    m_body->localGet(temporary);
+    m_body->i32Const(0);
+    m_body->i32Store(PayloadOffset);
+    m_body->localGet(temporary);
+    m_body->i32Const(sizeof(Register));
+    m_body->op(Op::I32Sub);
+    m_body->localSet(temporary);
+    m_body->br(0);
+    m_body->end();
+    m_body->end();
+    // Its scope register
+    m_body->localGet(entry);
+    m_body->i32Load(field(OBJECT_OFFSETOF(CallTarget, scopeRegister)));
+    m_body->i32Const(3);
+    m_body->op(Op::I32Shl);
+    m_body->localGet(frame);
+    m_body->op(Op::I32Add);
+    m_body->localTee(temporary);
+    m_body->i32Const(cellTag);
+    m_body->i32Store(TagOffset);
+    m_body->localGet(temporary);
+    m_body->localGet(callee);
+    m_body->i32Load(JSCallee::offsetOfScopeChain());
+    m_body->i32Store(PayloadOffset);
+    // runCompiled with the stack pointer below the callee's frame
+    loadAddress(cloopStackPointerAddress(vm));
+    m_body->localSet(saved);
+    storeAddress(cloopStackPointerAddress(vm), top);
+    loadAddress(&depth);
+    m_body->i32Const(1);
+    m_body->op(Op::I32Add);
+    m_body->localSet(temporary);
+    storeAddress(&depth, temporary);
+    m_body->localGet(frame);
+    m_body->i32Const(0);
+    m_body->localGet(function);
+    m_body->callIndirect(0);
+    m_body->localSet(result);
+    m_body->block();
+    m_body->loop();
+    m_body->localGet(result);
+    m_body->i32Const(reenterStatus);
+    m_body->op(Op::I32LtS);
+    m_body->brIf(1);
+    m_body->localGet(frame);
+    m_body->localGet(result);
+    m_body->i32Const(reenterStatus);
+    m_body->op(Op::I32Sub);
+    m_body->localGet(function);
+    m_body->callIndirect(0);
+    m_body->localSet(result);
+    m_body->br(0);
+    m_body->end();
+    m_body->end();
+    loadAddress(&depth);
+    m_body->i32Const(1);
+    m_body->op(Op::I32Sub);
+    m_body->localSet(temporary);
+    storeAddress(&depth, temporary);
+    storeAddress(cloopStackPointerAddress(vm), saved);
+    storeAddress(&vm.topCallFrame, cfr);
+    m_body->localGet(result);
+    m_body = main;
 }
 
 // Math.imul(a, b) of two numbers inline: sets m_next when it did the call
@@ -3601,6 +3976,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_c = m_body->addLocal(ValueType::I32);
     m_d = m_body->addLocal(ValueType::I32);
     m_e = m_body->addLocal(ValueType::I32);
+    m_g = m_body->addLocal(ValueType::I32);
     m_t1 = m_body->addLocal(ValueType::I32);
     m_t2 = m_body->addLocal(ValueType::I32);
     m_next = m_body->addLocal(ValueType::I32);
@@ -3647,6 +4023,8 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_body->unreachable();
     m_body->end();
     m_body->i32Const(1);
+    if (m_usesCompiledCall)
+        emitCompiledCallFunction();
     return m_module.bytes();
 }
 
@@ -3656,7 +4034,20 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
 {
     if (!enabled())
         return nullptr;
-    auto function = compiledFunction(codeBlock);
+    // Through the callee table like calls in compiled code: the interpreter's calls of compiled
+    // functions (and JSC's generic call) come here for each call
+    VM& vm = codeBlock->vm();
+    if (!existingCallTargets(vm))
+        return nullptr;
+    bool isConstruct = codeBlock->specializationKind() == CodeSpecializationKind::CodeForConstruct;
+    auto* target = cachedCallTarget(vm, codeBlock->ownerExecutable(), isConstruct);
+    uint32_t function = target && target->codeBlock == codeBlock ? target->function : 0;
+    if (!function) {
+        function = compiledFunction(codeBlock);
+        auto* executable = dynamicDowncast<FunctionExecutable>(codeBlock->ownerExecutable());
+        if (function && executable && !codeBlock->couldBeTainted())
+            fillCallTarget(vm, executable, codeBlock, function, isConstruct);
+    }
     if (!function || !roomForCompiledCode())
         return nullptr;
     auto status = runCompiled(function, callFrame, 0);
@@ -3665,7 +4056,11 @@ const JSInstruction* wasmJITEnter(CallFrame* callFrame, CodeBlock* codeBlock)
 
 void wasmJITTierUp(CodeBlock* codeBlock)
 {
-    if (enabled() && !compiledCode().contains(codeBlock)) {
+    // The callee table of the VM, which compiled calls read at its address: a thread compiles for
+    // one VM at a time
+    auto& table = threadCallTargets();
+    bool otherVM = table && &table->vm != &codeBlock->vm();
+    if (enabled() && !otherVM && !compiledCode().contains(codeBlock)) {
         // Not yet hot enough: the interpreter's counter once more
         auto& fires = warmUp().add(codeBlock, 0).iterator->value;
         if (++fires < warmUpFires(codeBlock)) {
@@ -3673,17 +4068,19 @@ void wasmJITTierUp(CodeBlock* codeBlock)
             return;
         }
         warmUp().remove(codeBlock);
+        if (!table)
+            table = makeUnique<CallTargets>(codeBlock->vm());
         Compiled compiled;
         Compiler compiler(codeBlock);
         auto bytes = compiler.compile();
         if (bytes) {
             compiled.function = wasmJITInstall(bytes->data(), bytes->size(), level() >= 3);
             if (compiled.function) {
+                ++table->compiledCodeBlocks;
                 Locker locker { compiledCodeBlocksLock };
                 compiledCodeBlocks().add(codeBlock);
             }
             compiled.loops = compiler.takeLoops();
-            compiled.callCaches = compiler.takeCallCaches();
             compiled.propertyCaches = compiler.takePropertyCaches();
         }
         if (level() >= 2) {
@@ -3693,6 +4090,8 @@ void wasmJITTierUp(CodeBlock* codeBlock)
                 dataLogLn("[jit] ", *codeBlock, ": not compiled (", compiler.tooLarge() ? "too large" : opcodeNames[compiler.unsupported()], ")");
         }
         compiledCode().add(codeBlock, WTF::move(compiled));
+        if (!table->compiledCodeBlocks)
+            table = nullptr;
     }
     // The counter belongs to the UnlinkedCodeBlock, which every CodeBlock of the same code shares:
     // those of the same script in other frames, of the builtins in every global object and the
@@ -3731,6 +4130,13 @@ void wasmJITForget(CodeBlock* codeBlock)
     if (it == compiledCode().end())
         return;
     if (it->value.function) {
+        // Its table slot serves another function next
+        auto& table = callTargets(codeBlock->vm());
+        auto& target = table.slot(CallTargets::key(codeBlock->ownerExecutable(), codeBlock->specializationKind() == CodeSpecializationKind::CodeForConstruct));
+        if (target.codeBlock == codeBlock)
+            target = { };
+        if (!--table.compiledCodeBlocks)
+            threadCallTargets() = nullptr;
         wasmJITRelease(it->value.function);
         Locker locker { compiledCodeBlocksLock };
         compiledCodeBlocks().remove(codeBlock);

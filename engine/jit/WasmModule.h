@@ -1,10 +1,13 @@
-// A WebAssembly module with one function, written as bytes for the JIT (docs/jit.md). It imports
-// the engine's memory (shared, 32 bit) and function table, so the function reads and writes the
-// engine's memory and calls its C++ functions through their table index.
+// A WebAssembly module of one exported function and its helpers, written as bytes for the JIT
+// (docs/jit.md). It imports the engine's memory (shared, 32 bit) and function table, so the
+// functions read and write the engine's memory and call its C++ functions through their table
+// index.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace JSC::LLInt::WasmJIT {
@@ -52,6 +55,8 @@ public:
     void returnValue();
     void unreachable();
     void drop();
+    // call of a function of the module (0 the exported one, then those of addFunction)
+    void call(uint32_t functionIndex);
     // call_indirect through table 0 with the type `typeIndex` of the module
     void callIndirect(uint32_t typeIndex);
 
@@ -74,11 +79,14 @@ public:
     uint32_t addType(std::span<const ValueType> parameters, std::span<const ValueType> results);
     // The function, exported as "f", of type 0
     FunctionBody& function(uint32_t parameterCount);
+    // A function of the module for the exported one to call (index 1, 2, ...)
+    FunctionBody& addFunction(uint32_t typeIndex, uint32_t parameterCount);
     std::vector<uint8_t> bytes() const;
 
 private:
     std::vector<std::vector<uint8_t>> m_types;
     FunctionBody m_function;
+    std::vector<std::pair<uint32_t, std::unique_ptr<FunctionBody>>> m_helpers;
 };
 
 // Instruction codes without immediates that the JIT uses

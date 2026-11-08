@@ -98,6 +98,12 @@ void FunctionBody::returnValue() { m_code.push_back(0x0f); }
 void FunctionBody::unreachable() { m_code.push_back(0x00); }
 void FunctionBody::drop() { m_code.push_back(0x1a); }
 
+void FunctionBody::call(uint32_t functionIndex)
+{
+    m_code.push_back(0x10);
+    unsignedLEB(m_code, functionIndex);
+}
+
 void FunctionBody::callIndirect(uint32_t typeIndex)
 {
     m_code.push_back(0x11);
@@ -124,6 +130,34 @@ FunctionBody& Module::function(uint32_t parameterCount)
     return m_function;
 }
 
+FunctionBody& Module::addFunction(uint32_t typeIndex, uint32_t parameterCount)
+{
+    m_helpers.push_back({ typeIndex, std::make_unique<FunctionBody>() });
+    m_helpers.back().second->m_parameterCount = parameterCount;
+    return *m_helpers.back().second;
+}
+
+// A function's entry of the code section: its locals in runs of the same type, then its code
+static void functionCode(std::vector<uint8_t>& out, const FunctionBody& function)
+{
+    std::vector<uint8_t> body;
+    std::vector<std::pair<uint32_t, ValueType>> runs;
+    for (auto type : function.locals()) {
+        if (runs.empty() || runs.back().second != type)
+            runs.push_back({ 0, type });
+        runs.back().first++;
+    }
+    unsignedLEB(body, runs.size());
+    for (auto [count, type] : runs) {
+        unsignedLEB(body, count);
+        body.push_back(static_cast<uint8_t>(type));
+    }
+    body.insert(body.end(), function.code().begin(), function.code().end());
+    body.push_back(0x0b);
+    unsignedLEB(out, body.size());
+    out.insert(out.end(), body.begin(), body.end());
+}
+
 std::vector<uint8_t> Module::bytes() const
 {
     std::vector<uint8_t> out { 0, 'a', 's', 'm', 1, 0, 0, 0 };
@@ -145,7 +179,12 @@ std::vector<uint8_t> Module::bytes() const
     imports.insert(imports.end(), { 0x01, 0x70, 0x00, 0x01 });
     section(out, 2, imports);
 
-    section(out, 3, { 1, 0 });
+    std::vector<uint8_t> functions;
+    unsignedLEB(functions, 1 + m_helpers.size());
+    unsignedLEB(functions, 0);
+    for (auto& [type, helper] : m_helpers)
+        unsignedLEB(functions, type);
+    section(out, 3, functions);
 
     std::vector<uint8_t> exports;
     unsignedLEB(exports, 1);
@@ -153,25 +192,11 @@ std::vector<uint8_t> Module::bytes() const
     exports.insert(exports.end(), { 0x00, 0x00 });
     section(out, 7, exports);
 
-    // Locals in runs of the same type
-    std::vector<uint8_t> body;
-    std::vector<std::pair<uint32_t, ValueType>> runs;
-    for (auto type : m_function.m_locals) {
-        if (runs.empty() || runs.back().second != type)
-            runs.push_back({ 0, type });
-        runs.back().first++;
-    }
-    unsignedLEB(body, runs.size());
-    for (auto [count, type] : runs) {
-        unsignedLEB(body, count);
-        body.push_back(static_cast<uint8_t>(type));
-    }
-    body.insert(body.end(), m_function.m_code.begin(), m_function.m_code.end());
-    body.push_back(0x0b);
     std::vector<uint8_t> code;
-    unsignedLEB(code, 1);
-    unsignedLEB(code, body.size());
-    code.insert(code.end(), body.begin(), body.end());
+    unsignedLEB(code, 1 + m_helpers.size());
+    functionCode(code, m_function);
+    for (auto& [type, helper] : m_helpers)
+        functionCode(code, *helper);
     section(out, 10, code);
     return out;
 }

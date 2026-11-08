@@ -359,13 +359,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    found yet). Not done either: the demo's "Wait" after `unresponsive` does not
    move the watchdog's deadline, so waiting cannot save such a script. LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
-   Chromium also loads, its main thread 10 % busy): after the load the engine thread answers no
-   eval for up to 10 s, about 35 s in all, then recovers. Its hashing loops (bit operations on
-   uint32 values, typed arrays, `Math.imul`) fell to slow paths: they now run inline and such
-   loops 2 to 5 times faster (#424), but the block stayed as long. Its profile is the script's
-   obfuscated VM calling small functions: the C++ path of calls from compiled code 15 % of the
-   engine thread (self time), entries through the interpreter 8 %, compiled code half. Cheaper
-   calls (in WASM, values in locals, phase 4 of [jit.md](jit.md)) are what is left.
+   Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
+   no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline
+   (#424). Its profile was an obfuscated VM calling small functions from one site, which the cache
+   per call site missed every time (the C++ path of calls 15 % of the engine thread, generic calls
+   8 %): calls now go through a callee table of the VM and compiled callees are called in WASM,
+   such a dispatch 1.5 to 2.2 times faster (#459). On 2026-11-08 the freeze no longer showed, with
+   this engine, the one before it and that of 2026-11-06 with its own core alike (the longest wait
+   for an eval 2 to 4 s in the first 30 s after the load, then below 0.3 s):
+   PerimeterX sends less work now (plain Chromium 4.4 % busy), so the gain on the page itself could
+   not be measured. What is left for such scripts is compiled code itself (values in locals,
+   inlining, phase 4 of [jit.md](jit.md)).
 2. WebGL contexts of page scripts (feature checks, fingerprinting): every synchronous query of the
    shared host context waits for the GPU process, which is slow while it is busy (a live video,
    compositing). A switch between contexts read the whole GL state back (about 100 queries, more

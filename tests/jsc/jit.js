@@ -233,6 +233,37 @@ for (let i = 0; i < 300; i++) {
     if (i % 50 === 49)
         gc();
 }
+// Calls of compiled callees in WASM through the callee table: a VM's dispatch with many callees
+// at one site, a callee whose loop returns to be called again, exceptions caught in the caller,
+// too few and too many arguments, constructors, a GC inside the callee, recursion
+const handlers = [];
+for (let k = 0; k < 40; k++)
+    handlers.push(new Function("state", "x", "state.acc = (state.acc * 31 + x + " + k + ") | 0; return state.acc & 1;"));
+function dispatch(n) { const state = { acc: 7 }; let odd = 0; for (let i = 0; i < n; i++) odd += handlers[(i * 7) % handlers.length](state, i); return state.acc + ":" + odd; }
+function expectedDispatch(n) { let acc = 7; let odd = 0; for (let i = 0; i < n; i++) { acc = (acc * 31 + i + (i * 7) % 40) | 0; odd += acc & 1; } return acc + ":" + odd; }
+function spin(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i) | 0; return s; }
+function spinTwice(n) { return spin(n) + spin(n + 1); }
+function throwAt(i, at) { if (i === at) throw new TypeError("at " + i); return i; }
+function catchFromCallee(n, at) { let s = 0; for (let i = 0; i < n; i++) { try { s += throwAt(i, at); } catch (e) { s -= 1000; } } return s; }
+function threeParameters(a, b, c) { return [a, b, c].join("/"); }
+function fewer(i) { return threeParameters(i); }
+function more(i) { return threeParameters(i, 1, 2, 3, 4); }
+function Point(x, y) { this.x = x; this.y = y; }
+Point.prototype.sum = function () { return this.x + this.y; };
+function points(n) { let s = 0; for (let i = 0; i < n; i++) s += new Point(i, 1).sum(); return s; }
+let collections = 0;
+function collectSometimes(i) { if (i % 500 === 499) { gc(); collections++; } return { i }; }
+function keepAcrossGC(n) { const list = []; for (let i = 0; i < n; i++) list.push(collectSometimes(i)); let s = 0; for (const o of list) s += o.i; return s; }
+for (let round = 0; round < 30; round++) {
+    check("dispatch " + round, dispatch(2000), expectedDispatch(2000));
+    check("loop in callee", spinTwice(25000), 25000 * 24999 / 2 + 25001 * 25000 / 2);
+    check("caught from callee", catchFromCallee(300, round * 7), 299 * 300 / 2 - round * 7 - 1000);
+    check("too few arguments", fewer(round), round + "//");
+    check("too many arguments", more(round), round + "/1/2");
+    check("constructor", points(200), 199 * 200 / 2 + 200);
+}
+check("GC in callee", keepAcrossGC(3000), 2999 * 3000 / 2);
+check("collections", collections, 6);
 // A function too large to compile (over 100 KB of bytecode) with a hot loop stays interpreted
 const large = new Function("n", "let x = 0; for (let i = 0; i < n; i++) { " + "x = (x + i) | 0; ".repeat(12000) + "} return x;");
 check("too large to compile", large(1500), (1499 * 1500 / 2) * 12000 | 0);
