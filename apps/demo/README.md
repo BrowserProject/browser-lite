@@ -130,7 +130,8 @@ select popup) are in the same sheet.
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
   A discarded tab, a reopened one and the tabs of a restored session come back at the scroll
-  position of their page like in Chrome (`scrollX`/`scrollY` of the history entries, #440).
+  position of their page like in Chrome (`scrollX`/`scrollY` of the history entries, #440), also
+  when the demo is reloaded or closed right after a scroll (#452).
   Dragging a tab with the mouse or a pen moves it along the strip like in Chrome and Firefox
   (`tab-drag.ts`): past 5 px it follows the pointer, takes the place of a neighbour once it
   covers half of it and slides into its place when released; a click only activates, the cross

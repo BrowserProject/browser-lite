@@ -223,6 +223,8 @@ public:
     void didNavigateWithinPage();
     // The main frame scrolled: event history with the new position, at most once a second
     void didScrollMainFrame();
+    // Event history now when it changed since the host got it last (bl_sync_history)
+    void notifyHistoryIfChanged();
     void didFinishLoading();
     // Cancelled (stop, new navigation, download): no error, not finished
     void didStopLoading();
@@ -258,7 +260,6 @@ private:
     void createSurface();
     void notifyNavigationState();
     String sessionHistory() const;
-    void notifyHistoryIfChanged();
     // The last history the host got (event navigation or history)
     String m_sentHistory;
     bool m_historyUpdatePending { false };

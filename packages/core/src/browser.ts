@@ -275,6 +275,7 @@ class BrowserImpl implements Browser, ViewHost {
       'pagehide',
       (event) => {
         leaving = true;
+        this.syncHistory();
         if (event.persisted) this.storage.flush(500);
         else this.leave();
       },
@@ -382,7 +383,10 @@ class BrowserImpl implements Browser, ViewHost {
     document.addEventListener(
       'visibilitychange',
       () => {
-        if (document.hidden) this.storage.flush();
+        if (document.hidden) {
+          this.syncHistory();
+          this.storage.flush();
+        }
         for (const view of this.views.values()) view.updateVisibility();
       },
       { signal },
@@ -775,6 +779,15 @@ class BrowserImpl implements Browser, ViewHost {
     if (this.ready) this.storage.flush(500);
     this.watchdog.stop();
     this.stopEngine();
+  }
+
+  /**
+   * The page goes into the background or away: scroll positions the engine has not reported yet
+   * (it does at most once a second) arrive now as view events `history`, so the embedder saves
+   * them with its session. Waits up to 200 ms for a busy engine thread.
+   */
+  private syncHistory(): void {
+    if (this.ready && this.views.size) this.module._bl_sync_history(200);
   }
 
   /** Ends the engine and lets go of it (destroy, leave). */

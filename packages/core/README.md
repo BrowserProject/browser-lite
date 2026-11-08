@@ -131,7 +131,10 @@ that page is the message for users; showing `description` as well only repeats i
 do not understand.
 
 `view.history` holds the back/forward list with the scroll position of every entry; for the
-page shown it follows the `history` event (at most once a second while it scrolls).
+page shown it follows the `history` event (at most once a second while it scrolls). When the
+embedding page goes into the background or away (`visibilitychange`, `pagehide`) the positions
+not reported yet arrive as `history` events before it goes, so a session saved from them is
+current.
 `restoreHistory(history)` and `createView({ history })` bring the page back at that position, like
 back and forward.
 

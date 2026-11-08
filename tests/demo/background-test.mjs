@@ -1,7 +1,7 @@
 // Background tabs in the demo UI (the engine side is tests/core/background-test.mjs): under memory
 // pressure the demo discards the least recently used background tab (titles stay, a discarded
-// tab loads again when clicked at its scroll position, also a reopened one, with none left to
-// discard the message names the page), never a tab with a picture-in-picture window; the hang message after an input without an answer for
+// tab loads again when clicked at its scroll position, also a reopened one and the tabs of a
+// restored session, with none left to discard the message names the page), never a tab with a picture-in-picture window; the hang message after an input without an answer for
 // 10 s goes away when the watchdog stops the script; a long alert does not count as a hang.
 //
 //   node tests/demo/background-test.mjs [engine-dir]
@@ -205,6 +205,33 @@ check(
   `scrolled to ${scrolled}, back at ${reopenedAt}`,
 );
 await long.context.close();
+
+// Like Chrome a restored session brings a background tab back at its scroll position: scrolled
+// in tab 2, tab 1 in front, the demo page reloaded at once (before the engine's report a second
+// after the scroll, the page hide brings it), then tab 2 clicked
+const restore = await openApp({ url: `${siteURL}empty` });
+await restore.wait('loaded', 'empty');
+await restore.newTab(`${siteURL}long`);
+await restore.wait('at', '0');
+const restoreOrigin = await canvasOrigin(restore.page);
+await restore.page.mouse.move(restoreOrigin.x + 300, restoreOrigin.y + 300);
+for (let i = 0; i < 10; i++) await restore.page.mouse.wheel(0, 300);
+const restoreScrolled = Number((await restore.wait('scrolled'))?.[2]);
+await restore.selectTab(1);
+await restore.page.goto(stack.app());
+await restore.page.waitForFunction(() => document.getElementById('boot').hidden, null, {
+  timeout: TIMEOUT,
+});
+await restore.wait('loaded', 'empty');
+await restore.selectTab(2);
+await restore.wait('loaded', 'long');
+const sessionAt = (await restore.wait('at'))?.[2];
+check(
+  'session: a restored tab comes back at its scroll position',
+  restoreScrolled > 1000 && Number(sessionAt) === restoreScrolled,
+  `scrolled to ${restoreScrolled}, back at ${sessionAt}`,
+);
+await restore.context.close();
 
 // A hang after an input: the engine thread finishes no task any more
 const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '20' });

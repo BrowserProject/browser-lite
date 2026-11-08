@@ -62,6 +62,7 @@
 #include <emscripten/emscripten.h>
 #include <emscripten/heap.h>
 #include <emscripten/stack.h>
+#include <emscripten/threading.h>
 #include <wtf/JSONValues.h>
 
 using namespace BrowserLite;
@@ -845,6 +846,31 @@ EMSCRIPTEN_KEEPALIVE void bl_storage_flush(int waitMilliseconds)
         flushMemoryVFSAndWait(Seconds::fromMilliseconds(waitMilliseconds));
     else
         flushMemoryVFS();
+}
+
+// The host page goes into the background or away: the scroll positions didScrollMainFrame has
+// not sent yet (up to a second) reach the host now, like Chrome sends the page state of a
+// renderer before it goes. With waitMilliseconds > 0 the caller (the page's main thread) waits
+// until the history events ran there, or the time is up while the engine thread is busy.
+EMSCRIPTEN_KEEPALIVE void bl_sync_history(int waitMilliseconds)
+{
+    auto done = std::make_shared<std::atomic<uint32_t>>(0);
+    runOnEngineThread([done] {
+        WebView::forEach([](WebView& view) { view.notifyHistoryIfChanged(); });
+        done->store(1);
+        emscripten_futex_wake(done.get(), INT_MAX);
+    });
+    if (waitMilliseconds <= 0)
+        return;
+    auto deadline = MonotonicTime::now() + Seconds::fromMilliseconds(waitMilliseconds);
+    while (!done->load()) {
+        auto left = deadline - MonotonicTime::now();
+        if (left <= 0_s)
+            return;
+        emscripten_futex_wait(done.get(), 0, left.milliseconds());
+    }
+    // The events were queued for this thread before the wake
+    emscripten_current_thread_process_queued_calls();
 }
 
 // Allocated memory (malloc) for tests. mallinfo walks the whole heap (about
