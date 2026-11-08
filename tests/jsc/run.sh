@@ -23,6 +23,11 @@ run() {
     fi
 }
 
+# How often `hot` of jit-recompile.js compiles with these options (the JIT logs its compiles)
+compiles() {
+    BL_JIT=2 node "$jsc" "$@" "$here/jit-recompile.js" 2>&1 | grep -c '^\[jit\] hot#' || true
+}
+
 for jit in 0 1; do
 run basics "$here/basics.js"
 run calls "$here/calls.js"
@@ -38,5 +43,15 @@ run jit "$here/jit.js"
 # Speed of the JIT's fast paths for hashing code against their int32 twins
 [ "$jit" = 0 ] || run jit-hash "$here/jit-hash.js"
 done
+
+# Compiled code stays through a full GC of old code, code thrown away compiles again
+kept="$(compiles)"
+again="$(compiles --forceCodeBlockToJettisonDueToOldAge=true)"
+if [ "$kept" = 1 ] && [ "$again" = 2 ]; then
+    echo "ok    jit-recompile (jit)"
+else
+    echo "FAIL  jit-recompile (jit): compiled $kept times through a GC (expected 1), $again times after the code was thrown away (expected 2)"
+    fail=1
+fi
 
 exit $fail

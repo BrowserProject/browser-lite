@@ -51,6 +51,8 @@
 #include <optional>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/Lock.h>
+#include <wtf/NeverDestroyed.h>
 
 namespace JSC::LLInt {
 
@@ -131,6 +133,15 @@ HashMap<CodeBlock*, Compiled>& compiledCode()
 {
     static thread_local HashMap<CodeBlock*, Compiled> map;
     return map;
+}
+
+// CodeBlocks with compiled code of every thread's VM, for the GC's markers on other threads
+// (wasmJITHasCompiledCode)
+Lock compiledCodeBlocksLock;
+HashSet<const CodeBlock*>& compiledCodeBlocks() WTF_REQUIRES_LOCK(compiledCodeBlocksLock)
+{
+    static NeverDestroyed<HashSet<const CodeBlock*>> set;
+    return set;
 }
 
 // How often the interpreter's counter must fire (about 50 calls or 500 loop iterations each)
@@ -3528,6 +3539,10 @@ void wasmJITTierUp(CodeBlock* codeBlock)
         auto bytes = compiler.compile();
         if (bytes) {
             compiled.function = wasmJITInstall(bytes->data(), bytes->size(), level() >= 3);
+            if (compiled.function) {
+                Locker locker { compiledCodeBlocksLock };
+                compiledCodeBlocks().add(codeBlock);
+            }
             compiled.loops = compiler.takeLoops();
             compiled.callCaches = compiler.takeCallCaches();
             compiled.propertyCaches = compiler.takePropertyCaches();
@@ -3540,7 +3555,12 @@ void wasmJITTierUp(CodeBlock* codeBlock)
         }
         compiledCode().add(codeBlock, WTF::move(compiled));
     }
-    codeBlock->dontJITAnytimeSoon();
+    // The counter belongs to the UnlinkedCodeBlock, which every CodeBlock of the same code shares:
+    // those of the same script in other frames, of the builtins in every global object and the
+    // one that replaces this when the code was thrown away (memory short, or before it compiled).
+    // Stopping it for good kept them all interpreted; it goes on firing, once per about 50 calls
+    // of them in the interpreter, so they warm up and compile too.
+    codeBlock->unlinkedCodeBlock()->llintExecuteCounter().setNewThreshold(Options::thresholdForJITAfterWarmUp(), codeBlock);
 }
 
 void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction* pc)
@@ -3571,9 +3591,18 @@ void wasmJITForget(CodeBlock* codeBlock)
     auto it = compiledCode().find(codeBlock);
     if (it == compiledCode().end())
         return;
-    if (it->value.function)
+    if (it->value.function) {
         wasmJITRelease(it->value.function);
+        Locker locker { compiledCodeBlocksLock };
+        compiledCodeBlocks().remove(codeBlock);
+    }
     compiledCode().remove(it);
+}
+
+bool wasmJITHasCompiledCode(const CodeBlock* codeBlock)
+{
+    Locker locker { compiledCodeBlocksLock };
+    return compiledCodeBlocks().contains(codeBlock);
 }
 
 } // namespace JSC::LLInt

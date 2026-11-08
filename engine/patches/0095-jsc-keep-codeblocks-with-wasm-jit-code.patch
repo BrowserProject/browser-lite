@@ -1,0 +1,42 @@
+diff --git a/Source/JavaScriptCore/bytecode/CodeBlock.cpp b/Source/JavaScriptCore/bytecode/CodeBlock.cpp
+index 857252ea09..0778af427e 100644
+--- a/Source/JavaScriptCore/bytecode/CodeBlock.cpp
++++ b/Source/JavaScriptCore/bytecode/CodeBlock.cpp
+@@ -1321,6 +1321,12 @@ ALWAYS_INLINE bool CodeBlock::shouldJettisonDueToOldAge(const ConcurrentJSLocker
+     
+     if (timeSinceCreation() < timeToLive(jitType()))
+         return false;
++
++    // browser-lite: the code of the JIT to WebAssembly belongs to its CodeBlock (JSC's baseline
++    // code goes on to the next one), which stays until its function goes away or memory is short
++    // (deleteAllCode, docs/jit.md)
++    if (LLInt::wasmJITHasCompiledCode(this))
++        return false;
+     
+     return true;
+ }
+diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+index 683e5d39ec..b57f38d780 100644
+--- a/Source/JavaScriptCore/llint/LLIntWasmJIT.h
++++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+@@ -17,8 +17,8 @@ namespace LLInt {
+ // instruction to go on with (an op_ret, or the exception instructions), nullptr to interpret.
+ const JSInstruction* wasmJITEnter(CallFrame*, CodeBlock*);
+ 
+-// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can, and stops the
+-// interpreter's counter.
++// The CodeBlock got hot (llint_replace): compiles it, if the JIT is on and it can. The
++// interpreter's counter, which all CodeBlocks of the same code share, goes on for the others.
+ void wasmJITTierUp(CodeBlock*);
+ 
+ // A loop of the CodeBlock got hot (llint_loop_osr at the op_loop_hint `pc`): tiers up, then runs
+@@ -35,5 +35,9 @@ unsigned wasmJITGenericEntries();
+ // The CodeBlock goes away (~CodeBlock): its compiled code too.
+ void wasmJITForget(CodeBlock*);
+ 
++// The CodeBlock has compiled code, which the GC keeps whatever its age (shouldJettisonDueToOldAge):
++// compiling again would cost a warm-up in the interpreter and a compile. Any thread (GC markers).
++bool wasmJITHasCompiledCode(const CodeBlock*);
++
+ } // namespace LLInt
+ } // namespace JSC

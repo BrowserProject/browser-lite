@@ -7,10 +7,11 @@ it through `LLIntWasmJIT.h`. On unless `BL_JIT=0`.
 
 | File | |
 |---|---|
-| `WasmJIT.cpp` | Hooks of the C loop (entry at `op_enter`, tier-up at `llint_replace` and `llint_loop_osr`), calls from compiled code (compiled and host callees through a cache per call site; the VM entries of its generic calls counted for the GC, `wasmJITGenericEntries`, patch 0090) and the compiler of a `CodeBlock` with its fast paths |
+| `WasmJIT.cpp` | Hooks of the C loop (entry at `op_enter`, tier-up at `llint_replace` and `llint_loop_osr`), calls from compiled code (compiled and host callees through a cache per call site; the VM entries of its generic calls counted for the GC, `wasmJITGenericEntries`, patch 0090), which `CodeBlock`s the GC keeps for their compiled code (`wasmJITHasCompiledCode`, patch 0095) and the compiler of a `CodeBlock` with its fast paths |
 | `MachineStack.cpp` | Probe of the browser's machine stack for the JIT and for JSC's recursion checks (patch 0075) |
 | `WasmModule.cpp` | Writes the WASM module of one function |
 
 Tests: `tests/jsc/jit.js` (results against the interpreter's), `tests/jsc/jit-hash.js` (speed of the
-fast paths for hashing code against their int32 twins), `tests/engine/gc-test.mjs` (the GC inside a
-generic call of compiled code).
+fast paths for hashing code against their int32 twins), `tests/jsc/jit-recompile.js` (compiled code
+through a full GC, and code thrown away compiles again), `tests/engine/gc-test.mjs` (the GC inside
+a generic call of compiled code).

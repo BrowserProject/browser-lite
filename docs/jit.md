@@ -27,7 +27,11 @@ never baked into the code (the GC resets inline caches).
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
   `llint_loop_osr` at loops) call the compiler instead of giving up, after 4000 / bytecode bytes
   firings (4 to 64; one is about 50 calls or 500 loop iterations): a compile costs about 1 ms
-  whatever the size, a call saves more the larger the function.
+  whatever the size, a call saves more the larger the function. The counter belongs to the
+  `UnlinkedCodeBlock`, which all `CodeBlock`s of the same code share (the same script in other
+  frames, the builtins of every global object, the one that replaces a `CodeBlock` thrown away),
+  so it keeps firing after a compile instead of stopping for good, which had kept all of them
+  interpreted.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
@@ -62,6 +66,12 @@ never baked into the code (the GC resets inline caches).
   looks through these entries (the JIT counts them, `wasmJITGenericEntries`, patch 0090, #448).
   Before, the GC waited inside them until the task ended: Cloudflare's Turnstile piled up 0.5 to
   1.5 GB of garbage that way, which the WASM memory kept for good.
+- **Code lifetime**: the compiled code belongs to its `CodeBlock` (JSC's baseline code goes on to
+  the next `CodeBlock` of the same code, this cannot: constants and caches are baked in). A full
+  GC throws away every `CodeBlock` that is not running and older than 5 s; one with compiled
+  code stays (patch 0095), until its function goes away or memory is short (`deleteAllCode`,
+  #441). Before, every full GC sent the hot code of a page back to warm-up, and the counter
+  above then kept it interpreted for good (6x slower for a hot loop, `tests/jsc/jit-recompile.js`).
 
 ## Measured
 
