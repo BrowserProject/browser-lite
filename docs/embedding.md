@@ -286,7 +286,7 @@ of `context.storage` (default in memory), for example in your user's profile.
   4096 characters; WebAssembly frames show function names only with an engine that keeps its name
   section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` and `history`
   events; the latter brings the scroll position of the current entry, at most once a second and
-  at once when the page is hidden or left) to restore the session with `createView({ history })`:
+  at once when the page is hidden or left or the view closed with `close()`) to restore the session with `createView({ history })`:
   the page comes back where it was scrolled to.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`

@@ -29,6 +29,8 @@ import type { Watchdog } from './watchdog.js';
 // Like Chrome: a page that does not answer beforeunload in time (its engine thread is busy)
 // closes without asking, so that closing a tab never waits on a busy page
 const BEFOREUNLOAD_TIMEOUT_MS = 500;
+// How long closing a view waits for its last scroll position from a busy engine thread
+const CLOSE_HISTORY_WAIT_MS = 50;
 
 /** What a view needs from its browser. */
 export interface ViewHost {
@@ -48,6 +50,8 @@ export interface ViewHost {
   gesture(): void;
   focusView(view: ViewImpl): void;
   removeView(view: ViewImpl): void;
+  /** Lets the views send their `history` events not sent yet, waiting up to the given time. */
+  syncHistory(waitMilliseconds: number): void;
 }
 
 interface Caret {
@@ -485,7 +489,7 @@ export class ViewImpl implements View {
   close(options?: { force?: boolean }): Promise<boolean> {
     if (this.closed) return Promise.resolve(true);
     if (!this.alive || options?.force || !this.hasBeforeUnload) {
-      this.dispose();
+      this.closeNow();
       return Promise.resolve(true);
     }
     if (!this.closing) {
@@ -495,10 +499,17 @@ export class ViewImpl implements View {
       this.call((m) => m._bl_try_close(this.id), true);
       // An open beforeunload question waits for the user, the answer comes as 'try-close'
       this.closeTimer = setTimeout(() => {
-        if (!this.host.requests.hasDialog(this, 'beforeunload')) this.dispose();
+        if (!this.host.requests.hasDialog(this, 'beforeunload')) this.closeNow();
       }, BEFOREUNLOAD_TIMEOUT_MS);
     }
     return this.closing;
+  }
+
+  // Closing by the host: like Chrome takes the page state of a tab it closes, view.history
+  // holds the scroll position of the last second when 'close' comes (Ctrl+Shift+T, sessions)
+  private closeNow(): void {
+    if (this.alive) this.host.syncHistory(CLOSE_HISTORY_WAIT_MS);
+    this.dispose();
   }
 
   /** @internal Closes the view (also after window.close() or when the browser ends). */
@@ -742,7 +753,7 @@ export class ViewImpl implements View {
         const resolve = this.resolveClosing;
         this.closing = null;
         this.resolveClosing = null;
-        if (data.close) this.dispose();
+        if (data.close) this.closeNow();
         resolve?.(!!data.close);
         return;
       }

@@ -134,7 +134,8 @@ do not understand.
 page shown it follows the `history` event (at most once a second while it scrolls). When the
 embedding page goes into the background or away (`visibilitychange`, `pagehide`) the positions
 not reported yet arrive as `history` events before it goes, so a session saved from them is
-current.
+current; `view.close()` does the same for its view before `close`, so a closed tab kept for
+reopening has the position of its last second.
 `restoreHistory(history)` and `createView({ history })` bring the page back at that position, like
 back and forward.
 

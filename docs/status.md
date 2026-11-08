@@ -21,7 +21,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   downloads (a link or form whose answer becomes a download asks the server once, #412), uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
-  at the scroll position of its page like Chrome, also right after a scroll (#440, #452),
+  at the scroll position of its page like Chrome, also when the demo or the tab is closed right
+  after a scroll (#440, #452, #453),
   print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),

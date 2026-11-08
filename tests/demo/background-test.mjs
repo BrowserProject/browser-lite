@@ -51,6 +51,7 @@ console.log('RESULT loaded=' + name)</script>`,
 <script>let timer;
 addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(() => console.log('RESULT scrolled=' + Math.round(scrollY)), 300); });
 addEventListener('load', () => setTimeout(() => console.log('RESULT at=' + Math.round(scrollY)), 1000));
+addEventListener('pagehide', () => console.log('RESULT left=' + Math.round(scrollY)));
 console.log('RESULT loaded=long')</script>`,
 };
 const browser = await launch({
@@ -193,16 +194,23 @@ check(
   discardedLong > 0 && scrolled > 1000 && Number(restoredAt) === scrolled,
   `discarded ${discardedLong}, scrolled to ${scrolled}, back at ${restoredAt}`,
 );
+// Scrolled further and closed at once, before the engine's report a second after the scroll:
+// closing the view brings it
+await long.page.waitForTimeout(1500);
+long.results.length = 0;
+await long.page.mouse.move(longOrigin.x + 300, longOrigin.y + 300);
+for (let i = 0; i < 5; i++) await long.page.mouse.wheel(0, 300);
 await long.page.click('#address');
 await long.page.keyboard.press('Control+w');
 await long.page.waitForFunction(() => document.querySelectorAll('#tab-list .tab').length === 1);
 await long.page.keyboard.press('Control+Shift+T');
 await long.wait('loaded', 'long');
 const reopenedAt = (await long.wait('at'))?.[2];
+const closedAt = Number((await long.wait('left'))?.[2]);
 check(
-  'Ctrl+Shift+T: the reopened tab comes back at its scroll position',
-  Number(reopenedAt) === scrolled,
-  `scrolled to ${scrolled}, back at ${reopenedAt}`,
+  'Ctrl+Shift+T: a tab closed right after a scroll comes back at its scroll position',
+  closedAt > scrolled && Number(reopenedAt) === closedAt,
+  `scrolled to ${scrolled}, then to ${closedAt}, back at ${reopenedAt}`,
 );
 await long.context.close();
 

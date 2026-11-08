@@ -485,7 +485,9 @@ export interface View {
   exitFullscreen(): void;
   /**
    * Runs beforeunload unless `force`; resolves true when the view closed. Like Chrome, a page
-   * that does not answer within 500 ms (busy) closes without asking.
+   * that does not answer within 500 ms (busy) closes without asking. A scroll position not
+   * reported yet comes as `history` event before `close`, so {@link View.history} is current then
+   * (waits up to 50 ms for a busy engine thread).
    */
   close(options?: { force?: boolean }): Promise<boolean>;
 }
