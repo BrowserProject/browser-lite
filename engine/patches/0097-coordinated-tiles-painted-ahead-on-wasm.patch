@@ -1,0 +1,733 @@
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
+index 5f212e2616..6d0badee0b 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.cpp
+@@ -64,11 +64,31 @@ void SkiaBackingStore::update(const FloatSize& size, float scale, CoordinatedBac
+     for (const auto& tileUpdate : update.tilesToUpdate()) {
+         auto it = m_tiles.find(tileUpdate.tileID);
+         ASSERT(it != m_tiles.end());
++#if PLATFORM(WASM)
++        it->value.scheduleUpdate(tileUpdate.dirtyRect, tileUpdate.tileRect, tileUpdate.buffer, tileUpdate.prepaint);
++#else
+         it->value.scheduleUpdate(tileUpdate.dirtyRect, tileUpdate.tileRect, tileUpdate.buffer);
++#endif
+         m_hasPendingTileUpdates = true;
+     }
+ }
+ 
++#if PLATFORM(WASM)
++void SkiaBackingStore::processPendingTileUpdates(Damage& damage)
++{
++    if (!m_hasPendingTileUpdates)
++        return;
++
++    m_hasPaddedTiles = false;
++    bool stillPending = false;
++    for (auto& tile : m_tiles.values()) {
++        stillPending |= tile.processPendingUpdateIfNeeded(damage);
++        m_hasPaddedTiles |= tile.isPadded();
++    }
++
++    m_hasPendingTileUpdates = stillPending;
++}
++#else
+ void SkiaBackingStore::processPendingTileUpdates()
+ {
+     if (!m_hasPendingTileUpdates)
+@@ -82,6 +102,7 @@ void SkiaBackingStore::processPendingTileUpdates()
+ 
+     m_hasPendingTileUpdates = false;
+ }
++#endif
+ 
+ static inline bool allTileEdgesExposed(const FloatRect& totalRect, const FloatRect& tileRect)
+ {
+@@ -220,6 +241,35 @@ void SkiaBackingStore::drawDebugBorders(SkCanvas& canvas, const SkPaint& paint)
+         canvas.drawRect(SkRect(tile.rect()), paint);
+ }
+ 
++#if PLATFORM(WASM)
++void SkiaBackingStore::Tile::scheduleUpdate(const IntRect& dirtyRect, const IntRect& tileRect, CoordinatedTileBuffer& buffer, bool prepaint)
++{
++    // New contents of the whole tile make the updates before them pointless (a prepainted tile
++    // still painting would otherwise hold back the newer contents)
++    if (dirtyRect == IntRect { { }, tileRect.size() })
++        m_pendingUpdates.clear();
++    m_pendingUpdates.append({ tileRect, dirtyRect, Ref { buffer }, prepaint });
++}
++
++bool SkiaBackingStore::Tile::processPendingUpdateIfNeeded(Damage& damage)
++{
++    size_t taken = 0;
++    for (auto& pendingUpdate : m_pendingUpdates) {
++        if (pendingUpdate.prepaint && !pendingUpdate.buffer->isPaintingComplete())
++            break;
++        update(pendingUpdate.dirtyRect, pendingUpdate.tileRect, pendingUpdate.buffer.get());
++        FloatRect changed(pendingUpdate.dirtyRect);
++        changed.moveBy(pendingUpdate.tileRect.location());
++        changed.scale(1. / m_scale);
++        damage.add(changed);
++        ++taken;
++    }
++    // Vector::removeAt() with length 0 would move every update onto itself (and lose it)
++    if (taken)
++        m_pendingUpdates.removeAt(0, taken);
++    return !m_pendingUpdates.isEmpty();
++}
++#else
+ void SkiaBackingStore::Tile::scheduleUpdate(const IntRect& dirtyRect, const IntRect& tileRect, CoordinatedTileBuffer& buffer)
+ {
+     m_pendingUpdates.append({ tileRect, dirtyRect, Ref { buffer } });
+@@ -231,6 +281,7 @@ void SkiaBackingStore::Tile::processPendingUpdateIfNeeded()
+         update(pendingUpdate.dirtyRect, pendingUpdate.tileRect, pendingUpdate.buffer.get());
+     m_pendingUpdates.clear();
+ }
++#endif
+ 
+ void SkiaBackingStore::Tile::ensureTexture(const IntSize& size, CoordinatedTileBuffer& buffer)
+ {
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.h b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.h
+index f393dbe729..c378c4d937 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaBackingStore.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaBackingStore.h
+@@ -55,7 +55,13 @@ public:
+     bool requiresStrictSourceConstraint(SkSamplingOptions sampling) const { return sampling.filter == SkFilterMode::kLinear && m_hasPaddedTiles; }
+ 
+     void update(const FloatSize&, float scale, CoordinatedBackingStoreProxy::Update&&);
++#if PLATFORM(WASM)
++    // browser-lite: prepainted tiles whose painting is not done yet stay pending (nothing waits for
++    // them); what is taken over goes into the damage (layer coordinates)
++    void processPendingTileUpdates(Damage&);
++#else
+     void processPendingTileUpdates();
++#endif
+ 
+     void paintToCanvas(SkCanvas&, const SkPaint&, const SkiaDamageRegion* = nullptr);
+     void appendImageSetEntries(SkCanvas&, const SkMatrix& ctm, size_t matrixIndex, float opacity, bool enableAntialias, Vector<SkCanvas::ImageSetEntry>& images, const SkiaDamageRegion* = nullptr) const;
+@@ -77,8 +83,14 @@ private:
+ 
+         ~Tile() = default;
+ 
++#if PLATFORM(WASM)
++        void scheduleUpdate(const IntRect& dirtyRect, const IntRect& tileRect, CoordinatedTileBuffer&, bool prepaint);
++        // Returns whether updates are still pending
++        bool processPendingUpdateIfNeeded(Damage&);
++#else
+         void scheduleUpdate(const IntRect& dirtyRect, const IntRect& tileRect, CoordinatedTileBuffer&);
+         void processPendingUpdateIfNeeded();
++#endif
+ 
+         const FloatRect& rect() const LIFETIME_BOUND { return m_rect; }
+         sk_sp<SkImage> image() const;
+@@ -95,6 +107,9 @@ private:
+             IntRect tileRect;
+             IntRect dirtyRect;
+             Ref<CoordinatedTileBuffer> buffer;
++#if PLATFORM(WASM)
++            bool prepaint { false };
++#endif
+         };
+ 
+         float m_scale { 1. };
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index 00935a8436..07749aae66 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -188,11 +188,23 @@ bool SkiaCompositingLayer::hasPendingBackingStoreTileUpdates() const
+ void SkiaCompositingLayer::processPendingTileUpdates()
+ {
+ #if PLATFORM(WASM)
+-    if (hasPendingBackingStoreTileUpdates())
+-        ++m_backingStoreVersion;
++    // browser-lite: prepainted tiles arrive in frames without a rendering update, so they bring
++    // their own damage; tiles still painting change nothing yet
++    if (!m_backingStore || !hasPendingBackingStoreTileUpdates())
++        return;
++    Damage damage(m_rect.size(), Damage::Mode::Rectangles);
++    m_backingStore->processPendingTileUpdates(damage);
++    if (damage.isEmpty())
++        return;
++    ++m_backingStoreVersion;
++#if ENABLE(DAMAGE_TRACKING)
++    if (damagePropagationEnabled())
++        addDamage(WTF::move(damage));
+ #endif
++#else
+     if (m_backingStore)
+         m_backingStore->processPendingTileUpdates();
++#endif
+ }
+ 
+ void SkiaCompositingLayer::setImageBackingStore(CoordinatedImageBackingStore* imageBackingStore)
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.cpp b/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.cpp
+index 372d613382..5f82118968 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.cpp
+@@ -243,6 +243,39 @@ Ref<SkiaRecordingResult> SkiaPaintingEngine::record(const GraphicsLayerCoordinat
+     return result;
+ }
+ 
++static void paintTile(CoordinatedTileBuffer& buffer, const IntRect& tileRect, const IntRect& dirtyRect, const Ref<SkiaRecordingResult>& recording, const sk_sp<GrContextThreadSafeProxy>& threadSafeGrContext)
++{
++    auto* canvas = buffer.canvas();
++    if (!canvas)
++        return;
++
++    auto replayPicture = [](const sk_sp<SkPicture>& picture, SkCanvas* canvas, const IntRect& recordRect, const IntRect& tileRect, const IntRect& dirtyRect, bool isDDLBuffer) {
++        canvas->save();
++        if (isDDLBuffer) {
++            canvas->clipRect(SkRect::MakeXYWH(dirtyRect.x() - tileRect.x(), dirtyRect.y() - tileRect.y(), dirtyRect.width(), dirtyRect.height()));
++            canvas->translate(recordRect.x() - tileRect.x(), recordRect.y() - tileRect.y());
++        } else {
++            canvas->clear(SkColors::kTransparent);
++            canvas->clipRect(SkRect::MakeXYWH(0, 0, dirtyRect.width(), dirtyRect.height()));
++            canvas->translate(recordRect.x() - dirtyRect.x(), recordRect.y() - dirtyRect.y());
++        }
++        picture->playback(canvas);
++        canvas->restore();
++    };
++
++    const bool isDDLBuffer = buffer.isBackedByOpenGL() && !static_cast<CoordinatedAcceleratedTileBuffer&>(buffer).texture();
++    WTFBeginSignpost(canvas, PaintTile, "Skia/%s%s threaded, dirty region %ix%i+%i+%i", buffer.isBackedByOpenGL() ? "GPU" : "CPU", isDDLBuffer ? "(DDL)" : "", dirtyRect.x(), dirtyRect.y(), dirtyRect.width(), dirtyRect.height());
++    // Use SkiaReplayCanvas if there are GPU fences or GPU atlases to handle.
++    if (recording->hasFences() || recording->hasGPUAtlases()) {
++        auto replayCanvas = SkiaReplayCanvas::create(tileRect.size(), recording, threadSafeGrContext);
++        replayCanvas->addCanvas(canvas);
++        replayPicture(replayCanvas->picture(), &replayCanvas.get(), recording->recordRect(), tileRect, dirtyRect, isDDLBuffer);
++        replayCanvas->removeCanvas(canvas);
++    } else
++        replayPicture(recording->picture(), canvas, recording->recordRect(), tileRect, dirtyRect, isDDLBuffer);
++    WTFEndSignpost(canvas, PaintTile);
++}
++
+ Ref<CoordinatedTileBuffer> SkiaPaintingEngine::replay(const GraphicsLayerCoordinated& layer, Ref<SkiaRecordingResult>&& recording, const IntRect& tileRect, const IntRect& dirtyRect)
+ {
+     // ### Asynchronous rendering on worker threads ###
+@@ -258,34 +291,7 @@ Ref<CoordinatedTileBuffer> SkiaPaintingEngine::replay(const GraphicsLayerCoordin
+     buffer->beginPainting();
+ 
+     m_paintingWorkerPool->postTask([platformLayer = WTF::move(platformLayer), buffer = Ref { buffer }, tileRect, dirtyRect, recording = WTF::move(recording), threadSafeGrContext = WTF::move(threadSafeGrContext)]() mutable {
+-        if (auto* canvas = buffer->canvas()) {
+-            auto replayPicture = [](const sk_sp<SkPicture>& picture, SkCanvas* canvas, const IntRect& recordRect, const IntRect& tileRect, const IntRect& dirtyRect, bool isDDLBuffer) {
+-                canvas->save();
+-                if (isDDLBuffer) {
+-                    canvas->clipRect(SkRect::MakeXYWH(dirtyRect.x() - tileRect.x(), dirtyRect.y() - tileRect.y(), dirtyRect.width(), dirtyRect.height()));
+-                    canvas->translate(recordRect.x() - tileRect.x(), recordRect.y() - tileRect.y());
+-                } else {
+-                    canvas->clear(SkColors::kTransparent);
+-                    canvas->clipRect(SkRect::MakeXYWH(0, 0, dirtyRect.width(), dirtyRect.height()));
+-                    canvas->translate(recordRect.x() - dirtyRect.x(), recordRect.y() - dirtyRect.y());
+-                }
+-                picture->playback(canvas);
+-                canvas->restore();
+-            };
+-
+-            const bool isDDLBuffer = buffer->isBackedByOpenGL() && !static_cast<CoordinatedAcceleratedTileBuffer&>(buffer.get()).texture();
+-            WTFBeginSignpost(canvas, PaintTile, "Skia/%s%s threaded, dirty region %ix%i+%i+%i", buffer->isBackedByOpenGL() ? "GPU" : "CPU", isDDLBuffer ? "(DDL)" : "", dirtyRect.x(), dirtyRect.y(), dirtyRect.width(), dirtyRect.height());
+-            // Use SkiaReplayCanvas if there are GPU fences or GPU atlases to handle.
+-            if (recording->hasFences() || recording->hasGPUAtlases()) {
+-                auto replayCanvas = SkiaReplayCanvas::create(tileRect.size(), recording, threadSafeGrContext);
+-                replayCanvas->addCanvas(canvas);
+-                replayPicture(replayCanvas->picture(), &replayCanvas.get(), recording->recordRect(), tileRect, dirtyRect, isDDLBuffer);
+-                replayCanvas->removeCanvas(canvas);
+-            } else
+-                replayPicture(recording->picture(), canvas, recording->recordRect(), tileRect, dirtyRect, isDDLBuffer);
+-            WTFEndSignpost(canvas, PaintTile);
+-        }
+-
++        paintTile(buffer.get(), tileRect, dirtyRect, recording, threadSafeGrContext);
+         buffer->completePainting();
+         platformLayer->didPaintTile();
+     });
+@@ -293,6 +299,65 @@ Ref<CoordinatedTileBuffer> SkiaPaintingEngine::replay(const GraphicsLayerCoordin
+     return buffer;
+ }
+ 
++#if PLATFORM(WASM)
++Ref<CoordinatedTileBuffer> SkiaPaintingEngine::prepaint(const GraphicsLayerCoordinated& layer, Ref<SkiaRecordingResult>&& recording, const IntRect& tileRect, const IntRect& dirtyRect)
++{
++    sk_sp<GrContextThreadSafeProxy> threadSafeGrContext;
++    if (canUseDDL())
++        threadSafeGrContext = m_threadSafeGrContext;
++    auto renderingMode = recording->renderingMode();
++    auto bufferSize = renderingMode == RenderingMode::Accelerated && threadSafeGrContext ? tileRect.size() : dirtyRect.size();
++    auto buffer = createBuffer(renderingMode, bufferSize, recording->contentsOpaque());
++    buffer->beginPainting();
++
++    if (!m_prepaintQueue)
++        m_prepaintQueue = PrepaintQueue::create(Ref { *m_paintingWorkerPool }, numberOfCPUPaintingThreads());
++    m_prepaintQueue->append([platformLayer = Ref { layer.coordinatedPlatformLayer() }, buffer = Ref { buffer }, tileRect, dirtyRect, recording = WTF::move(recording), threadSafeGrContext = WTF::move(threadSafeGrContext)]() mutable {
++        // Only this job holds the buffer: the tile is gone or has newer contents
++        bool wanted = !buffer->hasOneRef();
++        if (wanted)
++            paintTile(buffer.get(), tileRect, dirtyRect, recording, threadSafeGrContext);
++        buffer->completePainting();
++        if (wanted)
++            platformLayer->didPrepaintTile();
++    });
++
++    return buffer;
++}
++
++void SkiaPaintingEngine::PrepaintQueue::append(Function<void()>&& job)
++{
++    {
++        Locker locker { m_lock };
++        m_jobs.append(WTF::move(job));
++        if (m_running >= m_maxRunning)
++            return;
++        ++m_running;
++    }
++    m_pool->postTask([queue = Ref { *this }] {
++        queue->runNext();
++    });
++}
++
++void SkiaPaintingEngine::PrepaintQueue::runNext()
++{
++    Function<void()> job;
++    {
++        Locker locker { m_lock };
++        if (m_jobs.isEmpty()) {
++            --m_running;
++            return;
++        }
++        job = m_jobs.takeFirst();
++    }
++    job();
++    // Behind the tiles of rendering updates posted meanwhile
++    m_pool->postTask([queue = Ref { *this }] {
++        queue->runNext();
++    });
++}
++#endif
++
+ unsigned SkiaPaintingEngine::numberOfCPUPaintingThreads()
+ {
+     static std::once_flag onceFlag;
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.h b/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.h
+index ce9e1fb2ea..a0c2688df3 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaPaintingEngine.h
+@@ -33,6 +33,10 @@ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_END
+ #include <wtf/TZoneMalloc.h>
+ #include <wtf/WorkQueue.h>
+ #include <wtf/WorkerPool.h>
++#if PLATFORM(WASM)
++#include <wtf/Deque.h>
++#include <wtf/Lock.h>
++#endif
+ 
+ namespace WebCore {
+ 
+@@ -68,6 +72,13 @@ public:
+ 
+     Ref<SkiaRecordingResult> record(const GraphicsLayerCoordinated&, const IntRect& recordRect, bool contentsOpaque, float contentsScale, unsigned dirtyTilesCount);
+     Ref<CoordinatedTileBuffer> replay(const GraphicsLayerCoordinated&, Ref<SkiaRecordingResult>&&, const IntRect& tileRect, const IntRect& dirtyRect);
++#if PLATFORM(WASM)
++    // browser-lite: a tile ahead of the view. It paints after the tiles a rendering update waits for
++    // (at most one prepainted tile per thread runs ahead of them), nothing waits for it, and the layer
++    // learns when it is done (CoordinatedPlatformLayer::didPrepaintTile). A tile nobody holds anymore
++    // when its turn comes (removed or painted again meanwhile) is not painted.
++    Ref<CoordinatedTileBuffer> prepaint(const GraphicsLayerCoordinated&, Ref<SkiaRecordingResult>&&, const IntRect& tileRect, const IntRect& dirtyRect);
++#endif
+ 
+ private:
+     Ref<CoordinatedTileBuffer> createBuffer(RenderingMode, const IntSize&, bool contentsOpaque) const;
+@@ -78,6 +89,30 @@ private:
+ 
+     sk_sp<GrContextThreadSafeProxy> m_threadSafeGrContext;
+     RefPtr<WorkerPool> m_paintingWorkerPool;
++#if PLATFORM(WASM)
++    // Prepainted tiles in order; each running job takes one, then queues itself behind the tasks
++    // posted meanwhile
++    class PrepaintQueue : public ThreadSafeRefCounted<PrepaintQueue> {
++    public:
++        static Ref<PrepaintQueue> create(Ref<WorkerPool>&& pool, unsigned maxRunning) { return adoptRef(*new PrepaintQueue(WTF::move(pool), maxRunning)); }
++        void append(Function<void()>&&);
++
++    private:
++        PrepaintQueue(Ref<WorkerPool>&& pool, unsigned maxRunning)
++            : m_pool(WTF::move(pool))
++            , m_maxRunning(maxRunning)
++        {
++        }
++        void runNext();
++
++        const Ref<WorkerPool> m_pool;
++        const unsigned m_maxRunning;
++        Lock m_lock;
++        Deque<Function<void()>> m_jobs WTF_GUARDED_BY_LOCK(m_lock);
++        unsigned m_running WTF_GUARDED_BY_LOCK(m_lock) { 0 };
++    };
++    RefPtr<PrepaintQueue> m_prepaintQueue;
++#endif
+     RefPtr<WorkQueue> m_uploadWorkQueue;
+     unsigned m_cachedImageFingerprint { 0 };
+     Vector<Ref<SkiaGPUAtlas>> m_cachedGPUAtlases;
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.cpp
+index 30f54801b8..0da1d776f5 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.cpp
+@@ -124,6 +124,127 @@ void CoordinatedBackingStoreProxy::setAffectedByTransformAnimation(bool affected
+     }
+ }
+ 
++#if PLATFORM(WASM)
++// browser-lite: the engine thread learns the scroll position of the scrolling thread only with its
++// rendering updates, which a busy page spaces out (long scripts): in a fling the view ran away from
++// the tiles. Like Chrome's skewport (and the velocity based tile coverage of WebKit on iOS), the
++// tiles where the view gets within s_aheadTime at its speed are made at once and painted ahead.
++static constexpr Seconds s_aheadTime = 1_s;
++// A longer gap between two positions counts as this long (the view moved during it)
++static constexpr Seconds s_motionWindow = 500_ms;
++// After this long at the same place the view stands still
++static constexpr Seconds s_motionTimeout = 250_ms;
++// At most this many view heights (or widths) ahead; a farther jump between two positions is no motion
++static constexpr float s_maxAheadViews = 2.5;
++static constexpr float s_jumpViews = 8;
++
++void CoordinatedBackingStoreProxy::updateMotion(const IntRect& visibleRect)
++{
++    auto now = MonotonicTime::now();
++    if (visibleRect.isEmpty() || !m_hasLastLocation) {
++        m_hasLastLocation = !visibleRect.isEmpty();
++        m_lastLocation = visibleRect.location();
++        m_lastMoveTime = now;
++        m_velocity = { };
++        m_aheadRect = { };
++        m_lastAheadRect = { };
++        m_lastVelocity = { };
++        return;
++    }
++
++    auto delta = visibleRect.location() - m_lastLocation;
++    if (delta.isZero()) {
++        if (now - m_lastMoveTime > s_motionTimeout)
++            m_velocity = { };
++    } else {
++        auto elapsed = std::clamp(now - m_lastMoveTime, 4_ms, s_motionWindow);
++        bool jump = std::abs(delta.width()) > s_jumpViews * visibleRect.width() || std::abs(delta.height()) > s_jumpViews * visibleRect.height();
++        m_velocity = jump ? FloatSize { } : FloatSize { static_cast<float>(delta.width() / elapsed.seconds()), static_cast<float>(delta.height() / elapsed.seconds()) };
++        if (jump) {
++            m_lastAheadRect = { };
++            m_lastVelocity = { };
++        }
++        m_lastLocation = visibleRect.location();
++        m_lastMoveTime = now;
++    }
++
++    if (m_velocity.isZero()) {
++        m_aheadRect = { };
++        return;
++    }
++    auto ahead = [&](float velocity, int viewSize) {
++        float limit = s_maxAheadViews * viewSize;
++        return std::clamp(velocity * static_cast<float>(s_aheadTime.seconds()), -limit, limit);
++    };
++    FloatRect reached(visibleRect);
++    reached.move(ahead(m_velocity.width(), visibleRect.width()), ahead(m_velocity.height(), visibleRect.height()));
++    m_aheadRect = unionRect(visibleRect, enclosingIntRect(reached));
++
++    // A slower motion in the same direction keeps the tiles painted farther ahead before, but none
++    // behind the view
++    bool sameDirection = (m_velocity.width() * m_lastVelocity.width() + m_velocity.height() * m_lastVelocity.height()) > 0;
++    auto kept = sameDirection ? unionRect(m_lastAheadRect, m_aheadRect) : m_aheadRect;
++    if (m_velocity.height() > 0)
++        kept.shiftYEdgeTo(std::max(kept.y(), visibleRect.y()));
++    else if (m_velocity.height() < 0)
++        kept.shiftMaxYEdgeTo(std::min(kept.maxY(), visibleRect.maxY()));
++    if (m_velocity.width() > 0)
++        kept.shiftXEdgeTo(std::max(kept.x(), visibleRect.x()));
++    else if (m_velocity.width() < 0)
++        kept.shiftMaxXEdgeTo(std::min(kept.maxX(), visibleRect.maxX()));
++    m_lastAheadRect = kept;
++    m_lastVelocity = m_velocity;
++}
++
++void CoordinatedBackingStoreProxy::paintDirtyTiles(SkiaPaintingEngine& paintingEngine, const Ref<SkiaRecordingResult>& recording, CoordinatedPlatformLayer& layer, Vector<Update::TileUpdate>& tilesToUpdate)
++{
++    // The rendering update waits only for tiles in view that have contents already, so a change
++    // shows everywhere at once. Tiles out of view, and new tiles while the view moves, paint after
++    // them and show when they are done: nearest to the view first, those behind a motion last.
++    bool moving = !m_velocity.isZero();
++    FloatRect visible(m_visibleRect);
++    auto prepaintOrder = [&](const Tile& tile) -> float {
++        if (tile.rect.intersects(m_visibleRect))
++            return 0;
++        auto center = FloatRect(tile.rect).center();
++        float dx = std::max({ 0.f, visible.x() - center.x(), center.x() - visible.maxX() });
++        float dy = std::max({ 0.f, visible.y() - center.y(), center.y() - visible.maxY() });
++        auto towards = center - visible.center();
++        bool behind = moving && towards.width() * m_velocity.width() + towards.height() * m_velocity.height() < 0;
++        return std::hypot(dx, dy) + (behind ? 1e7f : 0);
++    };
++
++    Vector<std::pair<float, Tile*>> prepaintTiles;
++    for (auto& tile : m_tiles.values()) {
++        if (!tile.isDirty())
++            continue;
++        if (!tile.rect.intersects(m_visibleRect) || (moving && tile.neverPainted)) {
++            prepaintTiles.append({ prepaintOrder(tile), &tile });
++            continue;
++        }
++        IntRect updateRect(tile.dirtyRect);
++        updateRect.move(-tile.rect.x(), -tile.rect.y());
++        auto buffer = paintingEngine.replay(*layer.owner(), recording.copyRef(), tile.rect, tile.dirtyRect);
++        tilesToUpdate.append({ tile.id, tile.rect, WTF::move(updateRect), WTF::move(buffer) });
++        tile.markClean();
++        tile.prepainted = false;
++        tile.neverPainted = false;
++    }
++
++    std::ranges::sort(prepaintTiles, { }, [](auto& entry) { return entry.first; });
++    for (auto& entry : prepaintTiles) {
++        auto& tile = *entry.second;
++        IntRect updateRect(tile.dirtyRect);
++        updateRect.move(-tile.rect.x(), -tile.rect.y());
++        auto buffer = paintingEngine.prepaint(*layer.owner(), recording.copyRef(), tile.rect, tile.dirtyRect);
++        tilesToUpdate.append({ tile.id, tile.rect, WTF::move(updateRect), WTF::move(buffer), true });
++        tile.markClean();
++        tile.prepainted = true;
++        tile.neverPainted = false;
++    }
++}
++#endif
++
+ OptionSet<CoordinatedBackingStoreProxy::UpdateResult> CoordinatedBackingStoreProxy::updateIfNeeded(const IntRect& unscaledVisibleRect, const FloatSize& unscaledSize, const FloatRect& unscaledViewportRect, float contentsScale, bool contentsOpaque, bool shouldCreateAndDestroyTiles, const Vector<IntRect, 1>& dirtyRegion, Damage& damage, CoordinatedPlatformLayer& layer)
+ {
+     assertIsMainThread();
+@@ -146,10 +267,14 @@ OptionSet<CoordinatedBackingStoreProxy::UpdateResult> CoordinatedBackingStorePro
+     // Update the dirty tiles.
+     IntRect tileDirtyRectUnion;
+     unsigned dirtyTilesCount = 0;
+-    for (const auto& tile : m_tiles.values()) {
++    for (auto& tile : m_tiles.values()) {
+         if (!tile.isDirty())
+             continue;
+ 
++#if PLATFORM(WASM)
++        if (tile.prepainted)
++            tile.dirtyRect = tile.rect;
++#endif
+         tileDirtyRectUnion.unite(tile.dirtyRect);
+         ++dirtyTilesCount;
+     }
+@@ -165,6 +290,10 @@ OptionSet<CoordinatedBackingStoreProxy::UpdateResult> CoordinatedBackingStorePro
+         auto recording = paintingEngine.record(*layer.owner(), tileDirtyRectUnion, contentsOpaque, contentsScale, dirtyTilesCount);
+ #endif
+ 
++#if PLATFORM(WASM)
++        paintDirtyTiles(paintingEngine, recording, layer, tilesToUpdate);
++        result.add(UpdateResult::BuffersChanged);
++#else
+         unsigned dirtyTileIndex = 0;
+         for (auto& tile : m_tiles.values()) {
+             if (!tile.isDirty())
+@@ -194,6 +323,7 @@ OptionSet<CoordinatedBackingStoreProxy::UpdateResult> CoordinatedBackingStorePro
+ 
+ #if !HAVE(OS_SIGNPOST) && !USE(SYSPROF_CAPTURE)
+         UNUSED_VARIABLE(dirtyTileIndex);
++#endif
+ #endif
+ 
+         WTFEndSignpost(this, UpdateTiles);
+@@ -245,6 +375,12 @@ void CoordinatedBackingStoreProxy::createOrDestroyTiles(const IntRect& unscaledV
+ 
+     IntRect contentsRect = mapFromContents(unscaledContentsRect);
+     IntRect visibleRect = mapFromContents(unscaledVisibleRect);
++#if PLATFORM(WASM)
++    // Positions at another scale are no motion
++    if (contentsScaleChanged)
++        m_hasLastLocation = false;
++    updateMotion(visibleRect);
++#endif
+     bool contentsRectChanged = contentsScaleChanged || m_contentsRect != contentsRect;
+     bool geometryChanged = contentsRectChanged || m_visibleRect != visibleRect || m_coverAreaMultiplier != coverAreaMultiplier;
+     if (!geometryChanged && !m_pendingTileCreation)
+@@ -338,6 +474,10 @@ void CoordinatedBackingStoreProxy::createOrDestroyTiles(const IntRect& unscaledV
+     auto tileDistance = [&] (const IntPoint& tilePosition) -> double {
+         if (m_visibleRect.intersects(tileRectForPosition(tilePosition)))
+             return 0;
++#if PLATFORM(WASM)
++        if (m_aheadRect.intersects(tileRectForPosition(tilePosition)))
++            return 0;
++#endif
+ 
+         return std::max(std::abs(visibleCenterPosition.y() - tilePosition.y()), std::abs(visibleCenterPosition.x() - tilePosition.x()));
+     };
+@@ -513,6 +653,14 @@ std::pair<IntRect, IntRect> CoordinatedBackingStoreProxy::computeCoverAndKeepRec
+ 
+     adjustForContentsRect(coverRect);
+ 
++#if PLATFORM(WASM)
++    // browser-lite: where a motion goes (updateMotion), and the tiles where the last one went
++    if (m_coverAreaMultiplier > 1) {
++        coverRect.unite(intersection(m_aheadRect, m_contentsRect));
++        keepRect.unite(intersection(m_lastAheadRect, m_contentsRect));
++    }
++#endif
++
+     // The keep rect is an inflated version of the cover rect, inflated in tile dimensions.
+     keepRect.unite(coverRect);
+     keepRect.inflateX(m_tileSize.width() / 2);
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.h
+index 07d60fbf54..3beb0f94b6 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedBackingStoreProxy.h
+@@ -27,6 +27,10 @@
+ #include <wtf/Assertions.h>
+ #include <wtf/HashMap.h>
+ #include <wtf/Lock.h>
++#if PLATFORM(WASM)
++#include "FloatSize.h"
++#include <wtf/MonotonicTime.h>
++#endif
+ #include <wtf/TZoneMalloc.h>
+ #include <wtf/ThreadSafeRefCounted.h>
+ 
+@@ -36,6 +40,10 @@ class CoordinatedPlatformLayer;
+ class CoordinatedTileBuffer;
+ class Damage;
+ class GraphicsLayer;
++#if PLATFORM(WASM)
++class SkiaPaintingEngine;
++class SkiaRecordingResult;
++#endif
+ 
+ class CoordinatedBackingStoreProxy final : public ThreadSafeRefCounted<CoordinatedBackingStoreProxy> {
+     WTF_MAKE_TZONE_ALLOCATED(CoordinatedBackingStoreProxy);
+@@ -63,6 +71,10 @@ public:
+             IntRect tileRect;
+             IntRect dirtyRect;
+             Ref<CoordinatedTileBuffer> buffer;
++#if PLATFORM(WASM)
++            // Painted ahead of the view: the compositor shows it when it is done, without waiting
++            bool prepaint { false };
++#endif
+         };
+ 
+         const Vector<uint32_t>& tilesToCreate() const LIFETIME_BOUND { return m_tilesToCreate; }
+@@ -130,6 +142,13 @@ private:
+         uint32_t id { 0 };
+         IntRect rect;
+         IntRect dirtyRect;
++#if PLATFORM(WASM)
++        // The last contents went out as a prepainted tile, which the compositor may not have yet:
++        // the next update repaints the whole tile, so it does not build on them
++        bool prepainted { false };
++        // No contents painted yet: while the view moves it shows as soon as it is painted
++        bool neverPainted { true };
++#endif
+     };
+ 
+     CoordinatedBackingStoreProxy() = default;
+@@ -138,6 +157,10 @@ private:
+     void createOrDestroyTiles(const IntRect& unscaledVisibleRect, const IntRect& unscaledContentsRect, const IntSize& unscaledViewportSize, float contentsScale, int maxTextureSize, Damage&, Vector<uint32_t>& tilesToCreate, Vector<uint32_t>& tilesToRemove);
+     IntSize computeTileSize(const IntSize& viewportSize, int maxTextureSize) const;
+     std::pair<IntRect, IntRect> computeCoverAndKeepRect() const;
++#if PLATFORM(WASM)
++    void updateMotion(const IntRect& visibleRect);
++    void paintDirtyTiles(SkiaPaintingEngine&, const Ref<SkiaRecordingResult>&, CoordinatedPlatformLayer&, Vector<Update::TileUpdate>&);
++#endif
+     void adjustForContentsRect(IntRect&) const;
+ 
+     IntRect mapToContents(const IntRect&) const;
+@@ -154,6 +177,18 @@ private:
+     IntRect m_visibleRect;
+     IntRect m_coverRect;
+     IntRect m_keepRect;
++#if PLATFORM(WASM)
++    // browser-lite: how the visible rect moves (scaled pixels per second) and the area it reaches
++    // within s_aheadTime at that speed: tiles there are made in one go and painted ahead
++    FloatSize m_velocity;
++    IntPoint m_lastLocation;
++    MonotonicTime m_lastMoveTime;
++    bool m_hasLastLocation { false };
++    IntRect m_aheadRect;
++    // The area ahead of the last motion keeps its tiles until the view moves another way
++    IntRect m_lastAheadRect;
++    FloatSize m_lastVelocity;
++#endif
+     HashMap<IntPoint, Tile> m_tiles;
+     RefPtr<CoordinatedAnimatedBackingStoreClient> m_animatedBackingStoreClient;
+     struct {
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+index 06e0b02424..80b21801ed 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+@@ -964,6 +964,15 @@ void CoordinatedPlatformLayer::didPaintTile()
+         m_client->didPaintTile();
+ }
+ 
++#if PLATFORM(WASM)
++void CoordinatedPlatformLayer::didPrepaintTile()
++{
++    // Called from painting threads, like didPaintTile().
++    if (m_client)
++        m_client->didPrepaintTile();
++}
++#endif
++
+ #if USE(SKIA)
+ sk_sp<GrContextThreadSafeProxy> CoordinatedPlatformLayer::threadSafeGrContext() const
+ {
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+index a8134c4e2f..483919583d 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+@@ -88,6 +88,10 @@ public:
+         virtual int maxTextureSize() const = 0;
+         virtual void willPaintTile() = 0;
+         virtual void didPaintTile() = 0;
++#if PLATFORM(WASM)
++        // browser-lite: a tile painted ahead of the view is ready (painting threads), a frame shows it
++        virtual void didPrepaintTile() { }
++#endif
+     };
+ 
+     static Ref<CoordinatedPlatformLayer> create();
+@@ -218,6 +222,9 @@ public:
+ 
+     void willPaintTile();
+     void didPaintTile();
++#if PLATFORM(WASM)
++    void didPrepaintTile();
++#endif
+     void waitUntilPaintingComplete();
+ 
+ private:
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
+index 0c8dbfddae..5d2cdf2d9d 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.cpp
+@@ -102,6 +102,14 @@ void CoordinatedTileBuffer::waitUntilPaintingComplete()
+     });
+ }
+ 
++#if PLATFORM(WASM)
++bool CoordinatedTileBuffer::isPaintingComplete()
++{
++    Locker locker { m_painting.lock };
++    return m_painting.state == PaintingState::Complete;
++}
++#endif
++
+ Ref<CoordinatedTileBuffer> CoordinatedUnacceleratedTileBuffer::create(const IntSize& size, Flags flags)
+ {
+     return adoptRef(*new CoordinatedUnacceleratedTileBuffer(size, flags));
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
+index eb5c1d0599..1c24302175 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedTileBuffer.h
+@@ -72,6 +72,10 @@ public:
+     virtual void beginPainting();
+     virtual void completePainting();
+     void waitUntilPaintingComplete();
++#if PLATFORM(WASM)
++    // browser-lite: a compositor that does not wait for prepainted tiles asks first
++    bool isPaintingComplete();
++#endif
+ 
+ #if USE(SKIA)
+     virtual SkCanvas* canvas() = 0;

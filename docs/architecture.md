@@ -124,6 +124,12 @@ compositor's phase and how long it lasts, since the scene started if it never ra
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).
 A layer gets tiles as far down as layout reaches (LayoutUnit, about 33.5 million px): its visible
 rect is no longer clamped to 2^24 px (patch 0081, #409).
+Tiles cover the visible rect of a layer and half a view around it (WPE). A rendering update waits
+only for the tiles in view that already showed something; tiles out of view, and new tiles while
+the view moves, are painted after them (at most one per tile thread ahead of a rendering update's
+tiles) and each shows when it is done. While a layer's visible rect moves, the tiles where it gets
+within 1 s at its speed (at most 2.5 views ahead) are made at once, so a fling on a page whose
+scripts hold the engine thread for long stretches stays painted (patch 0097, #460).
 A layer whose filter the compositor applies leaves the filter outsets out of its bounds only when
 nothing of its contents reaches further: what the contents paint outside the box (text-shadow,
 shadows and outlines of children) stays in the layer (patch 0089, #442).

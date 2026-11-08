@@ -157,6 +157,8 @@ static void compositeScene(CompositorScene& scene)
         // frame: animations and scrolling wait as long as the painting takes
         // (#220). The upload would wait for them anyway (patch 0025), but
         // blocking this thread, without ticks for the scrolling thread.
+        // Tiles painted ahead of the view (out of view, or new while it moves, patch 0097) do not
+        // count: each shows when it is done (didPrepaintTile).
         if (scene.reasons.contains(CompositionReason::RenderingUpdate) && scene.pendingTiles.load()) {
             scene.waitingForTiles = true;
             // Look again in the next frame
@@ -806,6 +808,13 @@ void LayerTreeHostWasm::didPaintTile()
     if (!std::exchange(m_scene->waitingForTiles, false))
         return;
     m_scene->scheduleFrameLocked();
+}
+
+void LayerTreeHostWasm::didPrepaintTile()
+{
+    // From the painting threads: a tile painted ahead of the view is done, the next frame takes it
+    // (nothing waited for it, SkiaPaintingEngine::prepaint)
+    m_scene->requestComposition(CompositionReason::Animation);
 }
 
 Ref<GraphicsLayer> LayerTreeHostWasm::createGraphicsLayer(GraphicsLayer::Type layerType, GraphicsLayerClient& client)

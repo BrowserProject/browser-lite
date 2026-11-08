@@ -74,7 +74,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   last frame stays unscaled until the page painted the new size (#404; before, it was stretched
   or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
   WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all
-  below about 16.7 million px was blank). A filtered layer keeps the text shadow of its contents
+  below about 16.7 million px was blank). Fast flings stay painted while the page's scripts
+  hold the engine thread: the tiles where a moving view goes are made at once and painted after
+  those in view, without holding the frame (#460; locally with 400 ms of script every 450 ms
+  on average 5 to 21 % of the view and for 0.5 to 1.2 s more than a quarter of it blank, now 0). A filtered layer keeps the text shadow of its contents
   (#442; zoo.ch had hard dark boxes behind its headline with `filter: blur(0px)`).
   AVIF images decode (libavif with dav1d, also 10 bit, alpha and animated, #447): the engine sends
   Safari's user agent, so AliExpress sent its product pictures as AVIF, which showed as broken
@@ -555,9 +558,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 - Real devices 2026-11-03 (BrowserStack): on a Moto G71 one Chrome tab crash during a reload of
   20min.ch (not again in 3 heavy and 5 light reloads; the renderer holds about 0.9 GB with such a
-  page); after three fast flings in a row on 20min.ch (Pixel 9) the new area stays empty for 1 to
-  2 s until the busy engine records its tiles (one fling is painted at once; tiles cover half a
-  viewport above and below). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
+  page). Fast flings on busy pages (20min.ch, bbc.com, spiegel.de on a Pixel 9) left the new
+  area empty for 0.5 to 2 s, sometimes the whole view: fixed with tiles painted ahead of a moving
+  view (#460; bbc.com on the Pixel 9 with a local build: blank right after four swipes before,
+  painted after; images that load late still come later). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
 - Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (44 px since #356; the
   page kept 221 of 303 px on a Pixel 9 with the old 58 px bar; hiding it while scrolling needs a

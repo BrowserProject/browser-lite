@@ -15,7 +15,8 @@ content more than 16.7 million px down a page, or the overlay scrollbars that to
 the right edge of a phone, or the hover a scroll moved to the element under the last tap, or
 an interpreter cache that took the missing export of one module for all modules, or the decoded
 image a compositing layer still showed, which the memory cache dropped and the layer decoded again,
-or the text shadow a filtered layer cut off at its box)
+or the text shadow a filtered layer cut off at its box, or the tiles a fling on a busy page
+ran away from)
 comes as patches from `patches/`.
 
 ## Folders
