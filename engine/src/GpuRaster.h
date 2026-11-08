@@ -15,6 +15,7 @@
 // the context. Then Skia gets a new one.
 #pragma once
 
+#include <optional>
 #include <skia/core/SkRefCnt.h>
 
 class GrDirectContext;
@@ -46,9 +47,11 @@ sk_sp<SkSurface> createSurface(int width, int height);
 bool present(int viewId, SkSurface&);
 
 // Paint directly into the framebuffer of the context (compositor): surface in
-// the size of the view, nullptr if the view has no canvas here. Afterwards
-// showFramebuffer() sends the frame without a copy into the canvas of the view.
+// the size of the view or of a damage tile (DamageTiles.h), nullptr if the view
+// has no canvas here. Afterwards showFramebuffer() sends the frame without a copy
+// into the canvas of the view or of the tile.
+bool hasCanvas(int viewId);
 sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height);
-bool showFramebuffer(int viewId);
+bool showFramebuffer(int viewId, std::optional<unsigned> tile = std::nullopt);
 
 } // namespace BrowserLite::Gpu

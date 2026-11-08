@@ -2,6 +2,7 @@
 #include "LayerTreeHostWasm.h"
 
 #include "Compositor.h"
+#include "DamageTiles.h"
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "GpuRaster.h"
@@ -95,6 +96,30 @@ static SkColor backgroundOf(const LocalFrameView& frameView)
         return SK_ColorWHITE;
     auto [red, green, blue, alpha] = blendSourceOver(Color::white, color).toColorTypeLossy<SRGBA<uint8_t>>().resolved();
     return SkColorSetARGB(255, red, green, blue);
+}
+
+// Composites the frame into the damage tiles, each translated to its place. false: the frame
+// goes whole into the view canvas instead (a video hole in a tile, a canvas missing)
+static bool compositeTiles(CompositorScene& scene, SkiaCompositingLayer& rootLayer, const Vector<DamageTiles::Tile>& tiles, SkColor background, bool& hasRunningAnimations)
+{
+    auto* grContext = Gpu::context();
+    for (auto& tile : tiles) {
+        auto surface = Gpu::framebufferSurface(scene.viewId, tile.rect.width(), tile.rect.height());
+        if (!surface)
+            return false;
+        auto* canvas = surface->getCanvas();
+        VideoOverlay::Frame overlayFrame(scene.viewId, *canvas, VideoOverlay::Frame::Kind::Part);
+        canvas->save();
+        canvas->translate(-tile.rect.x(), -tile.rect.y());
+        hasRunningAnimations |= rootLayer.drawFrame(*canvas, background);
+        canvas->restore();
+        if (overlayFrame.punched())
+            return false;
+        grContext->flushAndSubmit(surface.get());
+        if (!scene.damageTiles.show(tile))
+            return false;
+    }
+    return true;
 }
 
 static void compositeScene(CompositorScene& scene)
@@ -262,8 +287,7 @@ static void compositeScene(CompositorScene& scene)
 
     setFramePhase(scene, 2);
     // Without a canvas (not there yet) only take the state
-    auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
-    if (!surface) {
+    if (!Gpu::hasCanvas(scene.viewId)) {
         skipFrame();
         return;
     }
@@ -278,35 +302,55 @@ static void compositeScene(CompositorScene& scene)
     }
     rootLayer.setTransform(matrix);
 
-    // Damage tracking (#220): paint() collects what changed first. A frame
+    // Damage tracking (#220): prepareFrame() collects what changed first. A frame
     // without a change is neither composited nor shown, the canvas keeps the
-    // last one; a change composites the whole view into the framebuffer, which
-    // is new every frame. A new size (new canvas) and forceRepaint() show the
-    // whole view.
+    // last one. A frame that changes only a few damage tiles composites only
+    // those, each into its own canvas over the view canvas (DamageTiles.h).
+    // Otherwise the whole view is composited into the framebuffer, which is new
+    // every frame. A new size (new canvas) and forceRepaint() show the whole view.
     repaintAll |= pixelSize != scene.shownSize;
     std::optional<Damage> frameDamage;
     if (scene.damageMode)
         frameDamage.emplace(pixelSize, *scene.damageMode);
     // BL_DAMAGE=0 (reference of tests/core/damage-test.mjs): every frame is
-    // composited and shown
+    // composited and shown whole
     bool skipUnchanged = engineConfig().skipUnchangedFrames;
-    auto* canvas = surface->getCanvas();
-    // Holes of videos the host shows behind the canvas (#232)
-    VideoOverlay::Frame overlayFrame(scene.viewId, *canvas);
     setFramePhase(scene, 3);
-    canvas->save();
-    auto drawsWholeTarget = frameDamage && skipUnchanged && !repaintAll ? SkiaCompositingLayer::DrawsWholeTarget::Yes : SkiaCompositingLayer::DrawsWholeTarget::No;
-    bool hasRunningAnimations = rootLayer.paint(*canvas, frameDamage, std::nullopt, background, drawsWholeTarget);
-    canvas->restore();
+    auto prepared = rootLayer.prepareFrame(pixelSize, frameDamage);
+    bool hasRunningAnimations = prepared.hasRunningAnimations;
+    auto finishFrame = makeScopeExit([&] {
+        rootLayer.finishFrame();
+    });
     bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
-    setFramePhase(scene, 4);
-    grContext->flushAndSubmit(surface.get());
     if (changed || !skipUnchanged) {
-        setFramePhase(scene, 5);
-        Gpu::showFramebuffer(scene.viewId);
-        overlayFrame.shown();
+        std::optional<Vector<DamageTiles::Tile>> tiles;
+        // Video holes are placed by whole frames (VideoOverlay.h)
+        if (!repaintAll && frameDamage && skipUnchanged && !VideoOverlay::hasPlacements(scene.viewId))
+            tiles = scene.damageTiles.tilesFor(pixelSize, deviceScaleFactor, *frameDamage, prepared.rectsDrawnWhole);
+        if (tiles && !compositeTiles(scene, rootLayer, *tiles, background, hasRunningAnimations))
+            tiles = std::nullopt;
+        if (!tiles) {
+            auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
+            if (!surface) {
+                skipFrame();
+                return;
+            }
+            auto* canvas = surface->getCanvas();
+            // Holes of videos the host shows behind the canvas (#232)
+            VideoOverlay::Frame overlayFrame(scene.viewId, *canvas);
+            hasRunningAnimations |= rootLayer.drawFrame(*canvas, background);
+            setFramePhase(scene, 4);
+            grContext->flushAndSubmit(surface.get());
+            setFramePhase(scene, 5);
+            Gpu::showFramebuffer(scene.viewId);
+            overlayFrame.shown();
+            scene.damageTiles.didShowWholeFrame();
+        }
         scene.shownSize = pixelSize;
         s_framesShown.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        // Tile uploads of the rendering update
+        grContext->flushAndSubmit();
     }
     if (firstPaint)
         WebView::firstPaintShown(scene.viewId);
@@ -612,6 +656,7 @@ void LayerTreeHostWasm::detachScene()
     }
     Compositor::dispatch([viewId = m_scene->viewId] {
         VideoOverlay::forgetView(viewId);
+        DamageTiles::forgetView(viewId);
     });
 }
 

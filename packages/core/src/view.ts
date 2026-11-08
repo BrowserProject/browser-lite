@@ -24,6 +24,7 @@ import type {
   ViewOptions,
 } from './types.js';
 import { type Uploads, uploadDirectory } from './uploads.js';
+import { ViewTiles } from './view-tiles.js';
 import type { Watchdog } from './watchdog.js';
 
 // Like Chrome: a page that does not answer beforeunload in time (its engine thread is busy)
@@ -73,6 +74,8 @@ export class ViewImpl implements View {
   audible = false;
   closed = false;
   readonly canvas: HTMLCanvasElement;
+  /** @internal Damage tiles over the canvas (only when the canvas went to the engine worker). */
+  readonly tiles: ViewTiles | null = null;
   /** @internal */ onWheelResult: ((consumed: boolean) => void) | null = null;
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
@@ -130,6 +133,7 @@ export class ViewImpl implements View {
     }
     const ime = createImeField(this, this.lifetime.signal);
     this.ime = ime.field;
+    if (worker) this.tiles = new ViewTiles(this.canvas, this.ime, worker, id);
     this.forgetImeText = ime.forget;
     this.setEnterKeyHint = enterKeyHintSetter(this.ime, this.lifetime.signal);
     this.fieldArrows = attachFieldArrows(this, this.ime, this.lifetime.signal);
@@ -217,6 +221,7 @@ export class ViewImpl implements View {
     if (!this.container) return;
     this.resizeObserver.disconnect();
     this.canvas.remove();
+    this.tiles?.place();
     this.ime.remove();
     this.fieldArrows.remove();
     this.container = null;
@@ -229,6 +234,7 @@ export class ViewImpl implements View {
     this.container = container;
     this.resizeObserver.observe(this.canvas);
     this.canvas.style.display = this.visible ? 'block' : 'none';
+    this.tiles?.place();
   }
 
   /** @internal Container while attached (fullscreen). */
@@ -273,6 +279,7 @@ export class ViewImpl implements View {
     style.maxWidth = device ? `${device.width * ratio}px` : '';
     style.maxHeight = device ? `${device.height * ratio}px` : '';
     style.marginLeft = device ? `max(0px, (100% - ${device.width}px) / 2)` : '';
+    this.tiles?.place();
   }
 
   /** @internal Sends the current size (resize, pixel ratio change). */
@@ -393,6 +400,7 @@ export class ViewImpl implements View {
   setVisible(visible: boolean): void {
     this.visible = visible;
     this.canvas.style.display = visible ? 'block' : 'none';
+    this.tiles?.place();
     this.updateVisibility();
     if (visible) this.measure();
   }
@@ -529,6 +537,7 @@ export class ViewImpl implements View {
     }
     this.resizeObserver.disconnect();
     this.canvas.remove();
+    this.tiles?.remove();
     this.ime.remove();
     this.container = null;
     this.resolveClosing?.(true);
@@ -715,6 +724,9 @@ export class ViewImpl implements View {
           touch: this.menuByTouch,
         } satisfies ContextMenuInfo);
         return;
+      case 'tiles':
+        this.tiles?.add(Number(data.size), (data.tiles as number[] | undefined) ?? []);
+        break;
       case 'cursor':
         this.canvas.style.cursor = String(data.cursor ?? '');
         return;

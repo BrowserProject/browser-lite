@@ -18,11 +18,19 @@ void initialize();
 // are placements of this frame
 class Frame {
 public:
-    Frame(int viewId, SkCanvas& target);
+    // Part: a damage tile (DamageTiles.h), which places no video: a hole punched into it only
+    // marks the frame as one to show whole
+    enum class Kind : bool { Whole, Part };
+    Frame(int viewId, SkCanvas& target, Kind = Kind::Whole);
     ~Frame();
     // The frame was shown: placements that changed since the last shown frame go to the host
     void shown();
+    // A part with a hole
+    bool punched() const;
 };
+
+// The last frame shown placed videos in the view (compositor thread)
+bool hasPlacements(int viewId);
 
 // The view is gone: forget its placements (compositor thread)
 void forgetView(int viewId);

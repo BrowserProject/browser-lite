@@ -5,7 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 23;
+Module.blAbiVersion = 24;
 
 // A thread that traps or aborts ends the engine. The error event the main
 // thread gets from a worker has only the message, so the worker writes the
@@ -67,6 +67,14 @@ if (ENVIRONMENT_IS_PTHREAD) {
   if (typeof self !== 'undefined')
     self.addEventListener('message', (event) => {
       const data = event.data;
+      // The canvas of a damage tile (engine/src/DamageTiles.h), only for its current size
+      if (data && data.blTile) {
+        const target = Module.blCanvases.get(data.viewId);
+        const tiles = target && target.tiles;
+        if (tiles && tiles.size === data.size)
+          tiles.canvases.set(data.key, { canvas: data.blTile });
+        return;
+      }
       if (!data || !data.blCanvas)
         return;
       // The first frame creates the context: 2d (CPU) or bitmaprenderer (GPU)

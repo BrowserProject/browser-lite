@@ -1,0 +1,147 @@
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index aab3681016..00935a8436 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -583,7 +583,10 @@ bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameD
+     // Both walks below assume the animations have been applied and the transforms computed.
+     bool hasRunningAnimations = computeTransformsAndAnimations({ }, { }, MonotonicTime::now());
+ 
+-#if ENABLE(DAMAGE_TRACKING)
++#if PLATFORM(WASM) && ENABLE(DAMAGE_TRACKING)
++    if (frameDamage)
++        collectDamage(canvas.getBaseLayerSize(), *frameDamage, nullptr);
++#elif ENABLE(DAMAGE_TRACKING)
+     // Collect the damage in a walk of its own first, so it is complete before the walk that draws. Each
+     // layer's damage stays until recursiveCleanUpAfterPaint() clears it at the end of the frame.
+     if (frameDamage) {
+@@ -668,6 +671,62 @@ bool SkiaCompositingLayer::paint(SkCanvas& canvas, std::optional<Damage>& frameD
+     return hasRunningAnimations;
+ }
+ 
++#if PLATFORM(WASM)
++#if ENABLE(DAMAGE_TRACKING)
++// Collect the damage in a walk of its own first, so it is complete before the walk that draws. Each
++// layer's damage stays until recursiveCleanUpAfterPaint() clears it at the end of the frame.
++void SkiaCompositingLayer::collectDamage(const SkISize& targetSize, Damage& frameDamage, Vector<FloatRect>* rectsDrawnWhole)
++{
++    // Only the layer paint() is called on needs the table, so only the root ever allocates one.
++    if (!m_layerRectTracker)
++        m_layerRectTracker = makeUnique<LayerRectTracker>();
++    m_layerRectTracker->advanceToNextFrame();
++
++    PaintContext collectContext;
++    collectContext.collectState.emplace(frameDamage, *m_layerRectTracker);
++
++    // Sized like the canvas that will be drawn into, so both walks clip against the same device bounds.
++    SkNoDrawCanvas noDrawCanvas(targetSize.width(), targetSize.height());
++    recursivePaint(noDrawCanvas, collectContext);
++
++    m_layerRectTracker->damageStaleLayerRectsAndAdvanceEntries(frameDamage);
++    resolveBackdropDamage(collectContext.collectState->backdropRectsInFrame, frameDamage);
++    if (rectsDrawnWhole) {
++        rectsDrawnWhole->appendVector(collectContext.collectState->backdropRectsInFrame);
++        rectsDrawnWhole->appendVector(collectContext.collectState->filterRectsInFrame);
++    }
++}
++#endif
++
++SkiaCompositingLayer::PreparedFrame SkiaCompositingLayer::prepareFrame(const IntSize& targetSize, std::optional<Damage>& frameDamage)
++{
++    PreparedFrame frame;
++    frame.hasRunningAnimations = computeTransformsAndAnimations({ }, { }, MonotonicTime::now());
++#if ENABLE(DAMAGE_TRACKING)
++    if (frameDamage)
++        collectDamage(SkISize::Make(targetSize.width(), targetSize.height()), *frameDamage, &frame.rectsDrawnWhole);
++#else
++    UNUSED_PARAM(frameDamage);
++#endif
++    return frame;
++}
++
++bool SkiaCompositingLayer::drawFrame(SkCanvas& canvas, std::optional<SkColor> clearColor)
++{
++    if (clearColor)
++        canvas.clear(*clearColor);
++    PaintContext context;
++    recursivePaint(canvas, context);
++    context.imageSetBatch.flushIfNeeded(canvas);
++    return context.needsFrameForFilterResult;
++}
++
++void SkiaCompositingLayer::finishFrame()
++{
++    recursiveCleanUpAfterPaint();
++}
++#endif
++
+ void SkiaCompositingLayer::clipRect(SkCanvas& canvas, const FloatRoundedRect& rect, const TransformationMatrix& transform)
+ {
+     if (transform.isIdentity()) {
+@@ -1643,10 +1702,18 @@ void SkiaCompositingLayer::paintWithFilterAndMask(SkCanvas& canvas, PaintContext
+         // the layer then, so it damages itself until it is back.
+         damaged |= m_filterResult && !m_filterResult->deviceAligned && m_filterResult->stillFrames <= s_filterResultSettleFrames;
+ #endif
+-        if (!hasGroupPropertyDamage() && damaged) {
+-            auto mode = m_mask ? ComputeOverlapRegionMode::Mask : ComputeOverlapRegionMode::Union;
++        auto mode = m_mask ? ComputeOverlapRegionMode::Mask : ComputeOverlapRegionMode::Union;
++#if PLATFORM(WASM)
++        // A part of the target that the filtered region overlaps lacks the pixels around it (prepareFrame)
++        auto overlapRects = computeConsolidatedOverlapRegionRects(canvas, context, mode);
++        for (const auto& rect : overlapRects)
++            context.collectState->filterRectsInFrame.append(rect);
++        if (!hasGroupPropertyDamage() && damaged)
++            addGroupDamage(canvas, context, overlapRects);
++#else
++        if (!hasGroupPropertyDamage() && damaged)
+             addGroupDamage(canvas, context, computeConsolidatedOverlapRegionRects(canvas, context, mode));
+-        }
++#endif
+ 
+         paintSelfAndChildren(canvas, context);
+         return;
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+index 528994730e..205acb1320 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+@@ -128,6 +128,20 @@ public:
+     // nothing changed, otherwise the whole target.
+     enum class DrawsWholeTarget : bool { No, Yes };
+     bool paint(SkCanvas&, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage = std::nullopt, std::optional<SkColor> clearColor = std::nullopt, DrawsWholeTarget = DrawsWholeTarget::No);
++
++    // browser-lite: a frame in steps, for an embedder that shows the parts of a target that changed in
++    // canvases of their own. prepareFrame() applies the animations and collects the damage of a target of
++    // targetSize like paint(); it also returns the areas that a part cannot draw alone, because a filter or a
++    // backdrop filter there reads pixels from outside the part. drawFrame() then draws the whole frame into
++    // a canvas, as often as needed, each time translated and clipped to one part (whole device pixels), and
++    // finishFrame() ends the frame. prepareFrame() and drawFrame() return whether to composite again.
++    struct PreparedFrame {
++        bool hasRunningAnimations { false };
++        Vector<FloatRect> rectsDrawnWhole;
++    };
++    PreparedFrame prepareFrame(const IntSize& targetSize, std::optional<Damage>& frameDamage);
++    bool drawFrame(SkCanvas&, std::optional<SkColor> clearColor);
++    void finishFrame();
+ #else
+     bool paint(SkCanvas&, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage = std::nullopt, std::optional<SkColor> clearColor = std::nullopt);
+ #endif
+@@ -199,6 +213,10 @@ private:
+             Damage& frameDamage;
+             LayerRectTracker& layerRectTracker;
+             Vector<FloatRect> backdropRectsInFrame; // Resolved once the walk has finished.
++#if PLATFORM(WASM)
++            // browser-lite: where filters read pixels from outside a part of the target (prepareFrame)
++            Vector<FloatRect> filterRectsInFrame;
++#endif
+         };
+ 
+         std::optional<CollectState> collectState;
+@@ -256,6 +274,9 @@ private:
+     void paintDebugBorder(SkCanvas&, PaintContext&);
+     void paintRepaintCounter(SkCanvas&, PaintContext&);
+ #if ENABLE(DAMAGE_TRACKING)
++#if PLATFORM(WASM)
++    void collectDamage(const SkISize& targetSize, Damage&, Vector<FloatRect>* rectsDrawnWhole);
++#endif
+     void collectFrameDamage(SkCanvas&, PaintContext&);
+     void collectBackdropDamage(SkCanvas&, PaintContext&);
+     void collectGroupDamage(SkCanvas&, PaintContext&);

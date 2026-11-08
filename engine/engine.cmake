@@ -27,6 +27,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Clients.cpp
     ${BL_ENGINE_SRC}/Compositor.cpp
     ${BL_ENGINE_SRC}/CookieJarWasm.cpp
+    ${BL_ENGINE_SRC}/DamageTiles.cpp
     ${BL_ENGINE_SRC}/DeviceClients.cpp
     ${BL_ENGINE_SRC}/EditorClient.cpp
     ${BL_ENGINE_SRC}/EngineConfig.cpp

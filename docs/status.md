@@ -65,7 +65,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
-  no frame without a visible change (damage tracking, #220), the first paint right after the first visible layout, before
+  no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454), the first paint right after the first visible layout, before
   waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
   33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
   Worklet, WebGL 1 and 2, recovery after GPU loss. After a rotation or an on-screen keyboard the
@@ -393,23 +393,16 @@ browser (Safari keeps Cmd+L, T and W for itself).
    animation outside the view took all CPU of the device before, now 0.03 CPU seconds per second
    on C); where every frame changes, a frame costs as much as before, and compositing only the
    damage cost more under SwiftShader (CI perf 39644894451 and 39670991733, #220).
-   A small visible animation therefore costs a whole view per frame, and the cost follows the
-   view's area, not the change (2026-11-05, local, Chromium headless with SwiftShader): one
-   44 px CSS spinner keeps the GPU process at about 2 cores, 60 frames per second at 640x480,
-   13 at 1920x1080 (165 ms of GPU process CPU per frame); Chromium itself shows it with 7 %
-   CPU. On weather.com 46 pulsing skeleton boxes kept 4 cores busy after the load event. Most
-   of it is the host showing a new view sized canvas, which no engine side change avoids.
-   Measured in plain Chromium at 1920x1080, GPU process CPU per frame: a WebGL frame that is
-   only cleared and shown with `transferToImageBitmap` 94 to 105 ms; the same with
-   `preserveDrawingBuffer` and only a 52 px square drawn (compositing just the damage into a
-   kept framebuffer) 117 to 119 ms; a whole view textured quad 181 to 183 ms; even Chromium's
-   own 2D canvas in the page with a 52 px `fillRect` per frame 49 ms; a separate 64 px canvas
-   element 1.9 ms. So compositing only the damage would gain at most about a third on frames
-   with a small change and cost a copy of the view on every other frame (scrolling), as #220
-   found. Cheap small animations need the host browser to composite them: layers with running
-   animations as their own host elements, moved by the host's compositor. That is a new
-   compositor architecture, not done; on devices with a real GPU a whole view frame costs far
-   less (not measured).
+   A frame with a small change goes only into the damage tiles it touches, small host canvases
+   over the view canvas (#454): one 44 px CSS spinner (local, Chromium headless with SwiftShader)
+   now costs 0.75 to 0.8 CPU cores at 60 frames per second at 640x480, 1280x800 and 1920x1080
+   alike, before 2.5, 6.6 and 7.0 cores (39 frames per second at 1920x1080); Chromium itself
+   needs 0.07. Still open: many animations spread over the view (46 pulsing skeleton boxes, as
+   on weather.com) touch more than half of the view and stay whole frames, 7.6 cores before and
+   after. Under SwiftShader a new view sized canvas frame costs the host about 100 ms of GPU
+   process CPU at 1920x1080 whatever it shows (#454); only the host compositing such layers
+   itself (host elements per animated layer) would avoid it. On devices with a real GPU a whole
+   view frame costs far less (not measured).
 
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also
@@ -559,6 +552,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
   Instagram, Twitch, Walmart and Facebook scripts early, 87 KB since #374. A one-character `replace` on a
   string built by 100000 appends crashed the engine the same way (Temu's bot check), fixed (#368). Its load event comes after 93 s on
   the CI runners (US) and after 6.8 s from Switzerland (2026-11-03), probably other content there.
+- `damage-test` "changed while hidden" (local, 2026-11-08): in about one of three runs the
+  selected text of the input differs in 45 pixels from the reference, with and without damage
+  tiles (#454): the selection looks focused in one run and unfocused in the other after the view
+  switch, a matter of focus timing, not of damage tracking.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU

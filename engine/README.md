@@ -57,8 +57,9 @@ comes as patches from `patches/`.
     the user works in, types in or waits for a visible one, also for the first frame of a tab
     switched to)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
-    (layers on the compositor thread, the stall log's state), `ScrollingWasm.cpp` (scrolling thread: wheel, swipe and
-    scroll animations on the compositor's ticks)
+    (layers on the compositor thread, the stall log's state), `DamageTiles.cpp` (a frame with a
+    small change goes only into the host canvases of the tiles it touches), `ScrollingWasm.cpp`
+    (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request), `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
     Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,

@@ -33,7 +33,9 @@ using Placements = HashMap<int, Placement>;
 struct CurrentFrame {
     int viewId;
     SkCanvas* target;
+    Frame::Kind kind;
     Placements placements;
+    bool punched { false };
 };
 
 static thread_local CurrentFrame* s_frame;
@@ -61,6 +63,9 @@ static bool punch(uint64_t client, SkCanvas& canvas, const FloatRect& rect, bool
         refuse(playerId);
         return false;
     }
+    s_frame->punched = true;
+    if (s_frame->kind == Frame::Kind::Part)
+        return true;
     s_frame->placements.set(playerId, Placement {
         { m.rc(0, 0), m.rc(1, 0), m.rc(0, 1), m.rc(1, 1), m.rc(0, 3), m.rc(1, 3) },
         { rect.x(), rect.y(), rect.width(), rect.height() },
@@ -73,9 +78,20 @@ void initialize()
     CoordinatedPlatformLayerBufferHolePunch::setPunchCallback(punch);
 }
 
-Frame::Frame(int viewId, SkCanvas& target)
+Frame::Frame(int viewId, SkCanvas& target, Kind kind)
 {
-    s_frame = new CurrentFrame { viewId, &target, { } };
+    s_frame = new CurrentFrame { viewId, &target, kind, { } };
+}
+
+bool Frame::punched() const
+{
+    return s_frame->punched;
+}
+
+bool hasPlacements(int viewId)
+{
+    auto it = shownPlacements().find(viewId);
+    return it != shownPlacements().end() && !it->value.isEmpty();
 }
 
 Frame::~Frame()

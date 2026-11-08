@@ -5,7 +5,8 @@
 // repaint while wheel frames come (patch 0045: the damage goes with the tiles) and pinch zoom must
 // look exactly like with every frame composited and shown (BL_DAMAGE=0): 0 different pixels in
 // each of 3 runs, and while nothing visible changes (an animation off the view) no new frame is
-// shown.
+// shown. The snapshots include the damage tiles over the view canvas (DamageTiles.h), which the
+// reference never uses.
 //
 //   node tests/core/damage-test.mjs [engine-dir]
 import fs from 'node:fs';
@@ -179,6 +180,17 @@ const snapshot = (page) =>
     const context = probe.getContext('2d', { willReadFrequently: true });
     context.imageSmoothingEnabled = false;
     context.drawImage(canvas, 0, 0, probe.width, probe.height);
+    // Damage tiles over the canvas show the frames that changed little (DamageTiles.h)
+    const scale = probe.width / canvas.width;
+    const layer = canvas.parentElement.querySelector(`[data-bl-tiles="${canvas.dataset.blView}"]`);
+    for (const tile of layer ? layer.querySelectorAll('canvas') : [])
+      context.drawImage(
+        tile,
+        Number.parseFloat(tile.style.left) * scale,
+        Number.parseFloat(tile.style.top) * scale,
+        tile.width * scale,
+        tile.height * scale,
+      );
     const data = context.getImageData(0, 0, probe.width, probe.height).data;
     let text = '';
     for (let i = 0; i < data.length; i += 0x8000)
@@ -456,6 +468,9 @@ async function scenario(env, run) {
     );
     info.states[name] = await result(`state${index}`);
   }
+  info.tiles = await page.evaluate(
+    () => document.querySelectorAll('[data-bl-tiles] canvas').length,
+  );
   await screenshot(page, `damage-${env || 'skip'}-${run}`.replace('BL_DAMAGE=', ''));
   await context.close();
   return { shots, info };
@@ -480,6 +495,12 @@ for (let run = 1; run <= RUNS; run++) {
     `${label}: no new frame while nothing visible changes`,
     on.info.idleFrames <= 2 && full.info.idleFrames >= 10,
     `${on.info.idleFrames} frames in 1.5 s, the reference ${full.info.idleFrames}`,
+  );
+  // Small changes (the canvases, the selections) go into damage tiles, never in the reference
+  check(
+    `${label}: small changes shown in damage tiles`,
+    on.info.tiles > 0 && full.info.tiles === 0,
+    `${on.info.tiles} tiles, the reference ${full.info.tiles}`,
   );
   for (const [name, shot] of on.shots) {
     const diff = difference(shot, full.shots.get(name));

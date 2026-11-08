@@ -81,6 +81,10 @@ EM_JS(int, bl_gpu_context_lost, (int handle), {
     return !context || context.GLctx.isContextLost() ? 1 : 0;
 });
 
+EM_JS(int, bl_gpu_has_canvas, (int viewId), {
+    return Module.blGpuCanvas && Module.blCanvases && Module.blCanvases.has(viewId) ? 1 : 0;
+});
+
 // Framebuffer in the size of the view; 0 if the view has no canvas here
 EM_JS(int, bl_gpu_prepare, (int viewId, int width, int height), {
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
@@ -94,9 +98,12 @@ EM_JS(int, bl_gpu_prepare, (int viewId, int width, int height), {
     return 1;
 });
 
-// The finished frame without a copy into the canvas of the view
-EM_JS(int, bl_gpu_transfer, (int viewId), {
+// The finished frame without a copy into the canvas of the view, or of one of its damage tiles
+// (DamageTiles.h; tile -1: the view canvas)
+EM_JS(int, bl_gpu_transfer, (int viewId, int tile), {
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
+    if (target && tile >= 0)
+        target = target.tiles && target.tiles.canvases.get(tile);
     if (!target)
         return 0;
     if (!target.bitmapContext) {
@@ -233,7 +240,12 @@ bool present(int viewId, SkSurface& surface)
         return false;
     surface.draw(screen->getCanvas(), 0, 0);
     gr->flushAndSubmit(screen.get());
-    return bl_gpu_transfer(viewId);
+    return bl_gpu_transfer(viewId, -1);
+}
+
+bool hasCanvas(int viewId)
+{
+    return context() && bl_gpu_has_canvas(viewId);
 }
 
 sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height)
@@ -246,9 +258,9 @@ sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height)
     return SkSurfaces::WrapBackendRenderTarget(gr, target, kBottomLeft_GrSurfaceOrigin, kRGBA_8888_SkColorType, nullptr, nullptr);
 }
 
-bool showFramebuffer(int viewId)
+bool showFramebuffer(int viewId, std::optional<unsigned> tile)
 {
-    return bl_gpu_transfer(viewId);
+    return bl_gpu_transfer(viewId, tile ? static_cast<int>(*tile) : -1);
 }
 
 } // namespace BrowserLite::Gpu

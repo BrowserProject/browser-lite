@@ -67,6 +67,11 @@ EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
     if (!target)
         return;
     Module.blCanvases.delete(viewId);
+    if (target.tiles)
+        target.tiles.canvases.forEach(function (tile) {
+            if (tile.bitmapContext)
+                tile.bitmapContext.transferFromImageBitmap(null);
+        });
     target.canvas.width = 1;
     target.canvas.height = 1;
     if (target.ctx)

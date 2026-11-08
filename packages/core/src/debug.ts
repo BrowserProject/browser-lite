@@ -1,5 +1,6 @@
 import type { EngineModule } from './engine.js';
 import type { DebugApi, View } from './types.js';
+import type { ViewImpl } from './view.js';
 
 interface DebugHost {
   readonly module: EngineModule;
@@ -24,6 +25,8 @@ function snapshot(view: View, ratio: number, rows?: { y: number }): ImageData | 
   if (!context) return null;
   context.imageSmoothingEnabled = false;
   context.drawImage(view.canvas, 0, 0, view.canvas.width / ratio, view.canvas.height / ratio);
+  // Damage tiles show the latest frame where it changed little (view-tiles.ts)
+  (view as Partial<ViewImpl>).tiles?.drawOver(context, ratio);
   return rows
     ? context.getImageData(0, Math.round(rows.y), width, 1)
     : context.getImageData(0, 0, width, height);

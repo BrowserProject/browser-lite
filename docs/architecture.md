@@ -112,9 +112,11 @@ updates and flushes, tile threads paint, the compositor thread composites, so `t
 `opacity` animations and scrolling continue while JS blocks (#94, #98). Blur and shadow run on
 the GPU with cached filtered layers (#156); `url()` and SVG filters on the CPU. Damage tracking
 like WPE (`ENABLE_DAMAGE_TRACKING`, #220): the layers report what changed, a frame without a
-visible change is neither composited nor shown, otherwise the compositor composites the whole view
-(compositing only the damage would need a copy of the view per frame, which costs more under
-SwiftShader). The compositor's answer that a rendering update is shown (and the presenter's that
+visible change is neither composited nor shown. A frame whose damage touches at most 16 damage
+tiles of 128 CSS pixels and half of the view is composited only into those tiles, each into
+a small canvas of its own over the view canvas, which keeps its last frame (`DamageTiles.cpp`,
+`view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
+whole view per frame before); other frames composite the whole view and empty the tiles. The compositor's answer that a rendering update is shown (and the presenter's that
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
 a frame every task or two (#359). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
