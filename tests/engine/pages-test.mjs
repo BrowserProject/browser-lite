@@ -12,6 +12,9 @@
 //   localized-strings.html  UI strings with placeholders filled: validation messages (patch 0076)
 //   absent-properties.html  missing properties of module namespaces and named properties are not
 //                  cached as absent (patch 0085), with the JIT and in the interpreter alone
+//   percent-heights.html  boxes with percentage heights are laid out again only when what their
+//                  percentages resolve against changed (patch 0098): same geometry as a fresh
+//                  layout, a small change next to many of them costs a fraction of a full relayout
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -36,6 +39,7 @@ const CASES = [
   { name: 'computed-style', wait: 'COMPUTED done' },
   { name: 'localized-strings', wait: 'L10N done' },
   { name: 'absent-properties', wait: 'ABSENT done' },
+  { name: 'percent-heights', size: [1000, 700], wait: 'PERCENT done' },
   {
     name: 'absent-properties',
     label: 'absent-properties (interpreter)',

@@ -1,0 +1,262 @@
+diff --git a/Source/WebCore/rendering/RenderBlock.cpp b/Source/WebCore/rendering/RenderBlock.cpp
+index 90893caea4..9b85ced912 100644
+--- a/Source/WebCore/rendering/RenderBlock.cpp
++++ b/Source/WebCore/rendering/RenderBlock.cpp
+@@ -738,13 +738,12 @@ void RenderBlock::updateBlockChildDirtyBitsBeforeLayout(RelayoutChildren relayou
+     if (child.isOutOfFlowPositioned())
+         return;
+ 
+-    // FIXME: Technically percentage height objects only need a relayout if their percentage isn't going to be turned into
+-    // an auto value. Add a method to determine this, so that we can avoid the relayout.
++    // Percentage height objects only need a relayout if their percentages resolve against another height than in their last layout.
+     auto childHasRelativeHeight = [&] {
+         auto& style = child.style();
+         return style.height().isPercentOrCalculated() || style.minHeight().isPercentOrCalculated() || style.maxHeight().isPercentOrCalculated();
+     };
+-    if (relayoutChildren == RelayoutChildren::Yes || (childHasRelativeHeight() && !isRenderView()))
++    if (relayoutChildren == RelayoutChildren::Yes || (childHasRelativeHeight() && !isRenderView() && child.needsLayoutForPercentageHeights()))
+         child.setChildNeedsLayout(MarkingBehavior::MarkOnlyThis);
+ 
+     // If relayoutChildren is set and the child has percentage padding or an embedded content box, we also need to invalidate the childs pref widths.
+diff --git a/Source/WebCore/rendering/RenderBlockFlow.cpp b/Source/WebCore/rendering/RenderBlockFlow.cpp
+index 8175de8e81..7064778339 100644
+--- a/Source/WebCore/rendering/RenderBlockFlow.cpp
++++ b/Source/WebCore/rendering/RenderBlockFlow.cpp
+@@ -573,7 +573,7 @@ void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit
+     // descendants' preferred widths depend on our height transitively (via height: % and
+     // aspect ratio). This must happen before recomputeLogicalWidthAndColumnWidth() so that
+     // a shrink-to-fit width (e.g., a float) picks up the updated preferred widths.
+-    dirtyForLayoutFromPercentageHeightDescendants();
++    dirtyForLayoutFromPercentageHeightDescendants(PercentageHeightDescendants::WithChangedBasis);
+ 
+     if (recomputeLogicalWidthAndColumnWidth())
+         relayoutChildren = RelayoutChildren::Yes;
+@@ -623,7 +623,7 @@ void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit
+         }
+         if (!firstChild() && !isAnonymousBlock())
+             setChildrenInline(true);
+-        dirtyForLayoutFromPercentageHeightDescendants();
++        dirtyForLayoutFromPercentageHeightDescendants(PercentageHeightDescendants::WithChangedBasis);
+         layoutInFlowChildren(relayoutChildren, previousHeight, repaintLogicalTop, repaintLogicalBottom, maxFloatLogicalBottom);
+         // Expand our intrinsic height to encompass floats.
+         LayoutUnit toAdd = borderAndPaddingAfter() + scrollbarLogicalHeight();
+@@ -818,14 +818,19 @@ void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendant(RenderBox& de
+     }
+ }
+ 
+-void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendants()
++void RenderBlockFlow::dirtyForLayoutFromPercentageHeightDescendants(PercentageHeightDescendants which)
+ {
+     auto* descendants = percentHeightDescendants();
+     if (!descendants)
+         return;
+ 
+-    for (auto& descendant : *descendants)
++    for (auto& descendant : *descendants) {
++        // A descendant whose percentages resolve against the same height as in its last layout keeps it
++        // (webkit.org/b/204318): a layout of a container no longer lays out all of them again.
++        if (which == PercentageHeightDescendants::WithChangedBasis && !descendant.needsLayoutForPercentageHeights())
++            continue;
+         dirtyForLayoutFromPercentageHeightDescendant(descendant);
++    }
+ }
+ 
+ LayoutUnit RenderBlockFlow::shiftForAlignContent(LayoutUnit intrinsicLogicalHeight, LayoutUnit& repaintLogicalTop, LayoutUnit& repaintLogicalBottom)
+diff --git a/Source/WebCore/rendering/RenderBlockFlow.h b/Source/WebCore/rendering/RenderBlockFlow.h
+index d412c33624..96c00813ae 100644
+--- a/Source/WebCore/rendering/RenderBlockFlow.h
++++ b/Source/WebCore/rendering/RenderBlockFlow.h
+@@ -518,7 +518,8 @@ private:
+     void adjustTextBoxTrimAfterLayout();
+     std::pair<float, float> inlineContentTopAndBottomIncludingInkOverflow() const;
+ 
+-    void dirtyForLayoutFromPercentageHeightDescendants();
++    enum class PercentageHeightDescendants : bool { All, WithChangedBasis };
++    void dirtyForLayoutFromPercentageHeightDescendants(PercentageHeightDescendants = PercentageHeightDescendants::All);
+ 
+ #if ENABLE(TEXT_AUTOSIZING)
+     int m_widthForTextAutosizing;
+diff --git a/Source/WebCore/rendering/RenderBox.cpp b/Source/WebCore/rendering/RenderBox.cpp
+index 0c5c0cc9ba..dd816a2c9a 100644
+--- a/Source/WebCore/rendering/RenderBox.cpp
++++ b/Source/WebCore/rendering/RenderBox.cpp
+@@ -3951,7 +3951,7 @@ static bool NODELETE tableCellShouldHaveZeroInitialSize(const RenderTableCell& t
+     return true;
+ }
+ 
+-template<typename SizeType> std::optional<LayoutUnit> RenderBox::computePercentageLogicalHeightGeneric(const SizeType& logicalHeight, UpdatePercentageHeightDescendants updateDescendants) const
++auto RenderBox::percentageHeightBasis(UpdatePercentageHeightDescendants updateDescendants) const -> PercentageHeightBasis
+ {
+     bool skippedAutoHeightContainingBlock = false;
+     auto* containingBlock = this->containingBlock();
+@@ -3997,7 +3997,7 @@ template<typename SizeType> std::optional<LayoutUnit> RenderBox::computePercenta
+         bool cellHasUnresolvablePercentageHeight = tableCell->style().logicalHeight().isPercentOrCalculated() && tableCell->table()->style().logicalHeight().isAuto();
+         auto tableCellLogicalHeight = cellHasUnresolvablePercentageHeight ? std::nullopt : tableCell->overridingBorderBoxLogicalHeight();
+         if (!tableCellLogicalHeight)
+-            return tableCellShouldHaveZeroInitialSize(*tableCell, *this, scrollsOverflowY()) ? std::make_optional(0_lu) : std::nullopt;
++            return { .resolvesToZero = tableCellShouldHaveZeroInitialSize(*tableCell, *this, scrollsOverflowY()) };
+         // Note: can't use contentBoxLogicalHeight here on table cells due to intrinsic padding.
+         overridingAvailableSize = *tableCellLogicalHeight - tableCell->computedCSSPaddingBefore() - tableCell->computedCSSPaddingAfter() - tableCell->borderLogicalHeight() - tableCell->scrollbarLogicalHeight();
+     }
+@@ -4021,13 +4021,6 @@ template<typename SizeType> std::optional<LayoutUnit> RenderBox::computePercenta
+     if (!availableHeight)
+         return { };
+ 
+-    auto result = [&] {
+-        if constexpr (Style::IsPercentage<SizeType>)
+-            return Style::evaluate<LayoutUnit>(logicalHeight, *availableHeight - rootMarginBorderPaddingHeight + (isRenderTable() && isOutOfFlowPositioned() ? containingBlock->paddingBefore() + containingBlock->paddingAfter() : 0_lu));
+-        else
+-            return Style::evaluate<LayoutUnit>(logicalHeight, *availableHeight - rootMarginBorderPaddingHeight + (isRenderTable() && isOutOfFlowPositioned() ? containingBlock->paddingBefore() + containingBlock->paddingAfter() : 0_lu), style().usedZoomForLength());
+-    }();
+-
+     // |overridingLogicalHeight| is the maximum height made available by the
+     // cell to its percent height children when we decide they can determine the
+     // height of the cell. If the percent height child is box-sizing:content-box
+@@ -4035,7 +4028,91 @@ template<typename SizeType> std::optional<LayoutUnit> RenderBox::computePercenta
+     // |availableHeight| (given by |overridingLogicalHeight|) to arrive
+     // at the child's computed height.
+     bool subtractBorderAndPadding = isRenderTable() || (is<RenderTableCell>(*containingBlock) && !skippedAutoHeightContainingBlock && containingBlock->overridingBorderBoxLogicalHeight() && style().boxSizing() == BoxSizing::ContentBox);
+-    if (subtractBorderAndPadding) {
++    return {
++        .availableHeight = *availableHeight - rootMarginBorderPaddingHeight + (isRenderTable() && isOutOfFlowPositioned() ? containingBlock->paddingBefore() + containingBlock->paddingAfter() : 0_lu),
++        .subtractBorderAndPadding = subtractBorderAndPadding
++    };
++}
++
++// The basis each box's percentage heights were last resolved against, for boxes whose containers
++// asked needsLayoutForPercentageHeights(). An entry is dropped as soon as a percentage
++// height of the box resolves against another basis, so an entry always describes the box's layout.
++using PercentageHeightBasisMap = SingleThreadWeakHashMap<const RenderBox, RenderBox::PercentageHeightBasis>;
++static PercentageHeightBasisMap* gPercentageHeightBasisMap = nullptr;
++
++bool RenderBox::tracksPercentageHeightBasis() const
++{
++    // Only block containers in normal flow whose percentage heights depend on nothing but their basis:
++    // replaced boxes, tables, flex and grid items and stretch sizes also depend on other state.
++    if (!is<RenderBlock>(*this) || isRenderTable() || isRenderTableCell() || isOutOfFlowPositioned() || isFlexItem() || isGridItem())
++        return false;
++    auto& style = this->style();
++    if (style.aspectRatio().hasRatio())
++        return false;
++    return !style.logicalHeight().isStretch() && !style.logicalMinHeight().isStretch() && !style.logicalMaxHeight().isStretch()
++        && !style.logicalWidth().isStretch() && !style.logicalMinWidth().isStretch() && !style.logicalMaxWidth().isStretch();
++}
++
++bool RenderBox::replacedSizeIsCurrent() const
++{
++    if (!isRenderReplaced() || needsLayout() || isOutOfFlowPositioned() || isFlexItem() || isGridItem() || shouldApplySizeContainment())
++        return false;
++    // Percentages of replaced boxes resolve through auto height containing blocks, in a table cell against
++    // its current height, which changes while it is laid out.
++    for (CheckedPtr block = containingBlock(); block && !is<RenderView>(*block); block = block->containingBlock()) {
++        if (block->isRenderTableCell())
++            return false;
++        auto& logicalHeight = block->style().logicalHeight();
++        if (!logicalHeight.isAuto() && !logicalHeight.isPercentOrCalculated())
++            break;
++    }
++    LogicalExtentComputedValues width;
++    computeLogicalWidth(width);
++    if (width.extent != logicalWidth() || width.margins.start != marginStart() || width.margins.end != marginEnd())
++        return false;
++    auto height = computeLogicalHeight(logicalHeight(), logicalTop());
++    return height.extent == logicalHeight() && height.margins.before == marginBefore() && height.margins.after == marginAfter();
++}
++
++bool RenderBox::needsLayoutForPercentageHeights() const
++{
++    if (isRenderReplaced())
++        return !replacedSizeIsCurrent();
++    if (!tracksPercentageHeightBasis())
++        return true;
++    auto basis = percentageHeightBasis(UpdatePercentageHeightDescendants::No);
++    if (!gPercentageHeightBasisMap)
++        gPercentageHeightBasisMap = new PercentageHeightBasisMap;
++    auto result = gPercentageHeightBasisMap->add(*this, basis);
++    if (result.isNewEntry)
++        return true;
++    if (result.iterator->value == basis)
++        return false;
++    result.iterator->value = basis;
++    return true;
++}
++
++template<typename SizeType> std::optional<LayoutUnit> RenderBox::computePercentageLogicalHeightGeneric(const SizeType& logicalHeight, UpdatePercentageHeightDescendants updateDescendants) const
++{
++    auto basis = percentageHeightBasis(updateDescendants);
++    if (gPercentageHeightBasisMap) {
++        if (auto entry = gPercentageHeightBasisMap->find(*this); entry != gPercentageHeightBasisMap->end() && entry->value != basis)
++            gPercentageHeightBasisMap->remove(entry);
++    }
++
++    if (basis.resolvesToZero)
++        return 0_lu;
++    if (!basis.availableHeight)
++        return { };
++
++    auto result = [&] {
++        if constexpr (Style::IsPercentage<SizeType>)
++            return Style::evaluate<LayoutUnit>(logicalHeight, *basis.availableHeight);
++        else
++            return Style::evaluate<LayoutUnit>(logicalHeight, *basis.availableHeight, style().usedZoomForLength());
++    }();
++
++    if (basis.subtractBorderAndPadding) {
+         result -= borderAndPaddingLogicalHeight();
+         return std::max(0_lu, result);
+     }
+diff --git a/Source/WebCore/rendering/RenderBox.h b/Source/WebCore/rendering/RenderBox.h
+index 680d609cde..f5efe415db 100644
+--- a/Source/WebCore/rendering/RenderBox.h
++++ b/Source/WebCore/rendering/RenderBox.h
+@@ -382,6 +382,19 @@ public:
+     std::optional<LayoutUnit> computePercentageLogicalHeight(const Style::UnevaluatedCalculation<CSS::LengthPercentage<CSS::NonnegativeLayoutUnitClampedUnzoomed, float>>& logicalHeight, UpdatePercentageHeightDescendants = UpdatePercentageHeightDescendants::Yes) const;
+     bool hasAutoHeightOrContainingBlockWithAutoHeight(UpdatePercentageHeightDescendants = UpdatePercentageHeightDescendants::Yes) const;
+ 
++    // What the percentage heights of this box resolve against.
++    struct PercentageHeightBasis {
++        std::optional<LayoutUnit> availableHeight; // std::nullopt: percentages behave as auto.
++        bool resolvesToZero { false }; // A table cell sizes the box to zero first.
++        bool subtractBorderAndPadding { false };
++        bool operator==(const PercentageHeightBasis&) const = default;
++    };
++    // Whether this box needs a layout because its percentage heights may resolve differently than in its last
++    // layout. A block container answers no when its basis is the one remembered from the last check and no
++    // percentage height of it resolved against another basis since (it remembers the current basis), a
++    // replaced box when the size it would get now is the size it has.
++    bool needsLayoutForPercentageHeights() const;
++
+     virtual LayoutUnit availableLogicalHeight(AvailableLogicalHeightType) const;
+     LayoutUnit availableLogicalHeightUsing(const Style::PreferredSize&, AvailableLogicalHeightType) const;
+ 
+@@ -706,6 +719,9 @@ private:
+     template<typename SizeType> std::optional<LayoutUnit> computeLogicalHeightUsingGeneric(const SizeType& logicalHeight, std::optional<LayoutUnit> intrinsicContentHeight) const;
+     template<typename SizeType> std::optional<LayoutUnit> computeSizingKeywordLogicalContentHeightUsingGeneric(const SizeType& logicalHeight, std::optional<LayoutUnit> intrinsicContentHeight, LayoutUnit borderAndPadding) const;
+     template<typename SizeType> std::optional<LayoutUnit> computePercentageLogicalHeightGeneric(const SizeType& logicalHeight, UpdatePercentageHeightDescendants = UpdatePercentageHeightDescendants::Yes) const;
++    PercentageHeightBasis percentageHeightBasis(UpdatePercentageHeightDescendants) const;
++    bool tracksPercentageHeightBasis() const;
++    bool replacedSizeIsCurrent() const;
+     template<typename SizeType> std::optional<LayoutUnit> computeContentLogicalHeightGeneric(const SizeType& logicalHeight, std::optional<LayoutUnit> intrinsicContentHeight) const;
+     template<typename SizeType> std::optional<LayoutUnit> computeContentAndScrollbarLogicalHeightUsing(const SizeType& logicalHeight, std::optional<LayoutUnit> intrinsicContentHeight) const;
+ 
+diff --git a/Source/WebCore/rendering/RenderFlexibleBox.cpp b/Source/WebCore/rendering/RenderFlexibleBox.cpp
+index cce8d8fb1b..569c9f06c0 100644
+--- a/Source/WebCore/rendering/RenderFlexibleBox.cpp
++++ b/Source/WebCore/rendering/RenderFlexibleBox.cpp
+@@ -671,11 +671,13 @@ void RenderFlexibleBox::layoutFlexItemWithMainSize(FlexLayoutItem& flexLayoutIte
+     // We may have already forced relayout for orthogonal flowing children in
+     // computeInnerFlexBaseSizeForFlexItem.
+     bool forceFlexItemRelayout = flexLayoutItem.shouldInvalidateChildContent && !hasFlexItemCompletedLayout(flexItem);
+-    if (!forceFlexItemRelayout && flexItemHasPercentHeightDescendants(flexItem)) {
++    if (!forceFlexItemRelayout && hasFlexItemCompletedLayout(flexItem) && flexItemHasPercentHeightDescendants(flexItem)) {
+         // Have to force another relayout even though the child is sized
+         // correctly, because its descendants are not sized correctly yet. Our
+-        // previous layout of the child was done without an override height set.
+-        // So, redo it here.
++        // previous layout of the child (to measure it) was done without an
++        // override height set. So, redo it here. A child not laid out yet in
++        // this layout keeps the descendants of its last final layout: a new
++        // main size is checked above, a new stretched size by the stretch.
+         forceFlexItemRelayout = true;
+     }
+     updateFlexItemDirtyBitsBeforeLayout(forceFlexItemRelayout, flexItem);

@@ -50,7 +50,10 @@ a `PlatformWasm.cmake` per project (patch 0006). All WebKit changes are patches 
 `engine/patches/` ([build.md](build.md)). WebKit's UI strings with placeholders (validation
 messages, the file input's "2 files", time labels of media controls) are formatted with WTF's
 `StringPrintStream` (`vsnprintf`, also positional `%1$d`) and take the same UTF-8 texts as the
-GLib ports (patch 0076, #363).
+GLib ports (patch 0076, #363). Layout lays a box with a percentage height out again only when
+what its percentages resolve against changed, not on every layout of its parent or of the block
+they resolve against, and a flex item with such descendants only after it was measured in the
+same layout (patch 0098, #461).
 
 The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`): `commit`,
 then `navigation` and `title` of the new document. A page from the back/forward cache commits

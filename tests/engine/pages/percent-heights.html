@@ -1,0 +1,129 @@
+<!doctype html>
+<title>Percentage heights</title>
+<!-- Boxes with percentage heights are laid out again only when the height their percentages
+     resolve against changed (patch 0098, webkit.org/b/204318). Every change below is laid out
+     incrementally and must give the same geometry as a fresh layout of the whole tree; a small
+     change next to many percentage height boxes costs a fraction of a full relayout. -->
+<style>
+  body { margin: 0; font: 12px/16px sans-serif; }
+  #app { display: flex; flex-direction: column; }
+  #row { display: flex; }
+  #side { width: 120px; }
+  #col { flex: 1 1 0%; min-height: 300px; }
+  .fill { height: 100%; }
+  .half { height: 50%; min-height: 10%; }
+  .calc { height: calc(100% - 7px); max-height: 90%; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; height: 100%; }
+  .stack { display: flex; flex-direction: column; height: 100%; }
+  .stack > div { height: 100%; }
+  .box { height: 120px; }
+  .vert { writing-mode: vertical-rl; height: 100%; width: 50%; }
+  table { height: 200px; }
+  td { height: 100%; }
+  p { margin: 2px; }
+  canvas { display: block; height: 100%; }
+  .pic { aspect-ratio: 16 / 9; width: 40%; }
+  .pic canvas { width: 100%; }
+  #flexrow { display: flex; height: 140px; }
+  #flexrow > div { flex: 1; }
+</style>
+<div id="app">
+  <header id="head">Head</header>
+  <div id="row">
+    <div id="side">Menu</div>
+    <div id="col">
+      <div id="top" class="fill"><div class="fill"><p>Top</p></div></div>
+      <div id="cases">
+        <div id="sized" class="box"><div class="half"><div class="fill"><p>Sized</p></div></div><div class="calc"><p>Calc</p></div></div>
+        <div id="orth" class="box"><div class="vert"><p>Vertical text</p></div></div>
+        <table><tr><td id="cell"><div class="fill"><p>Cell</p></div></td></tr></table>
+        <div id="stacked" class="box"><div class="stack"><div><p>A</p></div><div><p>B</p></div></div></div>
+        <div id="mid"><div id="switch" class="fill"><div class="fill"><p>Switch</p></div></div></div>
+        <div id="pics" class="box"><div><div><canvas width="40" height="20"></canvas></div></div><div class="pic"><canvas width="40" height="20"></canvas></div></div>
+        <table><tr><td id="piccell"><div><canvas width="30" height="30"></canvas></div></td></tr></table>
+        <div id="flexrow"><div><div class="fill"><canvas width="20" height="20"></canvas></div></div><div id="flexleaf">Flex</div></div>
+      </div>
+      <div id="many"></div>
+    </div>
+  </div>
+</div>
+<script>
+const many = document.getElementById('many');
+const parts = [];
+for (let i = 0; i < 300; i++) {
+  const content = i % 3 === 0
+    ? '<div class="grid"><div class="fill"><p>a ' + i + '</p></div><div><p>b</p></div><div><p>c</p></div></div>'
+    : i % 3 === 1
+      ? '<div class="stack"><div><p>Item ' + i + '</p></div><div><p>more</p></div></div>'
+      : '<div class="fill"><div class="fill"><p>Text ' + i + ' that is a bit longer</p></div><div><canvas width="20" height="10"></canvas></div></div>';
+  parts.push('<div class="fill">' + content + '</div>');
+}
+many.innerHTML = '<p><span id="leaf">Latest</span></p>' + parts.join('');
+
+const app = document.getElementById('app');
+const $ = (id) => document.getElementById(id);
+const geometry = () =>
+  [...app.querySelectorAll('*')].map((element) => {
+    const r = element.getBoundingClientRect();
+    return [r.left, r.top, r.width, r.height].map((v) => Math.round(v * 64)).join(',');
+  });
+// A fresh layout: the renderers of the whole tree are made again
+const fresh = () => {
+  app.style.display = 'none';
+  app.offsetHeight;
+  app.style.display = '';
+  return geometry();
+};
+
+const changes = [
+  ['body width', () => { document.body.style.width = '700px'; }],
+  ['body width back', () => { document.body.style.width = ''; }],
+  ['leaf text', () => { $('leaf').textContent = 'A much longer entry that wraps over more than one line in this column'; }],
+  ['side text', () => { $('side').textContent = 'Menu with more entries'; }],
+  ['header text', () => { $('head').textContent = 'Head\nwith two lines'; $('head').style.whiteSpace = 'pre'; }],
+  ['stretched minimum', () => { $('col').style.minHeight = '2000px'; }],
+  ['stretched minimum back', () => { $('col').style.minHeight = ''; }],
+  ['container height', () => { $('sized').style.height = '200px'; }],
+  ['container width', () => { $('orth').style.width = '300px'; }],
+  ['table height', () => { document.querySelector('table').style.height = '260px'; }],
+  ['column flex height', () => { $('stacked').style.height = '180px'; }],
+  ['auto to fixed', () => { $('mid').style.height = '90px'; }],
+  ['fixed to auto', () => { $('mid').style.height = ''; }],
+  ['text in a chain', () => { many.querySelector('.fill .fill p').textContent = 'Changed text that wraps over more than one line for sure'; }],
+  ['picture box height', () => { $('pics').style.height = '160px'; }],
+  ['picture box width', () => { $('pics').style.width = '500px'; }],
+  ['picture cell height', () => { document.querySelectorAll('table')[1].style.height = '120px'; }],
+  ['flex row height', () => { $('flexrow').style.height = '90px'; }],
+  ['flex sibling text', () => { $('flexleaf').textContent = 'Flex sibling with a longer text'; }],
+  ['side wider', () => { $('side').style.width = '200px'; }],
+  ['row content taller', () => { $('side').style.height = '5000px'; }],
+];
+
+const results = [];
+for (const [name, change] of changes) {
+  change();
+  const incremental = geometry();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]).length;
+  if (differ) results.push(name + ':' + differ);
+}
+
+// Cost of a small change next to the 300 percentage height boxes against a full relayout
+const median = (run) => {
+  const times = [];
+  for (let i = 0; i < 9; i++) {
+    const start = performance.now();
+    run(i);
+    document.body.offsetHeight;
+    times.push(performance.now() - start);
+  }
+  times.sort((a, b) => a - b);
+  return times[4];
+};
+const small = median((i) => { $('leaf').textContent = i % 2 ? 'Latest' : 'Latest news'; });
+const full = median((i) => { document.body.style.width = i % 2 ? '' : '701px'; });
+const ratio = small / full;
+console.log('PERCENT small=' + small.toFixed(2) + 'ms full=' + full.toFixed(2) + 'ms');
+if (ratio > 0.25) results.push('small change costs ' + Math.round(ratio * 100) + '% of a full relayout');
+console.log('PERCENT done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
+</script>
