@@ -4,13 +4,15 @@
 // The function runs the CodeBlock from one of its basic blocks: (cfr, block) -> status, block 0
 // after op_enter or the one after a loop hint, status 0 when it returned (the value in the
 // frame's `this` slot, an op_ret of the C loop takes it from there), 1 on an exception (the C loop
-// unwinds). Virtual registers stay in the frame, as tag and payload in linear memory, so a
-// safepoint inside sees every value like in the interpreter.
+// unwinds), 2 plus a block to be called again from there (runCompiled). Virtual registers stay in
+// the frame, as tag and payload in linear memory, so a safepoint inside sees every value like in
+// the interpreter.
 #include "config.h"
 #include "LLIntWasmJIT.h"
 #include "MachineStack.h"
 
 #include "ArrayStorage.h"
+#include "BuiltinExecutables.h"
 #include "BytecodeGenerator.h"
 #include "BytecodeStructs.h"
 #include "CallData.h"
@@ -23,11 +25,13 @@
 #include "DirectArguments.h"
 #include "Fits.h"
 #include "FrameTracers.h"
+#include "FunctionExecutable.h"
 #include "FunctionRareData.h"
 #include "IndexingType.h"
 #include "Interpreter.h"
 #include "InterpreterInlines.h"
 #include "JSArrayBufferView.h"
+#include "JSBoundFunction.h"
 #include "JSCJSValueInlines.h"
 #include "JSFunction.h"
 #include "JSFunctionInlines.h"
@@ -276,10 +280,22 @@ struct GenericEntry {
     ~GenericEntry() { --genericEntries; }
 };
 
+// A compiled function returns 0, 1 after an exception, or reenterStatus plus a block: its loops
+// return every loopIterationsPerCall iterations and are called again from that block. V8 has no
+// on-stack replacement for WebAssembly, a function runs the code it was called with to its end:
+// a loop entered once (an obfuscated VM's dispatch, a proof of work) ran in Liftoff, V8's first
+// tier, about 2.5x slower than the optimized code that V8 compiles meanwhile in the background
+// and that the next call takes.
+constexpr int32_t reenterStatus = 2;
+constexpr int32_t loopIterationsPerCall = 10000;
+
 int32_t runCompiled(uint32_t function, CallFrame* callFrame, uint32_t block)
 {
     ++depth;
-    auto status = reinterpret_cast<CompiledFunction>(static_cast<uintptr_t>(function))(callFrame, block);
+    auto compiled = reinterpret_cast<CompiledFunction>(static_cast<uintptr_t>(function));
+    auto status = compiled(callFrame, block);
+    while (status >= reenterStatus)
+        status = compiled(callFrame, status - reenterStatus);
     --depth;
     return status;
 }
@@ -313,13 +329,64 @@ void cacheHostFunction(VM& vm, JSFunction* function, CallCache* cache)
     cache->hostFunction = executable->function();
 }
 
+// The builtin Function.prototype.call (FunctionPrototype.js), which calls its `this` through
+// Function.prototype.apply
+bool isFunctionPrototypeCall(VM& vm, JSFunction* function)
+{
+    if (function->isHostFunction())
+        return false;
+    auto* executable = function->jsExecutable();
+    return executable->isBuiltinFunction() && executable->unlinkedExecutable() == vm.builtinExecutables()->functionPrototypeCallCodeExecutable();
+}
+
+// The call that Function.prototype.call (fn.call(thisArgument, a, b), which obfuscated code also
+// reaches as fn["call"](...)) and bound functions without arguments of their own make, in place
+// of theirs: what each of them leaves to a VM entry of the generic call. Moves `this` and the
+// arguments in the frame and returns the callee to call instead; unchanged for everything else.
+JSValue unwrapForwardingCall(VM& vm, CallFrame* calleeFrame, JSValue callee, unsigned& argumentCount)
+{
+    auto argument = [&](unsigned index) -> Register& {
+        return calleeFrame->uncheckedR(virtualRegisterForArgumentIncludingThis(index));
+    };
+    // fn.call.call(...) and bound functions of bound functions, a few levels
+    for (unsigned level = 0; level < 4 && callee.isCell() && callee.asCell()->type() == JSFunctionType; ++level) {
+        auto* function = uncheckedDowncast<JSFunction>(callee.asCell());
+        if (auto* bound = dynamicDowncast<JSBoundFunction>(function)) {
+            if (bound->boundArgsLength())
+                break;
+            argument(0) = bound->boundThis();
+            callee = bound->targetFunction();
+            continue;
+        }
+        if (!isFunctionPrototypeCall(vm, function))
+            break;
+        // Its `this.@apply(thisArgument, argumentValues)` calls `this` directly (a varargs call);
+        // other callees than functions stay with it
+        JSValue target = argument(0).jsValue();
+        if (!target.isCell() || target.asCell()->type() != JSFunctionType)
+            break;
+        for (unsigned i = 1; i < argumentCount; ++i)
+            argument(i - 1) = argument(i);
+        if (argumentCount > 1)
+            --argumentCount;
+        else
+            argument(0) = jsUndefined();
+        callee = target;
+    }
+    return callee;
+}
+
 // Calls the callee in its frame below callFrame, where `this` (new.target for a construct) and
 // the arguments already are: a compiled callee directly in that frame, a host function like the
-// interpreter calls it, everything else through JSC's generic call or construct (bound functions,
-// proxies, interpreted functions, stack overflow). Returns the result, empty after an exception.
+// interpreter calls it, everything else through JSC's generic call or construct (bound functions
+// with arguments, proxies, interpreted functions, stack overflow). Function.prototype.call and
+// bound functions without arguments of their own give way to the call they make. Returns the
+// result, empty after an exception.
 template<bool isConstruct>
 JSValue callInFrame(VM& vm, JSGlobalObject* globalObject, ThrowScope& scope, CallFrame* callFrame, CallFrame* calleeFrame, JSValue callee, unsigned argumentCount, CallCache* cache)
 {
+    if constexpr (!isConstruct)
+        callee = unwrapForwardingCall(vm, calleeFrame, callee, argumentCount);
     auto setUpFrame = [&](CodeBlock* calleeCodeBlock) {
         calleeFrame->setCallerFrame(callFrame);
         calleeFrame->setReturnPC(nullptr);
@@ -788,6 +855,8 @@ UGPRPair catchFromCompiledCode(CallFrame* callFrame, const JSInstruction* pc)
 // Larger CodeBlocks (whole bundles run once as one function) stay interpreted: their module would
 // be about 20 times their bytecode, past V8's limit of a function and much memory to build
 constexpr unsigned maximumBytecodeSize = 100000;
+// Entries of a switch table that compiled code takes through a br_table
+constexpr unsigned maximumInlineSwitchSize = 4096;
 
 constexpr int32_t int32Tag = static_cast<int32_t>(JSValue::Int32Tag);
 constexpr int32_t booleanTag = static_cast<int32_t>(JSValue::BooleanTag);
@@ -901,6 +970,7 @@ private:
     void emitGetFromScope(const JSInstructionStream::Ref&);
     void emitPutToScope(const JSInstructionStream::Ref&);
     template<typename Bytecode> void emitJumpIfNull(const JSInstructionStream::Ref&, unsigned block);
+    template<typename Bytecode> void emitSwitchSlowPath(const JSInstructionStream::Ref&, unsigned block);
     template<typename Bytecode> void emitSwitch(const JSInstructionStream::Ref&, unsigned block);
     template<typename Bytecode> void emitGenericJump(const JSInstructionStream::Ref&, unsigned block, SlowPath);
     // Address of a property at the offset in the local, of the object in the local: inline storage
@@ -925,6 +995,8 @@ private:
     uint32_t m_base { 0 };
     uint32_t m_baseBias { 0 };
     uint32_t m_block { 0 }, m_a { 0 }, m_b { 0 }, m_c { 0 }, m_d { 0 }, m_e { 0 }, m_t1 { 0 }, m_t2 { 0 }, m_next { 0 }, m_wide { 0 }, m_x { 0 }, m_y { 0 };
+    // Loop iterations left before the function returns to be called again (runCompiled)
+    uint32_t m_iterations { 0 };
     // Basic blocks: bytecode offset of each start, and the block of an offset
     Vector<unsigned> m_starts;
     OffsetMap m_blockAt;
@@ -1241,11 +1313,17 @@ void Compiler::endFastPaths(SlowPath slowPath, const JSInstructionStream::Ref& i
     m_body->end();
 }
 
-// To the dispatch loop with the block of the target: the code of block i sits in the blocks
-// i + 1 ... n - 1 within the loop
+// The code of block i sits after the end of the i-th of the blocks nested in the dispatch loop,
+// within the blocks i + 1 ... n - 1: a jump forward is a branch out to the end of the target's
+// block, a jump back goes through the loop's br_table with the block of the target
 void Compiler::jumpTo(unsigned targetOffset, unsigned fromBlock)
 {
-    m_body->i32Const(m_blockAt.get(targetOffset));
+    unsigned target = m_blockAt.get(targetOffset);
+    if (target > fromBlock) {
+        m_body->br(m_body->depth() - m_blockDepth + target - fromBlock - 1);
+        return;
+    }
+    m_body->i32Const(target);
     m_body->localSet(m_block);
     m_body->br(m_body->depth() - m_blockDepth + m_blockCount - 1 - fromBlock);
 }
@@ -2848,9 +2926,54 @@ Vector<unsigned> Compiler::switchTargets(const JSInstructionStream::Ref& instruc
     return targets;
 }
 
-// The target from C++, then to its block
 template<typename Bytecode>
 void Compiler::emitSwitch(const JSInstructionStream::Ref& instruction, unsigned block)
+{
+    if constexpr (std::is_same_v<Bytecode, OpSwitchImm>) {
+        // An int32 through a br_table to one jump per target (an obfuscated VM's dispatch), with
+        // a dense table of a sane size; other numbers and tables take the path below
+        auto bytecode = instruction->as<OpSwitchImm>();
+        auto& table = m_codeBlock->unlinkedSwitchJumpTable(bytecode.m_tableIndex);
+        if (!table.isList() && table.m_branchOffsets.size() <= maximumInlineSwitchSize) {
+            Vector<unsigned> targets;
+            HashMap<unsigned, uint32_t, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> caseOf;
+            auto caseFor = [&](unsigned target) {
+                auto result = caseOf.add(target, targets.size());
+                if (result.isNewEntry)
+                    targets.append(target);
+                return result.iterator->value;
+            };
+            caseFor(instruction.offset() + table.defaultOffset());
+            // From the innermost block (the slow path's), case k is the end of the block k + 1 out
+            Vector<uint32_t> depths;
+            for (auto offset : table.m_branchOffsets)
+                depths.append(1 + caseFor(offset ? instruction.offset() + offset : instruction.offset() + table.defaultOffset()));
+            for (unsigned i = 0; i < targets.size(); ++i)
+                m_body->block();
+            m_body->block();
+            loadTag(bytecode.m_scrutinee);
+            m_body->i32Const(int32Tag);
+            m_body->op(Op::I32Ne);
+            m_body->brIf(0);
+            loadPayload(bytecode.m_scrutinee);
+            m_body->i32Const(table.m_min);
+            m_body->op(Op::I32Sub);
+            m_body->brTable(depths.span(), 1);
+            m_body->end();
+            emitSwitchSlowPath<Bytecode>(instruction, block);
+            for (unsigned i = 0; i < targets.size(); ++i) {
+                m_body->end();
+                jumpTo(targets[i], block);
+            }
+            return;
+        }
+    }
+    emitSwitchSlowPath<Bytecode>(instruction, block);
+}
+
+// The target from C++, then to its block
+template<typename Bytecode>
+void Compiler::emitSwitchSlowPath(const JSInstructionStream::Ref& instruction, unsigned block)
 {
     auto targets = switchTargets(instruction);
     callSlowPath(switchFromCompiledCode<Bytecode>, instruction);
@@ -3017,8 +3140,21 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
         return;
     }
     case op_nop:
-    case op_loop_hint:
         return;
+    case op_loop_hint: {
+        // Every loopIterationsPerCall iterations out to runCompiled, which calls the function again
+        // from the block after this (where a loop entered from the interpreter starts too)
+        m_body->localGet(m_iterations);
+        m_body->i32Const(1);
+        m_body->op(Op::I32Sub);
+        m_body->localTee(m_iterations);
+        m_body->op(Op::I32Eqz);
+        m_body->ifThen();
+        m_body->i32Const(reenterStatus + static_cast<int32_t>(m_blockAt.get(instruction.offset() + instruction->size())));
+        m_body->returnValue();
+        m_body->end();
+        return;
+    }
     case op_add: emitArithmetic<OpAdd>(instruction, Op::I64Add, Op::F64Add, slow_path_add); return;
     case op_sub: emitArithmetic<OpSub>(instruction, Op::I64Sub, Op::F64Sub, slow_path_sub); return;
     case op_mul: emitArithmetic<OpMul>(instruction, Op::I64Mul, Op::F64Mul, slow_path_mul); return;
@@ -3471,6 +3607,7 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_wide = m_body->addLocal(ValueType::I64);
     m_x = m_body->addLocal(ValueType::F64);
     m_y = m_body->addLocal(ValueType::F64);
+    m_iterations = m_body->addLocal(ValueType::I32);
 
     m_base = m_body->addLocal(ValueType::I32);
     m_baseBias = (m_codeBlock->numCalleeLocals() + 16) * sizeof(Register);
@@ -3480,6 +3617,8 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_body->localSet(m_base);
     m_body->localGet(entry);
     m_body->localSet(m_block);
+    m_body->i32Const(loopIterationsPerCall);
+    m_body->localSet(m_iterations);
     // block { loop { block * n { br_table } code 0 } code 1 ... } code n - 1 } } return 1: the outer
     // block is the exit after an exception
     m_body->block();

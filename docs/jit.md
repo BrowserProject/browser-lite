@@ -15,6 +15,11 @@ interpreter are inlined (int32 arithmetic, comparisons, branches, property acces
 (`llint_slow_path_*`, `slow_path_*`) through the function table. Metadata is read at run time,
 never baked into the code (the GC resets inline caches).
 
+- **Control flow**: the basic blocks of the bytecode are WASM blocks nested in one loop with a
+  `br_table` at its head. The code of block i sits after the end of the i-th of them, so a jump
+  forward is a branch out to the end of its target's block and only a jump back goes through
+  the `br_table`. A dense `switch` on an int32 (an obfuscated VM's dispatch) takes a `br_table`
+  of its own, other values and sparse tables ask C++ for the target.
 - **Install**: the compiler writes a module that imports the engine's memory and function table,
   compiles it synchronously in its thread (`new WebAssembly.Module`, about 0.1 ms for a small
   one) and adds its export to that thread's table (tables are per thread); a map of the thread
@@ -24,6 +29,14 @@ never baked into the code (the GC resets inline caches).
   slot, where compiled code leaves the return value. A hot loop (`llint_loop_osr`) compiles the
   function and runs the rest of the call from the block after its `op_loop_hint`, then points the
   frame's bytecode offset (which the C loop reloads) at that `op_ret`.
+- **Loops call again**: V8 compiles WebAssembly in two tiers, Liftoff first and the optimized code
+  in the background, and a running function keeps the code it was called with (no on-stack
+  replacement for WebAssembly). A loop entered once, like an obfuscated VM's dispatch or a proof
+  of work, ran to its end in Liftoff, about 2.5x slower. At every `op_loop_hint` the function
+  counts down from 10000 and at 0 returns 2 plus the block after it, and `runCompiled` calls it
+  again from there (the frame holds every value), so the next call takes the optimized code
+  once it is ready (`tests/jsc/jit-tierup.js`: one long call 2.3 to 2.9x the time of many short
+  ones before, 0.9 to 1.3x now).
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
   `llint_loop_osr` at loops) call the compiler instead of giving up, after 4000 / bytecode bytes
   firings (4 to 64; one is about 50 calls or 500 loop iterations): a compile costs about 1 ms
@@ -50,7 +63,11 @@ never baked into the code (the GC resets inline caches).
   function like the interpreter, in the callee's realm, and through the same cache and short
   path once the site has seen it (`Math.max`, `charCodeAt`, DataView getters); else JSC's
   generic call or construct. Varargs (`apply`, spread) get a frame like the interpreter's and
-  then the same call, tail calls are ordinary calls.
+  then the same call, tail calls are ordinary calls. `Function.prototype.call` (a builtin in JS,
+  which obfuscated code reaches as `f["call"](a, b)` and the bytecode's own shortcut for `f.call`
+  does not catch) and bound functions without arguments of their own give way to the call they
+  make: `this` and the arguments move in the frame and the target is called like any callee,
+  where each of them had made a VM entry of the generic call (2 to 3 times faster).
 - **Exceptions**: an instruction within a `try` goes to its handler (known by its bytecode offset),
   whose `op_catch` takes the exception like the interpreter's; otherwise the compiled function
   returns a status and the interpreter unwinds.
@@ -104,4 +121,7 @@ to 2.7 s, Chromium 24 to 44 ms).
 2. Calls between compiled and interpreted functions, exceptions, entry into running loops.
 3. Coverage of the remaining bytecodes; on by default when the suites and real sites pass.
 4. Speed: values in WASM locals between safepoints, type checks folded, inlining of small
-   functions.
+   functions; less code per bytecode. Obfuscated VMs (Cloudflare's Turnstile) bring functions of
+   40 to 90 KB of bytecode, which become about 17 times that in WASM (54 KB: 0.9 MB), and V8 runs
+   such a function in Liftoff for seconds while it optimizes it (`jsc` shell: 470 ms a run in
+   Liftoff, 240 ms once optimized after about 2.5 s).

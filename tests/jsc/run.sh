@@ -42,6 +42,8 @@ run gc-stress-collect-continuously --collectContinuously=1 "$here/gc-stress.js"
 run jit "$here/jit.js"
 # Speed of the JIT's fast paths for hashing code against their int32 twins
 [ "$jit" = 0 ] || run jit-hash "$here/jit-hash.js"
+# A loop entered once gets V8's optimized code too
+[ "$jit" = 0 ] || run jit-tierup "$here/jit-tierup.js"
 done
 
 # Compiled code stays through a full GC of old code, code thrown away compiles again

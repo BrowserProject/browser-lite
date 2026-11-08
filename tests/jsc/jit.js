@@ -30,6 +30,17 @@ function maxOf(a, b) { return Math.max(a, b) + "abc".charCodeAt(1); }
 function pushTwice(list, v) { list.push(v); list.push(v); return list.length; }
 function add3(a, b, c) { return a + b + c; }
 function callBound(f) { return f(1); }
+// Function.prototype.call and bound functions without arguments give way to the call they make
+function describe(a, b) { "use strict"; return [typeof this === "object" && this ? this.tag : String(this), a, b, arguments.length].join(); }
+function callCall(f, ...rest) { return f["call"](...rest); }
+function callCallCall(f, t, a) { return Function.prototype.call.call(f, t, a); }
+function callNoThis(f) { return f.call(); }
+const tagged = { tag: "o" };
+const boundToTagged = describe.bind(tagged);
+const boundTwice = boundToTagged.bind({ tag: "ignored" });
+const boundWithArgument = describe.bind(tagged, "bound");
+const noPrototype = function () { return "called"; };
+Object.setPrototypeOf(noPrototype, null);
 function callShort() { return add3(1, 2); }
 function fourParameters(a, b, c, d) { return [a, b, c, d, arguments.length].join(); }
 function callFewer(x) { return fourParameters() + "|" + fourParameters(x) + "|" + fourParameters(x, x, x); }
@@ -93,6 +104,21 @@ const constant = 1;
 function setConstant() { constant = 2; }
 function kindOfThis() { return typeof this; }
 function number(x) { switch (x) { case 1: return "one"; case 2: return "two"; case 5: return "five"; default: return "other"; } }
+// A VM's dispatch: a dense switch in a loop, cases that fall through, jump back and leave
+function run(program) {
+    let pc = 0, acc = 0;
+    for (;;) {
+        switch (program[pc++]) {
+        case -2: acc -= 1; continue;
+        case 0: acc += 1;
+        case 1: acc *= 2; break;
+        case 2: if (acc > 100) return acc; pc = 0; continue;
+        case 3: acc += 5; break;
+        case 7: return acc;
+        default: acc += 1000;
+        }
+    }
+}
 function character(c) { switch (c) { case "a": return 1; case "b": return 2; default: return 0; } }
 function word(w) { switch (w) { case "hello": return 1; case "world": return 2; default: return 0; } }
 function sumArguments() { let s = 0; for (let i = 0; i < arguments.length; i++) s += arguments[i]; return s; }
@@ -381,6 +407,11 @@ for (let round = 0; round < 300; round++) {
     check("switch double", number(5.0), "five");
     check("switch fraction", number(1.5), "other");
     check("switch string", number("1"), "other");
+    check("switch negative", number(-1), "other");
+    check("switch far", number(2 ** 31 - 1), "other");
+    check("switch loop", run([0, 1, 3, -2, 2]), 168);
+    check("switch loop default", run([4, 3, 1, 7]), 2010);
+    check("switch loop double", run([1.0, 0, 7.5, 7]), 1002);
     check("switch char", character("b"), 2);
     check("switch char long", character("ab"), 0);
     check("switch char other", character(1), 0);
@@ -546,6 +577,24 @@ for (let round = 0; round < 300; round++) {
     check("host functions", maxOf(3, 8), 8 + 98);
     check("push", pushTwice([], round), 2);
     check("bound", callBound(add3.bind(null, 10, 20)), 31);
+    check("call", callCall(describe, tagged, 1, 2), "o,1,2,2");
+    check("call fewer", callCall(describe, tagged), "o,,,0");
+    check("call nothing", callNoThis(describe), "undefined,,,0");
+    check("call primitive this", callCall(describe, 5, round), "5," + round + ",,1");
+    check("call call", callCallCall(describe, tagged, round), "o," + round + ",,1");
+    check("call bound", callCall(boundToTagged, null, 1), "o,1,,1");
+    check("call host", callCall(Math.max, null, 1, round), Math.max(1, round));
+    check("bound this", callBound(boundToTagged), "o,1,,1");
+    check("bound twice", callBound(boundTwice), "o,1,,1");
+    check("bound with argument", callBound(boundWithArgument), "o,bound,1,2");
+    check("call without Function.prototype", callCallCall(noPrototype, null), "called");
+    let callError = null;
+    try {
+        callCall({}, null);
+    } catch (e) {
+        callError = e;
+    }
+    check("call of an object", callError instanceof TypeError, true);
     check("arity", callShort(), NaN);
     check("arity shift", callFewer(round), ",,,,0|" + round + ",,,,1|" + round + "," + round + "," + round + ",,3");
     check("arguments", callArguments(), 3);

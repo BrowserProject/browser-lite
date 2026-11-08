@@ -18,5 +18,30 @@ t('unset', () => { const opts = [{ a: 1 }, { a: 2 }, { a: 3 }]; let s = 0; for (
 t('stringmethods', () => { const w = 'hello world foo bar'; let s = 0; for (let i = 0; i < 100000; i++) s += w.indexOf('o') + w.charCodeAt(i & 7) + (w.startsWith('he') ? 1 : 0); return s; });
 t('getters', () => { class G { constructor() { this._v = 1; } get v() { return this._v; } } const g = new G(); let s = 0; for (let i = 0; i < 100000; i++) s += g.v; return s; });
 t('polymorphic', () => { const os = [{ a: 1 }, { b: 1, a: 2 }, { c: 1, a: 3 }, { d: 1, a: 4 }]; let s = 0; for (let i = 0; i < 300000; i++) s += os[i & 3].a; return s; });
+// An obfuscated VM like Cloudflare's: handlers from a table, called bound and through call, names
+// from a string table
+t('vm', () => {
+  const names = ['push', 'pop', 'call', 'length'];
+  const state = { stack: [], result: 0 };
+  const ops = [
+    function (v) { this.stack[names[0]](v); },
+    function () { const b = this.stack[names[1]](), a = this.stack[names[1]](); this.stack[names[0]]((a + b) | 0); },
+    function () { const b = this.stack.pop(), a = this.stack.pop(); this.stack.push(Math.imul(a ^ b, 31)); },
+    function () { this.result = (this.result + this.stack[this.stack[names[3]] - 1]) | 0; },
+  ];
+  const bound = ops.map((f) => f.bind(state));
+  const program = [];
+  for (let i = 0; i < 64; i++) program.push(i % 4 === 0 ? 0 : i % 4, i);
+  for (let k = 0; k < 2000; k++) {
+    state.stack.length = 0;
+    state.stack.push(1, 2);
+    for (let pc = 0; pc < program.length; pc += 2) {
+      const op = program[pc];
+      if (op === 0) ops[0][names[2]](state, program[pc + 1]);
+      else bound[op]();
+    }
+  }
+  return state.result;
+});
 console.log('BENCH done');
 </script>

@@ -335,16 +335,26 @@ browser (Safari keeps Cmd+L, T and W for itself).
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
    Long single tasks of a page become many times longer here, so they block all views and can
-   reach the script watchdog (#146). Cloudflare Turnstile on kaufland.de (2026-11-05, local,
-   Chromium host): the challenge iframe blocks the engine thread in single entries of 10 to 30 s
-   (about 90 s within 2 minutes), the one that reaches 30 s is terminated and the widget stays at
-   "Verifying". Plain Chromium with a desktop user agent on the same machine: the challenge's
-   renderer is busy 3.2 s, its longest tasks take 0.8, 0.55 and 0.34 s, so about 35x faster. The
-   profile of a block has no single cause: about half compiled code, 15 % interpreter and its
-   slow paths, the rest JS runtime (arrays, `apply` with spread arguments, `Reflect.construct`,
-   bound functions), WebGL fingerprinting 3 %, ICU data loaded lazily 3 %, forced layout 2.5 %.
-   With `?scripttimeout=600` the challenge passes after about 40 s of blocks. Only faster JS
-   fixes it ([jit.md](jit.md)). Its garbage no longer stays (#448), but while the challenge runs
+   reach the script watchdog (#146). Cloudflare Turnstile on kaufland.de (local, Chromium host):
+   every challenge brings a VM obfuscated anew (other function names and sizes each run), so its
+   work differs from run to run. It blocks the engine thread in single entries of several seconds:
+   on 2026-11-05 up to 30 s, which the watchdog terminated, the widget staying at "Verifying". On
+   2026-11-08 the challenge's first phase (until its `pat` request) took 8.5 to 60 s, median 18 s,
+   before (16 runs) and 9.6 to 17.6 s, median 12 s, with the changes below (7 runs); the longest
+   entry within a minute 6.5 to 36.7 s (1 run above 30 s) against 7.7 to 22.7 s, a median of 10
+   to 11 s in both, as later phases do more. Plain Chromium with a desktop user agent on the same
+   machine: the challenge's renderer is busy 3.2 s, its longest tasks take 0.8, 0.55 and 0.34 s.
+   Sampling the JS stacks at the watchdog's trap checks
+   (2026-11-08) showed that after the first full GC (a memory release about 29 s in) every hot
+   function of the challenge ran interpreted to the end, 73 % of the samples: a compile stopped
+   the tier-up counter that all CodeBlocks of a code share, and the GC throws away CodeBlocks
+   after 5 s (#455); now 9 % interpreted. Its handler calls through `f["call"](a, b)` (29 % of the
+   samples of one phase) and bound functions call their target directly (#456), loops entered
+   once get V8's optimized code (#457), jumps forward and dense switches branch directly (#458).
+   What is left is compiled code, half of the engine thread: the VM's functions of 40 to 90 KB of
+   bytecode become about 1 MB of WASM each, which V8 runs in Liftoff for seconds before its
+   optimized code is ready (phase 4 of [jit.md](jit.md)); then `get_by_val` with string keys 7 %,
+   array literals 4.5 %. Its garbage no longer stays (#448), but while the challenge runs
    malloc's use still rises by about 3 MB/s with a JS heap of about 25 MB (2026-11-07, not
    found yet). Not done either: the demo's "Wait" after `unresponsive` does not
    move the watchdog's deadline, so waiting cannot save such a script. LinkedIn Learning
