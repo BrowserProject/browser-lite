@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <wtf/CompletionHandler.h>
+#include <wtf/Expected.h>
 #include <wtf/Forward.h>
 #include <wtf/text/ASCIILiteral.h>
 
@@ -38,6 +39,8 @@ enum class LoadErrorCode : int {
 // of only zeros (AddressInvalid). The engine's own requests (icons, preconnect, the
 // redirects they follow) skip it the same way.
 std::optional<LoadErrorCode> refusedReason(const URL&);
+// The error of a load refused for refusedReason
+WebCore::ResourceError refusedError(const URL&, LoadErrorCode);
 // A load refused for refusedReason. FrameLoader::blockedError marks it as
 // cancelled, but like in Chrome a navigation gets an error and the error page.
 bool isRefusedAddress(const WebCore::ResourceError&);
@@ -66,10 +69,16 @@ Ref<WebCore::CurlRequest> createCurlRequest(WebCore::ResourceRequest&&, WebCore:
 WebCore::ResourceResponse networkResponse(WebCore::CurlResponse&);
 // curl does not follow redirects itself: 3xx with Location
 bool isRedirect(const WebCore::ResourceResponse&);
+// The next request after a redirect like in Chrome (method, fragment, credentials, at most 20).
+// redirectCount already counts this redirect. Cookies come from createCurlRequest.
+Expected<WebCore::ResourceRequest, WebCore::ResourceError> redirectedRequest(const WebCore::ResourceRequest& current, const WebCore::ResourceResponse&, unsigned redirectCount);
 // For loaders without a ResourceLoader: the running request ends, the next one
 // starts from current, the request that got the redirect (like Chrome, at most
 // 20). An error means it does not continue.
 WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::CurlRequestClient&, const WebCore::ResourceRequest& current, const WebCore::ResourceResponse&, unsigned& redirectCount);
+
+// data: and blob: from the engine itself, without a request
+void loadLocalResource(const URL&, WebCore::ResourceError&, WebCore::ResourceResponse&, Vector<uint8_t>& data);
 
 // Loads a favicon (small, entirely in memory). Empty data when there is none
 void loadIcon(const URL&, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&&);

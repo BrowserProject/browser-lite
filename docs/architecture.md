@@ -260,6 +260,15 @@ engine does not show) continues as the download (`continueAsDownload`, like WebK
 link or a form POST reaches the server once. `<a download>`, view source and a navigation the
 engine has no load for (answered by a service worker or WebKit's memory cache) send a request of
 their own (#412).
+A synchronous load (a synchronous `XMLHttpRequest`, its CORS preflight, an external entity of
+XML; `engine/src/SyncLoad.cpp`, #471) cannot block the engine thread, which is where curl's
+answers arrive. Like a dialog (#258) it defers the page group (`PageGroupLoadDeferrer`) and runs
+the other views in the nested event loop (`waitHoldingPageGroup` in `Clients.cpp`) until the load
+is done, so the page sees a blocking call and the other tabs go on. It uses the HTTP cache of the
+document's partition, cookies and redirects like any load; WebCore checks CORS of the result
+(`DocumentThreadableLoader`) and gives it a timeout of 10 s without data. The page's service
+worker does not see it, a closed view ends it, and like Chrome it is refused during unload,
+pagehide and beforeunload.
 
 TLS happens inside the engine, so the relay only sees encrypted bytes. On the network the engine
 looks like Safari 26 (#283; patch 0060 with `platform/wasm/NetworkFingerprintWasm.cpp`, curl patch

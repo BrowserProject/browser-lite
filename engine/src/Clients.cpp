@@ -345,6 +345,27 @@ static void withdrawQuestion(int id)
     answerQuestion(id, false);
 }
 
+void waitHoldingPageGroup(Page& page, const Function<bool()>& done)
+{
+    // Views of the page group (popups with their opener) share script with
+    // the waiting one. They stay alive until it is done, also when closed.
+    Vector<Ref<WebView>> views;
+    auto& group = page.group();
+    WebView::forEach([&](WebView& other) {
+        if (&other.page().group() == &group)
+            views.append(other);
+    });
+    for (auto& blocked : views)
+        blocked->blockForDialog();
+    runNestedEventLoop(done);
+    for (auto& blocked : views) {
+        blocked->unblockAfterDialog();
+        // Closed meanwhile: torn down in a later task, not under the waiting script
+        if (!blocked->isOpen())
+            runOnEngineThread([closed = WTF::move(blocked)] { closeChoosers(closed->id()); });
+    }
+}
+
 // Returns whether the user accepted; text gets the answer of a prompt
 static bool runDialog(WebView& view, LocalFrame& frame, int type, const String& message, const String& defaultValue, String* text = nullptr)
 {
@@ -356,24 +377,8 @@ static bool runDialog(WebView& view, LocalFrame& frame, int type, const String& 
     openDialogs().add(id, &dialog);
     if (!showDialog(id, view, frame, type, message, defaultValue))
         dialog.answered = true;
-    // Views of the page group (popups with their opener) share script with
-    // the waiting one. They stay alive until it is done, also when closed.
-    Vector<Ref<WebView>> views;
-    auto& group = view.page().group();
-    WebView::forEach([&](WebView& other) {
-        if (&other.page().group() == &group)
-            views.append(other);
-    });
-    for (auto& blocked : views)
-        blocked->blockForDialog();
-    runNestedEventLoop([&] { return dialog.answered; });
+    waitHoldingPageGroup(view.page(), [&] { return dialog.answered; });
     openDialogs().remove(id);
-    for (auto& blocked : views) {
-        blocked->unblockAfterDialog();
-        // Closed meanwhile: torn down in a later task, not under the waiting script
-        if (!blocked->isOpen())
-            runOnEngineThread([closed = WTF::move(blocked)] { closeChoosers(closed->id()); });
-    }
     if (text && dialog.accepted)
         *text = WTF::move(dialog.text);
     return dialog.accepted;

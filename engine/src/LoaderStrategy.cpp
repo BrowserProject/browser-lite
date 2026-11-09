@@ -9,6 +9,7 @@
 #include "config.h"
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
+#include "SyncLoad.h"
 
 #include "Engine.h"
 #include "Host.h"
@@ -123,7 +124,7 @@ std::optional<LoadErrorCode> refusedReason(const URL& url)
     return std::nullopt;
 }
 
-static ResourceError refusedError(const URL& url, LoadErrorCode reason)
+ResourceError refusedError(const URL& url, LoadErrorCode reason)
 {
     auto message = reason == LoadErrorCode::UnsafePort ? "Restricted network port"_s : "Address not allowed"_s;
     return ResourceError(loadErrorDomain, static_cast<int>(reason), url, message, ResourceError::Type::AccessControl);
@@ -154,9 +155,7 @@ static bool redirectAsGET(const ResourceRequest& request, const ResourceResponse
     return crossOrigin && request.httpMethod() == "DELETE"_s;
 }
 
-// Next request after a redirect like in Chrome (method, fragment,
-// credentials). redirectCount already counts this redirect.
-static Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
+Expected<ResourceRequest, ResourceError> redirectedRequest(const ResourceRequest& current, const ResourceResponse& response, unsigned redirectCount)
 {
     if (redirectCount > 20)
         return makeUnexpected(ResourceError(loadErrorDomain, static_cast<int>(LoadErrorCode::TooManyRedirects), response.url(), "Too many redirects"_s));
@@ -203,6 +202,22 @@ ResourceError followRedirect(RefPtr<CurlRequest>& curlRequest, CurlRequestClient
     curlRequest = createCurlRequest(WTF::move(*next), client);
     curlRequest->resume();
     return { };
+}
+
+void loadLocalResource(const URL& url, ResourceError& error, ResourceResponse& response, Vector<uint8_t>& data)
+{
+    if (url.protocolIsData()) {
+        if (auto result = DataURLDecoder::decode(url)) {
+            response = ResourceResponse::dataURLResponse(url, *result);
+            data = WTF::move(result->data);
+        } else
+            error = ResourceError(loadErrorDomain, 0, url, "Invalid data: URL"_s);
+    } else {
+        RefPtr blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(url);
+        BlobResourceHandle::loadResourceSynchronously(blob.get(), ResourceRequest { URL { url } }, error, response, data);
+    }
+    if (response.url().isEmpty())
+        response.setURL(URL { url });
 }
 
 // One load: one ResourceLoader, one CurlRequest (several in turn with redirects)
@@ -813,18 +828,7 @@ private:
         ResourceResponse response;
         ResourceError error;
         Vector<uint8_t> data;
-        if (url.protocolIsData()) {
-            if (auto result = DataURLDecoder::decode(url)) {
-                response = ResourceResponse { URL { url }, WTF::move(result->mimeType), static_cast<long long>(result->data.size()), WTF::move(result->charset) };
-                data = WTF::move(result->data);
-            } else
-                error = ResourceError(loadErrorDomain, 0, url, "Invalid data: URL"_s);
-        } else {
-            RefPtr blob = blobRegistry()->blobRegistryImpl()->blobDataFromURL(url);
-            BlobResourceHandle::loadResourceSynchronously(blob.get(), ResourceRequest { URL { url } }, error, response, data);
-        }
-        if (response.url().isEmpty())
-            response.setURL(URL { url });
+        loadLocalResource(url, error, response, data);
         announce(response);
         if (!error.isNull()) {
             finish(errorText(error));
@@ -1076,11 +1080,9 @@ private:
         });
     }
 
-    void loadResourceSynchronously(FrameLoader&, ResourceLoaderIdentifier, const ResourceRequest& request, ClientCredentialPolicy, const FetchOptions&, const HTTPHeaderMap&, ResourceError& error, ResourceResponse&, Vector<uint8_t>&) final
+    void loadResourceSynchronously(FrameLoader& frameLoader, ResourceLoaderIdentifier, const ResourceRequest& request, ClientCredentialPolicy, const FetchOptions& options, const HTTPHeaderMap&, ResourceError& error, ResourceResponse& response, Vector<uint8_t>& data) final
     {
-        // Synchronous XHR would block the only engine thread, while the response
-        // would have to be processed on exactly this thread.
-        error = ResourceError(loadErrorDomain, 0, request.url(), "Synchronous loads are not supported"_s);
+        loadSynchronously(frameLoader, request, options, error, response, data);
     }
 
     void pageLoadCompleted(Page&) final { }

@@ -62,6 +62,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/MemoryVFS.cpp
     ${BL_ENGINE_SRC}/MemoryWatch.cpp
     ${BL_ENGINE_SRC}/Sockets.cpp
+    ${BL_ENGINE_SRC}/SyncLoad.cpp
     ${BL_ENGINE_SRC}/Speech.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/UserContent.cpp

@@ -32,6 +32,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   print to PDF, view source in a tab directly after its page like Chrome (#468),
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
+  synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always
+  failed with `NetworkError`, so Akamai's bot check reloaded amazon.de in a loop, #471),
   permission prompts like Chrome's that go away when their page is left and close with Escape
   in the view (#462; before, a prompt stayed over the next site and Allow stored the grant for
   the origin left),

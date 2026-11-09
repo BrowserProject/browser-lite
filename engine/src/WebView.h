@@ -200,9 +200,10 @@ public:
     void find(const String&, bool backwards, bool again);
     void stopFind();
 
-    // A dialog of this view's page group is open (Clients.cpp, #258): its
-    // script waits, so the view drops input, holds back commands and makes no
-    // rendering update (the last frame stays) until unblockAfterDialog()
+    // A dialog or a synchronous load of this view's page group is open
+    // (waitHoldingPageGroup in Clients.cpp, #258): its script waits, so the view
+    // drops input, holds back commands and makes no rendering update (the last
+    // frame stays) until unblockAfterDialog()
     void blockForDialog() { ++m_dialogBlocks; }
     void unblockAfterDialog();
     bool isBlockedByDialog() const { return m_dialogBlocks; }

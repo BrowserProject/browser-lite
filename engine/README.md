@@ -65,9 +65,10 @@ comes as patches from `patches/`.
     canvas after `transferFromImageBitmap(null)`), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
-    keeps its request), `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with
-    Basic and Digest: stored credentials, the host's sign-in prompt), `PlatformStrategies.cpp`,
-    `ErrorPage.cpp`
+    keeps its request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
+    the page waits like below a dialog, the other views go on), `Sockets.cpp`, `HttpCache.cpp`,
+    `HttpAuth.cpp` (401 with Basic and Digest: stored credentials, the host's sign-in prompt),
+    `PlatformStrategies.cpp`, `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite in memory, written by its storage thread),
     `CookieJarWasm.cpp` (Cookie Store API),
     `CacheStorageWasm.cpp`,
