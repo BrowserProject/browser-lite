@@ -229,6 +229,7 @@ check(
 // Fields the engine keeps on Module for itself, and the Emscripten runtime
 const engineInternal = new Set([
   'blCanvases',
+  'blEmptyBitmap',
   'blTaskChannel',
   'blHostRegExps',
   'blGpuCanvas',

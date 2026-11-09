@@ -29,7 +29,7 @@ EM_JS(void, bl_tile_clear, (int viewId, unsigned key), {
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
     var tile = target && target.tiles && target.tiles.canvases.get(key);
     if (tile && tile.bitmapContext)
-        tile.bitmapContext.transferFromImageBitmap(null);
+        Module.blEmptyBitmap(tile.bitmapContext);
 });
 
 EM_JS(void, bl_tiles_forget, (int viewId), {
@@ -38,7 +38,7 @@ EM_JS(void, bl_tiles_forget, (int viewId), {
         return;
     target.tiles.canvases.forEach(function (tile) {
         if (tile.bitmapContext)
-            tile.bitmapContext.transferFromImageBitmap(null);
+            Module.blEmptyBitmap(tile.bitmapContext);
     });
     target.tiles = null;
 });

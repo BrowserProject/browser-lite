@@ -70,14 +70,14 @@ EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
     if (target.tiles)
         target.tiles.canvases.forEach(function (tile) {
             if (tile.bitmapContext)
-                tile.bitmapContext.transferFromImageBitmap(null);
+                Module.blEmptyBitmap(tile.bitmapContext);
         });
     target.canvas.width = 1;
     target.canvas.height = 1;
     if (target.ctx)
         target.ctx.fillRect(0, 0, 1, 1);
     else if (target.bitmapContext)
-        target.bitmapContext.transferFromImageBitmap(null);
+        Module.blEmptyBitmap(target.bitmapContext);
     if (target.scratch) {
         target.scratch.width = 0;
         target.scratch.height = 0;

@@ -119,7 +119,7 @@ visible change is neither composited nor shown. A frame whose damage touches at 
 tiles of 128 CSS pixels and half of the view is composited only into those tiles, each into
 a small canvas of its own over the view canvas, which keeps its last frame (`DamageTiles.cpp`,
 `view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
-whole view per frame before); other frames composite the whole view and empty the tiles. The compositor's answer that a rendering update is shown (and the presenter's that
+whole view per frame before); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463). The compositor's answer that a rendering update is shown (and the presenter's that
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
 a frame every task or two (#359). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the

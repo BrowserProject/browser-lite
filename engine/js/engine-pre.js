@@ -63,6 +63,18 @@ Module.blHeap = () => HEAPU8;
 // for the compositor. The Emscripten worker ignores messages without "cmd".
 if (ENVIRONMENT_IS_PTHREAD) {
   Module.blCanvases = new Map();
+  // Empties a canvas of a bitmaprenderer context and lets go of its last frame. With a transparent
+  // bitmap of 1x1 pixels, not transferFromImageBitmap(null): after that Safari 18 reads the canvas
+  // back empty but keeps showing its last frame on screen (damage tiles, DamageTiles.h).
+  let blankCanvas = null;
+  Module.blEmptyBitmap = (context) => {
+    if (!blankCanvas) {
+      blankCanvas = new OffscreenCanvas(1, 1);
+      blankCanvas.getContext('2d');
+    }
+    // A new transparent bitmap each time: the transfer takes it
+    context.transferFromImageBitmap(blankCanvas.transferToImageBitmap());
+  };
   // node (engine tests) has no self and no OffscreenCanvas
   if (typeof self !== 'undefined')
     self.addEventListener('message', (event) => {

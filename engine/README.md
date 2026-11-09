@@ -59,7 +59,9 @@ comes as patches from `patches/`.
     switched to)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state), `DamageTiles.cpp` (a frame with a
-    small change goes only into the host canvases of the tiles it touches), `ScrollingWasm.cpp`
+    small change goes only into the host canvases of the tiles it touches; emptied with a
+    transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
+    canvas after `transferFromImageBitmap(null)`), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request), `Sockets.cpp`, `HttpCache.cpp`, `HttpAuth.cpp` (401 with

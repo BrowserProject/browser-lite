@@ -3,6 +3,9 @@
 // its frame; the host browser then repaints only those tiles instead of the whole view. What the
 // tiles show must be what a whole frame shows (0 different pixels, but for a few edge pixels of a
 // rotated layer), and a whole frame empties them again. At device pixel ratio 1 and 2; the spinner crosses tile borders.
+// Like Safari 18, the engine's workers here keep a canvas's last frame after
+// transferFromImageBitmap(null): Safari reads such a canvas back empty but keeps showing the frame,
+// so tiles emptied that way showed stale pieces of earlier frames and pages on iPhones.
 //
 //   node tests/core/damage-tiles-test.mjs [engine-dir]
 import {
@@ -111,6 +114,20 @@ const differentPixels = (a, b, { tolerance = 0, box = null, inside = false } = {
 const SAMPLING = 4;
 const TILTED = [290, 90, 350, 150];
 
+// In a worker of the engine: transferFromImageBitmap(null) keeps the frame shown, as on screen in
+// Safari 18, so the readback of the test sees what Safari shows
+const keepFrameOnNull = (worker) =>
+  worker
+    .evaluate(() => {
+      const proto = globalThis.ImageBitmapRenderingContext?.prototype;
+      if (!proto) return;
+      const transfer = proto.transferFromImageBitmap;
+      proto.transferFromImageBitmap = function (bitmap) {
+        if (bitmap !== null) transfer.call(this, bitmap);
+      };
+    })
+    .catch(() => {});
+
 const stack = await startStack();
 const browser = await launch({ args: SWIFTSHADER });
 for (const ratio of [1, 2]) {
@@ -118,6 +135,7 @@ for (const ratio of [1, 2]) {
     viewport: { width: 800, height: 600 },
     deviceScaleFactor: ratio,
   });
+  page.on('worker', keepFrameOnNull);
   watchErrors(page);
   const results = collect(page);
   check(`ratio ${ratio}: page loaded`, await openHost(page, stack.app({ url: siteURL })));
@@ -151,9 +169,21 @@ for (const ratio of [1, 2]) {
   await results.wait('blinked');
   await page.waitForTimeout(500);
   const fromTiles = await shown(page, true);
-  // A change of the whole page shows a whole frame
+  // A change of the whole page shows a whole frame, and the tiles over it are empty
   await evalPage(page, `document.body.style.background = '#eee'`);
-  await page.waitForTimeout(500);
+  let grey = null;
+  await waitFor(
+    async () => differentPixels(fromTiles, (grey = await shown(page, false))) > 0,
+    5000,
+    200,
+  );
+  await page.waitForTimeout(300);
+  grey = await shown(page, false);
+  check(
+    `ratio ${ratio}: a whole frame empties the tiles`,
+    differentPixels(grey, await shown(page, true)) === 0,
+    `${differentPixels(grey, await shown(page, true))} pixels of the tiles differ`,
+  );
   await evalPage(page, `document.body.style.background = '#fff'`);
   let whole = null;
   const outside = () => differentPixels(whole, fromTiles, { box: TILTED, tolerance: SAMPLING });
@@ -166,7 +196,7 @@ for (const ratio of [1, 2]) {
     `${outside()} different pixels, ${edges()} edge pixels of the tilted square`,
   );
   check(
-    `ratio ${ratio}: a whole frame empties the tiles`,
+    `ratio ${ratio}: the tiles stay empty`,
     differentPixels(whole, await shown(page, true)) === 0,
   );
   await page.close();
