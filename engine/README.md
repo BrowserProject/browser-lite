@@ -49,7 +49,7 @@ comes as patches from `patches/`.
   - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
-    (event loop: the host's calls and the compositor's answers before the page's work, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
+    (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
     and when a view leaves its page (patch 0102), finds the memory limit, memory pressure),

@@ -332,6 +332,11 @@ void runNextOnEngineThread(Function<void()>&& function)
     scheduleLocalDrain();
 }
 
+// Set while a pump waits (in the mailbox or the local tasks); only that pump clears it when it
+// runs. A RunLoop pass from the timer leaves it set: otherwise every wake-up during such a pass
+// queues one more pump behind the waiting one, and a pass of the local tasks runs them all back
+// to back (a whole RunLoop cycle of the page's tasks each) without returning to the JS event loop,
+// where the host's frames arrive (on blick.ch 11 to 17 pumps, 0.3 to 2 s)
 static std::atomic<bool> s_pumpScheduled { false };
 static long s_timerId { 0 };
 static double s_timerDeadline { 0 };
@@ -372,7 +377,6 @@ static void armTimerForNextScheduledTask()
 
 static void pumpRunLoop()
 {
-    s_pumpScheduled.store(false, std::memory_order_release);
     auto start = WTF::MonotonicTime::now();
     // Run all due timers and waiting tasks once
     runWithGCAfterwards([] {
@@ -388,7 +392,10 @@ void scheduleRunLoopPump()
 {
     if (s_pumpScheduled.exchange(true, std::memory_order_acq_rel))
         return;
-    auto* heapFunction = new Function<void()>([] { pumpRunLoop(); });
+    auto* heapFunction = new Function<void()>([] {
+        s_pumpScheduled.store(false, std::memory_order_release);
+        pumpRunLoop();
+    });
     if (!emscripten_proxy_async(emscripten_proxy_get_system_queue(), s_engineThread, runFunction, heapFunction)) {
         delete heapFunction;
         s_pumpScheduled.store(false, std::memory_order_release);

@@ -121,7 +121,9 @@ a small canvas of its own over the view canvas, which keeps its last frame (`Dam
 `view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
 whole view per frame before); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463). The compositor's answer that a rendering update is shown (and the presenter's that
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
-a frame every task or two (#359). A view without a rendering update for two stall checks (2 s
+a frame every task or two (#359). At most one RunLoop pump waits among the engine's local tasks, so a
+pass of them returns to the JS event loop, where the host's frame calls arrive, after one RunLoop
+cycle (#477). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
 compositor's phase and how long it lasts, since the scene started if it never ran (#402). Pinch zoom scales the shown tiles on the compositor and commits once at the end
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).

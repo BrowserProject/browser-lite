@@ -360,6 +360,17 @@ browser (Safari keeps Cmd+L, T and W for itself).
    intersection observers, timers of ads), so a tap often waits behind one. What is left of the
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
+   blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
+   tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
+   fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames
+   meanwhile: a pass of the engine's local tasks ran a pile of RunLoop pumps back to back (#477);
+   now 77 to 105 frames in 12 s instead of 27 to 56 and the new route on screen 0.8 to 1.1 s after
+   it is in the DOM instead of 1.3 to 2.3 s. What is left is page work: React rendering the
+   route, ads and analytics in the interpreter and the JIT, forced layout (a quarter), a single
+   task of about 0.9 s that commits the route, and on Back in some runs a canvas ad on the
+   article whose animation frames (2D `drawImage` with rotation on the CPU, about 30 ms each)
+   took 57 to 61 % of the engine thread while the home page rendered. Like Chrome the demo shows
+   no progress for a same-document navigation (`pushState`).
    Long single tasks of a page become many times longer here, so they block all views and can
    reach the script watchdog (#146). Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its

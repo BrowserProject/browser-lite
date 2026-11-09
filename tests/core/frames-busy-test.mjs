@@ -2,6 +2,11 @@
 // compositor's answer for the last rendering update is urgent work (engine/src/EngineLoop.cpp),
 // taken in between two tasks of the page, so the page gets a frame every task or two. Before,
 // the answer waited behind all of the page's queued tasks and the page got one frame per batch.
+// The same while a worker of the page posts messages all the time (each one wakes the engine's
+// RunLoop from the worker's thread, like the network and the ad workers of a news page) and every
+// task also starts a timer: a pass of the engine's local tasks once ran several RunLoop pumps
+// queued meanwhile back to back, and the host's frame waited for all of them (a gap of 4 tasks and
+// more, on blick.ch up to 2.6 s). Now at most one pump waits (#477).
 // Also the stall diagnostic of a view the host gives no frames: its compositor never ran, so
 // the log tells the time since the view started (before: seconds since the clock's epoch).
 //
@@ -58,6 +63,31 @@ window.run = () => {
   };
   for (let i = 0; i < ${TASKS}; i++) channel.port1.postMessage(i);
 };
+window.runWithWakeups = () => {
+  gaps = [];
+  last = 0;
+  const worker = new Worker(URL.createObjectURL(new Blob([
+    'const t = setInterval(() => { for (let i = 0; i < 5; i++) postMessage(i); }, 2); onmessage = () => clearInterval(t);',
+  ])));
+  worker.onmessage = () => {};
+  let done = 0;
+  const channel = new MessageChannel();
+  channel.port2.onmessage = () => {
+    busy(${TASK_MS});
+    if (++done < ${TASKS}) {
+      setTimeout(() => busy(2), 0);
+      channel.port1.postMessage(0);
+      return;
+    }
+    worker.terminate();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const sorted = gaps.sort((a, b) => b - a).map(Math.round);
+      gaps = null;
+      console.log('RESULT wakeups=' + sorted.length + ':' + sorted.slice(0, 8).join(','));
+    }));
+  };
+  channel.port1.postMessage(0);
+};
 console.log('RESULT ready=1');
 </script>`;
 const { url: siteURL } = await serve((req, res) => {
@@ -91,6 +121,16 @@ check(
   `a frame at least every 4 of the page's busy tasks (${TASK_MS} ms each)`,
   Number(count) >= TASKS / 4 && second <= 4 * TASK_MS,
   `${count} frames, longest gaps ${longest} ms`,
+);
+
+await page.evaluate(() => window.blTest.eval('runWithWakeups()'));
+const wakeups = await results.wait('wakeups', 60000);
+const wakeupGaps = (wakeups || '0:').split(':')[1].split(',').map(Number);
+// Before the change 5 to 6 gaps of 2 to 4 tasks; one outlier allowed (a GC)
+check(
+  `with a worker waking the engine: at most one gap over 2 of the page's tasks (${TASK_MS} ms each)`,
+  wakeups && wakeupGaps.filter((gap) => gap > 2 * TASK_MS).length <= 1,
+  `${wakeups?.split(':')[0]} frames, longest gaps ${wakeupGaps.join(',')} ms`,
 );
 check('no compositor answer counted as lost', lost.length === 0, lost.join(' | '));
 

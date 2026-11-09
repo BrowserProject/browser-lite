@@ -259,7 +259,14 @@ EMSCRIPTEN_KEEPALIVE void bl_resize(int id, int width, int height, float deviceS
 // From the host once per requestAnimationFrame when the engine wanted a frame
 EMSCRIPTEN_KEEPALIVE void bl_frame(int id)
 {
-    withView(id, [](WebView& view) { view.presentIfNeeded(); });
+    // Wall clock: the host's and the engine thread's performance.now() differ
+    double sent = emscripten_date_now();
+    withView(id, [id, sent](WebView& view) {
+        double waited = emscripten_date_now() - sent;
+        if (waited > 50)
+            debugLog("View %d: frame waited %.0f ms for the engine thread", id, waited);
+        view.presentIfNeeded();
+    });
 }
 
 // Comes from the worker that receives the canvases (bl__presenter_thread)
