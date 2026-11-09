@@ -42,7 +42,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (httpforever.com, 127.0.0.1:7650 and localhost:7650 ended on ERR_SSL_PROTOCOL_ERROR, #435).
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
   Android keyboards after typing (#411), clipboard with HTML and files
-  (#126), drag and drop (#125), touch with pointer events (#316), swiping along `touch-action`
+  (#126), copy buttons of sites through `navigator.clipboard.writeText()` and `write()` (text
+  and HTML, #469; before, the promise resolved and nothing reached the clipboard), drag and drop
+  (#125), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
   Tab to links (#372), focus on click of buttons, checkboxes and links like Chrome (#450), mouse leave of the view (`:hover` and link address go away, #381),
@@ -475,6 +477,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- Clipboard: an image (`image/png`) in a `ClipboardItem` of `navigator.clipboard.write()` does not
+  reach the host, only text and HTML do (#469; the event `clipboard` carries no files). Like
+  WebKit, a write with several items resolves, Chrome rejects it.
 - Typed addresses (#435): the engine commits its error page of the failed `https://` load before
   the core falls back to `http://`, so the page shows for a moment and the failed address stays in
   back/forward before the `http://` page (Chrome keeps one entry). Falling back in the engine's

@@ -16,7 +16,8 @@ the right edge of a phone, or the hover a scroll moved to the element under the 
 an interpreter cache that took the missing export of one module for all modules, or the decoded
 image a compositing layer still showed, which the memory cache dropped and the layer decoded again,
 or the text shadow a filtered layer cut off at its box, or the tiles a fling on a busy page
-ran away from, or the boxes with percentage heights every layout of a container laid out again)
+ran away from, or the boxes with percentage heights every layout of a container laid out again,
+or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped)
 comes as patches from `patches/`.
 
 ## Folders

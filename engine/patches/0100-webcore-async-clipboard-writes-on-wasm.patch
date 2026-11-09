@@ -1,0 +1,20 @@
+diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+index 65706a9eeb..823b013cfe 100644
+--- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
++++ b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+@@ -259,8 +259,14 @@ void Pasteboard::writePlainText(const String& text, SmartReplaceOption)
+     writeString("text/plain;charset=utf-8"_s, text);
+ }
+ 
+-void Pasteboard::writeCustomData(const Vector<PasteboardCustomData>&)
++void Pasteboard::writeCustomData(const Vector<PasteboardCustomData>& data)
+ {
++#if PLATFORM(WASM)
++    // navigator.clipboard.write() and writeText() (Modules/async-clipboard)
++    platformStrategies()->pasteboardStrategy()->writeCustomData(data, name(), context());
++#else
++    UNUSED_PARAM(data);
++#endif
+ }
+ 
+ void Pasteboard::write(const Color&)

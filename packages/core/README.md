@@ -202,8 +202,8 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
 - `webrtc()`: opt-in; the connections bypass the transport and reveal the IP of the device.
 - `devices({ ... })`: geolocation, sensors, gamepad, speech, notifications, fileSystemAccess,
   clipboard, eyedropper, battery, keyboard, networkInfo, imageDecoder, touch (all on by default).
-  The `clipboard` switch covers the `navigator.clipboard` API of the pages; copy and cut in a page
-  always reach the clipboard of the host.
+  The `clipboard` switch covers the `navigator.clipboard` API of the pages, whose text and HTML
+  writes reach the clipboard of the host like copy and cut, which always do.
   Gamepads are read once per frame only while a page uses them; only then does the core listen
   for `gamepadconnected` on your window ([Resource use](../../docs/embedding.md#resource-use)).
 

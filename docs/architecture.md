@@ -220,7 +220,10 @@ Ctrl + wheel first reaches the page (#167), and so do keys: a keydown the page d
 back as `unhandled-key`, where the demo runs its shortcuts like Chrome; only the ones that leave or
 switch the tab skip the page (#436). Escape is Stop there, after the page and the demo's own
 fields (#437). Paste, drag and drop and uploads write files into the engine
-(#125, #126, #181).
+(#125, #126, #181). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
+put text and HTML on the engine's clipboard, which the host gets as the event `clipboard`
+(handler `clipboardWrite`; the async Clipboard API through `Pasteboard::writeCustomData`,
+patch 0100, #469).
 
 ## Network
 

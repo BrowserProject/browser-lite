@@ -1,6 +1,7 @@
 // Clipboard (paste and clipboard of the core, engine/src/Exports.cpp bl_set_clipboard, WebCore
 // PasteboardLibWPE.cpp): paste text, HTML and images from the host (paste event of the page,
-// formatted in contenteditable) and copy with HTML into the real clipboard. Also double and
+// formatted in contenteditable), copy with HTML into the real clipboard and
+// navigator.clipboard.writeText() and write() of the page into the real clipboard. Also double and
 // triple click (the core counts the clicks) and text input with a preview (IME, through the
 // DevTools protocol).
 //
@@ -30,10 +31,13 @@ body { margin: 0; font: 16px sans-serif }
 #editor { position: absolute; left: 20px; top: 20px; width: 400px; height: 100px; border: 1px solid #888 }
 #source { position: absolute; left: 20px; top: 200px; width: 400px; height: 40px }
 #jp { position: absolute; left: 20px; top: 300px; width: 300px; height: 40px }
+button { position: absolute; left: 20px; width: 200px; height: 40px }
 </style>
 <div id="editor" contenteditable="true"></div>
 <div id="source">Copy <i>me</i></div>
 <textarea id="jp"></textarea>
+<button id="writetext" style="top: 400px">writeText</button>
+<button id="writeitem" style="top: 460px">write</button>
 <script>
 const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
 const editor = document.getElementById('editor');
@@ -59,6 +63,13 @@ jp.addEventListener('compositionend', (e) => {
   composition.push('end:' + e.data);
   setTimeout(() => log('composition', composition.join('|') + '|' + jp.value), 100);
 });
+const settle = (key, promise) => promise.then(() => log(key, 'ok'), (e) => log(key, e.name));
+document.getElementById('writetext').onclick = () =>
+  settle('writetext', navigator.clipboard.writeText('From writeText'));
+document.getElementById('writeitem').onclick = () =>
+  settle('writeitem', navigator.clipboard.write([
+    new ClipboardItem({ 'text/plain': new Blob(['From ClipboardItem'], { type: 'text/plain' }) }),
+  ]));
 document.addEventListener('copy', () => { log('selection', getSelection().toString()); log('copied', 1); });
 log('ready', 1);
 </script>`;
@@ -157,23 +168,28 @@ await page.waitForTimeout(600);
 await page.mouse.click(box.x + 40, box.y + 215, { clickCount: 3 });
 await page.keyboard.press('Control+c');
 check('copy event in the page', (await result('copied')) === '1', results.get('selection'));
-let copied = null;
-for (let i = 0; i < 25 && !copied?.html; i++) {
-  await page.waitForTimeout(200);
-  copied = await page.evaluate(async () => {
-    try {
-      const items = await navigator.clipboard.read();
-      const out = { types: items[0]?.types.join(',') };
-      if (items[0]?.types.includes('text/html'))
-        out.html = await (await items[0].getType('text/html')).text();
-      if (items[0]?.types.includes('text/plain'))
-        out.text = await (await items[0].getType('text/plain')).text();
-      return out;
-    } catch (e) {
-      return { error: e.message };
-    }
-  });
-}
+/** The real clipboard, read until `done` holds for it (a write of the core is asynchronous). */
+const hostClipboard = async (done) => {
+  let copied = null;
+  for (let i = 0; i < 25 && !done(copied); i++) {
+    await page.waitForTimeout(200);
+    copied = await page.evaluate(async () => {
+      try {
+        const items = await navigator.clipboard.read();
+        const out = { types: items[0]?.types.join(',') };
+        if (items[0]?.types.includes('text/html'))
+          out.html = await (await items[0].getType('text/html')).text();
+        if (items[0]?.types.includes('text/plain'))
+          out.text = await (await items[0].getType('text/plain')).text();
+        return out;
+      } catch (e) {
+        return { error: e.message };
+      }
+    });
+  }
+  return copied;
+};
+const copied = await hostClipboard((copied) => copied?.html);
 check('clipboard: text', copied?.text?.trim() === 'Copy me', JSON.stringify(copied));
 check(
   'clipboard: HTML with formatting',
@@ -181,7 +197,18 @@ check(
   (copied?.html || '').slice(0, 120),
 );
 
-// 4. Input method (IME): preview in the page, candidate window at the cursor
+// 4. The async Clipboard API of the page writes into the real clipboard (copy buttons of sites)
+for (const [id, top, text] of [
+  ['writetext', 420, 'From writeText'],
+  ['writeitem', 480, 'From ClipboardItem'],
+]) {
+  await page.mouse.click(box.x + 100, box.y + top);
+  check(`${id}: promise resolves`, (await result(id)) === 'ok', results.get(id));
+  const written = await hostClipboard((copied) => copied?.text === text);
+  check(`${id}: text in the real clipboard`, written?.text === text, JSON.stringify(written));
+}
+
+// 5. Input method (IME): preview in the page, candidate window at the cursor
 if (chromiumOnly('input method (CDP Input.imeSetComposition)')) {
   await page.mouse.click(box.x + 100, box.y + 320);
   await page.waitForTimeout(300);

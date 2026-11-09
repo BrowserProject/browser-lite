@@ -710,8 +710,9 @@ export interface RequestHandlers {
    */
   dataListPopup(request: DataListRequest): Promise<number>;
   /**
-   * Copy and cut in a page: puts the text (and HTML) on a clipboard. Default: the clipboard of
-   * the host (`navigator.clipboard`, with HTML when ClipboardItem exists).
+   * Copy and cut in a page and its `navigator.clipboard.writeText()` and `write()`: puts the
+   * text (and HTML) on a clipboard. Default: the clipboard of the host (`navigator.clipboard`,
+   * with HTML when ClipboardItem exists).
    */
   clipboardWrite(request: ClipboardWriteRequest): void | Promise<void>;
 }
@@ -788,7 +789,7 @@ export interface AuthCredentials {
   password: string;
 }
 
-/** Text a page copied or cut (handler `clipboardWrite`). */
+/** Text a page copied, cut or wrote with `navigator.clipboard` (handler `clipboardWrite`). */
 export interface ClipboardWriteRequest {
   text: string;
   /** HTML of the selection, '' for plain text. */
