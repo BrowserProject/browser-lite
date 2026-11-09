@@ -1227,6 +1227,12 @@ svg.favicon {
   min-height: 52px;
   padding: 6px var(--space-2);
 }
+.panel-progress {
+  width: 100%;
+  height: 4px;
+  margin-top: var(--space-1);
+  accent-color: var(--primary);
+}
 .panel-action {
   align-self: flex-start;
 }

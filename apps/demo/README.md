@@ -114,6 +114,10 @@ select popup) are in the same sheet.
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
   Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
   the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
+- **Downloads** (Ctrl+J): the status line and the panel follow a running download; its row
+  counts the bytes with a progress bar and has Cancel like Chrome (`Download.cancel()`, the server
+  sees the request end). A finished file is saved with the host browser, its row has Save again.
+  No Pause: the core cannot hold a download's request yet.
 - **Settings**: a navigation with icons (on narrow screens chips as wide as their names that fill
   their rows, a name never breaks, #445) and the settings as cards of
   rows, switches for on and off; start, errors and the access code are a card over the page. On

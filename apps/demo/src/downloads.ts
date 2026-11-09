@@ -17,7 +17,10 @@ const listeners = new Set<() => void>();
 
 export const downloads = (): readonly DownloadEntry[] => entries;
 
-/** Calls listener after every change of a download. */
+/**
+ * Calls listener when a download starts or ends; its progress comes as the `progress` event of
+ * the core's Download.
+ */
 export function onDownloadsChange(listener: () => void): void {
   listeners.add(listener);
 }
@@ -37,7 +40,11 @@ export function addDownload(download: Download): void {
     setStatus(`Download: ${download.filename} ${formatSize(download.received)}${total}`);
   });
   download.on('error', () => {
-    setStatus(`Download failed: ${download.filename} (${download.error ?? ''})`);
+    setStatus(
+      cancelled(download)
+        ? `Download cancelled: ${download.filename}`
+        : `Download failed: ${download.filename} (${download.error ?? ''})`,
+    );
     changed();
   });
   download.on('done', () => {
@@ -52,11 +59,15 @@ export function addDownload(download: Download): void {
   });
 }
 
+/** Stopped with `Download.cancel()` (the core's error text for it). */
+const cancelled = (download: Download) => download.error === 'Cancelled';
+
 /** State text of a download for the panel. */
 export function downloadState(entry: DownloadEntry): string {
   const download = entry.download;
   if (!download) return formatSize(entry.size);
-  if (download.state === 'error') return `Error: ${download.error ?? ''}`;
+  if (download.state === 'error')
+    return cancelled(download) ? 'Cancelled' : `Error: ${download.error ?? ''}`;
   if (download.state === 'done') return formatSize(download.blob?.size ?? download.size);
   return `${formatSize(download.received)} of ${download.size ? formatSize(download.size) : '?'}`;
 }

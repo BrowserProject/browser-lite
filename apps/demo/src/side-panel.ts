@@ -1,5 +1,5 @@
 import { bookmarks, onBookmarksChange, toggleBookmark } from './bookmarks.js';
-import { downloadState, downloads, onDownloadsChange } from './downloads.js';
+import { type DownloadEntry, downloadState, downloads, onDownloadsChange } from './downloads.js';
 import { ui } from './extensions.js';
 import { favicon } from './favicons.js';
 import { clearHistory, onHistoryChange, readHistory, type Visit } from './history.js';
@@ -31,8 +31,8 @@ const menuButton = byId('menu-button');
 let current: PanelName | null = null;
 let filter = '';
 let actions: PanelActions;
-/** Runs when the shown panel of an extension goes away. */
-let leavePanel: (() => void) | undefined;
+/** Run when the shown panel goes away: the leave function of an extension, subscriptions. */
+const leave: (() => void)[] = [];
 
 /**
  * Menu and side panel like Chrome: the menu drops down from its button (a bottom sheet on a
@@ -317,44 +317,66 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
   if (!compactLayout()) search.focus();
 }
 
+/** A row of the downloads panel; a running download updates it and can be cancelled. */
+function downloadRow(entry: DownloadEntry): HTMLElement {
+  const state = element('span', { className: 'panel-url', textContent: downloadState(entry) });
+  const text = element(
+    'span',
+    { className: 'panel-text' },
+    element('span', { className: 'panel-title', textContent: entry.filename }),
+    state,
+  );
+  const row = element('div', { className: 'panel-row panel-download' }, icon('download'), text);
+  const download = entry.download;
+  if (download?.state === 'progress') {
+    const progress = element('progress', { className: 'panel-progress' });
+    const update = () => {
+      state.textContent = downloadState(entry);
+      // Without a known size the bar runs without a value
+      if (download.size > 0) {
+        progress.max = download.size;
+        progress.value = download.received;
+      }
+    };
+    update();
+    text.append(progress);
+    // The end of the download renders the panel again (onDownloadsChange)
+    leave.push(download.on('progress', update));
+    const cancel = element('button', {
+      className: 'panel-action',
+      type: 'button',
+      textContent: 'Cancel',
+    });
+    cancel.setAttribute('aria-label', `Cancel ${entry.filename}`);
+    cancel.addEventListener('click', () => download.cancel());
+    row.append(cancel);
+  } else if (download?.state === 'done') {
+    const save = element('button', {
+      className: 'panel-action',
+      type: 'button',
+      textContent: 'Save again',
+    });
+    save.addEventListener('click', () => download.save());
+    row.append(save);
+  }
+  return row;
+}
+
 function renderDownloads(): void {
   const list = element('div', { className: 'panel-list' });
-  for (const entry of downloads().slice().reverse()) {
-    const row = element(
-      'div',
-      { className: 'panel-row panel-download' },
-      icon('download'),
-      element(
-        'span',
-        { className: 'panel-text' },
-        element('span', { className: 'panel-title', textContent: entry.filename }),
-        element('span', { className: 'panel-url', textContent: downloadState(entry) }),
-      ),
-    );
-    const download = entry.download;
-    if (download?.state === 'done') {
-      const save = element('button', {
-        className: 'panel-action',
-        type: 'button',
-        textContent: 'Save again',
-      });
-      save.addEventListener('click', () => download.save());
-      row.append(save);
-    }
-    list.append(row);
-  }
+  for (const entry of downloads().slice().reverse()) list.append(downloadRow(entry));
   if (!downloads().length)
     list.append(element('p', { className: 'panel-empty', textContent: 'No downloads yet.' }));
   panel.append(list);
 }
 
 function clear(): void {
-  const leave = leavePanel;
-  leavePanel = undefined;
-  try {
-    leave?.();
-  } catch (error) {
-    console.warn('extension panel:', error);
+  for (const run of leave.splice(0)) {
+    try {
+      run();
+    } catch (error) {
+      console.warn('panel:', error);
+    }
   }
   panel.textContent = '';
 }
@@ -365,7 +387,8 @@ function renderExtension(name: PanelName): void {
   if (item) container.dataset.blItem = item.id;
   panel.append(container);
   try {
-    leavePanel = item?.render(container);
+    const left = item?.render(container);
+    if (left) leave.push(left);
   } catch (error) {
     console.warn('extension panel:', error);
   }

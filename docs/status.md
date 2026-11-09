@@ -23,7 +23,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (address and title of the restored page, #367; the page left last stays through the automatic
   memory releases, so back shows it at once where it was scrolled to, #451), favicons for every loaded page (also after a
   page without one or back to a page whose next page never loaded, #389),
-  downloads (a link or form whose answer becomes a download asks the server once, #412), uploads,
+  downloads (a link or form whose answer becomes a download asks the server once, #412; the
+  demo's panel follows a running one and cancels it, #466), uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
   at the scroll position of its page like Chrome, also when the demo or the tab is closed right
@@ -479,6 +480,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   `dispatchDidFailProvisionalLoad` instead of showing the error page would avoid both. No
   fallback timer: a host that drops connections to port 443 falls back only after the connection
   timeout.
+- Downloads (#466): no Pause like Chrome; the core would need to hold the download's request in
+  the engine (no reads, so the server waits) and resume it, or ask again with a `Range` header.
 - Touch selection: a long press selects the word, but there are no selection handles to extend
   it like Chrome and Safari on phones (needs the selection bounds from the engine and commands
   that move either end).
