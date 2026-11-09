@@ -262,7 +262,7 @@ export class Tab implements SessionTab {
       address.focus();
       address.select();
     });
-    this.on('find', (event) => showFindCount(view, event.matches, event.index));
+    this.on('find', (event) => showFindCount(view, event));
     this.on('context-menu', (info) => {
       const items = defaultMenuItems(view, info, {
         openTab: (url) => openMenuTab(url, this),

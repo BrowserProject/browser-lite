@@ -1,4 +1,4 @@
-import type { View } from '@browser-lite/core';
+import type { View, ViewEvents } from '@browser-lite/core';
 import { byId } from './util.js';
 
 const bar = byId('find-bar');
@@ -10,12 +10,13 @@ let api: { view(): View | null; focusPage(): void } = { view: () => null, focusP
 let shown: View | null = null;
 const sessions = new WeakMap<View, { text: string; count: string }>();
 
+/** Result of a search ('find' event of the view). */
+type FindResult = ViewEvents['find'];
+
 /** Connects the find bar (Ctrl+F) with the active view. */
 export function initFindBar(options: typeof api): void {
   api = options;
 }
-
-export const findOpen = (): boolean => !bar.hidden;
 
 function run(backwards: boolean, again: boolean, view = api.view()): void {
   clearTimeout(timer);
@@ -23,8 +24,13 @@ function run(backwards: boolean, again: boolean, view = api.view()): void {
   view?.find(input.value, { backwards, again });
 }
 
-function countText(text: string, matches: number, index: number): string {
-  return text ? (matches ? `${index || 1} of ${matches}` : 'No matches') : '';
+/** Count text of a result like Chrome, past the engine's limit like Safari ("1000+"). */
+function countText({ text, matches, index, more }: FindResult): string {
+  if (!text) return '';
+  if (!matches) return 'No matches';
+  const total = more ? `${matches}+` : `${matches}`;
+  if (index) return `${index} of ${total}`;
+  return more ? `${total} matches` : `1 of ${total}`;
 }
 
 /** Hides the bar; the page gets the focus back when the bar had it. */
@@ -35,6 +41,11 @@ function hide(): void {
   if (focused) api.focusPage();
 }
 
+/**
+ * Opens the bar with the last text selected, like Firefox without searching it again: typing
+ * replaces it, Enter searches it. A search on open would run before the one typed next and keep
+ * the bar on its result for as long as it takes on a long page.
+ */
 export function openFind(): void {
   const view = api.view();
   if (!view) return;
@@ -42,13 +53,12 @@ export function openFind(): void {
   bar.hidden = false;
   input.focus();
   input.select();
-  if (input.value) run(false, false);
 }
 
 /** Next (or previous) match; opens the bar when closed. */
 export function findAgain(backwards: boolean): void {
   if (bar.hidden) openFind();
-  else run(backwards, true);
+  if (input.value) run(backwards, true);
 }
 
 export function closeFind(): void {
@@ -93,17 +103,22 @@ export function endFind(view: View): void {
   }
 }
 
-/** Result of view ('find' event), also of a background tab whose find is open. */
-export function showFindCount(view: View, matches: number, index: number): void {
+/**
+ * Result of view ('find' event), also of a background tab whose find is open. A result for
+ * another text than the bar's belongs to an earlier search and is dropped.
+ */
+export function showFindCount(view: View, result: FindResult): void {
   const session = sessions.get(view);
-  if (session) session.count = countText(session.text, matches, index);
-  else if (view === shown && !bar.hidden)
-    count.textContent = countText(input.value, matches, index);
+  if (session) {
+    if (result.text === session.text) session.count = countText(result);
+  } else if (view === shown && !bar.hidden && result.text === input.value)
+    count.textContent = countText(result);
 }
 
 input.addEventListener('input', () => {
   // The text survives a return from the page cache like the address bar's (showAddress)
   input.defaultValue = input.value;
+  count.textContent = '';
   clearTimeout(timer);
   timer = setTimeout(() => run(false, false), 150);
 });

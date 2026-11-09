@@ -93,7 +93,10 @@ select popup) are in the same sheet.
   the next and previous match, F3 and Ctrl+G too; Escape closes it from anywhere in the bar, also
   after a click on a button took the focus (#376). Like Chrome each tab has its own: switching
   tabs shows the bar of the tab with its text and result or none, and a new document in the tab
-  (a navigation or reload) closes it (#390).
+  (a navigation or reload) closes it (#390). The count shows only the result of the text in the
+  field (a result of an earlier search is dropped, typing clears it), past 1000 matches as
+  `1000+` like Safari. Opened again, the bar selects the last text without searching it, like
+  Firefox: typing replaces it, Enter, F3 or Ctrl+G search it (#464).
 - **Keyboard shortcuts** (`shortcuts.ts`): like Chrome the page of the focused tab gets them
   first and they run only when it does not handle the key (`unhandled-key` of the core), so an
   editor keeps its own Ctrl+F, Ctrl+L or Ctrl+P and Ctrl+U underlines in rich text. Only the ones

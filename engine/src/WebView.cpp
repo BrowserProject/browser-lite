@@ -1832,13 +1832,16 @@ void WebView::pinch(PinchPhase phase, float factor, FloatPoint focus)
         m_pinch = std::nullopt;
 }
 
-// Find on the page (Ctrl+F): mark all matches, jump to the next one, report
-// "match x of y" to the host
+// Find on the page (Ctrl+F): mark all matches, jump to the next one, report "match x of y" to
+// the host with the text it belongs to, so the host can drop the answer of an earlier search.
+// One pass lists and marks the matches; it looks for one more than the count reported, so the
+// host can say "more" (Safari's "1000+"). The search keeps the same limit on Enter, so the
+// cached result of WebKit's CachedMatchFinder serves the next and previous match.
 void WebView::find(const String& text, bool backwards, bool again)
 {
     m_page->unmarkAllTextMatches();
     if (text.isEmpty()) {
-        notifyHost(m_id, "find", "{\"matches\":0,\"index\":0}"_s);
+        notifyHost(m_id, "find", "{\"text\":\"\",\"matches\":0,\"index\":0,\"more\":false}"_s);
         return;
     }
     constexpr unsigned maxMatches = 1000;
@@ -1847,19 +1850,24 @@ void WebView::find(const String& text, bool backwards, bool again)
         options.add(FindOption::Backwards);
     if (!again)
         options.add(FindOption::StartInSelection);
-    auto matches = m_page->findTextMatches(text, { FindOption::CaseInsensitive }, maxMatches, false);
-    m_page->markAllMatchesForText(text, { FindOption::CaseInsensitive }, true, maxMatches);
+    for (RefPtr<Frame> frame = m_page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        if (RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame))
+            localFrame->editor().setMarkedTextMatchesAreHighlighted(true);
+    }
+    auto matches = m_page->findTextMatches(text, { FindOption::CaseInsensitive }, maxMatches + 1, true);
     auto found = m_page->findString(text, options);
+    size_t count = std::min<size_t>(matches.ranges.size(), maxMatches);
     unsigned index = 0;
     if (found.range) {
-        for (size_t i = 0; i < matches.ranges.size(); i++) {
+        for (size_t i = 0; i < count; i++) {
             if (matches.ranges[i] == *found.range) {
                 index = i + 1;
                 break;
             }
         }
     }
-    notifyHost(m_id, "find", makeString("{\"matches\":"_s, matches.ranges.size(), ",\"index\":"_s, index, '}'));
+    notifyHost(m_id, "find", makeString("{\"text\":\""_s, jsonEscape(text), "\",\"matches\":"_s, count, ",\"index\":"_s, index,
+        ",\"more\":"_s, matches.ranges.size() > maxMatches ? "true"_s : "false"_s, '}'));
 }
 
 void WebView::stopFind()

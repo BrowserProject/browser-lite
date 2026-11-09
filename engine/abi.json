@@ -1,5 +1,5 @@
 {
-  "abiVersion": 24,
+  "abiVersion": 25,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -179,7 +179,7 @@
     { "type": "hover", "scope": "view", "payload": "{link, tooltip}" },
     { "type": "caret", "scope": "view", "payload": "{x, y, height} (for the IME field)" },
     { "type": "text-input", "scope": "view", "payload": "{mode, enterKeyHint} of the focused editable element (mode: inputmode or from the input type), mode \"\" when nothing editable has the selection (on-screen keyboard)" },
-    { "type": "find", "scope": "view", "payload": "{matches, index}" },
+    { "type": "find", "scope": "view", "payload": "{text, matches, index, more}: text of the call, matches at most 1000 and more when the page has more, index of the current match from 1 or 0" },
     { "type": "fullscreen", "scope": "view", "payload": "{on}" },
     { "type": "pointer-lock", "scope": "view", "payload": "{on}; on true asks the host to lock, answer bl_pointer_lock" },
     { "type": "media-state", "scope": "view", "payload": "{audio}" },

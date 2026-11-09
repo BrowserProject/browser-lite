@@ -668,7 +668,12 @@ export class ViewImpl implements View {
         this.emit('hover', { url: (data.link as string) || null });
         return;
       case 'find':
-        this.emit('find', { matches: Number(data.matches) || 0, index: Number(data.index) || 0 });
+        this.emit('find', {
+          text: String(data.text ?? ''),
+          matches: Number(data.matches) || 0,
+          index: Number(data.index) || 0,
+          more: !!data.more,
+        });
         return;
       case 'fullscreen':
         this.host.fullscreen.setFullscreen(this, !!data.on);

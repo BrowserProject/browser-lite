@@ -557,10 +557,12 @@ export interface ViewEvents {
   /** The pointer is over a link (its address) or left it (null). */
   hover: { url: string | null };
   /**
-   * Result of {@link View.find}: `matches` (at most 1000) and the position of the current one
-   * from 1, 0 when nothing was found.
+   * Result of {@link View.find} for `text`: `matches` (at most 1000, `more` when the page has
+   * more) and the position of the current one from 1, 0 when nothing was found or the current
+   * one comes after the first 1000. Results arrive in the order of the calls; one whose `text`
+   * is not the latest belongs to an earlier search.
    */
-  find: { matches: number; index: number };
+  find: { text: string; matches: number; index: number; more: boolean };
   /** The page entered or left fullscreen (its container is fullscreen in the host). */
   fullscreen: { active: boolean };
   /** The page started or stopped playing sound. */

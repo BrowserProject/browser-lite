@@ -355,6 +355,10 @@ const findIs = (state) =>
     );
 await clickPage();
 await page.keyboard.press('Control+f');
+// The page gets Ctrl+F first, the bar opens when it does not handle it
+await page.waitForFunction(() => document.activeElement?.id === 'find-input', null, {
+  timeout: 10000,
+});
 await page.keyboard.type('B');
 check(
   'find: a match on the page',

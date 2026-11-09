@@ -399,8 +399,8 @@ try {
 
   await page.evaluate(() => window.blTest.view().find('findme'));
   check(
-    'find event',
-    await waitFor(() => window.blHost.events.includes('find:3')),
+    'find event with its text',
+    await waitFor(() => window.blHost.events.includes('find:findme:3')),
     await page.evaluate(() => window.blHost.events.filter((e) => e.startsWith('find')).join()),
   );
   await page.evaluate(() => window.blTest.view().stopFind());

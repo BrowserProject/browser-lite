@@ -108,6 +108,10 @@ the signal aborts. `view.close()` of a page with a beforeunload listener asks it
 Chrome a page that does not answer within 500 ms (it or another view keeps the engine thread busy)
 closes without asking; an open beforeunload question waits for its answer.
 
+`view.find(text)` answers with a `find` event per call, in the order of the calls. It carries
+the `text` it belongs to, so a find bar shows only the result of its current text, and counts at
+most 1000 matches, with `more` when the page has more.
+
 The events are listed with their payloads in `BrowserEvents` and `ViewEvents` of
 [src/types.ts](src/types.ts) (a `Download` has `progress`, `done` and `error`). Some only report
 what a browser UI has to do, and nothing happens without a listener:

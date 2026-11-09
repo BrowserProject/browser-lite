@@ -119,7 +119,7 @@ function track(view, prefix) {
   for (const type of ['user-activation', 'close', 'focus-request'])
     view.on(type, () => record(type));
   view.on('console', ({ level, message }) => record(`console:${level}:${message}`));
-  view.on('find', ({ matches }) => record(`find:${matches}`));
+  view.on('find', ({ text, matches, more }) => record(`find:${text}:${matches}${more ? '+' : ''}`));
   view.on('zoom', ({ zoom }) => record(`zoom:${zoom}`));
   view.on('progress', ({ value }) => record(`progress:${value}`));
   view.on('hover', ({ url }) => record(`hover:${url ?? ''}`));

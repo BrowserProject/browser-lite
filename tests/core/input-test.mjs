@@ -790,7 +790,7 @@ check('date reaches the page', (await result('date')) === '2027-03-04', results.
 await host(() => window.blTest.view().find('Hover'));
 check(
   'find in the page',
-  !!(await waitEvent(page, 'find:1', 10000)),
+  !!(await waitEvent(page, 'find:Hover:1', 10000)),
   (await hostEvents(page)).filter((e) => e.startsWith('find')).join(),
 );
 await host(() => window.blTest.view().stopFind());

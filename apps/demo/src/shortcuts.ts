@@ -1,6 +1,6 @@
 import { focusAddress } from './address-bar.js';
 import { toggleBookmark } from './bookmarks.js';
-import { findAgain, findOpen, openFind } from './find-bar.js';
+import { findAgain, openFind } from './find-bar.js';
 import { closePreview, previewOpen } from './print-preview.js';
 import { runtime } from './runtime.js';
 import { settingsOpen } from './settings-page.js';
@@ -90,7 +90,7 @@ function shortcutAction(e: Key): (() => void) | null {
       case 'f':
         return openFind;
       case 'g':
-        return () => (findOpen() ? findAgain(e.shiftKey) : openFind());
+        return () => findAgain(e.shiftKey);
       case 'r':
         return () => tab?.view.reload();
       case 'u':
