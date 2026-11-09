@@ -1,12 +1,14 @@
 // The back and forward of the host browser (its buttons, the iOS edge swipe, the Android back
-// gesture) act on the tab in front like in an in-app browser: back goes back in the tab while it
-// has a back entry, only then the host leaves the demo; forward after a back goes forward in it.
+// gesture, the mouse buttons) act on the tab in front like in an in-app browser: back goes back in
+// the tab while it has a back entry, only then the host leaves the demo; forward after a back goes
+// forward in it, also while the tab can still go back.
 // The demo adds its host entry in the first user action, not when the tab gets a back entry:
 // Safari's back skips an entry pushed more than 10 s after one (no test browser applies that
 // rule), so here the tab gets its back entries by script.
 //
 //   node tests/demo/host-history-test.mjs [engine-dir]
 import {
+  BROWSER,
   TIMEOUT,
   check,
   collect,
@@ -54,6 +56,12 @@ const hostAt = (place) =>
 const tabURL = () => page.evaluate(() => window.blTest?.view()?.url);
 const hostBack = () => page.goBack({ waitUntil: 'commit' }).catch(() => {});
 const hostForward = () => page.goForward({ waitUntil: 'commit' }).catch(() => {});
+// The back and forward buttons of the mouse, which Playwright's mouse does not have
+const cdp = BROWSER === 'chromium' ? await context.newCDPSession(page) : null;
+async function mouseButton(button) {
+  for (const type of ['mousePressed', 'mouseReleased'])
+    await cdp.send('Input.dispatchMouseEvent', { type, x: 500, y: 400, button, clickCount: 1 });
+}
 
 // The host tab had a page before the demo
 await page.goto('about:blank#before');
@@ -90,6 +98,25 @@ await hostBack();
 check('host back: the tab goes back', await tabAt(2), await tabURL());
 check('host back: the demo stays', page.url().startsWith(stack.origin), page.url());
 check('host back: ready for the next back', await hostAt('guard'));
+await hostForward();
+check(
+  'host forward with a back entry in the tab: the tab goes forward',
+  await tabAt(3),
+  await tabURL(),
+);
+check('host forward: the demo stays', page.url().startsWith(stack.origin), page.url());
+check('host forward: ready for the next back', await hostAt('guard'));
+await hostBack();
+check('host back after forward: the tab goes back', await tabAt(2), await tabURL());
+await hostAt('guard');
+if (cdp) {
+  await mouseButton('forward');
+  check('mouse forward: the tab goes forward', await tabAt(3), await tabURL());
+  await hostAt('guard');
+  await mouseButton('back');
+  check('mouse back: the tab goes back', await tabAt(2), await tabURL());
+  await hostAt('guard');
+}
 await hostBack();
 check('second host back: the tab goes back again', await tabAt(1), await tabURL());
 check('first entry of the tab: the host on its own entry', await hostAt('base'));

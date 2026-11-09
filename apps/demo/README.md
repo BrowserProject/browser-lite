@@ -149,14 +149,17 @@ select popup) are in the same sheet.
   between, else its right neighbour, the left one at the end, like Chrome and Firefox (#410).
   A middle click on a tab closes it (through beforeunload like its cross) without activating
   it; only the left button activates a tab, like Chrome and Firefox (#418).
-- **Host back and forward**: the back of the host browser (its button, the iOS edge swipe, the
-  Android back gesture) goes back in the tab in front while it has a back entry, only then the
-  host leaves the demo; its forward goes forward in the tab after a back to the tab's first
-  entry (the demo's own forward button always does). `host-history.ts`
-  keeps two host entries of the demo, the one it loaded at and one above it that the first user
-  action pushes, and moves between them with `history.back()` and `history.forward()` (#414).
+- **Host back and forward**: the back of the host browser (its button, the mouse back button,
+  the iOS edge swipe, the Android back gesture) goes back in the tab in front while it has a back
+  entry, only then the host leaves the demo; its forward (also the mouse forward button) goes
+  forward in the tab whenever the tab can go forward. `host-history.ts` keeps up to three host
+  entries of the demo, the one it loaded at, one above it that the first user action pushes and
+  one above that for forward, pushed the first time the tab can go forward with a back entry
+  (#414, #467), and moves between them with `history.go()`.
   Before the first user action (a restored session) the host back still leaves the demo: Chrome
-  and Safari skip host entries a page added without one.
+  and Safari skip host entries a page added without one. On Safari a host forward right after a
+  host back without a user action in between can do nothing, until the next tap or key in the
+  demo pushes the forward entry once more.
 - **Dialogs**: alert, confirm, prompt, beforeunload and the question before a form is sent again
   (reload or back/forward of a POST result, #369) are dialogs of `@browser-lite/ui` over the
   page area, only the tab in front shows them (#338, #149); dialogs, permission prompts and

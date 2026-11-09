@@ -303,7 +303,9 @@ of `context.storage` (default in memory), for example in your user's profile.
 - The back of the host browser (the phone's back gesture, Safari's edge swipe) leaves your page,
   as views keep their history inside the engine. To make it go back in the view in front, keep
   an entry of your own above the page's with `history.pushState` in a user action and map
-  `popstate` to `view.back()` and `view.forward()`; the demo's `host-history.ts` does this (#414).
+  `popstate` to `view.back()` and `view.forward()`; for the host forward while the view can
+  still go back, keep one more entry above it. The demo's `host-history.ts` does this (#414,
+  #467).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left for good (`pagehide` without the back-forward cache) the browser ends
   like `destroy()`, without events: the page can no longer react. In the back-forward cache it
