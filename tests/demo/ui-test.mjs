@@ -406,8 +406,16 @@ check(
   await address(),
 );
 
-// Page source (Ctrl+U): a new tab with the HTML of the page
+// Page source (Ctrl+U): a new tab with the HTML of the page, right after the tab of the page like
+// Chrome (the two background tabs of the links come after it)
+const activeIndex = () =>
+  tab.evaluate(() =>
+    [...document.querySelectorAll('#tab-list .tab')].findIndex((t) =>
+      t.classList.contains('active'),
+    ),
+  );
 await tab.locator('#tab-list .tab.active .title').click();
+const pageIndex = await activeIndex();
 await tab.keyboard.press('Control+u');
 const sourceTab = await tab
   .waitForFunction(
@@ -426,6 +434,12 @@ check(
   'view source (Ctrl+U)',
   sourceTab,
   await tab.evaluate(() => document.querySelector('#tab-list .tab.active .title')?.textContent),
+);
+const sourceIndex = await activeIndex();
+check(
+  'view source tab right after the tab of the page',
+  sourceTab && sourceIndex === pageIndex + 1 && sourceIndex < (await tabCount()) - 1,
+  `page ${pageIndex}, source ${sourceIndex} of ${await tabCount()}`,
 );
 
 // Print: window.print() of the page and Ctrl+P show the preview with the PDF of the engine

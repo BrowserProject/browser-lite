@@ -275,7 +275,7 @@ export class Tab implements SessionTab {
     });
     this.on('source', (event) => {
       const page = sourcePage(event.url, event.text);
-      openTab('')?.view.loadHTML(page.html, page.baseURL);
+      openLinkTab('', this)?.view.loadHTML(page.html, page.baseURL);
     });
     if (!debug)
       this.on('console', (event) => {
@@ -514,14 +514,18 @@ export function openBackgroundTab(url: string, opener: Tab | null): Tab | null {
   return tab;
 }
 
-/** A new tab in front from a link of opener (Shift click), directly after it. */
-function openLinkTab(url: string, opener: Tab): void {
+/**
+ * A new tab in front opened from opener (Shift click on a link, view source), directly after it;
+ * empty url: a blank tab.
+ */
+function openLinkTab(url: string, opener: Tab): Tab | null {
   const view = createView(url);
-  if (!view) return;
+  if (!view) return null;
   const tab = new Tab(view, { url });
   tab.opener = active;
   tab.openedBy = opener;
   activate(add(tab, linkTabPlace(opener, true)));
+  return tab;
 }
 
 /**
