@@ -24,11 +24,12 @@ function clipboard(): Clipboard | undefined {
 }
 
 /**
- * The standard items of a context menu like Chrome: open and copy link or image, copy, cut,
- * paste, select all, back, forward, reload, print and view source. After a long press
- * (`info.touch`) like Chrome on phones only what was pressed: the address of the link or image
- * as a header and its commands, copy, cut, paste and select all for text, nothing else (no
- * menu on plain page). Pass them to {@link showContextMenu}, possibly with own items added.
+ * The standard items of a context menu like Chrome: open and copy link or image, copy, select
+ * all, back, forward, reload, print and view source. In an editable field only the edit
+ * commands: cut and copy (both disabled without a selection), paste and select all. After a
+ * long press (`info.touch`) like Chrome on phones only what was pressed: the address of the
+ * link or image as a header and its commands, the edit commands or copy and select all for
+ * text, nothing else (no menu on plain page). Pass them to {@link showContextMenu}, possibly with own items added.
  */
 export function defaultMenuItems(
   view: View,
@@ -68,8 +69,7 @@ export function defaultMenuItems(
     );
     separator();
   }
-  if (info.selection)
-    items.push({ id: 'copy', label: texts.copy, action: () => view.command('Copy') });
+  const copy: MenuItem = { id: 'copy', label: texts.copy, action: () => view.command('Copy') };
   if (info.editable) {
     items.push(
       {
@@ -78,6 +78,7 @@ export function defaultMenuItems(
         action: () => view.command('Cut'),
         enabled: !!info.selection,
       },
+      { ...copy, enabled: !!info.selection },
       {
         id: 'paste',
         label: texts.paste,
@@ -88,14 +89,14 @@ export function defaultMenuItems(
         },
       },
     );
-  }
+  } else if (info.selection) items.push(copy);
   if (!info.touch || info.selection || info.editable)
     items.push({
       id: 'select-all',
       label: texts.selectAll,
       action: () => view.command('SelectAll'),
     });
-  if (info.touch) return items;
+  if (info.touch || info.editable) return items;
   separator();
   items.push(
     { id: 'back', label: texts.back, action: () => view.back(), enabled: info.canGoBack },

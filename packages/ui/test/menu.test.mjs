@@ -76,9 +76,37 @@ test('link, image, selection and editable field', async () => {
     'open-image',
     'copy-image',
     '-',
-    'copy',
     'cut',
+    'copy',
     'paste',
+    'select-all',
+  ]);
+  const run = async (id) => items.find((item) => item.id === id).action();
+  await run('open-link');
+  await run('copy-link');
+  await run('open-image');
+  await run('copy-image');
+  await run('cut');
+  await run('copy');
+  await run('paste');
+  await run('select-all');
+  assert.deepEqual(opened, ['https://l.test/', 'https://i.test/x.png']);
+  assert.deepEqual(copied, ['https://l.test/', 'https://i.test/x.png']);
+  assert.deepEqual(view.calls, [
+    ['command', 'Cut'],
+    ['command', 'Copy'],
+    ['paste', 'clip'],
+    ['command', 'SelectAll'],
+  ]);
+});
+
+test('selection on the page: copy, select all and the page commands', async () => {
+  const view = fakeView();
+  const items = defaultMenuItems(view, info({ selection: 'sel', canGoForward: true }), {
+    openTab() {},
+  });
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    'copy',
     'select-all',
     '-',
     'back',
@@ -87,27 +115,10 @@ test('link, image, selection and editable field', async () => {
     'print',
     'view-source',
   ]);
-  const run = async (id) => items.find((item) => item.id === id).action();
-  await run('open-link');
-  await run('copy-link');
-  await run('open-image');
-  await run('copy-image');
-  await run('copy');
-  await run('cut');
-  await run('paste');
-  await run('select-all');
-  await run('back');
-  await run('forward');
-  await run('reload');
-  await run('print');
-  await run('view-source');
-  assert.deepEqual(opened, ['https://l.test/', 'https://i.test/x.png']);
-  assert.deepEqual(copied, ['https://l.test/', 'https://i.test/x.png']);
+  for (const id of ['copy', 'back', 'forward', 'reload', 'print', 'view-source'])
+    await items.find((item) => item.id === id).action();
   assert.deepEqual(view.calls, [
     ['command', 'Copy'],
-    ['command', 'Cut'],
-    ['paste', 'clip'],
-    ['command', 'SelectAll'],
     ['back'],
     ['forward'],
     ['reload'],
@@ -116,17 +127,23 @@ test('link, image, selection and editable field', async () => {
   ]);
 });
 
-test('cut needs a selection; paste without clipboard access uses the engine clipboard', async () => {
-  const view = fakeView({ url: 'about:blank' });
-  const items = defaultMenuItems(view, info({ editable: true }), {
+test('field with a caret: cut and copy disabled, no page commands', async () => {
+  const view = fakeView();
+  const items = defaultMenuItems(view, info({ editable: true, canGoBack: true }), {
     openTab() {},
     readText: async () => null,
   });
-  const cut = items.find((item) => item.id === 'cut');
-  assert.equal(cut.enabled, false);
+  assert.deepEqual(ids(normalizeMenu(items)), ['cut', 'copy', 'paste', 'select-all']);
+  assert.equal(items.find((item) => item.id === 'cut').enabled, false);
+  assert.equal(items.find((item) => item.id === 'copy').enabled, false);
+  assert.equal(items.find((item) => item.id === 'paste').enabled, undefined);
   await items.find((item) => item.id === 'paste').action();
-  assert.deepEqual(view.calls, [['command', 'Paste']]);
-  assert.equal(items.find((item) => item.id === 'view-source').enabled, false, 'only for http(s)');
+  assert.deepEqual(view.calls, [['command', 'Paste']], 'no clipboard access: engine clipboard');
+});
+
+test('view source only for http(s) pages', () => {
+  const items = defaultMenuItems(fakeView({ url: 'about:blank' }), info(), { openTab() {} });
+  assert.equal(items.find((item) => item.id === 'view-source').enabled, false);
 });
 
 test('app actions replace reload, print and view source; texts are replaceable', () => {
@@ -184,7 +201,7 @@ test('long press on text: copy and select all; on plain page and in fields', () 
   const field = defaultMenuItems(fakeView(), info({ touch: true, editable: true }), {
     openTab() {},
   });
-  assert.deepEqual(ids(normalizeMenu(field)), ['cut', 'paste', 'select-all']);
+  assert.deepEqual(ids(normalizeMenu(field)), ['cut', 'copy', 'paste', 'select-all']);
   assert.deepEqual(
     normalizeMenu(defaultMenuItems(fakeView(), info({ touch: true }), { openTab() {} })),
     [],
