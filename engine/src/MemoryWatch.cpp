@@ -9,7 +9,10 @@
 //   (kept in the back/forward cache) go too only once memory is short:
 //   rebuilding the code blocked the pages for seconds, the GC already ages out
 //   the code that does not run, and a page loaded again on back shows its top
-//   until the load is complete
+//   until the load is complete. JSC's code cache goes at every release and
+//   whenever a view leaves its page: it holds the bytecode and the sources of
+//   every script evaluated, also of the pages that are gone, which the code of
+//   the pages that live does not need
 // - at every growth of malloc by 32 MB, once the malloc area ends above
 //   reserveFrom, grows the memory ahead so that a reserve stays free above the
 //   malloc area; when that fails, the current size is the limit
@@ -35,7 +38,9 @@
 #include <emscripten/heap.h>
 #include <malloc.h>
 #include <pthread.h>
+#include <JavaScriptCore/CodeCacheRelease.h>
 #include <WebCore/BackForwardCache.h>
+#include <WebCore/CommonVM.h>
 #include <WebCore/MemoryRelease.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/text/MakeString.h>
@@ -155,6 +160,11 @@ void checkMemory(ReleaseCaches release)
     uint64_t limit = s_limit ? s_limit : emscripten_get_heap_max();
     debugLog("Memory pressure: malloc area %llu MB, limit %llu MB", mb(footprint), mb(limit));
     notifyHost(0, "memory-pressure", makeString("{\"footprint\":"_s, footprint, ",\"limit\":"_s, limit, '}'));
+}
+
+void pageLeft()
+{
+    JSC::clearCodeCache(WebCore::commonVM());
 }
 
 } // namespace BrowserLite

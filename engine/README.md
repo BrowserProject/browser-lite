@@ -50,8 +50,8 @@ comes as patches from `patches/`.
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
     (event loop: the host's calls and the compositor's answers before the page's work, watchdog), `Exports.cpp` (`bl_*`), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
-    back/forward cache only when memory is short (patch 0088), finds the memory limit, memory
-    pressure),
+    back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
+    and when a view leaves its page (patch 0102), finds the memory limit, memory pressure),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker), `EditorClient.cpp`, `BackForwardList.cpp`,

@@ -11,4 +11,8 @@ namespace BrowserLite {
 enum class ReleaseCaches : bool { No, Yes };
 void checkMemory(ReleaseCaches = ReleaseCaches::Yes);
 
+// A view left its page (a new document committed in its main frame) or closed: drops JSC's code
+// cache, so the bytecode and the sources of pages that are gone go with the next GC.
+void pageLeft();
+
 } // namespace BrowserLite

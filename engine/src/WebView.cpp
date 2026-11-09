@@ -14,6 +14,7 @@
 #include "GpuRaster.h"
 #include "HiddenViews.h"
 #include "LayerTreeHostWasm.h"
+#include "MemoryWatch.h"
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "UserContent.h"
@@ -184,6 +185,7 @@ void WebView::close(int id)
         closeChoosers(id);
     openViews().remove(id);
     detachDeviceClients(id);
+    pageLeft();
 }
 
 bool WebView::isOpen() const
@@ -2020,6 +2022,7 @@ void WebView::resumeLeavingPage()
 void WebView::didCommitLoad()
 {
     debugLog("View %d: commit", m_id);
+    pageLeft();
     // A commit without a response (substitute data): the new document must not stay paused
     resumeLeavingPage();
     m_firstPaint = FirstPaint::WaitingForLayout;

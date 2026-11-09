@@ -2,7 +2,9 @@
 // of malloc by 32 MB releases caches like memory pressure, but keeps the compiled JS of the pages
 // (patch 0088): functions that ran before the release do not need their bytecode built again. Only
 // when memory is short (here BL_MEMORY_PRESSURE_MB below the footprint) does the release take the
-// code too, and the first calls after it cost as much as the very first ones.
+// code too, and the first calls after it cost as much as the very first ones. The code of pages
+// and frames that are gone goes: a view that leaves its page and every release drop JSC's code
+// cache, which held the bytecode and the sources of every script evaluated (patch 0102).
 //
 //   node tests/core/memory-release-test.mjs [engine-dir]
 import {
@@ -10,6 +12,7 @@ import {
   collect,
   finish,
   launch,
+  load,
   openHost,
   serve,
   startStack,
@@ -37,11 +40,42 @@ window.allocate = (name, mb) => {
   keep.push(new Uint8Array(mb << 20).fill(1));
   console.log('RESULT ' + name + '=ok');
 };
+window.drop = () => {
+  keep.length = 0;
+  console.log('RESULT dropped=ok');
+};
+// Frames with scripts of their own, one after the other, each removed once loaded
+window.loadFrames = async (count) => {
+  for (let n = 0; n < count; n++) {
+    const frame = document.createElement('iframe');
+    frame.src = '/left' + (100 + n);
+    await new Promise((resolve) => {
+      frame.onload = resolve;
+      document.body.append(frame);
+    });
+    frame.remove();
+  }
+  console.log('RESULT frames=ok');
+};
 run('cold');
 </script>`;
-const { url: siteURL } = await serve((req, res) =>
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE),
-);
+// Pages that are left (and frames): scripts of their own (the code cache keys by the source), not
+// kept by the back/forward cache (a device motion listener)
+const LEFT_PAGES = 6;
+const leftPage = (n) => `<!doctype html><title>Left ${n}</title><body>Left ${n}<script>
+addEventListener('devicemotion', () => {});
+${Array.from({ length: FUNCTIONS }, (_, i) => body(i).replace(`'f${i}'`, `'p${n}f${i}'`)).join('\n')}
+const all = [${Array.from({ length: FUNCTIONS }, (_, i) => `f${i}`).join(',')}];
+let sum = 0;
+for (let r = 0; r < 20; r++) for (const f of all) sum += f(r);
+console.log('RESULT left${n}=' + sum);
+</script>`;
+const { url: siteURL } = await serve((req, res) => {
+  const left = /^\/left(\d+)$/.exec(req.url);
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(left ? leftPage(Number(left[1])) : PAGE);
+});
 
 const stack = await startStack();
 const browser = await launch();
@@ -103,6 +137,81 @@ check(
   short.after > short.warm * 3 + 20,
   `cold ${short.cold} ms, warm ${short.warm} ms, after the release ${short.after} ms`,
 );
+
+// Code of what is gone: JSC's code cache held the bytecode and the sources of every script
+// evaluated, also of pages left and of frames removed, until a later script pruned it
+{
+  const page = await browser.newPage();
+  const results = collect(page);
+  const heaps = [];
+  page.on('console', (message) => {
+    const heap = /\[memory\] malloc used .* JS heap (\d+) MB/.exec(message.text());
+    if (heap) heaps.push(Number(heap[1]));
+  });
+  // JS heap in MB after a full GC (memory report 2)
+  const heapAfterGC = async () => {
+    const count = heaps.length;
+    await page.evaluate(() => window.blTest.memory(2));
+    for (let i = 0; i < 200 && heaps.length === count; i++) await page.waitForTimeout(100);
+    return heaps.at(-1);
+  };
+  check(
+    'gone: host page starts',
+    await openHost(
+      page,
+      stack.app({
+        url: 'about:blank',
+        log: '1',
+        env: 'BL_MEMORY_RELEASE_MB=64,BL_MEMORY_PRESSURE_MB=4096',
+      }),
+    ),
+  );
+
+  // A view that leaves its page drops the code cache, the full GC then takes the page's code
+  await load(page, `${siteURL}left0`);
+  await results.wait('left0');
+  const one = await heapAfterGC();
+  for (let n = 1; n <= LEFT_PAGES; n++) {
+    await load(page, `${siteURL}left${n}`);
+    await results.wait(`left${n}`);
+  }
+  const left = await heapAfterGC();
+  check(
+    'gone: pages left take their code with them',
+    left < one + LEFT_PAGES,
+    `JS heap after a full GC ${one} MB with one page, ${left} MB with one page and ${LEFT_PAGES} left`,
+  );
+
+  // Frames that came and went in a page that stays: the release takes their code
+  await load(page, siteURL);
+  await results.wait('cold');
+  await page.evaluate((count) => window.blTest.eval(`loadFrames(${count})`), LEFT_PAGES);
+  await results.wait('frames');
+  const frames = await heapAfterGC();
+  const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
+  const before = released();
+  for (let i = 0; i < 4 && released() === before; i++) {
+    await page.evaluate((i) => window.blTest.eval(`allocate('gone${i}', 48)`), i);
+    await results.wait(`gone${i}`);
+    await page.waitForTimeout(200);
+  }
+  const lines = results.logs.filter((line) => line.includes('Memory released')).slice(before);
+  check(
+    'gone: the release keeps the JS code of the page',
+    lines.length > 0 && !lines.some((line) => line.includes('with the JS code')),
+    lines.join(' | '),
+  );
+  // Without the arrays, which count to the JS heap
+  await page.evaluate(() => window.blTest.eval('drop()'));
+  await results.wait('dropped');
+  const after = await heapAfterGC();
+  check(
+    'gone: the release takes the code of the frames that are gone',
+    after + LEFT_PAGES < frames,
+    `JS heap after a full GC ${frames} MB with ${LEFT_PAGES} frames gone, ${after} MB after the release`,
+  );
+  await page.close();
+}
 
 await browser.close();
 finish();

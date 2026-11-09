@@ -1,0 +1,85 @@
+diff --git a/Source/JavaScriptCore/CMakeLists.txt b/Source/JavaScriptCore/CMakeLists.txt
+index e90fe025b4..f4ecee45f4 100644
+--- a/Source/JavaScriptCore/CMakeLists.txt
++++ b/Source/JavaScriptCore/CMakeLists.txt
+@@ -1113,6 +1113,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
+     runtime/CloneDeserializerBase.h
+     runtime/CloneSerializerBase.h
+     runtime/ClonedArguments.h
++    runtime/CodeCacheRelease.h
+     runtime/CodeSpecializationKind.h
+     runtime/CommonIdentifiers.h
+     runtime/CompilationResult.h
+diff --git a/Source/JavaScriptCore/runtime/CodeCache.cpp b/Source/JavaScriptCore/runtime/CodeCache.cpp
+index 160323ca1d..d1775fb7a6 100644
+--- a/Source/JavaScriptCore/runtime/CodeCache.cpp
++++ b/Source/JavaScriptCore/runtime/CodeCache.cpp
+@@ -25,6 +25,7 @@
+ 
+ #include "config.h"
+ #include "CodeCache.h"
++#include "CodeCacheRelease.h"
+ 
+ #include "BytecodeGenerator.h"
+ #include "DirectEvalExecutable.h"
+@@ -275,6 +276,13 @@ void CodeCache::updateCache(const UnlinkedFunctionExecutable* executable, const
+     parentSource.provider()->updateCache(executable, parentSource, kind, codeBlock);
+ }
+ 
++void clearCodeCache(VM& vm)
++{
++    vm.whenIdle([&vm] {
++        vm.codeCache()->clear();
++    });
++}
++
+ void CodeCache::write()
+ {
+     for (auto& it : m_sourceCode)
+diff --git a/Source/JavaScriptCore/runtime/CodeCacheRelease.h b/Source/JavaScriptCore/runtime/CodeCacheRelease.h
+new file mode 100644
+index 0000000000..e2a44c239d
+--- /dev/null
++++ b/Source/JavaScriptCore/runtime/CodeCacheRelease.h
+@@ -0,0 +1,18 @@
++/*
++ * browser-lite: lets a memory release drop the code cache of the VM (docs/architecture.md of browser-lite).
++ */
++#pragma once
++
++#include "JSExportMacros.h"
++
++namespace JSC {
++
++class VM;
++
++// Empties the cache of the bytecode of evaluated scripts (programs, modules, eval, the Function
++// constructor), which holds it and the script sources with strong references until a later add
++// prunes it, also for pages that are gone. The functions that live keep their code. Runs once no
++// JS is on the stack.
++JS_EXPORT_PRIVATE void clearCodeCache(VM&);
++
++} // namespace JSC
+diff --git a/Source/WebCore/page/MemoryRelease.cpp b/Source/WebCore/page/MemoryRelease.cpp
+index ef1df6081e..38d528976c 100644
+--- a/Source/WebCore/page/MemoryRelease.cpp
++++ b/Source/WebCore/page/MemoryRelease.cpp
+@@ -66,6 +66,7 @@
+ #include "TextPainter.h"
+ #include "WorkerGlobalScope.h"
+ #include "WorkerThread.h"
++#include <JavaScriptCore/CodeCacheRelease.h>
+ #include <JavaScriptCore/VM.h>
+ #include <wtf/ResourceUsage.h>
+ #include <wtf/SystemTracing.h>
+@@ -165,6 +166,10 @@ static void releaseCriticalMemory(Synchronous synchronous, MaintainBackForwardCa
+             GarbageCollectionController::singleton().deleteAllCode(JSC::PreventCollectionAndDeleteAllCode);
+         else
+             GarbageCollectionController::singleton().deleteAllCode(JSC::DeleteAllCodeIfNotCollecting);
++    } else {
++        // browser-lite: the code of the pages stays, but not the code cache, which kept the
++        // bytecode and the sources of the scripts of every page that is gone
++        JSC::clearCodeCache(commonVM());
+     }
+ 
+ #if ENABLE(VIDEO)

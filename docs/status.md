@@ -131,7 +131,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   and the garbage of a long script is collected while it runs, also inside the generic calls of
   compiled code and without JSC's 256 MB bursts (#448): Cloudflare's Turnstile on kaufland.de no
   longer grows the WASM memory to 0.75 to 1.9 GB but to 440 to 550 MB with the page (3 local
-  runs), a loop of 6 s full of garbage keeps the 256 MB it started with (before 369 MB).
+  runs), a loop of 6 s full of garbage keeps the 256 MB it started with (before 369 MB). The
+  code of pages and frames that are gone goes too: JSC's code cache kept the bytecode and the
+  sources of every script evaluated until memory was short, now every memory release and every
+  page a view leaves empty it (#475; 16 heavy page loads in one tab, then about:blank and a full
+  GC, 2026-11-09 local: 474 to 525 instead of 573 to 619 MB in use, JS heap 39 to 61 instead of 71
+  to 79 MB, and each release frees 105 to 206 instead of 54 to 115 MB).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
@@ -577,6 +582,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: tests and operations
 
+- Engine crash in the painting of tiles ahead (#460, patch 0097), 2026-11-09 local: in both
+  15 min soak runs of 20 sites in up to 4 demo tabs the engine crashed in a callable of
+  `SkiaPaintingEngine::prepaint` on a painting thread ("null function" after 136 s, "table index
+  is out of bounds" after 679 s, with and without #475), a call through a freed or overwritten
+  function object. Not analysed yet.
 - Real devices 2026-11-03 (BrowserStack): on a Moto G71 one Chrome tab crash during a reload of
   20min.ch (not again in 3 heavy and 5 light reloads; the renderer holds about 0.9 GB with such a
   page). Fast flings on busy pages (20min.ch, bbc.com, spiegel.de on a Pixel 9) left the new

@@ -432,7 +432,11 @@ the compiled JS of the pages (bytecode and JIT code, patch 0088, #441) and the p
 the back/forward cache (of up to 3) unless memory is short (the condition of `memory-pressure`
 below): building the code again blocked the pages for seconds, the GC ages out code that no
 longer runs, and back to a page loaded again showed its top until its load was complete (#451,
-`tests/core/back-cache-test.mjs`). Once the malloc area ends above 384 MB it grows the
+`tests/core/back-cache-test.mjs`). JSC's code cache, which holds the bytecode and the sources of
+every script evaluated with strong references, goes at every release and whenever a view leaves
+its page (`JSC::clearCodeCache`, patch 0102, #475): kept, it held the code of every page and
+frame that was gone, while the functions that live keep their code without it
+(`tests/core/memory-release-test.mjs`). Once the malloc area ends above 384 MB it grows the
 memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
 From then on, or above 3 GB, it reports `memory-pressure` `{footprint, limit}` at every growth,
 and the host discards background views (#128, #171, #216). On iPhone and iPad a growth never
