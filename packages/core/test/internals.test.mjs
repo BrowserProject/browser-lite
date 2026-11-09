@@ -397,6 +397,47 @@ test('permissions: grant and deny are remembered, dismiss and errors are not', a
   );
 });
 
+test('permissions: leaving the page dismisses its questions, other views keep theirs', async () => {
+  const store = new MemoryPermissionStore();
+  const signals = [];
+  const { requests, module } = requestsWith(
+    {
+      permission({ signal }) {
+        signals.push(signal);
+        // Answers after the abort, like a prompt clicked too late: ignored
+        return new Promise((resolve) =>
+          signal.addEventListener('abort', () => setTimeout(() => resolve('grant')), {
+            once: true,
+          }),
+        );
+      },
+    },
+    store,
+  );
+  const left = fakeView(1);
+  const other = fakeView(2);
+  const asked = requests.permission(left, {
+    id: 1,
+    kind: 'notifications',
+    origin: 'https://a.example',
+  });
+  requests.permission(other, { id: 2, kind: 'geolocation', origin: 'https://b.example' });
+  requests.closePermissions(left);
+  await asked;
+  await tick();
+  assert.deepEqual(module.calls, [['permission', 1, 0]]);
+  assert.deepEqual(
+    signals.map((signal) => signal.aborted),
+    [true, false],
+  );
+  assert.deepEqual([...store.entries()], []);
+  requests.closeView(other);
+  assert.deepEqual(module.calls, [
+    ['permission', 1, 0],
+    ['permission', 2, 0],
+  ]);
+});
+
 test('authentication: credentials, cancel, defaults, auth-cancel and closed views', async () => {
   const none = requestsWith({});
   await none.requests.authenticate(fakeView(), { id: 1, realm: 'r' });

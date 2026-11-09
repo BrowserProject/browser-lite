@@ -577,6 +577,60 @@ test('permission prompt: queue, answers, abort, texts and notifications', async 
   });
 });
 
+test('permission prompt: Escape before the view keyboard, not from other fields', async () => {
+  await page.evaluate(() => {
+    const { permission } = ui.permissionPrompt();
+    // The view's keyboard input keeps every key for the page, like the core's
+    const ime = document.createElement('textarea');
+    const field = document.createElement('input');
+    document.body.append(ime, field);
+    const view = makeView(8);
+    Object.defineProperty(view, 'focused', { get: () => document.activeElement === ime });
+    window.escape = { ime, field, pageKeys: 0, answers: [] };
+    ime.addEventListener('keydown', (event) => {
+      window.escape.pageKeys++;
+      event.preventDefault();
+    });
+    window.escape.ask = () =>
+      permission({
+        view,
+        kind: 'geolocation',
+        origin: 'https://maps.example',
+        signal: new AbortController().signal,
+      }).then((answer) => window.escape.answers.push(answer));
+  });
+  const shown = () =>
+    page.evaluate(() => document.querySelectorAll('.bl-permission-prompt').length);
+  await page.evaluate(() => {
+    window.escape.ask();
+    window.escape.ime.focus();
+  });
+  await page.keyboard.press('Escape');
+  const afterView = await page.evaluate(() => ({
+    answers: [...window.escape.answers],
+    pageKeys: window.escape.pageKeys,
+    shown: document.querySelectorAll('.bl-permission-prompt').length,
+  }));
+  await page.evaluate(() => {
+    window.escape.ask();
+    window.escape.field.focus();
+  });
+  await page.keyboard.press('Escape');
+  const fieldShown = await shown();
+  await page.evaluate(() => document.activeElement.blur());
+  await page.keyboard.press('Escape');
+  const result = await page.evaluate(() => {
+    const { ime, field, answers, pageKeys } = window.escape;
+    ime.remove();
+    field.remove();
+    return { answers, pageKeys };
+  });
+  assert.deepEqual(
+    { view: [afterView.answers, afterView.pageKeys, afterView.shown], fieldShown, ...result },
+    { view: [['dismiss'], 0, 0], fieldShown: 1, answers: ['dismiss', 'dismiss'], pageKeys: 0 },
+  );
+});
+
 test('login prompt: texts, keyboard, queue, cancel and abort', async () => {
   await page.evaluate(() => {
     const { authenticate } = ui.loginPrompt({ texts: { signIn: 'Anmelden' } });

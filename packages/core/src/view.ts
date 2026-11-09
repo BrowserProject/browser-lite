@@ -636,8 +636,10 @@ export class ViewImpl implements View {
         this.emit('progress', { value: Number(data.progress) || 0 });
         return;
       case 'commit': {
-        // A new document (its navigation event follows): no user activation yet
+        // A new document (its navigation event follows): no user activation yet, the questions
+        // of the page left are dismissed
         const errorPage = (data.errorPage as string | undefined) || null;
+        this.host.requests.closePermissions(this);
         this.pending.end();
         this.fallback.commit(errorPage);
         this.userActivated = false;

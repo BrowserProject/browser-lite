@@ -679,7 +679,8 @@ export interface RequestHandlers {
    * Default 'dismiss'. 'grant' and 'deny' are remembered in the {@link PermissionStore};
    * 'dismiss' (also a thrown error) answers no for now and the page may ask again. Pages only
    * see notifications the host browser shows: grant 'notifications' after the host allowed them
-   * (Notification.requestPermission), as the ui permission prompt does.
+   * (Notification.requestPermission), as the ui permission prompt does. When the page that asked
+   * is left, the question is dismissed and its signal aborts.
    */
   permission(request: PermissionRequest): Promise<PermissionAnswer>;
   /**
@@ -753,7 +754,10 @@ export interface PermissionRequest {
   view: View;
   kind: PermissionKind;
   origin: string;
-  /** Aborted when the view closes or the engine ends. */
+  /**
+   * Aborted when the view's page is left (its main frame commits a new document, like Chrome),
+   * the view closes or the engine ends; the question counts as dismissed then.
+   */
   signal: AbortSignal;
 }
 

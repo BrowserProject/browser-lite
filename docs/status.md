@@ -28,6 +28,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   print to PDF, view source,
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
+  permission prompts like Chrome's that go away when their page is left and close with Escape
+  in the view (#462; before, a prompt stayed over the next site and Allow stored the grant for
+  the origin left),
   validation messages and the file input's label with their numbers and texts (#363), a typed
   `data:` or `about:` address without the Content-Security-Policy of the page before (#408),
   an address typed without a scheme over `https://` with a fallback to `http://` when the site

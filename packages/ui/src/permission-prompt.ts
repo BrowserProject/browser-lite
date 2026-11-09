@@ -10,11 +10,12 @@ interface Pending {
 
 /**
  * Asks like Chrome: "<host> wants to know your location" with Block and Allow. One question at
- * a time, the others wait in order; an aborted request leaves the queue. Block and Allow are
- * remembered by the PermissionStore of the browser; Escape while the prompt is shown (not hidden) dismisses it.
- * Allowing notifications also asks the host
- * browser (needs the click as user activation); when the host refuses, the answer is 'dismiss'
- * (nothing remembered, the page may ask again). Element: `.bl-permission-prompt` with `p` and
+ * a time, the others wait in order; an aborted request (its page was left, the view closed)
+ * leaves the queue. Block and Allow are remembered by the PermissionStore of the browser; Escape
+ * while the prompt is shown (not hidden) and the focus is in the asking view, in the prompt or
+ * nowhere dismisses it. Allowing notifications also asks the host browser (needs the click as
+ * user activation); when the host refuses, the answer is 'dismiss' (nothing remembered, the page
+ * may ask again). Element: `.bl-permission-prompt` with `p` and
  * `button[data-bl-answer=block|allow]`.
  */
 export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'permission'> {
@@ -31,7 +32,8 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
     prompt.setAttribute('role', 'dialog');
     prompt.dataset.blView = String(request.view.id);
     prompt.dataset.blKind = request.kind;
-    const text = root.ownerDocument.createElement('p');
+    const doc = root.ownerDocument;
+    const text = doc.createElement('p');
     const template = ui.texts.permissions[request.kind] ?? ui.texts.permissionOther;
     text.textContent = format(template, {
       host: hostOf(request.origin) || ui.texts.thisPage,
@@ -46,13 +48,24 @@ export function permissionPrompt(options?: UiOptions): Pick<RequestHandlers, 'pe
       return node;
     };
     prompt.append(text, button('block', ui.texts.block), button('allow', ui.texts.allow));
+    // Before the view's keyboard input, which keeps every key for the page; other fields and
+    // dialogs keep their Escape
     const onEscape = (event: Event) => {
       const key = event as KeyboardEvent;
       if (key.key !== 'Escape' || key.defaultPrevented || prompt.hidden) return;
+      const target = key.target as Node | null;
+      if (
+        !request.view.focused &&
+        !prompt.contains(target) &&
+        target !== doc.body &&
+        target !== doc.documentElement
+      )
+        return;
       key.preventDefault();
+      key.stopImmediatePropagation();
       answerShown('dismiss');
     };
-    const stop = listen([[root.ownerDocument.defaultView ?? window, 'keydown', onEscape]]);
+    const stop = listen([[doc.defaultView ?? window, 'keydown', onEscape, true]]);
     shown = { pending, prompt, stop };
     root.append(prompt);
   };

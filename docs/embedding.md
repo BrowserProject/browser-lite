@@ -211,7 +211,9 @@ The host browser grants camera, microphone, location, notifications and so on to
 origin, once for all pages inside browser-lite. The engine then asks per page origin through the
 `permission` handler (default: deny), and the core remembers answers in the `PermissionStore` you
 pass (default: in memory). Grant `notifications` only after `Notification.requestPermission()`
-of the host succeeded (the `@browser-lite/ui` prompt does this).
+of the host succeeded (the `@browser-lite/ui` prompt does this). Like Chrome, a question does not
+outlive its page: when the view's main frame commits a new document, the core dismisses the open
+questions of the view and aborts their signals, so an answer can never go to the origin left.
 
 Popups (`window.open`, `target=_blank`) open only after a user gesture, like in every browser.
 A blocked one sends the view event `popup-blocked` with its `url` and the page's `origin`;

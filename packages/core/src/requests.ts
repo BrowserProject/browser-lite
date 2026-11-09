@@ -77,7 +77,8 @@ const rectOf = (data: Record<string, unknown>): Rect => ({
 /**
  * Requests the engine waits for (dialogs, permissions, HTTP authentication, file chooser, popups
  * and pickers), answered by the request handlers of the options or safe defaults. Every request
- * has an AbortSignal: aborted when the page hides the popup, the view closes or the engine ends.
+ * has an AbortSignal: aborted when the page hides the popup, the view closes or the engine ends;
+ * dialogs and permission questions also when the view's page is left.
  */
 export class Requests {
   private readonly pending = new Map<number, Set<AbortController>>();
@@ -457,14 +458,24 @@ export class Requests {
     }
   }
 
+  /**
+   * Dismisses the open permission questions of the view and aborts their requests: its main
+   * frame committed a new document (like Chrome, a question never outlives the page that asked)
+   * or the view closes. Nothing is remembered.
+   */
+  closePermissions(view: ViewImpl): void {
+    for (const [id, entry] of [...this.permissions]) {
+      if (entry.view !== view.id) continue;
+      this.permissions.delete(id);
+      entry.controller.abort();
+      if (this.host.ready) this.host.module._bl_permission_answer(id, 0);
+    }
+  }
+
   /** The view closes: abort its requests; open dialogs and permission questions count as dismissed. */
   closeView(view: ViewImpl): void {
     this.closeDialogs(view);
-    for (const [id, entry] of this.permissions) {
-      if (entry.view !== view.id) continue;
-      this.permissions.delete(id);
-      if (this.host.ready) this.host.module._bl_permission_answer(id, 0);
-    }
+    this.closePermissions(view);
     for (const [id, entry] of this.auths) {
       if (entry.view !== view.id) continue;
       this.auths.delete(id);

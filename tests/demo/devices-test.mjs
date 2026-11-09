@@ -1,7 +1,8 @@
 // Permission requests in the demo UI (the permission prompt of the ui package, decisions stored
 // in the profile; the engine side is tests/core/devices-test.mjs): location, notifications and the
 // microphone for speech recognition with the prompt like in Chrome, a prompt of a closed tab goes
-// away and is not stored, permissions.query with the stored decisions, Block denies.
+// away and is not stored, permissions.query with the stored decisions, Block denies, Escape in
+// the view dismisses, leaving the page dismisses its prompt.
 //
 //   node tests/demo/devices-test.mjs [engine-dir]
 import {
@@ -49,6 +50,10 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   result('ready', 1);
 </script></body></html>`;
 const { url: siteURL } = await serve((req, res) =>
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE),
+);
+// Another origin: no stored decisions there
+const { url: otherURL } = await serve((req, res) =>
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE),
 );
 
@@ -204,6 +209,44 @@ check(
   'decisions stored in the profile',
   blocked.includes('camera') && blocked.includes('geolocation'),
   blocked,
+);
+
+// 6) Escape with the focus in the view dismisses (nothing stored); leaving the page dismisses its prompt, so an answer can no longer go to the old origin
+const otherOrigin = new URL(otherURL).origin;
+results.delete('ready');
+await page.fill('#address', otherURL);
+await page.press('#address', 'Enter');
+check('other origin ready', (await result('ready', TIMEOUT)) === '1');
+results.delete('geo');
+await page.mouse.click(...(await at(120, 220)));
+const escapePrompt = await promptShown();
+await page.keyboard.press('Escape');
+check(
+  'Escape in the view dismisses the prompt',
+  escapePrompt && (await result('geo', 10000)) === 'error1' && !(await prompt.count()),
+  `${escapePrompt} ${results.get('geo')} ${await prompt.count()}`,
+);
+// (The page's Geolocation keeps its denial, notifications ask again)
+await page.mouse.click(...(await at(360, 220)));
+const leftPrompt = await promptShown();
+results.delete('ready');
+await page.fill('#address', siteURL);
+await page.press('#address', 'Enter');
+await result('ready', TIMEOUT);
+const leftGone = await page
+  .locator('.bl-permission-prompt')
+  .waitFor({ state: 'detached', timeout: 5000 })
+  .then(
+    () => true,
+    () => false,
+  );
+const afterLeaving = await page.evaluate(() =>
+  JSON.stringify(window.blTest.profile.prefs('permissions') || {}),
+);
+check(
+  'leaving the page dismisses its prompt, nothing stored for it',
+  leftPrompt && leftGone && !afterLeaving.includes(otherOrigin),
+  `${leftPrompt} ${leftGone} ${afterLeaving}`,
 );
 
 await browser.close();
