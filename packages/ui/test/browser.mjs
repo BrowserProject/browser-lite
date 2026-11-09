@@ -1278,6 +1278,29 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
       empty.value = '2024-05-15';
       empty.dispatchEvent(new Event('change'));
       out.chosenFromEmpty = await promise;
+      // A field at the right window edge: the sheet keeps its width (the hint on one line) and
+      // moves left to 8 px from the edge
+      promise = dateTimePicker({
+        view,
+        rect: { x: 700, y: 6, width: 70, height: 22 },
+        type: 'date',
+        value: '',
+        min: 0,
+        max: 0,
+        step: 0,
+        signal: new AbortController().signal,
+      });
+      const atEdge = document.querySelector('form.bl-picker-sheet');
+      const hint = atEdge.querySelector('.bl-picker-hint');
+      const box = atEdge.getBoundingClientRect();
+      const text = document.createRange();
+      text.selectNodeContents(hint);
+      out.atEdge = {
+        right: Math.round(document.documentElement.clientWidth - box.right),
+        hintLines: text.getClientRects().length,
+      };
+      atEdge.querySelector('button[data-bl-answer=cancel]').click();
+      await promise;
       return out;
     } finally {
       for (const undo of restore) undo();
@@ -1294,6 +1317,7 @@ test('pickers on an iPhone: a sheet with the input, opened by the tap on it', as
     hintAfterChange: false,
     openAfterOpeningChange: true,
     chosenFromEmpty: '2024-05-15',
+    atEdge: { right: 8, hintLines: 1 },
   });
 });
 

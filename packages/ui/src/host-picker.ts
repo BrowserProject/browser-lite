@@ -67,6 +67,9 @@ function openHostPicker(
       ? tapSheet(ui, input, () => finish(null), value ? undefined : ui.texts.tapToChoose)
       : null;
     if (sheet) {
+      // Its own width: with only `left` a fixed box shrinks to the room right of it, and grows
+      // back to the window edge when the clamp below moves it left
+      sheet.style.width = 'max-content';
       sheet.style.left = `${anchor.x}px`;
       sheet.style.top = `${anchor.y + anchor.height + 4}px`;
     } else {
