@@ -45,6 +45,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/ErrorPage.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/HiddenViews.cpp
+    ${BL_ENGINE_SRC}/HostLayers.cpp
     ${BL_ENGINE_SRC}/Host.cpp
     ${BL_ENGINE_SRC}/HostRegExp.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp

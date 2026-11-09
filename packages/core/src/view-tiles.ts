@@ -2,7 +2,10 @@
 // every new frame, so a frame that changes only a small part of the page (a spinner, a pulsing
 // placeholder) goes into small canvases over the view canvas instead, and the host repaints only
 // those. The engine asks for the tiles it needs (event 'tiles'); they cover the view canvas in a
-// grid of `size` frame pixels and belong to the worker that paints, like the view canvas.
+// grid of `size` frame pixels and belong to the worker that paints, like the view canvas. The same
+// layer holds the canvases of the host layers above them (view-host-layers.ts).
+
+import { type HostLayerRequest, HostLayers } from './view-host-layers.js';
 
 /** Tile key of the engine: `row << 16 | column`. */
 function columnOf(key: number): number {
@@ -17,6 +20,7 @@ function rowOf(key: number): number {
 export class ViewTiles {
   private readonly layer = document.createElement('div');
   private readonly tiles = new Map<number, HTMLCanvasElement>();
+  private readonly hostLayers: HostLayers;
   private readonly observer = new ResizeObserver(() => this.place());
   private size = 0;
   private observed: HTMLElement | null = null;
@@ -29,6 +33,13 @@ export class ViewTiles {
     private readonly viewId: number,
   ) {
     this.layer.setAttribute('data-bl-tiles', String(viewId));
+    this.hostLayers = new HostLayers(this.layer, worker, viewId);
+  }
+
+  /** The host layers the engine wants now (event `layers`). */
+  setHostLayers(keep: readonly number[], add: readonly HostLayerRequest[]): void {
+    this.hostLayers.update(keep, add);
+    this.place();
   }
 
   /** New canvases for these tiles; a new size replaces all tiles of the old one. */
@@ -62,7 +73,11 @@ export class ViewTiles {
   place(): void {
     const { canvas, layer } = this;
     const parent = canvas.parentElement;
-    if (!parent || this.anchor.parentElement !== parent || !this.tiles.size) {
+    if (
+      !parent ||
+      this.anchor.parentElement !== parent ||
+      (!this.tiles.size && !this.hostLayers.size)
+    ) {
       this.observer.disconnect();
       this.observed = null;
       layer.remove();
@@ -79,6 +94,8 @@ export class ViewTiles {
     }
     layer.style.cssText = [
       'position:absolute',
+      // The z-index of the host layers stays inside
+      'isolation:isolate',
       'overflow:hidden',
       'pointer-events:none',
       'margin:0',
@@ -94,13 +111,17 @@ export class ViewTiles {
     ].join(';');
   }
 
-  /** Draws what the tiles show over a copy of the view canvas drawn at `1 / ratio` (debug). */
+  /**
+   * Draws what the tiles and host layers show over a copy of the view canvas drawn at `1 / ratio`
+   * (debug).
+   */
   drawOver(context: CanvasRenderingContext2D, ratio: number): void {
     for (const [key, tile] of this.tiles) {
       const x = (columnOf(key) * this.size) / ratio;
       const y = (rowOf(key) * this.size) / ratio;
       context.drawImage(tile, x, y, tile.width / ratio, tile.height / ratio);
     }
+    this.hostLayers.drawOver(context, ratio);
   }
 
   /** The view is closed. */
@@ -109,5 +130,6 @@ export class ViewTiles {
     this.observed = null;
     this.layer.remove();
     this.tiles.clear();
+    this.hostLayers.remove();
   }
 }

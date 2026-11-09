@@ -98,12 +98,14 @@ EM_JS(int, bl_gpu_prepare, (int viewId, int width, int height), {
     return 1;
 });
 
-// The finished frame without a copy into the canvas of the view, or of one of its damage tiles
-// (DamageTiles.h; tile -1: the view canvas)
-EM_JS(int, bl_gpu_transfer, (int viewId, int tile), {
+// The finished frame without a copy into the canvas of the view (kind 0), of one of its damage
+// tiles (1, DamageTiles.h) or of one of its host layers (2, HostLayers.h)
+EM_JS(int, bl_gpu_transfer, (int viewId, int kind, unsigned key), {
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
-    if (target && tile >= 0)
-        target = target.tiles && target.tiles.canvases.get(tile);
+    if (target && kind == 1)
+        target = target.tiles && target.tiles.canvases.get(key);
+    else if (target && kind == 2)
+        target = target.layers && target.layers.canvases.get(key);
     if (!target)
         return 0;
     if (!target.bitmapContext) {
@@ -172,7 +174,8 @@ GrDirectContext* context()
         return s_context.get();
     s_tried = true;
 
-    s_handle = bl_gpu_create_context(Compositor::isCompositorThread() && engineConfig().videoOverlay);
+    // Transparent where nothing is drawn: holes of videos and host layers (HostLayers.h)
+    s_handle = bl_gpu_create_context(Compositor::isCompositorThread() && (engineConfig().videoOverlay || engineConfig().hostLayers));
     if (!s_handle) {
         debugLog("GPU: no WebGL 2, painting on the CPU");
         return nullptr;
@@ -240,7 +243,7 @@ bool present(int viewId, SkSurface& surface)
         return false;
     surface.draw(screen->getCanvas(), 0, 0);
     gr->flushAndSubmit(screen.get());
-    return bl_gpu_transfer(viewId, -1);
+    return bl_gpu_transfer(viewId, 0, 0);
 }
 
 bool hasCanvas(int viewId)
@@ -260,7 +263,12 @@ sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height)
 
 bool showFramebuffer(int viewId, std::optional<unsigned> tile)
 {
-    return bl_gpu_transfer(viewId, tile ? static_cast<int>(*tile) : -1);
+    return tile ? bl_gpu_transfer(viewId, 1, *tile) : bl_gpu_transfer(viewId, 0, 0);
+}
+
+bool showFramebufferInLayer(int viewId, unsigned key)
+{
+    return bl_gpu_transfer(viewId, 2, key);
 }
 
 } // namespace BrowserLite::Gpu

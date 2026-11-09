@@ -450,12 +450,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    over the view canvas (#454): one 44 px CSS spinner (local, Chromium headless with SwiftShader)
    now costs 0.75 to 0.8 CPU cores at 60 frames per second at 640x480, 1280x800 and 1920x1080
    alike, before 2.5, 6.6 and 7.0 cores (39 frames per second at 1920x1080); Chromium itself
-   needs 0.07. Still open: many animations spread over the view (46 pulsing skeleton boxes, as
-   on weather.com) touch more than half of the view and stay whole frames, 7.6 cores before and
-   after. Under SwiftShader a new view sized canvas frame costs the host about 100 ms of GPU
-   process CPU at 1920x1080 whatever it shows (#454); only the host compositing such layers
-   itself (host elements per animated layer) would avoid it. On devices with a real GPU a whole
-   view frame costs far less (not measured).
+   needs 0.07. Many animations spread over the view (46 pulsing skeleton boxes, as on
+   weather.com) touched more than half of the view and stayed whole frames; under SwiftShader a
+   new view sized canvas frame costs the host about 100 ms of GPU process CPU at 1920x1080
+   whatever it shows (#454). Layers that only animate their opacity are now shown by the host
+   itself (#478): the page of 46 pulsing boxes (local, 2026-11-09, demo, 1280x800, 20 s standing
+   still, same engine A/B) 0.14 to 0.16 CPU cores and no engine frame instead of 5.96 to 6.67
+   cores at 52 to 55 frames per second (`BL_HOST_LAYERS=0`), the engine before 4.6 to 5.0 cores
+   at 40 to 43 frames per second; plain Chromium 0.08. Still open: layers that also animate their
+   transform (Wikipedia's `mw-pulsating-dot` scales and fades, 0.77 cores at 44 frames per
+   second in damage tiles, unchanged) and opacity animations under effects or covered by later
+   layers stay in the frames. On devices with a real GPU a whole view frame costs far less (not
+   measured).
 
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
    #286): PNG, AVIF, GIF and animated WebP decoders ignore the subsampling level. A JPEG also

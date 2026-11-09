@@ -64,7 +64,8 @@ comes as patches from `patches/`.
     (layers on the compositor thread, the stall log's state), `DamageTiles.cpp` (a frame with a
     small change goes only into the host canvases of the tiles it touches; emptied with a
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
-    canvas after `transferFromImageBitmap(null)`), `ScrollingWasm.cpp`
+    canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
+    their opacity get host canvases whose opacity the host animates), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:

@@ -73,6 +73,11 @@ EM_JS(void, bl_js_forget_worker_canvas, (int viewId), {
             if (tile.bitmapContext)
                 Module.blEmptyBitmap(tile.bitmapContext);
         });
+    if (target.layers)
+        target.layers.canvases.forEach(function (layer) {
+            if (layer.bitmapContext)
+                Module.blEmptyBitmap(layer.bitmapContext);
+        });
     target.canvas.width = 1;
     target.canvas.height = 1;
     if (target.ctx)

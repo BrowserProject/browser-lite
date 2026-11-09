@@ -30,7 +30,9 @@ The view puts its canvas (`position: relative`) and a hidden text field into the
 playing video goes before the canvas, underneath it (the engine leaves its rect transparent).
 After the text field an absolutely positioned layer over the canvas holds the damage tiles the
 engine asks for (`view-tiles.ts`): small canvases that show frames which change only a small part
-of the page (a spinner), so the host repaints only them and not the whole canvas.
+of the page (a spinner), so the host repaints only them and not the whole canvas. Above them it
+holds the host layers (`view-host-layers.ts`): a canvas per layer that only animates its opacity
+(a pulsing placeholder), whose opacity runs as a Web Animation, so the engine sends no frames for it.
 The canvas shows the page's frames pixel for pixel from its top left (its box is the pixel ratio
 times the container, scaled back with `transform`), so size the container, not the canvas.
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it

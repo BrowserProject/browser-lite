@@ -51,6 +51,9 @@ struct EngineConfig {
     // BL_VIDEO_OVERLAY: the host shows its <video> behind the view canvas (#232); 0 copies the
     // frames into the engine (#217)
     bool videoOverlay { true };
+    // BL_HOST_LAYERS: layers that only animate their opacity are shown by the host itself
+    // (HostLayers.h); 0 composites them into the frames
+    bool hostLayers { true };
     // BL_ASYNC_IMAGE_DECODING: large images decode on the decoder thread (WebKit's default);
     // 0 decodes them where they are painted
     bool asyncImageDecoding { true };

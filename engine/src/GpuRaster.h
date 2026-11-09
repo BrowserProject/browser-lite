@@ -47,11 +47,12 @@ sk_sp<SkSurface> createSurface(int width, int height);
 bool present(int viewId, SkSurface&);
 
 // Paint directly into the framebuffer of the context (compositor): surface in
-// the size of the view or of a damage tile (DamageTiles.h), nullptr if the view
-// has no canvas here. Afterwards showFramebuffer() sends the frame without a copy
-// into the canvas of the view or of the tile.
+// the size of the view, of a damage tile (DamageTiles.h) or of a host layer (HostLayers.h),
+// nullptr if the view has no canvas here. Afterwards showFramebuffer() sends the frame without a
+// copy into the canvas of the view or of the tile, showFramebufferInLayer() into that of the layer.
 bool hasCanvas(int viewId);
 sk_sp<SkSurface> framebufferSurface(int viewId, int width, int height);
 bool showFramebuffer(int viewId, std::optional<unsigned> tile = std::nullopt);
+bool showFramebufferInLayer(int viewId, unsigned key);
 
 } // namespace BrowserLite::Gpu

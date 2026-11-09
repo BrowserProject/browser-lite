@@ -5,7 +5,7 @@ if (typeof Module === 'undefined')
   var Module = {};
 
 // abiVersion of engine/abi.json: the host refuses an engine of another contract
-Module.blAbiVersion = 26;
+Module.blAbiVersion = 27;
 
 // A thread that traps or aborts ends the engine. The error event the main
 // thread gets from a worker has only the message, so the worker writes the
@@ -85,6 +85,14 @@ if (ENVIRONMENT_IS_PTHREAD) {
         const tiles = target && target.tiles;
         if (tiles && tiles.size === data.size)
           tiles.canvases.set(data.key, { canvas: data.blTile });
+        return;
+      }
+      // The canvas of a host layer (engine/src/HostLayers.h), only while the engine wants it
+      if (data && data.blLayer) {
+        const target = Module.blCanvases.get(data.viewId);
+        const layers = target && target.layers;
+        if (layers && layers.wanted.has(data.key))
+          layers.canvases.set(data.key, { canvas: data.blLayer });
         return;
       }
       if (!data || !data.blCanvas)

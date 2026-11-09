@@ -24,6 +24,7 @@ import type {
   ViewOptions,
 } from './types.js';
 import { type Uploads, uploadDirectory } from './uploads.js';
+import { hostLayerRequests } from './view-host-layers.js';
 import { ViewTiles } from './view-tiles.js';
 import type { Watchdog } from './watchdog.js';
 
@@ -741,6 +742,11 @@ export class ViewImpl implements View {
       case 'tiles':
         this.tiles?.add(Number(data.size), (data.tiles as number[] | undefined) ?? []);
         break;
+      case 'layers': {
+        const add = hostLayerRequests(data.add);
+        if (add && Array.isArray(data.keep)) this.tiles?.setHostLayers(data.keep.map(Number), add);
+        return;
+      }
       case 'cursor':
         this.canvas.style.cursor = String(data.cursor ?? '');
         return;

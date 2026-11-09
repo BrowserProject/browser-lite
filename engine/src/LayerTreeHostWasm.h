@@ -14,10 +14,12 @@
 //
 // Damage tracking like WPE (#220): the layers report what changed, a frame
 // without a change is neither composited nor shown, a frame with a small change
-// shows only the damage tiles it touches (DamageTiles.h).
+// shows only the damage tiles it touches (DamageTiles.h). Layers that only
+// animate their opacity are shown by the host itself (HostLayers.h).
 #pragma once
 
 #include "DamageTiles.h"
+#include "HostLayers.h"
 #include "PinchZoom.h"
 #include <WebCore/CoordinatedCompositionReason.h>
 #include <WebCore/CoordinatedPlatformLayer.h>
@@ -120,6 +122,7 @@ public:
     // Only on the compositor thread
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> committedLayers;
     DamageTiles damageTiles { viewId };
+    HostLayers hostLayers { viewId };
     // The size of the last frame shown
     WebCore::IntSize shownSize;
 

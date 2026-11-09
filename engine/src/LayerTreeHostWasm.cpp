@@ -324,6 +324,10 @@ static void compositeScene(CompositorScene& scene)
     auto finishFrame = makeScopeExit([&] {
         rootLayer.finishFrame();
     });
+    // Layers the host shows itself (HostLayers.h): which go to the host or come back adds damage.
+    // Not while the view gets a new size or a pinch gesture moves everything.
+    bool hostLayersAllowed = skipUnchanged && !repaintAll && !pinching && engineConfig().hostLayers;
+    scene.hostLayers.update(prepared.embedderLayers, frameDamage ? &*frameDamage : nullptr, hostLayersAllowed);
     bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
     if (changed || !skipUnchanged) {
         std::optional<Vector<DamageTiles::Tile>> tiles;
@@ -355,6 +359,8 @@ static void compositeScene(CompositorScene& scene)
         // Tile uploads of the rendering update
         grContext->flushAndSubmit();
     }
+    // In the same task as the frame: the host shows both together
+    scene.hostLayers.present(rootLayer);
     if (firstPaint)
         WebView::firstPaintShown(scene.viewId);
 
@@ -660,6 +666,7 @@ void LayerTreeHostWasm::detachScene()
     Compositor::dispatch([viewId = m_scene->viewId] {
         VideoOverlay::forgetView(viewId);
         DamageTiles::forgetView(viewId);
+        HostLayers::forgetView(viewId);
     });
 }
 
