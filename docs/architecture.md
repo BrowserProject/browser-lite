@@ -384,7 +384,10 @@ during user activation lift the rule for that element (#399). WebCodecs, MediaSt
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 Where the host has no `MediaStreamTrackProcessor` (Firefox), camera, microphone and screen reach
 the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `VideoFrame`s, an
-AudioWorklet `AudioData` (#259).
+AudioWorklet `AudioData` (#259). A `<video>` in fullscreen shows its whole picture like the native
+players of phones (`video:fullscreen { object-fit: contain !important }` only for the WASM port in
+WebKit's `fullscreen.css`, patch 0101, #474): m.youtube.com fullscreens its `<video>` for the
+iPhone it sees and keeps its own `object-fit: cover`.
 
 ## Audio
 

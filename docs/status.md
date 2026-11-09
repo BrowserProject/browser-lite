@@ -100,7 +100,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
   29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Transparent videos (VP8,
   VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
-  zoo.ch covered the photo with opaque green).
+  zoo.ch covered the photo with opaque green). A video in fullscreen shows its whole picture like
+  the native players of phones, also with the page's `object-fit: cover` (#474; m.youtube.com
+  fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),

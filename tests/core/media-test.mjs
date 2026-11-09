@@ -2,7 +2,8 @@
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
 // has video-overlay-test.mjs). Also MSE, blob:, data:, preload,
-// picture-in-picture, muted autoplay only in the view and the range special cases of media-sw.js.
+// picture-in-picture, muted autoplay only in the view, a fullscreen video letterboxed over a
+// page object-fit: cover and the range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -297,6 +298,23 @@ function oddRange(req, res) {
   res.end(TONE.subarray(start, end + 1));
 }
 
+// A video in fullscreen shows its whole picture even with object-fit: cover from the page, like
+// the native players of phones (m.youtube.com fullscreens its <video> for the iPhone it sees)
+const FULLSCREEN_PAGE = `<!doctype html><title>Fullscreen video</title><body style="margin:0;background:#fff">
+<video id="video" src="/clip.webm" muted loop playsinline autoplay style="display:block;width:100%;height:120px;object-fit:cover"></video>
+<button id="fs" style="position:absolute;left:20px;top:200px;width:200px;height:60px">Fullscreen</button>
+<script>
+const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const video = document.getElementById('video');
+video.addEventListener('playing', () => result('fsplaying', '1'), { once: true });
+document.getElementById('fs').addEventListener('click', () =>
+  video.requestFullscreen().catch((e) => result('fsfit', e.name)));
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement === video)
+    requestAnimationFrame(() => result('fsfit', getComputedStyle(video).objectFit + ',' + innerWidth + ',' + innerHeight));
+});
+</script>`;
+
 // <audio controls> on a blue page: the bar is only drawn once the controls exist
 const CONTROLS_PAGE = `<!doctype html><title>Controls</title><body style="margin:0;background:#00f">
 <audio controls src="/tone.wav" preload="none" style="position:absolute;left:20px;top:20px;width:300px;height:25px"></audio>`;
@@ -316,6 +334,7 @@ const { url: siteURL } = await serve((req, res) => {
     '/blob.html': BLOB_PAGE,
     '/controls.html': CONTROLS_PAGE,
     '/autoplay.html': AUTOPLAY_PAGE,
+    '/fullscreen.html': FULLSCREEN_PAGE,
   }[req.url];
   if (html) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
@@ -631,6 +650,27 @@ check(
 let hostsAfter = 0;
 await waitFor(async () => (hostsAfter = await playingHosts()) === 1, 10000, 250);
 check('autoplay: the host plays only the visible video', hostsAfter === 1, `${hostsAfter} playing`);
+
+// ----------------------------------------------------------- fullscreen
+await load(page, `${siteURL}fullscreen.html`);
+check('fullscreen video: plays inline', (await result('fsplaying')) === '1');
+const fsBox = await canvasOrigin(page);
+await page.mouse.click(fsBox.x + 120, fsBox.y + 230);
+const [fit, fsWidth, fsHeight] = String(await result('fsfit', 20000)).split(',');
+// The 4:3 clip in a wider screen: black bars left and right, red in the middle
+const fsMiddle = await waitForPixel(Number(fsWidth) / 2, Number(fsHeight) / 2, isRed);
+const isBlack = (p) => !!p && p.r < 40 && p.g < 40 && p.b < 40;
+const fsEdge = await waitForPixel(4, Number(fsHeight) / 2, isBlack);
+check(
+  'fullscreen video: letterboxed (object-fit contain over the page cover)',
+  fit === 'contain' &&
+    Number(fsWidth) * 3 > Number(fsHeight) * 4 &&
+    isRed(fsMiddle) &&
+    isBlack(fsEdge),
+  `${results.get('fsfit')}, middle ${JSON.stringify(fsMiddle)}, edge ${JSON.stringify(fsEdge)}`,
+);
+await screenshot(page, 'media-fullscreen');
+await page.evaluate(() => document.exitFullscreen().catch(() => {}));
 
 // ------------------------------------------- range special cases (media-sw.js of the core)
 // The answer of the service worker must end instead of loading forever. We read

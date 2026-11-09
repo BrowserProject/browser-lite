@@ -17,7 +17,8 @@ an interpreter cache that took the missing export of one module for all modules,
 image a compositing layer still showed, which the memory cache dropped and the layer decoded again,
 or the text shadow a filtered layer cut off at its box, or the tiles a fling on a busy page
 ran away from, or the boxes with percentage heights every layout of a container laid out again,
-or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped)
+or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped, or the
+fullscreen video a page's `object-fit: cover` cropped)
 comes as patches from `patches/`.
 
 ## Folders
