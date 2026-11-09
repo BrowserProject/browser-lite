@@ -28,8 +28,8 @@ namespace BrowserLite {
 // without one, -2 when the host cannot run the pattern. output: start and end of each capture,
 // 0xffffffff for one that did not take part.
 EM_JS(int, bl_host_regexp_exec, (unsigned id, const void* source, unsigned sourceLength, int source8, unsigned flags, const void* input, unsigned length, int input8, unsigned start, unsigned* output, unsigned outputSize), {
+    source >>>= 0; input >>>= 0; output >>>= 0;
     var text = function (pointer, size, latin1) {
-        pointer >>>= 0;
         var view = latin1 ? HEAPU8.subarray(pointer, pointer + size) : HEAPU16.subarray(pointer >>> 1, (pointer >>> 1) + size);
         var parts = [];
         // Small pieces: apply puts each character on the stack, and this can run deep in the stack

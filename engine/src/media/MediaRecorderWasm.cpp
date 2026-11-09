@@ -32,15 +32,19 @@ using namespace WebCore;
 namespace {
 
 EM_JS(char*, blJsRecorderCreate, (int id, const char* config), {
+    config >>>= 0;
     return blRecorder.create(id, UTF8ToString(config));
 });
 EM_JS(void, blJsRecorderVideo, (int id, const uint8_t* data, int size, int format, int width, int height, double timestamp), {
+    data >>>= 0;
     blRecorder.video(id, data, size, format, width, height, timestamp);
 });
 EM_JS(void, blJsRecorderAudio, (int id, const float* samples, int frames, int channels, double sampleRate, double timestamp), {
+    samples >>>= 0;
     blRecorder.audio(id, samples, frames, channels, sampleRate, timestamp);
 });
 EM_JS(uint8_t*, blJsRecorderTake, (int id, int* length), {
+    length >>>= 0;
     return blRecorder.take(id, length);
 });
 EM_JS(void, blJsRecorderFlush, (int id), {

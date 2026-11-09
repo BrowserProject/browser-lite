@@ -2,7 +2,7 @@
 
 | Suite | What | Needs | CI job |
 |---|---|---|---|
-| `contract/` | `engine/abi.json` against the engine sources, dependency direction of the packages | node | js |
+| `contract/` | `engine/abi.json` against the engine sources, unsigned pointers in the `EM_JS` glue (`pointers-test.mjs`), dependency direction of the packages | node | js |
 | `engine-js/` | JS parts of the engine in node: WebAssembly rewrite and API over a simulated bridge, WebM muxer, HTTP cache keys, cache names, cleanup and ranges | node | js (`npm test`) |
 | `engine/` | the engine in node without a browser: test pages (`pages/`), error page, the policy of a typed `data:` or `about:` address, GC stress (also in a generic call of compiled code, with a bound on the memory growth), native WTF tests (`wtf-tests.cpp`, built with the engine as `wtf-tests.js`) | engine build | engine |
 | `jsc/` | JS tests with the `jsc` shell in node (`run.sh`), also with the JIT (`BL_JIT=1`, `jit-hash.js` only there: its fast paths against int32 twins; `jit-recompile.js` counts the compiles in the JIT's log, `jit-tierup.js` times one long call against many short ones, `jit-calls.js` many callees at one site against one) | JSC build | jsc |

@@ -874,9 +874,11 @@ RefPtr<VideoFrame> MediaStreamPlayback::currentFrame() const
 // ------------------------------------------------------------ WebRTC bridge
 
 EM_JS(void, blJsSinkVideo, (int id, const uint8_t* data, int size, int format, int width, int height, double timestamp), {
+    data >>>= 0;
     blSinks.video(id, data, size, format, width, height, timestamp);
 });
 EM_JS(void, blJsSinkAudio, (int id, const float* samples, int frames, int channels, double sampleRate, double timestamp), {
+    samples >>>= 0;
     blSinks.audio(id, samples, frames, channels, sampleRate, timestamp);
 });
 EM_JS(void, blJsSinkClose, (int id), {

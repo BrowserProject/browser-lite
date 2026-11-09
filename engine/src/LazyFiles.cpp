@@ -29,6 +29,7 @@
 // reports the engine as unresponsive after 10 s: the read fails, ICU falls back to the root locale
 // and text to other fonts; the next read tries again)
 EM_JS(bool, bl_lazy_fetch, (const char* path, uint8_t* buffer, size_t size, double timeout), {
+    path >>>= 0; buffer >>>= 0;
     var url = locateFile(UTF8ToString(path));
     var data;
     try {

@@ -42,6 +42,7 @@ using namespace WebCore;
 // Next frame in the compositor's worker (rAF, otherwise 16 ms). If the animation frame does not
 // come, a timer brings it (logged once, bl__compositor_frame)
 EM_JS(void, bl_compositor_request_frame, (void* scene), {
+    scene >>>= 0;
     var done = false;
     var run = function (late) {
         if (done)

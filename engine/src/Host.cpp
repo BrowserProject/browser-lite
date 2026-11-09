@@ -17,6 +17,7 @@
 // OffscreenCanvas per view. ImageData must not point into the SharedArrayBuffer,
 // so the rows are copied. Chrome takes the frame at the end of the task.
 EM_JS(int, bl_js_present_in_worker, (int viewId, const uint8_t* pixels, int width, int height, int x, int y, int w, int h), {
+    pixels >>>= 0;
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
     if (!target)
         return 0;

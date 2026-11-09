@@ -255,6 +255,7 @@ CallTarget* fillCallTarget(VM& vm, FunctionExecutable* executable, CodeBlock* co
 }
 
 EM_JS(uint32_t, wasmJITInstall, (const uint8_t* bytes, uint32_t size, int dump), {
+    bytes >>>= 0;
     try {
         const code = HEAPU8.slice(bytes, bytes + size);
         // BL_JIT=3 in node: every module into the working directory, for wasm-dis

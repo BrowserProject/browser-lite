@@ -94,6 +94,9 @@ The full list is `abi.json`; the rules behind it:
 - Strings into exports are UTF-8 allocated with `malloc` (`stringToNewUTF8`), the engine frees
   them. Strings and buffers handed to hooks are copies the host owns, except where `abi.json`
   says the host frees them (`_free`).
+- Pointers in JS are unsigned numbers: the memory grows up to 4 GB, and above 2 GB a pointer
+  arrives as a negative `i32` where Emscripten does not convert it. Every `EM_JS` function
+  starts with `p >>>= 0;` for each pointer parameter (`tests/contract/pointers-test.mjs`, #465).
 - Threads: `main()` runs on its own pthread, the engine thread (`-sPROXY_TO_PTHREAD`). Exports
   may be called from any thread and run asynchronously on the engine thread, unless
   `abi.json` marks them synchronous. Hooks run on the main thread of the page.

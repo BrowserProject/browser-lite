@@ -424,6 +424,13 @@ and the host discards background views (#128, #171, #216). On iPhone and iPad a 
 fails, iOS ends the whole web content process instead, so the core sets the 3 GB of
 `BL_MEMORY_PRESSURE_MB` to 512 MB there (#358).
 
+Above 2 GB a wasm32 pointer is a negative `i32` in JS. Emscripten makes the pointers of its own
+library functions, of `EM_ASM` arguments and of `malloc` unsigned and rewrites direct `HEAP*[p]`,
+`subarray` and `set` accesses, but not the parameters of `EM_JS` functions, and `slice(p, ...)`
+with a negative `p` counts from the end of the memory. So every `EM_JS` function starts with
+`p >>>= 0;` for each of its pointer parameters (`tests/contract/pointers-test.mjs`), and glue that
+computes an index from a pointer shifts with `>>>` (#465, `tests/core/heap-above-2gib-test.mjs`).
+
 ## JavaScript
 
 JSC runs the C loop interpreter (`ENABLE_JIT=OFF`). Patches turn on the interpreter's call

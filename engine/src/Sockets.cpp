@@ -75,9 +75,11 @@ int __real_pipe2(int[2], int);
 
 // Run on the main thread (engine/js/sockets.js)
 EM_JS(void, blJsSocketOpen, (int id, const char* host, int port), {
+    host >>>= 0;
     blSockets.open(id, UTF8ToString(host), port);
 });
 EM_JS(void, blJsSocketSend, (int id, const uint8_t* data, int length), {
+    data >>>= 0;
     blSockets.send(id, HEAPU8.slice(data, data + length));
 });
 EM_JS(void, blJsSocketClose, (int id), {

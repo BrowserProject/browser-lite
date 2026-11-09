@@ -15,6 +15,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   stayed empty, the interpreter cached a missing `meta` export for all modules, #431). Compiled
   JS stays compiled through full GCs and in every frame (#455: before, a page's hot code ran
   interpreted for good after the first full GC, about 6x slower).
+  Above 2 GB of engine memory the JS glue gets unsigned pointers (#465: before, uploads sent other
+  memory of the page, the HTTP cache stored wrong bodies, compiled JS failed to install and
+  `decodeAudioData` threw).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384), history incl. back/forward cache
   (address and title of the restored page, #367; the page left last stays through the automatic

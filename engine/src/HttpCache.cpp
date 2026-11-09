@@ -63,14 +63,17 @@
 // Run on the main thread (engine/js/http-cache.js)
 // start < 0: the whole resource, end < 0: up to its end
 EM_JS(void, blJsHttpCacheLookup, (int id, const char* partition, const char* url, double start, double end), {
+    partition >>>= 0; url >>>= 0;
     blHttpCache.lookup(id, UTF8ToString(partition), UTF8ToString(url), start, end);
 });
 // version empty: the whole response, else the newest range of this version
 EM_JS(void, blJsHttpCacheUpdate, (const char* partition, const char* url, const char* headers, const char* version), {
+    partition >>>= 0; url >>>= 0; headers >>>= 0; version >>>= 0;
     blHttpCache.update(UTF8ToString(partition), UTF8ToString(url), UTF8ToString(headers), UTF8ToString(version));
 });
 // start < 0: a whole response, else a range of a resource of total bytes and this version
 EM_JS(void, blJsHttpCacheStore, (const char* partition, const char* url, int status, const char* headers, const uint8_t* body, int length, double start, double total, const char* version), {
+    partition >>>= 0; url >>>= 0; headers >>>= 0; body >>>= 0; version >>>= 0;
     blHttpCache.store(UTF8ToString(partition), UTF8ToString(url), status, UTF8ToString(headers), HEAPU8.slice(body, body + length), start, total, UTF8ToString(version));
 });
 

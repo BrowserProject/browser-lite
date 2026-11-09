@@ -23,15 +23,19 @@
 
 // Host side: engine/js/webcodecs-host.js. All calls on the engine thread.
 EM_JS(char*, blJsCodecCreate, (int id, int kind, const char* config, const uint8_t* description, int descriptionLength), {
+    config >>>= 0; description >>>= 0;
     return blCodecs.create(id, kind, UTF8ToString(config), descriptionLength >= 0 ? HEAPU8.slice(description, description + descriptionLength) : null);
 });
 EM_JS(char*, blJsCodecDecode, (int id, const uint8_t* data, int length, int key, double timestamp, double duration), {
+    data >>>= 0;
     return blCodecs.decode(id, HEAPU8.slice(data, data + length), key, timestamp, duration);
 });
 EM_JS(char*, blJsVideoEncode, (int id, const uint8_t* data, int length, int format, int width, int height, double timestamp, double duration, unsigned colorSpace, int key), {
+    data >>>= 0;
     return blCodecs.encodeVideo(id, data, length, format, width, height, timestamp, duration, colorSpace, key);
 });
 EM_JS(char*, blJsAudioEncode, (int id, const uint8_t* data, int length, int format, double sampleRate, int frames, int channels, double timestamp), {
+    data >>>= 0;
     return blCodecs.encodeAudio(id, data, length, format, sampleRate, frames, channels, timestamp);
 });
 EM_JS(void, blJsCodecFlush, (int id), {

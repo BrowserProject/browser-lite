@@ -1,0 +1,13 @@
+diff --git a/Source/WebCore/platform/audio/wasm/AudioFileReaderWasm.cpp b/Source/WebCore/platform/audio/wasm/AudioFileReaderWasm.cpp
+index aba7296620..8a09a4e420 100644
+--- a/Source/WebCore/platform/audio/wasm/AudioFileReaderWasm.cpp
++++ b/Source/WebCore/platform/audio/wasm/AudioFileReaderWasm.cpp
+@@ -78,7 +78,7 @@ void startDecodeOnMainThread(em_proxying_ctx* context, void* argument)
+                 return;
+             }
+             for (var c = 0; c < channels; c++)
+-                HEAPF32.set(buffer.getChannelData(c), (ptr >> 2) + c * length);
++                HEAPF32.set(buffer.getChannelData(c), (ptr >>> 2) + c * length);
+             _bl__audio_decoded(request, ptr, channels, length, buffer.sampleRate);
+         };
+         try {
