@@ -185,7 +185,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
   Android's back gesture) goes back in the tab and leaves the demo only at the tab's first entry
   (#414), the host's forward and the mouse forward button go forward in the tab also while it can
-  still go back (#467).
+  still go back (#467), the bottom bar slides away while the user scrolls a page down and comes
+  back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of
+  279 px with the bar; #472, checked on emulated phones, not yet on a device).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)
@@ -580,9 +582,6 @@ browser (Safari keeps Cmd+L, T and W for itself).
   view (#460; bbc.com on the Pixel 9 with a local build: blank right after four swipes before,
   painted after; images that load late still come later). Samsung Internet on BrowserStack reaches no demo server: a TLS proxy
   of that device's network fails the handshake (an IP address works), not a browser-lite fault.
-- Phone UI, seen on devices 2026-11-03: the bottom bar stays in landscape (44 px since #356; the
-  page kept 221 of 303 px on a Pixel 9 with the old 58 px bar; hiding it while scrolling needs a
-  scroll event of the page and a viewport that does not lay out again).
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
   C++ now gives the page a RangeError (#354), CI green since; its first reserve of 200 KB stopped

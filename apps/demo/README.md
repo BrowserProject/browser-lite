@@ -187,7 +187,13 @@ bar; the suggestions span the width and open upwards above the toolbar; the tab 
 tab overview (a card per tab with title, the site's icon and host: tap to switch, cross to close,
 new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the
 toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
-has two columns and the toolbar is 44 px high); the find bar sits at the bottom of the page; JS dialogs are centered and the
+has two columns and the toolbar is 44 px high); like mobile Chrome the bar slides away while the
+user scrolls a page down and comes back when they scroll up, the page is at its top, a new page
+commits, another tab comes to the front or the focus goes into the bar (`bar-hiding.ts` on the
+view's `scroll` event with `user`; scrolls of the page's script do not count). The page area
+takes the bar's room in one step, so the page is laid out once per change of direction: hiding
+gives it the room at once while the bar slides away over it, showing slides the bar in over the
+page first and gives the room back when it is there (#472); the find bar sits at the bottom of the page; JS dialogs are centered and the
 sign-in dialog at the top; touch targets are at least 44 px and fields have 16 px text (iOS zooms
 into smaller). The page uses `viewport-fit=cover` and keeps toolbar, page and sheets out of the
 notch and the home indicator (`env(safe-area-inset-*)`). While the iOS keyboard covers the page,
@@ -230,7 +236,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts` | the back and forward of the host browser act on the tab in front |
 | `tab-drag.ts` | reordering tabs by dragging them in the strip |
-| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields |
+| `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |
 | `toolbar.ts`, `address-bar.ts`, `find-bar.ts`, `zoom.ts`, `print-preview.ts` | toolbar, address bar with suggestions (connects to the first one or the typed address while typing), find bar, zoom steps and zoom per site, print preview (the engine's PDF in a frame; where the host shows no PDF in a frame, `navigator.pdfViewerEnabled` false like Chrome on Android, a hint and Save as PDF) |

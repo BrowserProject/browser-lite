@@ -123,6 +123,7 @@ function track(view, prefix) {
   view.on('zoom', ({ zoom }) => record(`zoom:${zoom}`));
   view.on('progress', ({ value }) => record(`progress:${value}`));
   view.on('hover', ({ url }) => record(`hover:${url ?? ''}`));
+  view.on('scroll', ({ y, user }) => record(`scroll:${y}:${user}`));
   view.on('context-menu', (info) => {
     record(`context-menu:${info.x},${info.y},${info.editable}`);
     host.contextMenus.push({ view: view.id, ...info });

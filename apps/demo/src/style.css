@@ -2054,6 +2054,21 @@ svg.favicon {
     background: var(--surface);
     box-shadow: 0 -1px 0 var(--outline-variant);
   }
+  /* While the page scrolls down the bar slides away (bar-hiding.ts): hidden and showing lay
+     it over the bottom of the page, whose area takes its room. Fixed, so the bar below the
+     window makes nothing scroll */
+  body[data-bar] #chrome {
+    position: fixed;
+    right: 0;
+    bottom: var(--keyboard-height, 0px);
+    left: 0;
+  }
+  body[data-bar="hidden"] #chrome {
+    translate: 0 100%;
+  }
+  body[data-bar="hidden"] {
+    --sheet-bottom: var(--keyboard-height, 0px);
+  }
   #profile-notice {
     order: -1;
   }
@@ -2376,6 +2391,9 @@ svg.favicon {
   }
 
   @media (prefers-reduced-motion: no-preference) {
+    #chrome {
+      transition: translate var(--medium) var(--ease);
+    }
     @starting-style {
       #side-panel,
       #side-panel[data-panel="menu"],

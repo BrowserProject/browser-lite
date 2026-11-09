@@ -628,6 +628,13 @@ export class ViewImpl implements View {
         this.history = data as unknown as SessionHistory;
         this.emit('history', { history: this.history });
         return;
+      case 'scroll':
+        this.emit('scroll', {
+          x: Number(data.x) || 0,
+          y: Number(data.y) || 0,
+          user: !!data.user,
+        });
+        return;
       case 'title':
         this.title = String(data.title ?? '');
         this.emit('title', { title: this.title, url: String(data.url ?? this.url) });

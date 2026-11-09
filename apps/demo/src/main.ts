@@ -20,6 +20,7 @@ import {
 } from '@browser-lite/ui';
 import { askForAccessCode } from './access.js';
 import { addressToLoad, takePendingAddress } from './address-bar.js';
+import { hideBarWhileScrolling } from './bar-hiding.js';
 import { initBlockedPopups } from './blocked-popups.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
@@ -363,6 +364,7 @@ installShortcuts();
 fitVisualViewport();
 keepPageSizeWhileEditing(byId('pages'));
 followRotation();
+hideBarWhileScrolling();
 renderIcons();
 // Where the chrome ends (side panel and menu start there) and how high it is (the sheets of the
 // phone layout sit on its bar at the bottom)

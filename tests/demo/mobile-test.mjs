@@ -8,8 +8,9 @@
 // bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
 // bar, the permission prompt and the sign-in dialog are fully visible, the section names of the
 // settings stay on one line at 390 and 360 px, the close button of the settings stays at the top
-// while they scroll, and the desktop layout
-// comes back above the breakpoint. An Android phone as host gets the iPhone device by default.
+// while they scroll, the bar slides away while the user scrolls a page down and comes back when
+// they scroll up (the page gets its room), and the desktop layout comes back above the
+// breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
 //   node tests/demo/mobile-test.mjs [engine-dir]
@@ -44,7 +45,10 @@ const { url: siteURL } = await serve((req, res) => {
     return;
   }
   const name = req.url.slice(1) || 'one';
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page(`Page ${name}`));
+  const body = name === 'long' ? '<div style="height:5000px"></div>' : '';
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(page(`Page ${name}`) + body);
 });
 
 const stack = await startStack({ app: 'demo', token: 'mobile-token-0123456789abcdef' });
@@ -577,6 +581,94 @@ check('landscape: slim toolbar', barHeight <= 46, `${barHeight} px`);
 // The view paints in the new size after a moment
 await tab.waitForTimeout(1500);
 await screenshot(tab, 'mobile-landscape');
+
+// Like Chrome the bar slides away while the user scrolls the page down and comes back when they
+// scroll up or the page is at its top; the page takes its room (#472)
+await tab.evaluate((url) => window.blTest.load(url), `${siteURL}long`);
+check('long page', await loaded('Page long'));
+const barState = () => tab.evaluate(() => document.body.dataset.bar ?? 'shown');
+const waitBar = (state, ms = 10000) =>
+  tab
+    .waitForFunction((state) => (document.body.dataset.bar ?? 'shown') === state, state, {
+      timeout: ms,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+const cdp = BROWSER === 'chromium' ? await context.newCDPSession(tab) : null;
+/** The user scrolls the page by dy (down when positive): a finger in Chromium, else the wheel. */
+async function userScroll(dy) {
+  const [x, y] = [LANDSCAPE.width / 2, 180];
+  if (!cdp) {
+    await tab.mouse.move(x, y);
+    await tab.mouse.wheel(0, dy);
+    return;
+  }
+  const steps = 10;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= steps; i++) {
+    await tab.waitForTimeout(30);
+    const point = { x, y: y - (dy * i) / steps };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [point] });
+  }
+  // Still before lifting: no fling
+  await tab.waitForTimeout(200);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+const shownHeight = await pageHeight();
+await tab.evaluate(() => window.blTest.eval('scrollTo(0, 600)'));
+await tab.waitForTimeout(1000);
+check('bar: a scroll by the page itself keeps it', (await barState()) === 'shown');
+await userScroll(150);
+check('bar: scrolling down hides it', await waitBar('hidden'));
+const hiddenBar = await bar();
+const hiddenArea = (await boxes('#viewport')).list[0];
+check(
+  'bar hidden: below the window, the page area down to the bottom',
+  !!hiddenBar &&
+    hiddenBar.top >= LANDSCAPE.height - 0.5 &&
+    Math.abs(hiddenArea.bottom - LANDSCAPE.height) < 1,
+  JSON.stringify([hiddenBar, hiddenArea]),
+);
+check(
+  'bar hidden: the demo itself does not scroll',
+  await tab.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight),
+);
+await tab.waitForTimeout(700);
+const hiddenHeight = await pageHeight();
+check(
+  'bar hidden: the page gets its room',
+  hiddenHeight === LANDSCAPE.height && shownHeight === LANDSCAPE.height - barHeight,
+  `${shownHeight} -> ${hiddenHeight}`,
+);
+await userScroll(150);
+await tab.waitForTimeout(500);
+check('bar: scrolling on down keeps it hidden', (await barState()) === 'hidden');
+// With motion: the bar slides in over the page and gives the room back once it is there
+await tab.emulateMedia({ reducedMotion: 'no-preference' });
+await tab.evaluate(() => {
+  window.barStates = [];
+  new MutationObserver(() => {
+    const area = document.getElementById('viewport').getBoundingClientRect();
+    window.barStates.push(`${document.body.dataset.bar ?? 'shown'}:${Math.round(area.bottom)}`);
+  }).observe(document.body, { attributes: true, attributeFilter: ['data-bar'] });
+});
+await userScroll(-100);
+check('bar: scrolling up shows it', await waitBar('shown'));
+const states = await tab.evaluate(() => window.barStates.join(','));
+check(
+  'bar: it slides in over the page first, then takes its room',
+  states === `showing:${LANDSCAPE.height},shown:${LANDSCAPE.height - barHeight}`,
+  states,
+);
+await tab.waitForTimeout(700);
+check('bar shown: the page gives the room back', (await pageHeight()) === shownHeight);
+await tab.emulateMedia({ reducedMotion: 'reduce' });
+await userScroll(150);
+check('bar: hidden again', await waitBar('hidden'));
+await tab.evaluate(() => window.blTest.eval('scrollTo(0, 0)'));
+check('bar: back at the top of the page', await waitBar('shown'));
 await tab.tap('#menu-button');
 await shown('#side-panel');
 const low = (await boxes('#side-panel')).list[0];

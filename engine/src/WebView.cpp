@@ -603,8 +603,11 @@ void WebView::resize(IntSize size, float deviceScaleFactor)
     m_size = size;
     m_deviceScaleFactor = deviceScaleFactor;
     m_page->setDeviceScaleFactor(deviceScaleFactor);
-    if (RefPtr view = mainFrameView())
+    if (RefPtr view = mainFrameView()) {
+        // A scroll position the new size clamps is no scroll by the user (event scroll)
+        ScrollTypeScope scope(*view, ScrollType::Programmatic);
         view->resize(size);
+    }
     // An on-screen keyboard of the host covers the lower part: keep the field being typed in
     // visible, like Chrome
     if (shorter) {
@@ -1913,9 +1916,28 @@ void WebView::notifyNavigationState()
 }
 
 // Like Chrome's page state updates: the scroll position of the current entry reaches the host
-// without an event for every scrolled pixel
+// without an event for every scrolled pixel. The event scroll lets a host hide its toolbar while
+// the user scrolls, like Chrome's browser controls; a scroll by the user is one by wheel, finger,
+// keys or scrollbar (also its fling), not one by the page's script or a restored position
 void WebView::didScrollMainFrame()
 {
+    // Layout clamps the position (a shorter document) with the type of the scroll before
+    if (RefPtr view = mainFrameView(); view && view->currentScrollType() == ScrollType::User && !view->layoutContext().isInLayout())
+        m_scrollByUser = true;
+    if (!std::exchange(m_scrollEventPending, true)) {
+        RunLoop::mainSingleton().dispatch([id = m_id] {
+            auto* view = fromID(id);
+            if (!view)
+                return;
+            view->m_scrollEventPending = false;
+            RefPtr frameView = view->mainFrameView();
+            if (!frameView)
+                return;
+            auto position = frameView->scrollPosition();
+            notifyHost(id, "scroll", makeString("{\"x\":"_s, position.x(), ",\"y\":"_s, position.y(),
+                ",\"user\":"_s, std::exchange(view->m_scrollByUser, false) ? "true"_s : "false"_s, '}'));
+        });
+    }
     if (std::exchange(m_historyUpdatePending, true))
         return;
     RunLoop::mainSingleton().dispatchAfter(1_s, [id = m_id] {

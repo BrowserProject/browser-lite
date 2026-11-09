@@ -147,6 +147,12 @@ reopening has the position of its last second.
 `restoreHistory(history)` and `createView({ history })` bring the page back at that position, like
 back and forward.
 
+The `scroll` event of a view comes as the page's main frame scrolls (`x`, `y`, at most once per
+engine task) with `user` true for a scroll by the user (wheel, finger and its fling, keys,
+scrollbar) and false for one by the page's script, a restored position or a clamp of a resized
+view. A browser UI hides its toolbar with it while the user scrolls down, like Chrome's browser
+controls (the demo's `bar-hiding.ts`).
+
 Console messages come as `console` of the view (`ConsoleMessage`: `level`, `message`, `source`,
 `line`); those of service workers, which have no view, as `service-worker-console` of the browser
 with the worker's script URL as `source`.

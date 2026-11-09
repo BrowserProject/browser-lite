@@ -523,6 +523,13 @@ export interface ViewEvents {
    * (at most once a second while the page scrolls), so {@link View.history} restores it.
    */
   history: { history: SessionHistory };
+  /**
+   * The main frame scrolled to `x`, `y` (pixels, like `scrollX`/`scrollY` of
+   * {@link SessionHistory}), at most once per engine task. `user` is true for a scroll by the
+   * user (wheel, finger and its fling, keys, scrollbar), false for one by the page's script or a
+   * restored position. A browser hides its toolbar with it, like Chrome's browser controls.
+   */
+  scroll: { x: number; y: number; user: boolean };
   /** The title of the page changed, '' for a document without one; `url` is the page it belongs to. */
   title: { title: string; url: string };
   /** Load progress of the page (its main frame) from 0 to 1, 1 when done; iframes that navigate later do not report. */
