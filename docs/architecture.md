@@ -387,7 +387,12 @@ the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `Vid
 AudioWorklet `AudioData` (#259). A `<video>` in fullscreen shows its whole picture like the native
 players of phones (`video:fullscreen { object-fit: contain !important }` only for the WASM port in
 WebKit's `fullscreen.css`, patch 0101, #474): m.youtube.com fullscreens its `<video>` for the
-iPhone it sees and keeps its own `object-fit: cover`.
+iPhone it sees and keeps its own `object-fit: cover`. The media controls (WebKit's modern media
+controls with the Adwaita layout) take their icons from WebCore itself: patch 0103 compiles the
+Adwaita images into it (`Scripts/generate-media-controls-images.py`), GTK and WPE read them from
+a GResource. The player supports element fullscreen (`MediaPlayerPrivateWasm::supportsFullscreen`),
+so the controls show their fullscreen button inline and the exit button in fullscreen, and
+`webkitEnterFullscreen()` works (#476).
 
 ## Audio
 

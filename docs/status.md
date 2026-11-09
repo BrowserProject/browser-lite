@@ -102,7 +102,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
   zoo.ch covered the photo with opaque green). A video in fullscreen shows its whole picture like
   the native players of phones, also with the page's `object-fit: cover` (#474; m.youtube.com
-  fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame).
+  fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame). The media
+  controls show their icons (play, pause, skip, mute, fullscreen) and their exit button leaves
+  fullscreen (#476; every button was blank and fullscreen had no visible way out).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload, Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
@@ -488,6 +490,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- Media controls: no overflow menu (playback speed, subtitles, chapters) like Chrome's three dots;
+  `MEDIA_CONTROLS_CONTEXT_MENUS` is off for the port and would need the menu of the media controls
+  in the host (#476).
 - Clipboard: an image (`image/png`) in a `ClipboardItem` of `navigator.clipboard.write()` does not
   reach the host, only text and HTML do (#469; the event `clipboard` carries no files). Like
   WebKit, a write with several items resolves, Chrome rejects it.

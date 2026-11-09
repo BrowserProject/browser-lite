@@ -124,6 +124,9 @@ private:
     bool didLoadingProgress() const final;
 
     void setPresentationSize(const WebCore::IntSize&) final;
+    // Element fullscreen of the <video>: webkitEnterFullscreen() and the fullscreen button of the
+    // media controls, which without it is hidden inline and in fullscreen
+    bool supportsFullscreen() const final { return true; }
     bool supportsAcceleratedRendering() const final { return !!m_overlay; }
     PlatformLayer* platformLayer() const final { return m_overlay.get(); }
     void paint(WebCore::GraphicsContext&, const WebCore::FloatRect&) final;

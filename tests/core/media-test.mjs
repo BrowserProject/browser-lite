@@ -3,7 +3,8 @@
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
 // has video-overlay-test.mjs). Also MSE, blob:, data:, preload,
 // picture-in-picture, muted autoplay only in the view, a fullscreen video letterboxed over a
-// page object-fit: cover and the range special cases of media-sw.js.
+// page object-fit: cover, the icons of the media controls and their exit fullscreen button and
+// the range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -315,6 +316,23 @@ document.addEventListener('fullscreenchange', () => {
 });
 </script>`;
 
+// <video controls> into fullscreen through webkitEnterFullscreen(): the media controls show their
+// icons (the WASM port compiles them in, patch 0103) and the exit button, which needs the
+// player's fullscreen support
+const CONTROLS_FULLSCREEN_PAGE = `<!doctype html><title>Fullscreen controls</title><body style="margin:0;background:#fff">
+<video id="video" src="/clip.webm" controls muted playsinline style="display:block;width:320px;height:240px"></video>
+<button id="fs" style="position:absolute;left:20px;top:300px;width:200px;height:60px">Fullscreen</button>
+<script>
+const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const video = document.getElementById('video');
+video.addEventListener('loadedmetadata', () => result('cfsupported', video.webkitSupportsFullscreen), { once: true });
+document.getElementById('fs').addEventListener('click', () => video.webkitEnterFullscreen());
+document.addEventListener('fullscreenchange', () =>
+  result(document.fullscreenElement === video ? 'cfsin' : 'cfsout', innerWidth + ',' + innerHeight));
+// Firefox can resize the fullscreen window once more after the change
+addEventListener('resize', () => result('cfssize', innerWidth + ',' + innerHeight));
+</script>`;
+
 // <audio controls> on a blue page: the bar is only drawn once the controls exist
 const CONTROLS_PAGE = `<!doctype html><title>Controls</title><body style="margin:0;background:#00f">
 <audio controls src="/tone.wav" preload="none" style="position:absolute;left:20px;top:20px;width:300px;height:25px"></audio>`;
@@ -335,6 +353,7 @@ const { url: siteURL } = await serve((req, res) => {
     '/controls.html': CONTROLS_PAGE,
     '/autoplay.html': AUTOPLAY_PAGE,
     '/fullscreen.html': FULLSCREEN_PAGE,
+    '/controls-fullscreen.html': CONTROLS_FULLSCREEN_PAGE,
   }[req.url];
   if (html) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(html);
@@ -367,6 +386,17 @@ const result = (key, timeout = TIMEOUT) => results.wait(key, timeout);
 
 const isRed = (p) => !!p && p.r > 180 && p.g < 60 && p.b < 60;
 const isWhite = (p) => !!p && p.r > 200 && p.g > 200 && p.b > 200;
+// First pixel of the page in the box [x0, x1) x [y0, y1) (every 2 px) that is a light icon of the
+// media controls, null when there is none
+async function iconPixel(x0, x1, y0, y1) {
+  for (let y = y0; y < y1; y += 2) {
+    for (let x = x0; x < x1; x += 2) {
+      const [r, g, b] = await pagePixel(page, x, y);
+      if (r > 120 && g > 120 && b > 120) return { x, y, r, g, b };
+    }
+  }
+  return null;
+}
 // Pixel of the page until test(pixel) is true (at most 20 s)
 async function waitForPixel(x, y, test) {
   let pixel = null;
@@ -615,6 +645,10 @@ const barShown = await waitFor(
   250,
 );
 check('controls: <audio controls> shows its bar', barShown, JSON.stringify(barPixels.slice(0, 4)));
+// The play button at the left end of the bar: empty without the icons (patch 0103)
+let playIcon = null;
+await waitFor(async () => !!(playIcon = await iconPixel(34, 52, 28, 42)), 10000, 250);
+check('controls: the play button shows its icon', !!playIcon, JSON.stringify(playIcon));
 
 // ------------------------------------------------------------- autoplay
 const earlier = new Set((await players()).map((p) => p.id));
@@ -671,6 +705,57 @@ check(
 );
 await screenshot(page, 'media-fullscreen');
 await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+
+// ------------------------------------------------------ fullscreen controls
+await load(page, `${siteURL}controls-fullscreen.html`);
+check(
+  'fullscreen controls: webkitSupportsFullscreen',
+  (await result('cfsupported')) === 'true',
+  results.get('cfsupported'),
+);
+const cfsBox = await canvasOrigin(page);
+await page.mouse.click(cfsBox.x + 120, cfsBox.y + 330);
+const cfsIn = await result('cfsin', 20000);
+check('fullscreen controls: webkitEnterFullscreen() enters fullscreen', !!cfsIn);
+if (cfsIn) {
+  // The bar of the Adwaita fullscreen controls is 468 px wide, centered, 25 px above the bottom;
+  // the exit button is at its right end, nothing is right of the bar (the disabled overflow
+  // button showed there). The icons load one after the other, so the position must hold for two
+  // looks. The mouse over the video shows the controls.
+  let cfsWidth = 0;
+  let cfsHeight = 0;
+  let exitIcon = null;
+  let besideBar = null;
+  let last = '';
+  await waitFor(
+    async () => {
+      [cfsWidth, cfsHeight] = (results.get('cfssize') ?? cfsIn).split(',').map(Number);
+      const barRight = cfsWidth / 2 + 234;
+      await page.mouse.move(cfsBox.x + cfsWidth / 2, cfsBox.y + cfsHeight / 2);
+      await page.mouse.move(cfsBox.x + cfsWidth / 2 + 10, cfsBox.y + cfsHeight / 2 + 10);
+      exitIcon = await iconPixel(barRight - 54, barRight - 2, cfsHeight - 90, cfsHeight - 62);
+      besideBar = await iconPixel(barRight + 2, barRight + 40, cfsHeight - 90, cfsHeight - 62);
+      const seen = JSON.stringify([cfsWidth, cfsHeight, exitIcon?.x, exitIcon?.y, besideBar]);
+      const stable = !!exitIcon && seen === last;
+      last = seen;
+      return stable;
+    },
+    20000,
+    500,
+  );
+  check(
+    'fullscreen controls: the exit button shows its icon',
+    !!exitIcon,
+    JSON.stringify(exitIcon),
+  );
+  check('fullscreen controls: no button outside the bar', !besideBar, JSON.stringify(besideBar));
+  await screenshot(page, 'media-fullscreen-controls');
+  if (exitIcon) await page.mouse.click(cfsBox.x + exitIcon.x, cfsBox.y + exitIcon.y);
+  check(
+    'fullscreen controls: the exit button leaves fullscreen',
+    !!exitIcon && !!(await result('cfsout', 10000)),
+  );
+}
 
 // ------------------------------------------- range special cases (media-sw.js of the core)
 // The answer of the service worker must end instead of loading forever. We read
