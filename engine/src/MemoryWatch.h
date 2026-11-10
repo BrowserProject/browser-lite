@@ -15,4 +15,9 @@ void checkMemory(ReleaseCaches = ReleaseCaches::Yes);
 // cache, so the bytecode and the sources of pages that are gone go with the next GC.
 void pageLeft();
 
+// A view closed: like pageLeft, and a full GC collects what its pages left once no view closed for
+// a moment and the user does not work in a visible view. JSC itself learns of the garbage only at
+// its next full collection, which a big heap without allocations reached only after minutes.
+void viewClosed();
+
 } // namespace BrowserLite

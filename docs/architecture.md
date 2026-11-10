@@ -498,7 +498,12 @@ longer runs, and back to a page loaded again showed its top until its load was c
 every script evaluated with strong references, goes at every release and whenever a view leaves
 its page (`JSC::clearCodeCache`, patch 0102, #475): kept, it held the code of every page and
 frame that was gone, while the functions that live keep their code without it
-(`tests/core/memory-release-test.mjs`). Once the malloc area ends above 384 MB it grows the
+(`tests/core/memory-release-test.mjs`). When views close, a full GC collects what their pages
+left once no view closed for 1 s and the user does not work in a visible view (like the hidden
+views wait, `hiddenViewsWaitForUser`): JSC alone learns of that garbage only at its next full
+collection, and without allocations its timer waits longer the less the last full GC freed, so
+10 heavy tabs closed kept 240 MB of JS heap and their documents for minutes
+(`tests/core/closed-view-gc-test.mjs`). Once the malloc area ends above 384 MB it grows the
 memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
 From then on, or above the budget of 3 GB, it reports `memory-pressure` `{footprint, limit,
 level}` at every growth, and the host discards background views (#128, #171, #216). On iPhone

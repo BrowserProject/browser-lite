@@ -187,7 +187,7 @@ void WebView::close(int id)
         closeChoosers(id);
     openViews().remove(id);
     detachDeviceClients(id);
-    pageLeft();
+    viewClosed();
 }
 
 bool WebView::isOpen() const

@@ -166,7 +166,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   sources of every script evaluated until memory was short, now every memory release and every
   page a view leaves empty it (#475; 16 heavy page loads in one tab, then about:blank and a full
   GC, 2026-11-09 local: 474 to 525 instead of 573 to 619 MB in use, JS heap 39 to 61 instead of 71
-  to 79 MB, and each release frees 105 to 206 instead of 54 to 115 MB).
+  to 79 MB, and each release frees 105 to 206 instead of 54 to 115 MB). Closed tabs free their
+  memory within seconds: a full GC follows once no view closed for 1 s and the user leaves the
+  engine thread free (#498); before, JSC's timer alone collected their garbage, minutes later when
+  the last full GC had freed little (10 heavy sites closed, 2026-11-10 local: JS heap 238 MB, 60
+  documents and 1092 MB of malloc for about 4 minutes; now 5 s after closing JS heap 60 MB, 6
+  documents, 563 instead of 1057 MB).
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),

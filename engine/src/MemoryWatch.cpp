@@ -25,6 +25,8 @@
 //   page keeps it above the budget for good, often with most of it free again
 //   after the release, so above the budget memory is short only while the
 //   area stays full.
+// - after views closed, collects their garbage once the user leaves the engine
+//   thread free (viewClosed)
 // malloc_footprint() costs nothing (mallinfo() walks the whole heap and cost
 // about 25 ms per call on CNN).
 
@@ -33,6 +35,7 @@
 
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "HiddenViews.h"
 #include "Host.h"
 
 #include <algorithm>
@@ -44,10 +47,14 @@
 #include <malloc.h>
 #include <pthread.h>
 #include <JavaScriptCore/CodeCacheRelease.h>
+#include <JavaScriptCore/JSLock.h>
+#include <JavaScriptCore/VM.h>
 #include <WebCore/BackForwardCache.h>
 #include <WebCore/CommonVM.h>
 #include <WebCore/MemoryRelease.h>
 #include <wtf/MonotonicTime.h>
+#include <wtf/NeverDestroyed.h>
+#include <wtf/RunLoop.h>
 #include <wtf/text/MakeString.h>
 
 // From Emscripten's dlmalloc, not declared in any header
@@ -202,6 +209,42 @@ void checkMemory(ReleaseCaches release)
 void pageLeft()
 {
     JSC::clearCodeCache(WebCore::commonVM());
+}
+
+// Longer than the pause between closing two tabs, so a series of them is collected once
+static constexpr Seconds closedViewsQuietTime = 1_s;
+// How often the collection checks again while the user works in a visible view
+static constexpr Seconds closedViewsCheckInterval = 250_ms;
+
+static void collectClosedViews();
+
+static RunLoop::Timer& closedViewsTimer()
+{
+    static NeverDestroyed<RunLoop::Timer> timer(RunLoop::mainSingleton(), "ClosedViews"_s, collectClosedViews);
+    return timer;
+}
+
+// A full collection is a pause of the engine thread (hundreds of ms with a big heap): it waits
+// like a hidden view while the user works in a visible one
+static void collectClosedViews()
+{
+    if (hiddenViewsWaitForUser()) {
+        closedViewsTimer().startOneShot(closedViewsCheckInterval);
+        return;
+    }
+    auto& vm = WebCore::commonVM();
+    JSC::JSLockHolder lock(vm);
+    // heap.size() is expensive, only for the debug output
+    if (debugEnabled())
+        debugLog("Collecting the garbage of closed views (JS heap %zu MB)", vm.heap.size() >> 20);
+    // Runs at the end of the running work item, where the GC sees every root (EngineLoop.cpp)
+    vm.heap.collectNow(JSC::Async, JSC::CollectionScope::Full);
+}
+
+void viewClosed()
+{
+    pageLeft();
+    closedViewsTimer().startOneShot(closedViewsQuietTime);
 }
 
 } // namespace BrowserLite
