@@ -98,6 +98,16 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   icons. A 1600 x 1067 picture decodes in about the time of the same WebP (46 against 47 ms,
   JPEG 30 ms, locally). Sites of the hot functions profile now send AVIF too (Accept), so the
   decoder's common paths are in `engine.wasm`: 90 KB more gzip for the start, 230 KB deferred.
+  AVIF images no longer run the memory away (#488, patch 0107): each one decoded its whole
+  picture only to learn its size and kept the dav1d decoder and the YUV planes until it was
+  painted, and its reader kept the decoder alive forever, so every memory release that dropped
+  the decoded images made them decode again and lose the old ones. vimeo.com grew by about
+  35 MB/s while idle and crashed out of memory at 4.3 GB after about 2 minutes, figma.com too;
+  now figma.com stays at 464 MB of engine memory for 150 s and a local page of 50 large AVIF
+  images loads in under 5 s and stays at 369 MB (before: `load` after 40 s, out of memory after
+  115 s). vimeo.com (2026-11-10) stays at 2.6 GB after 45 s: one task of 11 to 14 s about 30 s
+  into the load takes 1.8 GB (in use afterwards 1.7 GB, JS heap 500 MB, decoded images
+  145 MB, no AVIF decoder in samples of the engine thread), not looked into yet.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to

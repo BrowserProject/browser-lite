@@ -1,0 +1,144 @@
+diff --git a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
+index 14e3e1af87..e36b56efad 100644
+--- a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
++++ b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
+@@ -109,7 +109,7 @@ bool AVIFImageDecoder::isComplete()
+ void AVIFImageDecoder::tryDecodeSize(bool allDataReceived)
+ {
+     if (!m_reader)
+-        m_reader = makeUnique<AVIFImageReader>(this);
++        m_reader = makeUnique<AVIFImageReader>(*this);
+ 
+     if (!m_reader->parseHeader(*m_data, allDataReceived))
+         return;
+diff --git a/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.cpp b/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.cpp
+index 5f12f723d3..2a770a90b1 100644
+--- a/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.cpp
++++ b/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.cpp
+@@ -36,8 +36,8 @@ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(AVIFImageReader);
+ 
+-AVIFImageReader::AVIFImageReader(RefPtr<AVIFImageDecoder>&& decoder)
+-    : m_decoder(WTF::move(decoder))
++AVIFImageReader::AVIFImageReader(AVIFImageDecoder& decoder)
++    : m_decoder(decoder)
+     , m_avifDecoder(avifDecoderCreate())
+ {
+     // Allow the PixelInformationProperty ('pixi') to be missing in AV1 image
+@@ -53,54 +53,62 @@ bool AVIFImageReader::parseHeader(const SharedBuffer& data, bool allDataReceived
+ {
+     auto dataSpan = data.span();
+     if (avifDecoderSetIOMemory(m_avifDecoder.get(), dataSpan.data(), dataSpan.size()) != AVIF_RESULT_OK)
+-        return allDataReceived ? m_decoder->setFailed() : false;
++        return allDataReceived ? m_decoder.setFailed() : false;
+ 
+-    if (avifDecoderParse(m_avifDecoder.get()) != AVIF_RESULT_OK
+-        || avifDecoderNextImage(m_avifDecoder.get()) != AVIF_RESULT_OK)
+-        return allDataReceived ? m_decoder->setFailed() : false;
++    // Parsing the container gives the size and the frame count; decoding the first frame here
++    // would cost a full AV1 decode for every image, also the ones that are never painted.
++    if (avifDecoderParse(m_avifDecoder.get()) != AVIF_RESULT_OK)
++        return allDataReceived ? m_decoder.setFailed() : false;
+ 
+     if (!m_dataParsed && allDataReceived)
+         m_dataParsed = true;
+ 
+     const avifImage* firstImage = m_avifDecoder->image;
+-    return m_decoder->setSize(IntSize(firstImage->width, firstImage->height));
++    return m_decoder.setSize(IntSize(firstImage->width, firstImage->height));
+ }
+ 
+ void AVIFImageReader::decodeFrame(size_t frameIndex, ScalableImageDecoderFrame& buffer, const SharedBuffer& data)
+ {
+-    if (m_decoder->failed())
++    if (m_decoder.failed())
+         return;
+ 
++    // The size is known once the container is parsed, so a frame can be asked for before its
++    // data has arrived; that is only final once all data is there.
++    bool allDataReceived = m_decoder.isAllDataReceived();
++
+     if (!m_dataParsed) {
+         auto dataSpan = data.span();
+         if (avifDecoderSetIOMemory(m_avifDecoder.get(), dataSpan.data(), dataSpan.size()) != AVIF_RESULT_OK) {
+-            m_decoder->setFailed();
++            if (allDataReceived)
++                m_decoder.setFailed();
+             return;
+         }
+ 
+         if (avifDecoderParse(m_avifDecoder.get()) != AVIF_RESULT_OK) {
+-            m_decoder->setFailed();
++            if (allDataReceived)
++                m_decoder.setFailed();
+             return;
+         }
+ 
+-        if (m_decoder->isAllDataReceived())
++        if (allDataReceived)
+             m_dataParsed = true;
+     }
+ 
+     if (avifDecoderNthImage(m_avifDecoder.get(), frameIndex) != AVIF_RESULT_OK) {
+-        m_decoder->setFailed();
++        if (allDataReceived)
++            m_decoder.setFailed();
+         return;
+     }
+ 
+-    IntSize imageSize(m_decoder->size());
++    IntSize imageSize(m_decoder.size());
+ 
+     if (IntSize(m_avifDecoder->image->width, m_avifDecoder->image->height) != imageSize) {
+-        m_decoder->setFailed();
++        m_decoder.setFailed();
+         return;
+     }
+ 
+-    if (buffer.isInvalid() && !buffer.initialize(imageSize, m_decoder->premultiplyAlpha())) {
+-        m_decoder->setFailed();
++    if (buffer.isInvalid() && !buffer.initialize(imageSize, m_decoder.premultiplyAlpha())) {
++        m_decoder.setFailed();
+         return;
+     }
+ 
+@@ -110,13 +118,13 @@ void AVIFImageReader::decodeFrame(size_t frameIndex, ScalableImageDecoderFrame&
+     avifRGBImageSetDefaults(&decodedRGBImage, m_avifDecoder->image);
+ 
+     decodedRGBImage.depth = 8;
+-    decodedRGBImage.alphaPremultiplied = m_decoder->premultiplyAlpha();
++    decodedRGBImage.alphaPremultiplied = m_decoder.premultiplyAlpha();
+     decodedRGBImage.format = AVIF_RGB_FORMAT_BGRA;
+     decodedRGBImage.rowBytes = imageSize.width() * sizeof(uint32_t);
+     decodedRGBImage.pixels = reinterpret_cast<uint8_t*>(buffer.backingStore()->pixelsStartingAt(0, 0).data());
+ 
+     if (avifImageYUVToRGB(m_avifDecoder->image, &decodedRGBImage) != AVIF_RESULT_OK) {
+-        m_decoder->setFailed();
++        m_decoder.setFailed();
+         return;
+     }
+ 
+diff --git a/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.h b/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.h
+index ae99561c88..0dca9328a2 100644
+--- a/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.h
++++ b/Source/WebCore/platform/image-decoders/avif/AVIFImageReader.h
+@@ -37,7 +37,7 @@ class ScalableImageDecoderFrame;
+ class AVIFImageReader {
+     WTF_MAKE_TZONE_ALLOCATED(AVIFImageReader);
+ public:
+-    AVIFImageReader(RefPtr<AVIFImageDecoder>&&);
++    explicit AVIFImageReader(AVIFImageDecoder&);
+     ~AVIFImageReader();
+ 
+     bool parseHeader(const SharedBuffer&, bool allDataReceived);
+@@ -45,7 +45,8 @@ public:
+     size_t imageCount() const;
+ 
+ private:
+-    RefPtr<WebCore::AVIFImageDecoder> m_decoder;
++    // The decoder owns this reader; a strong reference back would keep both alive forever.
++    AVIFImageDecoder& m_decoder;
+     AVIFUniquePtr<avifDecoder> m_avifDecoder;
+ 
+     bool m_dataParsed { false };

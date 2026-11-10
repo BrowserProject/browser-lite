@@ -167,6 +167,10 @@ Images decode with WebKit's own decoders: PNG, JPEG, GIF, WebP, BMP, ICO and AVI
 dav1d, on one thread and without assembly). AVIF matters because the engine sends Safari's user
 agent and Safari has taken AVIF since version 16: sites that choose the format by user agent send
 it (AliExpress), and images are requested with `image/avif` in Accept like Safari (#447).
+An AVIF image learns its size and frame count from the container alone (`avifDecoderParse`), so
+an image that is never painted holds its data and the parsed boxes, not a dav1d decoder and a
+decoded picture; the reader does not hold its decoder, which owns it, so both go with the image
+(patch 0107, #488).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 The decoded frame of an image that is the contents of a compositing layer stays while the layer
