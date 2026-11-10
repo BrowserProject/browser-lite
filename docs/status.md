@@ -89,7 +89,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454; on iPhone Safari 18 emptied tiles kept showing stale pieces of earlier frames and pages until #463), the first paint right after the first visible layout, before
   waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
   33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
-  Worklet, WebGL 1 and 2, recovery after GPU loss. After a rotation or an on-screen keyboard the
+  Worklet, WebGL 1 and 2 with the host's GPU named to pages (#496: on a host with SwiftShader Google
+  Maps drew with WebGL, every frame held the engine thread about 650 ms in `readPixels`, its
+  controls came after 20 to 70 s and a search often moved no map; now it leaves WebGL like Chrome
+  there, controls after 4 to 10 s), recovery after GPU loss. After a rotation or an on-screen keyboard the
   last frame stays unscaled until the page painted the new size (#404; before, it was stretched
   or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
   WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all

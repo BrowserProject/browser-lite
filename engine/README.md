@@ -22,7 +22,9 @@ fullscreen video a page's `object-fit: cover` cropped, or the icons of the media
 the Adwaita theme reads only from a GResource, or the link address that stayed in the status
 when a cookie dialog appeared under a still mouse, or the cells at the edge of a table with
 collapsed borders, each of which looked through its whole column while it painted, or the AVIF
-images that decoded their whole picture to learn their size and were never freed)
+images that decoded their whole picture to learn their size and were never freed, or the GPU
+WebGL named to pages, always Apple's instead of the host's, so Google Maps drew with WebGL on a
+software renderer)
 comes as patches from `patches/`.
 
 ## Folders

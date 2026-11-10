@@ -203,6 +203,10 @@ transform feedback object, so no page sees another page's data. After each frame
 pixels with `readPixels` into the page or, with compositing, into a layer. A lost context reports
 `webglcontextlost` at its next `clear` or draw, never synchronously from `makeContextCurrent`
 (WebGL often holds `objectGraphLock` there, #157).
+`WEBGL_debug_renderer_info` names the GPU the host browser tells its own pages about (its
+unmasked vendor and renderer, read once per host context; patch 0108): pages choose their
+renderer by it, Google Maps for example leaves WebGL to a software renderer like SwiftShader
+(#496).
 
 ## Input
 

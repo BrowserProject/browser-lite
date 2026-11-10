@@ -1,0 +1,79 @@
+diff --git a/Source/WebCore/html/canvas/WebGLRenderingContextBase.cpp b/Source/WebCore/html/canvas/WebGLRenderingContextBase.cpp
+index 2216b3ef90..e93a3c3055 100644
+--- a/Source/WebCore/html/canvas/WebGLRenderingContextBase.cpp
++++ b/Source/WebCore/html/canvas/WebGLRenderingContextBase.cpp
+@@ -2125,13 +2125,25 @@ WebGLAny WebGLRenderingContextBase::getParameter(GCGLenum pname)
+         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter"_s, "invalid parameter name, OES_standard_derivatives not enabled"_s);
+         return nullptr;
+     case WebGLDebugRendererInfo::UNMASKED_RENDERER_WEBGL:
++#if PLATFORM(WASM)
++        // The GPU of the host browser that draws, as the host tells it: pages pick their
++        // renderer by it (Google Maps leaves WebGL to a software renderer like SwiftShader)
++        if (m_webglDebugRendererInfo)
++            return String::fromUTF8(protect(m_context)->getString(GraphicsContextGL::RENDERER).span());
++#else
+         if (m_webglDebugRendererInfo)
+             return "Apple GPU"_str;
++#endif
+         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter"_s, "invalid parameter name, WEBGL_debug_renderer_info not enabled"_s);
+         return nullptr;
+     case WebGLDebugRendererInfo::UNMASKED_VENDOR_WEBGL:
++#if PLATFORM(WASM)
++        if (m_webglDebugRendererInfo)
++            return String::fromUTF8(protect(m_context)->getString(GraphicsContextGL::VENDOR).span());
++#else
+         if (m_webglDebugRendererInfo)
+             return "Apple Inc."_str;
++#endif
+         synthesizeGLError(GraphicsContextGL::INVALID_ENUM, "getParameter"_s, "invalid parameter name, WEBGL_debug_renderer_info not enabled"_s);
+         return nullptr;
+     case GraphicsContextGL::VERTEX_ARRAY_BINDING_OES: // OES_vertex_array_object
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+index 07c2fb8a9e..943b8d6449 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+@@ -81,6 +81,9 @@ struct HostContext {
+     int users { 0 };
+     // Context whose state is currently in the host context
+     int stateOwner { 0 };
++    // GL_VENDOR and GL_RENDERER: the GPU of the host browser, read on first use
++    std::string vendor;
++    std::string renderer;
+ };
+ 
+ // A context of WebKit (virtual, shares the host context)
+@@ -544,6 +547,17 @@ EM_JS(int, blCreateGLContext, (int webgl2), {
+     return handle;
+ });
+ 
++// The GPU the host context runs on as the host browser tells it to pages
++// (WEBGL_debug_renderer_info, already masked by the host where it masks it),
++// else its plain VENDOR and RENDERER
++EM_JS(char*, blHostGPUString, (int renderer), {
++    var gl = GLctx;
++    var info = gl.getExtension("WEBGL_debug_renderer_info");
++    var value = info ? gl.getParameter(renderer ? info.UNMASKED_RENDERER_WEBGL : info.UNMASKED_VENDOR_WEBGL)
++        : gl.getParameter(renderer ? gl.RENDERER : gl.VENDOR);
++    return stringToNewUTF8(typeof value === "string" ? value : "");
++});
++
+ EM_JS(int, blIsContextLost, (int handle), {
+     var context = GL.getContext(handle);
+     return !context || context.GLctx.isContextLost() ? 1 : 0;
+@@ -823,6 +837,16 @@ extern "C" {
+ 
+ const GLubyte* GL_APIENTRY GL_GetString(GLenum name)
+ {
++    // Like ANGLE: the real GPU, which WebGL shows only as the unmasked strings
++    if (current && (name == GL_VENDOR || name == GL_RENDERER)) {
++        auto& value = name == GL_RENDERER ? current->host->renderer : current->host->vendor;
++        if (value.empty()) {
++            char* string = blHostGPUString(name == GL_RENDERER);
++            value = string ? string : "";
++            free(string);
++        }
++        return reinterpret_cast<const GLubyte*>(value.c_str());
++    }
+     if (current && name == GL_EXTENSIONS)
+         return reinterpret_cast<const GLubyte*>(current->enabledString.c_str());
+     if (current && name == GL_REQUESTABLE_EXTENSIONS_ANGLE)

@@ -1,6 +1,6 @@
 // WebGL: the page draws with WebGL 1 and WebGL 2, the engine forwards the GL calls to the WebGL
 // of the host browser (platform/wasm/angle) and paints the result into the page. Also the loss
-// of the host contexts (webglcontextlost, webglcontextrestored).
+// of the host contexts (webglcontextlost, webglcontextrestored) and the GPU the page is told about.
 //
 //   node tests/core/webgl-test.mjs [engine-dir]
 import {
@@ -480,6 +480,12 @@ for (const version of [1, 2]) {
 }
 const gl = document.createElement('canvas').getContext('webgl');
 result('extensions', gl ? gl.getSupportedExtensions().length : -1);
+// The GPU as WEBGL_debug_renderer_info tells it (pages choose their renderer by it)
+for (const version of [1, 2]) {
+  const context = document.createElement('canvas').getContext(version === 2 ? 'webgl2' : 'webgl');
+  const info = context && context.getExtension('WEBGL_debug_renderer_info');
+  result('gpu' + version, info ? encodeURIComponent(JSON.stringify([context.getParameter(info.UNMASKED_VENDOR_WEBGL), context.getParameter(info.UNMASKED_RENDERER_WEBGL)])) : 'none');
+}
 </script>`;
 
 const { url: siteURL } = await serve((req, res) =>
@@ -588,6 +594,31 @@ check(
 );
 const extensions = Number(await result('extensions'));
 check('WebGL 1: extensions', extensions > 5, String(extensions));
+
+// The page sees the GPU the host browser draws with, as the host tells it to its own pages: Google
+// Maps leaves its WebGL renderer for a software one like SwiftShader, which would otherwise take
+// the engine thread for most of a second per frame (#496)
+const hostGPU = await page.evaluate(() =>
+  [1, 2].map((version) => {
+    const context = document.createElement('canvas').getContext(version === 2 ? 'webgl2' : 'webgl');
+    const info = context?.getExtension('WEBGL_debug_renderer_info');
+    return info
+      ? JSON.stringify([
+          context.getParameter(info.UNMASKED_VENDOR_WEBGL),
+          context.getParameter(info.UNMASKED_RENDERER_WEBGL),
+        ])
+      : 'none';
+  }),
+);
+for (const version of [1, 2]) {
+  const value = await result('gpu' + version);
+  const gpu = value && value !== 'none' ? decodeURIComponent(value) : value;
+  check(
+    `WebGL ${version}: WEBGL_debug_renderer_info names the host's GPU`,
+    gpu === hostGPU[version - 1],
+    `${gpu} (host ${hostGPU[version - 1]})`,
+  );
+}
 
 // The picture must reach the page too
 const pixelAt = (x, y) => pagePixel(page, x, y);

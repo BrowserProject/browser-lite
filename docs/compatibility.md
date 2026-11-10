@@ -89,7 +89,7 @@ starts without stored data.
 
 | Site | Status | Note |
 |---|---|---|
-| Google Search, Google Maps, Google Translate | ok | Google's consent page first. Maps draws with WebGL |
+| Google Search, Google Maps, Google Translate | ok | Google's consent page first. Maps draws with WebGL, on a host with a software renderer (SwiftShader) without, like Chrome there (#496) |
 | YouTube | ok | Consent page first; the start page without login is empty, like in Chrome |
 | Wikipedia, Bing, DuckDuckGo, Yahoo | ok | |
 | X, Instagram, Facebook, LinkedIn | ok | Login pages |
