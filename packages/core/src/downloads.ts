@@ -87,16 +87,6 @@ export class DownloadImpl implements Download {
   }
 }
 
-/** Text of a page source (view-source download) in its charset. */
-export function decodeSource(bytes: ArrayBuffer, mime: string): string {
-  const charset = /charset=([\w-]+)/i.exec(mime || '')?.[1] || 'utf-8';
-  try {
-    return new TextDecoder(charset).decode(bytes);
-  } catch {
-    return new TextDecoder().decode(bytes);
-  }
-}
-
 interface DownloadsHost {
   readonly module: EngineModule;
   readonly ready: boolean;
@@ -106,14 +96,10 @@ interface DownloadsHost {
 
 /**
  * The running downloads (engine events download-start and download-done, data through
- * onEngineDownloadData). A page source of viewSource arrives the same way and goes to its view
- * as the event `source`. Without a `download` listener a finished file is saved.
+ * onEngineDownloadData). Without a `download` listener a finished file is saved.
  */
 export class Downloads {
-  private readonly running = new Map<
-    number,
-    { download: DownloadImpl; view: ViewImpl | undefined; source: boolean; announced: boolean }
-  >();
+  private readonly running = new Map<number, { download: DownloadImpl; announced: boolean }>();
 
   constructor(private readonly host: DownloadsHost) {}
 
@@ -130,10 +116,9 @@ export class Downloads {
         if (this.host.ready) this.host.module._bl_download_cancel(cancelled.id);
       },
     );
-    const source = !!data.viewSource;
-    const entry = { download, view, source, announced: false };
+    const entry = { download, announced: false };
     this.running.set(download.id, entry);
-    if (!source) entry.announced = this.host.announceDownload(download);
+    entry.announced = this.host.announceDownload(download);
   }
 
   data(id: number, bytes: Uint8Array<ArrayBuffer>): void {
@@ -144,16 +129,8 @@ export class Downloads {
     const entry = this.running.get(Number(data.id));
     if (!entry) return;
     this.running.delete(entry.download.id);
-    const { download, view } = entry;
+    const { download } = entry;
     download.finish(String(data.error ?? ''));
-    if (entry.source) {
-      if (!download.blob || !view || view.closed) return;
-      download.blob.arrayBuffer().then((bytes) => {
-        if (!view.closed)
-          view.emit('source', { url: download.url, text: decodeSource(bytes, download.mime) });
-      });
-      return;
-    }
     if (download.state === 'done' && !entry.announced) download.save();
   }
 

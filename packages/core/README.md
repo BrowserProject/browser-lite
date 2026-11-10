@@ -121,13 +121,12 @@ what a browser UI has to do, and nothing happens without a listener:
 | Event | What the host does |
 |---|---|
 | `new-view` (browser) | `window.open` or `target=_blank`: the view runs but has no container, so it cannot be seen. `view.attach(element)` it (for example in a new tab), or `view.close()` it |
-| `open-tab` | Ctrl/Cmd, middle or Shift click on a link, also one with `target=_blank`: open `url` in a new view as `disposition` says (`background`, `foreground` or `window`, like Chrome), or ignore it |
+| `open-tab` | Ctrl/Cmd, middle or Shift click on a link, also one with `target=_blank`, or `view.viewSource()` (`view-source:<url>`, `foreground`): open `url` in a new view as `disposition` says (`background`, `foreground` or `window`, like Chrome), or ignore it |
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
 | `context-menu` | A right click or long press (`touch` true, the menu comes when the finger lifts) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
 | `unhandled-key` | A keydown into the page (while `view.focused`) that the page did not handle (no `preventDefault`, editing command or default action): run your keyboard shortcut for it, like Chrome, where the page gets Ctrl+F or Ctrl+U first. Call `preventDefault` on the host keydown of such a shortcut and let it through to the view; run the ones the page must never get (Ctrl+T, Ctrl+W) on the host keydown right away |
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
-| `source` | `view.viewSource()`: show the text |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
 | `memory-pressure` (browser) | The engine memory runs short (`footprint` and `limit` in bytes; the limit is about 1 GB in a 32 bit browser, found at runtime; on iPhone and iPad it comes from 512 MB on, iOS ends the whole page before the memory stops growing): close or discard background views, tell the user when none is left |
 | `unresponsive` (browser) | No answer for 10 s after input: offer to wait (`browser.keepWaiting()`, the event comes again 10 s later while it lasts) or to restart; `responsive` when it answers again |

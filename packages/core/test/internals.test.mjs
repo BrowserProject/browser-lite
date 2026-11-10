@@ -126,6 +126,7 @@ test('typed addresses: https:// with an http:// fallback, local ones http:// lik
   assert.equal(typedAddress('a.example/x?y'), 'https://a.example/x?y');
   assert.equal(typedAddress(' a.example '), 'https://a.example/');
   assert.equal(typedAddress('about:blank'), 'about:blank');
+  assert.equal(typedAddress('view-source:https://a.example/'), 'view-source:https://a.example/');
   // Port 80 is http's own: upgraded like the address without it
   assert.equal(typedAddress('neverssl.example:80'), 'https://neverssl.example/');
   for (const [text, url] of [

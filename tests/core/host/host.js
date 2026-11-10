@@ -155,9 +155,6 @@ function track(view, prefix) {
   view.on('files-skipped', ({ files }) =>
     record(`files-skipped:${files.map(({ name, reason }) => `${name}:${reason}`).join()}`),
   );
-  view.on('source', ({ text }) => {
-    host.source = text;
-  });
   // window.focus() (for example WindowClient.focus() of a service worker) makes the view active
   view.on('focus-request', () => activate(view));
   view.on('close', () => {
@@ -257,7 +254,6 @@ const host = {
   ready: null,
   error: null,
   beforeStart: null,
-  source: null,
   events: [],
   warnings: [],
   downloads: [],

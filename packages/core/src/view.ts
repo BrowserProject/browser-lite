@@ -476,7 +476,8 @@ export class ViewImpl implements View {
   }
 
   viewSource(): void {
-    this.call((m) => m._bl_view_source(this.id));
+    if (/^https?:/.test(this.url))
+      this.emit('open-tab', { url: `view-source:${this.url}`, disposition: 'foreground' });
   }
 
   command(name: EditCommand): void {

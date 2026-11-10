@@ -19,6 +19,7 @@
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
 #include "UserContent.h"
+#include "ViewSource.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
 #include "wasm/WasmBridge.h"
@@ -658,7 +659,7 @@ bool FrameLoaderClient::isMainFrame() const
     return m_frameLoader->frame().isMainFrame();
 }
 
-// Addresses the engine loads itself (view-source: is shown by the host), and
+// Addresses the engine loads itself (view-source: in ViewSource.cpp), and
 // filesystem:, which in the host browser would be the host's storage.
 // Everything else (mailto:, tel:, zoommtg:, ...) can only be passed on to the
 // system by the host browser.
@@ -687,6 +688,19 @@ static void openExternalURL(int viewId, LocalFrame& frame, SandboxFlags sandboxF
     notifyHost(viewId, "external-url", makeString("{\"url\":\""_s, jsonEscape(url.string()), "\"}"_s));
 }
 
+// Like Chrome a view-source: page opens only in the main frame from the
+// address bar or the host, and comes back with its history entry or a reload.
+// A page cannot navigate there itself, not even with a redirect.
+static bool mayShowSource(LocalFrame& frame, const NavigationAction& action, const URL& url, const ResourceResponse& redirectResponse)
+{
+    if (frame.isMainFrame() && redirectResponse.isNull()
+        && (action.isRequestFromClientOrUserInput() || action.type() == NavigationType::BackForward || action.type() == NavigationType::Reload))
+        return true;
+    if (RefPtr document = frame.document())
+        document->addConsoleMessage(MessageSource::Security, MessageLevel::Error, makeString("Not allowed to load view-source: address '"_s, url.string(), "'"_s));
+    return false;
+}
+
 // Ctrl/Cmd+click, middle click or Shift+click on a link, also one with
 // target=_blank: the page stays and the host opens the link, like Chrome's
 // DispositionFromClick a tab in the background, with Shift in the foreground,
@@ -711,6 +725,10 @@ void FrameLoaderClient::dispatchDecidePolicyForNavigationAction(const Navigation
 {
     if (isExternalURL(request.url())) {
         openExternalURL(m_view->id(), m_frameLoader->frame(), sandboxFlags, action, request.url());
+        function(PolicyAction::Ignore);
+        return;
+    }
+    if (isViewSourceURL(request.url()) && !mayShowSource(m_frameLoader->frame(), action, request.url(), redirectResponse)) {
         function(PolicyAction::Ignore);
         return;
     }
@@ -793,6 +811,10 @@ void FrameLoaderClient::dispatchDecidePolicyForNewWindowAction(const NavigationA
     if (isExternalURL(request.url())) {
         Ref frame = m_frameLoader->frame();
         openExternalURL(m_view->id(), frame, frame->effectiveSandboxFlags(), action, request.url());
+        function(PolicyAction::Ignore);
+        return;
+    }
+    if (isViewSourceURL(request.url()) && !mayShowSource(m_frameLoader->frame(), action, request.url(), { })) {
         function(PolicyAction::Ignore);
         return;
     }

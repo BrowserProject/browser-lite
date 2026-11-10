@@ -136,7 +136,7 @@ select popup) are in the same sheet.
   the address bar or a panel starts over next to the page (`openedBy`, #416). Shift+click and
   Ctrl/Cmd+Shift+click open the link in front directly after its page; Chrome opens a window
   for Shift+click, the demo has none (#438). View source (Ctrl+U, context menu) opens its tab
-  in front directly after its page too (#468).
+  in front directly after its page too (#468), as a `view-source:` page with history (#490).
   Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
@@ -256,4 +256,4 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `settings.ts`, `settings-page.ts` | settings and what applies at the start; the settings page |
 | `extensions.ts` | extension host with the UI slots as `app` (toolbar, side panel, context menu, settings), built-in extensions (none yet), switches and data in the profile pref `extensions` ([docs/extensions.md](../../docs/extensions.md)) |
 | `dialogs.ts`, `prompts.ts`, `permissions.ts` | dialogs of the pages in the page with background suppression; prompts only of the tab in front; permission decisions in the profile |
-| `shortcuts.ts`, `engine-message.ts`, `view-source.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, messages over the page area, page source, reloads, `window.blTest`, helpers |
+| `shortcuts.ts`, `engine-message.ts`, `reload.ts`, `test-hooks.ts`, `util.ts` | shortcuts, messages over the page area, reloads, `window.blTest`, helpers |

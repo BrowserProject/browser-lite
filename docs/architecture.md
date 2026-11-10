@@ -291,9 +291,16 @@ patch 0080, #408). A navigation whose response becomes a download (`attachment`,
 engine does not show) continues as the download (`continueAsDownload`, like WebKit2's
 `NetworkResourceLoader::convertToDownload`): the paused request is taken from the
 `ResourceLoader` before WebCore cancels it, or the body comes from the HTTP cache, so a one-time
-link or a form POST reaches the server once. `<a download>`, view source and a navigation the
+link or a form POST reaches the server once. `<a download>` and a navigation the
 engine has no load for (answered by a service worker or WebKit's memory cache) send a request of
 their own (#412).
+A `view-source:` address is a document of its own like in Chrome (`engine/src/ViewSource.cpp`,
+#490): the loader strategy serves the main frame's load of it from a request for the address after
+the scheme (cookies of a navigation, redirects followed, the body of any status) and answers with
+the text decoded like the page would be and escaped into numbered lines, sandboxed by its CSP.
+WebCore keeps it in the history, so back, forward and reload come back to it. The navigation
+policy lets it through only in the main frame from the host or the user (`bl_load_url`) and for
+back, forward and reload; a page, a frame or a redirect cannot open it.
 A synchronous load (a synchronous `XMLHttpRequest`, its CORS preflight, an external entity of
 XML; `engine/src/SyncLoad.cpp`, #471) cannot block the engine thread, which is where curl's
 answers arrive. Like a dialog (#258) it defers the page group (`PageGroupLoadDeferrer`) and runs

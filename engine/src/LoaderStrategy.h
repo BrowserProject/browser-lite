@@ -55,8 +55,6 @@ void startDownload(int viewId, const WebCore::ResourceRequest&, const String& su
 bool continueAsDownload(int viewId, WebCore::ResourceLoader&, const WebCore::ResourceResponse&);
 // Stops a running download, which ends with download-done (error "Cancelled")
 void cancelDownload(int id);
-// Loads the source of an address (like a download, flagged viewSource)
-void startViewSource(int viewId, const URL&);
 
 // Stores Set-Cookie of the response if the request may have cookies
 void storeCookies(const WebCore::ResourceRequest&, const WebCore::CurlResponse&);

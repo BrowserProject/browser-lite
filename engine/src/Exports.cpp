@@ -290,16 +290,6 @@ EMSCRIPTEN_KEEPALIVE int bl__presenter_thread()
     return static_cast<int>(reinterpret_cast<uintptr_t>(Compositor::presenterThread()));
 }
 
-// Source of the current page (Ctrl+U): arrives like a download flagged viewSource
-EMSCRIPTEN_KEEPALIVE void bl_view_source(int id)
-{
-    withView(id, [id](WebView& view) {
-        URL url { view.currentURL() };
-        if (url.protocolIsInHTTPFamily())
-            startViewSource(id, url);
-    });
-}
-
 EMSCRIPTEN_KEEPALIVE void bl_download_cancel(int id)
 {
     runOnEngineThread([id] { cancelDownload(id); });

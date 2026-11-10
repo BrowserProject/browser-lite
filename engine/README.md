@@ -75,6 +75,7 @@ comes as patches from `patches/`.
     keeps its request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
     the page waits like below a dialog, the other views go on), `Sockets.cpp`, `HttpCache.cpp`,
     `HttpAuth.cpp` (401 with Basic and Digest: stored credentials, the host's sign-in prompt),
+    `ViewSource.cpp` (`view-source:` pages: the source of the address with numbered lines),
     `PlatformStrategies.cpp`, `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite in memory, written by its storage thread),
     `CookieJarWasm.cpp` (Cookie Store API),

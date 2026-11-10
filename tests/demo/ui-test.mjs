@@ -486,6 +486,26 @@ check(
   sourceTab && sourceIndex === pageIndex + 1 && sourceIndex < (await tabCount()) - 1,
   `page ${pageIndex}, source ${sourceIndex} of ${await tabCount()}`,
 );
+// The source page has a history entry like in Chrome: after an address typed into its tab, Back
+// shows the source again
+const sourceAddress = await address();
+await go(siteURL + 'after-source');
+check('address typed into the source tab loads', await waitLoaded('Page after-source'));
+check(
+  'back enabled after leaving the source page',
+  await tab
+    .waitForFunction(() => !document.getElementById('back').disabled, null, { timeout: 10000 })
+    .then(
+      () => true,
+      () => false,
+    ),
+);
+await tab.click('#back');
+check(
+  'back shows the source page again',
+  sourceAddress.startsWith('view-source:') && (await waitAddress(sourceAddress)),
+  `${sourceAddress} -> ${await address()}`,
+);
 
 // Print: window.print() of the page and Ctrl+P show the preview with the PDF of the engine
 await tab.locator('#tab-list .tab.active .title').click();

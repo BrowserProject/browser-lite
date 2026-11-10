@@ -31,7 +31,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
   at the scroll position of its page like Chrome, also when the demo or the tab is closed right
   after a scroll (#440, #452, #453),
-  print to PDF, view source in a tab directly after its page like Chrome (#468),
+  print to PDF, view source in a tab directly after its page like Chrome (#468), `view-source:`
+  addresses as pages with history, also typed into the address bar (#490),
   external schemes to the host after a click (#148), context menu data, link hover, fullscreen,
   HTTP authentication with Basic and Digest and a sign-in dialog like Chrome's (#257),
   synchronous `XMLHttpRequest`, where only its page waits like below a dialog (before it always

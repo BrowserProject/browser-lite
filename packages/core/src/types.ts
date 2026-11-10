@@ -483,7 +483,11 @@ export interface View {
   stopFind(): void;
   /** Builds a PDF; delivered with the event `print`. */
   print(): void;
-  /** Loads the page source; delivered with the event `source`. */
+  /**
+   * Page source like Chrome's Ctrl+U: the event `open-tab` asks for `view-source:<url>` in front.
+   * Only for http(s) pages. A `view-source:` address loads in any view (`load`) as a page of its
+   * own with history: the source of the address after the scheme with numbered lines.
+   */
   viewSource(): void;
   /** Editor command on the focused element or selection of the page. */
   command(name: EditCommand): void;
@@ -591,8 +595,8 @@ export interface ViewEvents {
   /** Click, key, text or paste into the page (until the next document). */
   'user-activation': Record<string, never>;
   /**
-   * Ctrl/Cmd, middle or Shift click on a link, also one with target=_blank (no `new-view` then):
-   * the page stays, the host opens `url` as `disposition` says.
+   * Ctrl/Cmd, middle or Shift click on a link, also one with target=_blank (no `new-view` then),
+   * or {@link View.viewSource}: the page stays, the host opens `url` as `disposition` says.
    */
   'open-tab': { url: string; disposition: LinkDisposition };
   /**
@@ -617,8 +621,6 @@ export interface ViewEvents {
   'context-menu': ContextMenuInfo;
   /** A PDF of the page from {@link View.print} or window.print(). */
   print: { pdf: Blob; title: string };
-  /** Source of the page from {@link View.viewSource}. */
-  source: { url: string; text: string };
   /** Files of an upload, drop or paste the page did not get. */
   'files-skipped': { files: SkippedFile[] };
   /** The view closed (close(), window.close() or the end of the browser). */

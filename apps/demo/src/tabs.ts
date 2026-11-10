@@ -26,7 +26,6 @@ import {
   updateToolbar,
 } from './toolbar.js';
 import { byId, element, isBlank, isInternal } from './util.js';
-import { sourcePage } from './view-source.js';
 import { rememberSiteZoom, siteZoom, zoomHost } from './zoom.js';
 
 const list: Tab[] = [];
@@ -274,10 +273,6 @@ export class Tab implements SessionTab {
     });
     this.on('print', (event) => {
       if (this.isActive) showPreview(event.pdf, event.title);
-    });
-    this.on('source', (event) => {
-      const page = sourcePage(event.url, event.text);
-      openLinkTab('', this)?.view.loadHTML(page.html, page.baseURL);
     });
     if (!debug)
       this.on('console', (event) => {

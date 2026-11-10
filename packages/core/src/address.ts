@@ -1,6 +1,6 @@
 // Schemes whose addresses load a document in the view; others (mailto:, javascript:, app links)
 // never commit there
-const LOADS = new Set(['http:', 'https:', 'file:', 'about:', 'data:']);
+const LOADS = new Set(['http:', 'https:', 'file:', 'about:', 'data:', 'view-source:']);
 
 // Error pages after which a typed address falls back to http://: no connection or no valid TLS.
 // An HTTP error is an answer of the https:// site and stays, like in Chrome

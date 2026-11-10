@@ -10,6 +10,7 @@
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
 #include "SyncLoad.h"
+#include "ViewSource.h"
 
 #include "Engine.h"
 #include "Host.h"
@@ -753,9 +754,9 @@ private:
 // and blob: itself, those need no network.
 class Download final : public RefCounted<Download>, public CurlRequestClient {
 public:
-    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename, bool viewSource = false)
+    static void start(int viewId, ResourceRequest&& request, const String& suggestedFilename)
     {
-        Ref download = create(viewId, suggestedFilename, viewSource);
+        Ref download = create(viewId, suggestedFilename);
         if (request.url().protocolIsData() || request.url().protocolIsBlob()) {
             download->loadLocally(request.url());
             return;
@@ -769,7 +770,7 @@ public:
     // The load of a navigation after its response: false if it cannot continue (no response yet)
     static bool takeOver(int viewId, ResourceLoad& load, const ResourceResponse& response)
     {
-        Ref download = create(viewId, { }, false);
+        Ref download = create(viewId, { });
         auto handOver = load.handOver(download.get());
         if (handOver.body) {
             download->announce(response);
@@ -809,17 +810,16 @@ private:
         return downloads;
     }
 
-    static Ref<Download> create(int viewId, const String& suggestedFilename, bool viewSource)
+    static Ref<Download> create(int viewId, const String& suggestedFilename)
     {
         static int nextID = 1;
-        return adoptRef(*new Download(nextID++, viewId, suggestedFilename, viewSource));
+        return adoptRef(*new Download(nextID++, viewId, suggestedFilename));
     }
 
-    Download(int id, int viewId, const String& suggestedFilename, bool viewSource)
+    Download(int id, int viewId, const String& suggestedFilename)
         : m_id(id)
         , m_viewId(viewId)
         , m_filename(suggestedFilename)
-        , m_viewSource(viewSource)
     {
     }
 
@@ -852,7 +852,7 @@ private:
             filename = "download"_s;
         notifyHost(m_viewId, "download-start", makeString("{\"id\":"_s, m_id, ",\"url\":\""_s, isData ? String { "data:"_s } : jsonEscape(response.url().string()),
             "\",\"filename\":\""_s, jsonEscape(filename), "\",\"mime\":\""_s, jsonEscape(response.mimeType()),
-            "\",\"size\":"_s, response.expectedContentLength(), m_viewSource ? ",\"viewSource\":true}"_s : "}"_s));
+            "\",\"size\":"_s, response.expectedContentLength(), '}'));
     }
 
     static String errorText(const ResourceError& error)
@@ -860,10 +860,10 @@ private:
         return error.localizedDescription().isEmpty() ? "Error"_s : error.localizedDescription();
     }
 
-    // Like Chrome: an error page is no file (view source shows it though)
+    // Like Chrome: an error page is no file
     bool acceptsResponse(const ResourceResponse& response)
     {
-        if (m_viewSource || response.httpStatusCode() < 400)
+        if (response.httpStatusCode() < 400)
             return true;
         finish(makeString("HTTP "_s, response.httpStatusCode()));
         return false;
@@ -916,8 +916,6 @@ private:
     int m_id;
     int m_viewId;
     String m_filename;
-    // View source: the host shows the data as text instead of saving it
-    bool m_viewSource { false };
     unsigned m_redirectCount { 0 };
     RefPtr<CurlRequest> m_request;
     // The client of a request taken over from a ResourceLoad
@@ -934,13 +932,6 @@ void startDownload(int viewId, const ResourceRequest& request, const String& sug
 void cancelDownload(int id)
 {
     Download::cancel(id);
-}
-
-void startViewSource(int viewId, const URL& url)
-{
-    ResourceRequest request { URL { url } };
-    request.setFirstPartyForCookies(url);
-    Download::start(viewId, WTF::move(request), { }, true);
 }
 
 // Favicon: small, entirely in memory, goes to the caller as a whole
@@ -1053,6 +1044,10 @@ private:
             loader.start();
             return;
         }
+        if (isViewSourceURL(loader.request().url())) {
+            startViewSourceLoad(loader);
+            return;
+        }
         // A responsible service worker first; it can hand it back to the network
         if (ServiceWorkers::startFetch(loader, [this, loader = Ref { loader }] { startNetworkLoad(loader); }))
             return;
@@ -1090,8 +1085,10 @@ private:
 
     void remove(ResourceLoader* loader) final
     {
-        if (loader)
+        if (loader) {
             ServiceWorkers::cancelFetch(*loader);
+            cancelViewSourceLoad(*loader);
+        }
         if (auto load = m_loads.take(loader))
             load->cancel();
     }

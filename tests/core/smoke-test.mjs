@@ -412,7 +412,13 @@ try {
   );
 
   await page.evaluate(() => window.blTest.view().viewSource());
-  check('source event', await waitFor(() => window.blHost.source?.includes('<title>More</title>')));
+  check(
+    'viewSource asks for a view-source: tab',
+    await waitFor(
+      (url) => window.blHost.events.includes(`open-tab:foreground:view-source:${url}`),
+      MORE_URL,
+    ),
+  );
 
   await page.evaluate(() => window.blTest.view().setZoom(1.5));
   check(
