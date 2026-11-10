@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Sets up browser-lite on a public Ubuntu or Debian server (repeatable, needs root there):
-# Docker, the user deploy for the deploy workflow (SSH key only, login shell deploy-shell.sh),
-# server.env with the domain and a generated relay token, SSH with keys only, fail2ban, a
-# firewall with only 22, 80 and 443 open, automatic security updates.
+# Sets up browser-lite on an Ubuntu or Debian server behind a Cloudflare Tunnel (repeatable, needs
+# root there): Docker, cloudflared as a service with the tunnel's token, the user deploy for the
+# deploy workflow (SSH key only, login shell deploy-shell.sh), server.env with the domain and a
+# generated relay token, SSH with keys only, fail2ban, a firewall with only 22 open, automatic
+# security updates. The server needs no public address: the tunnel connects outwards.
 #
-#   DOMAIN=browser-lite.example.com DEPLOY_KEY_FILE=<public key> apps/demo/deploy/setup-server.sh root@<host>
+#   DOMAIN=browser-lite.example.com DEPLOY_KEY_FILE=<public key> TUNNEL_TOKEN_FILE=<file> \
+#     apps/demo/deploy/setup-server.sh root@<host>
 #
 # DEPLOY_KEY_FILE: the public half of the key of the deploy workflow (its private half is the
-# repository secret DEPLOY_SSH_KEY). The relay token stays on the server (/opt/browser-lite/server.env).
+# repository secret DEPLOY_SSH_KEY). TUNNEL_TOKEN_FILE: the token of the tunnel (README). The relay
+# token stays on the server (/opt/browser-lite/server.env).
 set -euo pipefail
 here="$(dirname "$0")"
 
-target="${1:?Usage: DOMAIN=... DEPLOY_KEY_FILE=... apps/demo/deploy/setup-server.sh root@<host>}"
-: "${DOMAIN:?DOMAIN missing}" "${DEPLOY_KEY_FILE:?DEPLOY_KEY_FILE missing}"
+target="${1:?Usage: DOMAIN=... DEPLOY_KEY_FILE=... TUNNEL_TOKEN_FILE=... apps/demo/deploy/setup-server.sh root@<host>}"
+: "${DOMAIN:?DOMAIN missing}" "${DEPLOY_KEY_FILE:?DEPLOY_KEY_FILE missing}" "${TUNNEL_TOKEN_FILE:?TUNNEL_TOKEN_FILE missing}"
 [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { echo "invalid DOMAIN" >&2; exit 2; }
 key="$(cat "$DEPLOY_KEY_FILE")"
 [[ "$key" =~ ^ssh-ed25519\ [A-Za-z0-9+/=]+(\ [A-Za-z0-9@._\ -]+)?$ ]] || { echo "DEPLOY_KEY_FILE: one ssh-ed25519 key" >&2; exit 2; }
+tunnel="$(cat "$TUNNEL_TOKEN_FILE")"
+[[ "$tunnel" =~ ^[A-Za-z0-9+/=_-]+$ ]] || { echo "TUNNEL_TOKEN_FILE: one token" >&2; exit 2; }
+# shellcheck source=versions.env
+source "$here/../../../versions.env"
 
 scp -q "$here/deploy-shell.sh" "$target:/tmp/browser-lite-deploy-shell"
 
@@ -27,6 +34,18 @@ apt-get update -q
 command -v docker >/dev/null || apt-get install -y -q docker.io
 docker compose version >/dev/null 2>&1 || apt-get install -y -q docker-compose-v2
 apt-get install -y -q curl ca-certificates fail2ban ufw unattended-upgrades
+
+# cloudflared of versions.env, checked against its SHA256, as a service with the tunnel's token
+if [ "\$(cloudflared --version 2>/dev/null | awk '{print \$3}')" != '$CLOUDFLARED_VERSION' ]; then
+    deb=/tmp/cloudflared.deb
+    curl -fsSL -o "\$deb" 'https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64.deb'
+    echo '$CLOUDFLARED_DEB_SHA256  '"\$deb" | sha256sum -c --quiet
+    dpkg -i "\$deb" >/dev/null
+    rm "\$deb"
+fi
+systemctl list-unit-files cloudflared.service >/dev/null 2>&1 && cloudflared service uninstall >/dev/null 2>&1 || true
+cloudflared service install '$tunnel' >/dev/null 2>&1
+systemctl enable -q --now cloudflared
 
 install -m 755 /tmp/browser-lite-deploy-shell /usr/local/bin/browser-lite-deploy-shell
 rm /tmp/browser-lite-deploy-shell
@@ -80,9 +99,6 @@ systemctl restart fail2ban
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 ufw allow 22/tcp >/dev/null
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
-ufw allow 443/udp >/dev/null
 ufw --force enable >/dev/null
 
 echo 'APT::Periodic::Update-Package-Lists "1";' > /etc/apt/apt.conf.d/20auto-upgrades

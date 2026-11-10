@@ -4,8 +4,8 @@
 #
 #   deploy-shell -c '<image digest> <commit> <user>'    (the GitHub token on stdin)
 #
-# Gets compose.yml, Caddyfile and versions.env of that commit from the GitHub API, starts the
-# image by digest behind Caddy and checks /healthz. Anything else is refused.
+# Gets compose.yml of that commit from the GitHub API, starts the image by digest and checks
+# /healthz through the tunnel. Anything else is refused.
 set -euo pipefail
 
 repo=BrowserProject/browser-lite
@@ -26,16 +26,12 @@ IFS= read -r token
 
 cd "$dir"
 trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-for path in apps/demo/deploy/compose.yml apps/demo/deploy/Caddyfile versions.env; do
-    printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --config - \
-        -H 'Accept: application/vnd.github.raw' -o "$(basename "$path").new" \
-        "https://api.github.com/repos/$repo/contents/$path?ref=$sha"
-done
-for file in compose.yml Caddyfile versions.env; do mv "$file.new" "$file"; done
-caddy="$(sed -n 's/^CADDY_IMAGE=//p' versions.env)"
-[[ "$caddy" =~ ^[a-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$ ]] || { echo "deploy-shell: no CADDY_IMAGE" >&2; exit 1; }
+printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsSL --retry 3 --config - \
+    -H 'Accept: application/vnd.github.raw' -o compose.yml.new \
+    "https://api.github.com/repos/$repo/contents/apps/demo/deploy/compose.yml?ref=$sha"
+mv compose.yml.new compose.yml
 printf '%s' "$token" | docker login ghcr.io -u "$user" --password-stdin >/dev/null
-printf 'IMAGE=%s\nCADDY_IMAGE=%s\n' "$image" "$caddy" > image.env
+printf 'IMAGE=%s\n' "$image" > image.env
 compose=(docker compose -p browser-lite --env-file server.env --env-file image.env)
 "${compose[@]}" pull -q
 "${compose[@]}" up -d --wait --wait-timeout 90 --remove-orphans

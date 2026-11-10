@@ -1,12 +1,15 @@
-# browser-lite on the server: the demo behind Caddy (HTTPS with Let's Encrypt, HTTP/3). The deploy
-# (deploy-shell.sh) sets IMAGE (always by digest) and CADDY_IMAGE (versions.env); DOMAIN and
-# RELAY_TOKEN come from server.env on the server, never from the repository.
+# browser-lite on the server, behind a Cloudflare Tunnel: cloudflared on the server (setup-server.sh)
+# forwards the domain to the published port, which listens only on the loopback interface.
+# The deploy (deploy-shell.sh) sets IMAGE (always by digest); DOMAIN and RELAY_TOKEN come from
+# server.env on the server, never from the repository.
 services:
   browser-lite:
     image: ${IMAGE:?IMAGE missing}
     restart: unless-stopped
-    # No port on the host: only Caddy reaches it, so X-Forwarded-For can be trusted
-    expose: ["8080"]
+    # Only cloudflared on the same host reaches it: Cloudflare puts the client address last in
+    # X-Forwarded-For, so one proxy can be trusted
+    ports:
+      - "127.0.0.1:8080:8080"
     environment:
       ALLOWED_HOSTS: ${DOMAIN:?DOMAIN missing}
       RELAY_TOKEN: ${RELAY_TOKEN:?RELAY_TOKEN missing}
@@ -19,27 +22,5 @@ services:
     logging:
       driver: local
 
-  caddy:
-    image: ${CADDY_IMAGE:?CADDY_IMAGE missing}
-    restart: unless-stopped
-    depends_on: [browser-lite]
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      DOMAIN: ${DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
-    security_opt: [no-new-privileges:true]
-    logging:
-      driver: local
-
 volumes:
   profile:
-  caddy-data:
-  caddy-config:

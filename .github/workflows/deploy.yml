@@ -115,6 +115,20 @@ jobs:
       contents: read
       packages: read
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ needs.image.outputs.sha }}
+          sparse-checkout: versions.env
+          sparse-checkout-cone-mode: false
+      # The server sits behind a Cloudflare Tunnel: SSH goes through cloudflared, which Cloudflare
+      # Access lets through only with the deploy's service token
+      - name: cloudflared of versions.env
+        run: |
+          source versions.env
+          curl -fsSL -o cloudflared \
+            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  cloudflared" | sha256sum -c --quiet
+          install -m 755 cloudflared /usr/local/bin/cloudflared
       - name: Restart
         env:
           TOKEN: ${{ github.token }}
@@ -124,6 +138,8 @@ jobs:
           HOST: ${{ secrets.DEPLOY_HOST }}
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.DEPLOY_ACCESS_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.DEPLOY_ACCESS_SECRET }}
         # The token only on stdin: deploy-shell.sh fetches the deploy files with it and pulls the image
         run: |
           install -d -m 700 ~/.ssh
@@ -132,4 +148,5 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/deploy' EXIT
           printf '%s\n' "$TOKEN" | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes "deploy@$HOST" "$IMAGE $SHA $ACTOR"
+            -o StrictHostKeyChecking=yes -o 'ProxyCommand=cloudflared access ssh --hostname %h' \
+            "deploy@$HOST" "$IMAGE $SHA $ACTOR"

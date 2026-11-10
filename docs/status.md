@@ -238,8 +238,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   it runs.
 - **Yardstick**: 257 of 280 checks like Chromium.
 - **CI and deploy**: every push to `main` builds, tests and deploys the public demo;
-  all jobs on GitHub-hosted runners, the deploy logs in to the public server over SSH with a key
-  of its own, Caddy serves HTTPS and HTTP/3 in front (#335).
+  all jobs on GitHub-hosted runners, the server sits behind a Cloudflare Tunnel and the deploy
+  logs in over SSH through it with a key of its own and an Access service token (#335, #482).
 
 ## Measurements (local, first visit)
 
