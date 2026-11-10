@@ -119,6 +119,10 @@ check(
 // Back from the page cache WebKit resets fields with autocomplete=off (reset() of the form
 // control, after pageshow): the address bar and the find text keep what they show
 await page.keyboard.press('Control+f');
+// The page sees Ctrl+F first; the find bar opens when it did not prevent it
+await page.waitForFunction(() => document.activeElement?.id === 'find-input', null, {
+  timeout: TIMEOUT,
+});
 await page.keyboard.type('three');
 await page.evaluate(() => {
   document.getElementById('address-form').reset();
