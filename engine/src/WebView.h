@@ -18,6 +18,7 @@
 #include <wtf/CompletionHandler.h>
 #include <wtf/Deque.h>
 #include <wtf/Function.h>
+#include <wtf/MonotonicTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/URL.h>
@@ -134,8 +135,16 @@ public:
     // Input (coordinates in CSS pixels relative to the view)
     // buttons: the pressed buttons after the event like MouseEvent.buttons (1 left, 2 right,
     // 4 middle). tapPointer: the mouse events of a tap by that touch pointer, after its pointer
-    // events (no second pointerdown, click of type "touch")
-    void mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0, std::optional<WebCore::PointerID> tapPointer = std::nullopt);
+    // events (no second pointerdown, click of type "touch"). moves: the host's moves a move
+    // stands for, oldest first (PointerEvent.getCoalescedEvents; x, y the last, movement their sum)
+    struct MouseMove {
+        double x { 0 };
+        double y { 0 };
+        double movementX { 0 };
+        double movementY { 0 };
+        MonotonicTime time;
+    };
+    void mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0, std::optional<WebCore::PointerID> tapPointer = std::nullopt, std::span<const MouseMove> moves = { });
     void wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Drag and drop: from the page (DragClient) and from the host (bl_drag,
     // phase 0 = over the page, 1 = left, 2 = drop; data as JSON)

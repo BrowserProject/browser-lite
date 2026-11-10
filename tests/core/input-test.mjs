@@ -61,6 +61,7 @@ const PAGE = `<!doctype html>
   #rich { position: absolute; left: 330px; top: 280px; width: 220px; height: 30px; }
   #check { position: absolute; left: 180px; top: 80px; width: 20px; height: 20px; margin: 0; }
   #focuslink { position: absolute; left: 220px; top: 80px; }
+  #coal { position: absolute; left: 600px; top: 340px; width: 220px; height: 120px; background: #edc; }
 </style></head>
 <body>
 <input id="text" autocomplete="off">
@@ -85,6 +86,7 @@ const PAGE = `<!doctype html>
 <div id="rich" contenteditable>rich text</div>
 <input id="check" type="checkbox">
 <a id="focuslink" href="/nowhere" onclick="event.preventDefault()">Focus</a>
+<div id="coal"></div>
 <div id="objects">
   <object id="o-svg" data="/image.svg" type="image/svg+xml"></object>
   <embed id="o-embed" src="/image.svg">
@@ -127,6 +129,25 @@ const PAGE = `<!doctype html>
     });
   }
   pad.addEventListener('contextmenu', (e) => e.preventDefault());
+  // getCoalescedEvents() of trusted pointermoves: the first move over #coal keeps the engine busy,
+  // the hover moves meanwhile reach the page as one move with all of them, a drag after it
+  const coal = document.getElementById('coal');
+  const coalLog = [];
+  let coalBusy = false;
+  coal.addEventListener('pointermove', (e) => {
+    const list = e.getCoalescedEvents();
+    const last = list.at(-1);
+    const ordered = list.every((c, i) => !i || (c.timeStamp >= list[i - 1].timeStamp && c.clientX > list[i - 1].clientX));
+    const alike = list.every((c) => c.type === 'pointermove' && c.isTrusted && !c.bubbles && !c.cancelable && c.pointerId === e.pointerId && c.pointerType === e.pointerType && c.buttons === e.buttons);
+    const ok = e.isTrusted && e.pointerType === 'mouse' && !!last && last.clientX === e.clientX && last.clientY === e.clientY && ordered && alike;
+    coalLog.push((e.buttons ? 'drag' : 'hover') + ':' + list.length + (ok ? '' : ':bad'));
+    if (!coalBusy) {
+      coalBusy = true;
+      const end = performance.now() + 600;
+      while (performance.now() < end);
+    }
+  });
+  coal.addEventListener('pointerup', () => console.log('RESULT coalesced=' + coalLog.join(' ')));
   // The page's own Ctrl+G (like its own find next)
   document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.key === 'g') {
@@ -368,6 +389,28 @@ check(
     'pointerdown:2:2:p0.5 mousedown:2:2 pointerup:2:0:p0 mouseup:2:0',
   ].every((part) => buttons.includes(part)),
   buttons,
+);
+
+// 1c) PointerEvent.getCoalescedEvents(): at least the move itself for every trusted pointermove
+// (Excalidraw and other drawing apps read their points from it), and the hover moves the engine
+// joined while the page was busy
+await page.mouse.move(...(await at(610, 400)));
+await page.mouse.move(...(await at(700, 400)), { steps: 10 });
+await page.waitForTimeout(800);
+await page.mouse.down();
+await page.mouse.move(...(await at(800, 410)), { steps: 5 });
+await page.mouse.up();
+const coalesced = ((await result('coalesced')) ?? '').split(' ');
+const hoverMax = Math.max(
+  0,
+  ...coalesced.filter((e) => e.startsWith('hover:')).map((e) => Number(e.split(':')[1])),
+);
+check(
+  'coalesced events of trusted pointermoves',
+  coalesced.every((e) => /^(hover|drag):[1-9]\d*$/.test(e)) &&
+    coalesced.some((e) => e === 'drag:1') &&
+    hoverMax >= 2,
+  coalesced.join(' '),
 );
 
 // 2) Typing: normal keys (keydown) and text without a key (insertText, like an IME)

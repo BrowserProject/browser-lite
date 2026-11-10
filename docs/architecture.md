@@ -226,7 +226,9 @@ input (like the compositor's answers, #359) is taken in between two of its tasks
 WebCore's timers (#365), makes WTF's
 RunLoop return between two of its functions (patch 0072, #347) and WebCore's loops of deferred
 and async scripts and of the page's event loop return after one item (patch 0074, #351). Hidden
-views wait while the user works in a visible one (#364, see Threads). Waiting mouse moves coalesce (#350).
+views wait while the user works in a visible one (#364, see Threads). Waiting mouse moves coalesce (#350)
+into one move whose `PointerEvent.getCoalescedEvents()` lists them all, each with its own position,
+movement and time; every other trusted pointermove lists itself (#492).
 Mouse events carry the host's pressed buttons (`MouseEvent.buttons`, which also gives
 `PointerEvent.pressure`); a further button pressed or released while one is held (a host
 `pointermove` with a `button`) becomes a mousedown or mouseup (#370).

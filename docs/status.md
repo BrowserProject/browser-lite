@@ -57,7 +57,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the link address follows a dialog that appears under a still mouse (#481),
   mouseout and mouseleave on the first move after back or forward to a cached page (#398),
   taps under the overlay scrollbars at the right edge on phones (#413), no hover and mouseover from a
-  scroll after a tap (#426).
+  scroll after a tap (#426), `PointerEvent.getCoalescedEvents()` with every host move a pointermove
+  stands for (#492; before, empty for every trusted move). WebCore's own pointermove after a
+  scroll still has an empty list, as in upstream WebKit.
   Input runs before the engine's queued work (#347), waiting mouse moves coalesce (#350), the
   parser yields after 50 ms (#349): on 20min.ch locally the 90th percentile of input latency
   during the load went from 3.5 to 0.8 s; a Moto G71 before the change: median 6 s, up to 23 s.

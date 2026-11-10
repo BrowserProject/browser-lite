@@ -103,24 +103,19 @@ static void withNavigation(int id, Function&& function)
     withView(id, std::forward<Function>(function));
 }
 
-// A mouse move the engine has not handled yet; a newer one replaces it (Blink sends one per
-// frame). Each move hit tests the page, which lays it out first: while a page loads that took
+// Mouse moves the engine has not handled yet; newer ones join them and they reach the page as
+// one move at the newest position (Blink sends one per frame), with all of them as its coalesced
+// events. Each move hit tests the page, which lays it out first: while a page loads that took
 // 300 ms and more, and a hovering mouse queued moves faster than they ran. Only on the host's
 // main thread (the bl_* calls) and in the task that handles it.
-struct MoveValues {
-    double x { 0 };
-    double y { 0 };
-    double movementX { 0 };
-    double movementY { 0 };
-    int buttons { 0 };
-    int modifiers { 0 };
-};
 struct PendingMove : ThreadSafeRefCounted<PendingMove> {
-    explicit PendingMove(const MoveValues& values)
-        : values(values)
+    PendingMove(const WebView::MouseMove& move, int modifiers)
+        : moves { move }
+        , modifiers(modifiers)
     {
     }
-    MoveValues values;
+    Vector<WebView::MouseMove> moves;
+    int modifiers;
 };
 static Lock s_movesLock;
 static HashMap<int, Ref<PendingMove>>& openMoves() WTF_REQUIRES_LOCK(s_movesLock)
@@ -158,35 +153,45 @@ static int dragButton(int buttons)
     return buttons & 1 ? 0 : buttons & 4 ? 1 : buttons & 2 ? 2 : -1;
 }
 
-static void moveMouse(int id, const MoveValues& values)
+// One move to the page for the host's moves, at the newest position with the movement of all
+static void dispatchMove(WebView& view, std::span<const WebView::MouseMove> moves, int buttons, int modifiers)
+{
+    double movementX = 0;
+    double movementY = 0;
+    for (auto& move : moves) {
+        movementX += move.movementX;
+        movementY += move.movementY;
+    }
+    view.mouseEvent(2, dragButton(buttons), buttons, moves.back().x, moves.back().y, 0, modifiers, movementX, movementY, std::nullopt, moves);
+}
+
+static void moveMouse(int id, const WebView::MouseMove& move, int buttons, int modifiers)
 {
     // With a button pressed every move counts (dragging, selecting, drag and drop fires dragover
     // per move): only hovering coalesces
-    if (values.buttons) {
-        withInput(id, [values](WebView& view) { view.mouseEvent(2, dragButton(values.buttons), values.buttons, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY); });
+    if (buttons) {
+        withInput(id, [move, buttons, modifiers](WebView& view) { dispatchMove(view, std::span { &move, 1 }, buttons, modifiers); });
         return;
     }
-    Ref move = adoptRef(*new PendingMove(values));
+    Ref pending = adoptRef(*new PendingMove(move, modifiers));
     {
         Locker locker { s_movesLock };
         if (auto it = openMoves().find(id); it != openMoves().end()) {
-            auto& open = it->value->values;
-            open = { values.x, values.y, open.movementX + values.movementX, open.movementY + values.movementY, values.buttons, values.modifiers };
+            it->value->moves.append(move);
+            it->value->modifiers = modifiers;
             return;
         }
-        openMoves().set(id, move.copyRef());
+        openMoves().set(id, pending.copyRef());
     }
-    runUrgentOnEngineThread([id, move = WTF::move(move)] {
-        MoveValues values;
+    runUrgentOnEngineThread([id, pending = WTF::move(pending)] {
         {
             Locker locker { s_movesLock };
             // Still open: closed now, the next move queues anew
-            if (auto it = openMoves().find(id); it != openMoves().end() && it->value.ptr() == move.ptr())
+            if (auto it = openMoves().find(id); it != openMoves().end() && it->value.ptr() == pending.ptr())
                 openMoves().remove(it);
-            values = move->values;
         }
         if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
-            view->mouseEvent(2, dragButton(values.buttons), values.buttons, values.x, values.y, 0, values.modifiers, values.movementX, values.movementY);
+            dispatchMove(*view, pending->moves, 0, pending->modifiers);
     });
 }
 
@@ -334,7 +339,7 @@ EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, int buttons, do
 // buttons like in bl_mouse, without one there is no dragging/selecting
 EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movementX, double movementY, int buttons, int modifiers)
 {
-    moveMouse(id, { x, y, movementX, movementY, buttons, modifiers });
+    moveMouse(id, { x, y, movementX, movementY, MonotonicTime::now() }, buttons, modifiers);
 }
 
 // Dragging from the host over the page: phase 0 = over, 1 = left, 2 = dropped.

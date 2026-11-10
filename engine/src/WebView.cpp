@@ -1070,18 +1070,20 @@ namespace {
 // (with pointer lock the only movement)
 class MouseEventWasm final : public PlatformMouseEvent {
 public:
-    MouseEventWasm(const DoublePoint& position, MouseButton button, unsigned short buttons, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt)
-        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, MonotonicTime::now(), 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
+    MouseEventWasm(const DoublePoint& position, MouseButton button, unsigned short buttons, PlatformEvent::Type type, int clickCount, OptionSet<PlatformEvent::Modifier> modifiers, DoublePoint movement, std::optional<PointerID> tapPointer = std::nullopt, MonotonicTime time = MonotonicTime::now())
+        : PlatformMouseEvent(position, position, button, type, clickCount, modifiers, time, 0, tapPointer ? SyntheticClickType::OneFingerTap : SyntheticClickType::NoTap, MouseEventInputSource::UserDriven, tapPointer.value_or(mousePointerID))
     {
         m_buttons = buttons;
         m_movementDelta = movement;
         if (tapPointer)
             m_pointerType = touchPointerEventType();
     }
+
+    void setCoalescedEvents(Vector<PlatformMouseEvent>&& events) { m_coalescedEvents = WTF::move(events); }
 };
 }
 
-void WebView::mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX, double movementY, std::optional<PointerID> tapPointer)
+void WebView::mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX, double movementY, std::optional<PointerID> tapPointer, std::span<const MouseMove> moves)
 {
     RefPtr frame = mainFrame();
     if (!frame)
@@ -1110,6 +1112,16 @@ void WebView::mouseEvent(int type, int button, int buttons, double x, double y, 
 
     DoublePoint position { x, y };
     MouseEventWasm event { position, mouseButton, static_cast<unsigned short>(buttons), eventType, clickCount, modifiersFromBits(modifiers), { movementX, movementY }, tapPointer };
+    // A trusted pointermove has at least one coalesced event (Pointer Events 3): the moves it
+    // stands for, like WebKit2's WebPageProxy and Blink, else itself
+    if (eventType == PlatformEvent::Type::MouseMoved) {
+        auto coalesced = WTF::map(moves, [&](auto& move) -> PlatformMouseEvent {
+            return MouseEventWasm { { move.x, move.y }, mouseButton, static_cast<unsigned short>(buttons), eventType, 0, modifiersFromBits(modifiers), { move.movementX, move.movementY }, tapPointer, move.time };
+        });
+        if (coalesced.isEmpty())
+            coalesced.append(event);
+        event.setCoalescedEvents(WTF::move(coalesced));
+    }
 
     auto& handler = frame->eventHandler();
     switch (eventType) {
