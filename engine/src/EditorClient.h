@@ -20,6 +20,10 @@ namespace BrowserLite {
 // only or disabled, or an editable element
 bool takesTextInput(WebCore::Page&);
 
+// Next key of an on-screen keyboard without an enterkeyhint in a single line text field: the
+// focus moves to the next field of its form like in Chrome, nowhere without one
+void focusNextField(WebCore::Page&);
+
 class EditorClient final : public WebCore::EditorClient {
     WTF_MAKE_TZONE_ALLOCATED(EditorClient);
 public:

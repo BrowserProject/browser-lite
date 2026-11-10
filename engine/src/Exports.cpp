@@ -9,6 +9,7 @@
 #include "Compositor.h"
 #include "DeviceClients.h"
 #include "Printing.h"
+#include "EditorClient.h"
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "Gamepad.h"
@@ -470,6 +471,11 @@ EMSCRIPTEN_KEEPALIVE void bl_datalist_choose(int id, char* value)
 EMSCRIPTEN_KEEPALIVE void bl_focus_initial(int id, int forward)
 {
     withInput(id, [=](WebView& view) { view.focusInitial(forward); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_focus_next_field(int id)
+{
+    withInput(id, [](WebView& view) { focusNextField(view.page()); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_set_zoom(int id, float factor)

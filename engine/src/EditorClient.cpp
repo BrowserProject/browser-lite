@@ -6,13 +6,17 @@
 #include <WebCore/Document.h>
 #include <WebCore/EnterKeyHint.h>
 #include <WebCore/FocusController.h>
+#include <WebCore/HTMLFormElement.h>
 #include <WebCore/HTMLInputElement.h>
+#include <WebCore/HTMLSelectElement.h>
 #include <WebCore/HTMLTextFormControlElement.h>
 #include <WebCore/InputMode.h>
 #include <WebCore/Page.h>
+#include <WebCore/ContainerNodeInlines.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentPage.h>
 #include <WebCore/Editor.h>
+#include <WebCore/ElementAncestorIteratorInlines.h>
 #include <WebCore/EventNames.h>
 #include <WebCore/FrameDestructionObserverInlines.h>
 #include <WebCore/FrameInlines.h>
@@ -25,6 +29,7 @@
 #include <WebCore/Node.h>
 #include <WebCore/NodeInlines.h>
 #include <WebCore/PlatformKeyboardEvent.h>
+#include <WebCore/RenderObjectInlines.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
@@ -79,6 +84,35 @@ static RefPtr<Element> focusedTextInput(Page& page)
     return element->hasEditableStyle() ? element : nullptr;
 }
 
+// The field the Next key of an on-screen keyboard moves to from a single line text field, after
+// Chrome's FocusController::NextFocusableElementForImeAndAutofill (BSD): the next text field,
+// select or editable element in tab order with the same form, none past a submit button. At
+// most 50 steps, like Chrome, as every keystroke asks again.
+static RefPtr<Element> nextFieldOf(Page& page, HTMLInputElement& input)
+{
+    RefPtr form = input.form();
+    RefPtr<Element> next = &input;
+    for (int step = 0; step < 50; ++step) {
+        next = page.focusController().nextFocusableElement(*next).element;
+        if (!next)
+            return nullptr;
+        RefPtr control = dynamicDowncast<HTMLFormControlElement>(*next);
+        if (!control) {
+            if (next->hasEditableStyle() && ancestorsOfType<HTMLFormElement>(*next).first() == form)
+                return next;
+            continue;
+        }
+        if (control->isSuccessfulSubmitButton())
+            return nullptr;
+        if (control->form() != form || !control->isMutable())
+            continue;
+        CheckedPtr renderer = control->renderer();
+        if ((renderer && renderer->isRenderTextControl()) || is<HTMLSelectElement>(*control))
+            return next;
+    }
+    return nullptr;
+}
+
 // Text input of the focused frame for "text-input": mode "" while nothing takes text, so the
 // host shows no on-screen keyboard
 static String textInputState(LocalFrame& frame)
@@ -89,7 +123,17 @@ static String textInputState(LocalFrame& frame)
         return "{\"mode\":\"\"}"_s;
     RefPtr html = dynamicDowncast<HTMLElement>(*element);
     String hint = html ? attributeValueForEnterKeyHint(html->canonicalEnterKeyHint()) : String();
-    return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint, "\"}"_s);
+    RefPtr field = dynamicDowncast<HTMLInputElement>(*element);
+    bool nextField = field && nextFieldOf(*page, *field);
+    return makeString("{\"mode\":\""_s, inputModeOf(element.get()), "\",\"enterKeyHint\":\""_s, hint,
+        "\",\"singleLine\":"_s, field ? "true"_s : "false"_s, ",\"nextField\":"_s, nextField ? "true"_s : "false"_s, '}');
+}
+
+void focusNextField(Page& page)
+{
+    RefPtr field = dynamicDowncast<HTMLInputElement>(focusedTextInput(page));
+    if (RefPtr next = field ? nextFieldOf(page, *field) : nullptr)
+        next->focus({ .direction = FocusDirection::Forward });
 }
 
 bool takesTextInput(Page& page)

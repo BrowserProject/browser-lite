@@ -10,6 +10,9 @@ import {
   enterKeyHintOf,
   enterKeyHintSetter,
   focusOpensKeyboard,
+  hasNextKey,
+  opensNextField,
+  textInputOf,
   unhandledKey,
 } from './keyboard.js';
 import { PendingNavigation } from './pending.js';
@@ -82,6 +85,9 @@ export class ViewImpl implements View {
   /** @internal */ userActivated = false;
   /** @internal The last key sent was the Tab of a field arrow (attachFieldArrows). */
   tabFromFieldArrow = false;
+  /** @internal The on-screen keyboard's Enter key moves to the next field (opensNextField). */
+  nextFieldOnEnter = false;
+  private readonly nextKey = hasNextKey();
   // The last context menu request came from a finger (long press), not a right click: the
   // engine answers the latest request, a long press only once the finger lifts
   private menuByTouch = false;
@@ -763,14 +769,15 @@ export class ViewImpl implements View {
         // that moves the focus from one field to another (Google's search box opens an overlay
         // with its own field) passes through none: Android would close the keyboard and not open
         // it again without a new tap, so none applies only when no field follows soon
-        const mode = String(data.mode ?? '') || 'none';
-        const enterKeyHint = enterKeyHintOf(mode, String(data.enterKeyHint ?? ''));
+        const input = textInputOf(data);
+        const { mode } = input;
         this.forgetImeText();
         clearTimeout(this.imeModeTimer);
         const apply = () => {
           const opens = mode !== 'none' && this.ime.inputMode === 'none';
           this.ime.inputMode = mode;
-          this.setEnterKeyHint(enterKeyHint);
+          this.setEnterKeyHint(enterKeyHintOf(input, this.nextKey));
+          this.nextFieldOnEnter = opensNextField(input, this.nextKey);
           if (opens) this.showKeyboard();
         };
         if (mode === 'none' && this.ime.inputMode !== 'none')

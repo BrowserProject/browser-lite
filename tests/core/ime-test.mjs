@@ -1,7 +1,9 @@
 // Text from input methods through the IME field of the core, like an Android keyboard (Gboard)
 // sends it: committed text, a Backspace as a deletion inside the field (keydown 229 and
 // deleteContentBackward, no Backspace key), a suggestion that replaces the word, a composition
-// and a composition on the word again. A click or a plain key empties the field.
+// and a composition on the word again. A click or a plain key empties the field. The enter key
+// of the keyboard like in Chrome on Android: next in a field that a field of its form follows,
+// where Gboard's Next key moves to that field, go in the last one, return in a text area.
 //
 //   node tests/core/ime-test.mjs [engine-dir]
 import {
@@ -32,6 +34,20 @@ const PAGE = `<!doctype html>
 <body>
 <input id="a" value="hello world" autocomplete="off">
 <textarea id="t">abc</textarea>
+<form id="login" action="/login">
+  <input id="user" style="position: absolute; left: 20px; top: 160px; width: 300px; height: 30px">
+  <input id="pass" type="password" style="position: absolute; left: 20px; top: 200px; width: 300px; height: 30px">
+  <button style="position: absolute; left: 340px; top: 200px">Sign in</button>
+</form>
+<input id="solo" style="position: absolute; left: 20px; top: 240px; width: 300px; height: 30px">
+<input id="hinted" form="own" enterkeyhint="next" style="position: absolute; left: 20px; top: 280px; width: 300px; height: 30px">
+<input id="after" form="own" style="position: absolute; left: 20px; top: 320px; width: 300px; height: 30px">
+<form id="own"></form>
+<script>
+  window.enterLog = [];
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter') enterLog.push('enter:' + e.target.id); });
+  document.addEventListener('submit', (e) => { e.preventDefault(); enterLog.push('submit:' + e.target.id); });
+</script>
 <script>console.log('RESULT ready=1');</script>
 </body></html>`;
 
@@ -145,6 +161,87 @@ if (chromiumOnly('compositions through CDP')) {
   check('a composition over typed text replaces it', text === 'abcdwarf', JSON.stringify(text));
   await cdp.detach();
 }
+
+// The enter key of the on-screen keyboard. Chrome on Android sends its action key as an Enter
+// without the code of a physical key; the IME field is a textarea, which showed the return key
+// for every field of the page.
+const enterKey = async (code) => {
+  await page.evaluate((code) => {
+    const ime = document.querySelector('[data-bl-ime]');
+    for (const type of ['keydown', 'keyup'])
+      ime.dispatchEvent(
+        new KeyboardEvent(type, {
+          key: 'Enter',
+          code,
+          keyCode: 13,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+  }, code);
+};
+const hint = () => page.evaluate(() => document.querySelector('[data-bl-ime]').enterKeyHint);
+const hintIs = async (expected) => {
+  await waitFor(async () => (await hint()) === expected, 10000);
+  return hint();
+};
+const tapField = async (y, expected) => {
+  await page.mouse.click(...(await at(150, y)));
+  return hintIs(expected);
+};
+let fieldState = 0;
+const pageState = async () => {
+  const key = `state${++fieldState}`;
+  await evalPage(
+    page,
+    `console.log('RESULT ${key}=' + document.activeElement.id + '|' + enterLog.splice(0).join(','))`,
+  );
+  return results.wait(key, 10000);
+};
+const stateIs = async (expected) => {
+  let state = '';
+  await waitFor(async () => (state = await pageState()) === expected, 5000);
+  return state;
+};
+await pageState();
+let enter = await tapField(175, 'next');
+check('enter key: next in a field that another field of its form follows', enter === 'next', enter);
+await enterKey('');
+let state = await stateIs('pass|');
+check(
+  'enter key: Next moves to the next field, no Enter reaches the page',
+  state === 'pass|',
+  state,
+);
+enter = await hintIs('go');
+check('enter key: go in the last field of a form (a submit button follows)', enter === 'go', enter);
+await enterKey('');
+state = await stateIs('pass|enter:pass,submit:login');
+check(
+  'enter key: Go is the Enter key of the page',
+  state === 'pass|enter:pass,submit:login',
+  state,
+);
+await tapField(175, 'next');
+await page.keyboard.press('Enter');
+state = await stateIs('user|enter:user,submit:login');
+check(
+  'enter key: a hardware Enter in a field with Next stays the Enter key of the page',
+  state === 'user|enter:user,submit:login',
+  state,
+);
+enter = await tapField(255, 'go');
+check('enter key: go in a field without a form and a field after it', enter === 'go', enter);
+await tapField(295, 'next');
+await enterKey('');
+state = await stateIs('hinted|enter:hinted');
+check(
+  "enter key: the page's own enterkeyhint next gets the Enter key like in Chrome",
+  state === 'hinted|enter:hinted',
+  state,
+);
+enter = await tapField(110, '');
+check('enter key: return in a text area', enter === '', JSON.stringify(enter));
 
 await browser.close();
 finish();

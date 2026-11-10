@@ -217,7 +217,13 @@ page field's input mode, and Chrome closes it for none (#360). iOS gives its key
 field's enter key hint only at a focus, so on iPhone and iPad the core moves the focus through a
 second hidden field and back when the hint changes (#392). A search field without a hint gets the
 hint search like in Chrome and Safari: the IME field is a textarea, for which input mode search
-alone gives Gboard's return key and the "go" key of iOS (#443). Its keyboard's previous and next
+alone gives Gboard's return key and the "go" key of iOS (#443). A single line field without a hint
+gets next when a field of its form follows (the engine reports both in `text-input`) and go
+otherwise, like in Chrome on Android, so the textarea's return key shows only for text areas and
+editable elements; the Enter of that next key (no `code`, unlike a hardware Enter) moves the
+page's focus to that field (`bl_focus_next_field`) instead of reaching the page. iOS gives its
+keyboard's Enter the code of a hardware Enter, so there such a field gets go (#495). The iOS
+keyboard's previous and next
 field arrows step through the host page's fields in tab order and cannot see the page's: two hidden
 fields right before and after the focused IME field catch them, and the core sends Shift+Tab or
 Tab into the page; past the page's first or last element the page keeps no focus and the

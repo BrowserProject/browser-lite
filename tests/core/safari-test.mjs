@@ -190,16 +190,17 @@ check(
   focus.focus.at(-1) === 'text/send' && focus.active && focus.fields === 1,
   JSON.stringify(focus),
 );
-mode = await tapAndMode(85, 'decimal/');
-check('keyboard: number field', mode === 'decimal/', mode);
+mode = await tapAndMode(85, 'decimal/go');
+// A single line field gets go: iOS has no next key that the core can tell from Enter (hasNextKey)
+check('keyboard: number field', mode === 'decimal/go', mode);
 focus = await imeFocus();
 check(
   'keyboard (iOS): focused again for a field without a hint after one with a hint',
-  focus.focus.at(-1) === 'decimal/' && focus.active,
+  focus.focus.at(-1) === 'decimal/go' && focus.active,
   JSON.stringify(focus),
 );
-mode = await tapAndMode(135, 'numeric/');
-check('keyboard: inputmode numeric', mode === 'numeric/', mode);
+mode = await tapAndMode(135, 'numeric/go');
+check('keyboard: inputmode numeric', mode === 'numeric/go', mode);
 focus = await imeFocus();
 check(
   'keyboard (iOS): not focused again while the hint stays',
@@ -230,12 +231,15 @@ await page.evaluate(() => {
     attributeFilter: ['inputmode'],
   });
 });
-mode = await tapAndMode(335, 'text/');
+mode = await tapAndMode(335, 'text/go');
 await page.waitForTimeout(1000);
 const modes = await page.evaluate(() => window.imeModes);
 check(
   'keyboard: stays open while the focus moves to another field',
-  mode === 'text/' && modes.length > 0 && !modes.includes('none') && (await imeMode()) === 'text/',
+  mode === 'text/go' &&
+    modes.length > 0 &&
+    !modes.includes('none') &&
+    (await imeMode()) === 'text/go',
   JSON.stringify(modes),
 );
 mode = await tapAndMode(235, 'none/');
@@ -243,7 +247,7 @@ mode = await tapAndMode(235, 'none/');
 // Previous and next field arrows of the iOS keyboard: iOS focuses the host's field before or after
 // the IME field in tab order (it skips one that something covers at its centre). Before the fix
 // that was the host's address bar; now fields next to the IME field move the page's focus.
-mode = await tapAndMode(85, 'decimal/');
+mode = await tapAndMode(85, 'decimal/go');
 const arrows = await page.evaluate(() => {
   const ime = document.querySelector('[data-bl-ime]');
   const shown = (field) => {
@@ -276,10 +280,10 @@ check(
   `${mode} ${imeActive}`,
 );
 imeActive = await arrow('next');
-await waitFor(async () => (mode = await imeMode()) === 'decimal/', 10000);
+await waitFor(async () => (mode = await imeMode()) === 'decimal/go', 10000);
 check(
   'field arrows (iOS): next moves the page to its next field',
-  mode === 'decimal/' && imeActive,
+  mode === 'decimal/go' && imeActive,
   `${mode} ${imeActive}`,
 );
 await tapAndMode(35, 'text/send');

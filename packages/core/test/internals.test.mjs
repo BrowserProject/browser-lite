@@ -8,7 +8,7 @@ import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
-import { enterKeyHintOf, textEdit } from '../dist/keyboard.js';
+import { enterKeyHintOf, opensNextField, textEdit, textInputOf } from '../dist/keyboard.js';
 import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
 import { redirectPopup } from '../dist/popups.js';
@@ -628,11 +628,38 @@ test('IME field edits: Backspaces per grapheme cluster, then the new text', () =
   assert.deepEqual(textEdit('same', 'same'), { backspaces: 0, insert: '' });
 });
 
-test('IME field enter key: the page field hint, else search for a search field', () => {
-  assert.equal(enterKeyHintOf('search', ''), 'search');
-  assert.equal(enterKeyHintOf('search', 'go'), 'go');
-  assert.equal(enterKeyHintOf('search', 'enter'), 'enter');
-  assert.equal(enterKeyHintOf('text', ''), '');
-  assert.equal(enterKeyHintOf('text', 'send'), 'send');
-  assert.equal(enterKeyHintOf('none', ''), '');
+test('IME field enter key: the page field hint, else the key of Chrome on Android', () => {
+  const field = (data) => textInputOf({ mode: 'text', ...data });
+  assert.equal(enterKeyHintOf(field({ mode: 'search' }), true), 'search');
+  assert.equal(enterKeyHintOf(field({ mode: 'search', enterKeyHint: 'go' }), true), 'go');
+  assert.equal(enterKeyHintOf(field({ mode: 'search', enterKeyHint: 'enter' }), true), 'enter');
+  assert.equal(enterKeyHintOf(field({ enterKeyHint: 'send' }), true), 'send');
+  // A text area or editable element: the return key
+  assert.equal(enterKeyHintOf(field({}), true), '');
+  assert.equal(enterKeyHintOf(textInputOf({ mode: '' }), true), '');
+  // A single line field: next with a field of its form after it, else go
+  assert.equal(enterKeyHintOf(field({ singleLine: true }), true), 'go');
+  assert.equal(
+    enterKeyHintOf(field({ mode: 'email', singleLine: true, nextField: true }), true),
+    'next',
+  );
+  assert.equal(
+    enterKeyHintOf(field({ mode: 'search', singleLine: true, nextField: true }), true),
+    'search',
+  );
+  // A host without the next key (iOS): go
+  assert.equal(enterKeyHintOf(field({ singleLine: true, nextField: true }), false), 'go');
+  assert.equal(opensNextField(field({ singleLine: true, nextField: true }), false), false);
+  // Only the chosen next key moves to the next field, a page's own next is the Enter key
+  assert.equal(opensNextField(field({ singleLine: true, nextField: true }), true), true);
+  assert.equal(
+    opensNextField(field({ singleLine: true, nextField: true, enterKeyHint: 'next' }), true),
+    false,
+  );
+  assert.equal(opensNextField(field({ singleLine: true }), true), false);
+  assert.equal(
+    opensNextField(field({ mode: 'search', singleLine: true, nextField: true }), true),
+    false,
+  );
+  assert.equal(textInputOf({ mode: '' }).mode, 'none');
 });

@@ -24,14 +24,70 @@ export function focusOpensKeyboard(): boolean {
   return 'virtualKeyboard' in navigator;
 }
 
+/** @internal Focused field of the page for the on-screen keyboard (engine event "text-input"). */
+export interface TextInput {
+  /** Input mode, `none` without a field that takes text. */
+  mode: string;
+  /** The field's `enterkeyhint`, empty without one. */
+  enterKeyHint: string;
+  /** A text field, not a text area or editable element. */
+  singleLine: boolean;
+  /** A single line field that a next field of its form follows. */
+  nextField: boolean;
+}
+
+/** @internal The focused field of the engine event "text-input". */
+export function textInputOf(data: Record<string, unknown>): TextInput {
+  return {
+    mode: String(data.mode ?? '') || 'none',
+    enterKeyHint: String(data.enterKeyHint ?? ''),
+    singleLine: data.singleLine === true,
+    nextField: data.nextField === true,
+  };
+}
+
 /**
  * @internal Enter key hint of the IME field for the page's focused field: its `enterkeyhint`,
- * else the key Chrome and Safari give a field of that input mode. A search field (type or
- * `inputmode` search) gets the search key: for the IME field, a textarea, input mode search
- * alone gives the return key in Gboard and "go" on iOS, the hint search gives the search key.
+ * else the key Chrome on Android gives it. A search field (type or `inputmode` search) gets the
+ * search key: for the IME field, a textarea, input mode search alone gives the return key in
+ * Gboard and "go" on iOS. A single line field gets next when a field of its form follows and the
+ * host has the next key (`hasNextKey`), else go; a text area or editable element the return key.
+ * The IME field is a textarea and showed the return key for every field.
  */
-export function enterKeyHintOf(mode: string, hint: string): string {
-  return hint || (mode === 'search' ? 'search' : '');
+export function enterKeyHintOf(input: TextInput, nextKey: boolean): string {
+  if (input.enterKeyHint) return input.enterKeyHint;
+  if (input.mode === 'search') return 'search';
+  if (!input.singleLine) return '';
+  return input.nextField && nextKey ? 'next' : 'go';
+}
+
+/**
+ * @internal Whether the Enter key of the on-screen keyboard moves the focus to the next field
+ * instead of reaching the page, like Chrome's Next key on Android: only for the next key that
+ * `enterKeyHintOf` chose, a page's own `enterkeyhint` next gets the Enter key like in Chrome.
+ */
+export function opensNextField(input: TextInput, nextKey: boolean): boolean {
+  return !input.enterKeyHint && enterKeyHintOf(input, nextKey) === 'next';
+}
+
+/**
+ * @internal Whether the host's on-screen keyboard can have a next key that moves to the next
+ * field: its Enter must differ from a hardware one (`isOnScreenEnter`). iOS gives the Enter of
+ * its on-screen keyboard the code Enter like a hardware key (WebKit takes the key code from the
+ * character), so there a single line field gets go; its keyboard's field arrows move between
+ * fields (`attachFieldArrows`).
+ */
+export function hasNextKey(): boolean {
+  return !appleMobileHost();
+}
+
+/**
+ * @internal An Enter key that comes from the action key of an on-screen keyboard: Chrome on
+ * Android sends that key without a key code of a physical key (`code` empty), a hardware
+ * keyboard's Enter has the code Enter and stays a key of the page.
+ */
+export function isOnScreenEnter(e: KeyLike): boolean {
+  return e.key === 'Enter' && !e.code && !modifierBits(e);
 }
 
 /**
@@ -274,6 +330,8 @@ export function createImeField(
   let entered = '';
   // Entered text when the composition began: the engine shows the composition after it
   let compositionBase: string | null = null;
+  // The Enter key down moved to the next field: its key up stays out of the page as well
+  let nextFieldKey = false;
   const isTextInput = (e: KeyboardEvent) =>
     e.isComposing ||
     composing ||
@@ -308,12 +366,23 @@ export function createImeField(
     if (isPasteShortcut(e) || isTextInput(e)) return;
     view.userInput(false);
     forget();
+    if (view.nextFieldOnEnter && isOnScreenEnter(e)) {
+      nextFieldKey = true;
+      e.preventDefault();
+      host.module._bl_focus_next_field(view.id);
+      return;
+    }
     sendKey(view, 0, e);
     // Browser shortcuts like Tab, Backspace and Space stay in the page
     if (e.key !== 'F5' && e.key !== 'F12') e.preventDefault();
   });
   on('keyup', (e) => {
     if (typeof e.key !== 'string' || isPasteShortcut(e) || isTextInput(e)) return;
+    if (nextFieldKey && e.key === 'Enter') {
+      nextFieldKey = false;
+      e.preventDefault();
+      return;
+    }
     sendKey(view, 1, e);
     e.preventDefault();
   });
