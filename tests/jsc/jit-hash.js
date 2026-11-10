@@ -43,24 +43,34 @@ function add(a) {
         h = ((h & 0xffff) + 0x1b873593) ^ a[i];
     return h;
 }
-function best(f, a) {
+// Fastest of 7 rounds of each, alternating after a warm-up of both: measured one after the other,
+// the second profited from the host's WASM tier-up of the first (3.6 times on a CI runner)
+function fastestPair(f, a, twin, twinArgument) {
+    f(a);
+    twin(twinArgument);
     let fastest = Infinity;
+    let fastestTwin = Infinity;
     for (let round = 0; round < 7; round++) {
-        const start = now();
+        let start = now();
         f(a);
         fastest = Math.min(fastest, now() - start);
+        start = now();
+        twin(twinArgument);
+        fastestTwin = Math.min(fastestTwin, now() - start);
     }
-    return Math.max(fastest, 0.1);
+    return [Math.max(fastest, 0.1), Math.max(fastestTwin, 0.1)];
 }
 function compare(name, f, a, twin, twinArgument, limit) {
-    const ratio = best(f, a) / best(twin, twinArgument);
+    const [time, twinTime] = fastestPair(f, a, twin, twinArgument);
+    const ratio = time / twinTime;
     print(name + ": " + ratio.toFixed(2) + " times its twin");
     if (ratio > limit)
         throw new Error(name + " is " + ratio.toFixed(1) + " times slower than its twin");
 }
 if (unsignedBits(bytes) !== signedBits(plain) >>> 0 || imul(plain) !== 1213271617)
     throw new Error("wrong hash");
-compare("uint32 bits", unsignedBits, bytes, signedBits, plain, 3);
+// Through the slow paths about 10 times, inline 1.2 to 2 locally and up to 3.6 on CI runners
+compare("uint32 bits", unsignedBits, bytes, signedBits, plain, 4);
 compare("typed array", update, bytes, update, plain, 2);
 compare("Math.imul", imul, plain, add, plain, 3.5);
 print("OK jit-hash");
