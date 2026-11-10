@@ -1,7 +1,8 @@
 // Reordering tabs like Chrome and Firefox: a tab dragged with the mouse takes the place it is
 // dropped at and slides into it, a click without movement only activates it, a press on its cross
 // never drags, Ctrl+Shift+PageDown and PageUp move the active tab, and the session keeps the new
-// order after the demo opens again. Closing the active tab activates its right neighbour (the left
+// order after the demo opens again, the restored tabs in the background show the remembered icon
+// of their site before they load. Closing the active tab activates its right neighbour (the left
 // one at the end), or the tab it was opened from while no other tab was active in between. Tabs
 // opened from links come right after their page like in Chrome: in the background (Ctrl+click,
 // middle click, also on a target=_blank link) after the ones it opened before, in front
@@ -31,13 +32,17 @@ const LINKS =
 const FIELD =
   '<style>body{margin:0}textarea{width:300px;height:100px}</style><textarea></textarea>' +
   "<script>document.querySelector('textarea').oninput=(e)=>console.log('RESULT value='+e.target.value)</script>";
+const ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="#c00"/></svg>';
 const { url: siteURL } = await serve((req, res) => {
+  if (req.url === '/icon.svg')
+    return res.writeHead(200, { 'Content-Type': 'image/svg+xml' }).end(ICON);
   const name = req.url.slice(1).toUpperCase();
   if (!/^[A-EL]$/.test(name)) return res.writeHead(404).end();
   res
     .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     .end(
-      `<!doctype html><title>${name}</title>${name === 'L' ? LINKS : name === 'E' ? FIELD : `<p>${name}`}<script>console.log('RESULT ready=${name}')</script>`,
+      `<!doctype html><title>${name}</title><link rel="icon" href="/icon.svg">${name === 'L' ? LINKS : name === 'E' ? FIELD : `<p>${name}`}<script>console.log('RESULT ready=${name}')</script>`,
     );
 });
 
@@ -152,11 +157,47 @@ check('Ctrl+Shift+PageUp: one place left', await orderIs('BDCA'), await order())
 check('keyboard: the moved tab stays active', (await activeTitle()) === 'D', await activeTitle());
 
 // The order survives opening the demo again
+const iconRemembered = await page
+  .waitForFunction(
+    (host) => JSON.parse(localStorage.getItem('bl-favicons') ?? '{}')[host]?.icon,
+    new URL(siteURL).host,
+    { timeout: 10000 },
+  )
+  .then(
+    () => true,
+    () => false,
+  );
+check('the icon of the site is remembered', iconRemembered);
 await page.waitForTimeout(500);
 results.delete('ready');
 await page.goto(stack.app());
 await results.wait('ready', TIMEOUT);
 check('session: the restored tabs keep the order', await orderIs('BDCA'), await order());
+// Like Chrome the tabs that load on the first click show the icon of their site
+const backgroundIcons = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('#tab-list .tab:not(.active) .icon')].map((img) =>
+      img.hidden || !img.complete ? 0 : img.naturalWidth,
+    ),
+  );
+const iconsShown = await page
+  .waitForFunction(
+    () => {
+      const icons = [...document.querySelectorAll('#tab-list .tab:not(.active) .icon')];
+      return icons.length === 3 && icons.every((img) => !img.hidden && img.naturalWidth > 0);
+    },
+    null,
+    { timeout: 10000 },
+  )
+  .then(
+    () => true,
+    () => false,
+  );
+check(
+  'session: the restored background tabs show the icon of their site',
+  iconsShown,
+  JSON.stringify(await backgroundIcons()),
+);
 
 // Closing the active tab like Chrome and Firefox
 const tabCount = (count) =>

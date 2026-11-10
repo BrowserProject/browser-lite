@@ -4,7 +4,7 @@ import { enterAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
-import { hostOf, rememberIcon } from './favicons.js';
+import { hostOf, rememberedIcon, rememberIcon } from './favicons.js';
 import { endFind, showFindCount, showFindOf } from './find-bar.js';
 import { recordVisit } from './history.js';
 import { syncHostHistory } from './host-history.js';
@@ -80,6 +80,10 @@ export class Tab implements SessionTab {
   /** Popups the current document could not open (no user gesture). */
   blockedPopups: BlockedPopup[] = [];
   lastActive = 0;
+  /**
+   * Icon in the tab: an object URL of the engine's icon that the tab owns, or before the page
+   * has loaded the remembered data URL of its site.
+   */
   iconUrl: string | null = null;
   /** Host of the page the icon belongs to. */
   private iconHost = '';
@@ -159,7 +163,7 @@ export class Tab implements SessionTab {
       if (leftNewTab) this.newTab = false;
       // The engine reports the icon of every page once it has loaded: until then the last one
       // stays within the site
-      if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.setIcon(null);
+      if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.useIcon(null, '');
       this.url = event.url;
       this.canGoBack = event.canGoBack;
       this.canGoForward = event.canGoForward;
@@ -215,8 +219,7 @@ export class Tab implements SessionTab {
     // repeat it in words that mean nothing to users
     this.on('error', () => this.loadEnded());
     this.on('icon', (event) => {
-      this.setIcon(event.blob);
-      this.iconHost = hostOf(this.url);
+      this.useIcon(event.blob && URL.createObjectURL(event.blob), hostOf(this.url));
       if (this.iconUrl) rememberIcon(this.url, this.iconUrl);
     });
     this.on('media-state', () => this.updateAudio());
@@ -347,13 +350,32 @@ export class Tab implements SessionTab {
     button.classList.toggle('muted', muted);
   }
 
-  setIcon(blob: Blob | null): void {
-    if (this.iconUrl) URL.revokeObjectURL(this.iconUrl);
-    this.iconUrl = blob ? URL.createObjectURL(blob) : null;
+  /** Shows `src` as the icon of the page on `host`; an object URL now belongs to the tab. */
+  private useIcon(src: string | null, host: string): void {
+    this.releaseIcon();
+    this.iconUrl = src;
+    this.iconHost = host;
     this.showIcon();
   }
 
-  showIcon(): void {
+  private releaseIcon(): void {
+    if (this.iconUrl?.startsWith('blob:')) URL.revokeObjectURL(this.iconUrl);
+  }
+
+  /** @internal Like Chrome a tab that has not loaded yet shows the remembered icon of its site. */
+  showRememberedIcon(): void {
+    const src = rememberedIcon(this.url);
+    if (src) this.useIcon(src, hostOf(this.url));
+  }
+
+  /** @internal Takes over the icon of the tab this one replaces. */
+  takeIcon(from: Tab): void {
+    if (!from.iconUrl) return;
+    this.useIcon(from.iconUrl, from.iconHost);
+    from.iconUrl = null;
+  }
+
+  private showIcon(): void {
     const img = this.part<HTMLImageElement>('.icon');
     img.hidden = !this.iconUrl;
     if (this.iconUrl) img.src = this.iconUrl;
@@ -377,7 +399,7 @@ export class Tab implements SessionTab {
   dispose(): void {
     this.hideLinkStatus?.();
     this.hideLinkStatus = null;
-    if (this.iconUrl) URL.revokeObjectURL(this.iconUrl);
+    this.releaseIcon();
     this.element.remove();
   }
 }
@@ -544,6 +566,7 @@ export function restoredTab(entry: Omit<SessionEntry, 'active'>, before?: Tab): 
     url: entry.url,
     history: entry.history?.entries?.length ? entry.history : null,
   };
+  tab.showRememberedIcon();
   return add(tab, before);
 }
 
@@ -718,10 +741,7 @@ export function discardForMemory(): Tab | null {
   fresh.lastActive = tab.lastActive;
   fresh.openedBy = tab.openedBy;
   for (const other of list) if (other.openedBy === tab) other.openedBy = fresh;
-  // The icon now belongs to the new tab
-  fresh.iconUrl = tab.iconUrl;
-  tab.iconUrl = null;
-  fresh.showIcon();
+  fresh.takeIcon(tab);
   tab.replaced = true;
   void tab.view.close({ force: true });
   return fresh;

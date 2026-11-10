@@ -3,7 +3,8 @@ import { element, readJSON } from './util.js';
 
 /**
  * Favicons of the sites visited on this device, per host as 32 px PNG data URLs in localStorage,
- * for history, bookmarks, suggestions and the new tab page (the tabs show the engine's icon).
+ * for history, bookmarks, suggestions, the new tab page and the tabs that have not loaded yet
+ * (a loaded tab shows the engine's icon).
  */
 const KEY = 'bl-favicons';
 const MAX_HOSTS = 120;
@@ -56,15 +57,20 @@ export function rememberIcon(url: string, src: string): void {
     .catch(() => {});
 }
 
+/** The remembered icon of the host of `url` as a data URL, null without one. */
+export function rememberedIcon(url: string): string | null {
+  return load()[hostOf(url)]?.icon ?? null;
+}
+
 /** The remembered icon of the host of `url`, else a globe. */
 export function favicon(url: string, className = 'favicon'): HTMLElement | SVGSVGElement {
-  const known = load()[hostOf(url)];
-  if (!known) {
+  const src = rememberedIcon(url);
+  if (!src) {
     const globe = icon('globe');
     globe.classList.add(className);
     return globe;
   }
-  return element('img', { className, src: known.icon, alt: '', decoding: 'async' });
+  return element('img', { className, src, alt: '', decoding: 'async' });
 }
 
 /** Forgets every icon (with the history). */

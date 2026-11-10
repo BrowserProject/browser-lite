@@ -190,6 +190,9 @@ select popup) are in the same sheet.
   loaded; until then the last one stays within the site, it goes when the tab leaves the site. `favicons.ts` keeps a 32 px copy per host in localStorage (at most 120, cleared with the
   history) for suggestions, history, bookmarks, the new tab page and the tab overview, drawn
   on a CPU canvas (`willReadFrequently`, see [embedding](../../docs/embedding.md#resource-use)).
+  Like Chrome a tab that loads on its first click (from the last session, reopened) shows that
+  copy of its site until the engine's icon arrives; a tab discarded under memory pressure keeps
+  the icon it had.
 
 ## Phone layout
 
