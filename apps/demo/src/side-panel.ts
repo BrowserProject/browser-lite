@@ -1,5 +1,11 @@
 import { bookmarks, onBookmarksChange, toggleBookmark } from './bookmarks.js';
-import { type DownloadEntry, downloadState, downloads, onDownloadsChange } from './downloads.js';
+import {
+  clearDownloads,
+  type DownloadEntry,
+  downloadState,
+  downloads,
+  onDownloadsChange,
+} from './downloads.js';
 import { ui } from './extensions.js';
 import { favicon } from './favicons.js';
 import { clearHistory, onHistoryChange, readHistory, type Visit } from './history.js';
@@ -317,7 +323,10 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
   if (!compactLayout()) search.focus();
 }
 
-/** A row of the downloads panel; a running download updates it and can be cancelled. */
+/**
+ * A row of the downloads panel; a running download updates it and can be cancelled. Without its
+ * file (after a restart) or after an error the address can be loaded again, like Chrome's Retry.
+ */
 function downloadRow(entry: DownloadEntry): HTMLElement {
   const state = element('span', { className: 'panel-url', textContent: downloadState(entry) });
   const text = element(
@@ -327,8 +336,19 @@ function downloadRow(entry: DownloadEntry): HTMLElement {
     state,
   );
   const row = element('div', { className: 'panel-row panel-download' }, icon('download'), text);
+  if (entry.url) row.title = entry.url;
   const download = entry.download;
-  if (download?.state === 'progress') {
+  const action = (label: string, run: () => void) => {
+    const button = element('button', {
+      className: 'panel-action',
+      type: 'button',
+      textContent: label,
+    });
+    button.setAttribute('aria-label', `${label} ${entry.filename}`);
+    button.addEventListener('click', run);
+    row.append(button);
+  };
+  if (entry.state === 'progress' && download) {
     const progress = element('progress', { className: 'panel-progress' });
     const update = () => {
       state.textContent = downloadState(entry);
@@ -342,27 +362,28 @@ function downloadRow(entry: DownloadEntry): HTMLElement {
     text.append(progress);
     // The end of the download renders the panel again (onDownloadsChange)
     leave.push(download.on('progress', update));
-    const cancel = element('button', {
-      className: 'panel-action',
-      type: 'button',
-      textContent: 'Cancel',
-    });
-    cancel.setAttribute('aria-label', `Cancel ${entry.filename}`);
-    cancel.addEventListener('click', () => download.cancel());
-    row.append(cancel);
-  } else if (download?.state === 'done') {
-    const save = element('button', {
-      className: 'panel-action',
-      type: 'button',
-      textContent: 'Save again',
-    });
-    save.addEventListener('click', () => download.save());
-    row.append(save);
+    action('Cancel', () => download.cancel());
+  } else if (entry.state === 'done' && download?.blob) {
+    action('Save again', () => download.save());
+  } else if (entry.url) {
+    // A response that is a file leaves the page as it is and starts a new download
+    action(entry.state === 'done' ? 'Download again' : 'Retry', () =>
+      actions.openURL(entry.url, false),
+    );
   }
   return row;
 }
 
 function renderDownloads(): void {
+  if (downloads().some((entry) => entry.state !== 'progress')) {
+    const clearAll = element('button', {
+      className: 'panel-action',
+      type: 'button',
+      textContent: 'Clear all',
+    });
+    clearAll.addEventListener('click', clearDownloads);
+    panel.append(clearAll);
+  }
   const list = element('div', { className: 'panel-list' });
   for (const entry of downloads().slice().reverse()) list.append(downloadRow(entry));
   if (!downloads().length)

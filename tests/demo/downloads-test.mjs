@@ -1,7 +1,9 @@
 // The downloads panel (Ctrl+J) during a running download: its row counts the received bytes as
 // they arrive, a Cancel button stops the download (the server sees the connection end before the
-// file is through), the row then reads "Cancelled" and nothing goes to the host browser; a
-// finished download offers "Save again".
+// file is through), the row then reads "Cancelled", offers "Retry" and nothing goes to the host
+// browser; a finished download offers "Save again". Like Chrome the list outlives "Restart now"
+// (a reload of the demo): the rows come back without their files, "Download again" loads the
+// address once more and the page stays, "Clear all" empties the list for good.
 //
 //   node tests/demo/downloads-test.mjs [engine-dir]
 import {
@@ -31,9 +33,10 @@ const PAGE = `<!doctype html><title>Downloads</title>
 
 // The slow file: 64 KB every 50 ms (about 1.3 MB/s), so 20 MB would take 16 s
 const slow = { started: false, ended: false, aborted: false, sent: 0 };
+let smallRequests = 0;
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/') res.writeHead(200, { 'Content-Type': 'text/html' }).end(PAGE);
-  else if (req.url === '/small.txt')
+  else if (req.url === '/small.txt' && ++smallRequests)
     res
       .writeHead(200, {
         'Content-Type': 'text/plain',
@@ -129,9 +132,17 @@ const cancelled = await waitFor(async () => (await rowText()) === 'Cancelled', 5
 check('the row reads Cancelled', cancelled, String(await rowText()));
 const status = await page.evaluate(() => document.getElementById('status').textContent);
 check('the status line says it was cancelled', status === 'Download cancelled: slow.bin', status);
+const rowButtons = () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('#side-panel .panel-download')].map(
+      (row) =>
+        `${row.querySelector('.panel-title')?.textContent}|${row.querySelector('.panel-url')?.textContent}|${[...row.querySelectorAll('button')].map((b) => b.textContent).join(',')}`,
+    ),
+  );
 check(
-  'a cancelled download has no buttons',
-  (await page.locator('#side-panel .panel-download button').count()) === 0,
+  'a cancelled download offers Retry',
+  JSON.stringify(await rowButtons()) === JSON.stringify(['slow.bin|Cancelled|Retry']),
+  JSON.stringify(await rowButtons()),
 );
 
 // A finished download next to it offers Save again (the panel stays open over the page)
@@ -146,6 +157,63 @@ check(
   hostDownloads === 1 && (await saveAgain.count()) === 1,
   `${hostDownloads} host downloads`,
 );
+
+// Restart now (settings) marks the restart and reloads the demo: the list must come back
+results.delete('ready');
+await page.evaluate(() => sessionStorage.setItem('bl-restart', '1'));
+await page.reload();
+check('page ready after the restart', (await results.wait('ready', TIMEOUT)) === '1');
+await page.keyboard.press('Control+j');
+await page.waitForSelector('#side-panel .panel-download', { timeout: 10000 }).catch(() => {});
+check(
+  'the list outlives a restart, without the files',
+  JSON.stringify(await rowButtons()) ===
+    JSON.stringify(['small.txt|11 B|Download again', 'slow.bin|Cancelled|Retry']),
+  JSON.stringify(await rowButtons()),
+);
+
+// Download again requests the address once more; the answer is a file, so the page stays
+const requestsBefore = smallRequests;
+const hostBefore = hostDownloads;
+await page
+  .locator('#side-panel .panel-download button', { hasText: 'Download again' })
+  .click()
+  .catch(() => {});
+await waitFor(() => hostDownloads === hostBefore + 1, 30000);
+check(
+  'Download again requests the file once more and saves it',
+  hostDownloads === hostBefore + 1 && smallRequests === requestsBefore + 1,
+  `${hostDownloads - hostBefore} saved, ${smallRequests - requestsBefore} requests`,
+);
+const tabTitle = await page.evaluate(
+  () => document.querySelector('#tab-list .tab.active .title')?.textContent,
+);
+check('the page stays after Download again', tabTitle === 'Downloads', String(tabTitle));
+// The open panel follows the change
+await page
+  .locator('#side-panel .panel-download button', { hasText: 'Save again' })
+  .waitFor({ timeout: 10000 })
+  .catch(() => {});
+check(
+  'the new download is listed on top with its file',
+  (await rowButtons())[0] === 'small.txt|11 B|Save again' && (await rowButtons()).length === 3,
+  JSON.stringify(await rowButtons()),
+);
+
+// Clear all empties the list, also for the next start
+await page.locator('#side-panel > .panel-action', { hasText: 'Clear all' }).click();
+const emptied = await waitFor(
+  () => page.evaluate(() => !!document.querySelector('#side-panel .panel-empty')),
+  5000,
+);
+check('Clear all empties the list', emptied && (await rowButtons()).length === 0);
+results.delete('ready');
+await page.evaluate(() => sessionStorage.setItem('bl-restart', '1'));
+await page.reload();
+await results.wait('ready', TIMEOUT);
+await page.keyboard.press('Control+j');
+await page.waitForSelector('#side-panel .panel-empty', { timeout: 10000 }).catch(() => {});
+check('the cleared list stays empty after a restart', (await rowButtons()).length === 0);
 
 await browser.close();
 finish();

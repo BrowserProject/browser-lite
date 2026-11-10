@@ -120,6 +120,10 @@ select popup) are in the same sheet.
 - **Downloads** (Ctrl+J): the status line and the panel follow a running download; its row
   counts the bytes with a progress bar and has Cancel like Chrome (`Download.cancel()`, the server
   sees the request end). A finished file is saved with the host browser, its row has Save again.
+  Like Chrome the list outlives a restart (`bl-downloads` in localStorage, at most 100, #491); the
+  files stay only in memory (the last 10), so a row without its file has Download again and a
+  failed or cancelled one Retry, which load the address in the tab like a typed one (a file
+  answer starts a download and the page stays). Clear all empties the list.
   No Pause: the core cannot hold a download's request yet.
 - **Settings**: a navigation with icons (on narrow screens chips as wide as their names that fill
   their rows, a name never breaks, #445) and the settings as cards of
@@ -230,7 +234,7 @@ window (only a device the host is not gets a frame of its size). Rotating the ph
 Settings, bookmarks, permission decisions, the zoom per site (pref `site-zoom`, only hosts off the
 default zoom) and the extensions' data are prefs of the profile on the server
 (`@browser-lite/profile`, so they follow to other devices; "Delete site data" also clears the
-permissions and the zoom per site); history, the session and the access
+permissions and the zoom per site); history, the downloads list, the session and the access
 tokens stay in localStorage of this device. Pages store in the OPFS namespace `browserlite`.
 
 The prefs of the server only arrive in `storage.beforeStart`, after the engine options are fixed:
