@@ -1729,18 +1729,22 @@ void WebView::setVisible(bool visible)
     m_visible = visible;
     m_frameDueSinceShown = visible && m_frameRequested;
     updateActivityState();
-    updateWaitForUser();
     if (m_layerTreeHost)
         m_layerTreeHost->setVisible(visible);
-    if (!m_frameDueSinceShown)
+    if (!m_frameDueSinceShown) {
+        updateWaitForUser();
         return;
+    }
     // The frame that was due comes before the page's waiting tasks (loads and scripts it held
     // while hidden), like the first paint (didReachLayoutMilestone): otherwise they ran first while
-    // the frame of the host waited behind them
+    // the frame of the host waited behind them. So the page stops waiting only after that frame:
+    // released before, one of its tasks could still come first.
     requestFrameFromHost(m_id);
     runNextOnEngineThread([id = m_id] {
-        if (auto* view = fromID(id))
+        if (auto* view = fromID(id)) {
             view->presentIfNeeded();
+            view->updateWaitForUser();
+        }
     });
 }
 
