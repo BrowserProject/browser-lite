@@ -6,7 +6,8 @@
 // opened from links come right after their page like in Chrome: in the background (Ctrl+click,
 // middle click, also on a target=_blank link) after the ones it opened before, in front
 // (target=_blank, Shift+click, Ctrl+Shift+click) directly after it; an address typed into the page
-// starts over. A middle click on a tab closes it.
+// starts over. A middle click on a tab closes it. A click on a tab takes no focus: the field of
+// its page that had the keyboard gets it back, also on a click on the active tab.
 //
 //   node tests/demo/tab-order-test.mjs [engine-dir]
 import {
@@ -26,13 +27,17 @@ timeLimit();
 // L: a link to /a and a target=_blank link to /d, 60 px high each
 const LINKS =
   '<style>body{margin:0}a{display:block;width:300px;height:60px}</style><a href="/a">A</a><a href="/d" target="_blank">D</a>';
+// E: a textarea at the top left that reports its value
+const FIELD =
+  '<style>body{margin:0}textarea{width:300px;height:100px}</style><textarea></textarea>' +
+  "<script>document.querySelector('textarea').oninput=(e)=>console.log('RESULT value='+e.target.value)</script>";
 const { url: siteURL } = await serve((req, res) => {
   const name = req.url.slice(1).toUpperCase();
-  if (!/^[A-DL]$/.test(name)) return res.writeHead(404).end();
+  if (!/^[A-EL]$/.test(name)) return res.writeHead(404).end();
   res
     .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     .end(
-      `<!doctype html><title>${name}</title>${name === 'L' ? LINKS : `<p>${name}`}<script>console.log('RESULT ready=${name}')</script>`,
+      `<!doctype html><title>${name}</title>${name === 'L' ? LINKS : name === 'E' ? FIELD : `<p>${name}`}<script>console.log('RESULT ready=${name}')</script>`,
     );
 });
 
@@ -276,6 +281,37 @@ check(
   'middle click on a background tab: closes it, the active tab stays',
   (await orderIs('LAADAD')) && (await activeTitle()) === 'L',
   `${await order()}, ${await activeTitle()}`,
+);
+
+// Back to a tab with a click, like Chrome: the textarea of E that had the keyboard gets it again
+results.delete('ready');
+await page.click('#address');
+await page.fill('#address', `${siteURL}e`);
+await page.press('#address', 'Enter');
+await results.wait('ready');
+const field = await page.locator('canvas[data-bl-view]:visible').boundingBox();
+await page.mouse.click(field.x + 100, field.y + 50);
+await page.keyboard.type('a');
+const typed = async (value) => {
+  const end = Date.now() + 10000;
+  while (results.get('value') !== value && Date.now() < end) await page.waitForTimeout(100);
+  return results.get('value');
+};
+check('textarea: typed', (await typed('a')) === 'a', results.get('value'));
+await page.locator('#tab-list .tab').nth(1).click();
+await page.locator('#tab-list .tab').first().click();
+await page.keyboard.type('b');
+check(
+  'click on a tab: the field of its page has the keyboard again',
+  (await typed('ab')) === 'ab',
+  `${results.get('value')}, host focus on ${await page.evaluate(() => document.activeElement?.tagName)}`,
+);
+await page.locator('#tab-list .tab').first().click();
+await page.keyboard.type('c');
+check(
+  'click on the active tab: the page keeps the keyboard',
+  (await typed('abc')) === 'abc',
+  results.get('value'),
 );
 
 await browser.close();

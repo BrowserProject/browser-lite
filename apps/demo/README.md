@@ -151,7 +151,9 @@ select popup) are in the same sheet.
   was opened from in front (Ctrl+T, a link or a popup) as long as no other tab was active in
   between, else its right neighbour, the left one at the end, like Chrome and Firefox (#410).
   A middle click on a tab closes it (through beforeunload like its cross) without activating
-  it; only the left button activates a tab, like Chrome and Firefox (#418).
+  it; only the left button activates a tab, like Chrome and Firefox (#418). A press on a tab
+  or its buttons takes no focus like in Chrome: the tab's page gets the keyboard back with the
+  field that had it, a click on the active tab leaves it where it is (#486).
 - **Host back and forward**: the back of the host browser (its button, the mouse back button,
   the iOS edge swipe, the Android back gesture) goes back in the tab in front while it has a back
   entry, only then the host leaves the demo; its forward (also the mouse forward button) goes
