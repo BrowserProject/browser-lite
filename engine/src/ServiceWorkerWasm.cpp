@@ -114,6 +114,19 @@ static void post(Function<void()>&& function)
     RunLoop::mainSingleton().dispatch(WTF::move(function));
 }
 
+// The server's answer to a request of the page, like an IPC reply: it comes after the
+// messages the server posted before it, so the page has seen the state updates the answer
+// already contains (ready: the registration object has its active worker)
+template<typename Argument, typename Callback>
+static CompletionHandler<void(Argument&&)> reply(Callback&& callback)
+{
+    return [callback = std::forward<Callback>(callback)](Argument&& argument) mutable {
+        post([callback = WTF::move(callback), argument = WTF::move(argument)]() mutable {
+            callback(WTF::move(argument));
+        });
+    };
+}
+
 static ExceptionData notSupported()
 {
     return ExceptionData { ExceptionCode::NotSupportedError, "Not supported in browser-lite"_s };
@@ -874,24 +887,24 @@ public:
 void ClientConnection::matchRegistration(SecurityOriginData&& topOrigin, const URL& clientURL, RegistrationCallback&& callback)
 {
     post([topOrigin = WTF::move(topOrigin), clientURL, callback = WTF::move(callback)]() mutable {
-        serverConnection()->doRegistrationMatching(topOrigin, clientURL, WTF::move(callback));
+        serverConnection()->doRegistrationMatching(topOrigin, clientURL, reply<std::optional<ServiceWorkerRegistrationData>>(WTF::move(callback)));
     });
 }
 
 void ClientConnection::getRegistrations(SecurityOriginData&& topOrigin, const URL& clientURL, GetRegistrationsCallback&& callback)
 {
     post([topOrigin = WTF::move(topOrigin), clientURL, callback = WTF::move(callback)]() mutable {
-        server()->getRegistrations(topOrigin, clientURL, WTF::move(callback));
+        server()->getRegistrations(topOrigin, clientURL, reply<Vector<ServiceWorkerRegistrationData>>(WTF::move(callback)));
     });
 }
 
 void ClientConnection::whenRegistrationReady(const SecurityOriginData& topOrigin, const URL& clientURL, WhenRegistrationReadyCallback&& callback)
 {
     post([topOrigin, clientURL, callback = WTF::move(callback)]() mutable {
-        serverConnection()->whenRegistrationReady(topOrigin, clientURL, [callback = WTF::move(callback)](std::optional<ServiceWorkerRegistrationData>&& data) mutable {
+        serverConnection()->whenRegistrationReady(topOrigin, clientURL, reply<std::optional<ServiceWorkerRegistrationData>>([callback = WTF::move(callback)](std::optional<ServiceWorkerRegistrationData>&& data) mutable {
             if (data)
                 callback(WTF::move(*data));
-        });
+        }));
     });
 }
 
@@ -908,7 +921,7 @@ void ClientConnection::removeServiceWorkerRegistrationInServer(ServiceWorkerRegi
 void ClientConnection::scheduleUnregisterJobInServer(ServiceWorkerRegistrationIdentifier registration, ServiceWorkerOrClientIdentifier context, CompletionHandler<void(ExceptionOr<bool>&&)>&& callback)
 {
     post([registration, context, callback = WTF::move(callback)]() mutable {
-        serverConnection()->scheduleUnregisterJob(registration, context, WTF::move(callback));
+        serverConnection()->scheduleUnregisterJob(registration, context, reply<ExceptionOr<bool>>(WTF::move(callback)));
     });
 }
 

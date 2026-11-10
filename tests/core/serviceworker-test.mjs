@@ -1,11 +1,11 @@
 // Service workers and SharedWorker of the pages (engine/src/ServiceWorkerWasm.cpp): register,
-// control through clients.claim(), intercept fetch (own answer, Cache API, blob, unhandled ->
-// network), postMessage both ways, a navigation the worker answers, navigation preload
-// (respondWith of the preloadResponse and its content in the worker) and large Cache API
-// contents (as files, not in memory). After a restart: contents and preload still there, the
-// new script comes without register() (background update after a navigation),
-// WindowClient.navigate() reloads a window, registration.update() of the page during a
-// background update, navigate() to a blocked target and showNotification() with
+// ready with the active worker, control through clients.claim(), intercept fetch (own answer,
+// Cache API, blob, unhandled -> network), postMessage both ways, a navigation the worker
+// answers, navigation preload (respondWith of the preloadResponse and its content in the
+// worker) and large Cache API contents (as files, not in memory). After a restart: contents
+// and preload still there, the new script comes without register() (background update after a
+// navigation), WindowClient.navigate() reloads a window, registration.update() of the page
+// during a background update, navigate() to a blocked target and showNotification() with
 // notificationclick, which opens a view with clients.openWindow() or brings one to the front
 // with WindowClient.focus(). Last a restart with a stored registration of another origin that
 // does not cover the next navigation there: it loads without crashing the engine.
@@ -51,7 +51,9 @@ else {
   log('initialcontroller=' + !!navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('message', (e) => log('message=' + e.data));
   await navigator.serviceWorker.register('/sw.js');
-  await navigator.serviceWorker.ready;
+  // ready resolves only with an active worker, already set on the registration object
+  const ready = await navigator.serviceWorker.ready;
+  log('readyworkers=' + !!ready.active + ':' + !!ready.waiting + ':' + !!ready.installing);
   log('registered=1');
   if (!navigator.serviceWorker.controller)
     await new Promise((r) => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }));
@@ -338,6 +340,11 @@ check(
   results.get('error') || '',
 );
 check('registered (ready)', (await result('registered')) === '1', results.get('error') || '');
+check(
+  'ready: only the active worker (active:waiting:installing)',
+  results.get('readyworkers') === 'true:false:false',
+  results.get('readyworkers'),
+);
 check(
   'no worker at the start',
   results.get('initialcontroller') === 'false',

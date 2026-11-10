@@ -82,7 +82,9 @@ comes as patches from `patches/`.
     (the fonts and dictionaries the rendered text needs, fetched side by side), `FontArrival.cpp`
     (fallback fonts the text went on without arrived: only the text that may take them is laid
     out again)
-  - Platform: `ServiceWorkerWasm.cpp`, `WebPlatformExtras.cpp` (polyfills and host bridge),
+  - Platform: `ServiceWorkerWasm.cpp` (WebCore's service worker server, page and worker sides
+    connected through the RunLoop in IPC order, also the replies), `WebPlatformExtras.cpp`
+    (polyfills and host bridge),
     `UserContent.cpp` (scripts and CSS of the host's extensions, isolated worlds),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)

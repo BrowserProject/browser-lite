@@ -109,7 +109,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   controls show their icons (play, pause, skip, mute, fullscreen) and their exit button leaves
   fullscreen (#476; every button was blank and fullscreen had no visible way out).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
-- **Workers and storage**: service workers with soft update and navigation preload, Cache API,
+- **Workers and storage**: service workers with soft update and navigation preload (`ready`
+  resolves with the active worker set like in Chrome, #483: before, the registration still showed
+  only the installing worker and `ready.active.postMessage()` threw), Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).

@@ -45,7 +45,9 @@ and libsoup, which does not fit WASM. The `PORT=Wasm` port is structured like th
 port (WTF `RunLoopGeneric`, WebCore curl backend, static) with WPE's graphics (Skia). There is no
 WebKit2: `WebCore::Page` is driven directly (like WebKitLegacy), and what WebKit2 keeps in the
 network process (service workers, Cache API, OPFS, downloads) runs on the engine thread
-(`engine/src/`). A new port needs an entry in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake` and
+(`engine/src/`). The service worker server talks to its pages and workers through the RunLoop
+like WebKit2's IPC: every message, also the reply to a request, comes after the ones sent before
+it (#103, #483). A new port needs an entry in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake` and
 a `PlatformWasm.cmake` per project (patch 0006). All WebKit changes are patches in
 `engine/patches/` ([build.md](build.md)). WebKit's UI strings with placeholders (validation
 messages, the file input's "2 files", time labels of media controls) are formatted with WTF's
