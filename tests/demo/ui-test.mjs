@@ -76,6 +76,7 @@ let loaded = [];
 const printEvents = [];
 const loadedPattern = /RESULT loaded=(.*?)(\s+\(|$)/;
 const pageErrors = [];
+const pageKeys = [];
 tab.on('console', (msg) => {
   if (msg.text().includes('Script terminated')) pageErrors.push(msg.text());
   const printMatch = /RESULT print=(\w+)/.exec(msg.text());
@@ -83,6 +84,8 @@ tab.on('console', (msg) => {
   if (VERBOSE) console.log('   ', msg.text());
   const match = loadedPattern.exec(msg.text());
   if (match) loaded.push(match[1].trim());
+  const keyMatch = /RESULT key=(\w+)/.exec(msg.text());
+  if (keyMatch) pageKeys.push(keyMatch[1]);
 });
 // Loaded or shown from the back/forward cache ("title [cache]")
 async function waitLoaded(title, timeout = 30000, list = loaded) {
@@ -153,6 +156,46 @@ check(
   'forward: second page from the cache',
   await waitLoaded('Page two [cache]'),
   loaded.join('|'),
+);
+// Like Chrome a click on Back, Forward or Reload takes no focus: the page has the keyboard, Space
+// scrolls it instead of pressing the button again
+async function spaceReachesPage() {
+  pageKeys.length = 0;
+  await tab.evaluate(() =>
+    window.blTest.eval(
+      "addEventListener('keydown', (e) => console.log('RESULT key=' + e.code), { once: true }); console.log('RESULT key=ready')",
+    ),
+  );
+  await waitFor(() => pageKeys.includes('ready'), 10000);
+  await tab.keyboard.press('Space');
+  await waitFor(() => pageKeys.includes('Space'), 5000);
+  return pageKeys.includes('Space');
+}
+const focusAfter = () =>
+  tab.evaluate(() => `${document.activeElement?.tagName}#${document.activeElement?.id}`);
+check(
+  'forward: the page has the keyboard',
+  await spaceReachesPage(),
+  `host focus on ${await focusAfter()}`,
+);
+loaded = [];
+await tab.click('#back');
+await waitLoaded('Page one');
+check(
+  'back: the page has the keyboard',
+  await spaceReachesPage(),
+  `host focus on ${await focusAfter()}`,
+);
+loaded = [];
+await tab.click('#forward');
+await waitLoaded('Page two');
+loaded = [];
+await tab.click('#reload');
+check('reload: the page loads again', await waitLoaded('Page two'), loaded.join('|'));
+check(
+  'reload: the page has the keyboard',
+  await spaceReachesPage(),
+  `host focus on ${await focusAfter()}`,
 );
 
 // History (Ctrl+H): both pages, newest first, grouped by day

@@ -60,6 +60,7 @@ import {
   openURL,
   printTab,
   restoredTab,
+  type Tab,
 } from './tabs.js';
 import { installTestHooks, type TestState, withTestOptions } from './test-hooks.js';
 import { setStatus, updateStar } from './toolbar.js';
@@ -382,13 +383,27 @@ new ResizeObserver(() => {
 renderToolbar(ui, byId('extension-buttons'), () => activeTab()?.view ?? null);
 if (debug) installTestHooks(testState);
 
-byId('back').addEventListener('click', () => activeTab()?.view.back());
-byId('forward').addEventListener('click', () => activeTab()?.view.forward());
-byId('reload').addEventListener('click', () => {
-  const tab = activeTab();
-  if (tab?.loading) tab.view.stop();
-  else tab?.view.reload();
-});
+/**
+ * A toolbar button that acts on the page. Like Chrome a press with the mouse or a finger takes no
+ * focus and the page has the keyboard after the action, so Space and the arrow keys scroll it
+ * instead of pressing the button again; a button reached with Tab keeps the focus.
+ */
+function pageButton(id: string, action: (tab: Tab) => void): void {
+  const button = byId(id);
+  button.addEventListener('mousedown', (e) => {
+    if (e.button === 0) e.preventDefault();
+  });
+  button.addEventListener('click', () => {
+    const tab = activeTab();
+    if (!tab) return;
+    action(tab);
+    if (document.activeElement !== button) focusPage();
+  });
+}
+
+pageButton('back', (tab) => tab.view.back());
+pageButton('forward', (tab) => tab.view.forward());
+pageButton('reload', (tab) => (tab.loading ? tab.view.stop() : tab.view.reload()));
 byId('new-tab').addEventListener('click', () => openURL('', true));
 byId('bookmark').addEventListener('click', () => {
   const tab = activeTab();
