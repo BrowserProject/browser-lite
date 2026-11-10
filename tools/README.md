@@ -30,3 +30,4 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `hot-functions-file.mjs` | reads and writes `engine/hot-functions.txt` |
 | `wasm-binary.mjs` | shared helper: sections, names, imports and exports of WebAssembly binaries |
 | `pins.mjs` | shared helper of the node tools |
+| `update-tlds.mjs` | writes the top level domains of the address bar (`apps/demo/src/tlds.ts`) from IANA's list; run it now and then |

@@ -8,6 +8,7 @@ import { compactLayout } from './layout.js';
 import { runtime } from './runtime.js';
 import { SEARCH_ENGINES, settings } from './settings.js';
 import { activeTab, focusPage, loadInTab, openTab, type Tab } from './tabs.js';
+import { hasKnownTld, typedKind } from './typed-kind.js';
 import { byId, element, isBlank } from './util.js';
 
 const form = byId<HTMLFormElement>('address-form');
@@ -62,19 +63,15 @@ function searchURL(text: string): string {
  * What Enter opens for the text of the address bar: an address, or a search with the search
  * engine. An address without a scheme stays without one: `View.load` gives it https:// with a
  * fallback to http:// like Chrome, or http:// for a local one (`typedAddress` names where it
- * starts). Like Chrome an address that is invalid (a port above 65535) is a search.
+ * starts). Like Chrome text is an address only when it looks like one (`typedKind`: node.js and
+ * an invalid address like a port above 65535 are searches).
  */
 export function addressToLoad(text: string): string {
   const value = text.trim();
   if (!value) return '';
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value))
     return URL.canParse(value) ? value : searchURL(value);
-  if (
-    /^(localhost|[^\s/]+\.[^\s/]+|\[[0-9a-f:]+\])(:\d+)?(\/\S*)?$/i.test(value) &&
-    typedAddress(value)
-  )
-    return value;
-  return searchURL(value);
+  return typedKind(value) === 'address' ? value : searchURL(value);
 }
 
 /** Bookmarks and visited pages, weighted: a bookmark much, a visit more the more recent it is. */
@@ -138,13 +135,16 @@ function inlineCompletion(text: string): Row | null {
 }
 
 /**
- * Chrome's Ctrl+Enter: a name without a dot becomes a .com site with www. (wikipedia opens
- * www.wikipedia.com), with its port and path. Chrome also completes names with a dot but no known
- * top level domain (mail.yahoo); without the list of those domains only names without a dot.
+ * Chrome's Ctrl+Enter: a host without a known top level domain becomes a .com site with www.
+ * (wikipedia opens www.wikipedia.com, en.wii www.en.wii.com), with its port and path;
+ * localhost, IP addresses and names that end in a dot stay.
  */
 function withDotCom(text: string): string {
-  const match = /^([a-z0-9-]+)(:\d+)?([/?#]\S*)?$/i.exec(text.trim());
-  return match ? `www.${match[1]}.com${match[2] ?? ''}${match[3] ?? ''}` : text;
+  const match = /^([a-z0-9.-]+)(:\d+)?([/?#]\S*)?$/i.exec(text.trim());
+  const host = match?.[1] ?? '';
+  const local = /^localhost$|^[\d.]+$|\.$/i.test(host);
+  if (!match || local || hasKnownTld(host.toLowerCase())) return text;
+  return `${/^www\./i.test(host) ? '' : 'www.'}${host}.com${match[2] ?? ''}${match[3] ?? ''}`;
 }
 
 /** What the field shows for url when not focused: on a phone only the host, like mobile browsers. */
@@ -262,20 +262,26 @@ function showSuggestions(complete: boolean): void {
     address.value = inline.text;
     address.setSelectionRange(typed.length, inline.text.length, 'backward');
   }
-  // Then what Enter does with the text alone: open it as an address, and always a search
-  const asAddress = addressToLoad(text);
-  const shownAddress = typedAddress(asAddress) || asAddress;
+  // Then what Enter does with the text alone: open it as an address, and always a search; like
+  // Chrome a host without a known top level domain (node.js) is searched, the address after it
   const search = searchURL(text);
-  if (asAddress !== search && shownAddress !== typedAddress(inline?.url ?? '')) {
+  const opened = addressToLoad(text);
+  const offered = opened === search && typedKind(text) === 'maybe' ? text : '';
+  const asAddress = opened === search ? offered : opened;
+  const shownAddress = typedAddress(asAddress) || asAddress;
+  const addressRow = () => {
+    if (!asAddress || shownAddress === typedAddress(inline?.url ?? '')) return;
     const row = { url: asAddress, text };
     rows.push(row);
     box.append(rowElement(row, icon('globe'), shownAddress));
-  }
+  };
+  if (!offered) addressRow();
   const searchRow = { url: search, text };
   rows.push(searchRow);
   box.append(
     rowElement(searchRow, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${text}"`),
   );
+  if (offered) addressRow();
   for (const entry of suggestions(text)) {
     if (entry.url === shownAddress || entry.url === inline?.url) continue;
     const row = { url: entry.url, text: entry.url };

@@ -1,13 +1,13 @@
 // Typing in the address bar like Chrome: a visited site completes inline as soon as the typed text
 // starts its host (selected, so typing goes on over it, Backspace removes it) and Enter opens it
 // with the scheme it was visited with; Alt+Enter opens the address in a new tab in front,
-// Ctrl+Enter makes a name without a dot a .com site with www. Like Chrome localhost and IP
-// addresses without a scheme load over http://, other sites over https:// with a fallback to
-// http:// (unit tests of the core). The address and the find text stay
-// when Safari brings the demo back from its page cache (WebKit resets fields with autocomplete=off).
-// Every tab keeps an unfinished edit across a tab switch, the first Escape after choosing a row
-// with the arrow keys returns to the typed text, and after a javascript: address the field shows
-// the page's address again.
+// Ctrl+Enter makes a host without a known top level domain a .com site with www. Such a host
+// (node.js) is a search with the address after it. Like Chrome localhost and IP addresses
+// without a scheme load over http://, other sites over https:// with a fallback to http:// (unit
+// tests of the core). The address and the find text stay when Safari brings the demo back from
+// its page cache (WebKit resets fields with autocomplete=off). Every tab keeps an unfinished edit
+// across a tab switch, the first Escape after choosing a row with the arrow keys returns to the
+// typed text, and after a javascript: address the field shows the page's address again.
 //
 //   node tests/demo/address-bar-test.mjs [engine-dir]
 import {
@@ -249,9 +249,71 @@ const withPath = await ctrlEnter('example:8080/path');
 check('Ctrl+Enter: with port and path', withPath === 'www.example.com:8080/path', withPath);
 const withDot = await ctrlEnter(prefix);
 check(
-  'Ctrl+Enter: the typed text without the completion, a name with a dot stays',
+  'Ctrl+Enter: the typed text without the completion, an IP address stays',
   withDot === prefix,
   withDot,
+);
+const unknownTld = await ctrlEnter('en.wii');
+const knownTld = await ctrlEnter('example.org');
+check(
+  'Ctrl+Enter: a host without a known top level domain gets .com, one with stays',
+  unknownTld === 'www.en.wii.com' && knownTld === 'example.org',
+  `${unknownTld} ${knownTld}`,
+);
+
+// Like Chrome text is an address only when it looks like one: a host without a known top level
+// domain (node.js) is a search with the address in the row after it
+const rowTitles = () =>
+  page.locator('#suggestions:not([hidden]) .suggestion-title').allTextContents();
+await typeIn('node.js');
+const searchFirst = await rowTitles();
+await page.keyboard.press('Enter');
+const searched = await page.evaluate(() => window.loadedAddress);
+check(
+  'node.js: the search first, the address after it, Enter searches',
+  /^Search .* for "node\.js"$/.test(searchFirst[0] ?? '') &&
+    searchFirst[1] === 'https://node.js/' &&
+    searched.includes('q=node.js') &&
+    searched !== 'node.js',
+  `${JSON.stringify(searchFirst)} ${searched}`,
+);
+await typeIn('example.com');
+const addressFirst = await rowTitles();
+await page.keyboard.press('Enter');
+const opened = await page.evaluate(() => window.loadedAddress);
+check(
+  'example.com: the address first, Enter opens it',
+  addressFirst[0] === 'https://example.com/' &&
+    /^Search /.test(addressFirst[1] ?? '') &&
+    opened === 'example.com',
+  `${JSON.stringify(addressFirst)} ${opened}`,
+);
+const kinds = await page.evaluate(() => {
+  const search = window.blTest.addressToLoad('x').slice(0, -1);
+  return [
+    ...['node.js', 'vue.js', 'en.wii', 'node.js/docs', '3.14', 'me@example.com', 'weather'],
+    ...[
+      'example.com',
+      'bbc.co.uk',
+      'example.org/x',
+      'xn--e1afmkfd.xn--p1ai',
+      '\u043f.\u0440\u0444',
+    ],
+    ...['node.js/', 'node.js/docs?v=2', 'intranet:8080', 'localhost', '192.168.1.1', '[::1]'],
+  ].map((text) => {
+    const url = window.blTest.addressToLoad(text);
+    return `${text}=${url.startsWith(search) ? 'search' : url === text ? 'address' : url}`;
+  });
+});
+check(
+  'what is an address and what a search',
+  kinds.join(' ') ===
+    'node.js=search vue.js=search en.wii=search node.js/docs=search 3.14=search ' +
+      'me@example.com=search weather=search example.com=address bbc.co.uk=address ' +
+      'example.org/x=address xn--e1afmkfd.xn--p1ai=address \u043f.\u0440\u0444=address ' +
+      'node.js/=address node.js/docs?v=2=address intranet:8080=address localhost=address ' +
+      '192.168.1.1=address [::1]=address',
+  kinds.join(' '),
 );
 
 await browser.close();
