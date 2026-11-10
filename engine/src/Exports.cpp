@@ -24,6 +24,7 @@
 #include "ScrollingWasm.h"
 #include "Speech.h"
 #include "UserContent.h"
+#include "VisitedLinks.h"
 #include "WebPlatformExtras.h"
 #include "LoaderStrategy.h"
 #include "WebView.h"
@@ -691,6 +692,17 @@ EMSCRIPTEN_KEEPALIVE void bl_host_call_result(double identifier, int ok, char* r
 EMSCRIPTEN_KEEPALIVE void bl_set_user_content(char* json)
 {
     runOnEngineThread([json = takeString(json)] { setUserContent(json); });
+}
+
+// Addresses of the host's history, separated by newlines, count as visited for :visited
+EMSCRIPTEN_KEEPALIVE void bl_add_visited_links(char* urls)
+{
+    runOnEngineThread([urls = takeString(urls)] { addVisitedLinks(urls); });
+}
+
+EMSCRIPTEN_KEEPALIVE void bl_clear_visited_links()
+{
+    runOnEngineThread([] { clearVisitedLinks(); });
 }
 
 // A message (JSON) of the host to the scripts of an extension in a view

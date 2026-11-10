@@ -179,6 +179,12 @@ through the transport and TLS), for example while the user types it into an addr
 engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down
 on.
 
+Links to the addresses the views loaded get the `:visited` style of their page. The engine keeps
+them only while it runs: `browser.addVisitedLinks(urls)` adds the addresses of the host's own
+history (after the start, also after a restart), `browser.clearVisitedLinks()` forgets all of them
+when the user clears the history. Open pages restyle their links at once; like in other browsers a
+page cannot read whether a link counts as visited.
+
 ## Extensions
 
 `createExtensionHost({ app?, store? })` returns the host of an integrator's extensions; pass it as

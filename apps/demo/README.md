@@ -137,6 +137,8 @@ select popup) are in the same sheet.
   Ctrl+Shift+T (Cmd+Shift+T) brings the tab closed last back at its place with back and forward,
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
+  Links to the addresses of the history get the `:visited` style of their page: `main.ts` passes
+  the history to `browser.addVisitedLinks` at every start and clears it with the history (#480).
   A discarded tab, a reopened one and the tabs of a restored session come back at the scroll
   position of their page like in Chrome (`scrollX`/`scrollY` of the history entries, #440), also
   when the demo is reloaded or closed right after a scroll (#452) or the tab is closed right

@@ -57,7 +57,8 @@ comes as patches from `patches/`.
   - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker), `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
-    suggestions of `<input list>`), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
+    suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
+    loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in, types in or waits for a visible one, also for the first frame of a tab
     switched to)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`

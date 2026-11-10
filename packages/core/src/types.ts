@@ -268,6 +268,14 @@ export interface Browser {
    */
   preconnect(url: string): void;
   /**
+   * Addresses that count as visited for the `:visited` style of links, for example those of the
+   * host's own history after the start; the addresses the views load count without this. Open
+   * pages restyle their links to them. Like in other browsers pages cannot read the result.
+   */
+  addVisitedLinks(urls: string[]): void;
+  /** No link counts as visited any more, for example after the user cleared the history. */
+  clearVisitedLinks(): void;
+  /**
    * Highest pixel ratio the pages render at on the host screen (at least 1), null for no limit;
    * an emulated device keeps its own. On a screen with a higher pixel ratio the host scales the
    * views up: slightly softer, but the engine paints fewer pixels (a quarter at ratio 2 with

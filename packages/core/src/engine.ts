@@ -4,7 +4,7 @@ import type { StartProgress, Transport } from './types.js';
 type Export = (...args: number[]) => number;
 
 /** abiVersion of engine/abi.json this core is written for (checked by tests/contract/abi-test.mjs). */
-export const ENGINE_ABI_VERSION = 27;
+export const ENGINE_ABI_VERSION = 28;
 
 /** Public exports of the engine the core calls (engine/abi.json). */
 const ENGINE_EXPORTS = [
@@ -78,6 +78,8 @@ const ENGINE_EXPORTS = [
   '_bl_webgl_lose_context_for_testing',
   '_bl_host_call_result',
   '_bl_set_user_content',
+  '_bl_add_visited_links',
+  '_bl_clear_visited_links',
   '_bl_extension_message',
   '_bl_media_event',
   '_bl_media_frame',

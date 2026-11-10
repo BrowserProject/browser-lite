@@ -67,6 +67,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/Speech.cpp
     ${BL_ENGINE_SRC}/Storage.cpp
     ${BL_ENGINE_SRC}/UserContent.cpp
+    ${BL_ENGINE_SRC}/VisitedLinks.cpp
     ${BL_ENGINE_SRC}/WebView.cpp
     ${BL_ENGINE_SRC}/main.cpp
     ${BL_ENGINE_SRC}/media/ContainerParser.cpp

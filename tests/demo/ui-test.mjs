@@ -4,7 +4,8 @@
 // the URL, a hanging engine (message, the JSC watchdog stops the script, the time in a dialog
 // does not count), a real crash (abort, WASM trap) with a restart in the page (also from the
 // hang), back/forward that fails and stop, beforeunload (navigation, reload, closing a tab and
-// the host tab, loop), window.focus() and the question before a form is sent again.
+// the host tab, loop), window.focus(), the question before a form is sent again and :visited from
+// the history after a restart.
 //
 //   node tests/demo/ui-test.mjs [engine-dir]
 import {
@@ -17,6 +18,7 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
   watchErrors,
 } from '../lib/index.mjs';
 
@@ -719,6 +721,26 @@ check(
   `${restartURL.search} ${JSON.stringify(restoredTitles)}`,
 );
 check('crash: the background tab does not load yet', (loads.get('before') || 0) === beforeLoads);
+
+// :visited after the restart: the new engine gets the history of this device, so a link to the
+// page only the crashed engine loaded is visited (#480)
+await tab.evaluate(
+  (link) =>
+    window.blTest.eval(
+      `document.body.insertAdjacentHTML('afterbegin', '<style>#v { position: fixed; left: 0; top: 0; width: 100px; height: 100px; background: rgb(0, 0, 255) } #v:visited { background: rgb(255, 0, 0) }</style><a id="v" href="${link}"></a>')`,
+    ),
+  siteURL + 'before',
+);
+let visitedPixel = null;
+await waitFor(async () => {
+  visitedPixel = await tab.evaluate(() => window.blTest.pagePixel(50, 50));
+  return visitedPixel[0] > 200 && visitedPixel[2] < 50;
+}, 30000);
+check(
+  'crash: a link to a page of the history is visited after the restart',
+  visitedPixel[0] > 200 && visitedPixel[2] < 50,
+  JSON.stringify(visitedPixel),
+);
 
 // Another crash right away (abort() in the engine thread): afterwards the tabs load only when
 // clicked

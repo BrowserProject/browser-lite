@@ -66,6 +66,16 @@ text like Chrome (`typedAddress`, `packages/core/src/address.ts`, #435): without
 right away for localhost, IP addresses, names without a dot and other ports; the engine gets the
 full address.
 
+`:visited` asks the `VisitedLinkStore` of the page; the page configuration of a bare `Page` has
+WebCore's empty one, which answers "not visited" for every link. All views share the engine's own
+store (`engine/src/VisitedLinks.cpp`): WebCore's `HistoryController` adds every address a frame
+commits, the host adds its history with `browser.addVisitedLinks` and empties the store with
+`clearVisitedLinks` (`bl_add_visited_links`, `bl_clear_visited_links`). It keeps only the shared
+string hashes of the addresses, like the stores of WebKitLegacy and WebKit2, and a new entry
+restyles the links to it in the open documents; a document from the back/forward cache resolves
+its style again when it comes back. WebCore limits `:visited` to colors and makes
+`getComputedStyle` and painting APIs report the unvisited style (#480).
+
 ## Threads
 
 Emscripten pthreads need `SharedArrayBuffer`, hence cross-origin isolation

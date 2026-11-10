@@ -12,6 +12,7 @@ export interface Visit {
 const KEY = 'bl-history';
 const MAX_ENTRIES = 3000;
 const listeners = new Set<() => void>();
+const clearListeners = new Set<() => void>();
 
 export function readHistory(): Visit[] {
   return readJSON<Visit[]>(KEY, []);
@@ -49,9 +50,15 @@ export function clearHistory(): void {
   clearClosed();
   clearIcons();
   write([]);
+  for (const listener of clearListeners) listener();
 }
 
 /** Calls listener after every change of the history. */
 export function onHistoryChange(listener: () => void): void {
   listeners.add(listener);
+}
+
+/** Calls listener after the history was cleared. */
+export function onHistoryClear(listener: () => void): void {
+  clearListeners.add(listener);
 }

@@ -703,6 +703,18 @@ class BrowserImpl implements Browser, ViewHost {
     if (this.ready) this.module._bl_preconnect(this.text(url));
   }
 
+  addVisitedLinks(urls: string[]): void {
+    if (!Array.isArray(urls))
+      throw new BrowserLiteError('invalid-options', 'urls must be an array');
+    // The engine takes them separated by newlines, which a parsed address never contains
+    const list = urls.filter((url) => typeof url === 'string' && url && !/[\r\n]/.test(url));
+    if (this.ready && list.length) this.module._bl_add_visited_links(this.text(list.join('\n')));
+  }
+
+  clearVisitedLinks(): void {
+    if (this.ready) this.module._bl_clear_visited_links();
+  }
+
   setLanguages(list: string[]): void {
     const checked = languages(list);
     this.config.languages = checked;

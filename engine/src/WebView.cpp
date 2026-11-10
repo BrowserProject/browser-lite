@@ -18,6 +18,7 @@
 #include "ScrollingWasm.h"
 #include "ServiceWorkerWasm.h"
 #include "UserContent.h"
+#include "VisitedLinks.h"
 #include "WebPlatformExtras.h"
 #include "WebCodecsWasm.h"
 #if ENABLE(MEDIA_STREAM)
@@ -29,6 +30,7 @@
 #include "WasmSocketProvider.h"
 #include "Storage.h"
 
+#include <WebCore/VisitedLinkStore.h>
 #include <WebCore/BackForwardController.h>
 #include <WebCore/CookieJar.h>
 #include <WebCore/DatabaseProvider.h>
@@ -258,6 +260,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = createCacheStorageProvider();
     configuration.screenOrientationManager = screenOrientationManager();
+    // :visited (VisitedLinks.cpp), one store for all views
+    configuration.visitedLinkStore = &visitedLinkStore();
 
     // The empty configuration is meant for SVG images: everything sandboxed, no
     // script. For real pages: without sandbox and with our FrameLoaderClient.

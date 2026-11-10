@@ -28,6 +28,7 @@ import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
+import { onHistoryClear, readHistory } from './history.js';
 import { followHostHistory } from './host-history.js';
 import { renderIcons } from './icons.js';
 import { initNewTabPage } from './new-tab-page.js';
@@ -301,6 +302,8 @@ async function start(restarted: boolean): Promise<void> {
   emulateDevice(settings);
   runtime.browser = browser;
   runtime.stopped = false;
+  // :visited of the pages from the history of this device
+  browser.addVisitedLinks(readHistory().map((visit) => visit.url));
   profile.attach(browser);
   browser.on('new-view', ({ view, opener }) => adoptView(view, opener));
   browser.on('download', ({ download }) => addDownload(download));
@@ -321,6 +324,8 @@ async function start(restarted: boolean): Promise<void> {
   openStartTabs(restarted);
   if (profile.status === 'local') showNotice(profile.statusText);
 }
+
+onHistoryClear(() => runtime.browser?.clearVisitedLinks());
 
 // The profile was opened or reset on another device: nothing is saved here any more
 profile.on('status', () => {
