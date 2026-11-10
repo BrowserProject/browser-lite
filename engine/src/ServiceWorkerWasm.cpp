@@ -1260,6 +1260,11 @@ static Ref<CacheStorageProvider>& cacheStorageProvider()
 static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> privacy)
 {
     auto configuration = pageConfigurationWithEmptyClients(PageIdentifier::generate(), PAL::SessionID::defaultSessionID());
+    // Without the sandbox of the empty configuration, like WebKit2's worker pages: the
+    // placeholder document then has the worker's origin, which the loads of the worker are
+    // checked against (a blob: URL of the worker's origin may only be displayed by it)
+    if (auto* parameters = std::get_if<PageConfiguration::LocalMainFrameCreationParameters>(&configuration.mainFrameCreationParameters))
+        parameters->effectiveSandboxFlags = { };
     configuration.cookieJar = createCookieJar();
     configuration.storageNamespaceProvider = &storageNamespaceProvider();
     configuration.databaseProvider = &databaseProvider();
@@ -1272,7 +1277,6 @@ static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData
     settings.setGlobalPrivacyControlEnabled(WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl));
     enableIn(settings);
     page->setupForRemoteWorker(scriptURL, topOrigin, referrerPolicy, privacy);
-    HttpCache::setWorkerOrigin(page, SecurityOrigin::create(scriptURL)->data());
     return page;
 }
 

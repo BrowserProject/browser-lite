@@ -37,13 +37,11 @@
 #include <WebCore/CacheValidation.h>
 #include <WebCore/CachedResource.h>
 #include <WebCore/DocumentInlines.h>
-#include <WebCore/DocumentPage.h>
 #include <WebCore/FetchOptions.h>
 #include <WebCore/HTTPHeaderNames.h>
 #include <WebCore/HTTPParsers.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
-#include <WebCore/Page.h>
 #include <WebCore/ParsedContentRange.h>
 #include <WebCore/ResourceLoader.h>
 #include <WebCore/ResourceRequest.h>
@@ -56,7 +54,6 @@
 #include <wtf/HashMap.h>
 #include <wtf/HexNumber.h>
 #include <wtf/NeverDestroyed.h>
-#include <wtf/WeakHashMap.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -122,29 +119,6 @@ static SecurityOriginData originOf(const URL& url)
     return SecurityOrigin::create(url)->data();
 }
 
-static WeakHashMap<Page, SecurityOriginData>& workerOrigins()
-{
-    static NeverDestroyed<WeakHashMap<Page, SecurityOriginData>> origins;
-    return origins;
-}
-
-void setWorkerOrigin(Page& page, const SecurityOriginData& origin)
-{
-    workerOrigins().set(page, SecurityOriginData { origin });
-}
-
-// Origin of the context the frame loads for: the worker of a worker page, else the document
-static SecurityOriginData contextOrigin(const LocalFrame& frame)
-{
-    if (RefPtr page = frame.page()) {
-        auto worker = workerOrigins().find(*page);
-        if (worker != workerOrigins().end())
-            return worker->value;
-    }
-    RefPtr document = frame.document();
-    return document ? document->securityOrigin().data() : SecurityOriginData { };
-}
-
 static String partition(const LocalFrame& frame, const ResourceRequest& request, const FetchOptions& options, const SecurityOrigin* requester)
 {
     auto topOrigin = originOf(request.firstPartyForCookies());
@@ -158,7 +132,8 @@ static String partition(const LocalFrame& frame, const ResourceRequest& request,
     // worker is opaque too): then the context decides, which is opaque in a sandboxed document
     if (requester && !requester->isOpaque())
         return partition(topOrigin, requester->data(), false);
-    return partition(topOrigin, contextOrigin(frame), false);
+    RefPtr document = frame.document();
+    return partition(topOrigin, document ? document->securityOrigin().data() : SecurityOriginData { }, false);
 }
 
 String partition(const ResourceLoader& loader)

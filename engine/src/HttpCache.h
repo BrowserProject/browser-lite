@@ -9,7 +9,6 @@
 
 namespace WebCore {
 class Document;
-class Page;
 class ResourceLoader;
 struct SecurityOriginData;
 }
@@ -38,7 +37,7 @@ String partition(const WebCore::SecurityOriginData& topOrigin, const WebCore::Se
 // origin of the context that loads (requester, the CachedResource's origin:
 // document or worker), for a navigation from its target URL. If the requester is
 // opaque or missing (a CORS load after a cross-origin redirect) from the frame's
-// context: the worker of a worker page (setWorkerOrigin), else the document.
+// document (the placeholder document of a worker page has the worker's origin).
 // Workers load through a document whose firstPartyForCookies is their top origin:
 // a service worker or shared worker through the placeholder document of its own
 // page (top origin of the registration or creator), a dedicated worker through
@@ -47,10 +46,6 @@ String partition(const WebCore::ResourceLoader&);
 
 // Partition of a load of this document that WebCore's loader does not make (media)
 String partition(const WebCore::Document&);
-
-// Origin of the service worker or shared worker that runs in this page (its
-// placeholder document has an opaque origin)
-void setWorkerOrigin(WebCore::Page&, const WebCore::SecurityOriginData&);
 
 // May this request come from the cache or go into it? Of the range requests
 // only those with one range from a position on (bytes=a-b, bytes=a-)

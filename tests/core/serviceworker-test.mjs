@@ -1,7 +1,7 @@
 // Service workers and SharedWorker of the pages (engine/src/ServiceWorkerWasm.cpp): register,
 // ready with the active worker, control through clients.claim(), intercept fetch (own answer,
-// Cache API, blob, unhandled -> network), postMessage both ways, a navigation the worker
-// answers, navigation preload (respondWith of the preloadResponse and its content in the
+// Cache API, blob, unhandled -> network), postMessage both ways, a blob: URL of the page
+// fetched by the service worker and by the SharedWorker, a navigation the worker answers, navigation preload (respondWith of the preloadResponse and its content in the
 // worker) and large Cache API contents (as files, not in memory). After a restart: contents
 // and preload still there, the new script comes without register() (background update after a
 // navigation), WindowClient.navigate() reloads a window, registration.update() of the page
@@ -41,7 +41,12 @@ else {
   a.port.onmessage = (e) => {
     log('sharedA=' + e.data);
     const b = new SharedWorker('/shared.js');
-    b.port.onmessage = (e) => log('sharedB=' + e.data);
+    b.port.onmessage = (e) => {
+      log('sharedB=' + e.data);
+      // A blob: URL of the page, fetched by the shared worker
+      b.port.onmessage = (e) => log('sharedblob=' + e.data);
+      b.port.postMessage(URL.createObjectURL(new Blob(['shared-blob'])));
+    };
     b.port.postMessage('b');
   };
   a.port.postMessage('a');
@@ -49,7 +54,8 @@ else {
 (async () => {
   if (!('serviceWorker' in navigator)) { log('sw=none'); return; }
   log('initialcontroller=' + !!navigator.serviceWorker.controller);
-  navigator.serviceWorker.addEventListener('message', (e) => log('message=' + e.data));
+  navigator.serviceWorker.addEventListener('message', (e) =>
+    e.data.startsWith('blobfetch:') ? log('swblob=' + e.data.slice(10)) : log('message=' + e.data));
   await navigator.serviceWorker.register('/sw.js');
   // ready resolves only with an active worker, already set on the registration object
   const ready = await navigator.serviceWorker.ready;
@@ -69,6 +75,8 @@ else {
   await preload.enable();
   await preload.setHeaderValue('bl-test');
   navigator.serviceWorker.controller.postMessage('ping');
+  // A blob: URL of the page, fetched by its service worker
+  navigator.serviceWorker.controller.postMessage(URL.createObjectURL(new Blob(['page-blob'])));
 })().catch((e) => log('error=' + e));
 </script>`;
 
@@ -209,6 +217,8 @@ self.addEventListener('message', (e) => {
     e.source.navigate('http://127.0.0.1:1/').then((client) => 'resolved:' + client, (error) => error.name).then((outcome) => fetch('/report?' + outcome));
   else if (e.data === 'focus-without-click')
     e.source.focus().then(() => e.source.postMessage('focus:focused'), (error) => e.source.postMessage('focus:' + error.name));
+  else if (e.data.startsWith('blob:'))
+    fetch(e.data).then((r) => r.text()).catch(String).then((text) => e.source.postMessage('blobfetch:' + text));
   else if (e.data === 'open-without-click')
     self.clients.openWindow('/opened').then(() => e.source.postMessage('window'), (error) => e.source.postMessage('nowindow:' + error.name));
   else
@@ -221,7 +231,10 @@ let connections = 0;
 onconnect = (e) => {
   connections++;
   const port = e.ports[0];
-  port.onmessage = (m) => port.postMessage(m.data + ':' + connections);
+  port.onmessage = (m) => {
+    if (!m.data.startsWith('blob:')) return port.postMessage(m.data + ':' + connections);
+    fetch(m.data).then((r) => r.text()).catch(String).then((text) => port.postMessage(text));
+  };
 };
 `;
 
@@ -380,6 +393,11 @@ check(
   (await result('message', 30000)) === 'pong:ping',
   results.get('message'),
 );
+check(
+  'the worker fetches a blob: URL of its page',
+  (await result('swblob', 30000)) === 'page-blob',
+  results.get('swblob'),
+);
 
 check(
   'SharedWorker answers',
@@ -390,6 +408,11 @@ check(
   'second SharedWorker object uses the same worker',
   (await result('sharedB', 30000)) === 'b:2',
   results.get('sharedB'),
+);
+check(
+  'SharedWorker fetches a blob: URL of its page',
+  (await result('sharedblob', 30000)) === 'shared-blob',
+  results.get('sharedblob'),
 );
 
 // A navigation the worker answers (the page does not exist on the server)

@@ -111,7 +111,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload (`ready`
   resolves with the active worker set like in Chrome, #483: before, the registration still showed
-  only the installing worker and `ready.active.postMessage()` threw), Cache API,
+  only the installing worker and `ready.active.postMessage()` threw; service and shared workers
+  fetch `blob:` URLs of their pages like in Chrome, #484: before, every such fetch failed with
+  "Load failed"), Cache API,
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).
