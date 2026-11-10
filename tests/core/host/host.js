@@ -305,7 +305,7 @@ const host = {
     host.heldDialogs.splice(index, 1)[0].resolve(answer);
     return true;
   },
-  /** Payloads of the 'memory-pressure' events ({footprint, limit}). */
+  /** Payloads of the 'memory-pressure' events ({footprint, limit, level}). */
   memoryPressure: [],
   /** Download objects of the 'download' event (for cancel()). */
   downloadObjects: [],

@@ -299,10 +299,12 @@ of `context.storage` (default in memory), for example in your user's profile.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
   comes again if the engine still does not answer 10 s later.
-- `memory-pressure` (`{footprint, limit}` in bytes): the engine memory runs short. Close or
-  discard background views; when none is left, tell the user (the demo shows a message). Ask to
-  close tabs only while a background view still holds a page: a discarded one frees nothing, and
-  the event comes again at every further growth, as WASM memory never shrinks.
+- `memory-pressure` (`{footprint, limit, level}`, sizes in bytes): the engine memory grows above
+  its budget (`level` `'moderate'`) or runs short (`'critical'`: the engine already dropped the
+  compiled JS and the back/forward cache). Close or discard background views at either level;
+  when none is left and the level is `'critical'`, tell the user (the demo shows a message). Ask
+  to close tabs only while a background view still holds a page: a discarded one frees nothing,
+  and the event comes again at every further growth, as WASM memory never shrinks.
 - `view.close()` runs the page's beforeunload first and resolves `false` when the user stays.
   Like Chrome it does not wait longer than 500 ms for a busy page (all views share the engine
   thread), so closing tabs in a row never stalls behind a heavy page (#387).
@@ -343,7 +345,7 @@ folder. Stored data in OPFS and the HTTP cache stay.
   and never shrinks; the engine releases caches above 192 MB, from 384 MB keeps 128 MB free ahead
   and reports `memory-pressure` when less is left below the limit it found at runtime, or above
   3 GB (512 MB on iPhone and iPad: iOS ends the whole page instead of failing a growth, at about
-  1 GB of engine memory with three heavy tabs).
+  1 GB of engine memory with three heavy tabs); `critical` only when memory is short.
 - Threads: at least 12 Web Workers (a pool of 8 plus 4 spare), more when pages start workers.
 - CPU: JavaScript runs in an interpreter; large news sites take 10 to 60 s to load
   ([status.md](status.md)).

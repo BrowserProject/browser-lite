@@ -74,7 +74,7 @@ const DEFAULT_URL = 'https://example.com/';
 const REPEAT_WINDOW = 60000;
 const CRASH_KEY = 'bl-crash-time';
 const SAFE_START_KEY = 'bl-safe-start';
-// Memory pressure and no background tab left to discard, but loaded ones that stay (sound,
+// Memory critical and no background tab left to discard, but loaded ones that stay (sound,
 // camera); without them closing tabs frees nothing (discarded tabs hold no page)
 const MEMORY_FULL = 'Memory is almost full: close tabs, or the browser may crash and restart';
 const MEMORY_FULL_PAGE =
@@ -308,8 +308,9 @@ async function start(restarted: boolean): Promise<void> {
   profile.attach(browser);
   browser.on('new-view', ({ view, opener }) => adoptView(view, opener));
   browser.on('download', ({ download }) => addDownload(download));
-  browser.on('memory-pressure', () => {
-    if (discardForMemory()) return;
+  // 'moderate' (above the engine's budget) only discards; the notice only when memory is short
+  browser.on('memory-pressure', ({ level }) => {
+    if (discardForMemory() || level !== 'critical') return;
     showNotice(backgroundPageLoaded() ? MEMORY_FULL : MEMORY_FULL_PAGE);
   });
   browser.on('crash', ({ reason }) => crashed(reason));

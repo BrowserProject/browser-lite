@@ -492,8 +492,7 @@ WASM memory never shrinks and grows up to 4 GB, in a 32 bit browser only to abou
 serves both: `engine/src/MemoryWatch.cpp` runs after every engine task and acts when malloc's
 footprint grew by 32 MB. Above 192 MB it calls `WebCore::releaseMemory` (#61, #64), which keeps
 the compiled JS of the pages (bytecode and JIT code, patch 0088, #441) and the page left last in
-the back/forward cache (of up to 3) unless memory is short (the condition of `memory-pressure`
-below): building the code again blocked the pages for seconds, the GC ages out code that no
+the back/forward cache (of up to 3) unless memory is short (`critical` below): building the code again blocked the pages for seconds, the GC ages out code that no
 longer runs, and back to a page loaded again showed its top until its load was complete (#451,
 `tests/core/back-cache-test.mjs`). JSC's code cache, which holds the bytecode and the sources of
 every script evaluated with strong references, goes at every release and whenever a view leaves
@@ -501,10 +500,14 @@ its page (`JSC::clearCodeCache`, patch 0102, #475): kept, it held the code of ev
 frame that was gone, while the functions that live keep their code without it
 (`tests/core/memory-release-test.mjs`). Once the malloc area ends above 384 MB it grows the
 memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
-From then on, or above 3 GB, it reports `memory-pressure` `{footprint, limit}` at every growth,
-and the host discards background views (#128, #171, #216). On iPhone and iPad a growth never
-fails, iOS ends the whole web content process instead, so the core sets the 3 GB of
-`BL_MEMORY_PRESSURE_MB` to 512 MB there (#358).
+From then on, or above the budget of 3 GB, it reports `memory-pressure` `{footprint, limit,
+level}` at every growth, and the host discards background views (#128, #171, #216). On iPhone
+and iPad a growth never fails, iOS ends the whole web content process instead, so the core sets
+the 3 GB of `BL_MEMORY_PRESSURE_MB` to 512 MB there (#358). Memory is short, level `critical`,
+with less than 128 MB left below the limit, or above the budget when less than that is free
+inside the malloc area after a release that kept the code and the page left last; then a second
+release drops them too. Otherwise the level above the budget is `moderate`: the footprint never
+shrinks, and after one heavy page most of it is free again (#497).
 
 Above 2 GB a wasm32 pointer is a negative `i32` in JS. Emscripten makes the pointers of its own
 library functions, of `EM_ASM` arguments and of `malloc` unsigned and rewrites direct `HEAP*[p]`,

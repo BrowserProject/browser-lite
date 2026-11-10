@@ -482,6 +482,7 @@ class BrowserImpl implements Browser, ViewHost {
       this.events.emit('memory-pressure', {
         footprint: Number(data.footprint) || 0,
         limit: Number(data.limit) || 0,
+        level: data.level === 'critical' ? 'critical' : 'moderate',
       }),
     );
     this.handle<Record<string, unknown>>('clipboard', (data) => {
@@ -656,7 +657,7 @@ class BrowserImpl implements Browser, ViewHost {
   memoryPressure(): void {
     if (!this.ready) return;
     const size = this.module.blHeap().length;
-    this.events.emit('memory-pressure', { footprint: size, limit: size });
+    this.events.emit('memory-pressure', { footprint: size, limit: size, level: 'critical' });
   }
 
   warn(code: WarningCode, message: string): void {

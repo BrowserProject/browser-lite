@@ -138,7 +138,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), from 512 MB on iPhone and
-  iPad (#358), error pages with the
+  iPad (#358; `moderate` there, `critical` only while the malloc area stays full, #497), error
+  pages with the
   relay's reason and auto reload (#174, #175), also for a missing `file:` and an unknown
   `about:` address (#395) and for a restricted port or the address 0.0.0.0, typed or as a
   redirect target, where the view stayed blank before (#400), and for a redirect loop (more
@@ -592,8 +593,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
   allocation bigger than the 128 MB reserve can still crash the engine (#147, #216). On iPhone
   and iPad iOS ends the whole host page instead (all tabs lost); the 512 MB budget there (#358)
   discards background tabs early, but a single page far above it is not stopped. Android Chrome
-  has no budget yet (no kill seen so far). With no background tab left to discard the demo says
-  that the page uses the memory (#373), again at every growth by 32 MB.
+  has no budget yet (no kill seen so far). Above the budget memory counts as short only while the
+  malloc area stays full after a release (#497): the area never shrinks, so before one heavy page
+  (CNN at a phone's pixel ratio 3, about 530 MB) made every later growth drop the compiled JS and
+  the page left last and show the message with one tab. With no background tab left to discard
+  and memory short the demo says that the page uses the memory (#373), again at every growth by
+  32 MB.
   News sites with their ads reach the budget with two tabs (#417): on an iPhone 16 with the
   shared profile (consent given, so all ads load) nzz.ch alone holds 331 MB of malloc in use (JS
   heap 59 MB), The Guardian 267 MB after releasing everything, so nzz.ch plus one more page

@@ -3,7 +3,8 @@
 // with footprint and limit while every allocation still succeeds, then at every further growth;
 // beyond the limit the page gets a RangeError and the engine keeps running. Without the limit the
 // memory grows on without an event. On an iPhone host the core sets a budget of 512 MB: iOS ends
-// the whole page before a growth fails (#358).
+// the whole page before a growth fails (#358). Near the limit, or above the budget with the malloc
+// area full after the release (the page holds what it allocated), the level is 'critical'.
 //
 //   node tests/core/memory-test.mjs [engine-dir]
 import {
@@ -75,8 +76,11 @@ for (let i = 0; i < 40 && result === 'ok' && !(await events()).length; i++)
   result = await allocate();
 const [first] = await events();
 check(
-  'memory-pressure with footprint and limit',
-  !!first && first.limit === LIMIT_MB * MB && first.footprint > 256 * MB,
+  'memory-pressure with footprint and limit, critical',
+  !!first &&
+    first.limit === LIMIT_MB * MB &&
+    first.footprint > 256 * MB &&
+    first.level === 'critical',
   JSON.stringify(first),
 );
 const roomMB = first ? (first.limit - first.footprint) / MB : 0;
@@ -122,8 +126,10 @@ check(
 await page.evaluate(() => window.blTest.memoryPressure());
 const simulated = (await events()).at(-1);
 check(
-  'debug memoryPressure() with footprint and limit',
-  simulated?.footprint > 0 && simulated.footprint === simulated.limit,
+  'debug memoryPressure() with footprint and limit, critical',
+  simulated?.footprint > 0 &&
+    simulated.footprint === simulated.limit &&
+    simulated.level === 'critical',
   JSON.stringify(simulated),
 );
 
@@ -146,7 +152,8 @@ check(
   !!phoneFirst &&
     phoneFirst.footprint >= 512 * MB &&
     phoneFirst.footprint < 640 * MB &&
-    phoneFirst.limit > 2048 * MB,
+    phoneFirst.limit > 2048 * MB &&
+    phoneFirst.level === 'critical',
   JSON.stringify(phoneFirst ?? null),
 );
 

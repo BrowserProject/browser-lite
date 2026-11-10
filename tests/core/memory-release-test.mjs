@@ -1,8 +1,8 @@
 // Automatic memory release (engine/src/MemoryWatch.cpp): above BL_MEMORY_RELEASE_MB every growth
 // of malloc by 32 MB releases caches like memory pressure, but keeps the compiled JS of the pages
 // (patch 0088): functions that ran before the release do not need their bytecode built again. Only
-// when memory is short (here BL_MEMORY_PRESSURE_MB below the footprint) does the release take the
-// code too, and the first calls after it cost as much as the very first ones. The code of pages
+// when memory is short (here the malloc area full above BL_MEMORY_PRESSURE_MB: the page holds what
+// malloc grew by) does the release take the code too, and the first calls after it cost as much as the very first ones. The code of pages
 // and frames that are gone goes: a view that leaves its page and every release drop JSC's code
 // cache, which held the bytecode and the sources of every script evaluated (patch 0102).
 //
@@ -125,7 +125,8 @@ check(
   `cold ${kept.cold} ms, warm ${kept.warm} ms, after the release ${kept.after} ms`,
 );
 
-// Memory short from 64 MB on: the release deletes the code as under memory pressure
+// Above the budget from 64 MB on with the area full: the release deletes the code as under
+// memory pressure
 const short = await measure('short', 'BL_MEMORY_RELEASE_MB=64,BL_MEMORY_PRESSURE_MB=64');
 check(
   'with memory short the release takes the JS code too',

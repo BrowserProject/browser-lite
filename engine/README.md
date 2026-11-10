@@ -58,7 +58,8 @@ comes as patches from `patches/`.
     them all as its coalesced events), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
-    and when a view leaves its page (patch 0102), finds the memory limit, memory pressure),
+    and when a view leaves its page (patch 0102), finds the memory limit, memory pressure
+    `moderate` above the budget and `critical` when memory is short),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker), `EditorClient.cpp`, `BackForwardList.cpp`,

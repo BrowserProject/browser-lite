@@ -1,8 +1,8 @@
 # apps/demo/
 
 The full demo browser on browser-lite: tabs (with popups, restored tabs that load on the first
-click, discarding under memory pressure and a message when none is left: close tabs while a
-loaded background tab stays, else that the page uses the memory), a new tab page,
+click, discarding under memory pressure and, when memory is critical and none is left, a
+message: close tabs while a loaded background tab stays, else that the page uses the memory), a new tab page,
 address bar with suggestions, history, bookmarks, downloads panel, dialogs of the pages in the page, settings page with profile, extensions and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, pop-up blocker
 icon (open a blocked popup, always allow the site), crash and hang

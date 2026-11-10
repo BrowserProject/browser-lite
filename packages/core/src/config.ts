@@ -23,9 +23,10 @@ const NAMESPACE = /^[a-z0-9_]{1,32}$/;
 const EXPERT_ENV = /^(BL|JSC|FC)_[A-Za-z0-9_]+$/;
 
 /**
- * Memory budget of the engine on iPhone and iPad in MB of malloc footprint (#358). There a growth
- * of the WASM memory never fails: iOS ends the whole web content process instead (with three heavy
- * tabs at 0.9 to 1.1 GB of engine memory), so the engine cannot find its limit at runtime.
+ * Memory budget of the engine on iPhone and iPad in MB of malloc footprint (#358, #497): above it
+ * every growth reports memory-pressure, so background tabs go. There a growth of the WASM memory
+ * never fails: iOS ends the whole web content process instead (with three heavy tabs at 0.9 to
+ * 1.1 GB of engine memory), so the engine cannot find its limit at runtime.
  */
 const APPLE_MOBILE_MEMORY_PRESSURE_MB = 512;
 

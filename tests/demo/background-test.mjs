@@ -1,8 +1,10 @@
 // Background tabs in the demo UI (the engine side is tests/core/background-test.mjs): under memory
 // pressure the demo discards the least recently used background tab (titles stay, a discarded
 // tab loads again when clicked at its scroll position, also a reopened one and the tabs of a
-// restored session, with none left to discard the message names the page), never a tab with a picture-in-picture window; the hang message after an input without an answer for
-// 10 s goes away when the watchdog stops the script; a long alert does not count as a hang.
+// restored session, with none left to discard and memory critical the message names the page,
+// with memory only above the budget no message), never a tab with a picture-in-picture window;
+// the hang message after an input without an answer for 10 s goes away when the watchdog stops
+// the script; a long alert does not count as a hang.
 //
 //   node tests/demo/background-test.mjs [engine-dir]
 import {
@@ -173,6 +175,33 @@ check(
 await app.selectTab(1);
 check('memory pressure: a discarded tab loads when clicked', !!(await app.wait('loaded', 'one')));
 await app.context.close();
+
+// One tab above the budget with its malloc area free again after the release (the footprint
+// never shrinks, #497): the engine reports 'moderate', the demo has nothing to discard and shows
+// no message
+const single = await openApp({
+  url: `${siteURL}memory?single`,
+  env: `BL_MEMORY_PRESSURE_MB=${baseMB}`,
+  log: '1',
+});
+const engineLog = [];
+single.page.on('console', (msg) => engineLog.push(msg.text()));
+await single.wait('loaded', 'single');
+// Garbage the release after this task collects
+await single.page.evaluate(() => window.blTest.eval('new Uint8Array(256 << 20).fill(1).length'));
+const pressureLogged = () => engineLog.some((line) => line.includes('Memory pressure'));
+for (let i = 0; i < 100 && !pressureLogged(); i++) await single.page.waitForTimeout(100);
+await single.page.waitForTimeout(500);
+const singleStatus = await single.page.evaluate(
+  () => document.getElementById('status').textContent,
+);
+check(
+  'memory pressure above the budget with the area free again: moderate, no message',
+  engineLog.some((line) => line.includes('Memory pressure (moderate)')) &&
+    !/Memory is almost full/.test(singleStatus),
+  `${engineLog.filter((line) => /Memory (released|pressure)/.test(line)).join(' | ')}; status "${singleStatus}"`,
+);
+await single.context.close();
 
 // Like Chrome a discarded tab and a reopened one (Ctrl+Shift+T) come back at their scroll position
 const long = await openApp({ url: `${siteURL}long` });

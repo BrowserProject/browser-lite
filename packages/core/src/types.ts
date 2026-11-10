@@ -383,6 +383,14 @@ export interface MemoryPressureEvent {
    * browser), else the maximum of the engine build (4 GB).
    */
   limit: number;
+  /**
+   * 'critical': memory is short, less than 128 MB are left below `limit`, or above the budget of
+   * the engine (`BL_MEMORY_PRESSURE_MB`, 512 MB on iPhone and iPad) inside the malloc area after a
+   * release; the engine already dropped the compiled JS and the back/forward cache. 'moderate':
+   * the footprint is above the budget while memory is not short (the footprint never shrinks);
+   * freeing memory (closing background views) keeps it from growing further.
+   */
+  level: 'moderate' | 'critical';
 }
 
 /**
@@ -966,8 +974,8 @@ export interface DebugApi {
    */
   gpu(action: 'lose' | 'restore' | 'lose-webgl'): void;
   /**
-   * Behaves like a memory-pressure message of the engine at its limit (footprint and limit are the
-   * current size of the engine memory).
+   * Behaves like a memory-pressure message of the engine at its limit (level 'critical', footprint
+   * and limit are the current size of the engine memory).
    */
   memoryPressure(): void;
   /**

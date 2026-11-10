@@ -6,20 +6,25 @@
 //   (caches, decoded images, back/forward cache) above BL_MEMORY_RELEASE_MB at
 //   every growth of malloc by 32 MB, so free space is reused first. The
 //   compiled JS of the pages (bytecode and JIT code) and the page left last
-//   (kept in the back/forward cache) go too only once memory is short:
-//   rebuilding the code blocked the pages for seconds, the GC already ages out
-//   the code that does not run, and a page loaded again on back shows its top
-//   until the load is complete. JSC's code cache goes at every release and
-//   whenever a view leaves its page: it holds the bytecode and the sources of
-//   every script evaluated, also of the pages that are gone, which the code of
-//   the pages that live does not need
+//   (kept in the back/forward cache) go too only once memory is short (see
+//   limitIsNear): rebuilding the code blocked the pages for seconds, the GC
+//   already ages out the code that does not run, and a page loaded again on
+//   back shows its top until the load is complete.
+//   JSC's code cache goes at every release and whenever a view leaves its
+//   page: it holds the bytecode and the sources of every script evaluated,
+//   also of the pages that are gone, which the code of the pages that live
+//   does not need
 // - at every growth of malloc by 32 MB, once the malloc area ends above
 //   reserveFrom, grows the memory ahead so that a reserve stays free above the
 //   malloc area; when that fails, the current size is the limit
-// - then reports "memory-pressure" {footprint, limit} once less than the
-//   reserve is left below the limit, or above BL_MEMORY_PRESSURE_MB
-//   (fragmentation and big blocks make 4 GB scarce even when little is in
-//   use). The host then discards a background view.
+// - then reports "memory-pressure" {footprint, limit, level}: "critical" once
+//   memory is short, else "moderate" above BL_MEMORY_PRESSURE_MB (fragmentation
+//   and big blocks make 4 GB scarce even when little is in use; on iPhone and
+//   iPad, where a growth never fails, the budget of the core). The host then
+//   discards a background view. The footprint is a high-water mark: one heavy
+//   page keeps it above the budget for good, often with most of it free again
+//   after the release, so above the budget memory is short only while the
+//   area stays full.
 // malloc_footprint() costs nothing (mallinfo() walks the whole heap and cost
 // about 25 ms per call on CNN).
 
@@ -94,22 +99,37 @@ static uint64_t mallocEnd()
 // time (engine/engine.cmake), the engine never calls it itself.
 static pthread_mutex_t s_growLock = PTHREAD_MUTEX_INITIALIZER;
 
-// Above BL_MEMORY_PRESSURE_MB, or less than the reserve left below the limit
-static bool memoryIsShort(uint64_t footprint)
+// Memory is short when less than the reserve is left: below the limit, or,
+// above BL_MEMORY_PRESSURE_MB, inside the malloc area after a release. The
+// budget is no limit, the area may grow beyond it and what is free inside it is
+// used first. Below a limit only the room above the area counts: there a big
+// block that finds no free space of its size makes malloc fail.
+static bool limitIsNear()
 {
-    uint64_t pressureThreshold = static_cast<uint64_t>(engineConfig().memoryPressureMB) << 20;
-    return footprint >= pressureThreshold || (s_limit && mallocEnd() + memoryReserve > s_limit);
+    return s_limit && mallocEnd() + memoryReserve > s_limit;
 }
 
-static void releaseCaches(uint64_t footprint)
+static bool overBudget(uint64_t footprint)
+{
+    return footprint >= static_cast<uint64_t>(engineConfig().memoryPressureMB) << 20;
+}
+
+// mallinfo() walks the whole heap, so only above the budget
+static bool areaIsFull()
+{
+    return mallinfo().fordblks < memoryReserve;
+}
+
+static bool releaseIsDue(uint64_t footprint)
 {
     uint64_t threshold = static_cast<uint64_t>(engineConfig().memoryReleaseMB) << 20;
-    if (!threshold || footprint < threshold || footprint < s_footprintAtRelease + checkStep)
-        return;
-    s_footprintAtRelease = footprint;
+    return threshold && footprint >= threshold && footprint >= s_footprintAtRelease + checkStep;
+}
+
+static void releaseCaches(uint64_t footprint, bool memoryShort)
+{
     auto start = WTF::MonotonicTime::now();
     size_t usedBefore = debugEnabled() ? mallinfo().uordblks : 0;
-    bool memoryShort = memoryIsShort(footprint);
     // Before the release, so that its GC collects the pruned pages
     WebCore::BackForwardCache::singleton().pruneToSizeNow(memoryShort ? 0 : 1, WebCore::PruningReason::MemoryPressure);
     WebCore::releaseMemory(WTF::Critical::Yes, WTF::Synchronous::Yes, WebCore::MaintainBackForwardCache::Yes, WebCore::MaintainMemoryCache::No,
@@ -149,17 +169,34 @@ static void keepReserve()
 void checkMemory(ReleaseCaches release)
 {
     uint64_t footprint = malloc_footprint();
-    if (release == ReleaseCaches::Yes)
-        releaseCaches(footprint);
-    if (footprint < s_footprintAtCheck + checkStep)
+    bool releaseDue = release == ReleaseCaches::Yes && releaseIsDue(footprint);
+    bool checkDue = footprint >= s_footprintAtCheck + checkStep;
+    if (!releaseDue && !checkDue)
+        return;
+    bool budgetExceeded = overBudget(footprint);
+    // Full above the budget, measured after the release that keeps the JS code
+    // and the page left last; then they go too
+    bool areaFull = false;
+    if (releaseDue) {
+        s_footprintAtRelease = footprint;
+        bool limitNear = limitIsNear();
+        releaseCaches(footprint, limitNear);
+        areaFull = !limitNear && budgetExceeded && areaIsFull();
+        if (areaFull)
+            releaseCaches(footprint, true);
+    } else
+        areaFull = checkDue && budgetExceeded && areaIsFull();
+    if (!checkDue)
         return;
     s_footprintAtCheck = footprint;
     keepReserve();
-    if (!memoryIsShort(footprint))
+    bool critical = areaFull || limitIsNear();
+    if (!critical && !budgetExceeded)
         return;
     uint64_t limit = s_limit ? s_limit : emscripten_get_heap_max();
-    debugLog("Memory pressure: malloc area %llu MB, limit %llu MB", mb(footprint), mb(limit));
-    notifyHost(0, "memory-pressure", makeString("{\"footprint\":"_s, footprint, ",\"limit\":"_s, limit, '}'));
+    auto level = critical ? "critical"_s : "moderate"_s;
+    debugLog("Memory pressure (%s): malloc area %llu MB, limit %llu MB", level.characters(), mb(footprint), mb(limit));
+    notifyHost(0, "memory-pressure", makeString("{\"footprint\":"_s, footprint, ",\"limit\":"_s, limit, ",\"level\":\""_s, level, "\"}"_s));
 }
 
 void pageLeft()
