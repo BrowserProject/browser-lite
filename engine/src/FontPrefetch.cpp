@@ -119,8 +119,9 @@ void collect(Document& document, std::set<char32_t>& characters)
 {
     for (RefPtr node = document.firstChild(); node; node = NodeTraversal::next(*node)) {
         RefPtr text = dynamicDowncast<Text>(*node);
-        // Only what is rendered: hidden menus would load fonts the layout never asks for
-        if (!text || !text->renderer())
+        // Only what is rendered: hidden menus would load fonts the layout never asks for. Latin-1
+        // text is all in the fonts of engine.data (a page of 14 MB took 1.4 s per scan otherwise).
+        if (!text || !text->renderer() || text->data().is8Bit())
             continue;
         for (char32_t c : StringView(text->data()).codePoints()) {
             if (needsLazyFont(c))

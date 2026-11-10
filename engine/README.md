@@ -20,7 +20,8 @@ ran away from, or the boxes with percentage heights every layout of a container 
 or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped, or the
 fullscreen video a page's `object-fit: cover` cropped, or the icons of the media controls, which
 the Adwaita theme reads only from a GResource, or the link address that stayed in the status
-when a cookie dialog appeared under a still mouse)
+when a cookie dialog appeared under a still mouse, or the cells at the edge of a table with
+collapsed borders, each of which looked through its whole column while it painted)
 comes as patches from `patches/`.
 
 ## Folders
@@ -79,7 +80,7 @@ comes as patches from `patches/`.
     `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`
-    (the fonts and dictionaries the rendered text needs, fetched side by side), `FontArrival.cpp`
+    (the fonts and dictionaries the rendered text outside Latin-1 needs, fetched side by side), `FontArrival.cpp`
     (fallback fonts the text went on without arrived: only the text that may take them is laid
     out again)
   - Platform: `ServiceWorkerWasm.cpp` (WebCore's service worker server, page and worker sides

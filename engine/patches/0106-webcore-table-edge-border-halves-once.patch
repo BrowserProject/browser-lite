@@ -1,0 +1,109 @@
+diff --git a/Source/WebCore/rendering/RenderTable.cpp b/Source/WebCore/rendering/RenderTable.cpp
+index 00ad409358..73fa508e02 100644
+--- a/Source/WebCore/rendering/RenderTable.cpp
++++ b/Source/WebCore/rendering/RenderTable.cpp
+@@ -739,6 +739,7 @@ void RenderTable::invalidateCollapsedBorders(RenderTableCell* cellWithStyleChang
+ {
+     m_collapsedBordersValid = false;
+     m_collapsedBorders.clear();
++    m_collapsedEdgeInnerHalves.reset();
+ 
+     for (auto& section : childrenOfType<RenderTableSection>(*this))
+         section.clearCachedCollapsedBorders();
+@@ -771,6 +772,30 @@ void RenderTable::invalidateCollapsedBorders(RenderTableCell* cellWithStyleChang
+     m_collapsedEmptyBorderIsPresent = false;
+ }
+ 
++RenderTable::CollapsedEdgeInnerHalves RenderTable::collapsedEdgeInnerHalves()
++{
++    if (m_collapsedEdgeInnerHalves)
++        return *m_collapsedEdgeInnerHalves;
++    ASSERT(collapseBorders());
++    recalcSectionsIfNeeded();
++    CollapsedEdgeInnerHalves halves;
++    // With collapsed borders the border of a cell is its inner half
++    if (unsigned columns = numEffCols()) {
++        for (auto& section : childrenOfType<RenderTableSection>(*this)) {
++            for (auto* row = section.firstRow(); row; row = row->nextRow()) {
++                for (auto* cell = row->firstCell(); cell; cell = cell->nextCell()) {
++                    if (!colToEffCol(cell->col()))
++                        halves.left = std::max(halves.left, cell->borderLeft());
++                    if (colToEffCol(cell->col() + cell->colSpan() - 1) == columns - 1)
++                        halves.right = std::max(halves.right, cell->borderRight());
++                }
++            }
++        }
++    }
++    m_collapsedEdgeInnerHalves = halves;
++    return halves;
++}
++
+ // Collect all the unique border values that we want to paint in a sorted list.
+ void RenderTable::recalcCollapsedBorders()
+ {
+diff --git a/Source/WebCore/rendering/RenderTable.h b/Source/WebCore/rendering/RenderTable.h
+index 79267d6377..c273407ea1 100644
+--- a/Source/WebCore/rendering/RenderTable.h
++++ b/Source/WebCore/rendering/RenderTable.h
+@@ -186,6 +186,14 @@ public:
+     void collapsedEmptyBorderIsPresent() { m_collapsedEmptyBorderIsPresent = true; }
+     const CollapsedBorderValue* currentBorderValue() const LIFETIME_BOUND { return m_currentBorder; }
+     void paintCollapsedBordersForRow(PaintInfo&, RenderTableRow&, const LayoutPoint& paintOffset);
++
++    // The widest inner halves of the collapsed borders of the cells at the left and the right edge,
++    // kept until the collapsed borders are invalidated.
++    struct CollapsedEdgeInnerHalves {
++        LayoutUnit left;
++        LayoutUnit right;
++    };
++    CollapsedEdgeInnerHalves collapsedEdgeInnerHalves();
+     
+     bool hasSections() const { return m_head || m_foot || m_firstBody; }
+ 
+@@ -280,6 +288,7 @@ protected:
+ 
+     CollapsedBorderValues m_collapsedBorders;
+     const CollapsedBorderValue* m_currentBorder { nullptr };
++    std::optional<CollapsedEdgeInnerHalves> m_collapsedEdgeInnerHalves;
+     bool m_collapsedBordersValid : 1 { false };
+     bool m_collapsedEmptyBorderIsPresent : 1 { false };
+ 
+diff --git a/Source/WebCore/rendering/RenderTableCell.cpp b/Source/WebCore/rendering/RenderTableCell.cpp
+index 62386ecbc6..8b9ee46b7d 100644
+--- a/Source/WebCore/rendering/RenderTableCell.cpp
++++ b/Source/WebCore/rendering/RenderTableCell.cpp
+@@ -1589,26 +1589,14 @@ void RenderTableCell::paintBackgroundsBehindCell(PaintInfo& paintInfo, LayoutPoi
+         LayoutUnit rightInset;
+ 
+         if (isFirstColumn || isLastColumn) {
+-            LayoutUnit cellLeftHalf = isFirstColumn ? borderHalfLeft(false) : 0_lu;
+-            LayoutUnit cellRightHalf = isLastColumn ? borderHalfRight(false) : 0_lu;
+-            LayoutUnit maxLeftHalf = cellLeftHalf;
+-            LayoutUnit maxRightHalf = cellRightHalf;
+-
+-            for (auto* cell = tableElt->cellAbove(this); cell; cell = tableElt->cellAbove(cell)) {
+-                if (isFirstColumn)
+-                    maxLeftHalf = std::max(maxLeftHalf, cell->borderHalfLeft(false));
+-                if (isLastColumn)
+-                    maxRightHalf = std::max(maxRightHalf, cell->borderHalfRight(false));
+-            }
+-            for (auto* cell = tableElt->cellBelow(this); cell; cell = tableElt->cellBelow(cell)) {
+-                if (isFirstColumn)
+-                    maxLeftHalf = std::max(maxLeftHalf, cell->borderHalfLeft(false));
+-                if (isLastColumn)
+-                    maxRightHalf = std::max(maxRightHalf, cell->borderHalfRight(false));
+-            }
+-
+-            leftInset = maxLeftHalf - cellLeftHalf;
+-            rightInset = maxRightHalf - cellRightHalf;
++            // The widest halves of all cells at the edge, once per layout: looking through the
++            // cells above and below for each cell painted took a pass over the whole column per
++            // cell, seconds per paint on a table with thousands of rows
++            auto edgeHalves = tableElt->collapsedEdgeInnerHalves();
++            if (isFirstColumn)
++                leftInset = edgeHalves.left - borderHalfLeft(false);
++            if (isLastColumn)
++                rightInset = edgeHalves.right - borderHalfRight(false);
+         }
+ 
+         if (leftInset || rightInset) {

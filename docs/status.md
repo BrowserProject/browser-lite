@@ -513,6 +513,22 @@ browser (Safari keeps Cmd+L, T and W for itself).
    longer do (#446): on edition.cnn.com (2026-11-06, loaded machine) the engine thread had
    stood still for 3 to 13 s writing a 24 KB cookie database frame by frame, now no pointer move
    waits longer than about 1 s.
+11. Huge documents (2026-11-10, local copy, Chromium host, 1280x800): iana.org's IDN table
+   (14 MB of HTML, 12,000 rows, collapsed borders) loads in 14 to 15 s, as fast as Playwright's
+   native WebKitGTK on the same machine (13.5 to 15 s); Chromium 4 to 4.5 s. It took 17.5 to
+   21.5 s before (48 s under a load average of 19): every cell at the edge of the table looked
+   through its whole column for the widest border half while it painted (WebKit 308969@main),
+   after a layout working out each border anew, seconds per frame; now the table keeps them
+   (patch 0106, #485). What is left is WebKit's table layout at WASM speed: laying out each cell
+   with its `inline-flex` tags (9 s of a 25 s profile), work over the whole table in every
+   rendering update (row positions, all collapsed borders, column widths, about 3 s) and whole
+   relayouts after the page's scripts and after lazy fonts arrived (2 to 3 updates of 1.7 to 3 s).
+   Rendering updates take three fifths of the load; a parser working as long in one go as the
+   last update took (up to 500 ms) made 8 instead of 28 updates, each longer: iana no faster,
+   html.spec.whatwg.org 42 and 65 s instead of 21 and 30 s (Chromium 7.4 s), so the slices stay
+   at 50 ms (#349, #485). html.spec.whatwg.org spends most of its load in two rendering updates of
+   5 to 6 s after parsing, not looked into yet. The engine kept answering throughout (an eval ping
+   took at most 4.6 s).
 
 ## Open: features
 

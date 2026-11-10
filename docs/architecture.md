@@ -57,7 +57,9 @@ messages, the file input's "2 files", time labels of media controls) are formatt
 GLib ports (patch 0076, #363). Layout lays a box with a percentage height out again only when
 what its percentages resolve against changed, not on every layout of its parent or of the block
 they resolve against, and a flex item with such descendants only after it was measured in the
-same layout (patch 0098, #461).
+same layout (patch 0098, #461). A cell at the left or right edge of a table with collapsed borders
+paints its background inside the widest border half at that edge, which the table works out once
+until its collapsed borders change (patch 0106, #485).
 
 The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`): `commit`,
 then `navigation` and `title` of the new document. A page from the back/forward cache commits
@@ -368,7 +370,8 @@ Unicode emoji groups and the symbol fonts into Unicode blocks. Files usually nee
 a group (a CJK font's most frequent slices, the data of an ICU locale): the first read fetches the
 others in parallel. Once the engine runs it fetches the files of `engine/lazy-prefetch.txt` and
 the ICU groups of the user's languages in the background (#240). The first read the layout waits
-for scans the rendered text and fetches the fonts and dictionaries it needs side by side (#252);
+for scans the rendered text outside Latin-1 and fetches the fonts and dictionaries it needs side
+by side (#252, #485);
 fonts only reached as a fallback for characters (scripts, CJK, emoji) hold up the engine thread at
 most 300 ms, the text is laid out again once they are there (#255), only the elements with text
 outside the fonts of `engine.data` (#401). The fonts of a cascade keep every fallback font their
