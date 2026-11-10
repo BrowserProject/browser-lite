@@ -173,6 +173,11 @@ address bar, show it instead of `url` meanwhile, so a slow server or a sign in p
 leave the bar on the page being left. Navigations of the page never set it, so a page cannot
 make the bar show an address it is not on.
 
+`navigation-start` comes when the main frame starts a navigation to another document, whoever
+started it (a link, a form, script, the host, back/forward), also while the page still loads;
+it ends with `commit`, or without a new document with `navigation` and `loading` false. A
+browser UI shows its toolbar and progress with it, like Chrome's controls while a page loads.
+
 `browser.preconnect(url)` opens the connection to the origin of an http(s) address ahead (TCP
 through the transport and TLS), for example while the user types it into an address bar; the
 engine does the same for `<link rel=preconnect>` of the pages and for a link the mouse goes down

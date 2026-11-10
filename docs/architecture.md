@@ -61,9 +61,10 @@ same layout (patch 0098, #461). A cell at the left or right edge of a table with
 paints its background inside the widest border half at that edge, which the table works out once
 until its collapsed borders change (patch 0106, #485).
 
-The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`): `commit`,
-then `navigation` and `title` of the new document. A page from the back/forward cache commits
-while the frame still holds the page being left, so its `navigation` and `title` follow once it is
+The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`):
+`navigation-start` and `navigation` (`loading` true) when the main frame starts a provisional load
+(#494), `commit`, then `navigation` and `title` of the new document. A page from the back/forward
+cache commits while the frame still holds the page being left, so its `navigation` and `title` follow once it is
 back in the frame (`didRestoreFromBackForwardCache`, #367). Until the commit the engine reports
 the address of the document being left; the address a navigation of the host goes to is kept by
 the core (`View.pendingURL`, `packages/core/src/pending.ts`, #382). The core also reads typed

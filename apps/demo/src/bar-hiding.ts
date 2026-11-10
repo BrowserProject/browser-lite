@@ -12,9 +12,11 @@ type BarState = 'shown' | 'hidden' | 'showing';
 /**
  * Like mobile Chrome's browser controls, the bottom bar of the phone layout (`#chrome`) slides
  * away while the user scrolls the page of the tab in front down (the view's `scroll` event with
- * `user`) and comes back when they scroll up, the page is at its top, a new document commits,
+ * `user`) and comes back when they scroll up, the page is at its top, a page starts loading,
  * another tab comes to the front or the focus goes into the bar (keyboard shortcuts, Tab). Only
- * scrolls by the user count, not those of the page's script or a restored position.
+ * scrolls by the user count, not those of the page's script or a restored position. Like
+ * Chrome's controls while a page loads, the bar with its progress stays until the new document
+ * commits or the navigation ends without one, so a tapped link always shows that it loads.
  *
  * The page area takes the bar's room in one step, so the page is laid out at most once per
  * change of direction: hiding gives it the room at once while the bar slides away over it
@@ -29,6 +31,8 @@ export function hideBarWhileScrolling(): void {
   let lastY: number | null = null;
   // Distance scrolled by the user in the current direction (negative: up)
   let run = 0;
+  // Tabs whose main frame navigates to another document that has not committed yet
+  const navigating = new WeakSet<Tab>();
 
   const set = (next: BarState) => {
     state = next;
@@ -49,6 +53,8 @@ export function hideBarWhileScrolling(): void {
   const hide = () => {
     run = 0;
     if (state === 'hidden' || !compactLayout() || chrome.contains(document.activeElement)) return;
+    const tab = activeTab();
+    if (tab && navigating.has(tab)) return;
     set('hidden');
   };
   const scrolled = (event: ViewEvents['scroll']) => {
@@ -69,7 +75,16 @@ export function hideBarWhileScrolling(): void {
     tab.view.on('scroll', (event) => {
       if (tab.isActive) scrolled(event);
     });
+    tab.view.on('navigation-start', () => {
+      navigating.add(tab);
+      if (tab.isActive) show();
+    });
+    // Ended without a new document: stopped, a download or a failure
+    tab.view.on('navigation', (event) => {
+      if (!event.loading) navigating.delete(tab);
+    });
     tab.view.on('commit', () => {
+      navigating.delete(tab);
       if (!tab.isActive) return;
       lastY = null;
       show();

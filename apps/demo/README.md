@@ -206,10 +206,13 @@ tab overview (a card per tab with title, the site's icon and host: tap to switch
 new tab and Done at the bottom); menu, panels and the permission prompt are bottom sheets on the
 toolbar over a backdrop, as high as the visible part at most and scrolling (in landscape the menu
 has two columns and the toolbar is 44 px high); like mobile Chrome the bar slides away while the
-user scrolls a page down and comes back when they scroll up, the page is at its top, a new page
-commits, another tab comes to the front or the focus goes into the bar (`bar-hiding.ts` on the
-view's `scroll` event with `user`; scrolls of the page's script do not count). The page area
-takes the bar's room in one step, so the page is laid out once per change of direction: hiding
+user scrolls a page down and comes back when they scroll up, the page is at its top, a page
+starts loading, another tab comes to the front or the focus goes into the bar (`bar-hiding.ts` on
+the view's `scroll` event with `user`; scrolls of the page's script do not count). Like Chrome's
+controls while a page loads, the bar with its progress stays from `navigation-start` until the new
+document commits or the navigation ends without one, so a tapped link shows at once that it loads
+(#494). The page area takes the bar's room in one step, so the page is laid out once per change
+of direction: hiding
 gives it the room at once while the bar slides away over it, showing slides the bar in over the
 page first and gives the room back when it is there (#472); the find bar sits at the bottom of the page; JS dialogs are centered and the
 sign-in dialog at the top; touch targets are at least 44 px and fields have 16 px text (iOS zooms

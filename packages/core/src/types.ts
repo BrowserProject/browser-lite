@@ -517,6 +517,14 @@ export interface SkippedFile {
 /** Events of {@link View.on}. */
 export interface ViewEvents {
   /**
+   * The main frame starts a navigation to another document (a link, a form, script, the host,
+   * back/forward), also while the page still loads, before the `navigation` event with `loading`
+   * true. It ends with `commit` of its document, or without one with `navigation` (`loading`
+   * false: stopped, a download, failed). Same-document navigations do not start one. A browser
+   * shows its toolbar with it, like Chrome's browser controls while a page loads.
+   */
+  'navigation-start': Record<string, never>;
+  /**
    * The address or back/forward state changed: at the start of a navigation (`loading` true),
    * for the new document (also one from the back/forward cache, followed by its `title`),
    * same-document navigations, and when loading ends.

@@ -614,6 +614,9 @@ export class ViewImpl implements View {
   /** @internal Engine event of this view (other types are ignored). */
   engineEvent(type: string, data: Record<string, unknown>): void {
     switch (type) {
+      case 'navigation-start':
+        this.emit('navigation-start', {});
+        return;
       case 'navigation': {
         const url = String(data.url ?? '');
         const history = (data.history as SessionHistory | undefined) ?? null;

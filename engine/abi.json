@@ -1,5 +1,5 @@
 {
-  "abiVersion": 29,
+  "abiVersion": 30,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -164,6 +164,7 @@
     { "name": "blSetDeferred", "setBy": "engine", "type": "(chunk: number, module: WebAssembly.Module) => Promise", "doc": "Compiled chunk engine.deferred-<chunk>.wasm of a split engine (custom section bl.deferred in engine.wasm: the number of chunks, #238): instantiated on the main thread at once, sent to every worker; resolves when the main thread has it." }
   ],
   "events": [
+    { "type": "navigation-start", "scope": "view", "payload": "empty: the main frame starts a navigation to another document (a link, a form, script, the host, back/forward), also while the page still loads; the navigation event with loading true follows" },
     { "type": "navigation", "scope": "view", "payload": "{url, canGoBack, canGoForward, loading, history: {entries: [{url, title, scrollX, scrollY}], index} | null}" },
     { "type": "scroll", "scope": "view", "payload": "{x, y, user}: the main frame scrolled (at most once per run loop turn; scroll position like history's scrollX/scrollY; user: by wheel, finger, keys or scrollbar, not by script or a restored position)" },
     { "type": "history", "scope": "view", "payload": "{entries: [{url, title, scrollX, scrollY}], index}: the main frame scrolled (at most once a second and at bl_sync_history, only on a change)" },

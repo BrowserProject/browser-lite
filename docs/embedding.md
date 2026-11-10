@@ -293,7 +293,9 @@ of `context.storage` (default in memory), for example in your user's profile.
 - `scroll` of a view (`x`, `y`, `user`) follows the main frame's position; hide a toolbar while
   the user scrolls down (`user` true, `y` growing), like Chrome's browser controls. Give the view
   the toolbar's room in one step (not frame by frame while it slides): every new size lays the
-  page out again.
+  page out again. Show it again on `navigation-start` (the main frame starts a navigation to
+  another document, also one the page starts while it still loads) until `commit`, so a tapped
+  link shows its progress.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
   Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
   comes again if the engine still does not answer 10 s later.

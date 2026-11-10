@@ -2003,10 +2003,13 @@ void WebView::restoreHistory(const String& data)
     m_page->goToItem(*frame, current, FrameLoadType::IndexedBackForward, ShouldTreatAsContinuingLoad::No);
 }
 
+// Every navigation of the main frame to another document, also one that starts while the page
+// still loads (loading stays true then): a host shows its toolbar with it like Chrome
 void WebView::didStartLoading()
 {
     debugLog("View %d: loading starts", m_id);
     m_isLoading = true;
+    notifyHost(m_id, "navigation-start");
     notifyNavigationState();
     didChangeProgress(std::max(m_page->progress().estimatedProgress(), 0.1));
 }

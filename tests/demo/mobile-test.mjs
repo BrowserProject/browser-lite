@@ -9,7 +9,8 @@
 // bar, the permission prompt and the sign-in dialog are fully visible, the section names of the
 // settings stay on one line at 390 and 360 px, the close button of the settings stays at the top
 // while they scroll, the bar slides away while the user scrolls a page down and comes back when
-// they scroll up (the page gets its room), and the desktop layout comes back above the
+// they scroll up (the page gets its room) and comes back with the progress at once when the
+// page navigates (also while it still loads), and the desktop layout comes back above the
 // breakpoint. An Android phone as host gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
@@ -37,7 +38,7 @@ const PORTRAIT = { width: 390, height: 844 };
 const LANDSCAPE = { width: 844, height: 390 };
 const page = (title) =>
   `<!doctype html><meta name="viewport" content="width=device-width"><title>${title}</title><h1>${title}</h1><script>console.log('RESULT loaded=' + document.title)</script>`;
-const { url: siteURL } = await serve((req, res) => {
+const { url: siteURL } = await serve(async (req, res) => {
   if (req.url === '/auth' && req.headers.authorization !== `Basic ${btoa('user:secret')}`) {
     res
       .writeHead(401, { 'Content-Type': 'text/plain', 'WWW-Authenticate': 'Basic realm="phone"' })
@@ -45,7 +46,16 @@ const { url: siteURL } = await serve((req, res) => {
     return;
   }
   const name = req.url.slice(1) || 'one';
-  const body = name === 'long' ? '<div style="height:5000px"></div>' : '';
+  // An image that holds the load of its page, a page that answers late
+  if (name === 'hang') {
+    setTimeout(() => res.writeHead(404).end(), 20000);
+    return;
+  }
+  if (name === 'slow') await new Promise((resolve) => setTimeout(resolve, 3000));
+  const long = ['long', 'long-loading', 'slow'].includes(name);
+  const body =
+    (long ? '<div style="height:5000px"></div>' : '') +
+    (name === 'long-loading' ? '<img src="/hang">' : '');
   res
     .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     .end(page(`Page ${name}`) + body);
@@ -669,6 +679,33 @@ await userScroll(150);
 check('bar: hidden again', await waitBar('hidden'));
 await tab.evaluate(() => window.blTest.eval('scrollTo(0, 0)'));
 check('bar: back at the top of the page', await waitBar('shown'));
+// Like Chrome's controls while a page loads, a navigation of the page itself (a tapped link)
+// brings the bar with its progress back at once, also while the page left still loads, and it
+// stays until the new document commits
+await tab.evaluate((url) => window.blTest.load(url), `${siteURL}long-loading`);
+check('page that still loads', await loaded('Page long-loading'));
+// The first position after a commit only sets the start (one wheel step is one scroll event)
+await tab.evaluate(() => window.blTest.eval('scrollTo(0, 600)'));
+await userScroll(150);
+check('bar: hidden while the page loads', await waitBar('hidden'));
+await tab.evaluate(
+  (url) => window.blTest.eval(`location.href = ${JSON.stringify(url)}`),
+  `${siteURL}slow`,
+);
+check('bar: a navigation of the page shows it at once', await waitBar('shown', 1500));
+await userScroll(150);
+await tab.waitForTimeout(300);
+check(
+  'bar: it stays while the navigation is pending',
+  (await barState()) === 'shown' && results.get('loaded') !== 'Page slow',
+  `${await barState()}, ${results.get('loaded')}`,
+);
+check('slow page', await loaded('Page slow'));
+await tab.evaluate(() => window.blTest.eval('scrollTo(0, 600)'));
+await userScroll(150);
+check('bar: scrolling hides it again after the commit', await waitBar('hidden'));
+await tab.evaluate(() => window.blTest.eval('scrollTo(0, 0)'));
+check('bar: back at the top of the new page', await waitBar('shown'));
 await tab.tap('#menu-button');
 await shown('#side-panel');
 const low = (await boxes('#side-panel')).list[0];
