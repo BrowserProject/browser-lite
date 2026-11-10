@@ -40,9 +40,9 @@ window.allocate = (name, mb) => {
   keep.push(new Uint8Array(mb << 20).fill(1));
   console.log('RESULT ' + name + '=ok');
 };
-window.drop = () => {
+window.drop = (name) => {
   keep.length = 0;
-  console.log('RESULT dropped=ok');
+  console.log('RESULT ' + name + '=ok');
 };
 // Frames with scripts of their own, one after the other, each removed once loaded
 window.loadFrames = async (count) => {
@@ -185,25 +185,32 @@ check(
   // Frames that came and went in a page that stays: the release takes their code
   await load(page, siteURL);
   await results.wait('cold');
+  const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
+  // Grows malloc until it releases, the arrays (which count to the JS heap) go again
+  const growUntilRelease = async (name) => {
+    const before = released();
+    for (let i = 0; i < 4 && released() === before; i++) {
+      await page.evaluate((key) => window.blTest.eval(`allocate('${key}', 48)`), `${name}${i}`);
+      await results.wait(`${name}${i}`);
+      await page.waitForTimeout(200);
+    }
+    await page.evaluate((key) => window.blTest.eval(`drop('${key}')`), `${name}Dropped`);
+    await results.wait(`${name}Dropped`);
+    return results.logs.filter((line) => line.includes('Memory released')).slice(before);
+  };
+  // A release first, so the frames grow malloc into the space it left free: about 34 MB of
+  // their code could otherwise cross the next step of 32 MB and release it before it is measured
+  await growUntilRelease('room');
+  await heapAfterGC();
   await page.evaluate((count) => window.blTest.eval(`loadFrames(${count})`), LEFT_PAGES);
   await results.wait('frames');
   const frames = await heapAfterGC();
-  const released = () => results.logs.filter((line) => line.includes('Memory released')).length;
-  const before = released();
-  for (let i = 0; i < 4 && released() === before; i++) {
-    await page.evaluate((i) => window.blTest.eval(`allocate('gone${i}', 48)`), i);
-    await results.wait(`gone${i}`);
-    await page.waitForTimeout(200);
-  }
-  const lines = results.logs.filter((line) => line.includes('Memory released')).slice(before);
+  const lines = await growUntilRelease('gone');
   check(
     'gone: the release keeps the JS code of the page',
     lines.length > 0 && !lines.some((line) => line.includes('with the JS code')),
     lines.join(' | '),
   );
-  // Without the arrays, which count to the JS heap
-  await page.evaluate(() => window.blTest.eval('drop()'));
-  await results.wait('dropped');
   const after = await heapAfterGC();
   check(
     'gone: the release takes the code of the frames that are gone',
