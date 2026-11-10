@@ -290,7 +290,10 @@ has Safari's JA4; HTTP/2 with Safari's SETTINGS, windows and pseudo-header order
 fingerprint); request headers in Safari's order with its `Accept-Language`, `Priority` (urgency
 from the load priority) and `Accept-Encoding`. OpenSSL has no GREASE and its own extension order,
 so JA3 differs; the TCP/IP fingerprint is the relay's. All loaders share one request path (`LoaderStrategy.cpp`: cookies, at most 20
-redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). The HTTP cache
+redirects, CORS and CSP for pings). curl keeps 64 connections, 6 per host (#176). A new HTTP/2
+connection carries only the request that opened it until the server's SETTINGS announce how many
+streams it allows; the waiting requests then take what the limit leaves, the rest open the next
+connection (curl patch `deps/patches/curl/0003`, #479). The HTTP cache
 stores responses in the host's Cache API (`<namespace>-http-v<format>`, #70, #182), partitioned
 like Chrome's HTTP cache (#213): every entry belongs to the top site, the frame site and whether
 it is the document of a subframe (`HttpCache::partition`). The top site comes from the origin of

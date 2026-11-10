@@ -12,6 +12,9 @@ fontconfig config and cache, CA certificates). Skia comes with WebKit.
 - `relocate-pc.sh`: rewrites the pkg-config files to the current sysroot path.
 - `test.sh`: smoke test against the finished sysroot (`tests/smoke.cpp`).
 - `tools/fc-precache.c`: generates the fontconfig cache at build time.
+- `patches/<name>/`: our patches of a lib. curl: preconnected connections stay in the pool
+  (0001), Safari's HTTP/2 settings (0002), a new HTTP/2 connection takes more requests only once
+  the server announced its stream limit (0003).
 
 Output: `sysroot/` (headers, static libs, pkg-config), `sysroot/runtime/` (fonts,
 fontconfig, CA certificates), which becomes `engine.data` when the engine is linked, and

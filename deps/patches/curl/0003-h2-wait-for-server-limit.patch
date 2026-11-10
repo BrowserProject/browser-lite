@@ -1,0 +1,125 @@
+diff --git a/lib/cfilters.c b/lib/cfilters.c
+--- a/lib/cfilters.c
++++ b/lib/cfilters.c
+@@ -975,6 +975,22 @@
+   return (result || n < 0) ? 1 : (size_t)n;
+ }
+ 
++/* browser-lite */
++bool Curl_conn_limit_pending(struct Curl_easy *data,
++                             struct connectdata *conn,
++                             int8_t sockindex)
++{
++  struct Curl_cfilter *cf;
++  int pending = FALSE;
++
++  if(!CONN_SOCK_IDX_VALID(sockindex))
++    return FALSE;
++  cf = conn->cfilter[sockindex];
++  if(!cf || cf->cft->query(cf, data, CF_QUERY_LIMIT_PENDING, &pending, NULL))
++    return FALSE;
++  return (bool)pending;
++}
++
+ int Curl_conn_get_stream_error(struct Curl_easy *data,
+                                struct connectdata *conn,
+                                int8_t sockindex)
+diff --git a/lib/cfilters.h b/lib/cfilters.h
+--- a/lib/cfilters.h
++++ b/lib/cfilters.h
+@@ -181,6 +181,8 @@
+ #define CF_QUERY_TRANSPORT         14  /* TRNSPRT_*  - * */
+ #define CF_QUERY_ALPN_NEGOTIATED   15  /* -          const char * */
+ #define CF_QUERY_REALLY_CONNECTED  16  /* TRUE/FALSE - */
++/* browser-lite: TRUE while the peer has not announced its stream limit */
++#define CF_QUERY_LIMIT_PENDING     17  /* TRUE/FALSE - */
+ 
+ /**
+  * Query the cfilter for properties. Filters ignorant of a query will
+@@ -589,6 +591,14 @@
+                                     int8_t sockindex);
+ 
+ /**
++ * browser-lite: TRUE while the connection at `sockindex` has not learned
++ * how many concurrent streams its peer allows (HTTP/2 before the SETTINGS).
++ */
++bool Curl_conn_limit_pending(struct Curl_easy *data,
++                             struct connectdata *conn,
++                             int8_t sockindex);
++
++/**
+  * Get the underlying error code for a transfer stream or 0 if not known.
+  */
+ int Curl_conn_get_stream_error(struct Curl_easy *data,
+diff --git a/lib/http2.c b/lib/http2.c
+--- a/lib/http2.c
++++ b/lib/http2.c
+@@ -114,6 +114,7 @@
+   BIT(sent_goaway);
+   BIT(enable_push);
+   BIT(nw_out_blocked);
++  BIT(rcvd_settings); /* browser-lite: the server's SETTINGS arrived */
+ };
+ 
+ /* How to access `call_data` from a cf_h2 filter */
+@@ -1235,6 +1236,12 @@
+                     ctx->max_concurrent_streams);
+         CURL_TRC_CF(data, cf, "[0] ENABLE_PUSH: %s",
+                     ctx->enable_push ? "TRUE" : "false");
++        if(!ctx->rcvd_settings) {
++          /* browser-lite: transfers waiting for the server's limit may go */
++          ctx->rcvd_settings = TRUE;
++          if(data)
++            Curl_multi_connchanged(data->multi);
++        }
+         if(data && max_conn != ctx->max_concurrent_streams) {
+           /* only signal change if the value actually changed */
+           CURL_TRC_CF(data, cf, "[0] notify MAX_CONCURRENT_STREAMS: %u",
+@@ -2761,6 +2768,9 @@
+     *pres1 = (effective_max > INT_MAX) ? INT_MAX : (int)effective_max;
+     CF_DATA_RESTORE(cf, save);
+     return CURLE_OK;
++  case CF_QUERY_LIMIT_PENDING:
++    *pres1 = !ctx->rcvd_settings;
++    return CURLE_OK;
+   case CF_QUERY_STREAM_ERROR: {
+     struct h2_stream_ctx *stream = H2_STREAM_CTX(ctx, data);
+     *pres1 = stream ? (int)stream->error : 0;
+diff --git a/lib/url.c b/lib/url.c
+--- a/lib/url.c
++++ b/lib/url.c
+@@ -695,10 +695,24 @@
+ }
+ 
+ static bool url_match_multiplex_limits(struct connectdata *conn,
+-                                       struct url_conn_match *m)
++                                       struct url_conn_match *m,
++                                       bool *pwait_pipe)
+ {
+   if(CONN_INUSE(conn) && m->may_multiplex) {
+     DEBUGASSERT(conn->bits.multiplex);
++    /* browser-lite: until the server announced its MAX_CONCURRENT_STREAMS,
++     * a new connection carries only the transfers it has. More streams could
++     * exceed the limit, and servers reset those (Envoy even with
++     * FLOW_CONTROL_ERROR, which is not retried). Most servers send their
++     * SETTINGS with the end of the TLS handshake: there the wait is short. */
++    if(m->data->set.pipewait &&
++       Curl_conn_limit_pending(m->data, conn, FIRSTSOCKET)) {
++      infof(m->data, "Connection #%" FMT_OFF_T " waits for the server's "
++            "MAX_CONCURRENT_STREAMS", conn->connection_id);
++      m->found = NULL;
++      *pwait_pipe = TRUE;
++      return TRUE;
++    }
+     /* If multiplexed, make sure we do not go over concurrency limit */
+     if(conn->attached_xfers >=
+             Curl_multi_max_concurrent_streams(m->data->multi)) {
+@@ -1045,7 +1059,7 @@
+   if(!url_match_auth_nego(conn, m))
+     return CPOOL_MATCH_CONT;
+ 
+-  if(!url_match_multiplex_limits(conn, m))
++  if(!url_match_multiplex_limits(conn, m, &wait_pipe))
+     return CPOOL_MATCH_CONT;
+ 
+   /* The connection matches all conditions, but do we want to use it? */

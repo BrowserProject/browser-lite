@@ -121,7 +121,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   without a body (`HTTP ERROR 500`, before a blank page, #425), the error page as the only
   message: the demo no longer repeats it with curl's text in the status line or the phone
   layout's snackbar (#427), a request whose pooled connection dies before any response byte
-  goes again on a new connection like in Chrome (#397), the relay connects with Happy Eyeballs
+  goes again on a new connection like in Chrome (#397), a new HTTP/2 connection opens more
+  streams only once the server announced how many it allows, where www.postfinance.ch (limit 10)
+  reset the rest and the page lost stylesheets and scripts (#479), the relay connects with Happy Eyeballs
   like a browser, so a site with IPv4 and IPv6 addresses whose IPv4 handshake is slow or loses a
   packet no longer fails after 0.25 to 0.5 s on a relay without IPv6 (neverssl.com, #415), dead relay detection (#177), fix of a WTF timer
   bug that aborted about 1 % of heavy page loads (#219), pages left behind no longer kept alive
