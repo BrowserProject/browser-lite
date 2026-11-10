@@ -1,0 +1,53 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 592f9e66d6..4ddbf5e143 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3272,6 +3272,7 @@ void EventHandler::updateMouseEventTargetAfterLayoutIfNeeded()
+         updateMouseEventTargetNode(eventNames().mousemoveEvent, targetElement.get(), syntheticEvent, FireMouseOverOut::Yes);
+         if (document)
+             document->updateHoverActiveState(hoverTimerHitType, targetElement.get());
++        reportElementUnderStillMouse();
+     }
+ }
+ 
+@@ -4133,6 +4134,28 @@ void EventHandler::hoverTimerFired()
+             document->updateHoverActiveState(hoverTimerHitType, protect(result.targetElement()));
+         }
+     }
++
++    reportElementUnderStillMouse();
++}
++
++// The element under a mouse that did not move changed (layout, DOM): the chrome hears about it
++// like after a move, so the link address and tooltip it shows follow (Blink recomputes the hover
++// with a fake move). The main frame hit tests into the subframes, from the mouse it last saw.
++void EventHandler::reportElementUnderStillMouse()
++{
++    RefPtr page = m_frame->page();
++    RefPtr mainFrame = page ? page->localMainFrame() : nullptr;
++    if (!mainFrame)
++        return;
++    auto& handler = mainFrame->eventHandler();
++    if (!handler.m_lastKnownMousePosition || handler.m_lastKnownMousePositionSource == LastKnownMousePositionSource::Touch)
++        return;
++    RefPtr view = mainFrame->view();
++    if (!view)
++        return;
++    auto point = view->windowToContents(flooredIntPoint(*handler.m_lastKnownMousePosition));
++    auto result = handler.hitTestResultAtPoint(point, { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent });
++    page->chrome().mouseDidMoveOverElement(result, PlatformKeyboardEvent::currentStateOfModifierKeys());
+ }
+ 
+ #if ENABLE(IMAGE_ANALYSIS)
+diff --git a/Source/WebCore/page/EventHandler.h b/Source/WebCore/page/EventHandler.h
+index 078cc3ccee..431e3e44db 100644
+--- a/Source/WebCore/page/EventHandler.h
++++ b/Source/WebCore/page/EventHandler.h
+@@ -491,6 +491,7 @@ private:
+     void updateCursor(LocalFrameView&, const HitTestResult&, bool shiftKey);
+ 
+     void hoverTimerFired();
++    void reportElementUnderStillMouse();
+ 
+ #if ENABLE(IMAGE_ANALYSIS)
+     void textRecognitionHoverTimerFired();

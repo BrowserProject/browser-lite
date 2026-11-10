@@ -224,7 +224,10 @@ When the mouse leaves the canvas (to the host UI or an overlay) the core sends a
 outside the view, like WebKitGTK: the page gets mouseout and mouseleave and loses `:hover` and
 the hovered link; a finger keeps its hover (#381). A scroll after a tap hovers nothing new under
 the old tap point, like in mobile Chrome and Safari: WebCore leaves out its mouse move after a
-scroll while the last pointer position comes from a tap (patch 0084, #426). A page from the
+scroll while the last pointer position comes from a tap (patch 0084, #426). When the element
+under a still mouse changes (a cookie dialog appears over a link, the link goes away), WebCore's
+hover update after the layout or DOM change also reports it to the `ChromeClient` like a move,
+so the link address and tooltip follow like in Chrome (patch 0105, #481). A page from the
 back/forward cache still knows the element (and iframe) the mouse was over when it was left, so
 the first move out of it fires mouseout and mouseleave like in Chrome (patch 0079, #398).
 A click focuses the button, checkbox, radio button or link under it, like Chrome and Firefox and

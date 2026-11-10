@@ -19,7 +19,8 @@ or the text shadow a filtered layer cut off at its box, or the tiles a fling on 
 ran away from, or the boxes with percentage heights every layout of a container laid out again,
 or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped, or the
 fullscreen video a page's `object-fit: cover` cropped, or the icons of the media controls, which
-the Adwaita theme reads only from a GResource)
+the Adwaita theme reads only from a GResource, or the link address that stayed in the status
+when a cookie dialog appeared under a still mouse)
 comes as patches from `patches/`.
 
 ## Folders

@@ -762,6 +762,34 @@ check(
 );
 await host(() => document.getElementById('test-toolbar').remove());
 
+// 5e3) The mouse stays still and the element under it changes (a cookie dialog appears over the
+// link, the link goes away): the link address follows like after a move, like in Chrome
+await page.mouse.move(...(await at(40, 352)));
+await waitFor(async () => (await lastHover())?.endsWith('/target'), 10000);
+await evalPage(
+  page,
+  `document.body.append(Object.assign(document.createElement('div'), { id: 'cover', style: 'position:fixed;inset:0' }))`,
+);
+check(
+  'overlay under a still mouse: link address goes away',
+  await waitFor(async () => (await lastHover()) === 'hover:', 5000),
+  await lastHover(),
+);
+await evalPage(page, `document.getElementById('cover').remove()`);
+check(
+  'overlay gone under a still mouse: link address again',
+  await waitFor(async () => (await lastHover()) === `hover:${siteURL}target`, 5000),
+  await lastHover(),
+);
+await evalPage(page, `document.getElementById('hoverlink').style.display = 'none'`);
+check(
+  'link hidden under a still mouse: link address goes away',
+  await waitFor(async () => (await lastHover()) === 'hover:', 5000),
+  await lastHover(),
+);
+await evalPage(page, `document.getElementById('hoverlink').style.display = ''`);
+await page.mouse.move(...(await at(600, 600)));
+
 // 5f) Color: colorPicker handler with the value, the answer goes to the page
 await host(() => {
   window.blHost.colorAnswer = '#445566';
