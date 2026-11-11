@@ -7,7 +7,7 @@
 
 namespace JSC {
 
-// Whether the machine stack has room for about 200 KB more. Costs about 15 us: a probe.
+// Whether the machine stack has room for 214 KB more. Costs about 8 us: a probe.
 bool machineStackHasRoom();
 
 } // namespace JSC

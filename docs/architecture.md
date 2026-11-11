@@ -538,7 +538,16 @@ and the browser's machine stack (about 500 KB left in a Chromium worker when a s
 the browser stops in the middle of the engine's C++ when it is full. Deep recursion through C++ (getters calling getters,
 proxies, `toString`, `JSON.stringify`) fills the machine stack long before the shadow stack, so
 JSC's recursion checks also probe the machine stack (patch 0075, `engine/jit/MachineStack.cpp`,
-#354): the page gets a RangeError instead of the engine crashing. A check asks for about 87 KB
-of room (#374), enough to throw and little enough for the deep scripts of Instagram or Twitch. A one-character `replace` on a
+#354): the page gets a RangeError instead of the engine crashing. A check asks for 94 KB
+of room (#374), enough to throw and little enough for the deep scripts of Instagram or Twitch.
+The probe is a WASM function with a frame that large, whose prologue alone checks it against the
+browser's limit (about 0.1 us); it holds for at most 64 checks and while the shadow stack stays
+within 4 KB below and 16 KB above its point, so recursions that take no shadow stack or follow a
+deeper one are probed too (#500). A one-character `replace` on a
 deep rope string (a string built by appending) probes too and then replaces in the resolved string
-(#368).
+(#368). The parser and the bytecode generator take the else branches of a conditional chain
+(`a ? b : c ? d : ...`, webpack's map of chunk names) in a loop, and the parser gives up at once
+when out of stack instead of retrying other readings of a deep literal at every level (patch
+0109, #499). Recursion through C++ (a getter calling a getter, proxies, `toString`, a `sort`
+comparator) takes about 1.1 KB of machine stack per level and so stops after 300 to 550 levels
+in Chromium, where Chromium's own pages reach thousands (open, [status](status.md)).

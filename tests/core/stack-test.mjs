@@ -2,7 +2,10 @@
 // toString and nested objects for JSON.stringify fill the browser's machine stack long before
 // JSC's own limit; the page gets a RangeError it can catch like in Chromium, the engine keeps
 // running. A one-character replace on a deep rope string and JSON.parse of deep arrays give the
-// same result as in Chromium (#368). Shallow chains still work.
+// same result as in Chromium (#368). Shallow chains still work. Long conditional chains (webpack's
+// map of chunk names on walmart.com) parse and run without recursion, a deep literal fails with a
+// RangeError in time instead of retrying its alternatives at every level, and recursions that
+// take no shadow stack or follow a deeper one get a RangeError instead of crashing the engine.
 //
 //   node tests/core/stack-test.mjs [engine-dir]
 import {
@@ -64,6 +67,55 @@ function stackCases() {
     }
     return depth;
   };
+  // x === 0 ? "c0" : x === 1 ? "c1" : ... "none", as a value and as a condition
+  const chain = (n) => {
+    let links = '';
+    for (let i = 0; i < n; i++) links += `x === ${i} ? "c${i}" : `;
+    const value = new Function('x', `return ${links}"none"`);
+    const condition = new Function(
+      'x',
+      `if (${links.replaceAll(/"c\d+"/g, 'true')}false) return 1; return 0`,
+    );
+    return [value(0), value(n - 1), value(n), condition(n - 1), condition(n)].join();
+  };
+  // What may follow the colon of a chain: assignments, arrows, yield, patterns, async calls
+  const chainForms = () => {
+    const results = [];
+    const sources = [
+      ['x, y', 'let z = 0; const r = x ? 1 : y ? 2 : z = 3; return r + "/" + z', [0, 0]],
+      ['x', 'return (x ? (a) => 1 : x === 0 ? (a) => a + 2 : (a) => 3)(5)', [0]],
+      [
+        'x',
+        'function* g() { return x ? 1 : x === 0 ? yield 7 : 3; } const it = g(); return it.next().value + "/" + it.next(9).value',
+        [0],
+      ],
+      ['x', 'let a, b; x ? 0 : x === 0 ? [a, b] = [1, 2] : 0; return a + b', [0]],
+      [
+        'x',
+        'const async = (v) => v; return x ? 1 : async(0) ? 3 : x === 0 ? async (y) => y : 5',
+        [0],
+      ],
+      ['x', 'const o = { b: 1 }; return "a" in o ? 1 : "b" in o ? x ? 2 : 3 : 4', [0]],
+      ['x', 'for (var i = x ? 1 : x === 0 ? 2 : 3; false; ); return i', [0]],
+      ['x, y', 'return x ? 1 : y ? 2 : 3 = 4', [0, 0]],
+      ['x, y', 'return (x ? 1 : y ? 2 : 3) = 4', [0, 0]],
+      ['x', 'return x ? 1 : x === 0 ? 2 :', [0]],
+    ];
+    for (const [params, body, args] of sources) {
+      try {
+        const r = new Function(...params.split(', '), body)(...args);
+        results.push(typeof r === 'function' ? `fn${r.length}` : r);
+      } catch (e) {
+        results.push(e.name);
+      }
+    }
+    return results.join();
+  };
+  // A literal nested n deep: arrays, objects or parentheses
+  const nested = (open, close, n) => {
+    new Function(`return ${open.repeat(n)}0${close.repeat(n)}`);
+    return 'parsed';
+  };
   const out = [];
   const run = (name, fn) => {
     try {
@@ -80,6 +132,10 @@ function stackCases() {
   run('stringify1000', () => stringify(1000));
   run('ropeReplace100', () => ropeReplace(100, 'c'));
   run('parse1000', () => parse(1000));
+  run('chain3000', () => chain(3000));
+  run('chainForms', chainForms);
+  run('arrays300', () => nested('[', ']', 300));
+  run('objects300', () => nested('{a:', '}', 300));
   run('proxyDeep', () => proxy(200000));
   run('getterDeep', () => getter(100000));
   run('toStringDeep', () => toString(100000));
@@ -87,6 +143,15 @@ function stackCases() {
   run('ropeReplaceDeep', () => ropeReplace(100000, 'z'));
   run('ropeReplaceDeepFound', () => ropeReplace(100000, 'b'));
   run('parseDeep', () => parse(100000));
+  run('arraysDeep', () => nested('[', ']', 100000));
+  run('objectsDeep', () => nested('({a:', '})', 100000));
+  run('parensDeep', () => nested('(', ')', 100000));
+  // Code generation that recursed without any shadow stack
+  run('equalityDeep', () => new Function('x', `return ${'x==='.repeat(100000)}1`)(0));
+  // Deep code generation after a deeper one in the same task, once V8 optimized it
+  const or = (n) => new Function('x', `return ${'x||'.repeat(n)}1`)(0);
+  run('orDeep', () => or(5000));
+  run('orAfterDeep', () => [2500, 3750, 4375, 4687].map(or).join());
   // The same again: the checks still hold after a RangeError
   run('getterAgain', () => getter(100000));
   run('after', () => getter(100));
@@ -111,7 +176,8 @@ const raw = await results.wait('cases');
 const cases = Object.fromEntries(
   (raw ? decodeURIComponent(raw).split(' ') : []).map((line) => line.split(':')),
 );
-// Shallow cases as in node; deep ones throw (V8's JSON.stringify does not recurse, JSC's does)
+// Shallow cases as in node; deep ones throw (V8's JSON.stringify and its code for long || chains do
+// not recurse, JSC's do)
 const expected = Object.fromEntries(
   stackCases()
     .split(' ')
@@ -119,8 +185,9 @@ const expected = Object.fromEntries(
 );
 check('all cases ran', raw !== null, raw ?? 'no result');
 for (const [name, value] of Object.entries(expected)) {
-  const ok =
-    name === 'stringifyDeep' ? [value, 'RangeError'].includes(cases[name]) : cases[name] === value;
+  const ok = ['stringifyDeep', 'orDeep', 'orAfterDeep'].includes(name)
+    ? [value, 'RangeError'].includes(cases[name])
+    : cases[name] === value;
   check(`${name}: ${value}`, ok, cases[name]);
 }
 check('the page keeps running', (await results.wait('alive')) === '2,4,6');

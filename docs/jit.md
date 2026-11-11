@@ -83,7 +83,7 @@ never baked into the code (the GC resets inline caches).
   returns a status and the interpreter unwinds.
 - **Machine stack**: compiled calls nest on the host's stack, which JSC does not see and which V8
   would stop halfway. Past 64 levels a probe (`MachineStack.cpp`: a WASM recursion of known
-  frame size) checks for about 200 KB of room at every 8 levels beyond the deepest checked one
+  frame size) checks for 214 KB of room at every 8 levels beyond the deepest checked one
   (per outermost run); without room the interpreter takes the calls. JSC's own recursion checks
   probe too (patch 0075, [architecture](architecture.md#javascript)).
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the

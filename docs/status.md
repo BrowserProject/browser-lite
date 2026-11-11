@@ -691,9 +691,23 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - weather.com in the CI compatibility job 2026-11-03: two of five runs ended in a crash ("Maximum
   call stack size exceeded" in the engine, in a deep chain of proxies). Deep recursion through
   C++ now gives the page a RangeError (#354), CI green since; its first reserve of 200 KB stopped
-  Instagram, Twitch, Walmart and Facebook scripts early, 87 KB since #374. A one-character `replace` on a
+  Instagram, Twitch, Walmart and Facebook scripts early, 87 KB since #374 (94 KB in bytes since #500). A one-character `replace` on a
   string built by 100000 appends crashed the engine the same way (Temu's bot check), fixed (#368). Its load event comes after 93 s on
   the CI runners (US) and after 6.8 s from Switzerland (2026-11-03), probably other content there.
+- walmart.com showed its error page in about one of three loads (2026-11-11): its webpack runtime
+  maps chunk names with 539 nested conditionals, and the parser's recursion for them ran out of
+  machine stack when a microtask compiled it; conditional chains now parse without recursion
+  (#499: 0 of 6 loads with the error, 2 of 6 before; chains of 5000 and more work, before 575). The same work
+  found three engine faults: a literal nested about 600 deep (`[[[...]]]`, `{a:{a:...}}`) kept
+  the engine thread busy for good (#499), and the code of a long `===` chain (4518 levels) or a
+  second deep `||` chain in the same task crashed it (#500); both give a RangeError now. Still
+  open: recursion through C++ (a getter calling a getter, proxies, `toString`, a `sort`
+  comparator, a `JSON.parse` reviver) stops after 285 to 560 levels (Chromium 900 to 5800 in
+  its own pages): Chromium leaves a worker about 500 KB of machine stack and each such level
+  takes about 1.1 KB in eight WASM frames (`callGetter`, `JSC::call`, `executeCall`,
+  `vmEntryToJavaScript`, `CLoop::execute` and the slow path). Calling getters and setters from
+  the interpreter and the JIT like JS calls would lift it for those; the other paths re-enter
+  through C++ in JavaScriptCore itself.
 - `damage-test` "changed while hidden" (local, 2026-11-08): in about one of three runs the
   selected text of the input differs in 45 pixels from the reference, with and without damage
   tiles (#454): the selection looks focused in one run and unfocused in the other after the view

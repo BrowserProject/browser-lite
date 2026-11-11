@@ -1,0 +1,267 @@
+diff --git a/Source/JavaScriptCore/bytecompiler/NodesCodegen.cpp b/Source/JavaScriptCore/bytecompiler/NodesCodegen.cpp
+index 9b32565f36..e13cca7c29 100644
+--- a/Source/JavaScriptCore/bytecompiler/NodesCodegen.cpp
++++ b/Source/JavaScriptCore/bytecompiler/NodesCodegen.cpp
+@@ -3558,50 +3558,72 @@ void OptionalChainNode::emitBytecodeInConditionContext(BytecodeGenerator& genera
+ 
+ // ------------------------------ ConditionalNode ------------------------------
+ 
++// The conditionals in the else branches of a chain a ? b : c ? d : e are emitted in a loop
++// instead of by recursion, like the parser parses them (parseConditionalChain)
+ RegisterID* ConditionalNode::emitBytecode(BytecodeGenerator& generator, RegisterID* dst)
+ {
+     RefPtr<RegisterID> newDst = generator.finalDestination(dst);
+-    Ref<Label> beforeElse = generator.newLabel();
+-    Ref<Label> afterElse = generator.newLabel();
+-
+-    Ref<Label> beforeThen = generator.newLabel();
+-    generator.emitNodeInConditionContext(m_logical, beforeThen.get(), beforeElse.get(), FallThroughMeansTrue);
+-    generator.emitLabel(beforeThen.get());
+-
+-    generator.emitProfileControlFlow(m_expr1->startOffset());
+-    generator.emitNodeInTailPosition(newDst.get(), m_expr1);
+-    generator.emitJump(afterElse.get());
+-
+-    generator.emitLabel(beforeElse.get());
+-    generator.emitProfileControlFlow(m_expr1->endOffset() + 1);
+-    generator.emitNodeInTailPosition(newDst.get(), m_expr2);
+-
+-    generator.emitLabel(afterElse.get());
++    Vector<std::pair<ConditionalNode*, Ref<Label>>, 8> chain;
++    ConditionalNode* node = this;
++    while (true) {
++        Ref<Label> beforeElse = generator.newLabel();
++        Ref<Label> afterElse = generator.newLabel();
++
++        Ref<Label> beforeThen = generator.newLabel();
++        generator.emitNodeInConditionContext(node->m_logical, beforeThen.get(), beforeElse.get(), FallThroughMeansTrue);
++        generator.emitLabel(beforeThen.get());
++
++        generator.emitProfileControlFlow(node->m_expr1->startOffset());
++        generator.emitNodeInTailPosition(newDst.get(), node->m_expr1);
++        generator.emitJump(afterElse.get());
++
++        generator.emitLabel(beforeElse.get());
++        generator.emitProfileControlFlow(node->m_expr1->endOffset() + 1);
++        chain.append({ node, WTF::move(afterElse) });
++        if (!node->m_expr2->isConditionalNode())
++            break;
++        node = static_cast<ConditionalNode*>(node->m_expr2);
++        if (node->needsDebugHook()) [[unlikely]]
++            generator.emitDebugHook(node);
++    }
++    generator.emitNodeInTailPosition(newDst.get(), node->m_expr2);
+ 
+-    generator.emitProfileControlFlow(m_expr2->endOffset() + 1);
++    for (size_t i = chain.size(); i--;) {
++        generator.emitLabel(chain[i].second.get());
++        generator.emitProfileControlFlow(chain[i].first->m_expr2->endOffset() + 1);
++    }
+ 
+     return newDst.unsafeGet();
+ }
+ 
+ void ConditionalNode::emitBytecodeInConditionContext(BytecodeGenerator& generator, Label& trueTarget, Label& falseTarget, FallThroughMode fallThroughMode)
+ {
+-    if (needsDebugHook()) [[unlikely]]
+-        generator.emitDebugHook(this);
++    Vector<Ref<Label>, 8> ends;
++    ConditionalNode* node = this;
++    while (true) {
++        if (node->needsDebugHook()) [[unlikely]]
++            generator.emitDebugHook(node);
+ 
+-    Ref<Label> beforeThen = generator.newLabel();
+-    Ref<Label> beforeElse = generator.newLabel();
+-    Ref<Label> end = generator.newLabel();
++        Ref<Label> beforeThen = generator.newLabel();
++        Ref<Label> beforeElse = generator.newLabel();
++        Ref<Label> end = generator.newLabel();
+ 
+-    generator.emitNodeInConditionContext(m_logical, beforeThen.get(), beforeElse.get(), FallThroughMeansTrue);
+-    generator.emitLabel(beforeThen.get());
++        generator.emitNodeInConditionContext(node->m_logical, beforeThen.get(), beforeElse.get(), FallThroughMeansTrue);
++        generator.emitLabel(beforeThen.get());
+ 
+-    generator.emitNodeInConditionContext(m_expr1, trueTarget, falseTarget, fallThroughMode);
+-    generator.emitJump(end.get());
++        generator.emitNodeInConditionContext(node->m_expr1, trueTarget, falseTarget, fallThroughMode);
++        generator.emitJump(end.get());
+ 
+-    generator.emitLabel(beforeElse.get());
+-    generator.emitNodeInConditionContext(m_expr2, trueTarget, falseTarget, fallThroughMode);
++        generator.emitLabel(beforeElse.get());
++        ends.append(WTF::move(end));
++        if (!node->m_expr2->isConditionalNode())
++            break;
++        node = static_cast<ConditionalNode*>(node->m_expr2);
++    }
++    generator.emitNodeInConditionContext(node->m_expr2, trueTarget, falseTarget, fallThroughMode);
+ 
+-    generator.emitLabel(end.get());
++    for (size_t i = ends.size(); i--;)
++        generator.emitLabel(ends[i].get());
+ }
+ 
+ // ------------------------------ ReadModifyResolveNode -----------------------------------
+diff --git a/Source/JavaScriptCore/parser/Nodes.h b/Source/JavaScriptCore/parser/Nodes.h
+index 866e3da8c3..e368c130ea 100644
+--- a/Source/JavaScriptCore/parser/Nodes.h
++++ b/Source/JavaScriptCore/parser/Nodes.h
+@@ -201,6 +201,7 @@ namespace JSC {
+         virtual bool isArrowFuncExprNode() const { return false; }
+         virtual bool isClassExprNode() const { return false; }
+         virtual bool isCommaNode() const { return false; }
++        virtual bool isConditionalNode() const { return false; }
+         virtual bool isSimpleArray() const { return false; }
+         virtual bool isAdd() const { return false; }
+         virtual bool isSubtract() const { return false; }
+@@ -1498,6 +1499,7 @@ namespace JSC {
+         ConditionalNode(const JSTokenLocation&, ExpressionNode* logical, ExpressionNode* expr1, ExpressionNode* expr2);
+ 
+     private:
++        bool isConditionalNode() const final { return true; }
+         RegisterID* emitBytecode(BytecodeGenerator&, RegisterID* = nullptr) final;
+         void emitBytecodeInConditionContext(BytecodeGenerator&, Label& trueTarget, Label& falseTarget, FallThroughMode) final;
+ 
+diff --git a/Source/JavaScriptCore/parser/Parser.cpp b/Source/JavaScriptCore/parser/Parser.cpp
+index 52c169f576..422c3442a9 100644
+--- a/Source/JavaScriptCore/parser/Parser.cpp
++++ b/Source/JavaScriptCore/parser/Parser.cpp
+@@ -4277,6 +4277,7 @@ template <typename TreeBuilder> bool Parser<LexerType>::isSimpleAssignmentTarget
+ template <typename LexerType>
+ template <typename TreeBuilder> TreeExpression Parser<LexerType>::parseAssignmentExpression(TreeBuilder& context)
+ {
++    bool isConditionalElse = std::exchange(m_parsingConditionalElse, false);
+     ASSERT(!hasError());
+     
+     failIfStackOverflow();
+@@ -4304,7 +4305,9 @@ template <typename TreeBuilder> TreeExpression Parser<LexerType>::parseAssignmen
+         currentScope()->pushUsedVariableSet();
+     }
+ 
+-    TreeExpression lhs = parseConditionalExpression(context);
++    TreeExpression lhs = parseConditionalExpression(context, isConditionalElse);
++    if (m_conditionalElseContinues) [[unlikely]]
++        return lhs;
+ 
+     // Current implementation of parseAssignmentExpression causes a weird parsing loop 
+     // for this example:
+@@ -4493,30 +4496,63 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseAwaitExpress
+ }
+ 
+ template <typename LexerType>
+-template <class TreeBuilder> TreeExpression Parser<LexerType>::parseConditionalExpression(TreeBuilder& context)
++template <class TreeBuilder> TreeExpression Parser<LexerType>::parseConditionalExpression(TreeBuilder& context, bool isConditionalElse)
+ {
+     JSTokenLocation location(tokenLocation());
+     TreeExpression cond = parseBinaryExpression(context);
+     failIfFalse(cond, "Cannot parse expression");
+     if (!match(QUESTION)) [[likely]]
+         return cond;
+-    m_parserState.nonTrivialExpressionCount++;
+-    m_parserState.nonLHSCount++;
+-    next(TreeBuilder::DontBuildStrings);
+-    TreeExpression lhs = 0;
+-    {
+-        // this block is necessary so that we don't leave `in` enabled for the rhs
+-        AllowInOverride allowInOverride(this);
+-        lhs = parseAssignmentExpression(context);
++    if (isConditionalElse) {
++        // The chain that this else branch belongs to parses the rest
++        m_conditionalElseContinues = true;
++        return cond;
++    }
++    return parseConditionalChain(context, location, cond);
++}
++
++// a ? b : c ? d : e nests to the right. The conditionals of its else branches are parsed in this
++// loop instead of by recursion, so that long chains (minified switch statements, the chunk name
++// maps of webpack) do not run out of stack. V8 does the same.
++template <typename LexerType>
++template <class TreeBuilder> TreeExpression Parser<LexerType>::parseConditionalChain(TreeBuilder& context, JSTokenLocation location, TreeExpression cond)
++{
++    struct Link {
++        JSTokenLocation location;
++        TreeExpression cond;
++        TreeExpression lhs;
++    };
++    Vector<Link, 8> links;
++    while (true) {
++        m_parserState.nonTrivialExpressionCount++;
++        m_parserState.nonLHSCount++;
++        next(TreeBuilder::DontBuildStrings);
++        TreeExpression lhs = 0;
++        {
++            // this block is necessary so that we don't leave `in` enabled for the rhs
++            AllowInOverride allowInOverride(this);
++            lhs = parseAssignmentExpression(context);
++        }
++        failIfFalse(lhs, "Cannot parse left hand side of ternary operator");
++        context.setEndOffset(lhs, m_lastTokenLocation.endOffset);
++        consumeOrFailWithFlags(COLON, TreeBuilder::DontBuildStrings, "Expected ':' in ternary operator");
++        links.append({ location, cond, lhs });
++
++        location = tokenLocation();
++        m_parsingConditionalElse = true;
++        TreeExpression rhs = parseAssignmentExpression(context);
++        failIfFalse(rhs, "Cannot parse right hand side of ternary operator");
++        if (std::exchange(m_conditionalElseContinues, false)) {
++            // A conditional, its condition parsed: the next link of the chain
++            cond = rhs;
++            continue;
++        }
++        for (size_t i = links.size(); i--;) {
++            context.setEndOffset(rhs, m_lastTokenLocation.endOffset);
++            rhs = context.createConditionalExpr(links[i].location, links[i].cond, links[i].lhs, rhs);
++        }
++        return rhs;
+     }
+-    failIfFalse(lhs, "Cannot parse left hand side of ternary operator");
+-    context.setEndOffset(lhs, m_lastTokenLocation.endOffset);
+-    consumeOrFailWithFlags(COLON, TreeBuilder::DontBuildStrings, "Expected ':' in ternary operator");
+-    
+-    TreeExpression rhs = parseAssignmentExpression(context);
+-    failIfFalse(rhs, "Cannot parse right hand side of ternary operator");
+-    context.setEndOffset(rhs, m_lastTokenLocation.endOffset);
+-    return context.createConditionalExpr(location, cond, lhs, rhs);
+ }
+ 
+ ALWAYS_INLINE static bool isUnaryOpExcludingUpdateOp(JSTokenType token)
+diff --git a/Source/JavaScriptCore/parser/Parser.h b/Source/JavaScriptCore/parser/Parser.h
+index ab6dc1e882..756f3b1f71 100644
+--- a/Source/JavaScriptCore/parser/Parser.h
++++ b/Source/JavaScriptCore/parser/Parser.h
+@@ -1788,7 +1788,8 @@ private:
+     template <class TreeBuilder> TreeExpression parseExpression(TreeBuilder&);
+     template <class TreeBuilder> TreeExpression parseAssignmentExpression(TreeBuilder&);
+     template <class TreeBuilder> TreeExpression parseYieldExpression(TreeBuilder&);
+-    template <class TreeBuilder> ALWAYS_INLINE TreeExpression parseConditionalExpression(TreeBuilder&);
++    template <class TreeBuilder> ALWAYS_INLINE TreeExpression parseConditionalExpression(TreeBuilder&, bool isConditionalElse);
++    template <class TreeBuilder> NEVER_INLINE TreeExpression parseConditionalChain(TreeBuilder&, JSTokenLocation, TreeExpression condition);
+     template <class TreeBuilder> ALWAYS_INLINE TreeExpression parseBinaryExpression(TreeBuilder&);
+     template <class TreeBuilder> ALWAYS_INLINE TreeExpression parseUnaryExpression(TreeBuilder&);
+     template <class TreeBuilder> NEVER_INLINE TreeExpression parseAwaitExpression(TreeBuilder&);
+@@ -1863,7 +1864,10 @@ private:
+     
+     bool canRecurse()
+     {
+-        return m_vm.isSafeToRecurse();
++        // Once out of stack, every alternative a save point would try next (a destructuring
++        // pattern, arrow function parameters) runs out as well: retrying them at each level of
++        // a deep nesting took exponential time
++        return !m_hasStackOverflow && m_vm.isSafeToRecurse();
+     }
+     
+     JSTextPosition lastTokenEndPosition() const
+@@ -2122,6 +2126,10 @@ private:
+     JSParserScriptMode m_scriptMode;
+     SuperBinding m_superBinding;
+     bool m_hasStackOverflow;
++    // The next parseAssignmentExpression parses the else branch of a conditional chain
++    // (parseConditionalChain); it sets m_conditionalElseContinues when that is a conditional too
++    bool m_parsingConditionalElse { false };
++    bool m_conditionalElseContinues { false };
+     ScopeStack m_scopeStack;
+ 
+     static void verifyLayout();
