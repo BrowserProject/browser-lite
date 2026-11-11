@@ -172,9 +172,11 @@ public:
     void pointerLockResult(bool locked);
 #endif
     void touchEvent(int type, const String& pointsJSON, int modifiers, bool tap);
-    // A keydown the page does not handle (no preventDefault, no editing command, no default
-    // action like scrolling) goes back to the host as "unhandled-key": its browser shortcuts
+    // Every keydown is answered with "key-result": handled false when the page did not handle it
+    // (no preventDefault, no editing command, no default action like scrolling), for the host's
+    // browser shortcuts. The host holds later keys until the answer, like Chrome's input router
     void keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
+    static void keyResult(int id, bool handled, const String& key, const String& code, int modifiers);
     void insertText(const String&);
     // Text input with preview (IME, dead keys): underlined text in the page
     void setComposition(const String&, unsigned selectionStart, unsigned selectionEnd);

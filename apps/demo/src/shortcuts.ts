@@ -35,7 +35,8 @@ interface Shortcut {
 // Like Chrome, which reserves only the shortcuts that leave or switch the tab (Ctrl+T/W/N/Tab,
 // Ctrl+PageUp/PageDown; it passes them to pages only in an app window). The others reach the page
 // first when it has the focus and run only when it does not handle the key (`unhandled-key`):
-// Ctrl+F in an editor with its own find, Ctrl+U in a rich text field. Alt combinations stay the
+// Ctrl+F in an editor with its own find, Ctrl+U in a rich text field. Keys typed until then wait
+// in the core and go to the address or find bar the shortcut focused. Alt combinations stay the
 // browser's: the engine would type the letter of Alt+D into a field, as it cannot tell Alt+D on
 // Linux and Windows from an Option character on macOS.
 function shortcut(e: Key): Shortcut | null {

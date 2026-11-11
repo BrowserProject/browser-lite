@@ -134,14 +134,17 @@ static void closeMove(int id)
 
 // Input for a view: dropped while a dialog of its page group is open, like Chrome. Hidden views
 // wait while the user works in a visible one (HiddenViews.h).
-template<typename Function>
-static void withInput(int id, Function&& function, UserInput input = UserInput::Other)
+// `dropped` runs instead when there is no such view or a dialog blocks it.
+template<typename Function, typename Dropped = void (*)()>
+static void withInput(int id, Function&& function, UserInput input = UserInput::Other, Dropped&& dropped = [] { })
 {
     closeMove(id);
-    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function)]() mutable {
+    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function), dropped = std::forward<Dropped>(dropped)]() mutable {
         auto* view = WebView::fromID(id);
-        if (!view || view->isBlockedByDialog())
+        if (!view || view->isBlockedByDialog()) {
+            dropped();
             return;
+        }
         if (view->isVisible())
             userWorksInVisibleView(input);
         function(*view);
@@ -414,11 +417,20 @@ EMSCRIPTEN_KEEPALIVE int bl_zoom_wheel(int id, double x, double y, double deltaX
     return blocking;
 }
 
+// Every keydown gets its "key-result", also one a dialog drops (handled): the host holds later
+// keys until then
 EMSCRIPTEN_KEEPALIVE void bl_key(int id, int type, char* key, char* code, char* text, int keyCode, int repeat, int modifiers)
 {
-    withInput(id, [=, key = takeString(key), code = takeString(code), text = takeString(text)](WebView& view) {
+    // Each lambda its own strings: they end on the engine thread
+    String keyString = takeString(key);
+    String codeString = takeString(code);
+    auto dropped = [id, type, modifiers, key = keyString.isolatedCopy(), code = codeString.isolatedCopy()] {
+        if (!type)
+            WebView::keyResult(id, true, key, code, modifiers);
+    };
+    withInput(id, [=, key = WTF::move(keyString), code = WTF::move(codeString), text = takeString(text)](WebView& view) {
         view.keyEvent(type, key, code, text, keyCode, repeat, modifiers);
-    }, UserInput::Typing);
+    }, UserInput::Typing, WTF::move(dropped));
 }
 
 // Preview during text input (compositionupdate) and completion (compositionend)

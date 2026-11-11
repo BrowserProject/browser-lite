@@ -1,5 +1,5 @@
 {
-  "abiVersion": 33,
+  "abiVersion": 34,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -26,7 +26,7 @@
     { "name": "bl_wheel", "returns": "void", "args": "int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers", "thread": "Goes directly to the scrolling thread when compositing, so pages scroll while the engine thread is busy.", "doc": "Wheel with DOM deltas (pixels) and the legacy wheelDeltaX/Y of the host event (120 per notch, 0 when unknown), which pages read as wheelDelta." },
     { "name": "bl_touch_scroll", "returns": "void", "args": "int id, double x, double y, double deltaX, double deltaY, int phase", "thread": "Goes directly to the scrolling thread when compositing, like bl_wheel.", "doc": "A finger scrolls what is under x, y (the point where it came down, for the whole gesture), without wheel events for the page like touch scrolling in browsers. phase 0: the finger is down (stops a fling), 1: first move, 2: further moves (DOM deltas in pixels), 3: lifted (deltas: velocity of the fling in px/s, 0 for none). The engine flings and snaps (scroll-snap) itself." },
     { "name": "bl_zoom_wheel", "returns": "int", "args": "int id, double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers, int cancelable", "thread": "Synchronous answer.", "doc": "Ctrl + wheel to the page. Returns 1 when the page may call preventDefault (answer in 'wheel-result'), 0 when the host should zoom right away." },
-    { "name": "bl_key", "returns": "void", "args": "int id, int type, char* key, char* code, char* text, int keyCode, int repeat, int modifiers", "doc": "Key event: type 0 down, 1 up; modifiers like bl_mouse. A keydown the page does not handle comes back as 'unhandled-key'." },
+    { "name": "bl_key", "returns": "void", "args": "int id, int type, char* key, char* code, char* text, int keyCode, int repeat, int modifiers", "doc": "Key event: type 0 down, 1 up; modifiers like bl_mouse. Every keydown is answered with 'key-result', also one a dialog drops." },
     { "name": "bl_set_composition", "returns": "void", "args": "int id, char* text, int selectionStart, int selectionEnd", "doc": "IME preview (compositionupdate)." },
     { "name": "bl_confirm_composition", "returns": "void", "args": "int id, char* text", "doc": "IME completion (compositionend)." },
     { "name": "bl_insert_text", "returns": "void", "args": "int id, char* text", "doc": "Inserts finished text (on-screen keyboard, dead keys)." },
@@ -210,7 +210,7 @@
     { "type": "datalist-hide", "scope": "view", "payload": "empty" },
     { "type": "picker-hide", "scope": "view", "payload": "empty" },
     { "type": "wheel-result", "scope": "view", "payload": "{consumed}" },
-    { "type": "unhandled-key", "scope": "view", "payload": "{key, code, modifiers} (a keydown of bl_key the page did not handle: no preventDefault, editing command or default action; modifiers like bl_mouse)" },
+    { "type": "key-result", "scope": "view", "payload": "{handled, key, code, modifiers} (answer to every keydown of bl_key, in order: handled false when the page did not handle it, no preventDefault, editing command or default action; true also when a dialog dropped it; modifiers like bl_mouse)" },
     { "type": "touch-result", "scope": "view", "payload": "{type, consumed, pinch, panX, panY} (pinch, panX, panY: CSS touch-action at the points that start touching allows zooming, scrolling along x, along y)" },
     { "type": "download-start", "scope": "view", "payload": "{id, url, filename, mime, size}" },
     { "type": "download-done", "scope": "view", "payload": "{id, error} (error empty = success)" },

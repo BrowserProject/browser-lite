@@ -1588,9 +1588,14 @@ static String keyIdentifierForKey(const String& key)
 
 void WebView::keyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)
 {
-    if (dispatchKeyEvent(type, key, code, text, keyCode, repeat, modifiers) || type)
-        return;
-    notifyHost(m_id, "unhandled-key", makeString("{\"key\":\""_s, jsonEscape(key), "\",\"code\":\""_s, jsonEscape(code), "\",\"modifiers\":"_s, modifiers, '}'));
+    bool handled = dispatchKeyEvent(type, key, code, text, keyCode, repeat, modifiers);
+    if (!type)
+        keyResult(m_id, handled, key, code, modifiers);
+}
+
+void WebView::keyResult(int id, bool handled, const String& key, const String& code, int modifiers)
+{
+    notifyHost(id, "key-result", makeString("{\"handled\":"_s, handled ? "true"_s : "false"_s, ",\"key\":\""_s, jsonEscape(key), "\",\"code\":\""_s, jsonEscape(code), "\",\"modifiers\":"_s, modifiers, '}'));
 }
 
 bool WebView::dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers)

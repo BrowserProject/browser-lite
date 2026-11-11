@@ -104,7 +104,9 @@ select popup) are in the same sheet.
   first and they run only when it does not handle the key (`unhandled-key` of the core), so an
   editor keeps its own Ctrl+F, Ctrl+L or Ctrl+P and Ctrl+U underlines in rich text. Only the ones
   that leave or switch the tab (Ctrl+T, Ctrl+Shift+T, Ctrl+W, Ctrl+Tab, Ctrl+PageUp and PageDown)
-  and the Alt ones (Alt+Left, Alt+Right, Alt+D) never reach the page (#436). Escape stops a
+  and the Alt ones (Alt+Left, Alt+Right, Alt+D) never reach the page (#436). Letters typed right
+  after Ctrl+L or Ctrl+F while the page is busy wait in the core and land in the bar, not the
+  page (#507). Escape stops a
   loading page like Chrome's Stop, but only when nothing else takes the key: not the page
   (closing its own dialog), the address bar (restores the address) or the find bar (#437).
 - **Failed navigations**: like Chrome the engine's error page is the only message; the status

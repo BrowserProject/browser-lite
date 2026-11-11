@@ -274,7 +274,9 @@ past the last element it goes back to the host (`take-focus`).
 Ctrl + wheel first reaches the page (#167), and so do keys: a keydown the page does not handle
 (no `preventDefault`, editing command or default action, `EventHandler::keyEvent` false) comes
 back as `unhandled-key`, where the demo runs its shortcuts like Chrome; only the ones that leave or
-switch the tab skip the page (#436). Escape is Stop there, after the page and the demo's own
+switch the tab skip the page (#436). The engine answers every keydown (`key-result`), and like
+Chrome's input router the core holds later keyboard input until then (`key-queue.ts`): what was
+typed right after Ctrl+L goes to the address bar the shortcut focused, not to the busy page (#507). Escape is Stop there, after the page and the demo's own
 fields (#437). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
 put text and HTML on the engine's clipboard, which the host gets as the event `clipboard`

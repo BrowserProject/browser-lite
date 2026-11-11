@@ -1,5 +1,6 @@
 import { pendingClipboardWrite } from './clipboard.js';
 import { modifierBits } from './input.js';
+import { editHostField, keyToHost } from './key-queue.js';
 import type { UnhandledKey } from './types.js';
 import { appleMobileHost } from './util.js';
 import type { ViewImpl } from './view.js';
@@ -206,7 +207,10 @@ function keyText(e: KeyLike): string {
   return '';
 }
 
-/** Sends a key event (type 0 down, 1 up) to the view. */
+/**
+ * Sends a key event (type 0 down, 1 up) to the view, in the order of its key queue: a keydown
+ * waits for its `key-result` there.
+ */
 export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
   const { host } = view;
   if (type === 0) view.tabFromFieldArrow = false;
@@ -220,7 +224,10 @@ export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
     e.repeat ? 1 : 0,
     modifierBits(e),
   );
-  if (type === 0) host.watchdog.inputSent();
+  if (type === 0) {
+    view.keys.sent();
+    host.watchdog.inputSent();
+  }
 }
 
 /** @internal The key of the engine event `unhandled-key` ({key, code, modifiers}). */
@@ -271,8 +278,12 @@ function pressKey(view: ViewImpl, e: KeyLike): void {
  */
 export function pressFieldArrow(view: ViewImpl, forward: boolean): void {
   view.userInput(false);
-  pressKey(view, forward ? TAB : SHIFT_TAB);
-  view.tabFromFieldArrow = true;
+  view.keys.run({
+    page: () => {
+      pressKey(view, forward ? TAB : SHIFT_TAB);
+      view.tabFromFieldArrow = true;
+    },
+  });
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
@@ -355,8 +366,13 @@ export function createImeField(
     entered = ime.value;
     if (!backspaces && !insert) return;
     view.userInput(false);
-    for (let i = 0; i < backspaces; i++) pressKey(view, BACKSPACE);
-    if (insert) host.module._bl_insert_text(view.id, host.text(insert));
+    view.keys.run({
+      page: () => {
+        for (let i = 0; i < backspaces; i++) pressKey(view, BACKSPACE);
+        if (insert) host.module._bl_insert_text(view.id, host.text(insert));
+      },
+      host: () => editHostField(backspaces, insert),
+    });
   };
 
   // Autofill and some on-screen keyboards send key events without a key: no key to forward
@@ -369,10 +385,10 @@ export function createImeField(
     if (view.nextFieldOnEnter && isOnScreenEnter(e)) {
       nextFieldKey = true;
       e.preventDefault();
-      host.module._bl_focus_next_field(view.id);
+      view.keys.run({ page: () => host.module._bl_focus_next_field(view.id) });
       return;
     }
-    sendKey(view, 0, e);
+    view.keys.run({ page: () => sendKey(view, 0, e), host: () => keyToHost('keydown', e) });
     // Browser shortcuts like Tab, Backspace and Space stay in the page
     if (e.key !== 'F5' && e.key !== 'F12') e.preventDefault();
   });
@@ -383,7 +399,7 @@ export function createImeField(
       e.preventDefault();
       return;
     }
-    sendKey(view, 1, e);
+    view.keys.run({ page: () => sendKey(view, 1, e), host: () => keyToHost('keyup', e) });
     e.preventDefault();
   });
   on('compositionstart', () => {
@@ -394,13 +410,19 @@ export function createImeField(
   on('compositionupdate', (e) => {
     compositionBase ??= entered;
     const text = e.data || '';
-    host.module._bl_set_composition(view.id, host.text(text), text.length, text.length);
+    view.keys.run({
+      page: () =>
+        host.module._bl_set_composition(view.id, host.text(text), text.length, text.length),
+    });
   });
   on('compositionend', (e) => {
     composing = false;
     view.userInput(false);
     const text = e.data || '';
-    host.module._bl_confirm_composition(view.id, host.text(text));
+    view.keys.run({
+      page: () => host.module._bl_confirm_composition(view.id, host.text(text)),
+      host: () => editHostField(0, text),
+    });
     entered = (compositionBase ?? entered) + text;
     compositionBase = null;
     sync();
@@ -427,8 +449,13 @@ export function createImeField(
     const files = [...(clipboardData?.files ?? [])];
     data.files = await host.uploads.write(view, files);
     if (!view.alive) return;
-    host.module._bl_set_clipboard(host.text(JSON.stringify(data)));
-    pressKey(view, PASTE);
+    view.keys.run({
+      page: () => {
+        host.module._bl_set_clipboard(host.text(JSON.stringify(data)));
+        pressKey(view, PASTE);
+      },
+      host: () => editHostField(0, String(data.text)),
+    });
   });
   return { field: ime, forget };
 }

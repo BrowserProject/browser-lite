@@ -1,4 +1,4 @@
-// Parts of the core that need no browser: page dialogs, permission and HTTP authentication
+// Parts of the core that need no browser: the key queue, page dialogs, permission and HTTP authentication
 // answers (Requests), the
 // downloads, the upload limit, popups without a new-view listener, typed addresses and their
 // fallback to http://, the pending navigation, the engine check and the edits of the IME field.
@@ -8,6 +8,7 @@ import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
+import { KeyQueue } from '../dist/key-queue.js';
 import { enterKeyHintOf, opensNextField, textEdit, textInputOf } from '../dist/keyboard.js';
 import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
@@ -662,4 +663,45 @@ test('IME field enter key: the page field hint, else the key of Chrome on Androi
     false,
   );
   assert.equal(textInputOf({ mode: '' }).mode, 'none');
+});
+
+test('key queue: input after a keydown waits for its answer and goes where the focus is then', () => {
+  let focused = true;
+  const log = [];
+  const keys = new KeyQueue(() => focused);
+  // A keydown counts as sent when its input runs
+  const key = (name) => ({
+    page: () => {
+      log.push(`page ${name}`);
+      keys.sent();
+    },
+    host: () => log.push(`host ${name}`),
+  });
+  keys.run(key('a'));
+  keys.run(key('b'));
+  keys.run({ page: () => log.push('page text') });
+  assert.deepEqual(log, ['page a']);
+  // The page handled a: b goes to the page and waits for its answer, then the text
+  keys.answered();
+  assert.deepEqual(log, ['page a', 'page b']);
+  keys.answered();
+  assert.deepEqual(log, ['page a', 'page b', 'page text']);
+  // Ctrl+L: its shortcut moved the focus before the answer, the letters go to the host
+  log.length = 0;
+  keys.run(key('ctrl+l'));
+  keys.run(key('x'));
+  keys.run({ page: () => log.push('page composition') });
+  keys.run(key('y'));
+  focused = false;
+  keys.answered();
+  assert.deepEqual(log, ['page ctrl+l', 'host x', 'host y']);
+  // Nothing waits: input runs right away; a closed view drops what it held
+  focused = true;
+  log.length = 0;
+  keys.run(key('z'));
+  keys.run(key('w'));
+  keys.clear();
+  keys.answered();
+  keys.run({ page: () => log.push('page after') });
+  assert.deepEqual(log, ['page z', 'page after']);
 });

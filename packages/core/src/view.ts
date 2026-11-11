@@ -4,6 +4,7 @@ import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
 import { attachPointerInput } from './input.js';
+import { KeyQueue } from './key-queue.js';
 import {
   attachFieldArrows,
   createImeField,
@@ -83,6 +84,8 @@ export class ViewImpl implements View {
   /** @internal */ onWheelResult: ((consumed: boolean) => void) | null = null;
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
+  /** @internal Keyboard input in order, held while a keydown waits for its answer. */
+  readonly keys = new KeyQueue(() => this.focused);
   /** @internal The last key sent was the Tab of a field arrow (attachFieldArrows). */
   tabFromFieldArrow = false;
   /** @internal The on-screen keyboard's Enter key moves to the next field (opensNextField). */
@@ -536,6 +539,7 @@ export class ViewImpl implements View {
     clearTimeout(this.imeModeTimer);
     clearTimeout(this.closeTimer);
     this.lifetime.abort();
+    this.keys.clear();
     this.host.requests.closeView(this);
     this.host.fullscreen.setFullscreen(this, false);
     if (alive) {
@@ -785,8 +789,10 @@ export class ViewImpl implements View {
         else apply();
         return;
       }
-      case 'unhandled-key':
-        this.emit('unhandled-key', unhandledKey(data));
+      case 'key-result':
+        // The shortcut of an unhandled key runs before held keys go on (it may move the focus)
+        if (data.handled === false) this.emit('unhandled-key', unhandledKey(data));
+        this.keys.answered();
         return;
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);
