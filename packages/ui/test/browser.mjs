@@ -20,7 +20,10 @@ before(async () => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<!doctype html><meta charset="utf-8"><body style="margin:0"></body>');
+      // Menu rows one below the other like in an app's style sheet, so their widths do not add up
+      res.end(
+        '<!doctype html><meta charset="utf-8"><style>.bl-menu-item{display:block}</style><body style="margin:0"></body>',
+      );
       return;
     }
     try {
