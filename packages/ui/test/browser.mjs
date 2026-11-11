@@ -800,6 +800,7 @@ test('context menu with the default items', async () => {
   assert.deepEqual(result, {
     rows: [
       'Open link in new tab',
+      'Save link as…',
       'Copy link address',
       '-',
       'Select all',
@@ -861,6 +862,7 @@ test('context menu of a long press', async () => {
     rows: [
       'bl-menu-header: https://l.test/a/long/path',
       'bl-menu-item: Open link in new tab',
+      'bl-menu-item: Save link as…',
       'bl-menu-item: Copy link address',
     ],
     plain: 0,
