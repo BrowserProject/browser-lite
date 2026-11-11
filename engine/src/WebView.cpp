@@ -1101,6 +1101,7 @@ void WebView::mouseEvent(int type, int button, int buttons, double x, double y, 
     default: break;
     }
     PlatformEvent::Type eventType = type == 0 ? PlatformEvent::Type::MousePressed : type == 1 ? PlatformEvent::Type::MouseReleased : PlatformEvent::Type::MouseMoved;
+    m_pointerIsTouch = tapPointer.has_value();
 
     // While the page drags something the mouse belongs to the drag (like a
     // system drag in Chrome: no mousemove/mouseup to the page)

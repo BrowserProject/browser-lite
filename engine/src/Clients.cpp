@@ -545,14 +545,19 @@ void ChromeClient::requestPointerUnlock(CompletionHandler<void(bool)>&& completi
 }
 #endif
 
-// Link address at the bottom left and tooltips (title attribute) like in Chrome
-void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& toolTip, TextDirection)
+// Link address at the bottom left and tooltips (title attribute) like in Chrome. A finger does
+// not hover: like Chrome on Android the host gets neither for the mouse events of a tap, also not
+// for WebCore's fake mouse moves at the tap point after a scroll, until the mouse moves again.
+void ChromeClient::mouseDidMoveOverElement(const HitTestResult& result, OptionSet<PlatformEventModifier>, const String& pointerToolTip, TextDirection)
 {
-    String link = result.absoluteLinkURL().string();
+    String pointerLink = result.absoluteLinkURL().string();
+    m_view->setHoveredLink(pointerLink);
+    bool touch = m_view->pointerIsTouch();
+    String link = touch ? emptyString() : pointerLink;
+    String toolTip = touch ? emptyString() : pointerToolTip;
     if (link == m_hoveredLink && toolTip == m_toolTip)
         return;
     m_hoveredLink = link;
-    m_view->setHoveredLink(link);
     m_toolTip = toolTip;
     notifyHost(m_view->id(), "hover", makeString("{\"link\":\""_s, jsonEscape(link), "\",\"tooltip\":\""_s, jsonEscape(toolTip), "\"}"_s));
 }

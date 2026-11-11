@@ -102,6 +102,8 @@ public:
     void scheduleRenderingUpdate();
     // Link under the mouse (ChromeClient): a press on it connects to its origin ahead
     void setHoveredLink(const String& link) { m_hoveredLink = link; }
+    // The last mouse event came from a tap: a finger hovers no link for the host (ChromeClient)
+    bool pointerIsTouch() const { return m_pointerIsTouch; }
     // Rendering update (rAF, style, layout) and repaint what is damaged.
     // Returns true if pixels changed.
     bool renderFrame(WebCore::IntRect* dirtyOut = nullptr);
@@ -344,6 +346,7 @@ private:
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
     String m_hoveredLink;
+    bool m_pointerIsTouch { false };
     // In Page::updateRendering (for the debug log of the first layout)
     bool m_inRenderingUpdate { false };
     ErrorPage::Kind m_errorPageKind { ErrorPage::Kind::Network };

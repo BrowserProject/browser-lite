@@ -1,6 +1,8 @@
 // Hover after a tap: a scroll hovers nothing new under the old tap point and the page sees no
 // mouseover, like in Chrome on Android and Safari on iOS; the tapped link keeps :hover until a
-// touch ends.
+// touch ends. A finger hovers no link for the host either: no link address (view event 'hover'
+// with a url) for a tap, a scroll or a swipe, like Chrome on Android; the demo showed the
+// address bubble of a tapped link until the next navigation.
 // With a mouse a scroll still hovers what comes under the pointer. Before patch 0084 every scroll
 // after a tap hovered the element that came under the old tap point (WebCore's fake mouse move).
 //
@@ -14,6 +16,7 @@ import {
   emulateTouchPoints,
   evalPage,
   finish,
+  hostEvents,
   launch,
   openHost,
   serve,
@@ -72,6 +75,10 @@ const report = async (key, [x, y] = [200, 150]) => {
   return { hovered, overs, under };
 };
 
+// The link addresses the host was told about (view event 'hover')
+const hoveredLinks = async () =>
+  (await hostEvents(page)).filter((e) => e.startsWith('hover:') && e !== 'hover:');
+
 await page.touchscreen.tap(...(await at(200, 150)));
 const tapped = await report('tapped');
 check('tap hovers the tapped link', tapped.hovered === 'l1', JSON.stringify(tapped));
@@ -106,10 +113,21 @@ if (chromiumOnly('swipe after a tap (CDP Input.dispatchTouchEvent)')) {
   );
 }
 
+check(
+  'touch shows no link address',
+  (await hoveredLinks()).length === 0,
+  String(await hoveredLinks()),
+);
+
 // A mouse: the scroll hovers what comes under the pointer
 await page.mouse.move(...(await at(200, 150)), { steps: 3 });
 const moved = await report('moved');
 check('mouse hovers the link under it', moved.hovered === moved.under, JSON.stringify(moved));
+check(
+  'mouse shows the link address',
+  (await hoveredLinks()).at(-1) === `hover:${url}#`,
+  String(await hoveredLinks()),
+);
 await evalPage(page, 'scrollBy(0, 330)');
 const mouseScrolled = await report('mousescrolled');
 check(

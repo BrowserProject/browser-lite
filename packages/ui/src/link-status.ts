@@ -3,7 +3,8 @@ import { context, element, type UiOptions } from './options.js';
 
 /**
  * Shows the address of the link under the mouse in a bubble (bottom left by stylesheet), like
- * Chrome. Typically for the active view only. Returns a function that removes the bubble.
+ * Chrome; a tapped link shows none (the view's `hover` event). Typically for the active view
+ * only. Returns a function that removes the bubble.
  * Element: `.bl-link-status`, hidden while there is no link.
  */
 export function linkStatus(view: View, options?: UiOptions): () => void {

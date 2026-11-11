@@ -260,7 +260,10 @@ When the mouse leaves the canvas (to the host UI or an overlay) the core sends a
 outside the view, like WebKitGTK: the page gets mouseout and mouseleave and loses `:hover` and
 the hovered link; a finger keeps its hover (#381). A scroll after a tap hovers nothing new under
 the old tap point, like in mobile Chrome and Safari: WebCore leaves out its mouse move after a
-scroll while the last pointer position comes from a tap (patch 0084, #426). When the element
+scroll while the last pointer position comes from a tap (patch 0084, #426). A finger hovers no
+link for the host either: while the last mouse event came from a tap, `ChromeClient` reports no
+link address and no tooltip (the `hover` event without a url, also for WebCore's hover updates
+at the tap point), like Chrome on Android, until the mouse moves again (#515). When the element
 under a still mouse changes (a cookie dialog appears over a link, the link goes away), WebCore's
 hover update after the layout or DOM change also reports it to the `ChromeClient` like a move,
 so the link address and tooltip follow like in Chrome (patch 0105, #481). A page from the

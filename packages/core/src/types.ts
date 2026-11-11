@@ -607,7 +607,10 @@ export interface ViewEvents {
    * loaded, also when the page before had the same icon.
    */
   icon: { blob: Blob | null };
-  /** The pointer is over a link (its address) or left it (null). */
+  /**
+   * The mouse is over a link (its address) or left it (null). A finger hovers nothing: after a
+   * tap the url is null until the mouse moves again, like Chrome on Android.
+   */
   hover: { url: string | null };
   /**
    * Result of {@link View.find} for `text`: `matches` (at most 1000, `more` when the page has
