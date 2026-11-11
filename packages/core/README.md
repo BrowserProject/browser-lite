@@ -134,7 +134,10 @@ what a browser UI has to do, and nothing happens without a listener:
 | `unresponsive` (browser) | No answer for 10 s after input: offer to wait (`browser.keepWaiting()`: the script gets the whole `scriptTimeoutSeconds` again, the event comes again 10 s later while it lasts) or to restart; `responsive` when it answers again. The engine stops a script once input or a call waited `scriptTimeoutSeconds` (default 30) for it |
 | `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)); `reason` is the error with its WebAssembly stack, for a bug report |
 
-Without a `download` listener finished downloads are saved automatically.
+Without a `download` listener finished downloads are saved automatically. `download.view` is the
+view that started it: like Chrome, close a tab whose navigation became the download while its view
+never showed a page (no entry in `view.history` other than `about:blank`, for example a
+`target=_blank` link to a file), so no empty tab stays in front.
 
 A failed navigation comes as `error` with the network layer's English text (`description`, for
 logs), then usually the engine's error page commits (`commit` with `errorPage`). Like in Chrome

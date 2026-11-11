@@ -54,6 +54,7 @@ import {
   backgroundPageLoaded,
   clearTabs,
   discardForMemory,
+  downloadStarted,
   focusPage,
   openNewTab,
   openTab,
@@ -308,7 +309,10 @@ async function start(restarted: boolean): Promise<void> {
   browser.addVisitedLinks(readHistory().map((visit) => visit.url));
   profile.attach(browser);
   browser.on('new-view', ({ view, opener }) => adoptView(view, opener));
-  browser.on('download', ({ download }) => addDownload(download));
+  browser.on('download', ({ download }) => {
+    addDownload(download);
+    downloadStarted(download.view);
+  });
   // 'moderate' (above the engine's budget) only discards; the notice only when memory is short
   browser.on('memory-pressure', ({ level }) => {
     if (discardForMemory() || level !== 'critical') return;

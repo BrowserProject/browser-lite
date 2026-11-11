@@ -32,7 +32,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   link kept its unvisited color, in search results and on Wikipedia too, #480),
   downloads (a link or form whose answer becomes a download asks the server once, #412; the
   demo's panel follows a running one and cancels it, #466, and like Chrome keeps the list over
-  a restart, with Download again and Retry, #491), uploads,
+  a restart, with Download again and Retry, #491; a tab whose only navigation became a download
+  closes again like in Chrome, a new tab page stays, #508), uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150), also while the
   page is busy (#505),
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back

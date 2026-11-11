@@ -72,8 +72,11 @@ export class Tab implements SessionTab {
    * Chrome. Forgotten when an address is loaded from the address bar or a panel.
    */
   openedBy: Tab | null = null;
-  /** Discarded: a tab in its place took over, closing the view is no closing by the user. */
-  replaced = false;
+  /**
+   * Closed by the browser, not by the user: a discard (a tab in its place took over) or a tab
+   * whose only navigation became a download. Ctrl+Shift+T does not bring it back.
+   */
+  closedByBrowser = false;
   /** Dialogs of the current document blocked by the user, or skipped in the background. */
   dialogsBlocked = false;
   dialogSuppressed = false;
@@ -87,8 +90,14 @@ export class Tab implements SessionTab {
   iconUrl: string | null = null;
   /** Host of the page the icon belongs to. */
   private iconHost = '';
-  /** Shows the new tab page of the demo until the first address loads. */
+  /**
+   * Shows the new tab page of the demo until the first document commits. Like Chrome's new tab
+   * page it stays while an address loads, and when the load ends without a page (a download, a
+   * stop, an answer without content).
+   */
   newTab = false;
+  /** The label in the tab strip. */
+  private shownLabel = '';
   private hideLinkStatus: (() => void) | null = null;
 
   constructor(view: View, init: { url?: string; title?: string; history?: SessionHistory | null }) {
@@ -153,14 +162,11 @@ export class Tab implements SessionTab {
   private listen(): void {
     const view = this.view;
     this.on('navigation', (event) => {
-      const label = this.label;
       const moved = event.url !== this.url;
       if (moved) {
         const entry = event.history?.entries?.[event.history.index];
         recordVisit(event.url, entry && entry.url === event.url ? entry.title : '');
       }
-      const leftNewTab = this.newTab && !isBlank(event.url);
-      if (leftNewTab) this.newTab = false;
       // The engine reports the icon of every page once it has loaded: until then the last one
       // stays within the site
       if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.useIcon(null, '');
@@ -169,8 +175,9 @@ export class Tab implements SessionTab {
       this.canGoForward = event.canGoForward;
       this.loading = event.loading;
       if (event.history) this.history = event.history;
-      // Without a title the label is the address, also a pending one
-      if (this.label !== label) this.updateTitle();
+      // Without a title the label is the address, also a pending one; the view's pending address
+      // has already changed when the event comes
+      if (this.label !== this.shownLabel) this.updateTitle();
       if (this.isActive) updateStar(this.url);
       this.followSiteZoom();
       persistSession();
@@ -204,6 +211,10 @@ export class Tab implements SessionTab {
     });
     this.on('commit', (event) => {
       this.errorPage = event.errorPage;
+      if (this.newTab) {
+        this.newTab = false;
+        tabsChanged();
+      }
       if (this.isActive) updateSecurity(this);
       // A new document: dialogs allowed again, no user activation yet
       this.dialogsBlocked = false;
@@ -328,7 +339,8 @@ export class Tab implements SessionTab {
   }
 
   updateTitle(): void {
-    this.part('.title').textContent = this.label;
+    this.shownLabel = this.label;
+    this.part('.title').textContent = this.shownLabel;
     this.element.title = this.title;
     if (this.isActive) document.title = `${this.label} - browser-lite`;
     tabsChanged();
@@ -510,16 +522,19 @@ export function openURL(url: string, inNewTab: boolean): void {
   loadInTab(active, url);
 }
 
-/** Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page. */
+/**
+ * Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page; a new
+ * tab page stays until the document commits.
+ */
 export function loadInTab(tab: Tab, url: string): void {
-  tab.newTab = false;
   // Like Chrome after a typed address: the next tabs from links go next to their opener again
   for (const other of list) other.openedBy = null;
   tab.view.load(url);
   // The address shows right away (pending until the page commits)
   tab.updateTitle();
-  if (tab.isActive) updateToolbar(tab);
-  focusPage();
+  if (!tab.isActive) return;
+  updateToolbar(tab);
+  if (!focusPrompt(tab.view)) tab.view.focus();
 }
 
 /** A new tab in the background from a link of opener (Ctrl click), placed after it. */
@@ -593,6 +608,27 @@ export function adoptView(view: View, opener: View | null): void {
   tab.opener = active;
   tab.openedBy = (opener && tabOf(opener)) ?? active;
   activate(add(tab, linkTabPlace(tab.openedBy, true)));
+}
+
+/**
+ * A download started in view. Like Chrome and Firefox a tab that never showed a page and whose
+ * navigation became the download (a link with target=_blank, a popup, a Ctrl click) does not stay
+ * as an empty tab: it closes, and the tab it came from is in front again. The only tab shows the
+ * new tab page instead; a new tab page stays as it is.
+ */
+export function downloadStarted(view: View | null): void {
+  const tab = view && tabOf(view);
+  if (!tab || tab.newTab || tab.closing) return;
+  // The initial about:blank of a popup is no page of its own
+  if (tab.view.history?.entries.some((entry) => !isBlank(entry.url))) return;
+  if (list.length > 1) {
+    tab.closedByBrowser = true;
+    void tab.view.close({ force: true });
+    return;
+  }
+  // The navigation event that ends the load follows and empties the address bar
+  tab.newTab = true;
+  tab.updateTitle();
 }
 
 export function activate(tab: Tab): void {
@@ -678,7 +714,8 @@ function removeTab(tab: Tab): void {
   tab.dispose();
   tabsChanged();
   if (runtime.stopped) return;
-  if (!tab.replaced && !isInternal(tab.url)) rememberClosed({ entry: sessionEntry(tab), index });
+  if (!tab.closedByBrowser && !isInternal(tab.url))
+    rememberClosed({ entry: sessionEntry(tab), index });
   setTimeout(persistSession);
   updateHostBeforeUnload();
   if (active !== tab) return;
@@ -742,7 +779,7 @@ export function discardForMemory(): Tab | null {
   fresh.openedBy = tab.openedBy;
   for (const other of list) if (other.openedBy === tab) other.openedBy = fresh;
   fresh.takeIcon(tab);
-  tab.replaced = true;
+  tab.closedByBrowser = true;
   void tab.view.close({ force: true });
   return fresh;
 }

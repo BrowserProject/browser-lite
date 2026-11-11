@@ -115,7 +115,9 @@ select popup) are in the same sheet.
 - **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
   view (no request to the engine): a greeting by the time of day, a search field that hands over
   to the address bar and tiles of the sites visited most often (the site's icon, else its first
-  letter on a color of its host). The tab is called "New tab".
+  letter on a color of its host). The tab is called "New tab". Like Chrome the page stays until
+  a document commits: while a typed address loads, and when the load ends without one (a file,
+  a stop), so the tab is "New tab" again with an empty address bar (#508).
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
   Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
   the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
@@ -126,7 +128,10 @@ select popup) are in the same sheet.
   files stay only in memory (the last 10), so a row without its file has Download again and a
   failed or cancelled one Retry, which load the address in the tab like a typed one (a file
   answer starts a download and the page stays). Clear all empties the list.
-  No Pause: the core cannot hold a download's request yet.
+  No Pause: the core cannot hold a download's request yet. Like Chrome and Firefox a tab that
+  never showed a page and whose navigation became the download (a `target=_blank` link, a popup,
+  a Ctrl click) closes again and is not offered by Ctrl+Shift+T; the tab it came from is in front.
+  The only tab shows the new tab page instead (`downloadStarted` in `tabs.ts`, #508).
 - **Settings**: a navigation with icons (on narrow screens chips as wide as their names that fill
   their rows, a name never breaks, #445) and the settings as cards of
   rows, switches for on and off; start, errors and the access code are a card over the page. On
