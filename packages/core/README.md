@@ -222,6 +222,9 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
 - `webrtc()`: opt-in; the connections bypass the transport and reveal the IP of the device.
 - `devices({ ... })`: geolocation, sensors, gamepad, speech, notifications, fileSystemAccess,
   clipboard, eyedropper, battery, keyboard, networkInfo, imageDecoder, touch (all on by default).
+  With `touch` fingers on the canvas are touches for the page; what it leaves to the browser
+  scrolls, taps, opens the menu on a long press and zooms with two fingers, also when the page
+  answers late ([Input](../../docs/architecture.md#input)).
   The `clipboard` switch covers the `navigator.clipboard` API of the pages, whose text and HTML
   writes reach the clipboard of the host like copy and cut, which always do.
   Gamepads are read once per frame only while a page uses them; only then does the core listen

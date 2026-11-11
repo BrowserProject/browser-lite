@@ -6,7 +6,8 @@
 // and preventDefault of the page prevent zooming, Ctrl + mouse wheel stays page zoom (the zoom
 // of the view). Ctrl + wheel goes to the page first: when a wheel listener calls preventDefault
 // (like maps), only the page zooms, also in an iframe (embedded map); without a blocking
-// listener at that place the view zooms right away. A new page starts at 1 (back restores it).
+// listener at that place the view zooms right away. Two fingers while the JS blocks zoom once
+// the page answered, the whole way. A new page starts at 1 (back restores it).
 // Without the compositor (compositing: false) the engine thread scales.
 //
 //   node tests/core/pinch-test.mjs [engine-dir]
@@ -493,6 +494,34 @@ check(
   (await result('grabbed', 5000)) === '1' && (await viewport())?.scale === 1 && (await unscaled()),
   JSON.stringify(await viewport()),
 );
+
+// 5c) Two fingers while the JS of the page blocks the engine thread: the answers to the
+// touchstarts come after the fingers lifted. Like Chrome the core keeps the movement and zooms
+// once the page let the fingers go, nothing is lost. On touch-action: none it stays at 1
+await blockEngine(2500);
+await page.waitForTimeout(100);
+await touchPinch(700, 450, 100, 200);
+await page.waitForTimeout(4000);
+check(
+  'touch-action: none prevents pinch zoom while the JS blocks',
+  (await viewport())?.scale === 1 && (await unscaled()),
+  JSON.stringify(await viewport()),
+);
+await blockEngine(2500);
+await page.waitForTimeout(100);
+const blockedPinchStart = Date.now();
+await touchPinch(100, 100, 100, 200);
+const blockedPinchMs = Date.now() - blockedPinchStart;
+const blockedTouch = await waitFor(
+  async () => Math.abs((await viewport())?.scale - 2) < 0.05,
+  15000,
+);
+check(
+  'two fingers while the JS blocks: zoomed once the page answered',
+  blockedPinchMs < 2000 && blockedTouch && (await waitFor(scaledTwice, 5000)),
+  JSON.stringify({ gestureMs: blockedPinchMs, viewport: await viewport() }),
+);
+await zoomOutToTop();
 
 // 6) Two fingers apart around (100, 100): twice as large
 await touchPinch(100, 100, 100, 200);

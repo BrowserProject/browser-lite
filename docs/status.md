@@ -30,7 +30,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   downloads (a link or form whose answer becomes a download asks the server once, #412; the
   demo's panel follows a running one and cancels it, #466, and like Chrome keeps the list over
   a restart, with Download again and Retry, #491), uploads,
-  find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150),
+  find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150), also while the
+  page is busy (#505),
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
   at the scroll position of its page like Chrome, also when the demo or the tab is closed right
   after a scroll (#440, #452, #453),
@@ -608,7 +609,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - `timeZone` applies only at `createBrowser`; the demo restarts the engine for a changed device
   too, although `Browser.setDevice()` could apply it (it uses that only for the rotation, #336).
 - Pinch zoom: `visualViewport` events only at the end of the gesture; two fingers wait for the
-  page's touchstart answer even without blocking listeners.
+  page's touchstart answers even without blocking listeners (the zoom catches up with the kept
+  movement, #505), where Chrome zooms at once.
 - Background views: `scheduler.yield()` and `postTask` are throttled like nested timers; video
   without an audio track pauses when hidden like Chrome (not after PiP, #170, #386), but only when
   the view becomes hidden: video a page starts in a view that is hidden from the start (a tab

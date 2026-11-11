@@ -2,6 +2,7 @@ import { modifierBits } from '../../input.js';
 import type { ViewImpl } from '../../view.js';
 import type { ServiceContext } from '../service.js';
 import { engineFlingVelocity, VelocityTracker } from './fling.js';
+import { type PinchFinger, TouchPinch } from './touch-pinch.js';
 
 const TAP_DISTANCE = 10;
 const LONG_PRESS = 550;
@@ -14,15 +15,12 @@ interface TouchResult {
   panY?: boolean;
 }
 
-interface Point {
+interface Point extends PinchFinger {
   id: number;
-  x: number;
-  y: number;
-  pinch: boolean;
 }
 
 interface Gesture {
-  pointerId: number;
+  finger: Point;
   // CSS touch-action where the finger came down: may the view scroll along x, y?
   panX: boolean;
   panY: boolean;
@@ -66,10 +64,10 @@ function attachTouch(
   const canvas = view.canvas;
   const touches = new Map<number, Point>();
   let gesture: Gesture | null = null;
-  // Two fingers: pinch zoom of the view like Chrome when the page does not take them
-  let pinch: { x: number; y: number; distance: number } | null = null;
-  // pointerId per touchstart; the answers come in order
-  const startsWithoutResult: number[] = [];
+  // The two fingers on the view zoom it like Chrome when the page does not take them
+  let pinch: TouchPinch | null = null;
+  // What every touch event sent to the engine belongs to; the answers come in order
+  const answers: { start?: Point; gesture: Gesture | null; pinch: TouchPinch | null }[] = [];
 
   // tap: the end of a tap, the engine clicks there itself (in the same task as the touchend)
   const send = (type: number, changedId: number, state: number, e: PointerEvent, tap = false) => {
@@ -82,40 +80,24 @@ function attachTouch(
       ry: (e.height || 1) / 2,
       force: e.pressure || 0,
     }));
+    answers.push({ start: type === 0 ? touches.get(changedId) : undefined, gesture, pinch });
     module._bl_touch(view.id, type, ctx.text(JSON.stringify(points)), modifierBits(e), tap ? 1 : 0);
   };
 
-  const fingers = () => {
-    const [a, b] = touches.values() as unknown as [Point, Point];
-    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y) };
-  };
-  const startPinch = () => {
-    if (pinch || touches.size !== 2 || ![...touches.values()].every((t) => t.pinch)) return;
-    pinch = fingers();
-    module._bl_pinch(view.id, 0, 1, pinch.x, pinch.y);
-  };
-  // phase 2 end, 3 cancel (back to the start of the gesture)
-  const stopPinch = (phase: number) => {
-    if (!pinch) return;
-    module._bl_pinch(view.id, phase, 1, pinch.x, pinch.y);
-    pinch = null;
-  };
-
   results.set(view, (data) => {
-    if (data.type === 0) {
-      const pointerId = startsWithoutResult.shift() ?? -1;
-      const touch = touches.get(pointerId);
-      if (touch) touch.pinch = data.pinch && !data.consumed;
-      if (gesture?.pointerId === pointerId) {
-        gesture.panX = data.panX !== false;
-        gesture.panY = data.panY !== false;
+    const { start, gesture: g, pinch: p } = answers.shift() ?? { gesture: null, pinch: null };
+    if (start) {
+      start.pinch = data.pinch && !data.consumed;
+      if (g?.finger === start) {
+        g.panX = data.panX !== false;
+        g.panY = data.panY !== false;
       }
-      startPinch();
     }
-    if (data.consumed) {
-      if (gesture) gesture.consumed = true;
-      stopPinch(3);
-    }
+    if (data.consumed && g) g.consumed = true;
+    // preventDefault on a touchstart or touchmove: the page takes the fingers. The answer to the
+    // second finger's touchstart decides the pinch, the first one's came before
+    if (data.consumed && data.type < 2) p?.cancel();
+    else if (start && start === p?.fingers[1]) p.answered();
   });
 
   // A scroll gesture for the engine (it flings and snaps itself): 0 the finger is down, 1 the
@@ -136,12 +118,11 @@ function attachTouch(
       view.userInput();
       canvas.setPointerCapture(e.pointerId);
       const [x, y] = view.position(e);
-      touches.set(e.pointerId, { id: e.pointerId, x, y, pinch: false });
-      startsWithoutResult.push(e.pointerId);
-      send(0, e.pointerId, 1, e);
+      const finger: Point = { id: e.pointerId, x, y };
+      touches.set(e.pointerId, finger);
       if (touches.size === 1) {
         const current: Gesture = {
-          pointerId: e.pointerId,
+          finger,
           panX: true,
           panY: true,
           startX: x,
@@ -163,12 +144,20 @@ function attachTouch(
         }, LONG_PRESS);
         current.velocity.add(e.timeStamp, x, y);
         gesture = current;
+        send(0, e.pointerId, 1, e);
         // A finger on the page stops a fling
         touchScroll(current, 0);
-      } else if (gesture) {
-        // Second finger: no click and no scrolling for this gesture
-        gesture.consumed = true;
+        return;
       }
+      // Second finger: no click and no scrolling for this gesture, but a pinch
+      if (gesture) gesture.consumed = true;
+      if (!pinch && touches.size === 2) {
+        const [first] = touches.values() as unknown as [Point];
+        pinch = new TouchPinch([first, finger], (phase, factor, px, py) =>
+          module._bl_pinch(view.id, phase, factor, px, py),
+        );
+      }
+      send(0, e.pointerId, 1, e);
     },
     options,
   );
@@ -188,12 +177,7 @@ function attachTouch(
       touch.x = x;
       touch.y = y;
       send(1, e.pointerId, 2, e);
-      if (pinch && touches.size >= 2) {
-        const now = fingers();
-        if (pinch.distance > 0 && now.distance > 0)
-          module._bl_pinch(view.id, 1, now.distance / pinch.distance, now.x, now.y);
-        pinch = now;
-      }
+      if (pinch?.fingers.includes(touch)) pinch.moved();
       if (!gesture || touches.size !== 1) return;
       if (!gesture.moved && Math.hypot(x - gesture.startX, y - gesture.startY) > TAP_DISTANCE) {
         gesture.moved = true;
@@ -229,7 +213,10 @@ function attachTouch(
     const tap = !!g && !cancelled && !g.consumed && !g.longPress && !g.moved;
     send(cancelled ? 3 : 2, e.pointerId, cancelled ? 4 : 0, e, tap);
     touches.delete(e.pointerId);
-    if (touches.size < 2) stopPinch(cancelled ? 3 : 2);
+    if (pinch?.fingers.includes(touch)) {
+      pinch.lift(cancelled);
+      pinch = null;
+    }
     if (!g) return;
     gesture = null;
     clearTimeout(g.timer);
