@@ -4,7 +4,8 @@
 // in the front view (also through pauses while the focus stays in the field), the front view
 // loads a page or a view was just shown (until its first frame), a busy hidden view waits. With
 // and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
-// input (unresponsive, responsive) and no hang during a long native dialog of the host page, a
+// input (unresponsive, responsive; the engine stops a script only once input waited its limit,
+// keepWaiting() gives the script the limit again) and no hang during a long native dialog of the host page, a
 // muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
 // muted sound. Hidden, a video without an audio track pauses (in the host too), a muted one with
 // an audio track goes on.
@@ -574,8 +575,40 @@ check(
 );
 await app.context.close();
 
+// A script nobody waits for runs to its end, also beyond the limit (an anti-bot challenge on a
+// slow device); one that keeps an input waiting is stopped once the input waited the limit
+const busy = await openApp({ url: `${siteURL}stuck`, scripttimeout: '3' });
+await busy.wait('loaded', 'stuck');
+const spin = (seconds, name) =>
+  busy.page.evaluate(
+    (source) => window.blTest.eval(source),
+    `setTimeout(() => { const end = Date.now() + ${seconds * 1000}; while (Date.now() < end); console.log("RESULT ${name}=done"); }, 0)`,
+  );
+await spin(6, 'unwatched');
+check(
+  'a script nobody waits for runs past the limit',
+  !!(await busy.wait('unwatched', 'done', 20000)),
+);
+await spin(15, 'watched');
+await busy.page.waitForTimeout(1000);
+const busyOrigin = await canvasOrigin(busy.page);
+const pressed = Date.now();
+await busy.page.mouse.click(busyOrigin.x + 100, busyOrigin.y + 100);
+await busy.page.evaluate(() => window.blTest.eval('console.log("RESULT after=1")'));
+const answered = await busy.wait('after', '1', 20000);
+const stoppedAfter = (Date.now() - pressed) / 1000;
+check(
+  'a script that keeps a click waiting is stopped once the click waited the limit',
+  !!answered &&
+    stoppedAfter > 2.5 &&
+    stoppedAfter < 6 &&
+    !busy.results.some((result) => result[1] === 'watched'),
+  `${stoppedAfter.toFixed(1)} s`,
+);
+await busy.context.close();
+
 // Hang after an input: the engine thread finishes no task any more
-const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '30' });
+const hang = await openApp({ url: `${siteURL}stuck`, scripttimeout: '20' });
 await hang.wait('loaded', 'stuck');
 const origin = await canvasOrigin(hang.page);
 await hang.page.mouse.click(origin.x + 100, origin.y + 100);
@@ -610,8 +643,14 @@ check(
   repeats === 2 && Date.now() - waited >= 9500,
   `${repeats}x after ${Date.now() - waited} ms`,
 );
+// The engine gives the script the whole limit again: stopped 20 s after keepWaiting(), not 20 s
+// after the click
 const recovered = await waitEvent(hang.page, 'responsive', 15000);
-check('hang after a click: responsive as soon as the watchdog stops the script', !!recovered);
+check(
+  'hang after a click: responsive once the script kept the host waiting 20 s after keepWaiting()',
+  !!recovered && Date.now() - waited >= 18000,
+  `${Date.now() - waited} ms`,
+);
 await hang.context.close();
 
 // A native dialog of the host page stops its main thread: the time until the answer does not

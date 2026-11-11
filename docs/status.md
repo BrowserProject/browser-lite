@@ -144,7 +144,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).
-- **Robustness**: watchdog for scripts (#146), crash and hang detection with in-page restart
+- **Robustness**: watchdog for scripts that keep input or a call waiting (#146, #501), crash and hang detection with in-page restart
   (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), from 512 MB on iPhone and
   iPad (#358; `moderate` there, `critical` only while the malloc area stays full, #497), error
@@ -419,8 +419,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
    article whose animation frames (2D `drawImage` with rotation on the CPU, about 30 ms each)
    took 57 to 61 % of the engine thread while the home page rendered. Like Chrome the demo shows
    no progress for a same-document navigation (`pushState`).
-   Long single tasks of a page become many times longer here, so they block all views and can
-   reach the script watchdog (#146). Cloudflare Turnstile on kaufland.de (local, Chromium host):
+   Long single tasks of a page become many times longer here, so they block all views (the
+   script watchdog stops only those that keep input or a call waiting, #146, #501). Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its
    work differs from run to run. It blocks the engine thread in single entries of several seconds:
    on 2026-11-05 up to 30 s, which the watchdog terminated, the widget staying at "Verifying". On
@@ -441,8 +441,16 @@ browser (Safari keeps Cmd+L, T and W for itself).
    optimized code is ready (phase 4 of [jit.md](jit.md)); then `get_by_val` with string keys 7 %,
    array literals 4.5 %. Its garbage no longer stays (#448), but while the challenge runs
    malloc's use still rises by about 3 MB/s with a JS heap of about 25 MB (2026-11-07, not
-   found yet). Not done either: the demo's "Wait" after `unresponsive` does not
-   move the watchdog's deadline, so waiting cannot save such a script. LinkedIn Learning
+   found yet). OpenStreetMap's sign-up (2026-11-11, local, Chromium host, load 3 to 10): the
+   widget shows its checkbox after 45 to 75 s (plain Chromium within 30 s, its challenge frame
+   busy about 3.5 s in all, longest task 0.95 s); the challenge's longest entries take 9 to 23 s,
+   up to 40 s at a load of 28. The engine thread was busy 56 of 70 s: compiled code itself 41 %,
+   `get_by_val` 6 % (with the DOM getters of the window it reads), `new_array` 3 %,
+   `put_by_val` and `===` of strings 2 % each. Under load such an entry passed the limit of 30 s
+   and its termination left the widget at "Verifying... Stuck?"; the watchdog now stops a
+   script only once input or a call waited its limit for it (#501), and the demo's "Wait" gives
+   it the limit again. (brunhild.challenges.cloudflare.com has only IPv6 addresses, which this
+   machine lacks; plain Chromium fails it too and still shows the checkbox.) LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered
    no eval for up to 10 s, about 35 s in all, then recovered. Its hashing loops now run inline

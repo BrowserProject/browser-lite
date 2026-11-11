@@ -157,7 +157,10 @@ export interface EngineOptions {
   safepointGC?: boolean | 'debug';
   /** Persistent HTTP cache (default true). */
   httpCache?: boolean;
-  /** Seconds before a long running script is stopped. */
+  /**
+   * Seconds input or a call may wait for a script that blocks the engine before the engine stops
+   * it (default 30, 0 = never). A script nobody waits for runs to its end.
+   */
   scriptTimeoutSeconds?: number;
   /** Extra CA certificates (PEM) for TLS inside the engine. */
   extraCA?: string;
@@ -299,9 +302,9 @@ export interface Browser {
    */
   setPermission(origin: string, kind: PermissionKind, decision: PermissionDecision | null): void;
   /**
-   * After `unresponsive`, when the user chose to wait: the watchdog starts over, so
-   * `unresponsive` comes again if the engine still does not answer 10 s later. Does nothing
-   * while the engine answers.
+   * After `unresponsive`, when the user chose to wait: the engine gives the script that blocks it
+   * the whole `scriptTimeoutSeconds` again, and `unresponsive` comes again if the engine still
+   * does not answer 10 s later. Does nothing while the engine answers.
    */
   keepWaiting(): void;
   readonly storage: BrowserStorage;

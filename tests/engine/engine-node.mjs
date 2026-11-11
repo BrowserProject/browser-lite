@@ -20,6 +20,8 @@ export function enginePath(arg) {
 // memory); without onFrame every frame is reported as presented right away.
 // onEvent({ engine, viewId, type, payload }): every engine event. onPrint(text): stdout of the
 // engine. Without html the view loads url like an address typed by the user (bl_load_url).
+// hostWaits: the host waits for the page from the start (bl_host_wait_address), so the script
+// watchdog stops a script that runs longer than BL_SCRIPT_TIMEOUT.
 export async function runEngine({
   enginePath,
   html,
@@ -31,6 +33,7 @@ export async function runEngine({
   onFrame = null,
   onEvent = () => {},
   onPrint = () => {},
+  hostWaits = false,
 }) {
   const createEngine = createRequire(import.meta.url)(path.resolve(enginePath));
   // Emscripten (MODULARIZE) uses exactly this object as Module, so the exports
@@ -47,6 +50,10 @@ export async function runEngine({
     ],
     onEngineReady() {
       console.log('Engine ready');
+      if (hostWaits) {
+        const heap = new Int32Array(engine.HEAPU8.buffer);
+        Atomics.store(heap, engine._bl_host_wait_address() >> 2, 1);
+      }
       engine._bl_create_view(1, width, height, 1);
       if (html === undefined) engine._bl_load_url(1, engine.stringToNewUTF8(url));
       else engine._bl_load_html(1, engine.stringToNewUTF8(html), engine.stringToNewUTF8(url));

@@ -297,8 +297,11 @@ of `context.storage` (default in memory), for example in your user's profile.
   another document, also one the page starts while it still loads) until `commit`, so a tapped
   link shows its progress.
 - `unresponsive` fires after 10 s without an answer to input, `responsive` when it answers again.
-  Offer to wait or to restart; after "wait" call `browser.keepWaiting()`, then `unresponsive`
-  comes again if the engine still does not answer 10 s later.
+  Offer to wait or to restart; after "wait" call `browser.keepWaiting()`: the engine gives the
+  script that blocks it the whole `scriptTimeoutSeconds` again, and `unresponsive` comes again if
+  it still does not answer 10 s later. Without "wait" the engine stops the script once the input
+  waited `scriptTimeoutSeconds`; a script nobody waits for (an anti-bot check on a slow phone)
+  runs to its end.
 - `memory-pressure` (`{footprint, limit, level}`, sizes in bytes): the engine memory grows above
   its budget (`level` `'moderate'`) or runs short (`'critical'`: the engine already dropped the
   compiled JS and the back/forward cache). Close or discard background views at either level;

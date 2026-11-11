@@ -3,7 +3,8 @@
 //   crypto.html    WebCrypto (OpenSSL in WASM)
 //   stack.html     stack limit after a VM trap (recursion after a GC request)
 //   limits.html    deep DOM, long strings, memory until the end
-//   hang.html      watchdog: an endless loop is stopped, the engine keeps running (BL_SCRIPT_TIMEOUT=2)
+//   hang.html      watchdog: an endless loop the host waits for is stopped, the engine keeps
+//                  running (BL_SCRIPT_TIMEOUT=2)
 //   bridges.html   features and host bridges: no __bl globals, disabled features missing (none, all)
 //   lazy.html      ICU data and fonts loaded on first use (lazy/ next to the engine)
 //   svg-use.html   load events of <use> elements of an external sprite (patch 0051)

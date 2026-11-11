@@ -656,21 +656,30 @@ check(
   envState.relay.url === `${stack.origin.replace('http', 'ws')}/wisp/` && !envState.relay.token,
   JSON.stringify(envState.relay),
 );
-// ?scripttimeout=9 reaches the engine: its watchdog stops an endless loop after 9 s
+// ?scripttimeout=9 reaches the engine: its watchdog stops an endless loop once a click waited
+// 9 s for it
 loaded = [];
 await tab.evaluate(() =>
   window.blTest.eval('(() => { console.log("RESULT loaded=env-loop"); for (;;); })()'),
 );
 const envLoop = await waitLoaded('env-loop', 10000);
-const loopStart = Date.now();
 await tab.evaluate(() =>
   window.blTest.eval('setTimeout(() => console.log("RESULT loaded=env-after"), 0)'),
 );
+await tab.waitForTimeout(2000);
+const envCanvas = await tab.evaluate(() => {
+  const rect = [...document.querySelectorAll('canvas[data-bl-view]')]
+    .find((c) => c.style.display !== 'none')
+    .getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+});
+const loopClicked = Date.now();
+await tab.mouse.click(envCanvas.x + 10, envCanvas.y + 10);
 const envAfter = envLoop && (await waitLoaded('env-after', 20000));
-const loopSeconds = (Date.now() - loopStart) / 1000;
+const loopSeconds = (Date.now() - loopClicked) / 1000;
 check(
-  '?scripttimeout=9 stops the loop after about 9 s',
-  envAfter && loopSeconds > 6 && loopSeconds < 13,
+  '?scripttimeout=9 stops the loop about 9 s after a click',
+  envAfter && loopSeconds > 8 && loopSeconds < 13,
   `${loopSeconds.toFixed(1)} s ${loaded.join('|')}`,
 );
 pageErrors.length = 0;
@@ -716,8 +725,9 @@ const waitBoot = (text, timeout) =>
       () => false,
     );
 
-// Hang: an endless loop blocks the engine thread, reload gets no answer. After 15 s (set here)
-// the watchdog (engine/src/EngineLoop.cpp) stops it. Click only when the loop runs.
+// Hang: an endless loop blocks the engine thread, reload gets no answer. Once the reload waited
+// 15 s (set here) the watchdog (engine/src/EngineLoop.cpp) stops it. Click only when the loop
+// runs.
 loaded = [];
 await tab.evaluate(() =>
   window.blTest.eval('(() => { console.log("RESULT loaded=Loop"); for (;;); })()'),
@@ -981,8 +991,8 @@ check(
 );
 
 // The time confirm() waits for the user does not count for the watchdog (2 s here): the script
-// goes on after the answer, an endless loop afterwards is still stopped. An own context, so the
-// session above stays untouched.
+// goes on after the answer, an endless loop afterwards is still stopped once a click waited for
+// it. An own context, so the session above stays untouched.
 const dialogTab = await (
   await browser.newContext({ viewport: { width: 1100, height: 700 } })
 ).newPage();
@@ -1010,6 +1020,13 @@ await dialogTab.evaluate(() =>
   window.blTest.eval('console.log("RESULT confirm=" + confirm("Continue?")); for (;;);'),
 );
 const answered = await dialogLine(/RESULT confirm=true/, 15000);
+const dialogCanvas = await dialogTab.evaluate(() => {
+  const rect = [...document.querySelectorAll('canvas[data-bl-view]')]
+    .find((c) => c.style.display !== 'none')
+    .getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+});
+await dialogTab.mouse.click(dialogCanvas.x + 10, dialogCanvas.y + 10);
 const aborted = await dialogLine(/Script terminated/, 10000);
 check(
   'dialog: the script goes on after 3.5 s in confirm()',

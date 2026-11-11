@@ -131,7 +131,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
 | `memory-pressure` (browser) | The engine memory grows above its budget or runs short (`footprint` and `limit` in bytes; the limit is about 1 GB in a 32 bit browser, found at runtime; on iPhone and iPad it comes from 512 MB on, iOS ends the whole page before the memory stops growing; `level` `'moderate'`, or `'critical'` once memory is short): close or discard background views, tell the user when none is left and the level is critical |
-| `unresponsive` (browser) | No answer for 10 s after input: offer to wait (`browser.keepWaiting()`, the event comes again 10 s later while it lasts) or to restart; `responsive` when it answers again |
+| `unresponsive` (browser) | No answer for 10 s after input: offer to wait (`browser.keepWaiting()`: the script gets the whole `scriptTimeoutSeconds` again, the event comes again 10 s later while it lasts) or to restart; `responsive` when it answers again. The engine stops a script once input or a call waited `scriptTimeoutSeconds` (default 30) for it |
 | `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)); `reason` is the error with its WebAssembly stack, for a bug report |
 
 Without a `download` listener finished downloads are saved automatically.

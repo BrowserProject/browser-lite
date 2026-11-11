@@ -174,13 +174,14 @@ function closeTransport(): void {
 function showHang(): void {
   showMessage(
     'The page is not responding.',
-    ['A script blocks the engine and with it all tabs. If it runs too long, the engine stops it.'],
+    ['A script blocks the engine and with it all tabs. Unless you wait, the engine stops it.'],
     [
       [
         'Wait',
         () => {
           hideMessage();
-          // The question comes again if the engine still does not answer
+          // The script gets the engine's whole limit again, the question comes again if the
+          // engine still does not answer
           runtime.browser?.keepWaiting();
         },
       ],

@@ -110,9 +110,11 @@ A thread that traps or aborts ends the engine. Its worker writes the error with 
 static engine memory (`bl__crash_reason`) before the error reaches the main thread, where the
 core reports it as the reason of `crash` (#218).
 
-All views share one engine thread. A JS entry may run at most 30 s (`scriptTimeoutSeconds`,
-#146). The core watchdog emits `unresponsive` when input or an expected answer gets no reply
-within 10 s (#147, #172). A page dialog holds only its page: until the answer the engine thread
+All views share one engine thread. The core watchdog emits `unresponsive` when input or an
+expected answer gets no reply within 10 s (#147, #172). The engine stops a JS entry once the host
+has waited 30 s for it (`scriptTimeoutSeconds`, #146); the core tells it in shared memory whether
+it waits (`bl_host_wait_address`), and the user's "wait" (`keepWaiting()`) gives the script the
+whole limit again. A script nobody waits for runs to its end, like in Chrome (#501). A page dialog holds only its page: until the answer the engine thread
 runs the other views in a nested event loop (`runNestedEventLoop`, #258). The question before a
 form is sent again waits without a nested loop: the navigation policy answers later (#369). Input to a visible view
 makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,

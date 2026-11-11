@@ -83,6 +83,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_input_mark_address()
     return reinterpret_cast<uintptr_t>(&s_inputMark);
 }
 
+// Whether the host waits for an answer of the engine thread (input or a call): 0 when it waits
+// for nothing, otherwise a value that changes each time it starts to wait anew (also when the
+// user chose to wait on). The host writes it directly in memory, the script watchdog reads it.
+static std::atomic<uint32_t> s_hostWait;
+
+extern "C" EMSCRIPTEN_KEEPALIVE uintptr_t bl_host_wait_address()
+{
+    return reinterpret_cast<uintptr_t>(&s_hostWait);
+}
+
 static Vector<Function<void()>>& topLevelWork()
 {
     static NeverDestroyed<Vector<Function<void()>>> work;
@@ -403,21 +413,58 @@ void scheduleRunLoopPump()
 }
 
 // All views share the engine thread, an endless loop in one page stops all of
-// them. If an entry into JS (a script, an event handler, a timer) takes longer
-// than the limit, the JSC watchdog terminates it, like a terminated worker
-// (TerminationException, cannot be caught). The page gets a console message,
-// its timers and the other views keep running. Checked at the trap points of
-// the interpreter (op_check_traps), the time is measured by a timer in the VM
-// traps thread (under Emscripten wall time counts, not CPU time).
+// them. Like Chrome, which asks the user once input goes unanswered and stops
+// no script on its own, a script is stopped only when it keeps the host waiting:
+// once the host has waited the limit for an answer (bl_host_wait) while an
+// entry into JS (a script, an event handler, a timer) runs, the JSC watchdog
+// terminates that entry, like a terminated worker (TerminationException, cannot
+// be caught). The page gets a console message, its timers and the other views
+// keep running. A script nobody waits for runs to its end, such as an anti-bot
+// challenge that takes a minute on a slow phone. The watchdog looks every half
+// second while an entry runs, at the trap points of the interpreter and of
+// compiled code; the timer runs in the VM traps thread.
 // BL_SCRIPT_TIMEOUT: seconds, 0 = off.
 static double scriptTimeLimit()
 {
     return engineConfig().scriptTimeoutSeconds;
 }
 
+static WTF::Seconds watchdogInterval()
+{
+    return std::min(WTF::Seconds(scriptTimeLimit()), 500_ms);
+}
+
+// The host's wait the watchdog saw last and since when it sees it
+static uint32_t s_seenHostWait;
+static WTF::MonotonicTime s_seenHostWaitSince;
+
+static void restartHostWait()
+{
+    s_seenHostWait = s_hostWait.load(std::memory_order_relaxed);
+    s_seenHostWaitSince = WTF::MonotonicTime::now();
+}
+
+static bool terminateRunawayScript(JSC::JSGlobalObject*, void*, void*);
+
+// Looks again after the interval. Also from the callback, where JSC's watchdog only starts its
+// timer again when the callback does (setTimeLimit)
+static void armScriptWatchdog(JSC::VM& vm)
+{
+    vm.ensureWatchdog().setTimeLimit(watchdogInterval(), terminateRunawayScript);
+}
+
 static bool terminateRunawayScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
 {
-    auto message = makeString("Script terminated: it blocked the engine (all views) for "_s, scriptTimeLimit(), " s"_s);
+    uint32_t wait = s_hostWait.load(std::memory_order_relaxed);
+    if (wait != s_seenHostWait)
+        restartHostWait();
+    if (!wait || WTF::MonotonicTime::now() - s_seenHostWaitSince < WTF::Seconds(scriptTimeLimit())) {
+        armScriptWatchdog(entryGlobalObject->vm());
+        return false;
+    }
+    // The next script that keeps the host waiting gets the whole limit again
+    restartHostWait();
+    auto message = makeString("Script terminated: it blocked the engine (all views) while input or a call waited for "_s, scriptTimeLimit(), " s"_s);
     log("%s", message.utf8().data());
     // The running script, also when it runs nested below a dialog (the VM entry is the dialog's)
     auto* globalObject = WebCore::threadGlobalDataSingleton().currentState();
@@ -437,19 +484,21 @@ static void installScriptWatchdog()
         return;
     auto& vm = WebCore::commonVM();
     JSC::JSLockHolder lock(vm);
-    vm.ensureWatchdog().setTimeLimit(WTF::Seconds(limit), terminateRunawayScript);
+    armScriptWatchdog(vm);
     // Start the timer's thread right away, otherwise the engine thread waits
     // in the first script until a worker is ready for it
     JSC::VMTraps::queue();
 }
 
-// In the middle of an entry into JS, setTimeLimit restarts the deadline from now
+// In the middle of an entry into JS, setTimeLimit restarts the timer from now; the host's wait
+// counts from now too
 static void restartScriptWatchdog()
 {
     auto& vm = WebCore::commonVM();
-    if (auto* watchdog = vm.watchdog()) {
+    if (vm.watchdog()) {
         JSC::JSLockHolder lock(vm);
-        watchdog->setTimeLimit(WTF::Seconds(scriptTimeLimit()), terminateRunawayScript);
+        restartHostWait();
+        armScriptWatchdog(vm);
     }
 }
 

@@ -49,6 +49,8 @@ function savePPM({ rgba, width, height }) {
 
 await runEngine({
   enginePath: enginePath(engineArg),
+  // Waiting for the page: a script that blocks longer than BL_SCRIPT_TIMEOUT is stopped
+  hostWaits: true,
   html: readFileSync(htmlPath, 'utf8'),
   url: process.env.RENDER_URL || 'file:///test/',
   width: Number(widthArg || 800),
