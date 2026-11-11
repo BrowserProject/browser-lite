@@ -27,7 +27,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (address and title of the restored page, #367; the page left last stays through the automatic
   memory releases, so back shows it at once where it was scrolled to, #451), favicons for every loaded page (also after a
   page without one or back to a page whose next page never loaded, #389; in the demo a tab from
-  the last session shows the remembered icon of its site before it loads, #493),
+  the last session shows the remembered icon of its site before it loads, #493; like Chrome a
+  tab without an icon shows a globe, so narrow tabs are no longer a row of empty boxes, #510),
   `:visited` for the addresses the views loaded and those of the host's history (before, every
   link kept its unvisited color, in search results and on Wikipedia too, #480),
   downloads (a link or form whose answer becomes a download asks the server once, #412; the

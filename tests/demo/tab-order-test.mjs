@@ -176,15 +176,16 @@ check('session: the restored tabs keep the order', await orderIs('BDCA'), await 
 // Like Chrome the tabs that load on the first click show the icon of their site
 const backgroundIcons = () =>
   page.evaluate(() =>
-    [...document.querySelectorAll('#tab-list .tab:not(.active) .icon')].map((img) =>
-      img.hidden || !img.complete ? 0 : img.naturalWidth,
-    ),
+    [...document.querySelectorAll('#tab-list .tab:not(.active) .icon')].map((slot) => {
+      const img = slot.querySelector('img');
+      return img?.complete ? img.naturalWidth : 0;
+    }),
   );
 const iconsShown = await page
   .waitForFunction(
     () => {
       const icons = [...document.querySelectorAll('#tab-list .tab:not(.active) .icon')];
-      return icons.length === 3 && icons.every((img) => !img.hidden && img.naturalWidth > 0);
+      return icons.length === 3 && icons.every((slot) => slot.querySelector('img')?.naturalWidth);
     },
     null,
     { timeout: 10000 },

@@ -445,10 +445,8 @@ svg.favicon {
   }
 }
 .tab .icon {
-  width: 16px;
-  height: 16px;
+  display: inline-grid;
   flex: none;
-  object-fit: contain;
 }
 .tab .title {
   flex: 1;

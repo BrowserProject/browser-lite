@@ -199,7 +199,8 @@ select popup) are in the same sheet.
   on a CPU canvas (`willReadFrequently`, see [embedding](../../docs/embedding.md#resource-use)).
   Like Chrome a tab that loads on its first click (from the last session, reopened) shows that
   copy of its site until the engine's icon arrives; a tab discarded under memory pressure keeps
-  the icon it had.
+  the icon it had. Like Chrome a tab without an icon, or with one that does not decode, shows a
+  globe (`defaultFavicon()`), so narrow tabs that have given up their titles stay recognisable.
 
 ## Phone layout
 

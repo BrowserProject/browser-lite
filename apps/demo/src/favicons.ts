@@ -62,14 +62,17 @@ export function rememberedIcon(url: string): string | null {
   return load()[hostOf(url)]?.icon ?? null;
 }
 
+/** Like Chrome's default favicon a globe, for a page without an icon of its own. */
+export function defaultFavicon(className = 'favicon'): SVGSVGElement {
+  const globe = icon('globe');
+  globe.classList.add(className);
+  return globe;
+}
+
 /** The remembered icon of the host of `url`, else a globe. */
 export function favicon(url: string, className = 'favicon'): HTMLElement | SVGSVGElement {
   const src = rememberedIcon(url);
-  if (!src) {
-    const globe = icon('globe');
-    globe.classList.add(className);
-    return globe;
-  }
+  if (!src) return defaultFavicon(className);
   return element('img', { className, src, alt: '', decoding: 'async' });
 }
 

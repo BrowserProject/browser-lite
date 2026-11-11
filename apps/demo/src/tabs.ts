@@ -4,7 +4,7 @@ import { enterAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
 import { ui } from './extensions.js';
-import { hostOf, rememberedIcon, rememberIcon } from './favicons.js';
+import { defaultFavicon, hostOf, rememberedIcon, rememberIcon } from './favicons.js';
 import { endFind, showFindCount, showFindOf } from './find-bar.js';
 import { recordVisit } from './history.js';
 import { syncHostHistory } from './host-history.js';
@@ -110,11 +110,12 @@ export class Tab implements SessionTab {
     this.element.setAttribute('role', 'tab');
     this.element.setAttribute('aria-selected', 'false');
     this.element.innerHTML =
-      '<img class="icon" alt="" hidden><span class="title"></span>' +
+      '<span class="icon"></span><span class="title"></span>' +
       '<span class="recording" title="Camera, microphone or screen in use" hidden></span>' +
       '<span class="dialog-blocked" title="Dialog suppressed" hidden></span>' +
       '<button type="button" class="audio" hidden></button>' +
       '<button type="button" class="close" title="Close tab" aria-label="Close tab"></button>';
+    this.part('.icon').append(defaultFavicon());
     this.part('.dialog-blocked').append(icon('blocked'));
     this.part('.close').append(icon('close'));
     this.part('.audio').addEventListener('click', () => {
@@ -387,14 +388,17 @@ export class Tab implements SessionTab {
     from.iconUrl = null;
   }
 
+  /**
+   * Like Chrome a page without an icon, or with one that does not decode, shows a globe, so a
+   * narrow tab that has given up its title stays recognisable.
+   */
   private showIcon(): void {
-    const img = this.part<HTMLImageElement>('.icon');
-    img.hidden = !this.iconUrl;
-    if (this.iconUrl) img.src = this.iconUrl;
-    else img.removeAttribute('src');
-    img.onerror = () => {
-      img.hidden = true;
-    };
+    const slot = this.part('.icon');
+    if (this.iconUrl) {
+      const img = element('img', { className: 'favicon', alt: '', src: this.iconUrl });
+      img.onerror = () => img.replaceWith(defaultFavicon());
+      slot.replaceChildren(img);
+    } else slot.replaceChildren(defaultFavicon());
     tabsChanged();
   }
 

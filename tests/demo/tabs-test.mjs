@@ -247,8 +247,8 @@ await go(`${siteURL}icon`);
 const icon = await page
   .waitForFunction(
     () => {
-      const img = document.querySelector('.tab.active .icon');
-      return img && !img.hidden && img.complete && img.naturalWidth > 0 ? img.naturalWidth : 0;
+      const img = document.querySelector('.tab.active .icon img');
+      return img?.complete && img.naturalWidth > 0 ? img.naturalWidth : 0;
     },
     null,
     { timeout: 20000 },
