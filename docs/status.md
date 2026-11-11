@@ -205,6 +205,18 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   2026-11-11 local: `close-while-painting-test.mjs` crashed in all 8 Chromium runs within 2 to 9
   views and in Firefox, after the change in none of 7 Chromium runs of 10 to 24 views and 4
   Firefox runs; two runs of the 20 sites at once closed all tabs without a crash.
+  A tab hidden for 10 s releases its tiles (#517, patch 0116), like Chrome: before, every
+  background tab kept the textures of all its layers, which under SwiftShader and on integrated
+  GPUs are system memory of the host's GPU process. 2026-11-11 local, Chromium with SwiftShader
+  at 1280x800, the same 20 heavy sites one new tab each, 40 s per site, the build before and after
+  in turn: GPU process 2859 MB at 21 tabs before (about 130 MB per tab, still growing), 1157 MB
+  after (flat at 1.0 to 1.15 GB from the 11th tab on); after closing all but one tab 944 against
+  638 MB, after a page in the last tab 865 against 616 MB. Local pages with 6 layers in 10 new
+  tabs: 231 to 496 MB before, 235 to 398 MB after. Shown again, a tab keeps its last frame until
+  its tiles are painted again (`hidden-tiles-test.mjs`). Left: plain Chromium grows about 18 MB
+  per tab (388 MB at 10 tabs against 889 MB here); the GPU process keeps freed texture memory for
+  reuse rather than giving it back, so its size follows the heaviest pages seen, and each tab
+  keeps its last frame in its canvas.
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),

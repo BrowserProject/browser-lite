@@ -1782,7 +1782,8 @@ void WebView::setFocused(bool focused)
 // Like WebKit2 for a hidden page (DrawingArea::visibilityDidChange): WebCore
 // pauses rAF and CSS animations, throttles timers
 // (HiddenPageDOMTimerThrottling) and fires visibilitychange; we do not paint
-// anymore, the compositor neither. The last frame stays in the canvas.
+// anymore, the compositor neither. The last frame stays in the canvas; after a
+// while hidden the layers release their tiles (LayerTreeHostWasm::setVisible).
 void WebView::setVisible(bool visible)
 {
     if (visible == m_visible)

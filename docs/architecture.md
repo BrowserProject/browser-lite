@@ -174,6 +174,13 @@ Each view's layer tree host has its own painting engine and tile threads, whose 
 host through their layer when a tile is done. When a view closes, the engine goes first and waits
 for the jobs it started (they finish without painting, queued tiles ahead are not painted), then
 every layer that still names the host, attached or not, forgets it (patch 0113, #514).
+A view hidden for 10 s releases its tiles, like Chrome for background tabs: its layers drop their
+backing stores and the compositor their textures, which go back to WebKit's texture pool and are
+deleted 3 s later (patch 0116, #517). In a browser without a GPU of its own (SwiftShader,
+integrated GPUs) they are system memory of its GPU process. Shown again, the view keeps its last
+frame until the rendering update that paints them again is complete; the compositor shows no frame
+of it before. The memory report (`bl_memory_report`) prints the compositor's texture and Skia cache
+bytes.
 A layer whose filter the compositor applies leaves the filter outsets out of its bounds only when
 nothing of its contents reaches further: what the contents paint outside the box (text-shadow,
 shadows and outlines of children) stays in the layer (patch 0089, #442).

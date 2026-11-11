@@ -123,6 +123,16 @@ static bool compositeTiles(CompositorScene& scene, SkiaCompositingLayer& rootLay
     return true;
 }
 
+// The next rendering update waits for this answer: not behind the page's work (Engine.h)
+static void answerEngine(CompositorScene& scene)
+{
+    runUrgentOnEngineThread([scene = Ref { scene }] {
+        --scene->answersOnTheWay;
+        if (auto* view = WebView::fromID(scene->viewId))
+            view->didComposite();
+    });
+}
+
 static void compositeScene(CompositorScene& scene)
 {
     auto idle = makeScopeExit([&] { setFramePhase(scene, 0); });
@@ -151,6 +161,16 @@ static void compositeScene(CompositorScene& scene)
         scene.scrollingTick = false;
         if (scene.invalidated) {
             keepTicking = false;
+            return;
+        }
+        // Without its tiles the frame would show the layers empty: the view keeps its last frame
+        // and the state stays pending until the rendering update that paints them again
+        if (scene.tilesReleased) {
+            keepTicking = false;
+            if (std::exchange(scene.notifyEngine, false)) {
+                ++scene.answersOnTheWay;
+                answerEngine(scene);
+            }
             return;
         }
         // Only show the rendering update when all its tiles are painted (the
@@ -199,15 +219,9 @@ static void compositeScene(CompositorScene& scene)
     if (pinching && !reasons.isEmpty())
         reasons.add(CompositionReason::AsyncScrolling);
 
-    // The next rendering update waits for this answer: not behind the page's work (Engine.h)
     auto notifyEngine = [&] {
-        if (!notify)
-            return;
-        runUrgentOnEngineThread([scene = Ref { scene }] {
-            --scene->answersOnTheWay;
-            if (auto* view = WebView::fromID(scene->viewId))
-                view->didComposite();
-        });
+        if (notify)
+            answerEngine(scene);
     };
     // A frame that shows nothing (no GPU, no canvas yet) leaves the first paint and its rendering
     // update to the next frame, which the arriving canvas schedules (forceRepaint)
@@ -549,6 +563,7 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
     : m_view(view)
     , m_scene(CompositorScene::create(view.id(), frameDamageMode(view.page().settings())))
     , m_damagePropagation(view.page().settings().propagateDamagingInformation())
+    , m_releaseTilesTimer(RunLoop::mainSingleton(), "LayerTreeHostWasm::releaseTiles"_s, [this] { releaseTiles(); })
 {
     m_scene->rootLayer->setDamagePropagationEnabled(m_damagePropagation);
     {
@@ -657,6 +672,54 @@ void LayerTreeHostWasm::forceRepaint()
     m_scene->scheduleFrameLocked();
 }
 
+// A hidden view gives back the memory of its tiles, which in a browser without a GPU of its own
+// (SwiftShader, integrated GPUs of phones and Chromebooks) is system memory: about 25 MB for a
+// simple page, often 100 MB and more for a news site. Like Chrome, which drops the tiles of
+// background tabs. Long enough that switching back and forth between two tabs keeps them.
+static constexpr Seconds releaseTilesDelay = 10_s;
+
+void LayerTreeHostWasm::setVisible(bool visible)
+{
+    m_scene->setHidden(!visible);
+    if (visible)
+        m_releaseTilesTimer.stop();
+    else
+        m_releaseTilesTimer.startOneShot(releaseTilesDelay);
+}
+
+// Hidden there is no rendering update, so no layer gets tiles again before the view is shown. The
+// textures go back to the BitmapTexturePool, which frees them after 3 s unused; Skia's cache
+// drops what no view drew since.
+void LayerTreeHostWasm::releaseTiles()
+{
+    Vector<Ref<CoordinatedPlatformLayer>> layers;
+    {
+        Locker locker { m_layersLock };
+        layers = copyToVector(m_layers);
+    }
+    layers.removeAllMatching([](auto& layer) {
+        return !layer->releaseTiles();
+    });
+    if (layers.isEmpty())
+        return;
+    m_tilesReleased = true;
+    {
+        Locker locker { m_scene->lock };
+        m_scene->tilesReleased = true;
+    }
+    Compositor::dispatch([layers = WTF::move(layers)] {
+        Gpu::Scope scope;
+        for (auto& layer : layers)
+            layer->releaseTargetTiles();
+        if (auto* context = scope ? Gpu::context() : nullptr)
+            context->performDeferredCleanup(std::chrono::milliseconds(static_cast<long long>(releaseTilesDelay.milliseconds())));
+    });
+    debugLog("View %d: hidden, tiles of %zu layers released", m_scene->viewId, layers.size());
+    // When shown, the frame that was due paints them again (WebView::setVisible)
+    if (m_view)
+        m_view->scheduleRenderingUpdate();
+}
+
 void LayerTreeHostWasm::detachScene()
 {
     {
@@ -724,7 +787,8 @@ void LayerTreeHostWasm::flush(bool firstPaint)
         return entry.value->hasOneRef();
     });
 
-    if (!std::exchange(m_compositionRequired, false))
+    // The first rendering update since the tiles were released brings them again
+    if (!std::exchange(m_compositionRequired, false) && !m_tilesReleased)
         return;
     m_waitingForCompositor = true;
     RefPtr<CoordinatedPlatformLayer> scrollLayer;
@@ -746,6 +810,10 @@ void LayerTreeHostWasm::flush(bool firstPaint)
     m_scene->reasons.add(CompositionReason::RenderingUpdate);
     m_scene->notifyEngine = true;
     m_scene->firstPaint |= firstPaint;
+    if (std::exchange(m_tilesReleased, false)) {
+        m_scene->tilesReleased = false;
+        m_scene->repaintAll = true;
+    }
     m_scene->scheduleFrameLocked();
 }
 

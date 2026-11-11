@@ -1,0 +1,74 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.h b/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.h
+index d069cd221b..2d182ef996 100644
+--- a/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.h
++++ b/Source/WebCore/platform/graphics/texmap/BitmapTexturePool.h
+@@ -60,6 +60,14 @@ public:
+ #if USE(GRAPHICS_LAYER_WC)
+     void releaseUnusedTexturesNow() { releaseUnusedTexturesTimerFired(); }
+ #endif
++#if PLATFORM(WASM)
++    // browser-lite: bytes of all textures, in use or kept for reuse (memory report)
++    uint64_t sizeInBytes()
++    {
++        Locker locker { m_lock };
++        return m_poolSizeInBytes;
++    }
++#endif
+ 
+ private:
+     friend class NeverDestroyed<BitmapTexturePool>;
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+index 80b21801ed..7f4ae6881e 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.cpp
+@@ -971,6 +971,34 @@ void CoordinatedPlatformLayer::didPrepaintTile()
+     if (m_client)
+         m_client->didPrepaintTile();
+ }
++
++bool CoordinatedPlatformLayer::releaseTiles()
++{
++    assertIsMainThread();
++    {
++        Locker locker { m_lock };
++        if (!m_backingStoreProxy)
++            return false;
++        m_backingStoreProxy->invalidate();
++        m_backingStoreProxy = nullptr;
++        m_pendingChanges.add(Change::BackingStore);
++    }
++    m_pendingTilesCreation = false;
++    // The commit this asks for makes a new backing store (updateContents) and paints all its tiles
++    if (GraphicsLayer* owner = m_owner)
++        owner->setNeedsDisplay();
++    return true;
++}
++
++void CoordinatedPlatformLayer::releaseTargetTiles()
++{
++    ASSERT(!isMainThread());
++    Locker locker { m_lock };
++    // With a backing store again, the pending change gives the target a new one
++    if (m_backingStoreProxy || !m_skiaTarget)
++        return;
++    m_skiaTarget->setUseBackingStore(false);
++}
+ #endif
+ 
+ #if USE(SKIA)
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+index 483919583d..2fc4f6a39a 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/CoordinatedPlatformLayer.h
+@@ -224,6 +224,11 @@ public:
+     void didPaintTile();
+ #if PLATFORM(WASM)
+     void didPrepaintTile();
++    // browser-lite: the view stays hidden. Main thread: the layer drops its tiles and paints them
++    // again with its next commit (its owner needs display); false if it had none. Compositor thread
++    // afterwards: the target lets go of their textures, unless the layer has tiles again already.
++    bool releaseTiles();
++    void releaseTargetTiles();
+ #endif
+     void waitUntilPaintingComplete();
+ 

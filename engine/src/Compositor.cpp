@@ -12,6 +12,9 @@
 #include <wtf/Vector.h>
 
 #include <GLES2/gl2.h>
+#include <WebCore/BitmapTexturePool.h>
+#include <cstdio>
+#include <skia/gpu/ganesh/GrDirectContext.h>
 
 namespace WebCore {
 // Patch in PlatformDisplaySkia.cpp: GrDirectContext for SkiaCompositingLayer
@@ -112,6 +115,24 @@ void dispatch(Function<void()>&& function)
         delete heapFunction;
         debugLog("Compositor: proxy_async failed");
     }
+}
+
+void printMemoryReport()
+{
+    if (!isRunning())
+        return;
+    dispatch([] {
+        int resources = 0;
+        size_t bytes = 0;
+        size_t purgeable = 0;
+        if (auto* context = Gpu::context()) {
+            context->getResourceCacheUsage(&resources, &bytes);
+            purgeable = context->getResourceCachePurgeableBytes();
+        }
+        printf("[memory] GPU compositor: layer textures %llu MB (also those kept for reuse), Skia cache %zu MB in %d resources (%zu MB purgeable)\n",
+            static_cast<unsigned long long>(WebCore::BitmapTexturePool::singleton().sizeInBytes() >> 20), bytes >> 20, resources, purgeable >> 20);
+        fflush(stdout);
+    });
 }
 
 bool isLost()

@@ -1178,6 +1178,7 @@ static void printMemoryReport(int full)
         printDetachedDocumentRetainers(vm);
         printDetachedDocumentMarkers(vm);
     }
+    Compositor::printMemoryReport();
 }
 
 // Engine memory in the console (tests and debugging). Only with BL_TEST_HOOKS=1.

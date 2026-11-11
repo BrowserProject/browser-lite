@@ -33,6 +33,7 @@
 #include <wtf/Lock.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/OptionSet.h>
+#include <wtf/RunLoop.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/ThreadSafeWeakHashSet.h>
@@ -84,6 +85,9 @@ public:
     bool invalidated WTF_GUARDED_BY_LOCK(lock) { false };
     // Hidden view (WebView::setVisible): no frames, what is pending comes when shown
     bool hidden WTF_GUARDED_BY_LOCK(lock) { false };
+    // The tiles were released (LayerTreeHostWasm::releaseTiles): no frame is shown until the
+    // rendering update that paints them again
+    bool tilesReleased WTF_GUARDED_BY_LOCK(lock) { false };
     // Composite and show the whole view on the next frame (new canvas)
     bool repaintAll WTF_GUARDED_BY_LOCK(lock) { false };
     // Next frame even without new content (tick for the scrolling thread)
@@ -180,8 +184,12 @@ public:
     bool compositorIdleWhileWaiting() const;
     // Show everything again (e.g. new canvas)
     void forceRepaint();
-    // Hidden, the compositor does not composite the view (no animations either)
-    void setVisible(bool visible) { m_scene->setHidden(!visible); }
+    // Hidden, the compositor does not composite the view (no animations either); hidden for
+    // releaseTilesDelay, the tiles are released
+    void setVisible(bool);
+    // The layers drop their tiles and the compositor their textures, the view keeps showing its
+    // last frame; the next rendering update paints them again
+    void releaseTiles();
     // The view keeps painting without layers: nothing through the compositor anymore
     void detachScene();
     // The engine thread took over the target of a pinch gesture
@@ -229,6 +237,8 @@ private:
     unsigned m_pinchCommit { 0 };
     // The scrolling thread moved layers
     std::atomic<bool> m_compositionRequiredInScrollingThread { false };
+    RunLoop::Timer m_releaseTilesTimer;
+    bool m_tilesReleased { false };
 };
 
 } // namespace BrowserLite

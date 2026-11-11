@@ -31,6 +31,9 @@ pthread_t presenterThread();
 // Work on the compositor thread (from any thread)
 void dispatch(Function<void()>&&);
 
+// Memory report (bl_memory_report): what the compositor holds on the GPU, printed by its thread
+void printMemoryReport();
+
 // The compositor's WebGL context is lost (new views paint without layers)
 // until the browser restores it (GpuRaster.cpp)
 bool isLost();
