@@ -208,6 +208,22 @@ void sendPrintDocument(int viewId, std::span<const uint8_t> data, const String& 
     }, viewId, copy, data.size(), titleCopy);
 }
 
+void sendCopiedImage(int requestId, std::span<const uint8_t> png)
+{
+    uint8_t* copy = nullptr;
+    if (!png.empty()) {
+        copy = static_cast<uint8_t*>(malloc(png.size()));
+        memcpy(copy, png.data(), png.size());
+    }
+    MAIN_THREAD_ASYNC_EM_ASM({
+        var png = $1 ? HEAPU8.slice($1, $1 + $2) : new Uint8Array(0);
+        if ($1)
+            _free($1);
+        if (Module.onEngineCopyImage)
+            Module.onEngineCopyImage($0, png);
+    }, requestId, copy, png.size());
+}
+
 void notifyMedia(int playerId, ASCIILiteral type, const String& json, std::span<const uint8_t> data)
 {
     char* jsonCopy = strdup(json.utf8().data());

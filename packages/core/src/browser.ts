@@ -12,6 +12,7 @@ import {
   preferences,
   resolveConfig,
 } from './config.js';
+import { ImageCopies } from './copy-image.js';
 import { Debug } from './debug.js';
 import { Downloads } from './downloads.js';
 import { Emitter } from './emitter.js';
@@ -40,6 +41,7 @@ import type {
   BrowserEvents,
   BrowserOptions,
   BrowserStorage,
+  ClipboardWriteRequest,
   ColorScheme,
   ConsoleMessage,
   DeviceOptions,
@@ -161,6 +163,7 @@ class BrowserImpl implements Browser, ViewHost {
   readonly requests: Requests;
   readonly uploads: Uploads;
   readonly fullscreen: Fullscreen;
+  readonly imageCopies: ImageCopies;
   private readonly events = new Emitter<BrowserEvents>();
   private readonly lifetime = new AbortController();
   private readonly screen: Screen;
@@ -188,6 +191,7 @@ class BrowserImpl implements Browser, ViewHost {
       this.events.emit('network', { connected }),
     );
     this.downloads = new Downloads(this);
+    this.imageCopies = new ImageCopies(this.module);
     this.screen = new Screen(this.module, config, () => {
       for (const view of this.views.values()) view.measure(true);
     });
@@ -430,6 +434,7 @@ class BrowserImpl implements Browser, ViewHost {
         this.views
           .get(view)
           ?.emit('print', { pdf: new Blob([bytes], { type: 'application/pdf' }), title }),
+      onEngineCopyImage: (request, png) => this.imageCopies.answer(request, png),
       onEngineIcon: (view, _url, mime, bytes) =>
         this.views.get(view)?.emit('icon', {
           blob: bytes.length ? new Blob([bytes], { type: mime || 'image/x-icon' }) : null,
@@ -453,6 +458,22 @@ class BrowserImpl implements Browser, ViewHost {
     const handler = this.handlers.get(type);
     if (handler) handler(data, view, viewId);
     else view?.engineEvent(type, data);
+  }
+
+  /**
+   * Writes through the handler `clipboardWrite`; until the text of a page's copy arrived, a
+   * paste takes it.
+   */
+  writeClipboard(request: ClipboardWriteRequest): void {
+    const write = this.handler('clipboardWrite') ?? writeHostClipboard;
+    try {
+      const written = Promise.resolve(write(request)).catch((error: unknown) =>
+        console.warn('[browser-lite] clipboardWrite failed:', error),
+      );
+      if (!request.image) trackClipboardWrite(request.text, request.html, written);
+    } catch (error) {
+      console.warn('[browser-lite] clipboardWrite failed:', error);
+    }
   }
 
   /** The handler of a request: those of the extensions, then the one of the options. */
@@ -485,18 +506,9 @@ class BrowserImpl implements Browser, ViewHost {
         level: data.level === 'critical' ? 'critical' : 'moderate',
       }),
     );
-    this.handle<Record<string, unknown>>('clipboard', (data) => {
-      const write = this.handler('clipboardWrite') ?? writeHostClipboard;
-      const request = { text: String(data.text ?? ''), html: String(data.html ?? '') };
-      try {
-        const written = Promise.resolve(write(request)).catch((error: unknown) =>
-          console.warn('[browser-lite] clipboardWrite failed:', error),
-        );
-        trackClipboardWrite(request.text, request.html, written);
-      } catch (error) {
-        console.warn('[browser-lite] clipboardWrite failed:', error);
-      }
-    });
+    this.handle<Record<string, unknown>>('clipboard', (data) =>
+      this.writeClipboard({ text: String(data.text ?? ''), html: String(data.html ?? '') }),
+    );
     this.handle<Record<string, unknown>>('console', (data, view) => {
       const entry = consoleMessage(data);
       view?.emit('console', entry);
@@ -615,6 +627,7 @@ class BrowserImpl implements Browser, ViewHost {
     this.views.delete(view.id);
     if (this.focused === view) this.focused = null;
     this.fullscreen.forget(view);
+    this.imageCopies.abort(view.id);
   }
 
   focusView(view: ViewImpl): void {
@@ -762,6 +775,7 @@ class BrowserImpl implements Browser, ViewHost {
     this.watchdog.stop();
     this.requests.abortAll();
     this.downloads.abortAll();
+    this.imageCopies.abort();
     this.detachExtensions();
     this.lifetime.abort();
     this.events.emit('crash', { reason });
@@ -775,6 +789,7 @@ class BrowserImpl implements Browser, ViewHost {
     this.watchdog.stop();
     this.requests.abortAll();
     this.downloads.abortAll();
+    this.imageCopies.abort();
     // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
     this.detachExtensions();

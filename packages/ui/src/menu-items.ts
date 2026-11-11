@@ -13,6 +13,8 @@ export interface MenuActions {
   print?(): void;
   /** Default `view.viewSource()`. */
   viewSource?(): void;
+  /** Save link as, Save image as; default `view.download()`. */
+  download?(url: string): void;
   /** Writes text to the clipboard; default `navigator.clipboard.writeText`. */
   copyText?(text: string): void | Promise<void>;
   /** Reads the clipboard for Paste; default `navigator.clipboard.readText`, null when denied. */
@@ -24,8 +26,8 @@ function clipboard(): Clipboard | undefined {
 }
 
 /**
- * The standard items of a context menu like Chrome: open and copy link or image, copy, select
- * all, back, forward, reload, print and view source. In an editable field only the edit
+ * The standard items of a context menu like Chrome: open, save and copy the address of a link or
+ * image, copy an image, copy, select all, back, forward, reload, print and view source. In an editable field only the edit
  * commands: cut and copy (both disabled without a selection), paste and select all. After a
  * long press (`info.touch`) like Chrome on phones only what was pressed: the address of the
  * link or image as a header and its commands, the edit commands or copy and select all for
@@ -40,6 +42,7 @@ export function defaultMenuItems(
   const texts = resolveTexts(options?.texts);
   const copyText = (text: string) =>
     actions.copyText ? actions.copyText(text) : clipboard()?.writeText(text);
+  const download = (url: string) => (actions.download ? actions.download(url) : view.download(url));
   const readText = async () =>
     actions.readText
       ? actions.readText()
@@ -54,6 +57,7 @@ export function defaultMenuItems(
   if (info.link) {
     items.push(
       { id: 'open-link', label: texts.openLinkInNewTab, action: () => actions.openTab(info.link) },
+      { id: 'save-link', label: texts.saveLinkAs, action: () => download(info.link) },
       { id: 'copy-link', label: texts.copyLinkAddress, action: () => copyText(info.link) },
     );
     separator();
@@ -65,7 +69,13 @@ export function defaultMenuItems(
         label: texts.openImageInNewTab,
         action: () => actions.openTab(info.image),
       },
-      { id: 'copy-image', label: texts.copyImageAddress, action: () => copyText(info.image) },
+      { id: 'save-image', label: texts.saveImageAs, action: () => download(info.image) },
+      { id: 'copy-image', label: texts.copyImage, action: () => view.copyImage(info.x, info.y) },
+      {
+        id: 'copy-image-address',
+        label: texts.copyImageAddress,
+        action: () => copyText(info.image),
+      },
     );
     separator();
   }

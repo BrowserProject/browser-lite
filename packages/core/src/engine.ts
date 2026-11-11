@@ -49,6 +49,8 @@ const ENGINE_EXPORTS = [
   '_bl_find',
   '_bl_find_done',
   '_bl_print',
+  '_bl_copy_image',
+  '_bl_download',
   '_bl_choose_files',
   '_bl_remove_path',
   '_bl_popup_choose',
@@ -123,6 +125,7 @@ export interface EngineHooks {
   onEngineNeedsFrame?: (view: number) => void;
   onEngineDownloadData?: (id: number, bytes: Uint8Array<ArrayBuffer>) => void;
   onEnginePrint?: (view: number, bytes: Uint8Array<ArrayBuffer>, title: string) => void;
+  onEngineCopyImage?: (request: number, png: Uint8Array<ArrayBuffer>) => void;
   onEngineIcon?: (view: number, url: string, mime: string, bytes: Uint8Array<ArrayBuffer>) => void;
   onEngineAudio?: (
     type: string,

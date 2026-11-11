@@ -1,5 +1,6 @@
 import { HttpFallback, httpFallback, typedAddress } from './address.js';
 import type { Config } from './config.js';
+import type { ImageCopies } from './copy-image.js';
 import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
@@ -19,6 +20,7 @@ import {
 import { PendingNavigation } from './pending.js';
 import type { Requests } from './requests.js';
 import type {
+  ClipboardWriteRequest,
   ContextMenuInfo,
   EditCommand,
   SessionHistory,
@@ -53,6 +55,9 @@ export interface ViewHost {
   defaultSize(): { width: number; height: number };
   readonly uploads: Uploads;
   readonly fullscreen: Fullscreen;
+  readonly imageCopies: ImageCopies;
+  /** Writes through the handler `clipboardWrite`. */
+  writeClipboard(request: ClipboardWriteRequest): void;
   gesture(): void;
   focusView(view: ViewImpl): void;
   removeView(view: ViewImpl): void;
@@ -482,6 +487,20 @@ export class ViewImpl implements View {
 
   print(): void {
     this.call((m) => m._bl_print(this.id));
+  }
+
+  copyImage(x: number, y: number): void {
+    if (!this.alive) return;
+    // The write starts now with the image still on the way, so it keeps the click's permission
+    this.host.writeClipboard({
+      text: '',
+      html: '',
+      image: this.host.imageCopies.request(this.id, x, y),
+    });
+  }
+
+  download(url: string): void {
+    this.call((m) => m._bl_download(this.id, this.host.text(url)));
   }
 
   viewSource(): void {

@@ -45,6 +45,9 @@
 #include <WebCore/FileChooser.h>
 #include <WebCore/HTMLInputElement.h>
 #include <WebCore/HitTestResult.h>
+#include <WebCore/Image.h>
+#include <WebCore/ImageUtilities.h>
+#include <WebCore/NativeImage.h>
 #include <WebCore/HistoryController.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/FrameInlines.h>
@@ -59,6 +62,7 @@
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/LocalFrameView.h>
 #include <WebCore/NodeInlines.h>
+#include <WebCore/OriginAccessPatterns.h>
 #include <WebCore/Page.h>
 #include <WebCore/CacheStorageProvider.h>
 #include <WebCore/CompositionUnderline.h>
@@ -90,6 +94,7 @@
 #include <WebCore/ResourceRequest.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/ScrollingCoordinatorTypes.h>
+#include <WebCore/SecurityPolicy.h>
 #include <WebCore/Settings.h>
 #include <WebCore/StyleComputedStyle+GettersInlines.h>
 #include <WebCore/SharedBuffer.h>
@@ -1656,6 +1661,44 @@ void WebView::contextMenu(double x, double y)
         "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
         ",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
         ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, '}'));
+}
+
+// Like Chrome's CopyImageAt: hit tests the point of the menu again (also in frames) and copies
+// the image there decoded at full size and turned by its EXIF orientation, the current frame of
+// an animation, as PNG like every browser puts images on the clipboard.
+Vector<uint8_t> WebView::copyImageAt(double x, double y)
+{
+    RefPtr frame = mainFrame();
+    RefPtr view = mainFrameView();
+    if (!frame || !view)
+        return { };
+    constexpr OptionSet<HitTestRequest::Type> hitType { HitTestRequest::Type::ReadOnly, HitTestRequest::Type::Active, HitTestRequest::Type::DisallowUserAgentShadowContent, HitTestRequest::Type::AllowChildFrameContent };
+    auto hit = frame->eventHandler().hitTestResultAtPoint(LayoutPoint(view->windowToContents(flooredIntPoint(DoublePoint { x, y }))), hitType);
+    RefPtr image = hit.image();
+    if (!image)
+        return { };
+    RefPtr nativeImage = image->currentPreTransformedNativeImage(ImageOrientation::Orientation::FromImage);
+    if (!nativeImage)
+        return { };
+    return encodeData(*nativeImage, "image/png"_s);
+}
+
+// Like a link with download: a request of its own from the page, with its cookies and the
+// referrer its policy allows, so an image or file that needs them comes as the page shows it.
+void WebView::download(const String& address)
+{
+    URL url { address };
+    if (!url.isValid())
+        return;
+    ResourceRequest request { URL { url } };
+    if (RefPtr frame = mainFrame(); frame && frame->document()) {
+        Ref document = *frame->document();
+        request.setFirstPartyForCookies(document->firstPartyForCookies());
+        auto referrer = SecurityPolicy::generateReferrerHeader(document->referrerPolicy(), url, frame->loader().outgoingReferrerURL(), OriginAccessPatternsForWebProcess::singleton());
+        if (!referrer.isEmpty())
+            request.setHTTPReferrer(referrer);
+    }
+    startDownload(m_id, request, { });
 }
 
 void WebView::executeCommand(const String& name)

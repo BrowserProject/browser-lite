@@ -496,6 +496,20 @@ export interface View {
   /** Builds a PDF; delivered with the event `print`. */
   print(): void;
   /**
+   * Copy image like Chrome's context menu: the image at the point (CSS pixels of the view, like
+   * {@link ContextMenuInfo}) at its full size goes to the clipboard as PNG through the handler
+   * `clipboardWrite` (`image`). Call it in the click that asked for it: the write starts at once
+   * with the image still on the way, so Safari and Firefox allow it. Without an image there the
+   * write fails and the clipboard stays as it was.
+   */
+  copyImage(x: number, y: number): void;
+  /**
+   * Downloads an address like a link with `download` (Save image as, Save link as): requested
+   * as from the page, with its cookies and referrer; the file arrives as event `download` of the
+   * browser.
+   */
+  download(url: string): void;
+  /**
    * Page source like Chrome's Ctrl+U: the event `open-tab` asks for `view-source:<url>` in front.
    * Only for http(s) pages. A `view-source:` address loads in any view (`load`) as a page of its
    * own with history: the source of the address after the scheme with numbered lines.
@@ -748,8 +762,9 @@ export interface RequestHandlers {
   dataListPopup(request: DataListRequest): Promise<number>;
   /**
    * Copy and cut in a page and its `navigator.clipboard.writeText()` and `write()`: puts the
-   * text (and HTML) on a clipboard. Default: the clipboard of the host (`navigator.clipboard`,
-   * with HTML when ClipboardItem exists).
+   * text (and HTML) on a clipboard; {@link View.copyImage}: puts the image on it. Default: the
+   * clipboard of the host (`navigator.clipboard`, with HTML and images when ClipboardItem
+   * exists).
    */
   clipboardWrite(request: ClipboardWriteRequest): void | Promise<void>;
 }
@@ -826,11 +841,21 @@ export interface AuthCredentials {
   password: string;
 }
 
-/** Text a page copied, cut or wrote with `navigator.clipboard` (handler `clipboardWrite`). */
+/**
+ * Text a page copied, cut or wrote with `navigator.clipboard`, or an image of
+ * {@link View.copyImage} (handler `clipboardWrite`).
+ */
 export interface ClipboardWriteRequest {
+  /** '' for an image. */
   text: string;
-  /** HTML of the selection, '' for plain text. */
+  /** HTML of the selection, '' for plain text and an image. */
   html: string;
+  /**
+   * The PNG of Copy image, still on the way: write it without waiting, like
+   * `navigator.clipboard.write([new ClipboardItem({ 'image/png': image })])`, since Safari allows
+   * the write only in the click. Rejects when there is no image at the point.
+   */
+  image?: Promise<Blob>;
 }
 
 /** A file input of a page (handler `fileChooser`). */

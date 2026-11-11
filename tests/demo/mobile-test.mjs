@@ -387,10 +387,11 @@ if (chromiumOnly('long press on a link (CDP Input.dispatchTouchEvent)')) {
     .catch(() => []);
   check(
     'long press on a link: its address as header, no page commands',
-    rows.length === 3 &&
+    rows.length === 4 &&
       rows[0] === new URL('four', siteURL).href &&
       rows[1] === 'open-link' &&
-      rows[2] === 'copy-link',
+      rows[2] === 'save-link' &&
+      rows[3] === 'copy-link',
     JSON.stringify(rows),
   );
   await screenshot(tab, 'mobile-link-menu');

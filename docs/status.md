@@ -34,7 +34,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   downloads (a link or form whose answer becomes a download asks the server once, #412; the
   demo's panel follows a running one and cancels it, #466, and like Chrome keeps the list over
   a restart, with Download again and Retry, #491; a tab whose only navigation became a download
-  closes again like in Chrome, a new tab page stays, #508), uploads,
+  closes again like in Chrome, a new tab page stays, #508; Save link as, Save image as and Copy
+  image of the context menu like Chrome, the image at full size as PNG on the clipboard (checked
+  in Chromium, Firefox and WebKit), and Download again and Retry request the address as a
+  download, #511),
+  uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150), also while the
   page is busy (#505),
   a tab discarded under memory pressure, reopened (Ctrl+Shift+T) or from the last session back
@@ -604,10 +608,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
   timeout.
 - Downloads (#466): no Pause like Chrome; the core would need to hold the download's request in
   the engine (no reads, so the server waits) and resume it, or ask again with a `Range` header.
-  Download again and Retry of the demo (#491) load the address in the tab like a typed one: an
-  answer that is no file (an expired link's page, a 404 with a body) shows in the tab, where
-  Chrome requests the address as a download; that needs an engine call that downloads an
-  address. A download from a form POST is requested again with GET.
+  Download again and Retry of the demo (#491, #511) request a download from a form POST again
+  with GET. Save image as downloads the address again instead of the bytes the page shows (Chrome
+  takes them from its HTTP cache), so an image whose address answers differently every time
+  (a captcha) saves another picture; Copy image takes the shown one.
 - Touch selection: a long press selects the word, but there are no selection handles to extend
   it like Chrome and Safari on phones (needs the selection bounds from the engine and commands
   that move either end).

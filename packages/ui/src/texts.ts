@@ -41,8 +41,11 @@ export interface UiTexts {
   /** Next to the empty field of a date, time or color picker on iPhone and iPad. */
   tapToChoose: string;
   openLinkInNewTab: string;
+  saveLinkAs: string;
   copyLinkAddress: string;
   openImageInNewTab: string;
+  saveImageAs: string;
+  copyImage: string;
   copyImageAddress: string;
   copy: string;
   cut: string;
@@ -86,8 +89,11 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   cancel: 'Cancel',
   tapToChoose: 'Tap the field to choose',
   openLinkInNewTab: 'Open link in new tab',
+  saveLinkAs: 'Save link as…',
   copyLinkAddress: 'Copy link address',
   openImageInNewTab: 'Open image in new tab',
+  saveImageAs: 'Save image as…',
+  copyImage: 'Copy image',
   copyImageAddress: 'Copy image address',
   copy: 'Copy',
   cut: 'Cut',

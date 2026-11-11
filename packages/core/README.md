@@ -138,6 +138,14 @@ Without a `download` listener finished downloads are saved automatically. `downl
 view that started it: like Chrome, close a tab whose navigation became the download while its view
 never showed a page (no entry in `view.history` other than `about:blank`, for example a
 `target=_blank` link to a file), so no empty tab stays in front.
+`view.download(url)` requests an address as a download like Save link as and Save image as of
+Chrome's menu: as from the page, with its cookies and referrer, and it arrives as `download` like
+the page's own.
+
+`view.copyImage(x, y)` is Copy image of the menu: the engine copies the image at that point of a
+`context-menu` event at its full size as PNG, and the `clipboardWrite` handler gets it as
+`image`, a promise, already in the click (Safari allows a clipboard write only there). The
+default writes `new ClipboardItem({ 'image/png': image })`.
 
 A failed navigation comes as `error` with the network layer's English text (`description`, for
 logs), then usually the engine's error page commits (`commit` with `errorPage`). Like in Chrome

@@ -184,6 +184,10 @@ public:
     // Right click: first the page's contextmenu event, then (if the page does
     // not handle it) information for the host's menu
     void contextMenu(double x, double y);
+    // Copy image of the menu: the image at the point as PNG, empty without one
+    Vector<uint8_t> copyImageAt(double x, double y);
+    // Save image as, Save link as: a download of the address as requested by the page
+    void download(const String& url);
     // Editor command like "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);

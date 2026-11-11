@@ -281,7 +281,10 @@ fields (#437). Paste, drag and drop and uploads write files into the engine
 (#125, #126, #181). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
 put text and HTML on the engine's clipboard, which the host gets as the event `clipboard`
 (handler `clipboardWrite`; the async Clipboard API through `Pasteboard::writeCustomData`,
-patch 0100, #469).
+patch 0100, #469). Copy image of the context menu (`bl_copy_image`) hit tests the menu's point
+again like Chrome's `CopyImageAt` and encodes the image there at full size, turned by its EXIF
+orientation, as PNG with Skia (`onEngineCopyImage`); the core hands it to `clipboardWrite` as a
+promise the click already wrote, as Safari requires (#511).
 
 ## Network
 
@@ -315,9 +318,10 @@ patch 0080, #408). A navigation whose response becomes a download (`attachment`,
 engine does not show) continues as the download (`continueAsDownload`, like WebKit2's
 `NetworkResourceLoader::convertToDownload`): the paused request is taken from the
 `ResourceLoader` before WebCore cancels it, or the body comes from the HTTP cache, so a one-time
-link or a form POST reaches the server once. `<a download>` and a navigation the
-engine has no load for (answered by a service worker or WebKit's memory cache) send a request of
-their own (#412).
+link or a form POST reaches the server once. `<a download>`, a navigation the
+engine has no load for (answered by a service worker or WebKit's memory cache) and `bl_download`
+(Save link as, Save image as, the demo's Download again: the page's cookies and the referrer its
+policy allows, #511) send a request of their own (#412).
 A `view-source:` address is a document of its own like in Chrome (`engine/src/ViewSource.cpp`,
 #490): the loader strategy serves the main frame's load of it from a request for the address after
 the scheme (cookies of a navigation, redirects followed, the body of any status) and answers with

@@ -126,8 +126,10 @@ select popup) are in the same sheet.
   sees the request end). A finished file is saved with the host browser, its row has Save again.
   Like Chrome the list outlives a restart (`bl-downloads` in localStorage, at most 100, #491); the
   files stay only in memory (the last 10), so a row without its file has Download again and a
-  failed or cancelled one Retry, which load the address in the tab like a typed one (a file
-  answer starts a download and the page stays). Clear all empties the list.
+  failed or cancelled one Retry, which request the address as a download like Chrome
+  (`view.download` of the active tab; an answer that is no file is downloaded too and the page
+  stays, #511). Clear all empties the list. Save link as and Save image as of the context menu
+  start downloads the same way, Copy image puts the image on the clipboard.
   No Pause: the core cannot hold a download's request yet. Like Chrome and Firefox a tab that
   never showed a page and whose navigation became the download (a `target=_blank` link, a popup,
   a Ctrl click) closes again and is not offered by Ctrl+Shift+T; the tab it came from is in front.

@@ -35,6 +35,9 @@ void requestFrameFromHost(int viewId);
 void sendDownloadData(int downloadId, std::span<const uint8_t>);
 // Finished PDF for printing: calls Module.onEnginePrint(viewId, bytes, title) on the main thread
 void sendPrintDocument(int viewId, std::span<const uint8_t>, const String& title);
+// Answer to bl_copy_image: calls Module.onEngineCopyImage(requestId, png) on the main thread
+// (empty without an image)
+void sendCopiedImage(int requestId, std::span<const uint8_t> png);
 // Video/audio (media/): commands to the host <video> and data for the service worker
 void notifyMedia(int playerId, ASCIILiteral type, const String& json, std::span<const uint8_t> = { });
 void sendMediaFetch(int fetchId, ASCIILiteral type, const String& json, std::span<const uint8_t> = { });

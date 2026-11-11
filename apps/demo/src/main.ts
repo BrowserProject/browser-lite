@@ -346,6 +346,7 @@ profile.on('status', () => {
 
 initSidePanel({
   openURL,
+  download: (url) => activeTab()?.view.download(url),
   find: openFind,
   print: () => printTab(activeTab()),
   openSettings: (section) => openSettings(section),

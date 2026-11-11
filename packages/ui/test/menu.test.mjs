@@ -71,10 +71,13 @@ test('link, image, selection and editable field', async () => {
   );
   assert.deepEqual(ids(normalizeMenu(items)), [
     'open-link',
+    'save-link',
     'copy-link',
     '-',
     'open-image',
+    'save-image',
     'copy-image',
+    'copy-image-address',
     '-',
     'cut',
     'copy',
@@ -83,9 +86,12 @@ test('link, image, selection and editable field', async () => {
   ]);
   const run = async (id) => items.find((item) => item.id === id).action();
   await run('open-link');
+  await run('save-link');
   await run('copy-link');
   await run('open-image');
+  await run('save-image');
   await run('copy-image');
+  await run('copy-image-address');
   await run('cut');
   await run('copy');
   await run('paste');
@@ -93,6 +99,9 @@ test('link, image, selection and editable field', async () => {
   assert.deepEqual(opened, ['https://l.test/', 'https://i.test/x.png']);
   assert.deepEqual(copied, ['https://l.test/', 'https://i.test/x.png']);
   assert.deepEqual(view.calls, [
+    ['download', 'https://l.test/'],
+    ['download', 'https://i.test/x.png'],
+    ['copyImage', 10, 20],
     ['command', 'Cut'],
     ['command', 'Copy'],
     ['paste', 'clip'],
@@ -146,23 +155,24 @@ test('view source only for http(s) pages', () => {
   assert.equal(items.find((item) => item.id === 'view-source').enabled, false);
 });
 
-test('app actions replace reload, print and view source; texts are replaceable', () => {
+test('app actions replace download, reload, print and view source; texts are replaceable', () => {
   const view = fakeView();
   const used = [];
   const items = defaultMenuItems(
     view,
-    info(),
+    info({ image: 'https://i.test/x.png' }),
     {
       openTab() {},
+      download: (url) => used.push(`download ${url}`),
       reload: () => used.push('reload'),
       print: () => used.push('print'),
       viewSource: () => used.push('source'),
     },
     { texts: { reload: 'Neu laden' } },
   );
-  for (const id of ['reload', 'print', 'view-source'])
+  for (const id of ['save-image', 'reload', 'print', 'view-source'])
     items.find((item) => item.id === id).action();
-  assert.deepEqual(used, ['reload', 'print', 'source']);
+  assert.deepEqual(used, ['download https://i.test/x.png', 'reload', 'print', 'source']);
   assert.deepEqual(view.calls, []);
   assert.equal(items.find((item) => item.id === 'reload').label, 'Neu laden');
 });
@@ -173,7 +183,12 @@ test('long press on a link: its address as header and only its commands', () => 
     info({ touch: true, link: 'https://l.test/a', canGoBack: true }),
     { openTab() {} },
   );
-  assert.deepEqual(ids(normalizeMenu(items)), ['# https://l.test/a', 'open-link', 'copy-link']);
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    '# https://l.test/a',
+    'open-link',
+    'save-link',
+    'copy-link',
+  ]);
 });
 
 test('long press on an image: its address as header; on a linked image the link', () => {
@@ -183,7 +198,9 @@ test('long press on an image: its address as header; on a linked image the link'
   assert.deepEqual(ids(normalizeMenu(image)), [
     '# https://i.test/x.png',
     'open-image',
+    'save-image',
     'copy-image',
+    'copy-image-address',
   ]);
   const linked = defaultMenuItems(
     fakeView(),

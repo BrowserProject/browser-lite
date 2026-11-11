@@ -533,6 +533,25 @@ EMSCRIPTEN_KEEPALIVE void bl_print(int id)
     });
 }
 
+// Copy image of the context menu: always answered, also when the view is gone
+EMSCRIPTEN_KEEPALIVE void bl_copy_image(int id, int requestId, double x, double y)
+{
+    runOnEngineThread([=] {
+        auto* view = WebView::fromID(id);
+        if (!view) {
+            sendCopiedImage(requestId, { });
+            return;
+        }
+        view->runWhenNotBlocked([=](WebView& view) { sendCopiedImage(requestId, view.copyImageAt(x, y).span()); });
+    });
+}
+
+// Save image as, Save link as: events download-start and download-done like other downloads
+EMSCRIPTEN_KEEPALIVE void bl_download(int id, char* url)
+{
+    withView(id, [url = takeString(url)](WebView& view) { view.download(url); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)
 {
     withView(id, [](WebView& view) { view.stopFind(); });

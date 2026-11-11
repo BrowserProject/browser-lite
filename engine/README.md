@@ -62,7 +62,7 @@ comes as patches from `patches/`.
     memory limit, memory pressure
     `moderate` above the budget and `critical` when memory is short),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
-  - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
+  - Views: `WebView.cpp` (also Copy image and Save as of the context menu), `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
     restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation), `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
     suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views

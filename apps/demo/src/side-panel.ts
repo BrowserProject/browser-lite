@@ -19,6 +19,8 @@ export type PanelName = 'menu' | 'history' | 'bookmarks' | 'downloads' | `extens
 /** What the panel can start in the rest of the demo. */
 export interface PanelActions {
   openURL(url: string, inNewTab: boolean): void;
+  /** Requests an address as a download (Download again, Retry). */
+  download(url: string): void;
   find(): void;
   print(): void;
   /** The settings page, at the profile and site data with 'profile'. */
@@ -366,10 +368,7 @@ function downloadRow(entry: DownloadEntry): HTMLElement {
   } else if (entry.state === 'done' && download?.blob) {
     action('Save again', () => download.save());
   } else if (entry.url) {
-    // A response that is a file leaves the page as it is and starts a new download
-    action(entry.state === 'done' ? 'Download again' : 'Retry', () =>
-      actions.openURL(entry.url, false),
-    );
+    action(entry.state === 'done' ? 'Download again' : 'Retry', () => actions.download(entry.url));
   }
   return row;
 }
