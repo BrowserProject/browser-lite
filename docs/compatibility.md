@@ -95,7 +95,7 @@ starts without stored data.
 | X, Instagram, Facebook, LinkedIn | ok | Login pages |
 | Reddit, old.reddit | ok | Reddit runs a JavaScript check first |
 | TikTok | ok | Video plays |
-| Twitch | partly | Loads; the featured stream of the front page does not start: the player loads segments but never attaches media to its `<video>` (YouTube plays through MSE), and Twitch's bot check script (Kasada `ips.js`) throws only here (2026-10-29). Its player (Amazon IVS, in a worker) loads the segments, then its worker sends `pause` and the page never calls `play()` or MSE, also after a click; Chromium with the same user agent plays muted (also with MSE in workers hidden). Visibility, focus and the codec answers are the same; the cause is open |
+| Twitch | partly | The featured stream of the front page plays (2026-11-11, local, about 75 s after the start on the loaded test machine): its player (Amazon IVS, in a worker) asks `navigator.mediaCapabilities.decodingInfo` for every variant of the master playlist and dropped all of them ("No playable format", Error #4000) while the engine had no MediaCapabilities and answered unsupported for everything (#503). Twitch's bot check script (Kasada `ips.js`) throws only here (2026-10-29) |
 | Discord, Netflix, PayPal | ok | |
 | Spotify Web Player | ok | Takes longer until content |
 | GitHub, Stack Overflow, MDN, W3Schools, Python docs, Hacker News | ok | |

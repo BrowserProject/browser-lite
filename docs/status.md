@@ -135,6 +135,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame). The media
   controls show their icons (play, pause, skip, mute, fullscreen) and their exit button leaves
   fullscreen (#476; every button was blank and fullscreen had no visible way out).
+  `navigator.mediaCapabilities` of pages and workers answers with the host's `decodingInfo`
+  (#503; before it called every configuration unsupported, so Twitch's player dropped every
+  variant of a stream and showed Error #4000; its front page stream now plays).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload (`ready`
   resolves with the active worker set like in Chrome, #483: before, the registration still showed

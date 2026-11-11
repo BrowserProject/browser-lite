@@ -1,7 +1,7 @@
 // <video>/<audio> through the media service of @browser-lite/core: the hidden <video> of the host
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
-// has video-overlay-test.mjs). Also MSE, blob:, data:, preload,
+// has video-overlay-test.mjs). Also MSE, navigator.mediaCapabilities, blob:, data:, preload,
 // picture-in-picture, muted autoplay only in the view, a fullscreen video letterboxed over a
 // page object-fit: cover, the icons of the media controls and their exit fullscreen button and
 // the range special cases of media-sw.js.
@@ -136,11 +136,62 @@ const draw = setInterval(() => {
 }, 100);
 </script>`;
 
+// navigator.mediaCapabilities.decodingInfo: the MSE clip's codec, a file codec, an unknown codec
+// (the host's answer each) and a container the host's MSE may take but the engine's parsers do not
+// (always unsupported). Twitch's player drops every variant decodingInfo calls unsupported.
+const DECODING_CONFIGS = [
+  {
+    type: 'media-source',
+    video: {
+      contentType: 'video/webm;codecs="vp8"',
+      width: 640,
+      height: 360,
+      bitrate: 630000,
+      framerate: 30,
+    },
+  },
+  { type: 'file', audio: { contentType: 'audio/webm;codecs="opus"' } },
+  {
+    type: 'media-source',
+    video: {
+      contentType: 'video/mp4;codecs="xyz1.0"',
+      width: 640,
+      height: 360,
+      bitrate: 630000,
+      framerate: 30,
+    },
+  },
+  { type: 'media-source', audio: { contentType: 'audio/mpeg' } },
+];
+// "supported smooth powerEfficient" as digits per configuration, then encodingInfo of MediaRecorder
+const ASK_CAPABILITIES = `(async () => {
+  const answers = [];
+  for (const configuration of ${JSON.stringify(DECODING_CONFIGS)}) {
+    try {
+      const info = await navigator.mediaCapabilities.decodingInfo(configuration);
+      answers.push([info.supported, info.smooth, info.powerEfficient].map(Number).join(''));
+    } catch (e) {
+      answers.push(e.name);
+    }
+  }
+  try {
+    const info = await navigator.mediaCapabilities.encodingInfo({ type: 'record', video: { contentType: 'video/webm;codecs="vp8"', width: 640, height: 360, bitrate: 630000, framerate: 30 } });
+    answers.push('record:' + Number(info.supported));
+  } catch (e) {
+    answers.push('record:' + e.name);
+  }
+  return answers.join(',');
+})()`;
+
 // MSE: append the clip in two odd parts (also checks the parser with half elements)
 const MSE_PAGE = `<!doctype html><title>MSE test</title><body style="margin:0;background:#fff">
 <video id="video" muted playsinline style="position:absolute;left:20px;top:20px;width:320px;height:240px"></video>
 <script>
 const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const askCapabilities = ${JSON.stringify(ASK_CAPABILITIES)};
+(0, eval)(askCapabilities).then((answers) => result('capabilities', answers));
+const capabilitiesWorker = new Worker(URL.createObjectURL(new Blob([askCapabilities + '.then((answers) => postMessage(answers))'], { type: 'text/javascript' })));
+capabilitiesWorker.onmessage = (e) => result('workercapabilities', e.data);
 const type = 'video/webm; codecs="vp8"';
 result('msesupported', MediaSource.isTypeSupported(type));
 const video = document.getElementById('video');
@@ -498,6 +549,19 @@ const mseTime = Number(await result('msetime'));
 check('MSE: time runs', mseTime > 1, String(mseTime));
 const msePixel = await waitForPixel(180, 140, isRed);
 check('MSE: frame painted in the page', isRed(msePixel), JSON.stringify(msePixel));
+// The host's own answers for the first three, the engine's MSE never takes the fourth
+const hostCapabilities = (await page.evaluate(ASK_CAPABILITIES)).split(',');
+const expectedCapabilities = [...hostCapabilities.slice(0, 3), '000', 'record:1'].join(',');
+check(
+  "mediaCapabilities.decodingInfo like the host's (page)",
+  hostCapabilities[0].startsWith('1') && (await result('capabilities')) === expectedCapabilities,
+  `${results.get('capabilities')} expected ${expectedCapabilities}`,
+);
+check(
+  "mediaCapabilities.decodingInfo like the host's (worker)",
+  (await result('workercapabilities')) === expectedCapabilities,
+  `${results.get('workercapabilities')} expected ${expectedCapabilities}`,
+);
 await screenshot(page, 'mse');
 const mseRemoved = await result('mseremoved');
 const [removeFrom, removedTo] = String(mseRemoved).split('/').map(Number);

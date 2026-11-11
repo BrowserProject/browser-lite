@@ -133,6 +133,7 @@
     { "name": "bl__gpu_context_lost_event", "caller": "engine/src/GpuRaster.cpp", "doc": "webglcontextlost of the engine's context." },
     { "name": "bl__gpu_context_restored_event", "caller": "engine/src/GpuRaster.cpp", "doc": "webglcontextrestored of the engine's context." },
     { "name": "bl__media_host_answers", "caller": "engine/src/media/MediaPlayerPrivateWasm.cpp", "doc": "Prefetched answers of canPlayType/isTypeSupported." },
+    { "name": "bl__media_capabilities", "caller": "engine/src/media/MediaCapabilitiesWasm.cpp", "doc": "Answer of the host's navigator.mediaCapabilities (decodingInfo, encodingInfo) to a question of a page." },
     { "name": "bl__audio_decoded", "caller": "engine/patches/0013-webcore-web-audio-on-wasm.patch", "doc": "decodeAudioData result of the host." }
   ],
   "moduleHooks": [

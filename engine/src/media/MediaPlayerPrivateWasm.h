@@ -14,6 +14,7 @@
 #include <WebCore/BlobData.h>
 #include <WebCore/CoordinatedPlatformLayerBufferProxy.h>
 #include <WebCore/MediaPlayerPrivate.h>
+#include <WebCore/PlatformMediaDecodingType.h>
 #include <WebCore/PlatformTimeRanges.h>
 #include <WebCore/VideoFrameMetadata.h>
 #include <wtf/MonotonicTime.h>
@@ -42,6 +43,10 @@ public:
 
     static void registerMediaEngine(WebCore::MediaEngineRegistrar);
     static MediaPlayerPrivateWasm* fromId(int);
+    // The part of a type question the engine answers itself: the media feature and for MSE a
+    // container our parsers know. The host browser answers for the codecs: synchronously for
+    // canPlayType and isTypeSupported, asynchronously for MediaCapabilities (MediaCapabilitiesWasm.cpp)
+    static bool takesType(WebCore::PlatformMediaDecodingType, const WebCore::ContentType&);
     // MSE: container our parsers know and the host browser plays
     static bool supportsMediaSourceType(const WebCore::ContentType&);
 

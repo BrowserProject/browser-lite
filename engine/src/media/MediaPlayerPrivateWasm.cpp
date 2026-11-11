@@ -160,12 +160,35 @@ static bool hostMediaSourceSupports(const String& type)
     });
 }
 
+bool MediaPlayerPrivateWasm::takesType(PlatformMediaDecodingType platformType, const ContentType& type)
+{
+    switch (platformType) {
+    case PlatformMediaDecodingType::MediaStream:
+#if ENABLE(MEDIA_STREAM)
+        // Without the media feature too: a stream needs no host <video>
+        return true;
+#else
+        return false;
+#endif
+    case PlatformMediaDecodingType::FileOrHLS:
+        return featureEnabled(Feature::Media);
+    case PlatformMediaDecodingType::MediaSource: {
+#if ENABLE(MEDIA_SOURCE)
+        if (!featureEnabled(Feature::Media))
+            return false;
+        auto container = type.containerType().convertToASCIILowercase();
+        return container == "video/mp4"_s || container == "audio/mp4"_s || container == "video/webm"_s || container == "audio/webm"_s;
+#else
+        return false;
+#endif
+    }
+    }
+    return false;
+}
+
 bool MediaPlayerPrivateWasm::supportsMediaSourceType(const ContentType& type)
 {
-    auto container = type.containerType().convertToASCIILowercase();
-    if (container != "video/mp4"_s && container != "audio/mp4"_s && container != "video/webm"_s && container != "audio/webm"_s)
-        return false;
-    return hostMediaSourceSupports(type.raw());
+    return takesType(PlatformMediaDecodingType::MediaSource, type) && hostMediaSourceSupports(type.raw());
 }
 
 // Can the host browser play that? (synchronous through the main thread)
@@ -214,22 +237,12 @@ private:
 
     MediaPlayer::SupportsType supportsTypeAndCodecs(const MediaEngineSupportParameters& parameters) const final
     {
-#if ENABLE(MEDIA_STREAM)
+        if (!MediaPlayerPrivateWasm::takesType(parameters.platformType, parameters.type))
+            return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.platformType == PlatformMediaDecodingType::MediaStream)
             return MediaPlayer::SupportsType::IsSupported;
-#endif
-        // Without the media feature only MediaStream plays (it needs no host <video>)
-        if (!featureEnabled(Feature::Media))
-            return MediaPlayer::SupportsType::IsNotSupported;
-        if (parameters.platformType == PlatformMediaDecodingType::MediaSource) {
-#if ENABLE(MEDIA_SOURCE)
+        if (parameters.platformType == PlatformMediaDecodingType::MediaSource)
             return MediaPlayerPrivateWasm::supportsMediaSourceType(parameters.type) ? MediaPlayer::SupportsType::IsSupported : MediaPlayer::SupportsType::IsNotSupported;
-#else
-            return MediaPlayer::SupportsType::IsNotSupported;
-#endif
-        }
-        if (parameters.platformType != PlatformMediaDecodingType::FileOrHLS)
-            return MediaPlayer::SupportsType::IsNotSupported;
         if (parameters.type.isEmpty())
             return MediaPlayer::SupportsType::MayBeSupported;
         auto answer = hostCanPlayType(parameters.type.raw());

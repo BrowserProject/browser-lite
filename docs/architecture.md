@@ -423,7 +423,12 @@ page <video src>  -> MediaPlayerPrivateWasm --create--> host <video src=bl-media
 
 `MediaFetch` loads http(s) with the shared loader, `blob:` and `data:` from memory. MSE: WebCore
 gets tracks and timestamps from own fMP4/WebM parsers (`ContainerParser`) and the same bytes go to
-a host MediaSource that decodes (#48). With compositing the host shows its own `<video>`
+a host MediaSource that decodes (#48). Which types play is the engine's question only for what
+it does itself (the media feature, the containers of its MSE parsers); for the codecs it asks
+the host: `canPlayType` and `isTypeSupported` synchronously (common types answered ahead, #137),
+`navigator.mediaCapabilities.decodingInfo` of pages and workers asynchronously with the host's
+own `decodingInfo` on its main thread, so `supported`, `smooth` and `powerEfficient` are the
+host's (`MediaCapabilitiesWasm.cpp`, #503). With compositing the host shows its own `<video>`
 (#232): the video gets a composited layer whose contents is a hole punch buffer (patch 0047), the
 compositor clears that rect in the framebuffer (its WebGL context has alpha) and
 `VideoOverlay.cpp` sends the transform of every hole after a shown frame ("place"); the core puts

@@ -13,6 +13,7 @@
 #include "Gamepad.h"
 #include "Host.h"
 #include "LazyFiles.h"
+#include "MediaCapabilitiesWasm.h"
 #include "MediaPlayerPrivateWasm.h"
 #include "Prewarm.h"
 #include "ServiceWorkerWasm.h"
@@ -216,6 +217,8 @@ int main(int, char**)
     // <video>/<audio> through the host <video> (media/). Always registered:
     // srcObject streams play without the media feature, files and MSE do not
     WebCore::MediaPlayerFactorySupport::callRegisterMediaEngine(MediaPlayerPrivateWasm::registerMediaEngine);
+    // navigator.mediaCapabilities answered by the host browser (media/MediaCapabilitiesWasm.cpp)
+    BrowserLite::MediaCapabilities::initialize();
     // WebCodecs of the pages through the WebCodecs of the host (media/WebCodecsWasm.cpp)
     WebCodecs::initialize();
     BrowserLite::initializeWebAssembly();
