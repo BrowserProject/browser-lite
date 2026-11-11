@@ -116,6 +116,15 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   115 s). vimeo.com (2026-11-10) stays at 2.6 GB after 45 s: one task of 11 to 14 s about 30 s
   into the load takes 1.8 GB (in use afterwards 1.7 GB, JS heap 500 MB, decoded images
   145 MB, no AVIF decoder in samples of the engine thread), not looked into yet.
+  The leak was also most of the higher peak memory found on 2026-11-10 with 20 heavy sites
+  opened in tabs (40 s each, Chromium with SwiftShader, local): 1901 to 1971 MB malloc in use
+  and 2116 to 2215 MB WASM memory at 21 tabs against 1348 to 1350 and 1607 to 1637 MB with the
+  engine of 2026-11-06, which did not accept AVIF yet; amazon.de alone added about 390 MB. With
+  patch 0107 (2026-11-11, two runs each, alternating): 1445 to 1458 against 1398 to 1416 MB in
+  use, 1722 to 1744 against 1651 to 1676 MB WASM, amazon.de alone settles at 192 to 198 instead
+  of 240 MB (the old engine 160 to 169 MB, its page has fewer pictures). What remains is the
+  compiled JS kept while a page lives (#441, #455): after a release that deletes it 1337 to 1343
+  against 1356 to 1368 MB in use, on cnn.com alone 266 -> 223 against 236 -> 221 MB.
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
