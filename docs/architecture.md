@@ -49,8 +49,12 @@ network process (service workers, Cache API, OPFS, downloads) runs on the engine
 like WebKit2's IPC: every message, also the reply to a request, comes after the ones sent before
 it (#103, #483). Like WebKit2's, the page a service worker or shared worker runs in has no
 sandbox, so its placeholder document, which the worker's loads are checked against, has the
-worker's origin (#484). A new port needs an entry in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake` and
-a `PlatformWasm.cmake` per project (patch 0006). All WebKit changes are patches in
+worker's origin (#484). The workers share the engine's process, so a service worker that does
+not stop within WebKit's 10 s (blocked in the host, in WebAssembly or a RegExp, where termination
+cannot reach it) is given up instead of ending the process: its thread is left to run, the server
+counts the worker as ended and can start it again (patch 0111, #512); its events still pending end
+with it, so a waiting worker can activate (patch 0112). A new port needs an entry
+in `ALL_PORTS`, `Source/cmake/OptionsWasm.cmake` and a `PlatformWasm.cmake` per project (patch 0006). All WebKit changes are patches in
 `engine/patches/` ([build.md](build.md)). WebKit's UI strings with placeholders (validation
 messages, the file input's "2 files", time labels of media controls) are formatted with WTF's
 `StringPrintStream` (`vsnprintf`, also positional `%1$d`) and take the same UTF-8 texts as the

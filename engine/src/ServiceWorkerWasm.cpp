@@ -5,6 +5,7 @@
 #include "CookieJarWasm.h"
 #include "DeviceClients.h"
 #include "Engine.h"
+#include "EngineConfig.h"
 #include "Host.h"
 #include "HttpCache.h"
 #include "LoaderStrategy.h"
@@ -292,7 +293,9 @@ private:
     ProcessIdentifier webProcessIdentifier() const final { return Process::identifier(); }
     void openWindow(ServiceWorkerIdentifier, const URL&, OpenWindowCallback&& callback) final { callback(makeUnexpected(notSupported())); }
     void connectionIsNoLongerNeeded() final;
-    void terminateDueToUnresponsiveness() final;
+    // WebKit2 kills the workers' process when a worker did not stop in time. Here
+    // SWContextManager gives up just that worker (patch 0111), the others run on.
+    void terminateDueToUnresponsiveness() final { }
     void setInspectable(ServiceWorkerIsInspectable) final { }
 #if ENABLE(CONTENT_EXTENSIONS)
     void reportNetworkUsageToWorkerClient(const ScriptExecutionContextIdentifier, uint64_t) final { }
@@ -1275,6 +1278,7 @@ static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData
     auto& settings = page->settings();
     settings.setScriptEnabled(true);
     settings.setGlobalPrivacyControlEnabled(WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl));
+    settings.setShouldUseServiceWorkerShortTimeout(engineConfig().serviceWorkerShortTimeout);
     enableIn(settings);
     page->setupForRemoteWorker(scriptURL, topOrigin, referrerPolicy, privacy);
     return page;
@@ -1320,12 +1324,6 @@ void ContextConnection::connectionIsNoLongerNeeded()
     if (RefPtr server = this->server())
         server->removeContextConnection(*this);
     serverDelegate().forget(*this);
-}
-
-void ContextConnection::terminateDueToUnresponsiveness()
-{
-    for (auto identifier : m_workers)
-        SWContextManager::singleton().terminateWorker(identifier, 0_s, nullptr);
 }
 
 void ContextConnection::fireNotificationEvent(ServiceWorkerIdentifier identifier, const NotificationData& data, NotificationEventType type, CompletionHandler<void(bool)>&& callback)

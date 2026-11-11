@@ -136,8 +136,10 @@ void loadEngineConfig()
     auto& config = mutableConfig();
     config.debug = flag("BL_DEBUG", false);
     config.testHooks = flag("BL_TEST_HOOKS", false);
-    if (config.testHooks)
+    if (config.testHooks) {
         config.opfsWriteDelayMs = number("BL_OPFS_WRITE_DELAY_MS", 0);
+        config.serviceWorkerShortTimeout = flag("BL_SW_SHORT_TIMEOUT", false);
+    }
     config.features = parseFeatures(getenv("BL_FEATURES"));
     config.opfs = flag("BL_OPFS", true);
     config.httpCache = flag("BL_HTTP_CACHE", true);

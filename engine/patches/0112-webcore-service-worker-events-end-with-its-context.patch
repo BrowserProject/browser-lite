@@ -1,0 +1,16 @@
+diff --git a/Source/WebCore/workers/service/server/SWServer.cpp b/Source/WebCore/workers/service/server/SWServer.cpp
+index d12a898386..010e99128b 100644
+--- a/Source/WebCore/workers/service/server/SWServer.cpp
++++ b/Source/WebCore/workers/service/server/SWServer.cpp
+@@ -1319,6 +1319,11 @@ void SWServer::workerContextTerminated(SWServerWorker& worker)
+ 
+     if (CheckedPtr jobQueue = m_jobQueues.get(worker.registrationKey()))
+         jobQueue->cancelJobsFromServiceWorker(worker.identifier());
++
++    // https://w3c.github.io/ServiceWorker/#terminate-service-worker empties the worker's set of
++    // extended events: one that ended with events pending no longer holds back the activation
++    // of a waiting worker or the clearing of its registration.
++    worker.setHasPendingEvents(false);
+ }
+ 
+ void SWServer::fireInstallEvent(SWServerWorker& worker)

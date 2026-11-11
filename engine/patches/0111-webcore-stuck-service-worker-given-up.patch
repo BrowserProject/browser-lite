@@ -1,0 +1,95 @@
+diff --git a/Source/WebCore/workers/service/context/SWContextManager.cpp b/Source/WebCore/workers/service/context/SWContextManager.cpp
+index 6f241552f0..8ceadfcef1 100644
+--- a/Source/WebCore/workers/service/context/SWContextManager.cpp
++++ b/Source/WebCore/workers/service/context/SWContextManager.cpp
+@@ -212,10 +212,20 @@ void SWContextManager::stopWorker(ServiceWorkerThreadProxy& serviceWorker, Secon
+     auto identifier = serviceWorker.identifier();
+     serviceWorker.setAsTerminatingOrTerminated();
+ 
+-    m_pendingServiceWorkerTerminationRequests.add(identifier, makeUnique<ServiceWorkerTerminationRequest>(*this, identifier, timeout));
++    m_pendingServiceWorkerTerminationRequests.add(identifier, makeUnique<ServiceWorkerTerminationRequest>(*this, serviceWorker, timeout));
+ 
+     Ref thread = serviceWorker.thread();
+     thread->stop([this, identifier, serviceWorker = Ref { serviceWorker }, completionHandler = WTF::move(completionHandler)]() mutable {
++#if PLATFORM(WASM)
++        // browser-lite: a worker given up in serviceWorkerFailedToTerminate() is reported as
++        // terminated already, and its identifier may belong to a new run of the worker by now
++        if (m_abandonedServiceWorkers.remove(serviceWorker.ptr())) {
++            if (completionHandler)
++                completionHandler();
++            callOnMainThread([serviceWorker = WTF::move(serviceWorker)] { });
++            return;
++        }
++#endif
+         m_pendingServiceWorkerTerminationRequests.remove(identifier);
+ 
+         if (RefPtr connection = SWContextManager::singleton().connection())
+@@ -263,16 +273,31 @@ bool SWContextManager::stopRunningDebuggerTasksOnServiceWorker(ServiceWorkerIden
+     return true;
+ }
+ 
+-void SWContextManager::serviceWorkerFailedToTerminate(ServiceWorkerIdentifier serviceWorkerIdentifier)
++void SWContextManager::serviceWorkerFailedToTerminate(ServiceWorkerThreadProxy& serviceWorker)
+ {
++    auto serviceWorkerIdentifier = serviceWorker.identifier();
++#if PLATFORM(WASM)
++    // browser-lite: the workers run in the engine's own process, and exiting it here blocks the
++    // engine thread for good. A thread cannot be killed either, so the worker is given up: its
++    // thread may go on until its script returns (for example from the host's RegExp, which
++    // termination cannot interrupt), and the server learns now that the worker ended, so it can
++    // start it again.
++    RELEASE_LOG_ERROR(ServiceWorker, "Failed to terminate service worker with identifier %s, giving it up", serviceWorkerIdentifier.loggingString().utf8().data());
++    m_abandonedServiceWorkers.add(serviceWorker);
++    // The request owns the timer that runs this function, so it goes only after it returned
++    callOnMainThread([request = m_pendingServiceWorkerTerminationRequests.take(serviceWorkerIdentifier)] { });
++    if (RefPtr connection = m_connection)
++        connection->workerTerminated(serviceWorkerIdentifier);
++#else
+     UNUSED_PARAM(serviceWorkerIdentifier);
+     RELEASE_LOG_ERROR(ServiceWorker, "Failed to terminate service worker with identifier %s, killing the service worker process", serviceWorkerIdentifier.loggingString().utf8().data());
+     ASSERT_NOT_REACHED();
+     terminateProcess(EXIT_FAILURE);
++#endif
+ }
+ 
+-SWContextManager::ServiceWorkerTerminationRequest::ServiceWorkerTerminationRequest(SWContextManager& manager, ServiceWorkerIdentifier serviceWorkerIdentifier, Seconds timeout)
+-    : m_timeoutTimer([&manager, serviceWorkerIdentifier] { manager.serviceWorkerFailedToTerminate(serviceWorkerIdentifier); })
++SWContextManager::ServiceWorkerTerminationRequest::ServiceWorkerTerminationRequest(SWContextManager& manager, ServiceWorkerThreadProxy& serviceWorker, Seconds timeout)
++    : m_timeoutTimer([&manager, serviceWorker = Ref { serviceWorker }] { manager.serviceWorkerFailedToTerminate(serviceWorker); })
+ {
+     m_timeoutTimer.startOneShot(timeout);
+ }
+diff --git a/Source/WebCore/workers/service/context/SWContextManager.h b/Source/WebCore/workers/service/context/SWContextManager.h
+index 16e9591bbc..41ae19da9e 100644
+--- a/Source/WebCore/workers/service/context/SWContextManager.h
++++ b/Source/WebCore/workers/service/context/SWContextManager.h
+@@ -146,7 +146,11 @@ private:
+     SWContextManager() = default;
+ 
+     void startedServiceWorker(std::optional<ServiceWorkerJobDataIdentifier>, ServiceWorkerIdentifier, const String& exceptionMessage, bool doesHandleFetch);
+-    NO_RETURN_DUE_TO_CRASH void serviceWorkerFailedToTerminate(ServiceWorkerIdentifier);
++#if PLATFORM(WASM)
++    void serviceWorkerFailedToTerminate(ServiceWorkerThreadProxy&);
++#else
++    NO_RETURN_DUE_TO_CRASH void serviceWorkerFailedToTerminate(ServiceWorkerThreadProxy&);
++#endif
+ 
+     void stopWorker(ServiceWorkerThreadProxy&, Seconds, Function<void()>&&);
+ 
+@@ -158,12 +162,15 @@ private:
+     class ServiceWorkerTerminationRequest {
+         WTF_MAKE_TZONE_ALLOCATED(ServiceWorkerTerminationRequest);
+     public:
+-        ServiceWorkerTerminationRequest(SWContextManager&, ServiceWorkerIdentifier, Seconds timeout);
++        ServiceWorkerTerminationRequest(SWContextManager&, ServiceWorkerThreadProxy&, Seconds timeout);
+ 
+     private:
+         Timer m_timeoutTimer;
+     };
+     HashMap<ServiceWorkerIdentifier, std::unique_ptr<ServiceWorkerTerminationRequest>> m_pendingServiceWorkerTerminationRequests;
++#if PLATFORM(WASM)
++    HashSet<Ref<ServiceWorkerThreadProxy>> m_abandonedServiceWorkers;
++#endif
+ };
+ 
+ } // namespace WebCore

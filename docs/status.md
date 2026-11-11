@@ -159,7 +159,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).
 - **Robustness**: watchdog for scripts that keep input or a call waiting (#146, #501), crash and hang detection with in-page restart
-  (#147, #172), hidden background views (#170), memory pressure near the memory limit found at
+  (#147, #172), a service worker that does not stop (blocked in WebAssembly or the host's
+  RegExp) is given up and no longer freezes the whole engine with every tab after 1 to 10 s
+  (#512; seen after vscode.dev), its next event starts it again and a new version activates,
+  hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), from 512 MB on iPhone and
   iPad (#358; `moderate` there, `critical` only while the malloc area stays full, #497), error
   pages with the

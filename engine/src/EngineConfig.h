@@ -38,6 +38,9 @@ struct EngineConfig {
     // BL_OPFS_WRITE_DELAY_MS, only with test hooks: every write to the OPFS takes this long more,
     // like a slow disk (engine/js/wasmfs-opfs.js)
     double opfsWriteDelayMs { 0 };
+    // BL_SW_SHORT_TIMEOUT, only with test hooks: WebKit's 1 s heartbeat of service workers
+    // (ShouldUseServiceWorkerShortTimeout) instead of 60 s, so a test finds a blocked one soon
+    bool serviceWorkerShortTimeout { false };
     OptionSet<Feature> features; // BL_FEATURES, unset = all
     bool opfs { true }; // BL_OPFS
     CString storageNamespace; // BL_STORAGE_NAMESPACE
