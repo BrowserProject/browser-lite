@@ -456,12 +456,15 @@ void ChromeClient::focus()
 // New view for window.open / target=_blank. Like WebChromeClient in
 // WebKitLegacy: opener (except noopener), name and sandbox of the window.
 // The popup blocker is here, not in WebCore (javaScriptCanOpenWindowsAutomatically,
-// WebView.cpp), so that the host learns of a blocked popup: like WebCore's own
-// check it needs a user gesture, unless the top site has the permission 'popups'.
+// WebView.cpp), so that the host learns of a blocked popup. Like Chrome it needs a
+// user gesture or the window's transient activation (5 s after a click, used up by
+// the popup in LocalDOMWindow::createWindow), unless the top site has the permission
+// 'popups'. A gesture alone reaches timers only for 1 s (UserGestureToken).
 RefPtr<Page> ChromeClient::createWindow(LocalFrame& frame, const String& openedMainFrameName, const WindowFeatures& features, const NavigationAction& action)
 {
-    if (!UserGestureIndicator::processingUserGesture()) {
-        RefPtr document = frame.document();
+    RefPtr document = frame.document();
+    RefPtr window = document ? document->window() : nullptr;
+    if (!UserGestureIndicator::processingUserGesture() && !(window && window->hasTransientActivation())) {
         auto top = document ? document->topOrigin().toString() : String();
         if (storedPermission("popups"_s, top) != PermissionDecision::Granted) {
             notifyHost(m_view->id(), "popup-blocked", makeString("{\"url\":\""_s, jsonEscape(action.url().string()), "\",\"origin\":\""_s, jsonEscape(top), "\"}"_s));

@@ -63,7 +63,7 @@ comes as patches from `patches/`.
     `moderate` above the budget and `critical` when memory is short),
     `HostRegExp.cpp` (expensive regular expressions in the host's RegExp)
   - Views: `WebView.cpp`, `Clients.cpp` (WebCore's clients: loads, title, back/forward cache
-    restore, Tab to links, the popup blocker), `EditorClient.cpp`, `BackForwardList.cpp`,
+    restore, Tab to links, the popup blocker: a gesture or 5 s of transient activation), `EditorClient.cpp`, `BackForwardList.cpp`,
     `Choosers.cpp` (the host shows the `<select>` list, color and date pickers and the
     suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
     loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while

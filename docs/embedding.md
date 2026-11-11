@@ -215,7 +215,8 @@ of the host succeeded (the `@browser-lite/ui` prompt does this). Like Chrome, a 
 outlive its page: when the view's main frame commits a new document, the core dismisses the open
 questions of the view and aborts their signals, so an answer can never go to the origin left.
 
-Popups (`window.open`, `target=_blank`) open only after a user gesture, like in every browser.
+Popups (`window.open`, `target=_blank`) open only after a user gesture, like in every browser:
+like Chrome and Firefox one popup within 5 s of a click, also from a timer or after a request.
 A blocked one sends the view event `popup-blocked` with its `url` and the page's `origin`;
 `setPermission(origin, 'popups', 'grant')` lets that site open popups from then on. The engine
 never asks for this kind, the browser UI offers it (the demo: an icon in the address bar).
