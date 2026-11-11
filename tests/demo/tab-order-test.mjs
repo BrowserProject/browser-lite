@@ -244,18 +244,26 @@ check(
   await activeTitle(),
 );
 
-// Tabs from links of L, opened in B before C (B, restored by the session, loads on the click)
+// Tabs from links of L, opened in B before C (B, restored by the session, loads on the click;
+// C, restored too, may still be loading from being active before, so wait for the named page)
+const readyIs = async (name) => {
+  for (const end = Date.now() + TIMEOUT; Date.now() < end; ) {
+    if (results.get('ready') === name) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+};
 results.delete('ready');
 await page.locator('#tab-list .tab').first().click();
-await results.wait('ready');
+await readyIs('B');
 const typeL = async () => {
   results.delete('ready');
   await page.click('#address');
   await page.fill('#address', `${siteURL}l`);
   await page.press('#address', 'Enter');
-  return results.wait('ready');
+  return readyIs('L');
 };
-check('links page', (await typeL()) === 'L' && (await orderIs('LC')), await order());
+check('links page', (await typeL()) && (await orderIs('LC')), await order());
 const view = await page.locator('canvas[data-bl-view]:visible').boundingBox();
 const plainLink = { x: view.x + 100, y: view.y + 30 };
 const blankLink = { x: view.x + 100, y: view.y + 90 };
@@ -330,7 +338,7 @@ results.delete('ready');
 await page.click('#address');
 await page.fill('#address', `${siteURL}e`);
 await page.press('#address', 'Enter');
-await results.wait('ready');
+await readyIs('E');
 const field = await page.locator('canvas[data-bl-view]:visible').boundingBox();
 await page.mouse.click(field.x + 100, field.y + 50);
 await page.keyboard.type('a');
