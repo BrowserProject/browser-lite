@@ -18,6 +18,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Above 2 GB of engine memory the JS glue gets unsigned pointers (#465: before, uploads sent other
   memory of the page, the HTTP cache stored wrong bodies, compiled JS failed to install and
   `decodeAudioData` threw).
+  `CompressionStream` and `DecompressionStream` take buffers of another realm (an iframe's
+  `Uint8Array`, `ArrayBuffer` or `DataView`) like Chrome (#506; before they rejected them with
+  "Invalid type should be ArrayBuffer", which twitch.tv logged from code of its Kasada iframe).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384; like Chrome one popup within 5 s of a
   click, also from a timer, #504), history incl. back/forward cache

@@ -16,6 +16,8 @@
 //   percent-heights.html  boxes with percentage heights are laid out again only when what their
 //                  percentages resolve against changed (patch 0098): same geometry as a fresh
 //                  layout, a small change next to many of them costs a fraction of a full relayout
+//   compression.html  CompressionStream and DecompressionStream take buffers of another realm
+//                  (patch 0110) and still reject chunks that are no BufferSource
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -41,6 +43,7 @@ const CASES = [
   { name: 'localized-strings', wait: 'L10N done' },
   { name: 'absent-properties', wait: 'ABSENT done' },
   { name: 'percent-heights', size: [1000, 700], wait: 'PERCENT done' },
+  { name: 'compression', wait: 'COMPRESSION done' },
   {
     name: 'absent-properties',
     label: 'absent-properties (interpreter)',

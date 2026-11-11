@@ -24,7 +24,7 @@ when a cookie dialog appeared under a still mouse, or the cells at the edge of a
 collapsed borders, each of which looked through its whole column while it painted, or the AVIF
 images that decoded their whole picture to learn their size and were never freed, or the GPU
 WebGL named to pages, always Apple's instead of the host's, so Google Maps drew with WebGL on a
-software renderer)
+software renderer, or the buffers of an iframe's realm that compression streams refused)
 comes as patches from `patches/`.
 
 ## Folders

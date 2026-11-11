@@ -59,7 +59,10 @@ what its percentages resolve against changed, not on every layout of its parent 
 they resolve against, and a flex item with such descendants only after it was measured in the
 same layout (patch 0098, #461). A cell at the left or right edge of a table with collapsed borders
 paints its background inside the widest border half at that edge, which the table works out once
-until its collapsed borders change (patch 0106, #485).
+until its collapsed borders change (patch 0106, #485). `CompressionStream` and
+`DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
+`Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
+realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).
 
 The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`):
 `navigation-start` and `navigation` (`loading` true) when the main frame starts a provisional load

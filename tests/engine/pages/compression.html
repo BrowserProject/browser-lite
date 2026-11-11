@@ -1,0 +1,60 @@
+<!doctype html><title>compression</title><body><script>
+// CompressionStream and DecompressionStream take every BufferSource, also one of another realm
+// (patch 0110), and still reject other chunks with a TypeError. Output "COMPRESSION name=ok" or
+// "COMPRESSION name=ERROR ...", at the end "COMPRESSION done=ok" when everything works.
+const other = document.body.appendChild(document.createElement('iframe')).contentWindow;
+const text = 'browser-lite compression across realms';
+const bytes = new TextEncoder().encode(text);
+const run = async (Stream, format, chunks) => {
+  const stream = new Stream(format);
+  const writer = stream.writable.getWriter();
+  for (const chunk of chunks) writer.write(chunk).catch(() => {});
+  writer.close().catch(() => {});
+  return new Uint8Array(await new Response(stream.readable).arrayBuffer());
+};
+const gzip = (chunk) => run(CompressionStream, 'gzip', [chunk]);
+const gunzip = async (chunk) => new TextDecoder().decode(await run(DecompressionStream, 'gzip', [chunk]));
+const copy = (Realm, source) => {
+  const buffer = new Realm.ArrayBuffer(source.length);
+  new Uint8Array(buffer).set(source);
+  return buffer;
+};
+const rejects = async (Stream, chunk) => {
+  try {
+    await run(Stream, 'deflate', [chunk]);
+    return false;
+  } catch (e) {
+    return e instanceof TypeError;
+  }
+};
+const tests = {
+  'same realm Uint8Array': async () => (await gunzip(await gzip(bytes))) === text,
+  'other realm Uint8Array': async () => (await gunzip(await gzip(new other.Uint8Array(bytes)))) === text,
+  'other realm ArrayBuffer': async () => (await gunzip(await gzip(copy(other, bytes)))) === text,
+  'other realm DataView': async () => (await gunzip(await gzip(new other.DataView(copy(other, bytes))))) === text,
+  'decompress other realm Uint8Array': async () =>
+    (await gunzip(new other.Uint8Array(await gzip(bytes)))) === text,
+  'decompress other realm ArrayBuffer': async () => (await gunzip(copy(other, await gzip(bytes)))) === text,
+  'reject null': async () => (await rejects(CompressionStream, null)) && (await rejects(DecompressionStream, null)),
+  'reject string': async () => (await rejects(CompressionStream, 'abc')) && (await rejects(DecompressionStream, 'abc')),
+  'reject array': async () => (await rejects(CompressionStream, [1, 2])) && (await rejects(DecompressionStream, [1, 2])),
+  'reject object with a buffer': async () => {
+    const fake = { buffer: new ArrayBuffer(4) };
+    return (await rejects(CompressionStream, fake)) && (await rejects(DecompressionStream, fake));
+  },
+};
+(async () => {
+  let bad = 0;
+  for (const [name, test] of Object.entries(tests)) {
+    let ok = false;
+    try {
+      ok = await test();
+      console.log('COMPRESSION ' + name + '=' + (ok ? 'ok' : 'FALSE'));
+    } catch (e) {
+      console.log('COMPRESSION ' + name + '=ERROR ' + e.name + ': ' + e.message);
+    }
+    if (!ok) bad++;
+  }
+  console.log('COMPRESSION done=' + (bad ? bad + ' errors' : 'ok'));
+})();
+</script>

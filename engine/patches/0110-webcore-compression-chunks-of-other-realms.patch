@@ -1,0 +1,30 @@
+diff --git a/Source/WebCore/Modules/compression/CompressionStream.js b/Source/WebCore/Modules/compression/CompressionStream.js
+index d25c2d620a..7f82d9ce7a 100644
+--- a/Source/WebCore/Modules/compression/CompressionStream.js
++++ b/Source/WebCore/Modules/compression/CompressionStream.js
+@@ -48,9 +48,7 @@ function initializeCompressionStream(format)
+         return @promiseResolve(@Promise, @undefined);
+     };
+     const transformAlgorithm = (chunk) => {
+-        if (!@isObject(chunk) || (!(chunk instanceof @ArrayBuffer) && !(chunk.buffer instanceof @ArrayBuffer)))
+-            return @promiseReject(@Promise, @makeTypeError("Invalid type should be ArrayBuffer"));
+-
++        // The BufferSource conversion of the call below checks the type by brand, so buffers of other realms pass.
+         try {
+             const encoder = @getByIdDirectPrivate(this, "CompressionStreamEncoder");
+ 
+diff --git a/Source/WebCore/Modules/compression/DecompressionStream.js b/Source/WebCore/Modules/compression/DecompressionStream.js
+index 13d899f847..82765bd2b0 100644
+--- a/Source/WebCore/Modules/compression/DecompressionStream.js
++++ b/Source/WebCore/Modules/compression/DecompressionStream.js
+@@ -48,9 +48,7 @@ function initializeDecompressionStream(format)
+         return @promiseResolve(@Promise, @undefined);
+     };
+     const transformAlgorithm = (chunk) => {
+-        if (!@isObject(chunk) || (!(chunk instanceof @ArrayBuffer) && !(chunk.buffer instanceof @ArrayBuffer)))
+-            return @promiseReject(@Promise, @makeTypeError("Invalid type should be ArrayBuffer"));
+-
++        // The BufferSource conversion of the call below checks the type by brand, so buffers of other realms pass.
+         try {
+             const decoder = @getByIdDirectPrivate(this, "DecompressionStreamDecoder");
+             const buffer = decoder.@decode(chunk);
