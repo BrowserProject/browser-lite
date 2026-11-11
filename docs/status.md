@@ -446,10 +446,11 @@ browser (Safari keeps Cmd+L, T and W for itself).
    busy about 3.5 s in all, longest task 0.95 s); the challenge's longest entries take 9 to 23 s,
    up to 40 s at a load of 28. The engine thread was busy 56 of 70 s: compiled code itself 41 %,
    `get_by_val` 6 % (with the DOM getters of the window it reads), `new_array` 3 %,
-   `put_by_val` and `===` of strings 2 % each. Under load such an entry passed the limit of 30 s
-   and its termination left the widget at "Verifying... Stuck?"; the watchdog now stops a
-   script only once input or a call waited its limit for it (#501), and the demo's "Wait" gives
-   it the limit again. (brunhild.challenges.cloudflare.com has only IPv6 addresses, which this
+   `put_by_val` and `===` of strings 2 % each; the slow path of `if` and `!` on strings and
+   doubles (1.5 %) is gone, compiled code decides them inline now (#502). Under load such an
+   entry passed the limit of 30 s and its termination left the widget at "Verifying...
+   Stuck?"; the watchdog now stops a script only once input or a call waited its limit for it
+   (#501), and the demo's "Wait" gives it the limit again. (brunhild.challenges.cloudflare.com has only IPv6 addresses, which this
    machine lacks; plain Chromium fails it too and still shows the checkbox.) LinkedIn Learning
    (2026-11-06, the PerimeterX bot script `client.protechts.net/.../main.min.js`, which plain
    Chromium also loads, its main thread 10 % busy then): after the load the engine thread answered

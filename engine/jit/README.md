@@ -11,7 +11,7 @@ it through `LLIntWasmJIT.h`. On unless `BL_JIT=0`.
 | `MachineStack.cpp` | Probes of the browser's machine stack for the JIT and for JSC's recursion checks (patch 0075): a WASM function with a 94 KB frame that only runs its prologue, trusted after a test against a WASM recursion of known frame size, which probes until then and for the JIT |
 | `WasmModule.cpp` | Writes the WASM module of one compiled function and its helper for calls |
 
-Tests: `tests/jsc/jit.js` (results against the interpreter's), `tests/jsc/jit-hash.js` (speed of the
+Tests: `tests/jsc/jit.js` (results against the interpreter's, also of the inline ToBoolean), `tests/jsc/jit-hash.js` (speed of the
 fast paths for hashing code against their int32 twins), `tests/jsc/jit-recompile.js` (compiled code
 through a full GC, and code thrown away compiles again), `tests/jsc/jit-tierup.js` (a loop entered
 once gets V8's optimized code), `tests/jsc/jit-calls.js` (many callees at one site cost about

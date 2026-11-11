@@ -87,6 +87,7 @@ function shiftRight(a, b) { return a >> b; }
 function shiftUnsigned(a, b) { return a >>> b; }
 function plus(a) { return +a; }
 function truthy(a) { if (a) return 1; return 0; }
+function repeatWhile(a) { let n = 0; do { n++; } while (a && n < 3); return n; }
 function sumAll(list) { let s = 0; for (let i = 0; i < list.length; i++) s += list[i]; return s; }
 function setAt(list, i, v) { list[i] = v; return list; }
 function literalFirst() { const list = [1, 2, 3]; list[0] = 9; return list[0] + [1, 2, 3][0]; }
@@ -396,6 +397,24 @@ for (let round = 0; round < 300; round++) {
     check("truthy empty string", truthy(""), 0);
     check("truthy double", truthy(0.5), 1);
     check("truthy NaN", truthy(NaN), 0);
+    check("truthy -0", truthy(-0), 0);
+    check("truthy negative double", truthy(-0.5), 1);
+    check("truthy rope", truthy("a" + o.constructor.name), 1);
+    check("truthy empty slice", truthy("abc".slice(1, 1)), 0);
+    check("truthy empty join", truthy([].join()), 0);
+    check("truthy symbol", truthy(Symbol()), 1);
+    check("truthy 0n", truthy(0n), 0);
+    check("truthy 1n", truthy(1n), 1);
+    check("not double", not(-0.25), false);
+    check("not NaN", not(NaN), true);
+    check("not -0", not(-0), true);
+    check("not object", not(o), false);
+    check("not null", not(null), true);
+    check("not string x", not("x"), false);
+    check("jtrue string", repeatWhile("x"), 3);
+    check("jtrue empty string", repeatWhile(""), 1);
+    check("jtrue double", repeatWhile(0.5), 3);
+    check("jtrue NaN", repeatWhile(NaN), 1);
     check("int array", sumAll([1, 2, 3]), 6);
     check("double array", sumAll([1.5, 2.5]), 4);
     check("contiguous array", sumAll([1, "x"]), "1x");

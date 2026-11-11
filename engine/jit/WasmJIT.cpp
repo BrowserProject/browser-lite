@@ -1051,6 +1051,7 @@ private:
     template<typename Bytecode> void emitIncrement(const JSInstructionStream::Ref&, int32_t delta, SlowPath);
     void emitMod(const JSInstructionStream::Ref&);
     void emitNot(const JSInstructionStream::Ref&);
+    void emitToBoolean(VirtualRegister);
     void emitNegate(const JSInstructionStream::Ref&);
     // dst = src when it is a number (`numbers`), any other non-cell (`immediates`) or a cell the
     // condition (pushing a boolean, the cell in m_a) takes; else the slow path
@@ -2681,20 +2682,17 @@ void Compiler::emitEquality(const JSInstructionStream::Ref& instruction, unsigne
     }
 }
 
-// jtrue, jfalse: booleans, int32, undefined, null and objects (not masquerading as undefined)
-// inline
-template<typename Bytecode>
-void Compiler::emitConditionJump(const JSInstructionStream::Ref& instruction, unsigned block, bool jumpIfTrue, SlowPath slowPath)
+// ToBoolean of a register inline, into m_c, and m_e whether it is known: booleans, int32, doubles,
+// undefined, null, strings and objects (not those that masquerade as undefined); BigInts are
+// left to the slow path
+void Compiler::emitToBoolean(VirtualRegister reg)
 {
-    auto bytecode = instruction->as<Bytecode>();
-    unsigned target = targetOf(instruction, bytecode.m_targetLabel.target());
     auto tagIs = [&](int32_t tag) {
         m_body->localGet(m_t1);
         m_body->i32Const(tag);
         m_body->op(Op::I32Eq);
     };
-    // m_c: whether it is true, m_e: whether that is known
-    load(bytecode.m_condition, m_t1, m_a);
+    load(reg, m_t1, m_a);
     m_body->localGet(m_a);
     m_body->i32Const(0);
     m_body->op(Op::I32Ne);
@@ -2727,7 +2725,46 @@ void Compiler::emitConditionJump(const JSInstructionStream::Ref& instruction, un
     m_body->op(Op::I32And);
     m_body->localTee(m_e);
     m_body->localSet(m_c);
+    // Only the empty string is false, and every empty string is the VM's one (which JSC's own
+    // JITs rely on too)
+    cellType(m_a);
+    m_body->i32Const(StringType);
+    m_body->op(Op::I32Eq);
+    m_body->ifThen();
+    m_body->localGet(m_a);
+    m_body->i32Const(static_cast<int32_t>(reinterpret_cast<uintptr_t>(jsEmptyString(m_codeBlock->vm()))));
+    m_body->op(Op::I32Ne);
+    m_body->localSet(m_c);
+    m_body->i32Const(1);
+    m_body->localSet(m_e);
     m_body->end();
+    m_body->end();
+    // A double: neither 0, -0 nor NaN
+    m_body->localGet(m_t1);
+    m_body->i32Const(lowestTag);
+    m_body->op(Op::I32LtU);
+    m_body->ifThen();
+    loadNumber(reg, m_t1);
+    m_body->localTee(m_x);
+    m_body->f64Const(0);
+    m_body->op(Op::F64Lt);
+    m_body->localGet(m_x);
+    m_body->f64Const(0);
+    m_body->op(Op::F64Gt);
+    m_body->op(Op::I32Or);
+    m_body->localSet(m_c);
+    m_body->i32Const(1);
+    m_body->localSet(m_e);
+    m_body->end();
+}
+
+// jtrue, jfalse: what emitToBoolean knows inline
+template<typename Bytecode>
+void Compiler::emitConditionJump(const JSInstructionStream::Ref& instruction, unsigned block, bool jumpIfTrue, SlowPath slowPath)
+{
+    auto bytecode = instruction->as<Bytecode>();
+    unsigned target = targetOf(instruction, bytecode.m_targetLabel.target());
+    emitToBoolean(bytecode.m_condition);
 
     m_body->localGet(m_e);
     m_body->ifThen();
@@ -2812,16 +2849,15 @@ void Compiler::emitMod(const JSInstructionStream::Ref& instruction)
     endFastPaths(slow_path_mod, instruction);
 }
 
+// !x of what emitToBoolean knows inline (obfuscated code writes true and false as !0 and !1)
 void Compiler::emitNot(const JSInstructionStream::Ref& instruction)
 {
     auto bytecode = instruction->as<OpNot>();
-    loadTag(bytecode.m_operand);
-    m_body->i32Const(booleanTag);
-    m_body->op(Op::I32Eq);
+    emitToBoolean(bytecode.m_operand);
+    m_body->localGet(m_e);
     m_body->ifThen();
-    loadPayload(bytecode.m_operand);
-    m_body->i32Const(1);
-    m_body->op(Op::I32Xor);
+    m_body->localGet(m_c);
+    m_body->op(Op::I32Eqz);
     m_body->localSet(m_c);
     storeBoolean(bytecode.m_dst, m_c);
     m_body->elseThen();

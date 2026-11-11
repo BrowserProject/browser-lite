@@ -56,6 +56,10 @@ never baked into the code (the GC resets inline caches).
   arrays (all but Float16, BigInt and resizable ones; a Uint32 above 2^31 and Float32 too, NaN
   made pure) read and written with the conversions of the spec, and `Math.imul(a, b)` inline
   (its host function, which JSC keeps static, taken from a Math object of the JIT's own).
+  ToBoolean (`if`, `while`, `&&`, `!`) also of strings and doubles, where the interpreter takes
+  only booleans (`!`) or booleans, int32, undefined, null and objects: a string is false only
+  as the VM's empty string, which every empty string is (JSC's own JITs rely on that too), a
+  double unless it is 0, -0 or NaN (#502).
 - **Calls**: to a compiled function directly in the frame the bytecode prepared. The VM's callee
   table (direct mapped by the callee's executable, 2048 entries) holds what a call needs of a
   compiled or host callee: its `CodeBlock`, table index and frame sizes, or its host function. One
