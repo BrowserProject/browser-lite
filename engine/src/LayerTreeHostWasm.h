@@ -35,6 +35,7 @@
 #include <wtf/OptionSet.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/ThreadSafeWeakHashSet.h>
 #include <wtf/WeakPtr.h>
 
 namespace WebCore {
@@ -214,6 +215,8 @@ private:
     Lock m_layersLock;
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layers WTF_GUARDED_BY_LOCK(m_layersLock);
     HashSet<Ref<WebCore::CoordinatedPlatformLayer>> m_layersToRemove;
+    // Every layer that names us as its client, attached or not
+    ThreadSafeWeakHashSet<WebCore::CoordinatedPlatformLayer> m_clientLayers;
     WebCore::GraphicsLayer* m_rootCompositingLayer { nullptr };
     WebCore::GraphicsLayer* m_overlayCompositingLayer { nullptr };
     std::unique_ptr<WebCore::SkiaPaintingEngine> m_paintingEngine;

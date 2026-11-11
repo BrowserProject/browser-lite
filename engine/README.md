@@ -24,7 +24,8 @@ when a cookie dialog appeared under a still mouse, or the cells at the edge of a
 collapsed borders, each of which looked through its whole column while it painted, or the AVIF
 images that decoded their whole picture to learn their size and were never freed, or the GPU
 WebGL named to pages, always Apple's instead of the host's, so Google Maps drew with WebGL on a
-software renderer, or the buffers of an iframe's realm that compression streams refused)
+software renderer, or the buffers of an iframe's realm that compression streams refused, or the
+tile jobs of a closed view that its painting threads ran after its layer tree host was freed)
 comes as patches from `patches/`.
 
 ## Folders
@@ -70,7 +71,8 @@ comes as patches from `patches/`.
     the user works in, types in or waits for a visible one, also for the first frame of a tab
     switched to)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
-    (layers on the compositor thread, the stall log's state), `DamageTiles.cpp` (a frame with a
+    (layers on the compositor thread, the stall log's state; a closing view's host waits for its
+    tile jobs and detaches every layer that names it), `DamageTiles.cpp` (a frame with a
     small change goes only into the host canvases of the tiles it touches; emptied with a
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate

@@ -573,15 +573,16 @@ LayerTreeHostWasm::LayerTreeHostWasm(WebView& view)
 LayerTreeHostWasm::~LayerTreeHostWasm()
 {
     detachScene();
-    // Painting threads must not reach us anymore afterwards
+    // The painting engine waits for its jobs, which reach us through their layers
+    m_paintingEngine = nullptr;
+    // Layers can outlive us (detached ones too, held by jobs, buffer proxies or the compositor)
+    m_clientLayers.forEach([](auto& layer) {
+        layer.invalidateClient();
+    });
     HashSet<Ref<CoordinatedPlatformLayer>> layers;
     {
         Locker locker { m_layersLock };
         layers = WTF::move(m_layers);
-    }
-    for (auto& layer : layers) {
-        layer->waitUntilPaintingComplete();
-        layer->invalidateClient();
     }
     layers.addAll(std::exchange(m_layersToRemove, { }));
     {
@@ -759,6 +760,7 @@ Ref<CoordinatedImageBackingStore> LayerTreeHostWasm::imageBackingStore(Ref<Nativ
 void LayerTreeHostWasm::attachLayer(CoordinatedPlatformLayer& layer)
 {
     layer.setDamagePropagationEnabled(m_damagePropagation);
+    m_clientLayers.add(layer);
     {
         Locker locker { m_layersLock };
         m_layers.add(layer);

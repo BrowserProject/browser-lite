@@ -197,7 +197,14 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   engine thread free (#498); before, JSC's timer alone collected their garbage, minutes later when
   the last full GC had freed little (10 heavy sites closed, 2026-11-10 local: JS heap 238 MB, 60
   documents and 1092 MB of malloc for about 4 minutes; now 5 s after closing JS heap 60 MB, 6
-  documents, 563 instead of 1057 MB).
+  documents, 563 instead of 1057 MB). Closing tabs whose tiles still paint no longer crashes the
+  engine (#514, patch 0113): their painting jobs ran after the view's layer tree host was freed
+  and called into it ("table index is out of bounds", "function signature mismatch" or "null
+  function" on a painting thread; 20 heavy sites opened and closed: 3 of 3 runs crashed, also the
+  soak runs of 2026-11-09). Now the view's painting engine waits for them before the host goes.
+  2026-11-11 local: `close-while-painting-test.mjs` crashed in all 8 Chromium runs within 2 to 9
+  views and in Firefox, after the change in none of 7 Chromium runs of 10 to 24 views and 4
+  Firefox runs; two runs of the 20 sites at once closed all tabs without a crash.
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
@@ -705,11 +712,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: tests and operations
 
-- Engine crash in the painting of tiles ahead (#460, patch 0097), 2026-11-09 local: in both
-  15 min soak runs of 20 sites in up to 4 demo tabs the engine crashed in a callable of
-  `SkiaPaintingEngine::prepaint` on a painting thread ("null function" after 136 s, "table index
-  is out of bounds" after 679 s, with and without #475), a call through a freed or overwritten
-  function object. Not analysed yet.
+- Firefox (Playwright, xvfb, 2026-11-11 local): in `tests/core/close-while-painting-test.mjs`
+  every new view of its page (12 layers of 2400 px with blurred shadows that repaint every 50 ms)
+  takes about 33 s, closed or not, the same before and after #514: its first request and the
+  deferred chunks its threads need wait that long and the host's console arrives in batches, so
+  the host page seems to be blocked. Chromium takes well under 1 s; the test opens only 4 views
+  in Firefox. Not analysed yet.
 - Real devices 2026-11-03 (BrowserStack): on a Moto G71 one Chrome tab crash during a reload of
   20min.ch (not again in 3 heavy and 5 light reloads; the renderer holds about 0.9 GB with such a
   page). Fast flings on busy pages (20min.ch, bbc.com, spiegel.de on a Pixel 9) left the new

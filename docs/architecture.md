@@ -170,6 +170,10 @@ the view moves, are painted after them (at most one per tile thread ahead of a r
 tiles) and each shows when it is done. While a layer's visible rect moves, the tiles where it gets
 within 1 s at its speed (at most 2.5 views ahead) are made at once, so a fling on a page whose
 scripts hold the engine thread for long stretches stays painted (patch 0097, #460).
+Each view's layer tree host has its own painting engine and tile threads, whose jobs tell the
+host through their layer when a tile is done. When a view closes, the engine goes first and waits
+for the jobs it started (they finish without painting, queued tiles ahead are not painted), then
+every layer that still names the host, attached or not, forgets it (patch 0113, #514).
 A layer whose filter the compositor applies leaves the filter outsets out of its bounds only when
 nothing of its contents reaches further: what the contents paint outside the box (text-shadow,
 shadows and outlines of children) stays in the layer (patch 0089, #442).
