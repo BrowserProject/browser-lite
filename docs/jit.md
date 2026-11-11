@@ -96,7 +96,8 @@ never baked into the code (the GC resets inline caches).
   entry and the compiled caller C++ holds no JS values outside the frames, so the safepoint GC
   looks through these entries (the JIT counts them, `wasmJITGenericEntries`, patch 0090, #448).
   Before, the GC waited inside them until the task ended: Cloudflare's Turnstile piled up 0.5 to
-  1.5 GB of garbage that way, which the WASM memory kept for good.
+  1.5 GB of garbage that way, which the WASM memory kept for good. JSC's bound functions count
+  their call of a JS target with the same `GenericEntry` (patch 0115, #516).
 - **Code lifetime**: the compiled code belongs to its `CodeBlock` (JSC's baseline code goes on to
   the next `CodeBlock` of the same code, this cannot: constants and caches are baked in). A full
   GC throws away every `CodeBlock` that is not running and older than 5 s; one with compiled
@@ -121,6 +122,12 @@ slower, #327). The
 modules of the TypeScript compiler (1772 functions) are 11.9 MB of WASM; functions with more than
 100 KB of bytecode stay interpreted (YouTube's bundles gave modules of 19 and 102 MB). With
 YouTube open the engine's memory is the same as without the JIT, the renderer about 25 MB more.
+React's hydration of blick.ch, one task of cold code (2026-11-11, local, 3 runs each): 3.3 to 3.6 s
+with the JIT, 3.1 to 3.4 s with a 4 times higher warm-up (`JSC_thresholdForJITAfterWarmUp=2000`),
+2.5 to 2.8 s without it. In its profile the calls between compiled and interpreted code take about
+15 % (`slow_path_enter` with the lookup of compiled code, `callFromCompiledCode`, `callInFrame`
+with the VM entry of a generic call), the compiles 4 %, compiled code 22 %. A cache of
+CodeBlocks known to have no compiled code in front of that lookup measured no gain.
 
 Calls (#459, jsc shell, 2 million calls each, fastest of 3): one callee 84 against 62 ms, 16
 callees at one site 232 against 116 ms, 2 alternating 219 against 100 ms, a VM of 8 handlers 235

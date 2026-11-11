@@ -445,6 +445,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
    article whose animation frames (2D `drawImage` with rotation on the CPU, about 30 ms each)
    took 57 to 61 % of the engine thread while the home page rendered. Like Chrome the demo shows
    no progress for a same-document navigation (`pushState`).
+   blick.ch's first load (2026-11-11; the report: a task of 12.6 s on a Moto G71 after the load,
+   the bar and flings without answer meanwhile): that task is React's hydration, one task in Chrome
+   too (0.4 to 0.85 s on this machine), here 3.5 to 8 s. Its render ran without GC and with a
+   walk over all CodeBlocks at many trap checks (#516): now the WASM memory after it is 368
+   instead of 442 MB, its length is unchanged within the noise. Without the JIT it takes 2.5 to
+   2.8 s instead of 3.3 to 3.6 s: in such cold code the calls between compiled and interpreted
+   functions cost more than compiled code saves ([jit.md](jit.md#measured)), open.
    Long single tasks of a page become many times longer here, so they block all views (the
    script watchdog stops only those that keep input or a call waiting, #146, #501). Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its

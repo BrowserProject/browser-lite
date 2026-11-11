@@ -1,0 +1,23 @@
+diff --git a/Source/JavaScriptCore/runtime/VMTraps.cpp b/Source/JavaScriptCore/runtime/VMTraps.cpp
+index 391926510d..6be8b11c7e 100644
+--- a/Source/JavaScriptCore/runtime/VMTraps.cpp
++++ b/Source/JavaScriptCore/runtime/VMTraps.cpp
+@@ -450,6 +450,10 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
+     if (isDeferringTermination())
+         mask &= ~NeedTermination;
+ 
++#if ENABLE(SIGNAL_BASED_VM_TRAPS)
++    // browser-lite: only signal based traps install breakpoints. Without them this walk over every
++    // CodeBlock found nothing, at every trap check of C++ code while the heap asked for a safepoint
++    // GC (NeedSafepointGC): hundreds of times per long task of a page with much JS.
+     {
+         Locker codeBlockSetLocker { vm.heap.codeBlockSet().getLock() };
+         vm.heap.forEachCodeBlockIgnoringJITPlans(codeBlockSetLocker, [&] (CodeBlock* codeBlock) {
+@@ -458,6 +462,7 @@ bool VMTraps::handleTraps(VMTraps::BitField mask)
+                 codeBlock->jettison(Profiler::JettisonDueToVMTraps);
+         });
+     }
++#endif
+ 
+     auto takeTopPriorityTrap = [&] (VMTraps::BitField mask) -> Event {
+         Locker locker { *m_trapSignalingLock };

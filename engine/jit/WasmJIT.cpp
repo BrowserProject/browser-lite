@@ -354,14 +354,9 @@ bool roomForCompiledCode()
     return true;
 }
 
-// VM entries that compiled code has open through JSC's generic call or construct of a JS function
-// (wasmJITGenericEntries)
+// VM entries that compiled code has open through JSC's generic call or construct of a JS function,
+// and those of bound functions calling their target (wasmJITGenericEntries, GenericEntry)
 thread_local unsigned genericEntries;
-
-struct GenericEntry {
-    GenericEntry() { ++genericEntries; }
-    ~GenericEntry() { --genericEntries; }
-};
 
 // A compiled function returns 0, 1 after an exception, or reenterStatus plus a block: its loops
 // return every loopIterationsPerCall iterations and are called again from that block. V8 has no
@@ -4158,6 +4153,16 @@ void wasmJITLoop(CallFrame* callFrame, CodeBlock* codeBlock, const JSInstruction
 unsigned wasmJITGenericEntries()
 {
     return genericEntries;
+}
+
+GenericEntry::GenericEntry()
+{
+    ++genericEntries;
+}
+
+GenericEntry::~GenericEntry()
+{
+    --genericEntries;
 }
 
 void wasmJITForget(CodeBlock* codeBlock)

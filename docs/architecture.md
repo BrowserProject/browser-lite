@@ -508,11 +508,14 @@ spilling all pointers (#17, 14x slower) the engine runs the GC only on an empty 
 engine task runs under `DeferGC`, and explicit requests wait for the outermost one (patch 0012,
 #36). During long scripts the heap sets a VM trap that the interpreter serves at instruction
 boundaries where all values are in memory (#60, #72, `engine.safepointGC`), also inside the VM
-entries of the JIT's generic calls (patch 0090, [jit.md](jit.md)). The heap grows like JSC's on a
-machine with less than 16 GB (patch 0091: the threshold of the aggressive mode wrapped to 0 in 32
-bits, so its rate limiting let up to 256 MB of garbage pile up in one burst, #448). Proof:
-`tests/engine/gc-test.mjs` with `JSC_slowPathAllocsBetweenGCs=10`, also for the garbage of a
-generic call of compiled code.
+entries of the JIT's generic calls (patch 0090, [jit.md](jit.md)) and of a bound function's call
+of its JS target (patch 0115, #516: React's scheduler runs a whole render through one). Trap
+checks of C++ code leave the CodeBlocks alone while the heap waits for such a safepoint (patch
+0114: JSC walked all of them for breakpoints that only signal based traps install). The heap
+grows like JSC's on a machine with less than 16 GB (patch 0091: the threshold of the aggressive
+mode wrapped to 0 in 32 bits, so its rate limiting let up to 256 MB of garbage pile up in one
+burst, #448). Proof: `tests/engine/gc-test.mjs` with `JSC_slowPathAllocsBetweenGCs=10`, also for
+the garbage of a generic call of compiled code and of a bound function's call.
 
 All sites share one process, so a site's event loop may never run again once the user left it.
 JSC's microtask queues are GC roots and WebCore drops a stopped document's microtasks only at its

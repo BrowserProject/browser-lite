@@ -68,6 +68,40 @@ function nestedRound() {
   return error || check(live);
 }
 
+// The same garbage behind a bound function with an argument of its own, like React's scheduler
+// runs a whole render (performConcurrentWorkOnRoot.bind(null, root)): the bound function is a host
+// function, whose call of its target enters the VM again. Called by code that runs once (the
+// interpreter) and by a hot loop (compiled code).
+function boundRound() {
+  const live = makeGraph(-3);
+  const error = nestedGarbage.bind(null, -4)();
+  return error || check(live);
+}
+
+function boundCompiledRound() {
+  const live = makeGraph(-5);
+  const bound = nestedGarbage.bind(null, -6);
+  let error = 'not called';
+  for (let i = 0; i < 200000; i++)
+    if (i === 199999)
+      error = bound();
+  return error || check(live);
+}
+
+// The nested round named in the address (#nested, #bound, #bound-compiled), in an engine of its
+// own each: the test measures how much the WASM memory grows during it
+const NESTED = { nested: nestedRound, bound: boundRound, 'bound-compiled': boundCompiledRound };
+function nested() {
+  const name = location.hash.slice(1);
+  if (!NESTED[name]) {
+    console.log('GC-TEST ERROR no nested round ' + name);
+    return;
+  }
+  console.log('GC-TEST round ' + name);
+  const error = NESTED[name]();
+  console.log(error ? 'GC-TEST ERROR ' + name + ' call: ' + error : 'GC-TEST ok ' + ROUNDS + ' rounds and the ' + name + ' call');
+}
+
 function step() {
   // Garbage: about 5 MB per round
   let garbage = [];
@@ -88,11 +122,8 @@ function step() {
   round++;
   if (round < ROUNDS)
     setTimeout(step, 0);
-  else {
-    console.log('GC-TEST nested round');
-    const error = nestedRound();
-    console.log(error ? 'GC-TEST ERROR nested call: ' + error : 'GC-TEST ok ' + ROUNDS + ' rounds and a nested call');
-  }
+  else
+    setTimeout(nested, 0);
 }
 setTimeout(step, 0);
 </script>

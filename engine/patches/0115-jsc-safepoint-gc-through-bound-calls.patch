@@ -1,0 +1,63 @@
+diff --git a/Source/JavaScriptCore/llint/LLIntWasmJIT.h b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+index b57f38d780..8803342ca7 100644
+--- a/Source/JavaScriptCore/llint/LLIntWasmJIT.h
++++ b/Source/JavaScriptCore/llint/LLIntWasmJIT.h
+@@ -32,6 +32,14 @@ void wasmJITLoop(CallFrame*, CodeBlock*, const JSInstruction* pc);
+ // at a safepoint looks through them (Heap::collectAtSafepoint).
+ unsigned wasmJITGenericEntries();
+ 
++// Counts one such entry while it lasts: the generic calls of compiled code, and a bound function's
++// call of its JS target (JSBoundFunction.cpp), whose host function holds the bound function in its
++// own frame and the arguments in a MarkedArgumentBuffer.
++struct GenericEntry {
++    GenericEntry();
++    ~GenericEntry();
++};
++
+ // The CodeBlock goes away (~CodeBlock): its compiled code too.
+ void wasmJITForget(CodeBlock*);
+ 
+diff --git a/Source/JavaScriptCore/runtime/JSBoundFunction.cpp b/Source/JavaScriptCore/runtime/JSBoundFunction.cpp
+index 276c23bbad..cae79c9375 100644
+--- a/Source/JavaScriptCore/runtime/JSBoundFunction.cpp
++++ b/Source/JavaScriptCore/runtime/JSBoundFunction.cpp
+@@ -31,6 +31,9 @@
+ #include "FunctionPrototype.h"
+ #include "JSBoundFunctionInlines.h"
+ #include "JSCInlines.h"
++#if OS(EMSCRIPTEN)
++#include "LLIntWasmJIT.h"
++#endif
+ #include "TopExceptionScope.h"
+ #include "VMTrapsInlines.h"
+ 
+@@ -68,6 +71,15 @@ JSC_DEFINE_HOST_FUNCTION(boundThisNoArgsFunctionCall, (JSGlobalObject* globalObj
+     }
+     auto callData = JSC::getCallDataInline(targetFunction);
+     ASSERT(callData.type != CallData::Type::None);
++#if OS(EMSCRIPTEN)
++    // browser-lite: the safepoint GC looks through this VM entry (LLIntWasmJIT.h). React's scheduler
++    // runs a whole render through such a call (performConcurrentWorkOnRoot.bind(null, root)), whose
++    // garbage otherwise piled up until the task ended.
++    if (callData.type == CallData::Type::JS) {
++        LLInt::GenericEntry entry;
++        return JSValue::encode(call(globalObject, targetFunction, callData, boundFunction->boundThis(), args));
++    }
++#endif
+     return JSValue::encode(call(globalObject, targetFunction, callData, boundFunction->boundThis(), args));
+ }
+ 
+@@ -99,6 +111,13 @@ JSC_DEFINE_HOST_FUNCTION(boundFunctionCall, (JSGlobalObject* globalObject, CallF
+     JSObject* targetFunction = boundFunction->targetFunction();
+     auto callData = JSC::getCallDataInline(targetFunction);
+     ASSERT(callData.type != CallData::Type::None);
++#if OS(EMSCRIPTEN)
++    // browser-lite: like boundThisNoArgsFunctionCall
++    if (callData.type == CallData::Type::JS) {
++        LLInt::GenericEntry entry;
++        RELEASE_AND_RETURN(scope, JSValue::encode(call(globalObject, targetFunction, callData, boundFunction->boundThis(), args)));
++    }
++#endif
+     RELEASE_AND_RETURN(scope, JSValue::encode(call(globalObject, targetFunction, callData, boundFunction->boundThis(), args)));
+ }
+ 
