@@ -59,9 +59,20 @@ export function formatTime(time: number): string {
   return new Date(time).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 }
 
-/** No page yet: a new tab before its first address. */
-export const isBlank = (url: string | null | undefined): boolean => !url || url === 'about:blank';
+/**
+ * The address of the new tab page: an empty document the engine loads like about:blank, so the
+ * page is an entry of the tab's back and forward like Chrome's, and the demo draws its new tab
+ * page over it.
+ */
+export const NEW_TAB_URL = 'about:blank#new-tab';
+
+/** The new tab page, see NEW_TAB_URL. */
+export const isNewTabPage = (url: string | null | undefined): boolean => url === NEW_TAB_URL;
+
+/** No page yet: a new tab before its first address, or the new tab page. */
+export const isBlank = (url: string | null | undefined): boolean =>
+  !url || url === 'about:blank' || isNewTabPage(url);
 
 /** Internal pages that never go into history, session or bookmarks. */
 export const isInternal = (url: string | null | undefined): boolean =>
-  !url || url === 'about:blank' || url.startsWith('data:') || url.startsWith('blob:');
+  isBlank(url) || !!url?.startsWith('data:') || !!url?.startsWith('blob:');

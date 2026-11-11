@@ -25,7 +25,7 @@ import {
   updateStar,
   updateToolbar,
 } from './toolbar.js';
-import { byId, element, isBlank, isInternal } from './util.js';
+import { byId, element, isBlank, isInternal, isNewTabPage, NEW_TAB_URL } from './util.js';
 import { rememberSiteZoom, siteZoom, zoomHost } from './zoom.js';
 
 const list: Tab[] = [];
@@ -91,11 +91,13 @@ export class Tab implements SessionTab {
   /** Host of the page the icon belongs to. */
   private iconHost = '';
   /**
-   * Shows the new tab page of the demo until the first document commits. Like Chrome's new tab
-   * page it stays while an address loads, and when the load ends without a page (a download, a
-   * stop, an answer without content).
+   * Shows the new tab page of the demo: the tab's document is NEW_TAB_URL, a back entry like any
+   * page. Like Chrome's new tab page it stays while an address loads, and when the load ends
+   * without a page (a download, a stop, an answer without content).
    */
-  newTab = false;
+  newTab: boolean;
+  /** A document committed; its address comes with the next navigation event. */
+  private committed = false;
   /** The label in the tab strip. */
   private shownLabel = '';
   private hideLinkStatus: (() => void) | null = null;
@@ -105,6 +107,7 @@ export class Tab implements SessionTab {
     this.url = init.url ?? view.url;
     this.title = init.title ?? '';
     this.history = init.history ?? null;
+    this.newTab = isNewTabPage(this.url);
     this.zoom = view.zoom;
     this.element = element('div', { className: 'tab' });
     this.element.setAttribute('role', 'tab');
@@ -172,6 +175,14 @@ export class Tab implements SessionTab {
       // stays within the site
       if (this.iconUrl && hostOf(event.url) !== this.iconHost) this.useIcon(null, '');
       this.url = event.url;
+      if (this.committed) {
+        this.committed = false;
+        const newTab = isNewTabPage(event.url);
+        if (newTab !== this.newTab) {
+          this.newTab = newTab;
+          tabsChanged();
+        }
+      }
       this.canGoBack = event.canGoBack;
       this.canGoForward = event.canGoForward;
       this.loading = event.loading;
@@ -212,10 +223,7 @@ export class Tab implements SessionTab {
     });
     this.on('commit', (event) => {
       this.errorPage = event.errorPage;
-      if (this.newTab) {
-        this.newTab = false;
-        tabsChanged();
-      }
+      this.committed = true;
       if (this.isActive) updateSecurity(this);
       // A new document: dialogs allowed again, no user activation yet
       this.dialogsBlocked = false;
@@ -499,12 +507,11 @@ function createView(url?: string) {
   });
 }
 
-/** A new tab in the foreground with url (empty: a blank tab). */
-export function openTab(url: string, newTab = false): Tab | null {
+/** A new tab in the foreground with url (empty: a blank tab, NEW_TAB_URL: the new tab page). */
+export function openTab(url: string): Tab | null {
   const view = createView(url);
   if (!view) return null;
   const tab = new Tab(view, { url });
-  tab.newTab = newTab;
   tab.opener = active;
   activate(add(tab));
   return tab;
@@ -512,8 +519,7 @@ export function openTab(url: string, newTab = false): Tab | null {
 
 /** A new tab in front: the home page of the settings, else the new tab page. */
 export function openNewTab(): Tab | null {
-  const home = settings().homePage;
-  return home ? openTab(home) : openTab('', true);
+  return openTab(settings().homePage || NEW_TAB_URL);
 }
 
 /** Link or bookmark: in the active tab or a new one (empty url: a new tab). */

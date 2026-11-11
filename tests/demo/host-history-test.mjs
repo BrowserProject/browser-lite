@@ -127,6 +127,52 @@ await hostBack();
 check('host back after forward', await tabAt(1), await tabURL());
 await hostAt('base');
 
+// Like Chrome the new tab page is a back entry of its tab: back from the first address typed
+// there returns to it instead of leaving the demo
+const newTabPage = (shown) =>
+  page
+    .waitForFunction((shown) => document.getElementById('new-tab-page').hidden !== shown, shown, {
+      timeout: 30000,
+    })
+    .then(
+      () => true,
+      () => false,
+    );
+await page.click('#new-tab');
+check('new tab: its page shows', await newTabPage(true));
+results.delete('ready');
+await page.click('#address');
+await page.fill('#address', `${siteURL}p2`);
+await page.press('#address', 'Enter');
+check('address from the new tab page', (await results.wait('ready')) === '2');
+check('address from the new tab page: its page goes', await newTabPage(false));
+check(
+  'address from the new tab page: Back is enabled',
+  await page
+    .waitForFunction(() => !document.getElementById('back').disabled, null, { timeout: 10000 })
+    .then(
+      () => true,
+      () => false,
+    ),
+);
+check('address from the new tab page: the host on the entry above', await hostAt('guard'));
+await hostBack();
+check('host back: the new tab page again', await newTabPage(true));
+check('host back to the new tab page: the demo stays', page.url().startsWith(stack.origin));
+check(
+  'host back to the new tab page: the address bar is empty',
+  !(await page.inputValue('#address')),
+);
+const tabTitle = await page.textContent('.tab.active .title');
+check('host back to the new tab page: the tab is called New tab', tabTitle === 'New tab', tabTitle);
+check('new tab page: no back entry, the host on its own entry', await hostAt('base'));
+await hostForward();
+check('host forward from the new tab page', await tabAt(2), await tabURL());
+check('host forward from the new tab page: its page goes', await newTabPage(false));
+await page.click('.tab.active .close');
+check('closed the new tab: the first tab again', await tabAt(1), await tabURL());
+await hostAt('base');
+
 await hostBack();
 await page.waitForURL(/^about:blank/, { timeout: 10000 }).catch(() => {});
 check(

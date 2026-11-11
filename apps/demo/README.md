@@ -112,12 +112,14 @@ select popup) are in the same sheet.
 - **Failed navigations**: like Chrome the engine's error page is the only message; the status
   line and the phone layout's message stay empty instead of repeating it with the network
   layer's text (#427).
-- **New tab**: a new tab without a home page shows the new tab page of the demo over its blank
-  view (no request to the engine): a greeting by the time of day, a search field that hands over
-  to the address bar and tiles of the sites visited most often (the site's icon, else its first
-  letter on a color of its host). The tab is called "New tab". Like Chrome the page stays until
-  a document commits: while a typed address loads, and when the load ends without one (a file,
-  a stop), so the tab is "New tab" again with an empty address bar (#508).
+- **New tab**: a new tab without a home page loads `about:blank#new-tab` (`NEW_TAB_URL` in
+  `util.ts`, an empty document without a request) and the demo draws its new tab page over it: a
+  greeting by the time of day, a search field that hands over to the address bar and tiles of the
+  sites visited most often (the site's icon, else its first letter on a color of its host). The
+  tab is called "New tab". Like Chrome's the page is an entry of the tab's back and forward, so
+  Back (also the host's back gesture) from the first address returns to it (#513). It shows while
+  that document is committed: while a typed address loads, and when the load ends without one (a
+  file, a stop), so the tab is "New tab" again with an empty address bar (#508).
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
   Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
   the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
@@ -176,7 +178,7 @@ select popup) are in the same sheet.
   focus (`pageButton` in `main.ts`, #487).
 - **Host back and forward**: the back of the host browser (its button, the mouse back button,
   the iOS edge swipe, the Android back gesture) goes back in the tab in front while it has a back
-  entry, only then the host leaves the demo; its forward (also the mouse forward button) goes
+  entry (the new tab page is one, #513), only then the host leaves the demo; its forward (also the mouse forward button) goes
   forward in the tab whenever the tab can go forward. `host-history.ts` keeps up to three host
   entries of the demo, the one it loaded at, one above it that the first user action pushes and
   one above that for forward, pushed the first time the tab can go forward with a back entry

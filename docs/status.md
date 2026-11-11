@@ -252,7 +252,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   checked on emulated phones, the tab overview cards also on an iPhone with Safari 18 (#378); Android hosts get the iPhone or iPad identity by default (#332);
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
   Android's back gesture) goes back in the tab and leaves the demo only at the tab's first entry
-  (#414), the host's forward and the mouse forward button go forward in the tab also while it can
+  (#414; like Chrome's the new tab page is that first entry, so Back after the first address
+  typed into a new tab returns to it instead of leaving, #513), the host's forward and the mouse
+  forward button go forward in the tab also while it can
   still go back (#467), the bottom bar slides away while the user scrolls a page down and comes
   back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of
   279 px with the bar; #472, checked on emulated phones, not yet on a device); it comes back with
