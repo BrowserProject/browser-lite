@@ -1,17 +1,18 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
 // compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
-// window smaller, while the page keeps its size like in Chrome; a field in the page area makes
-// it smaller), the tab overview shows the tabs, switches and closes one, a long press on a
-// link shows its address and only its commands, Open link in new tab
-// opens it in the background with a message to switch to it, the menu opens as a
-// bottom sheet on the toolbar, an empty bookmarks sheet names its Bookmark button, the find
-// bar, the permission prompt and the sign-in dialog are fully visible, the section names of the
-// settings stay on one line at 390 and 360 px, the close button of the settings stays at the top
-// while they scroll, the bar slides away while the user scrolls a page down and comes back when
-// they scroll up (the page gets its room) and comes back with the progress at once when the
-// page navigates (also while it still loads), and the desktop layout comes back above the
-// breakpoint. An Android phone as host gets the iPhone device by default.
+// window smaller, while the page keeps its size like in Chrome; a field in the page area makes it
+// smaller), the tab overview shows the tabs, switches and closes one, a long press on a link shows
+// its address and only its commands, Open link in new tab opens it in the background with a
+// message to switch to it, the menu opens as a bottom sheet on the toolbar, an empty bookmarks
+// sheet names its Bookmark button, the find bar takes the toolbar's place without resizing the
+// page, a match near the bottom of the page is above it and Ctrl+L closes it, the permission
+// prompt and the sign-in dialog are fully visible, the section names of the settings stay on one
+// line at 390 and 360 px, the close button of the settings stays at the top while they scroll, the
+// bar slides away while the user scrolls a page down and comes back when they scroll up (the page
+// gets its room) and comes back with the progress at once when the page navigates (also while it
+// still loads), and the desktop layout comes back above the breakpoint. An Android phone as host
+// gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
 //
 //   node tests/demo/mobile-test.mjs [engine-dir]
@@ -46,6 +47,15 @@ const { url: siteURL } = await serve(async (req, res) => {
     return;
   }
   const name = req.url.slice(1) || 'one';
+  // A word just above the bottom of the view, where the find bar lies when it covers the page
+  if (name === 'find') {
+    res
+      .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      .end(
+        `${page('Page find')}<style>body{margin:0}h1{display:none}</style><div style="height:calc(100vh - 44px)"></div><p style="margin:0;font:16px/20px sans-serif">zebra</p><div style="height:2000px"></div>`,
+      );
+    return;
+  }
   // An image that holds the load of its page, a page that answers late
   if (name === 'hang') {
     setTimeout(() => res.writeHead(404).end(), 20000);
@@ -484,12 +494,65 @@ check(
 );
 await tab.touchscreen.tap(PORTRAIT.width / 2, 20);
 
-// Find bar over the whole width
+// Find bar over the whole width in place of the toolbar, like Safari and mobile Chrome: the page
+// keeps its size and ends above the bar, so a match the engine sees as visible is visible
+await tab.evaluate((url) => window.blTest.load(url), `${siteURL}find`);
+check('find page', await loaded('Page find'));
+const canvasBox = async () => (await boxes('canvas[data-bl-view]')).list[0];
+const toolbarBefore = await bar();
+const pageBefore = await canvasBox();
 await tab.tap('#menu-button');
 await tab.locator('#side-panel .panel-menu-item', { hasText: 'Find in page' }).tap();
 check('find bar opens', await shown('#find-bar'));
 check('find bar inside the window', ...(await inside('#find-bar, #find-bar button')));
+const findBar = (await boxes('#find-bar')).list[0];
+const pageWithFind = await canvasBox();
+check(
+  'find bar: in place of the toolbar, the page keeps its size and ends above it',
+  !(await bar()) &&
+    Math.abs(findBar.top - toolbarBefore.top) < 1 &&
+    Math.abs(findBar.bottom - PORTRAIT.height) < 1 &&
+    Math.abs(pageWithFind.height - pageBefore.height) < 1 &&
+    pageWithFind.bottom <= findBar.top + 0.5,
+  JSON.stringify([toolbarBefore, findBar, pageBefore, pageWithFind]),
+);
+await tab.locator('#find-input').fill('zebra');
+await tab
+  .waitForFunction(() => document.getElementById('find-count').textContent === '1 of 1', null, {
+    timeout: 10000,
+  })
+  .catch(() => {});
+results.delete('match');
+await tab.evaluate(() =>
+  window.blTest.eval(
+    "console.log('RESULT match=' + Math.round(getSelection().getRangeAt(0).getBoundingClientRect().bottom))",
+  ),
+);
+const matchBottom = pageWithFind.top + Number(await results.wait('match', 10000));
+check(
+  'find bar: the match near the bottom of the page is above the bar',
+  matchBottom <= findBar.top,
+  `match bottom ${matchBottom}, bar top ${findBar.top}`,
+);
+await screenshot(tab, 'mobile-find');
 await tab.tap('#find-close');
+check('find bar closed: the toolbar is back', !!(await bar()));
+// The address bar from a keyboard (Ctrl+L) ends the find, whose bar hides the toolbar
+await tab.tap('#menu-button');
+await tab.locator('#side-panel .panel-menu-item', { hasText: 'Find in page' }).tap();
+await shown('#find-bar');
+await tab.locator('#find-input').focus();
+await tab.keyboard.press('Control+l');
+const addressAfterFind = await tab.evaluate(() => ({
+  find: document.getElementById('find-bar').hidden,
+  address: document.activeElement?.id,
+}));
+check(
+  'find bar: Ctrl+L closes it and the address bar gets the keyboard',
+  addressAfterFind.find && addressAfterFind.address === 'address' && !!(await bar()),
+  JSON.stringify(addressAfterFind),
+);
+await tab.keyboard.press('Escape');
 
 // Permission prompt of a page
 results.delete('geo');

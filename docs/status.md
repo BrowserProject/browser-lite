@@ -279,7 +279,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of
   279 px with the bar; #472, checked on emulated phones, not yet on a device); it comes back with
   the progress at once when a page starts loading and stays until the new document commits, also
-  for a link tapped while the page still loads (#494).
+  for a link tapped while the page still loads (#494); the find bar takes the toolbar's place like
+  in Safari and mobile Chrome and the page ends above it, so the current match is no longer
+  hidden under the bar (#523; checked on emulated phones; on the device report the remaining
+  case was toureiffel.paris, whose fixed banner covers most of the screen and hides the match
+  in Chrome too, as Chrome's find also ignores fixed and sticky boxes).
 - **Settings**: device emulation with Safari user agents, languages, time zone, color scheme,
   JavaScript, images, Global Privacy Control (#193 to #196).
 - **Network identity**: the TLS ClientHello has Safari 26's JA4 (`t13d2013h2_a09f3c656075_7f0f34a4126d`)

@@ -1,4 +1,5 @@
 import type { View, ViewEvents } from '@browser-lite/core';
+import { compactLayout } from './layout.js';
 import { byId } from './util.js';
 
 const bar = byId('find-bar');
@@ -61,12 +62,21 @@ export function findAgain(backwards: boolean): void {
   if (input.value) run(backwards, true);
 }
 
-export function closeFind(): void {
+/** Closes the bar and ends the find; the page gets the keyboard unless another field takes it. */
+export function closeFind(focusPage = true): void {
   if (bar.hidden) return;
   bar.hidden = true;
   count.textContent = '';
   api.view()?.stopFind();
-  api.focusPage();
+  if (focusPage) api.focusPage();
+}
+
+/**
+ * The address bar is about to get the keyboard. In the phone layout the bar hides the toolbar
+ * (style.css), so the find ends first, like Safari on the iPhone.
+ */
+export function closeFindOverToolbar(): void {
+  if (compactLayout()) closeFind(false);
 }
 
 /**
@@ -137,4 +147,4 @@ bar.addEventListener('keydown', (e) => {
 });
 byId('find-next').addEventListener('click', () => run(false, true));
 byId('find-prev').addEventListener('click', () => run(true, true));
-byId('find-close').addEventListener('click', closeFind);
+byId('find-close').addEventListener('click', () => closeFind());

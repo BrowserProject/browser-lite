@@ -99,7 +99,8 @@ select popup) are in the same sheet.
   (a navigation or reload) closes it (#390). The count shows only the result of the text in the
   field (a result of an earlier search is dropped, typing clears it), past 1000 matches as
   `1000+` like Safari. Opened again, the bar selects the last text without searching it, like
-  Firefox: typing replaces it, Enter, F3 or Ctrl+G search it (#464).
+  Firefox: typing replaces it, Enter, F3 or Ctrl+G search it (#464). In the phone layout it
+  takes the toolbar's place like in Safari and mobile Chrome (#523).
 - **Keyboard shortcuts** (`shortcuts.ts`): like Chrome the page of the focused tab gets them
   first and they run only when it does not handle the key (`unhandled-key` of the core), so an
   editor keeps its own Ctrl+F, Ctrl+L or Ctrl+P and Ctrl+U underlines in rich text. Only the ones
@@ -237,7 +238,11 @@ document commits or the navigation ends without one, so a tapped link shows at o
 (#494). The page area takes the bar's room in one step, so the page is laid out once per change
 of direction: hiding
 gives it the room at once while the bar slides away over it, showing slides the bar in over the
-page first and gives the room back when it is there (#472); the find bar sits at the bottom of the page; JS dialogs are centered and the
+page first and gives the room back when it is there (#472); the find bar replaces the toolbar
+(`body:has(#find-bar:not([hidden])) #chrome` is hidden, the bar is as high as the toolbar row
+`--toolbar-row`) and the page area ends above it with a padding, so the page keeps its size and a
+match the engine sees as visible is never under the bar; the address bar from the keyboard (Ctrl+L,
+F6, Tab past the page) closes the find first (#523); JS dialogs are centered and the
 sign-in dialog at the top; touch targets are at least 44 px and fields have 16 px text (iOS zooms
 into smaller). The page uses `viewport-fit=cover` and keeps toolbar, page and sheets out of the
 notch and the home indicator (`env(safe-area-inset-*)`). While the iOS keyboard covers the page,

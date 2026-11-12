@@ -2040,6 +2040,9 @@ svg.favicon {
     --layout: compact;
     --bar-bottom: max(0px, calc(env(safe-area-inset-bottom) - var(--keyboard-height, 0px)));
     --sheet-bottom: calc(var(--keyboard-height, 0px) + var(--chrome-height, 64px));
+    /* The row of the toolbar, and of the find bar in its place */
+    --toolbar-row: 58px;
+    --find-bar-height: calc(var(--toolbar-row) + var(--bar-bottom));
   }
   html,
   body {
@@ -2079,6 +2082,7 @@ svg.favicon {
   }
   #toolbar {
     gap: 0;
+    height: var(--toolbar-row);
     padding: 6px var(--space-1);
     box-shadow: none;
   }
@@ -2338,15 +2342,29 @@ svg.favicon {
     line-height: 20px;
   }
 
-  /* Find bar: on the bottom of the page, above the toolbar and the keyboard */
+  /* Find bar: in place of the toolbar like in Safari and mobile Chrome, above the home
+     indicator and the keyboard. The views end above it (the padding of the page area), so the
+     match the engine reveals is never under it, and they keep their height when it opens */
+  body:has(#find-bar:not([hidden])) #chrome {
+    display: none;
+  }
+  #pages:has(> #find-bar:not([hidden])) {
+    padding-bottom: var(--find-bar-height);
+  }
+  #pages:has(> #find-bar:not([hidden])) > #snackbar {
+    bottom: calc(var(--find-bar-height) + var(--space-4));
+  }
   #find-bar {
     top: auto;
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 6px 6px 6px var(--space-2);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    box-shadow: 0 -4px 16px rgb(0 0 0 / 12%);
+    height: var(--find-bar-height);
+    padding: 6px calc(env(safe-area-inset-right) + 6px) calc(var(--bar-bottom) + 6px)
+      calc(env(safe-area-inset-left) + var(--space-2));
+    border-radius: 0;
+    background: var(--surface);
+    box-shadow: 0 -1px 0 var(--outline-variant);
   }
   #find-input {
     flex: 1;
@@ -2490,14 +2508,23 @@ svg.favicon {
 }
 /* A phone in landscape: low, so the toolbar is slimmer and the menu shows its items in two columns */
 @media (max-height: 500px) {
+  :root {
+    --toolbar-row: 44px;
+  }
   #toolbar {
     padding: 2px var(--space-1);
   }
-  #toolbar > button {
+  #toolbar > button,
+  #find-bar button {
     height: 40px;
   }
-  #address-form {
+  #address-form,
+  #find-input {
     height: 38px;
+  }
+  #find-bar {
+    padding-top: 2px;
+    padding-bottom: calc(var(--bar-bottom) + 2px);
   }
   .panel-menu {
     display: grid;

@@ -2,6 +2,7 @@ import { typedAddress } from '@browser-lite/core';
 import { bookmarks } from './bookmarks.js';
 import { showStartNote } from './engine-message.js';
 import { favicon, hostOf } from './favicons.js';
+import { closeFindOverToolbar } from './find-bar.js';
 import { readHistory } from './history.js';
 import { icon } from './icons.js';
 import { compactLayout } from './layout.js';
@@ -205,8 +206,9 @@ export function enterAddress(tab: Tab): boolean {
   return true;
 }
 
-/** Moves the keyboard to the address bar and selects it (Ctrl+L, F6). */
+/** Moves the keyboard to the address bar and selects it (Ctrl+L, F6, Tab past the page). */
 export function focusAddress(): void {
+  closeFindOverToolbar();
   address.focus();
   address.select();
 }
