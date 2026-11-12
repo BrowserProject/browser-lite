@@ -10,6 +10,7 @@
 #include "EngineConfig.h"
 #include "CacheStorageWasm.h"
 #include "Compositor.h"
+#include "CryptoKeys.h"
 #include "CookieJarWasm.h"
 #include "GpuRaster.h"
 #include "HiddenViews.h"
@@ -264,6 +265,7 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     configuration.socketProvider = createSocketProvider();
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = createCacheStorageProvider();
+    configuration.cryptoClient = createCryptoClient();
     configuration.screenOrientationManager = screenOrientationManager();
     // :visited (VisitedLinks.cpp), one store for all views
     configuration.visitedLinkStore = &visitedLinkStore();

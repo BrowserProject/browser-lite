@@ -161,6 +161,55 @@ const tests = {
     const two = await s.deriveBits({ name: 'X25519', public: b.publicKey }, a.privateKey, 256);
     return hex(one) === hex(two) && jwk.x === b64url(await s.exportKey('raw', a.publicKey));
   },
+  // CryptoKeys are serializable (engine/src/CryptoKeys.cpp): a clone keeps type, algorithm,
+  // usages and extractable and still works, also non-extractable private keys
+  'structuredClone': async () => {
+    const aes = await s.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    const hmac = await s.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+    const ecdh = await s.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+    const ed = await s.generateKey('Ed25519', true, ['sign', 'verify']);
+    const [aes2, hmac2, priv2, pub2, ed2] = structuredClone([aes, hmac, ecdh.privateKey, ecdh.publicKey, ed.privateKey]);
+    const iv = new Uint8Array(12);
+    const plain = await s.decrypt({ name: 'AES-GCM', iv }, aes2, await s.encrypt({ name: 'AES-GCM', iv }, aes, data));
+    const shared = await s.deriveBits({ name: 'ECDH', public: pub2 }, priv2, 256);
+    const expected = await s.deriveBits({ name: 'ECDH', public: ecdh.publicKey }, ecdh.privateKey, 256);
+    return aes2 instanceof CryptoKey && aes2 !== aes && !aes2.extractable && aes2.algorithm.length === 256
+      && aes2.usages.join() === aes.usages.join() && priv2.type === 'private' && ed2.extractable
+      && new TextDecoder().decode(plain) === 'Hello WebCrypto'
+      && await s.verify('HMAC', hmac2, await s.sign('HMAC', hmac, data), data)
+      && hex(shared) === hex(expected)
+      && await s.verify('Ed25519', ed.publicKey, await s.sign('Ed25519', ed2, data), data);
+  },
+  'postMessage': async () => {
+    const k = await s.generateKey({ name: 'AES-GCM', length: 128 }, false, ['encrypt']);
+    const channel = new MessageChannel();
+    const got = new Promise((resolve) => { channel.port2.onmessage = (e) => resolve(e.data); });
+    channel.port1.postMessage({ k });
+    return (await got).k.algorithm.name === 'AES-GCM';
+  },
+  'worker': async () => {
+    // Into a worker and back: the worker serializes through the page (WorkerGlobalScope)
+    const source = 'onmessage = async (e) => { const k = e.data; const iv = new Uint8Array(12);'
+      + ' postMessage({ k, c: await crypto.subtle.encrypt({ name: "AES-GCM", iv }, k, new Uint8Array([1, 2, 3])) }); };';
+    const worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    const k = await s.generateKey({ name: 'AES-GCM', length: 128 }, false, ['encrypt', 'decrypt']);
+    const got = new Promise((resolve, reject) => { worker.onmessage = (e) => resolve(e.data); worker.onerror = (e) => reject(new Error(e.message)); });
+    worker.postMessage(k);
+    const { k: back, c } = await got;
+    worker.terminate();
+    return (await s.decrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, back, c)).byteLength === 3;
+  },
+  'IndexedDB': async () => {
+    const request = (r) => new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const open = indexedDB.open('crypto-keys', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('keys');
+    const db = await request(open);
+    const pair = await s.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']);
+    await request(db.transaction('keys', 'readwrite').objectStore('keys').put(pair, 'pair'));
+    const stored = await request(db.transaction('keys').objectStore('keys').get('pair'));
+    const sig = await s.sign({ name: 'ECDSA', hash: 'SHA-256' }, stored.privateKey, data);
+    return !stored.privateKey.extractable && await s.verify({ name: 'ECDSA', hash: 'SHA-256' }, pair.publicKey, sig, data);
+  },
 };
 (async () => {
   let bad = 0;

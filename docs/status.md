@@ -156,7 +156,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   only the installing worker and `ready.active.postMessage()` threw; service and shared workers
   fetch `blob:` URLs of their pages like in Chrome, #484: before, every such fetch failed with
   "Load failed"), Cache API,
-  OPFS, IndexedDB with limit (#179), cookies and localStorage, all in an OPFS namespace (#142),
+  OPFS, IndexedDB with limit (#179), CryptoKeys in IndexedDB, `structuredClone` and
+  `postMessage` like Chrome (#527: before, every one threw `DataCloneError`, so WhatsApp Web
+  never showed its QR code and reported a database error), cookies and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).
 - **Robustness**: watchdog for scripts that keep input or a call waiting (#146, #501), crash and hang detection with in-page restart

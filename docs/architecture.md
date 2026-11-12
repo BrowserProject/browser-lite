@@ -456,7 +456,9 @@ from a copy on write of the database, so the engine thread never waits for the O
 appends its new WAL pages to a hidden log next to it (`.<database>-bllog`) at once; opening
 applies them if the log goes on from that very database file (hash), the next full write empties
 the log (#302). IndexedDB is
-limited to 256 MB per origin for writing (#179).
+limited to 256 MB per origin for writing (#179). A page's CryptoKeys go into it (and through
+`structuredClone` and `postMessage`) serialized by `engine/src/CryptoKeys.cpp`, without a
+wrapping master key, like the OpenSSL ports of WebKit, Chrome and Firefox (#527).
 
 ## Media
 

@@ -3,6 +3,7 @@
 
 #include "CacheStorageWasm.h"
 #include "CookieJarWasm.h"
+#include "CryptoKeys.h"
 #include "DeviceClients.h"
 #include "Engine.h"
 #include "EngineConfig.h"
@@ -1274,6 +1275,7 @@ static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData
     configuration.socketProvider = createSocketProvider();
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = cacheStorageProvider().copyRef();
+    configuration.cryptoClient = createCryptoClient();
     Ref page = Page::create(WTF::move(configuration));
     auto& settings = page->settings();
     settings.setScriptEnabled(true);

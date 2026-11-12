@@ -1,7 +1,8 @@
 // Service workers and SharedWorker of the pages (engine/src/ServiceWorkerWasm.cpp): register,
 // ready with the active worker, control through clients.claim(), intercept fetch (own answer,
 // Cache API, blob, unhandled -> network), postMessage both ways, a blob: URL of the page
-// fetched by the service worker and by the SharedWorker, a navigation the worker answers, navigation preload (respondWith of the preloadResponse and its content in the
+// fetched by the service worker and by the SharedWorker, a CryptoKey sent to the worker and back
+// through its IndexedDB, a navigation the worker answers, navigation preload (respondWith of the preloadResponse and its content in the
 // worker) and large Cache API contents (as files, not in memory). After a restart: contents
 // and preload still there, the new script comes without register() (background update after a
 // navigation), WindowClient.navigate() reloads a window, registration.update() of the page
@@ -55,7 +56,8 @@ else {
   if (!('serviceWorker' in navigator)) { log('sw=none'); return; }
   log('initialcontroller=' + !!navigator.serviceWorker.controller);
   navigator.serviceWorker.addEventListener('message', (e) =>
-    e.data.startsWith('blobfetch:') ? log('swblob=' + e.data.slice(10)) : log('message=' + e.data));
+    e.data.cryptoKey ? log('swkey=' + e.data.cryptoKey.algorithm.name + ':' + e.data.cryptoKey.extractable)
+      : e.data.startsWith('blobfetch:') ? log('swblob=' + e.data.slice(10)) : log('message=' + e.data));
   await navigator.serviceWorker.register('/sw.js');
   // ready resolves only with an active worker, already set on the registration object
   const ready = await navigator.serviceWorker.ready;
@@ -77,6 +79,9 @@ else {
   navigator.serviceWorker.controller.postMessage('ping');
   // A blob: URL of the page, fetched by its service worker
   navigator.serviceWorker.controller.postMessage(URL.createObjectURL(new Blob(['page-blob'])));
+  // A CryptoKey into the worker, through its IndexedDB and back (engine/src/CryptoKeys.cpp)
+  const cryptoKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 128 }, false, ['encrypt']);
+  try { navigator.serviceWorker.controller.postMessage({ cryptoKey }); } catch (e) { log('swkey=' + e.name); }
 })().catch((e) => log('error=' + e));
 </script>`;
 
@@ -208,8 +213,22 @@ self.addEventListener('notificationclick', (e) => {
   const opened = self.clients.openWindow('/opened').then((client) => client.postMessage('client:' + new URL(client.url).pathname + ':' + e.notification.tag));
   e.waitUntil(Promise.all([blocked, opened]));
 });
+const stored = (key) => new Promise((resolve, reject) => {
+  const open = indexedDB.open('sw-keys', 1);
+  open.onupgradeneeded = () => open.result.createObjectStore('keys');
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const store = open.result.transaction('keys', 'readwrite').objectStore('keys');
+    store.put(key, 'key');
+    const get = store.get('key');
+    get.onsuccess = () => resolve(get.result);
+    get.onerror = () => reject(get.error);
+  };
+});
 self.addEventListener('message', (e) => {
-  if (e.data === 'version')
+  if (e.data.cryptoKey)
+    e.waitUntil(stored(structuredClone(e.data.cryptoKey)).then((cryptoKey) => e.source.postMessage({ cryptoKey }), (error) => e.source.postMessage('key:' + error)));
+  else if (e.data === 'version')
     e.source.postMessage('version:' + VERSION + ':' + TEXT);
   else if (e.data === 'navigate')
     e.source.navigate('/navigated').then((client) => client.postMessage('client:' + new URL(client.url).pathname), (error) => console.log('RESULT navigate=' + error.name));
@@ -392,6 +411,11 @@ check(
   'postMessage both ways',
   (await result('message', 30000)) === 'pong:ping',
   results.get('message'),
+);
+check(
+  'a CryptoKey to the worker, through its IndexedDB and back',
+  (await result('swkey', 30000)) === 'AES-GCM:false',
+  results.get('swkey') ?? results.get('message'),
 );
 check(
   'the worker fetches a blob: URL of its page',

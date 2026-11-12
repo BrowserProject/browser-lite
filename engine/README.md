@@ -90,7 +90,8 @@ comes as patches from `patches/`.
     `ViewSource.cpp` (`view-source:` pages: the source of the address with numbered lines),
     `PlatformStrategies.cpp`, `ErrorPage.cpp`
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite in memory, written by its storage thread),
-    `CookieJarWasm.cpp` (Cookie Store API),
+    `CookieJarWasm.cpp` (Cookie Store API), `CryptoKeys.cpp` (CryptoKeys in `structuredClone`,
+    `postMessage` and IndexedDB of pages and workers),
     `CacheStorageWasm.cpp`,
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`

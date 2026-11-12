@@ -1,6 +1,7 @@
 // Test pages in the engine (node, render.mjs), one engine process each:
 //   basic.html     frame checked by check-basic.mjs (box, circle, text, JavaScript)
-//   crypto.html    WebCrypto (OpenSSL in WASM)
+//   crypto.html    WebCrypto (OpenSSL in WASM), CryptoKeys through structuredClone, postMessage, a
+//                  worker and IndexedDB (CryptoKeys.cpp)
 //   stack.html     stack limit after a VM trap (recursion after a GC request)
 //   limits.html    deep DOM, long strings, memory until the end
 //   hang.html      watchdog: an endless loop the host waits for is stopped, the engine keeps
