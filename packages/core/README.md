@@ -32,7 +32,8 @@ After the text field an absolutely positioned layer over the canvas holds the da
 engine asks for (`view-tiles.ts`): small canvases that show frames which change only a small part
 of the page (a spinner), so the host repaints only them and not the whole canvas. Above them it
 holds the host layers (`view-host-layers.ts`): a canvas per layer that only animates its opacity
-(a pulsing placeholder), whose opacity runs as a Web Animation, so the engine sends no frames for it.
+and transform (a pulsing placeholder or dot), whose animation runs as a Web Animation, so the engine
+sends no frames for it, and right above it a canvas without animation for the page's layers over it.
 The canvas shows the page's frames pixel for pixel from its top left (its box is the pixel ratio
 times the container, scaled back with `transform`), so size the container, not the canvas.
 Overlays of your own inside the container need a `z-index`; for the page the mouse leaves when it

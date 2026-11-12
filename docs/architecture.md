@@ -146,15 +146,20 @@ tiles of 128 CSS pixels and half of the view is composited only into those tiles
 a small canvas of its own over the view canvas, which keeps its last frame (`DamageTiles.cpp`,
 `view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
 whole view per frame before); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463).
-A layer that only animates its opacity (pulsing skeleton placeholders) is shown by the host
-browser itself once it stood still for about 20 frames (`HostLayers.cpp`, `view-host-layers.ts`,
-patch 0104, #478): a canvas of its own over the view canvas and the tiles, drawn once by the
-compositor, whose opacity the host runs as a Web Animation sampled from the engine's animation and
-started at the same time, so its pulsing needs no frame of the engine. Only leaves without effects
-under ancestors without effects, drawn axis aligned and not covered by a layer drawn after them,
-qualify. A frame takes such a layer into its canvas and out of the view (or back) in the same task
-of the worker, so the host shows both together; it goes back as soon as it moves, is clipped
-differently, gets covered, its animation changes or the view gets a new size. The compositor's answer that a rendering update is shown (and the presenter's that
+A layer that only animates its opacity and transform (pulsing skeleton placeholders, Wikipedia's
+pulsating dot) is shown by the host browser itself once it stood still for about 20 frames
+(`HostLayers.cpp`, `view-host-layers.ts`, patches 0104 and 0117, #478, #518): a canvas of its own
+over the view canvas and the tiles, drawn once by the compositor (a scaling layer at the largest
+scale of its animation, like Chromium rasterizes it), whose opacity and transform the host runs as
+a Web Animation sampled from the engine's animation and started at the same time, so its animation
+needs no frame of the engine. Only leaves without effects under ancestors without effects, drawn
+axis aligned, qualify; a transform only if it scales and moves without leaving the layer's clip.
+Plain leaves drawn after such a layer over where it may show (its covers: no animation, no effect
+but a mask, such as an icon over a pulsing dot) go into a cover canvas right above its canvas, and
+the view draws them only outside that area; any other later layer there keeps it in the frames. A
+frame takes such a layer into its canvas and out of the view (or back) in the same task of the
+worker, so the host shows both together; it goes back as soon as it or a cover moves, is clipped
+differently, gets covered otherwise, its animation changes or the view gets a new size. The compositor's answer that a rendering update is shown (and the presenter's that
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
 a frame every task or two (#359). At most one RunLoop pump waits among the engine's local tasks, so a
 pass of them returns to the JS event loop, where the host's frame calls arrive, after one RunLoop

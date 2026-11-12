@@ -1,7 +1,8 @@
 // Parts of the core that need no browser: the key queue, page dialogs, permission and HTTP authentication
 // answers (Requests), the
 // downloads, the upload limit, popups without a new-view listener, typed addresses and their
-// fallback to http://, the pending navigation, the engine check and the edits of the IME field.
+// fallback to http://, the pending navigation, the engine check, the edits of the IME field and
+// the requests of host layers.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
@@ -16,6 +17,7 @@ import { redirectPopup } from '../dist/popups.js';
 import { Requests } from '../dist/requests.js';
 import { MAX_UPLOAD, Uploads } from '../dist/uploads.js';
 import { errorText } from '../dist/util.js';
+import { hostLayerRequests } from '../dist/view-host-layers.js';
 
 /** Engine module that records the calls of the exports the tests need. */
 function fakeModule() {
@@ -704,4 +706,27 @@ test('key queue: input after a keydown waits for its answer and goes where the f
   keys.answered();
   keys.run({ page: () => log.push('page after') });
   assert.deepEqual(log, ['page z', 'page after']);
+});
+
+test('host layers: animated layers with or without a transform, covers without animation', () => {
+  const place = { x: 1, y: 2, width: 30, height: 40 };
+  const animation = {
+    period: 6000,
+    iterations: null,
+    start: 1e12,
+    times: [0, 6000],
+    opacity: [0, 1],
+  };
+  const layers = [
+    { key: 1, ...place, ...animation },
+    { key: 2, ...place, ...animation, transform: [0, 0, 15, 20, 1, 1, 0, 0] },
+    { key: 3, ...place },
+  ];
+  assert.deepEqual(hostLayerRequests(layers), layers);
+  assert.equal(
+    hostLayerRequests([{ key: 2, ...place, ...animation, transform: [1, 1, 0, 0] }]),
+    null,
+  );
+  assert.equal(hostLayerRequests([{ key: 1, ...place, ...animation, start: undefined }]), null);
+  assert.equal(hostLayerRequests([{ key: 3, x: 1, y: 2, width: 30 }]), null);
 });

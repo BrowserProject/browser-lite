@@ -1,0 +1,363 @@
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+index 08558f5e94..96b3158476 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.cpp
+@@ -374,24 +374,38 @@ void SkiaCompositingLayer::trackLayerRect(PaintContext& context, const FloatRect
+ 
+     layerRectTracker.recordVisit(m_layerRectID, layerRectInFrame);
+ #if PLATFORM(WASM)
+-    markOverlappedEmbedderLayers(context, *this, layerRectInFrame);
++    markOverlappedEmbedderLayers(context, layerRectInFrame, canCoverEmbedderLayers(context));
+ #endif
+ }
+ 
+ #if PLATFORM(WASM)
+-// browser-lite: a layer drawn after an embedder layer over it: the embedder cannot show that one over the target
+-void SkiaCompositingLayer::markOverlappedEmbedderLayers(PaintContext& context, const SkiaCompositingLayer& layer, const FloatRect& rectInFrame)
++// browser-lite: a layer drawn after an embedder layer over it. A simple one is a cover the embedder shows over
++// the embedder layer (EmbedderLayer::covers), any other one keeps the embedder from showing the embedder layer.
++void SkiaCompositingLayer::markOverlappedEmbedderLayers(PaintContext& context, const FloatRect& rectInFrame, bool canCover)
+ {
+     auto* embedderLayers = context.collectState->embedderLayers;
+     if (!embedderLayers || rectInFrame.isEmpty())
+         return;
+     auto rect = enclosingIntRect(rectInFrame);
+     for (auto& embedderLayer : *embedderLayers) {
+-        if (embedderLayer.layer.ptr() != &layer && embedderLayer.rect.intersects(rect))
++        if (embedderLayer.layer.ptr() == this || !embedderLayer.rect.intersects(rect))
++            continue;
++        if (canCover)
++            embedderLayer.covers.append({ *this, combinedTransform(context), hasLayerDamage() || m_groupPropertyChanged || (m_mask && m_mask->hasLayerDamage()) });
++        else
+             embedderLayer.overlapped = true;
+     }
+ }
+ 
++// A leaf without animations and without effects but a mask under ancestors without effects, drawn as a plane: drawn
++// alone, it shows what it shows in the target, and the target may leave out a part of it
++bool SkiaCompositingLayer::canCoverEmbedderLayers(const PaintContext& context) const
++{
++    return !context.collectState->embedderCoversBlocked && m_children.isEmpty() && opacity() == 1 && m_animations.isEmpty() && !filter()
++        && !m_replica && !isReplica() && !m_blendMode && !m_preserves3D && !isLeafOf3DRenderingContext() && !m_backdrop.filter
++        && !m_contentsBuffer && !m_debugBorder && !m_repaintCount && combinedTransform(context).isAffine();
++}
++
+ // Lists the layer if the embedder could show it (PreparedFrame::embedderLayers). true: the embedder shows
+ // it, the walk leaves it out (no damage, no rect to track).
+ bool SkiaCompositingLayer::collectEmbedderLayer(SkCanvas& canvas, PaintContext& context)
+@@ -399,22 +413,32 @@ bool SkiaCompositingLayer::collectEmbedderLayer(SkCanvas& canvas, PaintContext&
+     auto& state = *context.collectState;
+     if (!state.embedderLayers || state.embedderLayersBlocked || !m_children.isEmpty() || m_mask || m_replica || isReplica() || m_blendMode
+         || m_preserves3D || isLeafOf3DRenderingContext() || m_backdrop.filter || filter() || m_contentsBuffer || m_debugBorder || m_repaintCount
+-        || m_rect.isEmpty() || !m_visible || !m_contentsVisible || !hasVisualContent() || !opacityAnimation())
++        || m_rect.isEmpty() || !m_visible || !m_contentsVisible || !hasVisualContent())
+         return false;
+-    auto transform = combinedTransform(context);
+-    if (!transform.isAffine() || !SkM44(transform).asM33().rectStaysRect())
++    auto animation = embedderAnimation();
++    if (!animation)
+         return false;
+-    auto paintedRect = transform.mapRect(paintedLayerRect());
+-    auto rect = enclosingIntRect(paintedRect);
+-    rect.intersect(canvas.getDeviceClipBounds());
+-    if (rect.isEmpty())
++    // Axis aligned, also while a transform animation scales it to nothing
++    auto transform = combinedTransform(context);
++    if (!transform.isAffine() || !((!transform.b() && !transform.c()) || (!transform.a() && !transform.d())))
+         return false;
++    auto localRect = paintedLayerRect();
++    IntRect clip = canvas.getDeviceClipBounds();
++    auto rect = m_embedderBounds;
++    if (rect.isEmpty()) {
++        rect = enclosingIntRect(transform.mapRect(localRect));
++        rect.intersect(clip);
++        if (rect.isEmpty() && !animation->animatesTransform)
++            return false;
++    }
+     // Of two embedder layers over each other, the one drawn first stays in the frame
+     for (auto& embedderLayer : *state.embedderLayers) {
+         if (embedderLayer.rect.intersects(rect))
+             embedderLayer.overlapped = true;
+     }
+-    state.embedderLayers->append({ *this, rect, paintedRect, opacity(), m_drawnByEmbedder && (hasLayerDamage() || m_groupPropertyChanged), false });
++    auto placement = animation->animatesTransform ? transformWithLocal(m_parentTransform, { }) : transform;
++    state.embedderLayers->append({ *this, rect, clip, WTF::move(placement), localRect, WTF::move(transform), opacity(),
++        m_drawnByEmbedder && (hasLayerDamage() || m_groupPropertyChanged), false });
+     return m_drawnByEmbedder;
+ }
+ #endif
+@@ -561,6 +585,7 @@ bool SkiaCompositingLayer::computeTransformsAndAnimations(const TransformationMa
+     m_animationsState = syncAnimations(time);
+ #if PLATFORM(WASM)
+     m_animationTime = time;
++    m_parentTransform = parentTransform;
+ #endif
+     bool hasRunningAnimations = m_animationsState ? m_animationsState->isRunning : false;
+ 
+@@ -607,7 +632,8 @@ bool SkiaCompositingLayer::computeTransformsAndAnimations(const TransformationMa
+         futureCombinedForChildren.translate3d(-origin.x(), -origin.y(), -m_anchorPoint.z());
+ 
+ #if ENABLE(DAMAGE_TRACKING)
+-        if (previousTransform != m_transforms.combined)
++        // browser-lite: the embedder shows the layer and animates its transform itself
++        if (previousTransform != m_transforms.combined && !m_drawnByEmbedder)
+             damageWholeLayer();
+ #endif
+ 
+@@ -791,8 +817,9 @@ void SkiaCompositingLayer::finishFrame()
+     recursiveCleanUpAfterPaint();
+ }
+ 
+-void SkiaCompositingLayer::drawEmbedderLayer(SkCanvas& canvas, SkiaCompositingLayer& layer)
++void SkiaCompositingLayer::drawEmbedderLayer(SkCanvas& canvas, SkiaCompositingLayer& layer, const TransformationMatrix& transform)
+ {
++    SetForScope scopedTransform(layer.m_transforms.combined, transform);
+     PaintContext context;
+     context.onlyLayer = &layer;
+     recursivePaint(canvas, context);
+@@ -829,26 +856,53 @@ bool SkiaCompositingLayer::letsEmbedderShowDescendants() const
+         && !m_preserves3D && !m_backdrop.filter;
+ }
+ 
+-std::optional<SkiaCompositingLayer::OpacityAnimation> SkiaCompositingLayer::opacityAnimation() const
++std::optional<SkiaCompositingLayer::EmbedderAnimation> SkiaCompositingLayer::embedderAnimation() const
+ {
+-    if (m_animations.size() != 1 || !m_animationsState || !m_animationsState->isRunning)
++    if (m_animations.isEmpty() || !m_animationsState || !m_animationsState->isRunning)
+         return std::nullopt;
+-    auto& animation = m_animations.animations()[0];
+-    if (animation.keyframes().property() != AnimatedProperty::Opacity || animation.state() != TextureMapperAnimation::State::Playing
+-        || animation.duration() <= 0 || animation.runningTime() < 0_s)
+-        return std::nullopt;
+-    double iterations = animation.iterationCount() == GraphicsLayerAnimation::IterationCountInfinite ? std::numeric_limits<double>::infinity() : animation.iterationCount();
+-    return OpacityAnimation { m_animationTime - animation.runningTime(), animation.runningTime(), Seconds(animation.duration()), iterations };
++    std::optional<EmbedderAnimation> result;
++    for (auto& animation : m_animations.animations()) {
++        auto property = animation.keyframes().property();
++        bool transform = property == AnimatedProperty::Transform || property == AnimatedProperty::Translate || property == AnimatedProperty::Scale
++            || property == AnimatedProperty::Rotate;
++        if ((property != AnimatedProperty::Opacity && !transform) || animation.state() != TextureMapperAnimation::State::Playing
++            || animation.duration() <= 0 || animation.runningTime() < 0_s)
++            return std::nullopt;
++        double iterations = animation.iterationCount() == GraphicsLayerAnimation::IterationCountInfinite ? std::numeric_limits<double>::infinity() : animation.iterationCount();
++        EmbedderAnimation timing { m_animationTime - animation.runningTime(), animation.runningTime(), Seconds(animation.duration()), iterations, transform };
++        if (!result) {
++            result = timing;
++            continue;
++        }
++        // One timeline for all of them (the animations of one CSS animation)
++        if (timing.duration != result->duration || timing.iterations != result->iterations || std::abs((timing.elapsed - result->elapsed).milliseconds()) > 1)
++            return std::nullopt;
++        result->animatesTransform |= transform;
++    }
++    return result;
++}
++
++TransformationMatrix SkiaCompositingLayer::transformWithLocal(const TransformationMatrix& parentTransform, const TransformationMatrix& local) const
++{
++    // As computeTransformsAndAnimations() combines them
++    FloatPoint origin(m_anchorPoint.x(), m_anchorPoint.y());
++    origin.scale(m_rect.size().width(), m_rect.size().height());
++    TransformationMatrix transform = parentTransform;
++    transform.translate3d(origin.x() + (m_position.x() - m_boundsOrigin.x()), origin.y() + (m_position.y() - m_boundsOrigin.y()), m_anchorPoint.z())
++        .multiply(local)
++        .translate3d(-origin.x(), -origin.y(), -m_anchorPoint.z());
++    return transform;
+ }
+ 
+-float SkiaCompositingLayer::opacityAt(Seconds runningTime)
++SkiaCompositingLayer::AnimatedState SkiaCompositingLayer::animatedStateAt(Seconds runningTime)
+ {
+-    auto animation = opacityAnimation();
++    auto animation = embedderAnimation();
+     if (!animation)
+-        return opacity();
++        return { opacity(), m_transforms.combined };
+     TextureMapperAnimation::ApplicationResult result;
+     m_animations.apply(result, animation->start + runningTime, TextureMapperAnimation::KeepInternalState::Yes);
+-    return result.opacity.value_or(m_opacity);
++    float opacity = result.opacity.value_or(m_opacity);
++    return { opacity, result.transform ? transformWithLocal(m_parentTransform, *result.transform) : m_transforms.combined };
+ }
+ #endif
+ 
+@@ -888,6 +942,15 @@ void SkiaCompositingLayer::paintSelf(SkCanvas& canvas, PaintContext& context)
+     if (!hasVisiblePaintableContent())
+         return;
+ 
++#if PLATFORM(WASM)
++    // browser-lite: a cover of embedder layers the embedder shows is drawn there by the embedder
++    bool clipsOut = !m_embedderClipOut.isEmpty() && !context.onlyLayer;
++    ScopedFlush clipOutFlush(canvas, context.imageSetBatch, clipsOut ? ScopedFlush::Mode::FlushBeforeAndAfter : ScopedFlush::Mode::DoNothing);
++    if (clipsOut) {
++        for (auto& rect : m_embedderClipOut)
++            canvas.clipRect(SkRect::Make(SkIRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height())), SkClipOp::kDifference);
++    }
++#endif
+     paintContents(canvas, context);
+ 
+     // Drawn in the content stream, so content above hides the border and it shares
+@@ -1133,7 +1196,7 @@ void SkiaCompositingLayer::collectBackdropDamage(SkCanvas& canvas, PaintContext&
+     const auto transform = combinedTransform(context);
+     context.collectState->backdropRectsInFrame.append(FloatRect(projectedBoundingBox(transform, m_backdrop.clipRect.rect(), canvas.getDeviceClipBounds())));
+ #if PLATFORM(WASM)
+-    markOverlappedEmbedderLayers(context, *this, context.collectState->backdropRectsInFrame.last());
++    markOverlappedEmbedderLayers(context, context.collectState->backdropRectsInFrame.last(), false);
+ #endif
+ }
+ 
+@@ -1971,9 +2034,12 @@ void SkiaCompositingLayer::recursivePaint(SkCanvas& canvas, PaintContext& contex
+     if (!isVisible())
+         return;
+ #if PLATFORM(WASM) && ENABLE(DAMAGE_TRACKING)
++    std::optional<SetForScope<bool>> embedderCoversBlocked;
+     std::optional<SetForScope<bool>> embedderLayersBlocked;
+-    if (!context.shouldDraw())
++    if (!context.shouldDraw()) {
++        embedderCoversBlocked.emplace(context.collectState->embedderCoversBlocked, context.collectState->embedderLayersBlocked);
+         embedderLayersBlocked.emplace(context.collectState->embedderLayersBlocked, context.collectState->embedderLayersBlocked || !letsEmbedderShowDescendants());
++    }
+ #endif
+ 
+     SetForScope scopedOpacity(context.opacity, context.opacity * opacity());
+diff --git a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+index ef0a1ac1d0..8d9345b54e 100644
+--- a/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
++++ b/Source/WebCore/platform/graphics/skia/SkiaCompositingLayer.h
+@@ -137,20 +137,37 @@ public:
+     // a canvas, as often as needed, each time translated and clipped to one part (whole device pixels), and
+     // finishFrame() ends the frame. prepareFrame() and drawFrame() return whether to composite again.
+     //
+-    // A layer that only animates its opacity can be shown by the embedder itself, over the target, which
+-    // then neither draws it nor collects damage for its opacity (setDrawnByEmbedder()). prepareFrame()
+-    // lists every such layer the frame reaches (with a frame damage): a leaf without effects, whose
+-    // ancestors have none either and which is drawn axis aligned. A layer drawn after it that overlaps it
+-    // marks it overlapped, the embedder cannot show it then.
++    // A layer that only animates its opacity and its transform can be shown by the embedder itself, over
++    // the target, which then neither draws it nor collects damage for its animation (setDrawnByEmbedder()).
++    // prepareFrame() lists every such layer the frame reaches (with a frame damage): a leaf without effects,
++    // whose ancestors have none either and which is drawn axis aligned. A leaf without animations and effects
++    // but a mask, under ancestors without effects, drawn after it over it is one of its covers: the embedder shows the
++    // covers over it within its bounds, the target then draws them only outside (addEmbedderClipOut()). Any
++    // other layer drawn after it that overlaps it marks it overlapped, the embedder cannot show it then.
+     struct EmbedderLayer {
+         Ref<SkiaCompositingLayer> layer;
+-        // What it shows of the target, clipped, in whole device pixels, and what it paints, unclipped
++        // Where it shows in the target, in whole device pixels: the bounds of its whole animation once the
++        // embedder set them (setEmbedderBounds()), else where it shows now, clipped (empty while a transform
++        // animation scales it to nothing)
+         IntRect rect;
+-        FloatRect paintedRect;
++        // The clip of its ancestors and the target, in whole device pixels
++        IntRect clip;
++        // Its transform into the target without its animated transform (all of it if it animates none), what
++        // it paints in its own coordinates, and its whole transform now
++        TransformationMatrix placement;
++        FloatRect localRect;
++        TransformationMatrix transform;
+         float opacity { 1 };
+         // Drawn by the embedder, and its contents changed in this frame
+         bool changed { false };
+         bool overlapped { false };
++        struct Cover {
++            Ref<SkiaCompositingLayer> layer;
++            TransformationMatrix transform;
++            // Its contents changed in this frame
++            bool changed { false };
++        };
++        Vector<Cover> covers;
+     };
+     struct PreparedFrame {
+         bool hasRunningAnimations { false };
+@@ -159,23 +176,37 @@ public:
+     };
+     PreparedFrame prepareFrame(const IntSize& targetSize, std::optional<Damage>& frameDamage);
+     bool drawFrame(SkCanvas&, std::optional<SkColor> clearColor);
+-    // On the root during a frame: draws only this layer of its tree, at opacity 1, clipped by its ancestors
+-    void drawEmbedderLayer(SkCanvas&, SkiaCompositingLayer&);
++    // On the root during a frame: draws only this layer of its tree with the given whole transform, at
++    // opacity 1, clipped by its ancestors
++    void drawEmbedderLayer(SkCanvas&, SkiaCompositingLayer&, const TransformationMatrix&);
+     void finishFrame();
+ 
+     void setDrawnByEmbedder(bool drawn) { m_drawnByEmbedder = drawn; }
+     bool isDrawnByEmbedder() const { return m_drawnByEmbedder; }
+-    // The opacity animation of an embedder layer: when it started (its running time 0), its running time
+-    // in this frame, the duration of an iteration and the number of iterations (infinity: infinite)
+-    struct OpacityAnimation {
++    // Where the embedder shows the layer over its whole animation, in device pixels of the target (empty:
++    // not shown by the embedder); a layer drawn after it that overlaps them marks it overlapped
++    void setEmbedderBounds(const IntRect& bounds) { m_embedderBounds = bounds; }
++    // A cover of an embedder layer the embedder shows: the target does not draw it within these device pixels
++    void addEmbedderClipOut(const IntRect& rect) { m_embedderClipOut.append(rect); }
++    void removeEmbedderClipOut(const IntRect& rect) { m_embedderClipOut.removeFirst(rect); }
++    // The animation of an embedder layer (all its animations run on opacity and transform with the same
++    // timing): when it started (its running time 0), its running time in this frame, the duration of an
++    // iteration, the number of iterations (infinity: infinite) and whether it animates the transform
++    struct EmbedderAnimation {
+         MonotonicTime start;
+         Seconds elapsed;
+         Seconds duration;
+         double iterations { 0 };
++        bool animatesTransform { false };
++    };
++    std::optional<EmbedderAnimation> embedderAnimation() const;
++    // Its opacity and whole transform at a running time of that animation, with the transforms of its
++    // ancestors of this frame (the state of the animation stays)
++    struct AnimatedState {
++        float opacity { 1 };
++        TransformationMatrix transform;
+     };
+-    std::optional<OpacityAnimation> opacityAnimation() const;
+-    // Its opacity at a running time of that animation (the state of the animation stays)
+-    float opacityAt(Seconds runningTime);
++    AnimatedState animatedStateAt(Seconds runningTime);
+ #else
+     bool paint(SkCanvas&, std::optional<Damage>& frameDamage, const std::optional<Damage>& priorTargetDamage = std::nullopt, std::optional<SkColor> clearColor = std::nullopt);
+ #endif
+@@ -250,10 +281,12 @@ private:
+ #if PLATFORM(WASM)
+             // browser-lite: where filters read pixels from outside a part of the target (prepareFrame)
+             Vector<FloatRect> filterRectsInFrame;
+-            // browser-lite: the layers the embedder could show itself (PreparedFrame::embedderLayers), and
+-            // whether an ancestor of the walked layer has an effect that keeps its descendants out of them
++            // browser-lite: the layers the embedder could show itself (PreparedFrame::embedderLayers), whether
++            // the walked layer or an ancestor has an effect that keeps it and its descendants out of them, and
++            // whether an ancestor has one (then it cannot be a cover of them either)
+             Vector<EmbedderLayer>* embedderLayers { nullptr };
+             bool embedderLayersBlocked { false };
++            bool embedderCoversBlocked { false };
+ #endif
+         };
+ 
+@@ -317,12 +350,14 @@ private:
+     void paintOnlyLayer(SkCanvas&, PaintContext&);
+     bool isAncestorOf(const SkiaCompositingLayer&) const;
+     bool letsEmbedderShowDescendants() const;
++    TransformationMatrix transformWithLocal(const TransformationMatrix& parentTransform, const TransformationMatrix& local) const;
+ #endif
+ #if ENABLE(DAMAGE_TRACKING)
+ #if PLATFORM(WASM)
+     void collectDamage(const SkISize& targetSize, Damage&, Vector<FloatRect>* rectsDrawnWhole, Vector<EmbedderLayer>* embedderLayers = nullptr);
+     bool collectEmbedderLayer(SkCanvas&, PaintContext&);
+-    static void markOverlappedEmbedderLayers(PaintContext&, const SkiaCompositingLayer&, const FloatRect& rectInFrame);
++    void markOverlappedEmbedderLayers(PaintContext&, const FloatRect& rectInFrame, bool canCover);
++    bool canCoverEmbedderLayers(const PaintContext&) const;
+ #endif
+     void collectFrameDamage(SkCanvas&, PaintContext&);
+     void collectBackdropDamage(SkCanvas&, PaintContext&);
+@@ -479,9 +514,13 @@ private:
+     std::optional<FilterResult::Input> filterResultInput(const PaintContext&) const;
+     std::optional<FilterResult> m_filterResult;
+     unsigned m_backingStoreVersion { 0 };
+-    // browser-lite: shown by the embedder (setDrawnByEmbedder()), and the time of the last animation step
++    // browser-lite: shown by the embedder (setDrawnByEmbedder(), setEmbedderBounds()), the time of the last
++    // animation step and the transform of the parent then
+     bool m_drawnByEmbedder { false };
++    IntRect m_embedderBounds;
++    Vector<IntRect> m_embedderClipOut;
+     MonotonicTime m_animationTime;
++    TransformationMatrix m_parentTransform;
+ #endif
+     struct {
+         sk_sp<SkImageFilter> filter;

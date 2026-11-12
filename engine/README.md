@@ -77,7 +77,8 @@ comes as patches from `patches/`.
     small change goes only into the host canvases of the tiles it touches; emptied with a
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
-    their opacity get host canvases whose opacity the host animates), `ScrollingWasm.cpp`
+    their opacity and transform get host canvases whose animation the host runs; plain layers
+    drawn after one over it go into a cover canvas above it), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:

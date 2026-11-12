@@ -97,7 +97,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
-  no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454; on iPhone Safari 18 emptied tiles kept showing stale pieces of earlier frames and pages until #463), the first paint right after the first visible layout, before
+  no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454; on iPhone Safari 18 emptied tiles kept showing stale pieces of earlier frames and pages until #463), animations of only opacity and transform (pulsing placeholders and dots) run by the host browser itself without engine frames (#478, #518), the first paint right after the first visible layout, before
   waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
   33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
   Worklet, WebGL 1 and 2 with the host's GPU named to pages (#496: on a host with SwiftShader Google
@@ -559,10 +559,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
    itself (#478): the page of 46 pulsing boxes (local, 2026-11-09, demo, 1280x800, 20 s standing
    still, same engine A/B) 0.14 to 0.16 CPU cores and no engine frame instead of 5.96 to 6.67
    cores at 52 to 55 frames per second (`BL_HOST_LAYERS=0`), the engine before 4.6 to 5.0 cores
-   at 40 to 43 frames per second; plain Chromium 0.08. Still open: layers that also animate their
-   transform (Wikipedia's `mw-pulsating-dot` scales and fades, 0.77 cores at 44 frames per
-   second in damage tiles, unchanged) and opacity animations under effects or covered by later
-   layers stay in the frames. On devices with a real GPU a whole view frame costs far less (not
+   at 40 to 43 frames per second; plain Chromium 0.08. Layers that also scale and move, with the
+   plain layers over them as a cover canvas, are shown by the host too (#518): Wikipedia's
+   `mw-pulsating-dot` under the bookmark icon (World War II article, 1280x800, idle, local,
+   2026-11-11, packaged demo, same engine A/B) 0.06 to 0.09 CPU cores and no engine frame instead
+   of 0.65 to 0.71 cores at 43 to 46 frames per second (`BL_HOST_LAYERS=0`); plain Chromium 0.04
+   to 0.05. Still open: animations under effects, of filters, rotating or leaving their clip, and
+   layers covered by later layers with effects, children or animations stay in the frames. On devices with a real GPU a whole view frame costs far less (not
    measured).
 
 6. Images drawn small still decode at full size unless they are JPEGs or still WebPs (#270,
