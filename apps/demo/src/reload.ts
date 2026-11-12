@@ -1,6 +1,7 @@
 import { storage } from './util.js';
 
 const RESTART_KEY = 'bl-restart';
+const RUNNING_KEY = 'bl-running';
 let reloading = false;
 
 /** True while the demo reloads itself on purpose (no beforeunload question of the host). */
@@ -37,4 +38,19 @@ export function takeRestart(): boolean {
   const restart = !!storage(RESTART_KEY, undefined, true);
   storage(RESTART_KEY, null, true);
   return restart;
+}
+
+/**
+ * Marks the demo of this tab as running until its page is hidden. True when the last page of the
+ * tab ended without being hidden: the host browser ended it, as iOS does with a page that uses
+ * too much memory before Safari loads it again.
+ */
+export function watchUnexpectedEnd(): boolean {
+  const ended = !!storage(RUNNING_KEY, undefined, true);
+  storage(RUNNING_KEY, '1', true);
+  addEventListener('pagehide', () => storage(RUNNING_KEY, null, true));
+  addEventListener('pageshow', (event) => {
+    if (event.persisted) storage(RUNNING_KEY, '1', true);
+  });
+  return ended;
 }

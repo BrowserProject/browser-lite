@@ -249,7 +249,10 @@ export type ColorScheme = 'light' | 'dark' | 'system';
 
 /** The running engine. One per page at a time. */
 export interface Browser {
-  /** 'crashed' after the event `crash`, 'destroyed' after `destroy()`. */
+  /**
+   * 'crashed' after the event `crash`, 'destroyed' after `destroy()` and once the page was left
+   * (`pagehide`, also into the back-forward cache: create a new browser at `pageshow`).
+   */
   readonly state: 'ready' | 'crashed' | 'destroyed';
   /** Network of the pages: host online and transport connected (event `network`). */
   readonly online: boolean;

@@ -228,6 +228,16 @@ endforeach ()
 
 # File system: WasmFS (in WASM, file syscalls without a detour through the UI thread)
 target_link_options(BrowserLiteEngine PRIVATE "SHELL:-sWASMFS")
+# The engine memory with a smaller maximum when 4 GB of address space are not
+# free (engine/js/engine-memory.js); Emscripten's initMemory takes it from
+# Module.wasmMemory, which needs that name next to Emscripten's default list
+target_link_options(BrowserLiteEngine PRIVATE
+    "SHELL:--js-library ${BROWSER_LITE_ENGINE_DIR}/js/engine-memory.js"
+    "SHELL:-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=blEngineMemory"
+    "SHELL:-sINCOMING_MODULE_JS_API=ENVIRONMENT,arguments,canvas,dynamicLibraries,elementPointerLock,instantiateWasm,locateFile,monitorRunDependencies,noExitRuntime,noInitialRun,onAbort,onExit,onRuntimeInitialized,postRun,preInit,preRun,print,printErr,setStatus,statusMessage,stderr,stdin,stdout,thisProgram,wasm,websocket,wasmMemory"
+)
+set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/engine-memory.js)
+
 # OPFS root of /data (storage namespace) and more precise errors when writing to the host's OPFS (engine/js/wasmfs-opfs.js)
 target_link_options(BrowserLiteEngine PRIVATE "SHELL:--js-library ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js")
 set_property(TARGET BrowserLiteEngine APPEND PROPERTY LINK_DEPENDS ${BROWSER_LITE_ENGINE_DIR}/js/wasmfs-opfs.js)

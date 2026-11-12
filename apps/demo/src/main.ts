@@ -38,7 +38,13 @@ import { debug, engineOptions, relayUrl, startUrl, tokenFor } from './params.js'
 import { profilePermissions } from './permissions.js';
 import { onPreviewClosed } from './print-preview.js';
 import { followShownView } from './prompts.js';
-import { addressWithoutUrl, markRestart, reloadUI, takeRestart } from './reload.js';
+import {
+  addressWithoutUrl,
+  markRestart,
+  reloadUI,
+  takeRestart,
+  watchUnexpectedEnd,
+} from './reload.js';
 import { followRotation } from './rotation.js';
 import { profile, runtime } from './runtime.js';
 import { sessionToRestore } from './session.js';
@@ -212,6 +218,20 @@ function crashed(reason: string): void {
     ],
     [['Restart', () => void restart(repeated)]],
   );
+}
+
+/**
+ * The host browser ended the last page of this tab (iOS ends the whole page when it runs out of
+ * memory, then Safari loads it again): like after an engine crash the start keeps the session,
+ * without the tab of `?url=`, and a second end within a minute starts safe.
+ */
+function pageEndedUnexpectedly(): void {
+  const now = Date.now();
+  const repeated = now - (Number(storage(CRASH_KEY, undefined, true)) || 0) < REPEAT_WINDOW;
+  storage(CRASH_KEY, String(now), true);
+  if (repeated) storage(SAFE_START_KEY, '1', true);
+  markRestart();
+  history.replaceState(history.state, '', addressWithoutUrl());
 }
 
 /**
@@ -431,4 +451,11 @@ byId('menu-button').addEventListener('click', (e) => {
     byId('side-panel').querySelector<HTMLElement>('.panel-menu-item')?.focus();
 });
 
-void start(false);
+// Back from the back-forward cache: the core ended the engine when the page was hidden
+addEventListener('pageshow', (event) => {
+  if (event.persisted) void restart(false);
+});
+
+const endedUnexpectedly = watchUnexpectedEnd();
+if (endedUnexpectedly) pageEndedUnexpectedly();
+void start(endedUnexpectedly);

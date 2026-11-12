@@ -271,17 +271,18 @@ class BrowserImpl implements Browser, ViewHost {
           : errorText(error)) || fallback
       ).slice(0, MAX_CRASH_REASON);
     // While the page goes away its requests are cancelled, a thread that waits for one fails:
-    // no crash then. A page left for good ends its engine after a last write (leave), one in the
-    // back-forward cache keeps it. Firefox does not let the engine write while pagehide waits on
-    // the main thread, Chromium does.
+    // no crash then. A page that is left ends its engine after a last write (leave), also one
+    // that goes into the back-forward cache: there Safari keeps the engine's memory, address
+    // space and OPFS files, so a new start in the same tab fails, and it gives up the storage lock
+    // of the cached page. Firefox does not let the engine write while pagehide waits on the main
+    // thread, Chromium does.
     let leaving = false;
     addEventListener(
       'pagehide',
-      (event) => {
+      () => {
         leaving = true;
         this.syncHistory();
-        if (event.persisted) this.storage.flush(500);
-        else this.leave();
+        this.leave();
       },
       { signal },
     );
@@ -792,15 +793,14 @@ class BrowserImpl implements Browser, ViewHost {
     this.imageCopies.abort();
     // While still ready, so the engine closes the pages too
     for (const view of [...this.views.values()]) view.dispose();
-    this.detachExtensions();
     this.stopEngine();
     this.events.clear();
   }
 
   /**
-   * The page is left for good (pagehide, not into the back-forward cache): the engine writes
-   * and stops, without events (the page cannot react anymore). Firefox keeps a left page with its
-   * engine while the engine's main thread still waits for messages of its threads (#291).
+   * The page is left (pagehide, also into the back-forward cache): the engine writes and stops,
+   * without events (the page cannot react anymore). Firefox keeps a left page with its engine
+   * while the engine's main thread still waits for messages of its threads (#291).
    */
   private leave(): void {
     if (this.phase === 'destroyed') return;
@@ -822,6 +822,8 @@ class BrowserImpl implements Browser, ViewHost {
   /** Ends the engine and lets go of it (destroy, leave). */
   private stopEngine(): void {
     this.phase = 'destroyed';
+    // The extension host can serve the next browser of the page
+    this.detachExtensions();
     this.failStart?.(new BrowserLiteError('destroyed', 'Destroyed while starting'));
     this.lifetime.abort();
     const module = this.module;
@@ -831,9 +833,11 @@ class BrowserImpl implements Browser, ViewHost {
       console.warn('[browser-lite] engine shutdown failed:', error);
       leaked = true;
     }
-    for (const key of Object.keys(module) as (keyof EngineModule)[])
-      if (key.startsWith('on') || key === 'engineDialog' || key === 'blTransport')
-        delete (module as unknown as Record<string, unknown>)[key];
+    // Everything the engine put on the module leads to its memory: without it the memory goes
+    // with the next garbage collection, also while an embedder still holds this browser and while
+    // the page is in the back-forward cache
+    for (const key of Object.keys(module))
+      delete (module as unknown as Record<string, unknown>)[key];
     this.releaseLock?.();
     this.releaseLock = null;
     this.storage.persistent = false;

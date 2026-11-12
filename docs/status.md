@@ -707,8 +707,28 @@ browser (Safari keeps Cmd+L, T and W for itself).
   spiegel.de at 1.1 GB on 2026-11-03), so the budget stays. Lower only with lighter pages: most
   of the malloc in use is many small blocks of DOM, style and JS of the page and its ad frames,
   JS heap slabs and decoded images; tile buffers waiting for the compositor add up to 20 MB at a
-  phone size while a page paints. After a crash the restart on an iPhone failed twice with
-  `Engine start failed: RangeError: Out of memory` until Safari was restarted.
+  phone size while a page paints.
+  What iOS ends is the footprint of the whole Safari page, and most of it is outside the engine
+  memory (2026-11-12, iPhone 16 with iOS 18, BrowserStack; a page fills memory with
+  incompressible data until iOS ends it, so the room left is what the page did not use): a plain
+  page ends at about 3.9 to 4.3 GB, and one shared WebAssembly memory grown to 4 GB and filled
+  ended nothing. The demo idle on `about:blank` leaves 2.6 to 3.1 GB of it, with CNN loaded for
+  60 s (engine memory about 650 MB, consent not given) 64 MB; with `gpu=0` 352 MB, with
+  `BL_JIT=0` 672 MB, with both 1440 MB (one run each, the end varies by about 400 MB). So the
+  JIT's modules compiled by the host and the GPU raster's textures cost about 0.3 to 0.7 GB
+  each on CNN, and some 2 GB are neither the engine memory nor those. In Playwright's WebKit on
+  Linux the core host page holds 1.5 GB idle at pixel ratio 3 against 0.95 GB at ratio 1, about
+  0.5 GB of it white pixel buffers that grow with the square of the ratio, also with `gpu=0`; not
+  found yet whose. Open: break the host side down further and lower it (a code budget for the
+  JIT's modules, the textures, those buffers); the 512 MB budget of the malloc footprint only
+  stands in for it. Since #525 the engine of a page that is left ends also into the
+  back-forward cache, its memory takes a smaller reservation when 4 GB of address space are not
+  free (the restart that failed with `Engine start failed: RangeError: Out of memory`, and a new
+  demo in a tab whose earlier demo Safari kept, which hung at "Starting engine"), and the demo
+  brings its session back when iOS ends the page (#526). In Safari's back-forward cache the left
+  demo still holds two of the three 4 GB reservations of the process although its engine ended
+  (in Chromium and in Playwright's WebKit the memory is garbage at once); most likely the main
+  thread's pending `Atomics.waitAsync`, whose answer waits for the cached page's event loop.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.
 - WebAssembly: shared memory (threads) and JSPI (#153; `validate()` says false, so pages take

@@ -119,11 +119,20 @@ if (ENVIRONMENT_IS_PTHREAD) {
   // pending wait until it is notified, and with it the page and its engine
   // after the page is left (#291). ABORT keeps the woken mailbox check
   // (checkMailbox) from waiting again.
+  // The ended workers keep Emscripten's handlers, closures of this module that
+  // hold its memory: without them the memory goes with the next garbage
+  // collection, also while the host still holds a worker (the canvases of its
+  // views belong to one) or the page waits in the back-forward cache.
   Module.blShutdown = () => {
     Module.blTransport = null;
     if (typeof blSockets !== 'undefined')
       blSockets.closeAll();
+    const workers = [...PThread.unusedWorkers, ...Object.values(PThread.pthreads)];
     PThread.terminateAllThreads();
+    for (const worker of workers) {
+      worker.onmessage = null;
+      worker.onerror = null;
+    }
     ABORT = true;
     if (typeof _pthread_self === 'function')
       PThread.clearMailboxAwait(_pthread_self());

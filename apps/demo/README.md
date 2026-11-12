@@ -6,7 +6,9 @@ message: close tabs while a loaded background tab stays, else that the page uses
 address bar with suggestions, history, bookmarks, downloads panel, dialogs of the pages in the page, settings page with profile, extensions and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, pop-up blocker
 icon (open a blocked popup, always allow the site), crash and hang
-handling, a progress bar while the engine downloads (an address typed meanwhile opens once it
+handling (also of the whole page: when the host browser ended it, as iOS does with a page that
+uses too much memory, the session comes back like after an engine crash, and a page shown again
+from the back-forward cache starts a new engine with its tabs), a progress bar while the engine downloads (an address typed meanwhile opens once it
 runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
 `@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the public server:
 [deploy/](deploy/README.md).
@@ -30,7 +32,7 @@ the engine in `engine/<hash>/`. The engine is never bundled; the core loads it a
 
 | Parameter | |
 | --- | --- |
-| `url` | opens this address instead of the last session, read like text typed into the address bar |
+| `url` | opens this address instead of the last session, read like text typed into the address bar; removed after a restart and after the host browser ended the page (the session comes back then) |
 | `token` | access token, stored per relay host in localStorage (relay and profile of that host) and removed from the address; when the relay refuses the stored one (missing or old), the demo asks for the access code instead of showing lost connections (`access.ts`, #344) |
 | `log=1` | engine log in the console |
 | `gpu=0`, `compositing=0`, `safepointgc=0\|debug`, `httpcache=0`, `scripttimeout=<s>`, `fcdebug=<level>` | engine switches for debugging |

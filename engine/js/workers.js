@@ -25,15 +25,21 @@ function blKeepWorkers(count) {
   // The pool has loaded before the start
   const loaded = new WeakSet(PThread.unusedWorkers);
   const created = new WeakMap();
+  // Ended with the threads, so the workers no longer hold this module
+  const listeners = new AbortController();
   const allocate = PThread.allocateUnusedWorker;
   PThread.allocateUnusedWorker = () => {
     const worker = allocate();
     created.set(worker, performance.now());
     // Firefox in CI: now and then a worker loads for about 60 s, then fails without a message.
     // Not in Node (worker_threads have no addEventListener).
-    worker.addEventListener?.('error', (event) => {
-      if (!(event instanceof ErrorEvent)) blWorkerLog(worker, created, 'did not load');
-    });
+    worker.addEventListener?.(
+      'error',
+      (event) => {
+        if (!(event instanceof ErrorEvent)) blWorkerLog(worker, created, 'did not load');
+      },
+      { signal: listeners.signal },
+    );
     return worker;
   };
   const load = PThread.loadWasmModuleToWorker;
@@ -49,6 +55,8 @@ function blKeepWorkers(count) {
   const terminate = PThread.terminateAllThreads;
   PThread.terminateAllThreads = () => {
     stopped = true;
+    clearTimeout(refillTimer);
+    listeners.abort();
     terminate();
   };
   const refill = () => {
