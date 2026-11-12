@@ -22,6 +22,7 @@
 #include "ViewSource.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
+#include "WorkerGraphics.h"
 #include "wasm/WasmBridge.h"
 
 #include <JavaScriptCore/ConsoleTypes.h>
@@ -34,6 +35,7 @@
 #include <WebCore/DragItem.h>
 #include <WebCore/Pasteboard.h>
 #include <WebCore/WasmPlatform.h>
+#include <WebCore/WorkerClient.h>
 #include <WebCore/DocumentInlines.h>
 #include <WebCore/DocumentLoader.h>
 #include <WebCore/DocumentPage.h>
@@ -580,6 +582,11 @@ GraphicsLayerFactory* ChromeClient::graphicsLayerFactory() const
 RefPtr<ScrollingCoordinator> ChromeClient::createScrollingCoordinator(Page& page) const
 {
     return m_view->createScrollingCoordinator(page);
+}
+
+std::unique_ptr<WorkerClient> ChromeClient::createWorkerClient(SerialFunctionDispatcher&)
+{
+    return createWorkerGraphics();
 }
 
 void ChromeClient::attachRootGraphicsLayer(LocalFrame&, GraphicsLayer* layer)

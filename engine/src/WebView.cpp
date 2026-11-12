@@ -337,6 +337,8 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     settings.setWebAudioEnabled(featureEnabled(Feature::Audio));
 #if ENABLE(WEBGL)
     settings.setWebGLEnabled(true);
+    // On the worker's own thread (WorkerGraphics.cpp)
+    settings.setAllowWebGLInWorkers(true);
 #endif
 #if ENABLE(FULLSCREEN_API)
     settings.setFullScreenEnabled(true);

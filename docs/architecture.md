@@ -236,6 +236,17 @@ pixels with `readPixels` into the page or, with compositing, into a layer. A los
 unmasked vendor and renderer, read once per host context; patch 0108): pages choose their
 renderer by it, Google Maps for example leaves WebGL to a software renderer like SwiftShader
 (#496).
+Like ANGLE, packed depth stencil (and in WebGL 2 24 bit depth) is on from the start, so a
+drawing buffer with depth keeps its stencil (patch 0122).
+Workers have WebGL like in Chrome and Firefox (#528): every engine thread is a Web Worker of the
+host, so a dedicated, nested or shared worker gets its host contexts on its own thread
+(`engine/src/WorkerGraphics.cpp` is the worker client WebCore asks for them); all state of the
+shim is per thread. A worker's thread releases its host contexts with its last WebGL context
+(`WEBGL_lose_context`, patch 0120): the Web Worker runs other threads afterwards. Service workers
+have OffscreenCanvas but no WebGL (WebCore gives them no worker client). A canvas handed to an
+OffscreenCanvas (`transferControlToOffscreen`) shows each committed frame as its layer's contents
+(patch 0121: the first commit without a frame kept the layer's display pending and swallowed the
+flush of every later frame).
 
 ## Input
 

@@ -167,6 +167,38 @@ function features(version) {
   return failed.length ? failed.join('+') : 'ok';
 }
 
+// The drawing buffer has the stencil a page asks for, also with depth (pixi.js takes WebGL as
+// missing without it): a draw that fails the stencil test leaves the cleared color
+function stencil(version) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 8;
+  const gl = canvas.getContext(version === 2 ? 'webgl2' : 'webgl', { stencil: true, depth: true });
+  const program = gl.createProgram();
+  const sources = ['attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }',
+    'precision mediump float; void main() { gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); }'];
+  [gl.VERTEX_SHADER, gl.FRAGMENT_SHADER].forEach((type, k) => {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, sources[k]);
+    gl.compileShader(shader);
+    gl.attachShader(program, shader);
+  });
+  gl.linkProgram(program);
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.clearColor(0, 0, 1, 1);
+  gl.clearStencil(1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+  gl.enable(gl.STENCIL_TEST);
+  gl.stencilFunc(gl.EQUAL, 2, 0xff);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  const pixel = new Uint8Array(4);
+  gl.readPixels(4, 4, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  return gl.getContextAttributes().stencil + '/' + gl.getParameter(gl.STENCIL_BITS) + '/' + pixel.join('.') + '/' + gl.getError();
+}
+
 // Many contexts at once (Chrome allows only 4 real ones in a worker): each keeps its state, none
 // gets lost, none sees the textures of another.
 function sharing() {
@@ -468,6 +500,11 @@ for (const version of [1, 2]) {
 
 for (const version of [1, 2]) {
   try {
+    result('stencil' + version, stencil(version));
+  } catch (e) {
+    result('stencil' + version, 'error:' + String(e.message).replace(/\\s+/g, '_'));
+  }
+  try {
     result('webgl' + version, draw(document.getElementById('gl' + version), version));
   } catch (e) {
     result('webgl' + version, 'error:' + String(e.message).replace(/\\s+/g, '_'));
@@ -518,6 +555,14 @@ for (const version of [1, 2]) {
     `WebGL ${version}: textures, framebuffers, instancing, toDataURL`,
     features === 'ok',
     features,
+  );
+}
+for (const version of [1, 2]) {
+  const stencil = await result('stencil' + version);
+  check(
+    `WebGL ${version}: stencil buffer with depth in the drawing buffer`,
+    stencil === 'true/8/0.0.255.255/0',
+    stencil,
   );
 }
 const sharing = await result('sharing');

@@ -104,6 +104,8 @@ private:
     WebCore::GraphicsLayerFactory* graphicsLayerFactory() const final;
     void attachRootGraphicsLayer(WebCore::LocalFrame&, WebCore::GraphicsLayer*) final;
     RefPtr<WebCore::ScrollingCoordinator> createScrollingCoordinator(WebCore::Page&) const final;
+    // WebGL in the page's workers (WorkerGraphics.cpp)
+    std::unique_ptr<WebCore::WorkerClient> createWorkerClient(SerialFunctionDispatcher&) final;
     void attachViewOverlayGraphicsLayer(WebCore::GraphicsLayer*) final;
     bool scheduleRenderingUpdate() final;
 

@@ -1,0 +1,76 @@
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+index 943b8d6449..1390e61e6d 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+@@ -27,7 +27,9 @@
+ // see ANGLEShimForwardWasm.cpp and tools/gen-angle-shim.py in the browser-lite repo).
+ //
+ // WebGL of the page runs on a WebGL context of the host browser, which we
+-// create in the engine worker on an OffscreenCanvas. WebGL 1 gets a
++// create on an OffscreenCanvas in the Web Worker of the calling thread: the
++// engine thread for documents, a worker's own thread for its OffscreenCanvas
++// (all state here is per thread). WebGL 1 gets a
+ // WebGL 1, WebGL 2 a WebGL 2, so shaders and formats match exactly.
+ // ANGLE uses GLES names for extensions, the browser uses WebGL names.
+ // This file translates between the two.
+@@ -51,6 +53,7 @@
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <vector>
++#include <wtf/MainThread.h>
+ 
+ extern "C" {
+ const GLubyte* GL_APIENTRY glGetString(GLenum);
+@@ -201,7 +204,7 @@ void updateStrings(ShimContext& context)
+ 
+ } // namespace
+ 
+-// Host context in the engine worker on its own OffscreenCanvas. Drawing only
++// Host context in the thread's worker on its own OffscreenCanvas. Drawing only
+ // goes into framebuffers of WebKit, so no depth/stencil/antialiasing.
+ //
+ // Every query of the host context is a synchronous call to the GPU process,
+@@ -648,9 +651,28 @@ bool makeHostCurrent(HostContext& host)
+ // A replaced host context lives until the last context on it is gone
+ void deleteHostIfUnused(HostContext* host)
+ {
+-    if (host->users || host == hosts[0] || host == hosts[1])
++    if (host->users)
+         return;
+-    EM_ASM({ GL.deleteContext($0); }, host->handle);
++    // The main thread keeps its host contexts for the next page
++    // (angleShimPrewarm). A worker's thread releases them with its last
++    // context: a page worker ends with its contexts, and the Web Worker of
++    // its thread runs other threads afterwards.
++    for (auto*& kept : hosts) {
++        if (kept != host)
++            continue;
++        if (isMainThread())
++            return;
++        kept = nullptr;
++    }
++    // Lost at once: the host browser frees its GPU memory without waiting
++    // for its garbage collector
++    EM_ASM({
++        var context = GL.getContext($0);
++        var extension = context && context.GLctx.getExtension("WEBGL_lose_context");
++        if (extension && !context.GLctx.isContextLost())
++            extension.loseContext();
++        GL.deleteContext($0);
++    }, host->handle);
+     delete host;
+ }
+ 
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
+index bd95a9ed3d..0db34e7776 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.h
+@@ -31,7 +31,7 @@
+ 
+ namespace WebCore {
+ 
+-// WebGL context of the host browser in the engine worker (see ANGLEShimWasm.cpp).
++// WebGL context of the host browser on the calling thread (see ANGLEShimWasm.cpp).
+ // Returns 0 if WebGL is not possible.
+ int angleShimCreateContext(bool webgl2);
+ bool angleShimMakeCurrent(int handle);

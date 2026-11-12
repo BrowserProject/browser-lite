@@ -1,0 +1,27 @@
+diff --git a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+index 1390e61e6d..f45f1e7714 100644
+--- a/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
++++ b/Source/WebCore/platform/wasm/angle/ANGLEShimWasm.cpp
+@@ -760,11 +760,18 @@ int angleShimCreateContext(bool webgl2)
+     // Built into WebGL 2, WebKit asks for them anyway
+     if (webgl2) {
+         for (auto* name : { "GL_EXT_occlusion_query_boolean", "GL_ANGLE_framebuffer_multisample", "GL_ANGLE_framebuffer_blit",
+-            "GL_OES_packed_depth_stencil", "GL_OES_depth24", "GL_OES_rgb8_rgba8", "GL_EXT_blend_minmax", "GL_OES_texture_half_float" })
++            "GL_EXT_blend_minmax", "GL_OES_texture_half_float" })
+             context.requestable.insert(name);
+-    } else {
+-        // WebGL 1 has DEPTH_STENCIL renderbuffers (GL_RenderbufferStorage adapts the format)
+-        context.requestable.insert("GL_OES_packed_depth_stencil");
++    }
++    // On from the start like in ANGLE, where they cannot be requested: WebKit
++    // picks the formats of the drawing buffer by them before it requests
++    // anything, without packed depth stencil a drawing buffer with depth got
++    // no stencil. WebGL 1 has DEPTH_STENCIL renderbuffers
++    // (GL_RenderbufferStorage adapts the formats).
++    context.enabled.insert("GL_OES_packed_depth_stencil");
++    if (webgl2) {
++        context.enabled.insert("GL_OES_depth24");
++        context.enabled.insert("GL_OES_rgb8_rgba8");
+     }
+     context.requestable.insert("GL_ANGLE_translated_shader_source");
+     updateStrings(context);

@@ -43,6 +43,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/ServiceWorkerWasm.cpp
     ${BL_ENGINE_SRC}/WebPlatformExtras.cpp
     ${BL_ENGINE_SRC}/WebRTCPolyfill.cpp
+    ${BL_ENGINE_SRC}/WorkerGraphics.cpp
     ${BL_ENGINE_SRC}/ErrorPage.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
     ${BL_ENGINE_SRC}/HiddenViews.cpp

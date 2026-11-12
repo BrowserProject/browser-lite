@@ -1,0 +1,38 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+index edbd588109..436132f9f8 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+@@ -776,7 +776,10 @@ void GraphicsLayerCoordinated::noteLayerPropertyChanged(EnumSet<Change> change,
+     if (beingDestroyed())
+         return;
+ 
+-    bool needsFlush = m_pendingChanges.isEmpty() && !client().isFlushingLayers();
++    // After a retried contents display the next change schedules the flush,
++    // else the new buffer of a placeholder canvas (transferControlToOffscreen)
++    // never reaches the layer
++    bool needsFlush = (m_pendingChanges.isEmpty() || std::exchange(m_pendingChangesAreUnscheduled, false)) && !client().isFlushingLayers();
+     m_pendingChanges.add(change);
+     for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
+         auto& layer = downcast<GraphicsLayerCoordinated>(*ancestor);
+@@ -1202,6 +1205,7 @@ void GraphicsLayerCoordinated::commitLayerChanges(CommitState& commitState, floa
+ 
+     if (contentsBufferNeedsDisplay)
+         m_pendingChanges.add(Change::ContentsBufferNeedsDisplay);
++    m_pendingChangesAreUnscheduled = contentsBufferNeedsDisplay;
+ }
+ 
+ bool GraphicsLayerCoordinated::needsCommit(CommitState& commitState) const
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+index 732fbabe6a..70d32bca3a 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+@@ -207,6 +207,9 @@ private:
+ 
+     const Ref<CoordinatedPlatformLayer> m_platformLayer;
+     EnumSet<Change> m_pendingChanges;
++    // m_pendingChanges holds only the display of a contents delegate that had
++    // no buffer yet, kept for the next flush without scheduling one
++    bool m_pendingChangesAreUnscheduled { false };
+     bool m_hasDescendantsWithPendingChanges { false };
+     bool m_hasDescendantsWithPendingTilesCreation { false };
+     bool m_hasDescendantsWithRunningTransformAnimations { false };

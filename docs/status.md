@@ -104,7 +104,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Worklet, WebGL 1 and 2 with the host's GPU named to pages (#496: on a host with SwiftShader Google
   Maps drew with WebGL, every frame held the engine thread about 650 ms in `readPixels`, its
   controls came after 20 to 70 s and a search often moved no map; now it leaves WebGL like Chrome
-  there, controls after 4 to 10 s), recovery after GPU loss. After a rotation or an on-screen keyboard the
+  there, controls after 4 to 10 s), recovery after GPU loss. WebGL also in dedicated, nested
+  and shared workers on the worker's own thread, a canvas handed over with
+  `transferControlToOffscreen` shows its frames with layers, and a drawing buffer with depth keeps
+  the stencil a page asks for (#528: pixi.js took WebGL as missing and play2048.co said "Something
+  went wrong while starting the game"; WebGL 2 had no stencil bits behind `stencil: true`). After a rotation or an on-screen keyboard the
   last frame stays unscaled until the page painted the new size (#404; before, it was stretched
   or squashed for seconds on heavy pages), and fractional pixel ratios stay sharp in Firefox and
   WebKit. Pages taller than 2^24 px show their content to the bottom (#409; before, all

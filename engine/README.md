@@ -25,7 +25,9 @@ collapsed borders, each of which looked through its whole column while it painte
 images that decoded their whole picture to learn their size and were never freed, or the GPU
 WebGL named to pages, always Apple's instead of the host's, so Google Maps drew with WebGL on a
 software renderer, or the buffers of an iframe's realm that compression streams refused, or the
-tile jobs of a closed view that its painting threads ran after its layer tree host was freed)
+tile jobs of a closed view that its painting threads ran after its layer tree host was freed, or
+the frames of a canvas handed to an OffscreenCanvas, which never reached its layer, or the stencil
+a WebGL drawing buffer with depth went without)
 comes as patches from `patches/`.
 
 ## Folders
@@ -82,7 +84,8 @@ comes as patches from `patches/`.
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
     their opacity and transform get host canvases whose animation the host runs; plain layers
     drawn after one over it go into a cover canvas above it), `ScrollingWasm.cpp`
-    (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
+    (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks),
+    `WorkerGraphics.cpp` (WebGL in dedicated and shared workers, on the worker's own thread)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request; favicons, `data:` and `blob:` ones without a request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
     the page waits like below a dialog, the other views go on), `Sockets.cpp`, `HttpCache.cpp`,

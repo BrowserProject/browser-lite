@@ -14,6 +14,7 @@
 #include "WasmSocketProvider.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
+#include "WorkerGraphics.h"
 #include <WebCore/BackgroundFetchInformation.h>
 #include <WebCore/BackgroundFetchRecordInformation.h>
 #include <WebCore/BackgroundFetchStore.h>
@@ -59,6 +60,7 @@
 #include <WebCore/SWRegistrationDatabase.h>
 #include <WebCore/SWRegistrationStore.h>
 #include <WebCore/SWServer.h>
+#include <WebCore/WorkerClient.h>
 #include <WebCore/SWServerDelegate.h>
 #include <WebCore/SWServerRegistration.h>
 #include <WebCore/SWServerToContextConnection.h>
@@ -1260,6 +1262,11 @@ static Ref<CacheStorageProvider>& cacheStorageProvider()
     return provider;
 }
 
+// Chrome of a worker page: WebGL in its shared worker (service workers get no worker client)
+class WorkerPageChromeClient final : public EmptyChromeClient {
+    std::unique_ptr<WorkerClient> createWorkerClient(SerialFunctionDispatcher&) final { return createWorkerGraphics(); }
+};
+
 // Page in which a service worker or shared worker runs (without a window)
 static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData& topOrigin, const String& referrerPolicy, OptionSet<AdvancedPrivacyProtections> privacy)
 {
@@ -1276,9 +1283,21 @@ static Ref<Page> createWorkerPage(const URL& scriptURL, const SecurityOriginData
     configuration.storageProvider = createStorageProvider();
     configuration.cacheStorageProvider = cacheStorageProvider().copyRef();
     configuration.cryptoClient = createCryptoClient();
+    configuration.chromeClient = makeUniqueRef<WorkerPageChromeClient>();
     Ref page = Page::create(WTF::move(configuration));
     auto& settings = page->settings();
     settings.setScriptEnabled(true);
+    // OffscreenCanvas like in the views' workers, WebGL only in shared workers (WorkerPageChromeClient)
+#if ENABLE(OFFSCREEN_CANVAS)
+    settings.setOffscreenCanvasEnabled(true);
+#endif
+#if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
+    settings.setOffscreenCanvasInWorkersEnabled(true);
+#endif
+#if ENABLE(WEBGL)
+    settings.setWebGLEnabled(true);
+    settings.setAllowWebGLInWorkers(true);
+#endif
     settings.setGlobalPrivacyControlEnabled(WebView::preferences().contains(WebView::Preference::GlobalPrivacyControl));
     settings.setShouldUseServiceWorkerShortTimeout(engineConfig().serviceWorkerShortTimeout);
     enableIn(settings);
