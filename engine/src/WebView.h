@@ -81,11 +81,11 @@ public:
     // Loading
     void loadURL(const String&);
     void loadHTML(const String& html, const String& baseURL);
-    void goBack();
+    // Back (negative) or forward by offset entries; an offset outside the history does nothing
+    void go(int offset);
     // Puts the view's history back and loads the current entry:
     // {"entries":[{"url":..,"title":..}],"index":n}
     void restoreHistory(const String&);
-    void goForward();
     void reload();
     void stop();
     String currentURL() const;

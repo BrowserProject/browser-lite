@@ -243,8 +243,7 @@ EMSCRIPTEN_KEEPALIVE void bl_restore_history(int id, char* data)
     withView(id, [data = takeString(data)](WebView& view) { view.restoreHistory(data); });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_go_back(int id) { withNavigation(id, [](WebView& view) { view.goBack(); }); }
-EMSCRIPTEN_KEEPALIVE void bl_go_forward(int id) { withNavigation(id, [](WebView& view) { view.goForward(); }); }
+EMSCRIPTEN_KEEPALIVE void bl_go(int id, int offset) { withNavigation(id, [offset](WebView& view) { view.go(offset); }); }
 EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withNavigation(id, [](WebView& view) { view.reload(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_stop(int id) { withView(id, [](WebView& view) { view.stop(); }); }
 

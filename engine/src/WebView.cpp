@@ -568,14 +568,14 @@ void WebView::loadHTML(const String& html, const String& baseURL)
     frame->loader().load(FrameLoadRequest { *frame, ResourceRequest { WTF::move(base) }, WTF::move(data) });
 }
 
-void WebView::goBack()
+// Like Chrome's back/forward list menu: a jump over several entries is a back or forward load of
+// the entry, as WebKit's goBack and goForward are for the next one
+void WebView::go(int offset)
 {
-    m_page->backForward().goBack();
-}
-
-void WebView::goForward()
-{
-    m_page->backForward().goForward();
+    RefPtr item = offset ? m_page->backForward().itemAtIndex(offset) : nullptr;
+    RefPtr frame = mainFrame();
+    if (item && frame)
+        m_page->goToItem(*frame, *item, offset < 0 ? FrameLoadType::Back : FrameLoadType::Forward, ShouldTreatAsContinuingLoad::No);
 }
 
 void WebView::reload()

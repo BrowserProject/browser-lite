@@ -29,6 +29,7 @@ import { hideMessage, showMessage, showStartProgress } from './engine-message.js
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
 import { onHistoryClear, readHistory } from './history.js';
+import { initHistoryMenu } from './history-menu.js';
 import { followHostHistory } from './host-history.js';
 import { renderIcons } from './icons.js';
 import { initNewTabPage } from './new-tab-page.js';
@@ -368,6 +369,7 @@ initBlockedPopups((url) => openURL(url, true));
 initTabOverview();
 initTabDrag();
 initTabMenu();
+initHistoryMenu();
 initNewTabPage();
 followShownView([document.body, byId('pages')]);
 onPreviewClosed(focusPage);

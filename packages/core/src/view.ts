@@ -370,13 +370,17 @@ export class ViewImpl implements View {
   }
 
   back(): void {
-    this.pending.start(this.historyEntry(-1));
-    this.navigate((m) => m._bl_go_back(this.id));
+    this.go(-1);
   }
 
   forward(): void {
-    this.pending.start(this.historyEntry(1));
-    this.navigate((m) => m._bl_go_forward(this.id));
+    this.go(1);
+  }
+
+  go(offset: number): void {
+    if (!Number.isInteger(offset) || offset === 0) return;
+    this.pending.start(this.historyEntry(offset));
+    this.navigate((m) => m._bl_go(this.id, offset));
   }
 
   // Address of the back/forward entry at offset from the current one, '' when unknown

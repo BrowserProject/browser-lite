@@ -473,8 +473,16 @@ export interface View {
   reload(): void;
   /** Stops loading. */
   stop(): void;
+  /** Goes back one entry of the history, like `go(-1)`. */
   back(): void;
+  /** Goes forward one entry of the history, like `go(1)`. */
   forward(): void;
+  /**
+   * Goes back (negative `offset`) or forward by `offset` entries of {@link View.history}, like
+   * the list of Chrome's back and forward buttons and the page's `history.go`; an offset outside
+   * the history does nothing.
+   */
+  go(offset: number): void;
   /** Puts back a back/forward list (from {@link View.history}) and loads its current entry. */
   restoreHistory(history: SessionHistory): void;
   /** Hidden views paint nothing and throttle their timers. */

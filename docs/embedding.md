@@ -290,7 +290,9 @@ of `context.storage` (default in memory), for example in your user's profile.
   section (the packaged engine has `wasm-function[index]:offset`), worth keeping for a bug report. Keep each view's `history` (from `navigation` and `history`
   events; the latter brings the scroll position of the current entry, at most once a second and
   at once when the page is hidden or left or the view closed with `close()`) to restore the session with `createView({ history })`:
-  the page comes back where it was scrolled to.
+  the page comes back where it was scrolled to. A list of the back or forward pages like
+  Chrome's comes from the same `history` (`entries` around `index`); `view.go(offset)` goes to
+  the chosen one in one step.
 - `scroll` of a view (`x`, `y`, `user`) follows the main frame's position; hide a toolbar while
   the user scrolls down (`user` true, `y` growing), like Chrome's browser controls. Give the view
   the toolbar's room in one step (not frame by frame while it slides): every new size lays the

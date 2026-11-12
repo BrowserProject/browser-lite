@@ -181,7 +181,11 @@ select popup) are in the same sheet.
 - **Back, Forward and Reload** of the toolbar take no focus from a press with the mouse or a
   finger, like in Chrome: the page has the keyboard after the action, so Space, PageDown and the
   arrow keys scroll it instead of pressing the button again; a button reached with Tab keeps the
-  focus (`pageButton` in `main.ts`, #487).
+  focus (`pageButton` in `main.ts`, #487). A right click on Back or Forward, a press held for
+  half a second (mouse or finger) or the context menu key lists the tab's earlier or later pages
+  below the button like Chrome, nearest first, at most 12, and Show full history (the history
+  panel); a chosen page is reached in one step (`view.go`), and the release of a held press does
+  not go back as well (`history-menu.ts`, #522).
 - **Host back and forward**: the back of the host browser (its button, the mouse back button,
   the iOS edge swipe, the Android back gesture) goes back in the tab in front while it has a back
   entry (the new tab page is one, #513), only then the host leaves the demo; its forward (also the mouse forward button) goes
@@ -274,7 +278,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
-| `host-history.ts` | the back and forward of the host browser act on the tab in front |
+| `host-history.ts`, `history-menu.ts` | the back and forward of the host browser act on the tab in front; the list of the tab's pages on Back and Forward |
 | `tab-drag.ts`, `tab-menu.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |

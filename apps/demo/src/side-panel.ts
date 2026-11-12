@@ -69,6 +69,11 @@ const extensionPanel = (name: PanelName) =>
 
 export const panelOpen = (): boolean => current !== null;
 
+/** Opens the panel `name`; it stays when it is open already. */
+export function openPanel(name: PanelName): void {
+  if (current !== name) togglePanel(name);
+}
+
 /** Opens the panel `name`, or closes it when it is open (null closes any). */
 export function togglePanel(name: PanelName | null): void {
   const wasMenu = current === 'menu';

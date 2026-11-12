@@ -160,7 +160,10 @@ not reported yet arrive as `history` events before it goes, so a session saved f
 current; `view.close()` does the same for its view before `close`, so a closed tab kept for
 reopening has the position of its last second.
 `restoreHistory(history)` and `createView({ history })` bring the page back at that position, like
-back and forward.
+back and forward. `view.go(offset)` goes back (negative) or forward by `offset` entries in one
+step, like the list of Chrome's back button: show the entries of `view.history` before and after
+its `index` and pass the distance of the chosen one (`back()` is `go(-1)`, `forward()` is `go(1)`;
+an offset outside the history does nothing).
 
 The `scroll` event of a view comes as the page's main frame scrolls (`x`, `y`, at most once per
 engine task) with `user` true for a scroll by the user (wheel, finger and its fling, keys,
