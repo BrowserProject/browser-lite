@@ -1,5 +1,5 @@
 // browser-lite: copy from Source/WebKitLegacy/WebCoreSupport (WebKit wpewebkit-2.54.1),
-// adapted to our curl SocketStream (SocketStreamHandleCurl).
+// adapted to our curl SocketStream (SocketStreamHandleCurl) and permessage-deflate.
 /*
  * Copyright (C) 2011, 2012 Google Inc. All rights reserved.
  * Copyright (C) 2018-2021 Apple Inc. All rights reserved.
@@ -124,7 +124,7 @@ WebSocketChannel::ConnectStatus WebSocketChannel::connect(const URL& requestedUR
 
     m_handshake = makeUnique<WebSocketHandshake>(validatedURL->url, protocol, userAgent, clientOrigin, m_allowCookies, isAppInitiated);
     m_handshake->reset();
-    m_handshake->addExtensionProcessor(m_deflateFramer.createExtensionProcessor());
+    m_handshake->addExtensionProcessor(m_perMessageDeflate.createExtensionProcessor());
     NoWebSocketInspector::didCreateWebSocket(m_document.get(), m_progressIdentifier, validatedURL->url);
 
     auto* frame = m_document->frame();
@@ -238,7 +238,6 @@ void WebSocketChannel::fail(String&& reason)
     m_shouldDiscardReceivedData = true;
     if (!m_buffer.isEmpty())
         skipBuffer(m_buffer.size()); // Save memory.
-    m_deflateFramer.didFail();
     m_hasContinuousFrame = false;
     m_continuousFrameData.clear();
     if (RefPtr client = m_client)
@@ -558,15 +557,15 @@ bool WebSocketChannel::processFrame()
     ASSERT(m_buffer.begin() < frameEnd);
     ASSERT(frameEnd <= m_buffer.end());
 
-    auto inflateResult = m_deflateFramer.inflate(frame);
-    if (!inflateResult->succeeded()) {
-        fail(inflateResult->failureReason());
-        return false;
-    }
-
     // Validate the frame data.
     if (WebSocketFrame::isReservedOpCode(frame.opCode)) {
         fail(makeString("Unrecognized frame opcode: "_s, static_cast<unsigned>(frame.opCode)));
+        return false;
+    }
+
+    // permessage-deflate marks only the first frame of a compressed data message (RFC 7692 6).
+    if (frame.compress && (!m_perMessageDeflate.enabled() || frame.opCode == WebSocketFrame::OpCodeContinuation || WebSocketFrame::isControlOpCode(frame.opCode))) {
+        fail(m_perMessageDeflate.enabled() ? "Received unexpected compressed frame"_s : "Compressed bit must be 0 if no negotiated permessage-deflate extension"_s);
         return false;
     }
 
@@ -616,52 +615,21 @@ bool WebSocketChannel::processFrame()
             // so we should pretend that we have finished to read this frame and
             // make sure that the member variables are in a consistent state before
             // the handler is invoked.
-            Vector<uint8_t> continuousFrameData = WTF::move(m_continuousFrameData);
             m_hasContinuousFrame = false;
-            if (m_continuousFrameOpCode == WebSocketFrame::OpCodeText) {
-                String message;
-                if (continuousFrameData.size())
-                    message = String::fromUTF8(continuousFrameData.span());
-                else
-                    message = emptyString();
-                if (message.isNull())
-                    fail("Could not decode a text frame as UTF-8."_s);
-                else
-                    protect(m_client)->didReceiveMessage(WTF::move(message));
-            } else if (m_continuousFrameOpCode == WebSocketFrame::OpCodeBinary)
-                protect(m_client)->didReceiveBinaryData(WTF::move(continuousFrameData));
+            didReceiveDataMessage(m_continuousFrameOpCode, m_continuousFrameCompressed, std::exchange(m_continuousFrameData, { }));
         }
         break;
 
     case WebSocketFrame::OpCodeText:
-        if (frame.final) {
-            String message;
-            if (frame.payload.size())
-                message = String::fromUTF8(frame.payload);
-            else
-                message = emptyString();
-            skipBuffer(frameEnd - m_buffer.begin());
-            if (message.isNull())
-                fail("Could not decode a text frame as UTF-8."_s);
-            else
-                protect(m_client)->didReceiveMessage(WTF::move(message));
-        } else {
-            m_hasContinuousFrame = true;
-            m_continuousFrameOpCode = WebSocketFrame::OpCodeText;
-            ASSERT(m_continuousFrameData.isEmpty());
-            m_continuousFrameData.append(frame.payload);
-            skipBuffer(frameEnd - m_buffer.begin());
-        }
-        break;
-
     case WebSocketFrame::OpCodeBinary:
         if (frame.final) {
-            Vector<uint8_t> binaryData(frame.payload);
+            Vector<uint8_t> data(frame.payload);
             skipBuffer(frameEnd - m_buffer.begin());
-            protect(m_client)->didReceiveBinaryData(WTF::move(binaryData));
+            didReceiveDataMessage(frame.opCode, frame.compress, WTF::move(data));
         } else {
             m_hasContinuousFrame = true;
-            m_continuousFrameOpCode = WebSocketFrame::OpCodeBinary;
+            m_continuousFrameOpCode = frame.opCode;
+            m_continuousFrameCompressed = frame.compress;
             ASSERT(m_continuousFrameData.isEmpty());
             m_continuousFrameData.append(frame.payload);
             skipBuffer(frameEnd - m_buffer.begin());
@@ -720,6 +688,28 @@ bool WebSocketChannel::processFrame()
         return false;
     }
     return true;
+}
+
+// Hands a whole received data message to the client.
+void WebSocketChannel::didReceiveDataMessage(WebSocketFrame::OpCode opCode, bool compressed, Vector<uint8_t>&& data)
+{
+    if (compressed) {
+        auto inflated = m_perMessageDeflate.decompress(data.span());
+        if (!inflated) {
+            fail("Failed to decompress a message"_s);
+            return;
+        }
+        data = WTF::move(*inflated);
+    }
+    if (opCode == WebSocketFrame::OpCodeBinary) {
+        protect(m_client)->didReceiveBinaryData(WTF::move(data));
+        return;
+    }
+    String message = data.isEmpty() ? emptyString() : String::fromUTF8(data.span());
+    if (message.isNull())
+        fail("Could not decode a text frame as UTF-8."_s);
+    else
+        protect(m_client)->didReceiveMessage(WTF::move(message));
 }
 
 void WebSocketChannel::enqueueTextFrame(CString&& string)
@@ -839,9 +829,9 @@ void WebSocketChannel::sendFrame(WebSocketFrame::OpCode opCode, std::span<const 
     WebSocketFrame frame(opCode, true, false, true, data);
     NoWebSocketInspector::didSendWebSocketFrame(m_document.get(), m_progressIdentifier, frame);
 
-    auto deflateResult = m_deflateFramer.deflate(frame);
-    if (!deflateResult->succeeded()) {
-        fail(deflateResult->failureReason());
+    Vector<uint8_t> compressedPayload;
+    if (!m_perMessageDeflate.compress(frame, compressedPayload)) {
+        fail("Failed to compress a message"_s);
         return completionHandler(false);
     }
 

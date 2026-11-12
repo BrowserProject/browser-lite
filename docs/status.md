@@ -21,6 +21,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   `CompressionStream` and `DecompressionStream` take buffers of another realm (an iframe's
   `Uint8Array`, `ArrayBuffer` or `DataView`) like Chrome (#506; before they rejected them with
   "Invalid type should be ArrayBuffer", which twitch.tv logged from code of its Kasada iframe).
+  The pages' WebSockets compress their messages like Chrome (permessage-deflate, #529; in
+  the test 380 KB of messages take 2 KB on the wire instead of 381 KB). Before, every server that
+  answered with a `Sec-WebSocket-Extensions` header failed the connection ("header is invalid":
+  the comments and live feed of blick.ch over viafoura retried every 0.6 s).
 - **Browsing**: views with popups (opener, name, sandbox; without a user gesture blocked with an
   icon in the demo that opens them or allows the site, #384; like Chrome one popup within 5 s of a
   click, also from a timer, #504), history incl. back/forward cache

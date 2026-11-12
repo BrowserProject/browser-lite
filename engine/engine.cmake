@@ -88,6 +88,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandle.cpp
     ${BL_ENGINE_SRC}/websocket/SocketStreamHandleCurl.cpp
     ${BL_ENGINE_SRC}/websocket/WebSocketChannel.cpp
+    ${BL_ENGINE_SRC}/websocket/WebSocketPerMessageDeflate.cpp
 
     ${BL_LEGACY_STORAGE_SOURCES}
 )

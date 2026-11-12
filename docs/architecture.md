@@ -413,6 +413,16 @@ resource; another version replaces the ranges. `MediaFetch` looks up in the part
 element's document. A 304 only updates the headers of the stored entry, its body stays in the
 Cache API.
 
+WebSockets of the pages run over curl's sockets in `engine/src/websocket/` (WebKitLegacy's
+`WebSocketChannel`, WebCore's handshake and frames). Like Chrome they offer the compression
+`permessage-deflate; client_max_window_bits` (RFC 7692, `WebSocketPerMessageDeflate.cpp`,
+#529) instead of WebKitLegacy's obsolete `x-webkit-deflate-frame`: once the server accepts, a
+whole message is compressed with WebCore's zlib streams, with the client window and context
+takeover the server asked for; a received message is decompressed after its last frame. Patch
+0123 fixes WebCore's parser of the `Sec-WebSocket-Extensions` answer (it never moved past a
+token, so every answer with the header failed the connection) and its inflater for a message that
+ends with a final block.
+
 The favicon of a page is loaded by the engine itself (`WebView::updateFavicon`, `loadIcon` in
 `LoaderStrategy.cpp`, `data:` and `blob:` icons without a request). Like Chrome the best
 `<link rel=icon>` of an http(s) page is taken as soon as the parser or a script adds, changes or

@@ -33,12 +33,12 @@
 #pragma once
 
 #include "SocketStreamHandleClient.h"
+#include "WebSocketPerMessageDeflate.h"
 #include <WebCore/ExceptionCode.h>
 #include <WebCore/FileReaderLoaderClient.h>
 #include <WebCore/ThreadableWebSocketChannel.h>
 #include <WebCore/Timer.h>
 #include <WebCore/WebSocketChannelInspector.h>
-#include <WebCore/WebSocketDeflateFramer.h>
 #include <WebCore/WebSocketFrame.h>
 #include <WebCore/WebSocketHandshake.h>
 #include <wtf/Deque.h>
@@ -124,6 +124,7 @@ private:
     void closingTimerFired();
 
     bool processFrame();
+    void didReceiveDataMessage(WebSocketFrame::OpCode, bool compressed, Vector<uint8_t>&&);
 
     // It is allowed to send a Blob as a binary frame if hybi-10 protocol is in use. Sending a Blob
     // can be delayed because it must be read asynchronously. Other types of data (String or
@@ -199,6 +200,7 @@ private:
     // Private members only for hybi-10 protocol.
     bool m_hasContinuousFrame { false };
     WebSocketFrame::OpCode m_continuousFrameOpCode;
+    bool m_continuousFrameCompressed { false };
     Vector<uint8_t> m_continuousFrameData;
     unsigned short m_closeEventCode { CloseEventCodeAbnormalClosure };
     String m_closeEventReason;
@@ -209,7 +211,7 @@ private:
     RefPtr<FileReaderLoader> m_blobLoader;
     BlobLoaderStatus m_blobLoaderStatus { BlobLoaderNotStarted };
 
-    WebSocketDeflateFramer m_deflateFramer;
+    BrowserLite::WebSocketPerMessageDeflate m_perMessageDeflate;
     const Ref<SocketProvider> m_socketProvider;
 };
 

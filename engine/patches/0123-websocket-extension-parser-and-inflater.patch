@@ -1,0 +1,76 @@
+diff --git a/Source/WebCore/Modules/websockets/WebSocketDeflater.cpp b/Source/WebCore/Modules/websockets/WebSocketDeflater.cpp
+index ec7de941b0..effad11bea 100644
+--- a/Source/WebCore/Modules/websockets/WebSocketDeflater.cpp
++++ b/Source/WebCore/Modules/websockets/WebSocketDeflater.cpp
+@@ -173,6 +173,7 @@ bool WebSocketInflater::addBytes(std::span<const uint8_t> data)
+         int result = inflate(m_stream.get(), Z_NO_FLUSH);
+         consumedSoFar += remainingLength - m_stream->avail_in;
+         m_buffer.shrink(writePosition + availableCapacity - m_stream->avail_out);
++        m_streamEnded = result == Z_STREAM_END;
+         if (result == Z_BUF_ERROR)
+             continue;
+         if (result == Z_STREAM_END) {
+@@ -193,6 +194,12 @@ bool WebSocketInflater::finish()
+ {
+     constexpr std::array<uint8_t, 4> strippedFields { 0, 0, 0xFF, 0xFF };
+ 
++    // The message ended with a final block (RFC 7692 7.2.3.4): the tail would start a new stream.
++    if (m_streamEnded) {
++        m_streamEnded = false;
++        return true;
++    }
++
+     // Appends 4 octests of 0x00 0x00 0xff 0xff
+     size_t consumedSoFar = 0;
+     while (consumedSoFar < strippedFields.size()) {
+@@ -211,7 +218,10 @@ bool WebSocketInflater::finish()
+         m_buffer.shrink(writePosition + availableCapacity - m_stream->avail_out);
+         if (result == Z_BUF_ERROR)
+             continue;
+-        if (result != Z_OK && result != Z_STREAM_END)
++        // A final block ended the stream before the whole tail: inflate would not take the rest.
++        if (result == Z_STREAM_END)
++            return inflateReset(m_stream.get()) == Z_OK;
++        if (result != Z_OK)
+             return false;
+         ASSERT(remainingLength > m_stream->avail_in);
+     }
+@@ -223,6 +233,7 @@ bool WebSocketInflater::finish()
+ void WebSocketInflater::reset()
+ {
+     m_buffer.clear();
++    m_streamEnded = false;
+ }
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/Modules/websockets/WebSocketDeflater.h b/Source/WebCore/Modules/websockets/WebSocketDeflater.h
+index d88f9bcc34..583030da57 100644
+--- a/Source/WebCore/Modules/websockets/WebSocketDeflater.h
++++ b/Source/WebCore/Modules/websockets/WebSocketDeflater.h
+@@ -80,6 +80,8 @@ private:
+     int m_windowBits;
+     Vector<uint8_t> m_buffer;
+     std::unique_ptr<z_stream> m_stream;
++    // The data so far ended with a final block, so finish() must not append the tail.
++    bool m_streamEnded { false };
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/Modules/websockets/WebSocketExtensionParser.cpp b/Source/WebCore/Modules/websockets/WebSocketExtensionParser.cpp
+index 4348a72cb7..961187476a 100644
+--- a/Source/WebCore/Modules/websockets/WebSocketExtensionParser.cpp
++++ b/Source/WebCore/Modules/websockets/WebSocketExtensionParser.cpp
+@@ -67,12 +67,11 @@ void WebSocketExtensionParser::skipSpaces()
+ bool WebSocketExtensionParser::consumeToken()
+ {
+     skipSpaces();
+-    auto start = m_data;
+     size_t tokenLength = 0;
+     while (tokenLength < m_data.size() && isASCIIPrintable(m_data[tokenLength]) && !isSeparator(m_data[tokenLength]))
+         ++tokenLength;
+     if (tokenLength) {
+-        m_currentToken = String(consumeSpan(start, tokenLength));
++        m_currentToken = String(consumeSpan(m_data, tokenLength));
+         return true;
+     }
+     return false;
