@@ -1,6 +1,6 @@
 import { pendingClipboardWrite } from './clipboard.js';
 import { modifierBits } from './input.js';
-import { editHostField, keyToHost } from './key-queue.js';
+import { editHostField, keyToHost, mayBeShortcut } from './key-queue.js';
 import type { UnhandledKey } from './types.js';
 import { appleMobileHost } from './util.js';
 import type { ViewImpl } from './view.js';
@@ -209,7 +209,7 @@ function keyText(e: KeyLike): string {
 
 /**
  * Sends a key event (type 0 down, 1 up) to the view, in the order of its key queue: a keydown
- * waits for its `key-result` there.
+ * that may be a shortcut holds later input there until its `key-result`.
  */
 export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
   const { host } = view;
@@ -225,7 +225,7 @@ export function sendKey(view: ViewImpl, type: 0 | 1, e: KeyLike): void {
     modifierBits(e),
   );
   if (type === 0) {
-    view.keys.sent();
+    view.keys.sent(mayBeShortcut(e));
     host.watchdog.inputSent();
   }
 }

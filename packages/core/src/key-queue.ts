@@ -7,35 +7,51 @@ export interface KeyInput {
 }
 
 /**
+ * @internal Whether a keydown may come back unhandled as a browser shortcut that moves the focus:
+ * every key with Ctrl, Alt or Meta and every key that types no text (Tab, Escape, F-keys, arrows),
+ * but not typing (a character or Space with or without Shift, Enter, Backspace, Delete).
+ */
+export function mayBeShortcut(e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey'>) {
+  if (e.ctrlKey || e.altKey || e.metaKey) return true;
+  if (e.key === 'Enter' || e.key === 'Backspace' || e.key === 'Delete') return false;
+  return [...e.key].length !== 1;
+}
+
+/**
  * @internal Keyboard input of a view in its order, like Chrome's input router: while a keydown
- * waits for the engine's answer (`key-result`), later keyboard input waits in the host. The page
- * may not handle that keydown and the host run a browser shortcut for it that moves the focus
- * (Ctrl+L to the address bar, Ctrl+F to the find bar), so the input held meanwhile goes on to
- * whatever has the focus after the answer: the page while its view still has the focus, else the
- * host's focused element. Before, the letters typed right after Ctrl+L reached a busy page.
+ * that may be a browser shortcut (`mayBeShortcut`) waits for the engine's answer (`key-result`),
+ * later keyboard input waits in the host. The page may not handle that keydown and the host run
+ * a browser shortcut for it that moves the focus (Ctrl+L to the address bar, Ctrl+F to the find
+ * bar), so the input held meanwhile goes on to whatever has the focus after the answer: the page
+ * while its view still has the focus, else the host's focused element. Typing goes on without
+ * waiting, so after the engine was busy the keys held meanwhile reach it at once up to the next
+ * possible shortcut, not one engine round trip per key.
  */
 export class KeyQueue {
-  private waiting = 0;
+  /** Sent keydowns that wait for their answer, in order: true for a possible shortcut. */
+  private readonly sentKeys: boolean[] = [];
+  private shortcuts = 0;
   private readonly held: KeyInput[] = [];
 
   /** @param focused Whether the view still has the keyboard focus. */
   constructor(private readonly focused: () => boolean) {}
 
-  /** Runs the input now, or holds it while sent keydowns wait for their answer. */
+  /** Runs the input now, or holds it while a sent possible shortcut waits for its answer. */
   run(input: KeyInput): void {
-    if (this.waiting || this.held.length) this.held.push(input);
+    if (this.shortcuts || this.held.length) this.held.push(input);
     else input.page();
   }
 
   /** A keydown went to the engine; its answer comes as `answered`. */
-  sent(): void {
-    this.waiting++;
+  sent(shortcut: boolean): void {
+    this.sentKeys.push(shortcut);
+    if (shortcut) this.shortcuts++;
   }
 
-  /** The engine answered a keydown (after the shortcut of an unhandled one ran). */
+  /** The engine answered the oldest sent keydown (after the shortcut of an unhandled one ran). */
   answered(): void {
-    if (this.waiting) this.waiting--;
-    while (!this.waiting && this.held.length) {
+    if (this.sentKeys.shift()) this.shortcuts--;
+    while (!this.shortcuts && this.held.length) {
       const input = this.held.shift() as KeyInput;
       if (this.focused()) input.page();
       else input.host?.();
@@ -44,7 +60,8 @@ export class KeyQueue {
 
   /** The view closed: held input is dropped. */
   clear(): void {
-    this.waiting = 0;
+    this.sentKeys.length = 0;
+    this.shortcuts = 0;
     this.held.length = 0;
   }
 }

@@ -451,7 +451,8 @@ export interface View {
   /**
    * The keyboard focus is in the page. Its keys go to the page first; a keydown it does not handle
    * comes back as `unhandled-key`, where browser shortcuts run like in Chrome. Keys typed until the
-   * page answered wait and go to whatever has the focus after `unhandled-key`.
+   * page answered a keydown that may be a shortcut (with Ctrl, Alt or Meta, or one that types no
+   * text) wait and go to whatever has the focus after `unhandled-key`.
    */
   readonly focused: boolean;
   on<K extends keyof ViewEvents>(type: K, listener: (event: ViewEvents[K]) => void): Unsubscribe;

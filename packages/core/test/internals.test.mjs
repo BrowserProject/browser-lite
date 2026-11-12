@@ -9,7 +9,7 @@ import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
-import { KeyQueue } from '../dist/key-queue.js';
+import { KeyQueue, mayBeShortcut } from '../dist/key-queue.js';
 import { enterKeyHintOf, opensNextField, textEdit, textInputOf } from '../dist/keyboard.js';
 import { PendingNavigation } from '../dist/pending.js';
 import { MemoryPermissionStore } from '../dist/permissions.js';
@@ -667,27 +667,28 @@ test('IME field enter key: the page field hint, else the key of Chrome on Androi
   assert.equal(textInputOf({ mode: '' }).mode, 'none');
 });
 
-test('key queue: input after a keydown waits for its answer and goes where the focus is then', () => {
+test('key queue: input after a possible shortcut waits for its answer and goes where the focus is then', () => {
   let focused = true;
   const log = [];
   const keys = new KeyQueue(() => focused);
-  // A keydown counts as sent when its input runs
+  // A keydown counts as sent when its input runs; Ctrl, Alt, Meta and keys without text may be
+  // shortcuts
   const key = (name) => ({
     page: () => {
       log.push(`page ${name}`);
-      keys.sent();
+      keys.sent(name.includes('+') || name === 'Tab');
     },
     host: () => log.push(`host ${name}`),
   });
-  keys.run(key('a'));
-  keys.run(key('b'));
+  keys.run(key('ctrl+b'));
+  keys.run(key('ctrl+i'));
   keys.run({ page: () => log.push('page text') });
-  assert.deepEqual(log, ['page a']);
-  // The page handled a: b goes to the page and waits for its answer, then the text
+  assert.deepEqual(log, ['page ctrl+b']);
+  // The page handled Ctrl+B: Ctrl+I goes to the page and waits for its answer, then the text
   keys.answered();
-  assert.deepEqual(log, ['page a', 'page b']);
+  assert.deepEqual(log, ['page ctrl+b', 'page ctrl+i']);
   keys.answered();
-  assert.deepEqual(log, ['page a', 'page b', 'page text']);
+  assert.deepEqual(log, ['page ctrl+b', 'page ctrl+i', 'page text']);
   // Ctrl+L: its shortcut moved the focus before the answer, the letters go to the host
   log.length = 0;
   keys.run(key('ctrl+l'));
@@ -697,15 +698,44 @@ test('key queue: input after a keydown waits for its answer and goes where the f
   focused = false;
   keys.answered();
   assert.deepEqual(log, ['page ctrl+l', 'host x', 'host y']);
-  // Nothing waits: input runs right away; a closed view drops what it held
+  // Typing does not wait for answers: after a busy engine the held letters go on at once up to
+  // the next possible shortcut, and their answers do not count as the shortcut's
   focused = true;
   log.length = 0;
-  keys.run(key('z'));
+  keys.run(key('ctrl+a'));
+  keys.run(key('a'));
+  keys.run(key('b'));
+  keys.run(key('Tab'));
+  keys.run(key('c'));
+  keys.answered();
+  assert.deepEqual(log, ['page ctrl+a', 'page a', 'page b', 'page Tab']);
+  keys.answered();
+  keys.answered();
+  assert.deepEqual(log, ['page ctrl+a', 'page a', 'page b', 'page Tab']);
+  keys.answered();
+  assert.deepEqual(log, ['page ctrl+a', 'page a', 'page b', 'page Tab', 'page c']);
+  keys.answered();
+  // Nothing waits: input runs right away; a closed view drops what it held
+  log.length = 0;
+  keys.run(key('ctrl+z'));
   keys.run(key('w'));
   keys.clear();
   keys.answered();
   keys.run({ page: () => log.push('page after') });
-  assert.deepEqual(log, ['page z', 'page after']);
+  assert.deepEqual(log, ['page ctrl+z', 'page after']);
+});
+
+test('key queue: possible shortcuts are keys with Ctrl, Alt or Meta and keys that type no text', () => {
+  const press = (key, mods = {}) =>
+    mayBeShortcut({ key, ctrlKey: false, altKey: false, metaKey: false, ...mods });
+  for (const key of ['a', 'A', ' ', '/', '\u00e9', '\u{1F600}', 'Enter', 'Backspace', 'Delete'])
+    assert.equal(press(key), false, key);
+  for (const key of ['Tab', 'Escape', 'F5', 'ArrowDown', 'PageDown', 'Home', 'Unidentified'])
+    assert.equal(press(key), true, key);
+  assert.equal(press('l', { ctrlKey: true }), true);
+  assert.equal(press('d', { altKey: true }), true);
+  assert.equal(press('f', { metaKey: true }), true);
+  assert.equal(press('Enter', { ctrlKey: true }), true);
 });
 
 test('host layers: animated layers with or without a transform, covers without animation', () => {
