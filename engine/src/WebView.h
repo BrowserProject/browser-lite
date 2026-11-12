@@ -250,6 +250,8 @@ public:
     void didReachLayoutMilestone(OptionSet<WebCore::LayoutMilestone>);
     void didFailLoading(const String& url, const String& description);
     void didChangeTitle(const String&);
+    // A <link rel=icon> of the document was added, changed or removed
+    void didChangeIcons();
     void didChangeProgress(double);
     void didChangeCursor(const String& cssCursor);
     void didReceiveConsoleMessage(int level, const String& message, const String& source, unsigned line);
@@ -350,7 +352,7 @@ private:
     // In Page::updateRendering (for the debug log of the first layout)
     bool m_inRenderingUpdate { false };
     ErrorPage::Kind m_errorPageKind { ErrorPage::Kind::Network };
-    void loadFavicon();
+    void updateFavicon(bool pageLoaded);
     void notifyDocumentState();
 
     bool m_isLoading { false };
@@ -361,15 +363,19 @@ private:
     std::optional<WebCore::DoublePoint> m_longPressMenu;
     bool m_leavingPagePaused { false };
     bool m_restoringFromCache { false };
-    // The last icon loaded: a page with the same icon address gets it without a new load
+    // The last icons loaded, newest first: a page with the same icon address, or one that switches
+    // between a few icons (an unread badge), gets it without a new load
     struct Favicon {
         URL url;
         String mimeType;
         Vector<uint8_t> data;
     };
-    std::optional<Favicon> m_favicon;
-    // Icon address of the current document while it loads
+    static constexpr size_t keptFavicons = 4;
+    Vector<Favicon> m_favicons;
+    // Icon address of the current document (reported or loading) and the one still loading
+    URL m_faviconURL;
     URL m_faviconLoading;
+    bool m_faviconUpdateScheduled { false };
     RefPtr<WebCore::FileChooser> m_fileChooser;
 #if ENABLE(POINTER_LOCK)
     CompletionHandler<void(WebCore::PointerLockRequestResult)> m_pointerLockHandler;

@@ -81,7 +81,7 @@ comes as patches from `patches/`.
     drawn after one over it go into a cover canvas above it), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
-    keeps its request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
+    keeps its request; favicons, `data:` and `blob:` ones without a request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:
     the page waits like below a dialog, the other views go on), `Sockets.cpp`, `HttpCache.cpp`,
     `HttpAuth.cpp` (401 with Basic and Digest: stored credentials, the host's sign-in prompt),
     `ViewSource.cpp` (`view-source:` pages: the source of the address with numbered lines),

@@ -959,6 +959,12 @@ void FrameLoaderClient::dispatchDidReceiveTitle(const StringWithDirection& title
         m_view->didChangeTitle(title.string);
 }
 
+// Patch 0119: only for the main frame's document
+void FrameLoaderClient::dispatchDidChangeIcons()
+{
+    m_view->didChangeIcons();
+}
+
 // Also from iframes: their entries count for back/forward
 void FrameLoaderClient::dispatchDidNavigateWithinPage()
 {

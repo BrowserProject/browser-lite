@@ -934,6 +934,9 @@ void cancelDownload(int id)
     Download::cancel(id);
 }
 
+// A favicon is small: one larger is no icon
+static constexpr size_t maxIconSize = 512 * 1024;
+
 // Favicon: small, entirely in memory, goes to the caller as a whole
 class IconLoad final : public RefCounted<IconLoad>, public CurlRequestClient {
 public:
@@ -954,8 +957,6 @@ public:
     void deref() const final { RefCounted::deref(); }
 
 private:
-    static constexpr size_t maxSize = 512 * 1024;
-
     explicit IconLoad(Handler&& handler)
         : m_handler(WTF::move(handler))
     {
@@ -991,7 +992,7 @@ private:
     }
     void curlDidReceiveData(CurlRequest&, Ref<SharedBuffer>&& buffer) final
     {
-        if (m_data.size() + buffer->size() > maxSize) {
+        if (m_data.size() + buffer->size() > maxIconSize) {
             m_ok = false;
             return;
         }
@@ -1019,7 +1020,17 @@ private:
 
 void loadIcon(const URL& url, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&& handler)
 {
-    if (refusedReason(url))
+    // data: and blob: (icons a script draws, notification badges) need no network
+    if (url.protocolIsData() || url.protocolIsBlob()) {
+        ResourceError error;
+        ResourceResponse response;
+        Vector<uint8_t> data;
+        loadLocalResource(url, error, response, data);
+        if (!error.isNull() || data.size() > maxIconSize)
+            return handler({ }, { });
+        return handler(response.mimeType(), WTF::move(data));
+    }
+    if (!url.protocolIsInHTTPFamily() || refusedReason(url))
         return handler({ }, { });
     IconLoad::start(url, WTF::move(handler));
 }

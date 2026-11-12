@@ -603,8 +603,9 @@ export interface ViewEvents {
   /** A console message of the page. */
   console: ConsoleMessage;
   /**
-   * Favicon of the page, null when it has none. Reported for every http(s) page once it has
-   * loaded, also when the page before had the same icon.
+   * Favicon of the page, null when it has none. Reported for every http(s) page as soon as its
+   * `<link rel=icon>` is parsed (without one `/favicon.ico` once the page has loaded), again
+   * whenever the page changes its icon links, and also when the page before had the same icon.
    */
   icon: { blob: Blob | null };
   /**

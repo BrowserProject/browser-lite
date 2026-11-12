@@ -1,0 +1,70 @@
+diff --git a/Source/WebCore/html/HTMLLinkElement.cpp b/Source/WebCore/html/HTMLLinkElement.cpp
+index cdedfdde3d..d6dfb5fe86 100644
+--- a/Source/WebCore/html/HTMLLinkElement.cpp
++++ b/Source/WebCore/html/HTMLLinkElement.cpp
+@@ -193,6 +193,15 @@ void HTMLLinkElement::setDisabledState(bool disabled)
+     }
+ }
+ 
++// The client of the main frame hears when the icon links of its document change, so the tab icon
++// follows them while the page loads and afterwards, like Blink's UpdateFaviconURL
++static void iconLinksChanged(Document& document)
++{
++    RefPtr frame = document.frame();
++    if (frame && frame->isMainFrame() && frame->document() == &document)
++        frame->loader().client().dispatchDidChangeIcons();
++}
++
+ void HTMLLinkElement::attributeChanged(const QualifiedName& name, const AtomString& oldValue, const AtomString& newValue, AttributeModificationReason attributeModificationReason)
+ {
+     switch (name.nodeName()) {
+@@ -201,11 +210,15 @@ void HTMLLinkElement::attributeChanged(const QualifiedName& name, const AtomStri
+             document().addConsoleMessage(MessageSource::Other, MessageLevel::Error, "The \"spatial-backdrop\" link rel value is no longer supported and was ignored. Use the <model> immersive API instead."_s);
+         auto parsedRel = LinkRelAttribute(document(), newValue);
+         auto didMutateRel = parsedRel != m_relAttribute;
++        bool wasIcon = !!m_relAttribute.iconType;
+         m_relAttribute = WTF::move(parsedRel);
+         if (m_relList)
+             m_relList->associatedAttributeValueChanged();
+-        if (didMutateRel)
++        if (didMutateRel) {
+             process();
++            if (wasIcon && !m_relAttribute.iconType && isConnected())
++                iconLinksChanged(protect(document()));
++        }
+         break;
+     }
+     case AttributeNames::hrefAttr: {
+@@ -294,6 +307,9 @@ void HTMLLinkElement::process()
+     if (m_isHandlingBeforeLoad)
+         return;
+ 
++    if (m_relAttribute.iconType)
++        iconLinksChanged(protect(document()));
++
+     processInternalResourceLink();
+     if (m_relAttribute.isInternalResourceLink)
+         return;
+@@ -538,6 +554,9 @@ void HTMLLinkElement::removingSteps(RemovalType removalType, ContainerNode& oldP
+ 
+     processInternalResourceLink();
+     unblockRendering();
++
++    if (m_relAttribute.iconType)
++        iconLinksChanged(protect(document()));
+ }
+ 
+ void HTMLLinkElement::finishParsingChildren()
+diff --git a/Source/WebCore/loader/LocalFrameLoaderClient.h b/Source/WebCore/loader/LocalFrameLoaderClient.h
+index 8d1d5f840f..e9043804a6 100644
+--- a/Source/WebCore/loader/LocalFrameLoaderClient.h
++++ b/Source/WebCore/loader/LocalFrameLoaderClient.h
+@@ -184,6 +184,8 @@ public:
+     virtual void dispatchDidPopStateWithinPage() = 0;
+     virtual void dispatchWillClose() = 0;
+     virtual void dispatchDidReceiveIcon() { }
++    // The <link rel=icon> elements of the main frame's document were added, changed or removed
++    virtual void dispatchDidChangeIcons() { }
+     virtual void dispatchDidStartProvisionalLoad() = 0;
+     virtual void dispatchDidReceiveTitle(const StringWithDirection&) = 0;
+     virtual void dispatchDidCommitLoad(std::optional<HasInsecureContent>, std::optional<UsedLegacyTLS>, std::optional<WasPrivateRelayed>) = 0;

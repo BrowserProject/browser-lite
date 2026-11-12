@@ -2092,6 +2092,7 @@ void WebView::didCommitLoad()
     // A commit without a response (substitute data): the new document must not stay paused
     resumeLeavingPage();
     m_firstPaint = FirstPaint::WaitingForLayout;
+    m_faviconURL = { };
     m_faviconLoading = { };
     // New page without pinch zoom (back/forward restores the remembered one)
     m_pinch = std::nullopt;
@@ -2147,7 +2148,7 @@ void WebView::didFinishLoading()
     didChangeProgress(1);
     notifyNavigationState();
     notifyHost(m_id, "load");
-    loadFavicon();
+    updateFavicon(true);
 }
 
 void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
@@ -2190,10 +2191,25 @@ void WebView::exitFullscreen()
 #endif
 }
 
-// Best icon from <link rel=icon> (closest to 32 px, SVG always fits),
-// otherwise /favicon.ico. The engine loads it itself, the host has no network.
-// Reported for every loaded page, also when the last page had the same icon
-void WebView::loadFavicon()
+void WebView::didChangeIcons()
+{
+    // The parser adds the links of a head one by one: one decision on the next task
+    if (std::exchange(m_faviconUpdateScheduled, true))
+        return;
+    runOnEngineThread([weakThis = WeakPtr { *this }] {
+        RefPtr view = weakThis.get();
+        if (!view)
+            return;
+        view->m_faviconUpdateScheduled = false;
+        view->updateFavicon(false);
+    });
+}
+
+// Like Chrome the best <link rel=icon> (closest to 32 px, SVG always fits) as soon as the parser
+// or a script adds, changes or removes one, also after the load (notification badges, SPAs);
+// without one /favicon.ico once the page has loaded. The engine loads it itself, the host has no
+// network. Reported once per document and icon address, also when the last page had the same icon
+void WebView::updateFavicon(bool pageLoaded)
 {
     RefPtr frame = mainFrame();
     RefPtr document = frame ? frame->document() : nullptr;
@@ -2201,36 +2217,54 @@ void WebView::loadFavicon()
         return;
     // The error page has no icon and does not ask the site that failed, like Chrome
     if (RefPtr loader = frame->loader().documentLoader(); loader && !loader->unreachableURL().isEmpty()) {
-        m_faviconLoading = { };
-        sendIconData(m_id, { }, { }, { });
+        if (pageLoaded) {
+            m_faviconLoading = { };
+            sendIconData(m_id, { }, { }, { });
+        }
         return;
     }
     URL best;
     unsigned bestScore = std::numeric_limits<unsigned>::max();
     for (auto& icon : LinkIconCollector(*document).iconsOfTypes({ LinkIconType::Favicon })) {
-        unsigned score = icon.mimeType == "image/svg+xml"_s || icon.url.path().endsWith(".svg"_s) ? 0
+        bool isSVG = icon.mimeType == "image/svg+xml"_s || icon.url.path().endsWith(".svg"_s)
+            || (icon.url.protocolIsData() && icon.url.path().startsWithIgnoringASCIICase("image/svg+xml"_s));
+        unsigned score = isSVG ? 0
             : icon.size ? static_cast<unsigned>(std::abs(static_cast<int>(*icon.size) - 32)) + 1 : 20;
         if (score < bestScore) {
             bestScore = score;
             best = icon.url;
         }
     }
-    if (best.isEmpty())
+    if (best.isEmpty()) {
+        if (!pageLoaded && !document->loadEventFinished())
+            return;
         best = URL(document->url(), "/favicon.ico"_s);
-    if (m_favicon && m_favicon->url == best) {
-        sendIconData(m_id, best.string(), m_favicon->mimeType, m_favicon->data.span());
+    }
+    if (best == m_faviconLoading)
+        return;
+    // An icon still loading for an address the document no longer wants is dropped
+    m_faviconLoading = { };
+    if (best == m_faviconURL)
+        return;
+    m_faviconURL = best;
+    if (auto index = m_favicons.findIf([&](auto& icon) { return icon.url == best; }); index != notFound) {
+        auto icon = WTF::move(m_favicons[index]);
+        m_favicons.removeAt(index);
+        sendIconData(m_id, best.string(), icon.mimeType, icon.data.span());
+        m_favicons.insert(0, WTF::move(icon));
         return;
     }
     m_faviconLoading = best;
     loadIcon(best, [id = m_id, url = best](const String& mimeType, Vector<uint8_t>&& data) {
         auto* view = fromID(id);
-        // Another document came meanwhile: the icon is not its icon
+        // Another document or icon came meanwhile: the icon is not its icon
         if (!view || view->m_faviconLoading != url)
             return;
         view->m_faviconLoading = { };
         // Also without an icon (empty data), so the host removes the old one
         sendIconData(id, url.string(), mimeType, data.span());
-        view->m_favicon = Favicon { url, mimeType, WTF::move(data) };
+        view->m_favicons.insert(0, Favicon { url, mimeType, WTF::move(data) });
+        view->m_favicons.shrink(std::min(view->m_favicons.size(), keptFavicons));
     });
 }
 

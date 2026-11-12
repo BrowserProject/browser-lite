@@ -152,6 +152,7 @@ private:
     void dispatchDidStartProvisionalLoad() final;
     void dispatchDidCommitLoad(std::optional<WebCore::HasInsecureContent>, std::optional<WebCore::UsedLegacyTLS>, std::optional<WebCore::WasPrivateRelayed>) final;
     void dispatchDidReceiveTitle(const WebCore::StringWithDirection&) final;
+    void dispatchDidChangeIcons() final;
     // Within the same document (anchor, history.pushState/replaceState,
     // back/forward to it): new address and history to the host
     void dispatchDidNavigateWithinPage() final;

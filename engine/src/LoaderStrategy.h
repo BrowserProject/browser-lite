@@ -78,7 +78,8 @@ WebCore::ResourceError followRedirect(RefPtr<WebCore::CurlRequest>&, WebCore::Cu
 // data: and blob: from the engine itself, without a request
 void loadLocalResource(const URL&, WebCore::ResourceError&, WebCore::ResourceResponse&, Vector<uint8_t>& data);
 
-// Loads a favicon (small, entirely in memory). Empty data when there is none
+// Loads a favicon (small, entirely in memory; http(s) with a request, data: and blob: locally,
+// the handler may run at once). Empty data when there is none
 void loadIcon(const URL&, CompletionHandler<void(const String& mimeType, Vector<uint8_t>&&)>&&);
 
 } // namespace BrowserLite

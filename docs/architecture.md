@@ -400,11 +400,15 @@ resource; another version replaces the ranges. `MediaFetch` looks up in the part
 element's document. A 304 only updates the headers of the stored entry, its body stays in the
 Cache API.
 
-The favicon of a page is loaded by the engine itself (`WebView::loadFavicon`, `IconLoad` in
-`LoaderStrategy.cpp`) once an http(s) page has loaded: the best `<link rel=icon>`, else
-`/favicon.ico`. It goes to the host (`icon`) for every such page; the view keeps the last icon, so
-a page with the same icon address gets it without a new request, and an icon that arrives after
-its page was left is dropped (#389).
+The favicon of a page is loaded by the engine itself (`WebView::updateFavicon`, `loadIcon` in
+`LoaderStrategy.cpp`, `data:` and `blob:` icons without a request). Like Chrome the best
+`<link rel=icon>` of an http(s) page is taken as soon as the parser or a script adds, changes or
+removes one (patch 0119 tells the view, which decides once per task), also after the load
+(notification badges, single page apps); without one, `/favicon.ico` once the page has loaded. It
+goes to the host (`icon`) once per document and icon address; the view keeps its last 4 icons, so
+a page with the same icon address, or one that switches between a few (an unread badge), gets it
+without a new request, and an icon that arrives after its page was left or its link changed is
+dropped (#389, #520).
 
 ## Storage
 
