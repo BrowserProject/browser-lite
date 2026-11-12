@@ -4,6 +4,7 @@ export {
   type MenuItem,
   type MenuSeparator,
   showContextMenu,
+  showMenu,
 } from './context-menu.js';
 export { dataListPopup } from './datalist-popup.js';
 export { type DialogOptions, nativeDialogs } from './dialogs.js';

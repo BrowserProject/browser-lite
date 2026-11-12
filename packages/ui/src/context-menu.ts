@@ -51,6 +51,22 @@ export function normalizeMenu(items: readonly MenuItem[]): MenuItem[] {
 
 let closeOpen: (() => void) | null = null;
 
+/** Where a menu opens and what it stays inside of. */
+interface Placement {
+  /** Point of the menu's top left corner in viewport coordinates. */
+  x: number;
+  y: number;
+  /** Area the menu stays inside of, in viewport coordinates; the window when absent. */
+  area?: DOMRectReadOnly;
+  /** Runs after a command was chosen, before the command. */
+  chosen?: () => void;
+  /** Closes the menu when it runs the function it gets; returns a remover. */
+  until?: (close: () => void) => () => void;
+  /** Marks the menu with `data-bl-view` and `data-bl-touch`. */
+  view?: View;
+  touch?: boolean;
+}
+
 /**
  * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
  * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
@@ -66,6 +82,38 @@ export function showContextMenu(
   items: MenuItem[],
   options?: UiOptions,
 ): () => void {
+  const area = view.canvas.getBoundingClientRect();
+  return openMenu(
+    items,
+    {
+      x: area.left + info.x,
+      y: area.top + info.y,
+      area,
+      chosen: () => view.focus(),
+      until: (close) => view.on('close', close),
+      view,
+      touch: info.touch,
+    },
+    options,
+  );
+}
+
+/**
+ * Shows a menu of the embedding page itself, like the menu of a tab in a tab strip: the same
+ * element and behaviour as `showContextMenu`, at `x`, `y` in viewport coordinates (the
+ * `clientX`, `clientY` of a `contextmenu` event), kept inside the visible part of the window.
+ * A press on the menu does not move the keyboard focus, so it stays where it was. Returns a
+ * function that closes the menu.
+ */
+export function showMenu(
+  items: MenuItem[],
+  at: { x: number; y: number },
+  options?: UiOptions,
+): () => void {
+  return openMenu(items, { x: at.x, y: at.y }, options);
+}
+
+function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => void {
   closeOpen?.();
   const entries = normalizeMenu(items);
   if (!entries.some((item) => !isSeparator(item) && !isHeader(item))) return () => {};
@@ -74,14 +122,14 @@ export function showContextMenu(
   const win = doc.defaultView ?? window;
   const menu = element(root, 'div', 'context-menu');
   menu.setAttribute('role', 'menu');
-  menu.dataset.blView = String(view.id);
-  if (info.touch) menu.dataset.blTouch = '';
+  if (at.view) menu.dataset.blView = String(at.view.id);
+  if (at.touch) menu.dataset.blTouch = '';
 
   const close = () => {
     if (closeOpen !== close) return;
     closeOpen = null;
     stopListening();
-    stopViewClose();
+    stopUntil?.();
     menu.remove();
   };
   closeOpen = close;
@@ -110,7 +158,7 @@ export function showContextMenu(
       void Promise.resolve()
         .then(() => item.action())
         .catch((error: unknown) => console.warn('context menu:', error));
-      view.focus();
+      at.chosen?.();
     });
     menu.append(button);
   }
@@ -136,11 +184,13 @@ export function showContextMenu(
       true,
     ],
     [win, 'blur', close],
+    // The keyboard stays where it was (the page, a field of the app)
+    [menu, 'mousedown', (event) => event.preventDefault()],
   ]);
-  const stopViewClose = view.on('close', close);
+  const stopUntil = at.until?.(close);
 
   root.append(menu);
-  place(menu, view.canvas.getBoundingClientRect(), info, win);
+  place(menu, at, win);
   return close;
 }
 
@@ -148,31 +198,25 @@ export function showContextMenu(
 const MARGIN = 4;
 
 /**
- * At the position of `info`, moved and if needed shortened (it scrolls then) to stay inside the
- * visible part of the view canvas: what the app puts beside the view (a toolbar at the bottom on
- * a phone) or the on-screen keyboard may be in front of the menu.
+ * At the point of `at`, moved and if needed shortened (it scrolls then) to stay inside the
+ * visible part of its area: what the app puts beside a view (a toolbar at the bottom on a phone)
+ * or the on-screen keyboard may be in front of the menu.
  */
-function place(
-  menu: HTMLElement,
-  canvas: DOMRectReadOnly,
-  info: ContextMenuInfo,
-  win: Window,
-): void {
+function place(menu: HTMLElement, at: Placement, win: Window): void {
   const visual = win.visualViewport;
-  const top = Math.max(canvas.top, 0, visual?.offsetTop ?? 0);
+  const area = at.area;
+  const top = Math.max(area?.top ?? 0, 0, visual?.offsetTop ?? 0);
   const bottom = Math.min(
-    canvas.bottom,
+    area?.bottom ?? Number.POSITIVE_INFINITY,
     win.innerHeight,
     visual ? visual.offsetTop + visual.height : Number.POSITIVE_INFINITY,
   );
-  const left = Math.max(canvas.left, 0);
-  const right = Math.min(canvas.right, win.innerWidth);
+  const left = Math.max(area?.left ?? 0, 0);
+  const right = Math.min(area?.right ?? Number.POSITIVE_INFINITY, win.innerWidth);
   const style = menu.style;
   style.position = 'fixed';
   style.maxHeight = `${Math.max(0, bottom - top - 2 * MARGIN)}px`;
   style.overflowY = 'auto';
-  const x = canvas.left + info.x;
-  const y = canvas.top + info.y;
-  style.left = `${Math.max(left, Math.min(x, right - menu.offsetWidth - MARGIN))}px`;
-  style.top = `${Math.max(top + MARGIN, Math.min(y, bottom - menu.offsetHeight - MARGIN))}px`;
+  style.left = `${Math.max(left, Math.min(at.x, right - menu.offsetWidth - MARGIN))}px`;
+  style.top = `${Math.max(top + MARGIN, Math.min(at.y, bottom - menu.offsetHeight - MARGIN))}px`;
 }

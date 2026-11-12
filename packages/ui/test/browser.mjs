@@ -832,6 +832,74 @@ test('context menu with the default items', async () => {
   });
 });
 
+test('menu of the embedding page', async () => {
+  const state = await page.evaluate(() => {
+    const field = document.createElement('input');
+    field.id = 'app-field';
+    document.body.append(field);
+    field.focus();
+    const view = makeView(7);
+    window.chosen = [];
+    window.closeView = ui.showContextMenu(
+      view,
+      { x: 5, y: 5, link: '', image: '', selection: '', editable: false, touch: false },
+      [{ label: 'View item', action() {} }],
+    );
+    window.closeMenu = ui.showMenu(
+      [
+        { id: 'a', label: 'First', action: () => window.chosen.push('a') },
+        { separator: true },
+        { id: 'b', label: 'Off', enabled: false, action: () => window.chosen.push('b') },
+      ],
+      { x: 700, y: 20 },
+    );
+    const menus = document.querySelectorAll('.bl-context-menu');
+    const menu = menus[0];
+    const box = menu.getBoundingClientRect();
+    return {
+      single: menus.length,
+      role: menu.getAttribute('role'),
+      view: menu.hasAttribute('data-bl-view'),
+      rows: [...menu.children].map((node) => node.dataset.blItem ?? node.tagName),
+      top: menu.style.top,
+      inside: box.right <= 800 && box.left >= 0,
+    };
+  });
+  assert.deepEqual(state, {
+    single: 1,
+    role: 'menu',
+    view: false,
+    rows: ['a', 'HR', 'b'],
+    top: '20px',
+    inside: true,
+  });
+  // A real click: the field of the app keeps the keyboard
+  await page.click('.bl-context-menu [data-bl-item=a]');
+  const after = await page.evaluate(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const out = {
+      chosen: window.chosen,
+      closed: !document.querySelector('.bl-context-menu'),
+      focus: document.activeElement?.id,
+    };
+    ui.showMenu([{ label: 'x', action() {} }], { x: 10, y: 10 });
+    key('Escape');
+    out.escape = !document.querySelector('.bl-context-menu');
+    out.empty =
+      ui.showMenu([{ separator: true }], { x: 10, y: 10 }) &&
+      !document.querySelector('.bl-context-menu');
+    document.getElementById('app-field').remove();
+    return out;
+  });
+  assert.deepEqual(after, {
+    chosen: ['a'],
+    closed: true,
+    focus: 'app-field',
+    escape: true,
+    empty: true,
+  });
+});
+
 test('context menu of a long press', async () => {
   const result = await page.evaluate(() => {
     const view = makeView(6);

@@ -21,6 +21,11 @@ export function takeClosed(): ClosedTab | undefined {
   return closed.pop();
 }
 
+/** True while Ctrl+Shift+T has a tab to bring back. */
+export function hasClosed(): boolean {
+  return closed.length > 0;
+}
+
 /** Forgets all closed tabs (with the history). */
 export function clearClosed(): void {
   closed.length = 0;

@@ -46,6 +46,7 @@ import { openSettings } from './settings-page.js';
 import { installShortcuts } from './shortcuts.js';
 import { initSidePanel, panelOpen, togglePanel } from './side-panel.js';
 import { initTabDrag } from './tab-drag.js';
+import { initTabMenu } from './tab-menu.js';
 import { initTabOverview } from './tab-overview.js';
 import {
   activate,
@@ -366,6 +367,7 @@ followHostHistory(() => {
 initBlockedPopups((url) => openURL(url, true));
 initTabOverview();
 initTabDrag();
+initTabMenu();
 initNewTabPage();
 followShownView([document.body, byId('pages')]);
 onPreviewClosed(focusPage);

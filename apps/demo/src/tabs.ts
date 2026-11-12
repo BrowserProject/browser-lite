@@ -121,10 +121,7 @@ export class Tab implements SessionTab {
     this.part('.icon').append(defaultFavicon());
     this.part('.dialog-blocked').append(icon('blocked'));
     this.part('.close').append(icon('close'));
-    this.part('.audio').addEventListener('click', () => {
-      this.view.setMuted(!this.view.muted);
-      this.updateAudio();
-    });
+    this.part('.audio').addEventListener('click', () => this.toggleMuted());
     this.element.addEventListener('mousedown', (e) => {
       // Like Chrome a press on a tab takes no focus: the page or the address bar keeps the
       // keyboard, activate gives it to the tab's own. The middle button closes the tab on
@@ -360,6 +357,12 @@ export class Tab implements SessionTab {
     this.part('.dialog-blocked').hidden = !this.dialogsBlocked && !this.dialogSuppressed;
   }
 
+  /** Mutes the tab, or turns its sound on again. */
+  toggleMuted(): void {
+    this.view.setMuted(!this.view.muted);
+    this.updateAudio();
+  }
+
   /** Speaker like Chrome: shows sound, a click mutes the tab. */
   updateAudio(): void {
     const button = this.part<HTMLButtonElement>('.audio');
@@ -507,19 +510,25 @@ function createView(url?: string) {
   });
 }
 
-/** A new tab in the foreground with url (empty: a blank tab, NEW_TAB_URL: the new tab page). */
-export function openTab(url: string): Tab | null {
+/**
+ * A new tab in the foreground with url (empty: a blank tab, NEW_TAB_URL: the new tab page), before
+ * the tab `before`, else at the end of the strip.
+ */
+export function openTab(url: string, before?: Tab): Tab | null {
   const view = createView(url);
   if (!view) return null;
   const tab = new Tab(view, { url });
   tab.opener = active;
-  activate(add(tab));
+  activate(add(tab, before));
   return tab;
 }
 
-/** A new tab in front: the home page of the settings, else the new tab page. */
-export function openNewTab(): Tab | null {
-  return openTab(settings().homePage || NEW_TAB_URL);
+/**
+ * A new tab in front: the home page of the settings, else the new tab page; at the end of the
+ * strip, or right after `after` (New tab to the right of the tab menu).
+ */
+export function openNewTab(after?: Tab): Tab | null {
+  return openTab(settings().homePage || NEW_TAB_URL, after && list[list.indexOf(after) + 1]);
 }
 
 /** Link or bookmark: in the active tab or a new one (empty url: a new tab). */
@@ -655,13 +664,7 @@ export function activate(tab: Tab): void {
   tab.dialogSuppressed = false;
   tab.updateDialogMarker();
   updateStar(tab.url);
-  if (tab.pending) {
-    // With back/forward like before the restart or the discard
-    const { url, history } = tab.pending;
-    tab.pending = null;
-    if (history) tab.view.restoreHistory(history);
-    else tab.view.load(url);
-  }
+  loadPending(tab);
   persistSession();
   tab.show(true);
   showPromptsOf(tab.view);
@@ -673,6 +676,45 @@ export function activate(tab: Tab): void {
   syncHostHistory();
   tab.updateTitle();
   if (!enterAddress(tab)) focusPage();
+}
+
+/** A restored or discarded tab loads its page, with back/forward like before. */
+function loadPending(tab: Tab): void {
+  if (!tab.pending) return;
+  const { url, history } = tab.pending;
+  tab.pending = null;
+  if (history) tab.view.restoreHistory(history);
+  else tab.view.load(url);
+}
+
+/** Reloads the page of tab; one that has not loaded yet loads it, also in the background. */
+export function reloadTab(tab: Tab): void {
+  if (tab.pending) loadPending(tab);
+  else tab.view.reload();
+}
+
+/**
+ * Duplicate of the tab menu like Chrome: a tab with the same page and back/forward (and scroll
+ * positions) right after tab, in front.
+ */
+export function duplicateTab(tab: Tab): Tab | null {
+  const entry = sessionEntry(tab);
+  const next = list[list.indexOf(tab) + 1];
+  if (!entry.history) return openTab(tab.url, next);
+  const copy = restoredTab(entry, next);
+  if (!copy) return null;
+  copy.opener = active;
+  activate(copy);
+  return copy;
+}
+
+/**
+ * Closes tabs by the user (Close other tabs, Close tabs to the right) and keeps `keep`, which
+ * becomes active when the active tab is among them, like Chrome.
+ */
+export function closeTabs(tabs: readonly Tab[], keep: Tab): void {
+  if (active && tabs.includes(active)) activate(keep);
+  for (const tab of tabs) requestClose(tab);
 }
 
 /** Moves tab to index of the strip (clamped to its ends), like dragging it in Chrome. */

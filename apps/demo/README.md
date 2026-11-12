@@ -172,6 +172,12 @@ select popup) are in the same sheet.
   it; only the left button activates a tab, like Chrome and Firefox (#418). A press on a tab
   or its buttons takes no focus like in Chrome: the tab's page gets the keyboard back with the
   field that had it, a click on the active tab leaves it where it is (#486).
+  A right click on a tab opens its menu like Chrome (`tab-menu.ts`, the `showMenu` of
+  `@browser-lite/ui`): New tab to the right, Reload (a tab that has not loaded yet loads in the
+  background), Duplicate (the page with back and forward right after the tab, in front), Mute or
+  Unmute tab, Close, Close other tabs and Close tabs to the right (both through beforeunload,
+  the pressed tab becomes active when the active one goes) and Reopen closed tab; on the free
+  part of the strip New tab and Reopen closed tab. The right press takes no focus either (#521).
 - **Back, Forward and Reload** of the toolbar take no focus from a press with the mouse or a
   finger, like in Chrome: the page has the keyboard after the action, so Space, PageDown and the
   arrow keys scroll it instead of pressing the button again; a button reached with Tab keeps the
@@ -269,7 +275,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts` | the back and forward of the host browser act on the tab in front |
-| `tab-drag.ts` | reordering tabs by dragging them in the strip |
+| `tab-drag.ts`, `tab-menu.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |
