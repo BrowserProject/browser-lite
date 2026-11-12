@@ -20,6 +20,9 @@
 //   column-balancing.html  blocks inside one column keep their layout in the balancing passes of a
 //                  multicol (patch 0118): same geometry as a fresh layout and as a multicol where
 //                  nothing is kept, a relayout of balanced columns costs about as much as without
+//   cssom-rules.html  a rule insertRule() adds or deleteRule() removes restyles only the elements
+//                  it may match (patch 0124): same computed style as a fresh style of the tree, an
+//                  inserted rule next to 4000 elements costs a fraction of a full restyle
 //   compression.html  CompressionStream and DecompressionStream take buffers of another realm
 //                  (patch 0110) and still reject chunks that are no BufferSource
 //
@@ -49,6 +52,7 @@ const CASES = [
   { name: 'percent-heights', size: [1000, 700], wait: 'PERCENT done' },
   { name: 'column-balancing', size: [1000, 700], wait: 'COLUMNS done' },
   { name: 'compression', wait: 'COMPRESSION done' },
+  { name: 'cssom-rules', size: [800, 600], wait: 'CSSOM done' },
   {
     name: 'absent-properties',
     label: 'absent-properties (interpreter)',

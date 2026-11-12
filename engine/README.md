@@ -27,7 +27,8 @@ WebGL named to pages, always Apple's instead of the host's, so Google Maps drew 
 software renderer, or the buffers of an iframe's realm that compression streams refused, or the
 tile jobs of a closed view that its painting threads ran after its layer tree host was freed, or
 the frames of a canvas handed to an OffscreenCanvas, which never reached its layer, or the stencil
-a WebGL drawing buffer with depth went without)
+a WebGL drawing buffer with depth went without, or the whole document that every rule a CSS-in-JS
+library inserted restyled and laid out again)
 comes as patches from `patches/`.
 
 ## Folders

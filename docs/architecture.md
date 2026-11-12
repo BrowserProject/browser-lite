@@ -67,7 +67,13 @@ until its collapsed borders change (patch 0106, #485). The balancing passes of a
 column set, no spanners, not inside another fragmentation context) keep the layout of a block
 whose last layout met no column boundary and no forced break and that still lies strictly inside
 one column, like Blink's legacy layout; they lay out only what meets a column boundary again
-(patch 0118, #519). `CompressionStream` and
+(patch 0118, #519). A rule that `insertRule()` adds to or `deleteRule()` removes from an active
+sheet restyles only the elements it may match, like a sheet that was added (WebKit restyled the
+whole document; CSS-in-JS libraries insert hundreds of rules while a page renders), unless
+something else of the sheets changed or the rule is no style rule (also inside `@media`); the
+style resolver is still built anew. Such a new resolver keeps the faces of the `@font-face` rules
+whose descriptors did not change, where WebKit made every face anew, which loaded its font again
+and so restyled and laid out the whole document once more (patch 0124, #530). `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).

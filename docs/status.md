@@ -471,7 +471,21 @@ browser (Safari keeps Cmd+L, T and W for itself).
    task of about 0.9 s that commits the route, and on Back in some runs a canvas ad on the
    article whose animation frames (2D `drawImage` with rotation on the CPU, about 30 ms each)
    took 57 to 61 % of the engine thread while the home page rendered. Like Chrome the demo shows
-   no progress for a same-document navigation (`pushState`).
+   no progress for a same-document navigation (`pushState`). 2026-11-12 (the report: a Moto G71
+   showed the article after 13.5 s and the home page 14 to 16 s after Back, in tasks of up to 3.9
+   and 6.6 s): from the tap to the article's title in the DOM Chromium's renderer is busy 0.75 s
+   (blick's route 0.2 s, viafoura 0.17 s, style and layout 0.15 s), here 6 to 7 s. blick's
+   styled-components insert about 300 rules with `insertRule()` on a tap, and every one that a
+   style update met restyled the whole document and laid it out again: 105 to 135 ms per rule on
+   the home page (Chromium 1.3 ms). WebKit invalidated all style for any change of an active
+   sheet, and each new style resolver made the faces of all `@font-face` rules anew, whose fonts
+   then counted as loaded again and restyled and laid out everything once more. Now such a rule
+   restyles only the elements it may match and unchanged rules keep their faces (#530): 10 to 16
+   ms per rule. During the tap style, layout and resolver builds took 18.5 % of the engine thread
+   instead of 24 %; the title came after 6.5 to 7.9 s (median 6.9) instead of 6.8 to 8.7 s
+   (median 7.1), Back 5.5 to 7.6 s instead of 6.9 to 9.3 s (5 runs each, noisy). What is left of
+   them is building the resolver for every update with new rules (6 % of the engine thread
+   during the tap) and the JS of the route, comments and ads, about 8 to 10 times Chromium's.
    blick.ch's first load (2026-11-11; the report: a task of 12.6 s on a Moto G71 after the load,
    the bar and flings without answer meanwhile): that task is React's hydration, one task in Chrome
    too (0.4 to 0.85 s on this machine), here 3.5 to 8 s. Its render ran without GC and with a

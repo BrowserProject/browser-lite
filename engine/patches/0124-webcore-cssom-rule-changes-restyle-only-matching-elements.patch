@@ -1,0 +1,467 @@
+diff --git a/Source/WebCore/css/CSSFontFaceRule.cpp b/Source/WebCore/css/CSSFontFaceRule.cpp
+index 5fa3a4aaf0..3599450405 100644
+--- a/Source/WebCore/css/CSSFontFaceRule.cpp
++++ b/Source/WebCore/css/CSSFontFaceRule.cpp
+@@ -23,6 +23,9 @@
+ #include "CSSFontFaceRule.h"
+ 
+ #include "CSSFontFaceDescriptors.h"
++#include "CSSFontSelector.h"
++#include "CSSStyleSheet.h"
++#include "DocumentInlines.h"
+ #include "CSSSerializationContext.h"
+ #include "MutableStyleProperties.h"
+ #include "StyleProperties.h"
+@@ -51,6 +54,13 @@ CSSFontFaceDescriptors& CSSFontFaceRule::style()
+     return *m_propertiesCSSOMWrapper;
+ }
+ 
++void CSSFontFaceRule::descriptorsDidChange()
++{
++    RefPtr sheet = parentStyleSheet();
++    if (RefPtr document = sheet ? sheet->ownerDocument() : nullptr)
++        protect(document->fontSelector())->fontFaceRuleDescriptorsChanged(m_fontFaceRule);
++}
++
+ String CSSFontFaceRule::cssText() const
+ {
+     return cssTextInternal(protect(m_fontFaceRule)->properties().asText(CSS::defaultSerializationContext()));
+diff --git a/Source/WebCore/css/CSSFontFaceRule.h b/Source/WebCore/css/CSSFontFaceRule.h
+index 42668450ad..dbe062d7c3 100644
+--- a/Source/WebCore/css/CSSFontFaceRule.h
++++ b/Source/WebCore/css/CSSFontFaceRule.h
+@@ -36,6 +36,9 @@ public:
+ 
+     WEBCORE_EXPORT CSSFontFaceDescriptors& style();
+ 
++    // browser-lite: a descriptor changed through style()
++    void descriptorsDidChange();
++
+ private:
+     CSSFontFaceRule(StyleRuleFontFace&, CSSStyleSheet* parent);
+ 
+diff --git a/Source/WebCore/css/CSSFontSelector.cpp b/Source/WebCore/css/CSSFontSelector.cpp
+index 890ae3df48..1a8562f921 100644
+--- a/Source/WebCore/css/CSSFontSelector.cpp
++++ b/Source/WebCore/css/CSSFontSelector.cpp
+@@ -133,7 +133,11 @@ void CSSFontSelector::emptyCaches()
+ void CSSFontSelector::buildStarted()
+ {
+     m_buildIsUnderway = true;
+-    m_cssFontFaceSet->purge();
++    // browser-lite: no purge here, the faces of rules that the build does not add again go in
++    // buildCompleted. A face made anew for an unchanged rule loaded its font again (from the
++    // memory cache), and every font load restyles and lays out the whole document: so did every
++    // new style resolver of a page with web fonts (a rule inserted through the CSSOM, a memory
++    // release), about 100 ms on blick.ch
+     ++m_version;
+ 
+     ASSERT(m_cssConnectionsPossiblyToRemove.isEmpty());
+@@ -166,6 +170,7 @@ void CSSFontSelector::buildCompleted()
+     for (auto& item : m_stagingArea)
+         addFontFaceRule(item.styleRuleFontFace, item.isInitiatingElementInUserAgentShadowTree);
+     m_cssConnectionsEncounteredDuringBuild.clear();
++    m_fontFaceRulesWithChangedDescriptors.clear();
+     m_stagingArea.clear();
+     m_cssConnectionsPossiblyToRemove.clear();
+ }
+@@ -174,6 +179,9 @@ void CSSFontSelector::addFontFaceRule(StyleRuleFontFace& fontFaceRule, bool isIn
+ {
+     if (m_buildIsUnderway) {
+         m_cssConnectionsEncounteredDuringBuild.add(fontFaceRule);
++        // browser-lite: a rule whose descriptors did not change keeps the face it has
++        if (!m_fontFaceRulesWithChangedDescriptors.contains(fontFaceRule) && m_cssFontFaceSet->lookUpByCSSConnection(fontFaceRule))
++            return;
+         m_stagingArea.append({fontFaceRule, isInitiatingElementInUserAgentShadowTree});
+         return;
+     }
+@@ -245,6 +253,11 @@ void CSSFontSelector::addFontFaceRule(StyleRuleFontFace& fontFaceRule, bool isIn
+     ++m_version;
+ }
+ 
++void CSSFontSelector::fontFaceRuleDescriptorsChanged(StyleRuleFontFace& fontFaceRule)
++{
++    m_fontFaceRulesWithChangedDescriptors.add(fontFaceRule);
++}
++
+ void CSSFontSelector::addFontPaletteValuesRule(const StyleRuleFontPaletteValues& fontPaletteValuesRule)
+ {
+ 
+@@ -503,6 +516,7 @@ void CSSFontSelector::clearFonts()
+ {
+     m_isStopped = true;
+     m_cssFontFaceSet->clear();
++    m_fontFaceRulesWithChangedDescriptors.clear();
+     m_clients.clear();
+ }
+ 
+diff --git a/Source/WebCore/css/CSSFontSelector.h b/Source/WebCore/css/CSSFontSelector.h
+index 6a8ee2b0cb..a0ffc2dbb8 100644
+--- a/Source/WebCore/css/CSSFontSelector.h
++++ b/Source/WebCore/css/CSSFontSelector.h
+@@ -73,6 +73,9 @@ public:
+     void buildCompleted();
+ 
+     void addFontFaceRule(StyleRuleFontFace&, bool isInitiatingElementInUserAgentShadowTree);
++    // browser-lite: the descriptors of the rule changed through the CSSOM, the next build makes
++    // its face anew (the other rules keep theirs)
++    void fontFaceRuleDescriptorsChanged(StyleRuleFontFace&);
+     void addFontPaletteValuesRule(const StyleRuleFontPaletteValues&);
+     void addFontFeatureValuesRule(const StyleRuleFontFeatureValues&);
+ 
+@@ -145,6 +148,7 @@ private:
+ 
+     HashSet<Ref<CSSFontFace>> m_cssConnectionsPossiblyToRemove;
+     HashSet<Ref<StyleRuleFontFace>> m_cssConnectionsEncounteredDuringBuild;
++    HashSet<Ref<StyleRuleFontFace>> m_fontFaceRulesWithChangedDescriptors;
+ 
+     const Ref<CSSFontFaceSet::FontModifiedObserver> m_fontModifiedObserver;
+ 
+diff --git a/Source/WebCore/css/CSSStyleSheet.cpp b/Source/WebCore/css/CSSStyleSheet.cpp
+index a71bdfb126..ab9c578236 100644
+--- a/Source/WebCore/css/CSSStyleSheet.cpp
++++ b/Source/WebCore/css/CSSStyleSheet.cpp
+@@ -230,7 +230,7 @@ void CSSStyleSheet::didMutateRuleFromCSSStyleDeclaration()
+ }
+ 
+ // FIXME: counter-style: we might need something similar for counter-style (rdar://103018993).
+-void CSSStyleSheet::didMutateRules(RuleMutationType mutationType, ContentsClonedForMutation contentsClonedForMutation, StyleRuleKeyframes* insertedKeyframesRule, const String& modifiedKeyframesRuleName)
++void CSSStyleSheet::didMutateRules(RuleMutationType mutationType, ContentsClonedForMutation contentsClonedForMutation, StyleRuleKeyframes* insertedKeyframesRule, const String& modifiedKeyframesRuleName, StyleRuleBase* changedRule)
+ {
+     ASSERT(m_contents->isMutable());
+     ASSERT(m_contents->hasOneClient());
+@@ -252,7 +252,12 @@ void CSSStyleSheet::didMutateRules(RuleMutationType mutationType, ContentsCloned
+                 ownerDocument->keyframesRuleDidChange(modifiedKeyframesRuleName);
+         }
+ 
+-        scope.didChangeStyleSheetContents();
++        // browser-lite: a rule added or removed through the CSSOM restyles only the elements it
++        // may match instead of the whole document (CSS-in-JS inserts hundreds of rules)
++        if (changedRule)
++            scope.didChangeStyleSheetRule(*changedRule);
++        else
++            scope.didChangeStyleSheetContents();
+ 
+         m_wasMutated = true;
+     });
+@@ -387,7 +392,7 @@ ExceptionOr<unsigned> CSSStyleSheet::insertRule(const String& ruleString, unsign
+     if (m_wasConstructedByJS && rule->isImportRule())
+         return Exception { ExceptionCode::SyntaxError, "Cannot inserted an @import rule in a constructed CSSStyleSheet object"_s };
+ 
+-    RuleMutationScope mutationScope(this, RuleInsertion, dynamicDowncast<StyleRuleKeyframes>(*rule));
++    RuleMutationScope mutationScope(this, RuleInsertion, dynamicDowncast<StyleRuleKeyframes>(*rule), rule.get());
+ 
+     bool isNamespace = rule->isNamespaceRule();
+     bool success = m_contents.get().wrapperInsertRule(rule.releaseNonNull(), index);
+@@ -414,7 +419,7 @@ ExceptionOr<void> CSSStyleSheet::deleteRule(unsigned index)
+ 
+     if (index >= length())
+         return Exception { ExceptionCode::IndexSizeError };
+-    RuleMutationScope mutationScope(this);
++    RuleMutationScope mutationScope(this, OtherMutation, nullptr, m_contents->ruleAt(index));
+ 
+     bool success = protect(m_contents)->wrapperDeleteRule(index);
+     if (!success)
+@@ -627,10 +632,11 @@ void CSSStyleSheet::getChildStyleSheets(HashSet<Ref<CSSStyleSheet>>& childStyleS
+     }
+ }
+ 
+-CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSStyleSheet* sheet, RuleMutationType mutationType, StyleRuleKeyframes* insertedKeyframesRule)
++CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSStyleSheet* sheet, RuleMutationType mutationType, StyleRuleKeyframes* insertedKeyframesRule, StyleRuleBase* changedRule)
+     : m_styleSheet(sheet)
+     , m_mutationType(mutationType)
+     , m_insertedKeyframesRule(insertedKeyframesRule)
++    , m_changedRule(changedRule)
+ {
+     ASSERT(m_styleSheet);
+     m_contentsClonedForMutation = protect(m_styleSheet)->willMutateRules();
+@@ -653,7 +659,7 @@ CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSRule* rule)
+ CSSStyleSheet::RuleMutationScope::~RuleMutationScope()
+ {
+     if (RefPtr styleSheet = m_styleSheet.get()) {
+-        styleSheet->didMutateRules(m_mutationType, m_contentsClonedForMutation, m_insertedKeyframesRule.get(), m_modifiedKeyframesRuleName);
++        styleSheet->didMutateRules(m_mutationType, m_contentsClonedForMutation, m_insertedKeyframesRule.get(), m_modifiedKeyframesRuleName, m_changedRule.get());
+         styleSheet->contents().clearHasNestingRulesCache();
+     }
+ }
+diff --git a/Source/WebCore/css/CSSStyleSheet.h b/Source/WebCore/css/CSSStyleSheet.h
+index f1c7ded1cd..f941153e84 100644
+--- a/Source/WebCore/css/CSSStyleSheet.h
++++ b/Source/WebCore/css/CSSStyleSheet.h
+@@ -130,7 +130,8 @@ public:
+     class RuleMutationScope {
+         WTF_MAKE_NONCOPYABLE(RuleMutationScope);
+     public:
+-        RuleMutationScope(CSSStyleSheet*, RuleMutationType = OtherMutation, StyleRuleKeyframes* insertedKeyframesRule = nullptr);
++        // browser-lite: changedRule is the top-level rule that insertRule() adds or deleteRule() removes
++        RuleMutationScope(CSSStyleSheet*, RuleMutationType = OtherMutation, StyleRuleKeyframes* insertedKeyframesRule = nullptr, StyleRuleBase* changedRule = nullptr);
+         RuleMutationScope(CSSRule*);
+         ~RuleMutationScope();
+ 
+@@ -140,10 +141,11 @@ public:
+         ContentsClonedForMutation m_contentsClonedForMutation;
+         RefPtr<StyleRuleKeyframes> m_insertedKeyframesRule;
+         String m_modifiedKeyframesRuleName;
++        RefPtr<StyleRuleBase> m_changedRule;
+     };
+ 
+     ContentsClonedForMutation willMutateRules();
+-    void didMutateRules(RuleMutationType, ContentsClonedForMutation, StyleRuleKeyframes* insertedKeyframesRule, const String& modifiedKeyframesRuleName);
++    void didMutateRules(RuleMutationType, ContentsClonedForMutation, StyleRuleKeyframes* insertedKeyframesRule, const String& modifiedKeyframesRuleName, StyleRuleBase* changedRule = nullptr);
+     void didMutateRuleFromCSSStyleDeclaration();
+     void didMutate();
+     
+diff --git a/Source/WebCore/css/PropertySetCSSDescriptors.cpp b/Source/WebCore/css/PropertySetCSSDescriptors.cpp
+index b1f6449922..c8c311b38f 100644
+--- a/Source/WebCore/css/PropertySetCSSDescriptors.cpp
++++ b/Source/WebCore/css/PropertySetCSSDescriptors.cpp
+@@ -25,6 +25,7 @@
+ #include "config.h"
+ #include "PropertySetCSSDescriptors.h"
+ 
++#include "CSSFontFaceRule.h"
+ #include "CSSPropertyNames.h"
+ #include "CSSPropertyParser.h"
+ #include "CSSRule.h"
+@@ -278,6 +279,12 @@ void PropertySetCSSDescriptors::didMutate(MutationType type)
+     if (!strongParentStyleSheet)
+         return;
+ 
++    // browser-lite: the font face of the rule is made anew, the faces of unchanged rules stay
++    if (type != MutationType::NoChanges) {
++        if (RefPtr fontFaceRule = dynamicDowncast<CSSFontFaceRule>(*strongParentRule))
++            fontFaceRule->descriptorsDidChange();
++    }
++
+     // Style sheet mutation needs to be signaled even if the change failed. willMutate*/didMutate* must pair.
+     strongParentStyleSheet->didMutateRuleFromCSSStyleDeclaration();
+ }
+diff --git a/Source/WebCore/style/RuleSetBuilder.h b/Source/WebCore/style/RuleSetBuilder.h
+index 1faa3e0b20..5ec2abe4c5 100644
+--- a/Source/WebCore/style/RuleSetBuilder.h
++++ b/Source/WebCore/style/RuleSetBuilder.h
+@@ -40,6 +40,8 @@ public:
+ 
+     void addRulesFromSheet(const StyleSheetContents&, const MQ::MediaQueryList& sheetQuery = { });
+     void addStyleRule(const StyleRule&);
++    // browser-lite: rules of a sheet without the sheet, for the invalidation of rules changed through the CSSOM
++    void addTopLevelRules(const Vector<Ref<StyleRuleBase>>& rules) { addChildRules(rules); }
+ 
+ private:
+     RuleSetBuilder(const MQ::MediaQueryEvaluator&);
+diff --git a/Source/WebCore/style/StyleInvalidator.cpp b/Source/WebCore/style/StyleInvalidator.cpp
+index 584490dc2b..1324b49f33 100644
+--- a/Source/WebCore/style/StyleInvalidator.cpp
++++ b/Source/WebCore/style/StyleInvalidator.cpp
+@@ -105,6 +105,20 @@ Invalidator::Invalidator(const Vector<Ref<StyleSheetContents>>& sheets, const MQ
+     m_ruleInformation = collectRuleInformation();
+ }
+ 
++Invalidator::Invalidator(const Vector<Ref<StyleRuleBase>>& rules, const MQ::MediaQueryEvaluator& mediaQueryEvaluator)
++    : m_ownedRuleSet(RuleSet::create())
++    , m_ruleSets({ { m_ownedRuleSet } })
++    , m_dirtiesAllStyle(shouldDirtyAllStyle(rules))
++{
++    if (m_dirtiesAllStyle)
++        return;
++
++    RuleSetBuilder ruleSetBuilder(*m_ownedRuleSet, mediaQueryEvaluator, nullptr, RuleSetBuilder::ShrinkToFit::Disable);
++    ruleSetBuilder.addTopLevelRules(rules);
++
++    m_ruleInformation = collectRuleInformation();
++}
++
+ Invalidator::Invalidator(const InvalidationRuleSetVector& ruleSets)
+     : m_ruleSets(ruleSets)
+     , m_ruleInformation(collectRuleInformation())
+diff --git a/Source/WebCore/style/StyleInvalidator.h b/Source/WebCore/style/StyleInvalidator.h
+index 70bc1ba1df..fdd04dd98b 100644
+--- a/Source/WebCore/style/StyleInvalidator.h
++++ b/Source/WebCore/style/StyleInvalidator.h
+@@ -37,6 +37,7 @@ class Document;
+ class Element;
+ class ShadowRoot;
+ class StyleSheetContents;
++class StyleRuleBase;
+ 
+ namespace MQ {
+ class MediaQueryEvaluator;
+@@ -52,6 +53,8 @@ struct SelectorMatchingState;
+ class Invalidator {
+ public:
+     Invalidator(const Vector<Ref<StyleSheetContents>>&, const MQ::MediaQueryEvaluator&);
++    // browser-lite: top-level rules added to or removed from an active sheet (Scope::didChangeStyleSheetRule)
++    Invalidator(const Vector<Ref<StyleRuleBase>>&, const MQ::MediaQueryEvaluator&);
+     Invalidator(const InvalidationRuleSetVector&);
+ 
+     ~Invalidator();
+diff --git a/Source/WebCore/style/StyleScope.cpp b/Source/WebCore/style/StyleScope.cpp
+index f1bbaf577b..7771c9a19f 100644
+--- a/Source/WebCore/style/StyleScope.cpp
++++ b/Source/WebCore/style/StyleScope.cpp
+@@ -64,6 +64,7 @@
+ #include "StyleCustomPropertyRegistry.h"
+ #include "StyleInvalidator.h"
+ #include "StyleResolver.h"
++#include "StyleRule.h"
+ #include "StyleSheetContents.h"
+ #include "StyleSheetList.h"
+ #include "UserContentController.h"
+@@ -543,7 +544,7 @@ static void filterEnabledNonemptyCSSStyleSheets(Vector<Ref<CSSStyleSheet>>& resu
+     }
+ }
+ 
+-void Scope::updateActiveStyleSheets(UpdateType updateType)
++void Scope::updateActiveStyleSheets(UpdateType updateType, std::optional<Vector<Ref<StyleRuleBase>>>&& changedRules)
+ {
+     RELEASE_ASSERT(!m_isUpdatingStyleResolver);
+     ASSERT(!m_pendingUpdate);
+@@ -556,6 +557,7 @@ void Scope::updateActiveStyleSheets(UpdateType updateType)
+         // Crash stacks indicate we can get here when a resource load fails synchronously (for example due to content blocking).
+         // FIXME: These kind of cases should be eliminated and this path replaced by an assert.
+         m_pendingUpdate = UpdateType::ContentsOrInterpretation;
++        m_pendingChangedRules = std::nullopt;
+         m_document->scheduleFullStyleRebuild();
+         return;
+     }
+@@ -593,10 +595,10 @@ void Scope::updateActiveStyleSheets(UpdateType updateType)
+     if (m_resolver && m_resolver->ruleSets().features().usesHasPseudoClass)
+         m_usesHasPseudoClass = true;
+ 
+-    invalidateStyleAfterStyleSheetChange(styleSheetChange);
++    invalidateStyleAfterStyleSheetChange(styleSheetChange, changedRules);
+ }
+ 
+-void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSheetChange)
++void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSheetChange, const std::optional<Vector<Ref<StyleRuleBase>>>& changedRules)
+ {
+     if (m_shadowRoot && !m_shadowRoot->isConnected())
+         return;
+@@ -604,6 +606,16 @@ void Scope::invalidateStyleAfterStyleSheetChange(const StyleSheetChange& styleSh
+     // If we are already parsing the body and so may have significant amount of elements, put some effort into trying to avoid style recalcs.
+     bool invalidateAll = !m_document->bodyOrFrameset() || m_document->hasNodesWithMissingStyle();
+ 
++    // browser-lite: when only rules added or removed through the CSSOM changed, the elements they
++    // may match are all whose style changes, like for an added sheet (the resolver is built anew
++    // all the same, the positions of the rules after them moved). Rules other than style rules
++    // (also inside @media) still restyle everything (Invalidator::dirtiesAllStyle).
++    if (changedRules && !invalidateAll && styleSheetChange.resolverUpdateType == ResolverUpdateType::Reconstruct) {
++        Invalidator invalidator(*changedRules, resolver().mediaQueryEvaluator());
++        invalidator.invalidateStyle(*this);
++        return;
++    }
++
+     if (styleSheetChange.resolverUpdateType == ResolverUpdateType::Reconstruct || invalidateAll) {
+         Invalidator::invalidateAllStyle(*this);
+         return;
+@@ -684,10 +696,11 @@ void Scope::flushPendingSelfUpdate()
+     ASSERT(m_pendingUpdate);
+ 
+     auto updateType = *m_pendingUpdate;
++    auto changedRules = std::exchange(m_pendingChangedRules, std::nullopt);
+ 
+     clearPendingUpdate();
+     
+-    updateActiveStyleSheets(updateType);
++    updateActiveStyleSheets(updateType, WTF::move(changedRules));
+ }
+ 
+ void Scope::flushPendingDescendantUpdates()
+@@ -703,6 +716,7 @@ void Scope::clearPendingUpdate()
+ {
+     m_pendingUpdateTimer.stop();
+     m_pendingUpdate = { };
++    m_pendingChangedRules = std::nullopt;
+ }
+ 
+ TreeScope& Scope::treeScope()
+@@ -714,6 +728,9 @@ TreeScope& Scope::treeScope()
+ 
+ void Scope::scheduleUpdate(UpdateType update)
+ {
++    // browser-lite: any other change needs the whole scope restyled (didChangeStyleSheetRule)
++    m_pendingChangedRules = std::nullopt;
++
+     if (update == UpdateType::ContentsOrInterpretation) {
+         // :host and ::slotted rules might go away.
+         if (m_shadowRoot) {
+@@ -748,6 +765,21 @@ void Scope::didChangeStyleSheetContents()
+     scheduleUpdate(UpdateType::ContentsOrInterpretation);
+ }
+ 
++// browser-lite: beyond this many rules a change restyles everything anyway
++static constexpr size_t maximumChangedRulesToInvalidate = 512;
++
++void Scope::didChangeStyleSheetRule(StyleRuleBase& rule)
++{
++    // Only the first change of an update and the changes of rules after it keep the list
++    auto changedRules = m_pendingUpdate ? std::exchange(m_pendingChangedRules, std::nullopt) : std::optional<Vector<Ref<StyleRuleBase>>> { Vector<Ref<StyleRuleBase>> { } };
++    if (changedRules && changedRules->size() < maximumChangedRulesToInvalidate)
++        changedRules->append(rule);
++    else
++        changedRules = std::nullopt;
++    scheduleUpdate(UpdateType::ContentsOrInterpretation);
++    m_pendingChangedRules = WTF::move(changedRules);
++}
++
+ void Scope::didChangeViewportSize()
+ {
+     Ref<ContainerNode> rootNode = m_document;
+@@ -811,6 +843,7 @@ const Vector<Ref<StyleSheet>>& Scope::styleSheetsForStyleSheetList()
+         // Documents without a living render tree (e.g. created by DOMParser) can't do full
+         // style updates but should still have an accessible styleSheets collection per spec.
+         m_pendingUpdate = { };
++        m_pendingChangedRules = std::nullopt;
+         m_styleSheetsForStyleSheetList = collectActiveStyleSheets().styleSheetsForStyleSheetList;
+     }
+     return m_styleSheetsForStyleSheetList;
+diff --git a/Source/WebCore/style/StyleScope.h b/Source/WebCore/style/StyleScope.h
+index 8dcefcf638..d18da2bd2b 100644
+--- a/Source/WebCore/style/StyleScope.h
++++ b/Source/WebCore/style/StyleScope.h
+@@ -58,6 +58,7 @@ class Element;
+ class HTMLSlotElement;
+ class Node;
+ class ProcessingInstruction;
++class StyleRuleBase;
+ class RenderBoxModelObject;
+ class StyleSheet;
+ class StyleSheetContents;
+@@ -112,6 +113,10 @@ public:
+     void didChangeActiveStyleSheetCandidates();
+     // This is called when contents of a stylesheet is mutated.
+     void didChangeStyleSheetContents();
++    // browser-lite: a top-level rule of an active sheet was added or removed through the CSSOM
++    // (insertRule, deleteRule). Until the update only the elements such rules may match are
++    // restyled, as long as nothing else of the sheets changed.
++    void didChangeStyleSheetRule(StyleRuleBase&);
+ 
+     void didChangeViewportSize();
+ 
+@@ -161,7 +166,7 @@ private:
+     void didRemovePendingStylesheet();
+ 
+     enum class UpdateType : uint8_t { ActiveSet, FullForExtensionStyleSheets, ContentsOrInterpretation };
+-    void updateActiveStyleSheets(UpdateType);
++    void updateActiveStyleSheets(UpdateType, std::optional<Vector<Ref<StyleRuleBase>>>&& changedRules);
+     void scheduleUpdate(UpdateType);
+ 
+     WEBCORE_EXPORT void flushPendingSelfUpdate();
+@@ -184,7 +189,7 @@ private:
+         Vector<Ref<StyleSheetContents>> addedSheets { };
+     };
+     StyleSheetChange analyzeStyleSheetChange(const Vector<Ref<CSSStyleSheet>>& newStylesheets);
+-    void invalidateStyleAfterStyleSheetChange(const StyleSheetChange&);
++    void invalidateStyleAfterStyleSheetChange(const StyleSheetChange&, const std::optional<Vector<Ref<StyleRuleBase>>>& changedRules);
+ 
+     void updateResolver(std::span<const Ref<CSSStyleSheet>>, ResolverUpdateType);
+     void createOrFindSharedShadowTreeResolver();
+@@ -221,6 +226,8 @@ private:
+     WeakListHashSet<Node, WeakPtrImplWithEventTargetData> m_styleSheetCandidateNodes;
+ 
+     std::optional<UpdateType> m_pendingUpdate;
++    // browser-lite: the rules of didChangeStyleSheetRule when they are all the pending update changes
++    std::optional<Vector<Ref<StyleRuleBase>>> m_pendingChangedRules;
+ 
+     bool m_hasDescendantWithPendingUpdate { false };
+     bool m_usesStyleBasedEditability { false };

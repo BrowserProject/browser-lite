@@ -1,0 +1,182 @@
+<!doctype html>
+<title>CSSOM rule changes</title>
+<!-- A rule that insertRule() adds to or deleteRule() removes from an active sheet restyles only the
+     elements it may match (patch 0124), like CSS-in-JS libraries insert hundreds of rules while a
+     page renders, and the style resolver built anew keeps the faces of unchanged @font-face rules
+     (a new face loads its font again, which restyles and lays out the whole document). Every
+     change below must give the same computed style as a fresh style of the whole tree, and an
+     inserted rule in a big document with a web font costs a fraction of a full restyle. -->
+<style>
+  @font-face { font-family: Web; src: url(missing-web-font.woff2) format("woff2"); }
+  body { margin: 0; font: 12px/16px Web, sans-serif; }
+  .list { padding: 2px; }
+  .item { color: rgb(10, 10, 10); }
+  .late { margin-top: 3px; }
+</style>
+<style id="dynamic">
+  .base { padding-left: 1px; }
+  .other { padding-left: 2px; }
+</style>
+<style>
+  .after { color: rgb(0, 0, 200); }
+</style>
+<div id="app">
+  <div class="list" id="list">
+    <p class="item a" id="first">First</p>
+    <p class="item b">Second</p>
+    <p class="item after">Third</p>
+    <section class="parent"><span class="child">Inherits</span><em>Plain</em></section>
+    <div class="holder"><b class="target">Has</b></div>
+    <div class="holder"><i>No target</i></div>
+    <div class="vars"><span class="usevar">Var</span></div>
+    <p class="base late">Base</p>
+    <p data-kind="x">Attribute</p>
+    <div style="display: none"><span class="hidden">Hidden</span></div>
+    <div id="host"></div>
+  </div>
+  <div id="many"></div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const sheet = $('dynamic').sheet;
+const shadow = $('host').attachShadow({ mode: 'open' });
+shadow.innerHTML = '<style>.inner { color: rgb(1, 1, 1); }</style><p class="inner">Inner</p><slot></slot>';
+$('host').innerHTML = '<span class="slotted">Slotted</span>';
+const shadowSheet = shadow.querySelector('style').sheet;
+const adopted = new CSSStyleSheet();
+adopted.replaceSync('.adopt { color: rgb(2, 2, 2); }');
+document.adoptedStyleSheets = [adopted];
+$('list').insertAdjacentHTML('beforeend', '<p class="adopt">Adopted</p>');
+
+const properties = ['color', 'background-color', 'margin-top', 'padding-left', 'display', 'font-weight', 'font-family', 'outline-style', 'border-top-width'];
+const elements = () => [
+  ...$('list').querySelectorAll('*'),
+  ...shadow.querySelectorAll('*'),
+];
+const snapshot = () =>
+  elements().map((element) => {
+    const style = getComputedStyle(element);
+    const before = getComputedStyle(element, '::before').content;
+    return properties.map((name) => style.getPropertyValue(name)).join(',') + ',' + before;
+  });
+// A fresh style: the whole list is styled again from nothing
+const fresh = () => {
+  $('list').style.display = 'none';
+  $('list').offsetHeight;
+  $('list').style.display = '';
+  $('host').style.display = 'none';
+  $('host').offsetHeight;
+  $('host').style.display = '';
+  return snapshot();
+};
+const middle = () => Math.floor(sheet.cssRules.length / 2);
+const find = (target, text) => [...target.cssRules].findIndex((rule) => rule.cssText.startsWith(text));
+const remove = (target, text) => target.deleteRule(find(target, text));
+
+const changes = [
+  ['class rule in the middle', () => sheet.insertRule('.a { color: rgb(200, 0, 0); }', middle())],
+  ['rule matching nothing', () => sheet.insertRule('.nothing { color: red; }', 0)],
+  ['rule behind a later sheet', () => sheet.insertRule('.after { color: rgb(0, 200, 0); background-color: rgb(9, 9, 9); }', sheet.cssRules.length)],
+  ['rule at the start loses', () => sheet.insertRule('.base { padding-left: 7px; }', 0)],
+  ['rule at the end wins', () => sheet.insertRule('.base { padding-left: 8px; }', sheet.cssRules.length)],
+  ['inherited property', () => sheet.insertRule('.parent { color: rgb(0, 100, 0); font-weight: 700; }', middle())],
+  ['descendant combinator', () => sheet.insertRule('.list .b { margin-top: 5px; }', middle())],
+  ['sibling combinator', () => sheet.insertRule('.a + .b { outline-style: dotted; }', middle())],
+  ['has()', () => sheet.insertRule('.holder:has(.target) { background-color: rgb(3, 4, 5); }', middle())],
+  ['nth-child and not()', () => sheet.insertRule('.item:nth-child(2):not(.a) { border-top-width: 4px; border-top-style: solid; }', middle())],
+  ['attribute', () => sheet.insertRule('[data-kind="x"] { font-weight: 300; }', middle())],
+  ['pseudo-element', () => sheet.insertRule('.child::before { content: "x"; }', middle())],
+  ['custom property on the root', () => {
+    sheet.insertRule('.usevar { color: var(--c, rgb(5, 5, 5)); }', middle());
+    sheet.insertRule(':root { --c: rgb(6, 7, 8); }', middle());
+  }],
+  ['hidden subtree', () => sheet.insertRule('.hidden { color: rgb(11, 12, 13); }', middle())],
+  ['matching media', () => sheet.insertRule('@media (min-width: 1px) { .b { padding-left: 9px; } }', middle())],
+  ['other media', () => sheet.insertRule('@media (max-width: 1px) { .b { padding-left: 10px; } }', middle())],
+  ['keyframes and font-face', () => {
+    sheet.insertRule('@keyframes spin { from { opacity: 0; } }', middle());
+    sheet.insertRule('@font-face { font-family: Nothing; src: local(Nothing); }', middle());
+    sheet.insertRule('.late { color: rgb(14, 15, 16); font-family: Nothing, serif; }', middle());
+  }],
+  ['changed font-face', () => {
+    sheet.cssRules[find(sheet, '@font-face')].style.setProperty('font-weight', '700');
+    sheet.insertRule('.b { font-family: Nothing, monospace; }', middle());
+  }],
+  ['several before a style update', () => {
+    sheet.insertRule('.item { background-color: rgb(20, 20, 20); }', 0);
+    sheet.insertRule('.a { background-color: rgb(21, 21, 21); }', middle());
+    remove(sheet, '.list .b');
+  }],
+  ['rule and a new sheet together', () => {
+    sheet.insertRule('.b { font-weight: 900; }', middle());
+    const style = document.createElement('style');
+    style.id = 'added';
+    style.textContent = '.child { color: rgb(30, 31, 32); }';
+    document.head.append(style);
+  }],
+  ['rule and a changed declaration together', () => {
+    sheet.insertRule('.a { outline-style: solid; }', middle());
+    sheet.cssRules[find(sheet, '.other')].style.paddingLeft = '3px';
+    sheet.insertRule('.other { margin-top: 1px; }', 0);
+  }],
+  ['shadow tree rule', () => shadowSheet.insertRule('.inner { color: rgb(40, 41, 42); }', 1)],
+  ['host and slotted', () => {
+    shadowSheet.insertRule(':host { color: rgb(43, 44, 45); }', 0);
+    shadowSheet.insertRule('::slotted(.slotted) { font-weight: 600; }', 0);
+  }],
+  ['adopted sheet', () => adopted.insertRule('.adopt { padding-left: 11px; }', 1)],
+  ['delete class rule', () => remove(sheet, '.a { color')],
+  ['delete inherited property', () => remove(sheet, '.parent')],
+  ['delete has()', () => remove(sheet, '.holder:has')],
+  ['delete pseudo-element', () => remove(sheet, '.child::before')],
+  ['delete custom property', () => remove(sheet, ':root')],
+  ['delete winning rule', () => remove(sheet, '.base { padding-left: 8px')],
+  ['delete media', () => remove(sheet, '@media (min-width: 1px)')],
+  ['delete shadow rules', () => {
+    remove(shadowSheet, ':host');
+    remove(shadowSheet, '::slotted');
+  }],
+  ['delete adopted rule', () => remove(adopted, '.adopt { padding-left')],
+];
+
+const results = [];
+fresh();
+for (const [name, change] of changes) {
+  change();
+  const incremental = snapshot();
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]).length;
+  if (differ) results.push(name + ':' + differ);
+}
+
+// Cost of an inserted rule next to 4000 elements against a change of the sheet's contents that
+// restyles everything (a declaration of a rule set through the CSSOM), once the web font failed
+addEventListener('load', () => setTimeout(measure, 300));
+function measure() {
+  const rows = [];
+  for (let i = 0; i < 1000; i++)
+    rows.push('<div class="row r' + (i % 40) + '"><span class="cell">' + i + '</span><span class="cell"><b>x</b></span></div>');
+  $('many').innerHTML = rows.join('');
+  for (let i = 0; i < 200; i++) sheet.insertRule('.sc-base-' + i + ' { margin: ' + (i % 4) + 'px; }', sheet.cssRules.length);
+  document.body.offsetHeight;
+  const median = (run) => {
+    const times = [];
+    for (let i = 0; i < 9; i++) {
+      const start = performance.now();
+      run(i);
+      document.body.offsetHeight;
+      times.push(performance.now() - start);
+    }
+    times.sort((a, b) => a - b);
+    return times[4];
+  };
+  let next = 0;
+  const inserted = median(() => sheet.insertRule('.sc-new-' + next++ + ' { color: blue; }', middle()));
+  const declaration = sheet.cssRules[find(sheet, '.sc-base-7')];
+  const full = median((i) => { declaration.style.marginLeft = i + 'px'; });
+  const ratio = inserted / full;
+  console.log('CSSOM inserted=' + inserted.toFixed(2) + 'ms full=' + full.toFixed(2) + 'ms');
+  if (ratio > 0.5) results.push('an inserted rule costs ' + Math.round(ratio * 100) + '% of a full restyle');
+  console.log('CSSOM done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
+}
+</script>
