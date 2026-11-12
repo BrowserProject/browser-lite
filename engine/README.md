@@ -76,7 +76,7 @@ comes as patches from `patches/`.
     suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
     loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in, types in or waits for a visible one, also for the first frame of a tab
-    switched to)
+    switched to; their style, layout and load events wait too)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a

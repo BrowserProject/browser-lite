@@ -1,0 +1,135 @@
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index 311c56e5c1..203052dcdd 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -3873,6 +3873,12 @@ void Document::resumeActiveDOMObjects(ReasonForSuspension why)
+         m_documentTaskGroup->resume();
+     ScriptExecutionContext::resumeActiveDOMObjects(why);
+     resumeDeviceMotionAndOrientationUpdates();
++    // browser-lite: load and error events held while suspended (EventSender)
++    if (!activeDOMObjectsAreSuspended()) {
++        ImageLoader::resumePendingLoadEvents();
++        HTMLLinkElement::resumePendingLoadEvents();
++        HTMLStyleElement::resumePendingLoadEvents();
++    }
+     // FIXME: For iOS, do we need to add content change observers that were removed in Document::suspendActiveDOMObjects()?
+ }
+ 
+diff --git a/Source/WebCore/dom/EventSender.h b/Source/WebCore/dom/EventSender.h
+index 521743318b..86aca194f7 100644
+--- a/Source/WebCore/dom/EventSender.h
++++ b/Source/WebCore/dom/EventSender.h
+@@ -47,6 +47,14 @@ public:
+     void cancelEvent(T&);
+     void cancelEvent(T&, const AtomString& eventType);
+     void dispatchPendingEvents(Page*);
++    // browser-lite: the events of a sender whose document suspended its active DOM objects (a
++    // page below a dialog, a hidden view that waits for the user) wait in the list without the
++    // timer; the document calls this when it resumes them
++    void resumeEvents()
++    {
++        if (!m_dispatchSoonList.isEmpty() && !m_timer.isActive())
++            m_timer.startOneShot(0_s);
++    }
+ 
+ #if ASSERT_ENABLED
+     bool hasPendingEvents(T& sender) const
+@@ -134,7 +142,10 @@ template<typename T, typename WeakPtrImpl> void EventSender<T, WeakPtrImpl>::dis
+         if (!weakSender)
+             continue;
+         auto sender = std::exchange(weakSender, nullptr);
+-        if (!page || sender->document().page() == page)
++        // browser-lite: no event in a document that waits, resumeEvents() goes on
++        if (sender->document().activeDOMObjectsAreSuspended())
++            m_dispatchSoonList.append(DispatchTask { *sender, eventType });
++        else if (!page || sender->document().page() == page)
+             sender->dispatchPendingEvent(this, eventType);
+         else
+             dispatchEventSoon(*sender, eventType);
+diff --git a/Source/WebCore/html/HTMLLinkElement.cpp b/Source/WebCore/html/HTMLLinkElement.cpp
+index d6dfb5fe86..05bccefc3c 100644
+--- a/Source/WebCore/html/HTMLLinkElement.cpp
++++ b/Source/WebCore/html/HTMLLinkElement.cpp
+@@ -698,6 +698,11 @@ void HTMLLinkElement::dispatchPendingLoadEvents(Page* page)
+     linkLoadEventSenderSingleton().dispatchPendingEvents(page);
+ }
+ 
++void HTMLLinkElement::resumePendingLoadEvents()
++{
++    linkLoadEventSenderSingleton().resumeEvents();
++}
++
+ void HTMLLinkElement::dispatchPendingEvent(LinkEventSender* eventSender, const AtomString& eventType)
+ {
+     ASSERT_UNUSED(eventSender, eventSender == &linkLoadEventSenderSingleton());
+diff --git a/Source/WebCore/html/HTMLLinkElement.h b/Source/WebCore/html/HTMLLinkElement.h
+index 62ec0fbcd1..506ff9dc5d 100644
+--- a/Source/WebCore/html/HTMLLinkElement.h
++++ b/Source/WebCore/html/HTMLLinkElement.h
+@@ -83,6 +83,8 @@ public:
+ 
+     void dispatchPendingEvent(LinkEventSender*, const AtomString& eventType);
+     static void dispatchPendingLoadEvents(Page*);
++    // browser-lite: a document resumed its active DOM objects, its held events go on
++    static void resumePendingLoadEvents();
+ 
+     WEBCORE_EXPORT DOMTokenList& relList();
+     WEBCORE_EXPORT DOMTokenList& blocking();
+diff --git a/Source/WebCore/html/HTMLStyleElement.cpp b/Source/WebCore/html/HTMLStyleElement.cpp
+index 4aab225284..e7eba5c293 100644
+--- a/Source/WebCore/html/HTMLStyleElement.cpp
++++ b/Source/WebCore/html/HTMLStyleElement.cpp
+@@ -161,6 +161,11 @@ void HTMLStyleElement::dispatchPendingLoadEvents(Page* page)
+     styleLoadEventSenderSingleton().dispatchPendingEvents(page);
+ }
+ 
++void HTMLStyleElement::resumePendingLoadEvents()
++{
++    styleLoadEventSenderSingleton().resumeEvents();
++}
++
+ void HTMLStyleElement::dispatchPendingEvent(StyleEventSender* eventSender, const AtomString& eventType)
+ {
+     ASSERT_UNUSED(eventSender, eventSender == &styleLoadEventSenderSingleton());
+diff --git a/Source/WebCore/html/HTMLStyleElement.h b/Source/WebCore/html/HTMLStyleElement.h
+index d4caad18cf..8d3d99b28b 100644
+--- a/Source/WebCore/html/HTMLStyleElement.h
++++ b/Source/WebCore/html/HTMLStyleElement.h
+@@ -50,6 +50,8 @@ public:
+ 
+     void dispatchPendingEvent(StyleEventSender*, const AtomString& eventType);
+     static void dispatchPendingLoadEvents(Page*);
++    // browser-lite: a document resumed its active DOM objects, its held events go on
++    static void resumePendingLoadEvents();
+ 
+     void finishParsingChildren() final;
+ 
+diff --git a/Source/WebCore/loader/ImageLoader.cpp b/Source/WebCore/loader/ImageLoader.cpp
+index fccf5c9566..57670f0fc6 100644
+--- a/Source/WebCore/loader/ImageLoader.cpp
++++ b/Source/WebCore/loader/ImageLoader.cpp
+@@ -729,6 +729,11 @@ void ImageLoader::dispatchPendingLoadEvents(Page* page)
+     loadEventSender().dispatchPendingEvents(page);
+ }
+ 
++void ImageLoader::resumePendingLoadEvents()
++{
++    loadEventSender().resumeEvents();
++}
++
+ void ImageLoader::elementDidMoveToNewDocument(Document& oldDocument)
+ {
+     if (hasPendingDecodePromises())
+diff --git a/Source/WebCore/loader/ImageLoader.h b/Source/WebCore/loader/ImageLoader.h
+index 3e702c6b66..7a3ae7d3fd 100644
+--- a/Source/WebCore/loader/ImageLoader.h
++++ b/Source/WebCore/loader/ImageLoader.h
+@@ -91,6 +91,8 @@ public:
+     void dispatchPendingEvent(ImageEventSender*, const AtomString& eventType);
+ 
+     static void dispatchPendingLoadEvents(Page*);
++    // browser-lite: a document resumed its active DOM objects, its held events go on
++    static void resumePendingLoadEvents();
+ 
+     void loadDeferredImage();
+ 

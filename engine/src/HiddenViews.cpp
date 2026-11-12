@@ -165,14 +165,19 @@ void setPageWaits(Page& page, bool waits)
             }
         }
     };
-    // The order of PageGroupLoadDeferrer: the parser is suspended before loading defers
+    // The order of PageGroupLoadDeferrer: the parser is suspended before loading defers. Style
+    // and layout run from timers of their own that the suspension does not cover: a stylesheet
+    // or a change of the DOM shortly before made a hidden page recalculate its style and lay
+    // itself out in tasks of seconds while the user typed.
     if (waits) {
         forEachDocument([](Document& document) {
             document.suspendScheduledTasks(ReasonForSuspension::WillDeferLoading);
         });
         page.setDefersLoading(true);
+        page.setDefersStyleAndLayout(true);
         return;
     }
+    page.setDefersStyleAndLayout(false);
     page.setDefersLoading(false);
     // Only suspended documents (resumeScheduledTasks checks the reason): one that came meanwhile
     // (back from the back/forward cache) was never suspended, and resuming twice resumes its

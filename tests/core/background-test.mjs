@@ -2,7 +2,8 @@
 // see visibilityState 'hidden', rAF and CSS animations stop, setInterval runs at most about once
 // per second, the engine does not paint; with sound, sound and timers go on. While the user types
 // in the front view (also through pauses while the focus stays in the field), the front view
-// loads a page or a view was just shown (until its first frame), a busy hidden view waits. With
+// loads a page or a view was just shown (until its first frame), a busy hidden view waits, also
+// its restyles, relayouts and load events. With
 // and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive; the engine stops a script only once input waited its limit,
 // keepWaiting() gives the script the limit again) and no hang during a long native dialog of the host page, a
@@ -142,8 +143,49 @@ channel.port1.onmessage = () => {
 };
 channel.port2.postMessage(0);
 console.log('RESULT loaded=shown')</script>`,
+  // Tasks of 1.5 s that each leave a restyle and a relayout of a long text for the timers of
+  // style and layout and a load event of an image from the memory cache (not tasks of the page)
+  // whose handler asks for the layout, so input mostly comes while they are due; the cost of one
+  // restyle and relayout is measured
+  restyle: `<!doctype html><title>restyle</title><style>body.wide p{width:320px;font-size:15px}</style><body>
+<script>const text = 'lorem ipsum dolor sit amet consectetur '.repeat(6);
+document.body.append(...Array.from({ length: 6000 }, () => Object.assign(document.createElement('p'), { textContent: text })));
+document.body.offsetHeight;
+const start = performance.now();
+document.body.classList.toggle('wide');
+document.body.offsetHeight;
+console.log('RESULT restyle=' + Math.round(performance.now() - start));
+const channel = new MessageChannel();
+const sources = ['#e00', '#00e'].map((color) => {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  context.fillStyle = color;
+  context.fillRect(0, 0, 300, 150);
+  return canvas.toDataURL();
+});
+let preloaded = 0;
+for (const source of sources) {
+  const preload = new Image();
+  preload.onload = () => { if (++preloaded === sources.length) channel.port2.postMessage(0); };
+  preload.src = source;
+}
+const image = new Image();
+image.onload = () => {
+  document.body.offsetHeight;
+  console.log('RESULT imageload=' + Date.now());
+};
+let turn = 0;
+channel.port1.onmessage = () => {
+  const end = Date.now() + 1500;
+  while (Date.now() < end);
+  document.body.classList.toggle('wide');
+  image.src = sources[turn++ % 2];
+  channel.port2.postMessage(0);
+};
+console.log('RESULT loaded=restyle')</script>`,
   typing: `<!doctype html><title>typing</title><body style="margin:0"><input style="position:absolute;left:10px;top:10px;width:300px;height:30px">
 <script>document.querySelector('input').onkeydown = (e) => console.log('RESULT keydown=' + e.key + ':' + Date.now());
+document.onmousedown = () => console.log('RESULT mousedown=' + Date.now());
 console.log('RESULT loaded=typing')</script>`,
   // For memory pressure: reports when the view goes away
   memory: `<!doctype html><title>memory</title><p>memory<script>const name = location.search.slice(1);
@@ -479,6 +521,58 @@ const loadInFront = async (label, start) => {
 await loadInFront('navigation', () => typing.go(`${siteURL}slow?front`));
 await loadInFront('new tab', () => typing.newTab(`${siteURL}slow?tab`));
 await typing.context.close();
+
+// The hidden view's restyles and relayouts run from timers of their own and image load events
+// from a timer shared by all pages: the click that starts the hold may still wait for the running
+// task, but no restyle, relayout or load event of the hidden view comes after it and keeps the
+// keys waiting (patches 0125, 0126). The click mostly comes in a task after which they are due,
+// at least one of four bursts did before.
+const restyling = await openApp({ url: `${siteURL}restyle` });
+const restyleCost = Number((await restyling.wait('restyle'))?.[2]);
+await restyling.wait('loaded', 'restyle');
+await restyling.newTab(`${siteURL}typing`);
+await restyling.wait('loaded', 'typing');
+const restylingOrigin = await canvasOrigin(restyling.page);
+const restyleBursts = [];
+for (let burst = 0; burst < 4; burst++) {
+  await restyling.page.mouse.click(restylingOrigin.x + 100, restylingOrigin.y + 300);
+  // Away from the field the hold ends 1 s after the click: the hidden view restyles again
+  await restyling.page.waitForTimeout(2500);
+  restyling.results.splice(0, restyling.results.length);
+  // The click into the field starts the hold once the running task ended: type right after it
+  await restyling.page.mouse.click(restylingOrigin.x + 100, restylingOrigin.y + 25);
+  await restyling.wait('mousedown', null, 10000);
+  const sentKeys = [];
+  for (const key of 'abcdef') {
+    sentKeys.push(Date.now());
+    await restyling.page.keyboard.press(key);
+    await restyling.page.waitForTimeout(150);
+  }
+  await restyling.page.waitForTimeout(500);
+  const arrived = restyling.results
+    .filter((r) => r[1] === 'keydown')
+    .map((r) => Number(r[2].split(':')[1]));
+  restyleBursts.push(...sentKeys.map((time, i) => arrived[i] - time));
+}
+// Away from the field the hidden view goes on, its held load events too
+await restyling.page.mouse.click(restylingOrigin.x + 100, restylingOrigin.y + 300);
+const leftField = Date.now();
+await restyling.page.waitForTimeout(6000);
+const imageLoads = restyling.results.filter(
+  (r) => r[1] === 'imageload' && Number(r[2]) > leftField,
+);
+check(
+  'typing: the hidden view goes on afterwards, also its load events',
+  imageLoads.length >= 2,
+  `${imageLoads.length} load events`,
+);
+const restyleWorst = Math.max(...restyleBursts);
+check(
+  'typing: no restyle, relayout or load event of the hidden view between the keys',
+  restyleCost >= 50 && restyleWorst < Math.max(100, restyleCost / 4),
+  `restyle and relayout ${restyleCost} ms, keys ${restyleBursts.join(' ')} ms`,
+);
+await restyling.context.close();
 
 // Switching to a view that changed in the background: hidden views wait from the end of the
 // running task on (urgent, like input) until the shown view made its first frame, which comes

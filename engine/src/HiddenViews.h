@@ -29,8 +29,10 @@ void visibleViewShown(WebView&);
 bool hiddenViewsWaitForUser();
 
 // Holds a page like a page below a dialog (WebCore's PageGroupLoadDeferrer, for one page): its
-// documents suspend their scheduled tasks (timers, event loop tasks, scripts, parser, messages)
-// and its loads defer what arrives; false lets it go on where it stopped.
+// documents suspend their scheduled tasks (timers, event loop tasks, scripts, parser, messages),
+// its loads defer what arrives and its style recalculation and layout wait (patch 0125; load
+// events and the parser respect the suspension through patches 0126 and 0127); false lets it go
+// on where it stopped.
 void setPageWaits(WebCore::Page&, bool);
 
 } // namespace BrowserLite

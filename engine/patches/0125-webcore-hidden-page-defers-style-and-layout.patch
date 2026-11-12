@@ -1,0 +1,141 @@
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index e2af51448c..311c56e5c1 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -685,7 +685,12 @@ Document::Document(LocalFrame* frame, const Settings& settings, const URL& url,
+     , m_creationURL(url)
+     , m_domTreeVersion(++s_globalTreeVersion)
+     , m_styleScope(makeUniqueRef<Style::DocumentScope>(*this))
+-    , m_styleRecalcTimer([this] { Ref { *this }->updateStyleIfNeeded(); })
++    , m_styleRecalcTimer([this] {
++        // browser-lite: started before the page deferred them (Page::setDefersStyleAndLayout)
++        if (RefPtr page = this->page(); page && page->defersStyleAndLayout())
++            return;
++        Ref { *this }->updateStyleIfNeeded();
++    })
+ #if !LOG_DISABLED
+     , m_documentCreationTime(MonotonicTime::now())
+ #endif
+@@ -2804,6 +2809,10 @@ void Document::scheduleStyleRecalc()
+ 
+     ASSERT(childNeedsStyleRecalc() || m_needsFullStyleRebuild);
+ 
++    // browser-lite: Page::setDefersStyleAndLayout(false) schedules it again
++    if (RefPtr page = this->page(); page && page->defersStyleAndLayout())
++        return;
++
+     m_styleRecalcTimer.startOneShot(0_s);
+ 
+     InspectorInstrumentation::didScheduleStyleRecalculation(*this);
+diff --git a/Source/WebCore/page/LocalFrameViewLayoutContext.cpp b/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
+index 00b8770ff9..492cd96608 100644
+--- a/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
++++ b/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
+@@ -41,6 +41,7 @@
+ #include "LayoutTreeBuilder.h"
+ #include "LocalFrameView.h"
+ #include "Logging.h"
++#include "Page.h"
+ #include "Quirks.h"
+ #include "RenderBlockFlowInlines.h"
+ #include "RenderBoxInlines.h"
+@@ -737,6 +738,9 @@ void LocalFrameViewLayoutContext::scheduleLayout()
+         return;
+     if (!needsLayout())
+         return;
++    // browser-lite: Page::setDefersStyleAndLayout(false) schedules it again
++    if (layoutTimerDeferred())
++        return;
+ 
+ #if !LOG_DISABLED
+     if (!document->ownerElement())
+@@ -779,7 +783,8 @@ void LocalFrameViewLayoutContext::scheduleSubtreeLayout(RenderElement& layoutRoo
+         return;
+     }
+ 
+-    if (!isLayoutPending() && isLayoutSchedulingEnabled()) {
++    // browser-lite: deferred, the layout root is marked like for a pending full layout
++    if (!isLayoutPending() && isLayoutSchedulingEnabled() && !layoutTimerDeferred()) {
+         ASSERT(!layoutRoot.container() || is<RenderView>(layoutRoot.container()) || !layoutRoot.container()->needsLayout());
+         setSubtreeLayoutRoot(layoutRoot);
+         InspectorInstrumentation::didScheduleLayout(layoutRoot);
+@@ -819,8 +824,17 @@ void LocalFrameViewLayoutContext::scheduleSubtreeLayout(RenderElement& layoutRoo
+     InspectorInstrumentation::didScheduleLayout(renderView);
+ }
+ 
++bool LocalFrameViewLayoutContext::layoutTimerDeferred() const
++{
++    RefPtr page = frame().page();
++    return page && page->defersStyleAndLayout();
++}
++
+ void LocalFrameViewLayoutContext::layoutTimerFired()
+ {
++    // browser-lite: started before the page deferred it (Page::setDefersStyleAndLayout)
++    if (layoutTimerDeferred())
++        return;
+ #if !LOG_DISABLED
+     if (!document()->ownerElement())
+         LOG_WITH_STREAM(Layout, stream << "LocalFrameViewLayoutContext for LocalFrameView " << frame().view() << " layout timer fired at " << document()->timeSinceDocumentCreation().value());
+diff --git a/Source/WebCore/page/LocalFrameViewLayoutContext.h b/Source/WebCore/page/LocalFrameViewLayoutContext.h
+index fde0148acc..96b8f2eac9 100644
+--- a/Source/WebCore/page/LocalFrameViewLayoutContext.h
++++ b/Source/WebCore/page/LocalFrameViewLayoutContext.h
+@@ -214,6 +214,7 @@ private:
+     bool hasPendingUpdateLayerPositions() const { return !!m_pendingUpdateLayerPositions; }
+ 
+     void layoutTimerFired();
++    bool layoutTimerDeferred() const;
+     void runPostLayoutTasks();
+     void runOrScheduleAsynchronousTasks(bool canDeferUpdateLayerPositions);
+     bool inAsynchronousTasks() const { return m_inAsynchronousTasks; }
+diff --git a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+index 4ed7393c6f..128da985a9 100644
+--- a/Source/WebCore/page/Page.cpp
++++ b/Source/WebCore/page/Page.cpp
+@@ -1625,6 +1625,20 @@ void Page::setDefersLoading(bool defers)
+     }
+ }
+ 
++void Page::setDefersStyleAndLayout(bool defers)
++{
++    if (std::exchange(m_defersStyleAndLayout, defers) == defers || defers)
++        return;
++    forEachDocument([](Document& document) {
++        if (document.backForwardCacheState() != Document::NotInBackForwardCache)
++            return;
++        if (document.childNeedsStyleRecalc() || document.hasPendingFullStyleRebuild())
++            document.scheduleStyleRecalc();
++        if (RefPtr view = document.view())
++            view->layoutContext().scheduleLayout();
++    });
++}
++
+ void Page::clearUndoRedoOperations()
+ {
+     m_editorClient->clearUndoRedoOperations();
+diff --git a/Source/WebCore/page/Page.h b/Source/WebCore/page/Page.h
+index 87796eb425..45457b676f 100644
+--- a/Source/WebCore/page/Page.h
++++ b/Source/WebCore/page/Page.h
+@@ -607,6 +607,12 @@ public:
+     WEBCORE_EXPORT void setDefersLoading(bool);
+     bool defersLoading() const { return m_defersLoading; }
+ 
++    // browser-lite: while set, the documents of the page start no style recalculation and no
++    // layout from their own timers (a script or a rendering update may still ask for them);
++    // false schedules what is due
++    WEBCORE_EXPORT void setDefersStyleAndLayout(bool);
++    bool defersStyleAndLayout() const { return m_defersStyleAndLayout; }
++
+     WEBCORE_EXPORT void clearUndoRedoOperations();
+ 
+     WEBCORE_EXPORT bool NODELETE inLowQualityImageInterpolationMode() const;
+@@ -1541,6 +1547,7 @@ private:
+     bool m_tabKeyCyclesThroughElements { true };
+     bool m_defersLoading { false };
+     unsigned m_defersLoadingCallCount { 0 };
++    bool m_defersStyleAndLayout { false };
+ 
+     bool m_inLowQualityInterpolationMode { false };
+     bool m_areMemoryCacheClientCallsEnabled { true };

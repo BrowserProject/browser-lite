@@ -1,0 +1,104 @@
+diff --git a/Source/WebCore/html/parser/HTMLDocumentParser.cpp b/Source/WebCore/html/parser/HTMLDocumentParser.cpp
+index f231f4d493..8a2d1653fb 100644
+--- a/Source/WebCore/html/parser/HTMLDocumentParser.cpp
++++ b/Source/WebCore/html/parser/HTMLDocumentParser.cpp
+@@ -46,6 +46,7 @@
+ #include "NavigationScheduler.h"
+ #include "NodeDocument.h"
+ #include "ScriptElement.h"
++#include "StyleDocumentScope.h"
+ #include "TaskSource.h"
+ #include "ThrowOnDynamicMarkupInsertionCountIncrementer.h"
+ #include <JavaScriptCore/JSGlobalObject.h>
+@@ -659,6 +660,11 @@ void HTMLDocumentParser::executeScriptsWaitingForStylesheets()
+     if (!m_scriptRunner->hasScriptsWaitingForStylesheets())
+         return;
+ 
++    // browser-lite: not while the document waits (a page below a dialog, a hidden view that waits
++    // for the user); resumeScheduledTasks goes on
++    if (RefPtr parserScheduler = m_parserScheduler; parserScheduler && parserScheduler->isSuspended())
++        return;
++
+     // pumpTokenizer can cause this parser to be detached from the Document,
+     // but we need to ensure it isn't deleted yet.
+     Ref<HTMLDocumentParser> protectedThis(*this);
+@@ -686,6 +692,9 @@ void HTMLDocumentParser::resumeScheduledTasks()
+ {
+     if (RefPtr parserScheduler = m_parserScheduler)
+         parserScheduler->resume();
++    // browser-lite: a script that waited for stylesheets while suspended
++    if (!isDetached() && !protect(document())->styleScope().hasPendingSheets())
++        executeScriptsWaitingForStylesheetsSoon();
+ }
+ 
+ bool HTMLDocumentParser::isOnStackOfOpenElements(Element& element) const
+diff --git a/Source/WebCore/html/parser/HTMLParserScheduler.cpp b/Source/WebCore/html/parser/HTMLParserScheduler.cpp
+index 02bd14abb9..7c9b2c17a4 100644
+--- a/Source/WebCore/html/parser/HTMLParserScheduler.cpp
++++ b/Source/WebCore/html/parser/HTMLParserScheduler.cpp
+@@ -86,9 +86,7 @@ HTMLParserScheduler::HTMLParserScheduler(HTMLDocumentParser& parser)
+     , m_parserTimeLimit(parserTimeLimit(parser.document()->page()))
+     , m_continueNextChunkTimer(*this, &HTMLParserScheduler::continueNextChunkTimerFired)
+     , m_isSuspendedWithActiveTimer(false)
+-#if ASSERT_ENABLED
+     , m_suspended(false)
+-#endif
+ {
+ }
+ 
+@@ -179,7 +177,10 @@ bool HTMLParserScheduler::shouldYieldBeforeExecutingScript(const ScriptElement*
+ 
+ void HTMLParserScheduler::scheduleForResume()
+ {
+-    ASSERT(!m_suspended);
++    if (m_suspended) {
++        m_isSuspendedWithActiveTimer = true;
++        return;
++    }
+     m_continueNextChunkTimer.startOneShot(0_s);
+ }
+ 
+@@ -187,9 +188,7 @@ void HTMLParserScheduler::suspend()
+ {
+     ASSERT(!m_suspended);
+     ASSERT(!m_isSuspendedWithActiveTimer);
+-#if ASSERT_ENABLED
+     m_suspended = true;
+-#endif
+ 
+     if (!m_continueNextChunkTimer.isActive())
+         return;
+@@ -201,9 +200,7 @@ void HTMLParserScheduler::resume()
+ {
+     ASSERT(m_suspended);
+     ASSERT(!m_continueNextChunkTimer.isActive());
+-#if ASSERT_ENABLED
+     m_suspended = false;
+-#endif
+ 
+     if (!m_isSuspendedWithActiveTimer)
+         return;
+diff --git a/Source/WebCore/html/parser/HTMLParserScheduler.h b/Source/WebCore/html/parser/HTMLParserScheduler.h
+index 44d9b7f4cc..e8bf4037c3 100644
+--- a/Source/WebCore/html/parser/HTMLParserScheduler.h
++++ b/Source/WebCore/html/parser/HTMLParserScheduler.h
+@@ -94,6 +94,7 @@ public:
+ 
+     void suspend();
+     void resume();
++    bool isSuspended() const { return m_suspended; }
+ 
+     void didBeginYieldingParser()
+     {
+@@ -131,9 +132,9 @@ private:
+     Seconds m_parserTimeLimit;
+     Timer m_continueNextChunkTimer;
+     bool m_isSuspendedWithActiveTimer;
+-#if ASSERT_ENABLED
++    // browser-lite: also in release builds, a parser that pumps while suspended (a script that
++    // waited for a stylesheet) goes on only after resume()
+     bool m_suspended;
+-#endif
+     bool m_documentHasActiveParserYieldTokens { false };
+ };
+ 

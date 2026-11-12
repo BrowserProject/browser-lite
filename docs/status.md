@@ -86,6 +86,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   went from median 0.42 s (90th percentile 1.1 s, up to 7.5 s) to 2 ms (frame 32 ms), a new tab
   next to two loading heavy tabs commits in 0.3 to 2 s instead of 11 to 17 s. After a pause of
   more than 10 s (or 1 s outside a text field) a key can still wait for a task that already runs.
+  A hidden view that waits starts nothing at all since #531: its style and layout timers, the load
+  events of its images and a parser resumed by a script that waited for a stylesheet started tasks
+  of up to 3 s after the hold had begun. With Wikipedia, CNN and Spiegel in background tabs on a
+  busy machine (load 16 to 28) the worst typing rounds went from median 0.2 to 0.6 s (up to 1.5 s)
+  to under 12 ms (at most 0.23 s).
   A switch to a tab that loaded or changed in the background is urgent like input, its due frame
   comes before its own waiting tasks and hidden views wait for that frame (#419): with Wikipedia,
   20min.ch and weather.com opened by Ctrl+click, the page area stayed white for 0.9 to 14.9 s

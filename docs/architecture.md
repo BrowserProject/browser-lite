@@ -135,11 +135,13 @@ whole limit again. A script nobody waits for runs to its end, like in Chrome (#5
 runs the other views in a nested event loop (`runNestedEventLoop`, #258). The question before a
 form is sent again waits without a nested loop: the navigation policy answers later (#369). Input to a visible view
 makes the hidden views without sound wait like the pages below a dialog (timers, tasks, scripts,
-parser and loads held) until no input came for 1 s, after keys or text while the focus stays in a
-text field for up to 10 s, while a visible view loads a new page until it commits, and after a
-view became visible (a switch of tabs, urgent like input) until it made the frame that was due,
-which comes before its own waiting tasks (`HiddenViews.cpp`, #364, #394, #419), so a heavy page
-loading in a background tab does not hold up typing in, loading or switching to the front one.
+parser and loads held; also the timers of style and layout, the load events of images, links and
+style elements and a parser that pumps while suspended, patches 0125 to 0127) until no input came
+for 1 s, after keys or text while the focus stays in a text field for up to 10 s, while a visible
+view loads a new page until it commits, and after a view became visible (a switch of tabs, urgent
+like input) until it made the frame that was due, which comes before its own waiting tasks
+(`HiddenViews.cpp`, #364, #394, #419, #531), so a heavy page loading in a background tab does not
+hold up typing in, loading or switching to the front one.
 
 ## Frames
 
