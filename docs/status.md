@@ -625,6 +625,24 @@ browser (Safari keeps Cmd+L, T and W for itself).
    at 50 ms (#349, #485). html.spec.whatwg.org spends most of its load in two rendering updates of
    5 to 6 s after parsing, not looked into yet. The engine kept answering throughout (an eval ping
    took at most 4.6 s).
+12. Long articles right after the first paint (2026-11-12, local, Chromium host, first visit,
+   eval pings every 200 ms): en.wikipedia.org/wiki/World_War_II held the engine thread for up to
+   1.5 to 1.9 s in one task (unloaded machine; 7.5 to 9 s under a load average of 40). That task
+   is the first rendering update of the whole article: style, the grid and flex sizing of the
+   skin and the 700 references in balanced columns, plus code the host compiles on first use and
+   fonts loaded on demand. Balancing laid the references out 3 to 4 times per layout, 7 layouts
+   during the load, about 100 ms each with a warm engine; native WebKitGTK the same (a relayout
+   of the article 160 to 170 ms with columns, 60 ms without), Chromium about 40 ms either way.
+   Patch 0118 lays out again only the blocks that meet a column boundary (#519): a relayout of
+   the article 84 to 135 ms instead of 147 to 218 ms (80 to 87 ms without columns), the longest
+   wait of a ping 1.24 to 1.51 s instead of 1.52 to 1.91 s, the waits summed over the load 25 %
+   lower (warm engine: longest 455 to 526 instead of 647 to 678 ms, sum 40 to 60 % lower). What
+   is left of that task is the first layout itself at the speed of freshly compiled code; an SVG
+   image is still set up (parsed and laid out) in the task that receives it, as in WebKit.
+   www.nytimes.com: one deferred classic script (the app bundle hydrating the page) runs 2.5 s in
+   one go on an unloaded machine, more than 11 s under load; JS in the interpreter and the JIT
+   (see 1.), and about 5 % fontconfig lookups of the families its styles name in other weights
+   and styles. A script cannot be cut into slices; it waits for faster JS.
 
 ## Open: features
 

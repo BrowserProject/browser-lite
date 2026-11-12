@@ -63,7 +63,11 @@ what its percentages resolve against changed, not on every layout of its parent 
 they resolve against, and a flex item with such descendants only after it was measured in the
 same layout (patch 0098, #461). A cell at the left or right edge of a table with collapsed borders
 paints its background inside the widest border half at that edge, which the table works out once
-until its collapsed borders change (patch 0106, #485). `CompressionStream` and
+until its collapsed borders change (patch 0106, #485). The balancing passes of a multicol (one
+column set, no spanners, not inside another fragmentation context) keep the layout of a block
+whose last layout met no column boundary and no forced break and that still lies strictly inside
+one column, like Blink's legacy layout; they lay out only what meets a column boundary again
+(patch 0118, #519). `CompressionStream` and
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).

@@ -1,0 +1,266 @@
+diff --git a/Source/WebCore/rendering/RenderBlock.cpp b/Source/WebCore/rendering/RenderBlock.cpp
+index 9b85ced912..390727f34c 100644
+--- a/Source/WebCore/rendering/RenderBlock.cpp
++++ b/Source/WebCore/rendering/RenderBlock.cpp
+@@ -266,6 +266,7 @@ public:
+ 
+     LayoutUnit m_paginationStrut;
+     LayoutUnit m_pageLogicalOffset;
++    bool m_layoutStayedInsideColumn { false };
+     LayoutUnit m_intrinsicBorderForFieldset;
+     LayoutUnit m_intrinsicMarginBeforeForFieldset;
+     
+@@ -2673,6 +2674,23 @@ void RenderBlock::setPageLogicalOffset(LayoutUnit logicalOffset)
+     rareData->m_pageLogicalOffset = logicalOffset;
+ }
+ 
++bool RenderBlock::layoutStayedInsideColumn() const
++{
++    RenderBlockRareData* rareData = blockRareData();
++    return rareData && rareData->m_layoutStayedInsideColumn;
++}
++
++void RenderBlock::setLayoutStayedInsideColumn(bool stayedInside)
++{
++    RenderBlockRareData* rareData = blockRareData();
++    if (!rareData) {
++        if (!stayedInside)
++            return;
++        rareData = &ensureBlockRareData();
++    }
++    rareData->m_layoutStayedInsideColumn = stayedInside;
++}
++
+ void RenderBlock::boundingRects(Vector<LayoutRect>& rects, const LayoutPoint& accumulatedOffset) const
+ {
+     rects.append({ accumulatedOffset, borderBoxSize() });
+diff --git a/Source/WebCore/rendering/RenderBlock.h b/Source/WebCore/rendering/RenderBlock.h
+index 0b30e36c8a..5cf4e4c6af 100644
+--- a/Source/WebCore/rendering/RenderBlock.h
++++ b/Source/WebCore/rendering/RenderBlock.h
+@@ -160,6 +160,12 @@ public:
+     LayoutUnit NODELETE pageLogicalOffset() const;
+     void setPageLogicalOffset(LayoutUnit);
+ 
++    // Whether the last layout of this block in a multicol met no column boundary and no forced
++    // break, so that it does not depend on the column height (RenderMultiColumnFlow::
++    // keepsLayoutOfBlocksInsideColumns).
++    bool NODELETE layoutStayedInsideColumn() const;
++    void setLayoutStayedInsideColumn(bool);
++
+     // Fieldset legends that are taller than the fieldset border add in intrinsic border
+     // in order to ensure that content gets properly pushed down across all layout systems
+     // (flexbox, block, etc.)
+diff --git a/Source/WebCore/rendering/RenderBlockFlow.cpp b/Source/WebCore/rendering/RenderBlockFlow.cpp
+index 7064778339..10b804251e 100644
+--- a/Source/WebCore/rendering/RenderBlockFlow.cpp
++++ b/Source/WebCore/rendering/RenderBlockFlow.cpp
+@@ -553,9 +553,15 @@ void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit
+ {
+     ASSERT(needsLayout());
+ 
++    // Set again at the end of a full layout that stayed inside one column
++    setLayoutStayedInsideColumn(false);
++
+     if (relayoutChildren == RelayoutChildren::No && simplifiedLayout())
+         return;
+ 
++    CheckedPtr multicolFlow = dynamicDowncast<RenderMultiColumnFlow>(enclosingFragmentedFlow());
++    unsigned forcedBreakCountBefore = multicolFlow ? multicolFlow->forcedBreakCount() : 0;
++
+     auto isPaginated = [&] {
+         // FIXME: Grid calls into layout outside of regular layout phase (during preferred width computation).
+         if (auto* layoutState = view().frameView().layoutContext().layoutState())
+@@ -721,6 +727,10 @@ void RenderBlockFlow::layoutBlock(RelayoutChildren relayoutChildren, LayoutUnit
+     auto* state = view().frameView().layoutContext().layoutState();
+     if (state && state->pageLogicalHeight())
+         setPageLogicalOffset(state->pageLogicalOffset(this, logicalTop()));
++    if (multicolFlow && !isRenderFragmentedFlow() && state && state->isPaginated() && !paginationStrut() && multicolFlow->forcedBreakCount() == forcedBreakCountBefore) {
++        if (auto extent = extentInFragmentedFlow(state->pageLogicalOffset(this, logicalTop())))
++            setLayoutStayedInsideColumn(multicolFlow->contentStaysInsideColumn(extent->first, extent->second));
++    }
+ 
+     updateLayerTransform();
+ 
+@@ -4007,6 +4017,49 @@ void RenderBlockFlow::paintBlockLevelContentInInline(PaintInfo& paintInfo, const
+     }
+ }
+ 
++// The block with the overflow of its content (which is fragmented too), from the offset of its top
++// in the fragmented flow; only for horizontal-tb
++std::optional<std::pair<LayoutUnit, LayoutUnit>> RenderBlockFlow::extentInFragmentedFlow(LayoutUnit pageLogicalOffset) const
++{
++    if (!writingMode().isHorizontal() || writingMode().isBlockFlipped())
++        return std::nullopt;
++    auto layoutOverflow = layoutOverflowRect();
++    auto visualOverflow = visualOverflowRect();
++    LayoutUnit top = std::min({ 0_lu, layoutOverflow.y(), visualOverflow.y() });
++    LayoutUnit bottom = std::max({ logicalHeight(), layoutOverflow.maxY(), visualOverflow.maxY() });
++    return std::pair { pageLogicalOffset + top, pageLogicalOffset + bottom };
++}
++
++// A balancing pass of a multicol (relayoutForPagination) lays out its content again for the new
++// column height. This block keeps its layout when its last one met no column boundary and no
++// forced break and it still lies strictly inside one column: laid out again it would come out the
++// same. Wikipedia's reference lists took 2 to 4 such passes, longer than the rest of the article.
++// Like Blink's legacy LayoutBlock::ChildNeedsRelayoutForPagination.
++bool RenderBlockFlow::keepsLayoutForColumnBalancing()
++{
++    if (!layoutStayedInsideColumn() || paginationStrut() || isFloating() || isOutOfFlowPositioned() || isRenderFragmentedFlow() || multiColumnFlow())
++        return false;
++    auto* layoutState = view().frameView().layoutContext().layoutState();
++    if (!layoutState || !layoutState->isPaginated() || layoutState->lineGrid())
++        return false;
++    CheckedPtr multicolFlow = dynamicDowncast<RenderMultiColumnFlow>(enclosingFragmentedFlow());
++    if (!multicolFlow || !multicolFlow->keepsLayoutOfBlocksInsideColumns())
++        return false;
++    auto pageLogicalOffset = layoutState->pageLogicalOffset(this, logicalTop());
++    auto extent = extentInFragmentedFlow(pageLogicalOffset);
++    if (!extent || !multicolFlow->contentStaysInsideColumn(extent->first, extent->second))
++        return false;
++    setPageLogicalOffset(pageLogicalOffset);
++    return true;
++}
++
++void RenderBlockFlow::markForPaginationRelayoutIfNeeded()
++{
++    if (!needsLayout() && keepsLayoutForColumnBalancing())
++        return;
++    RenderBlock::markForPaginationRelayoutIfNeeded();
++}
++
+ bool RenderBlockFlow::relayoutForPagination()
+ {
+     if (!multiColumnFlow() || !multiColumnFlow()->shouldRelayoutForPagination())
+diff --git a/Source/WebCore/rendering/RenderBlockFlow.h b/Source/WebCore/rendering/RenderBlockFlow.h
+index 96c00813ae..f44b8102b7 100644
+--- a/Source/WebCore/rendering/RenderBlockFlow.h
++++ b/Source/WebCore/rendering/RenderBlockFlow.h
+@@ -129,6 +129,7 @@ public:
+     virtual ~RenderBlockFlow();
+         
+     void layoutBlock(RelayoutChildren, LayoutUnit pageLogicalHeight = 0_lu) override;
++    void markForPaginationRelayoutIfNeeded() override;
+ 
+ protected:
+     void willBeDestroyed() override;
+@@ -537,6 +538,8 @@ public:
+     };
+     LinePaginationAdjustment computeLineAdjustmentForPagination(const InlineIterator::LineBoxIterator&, LayoutUnit deltaOffset, LayoutUnit floatMinimumBottom = { });
+     bool relayoutForPagination();
++    bool keepsLayoutForColumnBalancing();
++    std::optional<std::pair<LayoutUnit, LayoutUnit>> extentInFragmentedFlow(LayoutUnit pageLogicalOffset) const;
+ 
+     bool hasRareBlockFlowData() const { return m_rareBlockFlowData.get(); }
+     RenderBlockFlowRareData* rareBlockFlowData() const LIFETIME_BOUND { ASSERT_WITH_SECURITY_IMPLICATION(hasRareBlockFlowData()); return m_rareBlockFlowData.get(); }
+diff --git a/Source/WebCore/rendering/RenderFragmentedFlow.cpp b/Source/WebCore/rendering/RenderFragmentedFlow.cpp
+index 9d3d2fc162..95ab48678b 100644
+--- a/Source/WebCore/rendering/RenderFragmentedFlow.cpp
++++ b/Source/WebCore/rendering/RenderFragmentedFlow.cpp
+@@ -41,6 +41,7 @@
+ #include "RenderLayer.h"
+ #include "RenderLayerCompositor.h"
+ #include "RenderLayoutState.h"
++#include "RenderMultiColumnFlow.h"
+ #include "RenderObjectInlines.h"
+ #include "RenderTheme.h"
+ #include "RenderView.h"
+@@ -435,6 +436,11 @@ void RenderFragmentedFlow::logicalWidthChangedInFragmentsForBlock(const RenderBl
+     if (relayoutChildren == RelayoutChildren::Yes)
+         return;
+ 
++    // Every box of a multicol with one column set has that set as its range and the same width in
++    // all columns: a balancing pass leaves the layout of the children to markForPaginationRelayoutIfNeeded
++    if (auto* multicolFlow = dynamicDowncast<RenderMultiColumnFlow>(*this); multicolFlow && multicolFlow->keepsLayoutOfBlocksInsideColumns())
++        return;
++
+     // Not necessary for the flow thread, since we already computed the correct info for it.
+     // If the fragments have changed invalidate the children.
+     if (&block == this) {
+diff --git a/Source/WebCore/rendering/RenderMultiColumnFlow.cpp b/Source/WebCore/rendering/RenderMultiColumnFlow.cpp
+index 09e7d64ef6..7b0906946a 100644
+--- a/Source/WebCore/rendering/RenderMultiColumnFlow.cpp
++++ b/Source/WebCore/rendering/RenderMultiColumnFlow.cpp
+@@ -28,6 +28,7 @@
+ #include "RenderMultiColumnFlow.h"
+ 
+ #include "HitTestResult.h"
++#include "LocalFrameView.h"
+ #include "RenderBoxInlines.h"
+ #include "RenderBoxModelObjectInlines.h"
+ #include "RenderIterator.h"
+@@ -274,6 +275,7 @@ void RenderMultiColumnFlow::setFragmentRangeForBox(const RenderBox& box, RenderF
+ 
+ bool RenderMultiColumnFlow::addForcedFragmentBreak(const RenderBlock* block, LayoutUnit offset, RenderBox* /*breakChild*/, bool /*isBefore*/, LayoutUnit* offsetBreakAdjustment)
+ {
++    ++m_forcedBreakCount;
+     if (auto* multicolSet = downcast<RenderMultiColumnSet>(fragmentAtBlockOffset(block, offset))) {
+         multicolSet->addForcedBreak(offset);
+         if (offsetBreakAdjustment)
+@@ -407,6 +409,34 @@ RenderFragmentContainer* RenderMultiColumnFlow::physicalTranslationFromFlowToFra
+     return fragmentContainer;
+ }
+ 
++bool RenderMultiColumnFlow::keepsLayoutOfBlocksInsideColumns() const
++{
++    if (!m_inBalancingPass || hasColumnSpanner())
++        return false;
++    auto* columnSet = firstMultiColumnSet();
++    if (!columnSet || columnSet != lastMultiColumnSet() || !columnSet->columnHeightComputed() || !columnSet->computedColumnHeight())
++        return false;
++    if (!writingMode().isHorizontal() || writingMode().isBlockFlipped())
++        return false;
++    auto* multicolBlock = multiColumnBlockFlow();
++    return multicolBlock && !multicolBlock->enclosingFragmentedFlow() && !document().printing()
++        && view().frameView().pagination().mode == Pagination::Mode::Unpaginated;
++}
++
++bool RenderMultiColumnFlow::contentStaysInsideColumn(LayoutUnit logicalTop, LayoutUnit logicalBottom) const
++{
++    auto* columnSet = firstMultiColumnSet();
++    if (!columnSet || columnSet != lastMultiColumnSet() || hasColumnSpanner())
++        return false;
++    if (!columnSet->columnHeightComputed())
++        return true;
++    LayoutUnit columnHeight = columnSet->computedColumnHeight();
++    if (columnHeight <= 0)
++        return false;
++    LayoutUnit columnTop = pageLogicalTopForOffset(logicalTop);
++    return logicalTop > columnTop && logicalBottom < columnTop + columnHeight;
++}
++
+ bool RenderMultiColumnFlow::isPageLogicalHeightKnown() const
+ {
+     if (RenderMultiColumnSet* columnSet = lastMultiColumnSet())
+diff --git a/Source/WebCore/rendering/RenderMultiColumnFlow.h b/Source/WebCore/rendering/RenderMultiColumnFlow.h
+index bc95fedccd..0a91138ca9 100644
+--- a/Source/WebCore/rendering/RenderMultiColumnFlow.h
++++ b/Source/WebCore/rendering/RenderMultiColumnFlow.h
+@@ -64,6 +64,19 @@ public:
+ 
+     bool shouldRelayoutForPagination() const { return !m_inBalancingPass && m_needsHeightsRecalculation; }
+ 
++    // Column balancing lays out the content again for every new column height. A block whose last
++    // layout met no column boundary and no forced break gets the same layout again as long as it
++    // stays strictly inside one column, so a balancing pass may keep it (RenderBlockFlow::
++    // keepsLayoutForColumnBalancing). Only for one column set without spanners in a multicol that
++    // is not fragmented itself, where all columns have the same height.
++    bool keepsLayoutOfBlocksInsideColumns() const;
++    // Whether the content between these offsets of the flow lies strictly inside one column, with
++    // no column boundary in it or at its edges. True before the column height is known (the first
++    // layout of a balanced multicol, which has no boundaries).
++    bool contentStaysInsideColumn(LayoutUnit logicalTop, LayoutUnit logicalBottom) const;
++    // Counts forced breaks: a block whose layout added one depends on the column boundaries
++    unsigned forcedBreakCount() const { return m_forcedBreakCount; }
++
+     void setColumnCountAndWidth(unsigned count, LayoutUnit width)
+     {
+         m_columnCount = count;
+@@ -129,6 +142,7 @@ private:
+     bool m_inLayout { false }; // Set while we're laying out the flow thread, during which colum set heights are unknown.
+     bool m_inBalancingPass { false }; // Guard to avoid re-entering column balancing.
+     bool m_needsHeightsRecalculation { false };
++    unsigned m_forcedBreakCount { 0 };
+     
+     bool m_progressionIsInline { false };
+     bool m_progressionIsReversed { false };

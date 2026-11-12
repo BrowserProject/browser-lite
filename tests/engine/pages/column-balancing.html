@@ -1,0 +1,124 @@
+<!doctype html>
+<title>Column balancing</title>
+<!-- A balanced multicol lays out its content again for every new column height. Blocks whose last
+     layout met no column boundary and still lie strictly inside one column keep their layout
+     (patch 0118). Every change below must give the same geometry as a fresh layout and as the
+     same content in a multicol inside another fragmentation context (where nothing is kept); a
+     relayout of a long list in balanced columns costs little more than in columns of a given
+     height, which need no balancing. -->
+<style>
+  body { margin: 0; font: 13px/17px sans-serif; }
+  .cols { column-width: 18em; column-gap: 2em; }
+  .cols li { break-inside: avoid-column; }
+  .loose li { break-inside: auto; }
+  .outer { columns: 1; column-fill: auto; height: 60000px; }
+  .float { float: left; width: 40px; height: 30px; }
+  .forced { break-before: column; }
+  .shadow { box-shadow: 0 0 6px #000; }
+  ol, ul { margin: 0; padding-left: 2em; }
+  p { margin: 4px 0; }
+  canvas { display: block; width: 60px; height: 20px; }
+</style>
+<div id="app">
+  <h2 id="head">Notes</h2>
+  <div id="a" class="cols"><ol id="list-a"></ol></div>
+  <div class="outer"><div id="b" class="cols"><ol id="list-b"></ol></div></div>
+  <div id="c" class="cols loose"><div id="blocks"></div></div>
+</div>
+<script>
+const words = 'the war in Europe began when Germany invaded Poland and ended with the surrender of its forces in May while fighting in Asia went on until August'.split(' ');
+const text = (i, n) => {
+  const out = [];
+  for (let k = 0; k < n; k++) out.push(words[(i * 7 + k * 3) % words.length]);
+  return out.join(' ');
+};
+const items = [];
+for (let i = 0; i < 400; i++) {
+  const n = 6 + ((i * 13) % 40);
+  let inner = text(i, n);
+  if (i % 37 === 0) inner = '<span class="float"></span>' + inner;
+  if (i % 53 === 0) inner = '<p>' + inner + '</p><p>' + text(i + 1, 9) + '</p>';
+  if (i % 61 === 0) inner += '<canvas width="30" height="10"></canvas>';
+  items.push('<li' + (i % 89 === 0 ? ' class="shadow"' : '') + '>' + inner + '</li>');
+}
+document.getElementById('list-a').innerHTML = items.join('');
+document.getElementById('list-b').innerHTML = items.join('');
+const blocks = [];
+for (let i = 0; i < 150; i++) blocks.push('<div' + (i === 70 ? ' id="forced"' : '') + '><p>' + text(i, 10 + (i % 30)) + '</p></div>');
+document.getElementById('blocks').innerHTML = blocks.join('');
+
+const app = document.getElementById('app');
+const $ = (id) => document.getElementById(id);
+const rects = (element, origin) =>
+  [...element.getClientRects()]
+    .map((r) => [r.left - origin.left, r.top - origin.top, r.width, r.height].map((v) => Math.round(v * 64)).join(','))
+    .join(';');
+const geometry = () => [...app.querySelectorAll('*')].map((element) => rects(element, app.getBoundingClientRect()));
+// The same list in the multicol inside another one, relative to its multicol
+const listGeometry = (id) => {
+  const origin = $(id).getBoundingClientRect();
+  return [...$(id).querySelectorAll('li, li *')].map((element) => rects(element, origin));
+};
+// A fresh layout: the renderers of the whole tree are made again
+const fresh = () => {
+  app.style.display = 'none';
+  app.offsetHeight;
+  app.style.display = '';
+  return geometry();
+};
+const both = (change) => () => {
+  for (const list of ['list-a', 'list-b']) change($(list));
+};
+
+const changes = [
+  ['body width', () => { document.body.style.width = '760px'; }],
+  ['body width back', () => { document.body.style.width = ''; }],
+  ['item text', both((list) => { list.children[120].textContent = text(5, 90); })],
+  ['item removed', both((list) => { list.children[30].style.display = 'none'; })],
+  ['item added', both((list) => { list.children[200].insertAdjacentHTML('afterend', '<li>' + text(9, 60) + '</li>'); })],
+  ['item taller', both((list) => { list.children[300].style.paddingBottom = '140px'; })],
+  ['font size', () => { document.body.style.fontSize = '15px'; }],
+  ['column width', () => { for (const id of ['a', 'b', 'c']) $(id).style.columnWidth = '14em'; }],
+  ['forced break', () => { $('forced').className = 'forced'; }],
+  ['forced break removed', () => { $('forced').className = ''; }],
+  ['heading', () => { $('head').textContent = 'Notes and references of the article'; }],
+  ['body width again', () => { document.body.style.width = '901px'; }],
+];
+
+const results = [];
+for (const [name, change] of changes) {
+  change();
+  const incremental = geometry();
+  const a = listGeometry('a');
+  const b = listGeometry('b');
+  const expected = fresh();
+  const differ = incremental.filter((value, index) => value !== expected[index]).length;
+  if (differ) results.push(name + ':' + differ + ' differ from a fresh layout');
+  const nested = a.filter((value, index) => value !== b[index]).length;
+  if (nested) results.push(name + ':' + nested + ' differ from the list in a nested multicol');
+}
+
+// A relayout of the long list in balanced columns against the same columns with a given height
+const median = (run) => {
+  const times = [];
+  for (let i = 0; i < 9; i++) {
+    const start = performance.now();
+    run(i);
+    document.body.offsetHeight;
+    times.push(performance.now() - start);
+  }
+  times.sort((x, y) => x - y);
+  return times[4];
+};
+$('b').parentElement.remove();
+$('c').remove();
+const relayout = (i) => { $('a').style.width = i % 2 ? '900px' : '901px'; };
+const balanced = median(relayout);
+$('a').style.height = $('a').offsetHeight + 40 + 'px';
+$('a').style.columnFill = 'auto';
+const given = median(relayout);
+const ratio = balanced / given;
+console.log('COLUMNS balanced=' + balanced.toFixed(2) + 'ms given=' + given.toFixed(2) + 'ms');
+if (ratio > 3.5) results.push('balancing costs ' + ratio.toFixed(1) + ' times the layout of columns with a given height');
+console.log('COLUMNS done=' + (results.length ? results.join('/').replace(/\s+/g, '_') : 'ok'));
+</script>

@@ -16,6 +16,9 @@
 //   percent-heights.html  boxes with percentage heights are laid out again only when what their
 //                  percentages resolve against changed (patch 0098): same geometry as a fresh
 //                  layout, a small change next to many of them costs a fraction of a full relayout
+//   column-balancing.html  blocks inside one column keep their layout in the balancing passes of a
+//                  multicol (patch 0118): same geometry as a fresh layout and as a multicol where
+//                  nothing is kept, a relayout of balanced columns costs about as much as without
 //   compression.html  CompressionStream and DecompressionStream take buffers of another realm
 //                  (patch 0110) and still reject chunks that are no BufferSource
 //
@@ -43,6 +46,7 @@ const CASES = [
   { name: 'localized-strings', wait: 'L10N done' },
   { name: 'absent-properties', wait: 'ABSENT done' },
   { name: 'percent-heights', size: [1000, 700], wait: 'PERCENT done' },
+  { name: 'column-balancing', size: [1000, 700], wait: 'COLUMNS done' },
   { name: 'compression', wait: 'COMPRESSION done' },
   {
     name: 'absent-properties',
