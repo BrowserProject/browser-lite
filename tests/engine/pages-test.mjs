@@ -25,6 +25,8 @@
 //                  inserted rule next to 4000 elements costs a fraction of a full restyle
 //   compression.html  CompressionStream and DecompressionStream take buffers of another realm
 //                  (patch 0110) and still reject chunks that are no BufferSource
+//   time-origin.html  performance.timeOrigin reads the same every time in a page, a frame and a
+//                  worker, next to Date.now() (patch 0134)
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -55,6 +57,7 @@ const CASES = [
   { name: 'column-balancing', size: [1000, 700], wait: 'COLUMNS done' },
   { name: 'compression', wait: 'COMPRESSION done' },
   { name: 'cssom-rules', size: [800, 600], wait: 'CSSOM done' },
+  { name: 'time-origin', wait: 'TIMEORIGIN done' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',

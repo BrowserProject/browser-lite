@@ -1,0 +1,43 @@
+diff --git a/Source/WebCore/page/Performance.cpp b/Source/WebCore/page/Performance.cpp
+index a47043aeb2..027a66d116 100644
+--- a/Source/WebCore/page/Performance.cpp
++++ b/Source/WebCore/page/Performance.cpp
+@@ -89,6 +89,7 @@ Performance::Performance(ScriptExecutionContext* context, MonotonicTime timeOrig
+     , m_resourceTimingBufferFullTimer(*this, &Performance::resourceTimingBufferFullTimerFired) // FIXME: Migrate this to the event loop as well. https://bugs.webkit.org/show_bug.cgi?id=229044
+     , m_timeOrigin(timeOrigin)
+     , m_continuousTimeOrigin(timeOrigin.approximate<ContinuousTime>())
++    , m_wallTimeOrigin(timeOrigin.approximate<WallTime>())
+ {
+     ASSERT(m_timeOrigin);
+     initializeEntryBufferMap();
+@@ -163,7 +164,9 @@ DOMHighResTimeStamp Performance::now() const
+ 
+ DOMHighResTimeStamp Performance::timeOrigin() const
+ {
+-    return reduceTimeResolution(m_timeOrigin.approximate<WallTime>().secondsSinceEpoch()).milliseconds();
++    // The time origin is one moment: converted once, so that clocks of different resolution
++    // cannot make the wall clock value differ between reads.
++    return reduceTimeResolution(m_wallTimeOrigin.secondsSinceEpoch()).milliseconds();
+ }
+ 
+ ReducedResolutionSeconds Performance::nowInReducedResolutionSeconds() const
+diff --git a/Source/WebCore/page/Performance.h b/Source/WebCore/page/Performance.h
+index 259f2de007..30e04a1561 100644
+--- a/Source/WebCore/page/Performance.h
++++ b/Source/WebCore/page/Performance.h
+@@ -46,6 +46,7 @@
+ #include <wtf/Forward.h>
+ #include <wtf/MonotonicTime.h>
+ #include <wtf/OrderedHashSet.h>
++#include <wtf/WallTime.h>
+ 
+ namespace JSC {
+ class JSGlobalObject;
+@@ -189,6 +190,7 @@ private:
+ 
+     MonotonicTime m_timeOrigin;
+     ContinuousTime m_continuousTimeOrigin;
++    WallTime m_wallTimeOrigin;
+ 
+     RefPtr<PerformanceNavigationTiming> m_navigationTiming;
+     std::unique_ptr<PerformanceUserTiming> m_userTiming;

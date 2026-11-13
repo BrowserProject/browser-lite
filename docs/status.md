@@ -711,6 +711,24 @@ browser (Safari keeps Cmd+L, T and W for itself).
    one go on an unloaded machine, more than 11 s under load; JS in the interpreter and the JIT
    (see 1.), and about 5 % fontconfig lookups of the families its styles name in other weights
    and styles. A script cannot be cut into slices; it waits for faster JS.
+13. YouTube's stream protection (2026-11-13, local, Chromium host, one video, 19 loads): in about
+   half of the loads playback stops after about 40 s with "Something went wrong. Refresh or try
+   again later." (`ump.spsrejectfailure`). Every media response of YouTube's SABR stream carries a
+   protection status: 2 (attestation pending) until the player sends a PO token, which it mints
+   from the snapshot of BotGuard (an obfuscated VM in the page, `www.google.com/js/th/`), then 1
+   (accepted), or in the failing loads 2 again and 3 (rejected) for every new token, and the
+   player gives up. The snapshot comes 15 to 25 s after the start (Chromium 3 to 6 s): the VM
+   yields through `requestIdleCallback` with a 4 ms timeout after each slice, about 40 times here
+   (9 in Chromium), and each yield waits behind the page's own work on the busy engine thread (up
+   to 7 s); alone in a quiet page the engine computes it in 0.75 s (Chromium 0.07 s, Chromium
+   throttled 12x 0.73 s). But the delay does not decide: holding playback until the token exists
+   still failed in 3 of 5 loads, and accepted and rejected loads differ neither in timing, consent
+   order, token use nor content binding, so the server's verdict on the snapshot does. The
+   engine's snapshot is about 40 % smaller than Chromium's, also throttled or with Safari's user
+   agent (the VM walks the globals and prototypes of the page: 984 globals against 1224); its
+   content is encrypted. `performance.timeOrigin` moving between two values was such a visible
+   difference, fixed (#547) without changing the rate (5 of 8 before, 6 of 11 after). Open until
+   the snapshot can be compared with real Safari's (Safari on BrowserStack with the same video).
 
 ## Open: features
 

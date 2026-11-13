@@ -31,8 +31,9 @@ a WebGL drawing buffer with depth went without, or the whole document that every
 library inserted restyled and laid out again, or the abort signals of a closed page, whose
 listeners kept the whole page alive, or the cookies of a host that is itself a public suffix,
 which the cookie jar dropped, or the tree view of an XML file or feed without style
-information, which WebKit shows only with developer extras, so its text ran together)
-comes as patches from `patches/`.
+information, which WebKit shows only with developer extras, so its text ran together, or
+`performance.timeOrigin`, which moved between two neighbouring milliseconds from one read to the
+next) comes as patches from `patches/`.
 
 ## Folders
 

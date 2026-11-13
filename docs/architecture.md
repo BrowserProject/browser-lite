@@ -77,6 +77,11 @@ and so restyled and laid out the whole document once more (patch 0124, #530). `C
 `DecompressionStream` take every `BufferSource`, also one of another realm such as an iframe's
 `Uint8Array`: WebKit's builtin refused chunks that failed `instanceof ArrayBuffer` of its own
 realm, now the WebIDL conversion of the encoder and decoder checks them by brand (patch 0110, #506).
+`performance.timeOrigin` is turned into wall clock time once, when the `Performance` object of a
+page or worker is made, and reads the same ever after like in Chrome and Firefox. WebKit turned it
+at every read (origin minus monotonic now plus wall now); the wall clock of the build is
+`Date.now()` in whole milliseconds, so the value moved between two neighbouring milliseconds, a
+difference fingerprinting scripts see (patch 0134, #547).
 
 The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`):
 `navigation-start` and `navigation` (`loading` true) when the main frame starts a provisional load

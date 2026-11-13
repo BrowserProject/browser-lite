@@ -1,0 +1,44 @@
+<!doctype html><title>time-origin</title><body><script>
+// performance.timeOrigin is one moment and reads the same every time (patch 0134), in the page, a
+// frame and a worker, and timeOrigin + now() stays next to Date.now(). Before, WebKit converted
+// the origin to the wall clock at every read, and with the wall clock in whole milliseconds the
+// value moved between two neighbours. Output "TIMEORIGIN name=ok" or "TIMEORIGIN name=..." with
+// the values, at the end "TIMEORIGIN done=ok" when everything works.
+const READ = `async () => {
+  const seen = new Set();
+  let drift = 0;
+  for (let batch = 0; batch < 40; batch++) {
+    for (let i = 0; i < 500; i++) seen.add(performance.timeOrigin);
+    drift = Math.max(drift, Math.abs(performance.timeOrigin + performance.now() - Date.now()));
+    await new Promise((resolve) => setTimeout(resolve, 7));
+  }
+  return { values: [...seen], drift };
+}`;
+const page = eval(`(${READ})`);
+const frame = () => {
+  const other = document.body.appendChild(document.createElement('iframe')).contentWindow;
+  return other.eval(`(${READ})`)();
+};
+const worker = () =>
+  new Promise((resolve, reject) => {
+    const source = `(${READ})().then((result) => postMessage(result));`;
+    const w = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
+    w.onmessage = (event) => resolve(event.data);
+    w.onerror = (event) => reject(new Error(event.message));
+  });
+(async () => {
+  let bad = 0;
+  for (const [name, read] of Object.entries({ page, frame, worker })) {
+    try {
+      const { values, drift } = await read();
+      const ok = values.length === 1 && drift <= 2;
+      console.log(`TIMEORIGIN ${name}=${ok ? 'ok' : `values:${values.join(',')};drift:${drift}`}`);
+      if (!ok) bad++;
+    } catch (e) {
+      console.log(`TIMEORIGIN ${name}=ERROR ${e.name}: ${e.message}`);
+      bad++;
+    }
+  }
+  console.log(`TIMEORIGIN done=${bad ? `${bad} errors` : 'ok'}`);
+})();
+</script>
