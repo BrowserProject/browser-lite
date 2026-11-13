@@ -25,9 +25,20 @@ export function toggleBookmark(url: string, title = ''): boolean {
   const index = list.findIndex((bookmark) => bookmark.url === url);
   if (index >= 0) list.splice(index, 1);
   else list.push({ url, title: title || url, time: Date.now() });
+  save(list);
+  return index < 0;
+}
+
+/** Removes the bookmark of url; nothing when there is none. */
+export function removeBookmark(url: string): void {
+  const list = bookmarks();
+  const kept = list.filter((bookmark) => bookmark.url !== url);
+  if (kept.length !== list.length) save(kept);
+}
+
+function save(list: Bookmark[]): void {
   profile.savePrefs('bookmarks', list);
   for (const listener of listeners) listener();
-  return index < 0;
 }
 
 /** Calls listener after every change of the bookmarks. */

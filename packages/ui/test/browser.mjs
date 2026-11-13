@@ -882,7 +882,17 @@ test('menu of the embedding page', async () => {
       closed: !document.querySelector('.bl-context-menu'),
       focus: document.activeElement?.id,
     };
-    ui.showMenu([{ label: 'x', action() {} }], { x: 10, y: 10 });
+    // The lift of a finger that held something down until the menu opened: no press on the menu
+    window.chosen = [];
+    ui.showMenu([{ id: 'c', label: 'Under the finger', action: () => window.chosen.push('c') }], {
+      x: 10,
+      y: 10,
+    });
+    document
+      .querySelector('.bl-context-menu [data-bl-item=c]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    out.liftIgnored = !!document.querySelector('.bl-context-menu') && window.chosen.length === 0;
     key('Escape');
     out.escape = !document.querySelector('.bl-context-menu');
     out.empty =
@@ -895,6 +905,7 @@ test('menu of the embedding page', async () => {
     chosen: ['a'],
     closed: true,
     focus: 'app-field',
+    liftIgnored: true,
     escape: true,
     empty: true,
   });

@@ -70,9 +70,10 @@ interface Placement {
 /**
  * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
  * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
- * menu, runs it and gives the keyboard back to the page. Escape, a click outside, losing the
- * window focus or closing the view close it. Only one menu is open at a time; without any command
- * none opens. Returns a function that closes the menu.
+ * menu, runs it and gives the keyboard back to the page; only a press that began on the menu (or
+ * the keyboard) chooses one. Escape, a click outside, losing the window focus or closing the view
+ * close it. Only one menu is open at a time; without any command none opens. Returns a function
+ * that closes the menu.
  * Element: `.bl-context-menu` (with `data-bl-touch` for a long press) with `div.bl-menu-header`,
  * `button.bl-menu-item` and `hr.bl-separator`.
  */
@@ -133,6 +134,9 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
     menu.remove();
   };
   closeOpen = close;
+  // The lift of a finger held down to open the menu (on a button, a row) clicks whatever lies
+  // under it, maybe an item: only a press that began on the menu, or the keyboard, chooses one
+  let pressed = false;
 
   for (const item of entries) {
     if (isSeparator(item)) {
@@ -153,7 +157,8 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
     button.textContent = item.label;
     button.disabled = item.enabled === false;
     if (item.id) button.dataset.blItem = item.id;
-    button.addEventListener('click', () => {
+    button.addEventListener('click', (event) => {
+      if (!pressed && event.detail !== 0) return;
       close();
       void Promise.resolve()
         .then(() => item.action())
@@ -184,6 +189,13 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
       true,
     ],
     [win, 'blur', close],
+    [
+      menu,
+      'pointerdown',
+      () => {
+        pressed = true;
+      },
+    ],
     // The keyboard stays where it was (the page, a field of the app)
     [menu, 'mousedown', (event) => event.preventDefault()],
   ]);

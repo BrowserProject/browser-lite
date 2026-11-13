@@ -126,6 +126,10 @@ select popup) are in the same sheet.
 - **Menu**: a dropdown under its button (arrow keys move), with "Profile and site data" and
   Settings at the end; history, bookmarks and downloads open as a floating panel at the right of
   the page, below the toolbar. History goes by day with the time of a visit, a page once per day.
+  Like Chrome's Remove from history, the cross of a row and its right click menu (Open in new tab,
+  Remove from history) remove the visits of that page on that day; the keyboard moves to the next
+  row, the list keeps its scroll position and search, and a page without any visit left loses
+  `:visited` (`removeFromHistory`, #544). Bookmark rows have the same cross and menu.
 - **Downloads** (Ctrl+J): the status line and the panel follow a running download; its row
   counts the bytes with a progress bar and has Cancel like Chrome (`Download.cancel()`, the server
   sees the request end). A finished file is saved with the host browser, its row has Save again.
@@ -162,7 +166,8 @@ select popup) are in the same sheet.
   like Chrome: the last 25 closed by the user or by `window.close()`, not discarded ones or new
   tab pages, only in this page and cleared with the history (`closed-tabs.ts`, #377).
   Links to the addresses of the history get the `:visited` style of their page: `main.ts` passes
-  the history to `browser.addVisitedLinks` at every start and clears it with the history (#480).
+  the history to `browser.addVisitedLinks` at every start and clears it with the history (#480);
+  after a page was removed from the history it clears the store and adds the rest again (#544).
   A discarded tab, a reopened one and the tabs of a restored session come back at the scroll
   position of their page like in Chrome (`scrollX`/`scrollY` of the history entries, #440), also
   when the demo is reloaded or closed right after a scroll (#452) or the tab is closed right

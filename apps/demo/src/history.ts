@@ -12,7 +12,10 @@ export interface Visit {
 const KEY = 'bl-history';
 const MAX_ENTRIES = 3000;
 const listeners = new Set<() => void>();
-const clearListeners = new Set<() => void>();
+const removeListeners = new Set<() => void>();
+
+/** The start of the local day of time; the history panel shows a page once per day. */
+export const startOfDay = (time: number): number => new Date(time).setHours(0, 0, 0, 0);
 
 export function readHistory(): Visit[] {
   return readJSON<Visit[]>(KEY, []);
@@ -50,7 +53,20 @@ export function clearHistory(): void {
   clearClosed();
   clearIcons();
   write([]);
-  for (const listener of clearListeners) listener();
+  for (const listener of removeListeners) listener();
+}
+
+/**
+ * Removes the visits of url on the day of time, like Remove from history on Chrome's history
+ * page: the entry the panel shows for that day. Visits on other days stay.
+ */
+export function removeFromHistory(url: string, time: number): void {
+  const day = startOfDay(time);
+  const history = readHistory();
+  const kept = history.filter((visit) => visit.url !== url || startOfDay(visit.time) !== day);
+  if (kept.length === history.length) return;
+  write(kept);
+  for (const listener of removeListeners) listener();
 }
 
 /** Calls listener after every change of the history. */
@@ -58,7 +74,7 @@ export function onHistoryChange(listener: () => void): void {
   listeners.add(listener);
 }
 
-/** Calls listener after the history was cleared. */
-export function onHistoryClear(listener: () => void): void {
-  clearListeners.add(listener);
+/** Calls listener after visits were removed: those of one page or the whole history. */
+export function onHistoryRemove(listener: () => void): void {
+  removeListeners.add(listener);
 }

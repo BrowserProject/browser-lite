@@ -1,4 +1,5 @@
-import { bookmarks, onBookmarksChange, toggleBookmark } from './bookmarks.js';
+import { showMenu } from '@browser-lite/ui';
+import { bookmarks, onBookmarksChange, removeBookmark } from './bookmarks.js';
 import {
   clearDownloads,
   type DownloadEntry,
@@ -8,7 +9,14 @@ import {
 } from './downloads.js';
 import { ui } from './extensions.js';
 import { favicon } from './favicons.js';
-import { clearHistory, onHistoryChange, readHistory, type Visit } from './history.js';
+import {
+  clearHistory,
+  onHistoryChange,
+  readHistory,
+  removeFromHistory,
+  startOfDay,
+  type Visit,
+} from './history.js';
 import { type IconName, icon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { byId, element } from './util.js';
@@ -41,6 +49,8 @@ let filter = '';
 let actions: PanelActions;
 /** Run when the shown panel goes away: the leave function of an extension, subscriptions. */
 const leave: (() => void)[] = [];
+/** Renders the list of the history or bookmarks panel again, keeping its search and focus. */
+let renderList: (() => void) | null = null;
 
 /**
  * Menu and side panel like Chrome: the menu drops down from its button (a bottom sheet on a
@@ -96,7 +106,15 @@ export function togglePanel(name: PanelName | null): void {
 }
 
 function refresh(name: PanelName): void {
-  if (current === name) render();
+  if (current !== name) return;
+  if (!renderList) {
+    render();
+    return;
+  }
+  // A visit or a removal while the user is far down the list leaves it there
+  const top = panel.scrollTop;
+  renderList();
+  panel.scrollTop = top;
 }
 
 /** Arrow keys, Home and End move between the items of the menu. */
@@ -114,7 +132,16 @@ function moveInMenu(e: KeyboardEvent): void {
   e.preventDefault();
 }
 
-function linkRow(entry: { url: string; title: string }, extra: HTMLElement | null): HTMLElement {
+/**
+ * A row of the history or bookmarks panel: a click opens the page (in a new tab with Ctrl or the
+ * middle button), the button at its end and its right click menu remove it with `remove`
+ * (`label` names the command).
+ */
+function linkRow(
+  entry: { url: string; title: string },
+  label: string,
+  remove: () => void,
+): HTMLElement {
   const row = element('div', { className: 'panel-row', title: entry.url });
   const open = element(
     'button',
@@ -131,8 +158,34 @@ function linkRow(entry: { url: string; title: string }, extra: HTMLElement | nul
   open.addEventListener('auxclick', (e) => {
     if (e.button === 1) actions.openURL(entry.url, true);
   });
-  row.append(open);
-  if (extra) row.append(extra);
+  const button = element('button', { className: 'panel-remove', type: 'button', title: label });
+  button.setAttribute('aria-label', `${label}: ${entry.title || entry.url}`);
+  button.append(icon('close'));
+  button.addEventListener('click', () => {
+    const list = row.parentElement;
+    const index = list ? [...list.querySelectorAll('.panel-row')].indexOf(row) : -1;
+    remove();
+    // The keyboard stays in the list: on the row that took this one's place, else the one before
+    const rest = list?.querySelectorAll<HTMLElement>('.panel-remove') ?? [];
+    const next = rest[Math.min(index, rest.length - 1)];
+    (next ?? panel.querySelector<HTMLElement>('.panel-close'))?.focus();
+  });
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showMenu(
+      [
+        {
+          id: 'open-new-tab',
+          label: 'Open in new tab',
+          action: () => actions.openURL(entry.url, true),
+        },
+        { separator: true },
+        { id: 'remove', label, action: remove },
+      ],
+      { x: e.clientX, y: e.clientY },
+    );
+  });
+  row.append(open, button);
   return row;
 }
 
@@ -221,8 +274,8 @@ function renderMenu(): void {
 
 /** "Today", "Yesterday" or the date of a day in the history. */
 function dayLabel(time: number): string {
-  const day = new Date(time).setHours(0, 0, 0, 0);
-  const today = new Date().setHours(0, 0, 0, 0);
+  const day = startOfDay(time);
+  const today = startOfDay(Date.now());
   if (day === today) return 'Today';
   if (today - day <= 86400000 * 1.5) return 'Yesterday';
   return new Date(time).toLocaleDateString(undefined, {
@@ -254,7 +307,9 @@ function renderHistory(list: HTMLElement, visits: Visit[]): number {
       hour: '2-digit',
       minute: '2-digit',
     });
-    const row = linkRow(visit, null);
+    const row = linkRow(visit, 'Remove from history', () =>
+      removeFromHistory(visit.url, visit.time),
+    );
     row.prepend(element('span', { className: 'panel-time', textContent: time }));
     list.append(row);
     if (++shown >= 300) break;
@@ -272,7 +327,7 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
   search.setAttribute('aria-label', search.placeholder);
   const list = element('div', { className: 'panel-list' });
   panel.append(search, list);
-  const renderList = () => {
+  const fill = () => {
     list.textContent = '';
     const query = filter.trim().toLowerCase();
     const matches = (entry: { url: string; title: string }) =>
@@ -284,15 +339,7 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
       shown = renderHistory(list, readHistory().slice().reverse().filter(matches));
     } else {
       for (const entry of bookmarks().slice().reverse().filter(matches).slice(0, 300)) {
-        const remove = element('button', {
-          className: 'panel-remove',
-          type: 'button',
-          title: 'Remove bookmark',
-        });
-        remove.setAttribute('aria-label', `Remove ${entry.title || entry.url}`);
-        remove.append(icon('close'));
-        remove.addEventListener('click', () => toggleBookmark(entry.url));
-        list.append(linkRow(entry, remove));
+        list.append(linkRow(entry, 'Remove bookmark', () => removeBookmark(entry.url)));
         shown++;
       }
     }
@@ -312,7 +359,7 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
   };
   search.addEventListener('input', () => {
     filter = search.value;
-    renderList();
+    fill();
   });
   if (name === 'history') {
     const clear = element('button', {
@@ -325,7 +372,8 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
     });
     panel.append(clear);
   }
-  renderList();
+  fill();
+  renderList = fill;
   // On a phone the keyboard would cover half of the sheet before the user wants to search
   if (!compactLayout()) search.focus();
 }
@@ -396,6 +444,7 @@ function renderDownloads(): void {
 }
 
 function clear(): void {
+  renderList = null;
   for (const run of leave.splice(0)) {
     try {
       run();

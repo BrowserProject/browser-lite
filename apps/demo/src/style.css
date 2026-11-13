@@ -1273,6 +1273,8 @@ svg.favicon {
   box-shadow: var(--elev-2);
 }
 .bl-context-menu {
+  /* Above the side panel and the sheets, whose rows have menus too */
+  z-index: 15;
   min-width: 232px;
   padding: 6px 0;
 }
