@@ -47,10 +47,19 @@ export function takeRestart(): boolean {
  */
 export function watchUnexpectedEnd(): boolean {
   const ended = !!storage(RUNNING_KEY, undefined, true);
-  storage(RUNNING_KEY, '1', true);
+  const running = () => storage(RUNNING_KEY, '1', true);
+  running();
+  // Firefox drops what pagehide writes to sessionStorage when the next page of the tab runs in
+  // another process (always after this cross-origin isolated page): beforeunload clears the mark
+  // too, and the next input marks it again when the user stayed on the page
+  addEventListener('beforeunload', () => {
+    storage(RUNNING_KEY, null, true);
+    addEventListener('pointerdown', running, { capture: true, once: true });
+    addEventListener('keydown', running, { capture: true, once: true });
+  });
   addEventListener('pagehide', () => storage(RUNNING_KEY, null, true));
   addEventListener('pageshow', (event) => {
-    if (event.persisted) storage(RUNNING_KEY, '1', true);
+    if (event.persisted) running();
   });
   return ended;
 }
