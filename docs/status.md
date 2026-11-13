@@ -318,7 +318,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   rotating the phone rotates the pages (#336); the host's back (Safari's button and edge swipe,
   Android's back gesture) goes back in the tab and leaves the demo only at the tab's first entry
   (#414; like Chrome's the new tab page is that first entry, so Back after the first address
-  typed into a new tab returns to it instead of leaving, #513), the host's forward and the mouse
+  typed into a new tab returns to it instead of leaving, #513; a tab a link opened in front
+  closes on the host back like in Chrome on Android and its opener is in front again, where
+  before the host left the demo, #546), the host's forward and the mouse
   forward button go forward in the tab also while it can
   still go back (#467), the bottom bar slides away while the user scrolls a page down and comes
   back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of

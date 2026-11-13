@@ -1,7 +1,8 @@
 // The back and forward of the host browser (its buttons, the iOS edge swipe, the Android back
 // gesture, the mouse buttons) act on the tab in front like in an in-app browser: back goes back in
 // the tab while it has a back entry, only then the host leaves the demo; forward after a back goes
-// forward in it, also while the tab can still go back.
+// forward in it, also while the tab can still go back. Like Chrome on Android the back on a tab a
+// link opened in front closes it when it has no back entry and returns to the tab with the link.
 // The demo adds its host entry in the first user action, not when the tab gets a back entry:
 // Safari's back skips an entry pushed more than 10 s after one (no test browser applies that
 // rule), so here the tab gets its back entries by script.
@@ -10,6 +11,7 @@
 import {
   BROWSER,
   TIMEOUT,
+  canvasOrigin,
   check,
   collect,
   finish,
@@ -17,19 +19,27 @@ import {
   serve,
   startStack,
   timeLimit,
+  waitFor,
   watchErrors,
 } from '../lib/index.mjs';
 
 timeLimit();
 
+// The first page has a link that opens a tab in front
+const LINK =
+  '<a href="/popup" target="_blank" style="display:block;height:100px;background:#cfc">popup</a>';
 const { url: siteURL } = await serve((req, res) => {
+  const html = (body) =>
+    res
+      .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      .end(`<!doctype html>${body}`);
+  if (req.url === '/popup')
+    return html(`<title>Popup</title><p>Popup<script>console.log('RESULT popup=1')</script>`);
   const n = /^\/p([1-3])$/.exec(req.url)?.[1];
   if (!n) return res.writeHead(404).end();
-  res
-    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    .end(
-      `<!doctype html><title>P${n}</title><p>P${n}<script>console.log('RESULT ready=${n}')</script>`,
-    );
+  html(
+    `<title>P${n}</title>${n === '1' ? LINK : ''}<p>P${n}<script>console.log('RESULT ready=${n}')</script>`,
+  );
 });
 
 const stack = await startStack({ app: 'demo', token: 'hostback-token-0123456789abcdef' });
@@ -54,6 +64,7 @@ const hostAt = (place) =>
       () => false,
     );
 const tabURL = () => page.evaluate(() => window.blTest?.view()?.url);
+const tabCount = () => page.evaluate(() => document.querySelectorAll('#tab-list .tab').length);
 const hostBack = () => page.goBack({ waitUntil: 'commit' }).catch(() => {});
 const hostForward = () => page.goForward({ waitUntil: 'commit' }).catch(() => {});
 // The back and forward buttons of the mouse, which Playwright's mouse does not have
@@ -172,6 +183,34 @@ check('host forward from the new tab page: its page goes', await newTabPage(fals
 await page.click('.tab.active .close');
 check('closed the new tab: the first tab again', await tabAt(1), await tabURL());
 await hostAt('base');
+
+// Like Chrome on Android the back on a tab a link opened closes it: the tab with the link is in
+// front again, still in the demo
+async function openPopup() {
+  results.delete('popup');
+  const origin = await canvasOrigin(page);
+  await page.mouse.click(origin.x + 50, origin.y + 50);
+  return (await results.wait('popup')) === '1';
+}
+check('target=_blank link: the popup loads', await openPopup());
+check('popup: two tabs', (await tabCount()) === 2, await tabCount());
+check(
+  'popup: Back is disabled',
+  await page.evaluate(() => document.getElementById('back').disabled),
+);
+check('popup: the host on the entry above', await hostAt('guard'));
+await hostBack();
+check('host back on the popup: the tab with the link again', await tabAt(1), await tabURL());
+check('host back on the popup: the popup closed', (await tabCount()) === 1, await tabCount());
+check('host back on the popup: the demo stays', page.url().startsWith(stack.origin), page.url());
+check('the tab with the link: no back entry, the host on its own entry', await hostAt('base'));
+
+// Without the tab it came from the popup has nothing to return to
+check('target=_blank link again: the popup loads', await openPopup());
+await hostAt('guard');
+await page.click('#tab-list .tab:not(.active) .close');
+await waitFor(async () => (await tabCount()) === 1, 10000);
+check('the tab with the link closed: the host on its own entry', await hostAt('base'));
 
 await hostBack();
 await page.waitForURL(/^about:blank/, { timeout: 10000 }).catch(() => {});

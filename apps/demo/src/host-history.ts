@@ -5,8 +5,9 @@
  * The demo keeps up to three entries of its own in the host history: `base`, the entry it loaded
  * at, `guard` on top of it and `ahead` on top of `guard`. While the tab can go back the host is on
  * `guard`, so a host back lands on `base` in the same document (a `popstate`) and the tab goes
- * back; the demo then returns to `guard` with `history.forward()`. Only when the tab has no back
- * entry the host stays on `base`, and the next host back leaves the demo. A host move up (from
+ * back (or, like Chrome on Android, a tab a link opened closes back to its parent tab); the demo
+ * then returns to `guard` with `history.forward()`. Only when back can do neither the host stays
+ * on `base`, and the next host back leaves the demo. A host move up (from
  * `base` to `guard`, from `guard` to `ahead`) goes forward in the tab, and the demo returns to
  * the entry it wants.
  *
@@ -20,6 +21,7 @@
 
 /** The tab the host back and forward act on. */
 export interface HistoryTarget {
+  /** Whether back acts in the demo: the tab goes back, or it closes back to its parent tab. */
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   back(): void;

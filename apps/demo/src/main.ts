@@ -61,8 +61,10 @@ import {
   activate,
   activeTab,
   adoptView,
+  backClosesTab,
   backgroundPageLoaded,
   clearTabs,
+  closeToParent,
   discardForMemory,
   downloadStarted,
   focusPage,
@@ -387,9 +389,9 @@ followHostHistory(() => {
   const tab = activeTab();
   return (
     tab && {
-      canGoBack: tab.canGoBack,
+      canGoBack: tab.canGoBack || backClosesTab(tab),
       canGoForward: tab.canGoForward,
-      back: () => tab.view.back(),
+      back: () => (tab.canGoBack ? tab.view.back() : closeToParent(tab)),
       forward: () => tab.view.forward(),
     }
   );

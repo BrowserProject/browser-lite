@@ -74,6 +74,12 @@ export class Tab implements SessionTab {
    */
   openedBy: Tab | null = null;
   /**
+   * Tab whose link opened this one in front (target=_blank, window.open, Shift click). Like
+   * Chrome on Android the host back closes this tab when it has no back entry and returns to the
+   * parent; forgotten when the parent closes.
+   */
+  parent: Tab | null = null;
+  /**
    * Closed by the browser, not by the user: a discard (a tab in its place took over) or a tab
    * whose only navigation became a download. Ctrl+Shift+T does not bring it back.
    */
@@ -582,6 +588,7 @@ function openLinkTab(url: string, opener: Tab): Tab | null {
   const tab = new Tab(view, { url });
   tab.opener = active;
   tab.openedBy = opener;
+  tab.parent = opener;
   activate(add(tab, linkTabPlace(opener, true)));
   return tab;
 }
@@ -631,6 +638,7 @@ export function adoptView(view: View, opener: View | null): void {
   const tab = new Tab(view, {});
   tab.opener = active;
   tab.openedBy = (opener && tabOf(opener)) ?? active;
+  tab.parent = tab.openedBy;
   activate(add(tab, linkTabPlace(tab.openedBy, true)));
 }
 
@@ -767,12 +775,33 @@ export function requestClose(tab: Tab): void {
   });
 }
 
+/** Whether the back of tab closes it and returns to the tab whose link opened it. */
+export function backClosesTab(tab: Tab): boolean {
+  return !tab.canGoBack && !tab.closing && !!tab.parent && list.includes(tab.parent);
+}
+
+/**
+ * The host back on tab without a back entry, like Chrome on Android: a tab a link opened in front
+ * closes, and the tab with the link is in front again. A page that may ask before it is left
+ * stays in front for the question.
+ */
+export function closeToParent(tab: Tab): void {
+  const parent = tab.parent;
+  if (!parent || !backClosesTab(tab)) return;
+  if (tab.isActive && tab.hasBeforeUnload && tab.userActivated) tab.opener = parent;
+  else activate(parent);
+  requestClose(tab);
+}
+
 // The view closed (by the user, window.close() or a discard)
 function removeTab(tab: Tab): void {
   const index = list.indexOf(tab);
   if (index < 0) return;
   list.splice(index, 1);
-  for (const other of list) if (other.openedBy === tab) other.openedBy = null;
+  for (const other of list) {
+    if (other.openedBy === tab) other.openedBy = null;
+    if (other.parent === tab) other.parent = null;
+  }
   tab.dispose();
   tabsChanged();
   if (runtime.stopped) return;
@@ -780,7 +809,11 @@ function removeTab(tab: Tab): void {
     rememberClosed({ entry: sessionEntry(tab), index });
   setTimeout(persistSession);
   updateHostBeforeUnload();
-  if (active !== tab) return;
+  if (active !== tab) {
+    // The tab in front may have lost its parent, and with it the host back
+    syncHostHistory();
+    return;
+  }
   active = null;
   // Like Chrome and Firefox: back to the tab it came from, else the right neighbour, else the left
   const next =
@@ -839,7 +872,11 @@ export function discardForMemory(): Tab | null {
   if (!fresh) return null;
   fresh.lastActive = tab.lastActive;
   fresh.openedBy = tab.openedBy;
-  for (const other of list) if (other.openedBy === tab) other.openedBy = fresh;
+  fresh.parent = tab.parent;
+  for (const other of list) {
+    if (other.openedBy === tab) other.openedBy = fresh;
+    if (other.parent === tab) other.parent = fresh;
+  }
   fresh.takeIcon(tab);
   tab.closedByBrowser = true;
   void tab.view.close({ force: true });

@@ -208,7 +208,9 @@ select popup) are in the same sheet.
   not go back as well (`history-menu.ts`, #522).
 - **Host back and forward**: the back of the host browser (its button, the mouse back button,
   the iOS edge swipe, the Android back gesture) goes back in the tab in front while it has a back
-  entry (the new tab page is one, #513), only then the host leaves the demo; its forward (also the mouse forward button) goes
+  entry (the new tab page is one, #513); like Chrome on Android a tab a link opened in front
+  (target=_blank, `window.open`, Shift click) without a back entry closes instead and the tab
+  with the link is in front again (#546); only then the host leaves the demo; its forward (also the mouse forward button) goes
   forward in the tab whenever the tab can go forward. `host-history.ts` keeps up to three host
   entries of the demo, the one it loaded at, one above it that the first user action pushes and
   one above that for forward, pushed the first time the tab can go forward with a back entry

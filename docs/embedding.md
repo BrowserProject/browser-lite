@@ -321,7 +321,8 @@ of `context.storage` (default in memory), for example in your user's profile.
   still go back, keep one more entry above it. The demo's `host-history.ts` does this (#414,
   #467). A start page you draw over a view is a back entry only when the view has loaded one:
   the demo loads `about:blank#new-tab` for its new tab page and shows the page while that address
-  is committed (#513).
+  is committed (#513). Like Chrome on Android the demo also takes the host back while a view a
+  link opened has no back entry: it closes that view and shows the one with the link (#546).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left (`pagehide`, also into the back-forward cache) the browser ends like
   `destroy()`, without events: the page can no longer react. A page shown again from the
