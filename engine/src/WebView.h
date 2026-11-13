@@ -191,6 +191,8 @@ public:
     Vector<uint8_t> copyImageAt(double x, double y);
     // Save image as, Save link as: a download of the address as requested by the page
     void download(const String& url);
+    // Save page as (Ctrl+S): a download of the page's address, named after its title
+    void savePage();
     // Editor command like "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);

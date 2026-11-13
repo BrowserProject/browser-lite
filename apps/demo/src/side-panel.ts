@@ -30,6 +30,8 @@ export interface PanelActions {
   /** Requests an address as a download (Download again, Retry). */
   download(url: string): void;
   find(): void;
+  /** Save page as (Ctrl+S). */
+  savePage(): void;
   print(): void;
   /** The settings page, at the profile and site data with 'profile'. */
   openSettings(section?: 'profile'): void;
@@ -234,6 +236,7 @@ function renderMenu(): void {
     ['bookmarks', 'Bookmarks', 'bookmarks', 'Ctrl+Shift+O', () => togglePanel('bookmarks')],
     ['downloads', 'Downloads', 'download', 'Ctrl+J', () => togglePanel('downloads')],
     ['find', 'Find in page', 'search', 'Ctrl+F', close(() => actions.find())],
+    ['save', 'Save page as…', 'save', 'Ctrl+S', close(() => actions.savePage())],
     ['print', 'Print…', 'print', 'Ctrl+P', close(() => actions.print())],
     ...ui
       .items('panel')
@@ -248,7 +251,7 @@ function renderMenu(): void {
       'profile',
       'Profile and site data',
       'profile',
-      '',
+      'Ctrl+Shift+Del',
       close(() => actions.openSettings('profile')),
     ],
     ['settings', 'Settings', 'settings', '', close(() => actions.openSettings())],

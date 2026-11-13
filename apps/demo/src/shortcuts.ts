@@ -1,15 +1,16 @@
-import { focusAddress } from './address-bar.js';
+import { focusAddress, focusSearch } from './address-bar.js';
 import { toggleBookmark } from './bookmarks.js';
 import { findAgain, openFind } from './find-bar.js';
 import { closePreview, previewOpen } from './print-preview.js';
 import { runtime } from './runtime.js';
-import { settingsOpen } from './settings-page.js';
+import { openClearData, settingsOpen } from './settings-page.js';
 import { panelOpen, togglePanel } from './side-panel.js';
 import { overviewOpen, toggleOverview } from './tab-overview.js';
 import {
   activate,
   activeTab,
   allTabs,
+  goHome,
   moveTab,
   onTabCreated,
   openURL,
@@ -72,6 +73,10 @@ function shortcutAction(e: Key): (() => void) | null {
   const tab = activeTab();
   if (key === 'Escape' && previewOpen()) return closePreview;
   if (ctrl && e.shiftKey && key === 'o') return () => togglePanel('bookmarks');
+  // Cmd+Shift+Delete is Cmd+Shift+Backspace on a Mac keyboard, Cmd+Shift+H its Alt+Home
+  if (ctrl && e.shiftKey && (key === 'Delete' || (e.metaKey && key === 'Backspace')))
+    return openClearData;
+  if (e.metaKey && e.shiftKey && key === 'h') return goHome;
   if (key === 'Escape' && panelOpen()) return () => togglePanel(null);
   if (key === 'Escape' && overviewOpen()) return () => toggleOverview(false);
   if (ctrl && !e.altKey) {
@@ -88,6 +93,11 @@ function shortcutAction(e: Key): (() => void) | null {
         return () => tab && requestClose(tab);
       case 'l':
         return focusAddress;
+      case 'k':
+      case 'e':
+        return focusSearch;
+      case 's':
+        return () => tab?.view.savePage();
       case 'f':
         return openFind;
       case 'g':
@@ -128,6 +138,7 @@ function shortcutAction(e: Key): (() => void) | null {
     if (key === 'ArrowLeft') return () => tab.view.back();
     if (key === 'ArrowRight') return () => tab.view.forward();
     if (key === 'd') return focusAddress;
+    if (key === 'Home') return goHome;
   }
   if (!ctrl && !e.altKey) {
     switch (key) {

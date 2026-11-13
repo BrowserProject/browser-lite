@@ -524,6 +524,13 @@ export interface View {
    */
   download(url: string): void;
   /**
+   * Save page as like Chrome's Ctrl+S with Webpage, HTML only: requests the page's address again
+   * as from the page and delivers it as event `download` of the browser, an HTML page named after
+   * its title (`Example Domain.html`), other documents (an image, text) with the name of their
+   * response. Does nothing for a page without an address of its own (`loadHTML`, `about:`).
+   */
+  savePage(): void;
+  /**
    * Page source like Chrome's Ctrl+U: the event `open-tab` asks for `view-source:<url>` in front.
    * Only for http(s) pages. A `view-source:` address loads in any view (`load`) as a page of its
    * own with history: the source of the address after the scheme with numbered lines.

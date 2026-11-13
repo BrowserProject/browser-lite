@@ -52,11 +52,19 @@ page.addEventListener('close', () => {
 });
 document.body.append(page);
 
-export function openSettings(name: Section = 'general'): void {
+/**
+ * Opens the settings at section `name`; the keyboard goes to the element with id `focus` in it
+ * when that can take it, else to the section's button.
+ */
+export function openSettings(name: Section = 'general', focus = ''): void {
   if (!page.open) page.showModal();
   showSection(name);
   nav.querySelector<HTMLElement>(`[data-section=${name}]`)?.focus();
+  if (focus) content.querySelector<HTMLElement>(`#${focus}`)?.focus();
 }
+
+/** Chrome's Ctrl+Shift+Delete: the profile and site data, at Delete site data. */
+export const openClearData = (): void => openSettings('profile', 'settings-clear-site-data');
 
 export const settingsOpen = (): boolean => page.open;
 

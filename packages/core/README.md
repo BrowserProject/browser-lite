@@ -150,7 +150,10 @@ never showed a page (no entry in `view.history` other than `about:blank`, for ex
 `target=_blank` link to a file), so no empty tab stays in front.
 `view.download(url)` requests an address as a download like Save link as and Save image as of
 Chrome's menu: as from the page, with its cookies and referrer, and it arrives as `download` like
-the page's own.
+the page's own. `view.savePage()` is Save page as (Ctrl+S) with Chrome's Webpage, HTML only: the
+page's address requested again the same way, an HTML page named after its title
+(`Example Domain.html`), other documents (an image, text) with the name of their response;
+nothing for a page without an address of its own (`loadHTML`, `about:`).
 
 `view.copyImage(x, y)` is Copy image of the menu: the engine copies the image at that point of a
 `context-menu` event at its full size as PNG, and the `clipboardWrite` handler gets it as

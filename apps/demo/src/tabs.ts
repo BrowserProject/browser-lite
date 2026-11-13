@@ -531,6 +531,11 @@ export function openNewTab(after?: Tab): Tab | null {
   return openTab(settings().homePage || NEW_TAB_URL, after && list[list.indexOf(after) + 1]);
 }
 
+/** Chrome's Alt+Home: the home page of the settings in the active tab, else the new tab page. */
+export function goHome(): void {
+  if (active) loadInTab(active, settings().homePage || NEW_TAB_URL);
+}
+
 /** Link or bookmark: in the active tab or a new one (empty url: a new tab). */
 export function openURL(url: string, inNewTab: boolean): void {
   if (inNewTab || !active) {

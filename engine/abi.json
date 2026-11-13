@@ -1,5 +1,5 @@
 {
-  "abiVersion": 37,
+  "abiVersion": 38,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -44,6 +44,7 @@
     { "name": "bl_print", "returns": "void", "args": "int id", "doc": "Prints the main frame to PDF, result through onEnginePrint." },
     { "name": "bl_copy_image", "returns": "void", "args": "int id, int requestId, double x, double y", "doc": "Copy image of the context menu: the image at the point (CSS pixels of the view, also in frames) at full size as PNG through onEngineCopyImage, empty bytes without one." },
     { "name": "bl_download", "returns": "void", "args": "int id, char* url", "doc": "Save image as, Save link as: downloads the address with the cookies and referrer of the page; events download-start and download-done like other downloads." },
+    { "name": "bl_save_page", "returns": "void", "args": "int id", "doc": "Save page as (Ctrl+S): downloads the address of the main frame's document with its cookies, an HTML document named after its title (else its host) with .html (.xhtml for XHTML), other documents with the name of the response; events download-start and download-done like other downloads. Does nothing for a document without an address of its own (loadHTML, about:)." },
     { "name": "bl_context_menu", "returns": "void", "args": "int id, double x, double y", "doc": "Right click: page contextmenu event first, then 'context-menu' unless the page handled it." },
     { "name": "bl_command", "returns": "void", "args": "int id, char* name", "doc": "Editor command (Copy, Cut, Paste, SelectAll, Undo, Redo, ...)." },
     { "name": "bl_media_event", "returns": "void", "args": "int playerId, char* json", "doc": "State of the host <video> of a player (answer to onEngineMedia commands)." },

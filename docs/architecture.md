@@ -374,9 +374,10 @@ engine does not show) continues as the download (`continueAsDownload`, like WebK
 `NetworkResourceLoader::convertToDownload`): the paused request is taken from the
 `ResourceLoader` before WebCore cancels it, or the body comes from the HTTP cache, so a one-time
 link or a form POST reaches the server once. `<a download>`, a navigation the
-engine has no load for (answered by a service worker or WebKit's memory cache) and `bl_download`
+engine has no load for (answered by a service worker or WebKit's memory cache), `bl_download`
 (Save link as, Save image as, the demo's Download again: the page's cookies and the referrer its
-policy allows, #511) send a request of their own (#412).
+policy allows, #511) and `bl_save_page` (Save page as, the main frame's address named after its
+title) send a request of their own (#412).
 A `view-source:` address is a document of its own like in Chrome (`engine/src/ViewSource.cpp`,
 #490): the loader strategy serves the main frame's load of it from a request for the address after
 the scheme (cookies of a navigation, redirects followed, the body of any status) and answers with

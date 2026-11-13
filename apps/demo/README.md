@@ -107,7 +107,12 @@ select popup) are in the same sheet.
   first and they run only when it does not handle the key (`unhandled-key` of the core), so an
   editor keeps its own Ctrl+F, Ctrl+L or Ctrl+P and Ctrl+U underlines in rich text. Only the ones
   that leave or switch the tab (Ctrl+T, Ctrl+Shift+T, Ctrl+W, Ctrl+Tab, Ctrl+PageUp and PageDown)
-  and the Alt ones (Alt+Left, Alt+Right, Alt+D) never reach the page (#436). Letters typed right
+  and the Alt ones (Alt+Left, Alt+Right, Alt+D, Alt+Home) never reach the page (#436). Like
+  Chrome Ctrl+K and Ctrl+E put `?` into the address bar (text after `?` is only a search, also
+  one that looks like an address), Ctrl+S saves the page (`view.savePage()`, also Save page as in
+  the menu), Ctrl+Shift+Delete opens the profile and site data at Delete site data and Alt+Home
+  loads the home page of the settings or the new tab page in the tab; on a Mac Cmd+Shift+H and
+  Cmd+Shift+Backspace too. Letters typed right
   after Ctrl+L or Ctrl+F while the page is busy wait in the core and land in the bar, not the
   page (#507). Escape stops a
   loading page like Chrome's Stop, but only when nothing else takes the key: not the page

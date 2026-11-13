@@ -21,6 +21,7 @@ const PATHS = {
   history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5M3.5 4v4.5H8M12 7.5V12l3 2"/>',
   bookmarks: '<path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/>',
   download: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
+  save: '<path d="M4.5 4.5h12l3 3v12h-15z"/><path d="M8 4.5v4.5h7V4.5M7.5 19.5v-6h9v6"/>',
   print:
     '<path d="M7 9V3.5h10V9M7 17.5H5a2 2 0 0 1-2-2v-4.5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4.5a2 2 0 0 1-2 2h-2M7 14h10v6.5H7z"/>',
   settings:

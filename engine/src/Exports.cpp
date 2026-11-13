@@ -551,6 +551,12 @@ EMSCRIPTEN_KEEPALIVE void bl_download(int id, char* url)
     withView(id, [url = takeString(url)](WebView& view) { view.download(url); });
 }
 
+// Save page as: download-start and download-done like other downloads
+EMSCRIPTEN_KEEPALIVE void bl_save_page(int id)
+{
+    withView(id, [](WebView& view) { view.savePage(); });
+}
+
 EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)
 {
     withView(id, [](WebView& view) { view.stopFind(); });

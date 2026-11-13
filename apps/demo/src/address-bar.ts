@@ -62,14 +62,26 @@ function searchURL(text: string): string {
 }
 
 /**
+ * The search of text that starts with `?`, like Chrome and Firefox: always a search for the rest
+ * (`? example.com` searches for example.com). Null for other text.
+ */
+function forcedQuery(text: string): string | null {
+  const value = text.trim();
+  return value.startsWith('?') ? value.slice(1).trim() : null;
+}
+
+/**
  * What Enter opens for the text of the address bar: an address, or a search with the search
  * engine. An address without a scheme stays without one: `View.load` gives it https:// with a
  * fallback to http:// like Chrome, or http:// for a local one (`typedAddress` names where it
  * starts). Like Chrome text is an address only when it looks like one (`typedKind`: node.js and
- * an invalid address like a port above 65535 are searches).
+ * an invalid address like a port above 65535 are searches); text that starts with `?` is always a
+ * search.
  */
 export function addressToLoad(text: string): string {
   const value = text.trim();
+  const query = forcedQuery(value);
+  if (query !== null) return query && searchURL(query);
   if (!value) return '';
   if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[a-z0-9.-]+:\d+/i.test(value))
     return URL.canParse(value) ? value : searchURL(value);
@@ -214,6 +226,25 @@ export function focusAddress(): void {
   address.select();
 }
 
+/**
+ * Chrome's Ctrl+K and Ctrl+E: the address bar takes the keyboard with `?` in it, so what follows
+ * is a search even when it looks like an address. A search already started there is selected
+ * after its `?`.
+ */
+export function focusSearch(): void {
+  closeFindOverToolbar();
+  const searching = edited && forcedQuery(address.value) !== null;
+  address.focus();
+  if (searching) {
+    address.setSelectionRange(address.value.indexOf('?') + 1, address.value.length);
+    return;
+  }
+  hideSuggestions();
+  edited = true;
+  typed = address.value = '?';
+  address.setSelectionRange(1, 1);
+}
+
 function hideSuggestions(): void {
   box.hidden = true;
   rows = [];
@@ -250,13 +281,21 @@ function rowElement(row: Row, start: Node, title: string, url = ''): HTMLElement
 function showSuggestions(complete: boolean): void {
   typed = address.value;
   const text = typed.trim();
+  const query = forcedQuery(text);
   box.textContent = '';
-  if (!text) {
+  if (!text || query === '') {
     hideSuggestions();
     return;
   }
   rows = [];
   selected = -1;
+  // Text after `?` is only a search: no address, no completion, no pages
+  if (query !== null) {
+    inline = null;
+    addSearchRow(query, text);
+    openSuggestions();
+    return;
+  }
   const atEnd = address.selectionStart === typed.length && address.selectionEnd === typed.length;
   inline = complete && atEnd ? inlineCompletion(typed) : null;
   if (inline) {
@@ -279,11 +318,7 @@ function showSuggestions(complete: boolean): void {
     box.append(rowElement(row, icon('globe'), shownAddress));
   };
   if (!offered) addressRow();
-  const searchRow = { url: search, text };
-  rows.push(searchRow);
-  box.append(
-    rowElement(searchRow, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${text}"`),
-  );
+  addSearchRow(text, text);
   if (offered) addressRow();
   for (const entry of suggestions(text)) {
     if (entry.url === shownAddress || entry.url === inline?.url) continue;
@@ -291,6 +326,19 @@ function showSuggestions(complete: boolean): void {
     rows.push(row);
     box.append(rowElement(row, favicon(entry.url), entry.title || entry.url, entry.url));
   }
+  openSuggestions();
+}
+
+/** The row that searches for query, showing text in the field while it is selected. */
+function addSearchRow(query: string, text: string): void {
+  const row = { url: searchURL(query), text };
+  rows.push(row);
+  box.append(
+    rowElement(row, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${query}"`),
+  );
+}
+
+function openSuggestions(): void {
   select(0);
   box.hidden = false;
   placeSuggestions();
@@ -430,8 +478,10 @@ address.addEventListener('blur', () => {
   setTimeout(() => {
     if (document.activeElement !== address) hideSuggestions();
   }, 100);
-  // Like Chrome the edit stays outside the field, unless it is empty or the address again
-  if (compactLayout() || !address.value.trim() || address.value === current) edited = false;
+  // Like Chrome the edit stays outside the field, unless it is empty (a `?` alone too) or the
+  // address again
+  const empty = !address.value.trim() || forcedQuery(address.value) === '';
+  if (compactLayout() || empty || address.value === current) edited = false;
   if (!edited) address.value = shownText(current);
 });
 address.addEventListener('keydown', (e) => {

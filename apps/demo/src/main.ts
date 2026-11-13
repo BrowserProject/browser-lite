@@ -378,6 +378,7 @@ initSidePanel({
   openURL,
   download: (url) => activeTab()?.view.download(url),
   find: openFind,
+  savePage: () => activeTab()?.view.savePage(),
   print: () => printTab(activeTab()),
   openSettings: (section) => openSettings(section),
 });

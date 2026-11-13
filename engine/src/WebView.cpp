@@ -1766,6 +1766,42 @@ void WebView::download(const String& address)
     startDownload(m_id, request, { });
 }
 
+// Like Chrome's Save page as with Webpage, HTML only: the page's address is requested again as
+// from the page. An HTML document is named after its title (else its host) with .html, illegal
+// file name characters replaced; other documents (an image, text) keep the name of the response.
+// Pages without an address of their own (loadHTML, about:) are not saved.
+void WebView::savePage()
+{
+    RefPtr frame = mainFrame();
+    RefPtr document = frame ? frame->document() : nullptr;
+    RefPtr loader = frame ? frame->loader().documentLoader() : nullptr;
+    if (!document || !loader || loader->substituteData().isValid())
+        return;
+    URL url = document->url();
+    if (!url.protocolIsInHTTPFamily() && !url.protocolIsData())
+        return;
+    url.removeFragmentIdentifier();
+    String filename;
+    if (document->isHTMLDocument() || document->isXHTMLDocument()) {
+        String name = document->title().simplifyWhiteSpace(isASCIIWhitespace);
+        if (name.isEmpty())
+            name = url.host().toString();
+        auto illegal = [](char16_t character) {
+            return character < 0x20 || character == '/' || character == '\\' || character == ':' || character == '*'
+                || character == '?' || character == '"' || character == '<' || character == '>' || character == '|';
+        };
+        StringBuilder builder;
+        for (auto character : StringView(name).codeUnits())
+            builder.append(illegal(character) ? u'_' : character);
+        name = builder.toString().left(200).trim([](char16_t character) { return character == '.' || isASCIIWhitespace(character); });
+        if (!name.isEmpty())
+            filename = makeString(name, document->isXHTMLDocument() ? ".xhtml"_s : ".html"_s);
+    }
+    ResourceRequest request { WTF::move(url) };
+    request.setFirstPartyForCookies(document->firstPartyForCookies());
+    startDownload(m_id, request, filename);
+}
+
 void WebView::executeCommand(const String& name)
 {
     if (RefPtr frame = m_page->focusController().focusedOrMainFrame())

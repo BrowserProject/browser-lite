@@ -511,6 +511,10 @@ export class ViewImpl implements View {
     this.call((m) => m._bl_download(this.id, this.host.text(url)));
   }
 
+  savePage(): void {
+    this.call((m) => m._bl_save_page(this.id));
+  }
+
   viewSource(): void {
     if (/^https?:/.test(this.url))
       this.emit('open-tab', { url: `view-source:${this.url}`, disposition: 'foreground' });
