@@ -384,6 +384,12 @@ the text decoded like the page would be and escaped into numbered lines, sandbox
 WebCore keeps it in the history, so back, forward and reload come back to it. The navigation
 policy lets it through only in the main frame from the host or the user (`bl_load_url`) and for
 back, forward and reload; a page, a frame or a redirect cannot open it.
+An XML document in the top frame without style information (no stylesheet, no XSLT, no element
+of XHTML, SVG or MathML), an RSS or Atom feed for example, shows WebKit's XML tree viewer like
+Chrome and Firefox: indented tags with buttons that fold them under the line "This XML file does
+not appear to have any style information". WebKit runs it only with developer extras; patch 0133
+runs it on the Wasm port wherever the page may run scripts, since the viewer is a script that
+builds the tree at the load event (with JavaScript off the document is rendered as before, #540).
 A synchronous load (a synchronous `XMLHttpRequest`, its CORS preflight, an external entity of
 XML; `engine/src/SyncLoad.cpp`, #471) cannot block the engine thread, which is where curl's
 answers arrive. Like a dialog (#258) it defers the page group (`PageGroupLoadDeferrer`) and runs

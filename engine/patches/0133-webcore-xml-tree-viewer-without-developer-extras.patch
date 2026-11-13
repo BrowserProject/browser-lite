@@ -1,0 +1,29 @@
+diff --git a/Source/WebCore/xml/parser/XMLDocumentParserLibxml2.cpp b/Source/WebCore/xml/parser/XMLDocumentParserLibxml2.cpp
+index ff8f3b47f5..f01f3c9230 100644
+--- a/Source/WebCore/xml/parser/XMLDocumentParserLibxml2.cpp
++++ b/Source/WebCore/xml/parser/XMLDocumentParserLibxml2.cpp
+@@ -62,6 +62,7 @@
+ #include "ProcessingInstruction.h"
+ #include "ResourceError.h"
+ #include "ResourceResponse.h"
++#include "ScriptController.h"
+ #include "ScriptElement.h"
+ #include "ScriptSourceCode.h"
+ #include "Settings.h"
+@@ -105,8 +106,16 @@ static inline bool shouldRenderInXMLTreeViewerMode(Document& document)
+     if (!frame)
+         return false;
+ 
++#if PLATFORM(WASM)
++    // Like Chrome and Firefox, the Wasm port shows the tree to everyone, not only with developer extras.
++    // The viewer is a script that builds the tree at the load event: where scripts may not run, that
++    // event never reaches it and the document would stay an empty tree.
++    if (!protect(frame->script())->canExecuteScripts(ReasonForCallingCanExecuteScripts::NotAboutToExecuteScript))
++        return false;
++#else
+     if (!frame->settings().developerExtrasEnabled())
+         return false;
++#endif
+ 
+     if (frame->tree().parent())
+         return false; // This document is not in a top frame
