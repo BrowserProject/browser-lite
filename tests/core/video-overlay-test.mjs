@@ -2,9 +2,9 @@
 // where the engine's compositor punched a hole into the page. Checked with screenshots of the host
 // page (what Chromium really shows): the video appears through the hole, page content above the
 // video stays above it, no frames are copied into the engine, requestVideoFrameCallback and
-// canvas.drawImage(video) still work (frames only on demand), the video follows scrolling, and a
-// video with opacity falls back to frames painted into the page, and a video hidden and shown
-// again gets its hole back.
+// canvas.drawImage(video) still work (frames only on demand), the video follows scrolling, a
+// video with opacity falls back to frames painted into the page, getVideoPlaybackQuality() counts
+// the frames of both, and a video hidden and shown again gets its hole back.
 //
 //   node tests/core/video-overlay-test.mjs [engine-dir]
 import {
@@ -139,6 +139,31 @@ check(
   'no frames copied for the overlay, all for the fallback',
   before.length === 2 && after[0] - before[0] <= 2 && after[1] - before[1] > 10,
   `${before.join('/')} -> ${after.join('/')}`,
+);
+
+// getVideoPlaybackQuality(): the frames the host decoded, for the overlay and the fallback;
+// "total/dropped/corrupted" per video
+const quality = async (key) => {
+  await page.evaluate(
+    (key) =>
+      window.blTest.eval(
+        `console.log('RESULT ${key}=' + ['video', 'faded'].map((id) => { const q = document.getElementById(id).getVideoPlaybackQuality(); return [q.totalVideoFrames, q.droppedVideoFrames, q.corruptedVideoFrames].join('/'); }).join('_'))`,
+      ),
+    key,
+  );
+  return ((await result(key)) || '').split('_').map((counts) => counts.split('/').map(Number));
+};
+const firstCounts = await quality('quality1');
+await page.waitForTimeout(1500);
+const counts = await quality('quality2');
+check(
+  'getVideoPlaybackQuality() counts the frames (overlay and fallback)',
+  counts.length === 2 &&
+    counts.every(
+      ([total, dropped, corrupted], i) =>
+        total > firstCounts[i][0] && dropped <= total && corrupted === 0,
+    ),
+  `${results.get('quality1')} -> ${results.get('quality2')}`,
 );
 
 // Hidden and shown again (YouTube does that around its consent dialog): WebCore makes a new

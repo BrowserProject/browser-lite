@@ -522,7 +522,11 @@ compositor clears that rect in the framebuffer (its WebGL context has alpha) and
 the host `<video>` before the view canvas (`position: relative`) with that transform, so page
 content over the video stays on top and clipping comes from the hole. Frames are copied only
 while the page reads them (`drawImage`, WebGL, `VideoFrame`), `requestVideoFrameCallback` gets
-the presented frames of the host (`bl_media_presented`). A hole the compositor cannot punch
+the presented frames of the host (`bl_media_presented`). `getVideoPlaybackQuality()` reports the
+frame counts of the host element, which decodes and shows every frame in both modes (sent with
+each state report); with copied frames a frame the host showed that never reached the engine
+counts as dropped as well (`media-quality.ts`), so adaptive players lower the quality when the
+copies fall behind (#538). A hole the compositor cannot punch
 straight into the framebuffer (opacity, blend mode, color filter, perspective, inside the
 offscreen surface of an effect) is refused and that player goes back to copied frames painted
 into the tiles (#217), as do all players with `BL_VIDEO_OVERLAY=0` or without compositing. Copied

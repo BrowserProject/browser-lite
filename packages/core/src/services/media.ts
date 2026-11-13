@@ -1,5 +1,6 @@
 import type { ViewImpl } from '../view.js';
 import { mediaSourceClass } from './host-apis.js';
+import { FrameQuality } from './media-quality.js';
 import { MediaUnlock } from './media-unlock.js';
 import { installPictureInPicture } from './pip.js';
 import { Service, type ServiceContext } from './service.js';
@@ -95,6 +96,7 @@ export class Player {
   private copyFrames: boolean;
   private placement: VideoPlacement | null = null;
   private destroyed = false;
+  private readonly quality = new FrameQuality();
 
   constructor(
     private readonly host: MediaHost,
@@ -140,17 +142,19 @@ export class Player {
       video.src = host.mediaUrl(id);
     }
     this.schedulePump();
-    if (this.overlay) this.watchPresentedFrames();
+    this.watchPresentedFrames();
   }
 
-  // Overlay: requestVideoFrameCallback of the page needs the frames the host shows
+  // The frames the host shows: with the overlay for requestVideoFrameCallback of the page,
+  // otherwise to find the ones never copied (getVideoPlaybackQuality)
   private watchPresentedFrames(): void {
     const video = this.video;
     if (typeof video.requestVideoFrameCallback !== 'function') return;
     const presented = (_now: number, metadata: VideoFrameCallbackMetadata) => {
-      if (this.destroyed || !this.overlay) return;
       const { ctx } = this.host;
-      if (!ctx.signal.aborted) ctx.module._bl_media_presented(this.id, metadata.mediaTime);
+      if (this.destroyed || ctx.signal.aborted) return;
+      this.quality.presented(metadata.presentedFrames);
+      if (this.overlay) ctx.module._bl_media_presented(this.id, metadata.mediaTime);
       video.requestVideoFrameCallback(presented);
     };
     video.requestVideoFrameCallback(presented);
@@ -205,6 +209,7 @@ export class Player {
       readyState: this.readyState(),
       loading: video.networkState === HTMLMediaElement.NETWORK_LOADING,
       buffered,
+      quality: this.quality.counts(video),
     });
   }
 
@@ -429,13 +434,14 @@ export class Player {
     if (video.readyState < 2 || !video.videoWidth) return;
     if (video.currentTime === this.lastTime && !this.forceFrame) return;
     this.lastTime = video.currentTime;
+    const restart = this.forceFrame;
     this.forceFrame = false;
-    this.copyFrame();
+    if (this.copyFrame() && !this.overlay) this.quality.copied(restart);
   }
 
   // Every frame into its own buffer, RGBA not premultiplied; the engine takes it over and frees it
-  // (MediaPlayerPrivateWasm::hostFrame). We never touch it again.
-  private copyFrame(): void {
+  // (MediaPlayerPrivateWasm::hostFrame). We never touch it again. false: nothing copied.
+  private copyFrame(): boolean {
     const { module } = this.host.ctx;
     const [width, height] = this.frameSize();
     if (!this.canvas || this.canvas.width !== width || this.canvas.height !== height) {
@@ -445,15 +451,16 @@ export class Player {
       if (this.context2d) this.context2d.globalCompositeOperation = 'copy';
     }
     const context = this.context2d;
-    if (!context) return;
+    if (!context) return false;
     context.drawImage(this.video, 0, 0, width, height);
     const pixels = context.getImageData(0, 0, width, height).data;
     const ptr = module._malloc(pixels.length);
-    if (!ptr) return;
+    if (!ptr) return false;
     module.blHeap().set(pixels, ptr);
     this.frameInFlight = true;
     this.frames++;
     module._bl_media_frame(this.id, ptr, width, height);
+    return true;
   }
 
   destroy(): void {

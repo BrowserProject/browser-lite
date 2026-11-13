@@ -335,6 +335,8 @@ void MediaPlayerPrivateWasm::load(const String& urlString)
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
     startOverlay();
+    // A new host <video>, its counts start at 0
+    m_hostQuality = std::nullopt;
     send("create"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume,
         ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s,
         ",\"overlay\":"_s, m_overlay ? "true"_s : "false"_s, '}'));
@@ -375,6 +377,8 @@ void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourc
     double volume = player ? player->volume() : 1;
     startOverlay();
     // Create the host player first, the SourceBuffers come right after
+    // A new host <video>, its counts start at 0
+    m_hostQuality = std::nullopt;
     send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate,
         ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, ",\"overlay\":"_s, m_overlay ? "true"_s : "false"_s, '}'));
     setNetworkState(MediaPlayer::NetworkState::Loading);
@@ -791,6 +795,17 @@ std::optional<VideoFrameMetadata> MediaPlayerPrivateWasm::videoFrameMetadata()
     return metadata;
 }
 
+// The host <video> decodes and shows the frames (also when they are copied), so its counts are
+// the ones adaptive players need; srcObject = MediaStream has none, there the frames the page got
+std::optional<VideoPlaybackQualityMetrics> MediaPlayerPrivateWasm::videoPlaybackQualityMetrics()
+{
+    if (m_hostQuality)
+        return m_hostQuality;
+    VideoPlaybackQualityMetrics metrics;
+    metrics.totalVideoFrames = m_presentedFrames;
+    return metrics;
+}
+
 static MediaPlayer::ReadyState readyStateFromHost(int value)
 {
     switch (value) {
@@ -856,6 +871,14 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
         m_hasVideo = hasVideo;
         m_hasAudio = hasAudio;
         player->characteristicChanged();
+    }
+
+    if (RefPtr quality = object->getArray("quality"_s); quality && quality->length() == 3) {
+        auto count = [&](size_t index) { return static_cast<uint32_t>(std::max(0.0, quality->get(index)->asDouble().value_or(0))); };
+        m_hostQuality = VideoPlaybackQualityMetrics { };
+        m_hostQuality->totalVideoFrames = count(0);
+        m_hostQuality->droppedVideoFrames = count(1);
+        m_hostQuality->corruptedVideoFrames = count(2);
     }
 
     if (RefPtr ranges = object->getArray("buffered"_s)) {

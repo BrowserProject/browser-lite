@@ -17,6 +17,7 @@
 #include <WebCore/PlatformMediaDecodingType.h>
 #include <WebCore/PlatformTimeRanges.h>
 #include <WebCore/VideoFrameMetadata.h>
+#include <WebCore/VideoPlaybackQualityMetrics.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/RefCounted.h>
 #include <wtf/WeakPtr.h>
@@ -142,6 +143,8 @@ private:
     bool hasAvailableVideoFrame() const final;
     // requestVideoFrameCallback: data of the newest frame, only once per frame
     std::optional<WebCore::VideoFrameMetadata> videoFrameMetadata() final;
+    // getVideoPlaybackQuality()
+    std::optional<WebCore::VideoPlaybackQualityMetrics> videoPlaybackQualityMetrics() final;
 
     bool didPassCORSAccessCheck() const final { return true; }
 
@@ -197,6 +200,9 @@ private:
     unsigned m_presentedFrames { 0 };
     unsigned m_lastMetadataFrame { 0 };
     MonotonicTime m_frameArrival;
+    // Frame counts of the host <video> (decoded, dropped, corrupted); the host counts the frames
+    // it showed but never copied into the page as dropped (media.ts)
+    std::optional<WebCore::VideoPlaybackQualityMetrics> m_hostQuality;
     double m_frameMediaTime { 0 };
     WebCore::IntSize m_presentationSize;
     bool m_pageIsVisible { true };

@@ -1,10 +1,11 @@
 // <video>/<audio> through the media service of @browser-lite/core: the hidden <video> of the host
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
-// has video-overlay-test.mjs). Also MSE, navigator.mediaCapabilities, blob:, data:, preload,
-// picture-in-picture, muted autoplay only in the view, a fullscreen video letterboxed over a
-// page object-fit: cover, the icons of the media controls and their exit fullscreen button and
-// the range special cases of media-sw.js.
+// has video-overlay-test.mjs), with requestVideoFrameCallback and getVideoPlaybackQuality().
+// Also MSE, navigator.mediaCapabilities, blob:, data:, preload, picture-in-picture, muted
+// autoplay only in the view, a fullscreen video letterboxed over a page object-fit: cover, the
+// icons of the media controls and their exit fullscreen button and the range special cases of
+// media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -70,6 +71,18 @@ if (video.requestVideoFrameCallback) {
   video.requestVideoFrameCallback(onFrame);
 } else
   result('rvfc', 'missing');
+
+// getVideoPlaybackQuality(): the frames counted while it plays, "total/dropped/corrupted" twice
+const quality = () => {
+  const q = video.getVideoPlaybackQuality();
+  return [q.totalVideoFrames, q.droppedVideoFrames, q.corruptedVideoFrames].join('/');
+};
+video.addEventListener('playing', () => {
+  setTimeout(() => {
+    const first = quality();
+    setTimeout(() => result('quality', first + '_' + quality()), 1000);
+  }, 700);
+}, { once: true });
 
 // Picture-in-picture on a click (through the <video> of the host)
 const pipEvents = [];
@@ -485,6 +498,18 @@ check(
   'video: requestVideoFrameCallback',
   (await result('rvfc')) === 'ok,320x240,true',
   results.get('rvfc'),
+);
+
+const counts = ((await result('quality')) || '')
+  .split('_')
+  .map((value) => value.split('/').map(Number));
+check(
+  'video: getVideoPlaybackQuality() counts the frames',
+  counts.length === 2 &&
+    counts[1][0] > counts[0][0] &&
+    counts[1][1] <= counts[1][0] &&
+    counts[1][2] === 0,
+  results.get('quality'),
 );
 
 // Picture-in-picture: click on the video

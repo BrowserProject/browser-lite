@@ -113,7 +113,8 @@ comes as patches from `patches/`.
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
-    `VideoOverlay.cpp` (holes of videos the host shows behind the canvas),
+    `VideoOverlay.cpp` (holes of videos the host shows behind the canvas), frame counts of
+    `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
     host's answers); muted autoplay only in the view is a WebCore setting in `WebView.cpp`
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly
