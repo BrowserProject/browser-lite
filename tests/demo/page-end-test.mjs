@@ -4,7 +4,9 @@
 //   the address has ?url= (before only that tab came back); a second end within a minute starts
 //   safe (the tabs load only when clicked)
 // - back from the back-forward cache, where the core ended the engine at pagehide: the demo
-//   starts a new one with its tabs
+//   starts a new one with its tabs, and only the new engine's views are on the page (before,
+//   the old canvases stayed: the old tab in front covered every tab and pushed the new one below
+//   the screen)
 //
 //   node tests/demo/page-end-test.mjs [engine-dir]
 import {
@@ -118,6 +120,26 @@ check(
   'shown again from the cache, a new engine runs the tabs',
   restored.length === 2,
   restored.join(', '),
+);
+await page.click('#tab-list .tab:first-child');
+check('the first tab loads', await waitLoaded('one'));
+const { views, canvases } = await page.evaluate(() => ({
+  views: window.blTest.browser.views.size,
+  canvases: [...document.querySelectorAll('#pages canvas')].map((canvas) => ({
+    shown: getComputedStyle(canvas).display !== 'none',
+    top: Math.round(canvas.getBoundingClientRect().top),
+  })),
+}));
+const shown = canvases.filter((canvas) => canvas.shown);
+check(
+  'only the canvases of the new engine are on the page',
+  canvases.length === views,
+  `${views} views: ${JSON.stringify(canvases)}`,
+);
+check(
+  'the tab in front is the one shown, on the screen',
+  shown.length === 1 && shown[0].top < 700,
+  JSON.stringify(canvases),
 );
 
 await browser.close();

@@ -251,7 +251,8 @@ export type ColorScheme = 'light' | 'dark' | 'system';
 export interface Browser {
   /**
    * 'crashed' after the event `crash`, 'destroyed' after `destroy()` and once the page was left
-   * (`pagehide`, also into the back-forward cache: create a new browser at `pageshow`).
+   * (`pagehide`, also into the back-forward cache: at `pageshow` call `destroy()`, which takes
+   * the views off the page, and create a new browser).
    */
   readonly state: 'ready' | 'crashed' | 'destroyed';
   /** Network of the pages: host online and transport connected (event `network`). */
@@ -315,7 +316,8 @@ export interface Browser {
   readonly debug?: DebugApi;
   /**
    * Stops the engine and frees its workers, memory, canvases and lock. Running downloads end
-   * with an error. The transport stays open: close it too (`transport.close()` of a
+   * with an error. Also after the engine ended (crash, page left): only this removes the
+   * views' canvases from the page. The transport stays open: close it too (`transport.close()` of a
    * `WispTransport`) unless the next browser reuses it.
    */
   destroy(): Promise<void>;

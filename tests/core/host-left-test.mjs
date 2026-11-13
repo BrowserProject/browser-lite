@@ -4,6 +4,8 @@
 //   like one that is left for good, and the engine's memory becomes garbage although the page
 //   still holds the browser: Safari kept the whole engine of a cached page, and a new start in
 //   the same tab then failed to get its memory
+// - destroy() of the ended browser still takes its views off the page: back from the cache the
+//   old canvases stayed above the views of the next browser, which looked dead
 // - without 4 GB of free address space for the memory (the engine of another page of the same
 //   process holds it) the engine starts with a smaller maximum and works
 // The garbage check needs Chromium's gc().
@@ -79,6 +81,18 @@ for (const persisted of [true, false]) {
     await collected(page),
     `after ${Date.now() - left} ms`,
   );
+  if (persisted) {
+    const elements = () =>
+      page.evaluate(() => document.querySelectorAll('canvas, textarea').length);
+    const before = await elements();
+    await page.evaluate(() => window.blTest.browser.destroy());
+    const after = await elements();
+    check(
+      'back from the cache, destroy() of the ended browser takes its views off the page',
+      before > 0 && after === 0,
+      `canvases and IME fields ${before} -> ${after}`,
+    );
+  }
   await page.close();
 }
 

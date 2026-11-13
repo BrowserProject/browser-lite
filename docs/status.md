@@ -778,9 +778,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
   back-forward cache, its memory takes a smaller reservation when 4 GB of address space are not
   free (the restart that failed with `Engine start failed: RangeError: Out of memory`, and a new
   demo in a tab whose earlier demo Safari kept, which hung at "Starting engine"), and the demo
-  brings its session back when iOS ends the page (#526). In Safari's back-forward cache the left
-  demo still holds two of the three 4 GB reservations of the process although its engine ended
-  (in Chromium and in Playwright's WebKit the memory is garbage at once); most likely the main
+  brings its session back when iOS ends the page (#526). Back from the cache the new engine's
+  tabs are the ones on screen (#541: before, `destroy()` of the ended browser returned at once,
+  so the old views' canvases stayed in the page, the old tab in front covered every tab and
+  pushed the new one below the screen, and only a reload helped). In Safari's back-forward
+  cache the left demo still holds two of the three 4 GB reservations of the process although
+  its engine ended (in Chromium and in Playwright's WebKit the memory is garbage at once); most likely the main
   thread's pending `Atomics.waitAsync`, whose answer waits for the cached page's event loop.
 - beforeunload: the host tab asks on close once a view with a listener had input, even if its
   handler would not ask; listeners only in iframes do not ask on close.

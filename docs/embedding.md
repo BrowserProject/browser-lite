@@ -326,9 +326,10 @@ of `context.storage` (default in memory), for example in your user's profile.
 - When the page is left (`pagehide`, also into the back-forward cache) the browser ends like
   `destroy()`, without events: the page can no longer react. A page shown again from the
   back-forward cache (`pageshow` with `persisted`) finds the browser with `state` `'destroyed'`
-  and creates a new one, as the demo does. Kept running, the engine held its memory, address
-  space and OPFS files in Safari's cache, so the next start in the same tab failed, and Safari
-  drops the storage lock of a cached page. The engine's memory is garbage once the browser has
+  and its views still on the page: it calls `destroy()`, which takes them off without calling
+  the ended engine, and creates a new browser, as the demo does (#541). Kept running, the
+  engine held its memory, address space and OPFS files in Safari's cache, so the next start in
+  the same tab failed, and Safari drops the storage lock of a cached page. The engine's memory is garbage once the browser has
   ended, also while the page still holds the browser object.
 
 ## Browser support

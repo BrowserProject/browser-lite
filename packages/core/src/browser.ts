@@ -783,7 +783,6 @@ class BrowserImpl implements Browser, ViewHost {
   }
 
   async destroy(): Promise<void> {
-    if (this.phase === 'destroyed') return;
     // Answer open dialogs, so their pages finish their scripts before the flush
     this.requests.closeDialogs();
     if (this.ready) this.storage.flush(500);
@@ -791,9 +790,11 @@ class BrowserImpl implements Browser, ViewHost {
     this.requests.abortAll();
     this.downloads.abortAll();
     this.imageCopies.abort();
-    // While still ready, so the engine closes the pages too
+    // While still ready, so the engine closes the pages too. A browser ended by leave still has
+    // its views on the page: back from the back-forward cache it shows their last frames above
+    // the views of the next browser until this removes them.
     for (const view of [...this.views.values()]) view.dispose();
-    this.stopEngine();
+    if (this.phase !== 'destroyed') this.stopEngine();
     this.events.clear();
   }
 
