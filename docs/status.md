@@ -93,7 +93,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   events of its images and a parser resumed by a script that waited for a stylesheet started tasks
   of up to 3 s after the hold had begun. With Wikipedia, CNN and Spiegel in background tabs on a
   busy machine (load 16 to 28) the worst typing rounds went from median 0.2 to 0.6 s (up to 1.5 s)
-  to under 12 ms (at most 0.23 s).
+  to under 12 ms (at most 0.23 s). Since #537 the hit test that WebKit runs 200 ms after a
+  layout to find the element under the mouse waits too: in a tab the mouse had been over, it laid
+  the held page out again (0.3 to 0.4 s per key burst in the test, every time in Firefox).
   A switch to a tab that loaded or changed in the background is urgent like input, its due frame
   comes before its own waiting tasks and hidden views wait for that frame (#419): with Wikipedia,
   20min.ch and weather.com opened by Ctrl+click, the page area stayed white for 0.9 to 14.9 s

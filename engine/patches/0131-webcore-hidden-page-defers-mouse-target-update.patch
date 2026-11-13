@@ -1,0 +1,17 @@
+diff --git a/Source/WebCore/page/EventHandler.cpp b/Source/WebCore/page/EventHandler.cpp
+index 4ddbf5e143..64537e16dd 100644
+--- a/Source/WebCore/page/EventHandler.cpp
++++ b/Source/WebCore/page/EventHandler.cpp
+@@ -3225,6 +3225,12 @@ void EventHandler::updateMouseEventTargetAfterLayoutIfNeeded()
+         return;
+ 
+     Ref frame = m_frame.get();
++    // browser-lite: the hit test would lay out a page that defers its style and layout
++    // (Page::setDefersStyleAndLayout, a hidden page while the user works in another one); its
++    // next layout schedules the update again
++    if (RefPtr page = frame->page(); page && page->defersStyleAndLayout())
++        return;
++
+     RefPtr view = frame->view();
+     if (!view || !m_elementUnderMouse)
+         return;

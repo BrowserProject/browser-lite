@@ -526,10 +526,15 @@ await typing.context.close();
 // from a timer shared by all pages: the click that starts the hold may still wait for the running
 // task, but no restyle, relayout or load event of the hidden view comes after it and keeps the
 // keys waiting (patches 0125, 0126). The click mostly comes in a task after which they are due,
-// at least one of four bursts did before.
+// at least one of four bursts did before. The mouse was over the hidden view before: the hit test
+// 200 ms after each of its layouts that finds the element under the mouse waits too (patch 0131).
 const restyling = await openApp({ url: `${siteURL}restyle` });
 const restyleCost = Number((await restyling.wait('restyle'))?.[2]);
 await restyling.wait('loaded', 'restyle');
+const restyleOrigin = await canvasOrigin(restyling.page);
+await restyling.page.mouse.move(restyleOrigin.x + 200, restyleOrigin.y + 200);
+await restyling.page.mouse.move(restyleOrigin.x + 210, restyleOrigin.y + 210);
+await restyling.page.waitForTimeout(300);
 await restyling.newTab(`${siteURL}typing`);
 await restyling.wait('loaded', 'typing');
 const restylingOrigin = await canvasOrigin(restyling.page);
