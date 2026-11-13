@@ -1,0 +1,42 @@
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+index 436132f9f8..080d415e00 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.cpp
+@@ -679,7 +679,15 @@ bool GraphicsLayerCoordinated::addAnimation(const GraphicsLayerKeyframeValueList
+         return false;
+     }
+ 
+-    m_animations.add(TextureMapperAnimation(animationName, valueList, *animation, MonotonicTime::now() - Seconds(timeOffset), 0_s, TextureMapperAnimation::State::Playing));
++    // browser-lite: the animations added until the next commit (every property of each animation
++    // that starts in this rendering update) read the clock once, so those started together run on
++    // one timeline. Reading it per animation let them drift apart by as long as the thread was
++    // descheduled in between (over a millisecond on a busy host), for as long as they run.
++    if (!m_animationClock)
++        m_animationClock = MonotonicTime::now();
++    auto startTime = *m_animationClock - Seconds(timeOffset);
++
++    m_animations.add(TextureMapperAnimation(animationName, valueList, *animation, startTime, 0_s, TextureMapperAnimation::State::Playing));
+     noteLayerPropertyChanged(Change::Animations, ScheduleFlush::Yes);
+     return true;
+ }
+@@ -1047,6 +1055,7 @@ void GraphicsLayerCoordinated::updateBackdropFiltersRect()
+ void GraphicsLayerCoordinated::updateAnimations()
+ {
+     assertIsHeld(m_platformLayer->lock());
++    m_animationClock = std::nullopt;
+ 
+     m_animations.setTranslate(client().transformMatrixForProperty(AnimatedProperty::Translate));
+     m_animations.setRotate(client().transformMatrixForProperty(AnimatedProperty::Rotate));
+diff --git a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+index 70d32bca3a..a85f36e238 100644
+--- a/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
++++ b/Source/WebCore/platform/graphics/texmap/coordinated/GraphicsLayerCoordinated.h
+@@ -232,6 +232,8 @@ private:
+     Color m_contentsColor;
+     RefPtr<CoordinatedPlatformLayer> m_backdropLayer;
+     TextureMapperAnimations m_animations;
++    // browser-lite: the clock reading of the animations added since the last commit (addAnimation())
++    std::optional<MonotonicTime> m_animationClock;
+ };
+ 
+ } // namespace WebCore

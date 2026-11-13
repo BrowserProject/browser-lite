@@ -86,7 +86,8 @@ comes as patches from `patches/`.
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
     their opacity and transform get host canvases whose animation the host runs; plain layers
-    drawn after one over it go into a cover canvas above it), `ScrollingWasm.cpp`
+    drawn after one over it go into a cover canvas above it; patch 0132 starts the animations a
+    layer gets in one commit on one clock reading, so they share a timeline), `ScrollingWasm.cpp`
     (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks),
     `WorkerGraphics.cpp` (WebGL in dedicated and shared workers, on the worker's own thread)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one

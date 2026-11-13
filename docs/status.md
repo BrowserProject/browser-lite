@@ -618,7 +618,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
    `mw-pulsating-dot` under the bookmark icon (World War II article, 1280x800, idle, local,
    2026-11-11, packaged demo, same engine A/B) 0.06 to 0.09 CPU cores and no engine frame instead
    of 0.65 to 0.71 cores at 43 to 46 frames per second (`BL_HOST_LAYERS=0`); plain Chromium 0.04
-   to 0.05. Still open: animations under effects, of filters, rotating or leaving their clip, and
+   to 0.05. In about 1 of 6 loads on a busy host the dot stayed in the frames for the page's whole
+   life (40 to 45 frames per second), as its opacity and transform animations started 1 ms apart;
+   since #539 they start on one clock reading. Still open: animations under effects, of filters, rotating or leaving their clip, and
    layers covered by later layers with effects, children or animations stay in the frames. On devices with a real GPU a whole view frame costs far less (not
    measured).
 

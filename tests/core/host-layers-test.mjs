@@ -8,6 +8,8 @@
 // new place; a placeholder whose animation ends goes back for good; new contents of a layer go into
 // its canvas. Layers that also scale and move (Wikipedia's pulsating dot) get host layers whose
 // transform the host runs, unless the animation leaves their clip. At device pixel ratio 1 and 2.
+// A layer whose transform and opacity animations took long to add (many keyframes) gets one too:
+// the animations of one CSS animation start on one clock reading (patch 0132).
 //
 //   node tests/core/host-layers-test.mjs [engine-dir]
 import {
@@ -72,11 +74,31 @@ const TRANSFORM_PAGE = `<!doctype html><title>Host layers with transforms</title
 </style>
 <span class="mw-pulsating-dot"></span><div id="disc"></div><div id="icon"></div><div id="clip"><div id="grows"></div></div>
 <script>console.log('RESULT ready=1');</script>`;
+// A box that shrinks through many keyframes and fades through two: the engine adds its transform
+// animation and its opacity animation to the layer one after the other, the first one taking long
+// enough to copy that a clock read for each would put them on two timelines (more than a
+// millisecond apart, the case of 1 in 6 loads of Wikipedia's dot on a busy host)
+const KEYFRAMES = 4000;
+const KEYFRAMES_PAGE = `<!doctype html><title>Host layers with many keyframes</title>
+<style>
+  body { margin: 0; background: #fff; }
+  #keyed { position: absolute; left: 100px; top: 100px; width: 80px; height: 80px; background: rgb(0, 64, 255);
+    animation: keyed 4s linear infinite alternate; }
+  @keyframes keyed { ${Array.from({ length: KEYFRAMES + 1 }, (_, i) => `${((i * 100) / KEYFRAMES).toFixed(3)}% { transform: scale(${(0.9 - (0.1 * i) / KEYFRAMES).toFixed(6)}) }`).join(' ')}
+    0% { opacity: 1 } 100% { opacity: 0.6 } }
+</style>
+<div id="keyed"></div>
+<script>console.log('RESULT ready=1');</script>`;
 const { url: siteURL } = await serve((req, res) => {
-  const page = req.url.startsWith('/transform') ? TRANSFORM_PAGE : PAGE;
+  const page = req.url.startsWith('/transform')
+    ? TRANSFORM_PAGE
+    : req.url.startsWith('/keyframes')
+      ? KEYFRAMES_PAGE
+      : PAGE;
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(page);
 });
 const transformURL = new URL('/transform', siteURL).href;
+const keyframesURL = new URL('/keyframes', siteURL).href;
 
 /** The host layers: key, place in frame pixels and whether the host runs a transform. */
 const hostLayers = (page) =>
@@ -360,5 +382,22 @@ for (const ratio of [1, 2]) {
   );
   await transformed.close();
 }
+
+// The animations of one CSS animation run on one timeline, also when adding them took a while
+const keyed = await browser.newPage({ viewport: { width: 800, height: 600 } });
+watchErrors(keyed);
+const keyedResults = collect(keyed);
+check('keyframes: page loaded', await openHost(keyed, stack.app({ url: keyframesURL })));
+await keyedResults.wait('ready');
+let keyedLayers = [];
+await waitFor(async () => (keyedLayers = await hostLayers(keyed)).length === 1, 15000, 200);
+await keyed.waitForTimeout(300);
+const keyedFrames = await framesIn(keyed, 2000);
+check(
+  'keyframes: a layer whose transform and opacity animations were added far apart gets a host layer and no frames',
+  keyedLayers.length === 1 && keyedLayers[0].transform && keyedFrames <= 4,
+  `${JSON.stringify(keyedLayers)}, ${keyedFrames} frames in 2 s`,
+);
+await keyed.close();
 await browser.close();
 finish();

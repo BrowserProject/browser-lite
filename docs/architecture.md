@@ -166,7 +166,9 @@ over the view canvas and the tiles, drawn once by the compositor (a scaling laye
 scale of its animation, like Chromium rasterizes it), whose opacity and transform the host runs as
 a Web Animation sampled from the engine's animation and started at the same time, so its animation
 needs no frame of the engine. Only leaves without effects under ancestors without effects, drawn
-axis aligned, qualify; a transform only if it scales and moves without leaving the layer's clip.
+axis aligned, whose animations run on one timeline, qualify (WebKit adds one animation per property
+of a CSS animation; patch 0132 starts those a layer gets in one commit on one clock reading); a
+transform only if it scales and moves without leaving the layer's clip.
 Plain leaves drawn after such a layer over where it may show (its covers: no animation, no effect
 but a mask, such as an icon over a pulsing dot) go into a cover canvas right above its canvas, and
 the view draws them only outside that area; any other later layer there keeps it in the frames. A

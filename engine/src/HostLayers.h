@@ -21,7 +21,8 @@
 //
 // SkiaCompositingLayer (patches 0104 and 0117) lists the layers that qualify in each frame: leaves
 // without effects whose ancestors have none (opacity 1, no filter, mask, blend mode or 3D), drawn axis
-// aligned, whose running animations all animate opacity or transform on one timeline, with their
+// aligned, whose running animations all animate opacity or transform on one timeline (patch 0132
+// starts the animations a layer gets in one commit, one per property, on one clock reading), with their
 // covers: leaves without animations and effects but a mask under ancestors without effects. The host
 // takes a transform animation only if it scales and moves the layer without rotating or mirroring it
 // and the layer stays inside its clip all the time (the host does not clip it).
