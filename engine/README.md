@@ -28,7 +28,8 @@ software renderer, or the buffers of an iframe's realm that compression streams 
 tile jobs of a closed view that its painting threads ran after its layer tree host was freed, or
 the frames of a canvas handed to an OffscreenCanvas, which never reached its layer, or the stencil
 a WebGL drawing buffer with depth went without, or the whole document that every rule a CSS-in-JS
-library inserted restyled and laid out again)
+library inserted restyled and laid out again, or the abort signals of a closed page, whose
+listeners kept the whole page alive)
 comes as patches from `patches/`.
 
 ## Folders

@@ -590,7 +590,11 @@ left once no view closed for 1 s and the user does not work in a visible view (l
 views wait, `hiddenViewsWaitForUser`): JSC alone learns of that garbage only at its next full
 collection, and without allocations its timer waits longer the less the last full GC freed, so
 10 heavy tabs closed kept 240 MB of JS heap and their documents for minutes
-(`tests/core/closed-view-gc-test.mjs`). Once the malloc area ends above 384 MB it grows the
+(`tests/core/closed-view-gc-test.mjs`). An abort signal whose context has stopped (its document
+was closed or left, its worker ended) is kept only by references, no longer by its abort
+listeners, as nothing can abort it any more (patch 0128, like Chrome): a timeout, an
+`AbortSignal.any` or a Request's signal with a listener whose closure held its controller or
+document kept that whole page for good (`tests/core/abort-signal-gc-test.mjs`). Once the malloc area ends above 384 MB it grows the
 memory ahead so that 128 MB stay free above it; when that fails, the current size is the limit.
 From then on, or above the budget of 3 GB, it reports `memory-pressure` `{footprint, limit,
 level}` at every growth, and the host discards background views (#128, #171, #216). On iPhone

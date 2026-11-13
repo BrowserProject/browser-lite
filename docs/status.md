@@ -213,7 +213,17 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   engine thread free (#498); before, JSC's timer alone collected their garbage, minutes later when
   the last full GC had freed little (10 heavy sites closed, 2026-11-10 local: JS heap 238 MB, 60
   documents and 1092 MB of malloc for about 4 minutes; now 5 s after closing JS heap 60 MB, 6
-  documents, 563 instead of 1057 MB). Closing tabs whose tiles still paint no longer crashes the
+  documents, 563 instead of 1057 MB). An abort signal of a closed or left page no longer keeps
+  it through its abort listener (patch 0128, like Chrome): a timeout, an `AbortSignal.any` or a
+  Request's signal with a listener whose closure held its controller or document kept that whole
+  page for good, on every run booking.com's main document with its frames (2026-11-13 local,
+  Chromium: booking.com alone, 60 s after closing its tab 169 instead of 304 MB of malloc in use,
+  101 instead of 253 MB after a critical release and a full GC, JS heap 0 instead of 58 MB, no
+  document of it left; 20 heavy sites, each in a tab for 40 s, all closed: 359 instead of 923 MB
+  after 60 s, 169 instead of 810 MB after the release, JS heap 0 instead of 48 MB). Still open
+  there: about 100 MB above the start, 14 small documents of SVG images outside the memory cache
+  and a CNN document that 24 of its nodes keep; the WASM memory keeps its peak (it cannot shrink).
+  Closing tabs whose tiles still paint no longer crashes the
   engine (#514, patch 0113): their painting jobs ran after the view's layer tree host was freed
   and called into it ("table index is out of bounds", "function signature mismatch" or "null
   function" on a painting thread; 20 heavy sites opened and closed: 3 of 3 runs crashed, also the

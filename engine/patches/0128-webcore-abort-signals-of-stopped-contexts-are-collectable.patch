@@ -1,0 +1,48 @@
+diff --git a/Source/WebCore/bindings/js/JSAbortSignalCustom.cpp b/Source/WebCore/bindings/js/JSAbortSignalCustom.cpp
+index c12d19b8a8..1dad80fe5c 100644
+--- a/Source/WebCore/bindings/js/JSAbortSignalCustom.cpp
++++ b/Source/WebCore/bindings/js/JSAbortSignalCustom.cpp
+@@ -37,6 +37,12 @@ bool JSAbortSignalOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> ha
+     if (abortSignal.aborted())
+         return false;
+ 
++    // Nothing aborts a signal of a stopped context any more (its document was closed or left, its
++    // worker ended): like in Chrome its listeners do not keep it, only references do. Else a closure
++    // of a listener that holds the signal's own controller or document keeps that document for good.
++    if (abortSignal.isContextStopped())
++        return containsWebCoreOpaqueRoot(visitor, abortSignal);
++
+     if (abortSignal.isFollowingSignal()) {
+         if (reason) [[unlikely]]
+             *reason = "Is Following Signal"_s;
+diff --git a/Source/WebCore/dom/AbortSignal.cpp b/Source/WebCore/dom/AbortSignal.cpp
+index 0ae26fc34d..4d323e554d 100644
+--- a/Source/WebCore/dom/AbortSignal.cpp
++++ b/Source/WebCore/dom/AbortSignal.cpp
+@@ -262,6 +262,12 @@ ScriptExecutionContext* AbortSignal::scriptExecutionContext() const
+     return ContextDestructionObserver::scriptExecutionContext();
+ }
+ 
++bool AbortSignal::isContextStopped() const
++{
++    auto* context = scriptExecutionContext();
++    return !context || context->activeDOMObjectsAreStopped();
++}
++
+ WebCoreOpaqueRoot root(AbortSignal* signal)
+ {
+     return WebCoreOpaqueRoot { signal };
+diff --git a/Source/WebCore/dom/AbortSignal.h b/Source/WebCore/dom/AbortSignal.h
+index 94a4bb9d05..d68ef126ac 100644
+--- a/Source/WebCore/dom/AbortSignal.h
++++ b/Source/WebCore/dom/AbortSignal.h
+@@ -75,6 +75,9 @@ public:
+ 
+     bool isFollowingSignal() const { return !!m_followingSignal; }
+ 
++    // Its context was destroyed or stopped its active DOM objects
++    bool isContextStopped() const;
++
+     void throwIfAborted(JSC::JSGlobalObject&);
+ 
+     using AbortSignalSet = WeakListHashSet<AbortSignal, WeakPtrImplWithEventTargetData>;
