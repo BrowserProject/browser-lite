@@ -457,6 +457,11 @@ memory and gets the `storage-locked` warning. With `storage.persistent: false`, 
 | `opfs/<origin>/`, `opfs-swap/` | OPFS of the pages (#95, #166) |
 | `tmp/` (incl. `tmp/uploads/<view>/`) | Atomic replacement and uploads, cleared at start (#142, #181) |
 
+Cookies live in curl's `CookieJarDB` (SQLite). A public suffix is no cookie domain, except for the
+host that is itself one (`github.io`, `httpbin.org`): like Chrome and Firefox (RFC 6265 5.3) its
+cookies without a Domain attribute, or with one naming exactly that host, are kept host-only
+(patch 0129, #533); before, every cookie of such a host was dropped.
+
 Read-only files outside `/data`: `engine.data` (Noto Sans regular and bold, fontconfig with its
 cache, CA list) in memory, and `/lazy`, files of `lazy/` next to the engine that load on first
 use: `/lazy/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`,

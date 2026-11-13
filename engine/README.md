@@ -29,7 +29,8 @@ tile jobs of a closed view that its painting threads ran after its layer tree ho
 the frames of a canvas handed to an OffscreenCanvas, which never reached its layer, or the stencil
 a WebGL drawing buffer with depth went without, or the whole document that every rule a CSS-in-JS
 library inserted restyled and laid out again, or the abort signals of a closed page, whose
-listeners kept the whole page alive)
+listeners kept the whole page alive, or the cookies of a host that is itself a public suffix,
+which the cookie jar dropped)
 comes as patches from `patches/`.
 
 ## Folders

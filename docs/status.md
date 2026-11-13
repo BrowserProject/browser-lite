@@ -171,7 +171,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   "Load failed"), Cache API,
   OPFS, IndexedDB with limit (#179), CryptoKeys in IndexedDB, `structuredClone` and
   `postMessage` like Chrome (#527: before, every one threw `DataCloneError`, so WhatsApp Web
-  never showed its QR code and reported a database error), cookies and localStorage, all in an OPFS namespace (#142),
+  never showed its QR code and reported a database error), cookies (also of a host that is itself
+  a public suffix like httpbin.org or github.io, like Chrome, #533: before, all its cookies were
+  dropped) and localStorage, all in an OPFS namespace (#142),
   HTTP cache in the host Cache API (#70), partitioned by site like Chrome (#213), with ranges
   (206, media pieces) like Chrome's sparse entries (#222).
 - **Robustness**: watchdog for scripts that keep input or a call waiting (#146, #501), crash and hang detection with in-page restart

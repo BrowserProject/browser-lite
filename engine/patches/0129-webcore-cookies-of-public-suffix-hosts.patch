@@ -1,0 +1,39 @@
+diff --git a/Source/WebCore/platform/network/curl/CookieJarDB.cpp b/Source/WebCore/platform/network/curl/CookieJarDB.cpp
+index 640699e2ed..bb252bcfc8 100644
+--- a/Source/WebCore/platform/network/curl/CookieJarDB.cpp
++++ b/Source/WebCore/platform/network/curl/CookieJarDB.cpp
+@@ -361,9 +361,6 @@ bool CookieJarDB::hasCookies(const URL& url)
+     if (host.isEmpty())
+         return false;
+ 
+-    if (PublicSuffixStore::singleton().isPublicSuffix(host))
+-        return false;
+-
+     RegistrableDomain registrableDomain { url };
+     auto& statement = preparedStatement(CHECK_EXISTS_COOKIE_SQL);
+ 
+@@ -512,7 +509,9 @@ static bool checkSecureCookie(const Cookie& cookie)
+ 
+ bool CookieJarDB::canAcceptCookie(const Cookie& cookie, const URL& firstParty, const URL& url, CookieJarDB::Source source)
+ {
+-    if (PublicSuffixStore::singleton().isPublicSuffix(cookie.domain))
++    // A public suffix is no cookie domain, except as the host-only domain of the host that is
++    // that suffix (https://www.rfc-editor.org/rfc/rfc6265#section-5.3 step 5).
++    if (cookie.domain != url.host().convertToASCIILowercase() && PublicSuffixStore::singleton().isPublicSuffix(cookie.domain))
+         return false;
+ 
+     bool fromJavaScript = source == CookieJarDB::Source::Script;
+@@ -564,8 +563,11 @@ bool CookieJarDB::setCookie(const URL& firstParty, const URL& url, const String&
+     if (!checkSecureCookie(*cookie))
+         return false;
+ 
+-    if (cookie->domain.isEmpty())
+-        cookie->domain = url.host().convertToASCIILowercase();
++    // Without a Domain attribute, or with one that names the request host when that host is a
++    // public suffix, the cookie is host-only: its domain is the host without a leading dot.
++    String host = url.host().convertToASCIILowercase();
++    if (cookie->domain.isEmpty() || (StringView(cookie->domain).substring(cookie->domain.startsWith('.') ? 1 : 0) == host && PublicSuffixStore::singleton().isPublicSuffix(host)))
++        cookie->domain = host;
+ 
+     if (cookie->path.isEmpty())
+         cookie->path = CookieUtil::defaultPathForURL(url);

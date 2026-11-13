@@ -25,6 +25,8 @@
 //                  inserted rule next to 4000 elements costs a fraction of a full restyle
 //   compression.html  CompressionStream and DecompressionStream take buffers of another realm
 //                  (patch 0110) and still reject chunks that are no BufferSource
+//   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
+//                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
 //   node tests/engine/pages-test.mjs [engine-dir]
 import { spawnSync } from 'node:child_process';
@@ -53,6 +55,18 @@ const CASES = [
   { name: 'column-balancing', size: [1000, 700], wait: 'COLUMNS done' },
   { name: 'compression', wait: 'COMPRESSION done' },
   { name: 'cssom-rules', size: [800, 600], wait: 'CSSOM done' },
+  {
+    name: 'cookies',
+    label: 'cookies (public suffix host)',
+    wait: 'COOKIES done',
+    env: { RENDER_URL: 'https://github.io/test/' },
+  },
+  {
+    name: 'cookies',
+    label: 'cookies (below a public suffix)',
+    wait: 'COOKIES done',
+    env: { RENDER_URL: 'https://user.github.io/test/' },
+  },
   {
     name: 'absent-properties',
     label: 'absent-properties (interpreter)',

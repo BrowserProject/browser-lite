@@ -1,0 +1,36 @@
+<!doctype html><title>cookies</title><body><script>
+// Cookies and public suffixes (patch 0129), like Chrome and Firefox (RFC 6265 5.3 step 5). Runs at
+// https://github.io/ (a public suffix itself, like httpbin.org) and at https://user.github.io/.
+// Output "COOKIES name=ok" or "COOKIES name=FALSE ...", at the end "COOKIES done=ok".
+const names = () => document.cookie.split('; ').filter(Boolean).sort().join(',');
+const set = (line) => {
+  document.cookie = line;
+  return names();
+};
+const tests =
+  location.hostname === 'github.io'
+    ? {
+        'host-only cookie of a public suffix host': () => set('a=1; path=/') === 'a=1',
+        'Domain naming the host is accepted': () => set('b=2; domain=github.io; path=/') === 'a=1,b=2',
+        // Host-only like Chrome: a host-only cookie of the same name replaces it
+        'Domain naming the host makes it host-only': () => set('b=3; path=/') === 'a=1,b=3',
+        'Domain of a wider public suffix is rejected': () => set('c=3; domain=io; path=/') === 'a=1,b=3',
+      }
+    : {
+        'host-only cookie below a public suffix': () => set('d=4; path=/') === 'd=4',
+        'Domain of the public suffix above is rejected': () => set('e=5; domain=github.io; path=/') === 'd=4',
+        'Domain of the own host is accepted': () => set('f=6; domain=user.github.io; path=/') === 'd=4,f=6',
+      };
+let bad = 0;
+for (const [name, test] of Object.entries(tests)) {
+  let ok = false;
+  try {
+    ok = test();
+    console.log('COOKIES ' + name + '=' + (ok ? 'ok' : 'FALSE ' + JSON.stringify(document.cookie)));
+  } catch (e) {
+    console.log('COOKIES ' + name + '=ERROR ' + e.name + ': ' + e.message);
+  }
+  if (!ok) bad++;
+}
+console.log('COOKIES done=' + (bad ? bad + ' errors' : 'ok'));
+</script>
