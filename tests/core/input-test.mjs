@@ -3,10 +3,10 @@
 // mailto: and tel: (external-url), sandbox (tel:, download), <a ping> with cookie, CSP report
 // without redirect, sendBeacon (preflight, CORS and CSP on redirects), favicon behind a redirect,
 // dialogs with the origin, context menu requests, <select>, color and date through the request
-// handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links, focus on click,
-// <object>/<embed>, file upload through the native file dialog of the host and fullscreen. The
-// test page reports results with console.log ("RESULT name=value"), the host page forwards the
-// console of the view.
+// handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links and color inputs,
+// focus on click, <object>/<embed>, file upload through the native file dialog of the host and
+// fullscreen. The test page reports results with console.log ("RESULT name=value"), the host page
+// forwards the console of the view.
 //
 //   node tests/core/input-test.mjs [engine-dir]
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -933,6 +933,15 @@ for (let i = 1; i <= 3; i++) {
 }
 const tabOrder = [await result('tab1'), await result('tab2'), await result('tab3')].join();
 check('Tab focuses links', tabOrder === 'popup,download,file', tabOrder);
+// and the color input like any other button-like control (Safari on macOS skips it, patch 0130)
+await evalPage(page, 'document.getElementById("hoverlink").focus()');
+for (let i = 1; i <= 2; i++) {
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(300);
+  await evalPage(page, `console.log("RESULT colortab${i}=" + document.activeElement?.id)`);
+}
+const colorTabOrder = [await result('colortab1'), await result('colortab2')].join();
+check('Tab focuses the color input', colorTabOrder === 'color,date', colorTabOrder);
 await evalPage(page, 'document.activeElement?.blur()');
 
 // 6d) A click focuses checkboxes, buttons and links like in Chrome and Firefox on Linux, without

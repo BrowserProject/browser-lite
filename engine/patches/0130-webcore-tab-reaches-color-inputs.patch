@@ -1,0 +1,23 @@
+diff --git a/Source/WebCore/html/ColorInputType.cpp b/Source/WebCore/html/ColorInputType.cpp
+index 880cbd6652..c212015c38 100644
+--- a/Source/WebCore/html/ColorInputType.cpp
++++ b/Source/WebCore/html/ColorInputType.cpp
+@@ -146,12 +146,17 @@ bool ColorInputType::isMouseFocusable() const
+     return protect(element())->isTextFormControlFocusable();
+ }
+ 
+-bool ColorInputType::isKeyboardFocusable(const FocusEventData&) const
++bool ColorInputType::isKeyboardFocusable(const FocusEventData& focusEventData) const
+ {
+     ASSERT(element());
+ #if PLATFORM(IOS_FAMILY)
++    UNUSED_PARAM(focusEventData);
+     return protect(element())->isTextFormControlFocusable();
++#elif PLATFORM(WASM)
++    // Like Chrome and Firefox: Tab reaches the color well like any other button-like control.
++    return InputType::isKeyboardFocusable(focusEventData);
+ #else
++    UNUSED_PARAM(focusEventData);
+     return false;
+ #endif
+ }

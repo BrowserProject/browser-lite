@@ -73,7 +73,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   the page), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), and keys typed right after such a shortcut wait for the page's answer like in Chrome, so with a busy page (YouTube, Wikipedia) the letters after Ctrl+L or Ctrl+F all land in the address or find bar instead of reaching the page as its own shortcuts (#507), while plain typing does not wait, so keys typed during a 5 s engine stall reach the page within about 0.25 s after it instead of one engine round trip per key (#524), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
-  Tab to links (#372), focus on click of buttons, checkboxes and links like Chrome (#450), mouse leave of the view (`:hover` and link address go away, #381),
+  Tab to links (#372) and color inputs (#535), focus on click of buttons, checkboxes and links like Chrome (#450), mouse leave of the view (`:hover` and link address go away, #381),
   the link address follows a dialog that appears under a still mouse (#481),
   mouseout and mouseleave on the first move after back or forward to a cached page (#398),
   taps under the overlay scrollbars at the right edge on phones (#413), no hover and mouseover from a
