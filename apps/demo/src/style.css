@@ -401,6 +401,11 @@ svg.favicon {
   background: var(--surface);
   color: var(--on-surface);
 }
+/* A link or text dragged over a tab loads there when dropped */
+.tab.drop-target {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
 /* A tab being dragged stays over its neighbours */
 .tab.dragging {
   z-index: 2;

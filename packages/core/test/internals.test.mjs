@@ -2,11 +2,12 @@
 // answers (Requests), the
 // downloads, the upload limit, popups without a new-view listener, typed addresses and their
 // fallback to http://, the pending navigation, the engine check, the edits of the IME field and
-// the requests of host layers.
+// the requests of host layers, the drop effect of a page's drag over the embedding page.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HttpFallback, httpFallback, typedAddress } from '../dist/address.js';
 import { Downloads } from '../dist/downloads.js';
+import { defaultEffect } from '../dist/drag-out.js';
 import { checkEngine, ENGINE_ABI_VERSION } from '../dist/engine.js';
 import { requestHandler } from '../dist/handlers.js';
 import { KeyQueue, mayBeShortcut } from '../dist/key-queue.js';
@@ -759,4 +760,13 @@ test('host layers: animated layers with or without a transform, covers without a
   );
   assert.equal(hostLayerRequests([{ key: 1, ...place, ...animation, start: undefined }]), null);
   assert.equal(hostLayerRequests([{ key: 3, x: 1, y: 2, width: 30 }]), null);
+});
+
+test('a drag out of the view: the effect of a target that accepts without its own', () => {
+  assert.equal(defaultEffect('all'), 'copy');
+  assert.equal(defaultEffect('uninitialized'), 'copy');
+  assert.equal(defaultEffect('copyMove'), 'copy');
+  assert.equal(defaultEffect('linkMove'), 'link');
+  assert.equal(defaultEffect('move'), 'move');
+  assert.equal(defaultEffect('none'), 'none');
 });

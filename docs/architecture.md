@@ -326,7 +326,10 @@ a shortcut, one with Ctrl, Alt or Meta or one that types no text (`key-queue.ts`
 right after Ctrl+L goes to the address bar the shortcut focused, not to the busy page (#507).
 Typing does not wait, so the keys typed while the engine was busy reach it at once (#524). Escape is Stop there, after the page and the demo's own
 fields (#437). Paste, drag and drop and uploads write files into the engine
-(#125, #126, #181). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
+(#125, #126, #181). A drag of the page sends its data to the host (`page-drag-start`); over an
+element of the embedding page (the view canvas has the pointer captured) the core sends that
+element untrusted drag events with the data and the page a point outside the view, and a drop
+there ends the page's drag with the drop effect (`bl_drag` phase 3, `drag-out.ts`, #534). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
 put text and HTML on the engine's clipboard, which the host gets as the event `clipboard`
 (handler `clipboardWrite`; the async Clipboard API through `Pasteboard::writeCustomData`,
 patch 0100, #469). Copy image of the context menu (`bl_copy_image`) hit tests the menu's point

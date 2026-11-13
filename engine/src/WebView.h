@@ -149,7 +149,8 @@ public:
     void mouseEvent(int type, int button, int buttons, double x, double y, int clickCount, int modifiers, double movementX = 0, double movementY = 0, std::optional<WebCore::PointerID> tapPointer = std::nullopt, std::span<const MouseMove> moves = { });
     void wheelEvent(double x, double y, double deltaX, double deltaY, double wheelDeltaX, double wheelDeltaY, int modifiers);
     // Drag and drop: from the page (DragClient) and from the host (bl_drag,
-    // phase 0 = over the page, 1 = left, 2 = drop; data as JSON)
+    // phase 0 = over the page, 1 = left, 2 = drop, 3 = the page's drag dropped
+    // outside the view; data as JSON)
     void startPageDrag(Ref<WebCore::WasmPlatform::DragContent>&&, OptionSet<WebCore::DragOperation> sourceOperations);
     void hostDrag(int phase, double x, double y, int modifiers, const String& data);
     void cancelDrag();
@@ -272,6 +273,8 @@ private:
     };
     void updateDrag(WebCore::IntPoint, int modifiers);
     void endDrag(WebCore::IntPoint, bool drop, int modifiers);
+    void dropOutside(std::optional<WebCore::DragOperation>);
+    void finishDrag(const DragSession&, WebCore::IntPoint, int modifiers, std::optional<WebCore::DragOperation> result);
     // True when the page handled the key (also when it called preventDefault)
     bool dispatchKeyEvent(int type, const String& key, const String& code, const String& text, int keyCode, bool repeat, int modifiers);
     std::optional<DragSession> m_drag;

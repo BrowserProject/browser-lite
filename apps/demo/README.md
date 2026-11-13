@@ -168,7 +168,11 @@ select popup) are in the same sheet.
   (`tab-drag.ts`): past 5 px it follows the pointer, takes the place of a neighbour once it
   covers half of it and slides into its place when released; a click only activates, the cross
   never drags, a finger keeps scrolling the strip. Ctrl+Shift+PageUp and PageDown move the
-  active tab; the session keeps the order (#383). Closing the active tab activates the tab it
+  active tab; the session keeps the order (#383). A link or text dragged out of a page or from
+  another window and dropped on the tab strip opens in a new tab at the end, on a tab it loads
+  there (the tab shows an outline while it is the target), on the address bar it loads in the
+  active tab, like Chrome; text is searched like typed text, `javascript:` is ignored (`tab-drop.ts`,
+  `dropped-text.ts`, `address-bar.ts`, #534). Closing the active tab activates the tab it
   was opened from in front (Ctrl+T, a link or a popup) as long as no other tab was active in
   between, else its right neighbour, the left one at the end, like Chrome and Firefox (#410).
   A middle click on a tab closes it (through beforeunload like its cross) without activating
@@ -286,7 +290,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts`, `history-menu.ts` | the back and forward of the host browser act on the tab in front; the list of the tab's pages on Back and Forward |
-| `tab-drag.ts`, `tab-menu.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip |
+| `tab-drag.ts`, `tab-menu.ts`, `tab-drop.ts`, `dropped-text.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip; links and text dropped on the strip and the address bar |
 | `tab-overview.ts`, `layout.ts`, `visual-viewport.ts`, `page-size.ts`, `bar-hiding.ts` | tab overview and tab count of the phone layout; whether it applies; following the iOS keyboard; the page keeps its size under the keyboard of the demo's own fields; the bar slides away while the user scrolls down |
 | `new-tab-page.ts`, `icons.ts`, `favicons.ts` | the new tab page (greeting, search, site tiles); the SVG icons; icons of the visited sites |
 | `blocked-popups.ts` | icon of the address bar for popups the page could not open (`popup-blocked`), its bubble opens one in a new tab or allows popups for the site (permission `popups`) |

@@ -1152,10 +1152,40 @@ void WebView::mouseEvent(int type, int button, int buttons, double x, double y, 
 
 // ------------------------------------------------------------ Drag and drop
 
+// effectAllowed of HTML drag and drop for the operations of a drag
+static ASCIILiteral effectAllowed(OptionSet<DragOperation> operations)
+{
+    bool copy = operations.contains(DragOperation::Copy);
+    bool link = operations.contains(DragOperation::Link);
+    bool move = operations.containsAny({ DragOperation::Move, DragOperation::Generic });
+    if (copy && link && move)
+        return "all"_s;
+    if (copy && link)
+        return "copyLink"_s;
+    if (copy && move)
+        return "copyMove"_s;
+    if (link && move)
+        return "linkMove"_s;
+    return copy ? "copy"_s : link ? "link"_s : move ? "move"_s : "none"_s;
+}
+
+// The host gets the data of a drag from the page, which may leave the view for the
+// elements around it (packages/core/src/drag-out.ts), like a system drag in Chrome
 void WebView::startPageDrag(Ref<WasmPlatform::DragContent>&& content, OptionSet<DragOperation> sourceOperations)
 {
     cancelDrag();
+    auto items = JSON::Array::create();
+    for (auto& [type, value] : content->strings) {
+        auto item = JSON::Object::create();
+        item->setString("type"_s, type);
+        item->setString("data"_s, value);
+        items->pushObject(WTF::move(item));
+    }
+    auto event = JSON::Object::create();
+    event->setArray("items"_s, WTF::move(items));
+    event->setString("effectAllowed"_s, effectAllowed(sourceOperations));
     m_drag = DragSession { WTF::move(content), true, sourceOperations, std::nullopt };
+    notifyHost(m_id, "page-drag-start", event->toJSONString());
 }
 
 void WebView::updateDrag(IntPoint point, int modifiers)
@@ -1197,12 +1227,34 @@ void WebView::endDrag(IntPoint point, bool drop, int modifiers)
         m_page->dragController().performDragOperation(WTF::move(dragData), *frame);
     else
         m_page->dragController().dragExited(*frame, WTF::move(dragData));
+    finishDrag(session, point, modifiers, dropped ? session.operation : std::nullopt);
+}
+
+// The host dropped the page's drag on one of its elements outside the view
+// (bl_drag phase 3): the page's drop target only sees it leave
+void WebView::dropOutside(std::optional<DragOperation> operation)
+{
+    RefPtr frame = mainFrame();
+    if (!frame || !m_drag || !m_drag->fromPage)
+        return;
+    auto session = WTF::move(*m_drag);
+    m_drag.reset();
+    DragData dragData { session.content.ptr(), session.lastPoint, session.lastPoint, session.sourceOperations, { DragApplicationFlags::IsSource }, { DragDestinationAction::DHTML, DragDestinationAction::Edit }, m_page->identifier() };
+    m_page->dragController().dragExited(*frame, WTF::move(dragData));
+    finishDrag(session, session.lastPoint, 0, operation);
+}
+
+void WebView::finishDrag(const DragSession& session, IntPoint point, int modifiers, std::optional<DragOperation> result)
+{
     m_page->dragController().dragEnded();
-    if (session.fromPage) {
-        // dragend to the source, with the result (dropEffect)
+    if (!session.fromPage)
+        return;
+    // dragend to the source, with the result (dropEffect)
+    if (RefPtr frame = mainFrame()) {
         MouseEventWasm event { DoublePoint { static_cast<double>(point.x()), static_cast<double>(point.y()) }, MouseButton::Left, 0, PlatformEvent::Type::MouseMoved, 0, modifiersFromBits(modifiers), { } };
-        frame->eventHandler().dragSourceEndedAt(event, dropped ? OptionSet<DragOperation> { *session.operation } : OptionSet<DragOperation> { });
+        frame->eventHandler().dragSourceEndedAt(event, result ? OptionSet<DragOperation> { *result } : OptionSet<DragOperation> { });
     }
+    notifyHost(m_id, "page-drag-end");
 }
 
 void WebView::cancelDrag()
@@ -1211,12 +1263,20 @@ void WebView::cancelDrag()
         endDrag({ }, false, 0);
 }
 
-// Dragging from the host: data = {"text":..,"html":..,"uriList":..,"files":[paths],"fileCount":n}.
+// Dragging from the host: data = {"text":..,"html":..,"uriList":..,"files":[paths],"fileCount":n};
+// phase 3 ends the page's own drag outside the view: data = {"dropEffect":..}.
 // While dragging over the page the host only knows the types and the number of
 // files (as Chrome also shows them to the page), on drop everything.
 void WebView::hostDrag(int phase, double x, double y, int modifiers, const String& data)
 {
     IntPoint point { static_cast<int>(x), static_cast<int>(y) };
+    if (phase == 3) {
+        auto value = JSON::Value::parseJSON(data);
+        auto object = value ? value->asObject() : nullptr;
+        auto effect = object ? object->getString("dropEffect"_s) : String();
+        dropOutside(effect == "copy"_s ? std::optional { DragOperation::Copy } : effect == "link"_s ? std::optional { DragOperation::Link } : effect == "move"_s ? std::optional { DragOperation::Move } : std::nullopt);
+        return;
+    }
     if (m_drag && m_drag->fromPage)
         return;
     if (phase == 1) {

@@ -50,6 +50,14 @@ On iPhone and iPad two more hidden fields lie right before and after it while it
 on the top left pixels of the view: the keyboard's previous and next field arrows focus them,
 and the view turns that into Shift+Tab or Tab in the page instead of leaving it for your own
 fields ([architecture, Input](../../docs/architecture.md#input)).
+A drag the page starts (a link, an image, selected text, `draggable`) may leave the view for your
+page, like a system drag reaches Chrome's tab strip and address bar: the element under the
+pointer gets `dragenter`, `dragover`, `dragleave` and, when its last `dragover` called
+`preventDefault`, `drop`, untrusted `DragEvent`s whose new `DataTransfer` holds the page's data
+(`text/uri-list`, `text/plain`, `text/html` and its own types) in every event. Handle them like
+drops from other windows; the page's `dragend` gets the drop effect (your `dropEffect` where the
+browser lets you set it, else copy, link or move of its `effectAllowed`). Default actions do not
+run for untrusted events: a text field of yours inserts nothing unless you do it in `drop`.
 `sw.js` and `media-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
 `@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them; how to serve
 them or load `media-sw.js` into the site's own worker:

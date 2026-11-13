@@ -1,7 +1,8 @@
 // Drag and drop (engine/src/WebView.cpp, DragClient in Clients.cpp, WebCore
 // platform/wasm/DragWasm.cpp): HTML5 dragging in the page with the mouse (dragstart, setData,
-// drop, dragend) and dropping files and text from the host (events on the view canvas). Dropped
-// files live in the folder of the view and go away with it.
+// drop, dragend), dragging out of the view onto an element of the host page (core drag-out.ts)
+// and dropping files and text from the host (events on the view canvas). Dropped files live in
+// the folder of the view and go away with it.
 //
 //   node tests/core/dragdrop-test.mjs [engine-dir]
 import {
@@ -144,6 +145,77 @@ check(
   results.get('events2'),
 );
 if (dropsBefore) results.set('drop', dropsBefore);
+
+// The drag leaves the view for an element of the embedding page (core drag-out.ts), here one
+// over the view: it gets dragenter, dragover and drop with the page's data, the page's own drop
+// zone sees nothing and the source gets dragend with the effect (copy, the first of copyMove);
+// without preventDefault on dragover there is no drop and dragend says none
+await page.evaluate(() => {
+  const zone = document.createElement('div');
+  zone.id = 'host-zone';
+  zone.style.cssText = 'position:fixed;width:200px;height:100px;background:#c8f;z-index:10';
+  document.body.append(zone);
+  const seen = [];
+  window.hostZone = { seen, accept: true };
+  for (const type of ['dragenter', 'dragover', 'dragleave', 'drop'])
+    zone.addEventListener(type, (e) => {
+      if (type === 'dragover' && window.hostZone.accept) e.preventDefault();
+      if (type === 'drop') e.preventDefault();
+      const last = seen.at(-1);
+      const entry =
+        type === 'drop'
+          ? `drop:${e.dataTransfer.getData('text/plain')}:${e.dataTransfer.getData('application/x-test')}`
+          : type === 'dragover'
+            ? `dragover:${e.dataTransfer.types.join(',')}`
+            : type;
+      if (entry !== last) seen.push(entry);
+    });
+});
+await page.evaluate(
+  ([x, y]) =>
+    Object.assign(document.getElementById('host-zone').style, { left: `${x}px`, top: `${y}px` }),
+  [box.x + 700, box.y + 120],
+);
+const dragOut = async (key) => {
+  await page.mouse.move(box.x + 80, box.y + 50);
+  await page.mouse.down();
+  // Down between the drop zone and the files of the page, then right onto the host's element
+  for (let i = 1; i <= 4; i++) {
+    await page.mouse.move(box.x + 80, box.y + 50 + i * 30);
+    await page.waitForTimeout(40);
+  }
+  for (let i = 1; i <= 14; i++) {
+    await page.mouse.move(box.x + 80 + i * 50, box.y + 170);
+    await page.waitForTimeout(40);
+  }
+  await page.mouse.up();
+  return result(key);
+};
+const events3 = await dragOut('events3');
+const zoneSeen = await page.evaluate(() => window.hostZone.seen.join('|'));
+check(
+  'dragged out to the host: dragenter, dragover with the types, drop with the data',
+  zoneSeen === 'dragenter|dragover:text/plain,application/x-test|drop:hello:secret',
+  zoneSeen,
+);
+check(
+  'dragged out to the host: the page saw no drop, dragend copy',
+  events3 === 'dragstart|dragend:copy',
+  events3,
+);
+await page.evaluate(() => {
+  window.hostZone.accept = false;
+  window.hostZone.seen.length = 0;
+});
+const events4 = await dragOut('events4');
+const zoneRefused = await page.evaluate(() => window.hostZone.seen.join('|'));
+check(
+  'host element without preventDefault: no drop, dragleave, dragend none',
+  zoneRefused === 'dragenter|dragover:text/plain,application/x-test|dragleave' &&
+    events4 === 'dragstart|dragend:none',
+  `${zoneRefused} ${events4}`,
+);
+await page.evaluate(() => document.getElementById('host-zone').remove());
 
 // 2. Drop a file from the host (events on the canvas like dragging from a file manager)
 const dropOnCanvas = (x, y, fill) =>

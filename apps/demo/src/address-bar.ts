@@ -1,5 +1,6 @@
 import { typedAddress } from '@browser-lite/core';
 import { bookmarks } from './bookmarks.js';
+import { acceptText, droppedText } from './dropped-text.js';
 import { showStartNote } from './engine-message.js';
 import { favicon, hostOf } from './favicons.js';
 import { closeFindOverToolbar } from './find-bar.js';
@@ -457,6 +458,23 @@ address.addEventListener('keydown', (e) => {
   e.preventDefault();
   select((selected + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
   address.value = rows[selected]?.text ?? address.value;
+});
+// A link or text dropped on the field opens like Enter (from a page or another window, like
+// Firefox and Chrome); text dragged inside the field itself moves as usual
+let draggingOwnText = false;
+address.addEventListener('dragstart', () => {
+  draggingOwnText = true;
+});
+address.addEventListener('dragend', () => {
+  draggingOwnText = false;
+});
+address.addEventListener('dragover', (e) => {
+  if (!draggingOwnText) acceptText(e);
+});
+address.addEventListener('drop', (e) => {
+  if (draggingOwnText) return;
+  e.preventDefault();
+  go(addressToLoad(droppedText(e.dataTransfer)));
 });
 // The phone layout shows only the host: follow a change of the layout (rotation); the
 // suggestions follow the toolbar when the on-screen keyboard comes or goes (after

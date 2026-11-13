@@ -67,7 +67,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Android keyboards after typing (#411), clipboard with HTML and files
   (#126), copy buttons of sites through `navigator.clipboard.writeText()` and `write()` (text
   and HTML, #469; before, the promise resolved and nothing reached the clipboard), drag and drop
-  (#125), touch with pointer events (#316), swiping along `touch-action`
+  (#125), also out of the page onto the embedding page, where the demo opens a link or text
+  dropped on the tab strip in a new tab or the tab under it and one dropped on the address bar in
+  the active tab like Chrome (#534: before, nothing outside the view could take a drag of
+  the page), touch with pointer events (#316), swiping along `touch-action`
   without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), and keys typed right after such a shortcut wait for the page's answer like in Chrome, so with a busy page (YouTube, Wikipedia) the letters after Ctrl+L or Ctrl+F all land in the address or find bar instead of reaching the page as its own shortcuts (#507), while plain typing does not wait, so keys typed during a 5 s engine stall reach the page within about 0.25 s after it instead of one engine round trip per key (#524), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
   Tab to links (#372), focus on click of buttons, checkboxes and links like Chrome (#450), mouse leave of the view (`:hover` and link address go away, #381),
@@ -807,7 +810,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - Measurement: layout shift and long animation frame entries, IdleDetector,
   `document.featurePolicy`.
 - UI: drag and drop outside a drop target opens nothing (#125; Chrome loads the link or file in
-  the same tab, deliberately not here because an accidental drop would replace the page).
+  the same tab, deliberately not here because an accidental drop would replace the page). A drag
+  out of the page reaches the embedding page as untrusted drag events, so a text field there
+  inserts nothing unless the page does it in `drop` (#534).
 - Devices and identity: passkeys (WebAuthn has no authenticator, #298), password credentials,
   Payment Request, Web MIDI/USB/HID/Serial, WebXR.
 - Extensions: no blocking or observing of requests (an engine export for WebCore's content

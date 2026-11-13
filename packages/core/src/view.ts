@@ -1,6 +1,7 @@
 import { HttpFallback, httpFallback, typedAddress } from './address.js';
 import type { Config } from './config.js';
 import type { ImageCopies } from './copy-image.js';
+import type { PageDrag } from './drag-out.js';
 import { Emitter } from './emitter.js';
 import type { EngineModule } from './engine.js';
 import type { Fullscreen } from './fullscreen.js';
@@ -87,6 +88,9 @@ export class ViewImpl implements View {
   /** @internal Damage tiles over the canvas (only when the canvas went to the engine worker). */
   readonly tiles: ViewTiles | null = null;
   /** @internal */ onWheelResult: ((consumed: boolean) => void) | null = null;
+  /** @internal The page started a drag (null: it ended). */ onPageDrag:
+    | ((drag: PageDrag | null) => void)
+    | null = null;
   /** @internal */ hasBeforeUnload = false;
   /** @internal */ userActivated = false;
   /** @internal Keyboard input in order, held while a keydown waits for its answer. */
@@ -816,6 +820,20 @@ export class ViewImpl implements View {
         // The shortcut of an unhandled key runs before held keys go on (it may move the focus)
         if (data.handled === false) this.emit('unhandled-key', unhandledKey(data));
         this.keys.answered();
+        return;
+      case 'page-drag-start':
+        this.onPageDrag?.({
+          items: Array.isArray(data.items)
+            ? data.items.map((item: { type?: unknown; data?: unknown }) => ({
+                type: String(item.type ?? ''),
+                data: String(item.data ?? ''),
+              }))
+            : [],
+          effectAllowed: String(data.effectAllowed ?? 'all'),
+        });
+        return;
+      case 'page-drag-end':
+        this.onPageDrag?.(null);
         return;
       case 'wheel-result':
         this.onWheelResult?.(!!data.consumed);

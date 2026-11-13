@@ -1,3 +1,4 @@
+import { DragOut } from './drag-out.js';
 import type { ViewImpl } from './view.js';
 
 /** Zoom steps of Ctrl + mouse wheel (like Chrome). */
@@ -138,6 +139,14 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
     }, 200);
   };
 
+  const outsideView = (point: [number, number]) => {
+    const rect = canvas.getBoundingClientRect();
+    return outside(point, rect.width, rect.height);
+  };
+  // A drag of the page may leave the view for the embedding page (drag-out.ts)
+  const dragOut = new DragOut(canvas);
+  view.onPageDrag = (drag) => (drag ? dragOut.start(drag) : dragOut.end());
+
   // Click count (double/triple click selects word/paragraph, dblclick) counted here:
   // PointerEvent.detail is always 0 in Chrome
   let lastDown = { time: 0, x: 0, y: 0, button: -1, count: 0 };
@@ -168,6 +177,12 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
   );
   on('pointerup', (e) => {
     endPinch();
+    const dropped = dragOut.release(e);
+    if (dropped) {
+      const data = view.host.text(JSON.stringify(dropped));
+      module._bl_drag(view.id, 3, 0, 0, modifierBits(e), data);
+      return;
+    }
     const [x, y] = view.position(e);
     const count = e.button === lastDown.button ? lastDown.count : 1;
     module._bl_mouse(view.id, 1, e.button, e.buttons, x, y, count, modifierBits(e));
@@ -191,10 +206,12 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
       );
       return;
     }
+    // Over the embedding page the page's drag left the view
+    const [mx, my] = dragOut.move(e) ? outsideView([x, y]) : [x, y];
     module._bl_mouse_move(
       view.id,
-      x,
-      y,
+      mx,
+      my,
       e.movementX || 0,
       e.movementY || 0,
       e.buttons,
@@ -208,8 +225,7 @@ export function attachPointerInput(view: ViewImpl, signal: AbortSignal): void {
   // :hover.
   on('pointerleave', (e) => {
     if (e.pointerType === 'touch') return;
-    const rect = canvas.getBoundingClientRect();
-    const [x, y] = outside(view.position(e), rect.width, rect.height);
+    const [x, y] = outsideView(view.position(e));
     module._bl_mouse_move(view.id, x, y, 0, 0, e.buttons, modifierBits(e));
   });
   on(
