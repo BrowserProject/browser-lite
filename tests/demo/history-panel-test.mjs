@@ -120,17 +120,17 @@ await page.evaluate((siteURL) => {
 }, siteURL);
 
 await page.keyboard.press('Control+h');
+const firstRows = JSON.stringify([
+  'Today:Page D',
+  'Today:Page C',
+  'Today:Page B',
+  'Today:Page A',
+  'Yesterday:Page A',
+  'Yesterday:Old page 59',
+]);
 check(
   'history panel: today D, C, B, A, yesterday A first',
-  JSON.stringify((await rows()).slice(0, 6)) ===
-    JSON.stringify([
-      'Today:Page D',
-      'Today:Page C',
-      'Today:Page B',
-      'Today:Page A',
-      'Yesterday:Page A',
-      'Yesterday:Old page 59',
-    ]),
+  await waitFor(async () => JSON.stringify((await rows()).slice(0, 6)) === firstRows, 5000),
   JSON.stringify((await rows()).slice(0, 6)),
 );
 const removeButtons = await page.evaluate(() =>
