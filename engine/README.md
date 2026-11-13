@@ -54,7 +54,8 @@ comes as patches from `patches/`.
   - `engine-memory.js` (`--js-library`): the engine's memory, with a maximum of 2 or 1 GB when
     4 GB of address space are not free (iOS Safari has room for three such memories per process)
   - `deferred.js`: loads the chunks `engine.deferred-<n>.wasm` into every thread (`Module.blSetDeferred`)
-  - `workers.js`: loaded web workers for new threads, a reserve refilled in the background
+  - `workers.js`: loaded web workers for new threads, a reserve refilled in the background; a
+    worker whose `engine.js` did not load is replaced, its thread moves to the replacement
   - `sockets.js`: TCP streams over `Module.blTransport`
   - `http-cache.js`: HTTP cache in the host's Cache API
   - `webcodecs-host.js`, `mediarecorder-host.js`: WebCodecs and MediaRecorder with the host's

@@ -234,6 +234,8 @@ const engineInternal = new Set([
   'blHostRegExps',
   'blGpuCanvas',
   'blGpuRestoreForTesting',
+  // engine/js/workers.js: watches the loads of the workers right after Emscripten created them
+  'preInit',
   'ENV',
   'HEAPU8',
   'HEAPF32',

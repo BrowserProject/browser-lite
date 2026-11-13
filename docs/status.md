@@ -255,6 +255,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   per tab (388 MB at 10 tabs against 889 MB here); the GPU process keeps freed texture memory for
   reuse rather than giving it back, so its size follows the heaviest pages seen, and each tab
   keeps its last frame in its canvas.
+  An engine worker whose `engine.js` did not load is replaced and a thread that had taken it runs
+  in the replacement, so the start no longer waits forever (#543: Firefox fails most of the 8 pool
+  workers that load the cached `engine.js` at once and stayed on "Starting engine..." for good;
+  now it starts in about 1.7 s locally, 0.3 s more than without failed loads); a worker that does
+  not load in 3 tries ends the start with `engine-load-failed`.
 - **Slow networks**: download progress at the start (#226), the relay connection opens while the
   engine downloads (#227), ICU data and fonts beyond the basics load on first use (#228, #229),
   the common ones and the user's languages in the background right after the start (#240),
@@ -888,9 +893,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
   the one that presents. Not worked around (#334); `compositing-test` skips this check in Firefox. Now and then in CI (auth, clipboard, background tests)
   an engine worker loaded for about 60 s and then failed: the core's service worker waited in
   `activate` for `clients.claim()`, which waits for the new worker, whose script request waits for
-  the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); the engine still logs such
-  a worker (`[workers] engine worker did not load after ... ms`), not seen in the 8 CI runs up to
-  2026-10-31 nor in 22 Firefox jobs of 11 main runs up to 2026-11-02. Closing or reloading a tab right after a
+  the activation. Fixed (#301, locally 0 of 8 runs instead of 1 of 5); a worker that does not
+  load is now replaced (#543) and logged (`[workers] engine.js did not load into a web worker`). Closing or reloading a tab right after a
   change lost it in Firefox (#275, the engine cannot write while `pagehide` waits): commits now go
   to a commit log at once (#302), localStorage reaches SQLite 100 ms after a change (#303).
 - WebKit (Playwright 1.63 in its Docker image, locally, #293), 2026-10-28: of the core suite 13
