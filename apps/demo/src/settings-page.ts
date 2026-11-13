@@ -45,6 +45,7 @@ close.append(icon('close'));
 close.addEventListener('click', () => page.close());
 page.append(close, nav, content);
 page.addEventListener('close', () => {
+  commitTexts();
   leaveSection?.();
   leaveSection = null;
   content.textContent = '';
@@ -77,6 +78,7 @@ function showSection(name: Section): void {
   }
   // New for every section: what comes later (profile info) checks section.isConnected
   const section = element('section', {}, element('h2', { textContent: SECTIONS[name][0] }));
+  commitTexts();
   leaveSection?.();
   leaveSection = null;
   content.replaceChildren(section);
@@ -129,9 +131,28 @@ function text(
   placeholder: string,
   onChange: (value: string, input: HTMLInputElement) => void,
 ): HTMLInputElement {
-  const input = element('input', { type: 'text', id, value, placeholder, spellcheck: false });
-  input.addEventListener('change', () => onChange(input.value.trim(), input));
+  const input = element('input', {
+    type: 'text',
+    id,
+    value,
+    placeholder,
+    spellcheck: false,
+    className: 'settings-text',
+  });
+  input.defaultValue = value;
+  input.addEventListener('change', () => {
+    input.defaultValue = input.value;
+    onChange(input.value.trim(), input);
+  });
   return input;
+}
+
+// Firefox does not always send change when Esc closes the dialog while a text field has the
+// keyboard, so an edit not saved yet is saved before the section goes away
+function commitTexts(): void {
+  for (const input of content.querySelectorAll<HTMLInputElement>('input.settings-text')) {
+    if (input.value !== input.defaultValue) input.dispatchEvent(new Event('change'));
+  }
 }
 
 const save =
