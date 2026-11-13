@@ -17,6 +17,7 @@ import { uiReloading } from './reload.js';
 import { runtime } from './runtime.js';
 import { type SessionEntry, type SessionTab, saveSession, sessionEntry } from './session.js';
 import { settings, startSettings } from './settings.js';
+import { showActiveInStrip, unwatchStripTab, watchStripTab } from './tab-strip.js';
 import {
   setProgress,
   setStatus,
@@ -424,6 +425,7 @@ export class Tab implements SessionTab {
     this.hideLinkStatus?.();
     this.hideLinkStatus = null;
     this.releaseIcon();
+    unwatchStripTab(this.element);
     this.element.remove();
   }
 }
@@ -479,6 +481,7 @@ function add(tab: Tab, before?: Tab): Tab {
     list.push(tab);
     byId('tab-list').append(tab.element);
   }
+  watchStripTab(tab.element);
   for (const listener of created) listener(tab);
   tabsChanged();
   return tab;
@@ -648,7 +651,11 @@ export function downloadStarted(view: View | null): void {
 }
 
 export function activate(tab: Tab): void {
-  if (active === tab || tab.view.closed) return;
+  if (tab.view.closed) return;
+  if (active === tab) {
+    showActiveInStrip(tab.element);
+    return;
+  }
   const now = Date.now();
   tab.lastActive = now;
   if (active) {
@@ -664,6 +671,7 @@ export function activate(tab: Tab): void {
   loadPending(tab);
   persistSession();
   tab.show(true);
+  showActiveInStrip(tab.element);
   showPromptsOf(tab.view);
   showFindOf(tab.view);
   // The address bar shows the address of this tab, or the edit it kept

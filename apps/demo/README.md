@@ -143,7 +143,10 @@ select popup) are in the same sheet.
   their rows, a name never breaks, #445) and the settings as cards of
   rows, switches for on and off; start, errors and the access code are a card over the page. On
   narrow screens the whole sheet scrolls and the close button sticks to its top (#379).
-- **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls; narrow tabs
+- **Tabs**: tabs share the width of the strip down to a minimum, then it scrolls like in Chrome
+  and Firefox: the active tab stays fully in view when it becomes active (also a new tab, Ctrl+1
+  to 9, Ctrl+Tab) and whenever a tab or the strip changes size, a strip the user scrolled stays
+  put otherwise, and the vertical mouse wheel scrolls it sideways (`tab-strip.ts`, #542); narrow tabs
   show the cross only on the active (and hovered) tab, on touch screens a little earlier. A tab
   and the window are named after the page's title, without one after its address (#367).
   Ctrl/Cmd+click, middle click (also on a `target=_blank` link) and Open link or image in new

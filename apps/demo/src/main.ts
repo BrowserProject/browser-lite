@@ -56,6 +56,7 @@ import { initTabDrag } from './tab-drag.js';
 import { initTabDrop } from './tab-drop.js';
 import { initTabMenu } from './tab-menu.js';
 import { initTabOverview } from './tab-overview.js';
+import { initTabStripWheel } from './tab-strip.js';
 import {
   activate,
   activeTab,
@@ -389,6 +390,7 @@ followHostHistory(() => {
 initBlockedPopups((url) => openURL(url, true));
 initTabOverview();
 initTabDrag();
+initTabStripWheel();
 initTabDrop();
 initTabMenu();
 initHistoryMenu();
