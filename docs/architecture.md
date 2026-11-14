@@ -135,7 +135,9 @@ thread's queue, so never hold a lock that a queued task could take (#69).
 
 A thread that traps or aborts ends the engine. Its worker writes the error with the stack into
 static engine memory (`bl__crash_reason`) before the error reaches the main thread, where the
-core reports it as the reason of `crash` (#218).
+core reports it as the reason of `crash` (#218). The demo then starts a new browser in the page
+with the session; Reload, a new tab or a typed address do that too and are carried out after the
+start ([apps/demo](../apps/demo/README.md), #565).
 
 All views share one engine thread. The core watchdog emits `unresponsive` when input or an
 expected answer gets no reply within 10 s (#147, #172). The engine stops a JS entry once the host

@@ -9,6 +9,7 @@ import {
 import { enterAddress, focusAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
+import { engineRunning, openOnStart, restartAfterCrash } from './engine-state.js';
 import { ui } from './extensions.js';
 import { defaultFavicon, hostOf, rememberedIcon, rememberIcon } from './favicons.js';
 import { endFind, showFindCount, showFindOf } from './find-bar.js';
@@ -515,7 +516,7 @@ function linkTabPlace(opener: Tab | null, foreground: boolean): Tab | undefined 
 
 function createView(url?: string) {
   const browser = runtime.browser;
-  if (browser?.state !== 'ready') return null;
+  if (!browser || !engineRunning()) return null;
   return browser.createView({
     container: pages(),
     visible: false,
@@ -526,9 +527,14 @@ function createView(url?: string) {
 
 /**
  * A new tab in the foreground with url (empty: a blank tab, NEW_TAB_URL: the new tab page), before
- * the tab `before`, else at the end of the strip.
+ * the tab `before`, else at the end of the strip. While no engine runs it opens once it runs
+ * (null now).
  */
 export function openTab(url: string, before?: Tab): Tab | null {
+  if (!engineRunning()) {
+    if (url) openOnStart(url);
+    return null;
+  }
   const view = createView(url);
   if (!view) return null;
   const tab = new Tab(view, { url });
@@ -562,9 +568,14 @@ export function openURL(url: string, inNewTab: boolean): void {
 
 /**
  * Loads url in tab (from the address bar, the new tab page or a panel) and focuses the page; a new
- * tab page stays until the document commits.
+ * tab page stays until the document commits. While no engine runs (after a crash) url opens in a
+ * new tab once it runs, so the page that crashed does not load again.
  */
 export function loadInTab(tab: Tab, url: string): void {
+  if (!engineRunning()) {
+    openOnStart(url);
+    return;
+  }
   // Like Chrome after a typed address: the next tabs from links go next to their opener again
   for (const other of list) other.openedBy = null;
   tab.view.load(url);
@@ -713,9 +724,13 @@ function loadPending(tab: Tab): void {
   else tab.view.load(url);
 }
 
-/** Reloads the page of tab; one that has not loaded yet loads it, also in the background. */
+/**
+ * Reloads the page of tab; one that has not loaded yet loads it, also in the background. After a
+ * crash the engine starts again, which loads the tab in front again.
+ */
 export function reloadTab(tab: Tab): void {
-  if (tab.pending) loadPending(tab);
+  if (!engineRunning()) restartAfterCrash();
+  else if (tab.pending) loadPending(tab);
   else tab.view.reload();
 }
 
@@ -914,6 +929,13 @@ export function printTab(tab: Tab | null): void {
   if (!tab) return;
   printing();
   tab.view.print();
+}
+
+/** The engine crashed: no tab loads any more, so Reload shows instead of Stop. */
+export function engineCrashed(): void {
+  for (const tab of list) tab.loading = false;
+  setProgress(1);
+  if (active) updateToolbar(active);
 }
 
 /** Removes all tabs from the strip (the views are gone with their browser). */

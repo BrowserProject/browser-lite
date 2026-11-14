@@ -6,10 +6,11 @@ message: close tabs while a loaded background tab stays, else that the page uses
 address bar with suggestions, history, bookmarks, downloads panel, dialogs of the pages in the page, settings page with profile, extensions and device
 emulation, find bar, zoom, print preview, keyboard shortcuts, security indicator, pop-up blocker
 icon (open a blocked popup, always allow the site), crash and hang
-handling (also of the whole page: when the host browser ended it, as iOS does with a page that
+handling (after a crash Reload, a new tab and an address typed into the address bar start the
+engine again with the session and then act, like Chrome on a crashed tab; also of the whole page: when the host browser ended it, as iOS does with a page that
 uses too much memory, the session comes back like after an engine crash, and a page shown again
-from the back-forward cache starts a new engine with its tabs), a progress bar while the engine downloads (an address typed meanwhile opens once it
-runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
+from the back-forward cache starts a new engine with its tabs), a progress bar while the engine downloads (an address typed or a new tab asked for meanwhile
+opens once it runs), and a phone layout. Built with Vite and only the public APIs of `@browser-lite/core`, `@browser-lite/ui`,
 `@browser-lite/profile` and `@browser-lite/transport-wisp`. Deployment on the public server:
 [deploy/](deploy/README.md).
 
@@ -317,6 +318,7 @@ the emulated device or "Restore tabs at start" changed on another device.
 | --- | --- |
 | `main.ts` | start: URL parameters to options, `createBrowser`, events, crash and hang, restart in the page |
 | `params.ts`, `runtime.ts` | URL parameters, relay and token; the running browser and the profile |
+| `engine-state.ts` | what the tabs do while no engine runs: a page asked for (address, new tab) opens in front once it runs; after a crash the request, Reload too, starts it again |
 | `tabs.ts` | tabs on views: popups (`new-view`), restored and discarded tabs, closing with beforeunload, memory pressure |
 | `host-history.ts`, `history-menu.ts` | the back and forward of the host browser act on the tab in front; the list of the tab's pages on Back and Forward |
 | `tab-drag.ts`, `tab-menu.ts`, `tab-drop.ts`, `dropped-text.ts` | reordering tabs by dragging them in the strip; the menu of a right click on the strip; links and text dropped on the strip and the address bar |

@@ -19,13 +19,14 @@ import {
   selectPopup,
 } from '@browser-lite/ui';
 import { askForAccessCode } from './access.js';
-import { addressToLoad, takePendingAddress } from './address-bar.js';
+import { addressToLoad } from './address-bar.js';
 import { hideBarWhileScrolling } from './bar-hiding.js';
 import { initBlockedPopups } from './blocked-popups.js';
 import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
+import { restartAfterCrash, setCrashRestart, takeOpenOnStart } from './engine-state.js';
 import { builtInExtensions, extensions, ui } from './extensions.js';
 import { initFindBar, openFind } from './find-bar.js';
 import { onHistoryRemove, readHistory } from './history.js';
@@ -67,11 +68,13 @@ import {
   closeToParent,
   discardForMemory,
   downloadStarted,
+  engineCrashed,
   focusPage,
   openNewTab,
   openTab,
   openURL,
   printTab,
+  reloadTab,
   restoredTab,
   type Tab,
 } from './tabs.js';
@@ -152,8 +155,8 @@ function browserOptions(
 
 /** The tabs at the start: the last session (unless ?url=) or the start page. */
 function openStartTabs(restarted: boolean): void {
-  // An address typed while the engine started opens in front of a restored session
-  const typed = takePendingAddress();
+  // A page asked for while no engine ran opens in front of a restored session
+  const typed = takeOpenOnStart();
   const url = typed || (restarted || !startUrl ? null : addressToLoad(startUrl));
   const safe = !!storage(SAFE_START_KEY, undefined, true);
   storage(SAFE_START_KEY, null, true);
@@ -212,6 +215,9 @@ function crashed(reason: string): void {
   // rest in the console
   console.error(`Engine crash: ${reason}`);
   const summary = reason.split('\n')[0] ?? '';
+  engineCrashed();
+  // Reload, a new tab and an address restart like the button (engine-state.ts)
+  setCrashRestart(() => void restart(repeated));
   showMessage(
     'The engine crashed.',
     [
@@ -220,7 +226,7 @@ function crashed(reason: string): void {
         : 'After the restart all tabs are back.',
       summary.length > 160 ? `${summary.slice(0, 160)}…` : summary,
     ],
-    [['Restart', () => void restart(repeated)]],
+    [['Restart', restartAfterCrash]],
   );
 }
 
@@ -244,6 +250,7 @@ function pageEndedUnexpectedly(): void {
  * engine cannot be stopped.
  */
 async function restart(safe: boolean): Promise<void> {
+  setCrashRestart(null);
   if (safe) storage(SAFE_START_KEY, '1', true);
   markRestart();
   history.replaceState(history.state, '', addressWithoutUrl());
@@ -447,7 +454,7 @@ function pageButton(id: string, action: (tab: Tab) => void): void {
 
 pageButton('back', (tab) => tab.view.back());
 pageButton('forward', (tab) => tab.view.forward());
-pageButton('reload', (tab) => (tab.loading ? tab.view.stop() : tab.view.reload()));
+pageButton('reload', (tab) => (tab.loading ? tab.view.stop() : reloadTab(tab)));
 byId('new-tab').addEventListener('click', () => openURL('', true));
 byId('bookmark').addEventListener('click', () => {
   const tab = activeTab();

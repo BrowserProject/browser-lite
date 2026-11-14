@@ -2,7 +2,6 @@ import { typedAddress } from '@browser-lite/core';
 import { displayHost, displayURL } from '@browser-lite/ui';
 import { bookmarks } from './bookmarks.js';
 import { acceptText, droppedText } from './dropped-text.js';
-import { showStartNote } from './engine-message.js';
 import { favicon, hostOf } from './favicons.js';
 import { closeFindOverToolbar } from './find-bar.js';
 import { readHistory } from './history.js';
@@ -28,7 +27,6 @@ let selected = -1;
 let typed = '';
 /** The site that completes the typed text inline (the first row), if any. */
 let inline: Row | null = null;
-let pending = '';
 /** Address of the active tab; the field shows it while it is not being edited. */
 let current = '';
 /** The field shows text of the user (typed, a row chosen) instead of current. */
@@ -49,13 +47,6 @@ const keptEdits = new WeakMap<Tab, KeptEdit>();
  */
 let selectOnClick = false;
 let preconnectTimer: ReturnType<typeof setTimeout> | undefined;
-
-/** The address submitted while the engine was still starting; the start opens it. */
-export function takePendingAddress(): string {
-  const url = pending;
-  pending = '';
-  return url;
-}
 
 /**
  * The search of text that starts with `?`, like Chrome and Firefox: always a search for the rest
@@ -384,24 +375,18 @@ function placeSuggestions(): void {
 }
 
 /**
- * Opens url in the active tab (with inNewTab in a new tab in front), or after the start when the
- * engine is not running yet.
+ * Opens url in the active tab (with inNewTab in a new tab in front); while no engine runs in a
+ * new tab once it runs (`openOnStart`).
  */
 function go(url: string, inNewTab = false): void {
   hideSuggestions();
   if (!url) return;
-  const tab = activeTab();
-  if (!tab) {
-    pending = url;
-    showStartNote(`${url} opens as soon as the engine runs.`);
-    address.blur();
-    return;
-  }
   // The edit ends: the field shows the address of the tab again, the one that loads (pending
   // until its page commits) or, for a javascript: address, the page's
   edited = false;
   address.blur();
-  if (inNewTab) openTab(url);
+  const tab = activeTab();
+  if (inNewTab || !tab) openTab(url);
   else loadInTab(tab, url);
 }
 

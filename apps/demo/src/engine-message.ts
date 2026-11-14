@@ -69,10 +69,17 @@ export function showStartProgress({ phase, loaded, total }: StartProgress): void
   else bar.removeAttribute('value');
 }
 
-/** A line under the start message, for example the address that opens once the engine runs. */
+/**
+ * A line under the start message, for example the address that opens once the engine runs;
+ * empty text removes it.
+ */
 export function showStartNote(text: string): void {
   note = text;
   let line = box.querySelector<HTMLElement>('.note');
+  if (!text) {
+    line?.remove();
+    return;
+  }
   if (!line) {
     line = document.createElement('p');
     line.className = 'detail note';

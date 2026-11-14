@@ -15,6 +15,7 @@ import {
   onTabCreated,
   openURL,
   printTab,
+  reloadTab,
   reopenClosedTab,
   requestClose,
   switchTab,
@@ -103,7 +104,7 @@ function shortcutAction(e: Key): (() => void) | null {
       case 'g':
         return () => findAgain(e.shiftKey);
       case 'r':
-        return () => tab?.view.reload();
+        return () => tab && reloadTab(tab);
       case 'u':
         return () => tab?.view.viewSource();
       case 'p':
@@ -143,7 +144,7 @@ function shortcutAction(e: Key): (() => void) | null {
   if (!ctrl && !e.altKey) {
     switch (key) {
       case 'F5':
-        return () => tab?.view.reload();
+        return () => tab && reloadTab(tab);
       case 'F6':
         return focusAddress;
       case 'F3':
@@ -156,7 +157,8 @@ function shortcutAction(e: Key): (() => void) | null {
 // An open select popup or context menu of the ui package takes its keys itself
 const uiPopupOpen = () => !!document.querySelector('.bl-select-popup, .bl-context-menu');
 
-const ready = () => runtime.browser?.state === 'ready' && !uiPopupOpen();
+// Not while the engine starts; after a crash they act like the toolbar (engine-state.ts)
+const ready = () => !!runtime.browser && !uiPopupOpen();
 
 /**
  * Keyboard shortcuts of the browser, skipped while a popup of the ui package is open. In the
