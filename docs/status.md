@@ -167,6 +167,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   fullscreens its `<video>` for the iPhone it sees and showed only a slice of the frame). The media
   controls show their icons (play, pause, skip, mute, fullscreen) and their exit button leaves
   fullscreen (#476; every button was blank and fullscreen had no visible way out).
+  They take Chrome's keys and double click (#552): on a focused `<video controls>` or
+  `<audio controls>` Space and Enter play or pause without scrolling the page, the arrows, Home and
+  End seek and change the volume, and a double click on the video enters or leaves fullscreen
+  (before, the keys only worked in fullscreen and a double click just paused and played).
   `navigator.mediaCapabilities` of pages and workers answers with the host's `decodingInfo`
   (#503; before it called every configuration unsupported, so Twitch's player dropped every
   variant of a stream and showed Error #4000; its front page stream now plays).
@@ -767,6 +771,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - Media controls: no overflow menu (playback speed, subtitles, chapters) like Chrome's three dots;
   `MEDIA_CONTROLS_CONTEXT_MENUS` is off for the port and would need the menu of the media controls
   in the host (#476).
+- Media: a `play()` during a click of the host gives the page `play`, `pause` and `play` again
+  within a few milliseconds (Chrome gives `play` once); a `play()` outside a gesture does not.
+  Seen with `<video controls>` and with a page's own click handler (#552). Not yet traced; likely
+  a state report of the host `<video>` sent before it applied the play command (the engine takes
+  `paused` from every report, `MediaPlayerPrivateWasm.cpp`), with the gesture unlock of
+  `media-unlock.ts` as the trigger.
 - Clipboard: an image (`image/png`) in a `ClipboardItem` of `navigator.clipboard.write()` does not
   reach the host, only text and HTML do (#469; the event `clipboard` carries no files). Like
   WebKit, a write with several items resolves, Chrome rejects it.

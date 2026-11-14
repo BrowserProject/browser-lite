@@ -1,0 +1,136 @@
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/background-click-delegate-notifier.js b/Source/WebCore/Modules/modern-media-controls/controls/background-click-delegate-notifier.js
+index c76bf621ce..0be9e888f9 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/background-click-delegate-notifier.js
++++ b/Source/WebCore/Modules/modern-media-controls/controls/background-click-delegate-notifier.js
+@@ -31,6 +31,7 @@ class BackgroundClickDelegateNotifier
+         this._mediaControls = mediaControls;
+         mediaControls.element.addEventListener("mousedown", this);
+         mediaControls.element.addEventListener("click", this);
++        mediaControls.element.addEventListener("dblclick", this);
+     }
+ 
+     // Protected
+@@ -53,6 +54,11 @@ class BackgroundClickDelegateNotifier
+                 mediaControls.delegate.macOSControlsBackgroundWasClicked();
+             delete this._receivedMousedown
+             return;
++
++        case "dblclick":
++            if (event.target === mediaControls.element && mediaControls.delegate && typeof mediaControls.delegate.macOSControlsBackgroundWasDoubleClicked === "function")
++                mediaControls.delegate.macOSControlsBackgroundWasDoubleClicked();
++            return;
+         }
+     }
+ 
+diff --git a/Source/WebCore/Modules/modern-media-controls/media/fullscreen-support.js b/Source/WebCore/Modules/modern-media-controls/media/fullscreen-support.js
+index a0fc2f8e6e..686726121b 100644
+--- a/Source/WebCore/Modules/modern-media-controls/media/fullscreen-support.js
++++ b/Source/WebCore/Modules/modern-media-controls/media/fullscreen-support.js
+@@ -45,11 +45,7 @@ class FullscreenSupport extends MediaControllerSupport
+ 
+     buttonWasPressed(control)
+     {
+-        const media = this.mediaController.media;
+-        if (this.mediaController.isFullscreen)
+-            media.webkitExitFullscreen();
+-        else
+-            media.webkitEnterFullscreen();
++        this.mediaController.toggleFullscreen();
+     }
+ 
+     syncControl()
+diff --git a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+index 07b1485756..d859ad42eb 100644
+--- a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
++++ b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+@@ -197,6 +197,14 @@ class MediaController
+             this.media.pause();
+     }
+ 
++    toggleFullscreen()
++    {
++        if (this.isFullscreen)
++            this.media.webkitExitFullscreen();
++        else
++            this.media.webkitEnterFullscreen();
++    }
++
+     get canShowMediaControlsContextMenu()
+     {
+         return !!this.host?.showMediaControlsContextMenu;
+@@ -255,6 +263,14 @@ class MediaController
+             this.togglePlayback();
+     }
+ 
++    macOSControlsBackgroundWasDoubleClicked()
++    {
++        // browser-lite: a double click on the video toggles fullscreen, like Chrome and Firefox.
++        // Its two clicks toggled playback twice, so playback goes on as before.
++        if (this._shouldControlsBeAvailable() && !this.isAudio && this.media.webkitSupportsFullscreen)
++            this.toggleFullscreen();
++    }
++
+     iOSInlineMediaControlsRecognizedTapGesture()
+     {
+         // Initiate playback when tapping anywhere over the video when showsStartButton is true.
+@@ -284,7 +300,9 @@ class MediaController
+         } else if (event.type === "keyup" && this.isFullscreen && event.key === " ") {
+             event.preventDefault();
+             event.stopPropagation();
+-        } else if (event.type === "dragstart" && this.isFullscreen)
++        } else if (event.type === "keydown" && event.currentTarget === this.media && this._handleMediaKeyDown(event))
++            event.preventDefault();
++        else if (event.type === "dragstart" && this.isFullscreen)
+             event.preventDefault();
+         else if (event.type === this.fullscreenChangeEventType)
+             this.host?.presentationModeChanged?.();
+@@ -504,6 +522,49 @@ class MediaController
+         this._supportingObjects.forEach(supportingObject => supportingObject.controlsUserVisibilityDidChange());
+     }
+ 
++    _handleMediaKeyDown(event)
++    {
++        // browser-lite: keys on the focused media element work like in the media controls of
++        // Chrome: Space and Enter play or pause, the left and right arrows step by a hundredth of
++        // the duration, Home and End seek to the start and the end, the up and down arrows change
++        // the volume by 5 %. Like Chrome only while the controls are shown and not after the page
++        // prevented the default. A key on a focused part of the controls stays with that part.
++        if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || this.shadowRoot?.activeElement || !this._shouldControlsBeAvailable())
++            return false;
++
++        const media = this.media;
++        switch (event.key) {
++        case " ":
++        case "Enter":
++            if (!event.repeat)
++                this.togglePlayback();
++            return true;
++        case "ArrowLeft":
++        case "ArrowRight":
++        case "Home":
++        case "End": {
++            const duration = media.duration;
++            if (!Number.isFinite(duration) || duration <= 0)
++                return false;
++            const step = duration / 100;
++            const time = { ArrowLeft: media.currentTime - step, ArrowRight: media.currentTime + step, Home: 0, End: duration }[event.key];
++            media.currentTime = Math.min(Math.max(time, 0), duration);
++            return true;
++        }
++        case "ArrowUp":
++        case "ArrowDown": {
++            // Like the volume slider (VolumeSupport): 0 mutes and keeps the volume for unmuting.
++            const volume = media.muted ? 0 : media.volume;
++            const value = Math.round(Math.min(Math.max(volume + (event.key === "ArrowUp" ? 0.05 : -0.05), 0), 1) * 100) / 100;
++            if (value > 0)
++                media.volume = value;
++            media.muted = !value;
++            return true;
++        }
++        }
++        return false;
++    }
++
+     _shouldControlsBeAvailable()
+     {
+         if (this.layoutTraits.controlsNeverAvailable())

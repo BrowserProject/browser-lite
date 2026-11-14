@@ -33,7 +33,8 @@ listeners kept the whole page alive, or the cookies of a host that is itself a p
 which the cookie jar dropped, or the tree view of an XML file or feed without style
 information, which WebKit shows only with developer extras, so its text ran together, or
 `performance.timeOrigin`, which moved between two neighbouring milliseconds from one read to the
-next) comes as patches from `patches/`.
+next, or the media controls, which had no keys and no double click to fullscreen like Chrome's)
+comes as patches from `patches/`.
 
 ## Folders
 

@@ -569,7 +569,10 @@ controls with the Adwaita layout) take their icons from WebCore itself: patch 01
 Adwaita images into it (`Scripts/generate-media-controls-images.py`), GTK and WPE read them from
 a GResource. The player supports element fullscreen (`MediaPlayerPrivateWasm::supportsFullscreen`),
 so the controls show their fullscreen button inline and the exit button in fullscreen, and
-`webkitEnterFullscreen()` works (#476).
+`webkitEnterFullscreen()` works (#476). Patch 0135 gives them the keys and the double click of
+Chrome's controls: on the focused element Space and Enter play or pause, the arrows left and right
+step by a hundredth of the duration, Home and End seek to the ends, up and down change the volume,
+and a double click on the video toggles fullscreen (#552).
 
 ## Audio
 
