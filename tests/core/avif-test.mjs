@@ -6,10 +6,14 @@
 // memory of AVIF images that are never painted: their size comes from the container alone, not
 // from a decode of the whole picture, and a memory release does not decode them again (it did,
 // and every release raised the memory in use until the engine ran out on vimeo.com).
+// Last the memory of a large animation (weather.metoffice.gov.uk shows a 120 frame animation of
+// 1280 x 1920 as the background: the decoder kept every decoded frame, 1.2 GB, and iOS ended
+// the page): it plays on, also after the first loop, with a few frames in memory.
 // The fixtures are 160 x 120 with the quadrants red, green, blue, yellow (tests/fixtures/avif-*):
 // made with Pillow (8 bit, quality 90; alpha: left half red, right half transparent; large: the
 // quadrants at 2048 x 1536) and ffmpeg with libaom (10 bit: -pix_fmt yuv420p10le -still-picture
-// 1; animated: 2 frames of 0.5 s).
+// 1; animated: 2 frames of 0.5 s; anim-large: 1024 x 1024, 30 frames red and 30 green at 25 fps,
+// -crf 40 -cpu-used 8 -g 30).
 //
 //   node tests/core/avif-test.mjs [engine-dir]
 import fs from 'node:fs';
@@ -44,6 +48,7 @@ const IMAGES = {
   'tenbit.avif': fixture('tenbit'),
   'alpha.avif': fixture('alpha'),
   'anim.avif': fixture('anim'),
+  'anim-large.avif': fixture('anim-large'),
 };
 // The large quadrants with a free box of 1 MB after the picture: every image holds that much
 // encoded data, so a decoder that is never freed shows in the memory in use
@@ -109,6 +114,13 @@ window.allocate = (name, mb) => {
   console.log('RESULT ' + name + '=ok');
 };
 </script>`);
+    return;
+  }
+  if (name === 'animation') {
+    res
+      .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      .end(`<!doctype html><title>Animation</title><body style="margin:0">
+<img src="/anim-large.avif" style="width:200px;height:200px" onload="console.log('RESULT animation=' + this.naturalWidth)">`);
     return;
   }
   if (name === 'slow.avif') {
@@ -272,6 +284,55 @@ check(
   'the release frees the AVIF images that are gone',
   usedAfter - allocatedMB - usedBefore < 24,
   `used ${usedBefore} -> ${usedLoaded} -> ${usedAfter} MB with ${allocatedMB} MB allocated`,
+);
+
+await memoryPage.close();
+
+// A large animation (60 frames of 4 MB) keeps a few decoded frames, not all of them. Without
+// memory releases, which would hide frames the decoder kept.
+const animationPage = await context.newPage();
+const animationResults = collect(animationPage);
+check(
+  'animation: host page starts',
+  (await openHost(
+    animationPage,
+    stack.app({ url: `${siteURL}blank`, log: '1', env: 'BL_MEMORY_RELEASE_MB=0' }),
+  )) && (await animationResults.wait('blank')) === '1',
+);
+const animationUsedMB = async () =>
+  Math.round(
+    (await animationPage.evaluate(() => window.blTest.browser.debug.memoryUsed())) / 2 ** 20,
+  );
+const animationBefore = await animationUsedMB();
+await load(animationPage, `${siteURL}animation`);
+check('the large animated AVIF loads', (await animationResults.wait('animation')) === '1024');
+// Red, green, red, green: the animation plays through its end and again (frames decoded again)
+const colors = [];
+let animationPeak = 0;
+await waitFor(
+  async () => {
+    const pixel = await pagePixel(animationPage, 100, 100);
+    const color = near(pixel, RED, 30) ? 'red' : near(pixel, GREEN, 30) ? 'green' : null;
+    if (color && colors.at(-1) !== color) colors.push(color);
+    animationPeak = Math.max(animationPeak, await animationUsedMB());
+    return colors.length >= 4;
+  },
+  30000,
+  50,
+);
+check(
+  'the large animated AVIF plays on after its first loop',
+  colors.length >= 4,
+  colors.join(','),
+);
+await animationPage.waitForTimeout(2000);
+animationPeak = Math.max(animationPeak, await animationUsedMB());
+// All 60 frames took 240 MB; the image keeps frames up to 30 MB (WebKit's large animation
+// cutoff), the decoder the frame shown
+check(
+  'a large animated AVIF keeps a few decoded frames, not all',
+  animationPeak - animationBefore < 96,
+  `used ${animationBefore} -> peak ${animationPeak} MB`,
 );
 
 await browser.close();

@@ -1,0 +1,84 @@
+diff --git a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
+index e36b56efad..24f7e70594 100644
+--- a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
++++ b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.cpp
+@@ -48,23 +48,6 @@ RepetitionCount AVIFImageDecoder::repetitionCount() const
+     return m_repetitionCount ? m_repetitionCount : RepetitionCountInfinite;
+ }
+ 
+-size_t AVIFImageDecoder::findFirstRequiredFrameToDecode(size_t frameIndex)
+-{
+-    assertIsHeld(m_lock);
+-    // The first frame doesn't depend on any other.
+-    if (!frameIndex)
+-        return 0;
+-
+-    size_t firstIncompleteFrame = frameIndex;
+-    while (firstIncompleteFrame > 0) {
+-        if (m_frameBufferCache[firstIncompleteFrame - 1].isComplete())
+-            break;
+-        --firstIncompleteFrame;
+-    }
+-
+-    return firstIncompleteFrame;
+-}
+-
+ ScalableImageDecoderFrame* AVIFImageDecoder::frameBufferAtIndex(size_t index)
+ {
+     assertIsHeld(m_lock);
+@@ -78,15 +61,26 @@ ScalableImageDecoderFrame* AVIFImageDecoder::frameBufferAtIndex(size_t index)
+     if (imageCount && m_frameBufferCache.size() != imageCount)
+         m_frameBufferCache.resize(imageCount);
+ 
+-    for (size_t i = findFirstRequiredFrameToDecode(index); i <= index; ++i) {
+-        if (m_frameBufferCache[i].isComplete())
+-            continue;
+-        decode(i, isAllDataReceived());
+-    }
++    // browser-lite: an AVIF frame is a whole picture and libavif seeks to it from the nearest
++    // key frame itself, so only the asked one is converted to pixels and kept
++    decode(index, isAllDataReceived());
+ 
+     return &m_frameBufferCache[index];
+ }
+ 
++// browser-lite: no frame needs the pixels of another one, so all but the asked one go. They
++// stayed, every decoded frame of an animation for as long as the image lived (the 120 frames of
++// 1280 x 1920 of weather.metoffice.gov.uk took 1.2 GB). A native image of a frame keeps its own
++// reference to the pixels.
++void AVIFImageDecoder::clearDecodedPixelDataIfNeeded(size_t keptFrame)
++{
++    assertIsHeld(m_lock);
++    for (size_t i = 0; i < m_frameBufferCache.size(); ++i) {
++        if (i != keptFrame && m_frameBufferCache[i].isComplete())
++            m_frameBufferCache[i].clear();
++    }
++}
++
+ bool AVIFImageDecoder::setFailed()
+ {
+     m_reader = nullptr;
+@@ -125,7 +119,9 @@ void AVIFImageDecoder::decode(size_t frameIndex, bool allDataReceived)
+     if (failed())
+         return;
+ 
+-    ASSERT(m_reader);
++    // browser-lite: the reader goes once every frame is decoded; a frame cleared since needs a new one
++    if (!m_reader)
++        m_reader = makeUnique<AVIFImageReader>(*this);
+     m_reader->decodeFrame(frameIndex, m_frameBufferCache[frameIndex], *m_data);
+ 
+     if (allDataReceived && !m_frameBufferCache.isEmpty() && isComplete())
+diff --git a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.h b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.h
+index 295a559ece..48d2f6bbf1 100644
+--- a/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.h
++++ b/Source/WebCore/platform/image-decoders/avif/AVIFImageDecoder.h
+@@ -55,7 +55,7 @@ private:
+     void tryDecodeSize(bool allDataReceived) final;
+     void decode(size_t frameIndex, bool allDataReceived) WTF_REQUIRES_LOCK(m_lock);
+     bool isComplete() WTF_REQUIRES_LOCK(m_lock);
+-    size_t findFirstRequiredFrameToDecode(size_t frameIndex) WTF_REQUIRES_LOCK(m_lock);
++    void clearDecodedPixelDataIfNeeded(size_t keptFrame) final WTF_REQUIRES_LOCK(m_lock);
+ 
+     std::unique_ptr<AVIFImageReader> m_reader { nullptr };
+ 

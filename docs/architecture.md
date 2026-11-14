@@ -224,7 +224,10 @@ it (AliExpress), and images are requested with `image/avif` in Accept like Safar
 An AVIF image learns its size and frame count from the container alone (`avifDecoderParse`), so
 an image that is never painted holds its data and the parsed boxes, not a dav1d decoder and a
 decoded picture; the reader does not hold its decoder, which owns it, so both go with the image
-(patch 0107, #488).
+(patch 0107, #488). An AVIF animation keeps only the decoded frame asked last in its decoder, a
+frame is decoded alone (libavif seeks from the key frame), and the image itself keeps its frames
+like any animation: all while they stay under WebKit's 30 MB cutoff, else the one shown (patch
+0141, #561).
 A JPEG drawn at half its size or smaller decodes at 1/2, 1/4 or 1/8 (WebKit's subsampling level,
 libjpeg-turbo scales in the DCT, patch 0054), drawn larger later it decodes again (#270).
 The decoded frame of an image that is the contents of a compositing layer stays while the layer

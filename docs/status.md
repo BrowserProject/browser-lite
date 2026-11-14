@@ -157,6 +157,16 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   of 240 MB (the old engine 160 to 169 MB, its page has fewer pictures). What remains is the
   compiled JS kept while a page lives (#441, #455): after a release that deletes it 1337 to 1343
   against 1356 to 1368 MB in use, on cnn.com alone 266 -> 223 against 236 -> 221 MB.
+  An AVIF animation no longer keeps every frame it decoded (#561, patch 0141):
+  weather.metoffice.gov.uk shows a 120 frame animation of 1280 x 1920 (1920 x 540 in landscape)
+  behind its forecast, and the decoder held each decoded frame for as long as the image lived,
+  outside the decoded image sizes of the memory report. That page alone grew to 1.25 GB of malloc
+  at phone size (606 MB at 1280 x 800), a memory release could not free it while the animation
+  decoded, and on an iPhone iOS ended the demo within 9 s of opening it and again after the
+  restore. Now it stays at about 200 MB at phone size and 175 MB at 1280 x 800 (locally, Chromium).
+  The frames of such an animation are decoded again at every loop, as WebKit does for large GIF,
+  PNG and WebP animations: about 110 ms each for 1280 x 1920 on the image decoding thread of a
+  loaded machine here, so that 25 fps background plays slower (open).
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
