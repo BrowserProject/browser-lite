@@ -74,7 +74,8 @@ select popup) are in the same sheet.
   the tab without a title, history and bookmarks, suggestions, menus of back and forward, the new
   tab page, the tab overview, blocked pop-ups and the site data in the settings. History,
   bookmarks and the session keep the ASCII address.
-- **Address bar**: the first click or tap selects the whole address, Escape restores it and
+- **Address bar**: the first click or tap selects the whole address (once the tap is handled, so
+  Chrome on Android shows no text toolbar over the page for it), Escape restores it and
   goes back to the page (like Chrome the first Escape after choosing a row with the arrow keys
   only returns to the typed text), the lock or "Not secure" hides while editing. Like Chrome
   every tab keeps an unfinished edit and whether the field had the keyboard across a tab switch,

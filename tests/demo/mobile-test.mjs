@@ -1,5 +1,6 @@
 // The phone layout of the demo UI (apps/demo) on an emulated phone, portrait and landscape: the
-// compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, the address
+// compact toolbar sits at the bottom, fits and has touch targets of at least 44 px, a tap on the
+// address selects all of it only after the tap (else Android shows its text toolbar), the address
 // entry navigates with its suggestions above the toolbar (also above a keyboard that makes the
 // window smaller, while the page keeps its size like in Chrome; a field in the page area makes it
 // smaller), the tab overview shows the tabs, switches and closes one, a long press on a link shows
@@ -216,16 +217,32 @@ async function pageHeight() {
 }
 const fullHeight = await pageHeight();
 
-// Address entry: the tap shows the whole address, selected
+// Address entry: the tap shows the whole address, selected. Only once the tap is handled: a tap
+// that lands on a selection made by its own focus gets Chrome's floating text toolbar on Android
+await tab.evaluate(() => {
+  const field = document.getElementById('address');
+  field.addEventListener(
+    'focus',
+    () => {
+      window.blTestFocusSelection = [field.selectionStart, field.selectionEnd];
+    },
+    { once: true },
+  );
+});
 await tab.tap('#address');
 const tapped = await tab.evaluate(() => {
   const field = document.getElementById('address');
-  return [field.value, field.selectionStart, field.selectionEnd];
+  return [field.value, field.selectionStart, field.selectionEnd, window.blTestFocusSelection];
 });
 check(
   'address tap: the whole address, selected',
   tapped[0] === `${siteURL}one` && tapped[1] === 0 && tapped[2] === tapped[0].length,
   JSON.stringify(tapped),
+);
+check(
+  'address tap: nothing selected while the tap is handled (no Android text toolbar)',
+  !!tapped[3] && tapped[3][0] === tapped[3][1],
+  JSON.stringify(tapped[3]),
 );
 await tab.fill('#address', `${siteURL}two`);
 const above = async () => {

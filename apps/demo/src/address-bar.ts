@@ -43,7 +43,10 @@ interface KeptEdit {
   selection: [number, number];
 }
 const keptEdits = new WeakMap<Tab, KeptEdit>();
-/** The pointer went down while the field was not focused: the click selects everything. */
+/**
+ * The pointer went down while the field was not focused: the focus selects nothing, the click
+ * selects everything.
+ */
 let selectOnClick = false;
 let preconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -453,9 +456,14 @@ function onEscape(): void {
 }
 
 // The first click or tap selects the whole address, so typing replaces it (Chrome, Safari);
-// a drag selects as usual, a second click places the caret
-address.addEventListener('pointerdown', () => {
-  selectOnClick = document.activeElement !== address;
+// a drag selects as usual, a second click places the caret. Only the click selects: a tap that
+// lands on a selection made by the focus it caused gets Chrome's floating text toolbar on
+// Android (Cut, Copy, Paste) over the page, a selection made after the tap does not
+address.addEventListener('pointerdown', (e) => {
+  selectOnClick = e.button === 0 && document.activeElement !== address;
+});
+address.addEventListener('pointercancel', () => {
+  selectOnClick = false;
 });
 address.addEventListener('click', () => {
   if (selectOnClick && address.selectionStart === address.selectionEnd) address.select();
@@ -464,7 +472,8 @@ address.addEventListener('click', () => {
 address.addEventListener('focus', () => {
   // The full address while editing (the phone layout shows only the host)
   if (!edited) address.value = isBlank(current) ? '' : displayURL(current);
-  address.select();
+  // Focus by keyboard or code: everything selected at once
+  if (!selectOnClick) address.select();
 });
 address.addEventListener('input', (e) => {
   // Only while editing: text set from outside (autofill, test drivers) opens no suggestions
@@ -475,6 +484,7 @@ address.addEventListener('input', (e) => {
   preconnectTyped();
 });
 address.addEventListener('blur', () => {
+  selectOnClick = false;
   // Unless the user is back in the field and typing again (rows of the new text)
   setTimeout(() => {
     if (document.activeElement !== address) hideSuggestions();
