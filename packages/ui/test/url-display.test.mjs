@@ -32,7 +32,7 @@ test('safe internationalized hosts show in Unicode', () => {
 
 test('hosts that could pass for others stay in xn--', () => {
   for (const host of [
-    'аpple.com', // Cyrillic а with Latin
+    'аpple.com', // Cyrillic a (U+0430) with Latin
     'аррӏе.com', // only Cyrillic letters that look Latin
     'ехаmple.com',
     'κατι.com', // only Greek letters that look Latin
