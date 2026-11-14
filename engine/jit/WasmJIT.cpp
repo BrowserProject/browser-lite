@@ -213,14 +213,16 @@ HashSet<const CodeBlock*>& compiledCodeBlocks() WTF_REQUIRES_LOCK(compiledCodeBl
 }
 
 // How often the interpreter's counter must fire (about 50 calls or 500 loop iterations each)
-// before a CodeBlock compiles: a compile costs about 1 ms whatever the size (our compiler, the
-// module's install, V8's compile at the first call), while a call saves more the larger the
-// function. Page loads compiled 1700 functions on weather.com, half of them tiny ones that ran a
-// few dozen times, and loaded 18 % slower than without the JIT.
+// before a CodeBlock compiles. A compile costs in proportion to the code: the module is 25 to 40
+// times the bytecode, and V8 compiles it on the engine thread at its first call (Liftoff, about
+// 4 ms for 25 KB in the engine), while code fresh from Liftoff runs little faster than the
+// interpreter. So a function warms up the longer the larger it is, and compiles only once it ran
+// long enough to pay that back: 64 fires plus one per 2 bytes, at most 2048 (about 100000 calls or
+// a million loop iterations, #566).
 unsigned warmUpFires(CodeBlock* codeBlock)
 {
-    unsigned size = std::max(codeBlock->instructions().size(), static_cast<size_t>(1));
-    return std::clamp(4000 / size, 4u, 64u);
+    size_t size = codeBlock->instructions().size();
+    return static_cast<unsigned>(std::min<size_t>(64 + size / 2, 2048));
 }
 
 // How often the counter fired for CodeBlocks not compiled yet

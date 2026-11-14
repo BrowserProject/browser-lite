@@ -38,13 +38,16 @@ never baked into the code (the GC resets inline caches).
   once it is ready (`tests/jsc/jit-tierup.js`: one long call 2.3 to 2.9x the time of many short
   ones before, 0.9 to 1.3x now).
 - **Tier-up**: the interpreter's counters with the JIT off (`llint_replace` at returns,
-  `llint_loop_osr` at loops) call the compiler instead of giving up, after 4000 / bytecode bytes
-  firings (4 to 64; one is about 50 calls or 500 loop iterations): a compile costs about 1 ms
-  whatever the size, a call saves more the larger the function. The counter belongs to the
-  `UnlinkedCodeBlock`, which all `CodeBlock`s of the same code share (the same script in other
-  frames, the builtins of every global object, the one that replaces a `CodeBlock` thrown away),
-  so it keeps firing after a compile instead of stopping for good, which had kept all of them
-  interpreted.
+  `llint_loop_osr` at loops) call the compiler instead of giving up, after 64 firings plus one
+  per 2 bytes of bytecode, at most 2048 (one is about 50 calls or 500 loop iterations; #566). A
+  compile costs in proportion to the code: the module is 25 to 40 times the bytecode and V8
+  compiles it with Liftoff on the engine thread at its first call (in the engine about 4 ms for
+  25 KB, 0.35 ms of that our compiler), and code fresh from Liftoff runs little faster than the
+  interpreter, so a function compiles once it ran long enough to pay that back. The counter
+  belongs to the `UnlinkedCodeBlock`, which all `CodeBlock`s of the same code share (the same
+  script in other frames, the builtins of every global object, the one that replaces a
+  `CodeBlock` thrown away), so it keeps firing after a compile instead of stopping for good, which
+  had kept all of them interpreted.
 - **Fast paths**: the interpreter's, reading its caches at run time: int32 and double arithmetic
   and comparisons, equality, property access (own, prototype, array length, unset, transitions;
   reads of own properties also from the last 4 structures of the site, until the next GC, looked
@@ -137,6 +140,22 @@ interpreter time it replaces (7.0 against 1.7 s), the calls between compiled and
 add about 2 s and the compiles 0.75 s. V8 tiering its optimized code in sooner
 (`--wasm-tiering-budget=20000`) leaves compiled code at 4.5 s, so it is not Liftoff: on this code
 compiled code saves nothing yet, open (phase 4).
+
+Warm-up by size (#566, 2026-11-14, local, Chromium host, load 3 to 6): before, a function compiled
+after 4000 / bytecode bytes firings (4 to 64), so a large one compiled first: the module function
+of a bundle (8 KB of bytecode) whose loop ran a few thousand times once per page became 300 KB of
+WASM. Speedometer 3.1 (NewsSite-Next and TodoMVC-React-Redux, 10 iterations, each in a new frame
+whose `CodeBlock`s compile again) compiled 974 functions into 22.7 MB of WASM in 30 s, and V8's
+compile of them took 3 to 4 s of the engine thread, about 4 ms per module (in node Liftoff
+compiles them at 25 to 35 MB/s); the score was 0.94 to 1.01 against 1.54 to 1.71 without the
+JIT. A higher counter threshold alone (`JSC_thresholdForJITAfterWarmUp`, which JSC clips at 1000)
+and compiling only from loops still scored 0.8 and 1.1 to 1.2. Now the score is 1.21 to 1.56
+(median 1.42, 3 runs; without the JIT 1.67 in the same round), Octane is unchanged (Richards 883
+against 872, DeltaBlue 875 against 868, Crypto 1695 against 1767, NavierStokes 2803 against 2910,
+RayTrace 1385 against 1421), and 20min.ch compiles 295 functions into 1.5 MB in its first 50 s
+instead of 789 into 12.1 MB. Its tap on an article (`tests/engine/jit-warmup-test.mjs` checks
+the warm-up itself): the click handlers 214 to 309 ms instead of 284 to 357, the data fetch of
+the route starts 0.91 to 1.03 s after the click instead of 1.11 to 1.21 s (4 runs each).
 
 Calls (#459, jsc shell, 2 million calls each, fastest of 3): one callee 84 against 62 ms, 16
 callees at one site 232 against 116 ms, 2 alternating 219 against 100 ms, a VM of 8 handlers 235

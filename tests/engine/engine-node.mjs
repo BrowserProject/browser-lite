@@ -1,5 +1,6 @@
 // Starts the engine in node with one view and an HTML page, through the same
-// contract as a host (engine/abi.json). For render.mjs, gc-test.mjs and error-page-test.mjs.
+// contract as a host (engine/abi.json). For render.mjs, gc-test.mjs, error-page-test.mjs and
+// jit-warmup-test.mjs.
 //
 // Environment: JSC_* (JSC options, e.g. JSC_useLLIntICs=false) and BL_* (engine
 // switches, e.g. BL_DEBUG=1) go into the environment of the engine. Without
@@ -19,7 +20,8 @@ export function enginePath(arg) {
 // onFrame({ engine, viewId, ptr, width, height }): finished frame (RGBA in engine
 // memory); without onFrame every frame is reported as presented right away.
 // onEvent({ engine, viewId, type, payload }): every engine event. onPrint(text): stdout of the
-// engine. Without html the view loads url like an address typed by the user (bl_load_url).
+// engine. onPrintErr(text): its stderr (the JIT's log with BL_JIT=2). Without html the view loads
+// url like an address typed by the user (bl_load_url).
 // hostWaits: the host waits for the page from the start (bl_host_wait_address), so the script
 // watchdog stops a script that runs longer than BL_SCRIPT_TIMEOUT.
 export async function runEngine({
@@ -33,6 +35,7 @@ export async function runEngine({
   onFrame = null,
   onEvent = () => {},
   onPrint = () => {},
+  onPrintErr = () => {},
   hostWaits = false,
 }) {
   const createEngine = createRequire(import.meta.url)(path.resolve(enginePath));
@@ -86,7 +89,10 @@ export async function runEngine({
       console.log(text);
       onPrint(text);
     },
-    printErr: (text) => console.error(text),
+    printErr: (text) => {
+      console.error(text);
+      onPrintErr(text);
+    },
   };
   await createEngine(engine);
   return engine;

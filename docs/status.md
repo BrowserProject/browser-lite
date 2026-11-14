@@ -533,6 +533,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    intersection observers, timers of ads), so a tap often waits behind one. What is left of the
    input latency are single long entries (a script, a microtask checkpoint, the load event with
    its forced layouts); yield points between deferred and async scripts would split some.
+   20min.ch again (2026-11-14; the report: on a Moto G71 the first tap on an article seemed lost
+   and the article came about 24 s after the second): the click reaches the link within 0.1 s and
+   the site's handlers take it; the URL changes only once the route's data is there, so the time
+   is the page's JS. The JIT made it longer: it compiled large functions after a few thousand loop
+   iterations, 789 functions into 12.1 MB of WASM in the first 50 s, and V8's compile of them on
+   the engine thread cost more than the compiled code saved. With warm-up by size (#566) 295
+   functions into 1.5 MB; the click handlers take 214 to 309 ms instead of 284 to 357 and the
+   route's data fetch starts 0.91 to 1.03 s after the click instead of 1.11 to 1.21 s (local, 4
+   runs each; plain Chromium 0.21 s, the fetch at once), Speedometer's React and Next.js suites
+   score 1.42 instead of 0.99 (medians). Without the JIT the tap is still 10 to 20 % faster
+   (compiled code calling functions not compiled, phase 4 of [jit.md](jit.md)), open; blick.ch
+   and the heavy loads below were not measured again.
    blick.ch (Next.js, 2026-11-09, local, 412x860; the report: 25 to 30 s on a Moto G71): after a
    tap the new route is in the DOM after 7 to 8 s (plain Chromium 3.5 to 6.6 s with the data
    fetch), Back shows the home page after 5 to 7.5 s (Chromium under 1 s). The page got few frames

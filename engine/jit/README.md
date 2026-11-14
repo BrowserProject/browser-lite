@@ -16,4 +16,5 @@ fast paths for hashing code against their int32 twins), `tests/jsc/jit-recompile
 through a full GC, and code thrown away compiles again), `tests/jsc/jit-tierup.js` (a loop entered
 once gets V8's optimized code), `tests/jsc/jit-calls.js` (many callees at one site cost about
 as much as one), `tests/engine/gc-test.mjs` (the GC inside a generic call of compiled code and inside a bound
-function's call of its target).
+function's call of its target), `tests/engine/jit-warmup-test.mjs` (code that ran briefly stays
+interpreted, a large function warms up longer than a small one, hot code compiles).

@@ -1,0 +1,24 @@
+<!doctype html><title>jit-warmup</title><body><script>
+// Warm-up of the JIT to WebAssembly (engine/jit/WasmJIT.cpp warmUpFires, docs/jit.md): code that
+// ran briefly stays interpreted, code that ran long compiles. jit-warmup-test.mjs runs this with
+// BL_JIT=2 and reads the compiles in the JIT's log. At the end "JIT-WARMUP done <results>".
+const filler = 'if (n < 0) { s = (s * 3 + 1) | 0; s = (s ^ 7) | 0; } ';
+// A large function (about 8 KB of bytecode, like a module function of a bundle) whose loop runs
+// a few thousand times, as code of a page load does: compiling it costs more than it saves
+const bigOnce = eval('(function bigOnce(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i) | 0; ' + filler.repeat(300) + 'return s; })');
+// A function of about 1 KB of bytecode called a few thousand times, like a handler of a click
+const warmMid = eval('(function warmMid(n) { let s = n; ' + filler.repeat(30) + 'return (s + 1) | 0; })');
+// The same large function with a loop of millions of iterations, and a small hot function
+const bigHot = eval('(function bigHot(n) { let s = 0; for (let i = 0; i < n; i++) s = (s + i) | 0; ' + filler.repeat(300) + 'return s; })');
+function hot(a) { return (a * 3 + 1) | 0; }
+function driveHot(n) { let s = 0; for (let i = 0; i < n; i++) s = hot(s + i); return s; }
+
+const results = [];
+for (let round = 0; round < 3; round++)
+  results.push(bigOnce(5000));
+let mid = 0;
+for (let i = 0; i < 3000; i++)
+  mid = (mid + warmMid(i)) | 0;
+results.push(mid, bigHot(3000000), driveHot(500000));
+console.log('JIT-WARMUP done ' + results.join(','));
+</script>
