@@ -37,7 +37,8 @@ next, or the media controls, which had no keys and no double click to fullscreen
 or their fullscreen bar, which stuck out at both sides of a phone held upright, or the
 intersection observers, which computed every target again in every frame, also when nothing had
 moved, or the muted videos with an audio track that hidden pages kept playing, so the host decoded
-them for nobody) comes as patches from `patches/`.
+them for nobody, or the quota of localStorage, which counted bytes, so text outside Latin-1 had
+half of Chrome's room) comes as patches from `patches/`.
 
 ## Folders
 

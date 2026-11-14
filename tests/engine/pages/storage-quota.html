@@ -1,0 +1,55 @@
+<!doctype html><title>storage-quota</title><body><script>
+// localStorage and sessionStorage hold 5 MiB of UTF-16 code units of keys and values per origin
+// whatever the width of the characters, like Chrome and Firefox (patch 0140). Before, WebKit counted
+// bytes, so text outside Latin-1 (2 bytes per character) got half the room and Wikipedia's module
+// store of about 3.3 M such characters was refused. Output "QUOTA name=ok" or "QUOTA name=..." with
+// what differed, at the end "QUOTA done=ok" when everything works.
+const QUOTA = 5 * 1024 * 1024;
+const tries = (storage, key, value) => {
+  try {
+    storage.setItem(key, value);
+    return 'stored';
+  } catch (e) {
+    return e.name;
+  }
+};
+const cases = {
+  // The whole quota with one key: one more code unit is refused, the old value stays
+  latin1: (s) => [tries(s, 'k', 'a'.repeat(QUOTA - 1)), tries(s, 'k', 'a'.repeat(QUOTA)), (s.getItem('k') ?? '').length],
+  wide: (s) => [tries(s, 'k', '\u4e00'.repeat(QUOTA - 1)), tries(s, 'k', '\u4e00'.repeat(QUOTA)), (s.getItem('k') ?? '').length],
+  // Keys count too, and a wide key next to a Latin-1 value is just as large
+  key: (s) => [tries(s, '\u4e00'.repeat(1024), 'a'.repeat(QUOTA - 1024)), tries(s, 'b', '')],
+  // Replacing a value counts only the new one, removing frees the room for wide text
+  replace: (s) => {
+    s.setItem('a', 'a'.repeat(QUOTA / 2));
+    s.setItem('b', '\u4e00'.repeat(QUOTA / 2 - 2));
+    const full = tries(s, 'c', 'x');
+    const replaced = tries(s, 'a', '\u4e00'.repeat(QUOTA / 2 - 1));
+    s.removeItem('a');
+    return [full, replaced, tries(s, 'c', '\u4e00'.repeat(QUOTA / 2))];
+  },
+};
+const expected = {
+  latin1: ['stored', 'QuotaExceededError', QUOTA - 1],
+  wide: ['stored', 'QuotaExceededError', QUOTA - 1],
+  key: ['stored', 'QuotaExceededError'],
+  replace: ['QuotaExceededError', 'stored', 'stored'],
+};
+let bad = 0;
+for (const [area, storage] of Object.entries({ localStorage, sessionStorage })) {
+  for (const [name, run] of Object.entries(cases)) {
+    storage.clear();
+    let result;
+    try {
+      result = run(storage);
+    } catch (e) {
+      result = [`ERROR ${e.name}: ${e.message}`];
+    }
+    const ok = JSON.stringify(result) === JSON.stringify(expected[name]);
+    console.log(`QUOTA ${area}.${name}=${ok ? 'ok' : result.join(',')}`);
+    if (!ok) bad++;
+  }
+  storage.clear();
+}
+console.log(`QUOTA done=${bad ? `${bad} errors` : 'ok'}`);
+</script>

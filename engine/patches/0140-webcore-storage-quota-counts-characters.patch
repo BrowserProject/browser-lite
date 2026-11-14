@@ -1,0 +1,113 @@
+diff --git a/Source/WebCore/storage/StorageMap.cpp b/Source/WebCore/storage/StorageMap.cpp
+index 86941ca885..e3a3207a67 100644
+--- a/Source/WebCore/storage/StorageMap.cpp
++++ b/Source/WebCore/storage/StorageMap.cpp
+@@ -34,9 +34,16 @@ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(StorageMap);
+ 
++// Like Chrome and Firefox, a string counts its UTF-16 code units whether it is
++// stored with 8 or 16 bits per character, so text outside Latin-1 gets the same room.
++static unsigned quotaSize(const String& string)
++{
++    return string.length();
++}
++
+ StorageMap::StorageMap(unsigned quota)
+     : m_impl(Impl::create())
+-    , m_quotaSize(quota) // quota measured in bytes
++    , m_quotaSize(quota)
+ {
+ }
+ 
+@@ -97,12 +104,12 @@ void StorageMap::setItem(const String& key, const String& value, String& oldValu
+     auto iter = m_impl->map.find(key);
+     if (iter != m_impl->map.end()) {
+         oldValue = iter->value;
+-        newSize -= oldValue.sizeInBytes();
++        newSize -= quotaSize(oldValue);
+     } else {
+         oldValue = nullString();
+-        newSize += key.sizeInBytes();
++        newSize += quotaSize(key);
+     }
+-    newSize += value.sizeInBytes();
++    newSize += quotaSize(value);
+     if (m_quotaSize != noQuota && (newSize.hasOverflowed() || newSize > m_quotaSize)) {
+         quotaException = true;
+         return;
+@@ -135,7 +142,7 @@ void StorageMap::removeItem(const String& key, String& oldValue)
+     if (iter == m_impl->map.end())
+         return;
+     oldValue = iter->value;
+-    newSize = newSize - iter->key.sizeInBytes() - oldValue.sizeInBytes();
++    newSize = newSize - quotaSize(iter->key) - quotaSize(oldValue);
+ 
+     if (m_impl->hasOneRef())
+         m_impl->map.remove(iter);
+@@ -172,8 +179,8 @@ void StorageMap::importItems(HashMap<String, String>&& items)
+ 
+     CheckedUint32 newSize;
+     for (auto& [key, value] : items) {
+-        newSize += key.sizeInBytes();
+-        newSize += value.sizeInBytes();
++        newSize += quotaSize(key);
++        newSize += quotaSize(value);
+     }
+ 
+     m_impl->map = WTF::move(items);
+diff --git a/Source/WebCore/storage/StorageMap.h b/Source/WebCore/storage/StorageMap.h
+index 5e18fdbb33..bc869153ac 100644
+--- a/Source/WebCore/storage/StorageMap.h
++++ b/Source/WebCore/storage/StorageMap.h
+@@ -37,7 +37,7 @@ namespace WebCore {
+ class StorageMap {
+     WTF_MAKE_TZONE_ALLOCATED_EXPORT(StorageMap, WEBCORE_EXPORT);
+ public:
+-    // Quota size measured in bytes.
++    // Quota size measured in UTF-16 code units of keys and values.
+     WEBCORE_EXPORT explicit StorageMap(unsigned quotaSize);
+ 
+     WEBCORE_EXPORT unsigned NODELETE length() const;
+@@ -78,7 +78,7 @@ private:
+     };
+ 
+     Ref<Impl> m_impl;
+-    unsigned m_quotaSize { noQuota }; // Measured in bytes.
++    unsigned m_quotaSize { noQuota }; // Measured in UTF-16 code units.
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/storage/StorageNamespaceProvider.cpp b/Source/WebCore/storage/StorageNamespaceProvider.cpp
+index 29bb763d51..d52be5f8b6 100644
+--- a/Source/WebCore/storage/StorageNamespaceProvider.cpp
++++ b/Source/WebCore/storage/StorageNamespaceProvider.cpp
+@@ -35,8 +35,8 @@
+ 
+ namespace WebCore {
+ 
+-// Suggested by the HTML5 spec.
+-unsigned localStorageDatabaseQuotaInBytes = 5 * 1024 * 1024;
++// Suggested by the HTML5 spec, in UTF-16 code units (StorageMap).
++unsigned localStorageQuota = 5 * 1024 * 1024;
+ 
+ StorageNamespaceProvider::StorageNamespaceProvider() = default;
+ 
+@@ -69,7 +69,7 @@ Ref<StorageArea> StorageNamespaceProvider::sessionStorageArea(Document& document
+ StorageNamespace& StorageNamespaceProvider::localStorageNamespace(PAL::SessionID sessionID)
+ {
+     if (!m_localStorageNamespace)
+-        lazyInitialize(m_localStorageNamespace, createLocalStorageNamespace(localStorageDatabaseQuotaInBytes, sessionID));
++        lazyInitialize(m_localStorageNamespace, createLocalStorageNamespace(localStorageQuota, sessionID));
+ 
+     ASSERT(m_localStorageNamespace->sessionID() == sessionID);
+     return *m_localStorageNamespace;
+@@ -78,7 +78,7 @@ StorageNamespace& StorageNamespaceProvider::localStorageNamespace(PAL::SessionID
+ StorageNamespace& StorageNamespaceProvider::transientLocalStorageNamespace(SecurityOrigin& securityOrigin, PAL::SessionID sessionID)
+ {
+     auto& slot = m_transientLocalStorageNamespaces.ensure(securityOrigin.data(), [&] {
+-        return createTransientLocalStorageNamespace(securityOrigin, localStorageDatabaseQuotaInBytes, sessionID);
++        return createTransientLocalStorageNamespace(securityOrigin, localStorageQuota, sessionID);
+     }).iterator->value;
+ 
+     ASSERT(slot->sessionID() == sessionID);

@@ -489,6 +489,10 @@ host that is itself one (`github.io`, `httpbin.org`): like Chrome and Firefox (R
 cookies without a Domain attribute, or with one naming exactly that host, are kept host-only
 (patch 0129, #533); before, every cookie of such a host was dropped.
 
+localStorage and sessionStorage hold 5 MiB of UTF-16 code units of keys and values per origin,
+whatever the width of the characters, like Chrome and Firefox (patch 0140, #556); WebKit counted
+bytes, so text outside Latin-1 had half the room.
+
 Read-only files outside `/data`: `engine.data` (Noto Sans regular and bold, fontconfig with its
 cache, CA list) in memory, and `/lazy`, files of `lazy/` next to the engine that load on first
 use: `/lazy/icu`, the ICU data beyond the core linked into `engine.wasm` (`engine/icu-core.txt`,

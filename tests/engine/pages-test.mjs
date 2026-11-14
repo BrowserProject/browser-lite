@@ -31,6 +31,8 @@
 //                  clipped a target (patch 0137): every change gives what a fresh observer reports,
 //                  a frame without a change next to 3000 targets costs a fraction of one with a new
 //                  target
+//   storage-quota.html  localStorage and sessionStorage hold 5 MiB of UTF-16 code units whatever
+//                  the width of the characters (patch 0140), like Chrome and Firefox
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -63,6 +65,7 @@ const CASES = [
   { name: 'cssom-rules', size: [800, 600], wait: 'CSSOM done' },
   { name: 'time-origin', wait: 'TIMEORIGIN done' },
   { name: 'intersection-observer', size: [800, 600], wait: 'INTERSECTION done' },
+  { name: 'storage-quota', wait: 'QUOTA done', env: { RENDER_URL: 'https://example.com/' } },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',
