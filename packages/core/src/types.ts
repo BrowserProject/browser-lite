@@ -661,7 +661,12 @@ export interface ViewEvents {
    * is not the latest belongs to an earlier search.
    */
   find: { text: string; matches: number; index: number; more: boolean };
-  /** The page entered or left fullscreen (its container is fullscreen in the host). */
+  /**
+   * The page entered or left fullscreen: its container is fullscreen in the host, or where the
+   * host has no element fullscreen (iPhone Safari, a frame without `allow="fullscreen"`) fills
+   * the host's viewport in the top layer, above everything else of the host page, until the
+   * page leaves fullscreen or the user presses Esc.
+   */
   fullscreen: { active: boolean };
   /** The page started or stopped playing sound. */
   'media-state': { audible: boolean };

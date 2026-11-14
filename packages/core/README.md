@@ -50,6 +50,12 @@ On iPhone and iPad two more hidden fields lie right before and after it while it
 on the top left pixels of the view: the keyboard's previous and next field arrows focus them,
 and the view turns that into Shift+Tab or Tab in the page instead of leaving it for your own
 fields ([architecture, Input](../../docs/architecture.md#input)).
+A page's fullscreen (`requestFullscreen`, the fullscreen button of a video) puts the container
+into host fullscreen, and Esc or `view.exitFullscreen()` ends it. Where the host has no element
+fullscreen (iPhone Safari, a frame without `allow="fullscreen"`) the container fills the window
+instead: it goes into the top layer as a manual popover with the styles of `:fullscreen` and the
+safe areas of a notched screen as padding (`viewport-fit=cover`), above everything else of your
+page (`viewport-fill.ts`). Keep what the user needs in fullscreen (your dialogs) inside the container.
 A drag the page starts (a link, an image, selected text, `draggable`) may leave the view for your
 page, like a system drag reaches Chrome's tab strip and address bar: the element under the
 pointer gets `dragenter`, `dragover`, `dragleave` and, when its last `dragover` called

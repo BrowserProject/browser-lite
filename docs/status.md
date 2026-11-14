@@ -184,6 +184,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   A fullscreen narrower than 500 px (a phone held upright) gets the inline controls with the exit
   button top left (#553; the 468 px fullscreen bar stuck out at both sides of a 393 px iPhone, cut
   off the volume, the time and the exit button, so only turning the phone left fullscreen).
+  Where the host has no element fullscreen (iPhone Safari, a frame without `allow="fullscreen"`)
+  a page's fullscreen fills the window above the demo's bar instead (#563; before, the bar with
+  back, address, tab count and menu stayed below the video, in landscape the video got about 290
+  of 393 pt); Safari's own bars stay.
   `navigator.mediaCapabilities` of pages and workers answers with the host's `decodingInfo`
   (#503; before it called every configuration unsupported, so Twitch's player dropped every
   variant of a stream and showed Error #4000; its front page stream now plays).

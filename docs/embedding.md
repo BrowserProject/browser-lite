@@ -31,6 +31,9 @@ camera; microphone; display-capture; geolocation; gamepad; accelerometer; gyrosc
 keyboard-map
 ```
 
+Without `fullscreen` a page's fullscreen fills the frame instead of the screen (like on iPhone
+Safari, which has no element fullscreen, [core README](../packages/core/README.md)).
+
 A same-origin frame has most of these by default. A cross-origin frame (for example on a
 subdomain) needs all of them, and its documents and resources need
 `Cross-Origin-Resource-Policy: cross-origin` or `same-site`. In Chromium a cross-origin frame
