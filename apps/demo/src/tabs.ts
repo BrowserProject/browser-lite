@@ -1,5 +1,11 @@
 import type { SessionHistory, SkippedFile, View, ViewEvents } from '@browser-lite/core';
-import { defaultMenuItems, linkStatus, showContextMenu, slotMenuItems } from '@browser-lite/ui';
+import {
+  defaultMenuItems,
+  displayURL,
+  linkStatus,
+  showContextMenu,
+  slotMenuItems,
+} from '@browser-lite/ui';
 import { enterAddress, focusAddress, leaveAddress } from './address-bar.js';
 import { addBlockedPopup, type BlockedPopup, updatePopupsButton } from './blocked-popups.js';
 import { rememberClosed, takeClosed } from './closed-tabs.js';
@@ -343,9 +349,9 @@ export class Tab implements SessionTab {
     return this.view.pendingURL || this.url;
   }
 
-  /** The title the tab shows: the page's, else its address, 'New tab' when blank. */
+  /** The title the tab shows: the page's, else its address as shown, 'New tab' when blank. */
   get label(): string {
-    return this.title || (isBlank(this.address) ? 'New tab' : this.address);
+    return this.title || (isBlank(this.address) ? 'New tab' : displayURL(this.address));
   }
 
   updateTitle(): void {

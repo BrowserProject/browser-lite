@@ -1,5 +1,6 @@
 import type { View } from '@browser-lite/core';
 import { context, element, type UiOptions } from './options.js';
+import { displayURL } from './url-display.js';
 
 /**
  * Shows the address of the link under the mouse in a bubble (bottom left by stylesheet), like
@@ -14,7 +15,7 @@ export function linkStatus(view: View, options?: UiOptions): () => void {
   bubble.hidden = true;
   root.append(bubble);
   const show = (url: string | null) => {
-    bubble.textContent = url ?? '';
+    bubble.textContent = url ? displayURL(url) : '';
     bubble.hidden = !url;
   };
   const stops = [

@@ -69,6 +69,11 @@ in Chrome (`align-items: normal`; Safari 18 aligns it at the start, which shrank
 the tab overview cards to the icon, #378). The styles of `@browser-lite/ui` (prompts, dialogs, context menu,
 select popup) are in the same sheet.
 
+- **Addresses** show an internationalized host in Unicode like Chrome (`displayURL` of
+  `@browser-lite/ui`, unless it could pass for another one): the address bar also while editing,
+  the tab without a title, history and bookmarks, suggestions, menus of back and forward, the new
+  tab page, the tab overview, blocked pop-ups and the site data in the settings. History,
+  bookmarks and the session keep the ASCII address.
 - **Address bar**: the first click or tap selects the whole address, Escape restores it and
   goes back to the page (like Chrome the first Escape after choosing a row with the arrow keys
   only returns to the typed text), the lock or "Not secure" hides while editing. Like Chrome

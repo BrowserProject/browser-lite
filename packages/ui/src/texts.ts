@@ -1,3 +1,5 @@
+import { displayHost } from './url-display.js';
+
 /**
  * Texts the ui shows. Templates replace `{host}` with the host of the page and `{kind}` with
  * the permission kind.
@@ -120,11 +122,14 @@ export function format(template: string, values: Record<string, string>): string
   return template.replace(/\{(\w+)\}/g, (match, name: string) => values[name] ?? match);
 }
 
-/** Host of an origin for questions and dialog titles; '' for opaque origins. */
+/**
+ * Host of an origin for questions and dialog titles, internationalized hosts shown like
+ * `displayHost`; '' for opaque origins.
+ */
 export function hostOf(origin: string): string {
   try {
     const host = new URL(origin).host;
-    if (host) return host;
+    if (host) return displayHost(host);
   } catch {}
   return origin && origin !== 'null' ? origin : '';
 }

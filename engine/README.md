@@ -184,7 +184,8 @@ The full list is `abi.json`; the rules behind it:
   A `BL_ERROR_PAGE` template gets these placeholders, all HTML-escaped (unknown ones stay):
   `{{lang}}`, `{{kind}}` (`network`, `certificate` or `http`), `{{title}}` (the host),
   `{{heading}}`, `{{message}}`, `{{code}}` (e.g. `ERR_NAME_NOT_RESOLVED`), `{{url}}` and
-  `{{retryLabel}}`.
+  `{{retryLabel}}`. Title and message name an internationalized host in Unicode when WebKit's
+  rules for showing one let it (`URLHelpers`), `{{url}}` stays the ASCII address.
   The engine inserts `<meta http-equiv="Content-Security-Policy" content="default-src 'none';
   style-src 'unsafe-inline'; img-src data:">` at the start, after a leading doctype: no scripts
   and no external resources, inline styles and `data:` images only. A click on any

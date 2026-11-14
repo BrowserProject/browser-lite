@@ -1,5 +1,5 @@
 import { type LocalStats, type ProfileInfo, siteOfPath } from '@browser-lite/profile';
-import { watchClose } from '@browser-lite/ui';
+import { displayHost, watchClose } from '@browser-lite/ui';
 import { renderExtensionSettings } from './extensions.js';
 import { type IconName, icon } from './icons.js';
 import { reloadUI, restartUI } from './reload.js';
@@ -337,7 +337,7 @@ function fillProfile(info: ProfileInfo | null, facts: HTMLElement, sites: HTMLEl
       element(
         'tr',
         {},
-        element('td', { textContent: host }),
+        element('td', { textContent: displayHost(host) }),
         element('td', { textContent: info.cookies ? String(entry.cookies || '') : '?' }),
         element('td', { textContent: entry.local ? formatSize(entry.local) : '' }),
         element('td', { textContent: databases }),

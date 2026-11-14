@@ -1,5 +1,6 @@
 import type { AuthCredentials, AuthRequest, RequestHandlers } from '@browser-lite/core';
 import { context, element, type UiOptions } from './options.js';
+import { displayURL } from './url-display.js';
 
 interface Pending {
   request: AuthRequest;
@@ -33,7 +34,7 @@ export function loginPrompt(options?: UiOptions): Pick<RequestHandlers, 'authent
     const title = doc.createElement('h2');
     title.textContent = texts.signIn;
     const origin = element(root, 'p', 'origin');
-    origin.textContent = request.origin;
+    origin.textContent = displayURL(request.origin);
     form.append(title, origin);
     if (request.origin.startsWith('http:')) {
       const warning = element(root, 'p', 'not-private');

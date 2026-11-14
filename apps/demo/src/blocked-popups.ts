@@ -1,4 +1,4 @@
-import { watchClose } from '@browser-lite/ui';
+import { displayHost, displayURL, watchClose } from '@browser-lite/ui';
 import { hostOf } from './favicons.js';
 import { runtime } from './runtime.js';
 import type { Tab } from './tabs.js';
@@ -73,8 +73,8 @@ function fill(): void {
     const entry = element('button', {
       type: 'button',
       className: 'popup-entry',
-      textContent: popup.url || 'about:blank',
-      title: popup.url,
+      textContent: displayURL(popup.url) || 'about:blank',
+      title: displayURL(popup.url),
     });
     entry.addEventListener('click', () => {
       tab.blockedPopups.splice(tab.blockedPopups.indexOf(popup), 1);
@@ -88,7 +88,7 @@ function fill(): void {
   const actions = element('div', { className: 'popup-actions' }, done);
   // Pages without a host of their own (data:, sandboxed) cannot be allowed
   const origin = tab.blockedPopups[0]?.origin ?? '';
-  const host = hostOf(origin);
+  const host = displayHost(hostOf(origin));
   if (host) {
     const allow = element('button', {
       type: 'button',

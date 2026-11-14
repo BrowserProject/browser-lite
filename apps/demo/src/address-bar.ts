@@ -1,4 +1,5 @@
 import { typedAddress } from '@browser-lite/core';
+import { displayHost, displayURL } from '@browser-lite/ui';
 import { bookmarks } from './bookmarks.js';
 import { acceptText, droppedText } from './dropped-text.js';
 import { showStartNote } from './engine-message.js';
@@ -107,10 +108,12 @@ export function suggestions(text: string, limit = 8): { url: string; title: stri
   if (!query) return [];
   const score = new Map<string, { url: string; title: string; points: number }>();
   const matches = (url: string, title: string) =>
-    url
-      .toLowerCase()
-      .replace(/^https?:\/\/(www\.)?/, '')
-      .includes(query) || (title || '').toLowerCase().includes(query);
+    [url, displayURL(url)].some((form) =>
+      form
+        .toLowerCase()
+        .replace(/^https?:\/\/(www\.)?/, '')
+        .includes(query),
+    ) || (title || '').toLowerCase().includes(query);
   for (const page of weightedPages()) {
     if (!matches(page.url, page.title)) continue;
     const entry = score.get(page.url) ?? { url: page.url, title: page.title, points: 0 };
@@ -121,10 +124,14 @@ export function suggestions(text: string, limit = 8): { url: string; title: stri
   return [...score.values()].sort((a, b) => b.points - a.points).slice(0, limit);
 }
 
-/** How a site can be typed, shortest first: without scheme and www., without scheme, whole. */
+/**
+ * How a site can be typed, shortest first: without scheme and www., without scheme, whole; an
+ * internationalized host as it is shown.
+ */
 function typedForms(origin: string): string[] {
-  const host = origin.replace(/^https?:\/\//, '');
-  return [host.replace(/^www\./, ''), host, origin];
+  const shown = displayURL(origin);
+  const host = shown.replace(/^https?:\/\//, '');
+  return [host.replace(/^www\./, ''), host, shown];
 }
 
 /**
@@ -161,11 +168,14 @@ function withDotCom(text: string): string {
   return `${/^www\./i.test(host) ? '' : 'www.'}${host}.com${match[2] ?? ''}${match[3] ?? ''}`;
 }
 
-/** What the field shows for url when not focused: on a phone only the host, like mobile browsers. */
+/**
+ * What the field shows for url when not focused: on a phone only the host, like mobile browsers.
+ * Like Chrome an internationalized host shows in Unicode unless it could pass for another one.
+ */
 function shownText(url: string): string {
   if (isBlank(url)) return '';
-  if (!compactLayout()) return url;
-  return hostOf(url).replace(/^www\./, '') || url;
+  if (!compactLayout()) return displayURL(url);
+  return displayHost(hostOf(url)).replace(/^www\./, '') || displayURL(url);
 }
 
 /**
@@ -300,7 +310,7 @@ function showSuggestions(complete: boolean): void {
   inline = complete && atEnd ? inlineCompletion(typed) : null;
   if (inline) {
     rows.push(inline);
-    box.append(rowElement(inline, favicon(inline.url), inline.text, inline.url));
+    box.append(rowElement(inline, favicon(inline.url), inline.text, displayURL(inline.url)));
     address.value = inline.text;
     address.setSelectionRange(typed.length, inline.text.length, 'backward');
   }
@@ -315,16 +325,17 @@ function showSuggestions(complete: boolean): void {
     if (!asAddress || shownAddress === typedAddress(inline?.url ?? '')) return;
     const row = { url: asAddress, text };
     rows.push(row);
-    box.append(rowElement(row, icon('globe'), shownAddress));
+    box.append(rowElement(row, icon('globe'), displayURL(shownAddress)));
   };
   if (!offered) addressRow();
   addSearchRow(text, text);
   if (offered) addressRow();
   for (const entry of suggestions(text)) {
     if (entry.url === shownAddress || entry.url === inline?.url) continue;
-    const row = { url: entry.url, text: entry.url };
+    const shown = displayURL(entry.url);
+    const row = { url: entry.url, text: shown };
     rows.push(row);
-    box.append(rowElement(row, favicon(entry.url), entry.title || entry.url, entry.url));
+    box.append(rowElement(row, favicon(entry.url), entry.title || shown, shown));
   }
   openSuggestions();
 }
@@ -433,7 +444,7 @@ function preconnectTyped(): void {
 function revert(): void {
   hideSuggestions();
   edited = false;
-  address.value = current;
+  address.value = displayURL(current);
   focusPage();
 }
 
@@ -462,7 +473,7 @@ address.addEventListener('click', () => {
 });
 address.addEventListener('focus', () => {
   // The full address while editing (the phone layout shows only the host)
-  if (!edited) address.value = isBlank(current) ? '' : current;
+  if (!edited) address.value = isBlank(current) ? '' : displayURL(current);
   address.select();
 });
 address.addEventListener('input', (e) => {
@@ -481,7 +492,7 @@ address.addEventListener('blur', () => {
   // Like Chrome the edit stays outside the field, unless it is empty (a `?` alone too) or the
   // address again
   const empty = !address.value.trim() || forcedQuery(address.value) === '';
-  if (compactLayout() || empty || address.value === current) edited = false;
+  if (compactLayout() || empty || address.value === displayURL(current)) edited = false;
   if (!edited) address.value = shownText(current);
 });
 address.addEventListener('keydown', (e) => {

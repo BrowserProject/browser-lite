@@ -16,6 +16,9 @@
 // engine installs in the window (installRetry), so the page needs no script and
 // no global.
 //
+// An internationalized host is named in Unicode when WebKit's rules for showing
+// one let it (shownHost), like Chrome names it in its error page.
+//
 // The curl codes are the reasons for web addresses. What fails at the
 // transport is turned back into a code by CurlRequest (patch 0039) from the
 // socket error (Sockets.cpp). Other addresses get a page for the engine's own
@@ -49,6 +52,7 @@
 #include <WebCore/SubstituteData.h>
 #include <curl/curl.h>
 #include <wtf/MainThread.h>
+#include <wtf/URLHelpers.h>
 #include <wtf/text/MakeString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -233,11 +237,45 @@ String withSecurityPolicy(const String& page)
     return makeString(StringView(page).left(insertAt), securityPolicy, StringView(page).substring(insertAt));
 }
 
+// An internationalized host (xn-- labels) as people read it, in Unicode when WebKit's rules for
+// showing one let it (URLHelpers: scripts safe to show, no lookalike characters, the letters of
+// Cyrillic top level domains), else as it is. The address bar of the UI decides by itself.
+String shownHost(const String& host)
+{
+    if (!host.contains("xn--"_s))
+        return host;
+    auto unicode = WTF::URLHelpers::mapHostName(host, nullptr);
+    return unicode && !unicode->isNull() ? *unicode : host;
+}
+
+String shownHostAndPort(const URL& url)
+{
+    auto host = shownHost(url.host().toString());
+    auto port = url.port();
+    return port ? makeString(host, ':', *port) : host;
+}
+
+// Only the host changes, the rest of the address stays as it is
+String shownURL(const URL& url)
+{
+    auto host = url.host();
+    if (!host.contains("xn--"_s))
+        return url.string();
+    // host[:port] ends where the path starts
+    StringView whole = url.string();
+    unsigned end = url.pathStart();
+    unsigned length = url.hostAndPort().length();
+    if (length > end || whole.substring(end - length, host.length()) != host)
+        return url.string();
+    unsigned start = end - length;
+    return makeString(whole.left(start), shownHost(host.toString()), whole.substring(start + host.length()));
+}
+
 String html(const Reason& reason, const URL& url, const ResourceError& error, Kind kind, bool resubmit)
 {
-    auto host = reason.refused ? error.failingURL().hostAndPort() : url.host().isEmpty() ? url.string() : url.host().toString();
+    auto host = reason.refused ? shownHostAndPort(error.failingURL()) : url.host().isEmpty() ? url.string() : shownHost(url.host().toString());
     auto code = reason.withDetail ? makeString(reason.code, " ("_s, error.localizedDescription(), ')') : reason.code;
-    auto message = makeString(reason.before, reason.withURL ? url.string() : host, reason.after);
+    auto message = makeString(reason.before, reason.withURL ? shownURL(url) : host, reason.after);
     if (resubmit)
         message = makeString(message, " Resend submits the form data to the site again."_s);
     auto& custom = engineConfig().errorPage;

@@ -1,4 +1,4 @@
-import { showMenu, watchClose } from '@browser-lite/ui';
+import { displayURL, showMenu, watchClose } from '@browser-lite/ui';
 import { bookmarks, onBookmarksChange, removeBookmark } from './bookmarks.js';
 import {
   clearDownloads,
@@ -150,7 +150,8 @@ function linkRow(
   label: string,
   remove: () => void,
 ): HTMLElement {
-  const row = element('div', { className: 'panel-row', title: entry.url });
+  const shown = displayURL(entry.url);
+  const row = element('div', { className: 'panel-row', title: shown });
   const open = element(
     'button',
     { className: 'panel-link' },
@@ -158,8 +159,8 @@ function linkRow(
     element(
       'span',
       { className: 'panel-text' },
-      element('span', { className: 'panel-title', textContent: entry.title || entry.url }),
-      element('span', { className: 'panel-url', textContent: entry.url }),
+      element('span', { className: 'panel-title', textContent: entry.title || shown }),
+      element('span', { className: 'panel-url', textContent: shown }),
     ),
   );
   open.addEventListener('click', (e) => actions.openURL(entry.url, e.ctrlKey || e.metaKey));
@@ -167,7 +168,7 @@ function linkRow(
     if (e.button === 1) actions.openURL(entry.url, true);
   });
   const button = element('button', { className: 'panel-remove', type: 'button', title: label });
-  button.setAttribute('aria-label', `${label}: ${entry.title || entry.url}`);
+  button.setAttribute('aria-label', `${label}: ${entry.title || shown}`);
   button.append(icon('close'));
   button.addEventListener('click', () => {
     const list = row.parentElement;
@@ -342,6 +343,7 @@ function renderLinks(name: 'history' | 'bookmarks'): void {
     const matches = (entry: { url: string; title: string }) =>
       !query ||
       entry.url.toLowerCase().includes(query) ||
+      displayURL(entry.url).toLowerCase().includes(query) ||
       entry.title.toLowerCase().includes(query);
     let shown = 0;
     if (name === 'history') {
@@ -400,7 +402,7 @@ function downloadRow(entry: DownloadEntry): HTMLElement {
     state,
   );
   const row = element('div', { className: 'panel-row panel-download' }, icon('download'), text);
-  if (entry.url) row.title = entry.url;
+  if (entry.url) row.title = displayURL(entry.url);
   const download = entry.download;
   const action = (label: string, run: () => void) => {
     const button = element('button', {

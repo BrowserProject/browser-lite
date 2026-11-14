@@ -1,4 +1,4 @@
-import { type MenuItem, showMenu } from '@browser-lite/ui';
+import { displayURL, type MenuItem, showMenu } from '@browser-lite/ui';
 import { openPanel } from './side-panel.js';
 import { activeTab, allTabs, focusPage, type Tab } from './tabs.js';
 import { byId } from './util.js';
@@ -82,7 +82,7 @@ function items(tab: Tab, direction: -1 | 1, button: HTMLButtonElement): MenuItem
     if (!entry) break;
     result.push({
       id: `go${offset}`,
-      label: entry.title || entry.url,
+      label: entry.title || displayURL(entry.url),
       action: () => {
         if (!allTabs().includes(tab)) return;
         tab.view.go(offset);

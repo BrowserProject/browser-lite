@@ -32,3 +32,4 @@ export {
   type UiSlots,
 } from './slots.js';
 export { defaultTexts, type UiTexts } from './texts.js';
+export { displayHost, displayURL } from './url-display.js';

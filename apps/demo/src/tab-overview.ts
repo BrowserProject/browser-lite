@@ -1,4 +1,4 @@
-import { watchClose } from '@browser-lite/ui';
+import { displayHost, displayURL, watchClose } from '@browser-lite/ui';
 import { favicon, hostOf } from './favicons.js';
 import { icon } from './icons.js';
 import {
@@ -71,7 +71,9 @@ function card(tab: Tab): HTMLElement {
     element('span', { className: 'overview-preview' }, preview),
     element('span', {
       className: 'overview-url',
-      textContent: hostOf(tab.address).replace(/^www[.]/, '') || (tab.newTab ? '' : tab.address),
+      textContent:
+        displayHost(hostOf(tab.address)).replace(/^www[.]/, '') ||
+        (tab.newTab ? '' : displayURL(tab.address)),
     }),
   );
   open.addEventListener('click', () => {

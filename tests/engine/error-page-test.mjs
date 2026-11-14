@@ -195,6 +195,24 @@ check(
   resolved.code === 'ERR_NAME_NOT_RESOLVED',
   resolved.code,
 );
+// An internationalized host in Unicode like in Chrome (title and message, the address stays
+// ASCII), one that mixes Cyrillic and Latin as it is
+for (const [url, named] of [
+  ['https://xn--r8jz45g.xn--zckzah/', '\u4f8b\u3048.\u30c6\u30b9\u30c8'],
+  ['https://xn--pple-43d.com/', 'xn--pple-43d.com'],
+]) {
+  const before = { commit: count('commit'), load: count('load') };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await waitFor(() => count('commit') > before.commit && count('load') > before.load);
+  const shown = JSON.parse(await evaluate(pageState));
+  check(
+    `${url}: title and message name ${named}`,
+    shown.linkHost === named &&
+      shown.message === `The server IP address of ${named} could not be found.`,
+    `${shown.linkHost} / ${shown.message}`,
+  );
+  check(`${url}: the address stays`, shown.url === url && shown.linkTitle === url, shown.url);
+}
 
 // 4. Addresses that are no web addresses keep the address and show the page instead of an
 // empty download (file:) or nothing (about:). A file that exists still loads.
@@ -245,6 +263,7 @@ for (const [url, code, named] of [
   ['http://example.com:6000/', 'ERR_UNSAFE_PORT', 'example.com:6000'],
   ['https://127.0.0.1:1/x', 'ERR_UNSAFE_PORT', '127.0.0.1:1'],
   ['http://0.0.0.0/', 'ERR_ADDRESS_INVALID', '0.0.0.0'],
+  ['http://xn--mnchen-3ya.de:6000/', 'ERR_UNSAFE_PORT', 'm\u00fcnchen.de:6000'],
 ]) {
   const before = { commit: count('commit'), load: count('load'), error: count('error') };
   const asked = opened.length;
@@ -296,8 +315,11 @@ engine.blTransport = {
       const path = received.split(' ')[1];
       received = '';
       requests.push(`${targetHost}${path}`);
-      if (targetHost === 'status.test') {
-        setTimeout(() => stream.ondata?.(new TextEncoder().encode(statusResponses[path])), 0);
+      if (targetHost === 'status.test' || targetHost === 'xn--mnchen-3ya.test') {
+        setTimeout(
+          () => stream.ondata?.(new TextEncoder().encode(statusResponses[path.split('?')[0]])),
+          0,
+        );
         return;
       }
       const step = Number(path.split('/').pop()) || 0;
@@ -395,6 +417,20 @@ for (const [path, code, heading, named] of [
   check(`${url} gives ${code}`, shown.code === code, shown.code);
   check(`${url} says ${heading}`, shown.heading === heading, shown.heading);
   check(`${url} names ${named}`, shown.message.includes(named), shown.message);
+}
+{
+  // The whole address with an internationalized host: only the host in Unicode
+  const url = 'http://xn--mnchen-3ya.test/404?q=xn--a';
+  const before = { commit: count('commit'), load: count('load') };
+  engine._bl_load_url(1, engine.stringToNewUTF8(url));
+  await settled(() => count('commit') > before.commit && count('load') > before.load);
+  const shown = JSON.parse(await evaluate(pageState));
+  check(
+    `${url} names the address with the host in Unicode`,
+    shown.message ===
+      'No webpage was found for the web address: http://m\u00fcnchen.test/404?q=xn--a',
+    shown.message,
+  );
 }
 {
   const url = 'http://status.test/404body';

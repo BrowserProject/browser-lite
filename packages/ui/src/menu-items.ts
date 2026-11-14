@@ -2,6 +2,7 @@ import type { ContextMenuInfo, View } from '@browser-lite/core';
 import type { MenuItem } from './context-menu.js';
 import type { UiOptions } from './options.js';
 import { resolveTexts } from './texts.js';
+import { displayURL } from './url-display.js';
 
 /** Actions of the standard menu that need the app; the optional ones default to the view. */
 export interface MenuActions {
@@ -53,7 +54,7 @@ export function defaultMenuItems(
   const separator = () => items.push({ separator: true });
 
   const pressed = info.link || info.image;
-  if (info.touch && pressed) items.push({ header: pressed });
+  if (info.touch && pressed) items.push({ header: displayURL(pressed) });
   if (info.link) {
     items.push(
       { id: 'open-link', label: texts.openLinkInNewTab, action: () => actions.openTab(info.link) },

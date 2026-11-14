@@ -1,3 +1,4 @@
+import { displayHost, displayURL } from '@browser-lite/ui';
 import { focusAddress } from './address-bar.js';
 import { bookmarks } from './bookmarks.js';
 import { favicon, hostOf } from './favicons.js';
@@ -66,7 +67,7 @@ function tileIcon(url: string): Element {
   for (const char of host) hue = (hue * 31 + char.charCodeAt(0)) % 360;
   const letter = element('span', {
     className: 'ntp-letter',
-    textContent: (host[0] ?? '?').toUpperCase(),
+    textContent: ([...displayHost(host)][0] ?? '?').toUpperCase(),
   });
   letter.style.setProperty('--hue', String(hue));
   return letter;
@@ -75,11 +76,11 @@ function tileIcon(url: string): Element {
 function tile(site: { url: string; title: string }): HTMLElement {
   const link = element(
     'a',
-    { className: 'ntp-tile', href: site.url, title: site.url },
+    { className: 'ntp-tile', href: site.url, title: displayURL(site.url) },
     element('span', { className: 'ntp-tile-icon' }, tileIcon(site.url)),
     element('span', {
       className: 'ntp-tile-title',
-      textContent: site.title || hostOf(site.url).replace(/^www\./, ''),
+      textContent: site.title || displayHost(hostOf(site.url)).replace(/^www\./, ''),
     }),
   );
   link.addEventListener('click', (e) => {

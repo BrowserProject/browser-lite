@@ -18,6 +18,7 @@ what that means and what to do before going to production. Setup details: [embed
 | SSRF through the relay | Pages could reach your LAN, loopback or cloud metadata services | The relay connects only to public unicast addresses and web ports, checks the address it actually connects to (DNS rebinding safe). `allowPrivateAddresses` and `RELAY_ALLOW_LOCAL` only in tests |
 | WebRTC reveals the IP | Peer connections use the host browser's network, not the relay | `webrtc()` is opt-in; enable it only when users expect it |
 | Error page in the failed site's origin | The engine shows its error page under the URL that failed, so a malicious template would run in that site's origin | The engine HTML-escapes every placeholder and prepends a CSP without scripts (`default-src 'none'; style-src 'unsafe-inline'; img-src data:`); the retry button is the engine's own listener. Keep custom `errorPage` templates static |
+| Lookalike addresses | An internationalized host (`xn--` in the URL) shown in Unicode could pass for another site (`apple.com` written with a Cyrillic letter) | Show addresses with `displayURL` and `displayHost` of `@browser-lite/ui`: Unicode only for hosts that pass spoofing checks like Chrome's ([below](#internationalized-addresses)); the demo uses them everywhere it shows an address |
 | Permissions under your origin | The host browser grants camera, location, notifications to your origin once, for all pages inside | Keep the `permission` handler asking per page origin, persist decisions in a `PermissionStore` you control, offer a way to revoke them |
 | Profile on the server | `createProfileStore` stores cookies (sign-ins) unencrypted | `authorize` is required, with its own token audience (`profile`) so a relay token never opens it; the store also checks `Host` (DNS rebinding) and refuses simple cross-site requests |
 
@@ -25,6 +26,27 @@ The relay sees only encrypted bytes (TLS happens inside the engine), but it sees
 names and ports, and timing. To look like Safari the engine offers Safari's TLS parameters (#283),
 including its three 3DES suites (last, servers pick them only without AES) and `rsa_pkcs1_sha1`
 (offered, but a server signature with SHA-1 is still refused).
+
+## Internationalized addresses
+
+URLs and the engine carry a host in ASCII (`xn--r8jz45g.xn--zckzah`, a Japanese test address);
+like Chrome, Firefox and Safari, `displayHost` and `displayURL` of `@browser-lite/ui` show it in
+Unicode when every label passes these checks, else the whole host stays as it is:
+
+- only letters, marks and digits of the recommended scripts of Unicode UAX 31 and `-`, without
+  characters that look like others or like punctuation (IPA, small capitals, modifier letters,
+  historic Cyrillic and Latin, sharp s and final sigma, invisible characters);
+- one script per label, Latin together with Chinese, Japanese or Korean counting as one (UTS 39
+  "highly restrictive", Chrome's level), digits of one numbering system, no combining mark twice
+  in a row and the combining diacriticals only after a Latin, Greek or Cyrillic letter;
+- Japanese characters that look like a slash only next to Japanese, the long vowel mark only
+  after kana;
+- a label in Cyrillic, Greek or Armenian made only of letters that look like Latin ones
+  (`apple` in Cyrillic) only under a top level domain in that script or of a country that writes it.
+
+Not done: Chrome's comparison with the skeletons of popular domains (it needs their list; Firefox
+and Safari do without). The engine's error page names the host by WebKit's own rules
+(`URLHelpers`), which keep Cyrillic and Greek hosts outside their top level domains in ASCII.
 
 ## Production checklist
 

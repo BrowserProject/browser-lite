@@ -309,7 +309,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   floating side panels, history by day with single pages removed by the cross of a row or its right
   click menu like Chrome (#544), Chrome's Ctrl+K and Ctrl+E (a search after `?` in the address
   bar), Ctrl+S (Save page as, also in the menu), Ctrl+Shift+Delete (profile and site data) and
-  Alt+Home (home page or new tab page) (#545), settings as cards with switches, dialogs of the pages in
+  Alt+Home (home page or new tab page) (#545), internationalized hosts in Unicode like Chrome in the
+  address bar (also while editing and in the phone layout), tabs, history, suggestions, menus and
+  the engine's error page unless they could pass for another host, stored addresses in ASCII
+  (#560), settings as cards with switches, dialogs of the pages in
   the page, hover only for real pointers, short transitions (off with reduced motion). Checked in
   Chromium at 1440x900, 1280x800, 820x1180 touch, 393x852 and 844x390, light and dark; not yet on
   real devices.
