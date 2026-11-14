@@ -2,10 +2,10 @@
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
 // has video-overlay-test.mjs), with requestVideoFrameCallback and getVideoPlaybackQuality().
-// Also MSE, navigator.mediaCapabilities, blob:, data:, preload, picture-in-picture, muted
-// autoplay only in the view, a fullscreen video letterboxed over a page object-fit: cover, the
-// icons of the media controls and their exit fullscreen button and the range special cases of
-// media-sw.js.
+// Also MSE, HLS and DASH manifests refused (players then take MSE), navigator.mediaCapabilities,
+// blob:, data:, preload, picture-in-picture, muted autoplay only in the view, a fullscreen video
+// letterboxed over a page object-fit: cover, the icons of the media controls and their exit
+// fullscreen button and the range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -151,7 +151,8 @@ const draw = setInterval(() => {
 
 // navigator.mediaCapabilities.decodingInfo: the MSE clip's codec, a file codec, an unknown codec
 // (the host's answer each) and a container the host's MSE may take but the engine's parsers do not
-// (always unsupported). Twitch's player drops every variant decodingInfo calls unsupported.
+// (always unsupported) and an HLS playlist as a file (always unsupported, the host <video> gets one
+// resource only). Twitch's player drops every variant decodingInfo calls unsupported.
 const DECODING_CONFIGS = [
   {
     type: 'media-source',
@@ -175,6 +176,25 @@ const DECODING_CONFIGS = [
     },
   },
   { type: 'media-source', audio: { contentType: 'audio/mpeg' } },
+  {
+    type: 'file',
+    video: {
+      contentType: 'application/vnd.apple.mpegurl',
+      width: 640,
+      height: 360,
+      bitrate: 630000,
+      framerate: 30,
+    },
+  },
+];
+// Streaming manifests: the engine plays neither, whatever the host answers (Chrome and Safari say
+// "maybe" for HLS), so players like video.js (SRF) take MSE instead of setting the playlist as src
+const MANIFEST_TYPES = [
+  'application/vnd.apple.mpegurl',
+  'application/x-mpegURL',
+  'audio/mpegurl',
+  'video/vnd.apple.mpegurl',
+  'application/dash+xml',
 ];
 // "supported smooth powerEfficient" as digits per configuration, then encodingInfo of MediaRecorder
 const ASK_CAPABILITIES = `(async () => {
@@ -207,6 +227,7 @@ const capabilitiesWorker = new Worker(URL.createObjectURL(new Blob([askCapabilit
 capabilitiesWorker.onmessage = (e) => result('workercapabilities', e.data);
 const type = 'video/webm; codecs="vp8"';
 result('msesupported', MediaSource.isTypeSupported(type));
+result('manifests', JSON.stringify(${JSON.stringify(MANIFEST_TYPES)}.map((type) => document.createElement('video').canPlayType(type))));
 const video = document.getElementById('video');
 const source = new MediaSource();
 video.src = URL.createObjectURL(source);
@@ -566,6 +587,11 @@ check(
   (await result('msesupported')) === 'true',
   results.get('msesupported'),
 );
+check(
+  'HLS and DASH: canPlayType says no, so players take MSE',
+  (await result('manifests')) === JSON.stringify(MANIFEST_TYPES.map(() => '')),
+  results.get('manifests'),
+);
 const mseBuffered = Number(await result('msebuffered'));
 check('MSE: buffered after two parts', mseBuffered > 2.5 && mseBuffered < 3.6, String(mseBuffered));
 check('MSE: play()', (await result('mseplay')) === 'ok', results.get('mseplay'));
@@ -574,9 +600,9 @@ const mseTime = Number(await result('msetime'));
 check('MSE: time runs', mseTime > 1, String(mseTime));
 const msePixel = await waitForPixel(180, 140, isRed);
 check('MSE: frame painted in the page', isRed(msePixel), JSON.stringify(msePixel));
-// The host's own answers for the first three, the engine's MSE never takes the fourth
+// The host's own answers for the first three, the engine never takes the fourth and the fifth
 const hostCapabilities = (await page.evaluate(ASK_CAPABILITIES)).split(',');
-const expectedCapabilities = [...hostCapabilities.slice(0, 3), '000', 'record:1'].join(',');
+const expectedCapabilities = [...hostCapabilities.slice(0, 3), '000', '000', 'record:1'].join(',');
 check(
   "mediaCapabilities.decodingInfo like the host's (page)",
   hostCapabilities[0].startsWith('1') && (await result('capabilities')) === expectedCapabilities,

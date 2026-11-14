@@ -102,7 +102,8 @@ starts without stored data.
 | npm, Medium | ok | Cloudflare may show "Verify you are human" for datacenter IPs; the check gets there with WebAssembly |
 | Apple, Microsoft, Amazon | ok | |
 | eBay | blocked | "Something went wrong on our end": eBay blocks datacenter IPs. Caused by the relay's IP, not the engine |
-| CNN, BBC, NYTimes, Spiegel, SRF | ok | |
+| CNN, BBC, NYTimes, Spiegel | ok | |
+| SRF | partly | Pages ok. Videos (Pillarbox, HLS) play with the Android identity; with a Safari identity they stop after 3.9 s (2026-11-13, local, [status.md](status.md) Open: features). Before #549 every video failed at once with its "could not be loaded" message |
 | weather.com | ok | Much JavaScript, the slowest of all |
 | 20min, Blick, NZZ, Galaxus, Zalando, Ricardo | ok | |
 | Booking, IMDb, SBB | ok | The AWS WAF bot check computes through (WebCrypto with OpenSSL 3, patch 0010) |

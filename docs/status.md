@@ -172,7 +172,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   variant of a stream and showed Error #4000; its front page stream now plays).
   `getVideoPlaybackQuality()` counts the frames of the host element, copied frames that never
   reached the page as dropped (#538; before, every count stayed 0, so YouTube, hls.js and Shaka
-  never lowered the quality when frames dropped).
+  never lowered the quality when frames dropped). `canPlayType` says no to HLS playlists and DASH
+  manifests whatever the host answers, so players stream them through MSE (#549; before, it
+  passed on the host's "maybe" of Chrome and Safari, players set the playlist as `src` and got
+  `MEDIA_ERR_SRC_NOT_SUPPORTED`, on srf.ch every video).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload (`ready`
   resolves with the active worker set like in Chrome, #483: before, the registration still showed
@@ -732,6 +735,16 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
+- HLS as `src` (#549): the engine plays no HLS playlist itself, Safari (the default identity on
+  every host) and current Chrome do. Players that decide by the user agent still treat the
+  engine as Safari: on srf.ch (Pillarbox, video.js VHS) the video starts through
+  MSE but stops after its first segment (3.9 s) for streams with a separate audio rendition,
+  because VHS keeps Safari's native `audioTracks`, which then disagree with its own audio group;
+  the same happens in plain Chromium with a Safari user agent and `audioTracks` turned on. With
+  the Android identity the same video plays on. The clean fix is playback of HLS as `src`: a
+  player in the host (hls.js, Apache-2.0, or an own one with a TS to fMP4 remuxer) on the host
+  `<video>` whose playlist and segment requests go through the engine's network (the media
+  service worker asked for any URL of that player). Needs a decision on the new dependency.
 - Media controls: no overflow menu (playback speed, subtitles, chapters) like Chrome's three dots;
   `MEDIA_CONTROLS_CONTEXT_MENUS` is off for the port and would need the menu of the media controls
   in the host (#476).

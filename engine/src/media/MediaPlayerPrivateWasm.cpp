@@ -51,8 +51,7 @@ EM_JS(void, blJsPrefetchHostAnswers, (), {
         'video/mp4; codecs="hvc1"', 'video/mp4; codecs="av01.0.05M.08"', 'video/mp4; codecs="mp4v.20.8"',
         'video/webm; codecs="vp8, vorbis"', 'video/webm; codecs="vp8"', 'video/webm; codecs="vp9"',
         'video/webm; codecs="vp9, opus"', 'video/webm; codecs="vp09.00.10.08"', 'video/webm; codecs="av01.0.05M.08"',
-        'application/vnd.apple.mpegurl', 'application/vnd.apple.mpegURL', 'application/x-mpegURL', 'application/x-mpegurl',
-        'audio/mpegurl', 'application/dash+xml', 'audio/mpeg', 'audio/mpeg;', 'audio/mp3', 'audio/mp4', 'audio/mp4; codecs="mp4a.40.2"',
+        'audio/mpeg', 'audio/mpeg;', 'audio/mp3', 'audio/mp4', 'audio/mp4; codecs="mp4a.40.2"',
         'audio/aac', 'audio/aac;', 'audio/x-aac', 'audio/x-m4a', 'audio/x-m4a;', 'audio/m4a', 'audio/ogg', 'audio/ogg; codecs="vorbis"',
         'audio/ogg; codecs="opus"', 'audio/ogg; codecs="flac"', 'audio/webm', 'audio/webm; codecs="opus"', 'audio/webm; codecs="vorbis"',
         'audio/wav', 'audio/wav; codecs="1"', 'audio/x-wav', 'audio/flac', 'audio/x-flac', 'audio/opus', 'audio/3gpp', 'video/3gpp'];
@@ -160,6 +159,20 @@ static bool hostMediaSourceSupports(const String& type)
     });
 }
 
+// HLS playlists and DASH manifests name further resources the player loads itself
+static bool isStreamingManifest(const ContentType& type)
+{
+    auto container = type.containerType();
+    auto slash = container.find('/');
+    if (slash == notFound)
+        return false;
+    auto subtype = StringView { container }.substring(slash + 1);
+    return equalLettersIgnoringASCIICase(subtype, "vnd.apple.mpegurl"_s)
+        || equalLettersIgnoringASCIICase(subtype, "mpegurl"_s)
+        || equalLettersIgnoringASCIICase(subtype, "x-mpegurl"_s)
+        || equalLettersIgnoringASCIICase(container, "application/dash+xml"_s);
+}
+
 bool MediaPlayerPrivateWasm::takesType(PlatformMediaDecodingType platformType, const ContentType& type)
 {
     switch (platformType) {
@@ -171,7 +184,10 @@ bool MediaPlayerPrivateWasm::takesType(PlatformMediaDecodingType platformType, c
         return false;
 #endif
     case PlatformMediaDecodingType::FileOrHLS:
-        return featureEnabled(Feature::Media);
+        // The host <video> gets exactly one resource through the media service worker, the
+        // playlists and segments a manifest names would not go through the engine's network.
+        // Pages then stream through MSE (hls.js, video.js VHS, Shaka), as on Firefox
+        return featureEnabled(Feature::Media) && !isStreamingManifest(type);
     case PlatformMediaDecodingType::MediaSource: {
 #if ENABLE(MEDIA_SOURCE)
         if (!featureEnabled(Feature::Media))

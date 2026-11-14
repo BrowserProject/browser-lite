@@ -525,7 +525,10 @@ page <video src>  -> MediaPlayerPrivateWasm --create--> host <video src=bl-media
 `MediaFetch` loads http(s) with the shared loader, `blob:` and `data:` from memory. MSE: WebCore
 gets tracks and timestamps from own fMP4/WebM parsers (`ContainerParser`) and the same bytes go to
 a host MediaSource that decodes (#48). Which types play is the engine's question only for what
-it does itself (the media feature, the containers of its MSE parsers); for the codecs it asks
+it does itself (the media feature, the containers of its MSE parsers, no streaming manifest as a
+file: the host `<video>` gets one resource through the service worker and the segments an HLS
+playlist or DASH manifest names would bypass the engine's network, so pages stream them through
+MSE like on Firefox, #549); for the codecs it asks
 the host: `canPlayType` and `isTypeSupported` synchronously (common types answered ahead, #137),
 `navigator.mediaCapabilities.decodingInfo` of pages and workers asynchronously with the host's
 own `decodingInfo` on its main thread, so `supported`, `smooth` and `powerEfficient` are the

@@ -120,7 +120,8 @@ next) comes as patches from `patches/`.
     `VideoOverlay.cpp` (holes of videos the host shows behind the canvas), frame counts of
     `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
-    host's answers); muted autoplay only in the view is a WebCore setting in `WebView.cpp`
+    host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE; muted
+    autoplay only in the view is a WebCore setting in `WebView.cpp`
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly
   - `websocket/`: WebSockets of the pages over curl (from WebKitLegacy, WebKit license),
     `WebSocketPerMessageDeflate.cpp` (compression like Chrome, permessage-deflate)
