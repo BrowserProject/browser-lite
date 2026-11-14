@@ -240,9 +240,9 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   `@browser-lite/core/audio-worklet.js`).
 - `media({ pictureInPicture })`: `<video>`/`<audio>` through hidden media elements of the host;
   media files need the service worker ([Service worker](../../docs/embedding.md#service-worker)).
-  Without it a `warning` event with code `media-sw-missing` follows. In a hidden view a video
-  without an audio track pauses like in Chrome, the host element too (it tells the engine which
-  media have one). `getVideoPlaybackQuality()` of the pages counts the frames of the host element,
+  Without it a `warning` event with code `media-sw-missing` follows. In a hidden view media that
+  never played with sound (no audio track, or muted since it started) pauses like in Chrome, the
+  host element too (it tells the engine which media have an audio track). `getVideoPlaybackQuality()` of the pages counts the frames of the host element,
   with copied frames also those it showed that never reached the engine as dropped. A view gets `picture-in-picture` events when one of its videos enters or leaves that window.
   Picture-in-picture needs the host's `requestPictureInPicture` (not in Firefox): without it the
   pages do not see the API.

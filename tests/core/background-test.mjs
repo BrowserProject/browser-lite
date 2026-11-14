@@ -7,9 +7,11 @@
 // and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive; the engine stops a script only once input waited its limit,
 // keepWaiting() gives the script the limit again) and no hang during a long native dialog of the host page, a
-// muted video in the picture-in-picture window keeps running hidden, so do a srcObject stream and
-// muted sound. Hidden, a video without an audio track pauses (in the host too), a muted one with
-// an audio track goes on.
+// muted video in the picture-in-picture window keeps running hidden, so does a srcObject stream.
+// Hidden, like Chrome, media that never played with sound pauses (in the host too): a video
+// without an audio track, one with an audio track that was muted since it started, an autoplay
+// video below the fold that a script started and sound that was always muted; a video muted
+// after it played unmuted goes on.
 //
 //   node tests/core/background-test.mjs [engine-dir]
 import {
@@ -84,7 +86,7 @@ video.onpause = () => console.log('RESULT pause=' + document.visibilityState);
 document.onclick = () => video.requestPictureInPicture().then(() => console.log('RESULT pip=ok'), (e) => console.log('RESULT pip=' + e.name));
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState));
 console.log('RESULT loaded=pip')</script>`,
-  // Muted, but no pure video: a srcObject stream (like a video conference) and muted sound
+  // Muted: a srcObject stream (like a video conference) and sound that never played unmuted
   stream: `<!doctype html><title>stream</title><canvas width="64" height="64"></canvas><video muted playsinline></video><audio src="/tone.wav" muted loop></audio>
 <script>const canvas = document.querySelector('canvas');
 const context = canvas.getContext('2d');
@@ -98,14 +100,20 @@ audio.onpause = () => console.log('RESULT pause=audio');
 Promise.all([video.play(), audio.play()]).then(() => console.log('RESULT playing=stream'), (e) => console.log('RESULT playing=' + e.name));
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + video.paused + ':' + audio.paused));
 </script>`,
-  // Muted autoplay: a video without an audio track and one with
+  // Muted autoplay: a video without an audio track and one with; a third one plays unmuted
+  // first and is muted once it plays; a fourth one far below waits as invisible autoplay until
+  // the page calls play()
   videos: `<!doctype html><title>videos</title><video id="silent" src="/clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
 <video id="sound" src="/sound-clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
+<video id="unmuted" src="/sound-clip.webm" loop playsinline width="160" height="120"></video>
+<div style="height:3000px"></div><video id="late" src="/clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
 <script>const videos = [...document.querySelectorAll('video')];
 for (const video of videos) {
   video.onplaying = () => console.log('RESULT playing=' + video.id);
   video.onpause = () => console.log('RESULT pause=' + video.id);
 }
+videos[2].play().then(() => { videos[2].muted = true; console.log('RESULT muted=unmuted'); }, (e) => console.log('RESULT muted=' + e.name));
+videos[3].addEventListener('canplaythrough', () => setTimeout(() => { console.log('RESULT late=' + videos[3].paused); videos[3].play(); }, 300), { once: true });
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + videos.map((v) => v.paused).join(':')));
 console.log('RESULT loaded=videos')</script>`,
   // Long tasks one after the other (not throttled like timers), for typing in another view
@@ -780,13 +788,24 @@ check(
 );
 await dialog.context.close();
 
-// Hidden like Chrome: only the video without an audio track pauses, in the host too (it stops
-// decoding); the host tells which one has an audio track. Visible again, it plays on.
+// Hidden like Chrome: the videos that never played with sound pause, in the host too (it stops
+// decoding), whether they have an audio track or not, also the one that waited as invisible
+// autoplay; the one muted after it played unmuted goes on (Chrome's "was always muted"). Visible
+// again, they play on.
 const silent = await openApp({ url: `${siteURL}videos` });
 await silent.wait('loaded', 'videos');
-const bothPlaying =
-  !!(await silent.wait('playing', 'silent')) && !!(await silent.wait('playing', 'sound'));
-check('videos: both muted videos play', bothPlaying);
+const allPlaying =
+  !!(await silent.wait('playing', 'silent')) &&
+  !!(await silent.wait('playing', 'sound')) &&
+  (await silent.wait('muted'))?.[2] === 'unmuted';
+check('videos: the muted videos and the one muted after it played unmuted play', allPlaying);
+// The one far below waited as invisible autoplay until its play()
+const late = (await silent.wait('late'))?.[2];
+check(
+  'videos: the autoplay video far below plays after play()',
+  late === 'true' && !!(await silent.wait('playing', 'late')),
+  late,
+);
 // Only what comes from here on (at the start muted playback briefly reports pause)
 await silent.page.waitForTimeout(1000);
 silent.results.length = 0;
@@ -803,27 +822,33 @@ await silent.page.waitForTimeout(500);
 const hostBefore = await hostVideos();
 await silent.page.waitForTimeout(2000);
 const hostAfter = await hostVideos();
-const silentPaused = silent.results.filter((r) => r[1] === 'pause').map((r) => r[2]);
+const silentPaused = silent.results
+  .filter((r) => r[1] === 'pause')
+  .map((r) => r[2])
+  .sort();
 check(
-  'videos: hidden, only the video without an audio track pauses',
-  silentHidden?.[2] === 'hidden:true:false' && silentPaused.join() === 'silent',
+  'videos: hidden, the videos that never played with sound pause',
+  silentHidden?.[2] === 'hidden:true:true:false:true' &&
+    silentPaused.join() === 'late,silent,sound',
   `${JSON.stringify(silentHidden)} paused: ${silentPaused}`,
 );
 check(
-  'videos: hidden, the host stops that video and plays the other',
-  hostAfter.length === 2 &&
-    hostAfter[0][1] &&
-    hostAfter[0][0] === hostBefore[0][0] &&
-    !hostAfter[1][1] &&
-    hostAfter[1][0] !== hostBefore[1][0],
+  'videos: hidden, the host stops those videos and plays the other',
+  hostAfter.length === 4 &&
+    [0, 1, 2].every((i) => hostAfter[i][1] && hostAfter[i][0] === hostBefore[i][0]) &&
+    !hostAfter[3][1] &&
+    hostAfter[3][0] !== hostBefore[3][0],
   `${JSON.stringify(hostBefore)} -> ${JSON.stringify(hostAfter)}`,
 );
 await silent.selectTab(1);
-check('videos: visible again, the video plays on', !!(await silent.wait('playing', 'silent')));
+check(
+  'videos: visible again, the videos play on',
+  !!(await silent.wait('playing', 'silent')) && !!(await silent.wait('playing', 'sound')),
+);
 await silent.context.close();
 
-// Muted in the background like Chrome: a srcObject stream and muted sound go on (only video
-// without an audio track is paused)
+// Muted in the background like Chrome: a srcObject stream goes on, sound that never played
+// unmuted pauses
 const muted = await openApp({ url: `${siteURL}stream` });
 check('muted: stream and sound play', (await muted.wait('playing'))?.[2] === 'stream');
 // Only what comes from here on (at the start muted playback briefly reports pause, see docs)
@@ -834,8 +859,8 @@ const mutedHidden = await muted.wait('state');
 await muted.page.waitForTimeout(2000);
 const mutedPaused = muted.results.filter((r) => r[1] === 'pause').map((r) => r[2]);
 check(
-  'muted: stream and sound go on in the background',
-  mutedHidden?.[2] === 'hidden:false:false' && !mutedPaused.length,
+  'muted: the stream goes on in the background, the always muted sound pauses',
+  mutedHidden?.[2] === 'hidden:false:true' && mutedPaused.join() === 'audio',
   `${JSON.stringify(mutedHidden)} paused: ${mutedPaused}`,
 );
 await muted.context.close();

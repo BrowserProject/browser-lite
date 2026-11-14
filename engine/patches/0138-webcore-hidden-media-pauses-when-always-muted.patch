@@ -1,0 +1,69 @@
+diff --git a/Source/WebCore/html/HTMLMediaElement.cpp b/Source/WebCore/html/HTMLMediaElement.cpp
+index ee9e25c8db..03ee8c6224 100644
+--- a/Source/WebCore/html/HTMLMediaElement.cpp
++++ b/Source/WebCore/html/HTMLMediaElement.cpp
+@@ -4906,6 +4906,10 @@ void HTMLMediaElement::setMutedInternal(bool muted, ForceMuteChange forceChange)
+         m_muted = muted;
+         if (!m_explicitlyMuted && !implicitlyMuted())
+             m_explicitlyMuted = true;
++#if PLATFORM(WASM)
++        if (m_playing && !this->muted())
++            m_hasPlayedUnmuted = true;
++#endif
+ 
+         // Avoid recursion when the player reports volume changes.
+         if (!processingMediaPlayerCallback()) {
+@@ -6649,6 +6653,10 @@ void HTMLMediaElement::updatePlayState()
+ 
+         startPlaybackProgressTimer();
+         setPlaying(true);
++#if PLATFORM(WASM)
++        if (!muted())
++            m_hasPlayedUnmuted = true;
++#endif
+     } else {
+         if (!playerPaused) {
+             pausePlayer();
+diff --git a/Source/WebCore/html/HTMLMediaElement.h b/Source/WebCore/html/HTMLMediaElement.h
+index a9bc0894ee..04cd26538f 100644
+--- a/Source/WebCore/html/HTMLMediaElement.h
++++ b/Source/WebCore/html/HTMLMediaElement.h
+@@ -621,6 +621,10 @@ public:
+ 
+     bool hasEverHadAudio() const { return m_hasEverHadAudio; }
+     bool hasEverHadVideo() const { return m_hasEverHadVideo; }
++#if PLATFORM(WASM)
++    // browser-lite: Chrome's opposite of "was always muted", true once the element played unmuted
++    bool hasPlayedUnmuted() const { return m_hasPlayedUnmuted; }
++#endif
+ 
+     double playbackStartedTime() const { return m_playbackStartedTime; }
+ 
+@@ -1520,6 +1524,9 @@ private:
+     WeakHashSet<HTMLMediaElementClient> m_clients;
+ 
+     bool m_hasEverPreparedToPlay { false };
++#if PLATFORM(WASM)
++    bool m_hasPlayedUnmuted { false };
++#endif
+ 
+     RefPtr<AggregateMessageClientForTesting> m_internalMessageClient;
+ 
+diff --git a/Source/WebCore/html/MediaElementSession.cpp b/Source/WebCore/html/MediaElementSession.cpp
+index b20353f354..8f811b7f79 100644
+--- a/Source/WebCore/html/MediaElementSession.cpp
++++ b/Source/WebCore/html/MediaElementSession.cpp
+@@ -317,9 +317,10 @@ void MediaElementSession::visibilityChanged()
+     bool isPlayingAudio = element->isPlaying() && element->hasAudio() && !element->muted() && element->volume();
+     if (!isPlayingAudio) {
+ #if PLATFORM(WASM)
+-        // browser-lite: like Chrome, only video without an audio track pauses in the background;
+-        // MediaStreams (video calls, camera) and muted media with an audio track keep playing
+-        bool keepsPlaying = element->hasAudio();
++        // browser-lite: like Chrome, a hidden page pauses only media that never played with sound:
++        // without an audio track, or muted ever since it started (Chrome's "was always muted").
++        // MediaStreams (video calls, camera) and media muted after playing unmuted keep playing
++        bool keepsPlaying = element->hasAudio() && element->hasPlayedUnmuted();
+ #if ENABLE(MEDIA_STREAM)
+         keepsPlaying = keepsPlaying || element->hasMediaStreamSrcObject();
+ #endif

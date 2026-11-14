@@ -1,0 +1,20 @@
+diff --git a/Source/WebCore/html/HTMLMediaElement.cpp b/Source/WebCore/html/HTMLMediaElement.cpp
+index 03ee8c6224..b8793bd665 100644
+--- a/Source/WebCore/html/HTMLMediaElement.cpp
++++ b/Source/WebCore/html/HTMLMediaElement.cpp
+@@ -4557,6 +4557,15 @@ void HTMLMediaElement::play(DOMPromiseDeferred<void>&& promise)
+         // by updateShouldAutoplay().
+         mediaSession->removeBehaviorRestriction(MediaElementSession::InvisibleAutoplayNotPermitted);
+     }
++#if PLATFORM(WASM)
++    // browser-lite: once the rule is lifted, its interruption ends too, as when the element comes
++    // into view (updateShouldAutoplay); left on the session's stack it made every later
++    // interruption ignored, so a hidden page did not pause the playing element
++    if (m_wasInterruptedForInvisibleAutoplay && !mediaSession->hasBehaviorRestriction(MediaElementSession::InvisibleAutoplayNotPermitted)) {
++        m_wasInterruptedForInvisibleAutoplay = false;
++        mediaSession->endInterruption(PlatformMediaSession::EndInterruptionFlags::NoFlags);
++    }
++#endif
+ 
+     m_pendingPlayPromises.append(WTF::move(promise));
+     playInternal();

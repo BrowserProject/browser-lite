@@ -36,7 +36,8 @@ information, which WebKit shows only with developer extras, so its text ran toge
 next, or the media controls, which had no keys and no double click to fullscreen like Chrome's,
 or their fullscreen bar, which stuck out at both sides of a phone held upright, or the
 intersection observers, which computed every target again in every frame, also when nothing had
-moved) comes as patches from `patches/`.
+moved, or the muted videos with an audio track that hidden pages kept playing, so the host decoded
+them for nobody) comes as patches from `patches/`.
 
 ## Folders
 
