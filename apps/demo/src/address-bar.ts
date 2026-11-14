@@ -9,7 +9,7 @@ import { readHistory } from './history.js';
 import { icon } from './icons.js';
 import { compactLayout } from './layout.js';
 import { runtime } from './runtime.js';
-import { SEARCH_ENGINES, settings } from './settings.js';
+import { searchEngine, searchURL } from './settings.js';
 import { activeTab, focusPage, loadInTab, openTab, type Tab } from './tabs.js';
 import { hasKnownTld, typedKind } from './typed-kind.js';
 import { byId, element, isBlank } from './util.js';
@@ -52,14 +52,6 @@ export function takePendingAddress(): string {
   const url = pending;
   pending = '';
   return url;
-}
-
-function searchEngine() {
-  return SEARCH_ENGINES[settings().searchEngine] ?? SEARCH_ENGINES.bing;
-}
-
-function searchURL(text: string): string {
-  return (searchEngine()?.url ?? '').replace('%s', encodeURIComponent(text.trim()));
 }
 
 /**
@@ -344,9 +336,7 @@ function showSuggestions(complete: boolean): void {
 function addSearchRow(query: string, text: string): void {
   const row = { url: searchURL(query), text };
   rows.push(row);
-  box.append(
-    rowElement(row, icon('search'), `Search ${searchEngine()?.name ?? ''} for "${query}"`),
-  );
+  box.append(rowElement(row, icon('search'), `Search ${searchEngine().name} for "${query}"`));
 }
 
 function openSuggestions(): void {

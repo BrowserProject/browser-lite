@@ -11,6 +11,8 @@ const info = (extra = {}) => ({
   image: '',
   selection: '',
   editable: false,
+  canUndo: false,
+  canRedo: false,
   canGoBack: false,
   canGoForward: false,
   touch: false,
@@ -66,7 +68,7 @@ test('link, image, selection and editable field', async () => {
     {
       openTab: (url) => opened.push(url),
       copyText: (text) => copied.push(text),
-      readText: async () => 'clip',
+      readClipboard: async () => ({ text: 'clip', html: '<b>clip</b>' }),
     },
   );
   assert.deepEqual(ids(normalizeMenu(items)), [
@@ -79,9 +81,13 @@ test('link, image, selection and editable field', async () => {
     'copy-image',
     'copy-image-address',
     '-',
+    'undo',
+    'redo',
+    '-',
     'cut',
     'copy',
     'paste',
+    'paste-plain',
     'select-all',
   ]);
   const run = async (id) => items.find((item) => item.id === id).action();
@@ -94,7 +100,10 @@ test('link, image, selection and editable field', async () => {
   await run('copy-image-address');
   await run('cut');
   await run('copy');
+  await run('undo');
+  await run('redo');
   await run('paste');
+  await run('paste-plain');
   await run('select-all');
   assert.deepEqual(opened, ['https://l.test/', 'https://i.test/x.png']);
   assert.deepEqual(copied, ['https://l.test/', 'https://i.test/x.png']);
@@ -104,6 +113,9 @@ test('link, image, selection and editable field', async () => {
     ['copyImage', 10, 20],
     ['command', 'Cut'],
     ['command', 'Copy'],
+    ['command', 'Undo'],
+    ['command', 'Redo'],
+    ['paste', { text: 'clip', html: '<b>clip</b>' }],
     ['paste', 'clip'],
     ['command', 'SelectAll'],
   ]);
@@ -136,18 +148,99 @@ test('selection on the page: copy, select all and the page commands', async () =
   ]);
 });
 
-test('field with a caret: cut and copy disabled, no page commands', async () => {
+test('field with a caret: undo, redo, cut and copy follow the state, no page commands', async () => {
   const view = fakeView();
-  const items = defaultMenuItems(view, info({ editable: true, canGoBack: true }), {
+  const items = defaultMenuItems(view, info({ editable: true, canGoBack: true, canUndo: true }), {
     openTab() {},
-    readText: async () => null,
+    search: { engine: 'Bing', open() {} },
+    readClipboard: async () => null,
   });
-  assert.deepEqual(ids(normalizeMenu(items)), ['cut', 'copy', 'paste', 'select-all']);
-  assert.equal(items.find((item) => item.id === 'cut').enabled, false);
-  assert.equal(items.find((item) => item.id === 'copy').enabled, false);
-  assert.equal(items.find((item) => item.id === 'paste').enabled, undefined);
-  await items.find((item) => item.id === 'paste').action();
-  assert.deepEqual(view.calls, [['command', 'Paste']], 'no clipboard access: engine clipboard');
+  assert.deepEqual(ids(normalizeMenu(items)), [
+    'undo',
+    'redo',
+    '-',
+    'cut',
+    'copy',
+    'paste',
+    'paste-plain',
+    'select-all',
+  ]);
+  const byId = (id) => items.find((item) => item.id === id);
+  assert.equal(byId('undo').enabled, true);
+  assert.equal(byId('redo').enabled, false);
+  assert.equal(byId('cut').enabled, false);
+  assert.equal(byId('copy').enabled, false);
+  assert.equal(byId('paste').enabled, undefined);
+  assert.deepEqual(
+    items.filter((item) => item.label).map((item) => item.label),
+    ['Undo', 'Redo', 'Cut', 'Copy', 'Paste', 'Paste as plain text', 'Select all'],
+  );
+  await byId('paste').action();
+  await byId('paste-plain').action();
+  assert.deepEqual(
+    view.calls,
+    [
+      ['command', 'Paste'],
+      ['command', 'PasteAndMatchStyle'],
+    ],
+    'no clipboard access: engine clipboard',
+  );
+});
+
+test('search for the selection like Chrome, on the page and in fields', async () => {
+  const searched = [];
+  const search = { engine: 'Bing', open: (text) => searched.push(text) };
+  const page = defaultMenuItems(fakeView(), info({ selection: ' Private\n' }), {
+    openTab() {},
+    search,
+  });
+  assert.deepEqual(ids(normalizeMenu(page)).slice(0, 3), ['copy', 'search', 'select-all']);
+  const item = page.find((entry) => entry.id === 'search');
+  assert.equal(item.label, 'Search Bing for “Private”');
+  await item.action();
+  const field = defaultMenuItems(fakeView(), info({ selection: 'abc', editable: true }), {
+    openTab() {},
+    search,
+  });
+  assert.deepEqual(ids(normalizeMenu(field)).slice(-3), ['select-all', '-', 'search']);
+  const touch = defaultMenuItems(fakeView(), info({ selection: 'word', touch: true }), {
+    openTab() {},
+    search,
+  });
+  assert.deepEqual(ids(normalizeMenu(touch)), ['copy', 'search', 'select-all']);
+  assert.deepEqual(searched, ['Private']);
+  // Long selections: the label shortens at a word break, the search takes all of it
+  const long = 'The quick brown fox jumps over the lazy dog and keeps on running far away';
+  const longItem = defaultMenuItems(fakeView(), info({ selection: `${long}\n\n` }), {
+    openTab() {},
+    search,
+    copyText() {},
+  }).find((entry) => entry.id === 'search');
+  assert.equal(
+    longItem.label,
+    'Search Bing for “The quick brown fox jumps over the lazy dog and…”',
+  );
+  await longItem.action();
+  assert.equal(searched.at(-1), long);
+  // No search without an engine or for white space only
+  for (const [selection, actions] of [
+    ['Private', { openTab() {} }],
+    [' \n ', { openTab() {}, search }],
+  ])
+    assert.equal(
+      defaultMenuItems(fakeView(), info({ selection }), actions).some((e) => e.id === 'search'),
+      false,
+    );
+  const texts = { searchFor: 'Mit {engine} nach „{text}“ suchen' };
+  const german = defaultMenuItems(
+    fakeView(),
+    info({ selection: 'x' }),
+    { openTab() {}, search },
+    {
+      texts,
+    },
+  );
+  assert.equal(german.find((entry) => entry.id === 'search').label, 'Mit Bing nach „x“ suchen');
 });
 
 test('view source only for http(s) pages', () => {

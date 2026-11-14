@@ -1,8 +1,9 @@
 import { displayHost } from './url-display.js';
 
 /**
- * Texts the ui shows. Templates replace `{host}` with the host of the page and `{kind}` with
- * the permission kind.
+ * Texts the ui shows. Templates replace `{host}` with the host of the page, `{kind}` with the
+ * permission kind, `{engine}` with the name of the search engine and `{text}` with the selected
+ * text.
  */
 export interface UiTexts {
   /** First line of alert, confirm and prompt. */
@@ -52,7 +53,12 @@ export interface UiTexts {
   copy: string;
   cut: string;
   paste: string;
+  pasteAsPlainText: string;
+  undo: string;
+  redo: string;
   selectAll: string;
+  /** Searches the web for the selected text (shortened to 50 characters here). */
+  searchFor: string;
   back: string;
   forward: string;
   reload: string;
@@ -100,7 +106,11 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
   copy: 'Copy',
   cut: 'Cut',
   paste: 'Paste',
+  pasteAsPlainText: 'Paste as plain text',
+  undo: 'Undo',
+  redo: 'Redo',
   selectAll: 'Select all',
+  searchFor: 'Search {engine} for “{text}”',
   back: 'Back',
   forward: 'Forward',
   reload: 'Reload',

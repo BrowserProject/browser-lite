@@ -205,7 +205,7 @@
     { "type": "external-url", "scope": "view", "payload": "{url} (mailto:, tel:, app links)" },
     { "type": "new-view", "scope": "view", "payload": "{opener} (view id of the opener, 0 = none); the view id is the new view" },
     { "type": "popup-blocked", "scope": "view", "payload": "{url, origin}: a window.open, target=_blank link or form without a user gesture was not opened; url is its address (empty for window.open without one), origin the top page's. The permission 'popups' (bl_set_permission) of that origin lets them open" },
-    { "type": "context-menu", "scope": "view", "payload": "{x, y, link, image, selection, editable, canGoBack, canGoForward, ...}" },
+    { "type": "context-menu", "scope": "view", "payload": "{x, y, link, image, selection, editable, canUndo, canRedo, canGoBack, canGoForward}" },
     { "type": "file-chooser", "scope": "view", "payload": "{multiple, accept}; answer bl_choose_files" },
     { "type": "popup", "scope": "view", "payload": "{x, y, width, height, selectedIndex, items: [{text, tooltip, enabled, label, selected} | {separator}]}; answer bl_popup_choose" },
     { "type": "popup-hide", "scope": "view", "payload": "empty" },

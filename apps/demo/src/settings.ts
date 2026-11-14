@@ -2,14 +2,20 @@ import type { BrowserOptions, ColorScheme } from '@browser-lite/core';
 import { DEFAULT_DB_LIMIT_KB } from '@browser-lite/profile';
 import { profile } from './runtime.js';
 
-/** Search engines of the address bar; `%s` is the query. */
-export const SEARCH_ENGINES: Record<string, { name: string; url: string }> = {
+/** A search engine of the settings; `%s` in `url` is the query. */
+export interface SearchEngine {
+  name: string;
+  url: string;
+}
+
+/** Search engines of the address bar and the context menu. */
+export const SEARCH_ENGINES = {
   duckduckgo: { name: 'DuckDuckGo', url: 'https://duckduckgo.com/html/?q=%s' },
   google: { name: 'Google', url: 'https://www.google.com/search?q=%s' },
   bing: { name: 'Bing', url: 'https://www.bing.com/search?q=%s' },
   startpage: { name: 'Startpage', url: 'https://www.startpage.com/do/search?q=%s' },
   ecosia: { name: 'Ecosia', url: 'https://www.ecosia.org/search?q=%s' },
-};
+} satisfies Record<string, SearchEngine>;
 
 /** Zoom levels like Chrome. */
 export const ZOOM_LEVELS = [
@@ -165,6 +171,17 @@ const DEFAULTS: Settings = {
 /** Current settings (changes to start options apply after a restart). */
 export function settings(): Settings {
   return { ...DEFAULTS, ...profile.prefs<Partial<Settings>>('settings') };
+}
+
+/** The search engine of the settings, Bing when it is unknown. */
+export function searchEngine(): SearchEngine {
+  const engines: Record<string, SearchEngine | undefined> = SEARCH_ENGINES;
+  return engines[settings().searchEngine] ?? SEARCH_ENGINES.bing;
+}
+
+/** Address of a search for text with the search engine of the settings. */
+export function searchURL(text: string): string {
+  return searchEngine().url.replace('%s', encodeURIComponent(text.trim()));
 }
 
 export function saveSettings(changes: Partial<Settings>): void {

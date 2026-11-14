@@ -22,7 +22,7 @@ import { focusPrompt, showPromptsOf } from './prompts.js';
 import { uiReloading } from './reload.js';
 import { runtime } from './runtime.js';
 import { type SessionEntry, type SessionTab, saveSession, sessionEntry } from './session.js';
-import { settings, startSettings } from './settings.js';
+import { searchEngine, searchURL, settings, startSettings } from './settings.js';
 import { showActiveInStrip, unwatchStripTab, watchStripTab } from './tab-strip.js';
 import {
   setProgress,
@@ -297,6 +297,8 @@ export class Tab implements SessionTab {
     this.on('context-menu', (info) => {
       const items = defaultMenuItems(view, info, {
         openTab: (url) => openMenuTab(url, this),
+        // Like Chrome the search opens in a new tab in front, next to this one
+        search: { engine: searchEngine().name, open: (text) => openLinkTab(searchURL(text), this) },
         print: () => printTab(this),
       });
       showContextMenu(view, info, [...items, ...slotMenuItems(ui, view, info)]);

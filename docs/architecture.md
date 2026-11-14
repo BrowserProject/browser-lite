@@ -355,7 +355,11 @@ put text and HTML on the engine's clipboard, which the host gets as the event `c
 patch 0100, #469). Copy image of the context menu (`bl_copy_image`) hit tests the menu's point
 again like Chrome's `CopyImageAt` and encodes the image there at full size, turned by its EXIF
 orientation, as PNG with Skia (`onEngineCopyImage`); the core hands it to `clipboardWrite` as a
-promise the click already wrote, as Safari requires (#511).
+promise the click already wrote, as Safari requires (#511). Paste of the menu reads text and
+HTML of the host clipboard (`readHostClipboard` of `@browser-lite/ui`) and hands both to
+`view.paste` (`bl_set_clipboard`), Paste as plain text only the text; Undo and Redo run on the
+undo stack of the view's `EditorClient`, whose state comes with `context-menu` (`canUndo`,
+`canRedo`, #562).
 
 ## Network
 

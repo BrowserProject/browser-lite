@@ -24,6 +24,7 @@ import type {
   ClipboardWriteRequest,
   ContextMenuInfo,
   EditCommand,
+  PasteContent,
   SessionHistory,
   Unsubscribe,
   View,
@@ -524,9 +525,11 @@ export class ViewImpl implements View {
     this.call((m) => m._bl_command(this.id, this.host.text(name)));
   }
 
-  paste(text: string): void {
+  paste(content: string | PasteContent): void {
+    const { text, html } = typeof content === 'string' ? { text: content } : content;
     this.call((m) => {
-      m._bl_set_clipboard_text(this.host.text(text));
+      if (html) m._bl_set_clipboard(this.host.text(JSON.stringify({ text, html })));
+      else m._bl_set_clipboard_text(this.host.text(text));
       m._bl_command(this.id, this.host.text('Paste'));
     });
   }
@@ -779,6 +782,8 @@ export class ViewImpl implements View {
           image: String(data.image ?? ''),
           selection: String(data.selection ?? ''),
           editable: !!data.editable,
+          canUndo: !!data.canUndo,
+          canRedo: !!data.canRedo,
           canGoBack: !!data.canGoBack,
           canGoForward: !!data.canGoForward,
           touch: this.menuByTouch,

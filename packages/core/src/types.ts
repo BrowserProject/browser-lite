@@ -538,8 +538,12 @@ export interface View {
   viewSource(): void;
   /** Editor command on the focused element or selection of the page. */
   command(name: EditCommand): void;
-  /** Puts text on the engine clipboard and pastes it. */
-  paste(text: string): void;
+  /**
+   * Puts text, or text with HTML, on the engine clipboard and pastes it like Ctrl+V: a rich text
+   * field gets the HTML, a text field and Paste as plain text (`command('PasteAndMatchStyle')`)
+   * the text.
+   */
+  paste(content: string | PasteContent): void;
   /** Ends fullscreen of the page (also ends host fullscreen). */
   exitFullscreen(): void;
   /**
@@ -551,8 +555,24 @@ export interface View {
   close(options?: { force?: boolean }): Promise<boolean>;
 }
 
-/** Commands of {@link View.command}. */
-export type EditCommand = 'Copy' | 'Cut' | 'Paste' | 'SelectAll' | 'Undo' | 'Redo';
+/**
+ * Commands of {@link View.command}. `PasteAndMatchStyle` is Chrome's Paste as plain text
+ * (Ctrl+Shift+V): only the text of the engine clipboard.
+ */
+export type EditCommand =
+  | 'Copy'
+  | 'Cut'
+  | 'Paste'
+  | 'PasteAndMatchStyle'
+  | 'SelectAll'
+  | 'Undo'
+  | 'Redo';
+
+/** What {@link View.paste} pastes: the text and, from a rich clipboard, its HTML. */
+export interface PasteContent {
+  text: string;
+  html?: string;
+}
 
 /** A file of an upload, drop or paste the page did not get. */
 export interface SkippedFile {
@@ -719,6 +739,9 @@ export interface ContextMenuInfo {
   selection: string;
   /** Over an editable element (text field, contenteditable). */
   editable: boolean;
+  /** The page has an edit to undo or redo (Undo and Redo of {@link View.command}). */
+  canUndo: boolean;
+  canRedo: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
   /**

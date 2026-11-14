@@ -1716,14 +1716,20 @@ void WebView::contextMenu(double x, double y)
     auto result = controller.hitTestResult();
     controller.clearContextMenu();
     String selection;
-    if (RefPtr focused = m_page->focusController().focusedOrMainFrame())
+    bool canUndo = false;
+    bool canRedo = false;
+    if (RefPtr focused = m_page->focusController().focusedOrMainFrame()) {
         selection = focused->editor().selectedText();
+        canUndo = focused->editor().canUndo();
+        canRedo = focused->editor().canRedo();
+    }
     auto& backForward = m_page->backForward();
     notifyHost(m_id, "context-menu", makeString("{\"x\":"_s, x, ",\"y\":"_s, y,
         ",\"link\":\""_s, jsonEscape(result.absoluteLinkURL().string()),
         "\",\"image\":\""_s, jsonEscape(result.absoluteImageURL().string()),
         "\",\"selection\":\""_s, jsonEscape(selection.left(200)),
         "\",\"editable\":"_s, result.isContentEditable() ? "true"_s : "false"_s,
+        ",\"canUndo\":"_s, canUndo ? "true"_s : "false"_s, ",\"canRedo\":"_s, canRedo ? "true"_s : "false"_s,
         ",\"canGoBack\":"_s, backForward.canGoBackOrForward(-1) ? "true"_s : "false"_s,
         ",\"canGoForward\":"_s, backForward.canGoBackOrForward(1) ? "true"_s : "false"_s, '}'));
 }

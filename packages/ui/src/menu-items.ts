@@ -1,13 +1,24 @@
-import type { ContextMenuInfo, View } from '@browser-lite/core';
+import type { ContextMenuInfo, PasteContent, View } from '@browser-lite/core';
+import { readHostClipboard } from './clipboard.js';
 import type { MenuItem } from './context-menu.js';
 import type { UiOptions } from './options.js';
-import { resolveTexts } from './texts.js';
+import { format, resolveTexts } from './texts.js';
 import { displayURL } from './url-display.js';
+
+/** The search engine of Search ... for "..." (`texts.searchFor`). */
+export interface MenuSearch {
+  /** Name in the label, for example `Google`. */
+  engine: string;
+  /** Opens the search for the selected text; Chrome opens it in a new tab in front. */
+  open(text: string): void;
+}
 
 /** Actions of the standard menu that need the app; the optional ones default to the view. */
 export interface MenuActions {
   /** Opens a link or image in a new tab; Chrome opens it in the background. */
   openTab(url: string): void;
+  /** Search for selected text like Chrome; without it the menu has no search item. */
+  search?: MenuSearch;
   /** Default `view.reload()`. */
   reload?(): void;
   /** Default `view.print()`. */
@@ -18,21 +29,40 @@ export interface MenuActions {
   download?(url: string): void;
   /** Writes text to the clipboard; default `navigator.clipboard.writeText`. */
   copyText?(text: string): void | Promise<void>;
-  /** Reads the clipboard for Paste; default `navigator.clipboard.readText`, null when denied. */
-  readText?(): Promise<string | null>;
+  /**
+   * Reads the clipboard for Paste and Paste as plain text; default `navigator.clipboard.read()`
+   * (text and HTML) or `readText()`, null when denied: then they paste the engine clipboard.
+   */
+  readClipboard?(): Promise<PasteContent | null>;
 }
 
-function clipboard(): Clipboard | undefined {
-  return globalThis.navigator?.clipboard;
+// Like Chrome's kMaxSelectionTextLength: the label shows at most 50 characters of the selection
+const SEARCH_LABEL_LENGTH = 50;
+
+/** Selected text as Chrome searches for it: white space collapsed, '' when there is none. */
+function searchText(selection: string): string {
+  return selection.replace(/\s+/g, ' ').trim();
+}
+
+/** Shortens text for a label at a word break where there is one, like gfx::TruncateString. */
+function shorten(text: string, length: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= length) return text;
+  const cut = chars.slice(0, length - 1).join('');
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 0 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 /**
  * The standard items of a context menu like Chrome: open, save and copy the address of a link or
- * image, copy an image, copy, select all, back, forward, reload, print and view source. In an editable field only the edit
- * commands: cut and copy (both disabled without a selection), paste and select all. After a
- * long press (`info.touch`) like Chrome on phones only what was pressed: the address of the
- * link or image as a header and its commands, the edit commands or copy and select all for
- * text, nothing else (no menu on plain page). Pass them to {@link showContextMenu}, possibly with own items added.
+ * image, copy an image, copy, search the web for the selection (with `actions.search`), select
+ * all, back, forward, reload, print and view source. In an editable field only the edit
+ * commands: undo and redo (disabled without an edit to undo or redo), cut and copy (disabled
+ * without a selection), paste, paste as plain text, select all and the search. After a long
+ * press (`info.touch`) like Chrome on phones only what was pressed: the address of the link or
+ * image as a header and its commands, cut, copy, paste and select all in a field or copy and
+ * select all for text, the search for a selection, nothing else (no menu on plain page). Pass
+ * them to {@link showContextMenu}, possibly with own items added.
  */
 export function defaultMenuItems(
   view: View,
@@ -42,14 +72,10 @@ export function defaultMenuItems(
 ): MenuItem[] {
   const texts = resolveTexts(options?.texts);
   const copyText = (text: string) =>
-    actions.copyText ? actions.copyText(text) : clipboard()?.writeText(text);
+    actions.copyText ? actions.copyText(text) : globalThis.navigator?.clipboard?.writeText(text);
   const download = (url: string) => (actions.download ? actions.download(url) : view.download(url));
-  const readText = async () =>
-    actions.readText
-      ? actions.readText()
-      : ((await clipboard()
-          ?.readText()
-          .catch(() => null)) ?? null);
+  const readClipboard = () =>
+    actions.readClipboard ? actions.readClipboard() : readHostClipboard();
   const items: MenuItem[] = [];
   const separator = () => items.push({ separator: true });
 
@@ -81,7 +107,43 @@ export function defaultMenuItems(
     separator();
   }
   const copy: MenuItem = { id: 'copy', label: texts.copy, action: () => view.command('Copy') };
+  const query = actions.search ? searchText(info.selection) : '';
+  const search = (): MenuItem[] =>
+    actions.search && query
+      ? [
+          {
+            id: 'search',
+            label: format(texts.searchFor, {
+              engine: actions.search.engine,
+              text: shorten(query, SEARCH_LABEL_LENGTH),
+            }),
+            action: () => actions.search?.open(query),
+          },
+        ]
+      : [];
+  const selectAll: MenuItem = {
+    id: 'select-all',
+    label: texts.selectAll,
+    action: () => view.command('SelectAll'),
+  };
   if (info.editable) {
+    if (!info.touch) {
+      items.push(
+        {
+          id: 'undo',
+          label: texts.undo,
+          action: () => view.command('Undo'),
+          enabled: info.canUndo,
+        },
+        {
+          id: 'redo',
+          label: texts.redo,
+          action: () => view.command('Redo'),
+          enabled: info.canRedo,
+        },
+      );
+      separator();
+    }
     items.push(
       {
         id: 'cut',
@@ -94,20 +156,30 @@ export function defaultMenuItems(
         id: 'paste',
         label: texts.paste,
         async action() {
-          const text = await readText();
-          if (text != null) view.paste(text);
+          const content = await readClipboard();
+          if (content) view.paste(content);
           else view.command('Paste');
         },
       },
     );
-  } else if (info.selection) items.push(copy);
-  if (!info.touch || info.selection || info.editable)
-    items.push({
-      id: 'select-all',
-      label: texts.selectAll,
-      action: () => view.command('SelectAll'),
-    });
-  if (info.touch || info.editable) return items;
+    if (!info.touch)
+      items.push({
+        id: 'paste-plain',
+        label: texts.pasteAsPlainText,
+        async action() {
+          const content = await readClipboard();
+          if (content) view.paste(content.text);
+          else view.command('PasteAndMatchStyle');
+        },
+      });
+    items.push(selectAll);
+    separator();
+    items.push(...search());
+    return items;
+  }
+  if (info.selection) items.push(copy, ...search());
+  if (!info.touch || info.selection) items.push(selectAll);
+  if (info.touch) return items;
   separator();
   items.push(
     { id: 'back', label: texts.back, action: () => view.back(), enabled: info.canGoBack },

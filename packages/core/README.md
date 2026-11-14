@@ -135,7 +135,7 @@ what a browser UI has to do, and nothing happens without a listener:
 | `open-tab` | Ctrl/Cmd, middle or Shift click on a link, also one with `target=_blank`, or `view.viewSource()` (`view-source:<url>`, `foreground`): open `url` in a new view as `disposition` says (`background`, `foreground` or `window`, like Chrome), or ignore it |
 | `external-url` | `mailto:`, `tel:` and app links: hand `url` to the host, or ignore it |
 | `popup-blocked` | A popup without a user gesture did not open (like in Chrome): show that, offer to open `url` and to allow the site with `browser.setPermission(origin, 'popups', 'grant')` |
-| `context-menu` | A right click or long press (`touch` true, the menu comes when the finger lifts) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`) |
+| `context-menu` | A right click or long press (`touch` true, the menu comes when the finger lifts) the page did not handle: show a menu (`showContextMenu` and `defaultMenuItems` of `@browser-lite/ui`). With the link, image and selection there, whether the point is editable and whether the page has an edit to undo or redo (`canUndo`, `canRedo`) |
 | `unhandled-key` | A keydown into the page (while `view.focused`) that the page did not handle (no `preventDefault`, editing command or default action): run your keyboard shortcut for it, like Chrome, where the page gets Ctrl+F or Ctrl+U first. Call `preventDefault` on the host keydown of such a shortcut and let it through to the view; run the ones the page must never get (Ctrl+T, Ctrl+W) on the host keydown right away. Keys typed after a keydown with Ctrl, Alt or Meta or one that types no text (Tab, Escape, F-keys, arrows) wait until the page answered it and then go to whatever has the focus: move it in this listener (to your address bar), and they reach that element as host key events, with their characters typed into a field. Typing (characters, Space, Enter, Backspace, Delete) does not wait, so a shortcut on such a key cannot take the keys after it |
 | `print` | `window.print()` or `view.print()`: show or save the PDF |
 | `close` | The view is closed (`window.close()` of the page or `view.close()`): remove its UI |
@@ -158,7 +158,10 @@ nothing for a page without an address of its own (`loadHTML`, `about:`).
 `view.copyImage(x, y)` is Copy image of the menu: the engine copies the image at that point of a
 `context-menu` event at its full size as PNG, and the `clipboardWrite` handler gets it as
 `image`, a promise, already in the click (Safari allows a clipboard write only there). The
-default writes `new ClipboardItem({ 'image/png': image })`.
+default writes `new ClipboardItem({ 'image/png': image })`. `view.paste(text)` or
+`view.paste({ text, html })` pastes like Ctrl+V (Paste of the menu: a rich text field gets the
+HTML); `view.command('PasteAndMatchStyle')` is Paste as plain text of the engine clipboard,
+`Undo` and `Redo` use the view's undo stack.
 
 A failed navigation comes as `error` with the network layer's English text (`description`, for
 logs), then usually the engine's error page commits (`commit` with `errorPage`). Like in Chrome
