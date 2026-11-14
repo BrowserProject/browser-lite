@@ -185,7 +185,8 @@ differently, gets covered otherwise, its animation changes or the view gets a ne
 a frame is) is urgent work on the engine thread like input (see Input), so a busy page still gets
 a frame every task or two (#359). At most one RunLoop pump waits among the engine's local tasks, so a
 pass of them returns to the JS event loop, where the host's frame calls arrive, after one RunLoop
-cycle (#477). A view without a rendering update for two stall checks (2 s
+cycle (#477). A long cycle is one long task of the page, not many short ones, so a cycle has no
+time budget of its own (#551). A view without a rendering update for two stall checks (2 s
 apart, `WebView.cpp`) logs where it and its compositor stand (`stallState`), with the
 compositor's phase and how long it lasts, since the scene started if it never ran (#402). Pinch zoom scales the shown tiles on the compositor and commits once at the end
 (#150). After GPU loss the engine paints on the CPU and returns to the GPU on restore (#157).

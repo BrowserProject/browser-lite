@@ -721,6 +721,18 @@ browser (Safari keeps Cmd+L, T and W for itself).
    one go on an unloaded machine, more than 11 s under load; JS in the interpreter and the JIT
    (see 1.), and about 5 % fontconfig lookups of the families its styles name in other weights
    and styles. A script cannot be cut into slices; it waits for faster JS.
+   Long engine steps while heavy sites load (2026-11-14, local, Chromium host; the report: single
+   steps of 5 to 13 s on netflix.com, open.spotify.com, webflow.com and ricardo.ch at load 16 to
+   33): at load 1 to 6 the longest steps take 1.4 to 2.0 s on netflix, 1.7 to 2.5 s on webflow and
+   3.3 to 5.1 s on ricardo. A step of the debug log is one cycle of WTF's RunLoop, which may run
+   many items (due timers, functions), but a build that counted them showed every step of 1 s and
+   more to be one item of nearly its whole length (ricardo 4.6 s of a 4.65 s step of 30 items):
+   one task of the page (a timer with its microtasks, a message event, a script) or one of
+   WebCore's loops over scripts. A time budget per step does not shorten them (#551). They are JS
+   on cold code, and with the JIT a quarter longer: the JIT costs these loads 15 to 30 % of the
+   engine thread and up to half of the longest step ([jit.md](jit.md#measured)), open. The debug
+   log no longer walks the JS heap around every work item, which made every step about 5 %
+   longer with `log=1` (#551).
 13. YouTube's stream protection (2026-11-13, local, Chromium host, one video, 19 loads): in about
    half of the loads playback stops after about 40 s with "Something went wrong. Refresh or try
    again later." (`ump.spsrejectfailure`). Every media response of YouTube's SABR stream carries a

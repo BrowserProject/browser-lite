@@ -128,6 +128,15 @@ with the JIT, 3.1 to 3.4 s with a 4 times higher warm-up (`JSC_thresholdForJITAf
 15 % (`slow_path_enter` with the lookup of compiled code, `callFromCompiledCode`, `callInFrame`
 with the VM entry of a generic call), the compiles 4 %, compiled code 22 %. A cache of
 CodeBlocks known to have no compiled code in front of that lookup measured no gain.
+Loads of heavy sites (2026-11-14, local, Chromium host, load 1 to 6, 30 s after the load, 2 runs
+each, without the JIT `BL_JIT=0`): the engine thread's RunLoop steps add up to 17.8 against 13.8 s
+on ricardo.ch, 7.7 to 8.4 against 7.1 to 7.2 s on netflix.com and 11.5 to 13.6 against 10.0 to
+11.6 s on webflow.com; the longest step takes 4.9 to 5.1 against 2.3 s on ricardo, 1.8 to 1.9
+against 1.4 s on netflix. In a profile of ricardo (45 s) compiled code runs 5.3 s, as long as the
+interpreter time it replaces (7.0 against 1.7 s), the calls between compiled and interpreted code
+add about 2 s and the compiles 0.75 s. V8 tiering its optimized code in sooner
+(`--wasm-tiering-budget=20000`) leaves compiled code at 4.5 s, so it is not Liftoff: on this code
+compiled code saves nothing yet, open (phase 4).
 
 Calls (#459, jsc shell, 2 million calls each, fastest of 3): one callee 84 against 62 ms, 16
 callees at one site 232 against 116 ms, 2 alternating 219 against 100 ms, a VM of 8 handlers 235

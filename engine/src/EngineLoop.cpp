@@ -175,8 +175,6 @@ static void runWithGCAfterwards(Work&& work)
     auto gcStart = WTF::MonotonicTime::now();
     s_workVM.store(vm, std::memory_order_relaxed);
     s_workSince.store(gcStart.secondsSinceEpoch().value(), std::memory_order_relaxed);
-    // heap.size() is expensive, only for the debug output
-    size_t sizeBefore = debugEnabled() ? vm->heap.size() : 0;
     {
         JSC::DeferGC deferGC(*vm);
         work();
@@ -187,9 +185,12 @@ static void runWithGCAfterwards(Work&& work)
     for (auto& next : std::exchange(topLevelWork(), { }))
         next();
     if (debugEnabled()) {
+        // heap.size() walks every block: only after a GC worth logging, not around every work
+        // item (with the debug log that was about 5 % of the engine thread and made every work
+        // item look longer)
         auto duration = (WTF::MonotonicTime::now() - gcStart).milliseconds();
         if (duration > 5)
-            debugLog("GC %.0f ms, Heap %zu -> %zu kB", duration, sizeBefore / 1024, vm->heap.size() / 1024);
+            debugLog("GC %.0f ms, Heap %zu kB after", duration, vm->heap.size() / 1024);
     }
     checkMemory();
 }
