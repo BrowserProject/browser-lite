@@ -624,7 +624,14 @@ browser (Safari keeps Cmd+L, T and W for itself).
    needs 0.07. Many animations spread over the view (46 pulsing skeleton boxes, as on
    weather.com) touched more than half of the view and stayed whole frames; under SwiftShader a
    new view sized canvas frame costs the host about 100 ms of GPU process CPU at 1920x1080
-   whatever it shows (#454). Layers that only animate their opacity are now shown by the host
+   whatever it shows (#454). A video the host shows behind the view canvas kept every frame
+   whole until #550, wherever it was (paused, or 4000 px below the view): the same spinner with
+   such a video next to it (local, 2026-11-14, 1280x800, packaged demo, same core A/B, two runs)
+   0.92 to 0.93 cores instead of 6.79, playing next to it 1.42 to 1.63 instead of 7.37, playing
+   below the view 1.95 to 2.12 instead of 7.07 to 7.37; idle edition.cnn.com 4.4 instead of 7.4
+   cores (its spinner alone 2.5 instead of 7.7). An animation over a video hole still shows whole
+   frames (7.1 cores): a tile there would show the view canvas's older frame through its hole.
+   Layers that only animate their opacity are now shown by the host
    itself (#478): the page of 46 pulsing boxes (local, 2026-11-09, demo, 1280x800, 20 s standing
    still, same engine A/B) 0.14 to 0.16 CPU cores and no engine frame instead of 5.96 to 6.67
    cores at 52 to 55 frames per second (`BL_HOST_LAYERS=0`), the engine before 4.6 to 5.0 cores

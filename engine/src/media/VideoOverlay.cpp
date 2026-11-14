@@ -12,6 +12,8 @@
 #include <array>
 #include <skia/core/SkCanvas.h>
 #include <skia/core/SkM44.h>
+#include <skia/core/SkMatrix.h>
+#include <skia/core/SkRect.h>
 #include <wtf/HashMap.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/MakeString.h>
@@ -30,20 +32,26 @@ struct Placement {
 
 using Placements = HashMap<int, Placement>;
 
+// The holes of a frame: placements by player and the device pixels they clear in the target
+struct Holes {
+    Placements placements;
+    Vector<FloatRect> rects;
+};
+
 struct CurrentFrame {
     int viewId;
     SkCanvas* target;
     Frame::Kind kind;
-    Placements placements;
+    Holes holes;
     bool punched { false };
 };
 
 static thread_local CurrentFrame* s_frame;
 
-static HashMap<int, Placements>& shownPlacements()
+static HashMap<int, Holes>& shownHoles()
 {
-    static NeverDestroyed<HashMap<int, Placements>> placements;
-    return placements;
+    static NeverDestroyed<HashMap<int, Holes>> holes;
+    return holes;
 }
 
 static void refuse(int playerId)
@@ -63,13 +71,22 @@ static bool punch(uint64_t client, SkCanvas& canvas, const FloatRect& rect, bool
         refuse(playerId);
         return false;
     }
-    s_frame->punched = true;
-    if (s_frame->kind == Frame::Kind::Part)
+    // The pixels the hole clears in the target: the compositor walks every layer for each damage
+    // tile, also those outside it. One more pixel around for antialiased edges.
+    auto cleared = m.asM33().mapRect(SkRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height())).roundOut().makeOutset(1, 1);
+    if (!cleared.intersect(canvas.getDeviceClipBounds()))
+        cleared.setEmpty();
+    if (s_frame->kind == Frame::Kind::Part) {
+        s_frame->punched |= !cleared.isEmpty();
         return true;
-    s_frame->placements.set(playerId, Placement {
+    }
+    s_frame->punched = true;
+    s_frame->holes.placements.set(playerId, Placement {
         { m.rc(0, 0), m.rc(1, 0), m.rc(0, 1), m.rc(1, 1), m.rc(0, 3), m.rc(1, 3) },
         { rect.x(), rect.y(), rect.width(), rect.height() },
     });
+    if (!cleared.isEmpty())
+        s_frame->holes.rects.append(FloatRect(cleared.x(), cleared.y(), cleared.width(), cleared.height()));
     return true;
 }
 
@@ -88,10 +105,10 @@ bool Frame::punched() const
     return s_frame->punched;
 }
 
-bool hasPlacements(int viewId)
+Vector<FloatRect> holes(int viewId)
 {
-    auto it = shownPlacements().find(viewId);
-    return it != shownPlacements().end() && !it->value.isEmpty();
+    auto it = shownHoles().find(viewId);
+    return it == shownHoles().end() ? Vector<FloatRect> { } : it->value.rects;
 }
 
 Frame::~Frame()
@@ -110,23 +127,24 @@ static String placementJSON(int viewId, const Placement& placement)
 void Frame::shown()
 {
     auto viewId = s_frame->viewId;
-    auto& shown = shownPlacements().add(viewId, Placements { }).iterator->value;
-    for (auto& [playerId, placement] : s_frame->placements) {
+    auto& shownFrame = shownHoles().add(viewId, Holes { }).iterator->value;
+    auto& shown = shownFrame.placements;
+    for (auto& [playerId, placement] : s_frame->holes.placements) {
         auto it = shown.find(playerId);
         if (it == shown.end() || it->value != placement)
             notifyMedia(playerId, "place"_s, placementJSON(viewId, placement));
     }
     // Holes no longer in the view (scrolled away, removed, refused)
     for (auto& playerId : shown.keys()) {
-        if (!s_frame->placements.contains(playerId))
+        if (!s_frame->holes.placements.contains(playerId))
             notifyMedia(playerId, "place"_s, makeString("{\"view\":"_s, viewId, '}'));
     }
-    shown = WTF::move(s_frame->placements);
+    shownFrame = WTF::move(s_frame->holes);
 }
 
 void forgetView(int viewId)
 {
-    shownPlacements().remove(viewId);
+    shownHoles().remove(viewId);
 }
 
 } // namespace BrowserLite::VideoOverlay

@@ -3,6 +3,9 @@
 // its frame; the host browser then repaints only those tiles instead of the whole view. What the
 // tiles show must be what a whole frame shows (0 different pixels, but for a few edge pixels of a
 // rotated layer), and a whole frame empties them again. At device pixel ratio 1 and 2; the spinner crosses tile borders.
+// Videos the host shows behind the view canvas (VideoOverlay.h) keep the spinner in its tiles when
+// they are elsewhere: playing, paused or far below the view. A tile on a video hole shows a whole
+// frame instead, also when the video is gone from there.
 // Like Safari 18, the engine's workers here keep a canvas's last frame after
 // transferFromImageBitmap(null): Safari reads such a canvas back empty but keeps showing the frame,
 // so tiles emptied that way showed stale pieces of earlier frames and pages on iPhones.
@@ -10,13 +13,17 @@
 //   node tests/core/damage-tiles-test.mjs [engine-dir]
 import {
   SWIFTSHADER,
+  canvasOrigin,
   check,
   collect,
   evalPage,
   finish,
   launch,
   openHost,
+  recordClip,
+  screenPixel,
   serve,
+  serveBytes,
   startStack,
   timeLimit,
   waitFor,
@@ -54,8 +61,33 @@ window.blink = (times) => {
 };
 console.log('RESULT ready=1');
 </script>`;
+// The spinner at 100, 100 again, a playing video at 400, 300 and a paused one at 40, 400, both in
+// other tiles, and a playing one far below the view
+const VIDEO_PAGE = `<!doctype html><title>Tiles and videos</title>
+<style>
+  body { margin: 0; background: #fff; }
+  #spinner { position: absolute; left: 100px; top: 100px; width: 36px; height: 36px; border: 4px solid #00f;
+    border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  video { position: absolute; width: 320px; height: 180px; }
+</style>
+<div id="spinner" style="z-index:1"></div>
+<video id="playing" src="/clip.webm" muted loop playsinline autoplay style="left:400px;top:300px"></video>
+<video id="paused" src="/clip.webm" muted preload="auto" style="left:40px;top:400px;width:160px;height:90px"></video>
+<video id="below" src="/clip.webm" muted loop playsinline autoplay style="left:40px;top:4000px"></video>
+<script>
+const playing = document.getElementById('playing');
+playing.addEventListener('playing', () => console.log('RESULT playing=1'), { once: true });
+</script>`;
+let clip = null;
 const { url: siteURL } = await serve((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE);
+  if (req.url === '/clip.webm') {
+    serveBytes(req, res, clip, 'video/webm');
+    return;
+  }
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(req.url === '/video' ? VIDEO_PAGE : PAGE);
 });
 
 /**
@@ -198,6 +230,83 @@ for (const ratio of [1, 2]) {
   check(
     `ratio ${ratio}: the tiles stay empty`,
     differentPixels(whole, await shown(page, true)) === 0,
+  );
+  await page.close();
+}
+
+// Videos in the view (ratio 1)
+clip = await recordClip(browser, 3);
+{
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  watchErrors(page);
+  const results = collect(page);
+  check('video: page loaded', await openHost(page, stack.app({ url: `${siteURL}video` })));
+  check('video: the video plays', (await results.wait('playing')) === '1');
+  const origin = await canvasOrigin(page);
+  const screen = (x, y) => screenPixel(page, origin.x + x, origin.y + y);
+  const isRed = (p) => p.r > 180 && p.g < 60 && p.b < 60;
+  const isWhite = (p) => p.r > 220 && p.g > 220 && p.b > 220;
+  let pixel = null;
+  await waitFor(async () => isRed((pixel = await screen(560, 390))), 20000, 250);
+  check('video: the video shows through its hole', isRed(pixel), JSON.stringify(pixel));
+
+  let viewBefore = null;
+  let viewAfter = null;
+  // The tiles of the spinner come after the first frames, which place the videos whole
+  await waitFor(
+    async () => {
+      viewBefore = await shown(page, false);
+      await page.waitForTimeout(500);
+      viewAfter = await shown(page, false);
+      return viewAfter.tiles > 0 && differentPixels(viewBefore, viewAfter) === 0;
+    },
+    10000,
+    0,
+  );
+  const allBefore = await shown(page, true);
+  const turned = await waitFor(
+    async () => differentPixels(allBefore, await shown(page, true)) > 0,
+    3000,
+    200,
+  );
+  check(
+    'video: the spinner turns in its tiles, the view canvas keeps its frame',
+    turned && differentPixels(viewBefore, viewAfter) === 0,
+    `${viewAfter.tiles} tiles, ${differentPixels(viewBefore, viewAfter)} pixels of the view canvas changed in 500 ms`,
+  );
+
+  // Over the video the spinner's tiles would show the view canvas's old frame through their hole
+  await evalPage(
+    page,
+    `Object.assign(document.getElementById('spinner').style, { left: '540px', top: '370px' })`,
+  );
+  await page.waitForTimeout(500);
+  const overBefore = await shown(page, false);
+  const overChanged = await waitFor(
+    async () => differentPixels(overBefore, await shown(page, false)) > 0,
+    3000,
+    100,
+  );
+  check('video: over the video the spinner turns in whole frames', overChanged);
+  // The clip of 4:3 shows from 440 to 680 in its box of 16:9
+  pixel = await screen(470, 320);
+  check('video: the video still shows beside the spinner', isRed(pixel), JSON.stringify(pixel));
+
+  // The spinner back in its tiles; the video goes: its hole closes with a whole frame
+  await evalPage(
+    page,
+    `Object.assign(document.getElementById('spinner').style, { left: '100px', top: '100px' })`,
+  );
+  await page.waitForTimeout(500);
+  await evalPage(page, `document.getElementById('playing').style.display = 'none'`);
+  await waitFor(async () => isWhite((pixel = await screen(560, 390))), 5000, 200);
+  const view = await shown(page, false);
+  const offset = (390 * view.width + 560) * 4;
+  const rgba = [...Buffer.from(view.data, 'base64').subarray(offset, offset + 4)];
+  check(
+    'video: where the video was the view canvas shows the page again',
+    isWhite(pixel) && rgba.every((value) => value > 220),
+    `screen ${JSON.stringify(pixel)}, view canvas ${rgba.join(',')}`,
   );
   await page.close();
 }

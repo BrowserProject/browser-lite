@@ -39,7 +39,7 @@ public:
 
     // The tiles a frame with this damage draws, or nullopt when it shows the whole view:
     // the damage covers too much, a tile overlaps rectsDrawnWhole (filters that read pixels
-    // around them) or the host has not given all of its tiles yet (they are asked for here).
+    // around them, holes of videos) or the host has not given all of its tiles yet (they are asked for here).
     std::optional<Vector<Tile>> tilesFor(const WebCore::IntSize& pixelSize, float deviceScaleFactor, const WebCore::Damage&, const Vector<WebCore::FloatRect>& rectsDrawnWhole);
     // The framebuffer of the compositor's context goes into the canvas of this tile
     bool show(const Tile&);

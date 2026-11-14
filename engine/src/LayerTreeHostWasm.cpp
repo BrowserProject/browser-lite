@@ -345,9 +345,11 @@ static void compositeScene(CompositorScene& scene)
     bool changed = repaintAll || !frameDamage || !frameDamage->isEmpty();
     if (changed || !skipUnchanged) {
         std::optional<Vector<DamageTiles::Tile>> tiles;
-        // Video holes are placed by whole frames (VideoOverlay.h)
-        if (!repaintAll && frameDamage && skipUnchanged && !VideoOverlay::hasPlacements(scene.viewId))
+        // Video holes are placed by whole frames (VideoOverlay.h): tiles stay off them
+        if (!repaintAll && frameDamage && skipUnchanged) {
+            prepared.rectsDrawnWhole.appendVector(VideoOverlay::holes(scene.viewId));
             tiles = scene.damageTiles.tilesFor(pixelSize, deviceScaleFactor, *frameDamage, prepared.rectsDrawnWhole);
+        }
         if (tiles && !compositeTiles(scene, rootLayer, *tiles, background, hasRunningAnimations))
             tiles = std::nullopt;
         if (!tiles) {

@@ -163,7 +163,9 @@ visible change is neither composited nor shown. A frame whose damage touches at 
 tiles of 128 CSS pixels and half of the view is composited only into those tiles, each into
 a small canvas of its own over the view canvas, which keeps its last frame (`DamageTiles.cpp`,
 `view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
-whole view per frame before); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463).
+whole view per frame before); a frame whose tiles touch the hole of a video the host shows (see Media), in
+this frame or in the last whole one, is shown whole too, while videos elsewhere in the page leave
+the tiles alone (#550); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463).
 A layer that only animates its opacity and transform (pulsing skeleton placeholders, Wikipedia's
 pulsating dot) is shown by the host browser itself once it stood still for about 20 frames
 (`HostLayers.cpp`, `view-host-layers.ts`, patches 0104 and 0117, #478, #518): a canvas of its own
@@ -535,7 +537,8 @@ own `decodingInfo` on its main thread, so `supported`, `smooth` and `powerEffici
 host's (`MediaCapabilitiesWasm.cpp`, #503). With compositing the host shows its own `<video>`
 (#232): the video gets a composited layer whose contents is a hole punch buffer (patch 0047), the
 compositor clears that rect in the framebuffer (its WebGL context has alpha) and
-`VideoOverlay.cpp` sends the transform of every hole after a shown frame ("place"); the core puts
+`VideoOverlay.cpp` sends the transform of every hole after a shown whole frame ("place"), so a
+damage tile never shows a hole and keeps off the holes of the last whole frame (#550); the core puts
 the host `<video>` before the view canvas (`position: relative`) with that transform, so page
 content over the video stays on top and clipping comes from the hole. Frames are copied only
 while the page reads them (`drawImage`, WebGL, `VideoFrame`), `requestVideoFrameCallback` gets

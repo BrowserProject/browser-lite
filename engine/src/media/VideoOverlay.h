@@ -7,7 +7,13 @@
 // the player goes back to copied frames.
 #pragma once
 
+#include <wtf/Vector.h>
+
 class SkCanvas;
+
+namespace WebCore {
+class FloatRect;
+}
 
 namespace BrowserLite::VideoOverlay {
 
@@ -18,19 +24,22 @@ void initialize();
 // are placements of this frame
 class Frame {
 public:
-    // Part: a damage tile (DamageTiles.h), which places no video: a hole punched into it only
-    // marks the frame as one to show whole
+    // Part: a damage tile (DamageTiles.h), which places no video: a hole punched into it where
+    // the tile shows it marks the frame as one to show whole. Holes outside the tile do not count.
     enum class Kind : bool { Whole, Part };
     Frame(int viewId, SkCanvas& target, Kind = Kind::Whole);
     ~Frame();
     // The frame was shown: placements that changed since the last shown frame go to the host
     void shown();
-    // A part with a hole
+    // A part with a hole in it
     bool punched() const;
 };
 
-// The last frame shown placed videos in the view (compositor thread)
-bool hasPlacements(int viewId);
+// Where the last whole frame shown punched holes, in device pixels of the view and clipped to it
+// (compositor thread). A damage tile there shows a whole frame instead: through a hole of its own
+// it would show that frame's content over the video, and without one the host would keep the
+// video where it no longer is (placements change only with whole frames).
+Vector<WebCore::FloatRect> holes(int viewId);
 
 // The view is gone: forget its placements (compositor thread)
 void forgetView(int viewId);

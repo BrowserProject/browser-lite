@@ -255,8 +255,14 @@ const arrows = await page.evaluate(() => {
     const rect = field.getBoundingClientRect();
     return document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === field;
   };
-  const before = ime.previousElementSibling;
-  const after = ime.nextElementSibling;
+  // The next focusable element in tree order: the layer of the damage tiles may lie between
+  const sibling = (direction) => {
+    let element = ime[direction];
+    while (element && element.tabIndex < 0) element = element[direction];
+    return element;
+  };
+  const before = sibling('previousElementSibling');
+  const after = sibling('nextElementSibling');
   return {
     previous: before?.getAttribute('data-bl-field-arrow') === 'previous' && shown(before),
     next: after?.getAttribute('data-bl-field-arrow') === 'next' && shown(after),

@@ -85,7 +85,8 @@ next) comes as patches from `patches/`.
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a
-    small change goes only into the host canvases of the tiles it touches; emptied with a
+    small change goes only into the host canvases of the tiles it touches, none on a video hole
+    of `VideoOverlay.cpp`; emptied with a
     transparent bitmap, `Module.blEmptyBitmap` in `engine-pre.js`, since Safari 18 keeps showing a
     canvas after `transferFromImageBitmap(null)`), `HostLayers.cpp` (layers that only animate
     their opacity and transform get host canvases whose animation the host runs; plain layers
