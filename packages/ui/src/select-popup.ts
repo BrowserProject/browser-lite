@@ -1,4 +1,5 @@
 import type { RequestHandlers, SelectRequest } from '@browser-lite/core';
+import { watchClose } from './close-watchers.js';
 import { context, element, listen, type UiOptions, viewportRect } from './options.js';
 import { placeAtField } from './popup-place.js';
 import { createTypeahead, moveHighlight } from './select-keys.js';
@@ -12,8 +13,8 @@ interface Entry {
 /**
  * List of a `<select>` below the field (above when there is more room), with keyboard
  * navigation (arrows, page keys, Home/End, typing jumps to a matching entry, Enter or Space
- * chooses, Escape or Tab cancels). A click outside, a change of the window width or losing the
- * window focus cancels. Elements: `.bl-select-popup` with rows `.bl-option` (`data-bl-highlighted`,
+ * chooses, Escape or Tab cancels). A click outside, a change of the window width, losing the
+ * window focus or a close request (`closeNewest`, the back of a phone) cancels. Elements: `.bl-select-popup` with rows `.bl-option` (`data-bl-highlighted`,
  * `aria-selected`, `aria-disabled`), `.bl-group` and `hr.bl-separator`.
  */
 export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectPopup'> {
@@ -54,6 +55,7 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
           if (current !== close) return;
           current = null;
           stopListening();
+          stopWatch();
           request.signal.removeEventListener('abort', onAbort);
           typeahead.reset();
           popup.remove();
@@ -127,6 +129,7 @@ export function selectPopup(options?: UiOptions): Pick<RequestHandlers, 'selectP
           [win, 'resize', () => win.innerWidth !== width && choose(-1)],
         ]);
         request.signal.addEventListener('abort', onAbort);
+        const stopWatch = watchClose(() => choose(-1));
 
         root.append(popup);
         placeAtField(popup, viewportRect(request.view, request.rect), win);

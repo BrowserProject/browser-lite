@@ -17,7 +17,13 @@
  * first time the tab can go forward there, and once more in the next user action when that push
  * had none, as Safari's forward skips an entry pushed without one. Otherwise the demo only moves
  * between its entries, which no browser counts against it.
+ *
+ * Like Chrome on Android and Safari a back with a menu, sheet or popup open closes that one
+ * first and leaves the tab where it is: the overlays register with the close watchers of
+ * `@browser-lite/ui`. The host stays on `guard` while one is open, also when the tab cannot go
+ * back, so that back closes it instead of leaving the demo.
  */
+import { closeNewest, closeWatched, onCloseWatchedChange } from '@browser-lite/ui';
 
 /** The tab the host back and forward act on. */
 export interface HistoryTarget {
@@ -68,13 +74,13 @@ function traverse(to: Place): void {
 }
 
 /**
- * Moves the host to `guard` while the tab in front can go back, else to `base`, and gives it
- * `ahead` while the tab can go forward.
+ * Moves the host to `guard` while the tab in front can go back or an overlay is open, else to
+ * `base`, and gives it `ahead` while the tab can go forward.
  */
 export function syncHostHistory(): void {
   if (!guardPushed || pending) return;
   const tab = target();
-  const want: Place = tab?.canGoBack ? 'guard' : 'base';
+  const want: Place = tab?.canGoBack || closeWatched() ? 'guard' : 'base';
   if (want !== current) {
     traverse(want);
     return;
@@ -98,8 +104,10 @@ function onPopState(event: PopStateEvent): void {
   pending = null;
   if (!own) {
     const tab = target();
-    if (move < 0 && tab?.canGoBack) tab.back();
-    else if (move > 0 && tab?.canGoForward) tab.forward();
+    // Back closes an open overlay first, the tab stays
+    if (move < 0) {
+      if (!closeNewest() && tab?.canGoBack) tab.back();
+    } else if (move > 0 && tab?.canGoForward) tab.forward();
   }
   syncHostHistory();
 }
@@ -113,6 +121,8 @@ export function followHostHistory(active: () => HistoryTarget | null): void {
   // Also after a reload at a former entry above: the entries of the earlier document load anew
   history.replaceState({ [KEY]: 'base' }, '');
   window.addEventListener('popstate', onPopState);
+  // Later in the task: an overlay the next one replaces (suggestions per key) moves nothing
+  onCloseWatchedChange(() => queueMicrotask(syncHostHistory));
   // Back in the document from the back/forward cache, maybe at another entry (Chrome skips
   // `guard` on its back button when `ahead` was pushed without a user action)
   window.addEventListener('pageshow', (event) => {

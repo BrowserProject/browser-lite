@@ -1,4 +1,5 @@
 import type { FileChooserRequest, RequestHandlers } from '@browser-lite/core';
+import { watchClose } from './close-watchers.js';
 import { context, element, listen, type UiOptions } from './options.js';
 import { needsTap, tapSheet } from './tap-sheet.js';
 
@@ -6,8 +7,8 @@ import { needsTap, tapSheet } from './tap-sheet.js';
  * File inputs of the pages for an iPhone or iPad, where Safari opens its file chooser only on a
  * tap: a sheet at the top of the window with a visible file input (multiple and accept of the
  * page's field) and Cancel (`form.bl-picker-sheet.bl-file-sheet`). Resolves the chosen files,
- * null on Cancel, a tap elsewhere or abort. Elsewhere an empty object: the core's default opens
- * the chooser at once.
+ * null on Cancel, a tap elsewhere, a close request (`closeNewest`) or abort. Elsewhere an empty
+ * object: the core's default opens the chooser at once.
  */
 export function fileChooser(options?: UiOptions): Partial<Pick<RequestHandlers, 'fileChooser'>> {
   const ui = context(options);
@@ -27,6 +28,7 @@ export function fileChooser(options?: UiOptions): Partial<Pick<RequestHandlers, 
         if (request.accept) input.accept = request.accept;
         const finish = (files: File[] | null) => {
           stopListening();
+          stopWatch();
           sheet.remove();
           resolve(files);
         };
@@ -45,6 +47,7 @@ export function fileChooser(options?: UiOptions): Partial<Pick<RequestHandlers, 
             true,
           ],
         ]);
+        const stopWatch = watchClose(() => finish(null));
         root.append(sheet);
       }),
   };

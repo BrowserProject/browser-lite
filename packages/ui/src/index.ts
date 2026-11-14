@@ -1,3 +1,4 @@
+export { closeNewest, closeWatched, onCloseWatchedChange, watchClose } from './close-watchers.js';
 export {
   type MenuAction,
   type MenuHeader,

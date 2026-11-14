@@ -332,8 +332,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#414; like Chrome's the new tab page is that first entry, so Back after the first address
   typed into a new tab returns to it instead of leaving, #513; a tab a link opened in front
   closes on the host back like in Chrome on Android and its opener is in front again, where
-  before the host left the demo, #546), the host's forward and the mouse
-  forward button go forward in the tab also while it can
+  before the host left the demo, #546; a back with the menu, a sheet, the tab overview, a context
+  menu, a select list or another overlay open closes it and the tab stays, like Chrome on Android
+  and Safari, also on a tab without a back entry, where before the tab went back under the open
+  overlay, #558; checked on a Pixel 9 with the Android back key and on an iPhone 16 with Safari's
+  back button; dialogs, permission prompts and sign-in dialogs of a page and the find bar are no
+  such overlays yet: a back there still goes back in the tab and the page left ends them), the
+  host's forward and the mouse forward button go forward in the tab also while it can
   still go back (#467), the bottom bar slides away while the user scrolls a page down and comes
   back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of
   279 px with the bar; #472, checked on emulated phones, not yet on a device); it comes back with

@@ -1,3 +1,4 @@
+import { watchClose } from '@browser-lite/ui';
 import { hostOf } from './favicons.js';
 import { runtime } from './runtime.js';
 import type { Tab } from './tabs.js';
@@ -16,6 +17,7 @@ const button = () => byId<HTMLButtonElement>('popups');
 const bubble = () => byId('popup-bubble');
 let shown: Tab | null = null;
 let openTab: (url: string) => void = () => {};
+let stopWatch: (() => void) | null = null;
 
 /**
  * Pop-up blocker indicator like Chrome: an icon in the address bar while the page in front had
@@ -31,6 +33,8 @@ export function initBlockedPopups(open: (url: string) => void): void {
     const opening = (event as ToggleEvent).newState === 'open';
     button().setAttribute('aria-expanded', String(opening));
     if (opening) fill();
+    stopWatch?.();
+    stopWatch = opening ? watchClose(() => popover.hidePopover()) : null;
   });
 }
 

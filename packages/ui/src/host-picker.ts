@@ -1,4 +1,5 @@
 import type { ColorRequest, DateTimeRequest, RequestHandlers, View } from '@browser-lite/core';
+import { watchClose } from './close-watchers.js';
 import { dateFallback, dateTimeType, stepAttribute, valueFromNumber } from './datetime.js';
 import {
   context,
@@ -41,8 +42,9 @@ function closeNativePicker(input: HTMLInputElement): void {
  * `button[data-bl-answer=cancel]`), the tap on it opens the picker. Every input event previews
  * the value in the page. Resolves its value (read from the input) on change (in the sheet not on
  * the change Safari reports when its picker opens on an empty field) or when the user clicks
- * elsewhere, null when aborted or cancelled. An abort (the field went away, the page navigated)
- * also closes the host's picker. A new picker in the same document finishes the open one.
+ * elsewhere, null when aborted or cancelled (also by a close request, `closeNewest`, while the
+ * sheet is shown). An abort (the field went away, the page navigated) also closes the host's
+ * picker. A new picker in the same document finishes the open one.
  */
 function openHostPicker(
   ui: UiContext,
@@ -92,6 +94,7 @@ function openHostPicker(
       openPickers.delete(doc);
       clearTimeout(blurTimer);
       stopListening();
+      stopWatch?.();
       request.signal.removeEventListener('abort', onAbort);
       if (aborted) closeNativePicker(input);
       (sheet ?? input).remove();
@@ -135,6 +138,8 @@ function openHostPicker(
       ],
     ]);
     request.signal.addEventListener('abort', onAbort);
+    // The host closes its own picker on a close request; the sheet before it is ours
+    const stopWatch = sheet ? watchClose(() => finish(null)) : null;
     root.append(sheet ?? input);
     if (sheet) {
       // Within the window, also when the field is at its right edge

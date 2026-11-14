@@ -1,4 +1,4 @@
-import { showMenu } from '@browser-lite/ui';
+import { showMenu, watchClose } from '@browser-lite/ui';
 import { bookmarks, onBookmarksChange, removeBookmark } from './bookmarks.js';
 import {
   clearDownloads,
@@ -53,6 +53,8 @@ let actions: PanelActions;
 const leave: (() => void)[] = [];
 /** Renders the list of the history or bookmarks panel again, keeping its search and focus. */
 let renderList: (() => void) | null = null;
+/** Ends the registration of the open menu or sheet with the close requests. */
+let stopWatch: (() => void) | null = null;
 
 /**
  * Menu and side panel like Chrome: the menu drops down from its button (a bottom sheet on a
@@ -89,6 +91,8 @@ export function openPanel(name: PanelName): void {
 /** Opens the panel `name`, or closes it when it is open (null closes any). */
 export function togglePanel(name: PanelName | null): void {
   const wasMenu = current === 'menu';
+  stopWatch?.();
+  stopWatch = null;
   if (!name || name === current) {
     current = null;
     clear();
@@ -104,6 +108,8 @@ export function togglePanel(name: PanelName | null): void {
   panel.dataset.panel = name.startsWith('extension:') ? 'extension' : name;
   menuButton.setAttribute('aria-expanded', String(name === 'menu'));
   panel.hidden = false;
+  // The back of a phone closes the menu and the sheets; a panel beside the page stays
+  if (name === 'menu' || compactLayout()) stopWatch = watchClose(() => togglePanel(null));
   render();
 }
 

@@ -1,4 +1,5 @@
 import type { DataListRequest, RequestHandlers } from '@browser-lite/core';
+import { watchClose } from './close-watchers.js';
 import { context, element, listen, type UiOptions, viewportRect } from './options.js';
 import { placeAtField } from './popup-place.js';
 
@@ -7,7 +8,7 @@ import { placeAtField } from './popup-place.js';
  * dropdown of Chrome. The field keeps the focus and the keys (the engine moves the highlight
  * and sends a new request), so the list takes no keys and a press on it does not move the focus.
  * A click on an entry chooses it; a click outside the list and the view, a change of the window
- * width or losing the window focus closes it. Elements: `.bl-datalist-popup` with rows
+ * width, losing the window focus or a close request (`closeNewest`) closes it. Elements: `.bl-datalist-popup` with rows
  * `.bl-option` (`data-bl-highlighted`, `span.bl-value` and `span.bl-label`).
  */
 export function dataListPopup(options?: UiOptions): Pick<RequestHandlers, 'dataListPopup'> {
@@ -33,6 +34,7 @@ export function dataListPopup(options?: UiOptions): Pick<RequestHandlers, 'dataL
           if (current !== finish) return;
           current = null;
           stopListening();
+          stopWatch();
           request.signal.removeEventListener('abort', onAbort);
           popup.remove();
           resolve(index);
@@ -79,6 +81,7 @@ export function dataListPopup(options?: UiOptions): Pick<RequestHandlers, 'dataL
           [win, 'resize', () => win.innerWidth !== width && finish(-1)],
         ]);
         request.signal.addEventListener('abort', onAbort);
+        const stopWatch = watchClose(() => finish(-1));
 
         root.append(popup);
         placeAtField(popup, viewportRect(request.view, request.rect), win);

@@ -1,4 +1,5 @@
 import { type LocalStats, type ProfileInfo, siteOfPath } from '@browser-lite/profile';
+import { watchClose } from '@browser-lite/ui';
 import { renderExtensionSettings } from './extensions.js';
 import { type IconName, icon } from './icons.js';
 import { reloadUI, restartUI } from './reload.js';
@@ -44,7 +45,10 @@ close.setAttribute('aria-label', 'Close');
 close.append(icon('close'));
 close.addEventListener('click', () => page.close());
 page.append(close, nav, content);
+let stopWatch: (() => void) | null = null;
 page.addEventListener('close', () => {
+  stopWatch?.();
+  stopWatch = null;
   commitTexts();
   leaveSection?.();
   leaveSection = null;
@@ -58,7 +62,11 @@ document.body.append(page);
  * when that can take it, else to the section's button.
  */
 export function openSettings(name: Section = 'general', focus = ''): void {
-  if (!page.open) page.showModal();
+  if (!page.open) {
+    page.showModal();
+    // Chrome closes the modal dialog on the back of a phone itself, Safari does not
+    stopWatch = watchClose(() => page.close());
+  }
   showSection(name);
   nav.querySelector<HTMLElement>(`[data-section=${name}]`)?.focus();
   if (focus) content.querySelector<HTMLElement>(`#${focus}`)?.focus();

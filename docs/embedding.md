@@ -323,6 +323,9 @@ of `context.storage` (default in memory), for example in your user's profile.
   the demo loads `about:blank#new-tab` for its new tab page and shows the page while that address
   is committed (#513). Like Chrome on Android the demo also takes the host back while a view a
   link opened has no back entry: it closes that view and shows the one with the link (#546).
+  A menu or sheet open over the view closes first, like Chrome on Android and Safari: the
+  overlays of `@browser-lite/ui` register as close watchers, `closeNewest()` closes the newest
+  and returns false when none was open; keep your entry while `closeWatched()` (#558).
 - Storage is flushed when the page hides; `browser.storage.flush(waitMs)` writes at once.
 - When the page is left (`pagehide`, also into the back-forward cache) the browser ends like
   `destroy()`, without events: the page can no longer react. A page shown again from the

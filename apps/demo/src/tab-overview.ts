@@ -1,3 +1,4 @@
+import { watchClose } from '@browser-lite/ui';
 import { favicon, hostOf } from './favicons.js';
 import { icon } from './icons.js';
 import {
@@ -15,11 +16,12 @@ const overview = byId('tab-overview');
 const grid = overview.querySelector('.overview-grid') as HTMLElement;
 const count = byId('tab-count');
 const countText = count.firstElementChild as HTMLElement;
+let stopWatch: (() => void) | null = null;
 
 /**
  * Tab overview of the phone layout, like the tab switcher of mobile Chrome and Safari: a card
  * per tab with icon, title and address, a tap switches, the cross closes; the toolbar button
- * shows the number of tabs and opens it.
+ * shows the number of tabs and opens it. Like there the back of the phone closes it.
  */
 export function initTabOverview(): void {
   count.addEventListener('click', () => toggleOverview(!overviewOpen()));
@@ -41,10 +43,14 @@ export const overviewOpen = (): boolean => !overview.hidden;
 /** Opens or closes the overview. */
 export function toggleOverview(open: boolean): void {
   overview.hidden = !open;
-  if (open) {
-    render();
-    grid.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  if (!open) {
+    stopWatch?.();
+    stopWatch = null;
+    return;
   }
+  stopWatch ??= watchClose(() => toggleOverview(false));
+  render();
+  grid.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
 }
 
 function card(tab: Tab): HTMLElement {

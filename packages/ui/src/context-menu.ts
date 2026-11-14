@@ -1,4 +1,5 @@
 import type { ContextMenuInfo, View } from '@browser-lite/core';
+import { watchClose } from './close-watchers.js';
 import { context, element, listen, type UiOptions } from './options.js';
 
 /** A command of the context menu. */
@@ -71,9 +72,9 @@ interface Placement {
  * Shows a context menu at the position of `info` (relative to the view canvas), kept inside the
  * visible part of the canvas (it scrolls when it is taller). A click on a command closes the
  * menu, runs it and gives the keyboard back to the page; only a press that began on the menu (or
- * the keyboard) chooses one. Escape, a click outside, losing the window focus or closing the view
- * close it. Only one menu is open at a time; without any command none opens. Returns a function
- * that closes the menu.
+ * the keyboard) chooses one. Escape, a click outside, losing the window focus, closing the view
+ * or a close request (`closeNewest`) close it. Only one menu is open at a time; without any
+ * command none opens. Returns a function that closes the menu.
  * Element: `.bl-context-menu` (with `data-bl-touch` for a long press) with `div.bl-menu-header`,
  * `button.bl-menu-item` and `hr.bl-separator`.
  */
@@ -131,9 +132,11 @@ function openMenu(items: MenuItem[], at: Placement, options?: UiOptions): () => 
     closeOpen = null;
     stopListening();
     stopUntil?.();
+    stopWatch();
     menu.remove();
   };
   closeOpen = close;
+  const stopWatch = watchClose(close);
   // The lift of a finger held down to open the menu (on a button, a row) clicks whatever lies
   // under it, maybe an item: only a press that began on the menu, or the keyboard, chooses one
   let pressed = false;

@@ -215,7 +215,12 @@ select popup) are in the same sheet.
   forward in the tab whenever the tab can go forward. `host-history.ts` keeps up to three host
   entries of the demo, the one it loaded at, one above it that the first user action pushes and
   one above that for forward, pushed the first time the tab can go forward with a back entry
-  (#414, #467), and moves between them with `history.go()`.
+  (#414, #467), and moves between them with `history.go()`. Like Chrome on Android and Safari
+  a host back with an overlay open closes it and the tab stays (#558): the menu, the sheets of
+  the phone layout, the tab overview, the print preview, the settings, the pop-up bubble and the
+  menus, lists and sheets of `@browser-lite/ui` register with its close watchers; while one is
+  open the host keeps the entry above, also when the tab has no back entry. A panel beside the
+  page in the desktop layout stays.
   Before the first user action (a restored session) the host back still leaves the demo: Chrome
   and Safari skip host entries a page added without one. On Safari a host forward right after a
   host back without a user action in between can do nothing, until the next tap or key in the

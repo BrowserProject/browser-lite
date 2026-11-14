@@ -1,3 +1,4 @@
+import { watchClose } from '@browser-lite/ui';
 import { setStatus } from './toolbar.js';
 import { byId } from './util.js';
 
@@ -5,6 +6,7 @@ const preview = byId('print-preview');
 let pdfUrl: string | null = null;
 let fileName = 'Page.pdf';
 let afterClose: () => void = () => {};
+let stopWatch: (() => void) | null = null;
 
 /** Called after the preview closed (keyboard back into the page). */
 export function onPreviewClosed(listener: () => void): void {
@@ -23,6 +25,8 @@ export function printing(): void {
 export function closePreview(): void {
   if (preview.hidden) return;
   preview.hidden = true;
+  stopWatch?.();
+  stopWatch = null;
   preview.querySelector(':scope > :is(iframe, .print-message)')?.remove();
   if (pdfUrl) URL.revokeObjectURL(pdfUrl);
   pdfUrl = null;
@@ -62,6 +66,8 @@ export function showPreview(pdf: Blob, title: string): void {
     preview.append(message);
   }
   preview.hidden = false;
+  // The back of a phone closes it, like the print dialog there
+  stopWatch = watchClose(closePreview);
 }
 
 // "Save as PDF" with the download of the host browser
