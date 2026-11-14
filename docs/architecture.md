@@ -81,7 +81,12 @@ realm, now the WebIDL conversion of the encoder and decoder checks them by brand
 page or worker is made, and reads the same ever after like in Chrome and Firefox. WebKit turned it
 at every read (origin minus monotonic now plus wall now); the wall clock of the build is
 `Date.now()` in whole milliseconds, so the value moved between two neighbouring milliseconds, a
-difference fingerprinting scripts see (patch 0134, #547).
+difference fingerprinting scripts see (patch 0134, #547). An intersection observer computes its
+observations again only when something that may move, size or clip a target happened since its
+last update: a style update, a layout, a scroll of the page, a scroller or a frame, a change of the
+layout or visual viewport or the page scale, a new target, a document fully active again. Like
+Blink; WebKit computed every target of every observer in every rendering update, which pages with
+many observed teasers and ads and an animation frame loop paid in every frame (patch 0137, #554).
 
 The view events of a load come from our `FrameLoaderClient` (`engine/src/Clients.cpp`):
 `navigation-start` and `navigation` (`loading` true) when the main frame starts a provisional load

@@ -1,0 +1,163 @@
+<!doctype html>
+<title>IntersectionObserver updates</title>
+<!-- An observer computes its observations again only after something that may move, size or clip
+     a target (patch 0137): style, layout, a scroll of the page, of a scroller or of the page
+     around a frame, the viewport, a new target. After every change below each long lived observer
+     must have reported what a fresh observer reports for the same targets, and a frame in which
+     nothing changed next to 6000 observed targets costs a fraction of one that observes a new
+     target. -->
+<style>
+  body { margin: 0; height: 3000px; font: 10px/12px sans-serif; }
+  .box { position: absolute; width: 40px; height: 40px; background: rgb(0, 120, 200); }
+  #scroller { position: absolute; left: 100px; top: 100px; width: 200px; height: 100px; overflow: scroll; }
+  #scroller .inner { height: 1000px; position: relative; }
+  #frame { position: absolute; left: 400px; top: 700px; width: 200px; height: 200px; border: 0; }
+  #many { position: absolute; left: 0; top: 1200px; width: 800px; }
+  #many div { display: inline-block; width: 8px; height: 8px; margin: 1px; background: rgb(200, 200, 0); }
+</style>
+<div class="box" id="a" style="left: 10px; top: 10px"></div>
+<div class="box" id="b" style="left: 10px; top: 650px"></div>
+<div class="box" id="c" style="left: 600px; top: 300px"></div>
+<div id="scroller"><div class="inner"><div class="box" id="s" style="left: 10px; top: 300px"></div></div></div>
+<iframe id="frame" srcdoc="<body style='margin:0;height:2000px'><div id=f style='position:absolute;top:10px;width:40px;height:40px'></div></body>"></iframe>
+<div id="many"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+const thresholds = [0, 0.25, 0.5, 0.75, 1];
+const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+// Observer callbacks of a rendering update come in a task after it
+const settle = async () => {
+  await frame();
+  await frame();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+// An observer reports a target again only when it crosses a threshold: compare those
+const state = (entry) =>
+  `${entry.isIntersecting ? 1 : 0}:${thresholds.filter((t) => t <= entry.intersectionRatio + 1e-6).length}`;
+
+// Long lived observers: what they reported last for each target
+const reported = new Map();
+const track = (name, options, targets) => {
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) reported.set(`${name} ${entry.target.id}`, state(entry));
+  }, options());
+  for (const target of targets()) observer.observe(target);
+  return observer;
+};
+const setups = [
+  ['viewport', () => ({ threshold: thresholds }), () => [$('a'), $('b'), $('c'), $('s')]],
+  ['margin', () => ({ threshold: thresholds, rootMargin: '-50px' }), () => [$('a'), $('b'), $('c')]],
+  ['scroller', () => ({ threshold: thresholds, root: $('scroller') }), () => [$('s')]],
+];
+const frameSetups = [['frame', () => ({ threshold: thresholds }), () => [frameDocument().getElementById('f')]]];
+const frameDocument = () => $('frame').contentDocument;
+
+// What fresh observers report for the same targets right now
+const truth = async () => {
+  const result = new Map();
+  const observers = [];
+  for (const [name, options, targets, view] of [
+    ...setups.map((setup) => [...setup, window]),
+    ...frameSetups.map((setup) => [...setup, $('frame').contentWindow]),
+  ]) {
+    const observer = new view.IntersectionObserver((entries) => {
+      for (const entry of entries) result.set(`${name} ${entry.target.id}`, state(entry));
+    }, options());
+    for (const target of targets()) observer.observe(target);
+    observers.push(observer);
+  }
+  await settle();
+  for (const observer of observers) observer.disconnect();
+  return result;
+};
+
+const errors = [];
+const check = async (label) => {
+  await settle();
+  const expected = await truth();
+  for (const [key, value] of expected) {
+    if (reported.get(key) !== value) errors.push(`${label}: ${key} reported ${reported.get(key)}, fresh ${value}`);
+  }
+};
+
+const changes = [
+  ['page scrolled', () => scrollTo(0, 300)],
+  ['page scrolled back', () => scrollTo(0, 0)],
+  ['scroller scrolled', () => { $('scroller').scrollTop = 250; }],
+  ['scroller scrolled partly', () => { $('scroller').scrollTop = 210; }],
+  ['transform', () => { $('a').style.transform = 'translateX(-30px)'; }],
+  ['transform away', () => { $('c').style.transform = 'translateY(2000px)'; }],
+  ['size', () => { $('a').style.width = '400px'; }],
+  ['position', () => { $('b').style.top = '520px'; }],
+  ['clip by overflow', () => { $('scroller').style.height = '20px'; }],
+  ['display none', () => { $('a').style.display = 'none'; }],
+  ['display again', () => { $('a').style.display = ''; }],
+  ['page scrolled past the frame', () => scrollTo(0, 650)],
+  ['frame scrolled', () => frameDocument().defaultView.scrollTo(0, 20)],
+  ['frame moved', () => { $('frame').style.top = '1000px'; }],
+  ['page scrolled to the top', () => scrollTo(0, 0)],
+];
+
+const many = $('many');
+for (let i = 0; i < 6000; i++) many.append(document.createElement('div'));
+
+// Time from the end of the animation frame callbacks to the task after the rendering update,
+// summed over 20 frames (performance.now() has a coarse resolution)
+const frameCost = async (change) => {
+  let total = 0;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((resolve) => requestAnimationFrame(() => {
+      change(i);
+      const start = performance.now();
+      setTimeout(() => {
+        total += performance.now() - start;
+        resolve();
+      }, 0);
+    }));
+  }
+  return total;
+};
+
+(async () => {
+  await new Promise((resolve) => (document.readyState === 'complete' ? resolve() : addEventListener('load', resolve)));
+  for (const setup of setups) track(...setup);
+  for (const [name, options, targets] of frameSetups) {
+    const observer = new ($('frame').contentWindow.IntersectionObserver)((entries) => {
+      for (const entry of entries) reported.set(`${name} ${entry.target.id}`, state(entry));
+    }, options());
+    for (const target of targets()) observer.observe(target);
+  }
+  await check('start');
+  for (const [label, change] of changes) {
+    change();
+    await check(label);
+  }
+
+  // Unchanged frames: a long lived observer reports nothing new
+  const before = reported.size;
+  let calls = 0;
+  const quiet = new IntersectionObserver(() => calls++, { threshold: thresholds });
+  quiet.observe($('a'));
+  await settle();
+  calls = 0;
+  for (let i = 0; i < 5; i++) await frame();
+  await settle();
+  if (calls) errors.push(`unchanged frames: ${calls} callbacks`);
+  quiet.disconnect();
+
+  // Cost of 20 frames next to 6000 targets of an observer of their own: without a change, and with
+  // a new target of another observer each (no style or layout, only the observations again)
+  const manyObserver = new IntersectionObserver(() => {}, { threshold: thresholds });
+  for (const target of many.children) manyObserver.observe(target);
+  await settle();
+  const extra = new IntersectionObserver(() => {});
+  const unchanged = await frameCost(() => {});
+  const changed = await frameCost((i) => extra.observe(many.children[i]));
+  console.log(`IO 20 frames without a change ${unchanged.toFixed(1)} ms, with a new target ${changed.toFixed(1)} ms (${before} observations)`);
+  if (changed < 5) console.log('IO frames too fast to compare, timing not checked');
+  else if (!(unchanged < changed * 0.5)) errors.push(`unchanged frames ${unchanged.toFixed(1)} ms not below half of ${changed.toFixed(1)} ms`);
+
+  for (const error of errors) console.log(`IO error ${error}`);
+  console.log(`INTERSECTION done=${errors.length ? 'fail' : 'ok'}`);
+})();
+</script>

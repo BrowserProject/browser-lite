@@ -540,6 +540,19 @@ browser (Safari keeps Cmd+L, T and W for itself).
    instead of 442 MB, its length is unchanged within the noise. Without the JIT it takes 2.5 to
    2.8 s instead of 3.3 to 3.6 s: in such cold code the calls between compiled and interpreted
    functions cost more than compiled code saves ([jit.md](jit.md#measured)), open.
+   nzz.ch (React Router, 2026-11-14, local, Chromium host, 412x860 with touch; the report: a Moto
+   G71 showed a tapped article after 10 to 16 s, with steps of 2.1 and 3.4 s, and the old article
+   about 10 s after Back): from the tap to the article's title in the DOM 2.9 to 4.8 s (median 3.3
+   s, 7 runs, load 4 to 8), plain Chromium 0.54 s without a long task. Its `__manifest` and `.data`
+   fetches are done 0.1 to 1 s after the tap and the URL changes then; Chrome shows no progress for
+   such a `pushState` navigation either. The rest is the engine thread, in the CPU profile (3 runs)
+   JS 70 to 75 % (React's scheduler tasks half of it, the calls between compiled and interpreted
+   code 6 to 7 %, regexps 3 %), timers of ads and analytics 15 % and rendering updates 15 to 18 %:
+   style, layout and the intersection observers, which computed every target in every frame also
+   when nothing had moved, 4.4 to 6.4 % of the engine thread. They now compute only after a style
+   update, a layout or a scroll (#554): 0.6 to 3.2 %. The time to the title moves within the noise;
+   without the JIT it is 3.3 to 4.2 s. Back was not measured apart, it is the same kind of route
+   change. What is left is the speed of JS (above, [jit.md](jit.md)).
    Long single tasks of a page become many times longer here, so they block all views (the
    script watchdog stops only those that keep input or a call waiting, #146, #501). Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its
@@ -693,7 +706,10 @@ browser (Safari keeps Cmd+L, T and W for itself).
    the engine thread one write for each cookie a page sets. The full writes of the databases no
    longer do (#446): on edition.cnn.com (2026-11-06, loaded machine) the engine thread had
    stood still for 3 to 13 s writing a 24 KB cookie database frame by frame, now no pointer move
-   waits longer than about 1 s.
+   waits longer than about 1 s. Each append opens, writes and closes the log, three round trips
+   to the OPFS worker: on nzz.ch's tap (#554) the engine thread waited about 0.1 s for them in
+   6 s. Keeping the log open would save two, but its sync access handle locks the file against
+   the engine of the next page after a reload.
 11. Huge documents (2026-11-10, local copy, Chromium host, 1280x800): iana.org's IDN table
    (14 MB of HTML, 12,000 rows, collapsed borders) loads in 14 to 15 s, as fast as Playwright's
    native WebKitGTK on the same machine (13.5 to 15 s); Chromium 4 to 4.5 s. It took 17.5 to

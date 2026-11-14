@@ -34,8 +34,9 @@ which the cookie jar dropped, or the tree view of an XML file or feed without st
 information, which WebKit shows only with developer extras, so its text ran together, or
 `performance.timeOrigin`, which moved between two neighbouring milliseconds from one read to the
 next, or the media controls, which had no keys and no double click to fullscreen like Chrome's,
-or their fullscreen bar, which stuck out at both sides of a phone held upright)
-comes as patches from `patches/`.
+or their fullscreen bar, which stuck out at both sides of a phone held upright, or the
+intersection observers, which computed every target again in every frame, also when nothing had
+moved) comes as patches from `patches/`.
 
 ## Folders
 

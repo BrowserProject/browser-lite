@@ -1,0 +1,224 @@
+diff --git a/Source/WebCore/dom/Document.cpp b/Source/WebCore/dom/Document.cpp
+index 203052dcdd..12e7df9b3f 100644
+--- a/Source/WebCore/dom/Document.cpp
++++ b/Source/WebCore/dom/Document.cpp
+@@ -2873,6 +2873,7 @@ void Document::resolveStyle(ResolveStyleType type)
+     }
+ 
+     TraceScope tracingScope(StyleRecalcStart, StyleRecalcEnd);
++    IntersectionObserver::geometryMayHaveChanged();
+ 
+     RenderView::RepaintRegionAccumulator repaintRegionAccumulator(renderView());
+ 
+@@ -7766,6 +7767,9 @@ void Document::resume(ReasonForSuspension reason)
+     if (!m_isSuspended)
+         return;
+ 
++    // browser-lite: fully active again, its targets count again
++    IntersectionObserver::geometryMayHaveChanged();
++
+     for (auto element : copyToVectorOf<Ref<Element>>(m_documentSuspensionCallbackElements))
+         element->resumeFromDocumentSuspension();
+ 
+diff --git a/Source/WebCore/page/IntersectionObserver.cpp b/Source/WebCore/page/IntersectionObserver.cpp
+index 40909799b3..9ba0c7728c 100644
+--- a/Source/WebCore/page/IntersectionObserver.cpp
++++ b/Source/WebCore/page/IntersectionObserver.cpp
+@@ -248,11 +248,26 @@ bool IntersectionObserver::isObserving(const Element& element) const
+     return m_observationTargets.contains(element);
+ }
+ 
++static uint64_t intersectionGeometryVersion = 1;
++
++void IntersectionObserver::geometryMayHaveChanged()
++{
++    ASSERT(isMainThread());
++    ++intersectionGeometryVersion;
++}
++
++uint64_t IntersectionObserver::geometryVersion()
++{
++    return intersectionGeometryVersion;
++}
++
+ void IntersectionObserver::observe(Element& target)
+ {
+     if (!trackingDocument() || isObserving(target))
+         return;
+ 
++    geometryMayHaveChanged();
++
+     target.ensureIntersectionObserverData().registrations.append({ *this, std::nullopt });
+     bool hadObservationTargets = hasObservationTargets();
+     m_observationTargets.add(target);
+@@ -740,6 +755,12 @@ auto IntersectionObserver::updateObservations(const Frame& hostFrame) -> NeedNot
+     if (!timestamp)
+         return NeedNotify::No;
+ 
++    // browser-lite: nothing moved, sized or clipped a target since the last update, so every
++    // observation would come out the same
++    if (m_geometryVersion == geometryVersion())
++        return NeedNotify::No;
++    m_geometryVersion = geometryVersion();
++
+     auto needNotify = NeedNotify::No;
+ 
+     // Iterate on a copy of m_observationTargets, in case something in the loop mutates it.
+diff --git a/Source/WebCore/page/IntersectionObserver.h b/Source/WebCore/page/IntersectionObserver.h
+index 5dc74daa93..4444e8ea23 100644
+--- a/Source/WebCore/page/IntersectionObserver.h
++++ b/Source/WebCore/page/IntersectionObserver.h
+@@ -118,6 +118,12 @@ public:
+     enum class NeedNotify : bool { No, Yes };
+     NeedNotify updateObservations(const Frame&);
+ 
++    // browser-lite: like Blink, an observer computes its observations again only after something
++    // that may move, size or clip a target or its root (style, layout, a scroll, the viewport, a
++    // new target); these call geometryMayHaveChanged(). Main thread only.
++    static void geometryMayHaveChanged();
++    static uint64_t geometryVersion();
++
+     std::optional<ReducedResolutionSeconds> nowTimestamp() const;
+ 
+     void appendQueuedEntry(Ref<IntersectionObserverEntry>&&);
+@@ -161,6 +167,8 @@ private:
+     Vector<Ref<IntersectionObserverEntry>> m_queuedEntries;
+     Vector<GCReachableRef<Element>> m_targetsWaitingForFirstObservation;
+     IncludeObscuredInsets m_includeObscuredInsets { IncludeObscuredInsets::No };
++    // browser-lite: geometryVersion() at the last update of the observations
++    uint64_t m_geometryVersion { 0 };
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/page/LocalFrameView.cpp b/Source/WebCore/page/LocalFrameView.cpp
+index 816c6d856d..796475152f 100644
+--- a/Source/WebCore/page/LocalFrameView.cpp
++++ b/Source/WebCore/page/LocalFrameView.cpp
+@@ -78,6 +78,7 @@
+ #include "ImageDocument.h"
+ #include "InspectorBackendClient.h"
+ #include "InspectorInstrumentation.h"
++#include "IntersectionObserver.h"
+ #include "LegacyRenderSVGRoot.h"
+ #include "LocalDOMWindow.h"
+ #include "LocalFrame.h"
+@@ -1107,6 +1108,7 @@ void LocalFrameView::obscuredInsetsWillChange(FloatBoxExtent&& obscuredInsetsDel
+ 
+ void LocalFrameView::obscuredContentInsetsDidChange(const FloatBoxExtent& newObscuredContentInsets)
+ {
++    IntersectionObserver::geometryMayHaveChanged();
+     CheckedPtr renderView = this->renderView();
+     if (!renderView)
+         return;
+@@ -1936,6 +1938,7 @@ void LocalFrameView::setBaseLayoutViewportOrigin(LayoutPoint origin, TriggerLayo
+         return;
+ 
+     m_layoutViewportOrigin = origin;
++    IntersectionObserver::geometryMayHaveChanged();
+     if (layoutTriggering == TriggerLayoutOrNot::Yes)
+         setViewportConstrainedObjectsNeedLayout();
+     
+@@ -1954,6 +1957,7 @@ void LocalFrameView::setLayoutViewportOverrideRect(std::optional<LayoutRect> rec
+     LayoutRect oldRect = layoutViewportRect();
+     m_layoutViewportOverrideRect = rect;
+     LayoutRect newRect = layoutViewportRect();
++    IntersectionObserver::geometryMayHaveChanged();
+ 
+     // Triggering layout on height changes is necessary to make bottom-fixed elements behave correctly.
+     if (oldRect.height() != newRect.height())
+@@ -3789,6 +3793,7 @@ void LocalFrameView::scrollPositionChanged(const ScrollPosition& oldPosition, co
+ {
+     UNUSED_PARAM(oldPosition);
+     UNUSED_PARAM(newPosition);
++    IntersectionObserver::geometryMayHaveChanged();
+ 
+     RefPtr page = m_frame->page();
+     Seconds throttlingDelay = page ? page->chrome().client().eventThrottlingDelay() : 0_s;
+@@ -4207,6 +4212,7 @@ void LocalFrameView::updateTiledBackingAdaptiveSizing()
+ // FIXME: This shouldn't be called from outside; LocalFrameView should call it when the relevant viewports change.
+ void LocalFrameView::layoutOrVisualViewportChanged()
+ {
++    IntersectionObserver::geometryMayHaveChanged();
+     if (m_frame->settings().visualViewportAPIEnabled()) {
+         if (RefPtr window = m_frame->window())
+             protect(window->visualViewport())->update();
+diff --git a/Source/WebCore/page/LocalFrameViewLayoutContext.cpp b/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
+index 492cd96608..5436bebaa3 100644
+--- a/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
++++ b/Source/WebCore/page/LocalFrameViewLayoutContext.cpp
+@@ -32,6 +32,7 @@
+ #include "DocumentQuirks.h"
+ #include "FrameInlines.h"
+ #include "InspectorInstrumentation.h"
++#include "IntersectionObserver.h"
+ #include "LayoutBoxGeometry.h"
+ #include "LayoutContext.h"
+ #include "LayoutDisallowedScope.h"
+@@ -221,6 +222,7 @@ void LocalFrameViewLayoutContext::performLayout(bool canDeferUpdateLayerPosition
+ 
+     LayoutFrameScope layoutFrameScope(*this);
+     TraceScope tracingScope(PerformLayoutStart, PerformLayoutEnd);
++    IntersectionObserver::geometryMayHaveChanged();
+     ScriptDisallowedScope::InMainThread scriptDisallowedScope;
+     InspectorInstrumentation::willLayout(frame);
+     SingleThreadWeakPtr<RenderElement> layoutRoot;
+diff --git a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+index 128da985a9..ecaefb2ba0 100644
+--- a/Source/WebCore/page/Page.cpp
++++ b/Source/WebCore/page/Page.cpp
+@@ -116,6 +116,7 @@
+ #include "InspectorBackendClient.h"
+ #include "InspectorInstrumentation.h"
+ #include "IntelligenceTextEffectsSupport.h"
++#include "IntersectionObserver.h"
+ #include "KeyboardScrollingAnimator.h"
+ #include "LayoutDisallowedScope.h"
+ #include "LegacySchemeRegistry.h"
+@@ -1707,6 +1708,7 @@ void Page::setPageScaleFactor(float scale, const IntPoint& origin, bool inStable
+             mainDocument->updateLayoutIgnorePendingStylesheets({ WebCore::LayoutOptions::UpdateCompositingLayers });
+     } else {
+         m_pageScaleFactor = scale;
++        IntersectionObserver::geometryMayHaveChanged();
+ 
+         for (auto& rootFrame : m_rootFrames) {
+             ASSERT(rootFrame->isRootFrame());
+diff --git a/Source/WebCore/rendering/RenderLayer.cpp b/Source/WebCore/rendering/RenderLayer.cpp
+index 4c06f80b9b..ca77ab6772 100644
+--- a/Source/WebCore/rendering/RenderLayer.cpp
++++ b/Source/WebCore/rendering/RenderLayer.cpp
+@@ -87,6 +87,7 @@
+ #include "HitTestingTransformState.h"
+ #include "ImageDocument.h"
+ #include "InspectorInstrumentation.h"
++#include "IntersectionObserver.h"
+ #include "LegacyRenderSVGForeignObject.h"
+ #include "LegacyRenderSVGImage.h"
+ #include "LegacyRenderSVGResourceClipper.h"
+@@ -4683,6 +4684,7 @@ bool RenderLayer::setAnchorScrollAdjustment(LayoutSize offset)
+ 
+     // FIXME: Scroll offset should be adjusted in the scrolling tree so layers stay exactly in sync.
+     m_anchorScrollAdjustment = offset;
++    IntersectionObserver::geometryMayHaveChanged();
+     updateTransform();
+ 
+     if (isComposited())
+diff --git a/Source/WebCore/rendering/RenderLayerScrollableArea.cpp b/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
+index ca7dca0392..3182c9d326 100644
+--- a/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
++++ b/Source/WebCore/rendering/RenderLayerScrollableArea.cpp
+@@ -66,6 +66,7 @@
+ #include "HTMLHtmlElement.h"
+ #include "HitTestResult.h"
+ #include "InspectorInstrumentation.h"
++#include "IntersectionObserver.h"
+ #include "LayoutScope.h"
+ #include "Logging.h"
+ #include "RenderBoxInlines.h"
+@@ -368,6 +369,7 @@ void RenderLayerScrollableArea::scrollTo(const ScrollPosition& position)
+     }
+ 
+     m_scrollPosition = newPosition;
++    IntersectionObserver::geometryMayHaveChanged();
+     m_layer.setSelfAndDescendantsNeedPositionUpdate();
+ 
+     auto& renderer = m_layer.renderer();

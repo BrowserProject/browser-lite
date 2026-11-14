@@ -27,6 +27,10 @@
 //                  (patch 0110) and still reject chunks that are no BufferSource
 //   time-origin.html  performance.timeOrigin reads the same every time in a page, a frame and a
 //                  worker, next to Date.now() (patch 0134)
+//   intersection-observer.html  observers compute again only after something moved, sized or
+//                  clipped a target (patch 0137): every change gives what a fresh observer reports,
+//                  a frame without a change next to 3000 targets costs a fraction of one with a new
+//                  target
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -58,6 +62,7 @@ const CASES = [
   { name: 'compression', wait: 'COMPRESSION done' },
   { name: 'cssom-rules', size: [800, 600], wait: 'CSSOM done' },
   { name: 'time-origin', wait: 'TIMEORIGIN done' },
+  { name: 'intersection-observer', size: [800, 600], wait: 'INTERSECTION done' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',
