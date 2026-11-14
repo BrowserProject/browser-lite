@@ -5,7 +5,8 @@
 // Also MSE, HLS and DASH manifests refused (players then take MSE), navigator.mediaCapabilities,
 // blob:, data:, preload, picture-in-picture, muted autoplay only in the view, a fullscreen video
 // letterboxed over a page object-fit: cover, the icons of the media controls and their exit
-// fullscreen button and the range special cases of media-sw.js.
+// fullscreen button (also on a screen held upright and turned) and the range special cases of
+// media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -15,6 +16,7 @@ import {
   TIMEOUT,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -473,10 +475,10 @@ const isRed = (p) => !!p && p.r > 180 && p.g < 60 && p.b < 60;
 const isWhite = (p) => !!p && p.r > 200 && p.g > 200 && p.b > 200;
 // First pixel of the page in the box [x0, x1) x [y0, y1) (every 2 px) that is a light icon of the
 // media controls, null when there is none
-async function iconPixel(x0, x1, y0, y1) {
+async function iconPixel(x0, x1, y0, y1, on = page) {
   for (let y = y0; y < y1; y += 2) {
     for (let x = x0; x < x1; x += 2) {
-      const [r, g, b] = await pagePixel(page, x, y);
+      const [r, g, b] = await pagePixel(on, x, y);
       if (r > 120 && g > 120 && b > 120) return { x, y, r, g, b };
     }
   }
@@ -870,6 +872,92 @@ if (cfsIn) {
     'fullscreen controls: the exit button leaves fullscreen',
     !!exitIcon && !!(await result('cfsout', 10000)),
   );
+}
+
+// ------------------------------------------- fullscreen controls on a narrow screen
+// A phone held upright is narrower than the 468 px fullscreen bar, which stuck out at both sides
+// with its exit button: there the controls are the inline ones over the whole screen, the exit
+// button top left (patch 0136). Turned to landscape the fullscreen bar comes back (the window
+// cannot be resized in fullscreen, CDP emulates the turn). A page of its own, the mouse over the
+// video shows the controls. Only Chromium: Firefox's fullscreen window is at least 500 px wide.
+if (chromiumOnly('narrow fullscreen controls (Firefox fullscreens at least 500 px wide)')) {
+  const narrow = await browser.newPage({ viewport: { width: 393, height: 659 } });
+  const narrowResults = collect(narrow);
+  await openHost(
+    narrow,
+    stack.app({ url: `${siteURL}controls-fullscreen.html`, env: 'BL_VIDEO_OVERLAY=0' }),
+  );
+  await narrowResults.wait('cfsupported');
+  const box = await canvasOrigin(narrow);
+  await narrow.mouse.click(box.x + 120, box.y + 330);
+  const narrowIn = await narrowResults.wait('cfsin', 20000);
+  check('narrow fullscreen controls: enters fullscreen', !!narrowIn, narrowIn);
+  // The light pixel of an icon in the area, once it holds for two looks
+  const stableIcon = async (area) => {
+    let icon = null;
+    let last = '';
+    await waitFor(
+      async () => {
+        const [width, height] = (narrowResults.get('cfssize') ?? narrowIn).split(',').map(Number);
+        await narrow.mouse.move(box.x + width / 2, box.y + height / 2);
+        await narrow.mouse.move(box.x + width / 2 + 10, box.y + height / 2 + 10);
+        icon = await iconPixel(...area(width, height), narrow);
+        const seen = JSON.stringify([width, height, icon?.x, icon?.y]);
+        const stable = !!icon && seen === last;
+        last = seen;
+        return stable;
+      },
+      20000,
+      500,
+    );
+    return icon;
+  };
+  const topLeft = () => [8, 52, 8, 34];
+  if (narrowIn) {
+    const exit = await stableIcon(topLeft);
+    check(
+      'narrow fullscreen controls: the exit button is on the screen',
+      !!exit,
+      JSON.stringify(exit),
+    );
+    await screenshot(narrow, 'media-fullscreen-controls-narrow');
+    if (exit) {
+      const cdp = await narrow.context().newCDPSession(narrow);
+      const turn = async (width, height) => {
+        narrowResults.delete('cfssize');
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width,
+          height,
+          deviceScaleFactor: 1,
+          mobile: false,
+        });
+        await waitFor(() => narrowResults.get('cfssize') === `${width},${height}`, 10000);
+      };
+      await turn(659, 393);
+      // The exit button at the right end of the centered 468 px bar
+      const barExit = await stableIcon((width, height) => [
+        width / 2 + 180,
+        width / 2 + 232,
+        height - 90,
+        height - 62,
+      ]);
+      check(
+        'narrow fullscreen controls: turned to landscape the fullscreen bar has the exit button',
+        !!barExit,
+        `${narrowResults.get('cfssize')} ${JSON.stringify(barExit)}`,
+      );
+      await screenshot(narrow, 'media-fullscreen-controls-landscape');
+      await turn(393, 659);
+    }
+    const back = await stableIcon(topLeft);
+    if (back) await narrow.mouse.click(box.x + back.x, box.y + back.y);
+    check(
+      'narrow fullscreen controls: the exit button leaves fullscreen',
+      !!back && !!(await narrowResults.wait('cfsout', 10000)),
+      JSON.stringify(back),
+    );
+  }
+  await narrow.close();
 }
 
 // ------------------------------------------- range special cases (media-sw.js of the core)

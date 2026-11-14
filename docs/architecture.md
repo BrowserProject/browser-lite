@@ -572,7 +572,10 @@ so the controls show their fullscreen button inline and the exit button in fulls
 `webkitEnterFullscreen()` works (#476). Patch 0135 gives them the keys and the double click of
 Chrome's controls: on the focused element Space and Enter play or pause, the arrows left and right
 step by a hundredth of the duration, Home and End seek to the ends, up and down change the volume,
-and a double click on the video toggles fullscreen (#552).
+and a double click on the video toggles fullscreen (#552). On a fullscreen narrower than the
+468 px fullscreen bar with 16 px margins (a phone held upright) patch 0136 shows the inline
+controls instead, which drop buttons by width and have the exit button top left; turned to
+landscape the fullscreen bar comes back (#553).
 
 ## Audio
 

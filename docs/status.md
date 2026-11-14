@@ -171,6 +171,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   `<audio controls>` Space and Enter play or pause without scrolling the page, the arrows, Home and
   End seek and change the volume, and a double click on the video enters or leaves fullscreen
   (before, the keys only worked in fullscreen and a double click just paused and played).
+  A fullscreen narrower than 500 px (a phone held upright) gets the inline controls with the exit
+  button top left (#553; the 468 px fullscreen bar stuck out at both sides of a 393 px iPhone, cut
+  off the volume, the time and the exit button, so only turning the phone left fullscreen).
   `navigator.mediaCapabilities` of pages and workers answers with the host's `decodingInfo`
   (#503; before it called every configuration unsupported, so Twitch's player dropped every
   variant of a stream and showed Error #4000; its front page stream now plays).

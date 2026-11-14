@@ -1,0 +1,109 @@
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/adwaita-inline-media-controls.js b/Source/WebCore/Modules/modern-media-controls/controls/adwaita-inline-media-controls.js
+index 7f49a27ce2..deeca55a06 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/adwaita-inline-media-controls.js
++++ b/Source/WebCore/Modules/modern-media-controls/controls/adwaita-inline-media-controls.js
+@@ -30,7 +30,9 @@ class AdwaitaInlineMediaControls extends InlineMediaControls
+ 
+     constructor(options = {})
+     {
+-        options.layoutTraits = new AdwaitaLayoutTraits(LayoutTraits.Mode.Inline);
++        // browser-lite: also the controls of a narrow fullscreen (NarrowViewer), whose
++        // fullscreen button shows the exit icon.
++        options.layoutTraits = new AdwaitaLayoutTraits(options.mode ?? LayoutTraits.Mode.Inline);
+ 
+         super(options);
+ 
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/adwaita-layout-traits.js b/Source/WebCore/Modules/modern-media-controls/controls/adwaita-layout-traits.js
+index eb09b62869..d31d1e389d 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/adwaita-layout-traits.js
++++ b/Source/WebCore/Modules/modern-media-controls/controls/adwaita-layout-traits.js
+@@ -27,7 +27,8 @@ class AdwaitaLayoutTraits extends LayoutTraits
+ {
+     mediaControlsClass()
+     {
+-        if (this.isFullscreen)
++        // browser-lite: a narrow fullscreen (NarrowViewer) gets the inline controls.
++        if (this._mode === LayoutTraits.Mode.Fullscreen)
+             return AdwaitaFullscreenMediaControls;
+         return AdwaitaInlineMediaControls;
+     }
+@@ -54,7 +55,7 @@ class AdwaitaLayoutTraits extends LayoutTraits
+ 
+     supportsIconWithFullscreenVariant()
+     {
+-        return this.isFullscreen;
++        return this._mode === LayoutTraits.Mode.Fullscreen;
+     }
+ 
+     supportsDurationTimeLabel()
+@@ -99,7 +100,7 @@ class AdwaitaLayoutTraits extends LayoutTraits
+ 
+     toString()
+     {
+-        const mode = this.isFullscreen ? "Fullscreen" : "Inline";
++        const mode = { [LayoutTraits.Mode.Inline]: "Inline", [LayoutTraits.Mode.Fullscreen]: "Fullscreen", [LayoutTraits.Mode.NarrowViewer]: "NarrowViewer" }[this._mode];
+         return `[AdwaitaLayoutTraits ${mode}]`;
+     }
+ }
+diff --git a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+index d859ad42eb..a848acd457 100644
+--- a/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
++++ b/Source/WebCore/Modules/modern-media-controls/media/media-controller.js
+@@ -25,6 +25,8 @@
+ 
+ const maxNonLiveDuration = 604800; // 604800 seconds == 1 week
+ const MaximumNarrowViewerControlsBarWidth = 468;
++// browser-lite: the fullscreen bar with a margin of 16 px at both sides.
++const MinimumFullscreenControlsBarScreenWidth = MaximumNarrowViewerControlsBarWidth + 2 * 16;
+ 
+ class MediaController
+ {
+@@ -173,7 +175,11 @@ class MediaController
+     {
+         let mode = LayoutTraits.Mode.Inline;
+         if (this.isFullscreen) {
+-            if (this.host && this.host.inWindowFullscreen && this.media.offsetWidth < MaximumNarrowViewerControlsBarWidth)
++            // browser-lite: also in element fullscreen, a screen narrower than the floating
++            // fullscreen bar (a phone held upright) gets the inline controls with an exit button,
++            // which drop buttons by width, instead of a bar cut off at both sides.
++            const narrowWidth = this.host && this.host.inWindowFullscreen ? MaximumNarrowViewerControlsBarWidth : MinimumFullscreenControlsBarScreenWidth;
++            if (this.media.offsetWidth < narrowWidth)
+                 mode = LayoutTraits.Mode.NarrowViewer;
+             else
+                 mode = LayoutTraits.Mode.Fullscreen;
+@@ -413,7 +419,8 @@ class MediaController
+         const layoutTraits = this.layoutTraits;
+         const previousControls = this.controls;
+         const ControlsClass = layoutTraits.mediaControlsClass();
+-        if (previousControls && previousControls.constructor === ControlsClass) {
++        // browser-lite: also the mode, the inline controls serve Inline and NarrowViewer.
++        if (previousControls && previousControls.constructor === ControlsClass && previousControls.layoutTraits?.mode === layoutTraits.mode) {
+             this._updateTextTracksClassList();
+             this._updateControlsSize();
+             return;
+diff --git a/Source/WebCore/Modules/modern-media-controls/media/start-support.js b/Source/WebCore/Modules/modern-media-controls/media/start-support.js
+index 2b73832908..9a0190337b 100644
+--- a/Source/WebCore/Modules/modern-media-controls/media/start-support.js
++++ b/Source/WebCore/Modules/modern-media-controls/media/start-support.js
+@@ -78,7 +78,10 @@ class StartSupport extends MediaControllerSupport
+         const media = this.mediaController.media;
+         const host = this.mediaController.host;
+         
+-        if (host && host.inWindowFullscreen)
++        // browser-lite: before shouldForceControlsDisplay, which is true for a video in element
++        // fullscreen: the inline controls of a narrow fullscreen would show only the start button,
++        // without the exit button.
++        if ((host && host.inWindowFullscreen) || this.mediaController.isFullscreen)
+             return false;
+ 
+         if (host && host.shouldForceControlsDisplay)
+@@ -96,9 +99,6 @@ class StartSupport extends MediaControllerSupport
+         if (media instanceof HTMLAudioElement)
+             return false;
+ 
+-        if (this.mediaController.isFullscreen)
+-            return false;
+-
+         if (media.error)
+             return false;
+ 
