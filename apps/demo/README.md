@@ -23,8 +23,8 @@ npm run dev -w @browser-lite/demo                         # http://localhost:517
 ```
 
 The Vite dev server sends the COOP/COEP headers, serves the engine under `/engine/` from
-`BL_ENGINE_DIR` (default `build/webcore/bin` of the repository) and `sw.js`/`media-sw.js` of the
-core at the root, and forwards `/wisp/` and `/profile/` to `BL_SERVER` (default
+`BL_ENGINE_DIR` (default `build/webcore/bin` of the repository) and `sw.js`, `media-sw.js` and
+`download-sw.js` of the core at the root, and forwards `/wisp/` and `/profile/` to `BL_SERVER` (default
 `http://localhost:5001`). `tools/package-demo.sh <engine-dir> <out>` builds the folder for
 `SITE_DIR` of `browser-lite-server`: the Vite build with `VITE_ENGINE_BASE=engine/<hash>/` and
 the engine in `engine/<hash>/`. The engine is never bundled; the core loads it at runtime.
@@ -144,10 +144,12 @@ select popup) are in the same sheet.
   `:visited` (`removeFromHistory`, #544). Bookmark rows have the same cross and menu.
 - **Downloads** (Ctrl+J): the status line and the panel follow a running download; its row
   counts the bytes with a progress bar and has Cancel like Chrome (`Download.cancel()`, the server
-  sees the request end). A finished file is saved with the host browser, its row has Save again.
-  Like Chrome the list outlives a restart (`bl-downloads` in localStorage, at most 100, #491); the
-  files stay only in memory (the last 10), so a row without its file has Download again and a
-  failed or cancelled one Retry, which request the address as a download like Chrome
+  sees the request end). The file streams into the host browser's downloads from the start
+  (`Download.save()`), so the host shows it with its own progress and the demo keeps no bytes; a
+  cancel on either side ends it on both. Only without the service worker the file waits in
+  memory until done and the row has Save again (the last 10 files up to 256 MB stay).
+  Like Chrome the list outlives a restart (`bl-downloads` in localStorage, at most 100, #491); a
+  finished row without its file has Download again and a failed or cancelled one Retry, which request the address as a download like Chrome
   (`view.download` of the active tab; an answer that is no file is downloaded too and the page
   stays, #511). Clear all empties the list. Save link as and Save image as of the context menu
   start downloads the same way, Copy image puts the image on the clipboard.

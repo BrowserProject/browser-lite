@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the folder the server delivers (SITE_DIR of browser-lite-server):
-#   <out>/index.html, assets/, sw.js, media-sw.js       the demo (Vite build of apps/demo)
+#   <out>/index.html, assets/, sw.js, media-sw.js,     the demo (Vite build of apps/demo)
+#   download-sw.js
 #   <out>/engine/<hash>/...                              the packaged engine
 # <engine> is the output of tools/package-engine.sh (folder with engine/<hash>/manifest.json,
 # CI artifact engine-dist) or a built engine folder, which is packaged here without notices.

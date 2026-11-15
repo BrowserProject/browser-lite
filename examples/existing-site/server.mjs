@@ -41,8 +41,8 @@ const LIBS = {
   'transport-wisp': distOf('@browser-lite/transport-wisp'),
   ui: distOf('@browser-lite/ui'),
 };
-// The media part of the core's service worker, imported by the site's own app/sw.js
-const MEDIA_SW_DIR = path.dirname(require.resolve('@browser-lite/core/sw/media-sw.js'));
+// The media and download parts of the core's service worker, imported by the site's own app/sw.js
+const SW_DIR = path.dirname(require.resolve('@browser-lite/core/sw/media-sw.js'));
 const APP_DIR = path.join(here, 'app');
 
 // Content Security Policy of /app/csp.html: what the engine, the core and the ui need, nothing
@@ -58,6 +58,7 @@ async function cspFor(file) {
     "worker-src 'self'",
     "connect-src 'self'",
     "media-src 'self' blob:",
+    "frame-src 'self'",
     "style-src 'self'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -165,8 +166,8 @@ async function handle(req, res) {
     const [, , name = '', ...file] = rest.split('/');
     if (Object.hasOwn(LIBS, name))
       found = await serveStatic(req, res, LIBS[name], { urlPath: `/${file.join('/')}` });
-  } else if (rest === '/media-sw.js') {
-    found = await serveStatic(req, res, MEDIA_SW_DIR, { urlPath: rest });
+  } else if (rest === '/media-sw.js' || rest === '/download-sw.js') {
+    found = await serveStatic(req, res, SW_DIR, { urlPath: rest });
   } else {
     // Normalized, so /app//csp.html cannot skip the policy of /app/csp.html
     const page = path.posix.normalize(rest);

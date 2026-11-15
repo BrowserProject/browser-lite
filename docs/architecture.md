@@ -436,6 +436,12 @@ engine has no load for (answered by a service worker or WebKit's memory cache), 
 (Save link as, Save image as, the demo's Download again: the page's cookies and the referrer its
 policy allows, #511) and `bl_save_page` (Save page as, the main frame's address named after its
 title) send a request of their own (#412).
+The engine hands the bytes of a download to the host as they arrive (`sendDownloadData`). With
+`Download.save()` the core streams them into the host browser's downloads (#577): the page posts
+them to `download-sw.js`, which answers the navigation of a hidden frame to `bl-download/...` with
+an attachment whose body is that stream, so the host writes the file to disk while it arrives and
+the page holds no bytes; a cancel in the host's download list cancels the download in the engine.
+Without the worker the bytes collect in memory and become a Blob at the end.
 A `view-source:` address is a document of its own like in Chrome (`engine/src/ViewSource.cpp`,
 #490): the loader strategy serves the main frame's load of it from a request for the address after
 the scheme (cookies of a navigation, redirects followed, the body of any status) and answers with

@@ -20,6 +20,7 @@
     },
     "./sw/sw.js": "./dist/sw/sw.js",
     "./sw/media-sw.js": "./dist/sw/media-sw.js",
+    "./sw/download-sw.js": "./dist/sw/download-sw.js",
     "./audio-worklet.js": "./dist/audio-worklet.js"
   },
   "types": "./dist/index.d.ts",

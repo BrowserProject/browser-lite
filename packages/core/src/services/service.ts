@@ -21,6 +21,8 @@ export interface ServiceContext {
   text(value: string | null | undefined): number;
   /** Worker of the engine thread (capture streams, sinks). */
   engineWorker(): Worker | null;
+  /** Registration of the `serviceWorker` option, null when there is none (registered once). */
+  serviceWorker(): Promise<ServiceWorkerRegistration | null>;
   /** Handles an engine event (notifyHost type). */
   on<T>(type: string, handler: (data: T, view: ViewImpl | undefined) => void): void;
   hostCall<P>(name: string, handler: HostCall<P>): void;

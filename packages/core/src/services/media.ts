@@ -484,58 +484,6 @@ interface FetchMessage {
   end: number;
 }
 
-async function serviceWorkerRegistration(
-  ctx: ServiceContext,
-): Promise<ServiceWorkerRegistration | null> {
-  const option = ctx.config.serviceWorker;
-  if (!option) {
-    ctx.warn(
-      'media-sw-missing',
-      'No service worker given (serviceWorker option): <video> and <audio> files will not play',
-    );
-    return null;
-  }
-  if (!('serviceWorker' in navigator)) {
-    ctx.warn('media-sw-missing', 'Service workers are not available: media files will not play');
-    return null;
-  }
-  try {
-    const registration =
-      'registration' in option
-        ? option.registration
-        : await navigator.serviceWorker.register(
-            option.url,
-            option.scope ? { scope: option.scope } : {},
-          );
-    // On the first visit the worker controls the page only after clients.claim(). Firefox also
-    // leaves later visits of a cross-origin isolated page uncontrolled: the worker claims it on
-    // request (media-sw.js).
-    if (!navigator.serviceWorker.controller)
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, 3000);
-        navigator.serviceWorker.addEventListener(
-          'controllerchange',
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
-        );
-        registration.active?.postMessage({ bl: 'claim' });
-      });
-    if (!navigator.serviceWorker.controller) {
-      ctx.warn(
-        'media-sw-missing',
-        'The service worker does not control this page (scope or clients.claim): media files will not play',
-      );
-    }
-    return registration;
-  } catch (error) {
-    ctx.warn('media-sw-missing', `Service worker failed: ${(error as Error)?.message ?? error}`);
-    return null;
-  }
-}
-
 /** <video> and <audio> of the pages (plus picture-in-picture). */
 export class MediaService extends Service {
   readonly features: readonly string[];
@@ -555,7 +503,7 @@ export class MediaService extends Service {
     // The registration runs while the engine loads; players only come once the browser is
     // ready, which waits for it
     let scope = new URL('./', location.href).href;
-    const registered = serviceWorkerRegistration(ctx).then((registration) => {
+    const registered = ctx.serviceWorker().then((registration) => {
       if (registration) scope = registration.scope;
       if ('serviceWorker' in navigator)
         navigator.serviceWorker.controller?.postMessage({ bl: 'media-hello', instance });

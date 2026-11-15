@@ -1,6 +1,7 @@
-// The site's own service worker. The media part of browser-lite comes first: it answers only
-// requests below bl-media/ of this scope and messages with a field `bl`, and ignores the rest.
-importScripts('media-sw.js');
+// The site's own service worker. The media and download parts of browser-lite come first: they
+// answer only requests below bl-media/ and bl-download/ of this scope and messages with a field
+// `bl`, and ignore the rest.
+importScripts('media-sw.js', 'download-sw.js');
 
 self.addEventListener('install', () => self.skipWaiting());
 // Control the open pages right away, so videos play on the first visit too. Not in waitUntil():

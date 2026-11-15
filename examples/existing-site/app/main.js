@@ -45,7 +45,7 @@ async function start() {
     );
     return;
   }
-  // The site's own service worker; its first line imports media-sw.js of the core
+  // The site's own service worker; its first line imports media-sw.js and download-sw.js of the core
   const registration = await navigator.serviceWorker.register('sw.js');
   const browser = await createBrowser({
     engineUrl: new URL('engine/', location.href),

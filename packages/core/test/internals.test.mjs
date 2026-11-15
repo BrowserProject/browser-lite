@@ -489,18 +489,20 @@ test('authentication: credentials, cancel, defaults, auth-cancel and closed view
   ]);
 });
 
-test('downloads: events with the download, cancel, abort and auto save', () => {
+test('downloads: events with the download, cancel, abort', () => {
   const module = fakeModule();
   const announced = [];
-  let listening = true;
-  const downloads = new Downloads({
-    module,
-    ready: true,
-    announceDownload(download) {
-      announced.push(download);
-      return listening;
+  const downloads = new Downloads(
+    {
+      module,
+      ready: true,
+      announceDownload(download) {
+        announced.push(download);
+        return true;
+      },
     },
-  });
+    { open: async () => assert.fail('nobody saves') },
+  );
   const view = fakeView(3);
   downloads.start(
     { id: 1, filename: 'a.txt', mime: 'text/plain', url: 'https://a/a.txt', size: 4 },
@@ -531,18 +533,154 @@ test('downloads: events with the download, cancel, abort and auto save', () => {
   second.cancel();
   assert.deepEqual(module.calls, [['cancel', 1]]);
 
-  // Nobody listens: saved when done
-  listening = false;
-  downloads.start({ id: 3, filename: 'c' }, view);
-  let saved = false;
-  announced[2].save = () => {
-    saved = true;
-  };
+  // Not saved: the file is the Blob at the end
+  downloads.start({ id: 3, filename: 'c', mime: 'text/plain' }, view);
   downloads.data(3, new Uint8Array([5]));
   downloads.done({ id: 3, error: '' });
   assert.equal(announced[2].state, 'done');
-  assert.equal(announced[2].size, 1);
-  assert.equal(saved, true);
+  assert.equal(announced[2].blob.size, 1);
+  assert.equal(announced[2].blob.type, 'text/plain');
+});
+
+/** Streams of the host browser's downloads that record what they get; open resolves on call. */
+function fakeStreams(answer = true) {
+  const opened = [];
+  return {
+    opened,
+    open(id, filename, mime, onCancel) {
+      const stream = { id, filename, mime, onCancel, bytes: [], ended: null };
+      let resolve;
+      const promise = new Promise((r) => {
+        resolve = r;
+      });
+      opened.push({
+        stream,
+        answer: (value = answer) =>
+          resolve(
+            value
+              ? {
+                  write: (bytes) => stream.bytes.push(...bytes),
+                  end: (error) => {
+                    stream.ended = error;
+                  },
+                }
+              : null,
+          ),
+      });
+      return promise;
+    },
+  };
+}
+
+test('downloads: nobody listens, the file streams into the host browser at once', async () => {
+  const module = fakeModule();
+  const streams = fakeStreams();
+  const announced = [];
+  const downloads = new Downloads(
+    {
+      module,
+      ready: true,
+      announceDownload: (download) => {
+        announced.push(download);
+        return false;
+      },
+    },
+    streams,
+  );
+  downloads.start({ id: 1, filename: 'a.bin', mime: 'x/y' }, undefined);
+  const [download] = announced;
+  // The host's download opens with the first bytes
+  assert.equal(streams.opened.length, 0);
+  downloads.data(1, new Uint8Array([1, 2]));
+  assert.equal(streams.opened.length, 1);
+  assert.deepEqual(
+    [streams.opened[0].stream.filename, streams.opened[0].stream.mime],
+    ['a.bin', 'x/y'],
+  );
+  // Bytes before the host answered wait, then go over; the engine's end waits for the stream
+  downloads.data(1, new Uint8Array([3]));
+  downloads.done({ id: 1, error: '' });
+  assert.equal(download.state, 'progress');
+  streams.opened[0].answer();
+  await tick();
+  assert.deepEqual(streams.opened[0].stream.bytes, [1, 2, 3]);
+  assert.equal(streams.opened[0].stream.ended, '');
+  assert.equal(download.state, 'done');
+  assert.equal(download.size, 3);
+  assert.equal(download.blob, null);
+
+  // Bytes after the answer go straight there; a cancel in the host ends it in the engine
+  downloads.start({ id: 2, filename: 'b.bin' }, undefined);
+  downloads.data(2, new Uint8Array([6]));
+  streams.opened[1].answer();
+  await tick();
+  downloads.data(2, new Uint8Array([7]));
+  assert.deepEqual(streams.opened[1].stream.bytes, [6, 7]);
+  streams.opened[1].stream.onCancel();
+  assert.equal(announced[1].state, 'error');
+  assert.equal(announced[1].error, 'Cancelled');
+  assert.equal(streams.opened[1].stream.ended, 'Cancelled');
+  assert.deepEqual(module.calls, [['cancel', 2]]);
+
+  // An error response is no file: no host download
+  downloads.start({ id: 3, filename: 'c.bin' }, undefined);
+  downloads.done({ id: 3, error: 'HTTP 404' });
+  assert.equal(announced[2].state, 'error');
+  assert.equal(streams.opened.length, 2);
+
+  // An error after bytes fails the host's download, also one that opens later
+  downloads.start({ id: 4, filename: 'd.bin' }, undefined);
+  downloads.data(4, new Uint8Array([8]));
+  downloads.done({ id: 4, error: 'Network error' });
+  streams.opened[2].answer();
+  await tick();
+  assert.equal(streams.opened[2].stream.ended, 'Network error');
+
+  // An empty file opens at its end
+  downloads.start({ id: 5, filename: 'e.bin' }, undefined);
+  downloads.done({ id: 5, error: '' });
+  assert.equal(streams.opened.length, 4);
+  streams.opened[3].answer();
+  await tick();
+  assert.equal(announced[4].state, 'done');
+  assert.equal(streams.opened[3].stream.ended, '');
+});
+
+test('downloads: without a host stream the file is saved once done', async () => {
+  const clicked = [];
+  globalThis.document = {
+    createElement: () => ({
+      style: {},
+      click() {
+        clicked.push(this.download);
+      },
+      remove() {},
+    }),
+    body: { append() {} },
+  };
+  try {
+    const streams = fakeStreams(false);
+    const announced = [];
+    const downloads = new Downloads(
+      {
+        module: fakeModule(),
+        ready: true,
+        announceDownload: (download) => announced.push(download) && false,
+      },
+      streams,
+    );
+    downloads.start({ id: 1, filename: 'a.bin' }, undefined);
+    downloads.data(1, new Uint8Array([1]));
+    streams.opened[0].answer();
+    await tick();
+    downloads.data(1, new Uint8Array([2]));
+    assert.deepEqual(clicked, []);
+    downloads.done({ id: 1, error: '' });
+    assert.equal(announced[0].blob.size, 2);
+    assert.deepEqual(clicked, ['a.bin']);
+  } finally {
+    delete globalThis.document;
+  }
 });
 
 test('uploads: files over the limit and unreadable files are reported', async () => {

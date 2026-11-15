@@ -19,7 +19,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 | Package | |
 |---|---|
-| [@browser-lite/core](packages/core/README.md) | `createBrowser`, views, input, storage, host services, media service worker |
+| [@browser-lite/core](packages/core/README.md) | `createBrowser`, views, input, storage, host services, service worker for media and downloads |
 | [@browser-lite/transport-wisp](packages/transport-wisp/README.md) | Wisp v1 client, the network of the engine |
 | [@browser-lite/ui](packages/ui/README.md) | Unstyled select popup, pickers, permission prompt, dialogs, context menu |
 | [@browser-lite/profile](packages/profile/README.md) | Optional server-side profile (stay signed in across devices) |
@@ -67,7 +67,7 @@ import { WispTransport } from '@browser-lite/transport-wisp';
 const browser = await createBrowser({
   engineUrl: '/engine/0.1.0/',
   transport: new WispTransport({ url: '/wisp/', token: () => fetch('/relay-token').then((r) => r.text()) }),
-  serviceWorker: { url: '/sw.js' }, // @browser-lite/core/sw/sw.js and media-sw.js, for <video>/<audio>
+  serviceWorker: { url: '/sw.js' }, // @browser-lite/core/sw/: sw.js, media-sw.js, download-sw.js
 });
 const view = browser.createView({ container: document.querySelector('#browser'), url: 'https://example.com/' });
 view.on('title', ({ title }) => (document.title = title));

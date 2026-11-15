@@ -86,9 +86,11 @@ try {
     `${engineJs.status} ${engineJs.headers.get('cross-origin-embedder-policy')}`,
   );
   const swFiles = await Promise.all(
-    ['sw.js', 'media-sw.js'].map((file) => fetch(`${PREVIEW}/${file}`).then((r) => r.ok)),
+    ['sw.js', 'media-sw.js', 'download-sw.js'].map((file) =>
+      fetch(`${PREVIEW}/${file}`).then((r) => r.ok),
+    ),
   );
-  check('minimal: sw.js and media-sw.js in the build', swFiles.every(Boolean));
+  check('minimal: sw.js, media-sw.js and download-sw.js in the build', swFiles.every(Boolean));
 
   const context = await browser.newContext({ viewport: { width: 1000, height: 700 } });
   const page = await context.newPage();

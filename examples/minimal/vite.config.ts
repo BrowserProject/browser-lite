@@ -13,17 +13,21 @@ const isolation = {
 // browser-lite-server (relay under /wisp/), started separately
 const relay = process.env.RELAY_URL ?? 'http://127.0.0.1:5001';
 
-// The service worker of the core (package exports): sw.js loads media-sw.js next to itself
+// The service worker of the core (package exports): sw.js loads media-sw.js and download-sw.js
+// next to itself
 const require = createRequire(import.meta.url);
 const swFiles: Record<string, string> = {
   'sw.js': require.resolve('@browser-lite/core/sw/sw.js'),
   'media-sw.js': require.resolve('@browser-lite/core/sw/media-sw.js'),
+  'download-sw.js': require.resolve('@browser-lite/core/sw/download-sw.js'),
 };
 
-/** Serves sw.js and media-sw.js of the core at the root in development, copies them in the build. */
-function mediaServiceWorker(): Plugin {
+/**
+ * Serves the service worker files of the core at the root in development, copies them in the build.
+ */
+function coreServiceWorker(): Plugin {
   return {
-    name: 'media-service-worker',
+    name: 'core-service-worker',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const name = new URL(req.url ?? '/', 'http://localhost').pathname.slice(1);
@@ -43,7 +47,7 @@ function mediaServiceWorker(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [mediaServiceWorker()],
+  plugins: [coreServiceWorker()],
   server: { headers: isolation, proxy: { '/wisp/': { target: relay, ws: true } } },
   preview: { headers: isolation, proxy: { '/wisp/': { target: relay, ws: true } } },
   build: {

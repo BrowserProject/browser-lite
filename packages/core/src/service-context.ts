@@ -13,6 +13,7 @@ interface RegistryHost {
   text(value: string | null | undefined): number;
   handle<T>(type: string, handler: (data: T, view: ViewImpl | undefined) => void): void;
   warn(code: WarningCode, message: string): void;
+  serviceWorker(): Promise<ServiceWorkerRegistration | null>;
 }
 
 /**
@@ -45,6 +46,7 @@ export class ServiceRegistry {
       signal,
       text: (value) => host.text(value),
       engineWorker: () => host.module.blEngineWorker?.() ?? null,
+      serviceWorker: () => host.serviceWorker(),
       on: (type, handler) => host.handle(type, handler),
       hostCall: <P>(name: string, handler: HostCall<P>) => {
         if (this.hostCalls.has(name)) throw new Error(`Host call ${name} is handled twice`);

@@ -19,7 +19,7 @@ import { WispTransport } from '@browser-lite/transport-wisp';
 const browser = await createBrowser({
   engineUrl: '/engine/0.1.0/', // one folder per engine version
   transport: new WispTransport({ url: 'wss://example.com/wisp/' }),
-  serviceWorker: { url: '/sw.js' }, // needed for <video>/<audio>, see below
+  serviceWorker: { url: '/sw.js' }, // needed for <video>/<audio> and streamed downloads, see below
 });
 const view = browser.createView({ container: document.querySelector('#page'), url: 'https://example.com/' });
 view.on('title', ({ title }) => console.log(title));
@@ -65,9 +65,9 @@ pointer gets `dragenter`, `dragover`, `dragleave` and, when its last `dragover` 
 drops from other windows; the page's `dragend` gets the drop effect (your `dropEffect` where the
 browser lets you set it, else copy, link or move of its `effectAllowed`). Default actions do not
 run for untrusted events: a text field of yours inserts nothing unless you do it in `drop`.
-`sw.js` and `media-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
-`@browser-lite/core/sw/media-sw.js`), so a build step can resolve and copy them; how to serve
-them or load `media-sw.js` into the site's own worker:
+`sw.js`, `media-sw.js` and `download-sw.js` are package exports (`@browser-lite/core/sw/sw.js`,
+`@browser-lite/core/sw/media-sw.js`, `@browser-lite/core/sw/download-sw.js`), so a build step
+can resolve and copy them; how to serve them or load the parts into the site's own worker:
 [Service worker](../../docs/embedding.md#service-worker).
 
 ## Options of createBrowser
@@ -79,7 +79,7 @@ them or load `media-sw.js` into the site's own worker:
 | `storage.persistent` | `true` | `false` keeps everything in memory (no OPFS, no HTTP cache) |
 | `storage.namespace` | `browserlite` | OPFS directory and prefix of caches and the Web Lock, `^[a-z0-9_]{1,32}$` |
 | `storage.beforeStart` | none | Runs with the namespace directory before the engine starts |
-| `serviceWorker` | none | `{ registration }` or `{ url, scope? }` of a worker that loads `media-sw.js`; never registered implicitly |
+| `serviceWorker` | none | `{ registration }` or `{ url, scope? }` of a worker that loads `media-sw.js` and `download-sw.js`; never registered implicitly |
 | `services` | `defaultServices()` | Host services, see below |
 | `handlers` | safe defaults | Request handlers, see below |
 | `extensions` | none | Host of `createExtensionHost()`, see [Extensions](#extensions) |
@@ -151,7 +151,14 @@ what a browser UI has to do, and nothing happens without a listener:
 | `crash` (browser) | The engine is gone: destroy the browser and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)); `reason` is the error with its WebAssembly stack, for a bug report |
 | `pageshow` (window, `persisted`) | Not an event of the browser: the page left at `pagehide` ended its browser (`state` `'destroyed'`), also into the back-forward cache; when the cache shows the page again, call its `destroy()` (only that takes the old views' canvases off the page) and create a new one ([Lifecycle](../../docs/embedding.md#lifecycle)) |
 
-Without a `download` listener finished downloads are saved automatically. `download.view` is the
+`download.save()` during a download streams it into the host browser's downloads like a download
+of the host itself: the host writes the file while it arrives and shows its progress, a cancel
+there cancels it in the engine, and the page keeps no bytes (`blob` stays null), so a file of
+several GB costs no memory. This goes through `download-sw.js` (a hidden frame whose navigation
+the worker answers with the stream) and needs `frame-src 'self'` in a Content Security Policy;
+where it is not possible (no service worker, no answer within 10 s) the file collects in memory
+and is saved once done. A download nobody calls `save()` for collects in memory and is the
+`blob` at `done`. Without a `download` listener every download is saved right away. `download.view` is the
 view that started it: like Chrome, close a tab whose navigation became the download while its view
 never showed a page (no entry in `view.history` other than `about:blank`, for example a
 `target=_blank` link to a file), so no empty tab stays in front.
@@ -250,7 +257,7 @@ extension with the global `extension`), `onMessage` and `postMessage`, `storage`
   `@browser-lite/core/audio-worklet.js`).
 - `media({ pictureInPicture })`: `<video>`/`<audio>` through hidden media elements of the host;
   media files need the service worker ([Service worker](../../docs/embedding.md#service-worker)).
-  Without it a `warning` event with code `media-sw-missing` follows. In a hidden view media that
+  Without it a `warning` event with code `sw-missing` follows. In a hidden view media that
   never played with sound (no audio track, or muted since it started) pauses like in Chrome, the
   host element too (it tells the engine which media have an audio track). `getVideoPlaybackQuality()` of the pages counts the frames of the host element,
   with copied frames also those it showed that never reached the engine as dropped. A view gets `picture-in-picture` events when one of its videos enters or leaves that window.

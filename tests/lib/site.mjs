@@ -18,6 +18,7 @@ export function coreSite(engine) {
     'host.js': path.join(root, 'tests', 'core', 'host', 'host.js'),
     'sw.js': path.join(root, 'packages', 'core', 'dist', 'sw', 'sw.js'),
     'media-sw.js': path.join(root, 'packages', 'core', 'dist', 'sw', 'media-sw.js'),
+    'download-sw.js': path.join(root, 'packages', 'core', 'dist', 'sw', 'download-sw.js'),
     packages: path.join(root, 'packages'),
     engine,
   };

@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import { ImageCopies } from './copy-image.js';
 import { Debug } from './debug.js';
+import { HostDownloads } from './download-stream.js';
 import { Downloads } from './downloads.js';
 import { Emitter } from './emitter.js';
 import {
@@ -34,6 +35,7 @@ import { redirectPopup } from './popups.js';
 import { Requests } from './requests.js';
 import { Screen } from './screen.js';
 import { ServiceRegistry } from './service-context.js';
+import { registerServiceWorker } from './service-worker.js';
 import { holdStorageLock, namespaceDirectory } from './storage.js';
 import { checkSupport } from './support.js';
 import type {
@@ -177,6 +179,7 @@ class BrowserImpl implements Browser, ViewHost {
   private releaseLock: (() => void) | null = null;
   private extensions: ExtensionLink | null = null;
   private failStart: ((error: Error) => void) | null = null;
+  private registration: Promise<ServiceWorkerRegistration | null> | null = null;
 
   constructor(readonly config: Config) {
     this.storage = new StorageImpl(this);
@@ -190,7 +193,10 @@ class BrowserImpl implements Browser, ViewHost {
     this.network = new Online(this.module, config.transport, (connected) =>
       this.events.emit('network', { connected }),
     );
-    this.downloads = new Downloads(this);
+    this.downloads = new Downloads(
+      this,
+      new HostDownloads(() => this.serviceWorker(), this.lifetime.signal),
+    );
     this.imageCopies = new ImageCopies(this.module);
     this.screen = new Screen(this.module, config, () => {
       for (const view of this.views.values()) view.measure(true);
@@ -210,6 +216,14 @@ class BrowserImpl implements Browser, ViewHost {
 
   get online(): boolean {
     return this.network.value;
+  }
+
+  /** The worker of the `serviceWorker` option (media files, downloads), registered once. */
+  serviceWorker(): Promise<ServiceWorkerRegistration | null> {
+    this.registration ??= registerServiceWorker(this.config.serviceWorker, (code, message) =>
+      this.warn(code, message),
+    );
+    return this.registration;
   }
 
   /** Emits `download`; false when nobody listens. */
@@ -239,6 +253,7 @@ class BrowserImpl implements Browser, ViewHost {
 
     // The synchronous part of setup (module hooks, handlers) runs now, async preparation
     // (service worker) while the engine loads
+    void this.serviceWorker();
     const context = this.services.context;
     const prepared = Promise.all(config.services.map((service) => service.setup(context)));
     prepared.catch(() => {});

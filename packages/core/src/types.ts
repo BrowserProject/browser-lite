@@ -181,7 +181,10 @@ export interface BrowserOptions {
   /** Network of the engine, for example a `WispTransport`. */
   transport: Transport;
   storage?: StorageOptions;
-  /** Needed for media files in `<video>`/`<audio>`; never registered implicitly. */
+  /**
+   * Needed for media files in `<video>`/`<audio>` (media-sw.js) and for downloads that stream into
+   * the host browser's downloads (download-sw.js); never registered implicitly.
+   */
   serviceWorker?: ServiceWorkerOption;
   /** Host services; default {@link defaultServices}. */
   services?: HostService[];
@@ -345,7 +348,7 @@ export interface BrowserEvents {
    * instead and the popup closes (a popup that stays on about:blank closes after 10 s).
    */
   'new-view': { view: View; opener: View | null };
-  /** A download started; without any listener the file is saved automatically when done. */
+  /** A download started; without any listener the file is saved right away (`Download.save()`). */
   download: { download: Download };
   /**
    * The engine's memory runs short: close or discard background views. Reported at every further
@@ -403,9 +406,10 @@ export interface MemoryPressureEvent {
 
 /**
  * Codes of the `warning` event: 'storage-locked' another tab uses the storage namespace (data
- * stays in memory), 'media-sw-missing' media files cannot play without the service worker.
+ * stays in memory), 'sw-missing' no service worker (`serviceWorker` option): media files cannot
+ * play and downloads are kept in memory until they are done.
  */
-export type WarningCode = 'storage-locked' | 'media-sw-missing';
+export type WarningCode = 'storage-locked' | 'sw-missing';
 
 /** Options of {@link Browser.createView}. */
 export interface ViewOptions {
@@ -999,7 +1003,10 @@ export interface PermissionStore {
   entries(): Iterable<[origin: string, kind: string, value: PermissionDecision]>;
 }
 
-/** A download of the pages. The file is collected in memory and becomes a Blob when done. */
+/**
+ * A download of the pages. Its bytes collect in memory and become a Blob when done, unless
+ * `save()` streams them into the host browser's downloads.
+ */
 export interface Download {
   readonly id: number;
   /** View that started it, null when it is gone or unknown. */
@@ -1015,7 +1022,7 @@ export interface Download {
   readonly state: 'progress' | 'done' | 'error';
   /** Why it failed: the network error, 'HTTP <status>', 'Cancelled' or 'Aborted' (browser ended). */
   readonly error?: string;
-  /** The file once done. */
+  /** The file once done; null when `save()` streamed it into the host browser's downloads. */
   readonly blob: Blob | null;
   /** `progress` for every chunk, then exactly one `done` or `error`. */
   on(
@@ -1024,7 +1031,15 @@ export interface Download {
   ): Unsubscribe;
   /** Stops a running download; it ends with `error` 'Cancelled'. */
   cancel(): void;
-  /** Saves the file with the download of the host browser. */
+  /**
+   * Saves the file with the download of the host browser. While the download runs this streams
+   * it there, like a download of the host browser itself: from the first bytes on (an error
+   * response is no file) the host writes them to disk as they arrive, shows its own progress, and
+   * a cancel there cancels this download; nothing stays in memory, `blob` stays null. That needs the service worker with download-sw.js
+   * (`serviceWorker` option); without it the file is saved once done. After the end it saves
+   * `blob`, if any. Without a `download` listener of the browser every download is saved this
+   * way right at its start.
+   */
   save(): void;
 }
 

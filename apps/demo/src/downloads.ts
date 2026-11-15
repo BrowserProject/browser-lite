@@ -4,7 +4,8 @@ import { formatSize, readJSON } from './util.js';
 
 /**
  * A download for the downloads panel (Ctrl+J). Like Chrome the list outlives a restart: it is
- * kept in localStorage of this device (like the history), the files only in memory.
+ * kept in localStorage of this device (like the history). The files stream into the host
+ * browser's downloads; only where they cannot (no service worker) they wait in memory until done.
  */
 export interface DownloadEntry {
   readonly id: string;
@@ -19,7 +20,10 @@ export interface DownloadEntry {
   error?: string;
   /** Size of the finished file. */
   size?: number;
-  /** The core's download while its file is in memory; null after a restart or once dropped. */
+  /**
+   * The core's download while it runs or its file is in memory (`blob`); null after a restart or
+   * once dropped.
+   */
   download: Download | null;
 }
 
@@ -28,7 +32,9 @@ type Saved = Omit<DownloadEntry, 'download'>;
 
 const KEY = 'bl-downloads';
 const MAX_ENTRIES = 100;
+/** Finished files kept in memory for Save again (only those that did not stream). */
 const KEEP_FILES = 10;
+const KEEP_BYTES = 256 * 1024 * 1024;
 const entries: DownloadEntry[] = readJSON<Saved[]>(KEY, []).map(restore);
 const listeners = new Set<() => void>();
 
@@ -76,7 +82,10 @@ function write(list: Saved[]): void {
 /** Only web addresses can be requested again (data: comes without its data, blob: dies). */
 const reloadable = (url: string) => (/^https?:/i.test(url) ? url : '');
 
-/** A download of the pages ('download' event): progress in the status line, saved when done. */
+/**
+ * A download of the pages ('download' event): saved right away, streaming into the host
+ * browser's downloads; progress in the status line.
+ */
 export function addDownload(download: Download): void {
   const entry: DownloadEntry = {
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -112,17 +121,26 @@ export function addDownload(download: Download): void {
     changed();
   });
   download.on('done', () => {
-    download.save();
     entry.state = 'done';
-    entry.size = download.blob?.size ?? download.size;
+    entry.size = download.size;
+    if (!download.blob) entry.download = null;
     persist(entry);
-    setStatus(`Download finished: ${download.filename} (${formatSize(download.blob?.size)})`);
-    // Old files leave memory (the list keeps the name)
-    const kept = entries.filter((e) => e.download?.state === 'done');
-    const oldest = kept[0];
-    if (kept.length > KEEP_FILES && oldest) oldest.download = null;
+    setStatus(`Download finished: ${download.filename} (${formatSize(download.size)})`);
+    dropOldFiles();
     changed();
   });
+  download.save();
+}
+
+/** Old files leave memory beyond 10 files or 256 MB, the oldest first (the list keeps them). */
+function dropOldFiles(): void {
+  const kept = entries.filter((e) => e.download?.blob);
+  let bytes = kept.reduce((sum, e) => sum + (e.download?.blob?.size ?? 0), 0);
+  for (const [index, e] of kept.entries()) {
+    if (kept.length - index <= KEEP_FILES && bytes <= KEEP_BYTES) break;
+    bytes -= e.download?.blob?.size ?? 0;
+    e.download = null;
+  }
 }
 
 /** Removes the ended downloads from the list (Chrome's "Clear all"); running ones stay. */

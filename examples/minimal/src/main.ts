@@ -37,7 +37,8 @@ async function start(): Promise<void> {
     engineUrl: new URL('engine/', location.href),
     // The dev server forwards /wisp/ to browser-lite-server
     transport: new WispTransport({ url: new URL('wisp/', location.href) }),
-    // sw.js imports media-sw.js: needed for <video> and <audio>
+    // sw.js imports media-sw.js and download-sw.js: needed for <video> and <audio> and for
+    // downloads that stream into the host browser's downloads
     serviceWorker: { url: new URL('sw.js', location.href) },
     handlers: defaultHandlers(),
   });

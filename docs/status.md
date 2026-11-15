@@ -42,7 +42,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   closes again like in Chrome, a new tab page stays, #508; Save link as, Save image as and Copy
   image of the context menu like Chrome, the image at full size as PNG on the clipboard (checked
   in Chromium, Firefox and WebKit), and Download again and Retry request the address as a
-  download, #511),
+  download, #511; a download streams into the host browser's downloads while it arrives instead of
+  waiting in the tab's memory: a 588 MB file raised the renderers by 1105 to 1167 MB before, by
+  89 to 197 MB (bounded, garbage of the passed chunks) now, at the same speed, #577),
   uploads,
   find, zoom (per site in the demo, #385), pinch zoom on the compositor (#150), also while the
   page is busy (#505),
@@ -886,6 +888,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
   timeout.
 - Downloads (#466): no Pause like Chrome; the core would need to hold the download's request in
   the engine (no reads, so the server waits) and resume it, or ask again with a `Range` header.
+  A streamed download (#577) has no size in the host browser's list (the engine's expected size is
+  that before the Content-Encoding), Resume or Retry there finds the stream gone (the demo's Retry
+  works), and without backpressure a host that writes slower than the network buffers the rest
+  in the service worker. Without the service worker, or under a Content Security Policy without
+  `frame-src 'self'`, files still wait in memory until done. Under Playwright, Firefox gives a tab
+  no more input after one of its downloads was interrupted (also one a server broke off), so
+  `tests/demo/downloads-test.mjs` restarts the demo in a new tab after its cancel.
   Download again and Retry of the demo (#491, #511) request a download from a form POST again
   with GET. Save image as downloads the address again instead of the bytes the page shows (Chrome
   takes them from its HTTP cache), so an image whose address answers differently every time

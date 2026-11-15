@@ -120,7 +120,7 @@ Extensions, Web Audio) by [examples/existing-site/](../examples/existing-site/RE
 
 ```
 default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-<inline import map>';
-worker-src 'self'; connect-src 'self'; media-src 'self' blob:; style-src 'self';
+worker-src 'self'; connect-src 'self'; media-src 'self' blob:; frame-src 'self'; style-src 'self';
 base-uri 'none'; form-action 'self'; frame-ancestors 'self'
 ```
 
@@ -133,9 +133,11 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'self'
   covered in Chromium); add the relay origin (`wss://relay.example.com`) when it runs elsewhere.
 - `media-src 'self' blob:`: required. Hidden media elements play `bl-media/` URLs of the service
   worker (`'self'`) and MediaSource object URLs (`blob:`); without it Chromium refuses both.
+- `frame-src 'self'`: the hidden frame of a download that streams into the host browser's
+  downloads ([Service worker](#service-worker)); without it downloads wait in memory until done.
 - `style-src 'self'`: the core and `@browser-lite/ui` set styles only through the CSSOM (no style
   attributes, `innerHTML` or style elements), so no `'unsafe-inline'`. Your own UI may need more.
-- Neither the core nor the ui needs `img-src` or `frame-src`; add `img-src 'self' blob: data:`
+- Neither the core nor the ui needs `img-src`; add `img-src 'self' blob: data:`
   if your UI shows favicons or other images.
 - `frame-ancestors 'self'`: in the iframe mode list the embedding origin instead.
 - If your server sends a CSP header also with `engine.js`, that policy applies to the engine
@@ -145,24 +147,32 @@ Pages inside the engine are not affected by this policy; the engine enforces the
 
 ## Service worker
 
-Needed only for `<video>` and `<audio>` with media files; the core never registers one.
+Needed for `<video>` and `<audio>` with media files (`media-sw.js`) and for downloads that stream
+into the host browser's downloads (`download-sw.js`); the core never registers one.
 
-- No own service worker: serve `@browser-lite/core/sw/sw.js` and `@browser-lite/core/sw/media-sw.js`
-  (package exports, files in `dist/sw/`) from one folder and pass `serviceWorker: { url: '/sw.js' }`
-  (scope default: the folder of the URL).
-- Own service worker: call `importScripts('media-sw.js')` before adding your own `fetch` listener,
-  register the worker yourself and pass `serviceWorker: { registration }`. `media-sw.js` adds its
-  own `fetch` and `message` listeners, answers only URLs below `bl-media/` relative to the scope
-  and messages with a `bl` field, and touches no lifecycle. Your own fetch logic must leave
-  `bl-media/` URLs alone and keep COOP/COEP/CORP on the responses it produces.
+- No own service worker: serve `@browser-lite/core/sw/sw.js`, `@browser-lite/core/sw/media-sw.js`
+  and `@browser-lite/core/sw/download-sw.js` (package exports, files in `dist/sw/`) from one
+  folder and pass `serviceWorker: { url: '/sw.js' }` (scope default: the folder of the URL).
+- Own service worker: call `importScripts('media-sw.js', 'download-sw.js')` before adding your own
+  `fetch` listener, register the worker yourself and pass `serviceWorker: { registration }`. The
+  parts add their own `fetch` and `message` listeners, answer only URLs below `bl-media/` and
+  `bl-download/` relative to the scope and messages with a `bl` field, and touch no lifecycle.
+  Your own fetch logic must leave those URLs alone and keep COOP/COEP/CORP on the responses it
+  produces.
+- A download (`Download.save()`, every download without a `download` listener) opens a hidden
+  frame on `<scope>bl-download/...`; the worker answers its navigation with an attachment whose
+  body streams the bytes the page posts (sandboxed, never shown), so the host browser saves the
+  file while it arrives and the page keeps nothing. Without the worker, or without an answer
+  within 10 s (a Content Security Policy without `frame-src 'self'`), the file collects in memory
+  and is saved when done.
 - Call `skipWaiting()` and `clients.claim()` in the worker. Otherwise the page is not controlled
-  on the first visit: the core waits 3 s for `controllerchange` and emits `media-sw-missing`.
+  on the first visit: the core waits 3 s for `controllerchange` and emits `sw-missing`.
   Do not pass `claim()` to `event.waitUntil()` in `activate`: the page's requests wait for the
   activation, also the script of a new engine worker, which is a client `claim()` waits for
   (Firefox resolves that only after about 60 s, and the worker fails to load).
 - The scope must cover the browser page: media URLs are `<scope>bl-media/...` (with `/app/sw.js`
-  the scope is `/app/`). Without a worker media files do not play and the browser emits the
-  warning `media-sw-missing`.
+  the scope is `/app/`). Without a worker media files do not play, downloads wait in memory until
+  done and the browser emits the warning `sw-missing`.
 
 ## Relay
 

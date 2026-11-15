@@ -10,9 +10,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const engineDir = path.resolve(here, '../..', process.env.BL_ENGINE_DIR ?? 'build/webcore/bin');
 // browser-lite-server with the relay (/wisp/) and the profile (/profile/)
 const server = process.env.BL_SERVER ?? 'http://localhost:5001';
-// The service worker of the core (package export): sw.js loads media-sw.js next to itself
+// The service worker of the core (package export): sw.js loads media-sw.js and download-sw.js
+// next to itself
 const swDir = path.dirname(createRequire(import.meta.url).resolve('@browser-lite/core/sw/sw.js'));
-const SW_FILES = ['sw.js', 'media-sw.js'];
+const SW_FILES = ['sw.js', 'media-sw.js', 'download-sw.js'];
 // Folder of the engine relative to the page, the same as in src/main.ts
 const engineBase = process.env.VITE_ENGINE_BASE || 'engine/';
 

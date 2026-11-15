@@ -1,8 +1,9 @@
 // @ts-check
-// Standalone service worker for @browser-lite/core: the media part and nothing else. Use it when
-// the site has no service worker of its own; otherwise importScripts('media-sw.js') there.
+// Standalone service worker for @browser-lite/core: the media and download parts and nothing
+// else. Use it when the site has no service worker of its own; otherwise
+// importScripts('media-sw.js', 'download-sw.js') there.
 
-importScripts('media-sw.js');
+importScripts('media-sw.js', 'download-sw.js');
 
 {
   const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));

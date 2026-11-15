@@ -32,7 +32,7 @@ Open the home page, sign in (a fake session cookie), then open one of the three 
 | `/app/csp.html` | the browser under a strict Content Security Policy |
 | `/app/wisp/` | relay (`createRelay` with `authorizeToken` and `allowedOrigins`) |
 | `/app/engine/`, `/app/lib/` | engine files, dist folders of the packages for the import map |
-| `/app/sw.js` | the site's own service worker; first line `importScripts('media-sw.js')` |
+| `/app/sw.js` | the site's own service worker; first line `importScripts('media-sw.js', 'download-sw.js')` |
 
 `app/main.js` checks `/session` first, asks `/token` for every relay connection (`WispTransport`
 `token` function), registers `sw.js` itself and passes the registration
@@ -46,7 +46,7 @@ the example applies them.
 - [Headers](../../docs/embedding.md#headers): `server.mjs` serves everything under `/app/`
   with `serveStatic`, which sends COOP, COEP and CORP; pages outside `/app/` stay as they are.
 - [Service worker](../../docs/embedding.md#service-worker): `app/sw.js` (scope `/app/`) loads
-  `media-sw.js` first, calls `skipWaiting()` and `clients.claim()`, and its own fetch handler
+  `media-sw.js` and `download-sw.js` first, calls `skipWaiting()` and `clients.claim()`, and its own fetch handler
   answers only its own URL, so the isolation headers of the other responses stay.
 - [Iframe](../../docs/embedding.md#embedding-modes): `app/iframe.html` is isolated like the
   frame and carries the tested `allow` list.

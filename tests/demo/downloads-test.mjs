@@ -1,15 +1,18 @@
 // The downloads panel (Ctrl+J) during a running download: its row counts the received bytes as
 // they arrive, a Cancel button stops the download (the server sees the connection end before the
-// file is through), the row then reads "Cancelled", offers "Retry" and nothing goes to the host
-// browser; a finished download offers "Save again". Like Chrome the list outlives "Restart now"
-// (a reload of the demo): the rows come back without their files, "Download again" loads the
-// address once more and the page stays, "Clear all" empties the list for good.
+// file is through), the row then reads "Cancelled", offers "Retry" and the host browser's download
+// of it fails; a finished download is complete in the host browser and offers "Download again"
+// (its file streamed there, the demo keeps none). Like Chrome the list outlives "Restart now" (a
+// reload of the demo), "Download again" loads the address once more and the page stays, "Clear
+// all" empties the list for good.
 //
 //   node tests/demo/downloads-test.mjs [engine-dir]
+import fs from 'node:fs';
 import {
   TIMEOUT,
   canvasOrigin,
   check,
+  chromiumOnly,
   collect,
   finish,
   launch,
@@ -72,13 +75,21 @@ const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
   acceptDownloads: true,
 });
-const page = await context.newPage();
-watchErrors(page);
-const results = collect(page);
-await page.goto(stack.app({ url: siteURL }));
-check('page ready', (await results.wait('ready', TIMEOUT)) === '1');
-let hostDownloads = 0;
-page.on('download', () => hostDownloads++);
+// The downloads of the host browser: they start with the download in the demo (streamed)
+const hostFiles = [];
+const hostFile = (name) => hostFiles.find((download) => download.suggestedFilename() === name);
+let page;
+let results;
+/** The demo in a new tab of the host browser. */
+async function openDemo() {
+  page = await context.newPage();
+  watchErrors(page);
+  results = collect(page);
+  page.on('download', (download) => hostFiles.push(download));
+  await page.goto(stack.app({ url: siteURL }));
+  return (await results.wait('ready', TIMEOUT)) === '1';
+}
+check('page ready', await openDemo());
 
 const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 40, box.y + 34);
@@ -144,18 +155,41 @@ check(
   JSON.stringify(await rowButtons()) === JSON.stringify(['slow.bin|Cancelled|Retry']),
   JSON.stringify(await rowButtons()),
 );
+// Playwright reports no failure of an interrupted download in Firefox, also not of a server's
+if (chromiumOnly('host download failure')) {
+  const slowFailure = await hostFile('slow.bin')?.failure();
+  check('the host browser download of it failed', !!slowFailure, String(slowFailure));
+}
 
-// A finished download next to it offers Save again (the panel stays open over the page)
+// The demo starts again in a new tab (in Firefox Playwright's input reaches no page of a tab after
+// one of its downloads was interrupted, also one a server broke off): the list is still there
+await page.close();
+check('page ready after a restart in a new tab', await openDemo());
+await page.keyboard.press('Control+j');
+await page.waitForSelector('#side-panel .panel-download', { timeout: 10000 }).catch(() => {});
+check(
+  'the list outlives the restart',
+  JSON.stringify(await rowButtons()) === JSON.stringify(['slow.bin|Cancelled|Retry']),
+  JSON.stringify(await rowButtons()),
+);
+
+// A finished download next to it is complete in the host browser (the panel stays open)
 await page.keyboard.press('Control+j');
 await page.mouse.click(box.x + 40, box.y + 94);
-await waitFor(() => hostDownloads === 1, 30000);
-await page.keyboard.press('Control+j');
-const saveAgain = page.locator('#side-panel .panel-download button', { hasText: 'Save again' });
-await saveAgain.waitFor({ timeout: 10000 }).catch(() => {});
+await waitFor(() => !!hostFile('small.txt'), 30000);
+const smallPath = await hostFile('small.txt')
+  ?.path()
+  .catch(() => null);
 check(
-  'only the finished download went to the host browser and offers Save again',
-  hostDownloads === 1 && (await saveAgain.count()) === 1,
-  `${hostDownloads} host downloads`,
+  'the finished download is complete in the host browser',
+  !!smallPath && fs.readFileSync(smallPath, 'utf8') === 'small file\n',
+);
+await page.keyboard.press('Control+j');
+const finishedRow = async () => (await rowButtons()).includes('small.txt|11 B|Download again');
+check(
+  'the finished download offers Download again',
+  await waitFor(finishedRow, 10000),
+  JSON.stringify(await rowButtons()),
 );
 
 // Restart now (settings) marks the restart and reloads the demo: the list must come back
@@ -174,29 +208,26 @@ check(
 
 // Download again requests the address once more; the answer is a file, so the page stays
 const requestsBefore = smallRequests;
-const hostBefore = hostDownloads;
+const hostBefore = hostFiles.length;
 await page
   .locator('#side-panel .panel-download button', { hasText: 'Download again' })
   .click()
   .catch(() => {});
-await waitFor(() => hostDownloads === hostBefore + 1, 30000);
+await waitFor(() => hostFiles.length === hostBefore + 1, 30000);
 check(
   'Download again requests the file once more and saves it',
-  hostDownloads === hostBefore + 1 && smallRequests === requestsBefore + 1,
-  `${hostDownloads - hostBefore} saved, ${smallRequests - requestsBefore} requests`,
+  hostFiles.length === hostBefore + 1 && smallRequests === requestsBefore + 1,
+  `${hostFiles.length - hostBefore} saved, ${smallRequests - requestsBefore} requests`,
 );
 const tabTitle = await page.evaluate(
   () => document.querySelector('#tab-list .tab.active .title')?.textContent,
 );
 check('the page stays after Download again', tabTitle === 'Downloads', String(tabTitle));
 // The open panel follows the change
-await page
-  .locator('#side-panel .panel-download button', { hasText: 'Save again' })
-  .waitFor({ timeout: 10000 })
-  .catch(() => {});
+await waitFor(async () => (await rowButtons()).length === 3, 10000);
 check(
-  'the new download is listed on top with its file',
-  (await rowButtons())[0] === 'small.txt|11 B|Save again' && (await rowButtons()).length === 3,
+  'the new download is listed on top',
+  (await rowButtons())[0] === 'small.txt|11 B|Download again' && (await rowButtons()).length === 3,
   JSON.stringify(await rowButtons()),
 );
 
