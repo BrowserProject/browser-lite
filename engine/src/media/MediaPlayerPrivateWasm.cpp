@@ -350,8 +350,9 @@ void MediaPlayerPrivateWasm::load(const String& urlString)
     RefPtr player = m_player.get();
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
+    // A new host <video>, without a frame and its counts at 0
+    setHostHasFrame(false);
     startOverlay();
-    // A new host <video>, its counts start at 0
     m_hostQuality = std::nullopt;
     send("create"_s, makeString("{\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume,
         ",\"rate\":"_s, m_rate, ",\"preload\":\""_s, preloadName(m_preload), "\",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s,
@@ -391,9 +392,10 @@ void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions&, MediaSourc
     RefPtr player = m_player.get();
     bool muted = player && player->muted();
     double volume = player ? player->volume() : 1;
+    // Create the host player first, the SourceBuffers come right after. A new host <video>,
+    // without a frame and its counts at 0
+    setHostHasFrame(false);
     startOverlay();
-    // Create the host player first, the SourceBuffers come right after
-    // A new host <video>, its counts start at 0
     m_hostQuality = std::nullopt;
     send("create"_s, makeString("{\"mse\":true,\"muted\":"_s, muted ? "true"_s : "false"_s, ",\"volume\":"_s, volume, ",\"rate\":"_s, m_rate,
         ",\"hidden\":"_s, m_pageIsVisible ? "false"_s : "true"_s, ",\"overlay\":"_s, m_overlay ? "true"_s : "false"_s, '}'));
@@ -726,10 +728,23 @@ void MediaPlayerPrivateWasm::startOverlay()
         player->renderingModeChanged();
 }
 
+// The hole only once the host <video> has a frame to show: before, the video draws nothing and
+// what lies under it stays visible, like in Chrome (a hole would show the host's page there), and
+// damage tiles stay possible over it (an endless loading spinner over a video that never loads)
 void MediaPlayerPrivateWasm::updateOverlayBuffer()
 {
-    if (m_overlay)
+    if (!m_overlay)
+        return;
+    if (m_hostHasFrame)
         m_overlay->setDisplayBuffer(CoordinatedPlatformLayerBufferHolePunch::create(expandedIntSize(m_naturalSize), m_id));
+    else
+        m_overlay->setDisplayBuffer(nullptr);
+}
+
+void MediaPlayerPrivateWasm::setHostHasFrame(bool value)
+{
+    if (std::exchange(m_hostHasFrame, value) != value)
+        updateOverlayBuffer();
 }
 
 void MediaPlayerPrivateWasm::overlayRefused()
@@ -934,6 +949,9 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     auto readyState = readyStateFromHost(object->getInteger("readyState"_s).value_or(0));
     if (readyState != m_readyState) {
         m_readyState = readyState;
+        // It keeps showing its frame while it seeks or waits for data
+        if (m_readyState >= MediaPlayer::ReadyState::HaveCurrentData)
+            setHostHasFrame(true);
         player->readyStateChanged();
     }
 

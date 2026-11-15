@@ -129,7 +129,8 @@ from `patches/`.
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
-    `VideoOverlay.cpp` (holes of videos the host shows behind the canvas), frame counts of
+    `VideoOverlay.cpp` (holes of videos the host shows behind the canvas, punched only once the
+    host's video has a frame), frame counts of
     `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
     host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE; muted

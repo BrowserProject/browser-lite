@@ -5,7 +5,9 @@
 // rotated layer), and a whole frame empties them again. At device pixel ratio 1 and 2; the spinner crosses tile borders.
 // Videos the host shows behind the view canvas (VideoOverlay.h) keep the spinner in its tiles when
 // they are elsewhere: playing, paused or far below the view. A tile on a video hole shows a whole
-// frame instead, also when the video is gone from there.
+// frame instead, also when the video is gone from there. A video without a frame yet (an MSE
+// player that never gets data, as under the loading spinners of edition.cnn.com) has no hole:
+// what lies under it shows like in Chrome, and the spinner over it turns in its tiles.
 // Like Safari 18, the engine's workers here keep a canvas's last frame after
 // transferFromImageBitmap(null): Safari reads such a canvas back empty but keeps showing the frame,
 // so tiles emptied that way showed stale pieces of earlier frames and pages on iPhones.
@@ -79,16 +81,56 @@ const VIDEO_PAGE = `<!doctype html><title>Tiles and videos</title>
 const playing = document.getElementById('playing');
 playing.addEventListener('playing', () => console.log('RESULT playing=1'), { once: true });
 </script>`;
+// A black box with an MSE video that never gets data at 400, 300 and the spinner over it, like the
+// player placeholders of edition.cnn.com
+const EMPTY_VIDEO_PAGE = `<!doctype html><title>Tiles over a video without frames</title>
+<style>
+  body { margin: 0; background: #fff; }
+  #box { position: absolute; left: 400px; top: 300px; width: 320px; height: 180px; background: #000; }
+  video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  #spinner { position: absolute; left: 140px; top: 70px; width: 36px; height: 36px; border: 4px solid #00f;
+    border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+<div id="box"><video id="empty" muted playsinline></video><div id="spinner"></div></div>
+<script>
+const empty = document.getElementById('empty');
+const source = new MediaSource();
+empty.src = URL.createObjectURL(source);
+source.addEventListener('sourceopen', () => {
+  source.addSourceBuffer('video/webm; codecs="vp8"');
+  console.log('RESULT open=1');
+});
+empty.addEventListener('playing', () => console.log('RESULT playing=1'), { once: true });
+</script>`;
 let clip = null;
+const PAGES = { '/video': VIDEO_PAGE, '/empty-video': EMPTY_VIDEO_PAGE };
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/clip.webm') {
     serveBytes(req, res, clip, 'video/webm');
     return;
   }
-  res
-    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    .end(req.url === '/video' ? VIDEO_PAGE : PAGE);
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGES[req.url] ?? PAGE);
 });
+
+/**
+ * Waits until the view canvas keeps its frame for 500 ms while tiles show; returns both frames.
+ */
+const viewCanvasStill = async (page) => {
+  let viewBefore = null;
+  let viewAfter = null;
+  await waitFor(
+    async () => {
+      viewBefore = await shown(page, false);
+      await page.waitForTimeout(500);
+      viewAfter = await shown(page, false);
+      return viewAfter.tiles > 0 && differentPixels(viewBefore, viewAfter) === 0;
+    },
+    10000,
+    0,
+  );
+  return { viewBefore, viewAfter };
+};
 
 /**
  * Frame pixels of the view (base64 RGBA) as the host shows them: the view canvas and, with tiles,
@@ -250,19 +292,8 @@ clip = await recordClip(browser, 3);
   await waitFor(async () => isRed((pixel = await screen(560, 390))), 20000, 250);
   check('video: the video shows through its hole', isRed(pixel), JSON.stringify(pixel));
 
-  let viewBefore = null;
-  let viewAfter = null;
   // The tiles of the spinner come after the first frames, which place the videos whole
-  await waitFor(
-    async () => {
-      viewBefore = await shown(page, false);
-      await page.waitForTimeout(500);
-      viewAfter = await shown(page, false);
-      return viewAfter.tiles > 0 && differentPixels(viewBefore, viewAfter) === 0;
-    },
-    10000,
-    0,
-  );
+  const { viewBefore, viewAfter } = await viewCanvasStill(page);
   const allBefore = await shown(page, true);
   const turned = await waitFor(
     async () => differentPixels(allBefore, await shown(page, true)) > 0,
@@ -308,6 +339,44 @@ clip = await recordClip(browser, 3);
     isWhite(pixel) && rgba.every((value) => value > 220),
     `screen ${JSON.stringify(pixel)}, view canvas ${rgba.join(',')}`,
   );
+  await page.close();
+}
+
+// A video without a frame (ratio 1)
+{
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  watchErrors(page);
+  const results = collect(page);
+  check(
+    'empty video: page loaded',
+    await openHost(page, stack.app({ url: `${siteURL}empty-video` })),
+  );
+  check('empty video: the MediaSource opens', (await results.wait('open')) === '1');
+  const origin = await canvasOrigin(page);
+  const screen = (x, y) => screenPixel(page, origin.x + x, origin.y + y);
+  const isBlack = (p) => p.r < 40 && p.g < 40 && p.b < 40;
+  const isRed = (p) => p.r > 180 && p.g < 60 && p.b < 60;
+  const { viewBefore, viewAfter } = await viewCanvasStill(page);
+  const allBefore = await shown(page, true);
+  const turned = await waitFor(
+    async () => differentPixels(allBefore, await shown(page, true)) > 0,
+    3000,
+    200,
+  );
+  check(
+    'empty video: the spinner over it turns in its tiles, the view canvas keeps its frame',
+    turned && viewAfter.tiles > 0 && differentPixels(viewBefore, viewAfter) === 0,
+    `${viewAfter.tiles} tiles, ${differentPixels(viewBefore, viewAfter)} pixels of the view canvas changed in 500 ms`,
+  );
+  // Inside the video's box of 16:9, where a hole would clear the box to the host's background
+  let pixel = await screen(460, 390);
+  check('empty video: the box under it shows', isBlack(pixel), JSON.stringify(pixel));
+
+  // With a frame the video punches its hole and shows
+  await evalPage(page, `empty.src = '/clip.webm'; empty.loop = true; empty.play()`);
+  check('empty video: then it plays', (await results.wait('playing')) === '1');
+  await waitFor(async () => isRed((pixel = await screen(460, 390))), 10000, 250);
+  check('empty video: with frames it shows through its hole', isRed(pixel), JSON.stringify(pixel));
   await page.close();
 }
 await browser.close();

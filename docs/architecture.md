@@ -578,8 +578,9 @@ the host: `canPlayType` and `isTypeSupported` synchronously (common types answer
 `navigator.mediaCapabilities.decodingInfo` of pages and workers asynchronously with the host's
 own `decodingInfo` on its main thread, so `supported`, `smooth` and `powerEfficient` are the
 host's (`MediaCapabilitiesWasm.cpp`, #503). With compositing the host shows its own `<video>`
-(#232): the video gets a composited layer whose contents is a hole punch buffer (patch 0047), the
-compositor clears that rect in the framebuffer (its WebGL context has alpha) and
+(#232): the video gets a composited layer whose contents is a hole punch buffer (patch 0047) once
+the host's `<video>` has a frame (before, it draws nothing and what lies under it shows, like in
+Chrome, #573), the compositor clears that rect in the framebuffer (its WebGL context has alpha) and
 `VideoOverlay.cpp` sends the transform of every hole after a shown whole frame ("place"), so a
 damage tile never shows a hole and keeps off the holes of the last whole frame (#550); the core puts
 the host `<video>` before the view canvas (`position: relative`) with that transform, so page

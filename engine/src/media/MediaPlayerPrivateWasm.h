@@ -151,6 +151,7 @@ private:
     void send(ASCIILiteral type, const String& json = "{}"_s);
     void startOverlay();
     void updateOverlayBuffer();
+    void setHostHasFrame(bool);
     // A reader of frames (canvas, WebGL, VideoFrame) in overlay mode: the host copies frames
     // until 2 s after the last read
     void framesWanted();
@@ -207,11 +208,14 @@ private:
     WebCore::IntSize m_presentationSize;
     bool m_pageIsVisible { true };
 
-    // Overlay (#232): the contents of the composited video layer, a hole punch buffer; null
-    // when frames are copied
+    // Overlay (#232): the contents of the composited video layer, a hole punch buffer once the
+    // host has a frame; null when frames are copied
     RefPtr<WebCore::CoordinatedPlatformLayerBufferProxy> m_overlay;
     bool m_overlayRefused { false };
     bool m_hostCopiesFrames { true };
+    // The host <video> has shown a frame since the last load (its readyState reached
+    // HAVE_CURRENT_DATA): only then the overlay punches its hole
+    bool m_hostHasFrame { false };
     MonotonicTime m_framesWantedUntil;
 };
 

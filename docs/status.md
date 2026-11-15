@@ -706,6 +706,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
    below the view 1.95 to 2.12 instead of 7.07 to 7.37; idle edition.cnn.com 4.4 instead of 7.4
    cores (its spinner alone 2.5 instead of 7.7). An animation over a video hole still shows whole
    frames (7.1 cores): a tile there would show the view canvas's older frame through its hole.
+   A video without a frame yet has no hole since #573 (before, a spinner over a player whose MSE
+   video never got data cost 5.2 to 7.3 cores in whole frames, now 1.1 to 1.2 in its tiles).
    Layers that only animate their opacity are now shown by the host
    itself (#478): the page of 46 pulsing boxes (local, 2026-11-09, demo, 1280x800, 20 s standing
    still, same engine A/B) 0.14 to 0.16 CPU cores and no engine frame instead of 5.96 to 6.67
