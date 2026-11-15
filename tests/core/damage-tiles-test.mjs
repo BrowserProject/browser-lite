@@ -129,6 +129,9 @@ const { url: siteURL } = await serve((req, res) => {
 
 /**
  * Waits until the view canvas keeps its frame for 500 ms while tiles show; returns both frames.
+ * In Firefox the readback of the transferred view canvas can wait 10 s for the engine worker
+ * while the engine starts threads (right after a MediaSource opens) and then reads it empty, so
+ * the wait leaves room for one such readback.
  */
 const viewCanvasStill = async (page) => {
   let viewBefore = null;
@@ -140,7 +143,7 @@ const viewCanvasStill = async (page) => {
       viewAfter = await shown(page, false);
       return viewAfter.tiles > 0 && differentPixels(viewBefore, viewAfter) === 0;
     },
-    10000,
+    25000,
     0,
   );
   return { viewBefore, viewAfter };
