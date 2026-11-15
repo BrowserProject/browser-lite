@@ -277,6 +277,10 @@ check(
   (await result('api')) === 'function,function,function,function',
   results.get('api'),
 );
+// A click activates the page: the media loopback below makes its sound with Web Audio, which
+// like in Chrome starts only after a user activation (autoplay-test.mjs)
+const pageBox = await canvasOrigin(page);
+await page.mouse.click(pageBox.x + 600, pageBox.y + 400);
 check(
   'frame that still loads: polyfill there, bridges not',
   (await result('initial')) === 'function,none',

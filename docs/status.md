@@ -179,7 +179,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Media**: `<video>`/`<audio>` (also `blob:`, `data:`), MSE, Web Audio, WebCodecs, camera,
   microphone, screen, MediaRecorder, WebRTC (opt-in), Picture-in-Picture, all through the host.
   Muted autoplay plays only in the view like Chrome: 20min.ch idles at 5 % CPU instead of 25 to
-  29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Transparent videos (VP8,
+  29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Sound (media that is not
+  muted, Web Audio) starts only after a user activation of the page like in Chrome (#578; BBC's
+  video started its pre-roll ad with sound by itself, so the tap on the play button clicked the
+  ad and opened the advertiser in a new tab). Transparent videos (VP8,
   VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
   zoo.ch covered the photo with opaque green). A video in fullscreen shows its whole picture like
   the native players of phones, also with the page's `object-fit: cover` (#474; m.youtube.com
@@ -857,6 +860,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
   player in the host (hls.js, Apache-2.0, or an own one with a TS to fMP4 remuxer) on the host
   `<video>` whose playlist and segment requests go through the engine's network (the media
   service worker asked for any URL of that player). Needs a decision on the new dependency.
+- Autoplay with sound (#578) differs from Chrome: the activation of the main document counts for
+  all its frames (WebKit has no `allow="autoplay"` permission policy; Chrome lets an activation
+  count only for the frame and its ancestors, across origins only with it), it does not carry
+  over to the next document of a same-origin navigation, and there is no Media Engagement Index
+  (sites often played with sound autoplay in Chrome). `speechSynthesis.speak()` needs no
+  activation (Chrome requires one).
 - Media controls: no overflow menu (playback speed, subtitles, chapters) like Chrome's three dots;
   `MEDIA_CONTROLS_CONTEXT_MENUS` is off for the port and would need the menu of the media controls
   in the host (#476).

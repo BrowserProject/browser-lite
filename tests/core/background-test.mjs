@@ -101,8 +101,8 @@ Promise.all([video.play(), audio.play()]).then(() => console.log('RESULT playing
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + video.paused + ':' + audio.paused));
 </script>`,
   // Muted autoplay: a video without an audio track and one with; a third one plays unmuted
-  // first and is muted once it plays; a fourth one far below waits as invisible autoplay until
-  // the page calls play()
+  // after a click (sound needs a user activation) and is muted once it plays; a fourth one far
+  // below waits as invisible autoplay until the page calls play()
   videos: `<!doctype html><title>videos</title><video id="silent" src="/clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
 <video id="sound" src="/sound-clip.webm" muted loop autoplay playsinline width="160" height="120"></video>
 <video id="unmuted" src="/sound-clip.webm" loop playsinline width="160" height="120"></video>
@@ -112,7 +112,7 @@ for (const video of videos) {
   video.onplaying = () => console.log('RESULT playing=' + video.id);
   video.onpause = () => console.log('RESULT pause=' + video.id);
 }
-videos[2].play().then(() => { videos[2].muted = true; console.log('RESULT muted=unmuted'); }, (e) => console.log('RESULT muted=' + e.name));
+document.addEventListener('click', () => videos[2].play().then(() => { videos[2].muted = true; console.log('RESULT muted=unmuted'); }, (e) => console.log('RESULT muted=' + e.name)), { once: true });
 videos[3].addEventListener('canplaythrough', () => setTimeout(() => { console.log('RESULT late=' + videos[3].paused); videos[3].play(); }, 300), { once: true });
 document.addEventListener('visibilitychange', () => console.log('RESULT state=' + document.visibilityState + ':' + videos.map((v) => v.paused).join(':')));
 console.log('RESULT loaded=videos')</script>`,
@@ -392,6 +392,9 @@ async function visibility(label, params) {
   // With sound: sound and timers go on in the background
   await app.go(`${siteURL}sound`);
   const soundLoaded = await app.wait('loaded');
+  // Sound needs a user activation of the page, like in Chrome (autoplay-test.mjs)
+  const soundOrigin = await canvasOrigin(app.page);
+  await app.page.mouse.click(soundOrigin.x + 300, soundOrigin.y + 300);
   await app.page.evaluate(() =>
     window.blTest.eval(
       'document.querySelector("audio").play().then(() => console.log("RESULT play=ok"), (e) => console.log("RESULT play=" + e.name))',
@@ -794,6 +797,8 @@ await dialog.context.close();
 // again, they play on.
 const silent = await openApp({ url: `${siteURL}videos` });
 await silent.wait('loaded', 'videos');
+const videosOrigin = await canvasOrigin(silent.page);
+await silent.page.mouse.click(videosOrigin.x + 600, videosOrigin.y + 300);
 const allPlaying =
   !!(await silent.wait('playing', 'silent')) &&
   !!(await silent.wait('playing', 'sound')) &&

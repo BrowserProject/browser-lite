@@ -1,0 +1,74 @@
+diff --git a/Source/WebCore/Modules/webaudio/AudioContext.cpp b/Source/WebCore/Modules/webaudio/AudioContext.cpp
+index e30f1a261c..abde5f01b5 100644
+--- a/Source/WebCore/Modules/webaudio/AudioContext.cpp
++++ b/Source/WebCore/Modules/webaudio/AudioContext.cpp
+@@ -92,11 +92,17 @@ static bool shouldDocumentAllowWebAudioToAutoPlay(const Document& document)
+ {
+     if (document.isCapturing())
+         return true;
++#if PLATFORM(WASM)
++    // browser-lite: sticky activation like Chrome (MediaUserGestureInheritsFromDocument), not only
++    // a transient one: a game that creates its context after loading for a while still sounds
++    return document.processingUserGestureForMedia();
++#else
+     RefPtr mainDocument = document.mainFrameDocument();
+     if (document.quirks().shouldAutoplayWebAudioForArbitraryUserGesture() && mainDocument && mainDocument->hasHadUserInteraction())
+         return true;
+     RefPtr window = document.window();
+     return window && window->hasTransientActivation();
++#endif
+ }
+ 
+ void AudioContext::setDefaultSampleRateForTesting(std::optional<float> sampleRate)
+diff --git a/Source/WebCore/html/HTMLMediaElement.cpp b/Source/WebCore/html/HTMLMediaElement.cpp
+index b8793bd665..f396002cc0 100644
+--- a/Source/WebCore/html/HTMLMediaElement.cpp
++++ b/Source/WebCore/html/HTMLMediaElement.cpp
+@@ -4560,8 +4560,11 @@ void HTMLMediaElement::play(DOMPromiseDeferred<void>&& promise)
+ #if PLATFORM(WASM)
+     // browser-lite: once the rule is lifted, its interruption ends too, as when the element comes
+     // into view (updateShouldAutoplay); left on the session's stack it made every later
+-    // interruption ignored, so a hidden page did not pause the playing element
+-    if (m_wasInterruptedForInvisibleAutoplay && !mediaSession->hasBehaviorRestriction(MediaElementSession::InvisibleAutoplayNotPermitted)) {
++    // interruption ignored, so a hidden page did not pause the playing element. An explicit
++    // play() lifts the rule also when the document's activation is only inherited, which keeps
++    // it for autoplay (removeBehaviorRestrictionsAfterFirstUserGesture).
++    mediaSession->removeBehaviorRestriction(MediaElementSession::InvisibleAutoplayNotPermitted);
++    if (m_wasInterruptedForInvisibleAutoplay) {
+         m_wasInterruptedForInvisibleAutoplay = false;
+         mediaSession->endInterruption(PlatformMediaSession::EndInterruptionFlags::NoFlags);
+     }
+@@ -8947,6 +8950,14 @@ void HTMLMediaElement::removeBehaviorRestrictionsAfterFirstUserGesture(MediaElem
+         | MediaElementSession::RequireUserGestureForVideoDueToAggressiveThermalMitigation
+         | MediaElementSession::InvisibleAutoplayNotPermitted
+         | MediaElementSession::RequireUserGestureToControlControlsManager);
++#if PLATFORM(WASM)
++    // browser-lite: an activation the document had earlier (MediaUserGestureInheritsFromDocument,
++    // Chrome's sticky activation) allows sound, but muted autoplay still plays only in the view
++    // (InvisibleAutoplayNotPermitted): otherwise after one click every teaser loaded later far
++    // below would decode
++    if (protect(document())->mediaUserGestureReason() == Document::MediaGestureReason::InheritsFromDocumentSetting)
++        restrictionsToRemove &= ~MediaElementSession::InvisibleAutoplayNotPermitted;
++#endif
+ 
+     m_removedBehaviorRestrictionsAfterFirstUserGesture = true;
+ 
+diff --git a/Source/WebCore/html/MediaElementSession.cpp b/Source/WebCore/html/MediaElementSession.cpp
+index 8f811b7f79..63665ff02e 100644
+--- a/Source/WebCore/html/MediaElementSession.cpp
++++ b/Source/WebCore/html/MediaElementSession.cpp
+@@ -538,7 +538,14 @@ Expected<void, MediaPlaybackDenialExplanation> MediaElementSession::playbackStat
+     if (m_restrictions & RequireUserGestureForVideoRateChange && element->isVideo() && !document->processingUserGestureForMedia())
+         return makeUnexpectedDenial(MediaPlaybackDenialReason::UserGestureRequired, "User gesture required for video rate change"_s);
+ 
++#if PLATFORM(WASM)
++    // browser-lite: like Chrome, every element that is not muted counts as audible. The host
++    // browser tells whether a video has an audio track only once it decoded some of it (Chrome),
++    // so the sound would start before the rule could stop it.
++    if (m_restrictions & RequireUserGestureForAudioRateChange && !element->muted() && element->volume() && !document->processingUserGestureForMedia())
++#else
+     if (m_restrictions & RequireUserGestureForAudioRateChange && (!element->isVideo() || element->hasAudio()) && !element->muted() && element->volume() && !document->processingUserGestureForMedia())
++#endif
+         return makeUnexpectedDenial(MediaPlaybackDenialReason::UserGestureRequired, "User gesture required for audio rate change"_s);
+ 
+     if (m_restrictions & RequirePageVisibilityToPlayAudio && (!element->isVideo() || element->hasAudio()) && !element->muted() && element->volume() && element->elementIsHidden())

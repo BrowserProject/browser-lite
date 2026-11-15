@@ -615,7 +615,11 @@ decoded audio bytes (Chrome, #386). Muted or silent `autoplay` video plays only 
 the view (WebCore's `InvisibleAutoplayNotPermitted`, like Chrome and Safari on iOS): one below the
 fold waits, one scrolled out pauses and plays on when back; `play()` from a script and a start
 during user activation lift the rule for that element (#399) and end its wait, so a hidden page
-still pauses it (#555). WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
+still pauses it (#555). Sound needs a user activation like Chrome's autoplay policy (#578): media
+that is not muted and Web Audio start only once the user activated the page, which stays so for
+that document (WebCore's `RequiresUserGestureForAudioPlayback` and
+`MediaUserGestureInheritsFromDocument`, patch 0147); without it `play()` rejects with
+`NotAllowedError`, `autoplay` waits and an `AudioContext` stays suspended. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 Where the host has no `MediaStreamTrackProcessor` (Firefox), camera, microphone and screen reach
 the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `VideoFrame`s, an

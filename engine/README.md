@@ -136,7 +136,8 @@ from `patches/`.
     `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
     host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE; muted
-    autoplay only in the view is a WebCore setting in `WebView.cpp`
+    autoplay only in the view and sound (media, Web Audio) only after a user activation of the
+    page are WebCore settings in `WebView.cpp` (with patch 0147)
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly
   - `websocket/`: WebSockets of the pages over curl (from WebKitLegacy, WebKit license),
     `WebSocketPerMessageDeflate.cpp` (compression like Chrome, permessage-deflate)

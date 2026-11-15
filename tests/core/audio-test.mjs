@@ -3,8 +3,8 @@
 //
 // Checked: oscillator (inverse FFT for the wave tables), AnalyserNode (FFT), ConvolverNode (FFT
 // convolution), decodeAudioData (decoder of the host browser, with rate conversion), HRTF panner
-// (data in engine.data), that sound really reaches the host after a click, the media-state
-// event and muting the view.
+// (data in engine.data), that the context waits for a click and sound then really reaches the
+// host, the media-state event and muting the view.
 //
 //   node tests/core/audio-test.mjs [engine-dir]
 import {
@@ -122,6 +122,13 @@ async function hrtfTest() {
   gain.connect(analyser);
   analyser.connect(context.destination);
   osc.start();
+  // Like in Chrome the context starts suspended and runs after a click in the page (sticky
+  // activation, autoplay-test.mjs)
+  result('suspended', context.state);
+  document.addEventListener('click', () => context.resume(), { once: true });
+  await new Promise((resolve) =>
+    context.addEventListener('statechange', () => context.state === 'running' && resolve()),
+  );
   const start = context.currentTime;
   setTimeout(async () => {
     const bins = new Float32Array(analyser.frequencyBinCount);
@@ -170,7 +177,8 @@ check(
   decode,
 );
 
-// A click as user activation, so the host AudioContext may start
+check('AudioContext suspended before a click', (await result('suspended')) === 'suspended');
+// A click as user activation, so the AudioContext of the page and the one of the host may start
 const box = await canvasOrigin(page);
 await page.mouse.click(box.x + 50, box.y + 50);
 

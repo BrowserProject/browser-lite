@@ -346,6 +346,10 @@ WebView::WebView(int id, IntSize size, float deviceScaleFactor)
     // Muted (or silent) autoplay plays only while the video is in the view, like Chrome and
     // Safari on iOS: teasers below the fold otherwise each keep a host player decoding
     settings.setInvisibleAutoplayNotPermitted(true);
+    // Media with sound and Web Audio start only once the user activated the page, sticky for the
+    // document like Chrome's autoplay policy (patch 0147); muted video autoplays as before
+    settings.setRequiresUserGestureForAudioPlayback(true);
+    settings.setMediaUserGestureInheritsFromDocument(true);
 #if ENABLE(MEDIA_SOURCE)
     settings.setMediaSourceEnabled(featureEnabled(Feature::Media));
     // ManagedMediaSource needs hints from the system (startstreaming) we do not
