@@ -25,6 +25,8 @@ Scripts for build, packaging and release. The shell scripts load `env.sh` (paths
 | `engine-deltas.mjs` | `.dcz` deltas of an engine against the previous one (Compression Dictionary Transport, #244) |
 | `build-images.sh` | builds and tests the images `server` and `demo` of the `Dockerfile` |
 | `optimize-assets.mjs` | smaller delivered files (no "name" section in .wasm, .br/.gz) |
+| `icu-data.mjs` | splits the ICU data of the sysroot into the part linked into the engine and the files of `lazy/icu` (build step, #228) |
+| `icu-word-rules.cpp` | ICU's word break rules with Chromium's change, compiled for the engine's ICU data (build step, run in node, #572) |
 | `split-engine.mjs` | splits the linked `engine.wasm` into `engine.wasm` and chunks `engine.deferred-<n>.wasm` (build step, #238) |
 | `hot-functions.mjs` | records the engine functions common pages run into `engine/hot-functions.txt` |
 | `hot-functions-file.mjs` | reads and writes `engine/hot-functions.txt` |

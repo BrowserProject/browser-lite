@@ -119,15 +119,35 @@ set_source_files_properties(${BL_ENGINE_SRC}/LazyFiles.cpp
 
 # ICU data: the items of icu-core.txt are linked (icudata.c, before libicudata.a in the link
 # order, so the full data of the sysroot is not taken), the others become files under lazy/icu
-# next to the engine that load on first use (tools/icu-data.mjs, LazyFiles.cpp)
+# next to the engine that load on first use (tools/icu-data.mjs, LazyFiles.cpp). Its word break
+# rules are ICU's with Chromium's change (tools/icu-word-rules.cpp, run in node at build time).
 if (BROWSER_LITE_ICU_DATA)
     set(BL_ICU_OUT "${CMAKE_CURRENT_BINARY_DIR}/browser-lite-icu")
+    add_executable(BrowserLiteICUWordRules ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-word-rules.cpp)
+    set_target_properties(BrowserLiteICUWordRules PROPERTIES
+        OUTPUT_NAME icu-word-rules
+        RUNTIME_OUTPUT_DIRECTORY ${BL_ICU_OUT}
+    )
+    target_link_libraries(BrowserLiteICUWordRules PRIVATE ICU::uc ICU::data)
+    target_link_options(BrowserLiteICUWordRules PRIVATE
+        "SHELL:-pthread"
+        "SHELL:-sINITIAL_MEMORY=64MB"
+        "SHELL:-sENVIRONMENT=node"
+        "SHELL:-sNODERAWFS=1"
+    )
+    add_custom_command(
+        OUTPUT ${BL_ICU_OUT}/word.rules
+        COMMAND node $<TARGET_FILE:BrowserLiteICUWordRules> ${BL_ICU_OUT}/word.rules
+        DEPENDS BrowserLiteICUWordRules
+        VERBATIM
+    )
     add_custom_command(
         OUTPUT ${BL_ICU_OUT}/icudata.c
         COMMAND node ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs ${BROWSER_LITE_ICU_DATA}
             ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt ${BL_ICU_OUT} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/lazy/icu
+            brkitr/word.brk=${BL_ICU_OUT}/word.rules
         DEPENDS ${BROWSER_LITE_ICU_DATA} ${BROWSER_LITE_ENGINE_DIR}/icu-core.txt
-            ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs
+            ${BROWSER_LITE_ENGINE_DIR}/../tools/icu-data.mjs ${BL_ICU_OUT}/word.rules
         VERBATIM
     )
     target_sources(BrowserLiteEngine PRIVATE ${BL_ICU_OUT}/icudata.c)

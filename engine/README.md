@@ -51,7 +51,8 @@ from `patches/`.
   sources.
 - `engine.cmake`: included by the WebKit build (patch 0006): sources, link options, data
   package, the split of the ICU data (`icu-core.txt` is linked, the rest goes to `lazy/icu`
-  through `tools/icu-data.mjs`). `BL_PRE_JS` is the only list of the `--pre-js` files. After the
+  through `tools/icu-data.mjs`; its word break rules are Chrome's, `tools/icu-word-rules.cpp`).
+  `BL_PRE_JS` is the only list of the `--pre-js` files. After the
   link `tools/split-engine.mjs` splits `engine.wasm` (`BROWSER_LITE_SPLIT_ENGINE`, #238). Also
   builds the native WTF tests (`tests/engine/wtf-tests.cpp`, `wtf-tests.js`).
 - `lazy-prefetch.txt`: files of `lazy/` the engine fetches in the background once it runs (data

@@ -342,6 +342,17 @@ or no further digit fits (a month of 03 or 4, an hour of 9 on a 12 hour clock), 
 03152025 types a whole date; the year takes up to 6 digits like Chrome's and moves on only at a
 separator or an arrow key (patch 0143, #570). An empty part shows `mm`, `dd`, `yyyy` or dashes in
 grey like Chrome and Firefox, not a part of the current date or time (patch 0144, #571).
+Words end where they end in Chrome on Linux (#572). The engine's ICU data has Chromium's word
+break rules: `tools/icu-word-rules.cpp`, built with the sysroot's ICU and run in node during the
+engine build, takes the rules ICU stores in its `word.brk`, makes a full stop between letters
+and a colon separate words ("example.com", "e.g.", "foo:bar"; "3.14" stays one) and compiles
+them again; `tools/icu-data.mjs` puts the result in place of `brkitr/word.brk`. So a double
+click, `Intl.Segmenter` and `text-transform: capitalize` see the same words as in Chrome. Moving and deleting by word (Ctrl+Arrow, Ctrl+Backspace, Ctrl+Delete,
+`Selection.modify`) stop like Blink's `position_units_word.cc` (patch 0145,
+`findPreviousWordPosition` and `findNextWordPosition` in WebCore's `TextBoundaries.cpp`):
+punctuation and symbols end a word and a run of them is one stop, so one Ctrl+Backspace on
+"hello world, " leaves "hello world". Ctrl+Left and Ctrl+Right go in the logical order of the
+block's direction like Chrome, not visually through the runs of bidi text.
 On a mobile device (`device.mobile`) the overlay scrollbars of the page and of scrolling boxes
 only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
 touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with

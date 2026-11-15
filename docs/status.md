@@ -113,7 +113,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (#371; on an iPhone or iPad their sheet keeps its width and 8 px from the window edge, #473) and close when the page removes the field or navigates (#424).
   Typed digits fill a date or time field part by part like in Chrome: `03152025` gives
   2025-03-15 (#570; before, the month kept taking digits and the value stayed empty), an empty
-  field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571). The suggestions of `<input list>` show below the field like Chrome's dropdown, with
+  field shows mm/dd/yyyy and --:-- -- instead of today's date and 12:30 PM in grey (#571).
+  Words end where they end in Chrome on Linux (#572): one Ctrl+Backspace on "hello world, "
+  leaves "hello world" and on "user@example.com" "user@example." (before, "hello " and
+  "user@"), Ctrl+Arrow stops at punctuation, and a double click on "example" selects "example",
+  not "example.com"; `Intl.Segmenter` and `text-transform: capitalize` split "foo.bar" like
+  Chrome. Left: Ctrl+Right into a paragraph that starts with punctuation stops after it, where
+  Chrome also stops at the paragraph start. The suggestions of `<input list>` show below the field like Chrome's dropdown, with
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),

@@ -33,6 +33,9 @@
 //                  target
 //   storage-quota.html  localStorage and sessionStorage hold 5 MiB of UTF-16 code units whatever
 //                  the width of the characters (patch 0140), like Chrome and Firefox
+//   word-boundaries.html  moving and deleting by word, the word of a double click and
+//                  Intl.Segmenter stop where Chrome stops (patch 0145, tools/icu-word-rules.cpp):
+//                  punctuation ends a word, a full stop or colon between letters separates them
 //   cookies.html   a host that is a public suffix (github.io, like httpbin.org) keeps its host-only
 //                  cookies, a Domain of a public suffix above the host is still rejected (patch 0129)
 //
@@ -66,6 +69,7 @@ const CASES = [
   { name: 'time-origin', wait: 'TIMEORIGIN done' },
   { name: 'intersection-observer', size: [800, 600], wait: 'INTERSECTION done' },
   { name: 'storage-quota', wait: 'QUOTA done', env: { RENDER_URL: 'https://example.com/' } },
+  { name: 'word-boundaries', size: [800, 600], wait: 'WORDS done' },
   {
     name: 'cookies',
     label: 'cookies (public suffix host)',

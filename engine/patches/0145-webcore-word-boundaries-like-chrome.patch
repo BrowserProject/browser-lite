@@ -1,0 +1,224 @@
+diff --git a/Source/WebCore/editing/FrameSelection.cpp b/Source/WebCore/editing/FrameSelection.cpp
+index d289ecc174..223d02f0c1 100644
+--- a/Source/WebCore/editing/FrameSelection.cpp
++++ b/Source/WebCore/editing/FrameSelection.cpp
+@@ -1053,9 +1053,9 @@ VisiblePosition FrameSelection::modifyMovingRight(TextGranularity granularity, b
+             pos = VisiblePosition(m_selection.extent(), m_selection.affinity()).right(true, reachedBoundary);
+         break;
+     case TextGranularity::WordGranularity: {
+-        bool skipsSpaceWhenMovingRight = m_document && protect(document())->editor().behavior().shouldSkipSpaceWhenMovingRight();
++        // Like Chrome, in the logical order of the block's direction (not visually through bidi runs)
+         VisiblePosition currentPosition(m_selection.extent(), m_selection.affinity());
+-        pos = rightWordPosition(currentPosition, skipsSpaceWhenMovingRight);
++        pos = directionOfEnclosingBlock() == TextDirection::LTR ? nextWordPositionForPlatform(currentPosition) : previousWordPosition(currentPosition);
+         if (reachedBoundary)
+             *reachedBoundary = pos == currentPosition;
+         break;
+@@ -1270,9 +1270,9 @@ VisiblePosition FrameSelection::modifyMovingLeft(TextGranularity granularity, bo
+             pos = VisiblePosition(m_selection.extent(), m_selection.affinity()).left(true, reachedBoundary);
+         break;
+     case TextGranularity::WordGranularity: {
+-        bool skipsSpaceWhenMovingRight = m_document && protect(document())->editor().behavior().shouldSkipSpaceWhenMovingRight();
++        // Like Chrome, in the logical order of the block's direction (not visually through bidi runs)
+         VisiblePosition currentPosition(m_selection.extent(), m_selection.affinity());
+-        pos = leftWordPosition(currentPosition, skipsSpaceWhenMovingRight);
++        pos = directionOfEnclosingBlock() == TextDirection::LTR ? previousWordPosition(currentPosition) : nextWordPositionForPlatform(currentPosition);
+         if (reachedBoundary)
+             *reachedBoundary = pos == currentPosition;
+         break;
+diff --git a/Source/WebCore/editing/VisibleUnits.cpp b/Source/WebCore/editing/VisibleUnits.cpp
+index 0f57d2aae2..ee53c859f1 100644
+--- a/Source/WebCore/editing/VisibleUnits.cpp
++++ b/Source/WebCore/editing/VisibleUnits.cpp
+@@ -464,6 +464,48 @@ unsigned suffixLengthForRange(const SimpleRange& forwardsScanRange, Vector<char1
+     return suffixLength;
+ }
+ 
++// Whether a word goes on across character depends on the characters on both sides of it (UAX #29
++// WB6, WB7, WB11, WB12: "don't", "3.14"), so a search that starts or ends next to it needs one more.
++static bool joinsWordParts(char32_t character)
++{
++    switch (u_getIntPropertyValue(character, UCHAR_WORD_BREAK)) {
++    case U_WB_MIDLETTER:
++    case U_WB_MIDNUM:
++    case U_WB_MIDNUMLET:
++    case U_WB_SINGLE_QUOTE:
++    case U_WB_DOUBLE_QUOTE:
++        return true;
++    default:
++        return false;
++    }
++}
++
++static unsigned appendFirstCharacter(const SimpleRange& range, Vector<char16_t, 1024>& string)
++{
++    for (TextIterator it(range); !it.atEnd(); it.advance()) {
++        StringView text = it.text();
++        if (text.isEmpty())
++            continue;
++        unsigned length = text.length() > 1 && U16_IS_LEAD(text[0]) ? 2 : 1;
++        append(string, text.left(length));
++        return length;
++    }
++    return 0;
++}
++
++static unsigned prependLastCharacter(const SimpleRange& range, Vector<char16_t, 1024>& string)
++{
++    for (SimplifiedBackwardsTextIterator it(range); !it.atEnd(); it.advance()) {
++        StringView text = it.text();
++        if (text.isEmpty())
++            continue;
++        unsigned length = text.length() > 1 && U16_IS_TRAIL(text[text.length() - 1]) ? 2 : 1;
++        prepend(string, text.substring(text.length() - length));
++        return length;
++    }
++    return 0;
++}
++
+ unsigned prefixLengthForRange(const SimpleRange& backwardsScanRange, Vector<char16_t, 1024>& string)
+ {
+     unsigned prefixLength = 0;
+@@ -566,7 +608,8 @@ static VisiblePosition previousBoundary(const VisiblePosition& position, Boundar
+     } else if (requiresContextForWordBoundary(position.characterBefore())) {
+         auto forwardsScanRange = makeSimpleRange(searchRange->end, makeBoundaryPointAfterNodeContents(*boundary));
+         suffixLength = suffixLengthForRange(forwardsScanRange, string);
+-    }
++    } else if (joinsWordParts(position.characterBefore()))
++        suffixLength = appendFirstCharacter(makeSimpleRange(searchRange->end, makeBoundaryPointAfterNodeContents(*boundary)), string);
+ 
+     SimplifiedBackwardsTextIterator it(*searchRange);
+     unsigned next = backwardSearchForBoundaryWithTextIterator(it, string, suffixLength, searchFunction);
+@@ -606,6 +649,11 @@ static VisiblePosition nextBoundary(const VisiblePosition& c, BoundarySearchFunc
+         if (!backwardsScanRange)
+             return { };
+         prefixLength = prefixLengthForRange(*backwardsScanRange, string);
++    } else if (joinsWordParts(c.characterAfter())) {
++        auto backwardsScanRange = makeSimpleRange(makeBoundaryPointBeforeNodeContents(*boundary), c);
++        if (!backwardsScanRange)
++            return { };
++        prefixLength = prependLastCharacter(*backwardsScanRange, string);
+     }
+ 
+     auto searchRange = makeSimpleRange(c, makeBoundaryPointAfterNodeContents(*boundary));
+@@ -708,7 +756,7 @@ static unsigned previousWordPositionBoundary(StringView text, unsigned offset, B
+         return 0;
+     }
+     needMoreContext = false;
+-    return findNextWordFromIndex(text, offset, false);
++    return findPreviousWordPosition(text, offset);
+ }
+ 
+ VisiblePosition previousWordPosition(const VisiblePosition& position)
+@@ -723,7 +771,7 @@ static unsigned nextWordPositionBoundary(StringView text, unsigned offset, Bound
+         return text.length();
+     }
+     needMoreContext = false;
+-    return findNextWordFromIndex(text, offset, true);
++    return findNextWordPosition(text, offset);
+ }
+ 
+ VisiblePosition nextWordPosition(const VisiblePosition& position)
+diff --git a/Source/WebCore/platform/text/TextBoundaries.cpp b/Source/WebCore/platform/text/TextBoundaries.cpp
+index 3a38d073ec..d4d59242fb 100644
+--- a/Source/WebCore/platform/text/TextBoundaries.cpp
++++ b/Source/WebCore/platform/text/TextBoundaries.cpp
+@@ -30,6 +30,7 @@
+ #include <unicode/ubrk.h>
+ #include <wtf/text/StringImpl.h>
+ #include <wtf/text/TextBreakIterator.h>
++#include <wtf/unicode/CharacterNames.h>
+ 
+ namespace WebCore {
+ 
+@@ -90,6 +91,71 @@ int findNextWordFromIndex(StringView text, int position, bool forward)
+     }
+ }
+ 
++// The rules of Blink's position_units_word.cc (PlatformWordBehavior::kWordDontSkipSpaces) on
++// WebKit's flattened text, where a block boundary is a line break like one in preformatted text.
++static bool isLineBreak(char16_t character)
++{
++    return character == '\n' || character == '\r';
++}
++
++static bool isWhitespace(char16_t character)
++{
++    return character == ' ' || character == '\n' || character == '\t' || character == noBreakSpace;
++}
++
++// A character that ends the word or punctuation run before it.
++static bool isWordBreak(char16_t character)
++{
++    return (u_isprint(character) && !isWhitespace(character)) || U16_IS_SURROGATE(character) || isLineBreak(character) || character == lowLine;
++}
++
++// Punctuation, symbols and characters outside the BMP (emoji): a run of them is one stop.
++static bool isPunctuationOrSymbol(char16_t character)
++{
++    return u_ispunct(character) || (U_GET_GC_MASK(character) & U_GC_S_MASK) || U16_IS_SURROGATE(character);
++}
++
++int findPreviousWordPosition(StringView text, int position)
++{
++    UBreakIterator* it = wordBreakIterator(text);
++    int punctuationRun = -1;
++    int runner = ubrk_preceding(it, position);
++    for (; runner > 0; runner = ubrk_preceding(it, runner)) {
++        if (isPunctuationOrSymbol(text[runner])) {
++            if (u_isalnum(text[runner - 1]))
++                return runner;
++            punctuationRun = runner;
++            continue;
++        }
++        if (punctuationRun >= 0)
++            return punctuationRun;
++        if (isWordBreak(text[runner]))
++            return runner;
++    }
++    // A run that reaches the start of the text may go on in text before it
++    if (!runner && punctuationRun >= 0 && !isPunctuationOrSymbol(text[0]))
++        return punctuationRun;
++    return 0;
++}
++
++int findNextWordPosition(StringView text, int position)
++{
++    unsigned length = text.length();
++    UBreakIterator* it = wordBreakIterator(text);
++    for (int runner = ubrk_following(it, position); runner != UBRK_DONE && static_cast<unsigned>(runner) < length; runner = ubrk_following(it, runner)) {
++        if (isLineBreak(text[runner]))
++            return runner;
++        if (isPunctuationOrSymbol(text[runner])) {
++            if (u_isalnum(text[runner - 1]))
++                return runner;
++            continue;
++        }
++        if (isWordBreak(text[runner - 1]))
++            return runner;
++    }
++    return length;
++}
++
+ #endif // !USE(APPKIT)
+ 
+ #if !PLATFORM(COCOA)
+diff --git a/Source/WebCore/platform/text/TextBoundaries.h b/Source/WebCore/platform/text/TextBoundaries.h
+index 00fbee3a22..f9af09d7c0 100644
+--- a/Source/WebCore/platform/text/TextBoundaries.h
++++ b/Source/WebCore/platform/text/TextBoundaries.h
+@@ -48,4 +48,14 @@ WEBCORE_EXPORT void findWordBoundary(StringView, int position, int* start, int*
+ void findEndWordBoundary(StringView, int position, int* end);
+ int findNextWordFromIndex(StringView, int position, bool forward);
+ 
++// Where word movement and word deletion stop (Ctrl+Arrow, Ctrl+Backspace), from position in the
++// text: like Chrome on Linux, punctuation and symbols end a word and a run of them is one stop.
++#if USE(APPKIT)
++inline int findPreviousWordPosition(StringView text, int position) { return findNextWordFromIndex(text, position, false); }
++inline int findNextWordPosition(StringView text, int position) { return findNextWordFromIndex(text, position, true); }
++#else
++int findPreviousWordPosition(StringView, int position);
++int findNextWordPosition(StringView, int position);
++#endif
++
+ }
