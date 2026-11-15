@@ -25,6 +25,7 @@
 #include "ScrollingWasm.h"
 #include "Speech.h"
 #include "UserContent.h"
+#include "UserNavigation.h"
 #include "VisitedLinks.h"
 #include "WebPlatformExtras.h"
 #include "LoaderStrategy.h"
@@ -92,16 +93,22 @@ static void withView(int id, Function&& function)
 // A navigation of the host (address bar, new tab, back, forward, reload): the user waits for it.
 // Like input, hidden views wait from the end of the running task on, not only once the command
 // runs after a long pass of the engine (HiddenViews.h). A view the host has not created yet will
-// be created visible.
+// be created visible. With a request (userNavigationRequested, on this thread) a running script
+// of the page it leaves stops (UserNavigation.h) until the command runs.
 template<typename Function>
-static void withNavigation(int id, Function&& function)
+static void withNavigation(int id, std::optional<uint64_t> request, Function&& function)
 {
     runUrgentOnEngineThread([id] {
         auto* view = WebView::fromID(id);
         if (!view || view->isVisible())
             userWorksInVisibleView();
     });
-    withView(id, std::forward<Function>(function));
+    runOnEngineThread([id, request, function = std::forward<Function>(function)]() mutable {
+        if (request)
+            userNavigationTaken(*request);
+        if (auto* view = WebView::fromID(id))
+            view->runWhenNotBlocked(WTF::move(function));
+    });
 }
 
 // Mouse moves the engine has not handled yet; newer ones join them and they reach the page as
@@ -217,9 +224,11 @@ EMSCRIPTEN_KEEPALIVE void bl_destroy_view(int id)
 
 EMSCRIPTEN_KEEPALIVE void bl_load_url(int id, char* url)
 {
-    withNavigation(id, [url = takeString(url)](WebView& view) {
-        debugLog("bl_load_url %s", url.utf8().data());
-        view.loadURL(url);
+    String address = takeString(url);
+    auto request = userNavigationRequested(id, address);
+    withNavigation(id, request, [address = WTF::move(address)](WebView& view) {
+        debugLog("bl_load_url %s", address.utf8().data());
+        view.loadURL(address);
     });
 }
 
@@ -243,8 +252,11 @@ EMSCRIPTEN_KEEPALIVE void bl_restore_history(int id, char* data)
     withView(id, [data = takeString(data)](WebView& view) { view.restoreHistory(data); });
 }
 
-EMSCRIPTEN_KEEPALIVE void bl_go(int id, int offset) { withNavigation(id, [offset](WebView& view) { view.go(offset); }); }
-EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withNavigation(id, [](WebView& view) { view.reload(); }); }
+EMSCRIPTEN_KEEPALIVE void bl_go(int id, int offset)
+{
+    withNavigation(id, offset ? std::optional { userNavigationRequested(id, offset) } : std::nullopt, [offset](WebView& view) { view.go(offset); });
+}
+EMSCRIPTEN_KEEPALIVE void bl_reload(int id) { withNavigation(id, std::nullopt, [](WebView& view) { view.reload(); }); }
 EMSCRIPTEN_KEEPALIVE void bl_stop(int id) { withView(id, [](WebView& view) { view.stop(); }); }
 
 // Close a view: first the page's beforeunload (with a prompt), the answer

@@ -15,6 +15,7 @@
 #include "Engine.h"
 #include "EngineConfig.h"
 #include "MemoryWatch.h"
+#include "UserNavigation.h"
 
 #include <algorithm>
 #include <atomic>
@@ -421,19 +422,18 @@ void scheduleRunLoopPump()
 // terminates that entry, like a terminated worker (TerminationException, cannot
 // be caught). The page gets a console message, its timers and the other views
 // keep running. A script nobody waits for runs to its end, such as an anti-bot
-// challenge that takes a minute on a slow phone. The watchdog looks every half
-// second while an entry runs, at the trap points of the interpreter and of
-// compiled code; the timer runs in the VM traps thread.
+// challenge that takes a minute on a slow phone. The same watchdog stops the
+// script of a page the user leaves (UserNavigation.h). It looks every 100 ms
+// while an entry runs, at the trap points of the interpreter and of compiled
+// code; the timer runs in the VM traps thread.
 // BL_SCRIPT_TIMEOUT: seconds, 0 = off.
 static double scriptTimeLimit()
 {
     return engineConfig().scriptTimeoutSeconds;
 }
 
-static WTF::Seconds watchdogInterval()
-{
-    return std::min(WTF::Seconds(scriptTimeLimit()), 500_ms);
-}
+// A navigation of the user waits at most this long for the watchdog
+static constexpr WTF::Seconds watchdogInterval = 100_ms;
 
 // The host's wait the watchdog saw last and since when it sees it
 static uint32_t s_seenHostWait;
@@ -445,32 +445,45 @@ static void restartHostWait()
     s_seenHostWaitSince = WTF::MonotonicTime::now();
 }
 
-static bool terminateRunawayScript(JSC::JSGlobalObject*, void*, void*);
+static bool stopScript(JSC::JSGlobalObject*, void*, void*);
 
 // Looks again after the interval. Also from the callback, where JSC's watchdog only starts its
 // timer again when the callback does (setTimeLimit)
 static void armScriptWatchdog(JSC::VM& vm)
 {
-    vm.ensureWatchdog().setTimeLimit(watchdogInterval(), terminateRunawayScript);
+    vm.ensureWatchdog().setTimeLimit(watchdogInterval, stopScript);
 }
 
-static bool terminateRunawayScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
+// Whether the host has waited the limit
+static bool hostWaitedTooLong()
 {
+    double limit = scriptTimeLimit();
+    if (limit <= 0)
+        return false;
     uint32_t wait = s_hostWait.load(std::memory_order_relaxed);
     if (wait != s_seenHostWait)
         restartHostWait();
-    if (!wait || WTF::MonotonicTime::now() - s_seenHostWaitSince < WTF::Seconds(scriptTimeLimit())) {
-        armScriptWatchdog(entryGlobalObject->vm());
-        return false;
-    }
-    // The next script that keeps the host waiting gets the whole limit again
-    restartHostWait();
-    auto message = makeString("Script terminated: it blocked the engine (all views) while input or a call waited for "_s, scriptTimeLimit(), " s"_s);
-    log("%s", message.utf8().data());
+    return wait && WTF::MonotonicTime::now() - s_seenHostWaitSince >= WTF::Seconds(limit);
+}
+
+static bool stopScript(JSC::JSGlobalObject* entryGlobalObject, void*, void*)
+{
     // The running script, also when it runs nested below a dialog (the VM entry is the dialog's)
     auto* globalObject = WebCore::threadGlobalDataSingleton().currentState();
     if (!globalObject)
         globalObject = entryGlobalObject;
+    String message;
+    if (userNavigationStopsScript(*globalObject))
+        message = "Script stopped: the user left the page"_s;
+    else if (hostWaitedTooLong()) {
+        // The next script that keeps the host waiting gets the whole limit again
+        restartHostWait();
+        message = makeString("Script terminated: it blocked the engine (all views) while input or a call waited for "_s, scriptTimeLimit(), " s"_s);
+        log("%s", message.utf8().data());
+    } else {
+        armScriptWatchdog(entryGlobalObject->vm());
+        return false;
+    }
     if (auto* domGlobalObject = dynamicDowncast<WebCore::JSDOMGlobalObject>(globalObject)) {
         if (RefPtr context = domGlobalObject->scriptExecutionContext())
             context->addConsoleMessage(JSC::MessageSource::JS, JSC::MessageLevel::Error, message);
@@ -480,8 +493,7 @@ static bool terminateRunawayScript(JSC::JSGlobalObject* entryGlobalObject, void*
 
 static void installScriptWatchdog()
 {
-    double limit = scriptTimeLimit();
-    if (limit <= 0)
+    if (scriptTimeLimit() <= 0 && !engineConfig().navigationStopsScripts)
         return;
     auto& vm = WebCore::commonVM();
     JSC::JSLockHolder lock(vm);

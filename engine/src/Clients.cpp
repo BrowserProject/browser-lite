@@ -19,6 +19,7 @@
 #include "LoaderStrategy.h"
 #include "ServiceWorkerWasm.h"
 #include "UserContent.h"
+#include "UserNavigation.h"
 #include "ViewSource.h"
 #include "WebPlatformExtras.h"
 #include "WebView.h"
@@ -640,6 +641,12 @@ FrameLoaderClient::FrameLoaderClient(FrameLoader& frameLoader, WebView& view)
     , m_frameLoader(frameLoader)
     , m_view(view)
 {
+}
+
+bool FrameLoaderClient::canCachePage() const
+{
+    RefPtr document = m_frameLoader->frame().document();
+    return !document || !scriptStoppedForUserNavigation(*document);
 }
 
 // One process like WebKitLegacy: the entry always starts at the main frame,

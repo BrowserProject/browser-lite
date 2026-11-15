@@ -170,8 +170,9 @@ private:
     // every back navigation
     RefPtr<WebCore::HistoryItem> createHistoryItemTree(bool clipAtTarget, WebCore::BackForwardItemIdentifier) const final;
     WebCore::ShouldGoToHistoryItem shouldGoToHistoryItem(WebCore::HistoryItem&, WebCore::IsSameDocumentNavigation) const final { return WebCore::ShouldGoToHistoryItem::Yes; }
-    // Back/forward cache (main.cpp): pages may stay suspended in memory
-    bool canCachePage() const final { return true; }
+    // Back/forward cache (main.cpp): pages may stay suspended in memory, not one whose script
+    // stopped for a navigation of the user (UserNavigation.h)
+    bool canCachePage() const final;
 
     bool isMainFrame() const;
     void didEndLoadWithError(const WebCore::ResourceError&);

@@ -177,6 +177,7 @@ void loadEngineConfig()
         config.fallbackFontWaitMs = atof(wait);
     if (const char* timeout = value("BL_SCRIPT_TIMEOUT"))
         config.scriptTimeoutSeconds = atof(timeout);
+    config.navigationStopsScripts = flag("BL_NAVIGATION_STOPS_SCRIPTS", true);
     config.memoryReleaseMB = static_cast<size_t>(number("BL_MEMORY_RELEASE_MB", config.memoryReleaseMB));
     config.memoryPressureMB = static_cast<size_t>(number("BL_MEMORY_PRESSURE_MB", config.memoryPressureMB));
     config.indexedDBQuotaMB = number("BL_INDEXEDDB_QUOTA_MB", config.indexedDBQuotaMB);

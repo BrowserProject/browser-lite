@@ -106,6 +106,13 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   (median about 3 s) after the click, now 0.35 to 1.7 s (median 0.9 s). What remains is a hidden
   task that already runs at the click and the page's own first layout and paint. The core still
   shows an empty view canvas until that first frame instead of the last tab's frame.
+  A typed address, Back or Forward to another document stops the running script of the page left,
+  like Firefox (#583): on a Moto G71 Back from a watson.ch article waited 4 to 7 s behind a step
+  of 9 s of the article's Datawrapper chart (an iframe, out of process in browsers with site
+  isolation). Locally (2026-11-15, Back while the chart's scripts ran, 4 runs each, alternating)
+  the commit came 0.11 to 0.13 s after Back instead of 0.33 to 1.0 s, on the article 0.11 to 0.64
+  s instead of up to 2 s; a script of 20 s in the test 0.1 s instead of 20 s. Reload, style and
+  layout without JS, and scripts of other views still run to their end first.
 - **Dialogs**: `alert`, `confirm`, `prompt` and `beforeunload` hold only their page like in
   Chrome; with an in-page dialog handler (a promise) the other views keep loading, running and
   rendering (#258). `@browser-lite/ui` shows them in the page by default (`pageDialogs`, #338).
@@ -670,6 +677,12 @@ browser (Safari keeps Cmd+L, T and W for itself).
    PerimeterX sends less work now (plain Chromium 4.4 % busy), so the gain on the page itself could
    not be measured. What is left for such scripts is compiled code itself (values in locals,
    inlining, phase 4 of [jit.md](jit.md)).
+   A Datawrapper chart (2026-11-15, `datawrapper.dwcdn.net/Rp4b3/2/`, the iframe of a watson.ch
+   article, 412x860): steps of 0.7 to 1.5 s at a load of 4 (3.4 and 5.1 s at 16 to 59, 9 s on a
+   Moto G71), plain Chromium at most 0.39 s. Its longest step is one microtask checkpoint of the
+   chart's Svelte code: `getComputedStyle` reads with forced style and layout about a third,
+   `for...in` over Proxies a tenth, the rest JS in the interpreter (compiled code 3 %, parse and
+   bytecode 10 % of the load). Back no longer waits for it (#583); the step itself is open.
 2. WebGL contexts of page scripts (feature checks, fingerprinting): every synchronous query of the
    shared host context waits for the GPU process, which is slow while it is busy (a live video,
    compositing). A switch between contexts read the whole GL state back (about 100 queries, more

@@ -71,6 +71,9 @@ struct EngineConfig {
     double fallbackFontWaitMs { 300 };
     bool httpCache { true }; // BL_HTTP_CACHE
     double scriptTimeoutSeconds { 30 }; // BL_SCRIPT_TIMEOUT
+    // BL_NAVIGATION_STOPS_SCRIPTS: a navigation of the user stops the running script of the page
+    // it leaves (UserNavigation.h); 0 waits for it to end
+    bool navigationStopsScripts { true };
     size_t memoryReleaseMB { 192 }; // BL_MEMORY_RELEASE_MB
     size_t memoryPressureMB { 3072 }; // BL_MEMORY_PRESSURE_MB
     uint64_t indexedDBQuotaMB { 256 }; // BL_INDEXEDDB_QUOTA_MB

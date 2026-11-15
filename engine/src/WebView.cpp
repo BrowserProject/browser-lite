@@ -542,16 +542,22 @@ static bool hasScheme(StringView text)
     return false;
 }
 
+URL WebView::typedAddress(const String& text)
+{
+    URL url { text };
+    // Without a scheme: https:// in front like in every browser. With one the
+    // prefix would make the scheme the host (https://http//...).
+    if (!url.isValid() && !hasScheme(text))
+        url = URL { makeString("https://"_s, text) };
+    return url;
+}
+
 void WebView::loadURL(const String& urlString)
 {
     RefPtr frame = mainFrame();
     if (!frame)
         return;
-    URL url { urlString };
-    // Without a scheme: https:// in front like in every browser. With one the
-    // prefix would make the scheme the host (https://http//...).
-    if (!url.isValid() && !hasScheme(urlString))
-        url = URL { makeString("https://"_s, urlString) };
+    URL url = typedAddress(urlString);
     // Like Chrome, an invalid address (a port above 65535) loads nothing
     if (!url.isValid()) {
         debugLog("loadURL: invalid address ignored");

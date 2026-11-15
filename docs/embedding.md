@@ -318,7 +318,8 @@ of `context.storage` (default in memory), for example in your user's profile.
   script that blocks it the whole `scriptTimeoutSeconds` again, and `unresponsive` comes again if
   it still does not answer 10 s later. Without "wait" the engine stops the script once the input
   waited `scriptTimeoutSeconds`; a script nobody waits for (an anti-bot check on a slow phone)
-  runs to its end.
+  runs to its end. `view.load()`, `back()`, `forward()` and `go()` to another document stop a
+  script of the view's page that runs at that moment, like Firefox (`reload()` waits for it).
 - `memory-pressure` (`{footprint, limit, level}`, sizes in bytes): the engine memory grows above
   its budget (`level` `'moderate'`) or runs short (`'critical'`: the engine already dropped the
   compiled JS and the back/forward cache). Close or discard background views at either level;

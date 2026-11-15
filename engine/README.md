@@ -78,7 +78,7 @@ from `patches/`.
   - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
-    (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, the watchdog that stops a script once the host waited its limit for it), `Exports.cpp` (`bl_*`; hovering mouse moves that wait join into one move that lists
+    (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, the watchdog that stops a script once the host waited its limit for it), `UserNavigation.cpp` (a typed address, Back or Forward of the user stops the running script of the page it leaves), `Exports.cpp` (`bl_*`; hovering mouse moves that wait join into one move that lists
     them all as its coalesced events), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release

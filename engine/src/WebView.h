@@ -80,6 +80,8 @@ public:
     WebCore::LocalFrameView* mainFrameView() const;
 
     // Loading
+    // The address loadURL loads for this text (invalid: none)
+    static URL typedAddress(const String&);
     void loadURL(const String&);
     void loadHTML(const String& html, const String& baseURL);
     // Back (negative) or forward by offset entries; an offset outside the history does nothing
