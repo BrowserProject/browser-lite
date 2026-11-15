@@ -22,7 +22,8 @@ import { askForAccessCode } from './access.js';
 import { addressToLoad } from './address-bar.js';
 import { hideBarWhileScrolling } from './bar-hiding.js';
 import { initBlockedPopups } from './blocked-popups.js';
-import { onBookmarksChange, toggleBookmark } from './bookmarks.js';
+import { initBookmarkBubble } from './bookmark-bubble.js';
+import { onBookmarksChange } from './bookmarks.js';
 import { dialogHandler } from './dialogs.js';
 import { addDownload } from './downloads.js';
 import { hideMessage, showMessage, showStartProgress } from './engine-message.js';
@@ -404,6 +405,7 @@ followHostHistory(() => {
   );
 });
 initBlockedPopups((url) => openURL(url, true));
+initBookmarkBubble(() => activeTab() ?? null, focusPage);
 initTabOverview();
 initTabDrag();
 initTabStripWheel();
@@ -456,10 +458,6 @@ pageButton('back', (tab) => tab.view.back());
 pageButton('forward', (tab) => tab.view.forward());
 pageButton('reload', (tab) => (tab.loading ? tab.view.stop() : reloadTab(tab)));
 byId('new-tab').addEventListener('click', () => openURL('', true));
-byId('bookmark').addEventListener('click', () => {
-  const tab = activeTab();
-  if (tab) toggleBookmark(tab.url, tab.title);
-});
 byId('zoom').addEventListener('click', () => {
   const tab = activeTab();
   if (tab) changeZoom(tab.view, 0);

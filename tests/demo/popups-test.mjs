@@ -103,7 +103,7 @@ check(
 );
 const host = new URL(siteURL).host;
 const bubble = await page.evaluate(() => ({
-  title: document.querySelector('#popup-bubble .popup-title')?.textContent,
+  title: document.querySelector('#popup-bubble .bubble-title')?.textContent,
   allow: document.querySelector('#popup-bubble .popup-allow')?.textContent,
 }));
 check(

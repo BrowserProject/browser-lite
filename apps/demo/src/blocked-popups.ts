@@ -1,4 +1,5 @@
-import { displayHost, displayURL, watchClose } from '@browser-lite/ui';
+import { displayHost, displayURL } from '@browser-lite/ui';
+import { closeOnHostBack, placeBubble } from './bubble.js';
 import { hostOf } from './favicons.js';
 import { runtime } from './runtime.js';
 import type { Tab } from './tabs.js';
@@ -17,7 +18,6 @@ const button = () => byId<HTMLButtonElement>('popups');
 const bubble = () => byId('popup-bubble');
 let shown: Tab | null = null;
 let openTab: (url: string) => void = () => {};
-let stopWatch: (() => void) | null = null;
 
 /**
  * Pop-up blocker indicator like Chrome: an icon in the address bar while the page in front had
@@ -29,12 +29,11 @@ export function initBlockedPopups(open: (url: string) => void): void {
   openTab = open;
   const popover = bubble();
   button().addEventListener('click', () => popover.togglePopover());
+  closeOnHostBack(popover);
   popover.addEventListener('beforetoggle', (event) => {
     const opening = (event as ToggleEvent).newState === 'open';
     button().setAttribute('aria-expanded', String(opening));
     if (opening) fill();
-    stopWatch?.();
-    stopWatch = opening ? watchClose(() => popover.hidePopover()) : null;
   });
 }
 
@@ -85,7 +84,7 @@ function fill(): void {
   }
   const done = element('button', { type: 'button', className: 'popup-done', textContent: 'Done' });
   done.addEventListener('click', () => popover.hidePopover());
-  const actions = element('div', { className: 'popup-actions' }, done);
+  const actions = element('div', { className: 'bubble-actions' }, done);
   // Pages without a host of their own (data:, sandboxed) cannot be allowed
   const origin = tab.blockedPopups[0]?.origin ?? '';
   const host = displayHost(hostOf(origin));
@@ -105,17 +104,11 @@ function fill(): void {
   }
   popover.replaceChildren(
     element('p', {
-      className: 'popup-title',
+      className: 'bubble-title',
       textContent: `Pop-ups blocked on ${host || 'this page'}`,
     }),
     list,
     actions,
   );
-  const anchor = button().getBoundingClientRect();
-  const below = anchor.top < innerHeight / 2;
-  popover.style.top = below ? `${anchor.bottom + 6}px` : 'auto';
-  popover.style.bottom = below ? 'auto' : `${innerHeight - anchor.top + 6}px`;
-  const right = Math.max(8, innerWidth - anchor.right);
-  popover.style.right = `${right}px`;
-  popover.style.maxWidth = `${innerWidth - right - 8}px`;
+  placeBubble(popover, button());
 }

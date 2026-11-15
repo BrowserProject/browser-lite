@@ -262,6 +262,8 @@ check(
 // Bookmark rows: the same menu with Remove bookmark
 await page.keyboard.press('Escape');
 await page.click('#bookmark');
+// The star bookmarks the page and opens its bubble, Escape closes it
+await page.keyboard.press('Escape');
 await page.keyboard.press('Control+Shift+O');
 await row('Page D').locator('.panel-link').click({ button: 'right' });
 check(

@@ -18,15 +18,21 @@ export function isBookmarked(url: string): boolean {
   return bookmarks().some((bookmark) => bookmark.url === url);
 }
 
-/** Adds or removes the bookmark of url; true when it was added. */
-export function toggleBookmark(url: string, title = ''): boolean {
-  if (isInternal(url)) return false;
+/** Bookmarks url with title (the address without one); nothing when it is bookmarked. */
+export function addBookmark(url: string, title = ''): void {
   const list = bookmarks();
-  const index = list.findIndex((bookmark) => bookmark.url === url);
-  if (index >= 0) list.splice(index, 1);
-  else list.push({ url, title: title || url, time: Date.now() });
+  if (isInternal(url) || list.some((bookmark) => bookmark.url === url)) return;
+  list.push({ url, title: title || url, time: Date.now() });
   save(list);
-  return index < 0;
+}
+
+/** Names the bookmark of url title (the address without one); nothing when there is none. */
+export function renameBookmark(url: string, title: string): void {
+  const list = bookmarks();
+  const bookmark = list.find((entry) => entry.url === url);
+  if (!bookmark || bookmark.title === (title || url)) return;
+  bookmark.title = title || url;
+  save(list);
 }
 
 /** Removes the bookmark of url; nothing when there is none. */

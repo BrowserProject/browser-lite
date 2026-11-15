@@ -1,5 +1,5 @@
 import { focusAddress, focusSearch } from './address-bar.js';
-import { toggleBookmark } from './bookmarks.js';
+import { openBookmarkBubble } from './bookmark-bubble.js';
 import { findAgain, openFind } from './find-bar.js';
 import { closePreview, previewOpen } from './print-preview.js';
 import { runtime } from './runtime.js';
@@ -89,7 +89,7 @@ function shortcutAction(e: Key): (() => void) | null {
       case 'j':
         return () => togglePanel('downloads');
       case 'd':
-        return () => tab && toggleBookmark(tab.url, tab.title);
+        return openBookmarkBubble;
       case 'w':
         return () => tab && requestClose(tab);
       case 'l':

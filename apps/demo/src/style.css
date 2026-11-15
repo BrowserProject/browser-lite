@@ -232,7 +232,7 @@ svg.favicon {
 :where(
   #boot button,
   .bl-permission-prompt button,
-  #popup-bubble .popup-actions button,
+  .bubble-actions button,
   .bl-login-prompt button,
   .bl-page-dialog button,
   .bl-picker-sheet button,
@@ -262,6 +262,7 @@ svg.favicon {
   #boot button.primary,
   .bl-permission-prompt .bl-allow,
   #popup-bubble .popup-allow,
+  #bookmark-bubble .bookmark-done,
   .bl-login-prompt .bl-sign-in,
   .bl-page-dialog .bl-ok,
   .settings-actions button.primary,
@@ -282,6 +283,7 @@ svg.favicon {
 :where(
   .bl-login-prompt input,
   .bl-page-dialog input,
+  #bookmark-bubble input,
   .settings-row input[type="text"],
   .settings-row select,
   #boot input,
@@ -302,6 +304,7 @@ svg.favicon {
 :where(
   .bl-login-prompt input,
   .bl-page-dialog input,
+  #bookmark-bubble input,
   .settings-row input[type="text"],
   .settings-row select,
   #boot input
@@ -618,9 +621,9 @@ svg.favicon {
   width: 18px;
   height: 18px;
 }
-/* Bubble of the blocked popups (a popover: light dismiss and Escape by the browser), placed by
-   blocked-popups.ts at the icon */
-#popup-bubble {
+/* Bubbles of the address bar (popovers: light dismiss and Escape by the browser), placed by
+   bubble.ts at their button: blocked popups, bookmark */
+.bubble {
   position: fixed;
   inset: auto;
   width: min(360px, calc(100vw - 16px));
@@ -632,9 +635,16 @@ svg.favicon {
   color: var(--on-surface);
   box-shadow: var(--elev-3);
 }
-#popup-bubble .popup-title {
+.bubble .bubble-title {
   margin: 0 0 var(--space-2);
   font-weight: 500;
+}
+.bubble .bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 #popup-bubble .popup-list {
   max-height: 40vh;
@@ -653,12 +663,11 @@ svg.favicon {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#popup-bubble .popup-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
+#bookmark-bubble label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--on-surface-variant);
+  font-size: var(--text-xs);
 }
 #status {
   max-width: 30%;
@@ -2323,7 +2332,8 @@ svg.favicon {
     font-size: var(--text-lg);
   }
   .bl-login-prompt input,
-  .bl-page-dialog input {
+  .bl-page-dialog input,
+  #bookmark-bubble input {
     min-height: 48px;
     font-size: var(--text-lg);
   }

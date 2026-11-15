@@ -1,5 +1,6 @@
 import { showAddress } from './address-bar.js';
 import { updatePopupsButton } from './blocked-popups.js';
+import { followBookmarkBubble } from './bookmark-bubble.js';
 import { isBookmarked } from './bookmarks.js';
 import { setIcon } from './icons.js';
 import { compactLayout } from './layout.js';
@@ -57,10 +58,10 @@ export function updateStar(url: string): void {
   const marked = isBookmarked(url);
   setIcon(star, marked ? 'star-filled' : 'star');
   star.classList.toggle('active', marked);
-  star.title = marked ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
-  star.setAttribute('aria-label', marked ? 'Remove bookmark' : 'Bookmark this page');
-  star.setAttribute('aria-pressed', String(marked));
+  star.title = marked ? 'Edit bookmark (Ctrl+D)' : 'Bookmark this page (Ctrl+D)';
+  star.setAttribute('aria-label', marked ? 'Edit bookmark' : 'Bookmark this page');
   star.disabled = isInternal(url);
+  followBookmarkBubble(url);
 }
 
 /**
