@@ -102,6 +102,12 @@ text like Chrome (`typedAddress`, `packages/core/src/address.ts`, #435): without
 right away for localhost, IP addresses, names without a dot and other ports; the engine gets the
 full address.
 
+A main frame navigation pauses the page being left until the answer of the new page (#337). A
+failed or stopped navigation ends as soon as its own loads ended, like in Chrome (patch 0146,
+#576): WebCore also waited until the page being left no longer delayed its load event, and a
+script of that page whose load the navigation cancelled waits in the paused page to fire its
+error event, so neither the error page nor Stop came.
+
 `:visited` asks the `VisitedLinkStore` of the page; the page configuration of a bare `Page` has
 WebCore's empty one, which answers "not visited" for every link. All views share the engine's own
 store (`engine/src/VisitedLinks.cpp`): WebCore's `HistoryController` adds every address a frame

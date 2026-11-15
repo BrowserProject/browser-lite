@@ -1,0 +1,27 @@
+diff --git a/Source/WebCore/loader/FrameLoader.cpp b/Source/WebCore/loader/FrameLoader.cpp
+index 5433d2710e..a8422b2cac 100644
+--- a/Source/WebCore/loader/FrameLoader.cpp
++++ b/Source/WebCore/loader/FrameLoader.cpp
+@@ -3000,7 +3000,8 @@ void FrameLoader::checkLoadCompleteForThisFrame(LoadWillContinueInAnotherProcess
+ 
+     // FIXME: Should this check be done in checkLoadComplete instead of here?
+     // FIXME: Why does this one check need to be repeated here, and not the many others from checkCompleted?
+-    if (m_frame->document()->isDelayingLoadEvent())
++    // A provisional load does not wait for the document it leaves (below).
++    if (m_state != FrameState::Provisional && m_frame->document()->isDelayingLoadEvent())
+         return;
+ 
+     switch (m_state) {
+@@ -3041,7 +3042,11 @@ void FrameLoader::checkLoadCompleteForThisFrame(LoadWillContinueInAnotherProcess
+ 
+         // Only reset if we aren't already going to a new provisional item.
+         bool shouldReset = !history().provisionalItem();
+-        if (!provisionalDocumentLoader->isLoadingInAPISense() || provisionalDocumentLoader->isStopping()) {
++        // A failed provisional load ends as soon as its own loads ended, like in Chrome, not when the
++        // document being left has also finished its load event, scripts and subframes
++        // (isLoadingInAPISense looks at that document). Its queued scripts may never run while the
++        // embedder pauses the page for the navigation, so neither the error page nor Stop came.
++        if (!provisionalDocumentLoader->isLoading() || provisionalDocumentLoader->isStopping()) {
+             FRAMELOADER_RELEASE_LOG_FORWARDABLE(FrameLoaderCheckLoadCompleteForThisFrameFailedProvisionalLoad, error.isTimeout(), error.isCancellation(), error.errorCode(), isHTTPSFirstApplicable);
+ 
+             // Provisional load failed before didBeginDocument() could clear the async-wait state;

@@ -245,7 +245,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   than 20 redirects) or a redirect to `file:` (#406), and like Chrome for an HTTP error status
   without a body (`HTTP ERROR 500`, before a blank page, #425), the error page as the only
   message: the demo no longer repeats it with curl's text in the status line or the phone
-  layout's snackbar (#427), a request whose pooled connection dies before any response byte
+  layout's snackbar (#427), a failed navigation gets its error page and Stop ends a navigation
+  also while the page being left still has scripts queued (#576: from bing.com a few seconds
+  after its load the tab stayed loading for good, without an error page, and the page froze),
+  a request whose pooled connection dies before any response byte
   goes again on a new connection like in Chrome (#397), a new HTTP/2 connection opens more
   streams only once the server announced how many it allows, where www.postfinance.ch (limit 10)
   reset the rest and the page lost stylesheets and scripts (#479), the relay connects with Happy Eyeballs
