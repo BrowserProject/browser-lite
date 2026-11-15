@@ -172,7 +172,13 @@ visible change is neither composited nor shown. A frame whose damage touches at 
 tiles of 128 CSS pixels and half of the view is composited only into those tiles, each into
 a small canvas of its own over the view canvas, which keeps its last frame (`DamageTiles.cpp`,
 `view-tiles.ts`; the host browser repaints a canvas whole for every new frame, so a spinner cost a
-whole view per frame before); a frame whose tiles touch the hole of a video the host shows (see Media), in
+whole view per frame before). Damage that keeps coming at one place over two tiles or more a frame
+(a pulsing ad placeholder over 12 tiles, a spinner on the corner of 4) gets a region instead, one
+canvas fitted to the damage of its last 16 frames, since every canvas costs the host about the
+same per frame however small it is (#574); tiles and regions may overlap, and every one that
+shows something shows the view as it is: a frame draws again each one its damage touches, or
+empties it when the canvases of the frame cover all of it where the view canvas is out of date. A
+frame whose tiles touch the hole of a video the host shows (see Media), in
 this frame or in the last whole one, is shown whole too, while videos elsewhere in the page leave
 the tiles alone (#550); other frames composite the whole view and empty the tiles (with a transparent bitmap of 1x1 pixels: after `transferFromImageBitmap(null)` Safari 18 keeps showing the tile's last frame, #463).
 A layer that only animates its opacity and transform (pulsing skeleton placeholders, Wikipedia's

@@ -101,6 +101,7 @@ EM_JS(int, bl_gpu_prepare, (int viewId, int width, int height), {
 // The finished frame without a copy into the canvas of the view (kind 0), of one of its damage
 // tiles (1, DamageTiles.h) or of one of its host layers (2, HostLayers.h)
 EM_JS(int, bl_gpu_transfer, (int viewId, int kind, unsigned key), {
+    key = key >>> 0;
     var target = Module.blCanvases && Module.blCanvases.get(viewId);
     if (target && kind == 1)
         target = target.tiles && target.tiles.canvases.get(key);

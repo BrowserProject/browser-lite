@@ -8,6 +8,9 @@
 // frame instead, also when the video is gone from there. A video without a frame yet (an MSE
 // player that never gets data, as under the loading spinners of edition.cnn.com) has no hole:
 // what lies under it shows like in Chrome, and the spinner over it turns in its tiles.
+// Damage that keeps coming at one place over many tiles (an ad placeholder that pulses its
+// background color, as on edition.cnn.com) gets a region, one canvas fitted to it, and the tiles
+// under it get empty; what it shows is what a whole frame shows.
 // Like Safari 18, the engine's workers here keep a canvas's last frame after
 // transferFromImageBitmap(null): Safari reads such a canvas back empty but keeps showing the frame,
 // so tiles emptied that way showed stale pieces of earlier frames and pages on iPhones.
@@ -103,8 +106,19 @@ source.addEventListener('sourceopen', () => {
 });
 empty.addEventListener('playing', () => console.log('RESULT playing=1'), { once: true });
 </script>`;
+// A box of 500x90 at 70, 100 over 10 tiles pulses its background color
+const PULSE_PAGE = `<!doctype html><title>A pulsing placeholder</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; background: #fff; }
+  #pulse { position: absolute; left: 70px; top: 100px; width: 500px; height: 90px;
+    animation: pulse 2s infinite; }
+  @keyframes pulse { 0% { background-color: #262626; } 50% { background-color: #808080; }
+    100% { background-color: #262626; } }
+  p { margin: 260px 20px 0; }
+</style>
+<div id="pulse"></div><p>${'Static text under a pulsing placeholder. '.repeat(20)}</p>`;
 let clip = null;
-const PAGES = { '/video': VIDEO_PAGE, '/empty-video': EMPTY_VIDEO_PAGE };
+const PAGES = { '/video': VIDEO_PAGE, '/empty-video': EMPTY_VIDEO_PAGE, '/pulse': PULSE_PAGE };
 const { url: siteURL } = await serve((req, res) => {
   if (req.url === '/clip.webm') {
     serveBytes(req, res, clip, 'video/webm');
@@ -338,6 +352,95 @@ clip = await recordClip(browser, 3);
     'video: where the video was the view canvas shows the page again',
     isWhite(pixel) && rgba.every((value) => value > 220),
     `screen ${JSON.stringify(pixel)}, view canvas ${rgba.join(',')}`,
+  );
+  await page.close();
+}
+
+// A region (ratio 1)
+{
+  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  page.on('worker', keepFrameOnNull);
+  watchErrors(page);
+  check('region: page loaded', await openHost(page, stack.app({ url: `${siteURL}pulse` })));
+  // The canvases over the box: regions (not of the tile size) and whether each shows something
+  const canvases = () =>
+    page.evaluate(() => {
+      const box = [70, 100, 570, 190];
+      return [...document.querySelectorAll('[data-bl-tiles] canvas')]
+        .map((canvas) => {
+          const x = Number.parseFloat(canvas.style.left);
+          const y = Number.parseFloat(canvas.style.top);
+          const probe = document.createElement('canvas');
+          probe.width = canvas.width;
+          probe.height = canvas.height;
+          const context = probe.getContext('2d', { willReadFrequently: true });
+          context.drawImage(canvas, 0, 0);
+          const data = context.getImageData(0, 0, probe.width, probe.height).data;
+          let shows = false;
+          for (let i = 3; i < data.length && !shows; i += 4) shows = data[i] > 0;
+          // The size it was made with: an emptied canvas holds 1x1 pixels
+          const width = Number.parseFloat(canvas.style.width);
+          const height = Number.parseFloat(canvas.style.height);
+          return { x, y, width, height, shows };
+        })
+        .filter(
+          (c) => c.x < box[2] && c.x + c.width > box[0] && c.y < box[3] && c.y + c.height > box[1],
+        );
+    });
+  let over = [];
+  await waitFor(
+    async () => (over = await canvases()).some((c) => c.width !== 128 && c.shows),
+    15000,
+    250,
+  );
+  const regions = over.filter((c) => c.width !== 128);
+  const region = regions.find((c) => c.shows);
+  check(
+    'region: the pulse gets one region fitted to it',
+    !!region && region.x <= 70 && region.x > 40 && region.width < 560 && region.height < 140,
+    JSON.stringify(regions),
+  );
+  await page.waitForTimeout(500);
+  over = await canvases();
+  const tilesShowing = over.filter((c) => c.width === 128 && c.shows).length;
+  check(
+    'region: the tiles under it are empty',
+    tilesShowing === 0 && over.filter((c) => c.width !== 128 && c.shows).length === 1,
+    JSON.stringify(over),
+  );
+  const { viewBefore, viewAfter } = await viewCanvasStill(page);
+  const allBefore = await shown(page, true);
+  const pulsed = await waitFor(
+    async () => differentPixels(allBefore, await shown(page, true)) > 0,
+    3000,
+    100,
+  );
+  check(
+    'region: it pulses there, the view canvas keeps its frame',
+    pulsed && differentPixels(viewBefore, viewAfter) === 0,
+    `${differentPixels(viewBefore, viewAfter)} pixels of the view canvas changed in 500 ms`,
+  );
+  // Paused, it shows what a whole frame shows
+  await evalPage(page, `document.getElementById('pulse').style.animationPlayState = 'paused'`);
+  await page.waitForTimeout(500);
+  const fromRegion = await shown(page, true);
+  await evalPage(page, `document.body.style.background = '#eee'`);
+  await waitFor(
+    async () => differentPixels(fromRegion, await shown(page, false)) > 1000,
+    5000,
+    200,
+  );
+  await evalPage(page, `document.body.style.background = '#fff'`);
+  let whole = null;
+  await waitFor(
+    async () => differentPixels((whole = await shown(page, false)), fromRegion) === 0,
+    5000,
+    200,
+  );
+  check(
+    'region: it showed what a whole frame shows',
+    differentPixels(whole, fromRegion) === 0,
+    `${differentPixels(whole, fromRegion)} different pixels`,
   );
   await page.close();
 }

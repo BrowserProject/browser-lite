@@ -2,8 +2,10 @@
 // every new frame, so a frame that changes only a small part of the page (a spinner, a pulsing
 // placeholder) goes into small canvases over the view canvas instead, and the host repaints only
 // those. The engine asks for the tiles it needs (event 'tiles'); they cover the view canvas in a
-// grid of `size` frame pixels and belong to the worker that paints, like the view canvas. The same
-// layer holds the canvases of the host layers above them (view-host-layers.ts).
+// grid of `size` frame pixels and belong to the worker that paints, like the view canvas. Damage
+// that keeps coming at one place gets a region instead, a canvas of its own fitted to it, which
+// the engine drops again when it no longer needs it. The same layer holds the canvases of the
+// host layers above them (view-host-layers.ts).
 
 import { type HostLayerRequest, HostLayers } from './view-host-layers.js';
 
@@ -16,10 +18,20 @@ function rowOf(key: number): number {
   return key >>> 16;
 }
 
+/** A region of the engine: `[key, x, y, width, height]` in frame pixels of the view canvas. */
+export type TileRegion = [number, number, number, number, number];
+
+/** A canvas of a tile or region and where it lies in frame pixels. */
+interface TileCanvas {
+  canvas: HTMLCanvasElement;
+  x: number;
+  y: number;
+}
+
 /** The tile canvases of one view, in a layer over the view canvas. */
 export class ViewTiles {
   private readonly layer = document.createElement('div');
-  private readonly tiles = new Map<number, HTMLCanvasElement>();
+  private readonly tiles = new Map<number, TileCanvas>();
   private readonly hostLayers: HostLayers;
   private readonly observer = new ResizeObserver(() => this.place());
   private size = 0;
@@ -42,28 +54,44 @@ export class ViewTiles {
     this.place();
   }
 
-  /** New canvases for these tiles; a new size replaces all tiles of the old one. */
-  add(size: number, keys: readonly number[]): void {
+  /**
+   * New canvases for these tiles and regions, and the regions the engine no longer uses; a new
+   * size replaces all tiles and regions of the old one.
+   */
+  add(
+    size: number,
+    keys: readonly number[],
+    regions: readonly TileRegion[] = [],
+    drop: readonly number[] = [],
+  ): void {
     if (size !== this.size) {
-      for (const tile of this.tiles.values()) tile.remove();
+      for (const tile of this.tiles.values()) tile.canvas.remove();
       this.tiles.clear();
       this.size = size;
     }
-    for (const key of keys) {
-      // The engine asks only for tiles it has no canvas of (a new compositor after a GPU loss)
-      this.tiles.get(key)?.remove();
-      const tile = document.createElement('canvas');
-      tile.width = size;
-      tile.height = size;
-      tile.style.cssText =
-        `position:absolute;left:${columnOf(key) * size}px;top:${rowOf(key) * size}px;` +
-        `width:${size}px;height:${size}px;object-fit:none;object-position:0 0;`;
-      this.layer.append(tile);
-      this.tiles.set(key, tile);
-      const offscreen = tile.transferControlToOffscreen();
-      this.worker.postMessage({ blTile: offscreen, viewId: this.viewId, size, key }, [offscreen]);
+    for (const key of drop) {
+      this.tiles.get(key)?.canvas.remove();
+      this.tiles.delete(key);
     }
+    for (const key of keys) this.create(key, columnOf(key) * size, rowOf(key) * size, size, size);
+    for (const [key, x, y, width, height] of regions) this.create(key, x, y, width, height);
     this.place();
+  }
+
+  private create(key: number, x: number, y: number, width: number, height: number): void {
+    // The engine asks only for canvases it has none of (a new compositor after a GPU loss)
+    this.tiles.get(key)?.canvas.remove();
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.cssText =
+      `position:absolute;left:${x}px;top:${y}px;` +
+      `width:${width}px;height:${height}px;object-fit:none;object-position:0 0;`;
+    this.layer.append(canvas);
+    this.tiles.set(key, { canvas, x, y });
+    const offscreen = canvas.transferControlToOffscreen();
+    const { size, viewId } = this;
+    this.worker.postMessage({ blTile: offscreen, viewId, size, key }, [offscreen]);
   }
 
   /**
@@ -116,11 +144,8 @@ export class ViewTiles {
    * (debug).
    */
   drawOver(context: CanvasRenderingContext2D, ratio: number): void {
-    for (const [key, tile] of this.tiles) {
-      const x = (columnOf(key) * this.size) / ratio;
-      const y = (rowOf(key) * this.size) / ratio;
-      context.drawImage(tile, x, y, tile.width / ratio, tile.height / ratio);
-    }
+    for (const { canvas, x, y } of this.tiles.values())
+      context.drawImage(canvas, x / ratio, y / ratio, canvas.width / ratio, canvas.height / ratio);
     this.hostLayers.drawOver(context, ratio);
   }
 

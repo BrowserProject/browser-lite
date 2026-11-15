@@ -708,6 +708,16 @@ browser (Safari keeps Cmd+L, T and W for itself).
    frames (7.1 cores): a tile there would show the view canvas's older frame through its hole.
    A video without a frame yet has no hole since #573 (before, a spinner over a player whose MSE
    video never got data cost 5.2 to 7.3 cores in whole frames, now 1.1 to 1.2 in its tiles).
+   Damage that keeps coming at one place over several tiles gets one canvas fitted to it since
+   #574, since every canvas costs the host about the same per frame: a 728x90 ad placeholder that
+   pulses its background color (local, 2026-11-15, 1280x800) 0.74 instead of 1.7 cores, plain
+   Chromium 0.46; idle edition.cnn.com in a new tab 3.7 instead of 4.3 cores, with its videos
+   paused 2.5 instead of 3.2. What CNN still costs: the host decoding its 6 playing videos (about
+   1.3 cores of the renderer, which also halves the frame rate of everything else to 31 per
+   second), and a spinner turning in its tile at 60 frames per second with the placeholder in its
+   region at 24 (with the videos paused 1.8 to 1.9 cores of the GPU process): under SwiftShader a
+   canvas costs the GPU process 9 ms or more per frame however small (plain Chromium about 2 ms per
+   frame for a spinner).
    Layers that only animate their opacity are now shown by the host
    itself (#478): the page of 46 pulsing boxes (local, 2026-11-09, demo, 1280x800, 20 s standing
    still, same engine A/B) 0.14 to 0.16 CPU cores and no engine frame instead of 5.96 to 6.67
@@ -1027,6 +1037,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   switch, a matter of focus timing, not of damage tracking.
 - Firefox CI 2026-11-03: `ui-test` once "Page crashed" at the navigation after the 9 s script
   timeout check (3 of 3 local runs and the rerun clean).
+- `cache-threads-test` (local, 2026-11-15, Chromium, in a full core run on a loaded machine): once
+  the engine aborted (`RuntimeError: Aborted()`, "every writer finishes" null); 6 runs alone after
+  it clean, also 5 with the engine before. Not followed further.
 - Firefox 155 (CI job reports without blocking): `compositing-test` CPU painting after a GPU
   loss without the compositor thread (only with `compositing=0`, an expert setting): the engine
   presents the right CPU frame at once (checked in the worker: the scratch canvas has the new

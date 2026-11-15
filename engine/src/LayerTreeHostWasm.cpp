@@ -352,6 +352,8 @@ static void compositeScene(CompositorScene& scene)
         }
         if (tiles && !compositeTiles(scene, rootLayer, *tiles, background, hasRunningAnimations))
             tiles = std::nullopt;
+        if (tiles)
+            scene.damageTiles.didShowTiles();
         if (!tiles) {
             auto surface = Gpu::framebufferSurface(scene.viewId, pixelSize.width(), pixelSize.height());
             if (!surface) {

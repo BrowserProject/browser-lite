@@ -33,7 +33,7 @@ import type {
 } from './types.js';
 import { type Uploads, uploadDirectory } from './uploads.js';
 import { hostLayerRequests } from './view-host-layers.js';
-import { ViewTiles } from './view-tiles.js';
+import { type TileRegion, ViewTiles } from './view-tiles.js';
 import type { Watchdog } from './watchdog.js';
 
 // Like Chrome: a page that does not answer beforeunload in time (its engine thread is busy)
@@ -790,7 +790,12 @@ export class ViewImpl implements View {
         } satisfies ContextMenuInfo);
         return;
       case 'tiles':
-        this.tiles?.add(Number(data.size), (data.tiles as number[] | undefined) ?? []);
+        this.tiles?.add(
+          Number(data.size),
+          (data.tiles as number[] | undefined) ?? [],
+          (data.regions as TileRegion[] | undefined) ?? [],
+          (data.drop as number[] | undefined) ?? [],
+        );
         break;
       case 'layers': {
         const add = hostLayerRequests(data.add);
