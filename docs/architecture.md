@@ -378,7 +378,8 @@ past the last element it goes back to the host (`take-focus`).
 Ctrl + wheel first reaches the page (#167), and so do keys: a keydown the page does not handle
 (no `preventDefault`, editing command or default action, `EventHandler::keyEvent` false) comes
 back as `unhandled-key`, where the demo runs its shortcuts like Chrome; only the ones that leave or
-switch the tab skip the page (#436). The engine answers every keydown (`key-result`), and like
+switch the tab skip the page (#436). A key the demo has a shortcut for never gets the host
+browser's own action (F5 and Ctrl+F5 would reload the demo, #580). The engine answers every keydown (`key-result`), and like
 Chrome's input router the core holds later keyboard input until it answered a keydown that may be
 a shortcut, one with Ctrl, Alt or Meta or one that types no text (`key-queue.ts`): what was typed
 right after Ctrl+L goes to the address bar the shortcut focused, not to the busy page (#507).

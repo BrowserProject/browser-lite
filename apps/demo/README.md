@@ -119,7 +119,8 @@ select popup) are in the same sheet.
   one that looks like an address), Ctrl+S saves the page (`view.savePage()`, also Save page as in
   the menu), Ctrl+Shift+Delete opens the profile and site data at Delete site data and Alt+Home
   loads the home page of the settings or the new tab page in the tab; on a Mac Cmd+Shift+H and
-  Cmd+Shift+Backspace too. Letters typed right
+  Cmd+Shift+Backspace too. F5, Ctrl+R and like Chrome Ctrl+F5, Ctrl+Shift+R and Shift+F5 reload
+  the tab, never the demo's own page. Letters typed right
   after Ctrl+L or Ctrl+F while the page is busy wait in the core and land in the bar, not the
   page (#507). Escape stops a
   loading page like Chrome's Stop, but only when nothing else takes the key: not the page

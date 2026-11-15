@@ -75,7 +75,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   dropped on the tab strip in a new tab or the tab under it and one dropped on the address bar in
   the active tab like Chrome (#534: before, nothing outside the view could take a drag of
   the page), touch with pointer events (#316), swiping along `touch-action`
-  without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), and keys typed right after such a shortcut wait for the page's answer like in Chrome, so with a busy page (YouTube, Wikipedia) the letters after Ctrl+L or Ctrl+F all land in the address or find bar instead of reaching the page as its own shortcuts (#507), while plain typing does not wait, so keys typed during a 5 s engine stall reach the page within about 0.25 s after it instead of one engine round trip per key (#524), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437),
+  without wheel events (#314) with scroll snapping and the engine's fling (#319), pointer lock, ctrl + wheel to the page first (#167), keys to the page before the browser's shortcuts like Chrome (an editor's own Ctrl+F, Ctrl+P, Ctrl+L, Ctrl+U underline, #436), and keys typed right after such a shortcut wait for the page's answer like in Chrome, so with a busy page (YouTube, Wikipedia) the letters after Ctrl+L or Ctrl+F all land in the address or find bar instead of reaching the page as its own shortcuts (#507), while plain typing does not wait, so keys typed during a 5 s engine stall reach the page within about 0.25 s after it instead of one engine round trip per key (#524), Escape stops a loading page like Chrome's Stop when neither the page nor a field of the demo takes it (#437), F5, Ctrl+R, Ctrl+F5, Ctrl+Shift+R and Shift+F5 reload the tab and never the demo's own page (#580),
   `buttons` and `pressure` of mouse and pointer events, also with chorded buttons (#370),
   Tab to links (#372) and color inputs (#535), focus on click of buttons, checkboxes and links like Chrome (#450), mouse leave of the view (`:hover` and link address go away, #381),
   the link address follows a dialog that appears under a still mouse (#481),
@@ -864,6 +864,9 @@ browser (Safari keeps Cmd+L, T and W for itself).
   player in the host (hls.js, Apache-2.0, or an own one with a TS to fMP4 remuxer) on the host
   `<video>` whose playlist and segment requests go through the engine's network (the media
   service worker asked for any URL of that player). Needs a decision on the new dependency.
+- Hard reload (#580): Ctrl+F5, Ctrl+Shift+R and Shift+F5 reload like Ctrl+R (WebKit's
+  `FrameLoader::reload()`, which revalidates the page and its subresources); Chrome loads them
+  again without the cache. Needs a reload from origin through `bl_reload` and the core.
 - Autoplay with sound (#578) differs from Chrome: the activation of the main document counts for
   all its frames (WebKit has no `allow="autoplay"` permission policy; Chrome lets an activation
   count only for the frame and its ancestors, across origins only with it), it does not carry

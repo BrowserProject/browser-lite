@@ -103,7 +103,9 @@ function shortcutAction(e: Key): (() => void) | null {
         return openFind;
       case 'g':
         return () => findAgain(e.shiftKey);
+      // Ctrl+F5 like Ctrl+Shift+R, as in Chrome
       case 'r':
+      case 'F5':
         return () => tab && reloadTab(tab);
       case 'u':
         return () => tab?.view.viewSource();

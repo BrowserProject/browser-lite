@@ -1,8 +1,9 @@
 // Chrome's shortcuts that the page does not handle: Ctrl+K and Ctrl+E put `?` into the address
 // bar, so what follows is only a search (also text that looks like an address); Ctrl+S saves the
 // page with a request of its own as `<title>.html`, the characters a file name cannot have
-// replaced; Ctrl+Shift+Delete opens the profile and site data at Delete site data; Alt+Home loads
-// the new tab page, or the home page of the settings, in the active tab.
+// replaced; F5, Shift+F5 and Ctrl+F5 reload the tab and never the demo's host page;
+// Ctrl+Shift+Delete opens the profile and site data at Delete site data; Alt+Home loads the new
+// tab page, or the home page of the settings, in the active tab.
 //
 //   node tests/demo/browser-shortcuts-test.mjs [engine-dir]
 import { readFileSync } from 'node:fs';
@@ -105,6 +106,29 @@ check(
   'Ctrl+S: with the content of the page, requested again',
   !!saved && readFileSync(await saved.path(), 'utf8') === PAGE && pageRequests > requestsBefore,
   `${pageRequests - requestsBefore} requests`,
+);
+
+// F5, Shift+F5 and Ctrl+F5 reload the tab, never the demo's host page
+await page.evaluate(() => {
+  window.f5Prevented = [];
+  addEventListener('keydown', (e) => e.key === 'F5' && window.f5Prevented.push(e.defaultPrevented));
+});
+for (const combo of ['F5', 'Shift+F5', 'Control+F5']) {
+  const before = pageRequests;
+  results.delete('ready');
+  await pressInPage(combo);
+  const reloaded = (await results.wait('ready', 15000)) === 'start';
+  check(
+    `${combo}: the tab reloads`,
+    reloaded && pageRequests > before,
+    `${pageRequests - before} requests`,
+  );
+}
+const prevented = await page.evaluate(() => window.f5Prevented);
+check(
+  'F5, Shift+F5, Ctrl+F5: not the host page',
+  prevented.length === 3 && prevented.every(Boolean),
+  JSON.stringify(prevented),
 );
 
 // Ctrl+Shift+Delete: the settings at the profile and site data
