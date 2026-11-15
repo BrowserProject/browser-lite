@@ -2,7 +2,8 @@
 // (Range), the engine loads it and hands head and data to the host. HTTP from
 // the HTTP cache of the page's partition or with curl through the transport,
 // with cookies and referrer of the page; blob: and data: from memory
-// (BlobResourceHandle, can do Range).
+// (BlobResourceHandle, can do Range). A streaming manifest (HLS, DASH) never reaches the host:
+// the media fails with MEDIA_ERR_SRC_NOT_SUPPORTED.
 #include "config.h"
 #include "MediaFetch.h"
 
@@ -13,6 +14,7 @@
 #include "MediaPlayerPrivateWasm.h"
 
 #include <WebCore/BlobResourceHandle.h>
+#include <WebCore/ContentType.h>
 #include <WebCore/CurlRequest.h>
 #include <WebCore/CurlRequestClient.h>
 #include <WebCore/CurlResponse.h>
@@ -51,8 +53,9 @@ public:
     }
 
 protected:
-    MediaFetch(int id, double start, double end)
+    MediaFetch(int id, int playerId, double start, double end)
         : m_id(id)
+        , m_playerId(playerId)
     {
         if (start > 0 || end >= 0)
             m_range = end >= 0 ? makeString("bytes="_s, static_cast<uint64_t>(start), '-', static_cast<uint64_t>(end)) : makeString("bytes="_s, static_cast<uint64_t>(start), '-');
@@ -69,8 +72,19 @@ protected:
         return request;
     }
 
-    void sendHead(const ResourceResponse& response)
+    // False (and the fetch ends) when the response is a streaming manifest, whose playlists or
+    // segments the host would load outside the engine
+    bool sendHead(const ResourceResponse& response)
     {
+        if (MediaPlayerPrivateWasm::isStreamingManifest(ContentType { response.mimeType() })) {
+            Ref protectedThis { *this };
+            sendMediaFetch(m_id, "error"_s, "{\"message\":\"streaming manifest\"}"_s);
+            detach(true);
+            fetches().remove(m_id);
+            if (auto* player = MediaPlayerPrivateWasm::fromId(m_playerId))
+                player->sourceNotSupported();
+            return false;
+        }
         auto header = [&](HTTPHeaderName name) {
             return jsonEscape(response.httpHeaderField(name));
         };
@@ -79,6 +93,7 @@ protected:
             "\",\"length\":\""_s, header(HTTPHeaderName::ContentLength),
             "\",\"range\":\""_s, header(HTTPHeaderName::ContentRange),
             "\",\"acceptRanges\":\""_s, header(HTTPHeaderName::AcceptRanges), "\"}"_s));
+        return true;
     }
 
     void sendData(std::span<const uint8_t> data)
@@ -101,14 +116,15 @@ protected:
 
 private:
     const int m_id;
+    const int m_playerId;
     String m_range;
 };
 
 class NetworkMediaFetch final : public MediaFetch, public CurlRequestClient {
 public:
-    static Ref<NetworkMediaFetch> create(int id, double start, double end, const String& referrer, const String& partition)
+    static Ref<NetworkMediaFetch> create(int id, int playerId, double start, double end, const String& referrer, const String& partition)
     {
-        return adoptRef(*new NetworkMediaFetch(id, start, end, referrer, partition));
+        return adoptRef(*new NetworkMediaFetch(id, playerId, start, end, referrer, partition));
     }
 
     void ref() const final { MediaFetch::ref(); }
@@ -135,8 +151,8 @@ public:
     }
 
 private:
-    NetworkMediaFetch(int id, double start, double end, const String& referrer, const String& partition)
-        : MediaFetch(id, start, end)
+    NetworkMediaFetch(int id, int playerId, double start, double end, const String& referrer, const String& partition)
+        : MediaFetch(id, playerId, start, end)
         , m_referrer(referrer)
         , m_partition(partition)
     {
@@ -154,7 +170,8 @@ private:
 
     void serveFromCache(const HttpCache::Entry& entry)
     {
-        sendHead(entry.response);
+        if (!sendHead(entry.response))
+            return;
         entry.body->forEachSegment([&](auto segment) {
             sendData(segment);
         });
@@ -185,8 +202,9 @@ private:
             return;
         }
         // Without the validation headers; the target of a redirect is not stored (its URL differs)
+        if (!sendHead(response))
+            return;
         m_cacheWriter.start(m_partition, m_cacheRequest, response);
-        sendHead(response);
         request.completeDidReceiveResponse();
     }
 
@@ -221,9 +239,9 @@ private:
 
 class BlobMediaFetch final : public MediaFetch, public ResourceHandleClient {
 public:
-    static Ref<BlobMediaFetch> create(int id, double start, double end)
+    static Ref<BlobMediaFetch> create(int id, int playerId, double start, double end)
     {
-        return adoptRef(*new BlobMediaFetch(id, start, end));
+        return adoptRef(*new BlobMediaFetch(id, playerId, start, end));
     }
 
     void load(BlobData& blob, const URL& url)
@@ -234,8 +252,8 @@ public:
     }
 
 private:
-    BlobMediaFetch(int id, double start, double end)
-        : MediaFetch(id, start, end)
+    BlobMediaFetch(int id, int playerId, double start, double end)
+        : MediaFetch(id, playerId, start, end)
     {
     }
 
@@ -292,12 +310,12 @@ void startMediaFetch(int playerId, int fetchId, double start, double end)
         return;
     }
     if (RefPtr blob = player->blob()) {
-        Ref fetch = BlobMediaFetch::create(fetchId, start, end);
+        Ref fetch = BlobMediaFetch::create(fetchId, playerId, start, end);
         fetches().set(fetchId, fetch.ptr());
         fetch->load(*blob, player->url());
         return;
     }
-    Ref fetch = NetworkMediaFetch::create(fetchId, start, end, player->referrer(), player->httpCachePartition());
+    Ref fetch = NetworkMediaFetch::create(fetchId, playerId, start, end, player->referrer(), player->httpCachePartition());
     fetches().set(fetchId, fetch.ptr());
     fetch->load(player->url());
 }

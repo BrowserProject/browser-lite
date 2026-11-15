@@ -213,7 +213,11 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   never lowered the quality when frames dropped). `canPlayType` says no to HLS playlists and DASH
   manifests whatever the host answers, so players stream them through MSE (#549; before, it
   passed on the host's "maybe" of Chrome and Safari, players set the playlist as `src` and got
-  `MEDIA_ERR_SRC_NOT_SUPPORTED`, on srf.ch every video).
+  `MEDIA_ERR_SRC_NOT_SUPPORTED`, on srf.ch every video). A playlist or manifest set as `src`
+  anyway (known from `.m3u8` or from the response's `Content-Type`) fails at once with
+  `MEDIA_ERR_SRC_NOT_SUPPORTED` and never reaches the host `<video>` (#581; before, iPhone
+  Safari's own HLS took it and stayed at `NETWORK_LOADING` without an error, so BBC's player
+  waited 20 s per CDN and then had a dead play button; now it takes DASH after 0.6 s and plays).
 - **WebAssembly of pages** in the host engine, also memory64 and multiple memories (#152, #184).
 - **Workers and storage**: service workers with soft update and navigation preload (`ready`
   resolves with the active worker set like in Chrome, #483: before, the registration still showed
@@ -854,8 +858,8 @@ browser (Safari keeps Cmd+L, T and W for itself).
 
 ## Open: features
 
-- HLS as `src` (#549): the engine plays no HLS playlist itself, Safari (the default identity on
-  every host) and current Chrome do. Players that decide by the user agent still treat the
+- HLS as `src` (#549): the engine plays no HLS playlist itself (it fails at once, #581), Safari
+  (the default identity on every host) and current Chrome do. Players that decide by the user agent still treat the
   engine as Safari: on srf.ch (Pillarbox, video.js VHS) the video starts through
   MSE but stops after its first segment (3.9 s) for streams with a separate audio rendition,
   because VHS keeps Safari's native `audioTracks`, which then disagree with its own audio group;

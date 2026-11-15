@@ -74,6 +74,13 @@ public:
     // Bytes of blob: and data:, otherwise nullptr (loaded with curl)
     WebCore::BlobData* blob() const { return m_blob.get(); }
     String referrer() const;
+    // HLS playlists and DASH manifests name further resources the player loads itself: the
+    // engine plays neither (the host <video> gets exactly one resource through the media
+    // service worker)
+    static bool isStreamingManifest(const WebCore::ContentType&);
+    // The response turned out to be a streaming manifest: MEDIA_ERR_SRC_NOT_SUPPORTED, the host
+    // <video> goes away
+    void sourceNotSupported();
     // HTTP cache partition of the document of the element
     String httpCachePartition() const;
 
@@ -89,6 +96,7 @@ private:
     constexpr WebCore::MediaPlayerType mediaPlayerType() const final { return m_isMediaSource ? WebCore::MediaPlayerType::WasmMSE : WebCore::MediaPlayerType::Wasm; }
 
     void load(const String&) final;
+    void load(const URL&, const LoadOptions&) final;
 #if ENABLE(MEDIA_SOURCE)
     void load(const URL&, const LoadOptions&, WebCore::MediaSourcePrivateClient&) final;
     void readyStateFromMediaSourceChanged() final;

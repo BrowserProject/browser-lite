@@ -592,7 +592,9 @@ a host MediaSource that decodes (#48). Which types play is the engine's question
 it does itself (the media feature, the containers of its MSE parsers, no streaming manifest as a
 file: the host `<video>` gets one resource through the service worker and the segments an HLS
 playlist or DASH manifest names would bypass the engine's network, so pages stream them through
-MSE like on Firefox, #549); for the codecs it asks
+MSE like on Firefox, #549; one set as `src` anyway, known from `.m3u8` or from the response's
+`Content-Type` in `MediaFetch`, fails with `MEDIA_ERR_SRC_NOT_SUPPORTED` before the host sees
+it, #581); for the codecs it asks
 the host: `canPlayType` and `isTypeSupported` synchronously (common types answered ahead, #137),
 `navigator.mediaCapabilities.decodingInfo` of pages and workers asynchronously with the host's
 own `decodingInfo` on its main thread, so `supported`, `smooth` and `powerEfficient` are the

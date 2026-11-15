@@ -135,7 +135,8 @@ from `patches/`.
     host's video has a frame), frame counts of
     `getVideoPlaybackQuality()` from the host element,
     `MediaCapabilitiesWasm.cpp` (`navigator.mediaCapabilities` of pages and workers with the
-    host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE; muted
+    host's answers); no HLS or DASH manifest as a file, so pages stream them through MSE (one
+    set as `src` fails at once and never reaches the host `<video>`); muted
     autoplay only in the view and sound (media, Web Audio) only after a user activation of the
     page are WebCore settings in `WebView.cpp` (with patch 0147)
   - `wasm/WasmBridge.cpp`: bridge between JSC and the pages' WebAssembly

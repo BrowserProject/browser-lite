@@ -159,8 +159,7 @@ static bool hostMediaSourceSupports(const String& type)
     });
 }
 
-// HLS playlists and DASH manifests name further resources the player loads itself
-static bool isStreamingManifest(const ContentType& type)
+bool MediaPlayerPrivateWasm::isStreamingManifest(const ContentType& type)
 {
     auto container = type.containerType();
     auto slash = container.find('/');
@@ -323,6 +322,28 @@ void MediaPlayerPrivateWasm::setNetworkState(MediaPlayer::NetworkState state)
     m_networkState = state;
     if (RefPtr player = m_player.get())
         player->networkStateChanged();
+}
+
+// A src whose type (also guessed from the extension, .m3u8) the engine does not take: WebCore
+// still loads it with the only engine there is (MediaPlayer::loadWithNextMediaEngine tries every
+// engine in the end). The host <video> must not get it: iPhone Safari's native HLS stays at
+// NETWORK_LOADING without an error, its playlists and segments outside the engine's network.
+void MediaPlayerPrivateWasm::load(const URL& url, const LoadOptions& options)
+{
+    if (!options.contentType.isEmpty() && !takesType(PlatformMediaDecodingType::FileOrHLS, options.contentType)) {
+        m_url = url;
+        setNetworkState(MediaPlayer::NetworkState::FormatError);
+        return;
+    }
+    load(url.string());
+}
+
+void MediaPlayerPrivateWasm::sourceNotSupported()
+{
+    if (m_networkState >= MediaPlayer::NetworkState::FormatError)
+        return;
+    send("destroy"_s);
+    setNetworkState(MediaPlayer::NetworkState::FormatError);
 }
 
 void MediaPlayerPrivateWasm::load(const String& urlString)

@@ -2,11 +2,11 @@
 // page plays, the data comes from the engine through the service worker (range requests over
 // the relay), the engine paints the frames into the page (BL_VIDEO_OVERLAY=0; the overlay of #232
 // has video-overlay-test.mjs), with requestVideoFrameCallback and getVideoPlaybackQuality().
-// Also MSE, HLS and DASH manifests refused (players then take MSE), navigator.mediaCapabilities,
-// blob:, data:, preload, picture-in-picture, muted autoplay only in the view, a fullscreen video
-// letterboxed over a page object-fit: cover, the icons of the media controls and their exit
-// fullscreen button (also on a screen held upright and turned) and the range special cases of
-// media-sw.js.
+// Also MSE, HLS and DASH manifests refused by canPlayType and as src (players then take MSE),
+// navigator.mediaCapabilities, blob:, data:, preload, picture-in-picture, muted autoplay only in
+// the view, a fullscreen video letterboxed over a page object-fit: cover, the icons of the media
+// controls and their exit fullscreen button (also on a screen held upright and turned) and the
+// range special cases of media-sw.js.
 //
 // The test files are made here: a WAV (30 s, several 2 MB pieces) and a WebM clip, recorded
 // with MediaRecorder in the test Chromium.
@@ -218,6 +218,29 @@ const ASK_CAPABILITIES = `(async () => {
   return answers.join(',');
 })()`;
 
+// Streaming manifests as src: the engine does not play them, so the element fails at once with
+// MEDIA_ERR_SRC_NOT_SUPPORTED and the host <video> never gets one (#549; iPhone Safari's native
+// HLS hung there at NETWORK_LOADING without an error, BBC's player waited 40 s). Known from the
+// extension (.m3u8) or from the Content-Type of the response. The bytes are the WebM clip, which
+// the host would play if it got them.
+const MANIFEST_SRC_PAGE = `<!doctype html><title>Manifest as src</title><body>
+<script>
+const result = (key, value) => console.log('RESULT ' + key + '=' + value);
+const started = performance.now();
+for (const [key, src] of [['ext', '/stream/clip.m3u8'], ['hls', '/stream/hls'], ['dash', '/stream/dash']]) {
+  const video = document.createElement('video');
+  video.muted = true;
+  video.addEventListener('loadedmetadata', () => result(key, 'metadata'));
+  video.addEventListener('error', () => {
+    result(key, video.error.code + '/' + video.networkState);
+    result(key + 'ms', Math.round(performance.now() - started));
+  });
+  video.src = src;
+  if (key === 'ext') video.play().then(() => result('extplay', 'ok'), (e) => result('extplay', e.name));
+  document.body.append(video);
+}
+</script>`;
+
 // MSE: append the clip in two odd parts (also checks the parser with half elements)
 const MSE_PAGE = `<!doctype html><title>MSE test</title><body style="margin:0;background:#fff">
 <video id="video" muted playsinline style="position:absolute;left:20px;top:20px;width:320px;height:240px"></video>
@@ -428,6 +451,9 @@ const ranges = [];
 const { url: siteURL } = await serve((req, res) => {
   const files = {
     '/clip.webm': [CLIP, 'video/webm'],
+    '/stream/clip.m3u8': [CLIP, 'application/vnd.apple.mpegurl'],
+    '/stream/hls': [CLIP, 'application/x-mpegURL'],
+    '/stream/dash': [CLIP, 'application/dash+xml'],
     '/clip.mov': [CLIP, 'video/quicktime'],
     '/alpha.webm': [ALPHA_CLIP, 'video/webm'],
     '/tone.wav': [TONE, 'audio/wav'],
@@ -435,6 +461,7 @@ const { url: siteURL } = await serve((req, res) => {
   const html = {
     '/': PAGE,
     '/mse.html': MSE_PAGE,
+    '/manifest-src.html': MANIFEST_SRC_PAGE,
     '/alpha.html': ALPHA_PAGE,
     '/blob.html': BLOB_PAGE,
     '/controls.html': CONTROLS_PAGE,
@@ -635,6 +662,33 @@ check(
   'MSE: remove() in the host too',
   hostBuffered && hostBuffered.length && hostBuffered[hostBuffered.length - 1][1] < 2.7,
   JSON.stringify(hostBuffered),
+);
+
+// ------------------------------------------------------ manifests as src
+await load(page, `${siteURL}manifest-src.html`);
+for (const [key, what] of [
+  ['ext', '.m3u8 src'],
+  ['hls', 'HLS Content-Type'],
+  ['dash', 'DASH Content-Type'],
+]) {
+  check(
+    `manifest as src: ${what} fails with MEDIA_ERR_SRC_NOT_SUPPORTED`,
+    (await result(key)) === '4/3',
+    `${results.get(key)} after ${results.get(`${key}ms`)} ms`,
+  );
+}
+check(
+  'manifest as src: play() rejects with NotSupportedError',
+  (await result('extplay')) === 'NotSupportedError',
+  results.get('extplay'),
+);
+// WebKit's sniffer reads the start of a failed src and tries again with the type it finds (WebM
+// here): the media still fails, as the response says it is a manifest
+await page.waitForTimeout(1500);
+check(
+  'manifest as src: the host never plays it',
+  ['ext', 'hls', 'dash'].every((key) => results.get(key) === '4/3'),
+  ['ext', 'hls', 'dash'].map((key) => results.get(key)).join(' '),
 );
 
 // ------------------------------------------------------ transparent video
