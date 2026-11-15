@@ -391,7 +391,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   host's forward and the mouse forward button go forward in the tab also while it can
   still go back (#467), the bottom bar slides away while the user scrolls a page down and comes
   back when they scroll up, like Chrome's toolbar (in landscape on a Pixel 9 the page got 235 of
-  279 px with the bar; #472, checked on emulated phones, not yet on a device); it comes back with
+  279 px with the bar; #472, checked on emulated phones, not yet on a device), also while the
+  page's script or a tab loading in the background keeps the engine thread busy: a swipe up with
+  the engine blocked for 2.5 s brings it 0.13 s after the swipe began instead of 2.2 s, on a
+  Pixel 9 0.17 to 0.21 s while the engine answered only after 2.6 s (#582); it comes back with
   the progress at once when a page starts loading and stays until the new document commits, also
   for a link tapped while the page still loads (#494); the find bar takes the toolbar's place like
   in Safari and mobile Chrome and the page ends above it, so the current match is no longer

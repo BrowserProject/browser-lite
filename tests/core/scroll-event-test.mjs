@@ -1,6 +1,8 @@
 // The view's `scroll` event: the main frame's position with `user` true for a scroll by the
 // user (wheel) and false for one by the page's script or a clamp of a larger view, which a
-// browser needs to hide its toolbar like Chrome (apps/demo bar-hiding.ts).
+// browser needs to hide its toolbar like Chrome (apps/demo bar-hiding.ts). While the page's
+// script blocks the engine thread, a wheel the scrolling thread scrolls reaches the host at once
+// from there, and the positions keep their order.
 //
 //   node tests/core/scroll-event-test.mjs [engine-dir]
 import {
@@ -59,6 +61,33 @@ check(
   'wheel: y grows to where the page is',
   last > 100 && all.every((e) => e.endsWith(':true')),
   JSON.stringify(all),
+);
+
+// The page's script blocks the engine thread: the scrolling thread sends the wheel's position at
+// once, like Chrome's toolbar follows the compositor instead of the busy renderer
+const BUSY = 3000;
+await evalPage('scrollTo(0, 0)');
+await page.waitForTimeout(1000);
+await clear();
+await evalPage(
+  `setTimeout(() => { const end = Date.now() + ${BUSY}; while (Date.now() < end); }, 0)`,
+);
+await page.waitForTimeout(300);
+const wheelStart = Date.now();
+await page.mouse.wheel(0, 300);
+const early = await waitEvent(page, /^scroll:[1-9]\d*:true$/, 10000);
+const earlyMs = Date.now() - wheelStart;
+check(
+  'busy engine thread: the wheel scroll arrives before the script ends',
+  !!early && earlyMs < BUSY - 1000,
+  `${earlyMs} ms ${JSON.stringify(await scrolls())}`,
+);
+await page.waitForTimeout(BUSY);
+const busy = (await scrolls()).map((e) => Number(e.split(':')[1]));
+check(
+  'busy engine thread: the positions of both threads arrive in their order',
+  busy.length > 0 && busy.every((y, i) => i === 0 || y >= busy[i - 1]) && busy.at(-1) > 0,
+  JSON.stringify(await scrolls()),
 );
 
 // At the bottom a taller view clamps the position: not by the user

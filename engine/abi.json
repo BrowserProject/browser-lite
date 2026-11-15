@@ -172,7 +172,7 @@
   "events": [
     { "type": "navigation-start", "scope": "view", "payload": "empty: the main frame starts a navigation to another document (a link, a form, script, the host, back/forward), also while the page still loads; the navigation event with loading true follows" },
     { "type": "navigation", "scope": "view", "payload": "{url, canGoBack, canGoForward, loading, history: {entries: [{url, title, scrollX, scrollY}], index} | null}" },
-    { "type": "scroll", "scope": "view", "payload": "{x, y, user}: the main frame scrolled (at most once per run loop turn; scroll position like history's scrollX/scrollY; user: by wheel, finger, keys or scrollbar, not by script or a restored position)" },
+    { "type": "scroll", "scope": "view", "payload": "{x, y, user}: the main frame scrolled (at most once per run loop turn of the engine thread, and from the scrolling thread at once for each wheel or finger move it scrolls, also while the engine thread is busy; in the order of the positions; scroll position like history's scrollX/scrollY; user: by wheel, finger, keys or scrollbar, not by script or a restored position)" },
     { "type": "history", "scope": "view", "payload": "{entries: [{url, title, scrollX, scrollY}], index}: the main frame scrolled (at most once a second and at bl_sync_history, only on a change)" },
     { "type": "title", "scope": "view", "payload": "{title, url}" },
     { "type": "progress", "scope": "view", "payload": "{progress} (0 to 1)" },

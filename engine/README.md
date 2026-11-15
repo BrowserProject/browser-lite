@@ -105,7 +105,8 @@ from `patches/`.
     their opacity and transform get host canvases whose animation the host runs; plain layers
     drawn after one over it go into a cover canvas above it; patch 0132 starts the animations a
     layer gets in one commit on one clock reading, so they share a timeline), `ScrollingWasm.cpp`
-    (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks),
+    (scrolling thread: wheel, swipe and scroll animations on the compositor's ticks; the main
+    frame's position after a wheel or swipe goes to the host from there at once),
     `WorkerGraphics.cpp` (WebGL in dedicated and shared workers, on the worker's own thread)
   - Network: `LoaderStrategy.cpp` (loads, pings, downloads: a navigation that becomes one
     keeps its request; favicons, `data:` and `blob:` ones without a request), `SyncLoad.cpp` (synchronous loads like a synchronous `XMLHttpRequest`:

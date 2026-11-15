@@ -10,6 +10,7 @@
 // its JS blocks the engine thread.
 #pragma once
 
+#include <WebCore/IntPoint.h>
 #include <WebCore/PlatformWheelEvent.h>
 
 #if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
@@ -47,6 +48,23 @@ void wheelEvent(int viewId, const WebCore::PlatformWheelEvent&);
 // Compositor thread: scrolling by a finger (WebView::touchScroll), on the scrolling thread
 // when it can, never with a DOM event
 void touchScroll(int viewId, const WebCore::PlatformWheelEvent&);
+
+// What moved the main frame during one run loop turn of the engine thread
+struct MainFrameScrolls {
+    // The engine thread itself: script, layout, a restored position, wheel or finger it handles,
+    // keys, scrollbar
+    bool byEngine { false };
+    // Of these one by the user
+    bool byEngineForUser { false };
+    // Scrolls by the user it took over from the scrolling thread: wheel, finger, fling, keys
+    bool fromScrollingThread { false };
+};
+
+// Engine thread: the view's event scroll for the main frame at the end of a run loop turn. The
+// scrolling thread sends one itself at once when wheel or finger move the main frame there, so a
+// host hides or shows its toolbar without waiting for a busy engine thread (Chrome's browser
+// controls follow the compositor). The engine thread then only sends a position that is newer
+void mainFrameScrolled(int viewId, WebCore::IntPoint, const MainFrameScrolls&);
 
 // Any thread: does the page have a wheel listener at that point that can call
 // preventDefault (wheel event regions)? Without a scrolling thread: yes

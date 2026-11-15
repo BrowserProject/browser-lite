@@ -2106,21 +2106,28 @@ void WebView::notifyNavigationState()
 // keys or scrollbar (also its fling), not one by the page's script or a restored position
 void WebView::didScrollMainFrame()
 {
-    // Layout clamps the position (a shorter document) with the type of the scroll before
-    if (RefPtr view = mainFrameView(); view && view->currentScrollType() == ScrollType::User && !view->layoutContext().isInLayout())
-        m_scrollByUser = true;
+    if (RefPtr view = mainFrameView()) {
+        // Layout clamps the position (a shorter document) with the type of the scroll before
+        bool user = view->currentScrollType() == ScrollType::User && !view->layoutContext().isInLayout();
+        // Only AsyncScrollingCoordinator::reconcileScrollingState, with the positions of the
+        // scrolling tree, sets a frame's position unclamped; those of the engine's own scroll
+        // requests (script, restored positions) come back there with the type Programmatic
+        if (user && view->scrollClamping() == ScrollClamping::Unclamped)
+            m_mainFrameScrolls.fromScrollingThread = true;
+        else {
+            m_mainFrameScrolls.byEngine = true;
+            m_mainFrameScrolls.byEngineForUser |= user;
+        }
+    }
     if (!std::exchange(m_scrollEventPending, true)) {
         RunLoop::mainSingleton().dispatch([id = m_id] {
             auto* view = fromID(id);
             if (!view)
                 return;
             view->m_scrollEventPending = false;
-            RefPtr frameView = view->mainFrameView();
-            if (!frameView)
-                return;
-            auto position = frameView->scrollPosition();
-            notifyHost(id, "scroll", makeString("{\"x\":"_s, position.x(), ",\"y\":"_s, position.y(),
-                ",\"user\":"_s, std::exchange(view->m_scrollByUser, false) ? "true"_s : "false"_s, '}'));
+            auto scrolls = std::exchange(view->m_mainFrameScrolls, { });
+            if (RefPtr frameView = view->mainFrameView())
+                Scrolling::mainFrameScrolled(id, frameView->scrollPosition(), scrolls);
         });
     }
     if (std::exchange(m_historyUpdatePending, true))

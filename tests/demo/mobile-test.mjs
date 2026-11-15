@@ -11,7 +11,7 @@
 // prompt and the sign-in dialog are fully visible, the section names of the settings stay on one
 // line at 390 and 360 px, the close button of the settings stays at the top while they scroll, the
 // bar slides away while the user scrolls a page down and comes back when they scroll up (the page
-// gets its room) and comes back with the progress at once when the page navigates (also while it
+// gets its room, also at once while the page's script blocks the engine thread) and comes back with the progress at once when the page navigates (also while it
 // still loads), and the desktop layout comes back above the breakpoint. An Android phone as host
 // gets the iPhone device by default.
 // Screenshots: build/e2e-mobile-*.png.
@@ -758,6 +758,29 @@ check('bar shown: the page gives the room back', (await pageHeight()) === shownH
 await tab.emulateMedia({ reducedMotion: 'reduce' });
 await userScroll(150);
 check('bar: hidden again', await waitBar('hidden'));
+// A script of the page that blocks the engine thread does not hold the bar back: the scrolling
+// thread sends the position the finger gives it at once, like Chrome's controls follow the
+// compositor instead of the busy renderer
+const BUSY = 4000;
+await tab.evaluate(
+  (ms) =>
+    window.blTest.eval(
+      `setTimeout(() => { const end = Date.now() + ${ms}; while (Date.now() < end); }, 0)`,
+    ),
+  BUSY,
+);
+await tab.waitForTimeout(300);
+const busyStart = Date.now();
+await userScroll(-100);
+const busyShown = await waitBar('shown', 1500);
+check(
+  'bar: scrolling up while the page blocks the engine shows it at once',
+  busyShown && Date.now() - busyStart < BUSY - 1000,
+  `${Date.now() - busyStart} ms`,
+);
+await tab.waitForTimeout(BUSY);
+await userScroll(150);
+check('bar: hidden again after the script', await waitBar('hidden'));
 await tab.evaluate(() => window.blTest.eval('scrollTo(0, 0)'));
 check('bar: back at the top of the page', await waitBar('shown'));
 // Like Chrome's controls while a page loads, a navigation of the page itself (a tapped link)

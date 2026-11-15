@@ -616,7 +616,8 @@ export interface ViewEvents {
   history: { history: SessionHistory };
   /**
    * The main frame scrolled to `x`, `y` (pixels, like `scrollX`/`scrollY` of
-   * {@link SessionHistory}), at most once per engine task. `user` is true for a scroll by the
+   * {@link SessionHistory}), at most once per engine task; a wheel or finger move comes at once,
+   * also while the page's script keeps the engine busy. `user` is true for a scroll by the
    * user (wheel, finger and its fling, keys, scrollbar), false for one by the page's script or a
    * restored position. A browser hides its toolbar with it, like Chrome's browser controls.
    */

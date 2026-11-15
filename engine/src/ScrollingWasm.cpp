@@ -2,8 +2,10 @@
 #include "ScrollingWasm.h"
 
 #include "Engine.h"
+#include "Host.h"
 #include "LayerTreeHostWasm.h"
 #include "WebView.h"
+#include <wtf/text/MakeString.h>
 
 #if ENABLE(ASYNC_SCROLLING) && ENABLE(SCROLLING_THREAD)
 #include <atomic>
@@ -21,6 +23,11 @@ namespace BrowserLite {
 using namespace WebCore;
 
 namespace {
+
+void notifyScroll(int viewId, IntPoint position, bool user)
+{
+    notifyHost(viewId, "scroll", makeString("{\"x\":"_s, position.x(), ",\"y\":"_s, position.y(), ",\"user\":"_s, user ? "true"_s : "false"_s, '}'));
+}
 
 // Like Safari for a trackpad gesture (ThreadedScrollingTree::waitForEventToBeProcessedByMainThread):
 // a wheel event over a listener that may cancel it goes to the engine thread, but when that thread
@@ -66,6 +73,9 @@ struct Entry {
     // Until then such wheel events scroll without waiting for the engine thread, which did not
     // take one in time
     MonotonicTime nonBlockingUntil;
+    // The scrolling thread sent the event scroll for wheel or finger since the engine thread's
+    // last one (mainFrameScrolled)
+    bool scrollSent { false };
 };
 
 Lock s_lock;
@@ -101,17 +111,25 @@ void sendToEngine(int viewId, const PlatformWheelEvent& event, OptionSet<WheelEv
 }
 
 // On the scrolling thread: the new position shows with the next tick if no rendering update of the
-// engine thread comes until then (it may be busy with the page's JS)
+// engine thread comes until then (it may be busy with the page's JS). A move of the main frame
+// goes to the host at once (mainFrameScrolled)
 WheelEventHandlingResult scrollInScrollingThread(int viewId, ThreadedScrollingTree& tree, const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> steps)
 {
+    auto before = roundedIntPoint(tree.mainFrameScrollPosition());
     auto result = tree.handleWheelEvent(event, steps);
     if (result.wasHandled) {
         tree.didScheduleRenderingUpdate();
+        auto position = roundedIntPoint(tree.mainFrameScrollPosition());
         {
             Locker locker { s_lock };
             auto it = entries().find(viewId);
-            if (it != entries().end())
+            if (it != entries().end()) {
                 it->value.wheelScrolled = true;
+                if (position != before) {
+                    it->value.scrollSent = true;
+                    notifyScroll(viewId, position, true);
+                }
+            }
         }
         requestTick(viewId);
     }
@@ -305,6 +323,18 @@ bool displayDidRefresh(int viewId)
     return animatedScroll || wheelsPending;
 }
 
+void mainFrameScrolled(int viewId, IntPoint position, const MainFrameScrolls& scrolls)
+{
+    // In the lock the events of both threads reach the host in the order of their positions
+    Locker locker { s_lock };
+    auto it = entries().find(viewId);
+    bool sent = it != entries().end() && std::exchange(it->value.scrollSent, false);
+    // Positions the scrolling thread sent already, or newer ones
+    if (sent && !scrolls.byEngine)
+        return;
+    notifyScroll(viewId, position, scrolls.byEngineForUser || (scrolls.fromScrollingThread && !sent));
+}
+
 bool mayCancelWheelEvent(int viewId, const PlatformWheelEvent& event)
 {
     RefPtr tree = treeForView(viewId);
@@ -334,6 +364,10 @@ void touchScroll(int viewId, const WebCore::PlatformWheelEvent& event)
         if (auto* view = WebView::fromID(viewId))
             view->touchScroll(event);
     });
+}
+void mainFrameScrolled(int viewId, WebCore::IntPoint position, const MainFrameScrolls& scrolls)
+{
+    notifyHost(viewId, "scroll", makeString("{\"x\":"_s, position.x(), ",\"y\":"_s, position.y(), ",\"user\":"_s, scrolls.byEngineForUser ? "true"_s : "false"_s, '}'));
 }
 bool mayCancelWheelEvent(int, const WebCore::PlatformWheelEvent&) { return true; }
 bool displayDidRefresh(int) { return false; }

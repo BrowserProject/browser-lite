@@ -195,7 +195,8 @@ its `index` and pass the distance of the chosen one (`back()` is `go(-1)`, `forw
 an offset outside the history does nothing).
 
 The `scroll` event of a view comes as the page's main frame scrolls (`x`, `y`, at most once per
-engine task) with `user` true for a scroll by the user (wheel, finger and its fling, keys,
+engine task, and at once for a wheel or finger move also while the page's script keeps the
+engine busy) with `user` true for a scroll by the user (wheel, finger and its fling, keys,
 scrollbar) and false for one by the page's script, a restored position or a clamp of a resized
 view. A browser UI hides its toolbar with it while the user scrolls down, like Chrome's browser
 controls (the demo's `bar-hiding.ts`).

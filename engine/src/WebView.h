@@ -4,6 +4,7 @@
 
 #include "ErrorPage.h"
 #include "PinchZoom.h"
+#include "ScrollingWasm.h"
 #include <WebCore/DragActions.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
@@ -294,9 +295,9 @@ private:
     // The last history the host got (event navigation or history)
     String m_sentHistory;
     bool m_historyUpdatePending { false };
-    // Event scroll: one per run loop turn, by the user when any change in it was
+    // Event scroll: one per run loop turn (Scrolling::mainFrameScrolled)
     bool m_scrollEventPending { false };
-    bool m_scrollByUser { false };
+    Scrolling::MainFrameScrolls m_mainFrameScrolls;
 
     int m_id;
     unsigned m_dialogBlocks { 0 };
