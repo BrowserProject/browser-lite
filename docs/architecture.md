@@ -47,9 +47,11 @@ WebKit2: `WebCore::Page` is driven directly (like WebKitLegacy), and what WebKit
 network process (service workers, Cache API, OPFS, downloads) runs on the engine thread
 (`engine/src/`). The service worker server talks to its pages and workers through the RunLoop
 like WebKit2's IPC: every message, also the reply to a request, comes after the ones sent before
-it (#103, #483). Like WebKit2's, the page a service worker or shared worker runs in has no
-sandbox, so its placeholder document, which the worker's loads are checked against, has the
-worker's origin (#484). The workers share the engine's process, so a service worker that does
+it (#103, #483). WebCore calls the Cache API's connection on the thread of the page or worker
+that uses it (WebKit2's only sends messages), so the engine's runs a worker's call on the engine
+thread and settles its promise with a copy for the worker (#567). Like WebKit2's, the page a
+service worker or shared worker runs in has no sandbox, so its placeholder document, which the
+worker's loads are checked against, has the worker's origin (#484). The workers share the engine's process, so a service worker that does
 not stop within WebKit's 10 s (blocked in the host, in WebAssembly or a RegExp, where termination
 cannot reach it) is given up instead of ending the process: its thread is left to run, the server
 counts the worker as ended and can start it again (patch 0111, #512); its events still pending end
@@ -488,7 +490,7 @@ memory and gets the `storage-locked` warning. With `storage.persistent: false`, 
 | Under `/data` | Owner |
 |---|---|
 | `cookies.db`, `localstorage/`, `indexeddb/` | WebCore and `WebKitLegacy/Storage` through the MemoryVFS (#67, #180) |
-| `cachestorage/` | Cache API of the pages (#105, #155) |
+| `cachestorage/` | Cache API of the pages and workers (#105, #155, #567) |
 | `serviceworkers/` | Service worker registrations (#105) |
 | `opfs/<origin>/`, `opfs-swap/` | OPFS of the pages (#95, #166) |
 | `tmp/` (incl. `tmp/uploads/<view>/`) | Atomic replacement and uploads, cleared at start (#142, #181) |

@@ -217,6 +217,12 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   carried out, like Chrome on a crashed tab, #565: before, they did nothing until Restart), a service worker that does not stop (blocked in WebAssembly or the host's
   RegExp) is given up and no longer freezes the whole engine with every tab after 1 to 10 s
   (#512; seen after vscode.dev), its next event starts it again and a new version activates,
+  the Cache API of service and other workers runs on the engine thread (#567: before, a worker
+  changed the entries from its own thread while the engine thread wrote them, so after minutes of
+  tabs with a busy service worker like nytimes.com's, which caches about 1000 responses, the
+  engine aborted out of memory while it encoded freed memory and every tab was lost, in 2 of 37
+  runs of 13 heavy sites in tabs; 4 workers and a page that put, list and delete entries of one
+  cache at the same time hung or aborted it within seconds),
   hidden background views (#170), memory pressure near the memory limit found at
   runtime, also in 32 bit browsers with about 1 GB (#171, #216), from 512 MB on iPhone and
   iPad (#358; `moderate` there, `critical` only while the malloc area stays full, #497), error

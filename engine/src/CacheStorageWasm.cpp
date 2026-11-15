@@ -2,8 +2,9 @@
 //
 // In WebKit2 the implementation lives in the network process
 // (CacheStorageManager). Here a small one of our own in the engine, shared by
-// all views, separated by origin. Persistent under /data/cachestorage (like
-// everything under /data in the host's OPFS): per origin one file with the
+// all views and workers, separated by origin, used only on the engine thread
+// (see onEngineThread). Persistent under /data/cachestorage (like everything
+// under /data in the host's OPFS): per origin one file with the
 // entries without bodies, read on the first access and replaced as a whole,
 // batched, after changes, and one file per body in the folder "<file>.bodies".
 // cache.put writes the bodies right away, they do not stay in memory, match
@@ -40,9 +41,11 @@ template<> struct CrossThreadCopierBase<false, false, WebCore::DOMCacheEngine::C
 #include <WebCore/RetrieveRecordsOptions.h>
 #include <WebCore/SharedBuffer.h>
 #include <WebCore/WebCorePersistentCoders.h>
+#include <wtf/CrossThreadCopier.h>
 #include <wtf/FileSystem.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/MainThread.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
 #include <wtf/UUID.h>
@@ -174,6 +177,66 @@ public:
     }
 
 private:
+    // WebCore calls the connection on the thread of the page or worker that uses the Cache API
+    // (WebKit2's connection only sends messages to the network process). The caches of all
+    // origins live here, and only the engine thread touches them: the call of a worker runs there
+    // with copies of its arguments, and its promise settles with a copy of the result for the
+    // worker's thread (NativePromise copies when it settles, #567).
+    template<typename Promise, typename Operation>
+    static Ref<Promise> onEngineThread(Operation&& operation)
+    {
+        if (isMainThread())
+            return operation();
+        typename Promise::Producer producer;
+        Ref promise = producer.promise();
+        callOnMainThread([operation = std::forward<Operation>(operation), producer = WTF::move(producer)]() mutable {
+            operation()->chainTo(WTF::move(producer));
+        });
+        return promise;
+    }
+
+    Ref<OpenPromise> open(const ClientOrigin& origin, const String& name) final
+    {
+        return onEngineThread<OpenPromise>([this, origin = crossThreadCopy(origin), name = crossThreadCopy(name)] {
+            return openCache(origin, name);
+        });
+    }
+
+    Ref<RemovePromise> remove(DOMCacheIdentifier identifier) final
+    {
+        return onEngineThread<RemovePromise>([this, identifier] {
+            return removeCache(identifier);
+        });
+    }
+
+    Ref<RetrieveCachesPromise> retrieveCaches(const ClientOrigin& origin, uint64_t) final
+    {
+        return onEngineThread<RetrieveCachesPromise>([this, origin = crossThreadCopy(origin)] {
+            return cacheList(origin);
+        });
+    }
+
+    Ref<RetrieveRecordsPromise> retrieveRecords(DOMCacheIdentifier identifier, RetrieveRecordsOptions&& options) final
+    {
+        return onEngineThread<RetrieveRecordsPromise>([this, identifier, options = crossThreadCopy(WTF::move(options))] {
+            return matchingRecords(identifier, options);
+        });
+    }
+
+    Ref<BatchPromise> batchDeleteOperation(DOMCacheIdentifier identifier, const ResourceRequest& request, CacheQueryOptions&& options) final
+    {
+        return onEngineThread<BatchPromise>([this, identifier, request = crossThreadCopy(request), options] {
+            return deleteRecords(identifier, request, options);
+        });
+    }
+
+    Ref<BatchPromise> batchPutOperation(DOMCacheIdentifier identifier, Vector<CrossThreadRecord>&& records) final
+    {
+        return onEngineThread<BatchPromise>([this, identifier, records = crossThreadCopy(WTF::move(records))]() mutable {
+            return putRecords(identifier, WTF::move(records));
+        });
+    }
+
     struct Cache {
         String name;
         ClientOrigin origin;
@@ -358,7 +421,7 @@ private:
         return m_originSizes.add(origin, 0).iterator->value;
     }
 
-    Ref<OpenPromise> open(const ClientOrigin& origin, const String& name) final
+    Ref<OpenPromise> openCache(const ClientOrigin& origin, const String& name)
     {
         ensureLoaded(origin);
         for (auto& [identifier, cache] : m_caches) {
@@ -373,7 +436,7 @@ private:
         return OpenPromise::createAndResolve(CacheIdentifierOperationResult { identifier, false });
     }
 
-    Ref<RemovePromise> remove(DOMCacheIdentifier identifier) final
+    Ref<RemovePromise> removeCache(DOMCacheIdentifier identifier)
     {
         auto it = m_caches.find(identifier);
         bool removed = it != m_caches.end();
@@ -389,7 +452,7 @@ private:
         return RemovePromise::createAndResolve(removed);
     }
 
-    Ref<RetrieveCachesPromise> retrieveCaches(const ClientOrigin& origin, uint64_t) final
+    Ref<RetrieveCachesPromise> cacheList(const ClientOrigin& origin)
     {
         ensureLoaded(origin);
         CacheInfos result { { }, m_updateCounter };
@@ -401,7 +464,7 @@ private:
         return RetrieveCachesPromise::createAndResolve(WTF::move(result));
     }
 
-    Ref<RetrieveRecordsPromise> retrieveRecords(DOMCacheIdentifier identifier, RetrieveRecordsOptions&& options) final
+    Ref<RetrieveRecordsPromise> matchingRecords(DOMCacheIdentifier identifier, const RetrieveRecordsOptions& options)
     {
         auto it = m_caches.find(identifier);
         if (it == m_caches.end())
@@ -427,7 +490,7 @@ private:
         return RetrieveRecordsPromise::createAndResolve(WTF::move(result));
     }
 
-    Ref<BatchPromise> batchDeleteOperation(DOMCacheIdentifier identifier, const ResourceRequest& request, CacheQueryOptions&& options) final
+    Ref<BatchPromise> deleteRecords(DOMCacheIdentifier identifier, const ResourceRequest& request, const CacheQueryOptions& options)
     {
         auto it = m_caches.find(identifier);
         if (it == m_caches.end())
@@ -446,7 +509,7 @@ private:
         return BatchPromise::createAndResolve(WTF::move(removed));
     }
 
-    Ref<BatchPromise> batchPutOperation(DOMCacheIdentifier identifier, Vector<CrossThreadRecord>&& records) final
+    Ref<BatchPromise> putRecords(DOMCacheIdentifier identifier, Vector<CrossThreadRecord>&& records)
     {
         auto it = m_caches.find(identifier);
         if (it == m_caches.end())

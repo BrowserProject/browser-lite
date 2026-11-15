@@ -109,7 +109,7 @@ half of Chrome's room) comes as patches from `patches/`.
   - Storage: `Storage.cpp`, `MemoryVFS.cpp` (SQLite in memory, written by its storage thread),
     `CookieJarWasm.cpp` (Cookie Store API), `CryptoKeys.cpp` (CryptoKeys in `structuredClone`,
     `postMessage` and IndexedDB of pages and workers),
-    `CacheStorageWasm.cpp`,
+    `CacheStorageWasm.cpp` (Cache API of pages and workers, only on the engine thread),
     `FileSystemStorageWasm.cpp` (OPFS of the pages), `FileAccessCache.cpp`, `LazyFiles.cpp`
     (files of `lazy/` mounted read only at `/lazy`, fetched on first read), `FontPrefetch.cpp`
     (the fonts and dictionaries the rendered text outside Latin-1 needs, fetched side by side), `FontArrival.cpp`
