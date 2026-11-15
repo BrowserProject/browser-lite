@@ -866,6 +866,13 @@ bool WebView::renderCompositedFrame(IntRect*)
         m_page->updateRendering();
         m_page->finalizeRenderingUpdate({ FinalizeRenderingUpdateFlags::ApplyScrollingTreeLayerPositions });
     }
+    // The compositor keeps showing the page left; the layers keep their state until the flush
+    // after the hold
+    if (m_paintHeld) {
+        m_page->didUpdateRendering();
+        didComposite();
+        return false;
+    }
     bool firstPaint = m_firstPaint == FirstPaint::WaitingForUpdate;
     if (firstPaint)
         debugLog("View %d: first paint goes to the compositor", m_id);
@@ -942,6 +949,9 @@ bool WebView::renderFrame(IntRect* dirtyOut)
         return false;
     view->updateLayoutAndStyleIfNeededRecursive();
     auto layoutDone = MonotonicTime::now();
+    // The buffer keeps the page left, the damage waits for the end of the hold
+    if (m_paintHeld)
+        return false;
 
     // On the GPU Skia creates textures (images) already while painting: the
     // own GL context has to be current the whole time
@@ -2218,6 +2228,37 @@ void WebView::didCommitLoad()
     notifyDocumentState();
 }
 
+// Chrome's limit for a new page that has not painted yet (new_content_rendering_timeout): after it
+// the view shows the new page as it is
+static constexpr Seconds paintHoldingLimit = 4_s;
+
+void WebView::holdPaintForNewPage()
+{
+    debugLog("View %d: holds the page left until the new one paints", m_id);
+    m_paintHeld = true;
+    RunLoop::mainSingleton().dispatchAfter(paintHoldingLimit, [id = m_id, hold = ++m_paintHolds] {
+        if (auto* view = fromID(id); view && view->m_paintHolds == hold)
+            view->endPaintHolding("limit");
+    });
+}
+
+void WebView::endPaintHolding(const char* reason)
+{
+    if (!std::exchange(m_paintHeld, false))
+        return;
+    debugLog("View %d: shows the new page (%s)", m_id, reason);
+    addDamage(IntRect { { }, m_size });
+    if (!m_inRenderingUpdate)
+        scheduleRenderingUpdate();
+}
+
+void WebView::willRestoreFromCache()
+{
+    m_restoringFromCache = true;
+    // The cached page is laid out and paints right away
+    endPaintHolding("back/forward cache");
+}
+
 void WebView::didRestoreFromCache()
 {
     notifyDocumentState();
@@ -2241,6 +2282,7 @@ void WebView::didNavigateWithinPage()
 
 void WebView::didStopLoading()
 {
+    endPaintHolding("load stopped");
     debugLog("View %d: loading cancelled", m_id);
     m_isLoading = false;
     didChangeProgress(1);
@@ -2249,6 +2291,7 @@ void WebView::didStopLoading()
 
 void WebView::didFinishLoading()
 {
+    endPaintHolding("loaded");
     debugLog("View %d: finished loading", m_id);
     m_isLoading = false;
     didChangeProgress(1);
@@ -2263,6 +2306,7 @@ void WebView::didReachLayoutMilestone(OptionSet<LayoutMilestone> milestones)
         return;
     debugLog("View %d: first visible layout%s", m_id, m_inRenderingUpdate ? " (in a rendering update)" : "");
     notifyHost(m_id, "first-layout");
+    endPaintHolding("visually non-empty");
     if (m_firstPaint != FirstPaint::WaitingForLayout)
         return;
     m_firstPaint = FirstPaint::WaitingForUpdate;
@@ -2376,6 +2420,7 @@ void WebView::updateFavicon(bool pageLoaded)
 
 void WebView::didFailLoading(const String& url, const String& description)
 {
+    endPaintHolding("load failed");
     m_isLoading = false;
     didChangeProgress(1);
     notifyNavigationState();

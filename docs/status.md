@@ -114,7 +114,7 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Up, Down, Enter and Escape in the field (#403).
 - **Rendering**: GPU raster with Skia on WebGL 2, compositing and async scrolling on own threads
   (smooth scrolls a page starts, such as `scrollTo` with `behavior: 'smooth'`, run without input, #366),
-  no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454; on iPhone Safari 18 emptied tiles kept showing stale pieces of earlier frames and pages until #463), animations of only opacity and transform (pulsing placeholders and dots) run by the host browser itself without engine frames (#478, #518), the first paint right after the first visible layout, before
+  no frame without a visible change (damage tracking, #220), a small change such as a spinner shown only in the damage tiles it touches (#454; on iPhone Safari 18 emptied tiles kept showing stale pieces of earlier frames and pages until #463), animations of only opacity and transform (pulsing placeholders and dots) run by the host browser itself without engine frames (#478, #518), the page left kept in view from the commit of the next page until that one paints (paint holding like Chrome and Safari, at most 4 s, #568; before, every navigation showed a white view until the new page's first paint, seconds on GitHub or behind a slow stylesheet), the first paint right after the first visible layout, before
   waiting scripts (#246), frames between the tasks of a busy page (#359: 40 tasks of 100 ms got
   33 to 36 frames instead of 7 or 8), GPU blur and shadow, CSS Paint
   Worklet, WebGL 1 and 2 with the host's GPU named to pages (#496: on a host with SwiftShader Google

@@ -237,8 +237,13 @@ public:
     // The kind of the next error page (ErrorPage.cpp)
     void willCommitErrorPage(ErrorPage::Kind kind) { m_errorPageKind = kind; }
     void didCommitLoad();
+    // Paint holding like Chrome and WebKit2 (WebPage::didStartPageTransition): from the commit of
+    // a new page the view keeps showing the page left, until the new one is visually non-empty,
+    // its load ends or paintHoldingLimit passed. Rendering updates go on, only nothing new is
+    // shown
+    void holdPaintForNewPage();
     // Back/forward cache: the commit of a cached page, then the page back in the frame
-    void willRestoreFromCache() { m_restoringFromCache = true; }
+    void willRestoreFromCache();
     void didRestoreFromCache();
     // Anchor, pushState/replaceState, popstate: new address without a new document
     void didNavigateWithinPage();
@@ -352,6 +357,10 @@ private:
     // compositor thread reports it with the frame that shows it
     enum class FirstPaint : uint8_t { None, WaitingForLayout, WaitingForUpdate };
     FirstPaint m_firstPaint { FirstPaint::None };
+    // holdPaintForNewPage: the hold that runs, counted so the limit only ends its own
+    bool m_paintHeld { false };
+    unsigned m_paintHolds { 0 };
+    void endPaintHolding(const char* reason);
     String m_hoveredLink;
     bool m_pointerIsTouch { false };
     // In Page::updateRendering (for the debug log of the first layout)

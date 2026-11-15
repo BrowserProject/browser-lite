@@ -915,8 +915,12 @@ void FrameLoaderClient::transitionToCommittedForNewPage(InitializingIframe)
     frame->createView(size, std::nullopt, { }, false);
     if (RefPtr view = frame->view())
         view->setCanHaveScrollbars(true);
-    if (frame->isMainFrame())
+    if (frame->isMainFrame()) {
         m_view->addDamage(IntRect { { }, m_view->size() });
+        // Nothing to keep after the initial empty document
+        if (!frame->loader().stateMachine().isDisplayingInitialEmptyDocument())
+            m_view->holdPaintForNewPage();
+    }
 }
 
 void FrameLoaderClient::transitionToCommittedFromCachedFrame(CachedFrame*)
