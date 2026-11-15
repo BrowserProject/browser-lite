@@ -337,6 +337,11 @@ A click focuses the button, checkbox, radio button or link under it, like Chrome
 WebKitGTK, not like Safari on macOS, which leaves them unfocused: Space toggles a checkbox just
 clicked and the page gets focus and blur (patch 0093, #450). Tab also reaches `<input type=color>`
 like any other button-like control, as in Chrome and Firefox (patch 0130, #535).
+Digits typed into a part of a date or time field move on to the next part once the part is full
+or no further digit fits (a month of 03 or 4, an hour of 9 on a 12 hour clock), like Chrome, so
+03152025 types a whole date; the year takes up to 6 digits like Chrome's and moves on only at a
+separator or an arrow key (patch 0143, #570). An empty part shows `mm`, `dd`, `yyyy` or dashes in
+grey like Chrome and Firefox, not a part of the current date or time (patch 0144, #571).
 On a mobile device (`device.mobile`) the overlay scrollbars of the page and of scrolling boxes
 only show the position, like in mobile Chrome and Safari: they take no hit tests, so taps,
 touches and `elementFromPoint` reach the content under their 21 px. On a desktop, also one with

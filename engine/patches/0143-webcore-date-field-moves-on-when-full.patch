@@ -1,0 +1,69 @@
+diff --git a/Source/WebCore/html/shadow/DateTimeFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
+index 8a9c1a86ed..db16eabaab 100644
+--- a/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeFieldElement.cpp
+@@ -117,7 +117,7 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent& keyboardEv
+     }
+ 
+     if ((key == nextKeyIdentifier || code == "Comma"_s || code == "Minus"_s || code == "Period"_s || code == "Slash"_s || code == "Semicolon"_s)
+-        && m_fieldOwner && m_fieldOwner->focusOnNextField(*this)) {
++        && focusOnNextField()) {
+         keyboardEvent.setDefaultHandled();
+         return;
+     }
+@@ -145,6 +145,11 @@ void DateTimeFieldElement::defaultKeyboardEventHandler(KeyboardEvent& keyboardEv
+     }
+ }
+ 
++bool DateTimeFieldElement::focusOnNextField()
++{
++    return m_fieldOwner && m_fieldOwner->focusOnNextField(*this);
++}
++
+ bool DateTimeFieldElement::isFieldOwnerDisabled() const
+ {
+     return m_fieldOwner && m_fieldOwner->isFieldOwnerDisabled();
+diff --git a/Source/WebCore/html/shadow/DateTimeFieldElement.h b/Source/WebCore/html/shadow/DateTimeFieldElement.h
+index 71382d05e4..8667d0d843 100644
+--- a/Source/WebCore/html/shadow/DateTimeFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeFieldElement.h
+@@ -100,6 +100,7 @@ protected:
+     virtual int placeholderValueAsInteger() const = 0;
+     virtual void handleKeyboardEvent(KeyboardEvent&) = 0;
+     virtual void handleBlurEvent(Event&);
++    bool focusOnNextField();
+ 
+ private:
+     std::optional<Style::UnadjustedStyle> resolveCustomStyle(const Style::ResolutionContext&, const Style::ComputedStyle*) final;
+diff --git a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+index 1eca39c58b..4a7ec0cd97 100644
+--- a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+@@ -178,18 +178,20 @@ void DateTimeNumericFieldElement::handleKeyboardEvent(KeyboardEvent& keyboardEve
+     Seconds timeSinceLastDigitChar = keyboardEvent.timeStamp() - m_lastDigitCharTime;
+     m_lastDigitCharTime = keyboardEvent.timeStamp();
+ 
+-    if (timeSinceLastDigitChar > typeAheadTimeout) {
++    unsigned maxLength = formatValue(m_range.maximum).length();
++    if (timeSinceLastDigitChar > typeAheadTimeout || m_typeAheadBuffer.length() >= maxLength)
+         m_typeAheadBuffer.clear();
+-    } else if (auto length = m_typeAheadBuffer.length()) {
+-        unsigned maxLength = formatValue(m_range.maximum).length();
+-        if (length == maxLength)
+-            m_typeAheadBuffer.clear();
+-    }
+ 
+     m_typeAheadBuffer.append(number);
+-    setValueAsInteger(parseIntegerAllowingTrailingJunk<int>(m_typeAheadBuffer).value_or(0), DispatchInputAndChangeEvents);
++    int value = parseIntegerAllowingTrailingJunk<int>(m_typeAheadBuffer).value_or(0);
++    setValueAsInteger(value, DispatchInputAndChangeEvents);
+ 
+     keyboardEvent.setDefaultHandled();
++
++    // browser-lite: like Chrome and Firefox, a part that is full, or that no further digit
++    // could keep in range, passes the focus to the next part, so 03152025 types a whole date.
++    if (m_typeAheadBuffer.length() >= maxLength || value * 10 > m_range.maximum)
++        focusOnNextField();
+ }
+ 
+ void DateTimeNumericFieldElement::handleBlurEvent(Event& event)

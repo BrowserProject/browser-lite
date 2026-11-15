@@ -40,7 +40,9 @@ button, which dropped the focus of the page when playback moved it into the bar,
 intersection observers, which computed every target again in every frame, also when nothing had
 moved, or the muted videos with an audio track that hidden pages kept playing, so the host decoded
 them for nobody, or the quota of localStorage, which counted bytes, so text outside Latin-1 had
-half of Chrome's room) comes as patches from `patches/`.
+half of Chrome's room, or the parts of a date or time field, which kept taking digits instead of
+moving on to the next part once full and showed today's date in grey when empty) comes as patches
+from `patches/`.
 
 ## Folders
 

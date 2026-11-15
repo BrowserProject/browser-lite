@@ -1,0 +1,177 @@
+diff --git a/Source/WebCore/html/shadow/DateTimeFieldElements.cpp b/Source/WebCore/html/shadow/DateTimeFieldElements.cpp
+index 83550cb59f..b6a4ea8611 100644
+--- a/Source/WebCore/html/shadow/DateTimeFieldElements.cpp
++++ b/Source/WebCore/html/shadow/DateTimeFieldElements.cpp
+@@ -40,7 +40,7 @@ namespace WebCore {
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(DateTimeDayFieldElement);
+ 
+ DateTimeDayFieldElement::DateTimeDayFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner)
+-    : DateTimeNumericFieldElement(document, fieldOwner, Range(1, 31), fieldOwner.placeholderDate().monthDay())
++    : DateTimeNumericFieldElement(document, fieldOwner, Range(1, 31), fieldOwner.placeholderDate().monthDay(), dateFieldDayPlaceholderText())
+ {
+ }
+ 
+@@ -246,7 +246,7 @@ void DateTimeMinuteFieldElement::setValueAsDate(const DateComponents& date)
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(DateTimeMonthFieldElement);
+ 
+ DateTimeMonthFieldElement::DateTimeMonthFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner)
+-    : DateTimeNumericFieldElement(document, fieldOwner, Range(1, 12), fieldOwner.placeholderDate().month() + 1)
++    : DateTimeNumericFieldElement(document, fieldOwner, Range(1, 12), fieldOwner.placeholderDate().month() + 1, dateFieldMonthPlaceholderText())
+ {
+ }
+ 
+@@ -337,7 +337,7 @@ void DateTimeSymbolicMonthFieldElement::setValueAsDate(const DateComponents& dat
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(DateTimeYearFieldElement);
+ 
+ DateTimeYearFieldElement::DateTimeYearFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner)
+-    : DateTimeNumericFieldElement(document, fieldOwner, Range(DateComponents::minimumYear(), DateComponents::maximumYear()), fieldOwner.placeholderDate().year())
++    : DateTimeNumericFieldElement(document, fieldOwner, Range(DateComponents::minimumYear(), DateComponents::maximumYear()), fieldOwner.placeholderDate().year(), dateFieldYearPlaceholderText())
+ {
+ }
+ 
+diff --git a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+index 4a7ec0cd97..e967b34aa1 100644
+--- a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.cpp
+@@ -55,10 +55,12 @@ bool DateTimeNumericFieldElement::Range::isInRange(int value) const
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(DateTimeNumericFieldElement);
+ 
+-DateTimeNumericFieldElement::DateTimeNumericFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner, const Range& range, int placeholder)
++// browser-lite: an empty part shows its placeholder text, or dashes as wide as its digits, like
++// Chrome and Firefox (WebKit showed the placeholder value, a part of the current date or time).
++DateTimeNumericFieldElement::DateTimeNumericFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner, const Range& range, int placeholder, const String& placeholderText)
+     : DateTimeFieldElement(document, fieldOwner)
+     , m_range(range)
+-    , m_placeholder(formatValue(placeholder))
++    , m_placeholder(placeholderText.isNull() ? makeString(pad('-', formatValue(placeholder).length(), emptyString())) : placeholderText)
+     , m_placeholderValue(placeholder)
+ {
+ }
+@@ -81,6 +83,8 @@ void DateTimeNumericFieldElement::adjustMinInlineSize(Style::ComputedStyle& styl
+         auto textRun = RenderBlock::constructTextRun(numberString, style);
+         inlineSize = std::max(inlineSize, font->width(protect(textRun)));
+     }
++    auto placeholderRun = RenderBlock::constructTextRun(m_placeholder, style);
++    inlineSize = std::max(inlineSize, font->width(protect(placeholderRun)));
+ 
+     style.setLogicalMinWidth(Style::MinimumSize::Fixed { inlineSize / style.usedZoomForLength().value });
+ }
+diff --git a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
+index 22b6b4340e..bbb07d98b3 100644
+--- a/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeNumericFieldElement.h
+@@ -46,7 +46,7 @@ public:
+     };
+ 
+ protected:
+-    DateTimeNumericFieldElement(Document&, DateTimeFieldElementFieldOwner&, const Range&, int placeholder);
++    DateTimeNumericFieldElement(Document&, DateTimeFieldElementFieldOwner&, const Range&, int placeholder, const String& placeholderText = { });
+ 
+     int NODELETE maximum() const;
+ 
+diff --git a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
+index 4197cab501..4962995c17 100644
+--- a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
++++ b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.cpp
+@@ -34,6 +34,7 @@
+ #include "StyleComputedStyle+GettersInlines.h"
+ #include "StyleComputedStyle+SettersInlines.h"
+ #include <wtf/TZoneMallocInlines.h>
++#include <wtf/text/MakeString.h>
+ #include <wtf/text/StringBuilder.h>
+ #include <wtf/text/TextBreakIterator.h>
+ 
+@@ -41,9 +42,20 @@ namespace WebCore {
+ 
+ WTF_MAKE_TZONE_ALLOCATED_IMPL(DateTimeSymbolicFieldElement);
+ 
++// browser-lite: an empty part shows dashes as long as its longest symbol, like Chrome ("--" for
++// AM and PM), instead of the placeholder symbol, which looks like a value.
++static String emptyFieldText(const Vector<String>& symbols)
++{
++    unsigned length = 0;
++    for (auto& symbol : symbols)
++        length = std::max(length, numGraphemeClusters(symbol));
++    return makeString(pad('-', length, emptyString()));
++}
++
+ DateTimeSymbolicFieldElement::DateTimeSymbolicFieldElement(Document& document, DateTimeFieldElementFieldOwner& fieldOwner, const Vector<String>& symbols, int placeholderIndex)
+     : DateTimeFieldElement(document, fieldOwner)
+     , m_symbols(symbols)
++    , m_placeholder(emptyFieldText(symbols))
+     , m_placeholderIndex(placeholderIndex)
+     , m_typeAhead(this)
+ {
+@@ -59,6 +71,8 @@ void DateTimeSymbolicFieldElement::adjustMinInlineSize(Style::ComputedStyle& sty
+         auto textRun = RenderBlock::constructTextRun(symbol, style);
+         inlineSize = std::max(inlineSize, font->width(protect(textRun)));
+     }
++    auto placeholderRun = RenderBlock::constructTextRun(m_placeholder, style);
++    inlineSize = std::max(inlineSize, font->width(protect(placeholderRun)));
+     style.setLogicalMinWidth(Style::MinimumSize::Fixed { inlineSize / style.usedZoomForLength().value });
+ }
+ 
+@@ -104,7 +118,7 @@ ValueOrReference<String> DateTimeSymbolicFieldElement::value() const
+ 
+ String DateTimeSymbolicFieldElement::placeholderValue() const
+ {
+-    return m_symbols[m_placeholderIndex];
++    return m_placeholder;
+ }
+ 
+ void DateTimeSymbolicFieldElement::handleKeyboardEvent(KeyboardEvent& keyboardEvent)
+diff --git a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
+index fa367211ec..c891edab08 100644
+--- a/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
++++ b/Source/WebCore/html/shadow/DateTimeSymbolicFieldElement.h
+@@ -59,6 +59,7 @@ private:
+     String optionAtIndex(int index) const final;
+ 
+     const Vector<String> m_symbols;
++    const String m_placeholder;
+     int m_selectedIndex { invalidIndex };
+     int m_placeholderIndex { invalidIndex };
+ 
+diff --git a/Source/WebCore/platform/LocalizedStrings.cpp b/Source/WebCore/platform/LocalizedStrings.cpp
+index c7460e96c2..cb07d12fb7 100644
+--- a/Source/WebCore/platform/LocalizedStrings.cpp
++++ b/Source/WebCore/platform/LocalizedStrings.cpp
+@@ -793,6 +793,23 @@ String AXTimeFieldMillisecondText()
+     return WEB_UI_STRING("milliseconds", "accessibility label for milliseconds fields.");
+ }
+ 
++// browser-lite: an empty part of a date field shows these, like Chrome and Firefox, instead of
++// a part of today's date in grey, which looks like a value.
++String dateFieldMonthPlaceholderText()
++{
++    return WEB_UI_STRING("mm", "placeholder for the empty month part of a date field.");
++}
++
++String dateFieldDayPlaceholderText()
++{
++    return WEB_UI_STRING("dd", "placeholder for the empty day part of a date field.");
++}
++
++String dateFieldYearPlaceholderText()
++{
++    return WEB_UI_STRING("yyyy", "placeholder for the empty year part of a date field.");
++}
++
+ String AXDateTimeFieldText()
+ {
+     return WEB_UI_STRING("date and time field", "accessibility role description for a date and time field.");
+diff --git a/Source/WebCore/platform/LocalizedStrings.h b/Source/WebCore/platform/LocalizedStrings.h
+index 42c1841200..890bd6e9a1 100644
+--- a/Source/WebCore/platform/LocalizedStrings.h
++++ b/Source/WebCore/platform/LocalizedStrings.h
+@@ -257,6 +257,9 @@ namespace WebCore {
+     String AXTimeFieldMinuteText();
+     String AXTimeFieldSecondText();
+     String AXTimeFieldMillisecondText();
++    String dateFieldMonthPlaceholderText();
++    String dateFieldDayPlaceholderText();
++    String dateFieldYearPlaceholderText();
+     String AXDateTimeFieldText();
+     String AXMonthFieldText();
+     String AXNumberFieldText();

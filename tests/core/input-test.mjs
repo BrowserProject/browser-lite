@@ -4,6 +4,7 @@
 // without redirect, sendBeacon (preflight, CORS and CSP on redirects), favicon behind a redirect,
 // dialogs with the origin, context menu requests, <select>, color and date through the request
 // handlers, hover and tooltip, find, zoom, keyboard scrolling, Tab to links and color inputs,
+// digits typed into date and time fields and the look of their empty parts,
 // focus on click, <object>/<embed>, file upload through the native file dialog of the host and
 // fullscreen. The test page reports results with console.log ("RESULT name=value"), the host page
 // forwards the console of the view.
@@ -49,6 +50,12 @@ const PAGE = `<!doctype html>
   #hoverlink { position: absolute; left: 20px; top: 345px; }
   #color { position: absolute; left: 20px; top: 380px; width: 60px; height: 30px; }
   #date { position: absolute; left: 20px; top: 430px; width: 160px; height: 26px; }
+  #tdate { position: absolute; left: 20px; top: 470px; }
+  #ttime { position: absolute; left: 20px; top: 510px; }
+  .ph { position: absolute; top: 560px; width: 170px; height: 26px; font: 16px sans-serif; }
+  #phtime, #phnoon { top: 600px; }
+  #phdate, #phtime { left: 20px; }
+  #phtoday, #phnoon { left: 220px; }
   #blob { position: absolute; left: 600px; top: 20px; width: 120px; height: 30px; }
   #data { position: absolute; left: 600px; top: 70px; }
   #missing { position: absolute; left: 600px; top: 110px; }
@@ -74,6 +81,10 @@ const PAGE = `<!doctype html>
 <a id="hoverlink" href="/target" title="A tip">Hover here</a>
 <input id="color" type="color" value="#112233">
 <input id="date" type="date" value="2026-10-12">
+<input id="tdate" type="date">
+<input id="ttime" type="time">
+<input id="phdate" class="ph" type="date"><input id="phtoday" class="ph" type="date">
+<input id="phtime" class="ph" type="time"><input id="phnoon" class="ph" type="time" value="12:30">
 <div id="own-menu" style="position:absolute;left:400px;top:20px;width:150px;height:60px;background:#ddd">own menu</div>
 <button id="blob">Save blob</button>
 <a id="data" download="data.csv" href="data:text/csv,a%2Cb%0A1%2C2%0A">data:</a>
@@ -193,6 +204,10 @@ const PAGE = `<!doctype html>
     console.log('RESULT hoverleave=' + (e.relatedTarget === null) + ',' + hoverlink.matches(':hover')));
   const color = document.getElementById('color');
   color.addEventListener('change', () => console.log('RESULT color=' + color.value));
+  const today = new Date();
+  document.getElementById('phtoday').value = [today.getFullYear(), today.getMonth() + 1, today.getDate()]
+    .map((part, i) => String(part).padStart(i ? 2 : 4, '0'))
+    .join('-');
   const date = document.getElementById('date');
   date.addEventListener('change', () => console.log('RESULT date=' + date.value));
   window.addEventListener('resize', () => console.log('RESULT width=' + window.innerWidth));
@@ -943,6 +958,57 @@ for (let i = 1; i <= 2; i++) {
 const colorTabOrder = [await result('colortab1'), await result('colortab2')].join();
 check('Tab focuses the color input', colorTabOrder === 'color,date', colorTabOrder);
 await evalPage(page, 'document.activeElement?.blur()');
+
+// 6c2) Digits typed into a date or time field move on to the next part once a part is full or no
+// further digit fits, like Chrome and Firefox (patch 0143): 03 is March, 4 alone April, 9 the hour
+for (const [id, keys, expected] of [
+  ['tdate', '03152025', '2025-03-15'],
+  ['ttime', '945p', '21:45'],
+  ['tdate', '4072026', '2026-04-07'],
+]) {
+  await evalPage(
+    page,
+    `document.getElementById("${id}").value = ""; document.getElementById("${id}").focus()`,
+  );
+  await page.waitForTimeout(300);
+  await page.keyboard.type(keys, { delay: 60 });
+  await page.waitForTimeout(300);
+  await evalPage(
+    page,
+    `console.log("RESULT typed${keys}=" + document.getElementById("${id}").value)`,
+  );
+  const typed = await result(`typed${keys}`);
+  check(`${keys} typed into the ${id.slice(1)} field`, typed === expected, typed);
+}
+await evalPage(page, 'document.activeElement?.blur()');
+
+// 6c3) An empty date or time field shows mm/dd/yyyy and --:-- -- like Chrome and Firefox, not
+// today's date and 12:30 PM in grey, which look like values (patch 0144): the text of the empty
+// field (dark pixels inside its border) differs from that of a field set to those values
+const ink = async (left, top) => {
+  const mask = [];
+  for (let y = top + 5; y < top + 24; y++)
+    for (const [r, g, b] of (await host((y) => window.blTest.pageRow(y), y)).slice(
+      left + 5,
+      left + 165,
+    ))
+      mask.push(Math.min(r, g, b) < 200);
+  return mask;
+};
+for (const [name, top] of [
+  ['date', 560],
+  ['time', 600],
+]) {
+  const empty = await ink(20, top);
+  const filled = await ink(220, top);
+  const differ = empty.filter((dark, i) => dark !== filled[i]).length;
+  const dark = empty.filter((dark, i) => dark || filled[i]).length;
+  check(
+    `an empty ${name} field shows no value`,
+    dark > 50 && differ / dark > 0.5,
+    `${differ} of ${dark} dark pixels differ`,
+  );
+}
 
 // 6d) A click focuses checkboxes, buttons and links like in Chrome and Firefox on Linux, without
 // :focus-visible (Safari on macOS focuses none of them, patch 0093): Space then toggles the
