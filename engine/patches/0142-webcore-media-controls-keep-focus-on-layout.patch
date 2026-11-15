@@ -1,0 +1,78 @@
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/button.css b/Source/WebCore/Modules/modern-media-controls/controls/button.css
+index 52a653f3bb..73bdff5ede 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/button.css
++++ b/Source/WebCore/Modules/modern-media-controls/controls/button.css
+@@ -54,7 +54,9 @@ button:focus {
+     outline: none;
+ }
+ 
+-button:focus > picture {
++/* browser-lite: like Chrome, a control shows its focus only when the keyboard focused it: buttons
++   take the focus of a click here, unlike on macOS. */
++button:focus-visible > picture {
+     background-color: -webkit-focus-ring-color !important;
+     mix-blend-mode: normal !important;
+ }
+diff --git a/Source/WebCore/Modules/modern-media-controls/controls/layout-node.js b/Source/WebCore/Modules/modern-media-controls/controls/layout-node.js
+index bf75d9a140..e51082c682 100644
+--- a/Source/WebCore/Modules/modern-media-controls/controls/layout-node.js
++++ b/Source/WebCore/Modules/modern-media-controls/controls/layout-node.js
+@@ -333,7 +333,10 @@ class LayoutNode
+             let childElement = child.element;
+ 
+             if (child._pendingDOMManipulation === LayoutNode.DOMManipulation.Addition) {
+-                element.insertBefore(childElement, nextChildElement);
++                // browser-lite: a child that is in its place already stays in the tree, so it
++                // keeps its focus (a layout sets the children of a container again).
++                if (childElement.parentNode !== element || childElement.nextSibling !== nextChildElement)
++                    element.insertBefore(childElement, nextChildElement);
+                 child._pendingDOMManipulation = LayoutNode.DOMManipulation.None;
+             }
+ 
+@@ -353,6 +356,7 @@ function performScheduledLayout()
+ {
+     const previousDirtyNodes = Array.from(dirtyNodes);
+     dirtyNodes.clear();
++    const focusedElements = focusedElementsOfShadowRoots(previousDirtyNodes);
+     previousDirtyNodes.forEach(node => {
+         node._needsLayout = false;
+         node.layout();
+@@ -361,6 +365,38 @@ function performScheduledLayout()
+ 
+     nodesRequiringChildrenUpdate.forEach(node => node._updateChildren());
+     nodesRequiringChildrenUpdate.clear();
++    restoreFocus(focusedElements);
++}
++
++// browser-lite: a layout that moves a control to another container takes it out of the tree for
++// a moment, and that drops its focus without a blur, so the focus of the page fell to the body:
++// the start button is the play button, which moves into the controls bar when playback starts.
++// The focused element of each shadow root of the controls before the layout, and whether it shows
++// its focus.
++function focusedElementsOfShadowRoots(nodes)
++{
++    const focusedElements = new Map;
++    for (const node of nodes) {
++        const root = node.element.getRootNode();
++        const element = root instanceof ShadowRoot && !focusedElements.has(root) && root.activeElement;
++        if (element)
++            focusedElements.set(root, { element, focusVisible: element.matches(":focus-visible") });
++    }
++    return focusedElements;
++}
++
++// Gives the focus back to a control that lost it in the layout and is still there, else to the
++// media element, so the keys of the media controls keep working, like in Chrome.
++function restoreFocus(focusedElements)
++{
++    for (const [root, { element, focusVisible }] of focusedElements) {
++        if (root.activeElement)
++            continue;
++        if (element.isConnected && element.getRootNode() === root)
++            element.focus({ preventScroll: true, focusVisible });
++        else if (root.host?.isConnected)
++            root.host.focus({ preventScroll: true, focusVisible });
++    }
+ }
+ 
+ function elementFromString(elementString)

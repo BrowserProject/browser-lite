@@ -1,5 +1,6 @@
-// Keys and the double click of the media controls (patch 0135), like Chrome: a click on a
-// <video controls> plays it and focuses it, Space and Enter on the focused element play or pause
+// Keys and the double click of the media controls (patch 0135), like Chrome: a click on the start
+// button in the middle of a <video controls> plays it and leaves it focused (patch 0142: the
+// button moves into the controls bar), Space and Enter on the focused element play or pause
 // without scrolling the page, a double click on the video enters and leaves fullscreen and leaves
 // playback as it was, the arrows, Home and End seek and change the volume of a focused
 // <audio controls>, and a key the page prevented stays with the page.
@@ -74,7 +75,9 @@ check('audio loaded', (await result('audiometa', TIMEOUT)) === '30.0', results.g
 // The controls are made after the first paint (patch 0049)
 await page.waitForTimeout(1500);
 const origin = await canvasOrigin(page);
-const videoMiddle = [origin.x + 240, origin.y + 120];
+// The start button is in the middle; the background of the controls above it
+const videoMiddle = [origin.x + 240, origin.y + 180];
+const videoBackground = [origin.x + 240, origin.y + 60];
 
 // ------------------------------------------------------------ video
 // The state "paused,focused element,fullscreen,scrollY" once test(state) holds (at most 10 s),
@@ -101,9 +104,15 @@ const pause = () => page.waitForTimeout(700);
 
 await page.mouse.click(...videoMiddle);
 const clicked = await stateWhen(playing);
-check('a click plays the video and focuses it', clicked?.startsWith('false,VIDEO,false,'), clicked);
-// Long enough to see a pause that a key did not make
+check('a click on the start button plays the video', clicked?.startsWith('false,'), clicked);
+// Long enough to see a pause that a key did not make, and for the button to move into the bar
 await page.waitForTimeout(1500);
+const focused = await stateWhen(playing);
+check(
+  'the video stays focused after the start button',
+  focused?.startsWith('false,VIDEO,false,'),
+  focused,
+);
 
 await page.keyboard.press(' ');
 const spaced = await stateWhen(paused);
@@ -114,9 +123,23 @@ await page.keyboard.press('Enter');
 const entered = await stateWhen(playing);
 check('Enter plays it again', entered?.startsWith('false,VIDEO,'), entered);
 
+// A click on the background of the controls toggles playback and focuses the video as well
+await pageEval('document.activeElement.blur()');
+await pause();
+await page.mouse.click(...videoBackground);
+const backgroundClicked = await stateWhen(paused);
+check(
+  'a click on the video pauses it and focuses it',
+  backgroundClicked?.startsWith('true,VIDEO,'),
+  backgroundClicked,
+);
+await page.keyboard.press(' ');
+const resumed = await stateWhen(playing);
+check('Space plays it again', resumed?.startsWith('false,VIDEO,false,0'), resumed);
+
 // The two clicks toggle playback twice (Chrome pauses and plays again), so it plays on
 await pause();
-await page.mouse.dblclick(...videoMiddle);
+await page.mouse.dblclick(...videoBackground);
 const inFullscreen = await stateWhen(([, , fullscreen]) => fullscreen === 'true');
 check('a double click enters fullscreen', inFullscreen?.split(',')[2] === 'true', inFullscreen);
 await page.waitForTimeout(1000);

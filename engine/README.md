@@ -35,7 +35,8 @@ which the cookie jar dropped, or the tree view of an XML file or feed without st
 information, which WebKit shows only with developer extras, so its text ran together, or
 `performance.timeOrigin`, which moved between two neighbouring milliseconds from one read to the
 next, or the media controls, which had no keys and no double click to fullscreen like Chrome's,
-or their fullscreen bar, which stuck out at both sides of a phone held upright, or the
+or their fullscreen bar, which stuck out at both sides of a phone held upright, or their start
+button, which dropped the focus of the page when playback moved it into the bar, or the
 intersection observers, which computed every target again in every frame, also when nothing had
 moved, or the muted videos with an audio track that hidden pages kept playing, so the host decoded
 them for nobody, or the quota of localStorage, which counted bytes, so text outside Latin-1 had

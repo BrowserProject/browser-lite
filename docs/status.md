@@ -181,6 +181,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   `<audio controls>` Space and Enter play or pause without scrolling the page, the arrows, Home and
   End seek and change the volume, and a double click on the video enters or leaves fullscreen
   (before, the keys only worked in fullscreen and a double click just paused and played).
+  A click on the start button in the middle of a `<video controls>` leaves the video focused, so
+  Space pauses it (#569; the button moves into the controls bar when playback starts, which
+  dropped the focus to the body, and Space scrolled the page instead).
   A fullscreen narrower than 500 px (a phone held upright) gets the inline controls with the exit
   button top left (#553; the 468 px fullscreen bar stuck out at both sides of a 393 px iPhone, cut
   off the volume, the time and the exit button, so only turning the phone left fullscreen).
