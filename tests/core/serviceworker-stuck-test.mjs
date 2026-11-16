@@ -94,6 +94,13 @@ async function site(html, first) {
 
 const count = (results, text) => results.logs.filter((line) => line.includes(text)).length;
 
+// Whether the worker said 'blocking' within ms: later messages overwrite the RESULT value, so the
+// log decides (on a slow machine the page can be past 'next-ping' before the host page opened)
+async function blocked(results, ms) {
+  await results.wait('message', ms);
+  return count(results, 'RESULT message=blocking') === 1;
+}
+
 const stack = await startStack();
 const browser = await launch();
 
@@ -104,7 +111,7 @@ const browser = await launch();
   await openHost(tab, stack.app({ url }));
   check(
     'update: the worker blocks in WebAssembly',
-    (await results.wait('message', 60000)) === 'blocking',
+    await blocked(results, 60000),
     results.get('error') || '',
   );
   check('update: the new script replaces it', (await results.wait('replaced', 60000)) === '1');
@@ -145,7 +152,7 @@ const browser = await launch();
   await openHost(tab, stack.app({ url, env: 'BL_SW_SHORT_TIMEOUT=1' }));
   check(
     'heartbeat: the worker blocks with an extended event',
-    (await results.wait('message', 60000)) === 'blocking',
+    await blocked(results, 60000),
     results.get('error') || '',
   );
   check('heartbeat: a new run of the worker answers', (await results.wait('pong', 60000)) === '1');
