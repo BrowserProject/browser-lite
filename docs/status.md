@@ -385,7 +385,9 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   Alt+Home (home page or new tab page) (#545), internationalized hosts in Unicode like Chrome in the
   address bar (also while editing and in the phone layout), tabs, history, suggestions, menus and
   the engine's error page unless they could pass for another host, stored addresses in ASCII
-  (#560), settings as cards with switches, dialogs of the pages in
+  (#560), escaped UTF-8 characters of paths, queries and fragments decoded in the address bar, tabs,
+  history, suggestions, menus and the link status bubble (`Z%C3%BCrich` with its u umlaut), the whole address copied
+  escaped like Chrome (#592), settings as cards with switches, dialogs of the pages in
   the page, hover only for real pointers, short transitions (off with reduced motion). Checked in
   Chromium at 1440x900, 1280x800, 820x1180 touch, 393x852 and 844x390, light and dark; not yet on
   real devices.

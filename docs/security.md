@@ -44,6 +44,14 @@ Unicode when every label passes these checks, else the whole host stays as it is
 - a label in Cyrillic, Greek or Armenian made only of letters that look like Latin ones
   (`apple` in Cyrillic) only under a top level domain in that script or of a country that writes it.
 
+After the host `displayURL` shows percent escapes of UTF-8 characters decoded like Chrome
+(`Z%C3%BCrich` with the u umlaut it encodes). Escapes stay for ASCII (`%2F`, `%3F`, `%23`, `%25`,
+`%20` would change the address), for bytes that are not well-formed UTF-8, and for characters
+that cannot be seen or could mislead: white space, controls, format characters (bidi controls
+like U+202E), default ignorables, unassigned and private use code points, the blank braille
+pattern and the lock symbols Chrome keeps escaped. The shown text loads the same address again;
+copying the whole address copies the escaped one.
+
 Not done: Chrome's comparison with the skeletons of popular domains (it needs their list; Firefox
 and Safari do without). The engine's error page names the host by WebKit's own rules
 (`URLHelpers`), which keep Cyrillic and Greek hosts outside their top level domains in ASCII.

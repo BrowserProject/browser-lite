@@ -505,6 +505,19 @@ address.addEventListener('keydown', (e) => {
   select((selected + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
   address.value = rows[selected]?.text ?? address.value;
 });
+// The whole address copies as the address itself, like Chrome: the field shows escaped
+// characters and internationalized hosts decoded, a pasted link should work everywhere
+function copyAddress(e: ClipboardEvent): void {
+  const whole = address.selectionStart === 0 && address.selectionEnd === address.value.length;
+  if (edited || !whole || isBlank(current) || address.value !== displayURL(current)) return;
+  e.preventDefault();
+  e.clipboardData?.setData('text/plain', current);
+  if (e.type !== 'cut') return;
+  address.setRangeText('');
+  address.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteByCut' }));
+}
+address.addEventListener('copy', copyAddress);
+address.addEventListener('cut', copyAddress);
 // A link or text dropped on the field opens like Enter (from a page or another window, like
 // Firefox and Chrome); text dragged inside the field itself moves as usual
 let draggingOwnText = false;

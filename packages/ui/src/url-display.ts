@@ -15,6 +15,7 @@
  * - a Cyrillic, Greek or Armenian label made only of letters that look like Latin ones only under
  *   a top level domain of that script or of a country that writes it.
  * One unsafe label keeps the whole host in `xn--`.
+ * The rest of an address shows its escaped UTF-8 characters decoded, see `displayURL`.
  */
 
 /** UAX #31 Table 5, the recommended scripts; Common and Inherited are counted apart. */
@@ -147,20 +148,63 @@ export function displayHost(host: string): string {
   return shown + (port?.[2] ?? '');
 }
 
+/** An escape of a byte outside ASCII, a run of escapes. */
+const NON_ASCII_ESCAPE = /%[89a-f][0-9a-f]/i;
+const ESCAPE_RUN = /(?:%[0-9a-f]{2})+/gi;
+const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+/** Characters an address shows escaped: invisible, unassigned, or spoofing the lock icon. */
+const KEPT_ESCAPED =
+  /[\p{White_Space}\p{Cc}\p{Cf}\p{Cn}\p{Co}\p{Cs}\p{Default_Ignorable_Code_Point}\u2800\u{1f50f}\u{1f510}\u{1f512}\u{1f513}]/u;
+
 /**
- * The address to show for url: like `displayHost` for its host, the rest exactly as it is, so
- * the text loads the same address again. `view-source:` and `blob:` show their inner address
- * that way too.
+ * The address to show for url, like Chrome: its host like `displayHost`, and in the rest (path,
+ * query, fragment) the percent escapes of UTF-8 characters as those characters
+ * (`Z%C3%BCrich` with the u umlaut it encodes). Escapes of ASCII, of bytes that are not UTF-8 and of
+ * characters that cannot be seen or could fool the reader (spaces, controls, bidi and other
+ * invisible characters, lock symbols) stay, so the text loads the same address again.
+ * `view-source:` and `blob:` show their inner address that way too.
  */
 export function displayURL(url: string): string {
-  if (!url.includes('xn--')) return url;
+  if (!url.includes('xn--') && !NON_ASCII_ESCAPE.test(url)) return url;
   const inner = /^(view-source:|blob:)(.*)$/is.exec(url);
   if (inner) return (inner[1] ?? '') + displayURL(inner[2] ?? '');
   const authority = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)/i.exec(url);
   if (!authority) return url;
   const [whole, scheme = '', hostPart = ''] = authority;
   const at = hostPart.lastIndexOf('@') + 1;
-  return `${scheme}${hostPart.slice(0, at)}${displayHost(hostPart.slice(at))}${url.slice(whole.length)}`;
+  const rest = url.slice(whole.length).replace(ESCAPE_RUN, unescapeRun);
+  return `${scheme}${hostPart.slice(0, at)}${displayHost(hostPart.slice(at))}${rest}`;
+}
+
+/** A run of escapes with its well-formed UTF-8 characters decoded, unless they stay escaped. */
+function unescapeRun(run: string): string {
+  const bytes = Uint8Array.from({ length: run.length / 3 }, (_, index) =>
+    Number.parseInt(run.slice(index * 3 + 1, index * 3 + 3), 16),
+  );
+  let shown = '';
+  for (let index = 0; index < bytes.length; ) {
+    const lead = bytes[index] ?? 0;
+    const length = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+    const char = length > 1 ? decodeUTF8(bytes.subarray(index, index + length), length) : '';
+    if (char && !KEPT_ESCAPED.test(char)) {
+      shown += char;
+      index += length;
+    } else {
+      shown += run.slice(index * 3, index * 3 + 3);
+      index++;
+    }
+  }
+  return shown;
+}
+
+/** The one character that bytes encode in UTF-8, '' when they are not that. */
+function decodeUTF8(bytes: Uint8Array, length: number): string {
+  if (bytes.length !== length) return '';
+  try {
+    return UTF8.decode(bytes);
+  } catch {
+    return '';
+  }
 }
 
 /** The Unicode form of an ASCII hostname, null when it is not valid or not safe to show. */

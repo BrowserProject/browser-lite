@@ -71,10 +71,12 @@ the tab overview cards to the icon, #378). The styles of `@browser-lite/ui` (pro
 select popup) are in the same sheet.
 
 - **Addresses** show an internationalized host in Unicode like Chrome (`displayURL` of
-  `@browser-lite/ui`, unless it could pass for another one): the address bar also while editing,
+  `@browser-lite/ui`, unless it could pass for another one) and the escaped UTF-8 characters of
+  path, query and fragment decoded (`Z%C3%BCrich` with its u umlaut): the address bar also while editing,
   the tab without a title, history and bookmarks, suggestions, menus of back and forward, the new
   tab page, the tab overview, blocked pop-ups and the site data in the settings. History,
-  bookmarks and the session keep the ASCII address.
+  bookmarks and the session keep the ASCII address, and copying or cutting the whole unedited
+  address in the address bar copies it too, like Chrome.
 - **Address bar**: the first click or tap selects the whole address (once the tap is handled, so
   Chrome on Android shows no text toolbar over the page for it), Escape restores it and
   goes back to the page (like Chrome the first Escape after choosing a row with the arrow keys
