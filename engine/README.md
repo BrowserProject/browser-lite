@@ -45,7 +45,8 @@ half of Chrome's room, or the parts of a date or time field, which kept taking d
 moving on to the next part once full and showed today's date in grey when empty, or the failed
 or stopped navigation that waited for the page being left to finish its scripts, so a page paused
 for the navigation never got its error page and Stop did nothing, or the web fonts, each of which
-restyled the whole document from scratch when it loaded) comes as patches
+restyled the whole document from scratch when it loaded, or the page step of Space and
+PageDown, which was Safari's 80 % of the view instead of Chrome's 87.5 %) comes as patches
 from `patches/`.
 
 ## Folders

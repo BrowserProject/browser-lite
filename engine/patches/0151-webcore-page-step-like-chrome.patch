@@ -1,0 +1,21 @@
+diff --git a/Source/WebCore/platform/Scrollbar.h b/Source/WebCore/platform/Scrollbar.h
+index 9dc87198a3..058d340686 100644
+--- a/Source/WebCore/platform/Scrollbar.h
++++ b/Source/WebCore/platform/Scrollbar.h
+@@ -53,9 +53,16 @@ public:
+     static constexpr int pixelsPerLineStep() { return 40; }
+     WEBCORE_EXPORT static int NODELETE pixelsPerLineStep(int viewWidthOrHeight);
+     WEBCORE_EXPORT static void NODELETE setShouldUseFixedPixelsPerLineStepForTesting(bool);
++#if PLATFORM(WASM)
++    // Chrome's kMinFractionToStepWhenPaging, truncated like its ScrollableArea::PageStep.
++    static float minFractionToStepWhenPaging() { return 0.875; }
++    WEBCORE_EXPORT static int maxOverlapBetweenPages();
++    static int pageStep(int viewWidthOrHeight, int contentWidthOrHeight) { return std::max(std::max<int>(static_cast<int>(viewWidthOrHeight * Scrollbar::minFractionToStepWhenPaging()), lroundf(contentWidthOrHeight - Scrollbar::maxOverlapBetweenPages())), 1); }
++#else
+     static float minFractionToStepWhenPaging() { return 0.8; }
+     WEBCORE_EXPORT static int maxOverlapBetweenPages();
+     static int pageStep(int viewWidthOrHeight, int contentWidthOrHeight) { return std::max(std::max<int>(lroundf(viewWidthOrHeight * Scrollbar::minFractionToStepWhenPaging()), lroundf(contentWidthOrHeight - Scrollbar::maxOverlapBetweenPages())), 1); }
++#endif
+     static int pageStep(int viewWidthOrHeight) { return pageStep(viewWidthOrHeight, viewWidthOrHeight); }
+     static float pageStepDelta(int widthOrHeight) { return std::max(std::max(static_cast<float>(widthOrHeight) * Scrollbar::minFractionToStepWhenPaging(), static_cast<float>(widthOrHeight) - Scrollbar::maxOverlapBetweenPages()), 1.0f); }
+ 

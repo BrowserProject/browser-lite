@@ -926,6 +926,7 @@ for (const [key, name] of [
   ['PageDown', 'keypagedown'],
   ['End', 'keyend'],
   ['Home', 'keyhome'],
+  ['Space', 'keyspace'],
 ]) {
   await page.keyboard.press(key);
   await page.waitForTimeout(800);
@@ -937,6 +938,14 @@ check(
   'keyboard scrolling: PageDown, End, Home',
   pageDown > 100 && end >= pageDown && Number(await result('keyhome')) === 0,
   `${pageDown}, ${end}, ${results.get('keyhome')}`,
+);
+// a page is 87.5 % of the view like in Chrome, not Safari's 80 % (patch 0151)
+await evalPage(page, 'console.log("RESULT viewheight=" + document.documentElement.clientHeight)');
+const pageStep = Math.trunc(Number(await result('viewheight')) * 0.875);
+check(
+  'keyboard scrolling: PageDown and Space step like Chrome',
+  pageDown === pageStep && Number(await result('keyspace')) === pageStep,
+  `${pageDown}, ${results.get('keyspace')}, expected ${pageStep}`,
 );
 
 // 6c) Tab reaches links like in Chrome and Firefox, not only form controls (Safari's default)

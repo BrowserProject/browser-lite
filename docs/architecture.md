@@ -395,6 +395,10 @@ up with it, also after the fingers lifted, so a pinch while the page keeps the e
 is not lost, like Chrome replays the queued touch moves (#505).
 Tab moves the focus to links too, like in Chrome and Firefox (`ChromeClient::keyboardUIMode`, #372);
 past the last element it goes back to the host (`take-focus`).
+Space, PageDown and PageUp, of the page and of scrolling boxes, step by 87.5 % of the view like
+Chrome (`kMinFractionToStepWhenPaging`, truncated), not Safari's 80 %: a 706 px view pages by
+617 px (patch 0151, `Scrollbar::pageStep`, #588). WebKit still leaves out fixed headers and
+footers that span the view.
 Ctrl + wheel first reaches the page (#167), and so do keys: a keydown the page does not handle
 (no `preventDefault`, editing command or default action, `EventHandler::keyEvent` false) comes
 back as `unhandled-key`, where the demo runs its shortcuts like Chrome; only the ones that leave or
