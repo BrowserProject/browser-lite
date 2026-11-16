@@ -1,0 +1,23 @@
+diff --git a/Source/WebCore/page/Page.cpp b/Source/WebCore/page/Page.cpp
+index ff50020bb7..982a989726 100644
+--- a/Source/WebCore/page/Page.cpp
++++ b/Source/WebCore/page/Page.cpp
+@@ -2273,7 +2273,18 @@ void Page::updateRendering()
+ 
+     auto runProcessingStep = [&](RenderingUpdateStep step, NOESCAPE const Function<void(Document&)>& perDocumentFunction) {
+         m_renderingUpdateRemainingSteps.last().remove(step);
++#if PLATFORM(WASM)
++        // browser-lite: a frame whose script is paused (the debugger, the embedder while the user
++        // needs the thread) gets the steps that run its script (events, observers) at the first
++        // update after it goes on; the update of the other frames does not run it nested
++        forEachRenderableDocument([&](Document& document) {
++            if (RefPtr frame = document.frame(); frame && frame->script().isPaused())
++                return;
++            perDocumentFunction(document);
++        });
++#else
+         forEachRenderableDocument(perDocumentFunction);
++#endif
+     };
+ 
+     runProcessingStep(RenderingUpdateStep::RestoreScrollPositionAndViewState, [] (Document& document) {

@@ -182,7 +182,16 @@ work in the nested event loop of dialogs while the page waits and the view holds
 a dialog, also through the hold, and the script goes on afterwards. Nested work sees none of the
 paused frames (`vm.topCallFrame` is empty meanwhile). Not when another view shares script with
 the page (a document in one of its event loops, which WebKit keeps per site, or its page group),
-and not for work outside JS (style, layout, parsing, compiling a script, the GC).
+and not for work outside JS (style, layout, parsing, compiling a script, the GC). The script of a
+cross-site frame pauses the same way while the user works in its page, like an out-of-process
+frame in Chrome (`FramePause.cpp`, #589): what pauses is its site's event loop, all documents of
+it, none of which may be a top-level document, with only its frames on the stack. Its documents
+are suspended, their loads deferred and their frames' scripts paused (WebCore runs no listener or
+script of a paused frame, as in its debugger), the rendering update leaves out the steps that run
+their script until it goes on (patch 0152). The page answers and renders meanwhile; input that
+would reach the frame (focus, pointer in it or leaving it) ends the pause and runs right after the
+script, in order with later input of its view. A frame removed or left meanwhile stops its script
+when it goes on. The pause lasts until no input came for 1 s.
 
 ## Frames
 

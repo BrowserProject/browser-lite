@@ -46,6 +46,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/WorkerGraphics.cpp
     ${BL_ENGINE_SRC}/ErrorPage.cpp
     ${BL_ENGINE_SRC}/Gamepad.cpp
+    ${BL_ENGINE_SRC}/FramePause.cpp
     ${BL_ENGINE_SRC}/HiddenViews.cpp
     ${BL_ENGINE_SRC}/UserNavigation.cpp
     ${BL_ENGINE_SRC}/HostLayers.cpp

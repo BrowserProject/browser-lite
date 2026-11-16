@@ -651,7 +651,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
    without the JIT it is 3.3 to 4.2 s. Back was not measured apart, it is the same kind of route
    change. What is left is the speed of JS (above, [jit.md](jit.md)).
    Long single tasks of a page become many times longer here, so they block all views (the
-   script watchdog stops only those that keep input or a call waiting, #146, #501). Cloudflare Turnstile on kaufland.de (local, Chromium host):
+   script watchdog stops only those that keep input or a call waiting, #146, #501). The script
+   of a cross-site frame (an anti-bot challenge in a frame, Turnstile on srf.ch) pauses while the
+   user works in its page, like an out-of-process frame in Chrome (#589): on srf.ch (2026-11-16,
+   local, a key every 1.5 s for 90 s, 4 runs) the longest key waited 9.5 to 21.9 s before, with
+   `unresponsive` in 2 runs, now at most 51 ms. Input into the frame itself, the script of a
+   challenge page that is the top-level document (canva.com's "Just a moment...") and a debug
+   `eval` still wait for the script. Cloudflare Turnstile on kaufland.de (local, Chromium host):
    every challenge brings a VM obfuscated anew (other function names and sizes each run), so its
    work differs from run to run. It blocks the engine thread in single entries of several seconds:
    on 2026-11-05 up to 30 s, which the watchdog terminated, the widget staying at "Verifying". On

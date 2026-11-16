@@ -1557,6 +1557,20 @@ static void showPickerOfTappedField(int viewId, LocalFrame& frame)
 // tap follows the end at once, in the same task like in a browser: otherwise the
 // page's reaction to the touch (Google opens its suggestions when the field gets
 // focus on touchend) was already there and took the click.
+Vector<DoublePoint> WebView::touchPoints(const String& json)
+{
+    Vector<DoublePoint> points;
+    auto value = JSON::Value::parseJSON(json);
+    auto array = value ? value->asArray() : nullptr;
+    if (!array)
+        return points;
+    for (auto& item : *array) {
+        if (auto point = item->asObject())
+            points.append({ point->getDouble("x"_s).value_or(0), point->getDouble("y"_s).value_or(0) });
+    }
+    return points;
+}
+
 void WebView::touchEvent(int type, const String& json, int modifiers, bool tap)
 {
 #if ENABLE(TOUCH_EVENTS)

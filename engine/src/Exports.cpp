@@ -12,6 +12,7 @@
 #include "EditorClient.h"
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "FramePause.h"
 #include "Gamepad.h"
 #include "HiddenViews.h"
 #include "Host.h"
@@ -141,13 +142,14 @@ static void closeMove(int id)
 }
 
 // Input for a view: dropped while a dialog of its page group is open, like Chrome. Hidden views
-// wait while the user works in a visible one (HiddenViews.h).
+// wait while the user works in a visible one (HiddenViews.h). Input that reaches a paused frame
+// waits for its script (FramePause.h); points: where a pointer input lands.
 // `dropped` runs instead when there is no such view or a dialog blocks it.
 template<typename Function, typename Dropped = void (*)()>
-static void withInput(int id, Function&& function, UserInput input = UserInput::Other, Dropped&& dropped = [] { })
+static void withInput(int id, Function&& function, UserInput input = UserInput::Other, Dropped&& dropped = [] { }, Vector<WebCore::DoublePoint>&& points = { })
 {
     closeMove(id);
-    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function), dropped = std::forward<Dropped>(dropped)]() mutable {
+    runUrgentOnEngineThread([id, input, function = std::forward<Function>(function), dropped = std::forward<Dropped>(dropped), points = WTF::move(points)]() mutable {
         auto* view = WebView::fromID(id);
         if (!view || view->isBlockedByDialog()) {
             dropped();
@@ -155,8 +157,19 @@ static void withInput(int id, Function&& function, UserInput input = UserInput::
         }
         if (view->isVisible())
             userWorksInVisibleView(input);
+        if (inputWaitsForPausedFrame(*view, points)) {
+            holdInputForPausedFrame(*view, WTF::move(function), WTF::move(dropped));
+            return;
+        }
         function(*view);
     });
+}
+
+// Input of a pointer at these points of the view
+template<typename Function>
+static void withPointerInput(int id, Vector<WebCore::DoublePoint>&& points, Function&& function)
+{
+    withInput(id, std::forward<Function>(function), UserInput::Other, [] { }, WTF::move(points));
 }
 
 // The button a move drags or selects with (like MouseEvent.button, -1 = none)
@@ -182,7 +195,7 @@ static void moveMouse(int id, const WebView::MouseMove& move, int buttons, int m
     // With a button pressed every move counts (dragging, selecting, drag and drop fires dragover
     // per move): only hovering coalesces
     if (buttons) {
-        withInput(id, [move, buttons, modifiers](WebView& view) { dispatchMove(view, std::span { &move, 1 }, buttons, modifiers); });
+        withPointerInput(id, { { move.x, move.y } }, [move, buttons, modifiers](WebView& view) { dispatchMove(view, std::span { &move, 1 }, buttons, modifiers); });
         return;
     }
     Ref pending = adoptRef(*new PendingMove(move, modifiers));
@@ -202,8 +215,16 @@ static void moveMouse(int id, const WebView::MouseMove& move, int buttons, int m
             if (auto it = openMoves().find(id); it != openMoves().end() && it->value.ptr() == pending.ptr())
                 openMoves().remove(it);
         }
-        if (auto* view = WebView::fromID(id); view && !view->isBlockedByDialog())
-            dispatchMove(*view, pending->moves, 0, pending->modifiers);
+        auto* view = WebView::fromID(id);
+        if (!view || view->isBlockedByDialog())
+            return;
+        auto& last = pending->moves.last();
+        WebCore::DoublePoint point { last.x, last.y };
+        if (inputWaitsForPausedFrame(*view, std::span { &point, 1 })) {
+            holdInputForPausedFrame(*view, [pending](WebView& view) { dispatchMove(view, pending->moves, 0, pending->modifiers); }, [] { });
+            return;
+        }
+        dispatchMove(*view, pending->moves, 0, pending->modifiers);
     });
 }
 
@@ -348,7 +369,7 @@ EMSCRIPTEN_KEEPALIVE void bl_frame_presented(int id)
 // buttons: the pressed buttons after the event, like MouseEvent.buttons
 EMSCRIPTEN_KEEPALIVE void bl_mouse(int id, int type, int button, int buttons, double x, double y, int clickCount, int modifiers)
 {
-    withInput(id, [=](WebView& view) { view.mouseEvent(type, button, buttons, x, y, clickCount, modifiers); });
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.mouseEvent(type, button, buttons, x, y, clickCount, modifiers); });
 }
 
 // Mouse move with movementX/Y (also with pointer lock). buttons: the pressed
@@ -362,7 +383,7 @@ EMSCRIPTEN_KEEPALIVE void bl_mouse_move(int id, double x, double y, double movem
 // data: JSON with text/HTML/URI list and file paths (WebView::hostDrag)
 EMSCRIPTEN_KEEPALIVE void bl_drag(int id, int phase, double x, double y, int modifiers, char* data)
 {
-    withInput(id, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
+    withPointerInput(id, { { x, y } }, [=, json = takeString(data)](WebView& view) { view.hostDrag(phase, x, y, modifiers, json); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_pointer_lock(int id, int locked)
@@ -385,7 +406,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         // wheel listener)
         RefPtr scene = CompositorScene::forView(id);
         if (scene && scene->scrollPinch({ static_cast<float>(deltaX), static_cast<float>(deltaY) })) {
-            withInput(id, [=](WebView& view) {
+            withPointerInput(id, { { x, y } }, [=](WebView& view) {
                 view.dispatchWheelEvent(WebView::makeWheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers), { WebCore::WheelEventProcessingSteps::NonBlockingDOMEventDispatch });
             });
             return;
@@ -395,7 +416,7 @@ EMSCRIPTEN_KEEPALIVE void bl_wheel(int id, double x, double y, double deltaX, do
         });
         return;
     }
-    withInput(id, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.wheelEvent(x, y, deltaX, deltaY, wheelDeltaX, wheelDeltaY, modifiers); });
 }
 
 // A finger scrolls: a gesture without DOM wheel events (WebView::makeTouchScrollEvent, touchScroll)
@@ -410,7 +431,7 @@ EMSCRIPTEN_KEEPALIVE void bl_touch_scroll(int id, double x, double y, double del
         Compositor::dispatch([=] { Scrolling::touchScroll(id, event); });
         return;
     }
-    withInput(id, [=](WebView& view) { view.touchScroll(event); });
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.touchScroll(event); });
 }
 
 // Ctrl + wheel (zoom) goes to the page first like in Chrome (maps, editors
@@ -519,7 +540,7 @@ EMSCRIPTEN_KEEPALIVE void bl_pinch(int id, int phase, double factor, double x, d
         scene->pinch(pinchPhase, factor, focus);
         return;
     }
-    withInput(id, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.pinch(pinchPhase, factor, focus); });
 }
 
 // Find: again = find next with the same input (Enter / Shift+Enter)
@@ -577,7 +598,7 @@ EMSCRIPTEN_KEEPALIVE void bl_find_done(int id)
 
 EMSCRIPTEN_KEEPALIVE void bl_context_menu(int id, double x, double y)
 {
-    withInput(id, [=](WebView& view) { view.contextMenu(x, y); });
+    withPointerInput(id, { { x, y } }, [=](WebView& view) { view.contextMenu(x, y); });
 }
 
 EMSCRIPTEN_KEEPALIVE void bl_command(int id, char* name)
@@ -676,7 +697,9 @@ EMSCRIPTEN_KEEPALIVE void bl_set_screen(int width, int height, int availableWidt
 
 EMSCRIPTEN_KEEPALIVE void bl_touch(int id, int type, char* points, int modifiers, int tap)
 {
-    withInput(id, [type, points = takeString(points), modifiers, tap](WebView& view) { view.touchEvent(type, points, modifiers, tap); });
+    String json = takeString(points);
+    auto where = WebView::touchPoints(json);
+    withPointerInput(id, WTF::move(where), [type, json = WTF::move(json), modifiers, tap](WebView& view) { view.touchEvent(type, json, modifiers, tap); });
 }
 
 // Permissions, geolocation, notifications (DeviceClients.cpp).

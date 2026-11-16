@@ -167,6 +167,11 @@ bool hiddenViewsWaitForUser()
     return s_waiting;
 }
 
+bool userJustWorked()
+{
+    return MonotonicTime::now() < s_lastInput + quietTime;
+}
+
 bool userNeedsEngineThread()
 {
     return s_waiting || urgentWorkWaiting();
@@ -204,7 +209,7 @@ static bool sharesScript(Page& page)
     return shares;
 }
 
-void pauseHiddenScriptForUser()
+bool pauseHiddenScriptForUser()
 {
     // The running script, also in an iframe of the page
     auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(threadGlobalDataSingleton().currentState());
@@ -212,15 +217,16 @@ void pauseHiddenScriptForUser()
     RefPtr page = document ? document->page() : nullptr;
     // Not while the page goes away (unload, pagehide): no dialog either
     if (!page || !page->arePromptsAllowed())
-        return;
+        return false;
     RefPtr<WebView> paused;
     WebView::forEach([&](WebView& view) {
         if (&view.page() == page.get())
             paused = &view;
     });
     if (!paused || !paused->canPauseScriptForUser() || sharesScript(*page))
-        return;
+        return false;
     paused->pauseScriptForUser();
+    return true;
 }
 
 void setPageWaits(Page& page, bool waits)

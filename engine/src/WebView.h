@@ -177,6 +177,8 @@ public:
     // Answer/end from the host: false = not granted or lost (Esc)
     void pointerLockResult(bool locked);
 #endif
+    // The points of touchEvent's JSON, on any thread
+    static Vector<WebCore::DoublePoint> touchPoints(const String& json);
     void touchEvent(int type, const String& pointsJSON, int modifiers, bool tap);
     // Every keydown is answered with "key-result": handled false when the page did not handle it
     // (no preventDefault, no editing command, no default action like scrolling), for the host's
@@ -199,6 +201,9 @@ public:
     // Editor command like "Copy", "Paste", "SelectAll"
     void executeCommand(const String&);
     void setFocused(bool);
+    // Where the last input of a pointer landed (FramePause.h)
+    std::optional<WebCore::DoublePoint> lastPointerPoint() const { return m_lastPointerPoint; }
+    void setLastPointerPoint(WebCore::DoublePoint point) { m_lastPointerPoint = point; }
     // Background view or host tab hidden: the page is hidden
     // (visibilityState, no rAF, timers throttled) and does not paint
     void setVisible(bool);
@@ -384,6 +389,7 @@ private:
     std::optional<WebCore::PointerID> m_touchPointer;
     // Where a long press asked for the context menu; it opens when the finger lifts
     std::optional<WebCore::DoublePoint> m_longPressMenu;
+    std::optional<WebCore::DoublePoint> m_lastPointerPoint;
     bool m_leavingPagePaused { false };
     bool m_restoringFromCache { false };
     // The last icons loaded, newest first: a page with the same icon address, or one that switches

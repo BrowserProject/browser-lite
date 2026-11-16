@@ -14,6 +14,7 @@
 #include "config.h"
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "FramePause.h"
 #include "HiddenViews.h"
 #include "MemoryWatch.h"
 #include "UserNavigation.h"
@@ -621,15 +622,16 @@ void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& on
 extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
 // At a safepoint of the running script (patch 0149), also one that requestSafepoint brought
-// it to: a hidden view's script pauses while urgent work waits (HiddenViews.h). Not inside a
-// nested event loop, whose work goes on where it was.
+// it to: a hidden view's script (HiddenViews.h) or a cross-site frame's (FramePause.h) pauses
+// while urgent work waits. Not inside a nested event loop, whose work goes on where it was.
 extern "C" void bl_jsc_set_safepoint_work(void (*)(JSC::VM&));
 
 static void atSafepoint(JSC::VM& vm)
 {
     if (!urgentWorkWaiting() || s_nestedEventLoops || &vm != WebCore::commonVMOrNull())
         return;
-    pauseHiddenScriptForUser();
+    if (!pauseHiddenScriptForUser())
+        pauseFrameScriptForUser();
 }
 
 void initializeEngineLoop()
