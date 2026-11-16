@@ -1,9 +1,11 @@
+import { pendingClipboardWrite, readHostClipboard } from './clipboard.js';
 import type { Config } from './config.js';
 import type { EngineModule } from './engine.js';
 import { storePermission } from './permissions.js';
 import type {
   AuthCredentials,
   AuthRequest,
+  ClipboardContent,
   DataListSuggestion,
   DialogAnswer,
   DialogRequest,
@@ -243,6 +245,43 @@ export class Requests {
     if (!this.host.ready) return;
     if (answer !== 'dismiss') storePermission(config.permissions, data.origin, data.kind, answer);
     module._bl_permission_answer(data.id, answer === 'grant' ? 1 : answer === 'deny' ? 2 : 0);
+  }
+
+  /**
+   * navigator.clipboard.read() or readText() of a page with the permission ('clipboard-read'):
+   * the clipboard of the handler `clipboardRead`, a PNG as a file like a paste; answered with
+   * bl_clipboard_read_answer, null without content or when the view closes meanwhile.
+   */
+  async clipboardRead(view: ViewImpl, data: { id: number }): Promise<void> {
+    const { host } = this;
+    const controller = this.track(view);
+    const answer = (content: Record<string, unknown> | null) => {
+      if (host.ready)
+        host.module._bl_clipboard_read_answer(
+          data.id,
+          content ? host.text(JSON.stringify(content)) : 0,
+        );
+    };
+    controller.signal.addEventListener('abort', () => answer(null), { once: true });
+    let content: ClipboardContent | null = null;
+    try {
+      // Right after a copy of a page the host clipboard may still have the old content
+      const read = host.handler('clipboardRead') ?? readHostClipboard;
+      content = pendingClipboardWrite() ?? (await read({ view, signal: controller.signal }));
+    } catch {}
+    const files =
+      content?.image && !controller.signal.aborted
+        ? await host.uploads.write(view, [
+            new File([content.image], 'image.png', { type: 'image/png' }),
+          ])
+        : [];
+    if (controller.signal.aborted) return;
+    this.done(view, controller);
+    answer(
+      content
+        ? { text: String(content.text ?? ''), html: String(content.html ?? ''), files }
+        : null,
+    );
   }
 
   /** A 401 the engine asks the user about ('auth'); answered with bl_auth_answer. */

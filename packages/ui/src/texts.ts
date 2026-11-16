@@ -86,6 +86,7 @@ export const defaultTexts: Readonly<UiTexts> = Object.freeze({
     microphone: '{host} wants to use your microphone',
     camera: '{host} wants to use your camera',
     'camera-microphone': '{host} wants to use your camera and microphone',
+    'clipboard-read': '{host} wants to see text and images copied to the clipboard',
   }) as Record<string, string>,
   permissionOther: '{host} wants to use {kind}',
   allow: 'Allow',

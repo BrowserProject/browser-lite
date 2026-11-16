@@ -228,6 +228,14 @@ of the host succeeded (the `@browser-lite/ui` prompt does this). Like Chrome, a 
 outlive its page: when the view's main frame commits a new document, the core dismisses the open
 questions of the view and aborts their signals, so an answer can never go to the origin left.
 
+A page reads the clipboard (`navigator.clipboard.read()`, `readText()`, only in a click) after
+the permission `clipboard-read` of its top site, like Chrome's "wants to see text and images
+copied to the clipboard". The `clipboardRead` handler then gives the content, by default the
+clipboard of your page through `navigator.clipboard.read()`: Chrome asks your origin once
+(`clipboard-read`), Safari and Firefox show their own Paste button each time unless the content
+came from your page. A Paste button of a page therefore works in a click or right after the Allow
+of the prompt, both count as a user activation of your page.
+
 Popups (`window.open`, `target=_blank`) open only after a user gesture, like in every browser:
 like Chrome and Firefox one popup within 5 s of a click, also from a timer or after a request.
 A blocked one sends the view event `popup-blocked` with its `url` and the page's `origin`;

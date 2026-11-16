@@ -825,6 +825,15 @@ export interface RequestHandlers {
    * exists).
    */
   clipboardWrite(request: ClipboardWriteRequest): void | Promise<void>;
+  /**
+   * `navigator.clipboard.read()` and `readText()` of a page, after its top site got the
+   * permission 'clipboard-read' (handler `permission`, like Chrome): resolves the content of a
+   * clipboard, null when there is none to give (the page gets `NotAllowedError`). Asked right
+   * after the click of the page or the Allow of the permission, so Safari and Firefox still count
+   * it as a user activation. Default: the clipboard of the host (`navigator.clipboard.read()`, or
+   * `readText()` without it); a page's own copy still on the way to it is taken directly.
+   */
+  clipboardRead(request: ClipboardReadRequest): Promise<ClipboardContent | null>;
 }
 
 /** A page dialog (handler `dialog`). */
@@ -854,6 +863,7 @@ export type PermissionKind =
   | 'camera'
   | 'microphone'
   | 'camera-microphone'
+  | 'clipboard-read'
   | 'popups';
 
 /** A decision remembered in the {@link PermissionStore}. */
@@ -914,6 +924,22 @@ export interface ClipboardWriteRequest {
    * the write only in the click. Rejects when there is no image at the point.
    */
   image?: Promise<Blob>;
+}
+
+/** A page reads the clipboard (handler `clipboardRead`). */
+export interface ClipboardReadRequest {
+  view: View;
+  /** Aborted when the view closes or the engine ends; the answer is ignored then. */
+  signal: AbortSignal;
+}
+
+/** What a page reads from the clipboard (handler `clipboardRead`). */
+export interface ClipboardContent {
+  text: string;
+  /** HTML of rich text, '' without. */
+  html: string;
+  /** A PNG image (`image/png` of `navigator.clipboard.read()`). */
+  image?: Blob;
 }
 
 /** A file input of a page (handler `fileChooser`). */

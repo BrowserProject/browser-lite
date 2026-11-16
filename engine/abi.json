@@ -1,5 +1,5 @@
 {
-  "abiVersion": 39,
+  "abiVersion": 40,
   "about": "Contract of engine.js/engine.wasm with its host (@browser-lite/core). Checked against engine/src, engine/js and engine/patches by tests/contract/abi-test.mjs. Strings passed into exports are UTF-8 allocated with malloc (stringToNewUTF8); the engine frees them. An empty env value counts as unset (the default applies) unless its doc says otherwise. Exports are callable from any thread and do their work asynchronously on the engine thread unless 'thread' says otherwise. abiVersion goes up with every change of exports, module hooks, events or their meaning; the engine announces it as Module.blAbiVersion and the core refuses an engine with another version. View ids are chosen by the host (from 1); views the engine opens itself (window.open) get ids from 2^20 and are announced with the event 'new-view'.",
   "closeReasons": ["closed", "reset", "refused", "unreachable", "name-not-resolved", "timeout", "blocked", "throttled", "invalid", "transport-down"],
   "exports": [
@@ -81,6 +81,7 @@
     { "name": "bl_set_online", "returns": "void", "args": "int onLine", "doc": "navigator.onLine and online/offline events (host network and transport.connected)." },
     { "name": "bl_set_clipboard_text", "returns": "void", "args": "char* text", "doc": "Puts text on the engine clipboard." },
     { "name": "bl_set_clipboard", "returns": "void", "args": "char* data", "doc": "Paste from the host: {\"text\",\"html\",\"files\":[engine paths]}." },
+    { "name": "bl_clipboard_read_answer", "returns": "void", "args": "int requestId, char* data", "doc": "Answer to 'clipboard-read': the host clipboard like bl_set_clipboard (a PNG as a file of files), null when the host gives none (the page gets NotAllowedError)." },
     { "name": "bl_remove_path", "returns": "void", "args": "char* path", "doc": "Deletes a file or folder of the engine file system (uploads of a closed view)." },
     { "name": "bl_storage_flush", "returns": "void", "args": "int waitMilliseconds", "thread": "waitMilliseconds > 0 blocks the caller up to that long (page hide).", "doc": "Writes pending databases to /data now." },
     { "name": "bl_sync_history", "returns": "void", "args": "int waitMilliseconds", "thread": "waitMilliseconds > 0 blocks the caller up to that long (page hide); the events arrive within the call.", "doc": "Sends the event history of every view whose scroll position the host did not get yet." },
@@ -223,6 +224,7 @@
     { "type": "dialog-cancel", "scope": "view", "payload": "{id}: the engine no longer waits for the engineDialog of type resubmit (the page navigated or stopped); bl_dialog_answer is ignored then" },
     { "type": "auth-cancel", "scope": "view", "payload": "{id}: the loads waiting for 'auth' are gone (stopped, navigated away, view closed); bl_auth_answer is ignored then" },
     { "type": "permission", "scope": "view", "payload": "{id, kind, origin}; answer bl_permission_answer" },
+    { "type": "clipboard-read", "scope": "view", "payload": "{id}: navigator.clipboard.read() or readText() of a page in a user activation, after the permission 'clipboard-read' of its top origin (event 'permission'; frames need the permissions policy clipboard-read); answer bl_clipboard_read_answer", "feature": "clipboard" },
     { "type": "extension-message", "scope": "view", "payload": "{id, extension, url (of the frame), message (JSON string)}: extension.sendMessage of an extension's script; answer bl_host_call_result" },
     { "type": "host-call", "scope": "view", "payload": "{id, name, origin, payload (JSON string)}; answer bl_host_call_result", "feature": "see hostCalls" },
     { "type": "geolocation-start", "scope": "view", "payload": "{highAccuracy}", "feature": "geolocation" },

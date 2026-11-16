@@ -1,4 +1,4 @@
-import { writeHostClipboard } from './clipboard.js';
+import { readHostClipboard, writeHostClipboard } from './clipboard.js';
 import type { ChainedHandler } from './extensions/types.js';
 import { nativeFileChooser } from './requests.js';
 import type { RequestHandlers } from './types.js';
@@ -16,6 +16,7 @@ const DEFAULTS: RequestHandlers = {
   dateTimePicker: async () => null,
   dataListPopup: async () => -1,
   clipboardWrite: writeHostClipboard,
+  clipboardRead: readHostClipboard,
 };
 
 /** True for the name of a request type (a key of RequestHandlers). */

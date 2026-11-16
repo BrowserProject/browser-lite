@@ -111,6 +111,8 @@ any number of listeners.
 | `fileChooser` | native file dialog of the host |
 | `selectPopup`, `colorPicker`, `dateTimePicker` | cancel |
 | `dataListPopup` | `-1`: no suggestion list. The suggestions of an `<input list>` while the user types (`suggestions` with `value` and `label`, `highlightedIndex`); the field keeps the focus and the keys: Up and Down move the highlight in the engine, which sends a new request (the old signal aborts), Enter takes it, Escape closes. Resolve the index of a clicked entry or `-1` to close |
+| `clipboardWrite` | the clipboard of the host page: copy and cut of a page, its `navigator.clipboard.writeText()` and `write()` (text and HTML), Copy image (`image`, a promise) |
+| `clipboardRead` | the clipboard of the host page (`navigator.clipboard.read()`, else `readText()`): `{ text, html, image? }` (a PNG) or `null` (the page gets `NotAllowedError`). For a page's `navigator.clipboard.read()` and `readText()` in a click, after the permission `clipboard-read` of its top site (handler `permission`, frames need `allow="clipboard-read"`); a page's own copy still on the way to the host is taken directly |
 
 Every request carries an `AbortSignal` that aborts when the page hides the popup, the view closes,
 the engine ends or the page opens the same popup again (the old answer is then ignored); that of

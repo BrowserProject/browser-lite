@@ -17,7 +17,8 @@ an interpreter cache that took the missing export of one module for all modules,
 image a compositing layer still showed, which the memory cache dropped and the layer decoded again,
 or the text shadow a filtered layer cut off at its box, or the tiles a fling on a busy page
 ran away from, or the boxes with percentage heights every layout of a container laid out again,
-or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped, or the
+or the writes of `navigator.clipboard`, which the pasteboard of the WPE port dropped, or its
+reads, which WebKit only allows through a synchronous question to the embedder, or the
 fullscreen video a page's `object-fit: cover` cropped, or the icons of the media controls, which
 the Adwaita theme reads only from a GResource, or the link address that stayed in the status
 when a cookie dialog appeared under a still mouse, or the cells at the edge of a table with
@@ -132,6 +133,8 @@ from `patches/`.
     (polyfills and host bridge),
     `UserContent.cpp` (scripts and CSS of the host's extensions, isolated worlds),
     `WebRTCPolyfill.cpp`, `DeviceClients.cpp`, `Permissions.cpp`, `Gamepad.cpp`, `Speech.cpp`,
+    `HostClipboard.cpp` (the host clipboard on the engine clipboard: a paste, and a page's
+    `navigator.clipboard.read()` after the permission `clipboard-read`, patch 0150),
     `PlatformResources.cpp` (WebCore's own images: broken image icon, text area corner)
   - `media/`: `<video>`/`<audio>`, MSE, MediaStream, MediaRecorder, WebCodecs, VideoFrame,
     `VideoOverlay.cpp` (holes of videos the host shows behind the canvas, punched only once the

@@ -411,7 +411,13 @@ element untrusted drag events with the data and the page a point outside the vie
 there ends the page's drag with the drop effect (`bl_drag` phase 3, `drag-out.ts`, #534). Copy and cut and the page's `navigator.clipboard.writeText()` and `write()`
 put text and HTML on the engine's clipboard, which the host gets as the event `clipboard`
 (handler `clipboardWrite`; the async Clipboard API through `Pasteboard::writeCustomData`,
-patch 0100, #469). Copy image of the context menu (`bl_copy_image`) hit tests the menu's point
+patch 0100, #469). A page's `navigator.clipboard.read()` and `readText()` in a user activation ask
+the embedder asynchronously (patch 0150, `EditorClient::requestClipboardRead`): frames need the
+permissions policy `clipboard-read` (default `'self'` like Chrome), the top origin the permission
+`clipboard-read` (event `permission`), then the event `clipboard-read` gets the host clipboard
+through the handler `clipboardRead` (default `navigator.clipboard.read()` of the host, a PNG as a
+file like a paste) and `bl_clipboard_read_answer` puts it on the engine clipboard before WebCore
+reads it (`engine/src/HostClipboard.cpp`, #587). Copy image of the context menu (`bl_copy_image`) hit tests the menu's point
 again like Chrome's `CopyImageAt` and encodes the image there at full size, turned by its EXIF
 orientation, as PNG with Skia (`onEngineCopyImage`); the core hands it to `clipboardWrite` as a
 promise the click already wrote, as Safari requires (#511). Paste of the menu reads text and

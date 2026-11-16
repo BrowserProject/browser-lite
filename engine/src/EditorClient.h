@@ -77,6 +77,7 @@ private:
     void clearUndoRedoOperations() final;
 
     WebCore::DOMPasteAccessResponse requestDOMPasteAccess(WebCore::DOMPasteAccessCategory, WebCore::FrameIdentifier, const String&) final { return WebCore::DOMPasteAccessResponse::GrantedForGesture; }
+    void requestClipboardRead(WebCore::LocalFrame&, CompletionHandler<void(bool)>&&) final;
 
     bool canCopyCut(WebCore::LocalFrame*, bool defaultValue) const final { return defaultValue; }
     bool canPaste(WebCore::LocalFrame*, bool defaultValue) const final { return defaultValue; }

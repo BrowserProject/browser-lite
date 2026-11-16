@@ -1,0 +1,600 @@
+diff --git a/Source/WebCore/Modules/async-clipboard/Clipboard.cpp b/Source/WebCore/Modules/async-clipboard/Clipboard.cpp
+index 5a23ba57dc..e3a9f381d8 100644
+--- a/Source/WebCore/Modules/async-clipboard/Clipboard.cpp
++++ b/Source/WebCore/Modules/async-clipboard/Clipboard.cpp
+@@ -33,6 +33,7 @@
+ #include "Document.h"
+ #include "DocumentPage.h"
+ #include "Editor.h"
++#include "EditorClient.h"
+ #include "EventLoop.h"
+ #include "EventTargetInterfaces.h"
+ #include "FrameInlines.h"
+@@ -47,6 +48,7 @@
+ #include "Navigator.h"
+ #include "PagePasteboardContext.h"
+ #include "Pasteboard.h"
++#include "PermissionsPolicy.h"
+ #include "Settings.h"
+ #include "SharedBuffer.h"
+ #include "TaskSource.h"
+@@ -133,6 +135,20 @@ void Clipboard::readText(Ref<DeferredPromise>&& promise)
+         return;
+     }
+ 
++#if PLATFORM(WASM)
++    requestHostClipboard(*frame, WTF::move(promise), &Clipboard::readTextWithAccess);
++}
++
++void Clipboard::readTextWithAccess(Ref<DeferredPromise>&& promise)
++{
++    RefPtr frame = this->frame();
++    RefPtr document = frame ? frame->document() : nullptr;
++    if (!document) {
++        promise->reject(ExceptionCode::NotAllowedError);
++        return;
++    }
++#endif
++
+     auto reject = [&] {
+         protect(document->eventLoop())->queueTask(TaskSource::Clipboard,
+             [promise = WTF::move(promise)] mutable {
+@@ -142,10 +158,12 @@ void Clipboard::readText(Ref<DeferredPromise>&& promise)
+ 
+     auto pasteboard = Pasteboard::createForCopyAndPaste(PagePasteboardContext::create(frame->pageID()));
+     auto changeCountAtStart = pasteboard->changeCount();
++#if !PLATFORM(WASM)
+     if (!frame->requestDOMPasteAccess()) {
+         reject();
+         return;
+     }
++#endif
+ 
+     auto allInfo = pasteboard->allPasteboardItemInfo();
+     if (!allInfo) {
+@@ -200,6 +218,21 @@ void Clipboard::read(Ref<DeferredPromise>&& promise)
+         return;
+     }
+ 
++#if PLATFORM(WASM)
++    requestHostClipboard(*frame, WTF::move(promise), &Clipboard::readWithAccess);
++}
++
++void Clipboard::readWithAccess(Ref<DeferredPromise>&& promise)
++{
++    RefPtr frame = this->frame();
++    RefPtr document = frame ? frame->document() : nullptr;
++    if (!document) {
++        m_activeSession = std::nullopt;
++        promise->reject(ExceptionCode::NotAllowedError);
++        return;
++    }
++#endif
++
+     auto reject = [&] {
+         m_activeSession = std::nullopt;
+         protect(document->eventLoop())->queueTask(TaskSource::Clipboard,
+@@ -211,10 +244,12 @@ void Clipboard::read(Ref<DeferredPromise>&& promise)
+     auto pasteboard = Pasteboard::createForCopyAndPaste(PagePasteboardContext::create(frame->pageID()));
+     auto changeCountAtStart = pasteboard->changeCount();
+ 
++#if !PLATFORM(WASM)
+     if (!frame->requestDOMPasteAccess()) {
+         reject();
+         return;
+     }
++#endif
+ 
+     if (!m_activeSession || m_activeSession->changeCount != changeCountAtStart) {
+         auto allInfo = pasteboard->allPasteboardItemInfo();
+@@ -235,6 +270,33 @@ void Clipboard::read(Ref<DeferredPromise>&& promise)
+         });
+ }
+ 
++#if PLATFORM(WASM)
++// The clipboard of the host browser comes asynchronously: the embedder asks the user (frames
++// need the permissions policy 'clipboard-read', like in Chrome), puts it on the pasteboard and
++// answers; only then the page reads it
++void Clipboard::requestHostClipboard(LocalFrame& frame, Ref<DeferredPromise>&& promise, ReadWithAccess readWithAccess)
++{
++    RefPtr document = frame.document();
++    CheckedPtr client = frame.editor().client();
++    if (!document || !client || !PermissionsPolicy::isFeatureEnabled(PermissionsPolicy::Feature::ClipboardRead, *document)) {
++        m_activeSession = std::nullopt;
++        promise->reject(ExceptionCode::NotAllowedError);
++        return;
++    }
++    client->requestClipboardRead(frame, [clipboard = Ref { *this }, document = document.releaseNonNull(), promise = WTF::move(promise), readWithAccess](bool granted) mutable {
++        RefPtr frame = clipboard->frame();
++        if (granted && frame && frame->document() == document.ptr()) {
++            (clipboard.get().*readWithAccess)(WTF::move(promise));
++            return;
++        }
++        clipboard->m_activeSession = std::nullopt;
++        protect(document->eventLoop())->queueTask(TaskSource::Clipboard, [promise = WTF::move(promise)] mutable {
++            promise->reject(ExceptionCode::NotAllowedError);
++        });
++    });
++}
++#endif
++
+ void Clipboard::getType(ClipboardItem& item, const String& type, Ref<DeferredPromise>&& promise)
+ {
+     if (!m_activeSession) {
+diff --git a/Source/WebCore/Modules/async-clipboard/Clipboard.h b/Source/WebCore/Modules/async-clipboard/Clipboard.h
+index 96d24d5b43..65d6b75f0a 100644
+--- a/Source/WebCore/Modules/async-clipboard/Clipboard.h
++++ b/Source/WebCore/Modules/async-clipboard/Clipboard.h
+@@ -77,6 +77,13 @@ private:
+ 
+     Pasteboard& NODELETE activePasteboard();
+ 
++#if PLATFORM(WASM)
++    using ReadWithAccess = void (Clipboard::*)(Ref<DeferredPromise>&&);
++    void requestHostClipboard(LocalFrame&, Ref<DeferredPromise>&&, ReadWithAccess);
++    void readTextWithAccess(Ref<DeferredPromise>&&);
++    void readWithAccess(Ref<DeferredPromise>&&);
++#endif
++
+     enum class SessionIsValid : bool { No, Yes };
+     SessionIsValid updateSessionValidity();
+ 
+diff --git a/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.cpp b/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.cpp
+index 308e0c3a1a..88c2874b8e 100644
+--- a/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.cpp
++++ b/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.cpp
+@@ -28,8 +28,10 @@
+ 
+ #include "Document.h"
+ #include "DocumentPage.h"
++#include "MIMETypeRegistry.h"
+ #include "SharedBuffer.h"
+ #include "markup.h"
++#include <wtf/FileSystem.h>
+ 
+ namespace WebCore {
+ 
+@@ -45,6 +47,18 @@ void ClipboardImageReader::readBuffer(const String&, const String&, Ref<SharedBu
+ 
+ #endif // !PLATFORM(COCOA)
+ 
++#if PLATFORM(WASM)
++// The pasteboard has the image of the host clipboard as a file
++void ClipboardImageReader::readFilename(const String& path)
++{
++    auto type = MIMETypeRegistry::mimeTypeForPath(path);
++    if (!shouldReadBuffer(type))
++        return;
++    if (auto data = FileSystem::readEntireFile(path))
++        readBuffer(path, type, SharedBuffer::create(WTF::move(*data)));
++}
++#endif
++
+ void ClipboardImageReader::readSVG(const SharedBuffer& buffer)
+ {
+     auto sanitizedMarkup = sanitizeSVG(String::fromUTF8(buffer.span()), m_document.get());
+diff --git a/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.h b/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.h
+index 89401cd21a..567d748ed8 100644
+--- a/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.h
++++ b/Source/WebCore/Modules/async-clipboard/ClipboardImageReader.h
+@@ -45,7 +45,11 @@ struct ClipboardImageReader : PasteboardFileReader {
+     RefPtr<Blob> takeResult() { return std::exchange(m_result, nullptr); }
+ 
+ private:
++#if PLATFORM(WASM)
++    void readFilename(const String&) final;
++#else
+     void readFilename(const String&) final { ASSERT_NOT_REACHED(); }
++#endif
+ 
+     bool shouldReadBuffer(const String&) const final;
+     void readBuffer(const String& filename, const String& type, Ref<SharedBuffer>&&) final;
+diff --git a/Source/WebCore/PlatformWasm.cmake b/Source/WebCore/PlatformWasm.cmake
+index 62a6cf26f4..b5b65202a2 100644
+--- a/Source/WebCore/PlatformWasm.cmake
++++ b/Source/WebCore/PlatformWasm.cmake
+@@ -56,6 +56,7 @@ list(APPEND WebCore_SOURCES
+     platform/unix/SharedMemoryUnix.cpp
+ 
+     dom/glib/PointerEventGLib.cpp
++    editing/glib/WebContentReaderGLib.cpp
+     page/glib/DragControllerGLib.cpp
+     platform/wasm/CurlSSLHandleWasm.cpp
+     platform/skia/DragImageSkia.cpp
+diff --git a/Source/WebCore/editing/WebContentReader.cpp b/Source/WebCore/editing/WebContentReader.cpp
+index 63422b15c1..ac9a7f3af2 100644
+--- a/Source/WebCore/editing/WebContentReader.cpp
++++ b/Source/WebCore/editing/WebContentReader.cpp
+@@ -52,7 +52,7 @@ MSOListQuirks FrameWebContentReader::msoListQuirksForMarkup() const
+     return contentOrigin().isNull() ? MSOListQuirks::CheckIfNeeded : MSOListQuirks::Disabled;
+ }
+ 
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+ bool WebContentReader::readFilePaths(const Vector<String>& paths)
+ {
+     if (paths.isEmpty() || !frame().document())
+diff --git a/Source/WebCore/editing/WebContentReader.h b/Source/WebCore/editing/WebContentReader.h
+index e1c498e358..3ad2be624b 100644
+--- a/Source/WebCore/editing/WebContentReader.h
++++ b/Source/WebCore/editing/WebContentReader.h
+@@ -63,7 +63,7 @@ public:
+     WebContentReader(LocalFrame& frame, const SimpleRange& context, bool allowPlainText)
+         : FrameWebContentReader(frame)
+         , m_context(context)
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+         , m_allowPlainText(allowPlainText)
+ #endif
+     {
+@@ -77,7 +77,7 @@ public:
+     bool madeFragmentFromPlainText() const { return m_madeFragmentFromPlainText; }
+ 
+ private:
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     bool readFilePath(const String&, PresentationSize preferredPresentationSize = { }, const String& contentType = { }) override;
+     bool readFilePaths(const Vector<String>&) override;
+     bool readHTML(const String&) override;
+@@ -94,7 +94,7 @@ private:
+ #endif
+ 
+     const SimpleRange m_context;
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     const bool m_allowPlainText;
+ #endif
+ 
+@@ -112,7 +112,7 @@ public:
+     String takeMarkup() { return std::exchange(m_markup, { }); }
+ 
+ private:
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     bool readFilePath(const String&, PresentationSize = { }, const String& = { }) override { return false; }
+     bool readFilePaths(const Vector<String>&) override { return false; }
+     bool readHTML(const String&) override;
+diff --git a/Source/WebCore/editing/glib/WebContentReaderGLib.cpp b/Source/WebCore/editing/glib/WebContentReaderGLib.cpp
+index c2ca3443f2..22a03f00e5 100644
+--- a/Source/WebCore/editing/glib/WebContentReaderGLib.cpp
++++ b/Source/WebCore/editing/glib/WebContentReaderGLib.cpp
+@@ -26,7 +26,7 @@
+ #include "config.h"
+ #include "WebContentReader.h"
+ 
+-#if PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+ #include "Blob.h"
+ #include "BlobURL.h"
+ #include "DOMURL.h"
+@@ -111,4 +111,4 @@ bool WebContentMarkupReader::readHTML(const String& string)
+ 
+ } // namespace WebCore
+ 
+-#endif // PLATFORM(GTK) || PLATFORM(WPE)
++#endif // PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+diff --git a/Source/WebCore/html/PermissionsPolicy.cpp b/Source/WebCore/html/PermissionsPolicy.cpp
+index 5417f27897..45d5593ab3 100644
+--- a/Source/WebCore/html/PermissionsPolicy.cpp
++++ b/Source/WebCore/html/PermissionsPolicy.cpp
+@@ -51,6 +51,10 @@ static ASCIILiteral toFeatureNameForLogging(PermissionsPolicy::Feature feature)
+         return "Camera"_s;
+     case PermissionsPolicy::Feature::Microphone:
+         return "Microphone"_s;
++#if PLATFORM(WASM)
++    case PermissionsPolicy::Feature::ClipboardRead:
++        return "ClipboardRead"_s;
++#endif
+     case PermissionsPolicy::Feature::SpeakerSelection:
+         return "SpeakerSelection"_s;
+     case PermissionsPolicy::Feature::DisplayCapture:
+@@ -108,6 +112,9 @@ static std::pair<PermissionsPolicy::Feature, StringView> readFeatureIdentifier(S
+ 
+     constexpr auto cameraToken { "camera"_s };
+     constexpr auto microphoneToken { "microphone"_s };
++#if PLATFORM(WASM)
++    constexpr auto clipboardReadToken { "clipboard-read"_s };
++#endif
+     constexpr auto speakerSelectionToken { "speaker-selection"_s };
+     constexpr auto displayCaptureToken { "display-capture"_s };
+     constexpr auto gamepadToken { "gamepad"_s };
+@@ -138,6 +145,11 @@ static std::pair<PermissionsPolicy::Feature, StringView> readFeatureIdentifier(S
+     } else if (value.startsWith(microphoneToken)) {
+         feature = PermissionsPolicy::Feature::Microphone;
+         remainingValue = value.substring(microphoneToken.length());
++#if PLATFORM(WASM)
++    } else if (value.startsWith(clipboardReadToken)) {
++        feature = PermissionsPolicy::Feature::ClipboardRead;
++        remainingValue = value.substring(clipboardReadToken.length());
++#endif
+     } else if (value.startsWith(speakerSelectionToken)) {
+         feature = PermissionsPolicy::Feature::SpeakerSelection;
+         remainingValue = value.substring(speakerSelectionToken.length());
+@@ -215,6 +227,9 @@ static ASCIILiteral defaultAllowlistValue(PermissionsPolicy::Feature feature)
+         return "*"_s;
+     case PermissionsPolicy::Feature::Camera:
+     case PermissionsPolicy::Feature::Microphone:
++#if PLATFORM(WASM)
++    case PermissionsPolicy::Feature::ClipboardRead:
++#endif
+     case PermissionsPolicy::Feature::SpeakerSelection:
+     case PermissionsPolicy::Feature::DisplayCapture:
+     case PermissionsPolicy::Feature::Geolocation:
+diff --git a/Source/WebCore/html/PermissionsPolicy.h b/Source/WebCore/html/PermissionsPolicy.h
+index a8ad291b48..d6a2498d19 100644
+--- a/Source/WebCore/html/PermissionsPolicy.h
++++ b/Source/WebCore/html/PermissionsPolicy.h
+@@ -48,6 +48,9 @@ public:
+     enum class Feature : uint8_t {
+         Camera = 0,
+         Microphone,
++#if PLATFORM(WASM)
++        ClipboardRead,
++#endif
+         SpeakerSelection,
+         DisplayCapture,
+         Gamepad,
+diff --git a/Source/WebCore/page/EditorClient.h b/Source/WebCore/page/EditorClient.h
+index ebb465dd53..209842106a 100644
+--- a/Source/WebCore/page/EditorClient.h
++++ b/Source/WebCore/page/EditorClient.h
+@@ -34,6 +34,9 @@
+ #include <WebCore/UndoStep.h>
+ #include <wtf/CheckedPtr.h>
+ #include <wtf/Forward.h>
++#if PLATFORM(WASM)
++#include <wtf/CompletionHandler.h>
++#endif
+ #include <wtf/Platform.h>
+ #include <wtf/TZoneMallocInlines.h>
+ #include <wtf/Vector.h>
+@@ -125,6 +128,11 @@ public:
+     virtual void handleAcceptedCandidateWithSoftSpaces(TextCheckingResult) { }
+ 
+     virtual DOMPasteAccessResponse requestDOMPasteAccess(DOMPasteAccessCategory, FrameIdentifier, const String& originIdentifier) = 0;
++#if PLATFORM(WASM)
++    // navigator.clipboard.read() and readText() of the frame: the embedder asks the user and puts
++    // the clipboard of the host browser on the pasteboard before it answers true
++    virtual void requestClipboardRead(LocalFrame&, CompletionHandler<void(bool)>&& completionHandler) { completionHandler(false); }
++#endif
+ 
+     // Notify an input method that a composition was voluntarily discarded by WebCore, so that it could clean up too.
+     // This function is not called when a composition is closed per a request from an input method.
+diff --git a/Source/WebCore/platform/Pasteboard.cpp b/Source/WebCore/platform/Pasteboard.cpp
+index e839a0adcd..0bb2fcb6c9 100644
+--- a/Source/WebCore/platform/Pasteboard.cpp
++++ b/Source/WebCore/platform/Pasteboard.cpp
+@@ -66,6 +66,9 @@ std::optional<Vector<PasteboardItemInfo>> Pasteboard::allPasteboardItemInfo() co
+ #if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
+     if (CheckedPtr strategy = platformStrategies()->pasteboardStrategy())
+         return strategy->allPasteboardItemInfo(name(), m_changeCount, context());
++#elif PLATFORM(WASM)
++    if (CheckedPtr strategy = platformStrategies()->pasteboardStrategy())
++        return strategy->allPasteboardItemInfo(name(), changeCount(), context());
+ #endif
+     return std::nullopt;
+ }
+@@ -75,6 +78,9 @@ std::optional<PasteboardItemInfo> Pasteboard::pasteboardItemInfo(size_t index) c
+ #if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
+     if (CheckedPtr strategy = platformStrategies()->pasteboardStrategy())
+         return strategy->informationForItemAtIndex(index, name(), m_changeCount, context());
++#elif PLATFORM(WASM)
++    if (CheckedPtr strategy = platformStrategies()->pasteboardStrategy())
++        return strategy->informationForItemAtIndex(index, name(), changeCount(), context());
+ #else
+     UNUSED_PARAM(index);
+ #endif
+diff --git a/Source/WebCore/platform/Pasteboard.h b/Source/WebCore/platform/Pasteboard.h
+index d6406bea2b..fca8a282d7 100644
+--- a/Source/WebCore/platform/Pasteboard.h
++++ b/Source/WebCore/platform/Pasteboard.h
+@@ -156,7 +156,7 @@ class PasteboardWebContentReader {
+ public:
+     virtual ~PasteboardWebContentReader() = default;
+ 
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     virtual bool readFilePath(const String&, PresentationSize preferredPresentationSize = { }, const String& contentType = { }) = 0;
+     virtual bool readFilePaths(const Vector<String>&) = 0;
+     virtual bool readHTML(const String&) = 0;
+@@ -298,7 +298,7 @@ public:
+     const PasteboardCustomData& readCustomData();
+ #endif
+ 
+-#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE)
++#if PLATFORM(COCOA) || PLATFORM(GTK) || PLATFORM(WPE) || PLATFORM(WASM)
+     int64_t changeCount() const;
+ #else
+     int64_t changeCount() const { return 0; }
+diff --git a/Source/WebCore/platform/PlatformPasteboard.h b/Source/WebCore/platform/PlatformPasteboard.h
+index 51a9bff158..5a1223094b 100644
+--- a/Source/WebCore/platform/PlatformPasteboard.h
++++ b/Source/WebCore/platform/PlatformPasteboard.h
+@@ -130,10 +130,6 @@ private:
+     struct wpe_pasteboard* m_pasteboard;
+     int64_t m_changeCount { 0 };
+ #endif
+-#if PLATFORM(WASM)
+-    // browser-lite: in-memory clipboard, the embedder syncs it with the host
+-    int64_t m_changeCount { 0 };
+-#endif
+ };
+ 
+ } // namespace WebCore
+diff --git a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+index 823b013cfe..5db28c9ff2 100644
+--- a/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
++++ b/Source/WebCore/platform/libwpe/PasteboardLibWPE.cpp
+@@ -166,10 +166,37 @@ void Pasteboard::read(PasteboardPlainText& text, PlainTextURLReadingPolicy, std:
+     text.text = platformStrategies()->pasteboardStrategy()->readStringFromPasteboard(0, "text/plain;charset=utf-8"_s, name(), context());
+ }
+ 
++#if PLATFORM(WASM)
++int64_t Pasteboard::changeCount() const
++{
++    if (DRAG_CONTENT(drag))
++        return 0;
++    return WasmPlatform::clipboardChangeCount();
++}
++
++// navigator.clipboard.read() and DataTransfer.getData("text/html"): the HTML, else the text
++void Pasteboard::read(PasteboardWebContentReader& reader, WebContentReadingPolicy policy, std::optional<size_t>)
++{
++    if (DRAG_CONTENT(drag)) {
++        auto markup = drag->string("text/html"_s);
++        if (!markup.isEmpty() && reader.readHTML(markup))
++            return;
++        if (policy == WebContentReadingPolicy::AnyType)
++            reader.readPlainText(drag->string("text/plain"_s));
++        return;
++    }
++    auto markup = readString("text/html"_s);
++    if (!markup.isEmpty() && reader.readHTML(markup))
++        return;
++    if (policy == WebContentReadingPolicy::AnyType)
++        reader.readPlainText(readString("text/plain"_s));
++}
++#else
+ void Pasteboard::read(PasteboardWebContentReader&, WebContentReadingPolicy, std::optional<size_t>)
+ {
+     notImplemented();
+ }
++#endif
+ 
+ void Pasteboard::read(PasteboardFileReader& reader, std::optional<size_t>)
+ {
+diff --git a/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp b/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp
+index 90b3c91a47..807ffc1ff4 100644
+--- a/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp
++++ b/Source/WebCore/platform/wasm/PlatformPasteboardWasm.cpp
+@@ -28,8 +28,10 @@
+ 
+ #if PLATFORM(WASM)
+ 
++#include "MIMETypeRegistry.h"
+ #include "Pasteboard.h"
+ #include "PasteboardCustomData.h"
++#include "PasteboardItemInfo.h"
+ #include "WasmPlatform.h"
+ 
+ namespace WebCore {
+@@ -52,7 +54,37 @@ void PlatformPasteboard::performAsDataOwner(DataOwnerType, NOESCAPE Function<voi
+ 
+ int64_t PlatformPasteboard::changeCount() const
+ {
+-    return m_changeCount;
++    return WasmPlatform::clipboardChangeCount();
++}
++
++// The clipboard as one item for navigator.clipboard.read() and readText(), with the types a
++// page may read like Chrome: text/plain, text/html and image/png (a pasted image file)
++std::optional<Vector<PasteboardItemInfo>> PlatformPasteboard::allPasteboardItemInfo(int64_t changeCount)
++{
++    if (changeCount != this->changeCount())
++        return std::nullopt;
++    PasteboardItemInfo info;
++    for (auto& item : WasmPlatform::clipboardContents()) {
++        auto type = item.first.startsWith("text/plain"_s) ? "text/plain"_s : item.first;
++        if ((type == "text/plain"_s || type == "text/html"_s) && !info.webSafeTypesByFidelity.contains(type))
++            info.webSafeTypesByFidelity.append(type);
++    }
++    for (auto& path : WasmPlatform::clipboardFiles()) {
++        if (MIMETypeRegistry::mimeTypeForPath(path) == "image/png"_s && !info.webSafeTypesByFidelity.contains("image/png"_s))
++            info.webSafeTypesByFidelity.append("image/png"_s);
++    }
++    if (info.webSafeTypesByFidelity.isEmpty())
++        return Vector<PasteboardItemInfo> { };
++    info.platformTypesByFidelity = info.webSafeTypesByFidelity;
++    return Vector<PasteboardItemInfo> { WTF::move(info) };
++}
++
++std::optional<PasteboardItemInfo> PlatformPasteboard::informationForItemAtIndex(size_t index, int64_t changeCount)
++{
++    auto items = allPasteboardItemInfo(changeCount);
++    if (!items || index >= items->size())
++        return std::nullopt;
++    return items->at(index);
+ }
+ 
+ void PlatformPasteboard::getTypes(Vector<String>& types) const
+@@ -78,7 +110,6 @@ void PlatformPasteboard::write(const PasteboardWebContent& content)
+     if (!content.markup.isNull())
+         items.append({ "text/html"_s, content.markup });
+     WasmPlatform::setClipboardContents(WTF::move(items));
+-    m_changeCount++;
+ }
+ 
+ void PlatformPasteboard::write(const String& type, const String& string)
+@@ -86,7 +117,6 @@ void PlatformPasteboard::write(const String& type, const String& string)
+     WasmPlatform::ClipboardItems items;
+     items.append({ type, string });
+     WasmPlatform::setClipboardContents(WTF::move(items));
+-    m_changeCount++;
+ }
+ 
+ Vector<String> PlatformPasteboard::typesSafeForDOMToReadAndWrite(const String&) const
+@@ -106,16 +136,16 @@ int64_t PlatformPasteboard::write(const PasteboardCustomData& customData, Pasteb
+         }
+     });
+     if (contents.text.isNull() && contents.markup.isNull())
+-        return m_changeCount;
++        return changeCount();
+ 
+     write(contents);
+-    return m_changeCount;
++    return changeCount();
+ }
+ 
+ int64_t PlatformPasteboard::write(const Vector<PasteboardCustomData>& data, PasteboardDataLifetime)
+ {
+     if (data.size() != 1)
+-        return m_changeCount;
++        return changeCount();
+     return write(data[0]);
+ }
+ 
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.cpp b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+index cc547b5ac1..1fbc1d82bf 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.cpp
++++ b/Source/WebCore/platform/wasm/WasmPlatform.cpp
+@@ -106,10 +106,18 @@ static Vector<String>& clipboardFileStorage()
+     return files;
+ }
+ 
++static int64_t clipboardChanges;
++
++int64_t clipboardChangeCount()
++{
++    return clipboardChanges;
++}
++
+ void setClipboardContents(ClipboardItems&& items)
+ {
+     clipboardStorage() = WTF::move(items);
+     clipboardFileStorage().clear();
++    clipboardChanges++;
+     if (auto& callback = clipboardCallback())
+         callback(clipboardStorage());
+ }
+@@ -128,6 +136,7 @@ void setClipboardFromHost(ClipboardItems&& items, Vector<String>&& files)
+ {
+     clipboardStorage() = WTF::move(items);
+     clipboardFileStorage() = WTF::move(files);
++    clipboardChanges++;
+ }
+ 
+ const Vector<String>& clipboardFiles()
+diff --git a/Source/WebCore/platform/wasm/WasmPlatform.h b/Source/WebCore/platform/wasm/WasmPlatform.h
+index 0d803cbe8b..3fed20951b 100644
+--- a/Source/WebCore/platform/wasm/WasmPlatform.h
++++ b/Source/WebCore/platform/wasm/WasmPlatform.h
+@@ -95,6 +95,9 @@ WEBCORE_EXPORT void setClipboardChangedCallback(Function<void(const ClipboardIte
+ // overwrite for example a copied image there). files: paths in the engine file system
+ WEBCORE_EXPORT void setClipboardFromHost(ClipboardItems&&, Vector<String>&& files);
+ WEBCORE_EXPORT const Vector<String>& clipboardFiles();
++// Counts every change of the clipboard (Pasteboard::changeCount): a navigator.clipboard.read()
++// session ends when the content changes
++WEBCORE_EXPORT int64_t clipboardChangeCount();
+ 
+ // Speech output (speechSynthesis): the host browser does the speaking. The
+ // embedder sets the voices and forwards the events of the host.

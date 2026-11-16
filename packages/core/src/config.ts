@@ -278,6 +278,7 @@ export const PERMISSION_KINDS: readonly PermissionKind[] = [
   'camera',
   'microphone',
   'camera-microphone',
+  'clipboard-read',
   'popups',
 ];
 

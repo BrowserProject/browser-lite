@@ -2,6 +2,7 @@
 #include "EditorClient.h"
 
 #include "Host.h"
+#include "HostClipboard.h"
 
 #include <WebCore/Document.h>
 #include <WebCore/EnterKeyHint.h>
@@ -30,6 +31,7 @@
 #include <WebCore/NodeInlines.h>
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/RenderObjectInlines.h>
+#include <WebCore/SecurityOrigin.h>
 #include <wtf/SetForScope.h>
 #include <wtf/TZoneMallocInlines.h>
 #include <wtf/text/MakeString.h>
@@ -139,6 +141,18 @@ void focusNextField(Page& page)
 bool takesTextInput(Page& page)
 {
     return !!focusedTextInput(page);
+}
+
+// Like Chrome: the decision of the top page applies, its frames need the permissions policy
+// 'clipboard-read' (WebCore Clipboard)
+void EditorClient::requestClipboardRead(LocalFrame& frame, CompletionHandler<void(bool)>&& completionHandler)
+{
+    RefPtr document = frame.document();
+    if (!document) {
+        completionHandler(false);
+        return;
+    }
+    requestHostClipboard(m_viewId, document->topOrigin().toString(), WTF::move(completionHandler));
 }
 
 void EditorClient::updateTextInput(LocalFrame& frame)

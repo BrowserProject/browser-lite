@@ -1,9 +1,10 @@
 // Clipboard (paste and clipboard of the core, engine/src/Exports.cpp bl_set_clipboard, WebCore
 // PasteboardLibWPE.cpp): paste text, HTML and images from the host (paste event of the page,
 // formatted in contenteditable), copy with HTML into the real clipboard and
-// navigator.clipboard.writeText() and write() of the page into the real clipboard. Also double and
-// triple click (the core counts the clicks) and text input with a preview (IME, through the
-// DevTools protocol).
+// navigator.clipboard.writeText() and write() of the page into the real clipboard,
+// navigator.clipboard.readText() and read() from the real clipboard after the permission prompt
+// (engine/src/HostClipboard.cpp, patch 0150). Also double and triple click (the core counts the
+// clicks) and text input with a preview (IME, through the DevTools protocol).
 //
 //   node tests/core/clipboard-test.mjs [engine-dir]
 import {
@@ -38,6 +39,10 @@ button { position: absolute; left: 20px; width: 200px; height: 40px }
 <textarea id="jp"></textarea>
 <button id="writetext" style="top: 400px">writeText</button>
 <button id="writeitem" style="top: 460px">write</button>
+<button id="readtext" style="top: 520px">readText</button>
+<button id="readall" style="top: 580px">read</button>
+<iframe name="denied" style="position: absolute; left: 450px; top: 400px; width: 300px; height: 60px; border: 0" src="FRAME_URL"></iframe>
+<iframe name="allowed" allow="clipboard-read" style="position: absolute; left: 450px; top: 500px; width: 300px; height: 60px; border: 0" src="FRAME_URL"></iframe>
 <script>
 const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
 const editor = document.getElementById('editor');
@@ -70,12 +75,42 @@ document.getElementById('writeitem').onclick = () =>
   settle('writeitem', navigator.clipboard.write([
     new ClipboardItem({ 'text/plain': new Blob(['From ClipboardItem'], { type: 'text/plain' }) }),
   ]));
+document.getElementById('readtext').onclick = () =>
+  navigator.clipboard.readText().then((text) => log('readtext', 'ok:' + text), (e) => log('readtext', e.name));
+document.getElementById('readall').onclick = async () => {
+  try {
+    const items = await navigator.clipboard.read();
+    const item = items[0];
+    const html = await (await item.getType('text/html')).text();
+    const png = await item.getType('image/png');
+    log('readall', [items.length, item.types.join(','), await (await item.getType('text/plain')).text(),
+      /<b[ >][^<]*bold<\\/b>/.test(html) ? 'html' : 'nohtml:' + html, png.type + ':' + png.size].join('|'));
+  } catch (e) {
+    log('readall', e.name);
+  }
+};
+navigator.clipboard.readText().then(() => log('noactivation', 'ok'), (e) => log('noactivation', e.name));
 document.addEventListener('copy', () => { log('selection', getSelection().toString()); log('copied', 1); });
 log('ready', 1);
 </script>`;
 
+// Another origin: frames of the page, and a page of its own
+const FRAME = `<!doctype html><style>body { margin: 0 } button { width: 100%; height: 60px }</style>
+<button>read</button>
+<script>
+const log = (key, value) => console.log('RESULT ' + key + '=' + String(value).replace(/\\s/g, '_'));
+const key = window === top ? 'other' : 'frame' + name;
+document.querySelector('button').onclick = () =>
+  navigator.clipboard.readText().then((text) => log(key, 'ok:' + text), (e) => log(key, e.name));
+log(key + 'ready', 1);
+</script>`;
+const { url: otherURL } = await serve((req, res) =>
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(FRAME),
+);
 const { url: siteURL } = await serve((req, res) =>
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(PAGE),
+  res
+    .writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    .end(PAGE.replaceAll('FRAME_URL', otherURL)),
 );
 
 const stack = await startStack({ token: 'clipboard-token-0123456789abcdef' });
@@ -208,7 +243,78 @@ for (const [id, top, text] of [
   check(`${id}: text in the real clipboard`, written?.text === text, JSON.stringify(written));
 }
 
-// 5. Input method (IME): preview in the page, candidate window at the cursor
+// 5. The page reads the real clipboard after the permission 'clipboard-read' of the top site
+// (the handler of the host page: 'wait' holds the question open, 'grant' answers)
+const clipboardQuestions = () =>
+  page.evaluate(() =>
+    window.blHost.permissionRequests
+      .filter((r) => r.kind === 'clipboard-read')
+      .map((r) => r.origin)
+      .join(','),
+  );
+const answerClipboard = (answer) =>
+  page.evaluate((answer) => {
+    window.blHost.permissionAnswers['clipboard-read'] = answer;
+  }, answer);
+check(
+  'readText() without a user activation: NotAllowedError',
+  (await result('noactivation')) === 'NotAllowedError',
+  results.get('noactivation'),
+);
+await page.evaluate(async () => {
+  const png = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    ),
+    (c) => c.charCodeAt(0),
+  );
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      'text/plain': new Blob(['Host text'], { type: 'text/plain' }),
+      'text/html': new Blob(['<meta charset="utf-8">Host <b>bold</b>'], { type: 'text/html' }),
+      'image/png': new Blob([png], { type: 'image/png' }),
+    }),
+  ]);
+});
+await answerClipboard('grant');
+await page.mouse.click(box.x + 100, box.y + 540);
+check(
+  'readText(): the text of the real clipboard',
+  (await result('readtext')) === 'ok:Host_text',
+  results.get('readtext'),
+);
+const siteOrigin = new URL(siteURL).origin;
+check(
+  'readText() asked for the permission clipboard-read of the site',
+  (await clipboardQuestions()) === siteOrigin,
+  await clipboardQuestions(),
+);
+await page.mouse.click(box.x + 100, box.y + 600);
+const all = await result('readall');
+check(
+  'read(): text, HTML and the PNG of the real clipboard',
+  /^1\|text\/plain,text\/html,image\/png\|Host_text\|html\|image\/png:\d+$/.test(all),
+  all,
+);
+check(
+  'read() asks no more (the decision is remembered)',
+  (await clipboardQuestions()) === siteOrigin,
+  await clipboardQuestions(),
+);
+await page.mouse.click(box.x + 600, box.y + 430);
+check(
+  'a frame of another site without allow="clipboard-read": NotAllowedError',
+  (await result('framedenied')) === 'NotAllowedError',
+  results.get('framedenied'),
+);
+await page.mouse.click(box.x + 600, box.y + 530);
+check(
+  'a frame of another site with allow="clipboard-read" reads with the decision of the top site',
+  (await result('frameallowed')) === 'ok:Host_text',
+  results.get('frameallowed'),
+);
+
+// 6. Input method (IME): preview in the page, candidate window at the cursor
 if (chromiumOnly('input method (CDP Input.imeSetComposition)')) {
   await page.mouse.click(box.x + 100, box.y + 320);
   await page.waitForTimeout(300);
@@ -240,6 +346,23 @@ if (chromiumOnly('input method (CDP Input.imeSetComposition)')) {
     JSON.stringify(imePlace),
   );
 }
+
+// 7. Another site, the question denied: NotAllowedError
+await openHost(page, stack.app({ url: otherURL }));
+await result('otherready', TIMEOUT);
+await answerClipboard('deny');
+const otherBox = await canvasOrigin(page);
+await page.mouse.click(otherBox.x + 100, otherBox.y + 30);
+check(
+  'readText() denied: NotAllowedError',
+  (await result('other')) === 'NotAllowedError',
+  results.get('other'),
+);
+check(
+  'readText() denied: asked for the other site',
+  (await clipboardQuestions()) === new URL(otherURL).origin,
+  await clipboardQuestions(),
+);
 
 await browser.close();
 finish();

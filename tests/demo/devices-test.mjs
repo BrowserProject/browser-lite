@@ -1,6 +1,7 @@
 // Permission requests in the demo UI (the permission prompt of the ui package, decisions stored
 // in the profile; the engine side is tests/core/devices-test.mjs): location, notifications and the
-// microphone for speech recognition with the prompt like in Chrome, a prompt of a closed tab goes
+// microphone for speech recognition and the clipboard (navigator.clipboard.readText) with the
+// prompt like in Chrome, a prompt of a closed tab goes
 // away and is not stored, permissions.query with the stored decisions, Block denies, Escape in
 // the view dismisses, leaving the page dismisses its prompt.
 //
@@ -12,6 +13,7 @@ import {
   collect,
   finish,
   launch,
+  permissions,
   serve,
   startStack,
   timeLimit,
@@ -25,10 +27,12 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
   #geo { position: absolute; left: 20px; top: 200px; width: 200px; height: 40px; }
   #notify { position: absolute; left: 260px; top: 200px; width: 200px; height: 40px; }
   #speech { position: absolute; left: 500px; top: 200px; width: 200px; height: 40px; }
+  #paste { position: absolute; left: 740px; top: 200px; width: 200px; height: 40px; }
 </style></head><body>
 <button id="geo">Location</button>
 <button id="notify">Notification</button>
 <button id="speech">Speak</button>
+<button id="paste">Paste</button>
 <script>
   const result = (key, value) => console.log('RESULT ' + key + '=' + value);
   document.getElementById('geo').addEventListener('click', () => {
@@ -47,6 +51,9 @@ const PAGE = `<!doctype html><html><head><title>Devices test</title>
     recognition.onerror = (e) => result('speecherror', e.error);
     recognition.start();
   });
+  document.getElementById('paste').addEventListener('click', () => {
+    navigator.clipboard.readText().then((text) => result('pasted', text), (e) => result('pasted', e.name));
+  });
   result('ready', 1);
 </script></body></html>`;
 const { url: siteURL } = await serve((req, res) =>
@@ -62,7 +69,7 @@ const browser = await launch();
 const context = await browser.newContext({
   viewport: { width: 1000, height: 700 },
   geolocation: { latitude: 46.948, longitude: 7.447 },
-  permissions: ['geolocation', 'notifications'],
+  permissions: permissions(['geolocation', 'notifications', 'clipboard-read', 'clipboard-write']),
 });
 // Speech recognition of the host as a stand-in (headless has no microphone)
 await context.addInitScript(() => {
@@ -134,7 +141,24 @@ check(
   results.get('speechresult') || results.get('speecherror'),
 );
 
-// 4) Close a tab with an open prompt: the prompt goes away and is not stored
+// 4) Clipboard: Chrome's question, after "Allow" the text of the real clipboard
+await page.evaluate(() => navigator.clipboard.writeText('Host text'));
+await page.mouse.click(...(await at(840, 220)));
+const clipboardPrompt = await promptShown();
+check(
+  'clipboard: prompt like Chrome',
+  clipboardPrompt &&
+    /wants to see text and images copied to the clipboard/.test(await prompt.textContent()),
+);
+check('clipboard: readText() waits for the answer', !results.has('pasted'));
+if (clipboardPrompt) await prompt.locator('button', { hasText: 'Allow' }).click();
+check(
+  'clipboard: the text after Allow',
+  (await result('pasted', 15000)) === 'Host text',
+  results.get('pasted'),
+);
+
+// 5) Close a tab with an open prompt: the prompt goes away and is not stored
 await page.click('#new-tab');
 await page.fill('#address', `${siteURL}?second-tab`);
 await page.press('#address', 'Enter');
@@ -166,7 +190,7 @@ const stored = await page.evaluate(() =>
 );
 check('closed tab: prompt gone and not stored', promptGone && !stored.includes('camera'), stored);
 
-// 5) permissions.query answers with the stored decisions; the camera is still open after the
+// 6) permissions.query answers with the stored decisions; the camera is still open after the
 // closed tab
 const queryPermissions = () =>
   page.evaluate(() =>
@@ -211,7 +235,7 @@ check(
   blocked,
 );
 
-// 6) Escape with the focus in the view dismisses (nothing stored); leaving the page dismisses its prompt, so an answer can no longer go to the old origin
+// 7) Escape with the focus in the view dismisses (nothing stored); leaving the page dismisses its prompt, so an answer can no longer go to the old origin
 const otherOrigin = new URL(otherURL).origin;
 results.delete('ready');
 await page.fill('#address', otherURL);

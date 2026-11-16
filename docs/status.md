@@ -70,7 +70,10 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
 - **Input**: keyboard incl. dead keys and IME preview (#127), Backspace and suggestions of
   Android keyboards after typing (#411), clipboard with HTML and files
   (#126), copy buttons of sites through `navigator.clipboard.writeText()` and `write()` (text
-  and HTML, #469; before, the promise resolved and nothing reached the clipboard), drag and drop
+  and HTML, #469; before, the promise resolved and nothing reached the clipboard), Paste buttons
+  of sites through `navigator.clipboard.readText()` and `read()` after Chrome's question (text,
+  HTML and PNG, frames with `allow="clipboard-read"`, #587; before, both rejected at once with
+  `NotAllowedError`), drag and drop
   (#125), also out of the page onto the embedding page, where the demo opens a link or text
   dropped on the tab strip in a new tab or the tab under it and one dropped on the address bar in
   the active tab like Chrome (#534: before, nothing outside the view could take a drag of
@@ -933,6 +936,13 @@ browser (Safari keeps Cmd+L, T and W for itself).
 - Clipboard: an image (`image/png`) in a `ClipboardItem` of `navigator.clipboard.write()` does not
   reach the host, only text and HTML do (#469; the event `clipboard` carries no files). Like
   WebKit, a write with several items resolves, Chrome rejects it.
+- Clipboard reads (#587): `navigator.permissions.query({ name: 'clipboard-read' })` throws a
+  `TypeError` like Safari (WebKit has no such permission name), Chrome answers with the state.
+  The host browser keeps its own say over its clipboard: Chrome asks the embedding origin once,
+  Safari and Firefox show their Paste button unless the content came from the host page, and a
+  host that refuses gives the page `NotAllowedError`. Checked in Chromium and Firefox, not yet on
+  a Safari device. `read()` gives one item with `text/plain`, `text/html` and `image/png`, no
+  other image types and no custom formats (Chrome has `web ` formats).
 - Typed addresses (#435): the engine commits its error page of the failed `https://` load before
   the core falls back to `http://`, so the page shows for a moment and the failed address stays in
   back/forward before the `http://` page (Chrome keeps one entry). Falling back in the engine's

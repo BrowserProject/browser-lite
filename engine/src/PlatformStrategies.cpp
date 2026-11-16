@@ -99,8 +99,14 @@ class WasmPasteboardStrategy final : public PasteboardStrategy {
     }
     RefPtr<SharedBuffer> readBufferFromPasteboard(std::optional<size_t>, const String&, const String&, const PasteboardContext*) final { return nullptr; }
     URL readURLFromPasteboard(size_t, const String&, String&, const PasteboardContext*) final { return { }; }
-    std::optional<PasteboardItemInfo> informationForItemAtIndex(size_t, const String&, int64_t, const PasteboardContext*) final { return std::nullopt; }
-    std::optional<Vector<PasteboardItemInfo>> allPasteboardItemInfo(const String&, int64_t, const PasteboardContext*) final { return std::nullopt; }
+    std::optional<PasteboardItemInfo> informationForItemAtIndex(size_t index, const String& name, int64_t changeCount, const PasteboardContext*) final
+    {
+        return PlatformPasteboard(name).informationForItemAtIndex(index, changeCount);
+    }
+    std::optional<Vector<PasteboardItemInfo>> allPasteboardItemInfo(const String& name, int64_t changeCount, const PasteboardContext*) final
+    {
+        return PlatformPasteboard(name).allPasteboardItemInfo(changeCount);
+    }
     int getPasteboardItemsCount(const String&, const PasteboardContext*) final { return 1; }
     Vector<String> typesSafeForDOMToReadAndWrite(const String& name, const String& origin, const PasteboardContext*) final
     {

@@ -50,6 +50,7 @@ add_executable(BrowserLiteEngine
     ${BL_ENGINE_SRC}/UserNavigation.cpp
     ${BL_ENGINE_SRC}/HostLayers.cpp
     ${BL_ENGINE_SRC}/Host.cpp
+    ${BL_ENGINE_SRC}/HostClipboard.cpp
     ${BL_ENGINE_SRC}/HostRegExp.cpp
     ${BL_ENGINE_SRC}/LoaderStrategy.cpp
     ${BL_ENGINE_SRC}/Permissions.cpp

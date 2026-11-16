@@ -1,4 +1,4 @@
-import type { ClipboardWriteRequest } from './types.js';
+import type { ClipboardContent, ClipboardWriteRequest } from './types.js';
 
 /**
  * Default of the handler `clipboardWrite`: the clipboard of the host, with HTML like Chrome. An
@@ -41,3 +41,27 @@ export function trackClipboardWrite(text: string, html: string, write: Promise<u
 
 /** The content of a clipboard write still on the way, null when none is. */
 export const pendingClipboardWrite = (): { text: string; html: string } | null => pendingWrite;
+
+/**
+ * Default of the handler `clipboardRead`: the clipboard of the host with text, HTML and a PNG
+ * like Chrome's `navigator.clipboard.read()`, only the text where the host has only `readText()`.
+ * Null when the host refuses (no permission, no user activation, the user dismissed its Paste).
+ */
+export async function readHostClipboard(): Promise<ClipboardContent | null> {
+  const clipboard = navigator.clipboard;
+  if (!clipboard) return null;
+  try {
+    if (typeof clipboard.read !== 'function') return { text: await clipboard.readText(), html: '' };
+    const content: ClipboardContent = { text: '', html: '' };
+    const read = async (item: ClipboardItem, type: string) =>
+      item.types.includes(type) ? item.getType(type) : null;
+    for (const item of await clipboard.read()) {
+      content.text ||= (await (await read(item, 'text/plain'))?.text()) ?? '';
+      content.html ||= (await (await read(item, 'text/html'))?.text()) ?? '';
+      content.image ??= (await read(item, 'image/png')) ?? undefined;
+    }
+    return content;
+  } catch {
+    return null;
+  }
+}

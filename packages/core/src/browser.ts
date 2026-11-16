@@ -551,6 +551,10 @@ class BrowserImpl implements Browser, ViewHost {
         this.requests.permission(view, data as unknown as Parameters<Requests['permission']>[1]);
       }),
     );
+    this.handle<{ id: number }>('clipboard-read', (data, view) => {
+      if (view && !view.closed) void this.requests.clipboardRead(view, data);
+      else this.module._bl_clipboard_read_answer(Number(data.id), 0);
+    });
     this.handle(
       'auth',
       withView((view, data) => {

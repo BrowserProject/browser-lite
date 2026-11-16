@@ -15,6 +15,7 @@
 #include "Gamepad.h"
 #include "HiddenViews.h"
 #include "Host.h"
+#include "HostClipboard.h"
 #include "HttpAuth.h"
 #include "Preconnect.h"
 #include "LayerTreeHostWasm.h"
@@ -850,26 +851,15 @@ EMSCRIPTEN_KEEPALIVE void bl_set_clipboard_text(char* text)
 // Paste from the host: {"text":..,"html":..,"files":[paths in the engine file system]}
 EMSCRIPTEN_KEEPALIVE void bl_set_clipboard(char* data)
 {
-    runOnEngineThread([json = takeString(data)] {
-        WebCore::WasmPlatform::ClipboardItems items;
-        Vector<String> files;
-        auto value = JSON::Value::parseJSON(json);
-        if (auto object = value ? value->asObject() : nullptr) {
-            auto text = object->getString("text"_s);
-            if (!text.isNull())
-                items.append({ "text/plain;charset=utf-8"_s, text });
-            auto html = object->getString("html"_s);
-            if (!html.isEmpty())
-                items.append({ "text/html"_s, html });
-            if (auto array = object->getArray("files"_s)) {
-                for (auto& file : *array)
-                    files.append(file->asString());
-            }
-        }
-        WebCore::WasmPlatform::setClipboardFromHost(WTF::move(items), WTF::move(files));
-    });
+    runOnEngineThread([json = takeString(data)] { setClipboardFromHost(json); });
 }
 
+// Answer to 'clipboard-read' (HostClipboard.cpp): the host clipboard like bl_set_clipboard,
+// null when the host gave none
+EMSCRIPTEN_KEEPALIVE void bl_clipboard_read_answer(int requestId, char* data)
+{
+    runOnEngineThread([requestId, json = takeString(data)] { answerClipboardRead(requestId, json); });
+}
 
 // Writes a chunk of a host file (upload, drag and drop, paste) into the engine
 // file system, offset 0 creates it. Only on the engine thread:

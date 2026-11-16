@@ -65,6 +65,8 @@ static bool permissionFeatureEnabled(const String& kind)
         return featureEnabled(Feature::Notifications);
     if (kind == "camera"_s || kind == "microphone"_s)
         return featureEnabled(Feature::Capture);
+    if (kind == "clipboard-read"_s)
+        return featureEnabled(Feature::Clipboard);
     return true;
 }
 
