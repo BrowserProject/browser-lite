@@ -157,6 +157,8 @@ private:
     bool didPassCORSAccessCheck() const final { return true; }
 
     void send(ASCIILiteral type, const String& json = "{}"_s);
+    // play or pause for the host <video>, numbered (m_playCommand)
+    void sendPlaying(bool);
     void startOverlay();
     void updateOverlayBuffer();
     void setHostHasFrame(bool);
@@ -184,6 +186,10 @@ private:
     WebCore::MediaPlayer::NetworkState m_networkState { WebCore::MediaPlayer::NetworkState::Empty };
     WebCore::MediaPlayer::ReadyState m_readyState { WebCore::MediaPlayer::ReadyState::HaveNothing };
     bool m_paused { true };
+    // Number of the last play or pause sent. The host's reports name the last one it applied: one
+    // that is older still has the paused of before and must not undo the newer command (a pause of
+    // WebCore that a report of the host's earlier play turned into playing with sound, #578)
+    unsigned m_playCommand { 0 };
     float m_streamVolume { 1 };
     bool m_streamMuted { false };
     bool m_ended { false };

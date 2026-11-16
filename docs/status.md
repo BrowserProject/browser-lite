@@ -207,7 +207,8 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   29 % with its teasers below the fold (plain Chromium 6 to 7 %, #399). Sound (media that is not
   muted, Web Audio) starts only after a user activation of the page like in Chrome (#578; BBC's
   video started its pre-roll ad with sound by itself, so the tap on the play button clicked the
-  ad and opened the advertiser in a new tab). Transparent videos (VP8,
+  ad and opened the advertiser in a new tab; a report of the host from before a pause no longer
+  starts the video again with sound, #590). Transparent videos (VP8,
   VP9, HEVC with alpha) keep their alpha when frames are copied (#442; the filtered hero video of
   zoo.ch covered the photo with opaque green). A video in fullscreen shows its whole picture like
   the native players of phones, also with the page's `object-fit: cover` (#474; m.youtube.com

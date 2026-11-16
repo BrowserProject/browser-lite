@@ -97,6 +97,8 @@ export class Player {
   private placement: VideoPlacement | null = null;
   private destroyed = false;
   private readonly quality = new FrameQuality();
+  /** Number of the last play or pause of the engine, sent back with every state (stale ones). */
+  private playCommand = 0;
 
   constructor(
     private readonly host: MediaHost,
@@ -205,6 +207,7 @@ export class Player {
       hasVideo: video.videoWidth > 0,
       hasAudio: hasAudioTrack(video),
       paused: video.paused,
+      command: this.playCommand,
       ended: video.ended,
       readyState: this.readyState(),
       loading: video.networkState === HTMLMediaElement.NETWORK_LOADING,
@@ -337,12 +340,14 @@ export class Player {
     const video = this.video;
     switch (type) {
       case 'play':
+        this.playCommand = data.command as number;
         video.play().then(
           () => this.host.unlock.played(video),
           () => this.sendState('pause'),
         );
         break;
       case 'pause':
+        this.playCommand = data.command as number;
         video.pause();
         break;
       case 'seek':

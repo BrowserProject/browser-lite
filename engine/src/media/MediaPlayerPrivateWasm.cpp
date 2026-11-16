@@ -578,7 +578,7 @@ void MediaPlayerPrivateWasm::play()
     m_paused = false;
     m_ended = false;
     m_loopRestart = false;
-    send("play"_s);
+    sendPlaying(true);
 }
 
 void MediaPlayerPrivateWasm::pause()
@@ -588,7 +588,12 @@ void MediaPlayerPrivateWasm::pause()
     m_hostTimeStamp = MonotonicTime::now();
     m_paused = true;
     m_loopRestart = false;
-    send("pause"_s);
+    sendPlaying(false);
+}
+
+void MediaPlayerPrivateWasm::sendPlaying(bool playing)
+{
+    send(playing ? "play"_s : "pause"_s, makeString("{\"command\":"_s, ++m_playCommand, '}'));
 }
 
 MediaTime MediaPlayerPrivateWasm::currentTime() const
@@ -944,8 +949,10 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
         m_buffered = WTF::move(buffered);
     }
 
-    // The host paused itself (end, autoplay not allowed, ...)
-    bool paused = object->getBoolean("paused"_s).value_or(m_paused);
+    // The host paused itself (end, autoplay not allowed, ...), but only a report that saw the last
+    // play or pause tells
+    bool current = object->getInteger("command"_s).value_or(0) == static_cast<int>(m_playCommand);
+    bool paused = current ? object->getBoolean("paused"_s).value_or(m_paused) : m_paused;
     bool ended = object->getBoolean("ended"_s).value_or(false);
     bool endedNow = ended && !m_ended;
     m_ended = ended;
@@ -955,7 +962,7 @@ void MediaPlayerPrivateWasm::hostEvent(const String& json)
     // belong to that end.
     if (ended && !m_paused && !m_loopRestart && player->isLooping()) {
         m_loopRestart = true;
-        send("play"_s);
+        sendPlaying(true);
     }
     if (m_loopRestart) {
         if (!paused && !ended)

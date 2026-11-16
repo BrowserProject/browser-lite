@@ -669,7 +669,7 @@ still pauses it (#555). Sound needs a user activation like Chrome's autoplay pol
 that is not muted and Web Audio start only once the user activated the page, which stays so for
 that document (WebCore's `RequiresUserGestureForAudioPlayback` and
 `MediaUserGestureInheritsFromDocument`, patch 0147); without it `play()` rejects with
-`NotAllowedError`, `autoplay` waits and an `AudioContext` stays suspended. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
+`NotAllowedError`, `autoplay` waits and an `AudioContext` stays suspended. The engine numbers its play and pause commands for the host `<video>` and takes the host's `paused` only from a report that names the last of them (#590), so a report still on its way does not undo a newer command. WebCodecs, MediaStream, MediaRecorder, WebRTC and Picture-in-Picture use the host's
 implementations (#107, #113, #114, #117 to #119); the corresponding services must be enabled.
 Where the host has no `MediaStreamTrackProcessor` (Firefox), camera, microphone and screen reach
 the engine through a stand-in (`track-reader.ts`): a hidden `<video>` gives `VideoFrame`s, an
