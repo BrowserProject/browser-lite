@@ -212,6 +212,12 @@ public:
     // Hidden and without sound, the page waits while the user works in a visible view
     // (HiddenViews.h); a dialog of its page group decides while it is open
     void updateWaitForUser();
+    // Its running script may pause for the user: hidden, without sound, not below a dialog
+    bool canPauseScriptForUser() const;
+    // At a safepoint of its running script: the page waits and the view holds back like below a
+    // dialog until the user no longer needs the engine thread, a command for the view comes or
+    // it closes (HiddenViews.h)
+    void pauseScriptForUser();
     void focusInitial(bool forward);
     void setZoom(float);
     // Pinch zoom (PinchZoom.h): only scale the view, the layout stays. pinch()
@@ -223,10 +229,10 @@ public:
     void find(const String&, bool backwards, bool again);
     void stopFind();
 
-    // A dialog or a synchronous load of this view's page group is open
-    // (waitHoldingPageGroup in Clients.cpp, #258): its script waits, so the view
-    // drops input, holds back commands and makes no rendering update (the last
-    // frame stays) until unblockAfterDialog()
+    // A dialog or a synchronous load of this view's page group is open or its
+    // script paused for the user (waitHoldingPageGroup in Clients.cpp, #258):
+    // its script waits, so the view drops input, holds back commands and makes
+    // no rendering update (the last frame stays) until unblockAfterDialog()
     void blockForDialog() { ++m_dialogBlocks; }
     void unblockAfterDialog();
     bool isBlockedByDialog() const { return m_dialogBlocks; }

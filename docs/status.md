@@ -92,7 +92,20 @@ Where the project stands, what was measured, what is open. Numbers like #142 ref
   commits (#394): with weather.com loading in a background tab, typing in bursts with 2.5 s pauses
   went from median 0.42 s (90th percentile 1.1 s, up to 7.5 s) to 2 ms (frame 32 ms), a new tab
   next to two loading heavy tabs commits in 0.3 to 2 s instead of 11 to 17 s. After a pause of
-  more than 10 s (or 1 s outside a text field) a key can still wait for a task that already runs.
+  more than 10 s (or 1 s outside a text field) a key waited for a task that already ran (up to
+  2.9 s 40 s after Wikipedia, CNN and Spiegel opened in background tabs on a busy machine). Since
+  #585 a script of a hidden view pauses at its next safepoint when input, a call of the host or a
+  compositor answer comes, and goes on once the user no longer needs the engine thread: keys
+  right after a hidden task of 3 s started waited 1.1 to 2.2 s, now at most 7 ms, in a loop as in
+  calls without one. Still waiting: hidden work outside JS (in the 24 s after the hold of that
+  scenario 14.1 s of engine work, of it 3.6 s style and layout from their timers, 1.8 s parsing
+  and compiling scripts, 0.6 s the style at the end of parsing, 0.5 s HTML parsing, 0.4 s GC,
+  each up to about 1 s; Chrome runs no style and layout in a background tab unless its script
+  asks, #531 kept it here for fast tab switches) and scripts of a hidden view that shares an event
+  loop with a visible one (WebKit keeps one per site: two tabs of the same site) or is in its
+  page group. Locally with an idle machine the first click after the hold waited 39 to 235 ms
+  before and 4 to 184 ms after (3 runs with and 3 without 4x CPU throttling, later clicks under
+  10 ms in both).
   A hidden view that waits starts nothing at all since #531: its style and layout timers, the load
   events of its images and a parser resumed by a script that waited for a stylesheet started tasks
   of up to 3 s after the hold had begun. With Wikipedia, CNN and Spiegel in background tabs on a

@@ -3,7 +3,8 @@
 // per second, the engine does not paint; with sound, sound and timers go on. While the user types
 // in the front view (also through pauses while the focus stays in the field), the front view
 // loads a page or a view was just shown (until its first frame), a busy hidden view waits, also
-// its restyles, relayouts and load events. With
+// its restyles, relayouts and load events, and a script of it that runs pauses at its next
+// safepoint. With
 // and without the compositor. Also memory pressure (the engine reports "memory-pressure"), the watchdog after an
 // input (unresponsive, responsive; the engine stops a script only once input waited its limit,
 // keepWaiting() gives the script the limit again) and no hang during a long native dialog of the host page, a
@@ -195,6 +196,41 @@ console.log('RESULT loaded=restyle')</script>`,
 <script>document.querySelector('input').onkeydown = (e) => console.log('RESULT keydown=' + e.key + ':' + Date.now());
 document.onmousedown = () => console.log('RESULT mousedown=' + Date.now());
 console.log('RESULT loaded=typing')</script>`,
+  // Like typing, and the stack of each keydown handler (whether it shows the hidden page's script)
+  typingstack: `<!doctype html><title>typingstack</title><body style="margin:0"><input style="position:absolute;left:10px;top:10px;width:300px;height:30px">
+<script>document.querySelector('input').onkeydown = (e) => {
+  console.log('RESULT keydown=' + e.key + ':' + Date.now());
+  console.log('RESULT keystack=' + (new Error().stack.includes('hiddenPageTick') ? 'hidden' : 'own'));
+};
+document.onmousedown = () => console.log('RESULT mousedown=' + Date.now());
+console.log('RESULT loaded=typingstack')</script>`,
+  // Tasks of 3 s back to back, each one script: ?loop spins in a loop, ?calls only calls
+  // functions (no loop, so a function entry is its only safepoint) five levels deep, each of which
+  // checks that its argument and local are the same after its calls. Each task reports its start,
+  // end, the longest gap between two of its steps and the broken locals.
+  longscript: `<!doctype html><title>longscript</title><p>long<script>
+let end = 0, last = 0, gap = 0, broken = 0;
+function hiddenPageTick() { const now = Date.now(); gap = Math.max(gap, now - last); last = now; return now < end; }
+const level = (next) => (a) => {
+  if (!hiddenPageTick()) return a;
+  const k = a * 3 + 1;
+  ${'next(k);'.repeat(30)}
+  if (k !== a * 3 + 1 || a !== (k - 1) / 3) broken++;
+  return k % 1000;
+};
+let calls = hiddenPageTick;
+for (let i = 0; i < 5; i++) calls = level(calls);
+const spin = () => { for (;;) { const now = Date.now(); gap = Math.max(gap, now - last); last = now; if (now >= end) return; } };
+const channel = new MessageChannel();
+channel.port1.onmessage = () => {
+  const start = Date.now();
+  end = start + 3000; last = start; gap = 0; broken = 0;
+  location.search === '?calls' ? calls(1) : spin();
+  console.log('RESULT task=' + start + ':' + Date.now() + ':' + gap + ':' + broken);
+  channel.port2.postMessage(0);
+};
+channel.port2.postMessage(0);
+console.log('RESULT loaded=longscript')</script>`,
   // For memory pressure: reports when the view goes away
   memory: `<!doctype html><title>memory</title><p>memory<script>const name = location.search.slice(1);
 addEventListener('pagehide', () => console.log('RESULT gone=' + name));
@@ -589,6 +625,64 @@ check(
   `restyle and relayout ${restyleCost} ms, keys ${restyleBursts.join(' ')} ms`,
 );
 await restyling.context.close();
+
+// A task of a hidden view that already runs when the user types pauses at its next safepoint
+// until the user no longer needs the engine thread (patch 0149, engine/src/HiddenViews.cpp), in
+// a loop and in calls without a loop (a function entry is the only safepoint there), and goes on
+// unharmed afterwards; the script of the visible page sees none of its frames. The hidden page is
+// of another site: with the same site (one event loop) it would not pause.
+async function pausedScript(kind) {
+  const app = await openApp({
+    url: `${siteURL.replace('127.0.0.1', 'localhost')}longscript?${kind}`,
+  });
+  await app.wait('loaded', 'longscript');
+  await app.newTab(`${siteURL}typingstack`);
+  await app.wait('loaded', 'typingstack');
+  const origin = await canvasOrigin(app.page);
+  await app.page.mouse.click(origin.x + 100, origin.y + 25);
+  await app.wait('mousedown', null, 10000);
+  // The hold of the click ends after 1 s: the hidden view runs its next task of 3 s
+  await app.page.waitForTimeout(1800);
+  const sent = [];
+  for (const key of 'abcdefgh') {
+    sent.push(Date.now());
+    await app.page.keyboard.press(key);
+    await app.page.waitForTimeout(150);
+  }
+  const typed = Date.now();
+  const keydowns = () => app.results.filter((r) => r[1] === 'keydown');
+  await waitFor(() => keydowns().length === sent.length, 10000);
+  const arrived = keydowns().map((r) => Number(r[2].split(':')[1]));
+  const latencies = sent.map((time, i) => arrived[i] - time);
+  check(
+    `paused script (${kind}): no key waits for the task of the hidden view that runs`,
+    arrived.length === sent.length && Math.max(...latencies) < 250,
+    `${latencies.join(' ')} ms`,
+  );
+  const stacks = app.results.filter((r) => r[1] === 'keystack').map((r) => r[2]);
+  check(
+    `paused script (${kind}): the stack of the visible page's handler ends at its own frames`,
+    stacks.length === sent.length && stacks.every((stack) => stack === 'own'),
+    stacks.join(' '),
+  );
+  // Away from the field the hold ends 1 s after the click: the paused task goes on
+  await app.page.mouse.click(origin.x + 100, origin.y + 300);
+  const task = () =>
+    app.results
+      .filter((r) => r[1] === 'task')
+      .map((r) => r[2].split(':').map(Number))
+      .find(([start, end]) => start < sent[0] && end > sent[0]);
+  await waitFor(() => task(), 10000);
+  const [start, end, gap, broken] = task() ?? [];
+  check(
+    `paused script (${kind}): the task paused while the user typed and went on unharmed`,
+    end > typed && gap >= typed - sent[0] - 300 && broken === 0,
+    task() ? `task ${end - start} ms, longest gap ${gap} ms, ${broken} broken locals` : 'no task',
+  );
+  await app.context.close();
+}
+await pausedScript('loop');
+await pausedScript('calls');
 
 // Switching to a view that changed in the background: hidden views wait from the end of the
 // running task on (urgent, like input) until the shown view made its first frame, which comes

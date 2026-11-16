@@ -28,6 +28,8 @@ void runOnEngineThread(Function<void()>&&);
 // work like a call from the host, and the engine thread also takes it in between two of its
 // tasks and returns from a long RunLoop pass for it.
 void runUrgentOnEngineThread(Function<void()>&&);
+// On the engine thread: urgent work waits, also while still in the mailbox
+bool urgentWorkWaiting();
 // On the engine thread: runs `function` before the other waiting tasks of the engine thread,
 // right after the current one.
 void runNextOnEngineThread(Function<void()>&&);
@@ -47,9 +49,10 @@ void clearStackBelow();
 void clearStackAboveForUnwind();
 // Whether the engine thread runs JS in a work item that started at least minimum ago
 bool engineThreadInLongScript(WTF::Seconds minimum);
-// A page dialog: runs the work of the engine thread nested until done()
-// returns true; the views of the dialog's page group hold back (WebView.h)
-void runNestedEventLoop(const Function<bool()>& done);
+// A page dialog or a paused script: runs the work of the engine thread nested
+// until done() returns true, only the urgent work while onlyUrgent() returns
+// true; the views of the waiting page's group hold back (WebView.h)
+void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& onlyUrgent = nullptr);
 
 // navigator.permissions.query() (Permissions.cpp)
 void installPermissionController();

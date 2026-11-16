@@ -14,6 +14,7 @@
 #include "config.h"
 #include "Engine.h"
 #include "EngineConfig.h"
+#include "HiddenViews.h"
 #include "MemoryWatch.h"
 #include "UserNavigation.h"
 
@@ -225,7 +226,7 @@ static Deque<Function<void()>*>& priorityTasks()
 // and returns from long work (RunLoop functions, patch 0072) for them.
 static std::atomic<int> s_urgentWaiting;
 
-static bool urgentWorkWaiting()
+bool urgentWorkWaiting()
 {
     return s_urgentWaiting.load(std::memory_order_relaxed) > 0 && isEngineThread();
 }
@@ -320,6 +321,16 @@ static void proxyToEngineThread(void (*run)(void*), Function<void()>&& function)
     }
 }
 
+// A script that runs on the engine thread goes on to its next safepoint (patch 0149), where a
+// hidden view's script pauses for the urgent work (atSafepoint). From the sending thread: the
+// trap bits are atomic.
+static void requestSafepoint()
+{
+    auto* vm = s_workVM.load(std::memory_order_relaxed);
+    if (vm && s_workSince.load(std::memory_order_relaxed) && std::atomic_ref(vm->entryScope).load(std::memory_order_relaxed))
+        vm->traps().fireTrap(JSC::VMTraps::NeedSafepointGC);
+}
+
 void runUrgentOnEngineThread(Function<void()>&& function)
 {
     // Counted before the queueing and uncounted when it runs: the count never stays above what waits
@@ -328,6 +339,7 @@ void runUrgentOnEngineThread(Function<void()>&& function)
         s_urgentWaiting.fetch_sub(1, std::memory_order_relaxed);
         function();
     });
+    requestSafepoint();
 }
 
 void runOnEngineThread(Function<void()>&& function)
@@ -543,27 +555,39 @@ static void runNestedWork(JSC::VM& vm, Work&& work)
 //   before the wait or a browser without Atomics.waitAsync (postMessage then)
 // Script of other views runs inside the VM entry of the waiting script. Its
 // JSExecState starts empty, so microtasks run after each script like in a
-// task. When idle the GC may run if the waiting script is the only JS entry on
-// the stack (Heap::collectAtSafepoint, patch 0012), like at a safepoint of the
-// interpreter: the C++ between that script and here (the dialog's binding and
-// Chrome) holds no JS values.
-void runNestedEventLoop(const Function<bool()>& done)
+// task, and it sees no frames of the waiting script, like at the top level:
+// their stack traces and callers end at their own entry (another page's
+// functions and addresses stay hidden). When idle the GC may run if the waiting
+// script is the only JS entry on the stack (Heap::collectAtSafepoint, patch
+// 0012), like at a safepoint of the interpreter: the C++ between that script
+// and here (the dialog's binding and Chrome) holds no JS values.
+// While onlyUrgent() holds, only the urgent work runs (the calls of the host
+// and the compositor's answers), not the local tasks and timers.
+static unsigned s_nestedEventLoops;
+
+void runNestedEventLoop(const Function<bool()>& done, const Function<bool()>& onlyUrgent)
 {
     RELEASE_ASSERT(isEngineThread());
     auto& vm = WebCore::commonVM();
     auto& threadData = WebCore::threadGlobalDataSingleton();
     auto* scriptState = threadData.currentState();
     threadData.setCurrentState(nullptr);
+    // A JS entry records the caller's frame here; at the waiting script's frames walks stop
+    auto* topCallFrame = std::exchange(vm.topCallFrame, nullptr);
+    ++s_nestedEventLoops;
     // Called from a timer: WebCore's timers may fire again
     WebCore::TimerBase::fireTimersInNestedEventLoop();
     pthread_t self = pthread_self();
     while (!done()) {
         _emscripten_check_mailbox();
-        if (!localTasks().isEmpty() || !priorityTasks().isEmpty()) {
-            runNestedWork(vm, [] { runLocalTasks(); });
+        bool urgentOnly = onlyUrgent && onlyUrgent();
+        if (!priorityTasks().isEmpty() || (!urgentOnly && !localTasks().isEmpty())) {
+            runNestedWork(vm, [urgentOnly] { urgentOnly ? runPriorityTasks() : runLocalTasks(); });
             continue;
         }
-        auto next = WTF::RunLoop::nextTimerFireTime();
+        std::optional<WTF::MonotonicTime> next;
+        if (!urgentOnly)
+            next = WTF::RunLoop::nextTimerFireTime();
         auto now = WTF::MonotonicTime::now();
         if (next && *next <= now) {
             runNestedWork(vm, [] { pumpRunLoop(); });
@@ -582,6 +606,8 @@ void runNestedEventLoop(const Function<bool()>& done)
             wait = std::min(wait, (*next - now).milliseconds());
         __builtin_wasm_memory_atomic_wait32(reinterpret_cast<int*>(self), static_cast<int>(self), static_cast<int64_t>(wait * 1e6));
     }
+    --s_nestedEventLoops;
+    vm.topCallFrame = topCallFrame;
     threadData.setCurrentState(scriptState);
     restartScriptWatchdog();
     // What is left runs from the JS event loop again
@@ -594,11 +620,24 @@ void runNestedEventLoop(const Function<bool()>& done)
 // while urgent work waits
 extern "C" void bl_wtf_set_run_loop_yield_check(bool (*)());
 
+// At a safepoint of the running script (patch 0149), also one that requestSafepoint brought
+// it to: a hidden view's script pauses while urgent work waits (HiddenViews.h). Not inside a
+// nested event loop, whose work goes on where it was.
+extern "C" void bl_jsc_set_safepoint_work(void (*)(JSC::VM&));
+
+static void atSafepoint(JSC::VM& vm)
+{
+    if (!urgentWorkWaiting() || s_nestedEventLoops || &vm != WebCore::commonVMOrNull())
+        return;
+    pauseHiddenScriptForUser();
+}
+
 void initializeEngineLoop()
 {
     RELEASE_ASSERT(isEngineThread());
     installScriptWatchdog();
     bl_wtf_set_run_loop_yield_check(urgentWorkWaiting);
+    bl_jsc_set_safepoint_work(atSafepoint);
     // Called while the RunLoop holds its lock, possibly from another thread:
     // only schedule here, never work directly.
     WTF::RunLoop::setWakeUpCallback([] {

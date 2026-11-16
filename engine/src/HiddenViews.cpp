@@ -19,6 +19,12 @@
 //   loaded in the background never painted, its first layout and paint come with that frame,
 //   and the user looks at an empty page until then; meanwhile hidden tabs (also the one just
 //   left) started tasks of seconds between its steps.
+// A task of a hidden view that already runs when the user needs the engine thread (an entry into
+// JS) pauses at its next safepoint (patch 0149) until the user no longer needs it, like a script
+// below a dialog: Firefox interrupts the script of a background tab in the same process to paint
+// a tab switch (PaintWhileInterruptingJS), Chrome runs background tabs in other processes. Only
+// when no other view shares script with that page: its event loop (the documents of a site) and
+// its page group (popups and their opener).
 #include "config.h"
 #include "HiddenViews.h"
 
@@ -28,11 +34,17 @@
 
 #include <WebCore/ActiveDOMObject.h>
 #include <WebCore/Document.h>
+#include <WebCore/DocumentPage.h>
 #include <WebCore/FrameLoader.h>
 #include <WebCore/FrameTree.h>
+#include <WebCore/JSDOMGlobalObject.h>
 #include <WebCore/LocalFrame.h>
 #include <WebCore/LocalFrameInlines.h>
 #include <WebCore/Page.h>
+#include <WebCore/PageGroup.h>
+#include <WebCore/ThreadGlobalData.h>
+#include <WebCore/WindowEventLoop.h>
+#include <wtf/HashSet.h>
 #include <wtf/MonotonicTime.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/RunLoop.h>
@@ -155,22 +167,70 @@ bool hiddenViewsWaitForUser()
     return s_waiting;
 }
 
+bool userNeedsEngineThread()
+{
+    return s_waiting || urgentWorkWaiting();
+}
+
+template<typename Function>
+static void forEachDocument(Page& page, const Function& function)
+{
+    for (RefPtr<Frame> frame = page.mainFrame(); frame; frame = frame->tree().traverseNext()) {
+        if (RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame)) {
+            if (RefPtr document = localFrame->document())
+                function(*document);
+        }
+    }
+}
+
+// Whether another view shares script with the page: a page of its group or a document in the
+// event loop of one of its documents (a script may run for one in the task of another)
+static bool sharesScript(Page& page)
+{
+    HashSet<WindowEventLoop*> eventLoops;
+    forEachDocument(page, [&](Document& document) {
+        eventLoops.add(&document.windowEventLoop());
+    });
+    bool shares = false;
+    WebView::forEach([&](WebView& view) {
+        Ref other = view.page();
+        if (shares || other.ptr() == &page)
+            return;
+        shares = &other->group() == &page.group();
+        forEachDocument(other, [&](Document& document) {
+            shares = shares || eventLoops.contains(&document.windowEventLoop());
+        });
+    });
+    return shares;
+}
+
+void pauseHiddenScriptForUser()
+{
+    // The running script, also in an iframe of the page
+    auto* globalObject = dynamicDowncast<JSDOMGlobalObject>(threadGlobalDataSingleton().currentState());
+    RefPtr document = dynamicDowncast<Document>(globalObject ? globalObject->scriptExecutionContext() : nullptr);
+    RefPtr page = document ? document->page() : nullptr;
+    // Not while the page goes away (unload, pagehide): no dialog either
+    if (!page || !page->arePromptsAllowed())
+        return;
+    RefPtr<WebView> paused;
+    WebView::forEach([&](WebView& view) {
+        if (&view.page() == page.get())
+            paused = &view;
+    });
+    if (!paused || !paused->canPauseScriptForUser() || sharesScript(*page))
+        return;
+    paused->pauseScriptForUser();
+}
+
 void setPageWaits(Page& page, bool waits)
 {
-    auto forEachDocument = [&](const auto& function) {
-        for (RefPtr<Frame> frame = page.mainFrame(); frame; frame = frame->tree().traverseNext()) {
-            if (RefPtr localFrame = dynamicDowncast<LocalFrame>(*frame)) {
-                if (RefPtr document = localFrame->document())
-                    function(*document);
-            }
-        }
-    };
     // The order of PageGroupLoadDeferrer: the parser is suspended before loading defers. Style
     // and layout run from timers of their own that the suspension does not cover: a stylesheet
     // or a change of the DOM shortly before made a hidden page recalculate its style and lay
     // itself out in tasks of seconds while the user typed.
     if (waits) {
-        forEachDocument([](Document& document) {
+        forEachDocument(page, [](Document& document) {
             document.suspendScheduledTasks(ReasonForSuspension::WillDeferLoading);
         });
         page.setDefersLoading(true);
@@ -182,7 +242,7 @@ void setPageWaits(Page& page, bool waits)
     // Only suspended documents (resumeScheduledTasks checks the reason): one that came meanwhile
     // (back from the back/forward cache) was never suspended, and resuming twice resumes its
     // objects twice
-    forEachDocument([](Document& document) {
+    forEachDocument(page, [](Document& document) {
         if (document.activeDOMObjectsAreSuspended())
             document.resumeScheduledTasks(ReasonForSuspension::WillDeferLoading);
     });

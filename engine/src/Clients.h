@@ -16,11 +16,13 @@ class WebView;
 // Ends the open dialogs of a view with the default answer (the view closes)
 void dismissDialogs(int viewId);
 
-// A script of the page waits until done() (a dialog, a synchronous load): the
-// engine thread runs the other views in a nested event loop (#258), the views of
-// the page's group drop input, hold back commands and make no rendering update.
-// WebCore's page itself must be deferred by the caller (PageGroupLoadDeferrer).
-void waitHoldingPageGroup(WebCore::Page&, const Function<bool()>& done);
+// A script of the page waits until done() (a dialog, a synchronous load, a
+// hidden view's script paused for the user): the engine thread runs the other
+// views in a nested event loop (#258), only the urgent work while onlyUrgent()
+// holds; the views of the page's group drop input, hold back commands and make
+// no rendering update. WebCore's page itself must be deferred by the caller
+// (PageGroupLoadDeferrer, setPageWaits).
+void waitHoldingPageGroup(WebCore::Page&, const Function<bool()>& done, const Function<bool()>& onlyUrgent = nullptr);
 
 class ChromeClient final : public WebCore::EmptyChromeClient {
 public:

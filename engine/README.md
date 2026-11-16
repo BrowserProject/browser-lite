@@ -79,7 +79,7 @@ from `patches/`.
   - `wasmfs-opfs.js` (`--js-library`): OPFS root of `/data` and `ENOSPC` for a full OPFS
 - `src/`: C++ of the engine
   - Start and loop: `main.cpp`, `EngineConfig.cpp` (every `BL_*` value), `EngineLoop.cpp`
-    (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, the watchdog that stops a script once the host waited its limit for it), `UserNavigation.cpp` (a typed address, Back or Forward of the user stops the running script of the page it leaves), `Exports.cpp` (`bl_*`; hovering mouse moves that wait join into one move that lists
+    (event loop: the host's calls and the compositor's answers before the page's work, at most one RunLoop pump waiting, the watchdog that stops a script once the host waited its limit for it, urgent work that brings a running script to its next safepoint, the nested event loop of dialogs and paused scripts), `UserNavigation.cpp` (a typed address, Back or Forward of the user stops the running script of the page it leaves), `Exports.cpp` (`bl_*`; hovering mouse moves that wait join into one move that lists
     them all as its coalesced events), `Host.cpp` (events to the host),
     `MemoryWatch.cpp` (releases caches, the pages' compiled JS and the page left last in the
     back/forward cache only when memory is short (patch 0088), JSC's code cache at every release
@@ -95,7 +95,8 @@ from `patches/`.
     suggestions of `<input list>`), `VisitedLinks.cpp` (`:visited`: the addresses the views
     loaded and those of the host's history), `Printing.cpp`, `PinchZoom.h`, `HiddenViews.cpp` (hidden views wait while
     the user works in, types in or waits for a visible one, also for the first frame of a tab
-    switched to; their style, layout and load events wait too)
+    switched to; their style, layout and load events wait too, and a script of theirs that runs
+    when input comes pauses at its next safepoint, patch 0149)
   - Graphics: `GpuRaster.cpp` (Skia over WebGL 2), `LayerTreeHostWasm.cpp` and `Compositor.cpp`
     (layers on the compositor thread, the stall log's state; a closing view's host waits for its
     tile jobs and detaches every layer that names it; a view hidden for 10 s releases its tiles), `DamageTiles.cpp` (a frame with a

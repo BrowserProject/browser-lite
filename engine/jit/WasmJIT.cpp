@@ -974,6 +974,7 @@ private:
     OpcodeID m_unsupported { op_enter };
     bool m_tooLarge { false };
     void emitInstruction(const JSInstructionStream::Ref&, unsigned block);
+    void emitTrapCheck(const JSInstructionStream::Ref&);
 
     unsigned targetOf(const JSInstructionStream::Ref& instruction, int label)
     {
@@ -3502,6 +3503,30 @@ bool Compiler::scan()
     return true;
 }
 
+// Like the interpreter: the trap bits, and with any set the bytecode offset in the frame and the
+// trap handler (a GC at this safepoint, a watchdog's exception, the embedder's work, patch 0149)
+void Compiler::emitTrapCheck(const JSInstructionStream::Ref& instruction)
+{
+    m_body->i32Const(reinterpret_cast<uintptr_t>(m_codeBlock->vm().traps().trapBitsAddress()));
+    m_body->i32Load(0);
+    m_body->i32Const(VMTraps::AsyncEvents);
+    m_body->op(Op::I32And);
+    m_body->ifThen();
+    m_body->localGet(cfr);
+    m_body->i32Const(instruction.offset());
+    m_body->i32Store(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + TagOffset);
+    m_body->localGet(cfr);
+    m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
+    m_body->i32Const(reinterpret_cast<uintptr_t>(static_cast<SlowPath>(llint_slow_path_handle_traps)));
+    m_body->callIndirect(m_slowPathType);
+    m_body->op(Op::I32WrapI64);
+    m_body->ifThen();
+    m_body->i32Const(1);
+    m_body->returnValue();
+    m_body->end();
+    m_body->end();
+}
+
 void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsigned block)
 {
     auto isObject = [&] {
@@ -3931,29 +3956,9 @@ void Compiler::emitInstruction(const JSInstructionStream::Ref& instruction, unsi
         m_body->end();
         return;
     }
-    case op_check_traps: {
-        // Like the interpreter: the trap bits, and with any set the bytecode offset in the frame
-        // and the trap handler (a GC at this safepoint, a watchdog's exception)
-        m_body->i32Const(reinterpret_cast<uintptr_t>(m_codeBlock->vm().traps().trapBitsAddress()));
-        m_body->i32Load(0);
-        m_body->i32Const(VMTraps::AsyncEvents);
-        m_body->op(Op::I32And);
-        m_body->ifThen();
-        m_body->localGet(cfr);
-        m_body->i32Const(instruction.offset());
-        m_body->i32Store(CallFrameSlot::argumentCountIncludingThis * sizeof(Register) + TagOffset);
-        m_body->localGet(cfr);
-        m_body->i32Const(reinterpret_cast<uintptr_t>(instruction.ptr()));
-        m_body->i32Const(reinterpret_cast<uintptr_t>(static_cast<SlowPath>(llint_slow_path_handle_traps)));
-        m_body->callIndirect(m_slowPathType);
-        m_body->op(Op::I32WrapI64);
-        m_body->ifThen();
-        m_body->i32Const(1);
-        m_body->returnValue();
-        m_body->end();
-        m_body->end();
+    case op_check_traps:
+        emitTrapCheck(instruction);
         return;
-    }
     case op_ret: {
         auto bytecode = instruction->as<OpRet>();
         load(bytecode.m_value, m_a, m_b);
@@ -4031,6 +4036,15 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
     m_body->localSet(m_iterations);
     // block { loop { block * n { br_table } code 0 } code 1 ... } code n - 1 } } return 1: the outer
     // block is the exit after an exception
+    auto& instructions = m_codeBlock->instructions();
+    // The function's entry is a safepoint like the interpreter's, whose stack check traps there:
+    // calls without a loop stop for the watchdog too, and a hidden view's script pauses there
+    // for the user (patch 0149). Calls between compiled functions check no stack limit of traps.
+    m_body->localGet(entry);
+    m_body->op(Op::I32Eqz);
+    m_body->ifThen();
+    emitTrapCheck(instructions.at(m_starts[0]));
+    m_body->end();
     m_body->block();
     m_body->loop();
     for (unsigned i = 0; i < m_blockCount; ++i)
@@ -4041,7 +4055,6 @@ std::optional<std::vector<uint8_t>> Compiler::compile()
         depths.append(i);
     m_body->brTable(depths.span(), m_blockCount - 1);
 
-    auto& instructions = m_codeBlock->instructions();
     for (unsigned block = 0; block < m_blockCount; ++block) {
         m_body->end();
         m_currentBlock = block;

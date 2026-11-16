@@ -1953,6 +1953,31 @@ void WebView::updateWaitForUser()
     setPageWaits(*m_page, wait);
 }
 
+bool WebView::canPauseScriptForUser() const
+{
+    // A page that defers its loads for another reason (leaving it) is not held here
+    return isOpen() && !m_visible && !m_audible && !m_dialogBlocks && (m_waitsForUser || !m_page->defersLoading());
+}
+
+void WebView::pauseScriptForUser()
+{
+    Ref protectedThis { *this };
+    // Like in a hold, also before one began: the input that starts it may still wait
+    if (!m_waitsForUser) {
+        m_waitsForUser = true;
+        setPageWaits(*m_page, true);
+    }
+    auto start = MonotonicTime::now();
+    // Without a hold the other hidden views go on: only what the user waits for runs meanwhile
+    waitHoldingPageGroup(*m_page, [this] {
+        return !isOpen() || !m_heldCommands.isEmpty() || !userNeedsEngineThread();
+    }, [] {
+        return !hiddenViewsWaitForUser();
+    });
+    debugLog("View %d: script paused %.0f ms for the user", m_id, (MonotonicTime::now() - start).milliseconds());
+    updateWaitForUser();
+}
+
 void WebView::updateActivityState()
 {
     // Also while tearing down the page still reports media

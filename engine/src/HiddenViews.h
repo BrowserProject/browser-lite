@@ -28,6 +28,15 @@ void visibleViewShown(WebView&);
 // Whether hidden views wait for the user right now
 bool hiddenViewsWaitForUser();
 
+// Whether the user waits for the engine thread: urgent work waits (input, a call of the host, the
+// compositor's answer) or hidden views wait for the user
+bool userNeedsEngineThread();
+
+// At a safepoint of the running script while urgent work waits (EngineLoop.cpp): a script of a
+// hidden view that waits for the user pauses until the user no longer needs the engine thread
+// (WebView::pauseScriptForUser), unless another view shares script with its page
+void pauseHiddenScriptForUser();
+
 // Holds a page like a page below a dialog (WebCore's PageGroupLoadDeferrer, for one page): its
 // documents suspend their scheduled tasks (timers, event loop tasks, scripts, parser, messages),
 // its loads defer what arrives and its style recalculation and layout wait (patch 0125, also

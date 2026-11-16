@@ -175,7 +175,14 @@ for 1 s, after keys or text while the focus stays in a text field for up to 10 s
 view loads a new page until it commits, and after a view became visible (a switch of tabs, urgent
 like input) until it made the frame that was due, which comes before its own waiting tasks
 (`HiddenViews.cpp`, #364, #394, #419, #531, #537), so a heavy page loading in a background tab does not
-hold up typing in, loading or switching to the front one.
+hold up typing in, loading or switching to the front one. A script of a hidden view that already
+runs when input, a call of the host or a compositor answer comes pauses at its next safepoint
+(patch 0149, #585): the sending thread sets the safepoint trap, the engine thread runs the urgent
+work in the nested event loop of dialogs while the page waits and the view holds back like below
+a dialog, also through the hold, and the script goes on afterwards. Nested work sees none of the
+paused frames (`vm.topCallFrame` is empty meanwhile). Not when another view shares script with
+the page (a document in one of its event loops, which WebKit keeps per site, or its page group),
+and not for work outside JS (style, layout, parsing, compiling a script, the GC).
 
 ## Frames
 
@@ -693,7 +700,8 @@ boundaries where all values are in memory (#60, #72, `engine.safepointGC`), also
 entries of the JIT's generic calls (patch 0090, [jit.md](jit.md)) and of a bound function's call
 of its JS target (patch 0115, #516: React's scheduler runs a whole render through one). Trap
 checks of C++ code leave the CodeBlocks alone while the heap waits for such a safepoint (patch
-0114: JSC walked all of them for breakpoints that only signal based traps install). The heap
+0114: JSC walked all of them for breakpoints that only signal based traps install) and leave its
+trap set for the next one (patch 0149); the embedder runs its own work there first (#585). The heap
 grows like JSC's on a machine with less than 16 GB (patch 0091: the threshold of the aggressive
 mode wrapped to 0 in 32 bits, so its rate limiting let up to 256 MB of garbage pile up in one
 burst, #448). Proof: `tests/engine/gc-test.mjs` with `JSC_slowPathAllocsBetweenGCs=10`, also for

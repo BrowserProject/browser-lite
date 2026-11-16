@@ -95,7 +95,9 @@ never baked into the code (the GC resets inline caches).
   probe too (patch 0075, [architecture](architecture.md#javascript)).
 - **GC**: at its safepoints (trap checks, calls) every live value is in the frame and the
   `CLoopStack` pointer is current, as in the interpreter (#60); nothing lives in WASM locals across
-  them. JSC's generic call to a callee that is not compiled yet enters the VM again; between that
+  them. A compiled function checks the traps at its entry too, like the interpreter's stack check:
+  calls between compiled functions check no limit that a trap moves, so code of calls without a
+  loop reached no safepoint at all (no watchdog, no pause of a hidden view for the user, #585). JSC's generic call to a callee that is not compiled yet enters the VM again; between that
   entry and the compiled caller C++ holds no JS values outside the frames, so the safepoint GC
   looks through these entries (the JIT counts them, `wasmJITGenericEntries`, patch 0090, #448).
   Before, the GC waited inside them until the task ended: Cloudflare's Turnstile piled up 0.5 to

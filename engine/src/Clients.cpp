@@ -349,7 +349,7 @@ static void withdrawQuestion(int id)
     answerQuestion(id, false);
 }
 
-void waitHoldingPageGroup(Page& page, const Function<bool()>& done)
+void waitHoldingPageGroup(Page& page, const Function<bool()>& done, const Function<bool()>& onlyUrgent)
 {
     // Views of the page group (popups with their opener) share script with
     // the waiting one. They stay alive until it is done, also when closed.
@@ -361,7 +361,7 @@ void waitHoldingPageGroup(Page& page, const Function<bool()>& done)
     });
     for (auto& blocked : views)
         blocked->blockForDialog();
-    runNestedEventLoop(done);
+    runNestedEventLoop(done, onlyUrgent);
     for (auto& blocked : views) {
         blocked->unblockAfterDialog();
         // Closed meanwhile: torn down in a later task, not under the waiting script
