@@ -501,10 +501,19 @@ svg.favicon {
   width: 14px;
   height: 14px;
 }
-/* Narrow tabs: the cross only on the active (and hovered) tab, the title gives way first */
+/* Narrow tabs like Chrome: the cross only on the active tab, and on a hovered one while its title
+   still pushes the cross to the right edge. Without a title a tab shows its icon (background) or
+   its cross (active) centred, so a click on a narrow background tab always selects it. */
 @container (max-width: 110px) {
   .tab:not(.active) .close {
     display: none;
+  }
+}
+@media (hover: hover) {
+  @container (64px < width <= 110px) {
+    .tab:hover .close {
+      display: inline-grid;
+    }
   }
 }
 @container (max-width: 64px) {
@@ -512,15 +521,9 @@ svg.favicon {
   .tab.active .icon {
     display: none;
   }
-  .tab {
-    justify-content: center;
-  }
-}
-@media (hover: hover) {
-  @container (max-width: 110px) {
-    .tab:hover .close {
-      display: inline-grid;
-    }
+  .tab .icon,
+  .tab .close {
+    margin-inline: auto;
   }
 }
 #extension-buttons {
